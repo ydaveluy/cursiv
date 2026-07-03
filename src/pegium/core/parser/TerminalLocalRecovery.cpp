@@ -31,24 +31,9 @@ profile_word_boundary_violation(const RecoveryContext &ctx,
 /// (`recover_by_terminal_delete_scan`) passes: from `scanStart`, returns the
 /// terminal's end iff the scan is admissible AND the match can be committed,
 /// else nullptr.
+template <EditableParseModeContext Context>
 [[nodiscard]] const char *
-delete_scan_match_end(RecoveryContext &ctx,
-                      const TerminalRecoveryProfile &profile,
-                      const char *cursorStart, const char *scanStart) noexcept {
-  if (!allows_extended_terminal_delete_scan_match(ctx, cursorStart,
-                                                  scanStart)) {
-    return nullptr;
-  }
-  const char *const scanEnd = profile_match(profile, scanStart);
-  if (scanEnd == nullptr || !can_apply_recovery_match(ctx, scanEnd)) {
-    return nullptr;
-  }
-  return scanEnd;
-}
-
-[[nodiscard]] const char *
-delete_scan_match_end(ExpectContext &ctx,
-                      const TerminalRecoveryProfile &profile,
+delete_scan_match_end(Context &ctx, const TerminalRecoveryProfile &profile,
                       const char *cursorStart, const char *scanStart) noexcept {
   if (!allows_extended_terminal_delete_scan_match(ctx, cursorStart,
                                                   scanStart)) {
@@ -63,8 +48,9 @@ delete_scan_match_end(ExpectContext &ctx,
 
 } // namespace
 
+template <EditableParseModeContext Context>
 LiteralFuzzyCandidates collect_terminal_replace_candidates(
-    RecoveryContext &ctx, const TerminalRecoveryProfile &profile,
+    Context &ctx, const TerminalRecoveryProfile &profile,
     const char *cursorStart, const TerminalRecoveryFacts &facts) {
   if (!profile.hasLiteralText ||
       (context_has_had_edits(ctx) &&
@@ -77,19 +63,12 @@ LiteralFuzzyCandidates collect_terminal_replace_candidates(
                                             profile.shape, facts);
 }
 
-LiteralFuzzyCandidates collect_terminal_replace_candidates(
-    ExpectContext &ctx, const TerminalRecoveryProfile &profile,
-    const char *cursorStart, const TerminalRecoveryFacts &facts) {
-  if (!profile.hasLiteralText ||
-      (context_has_had_edits(ctx) &&
-       !allows_fuzzy_replace_after_prior_edits(profile.shape))) {
-    return {};
-  }
-  return collect_literal_replace_candidates(ctx, cursorStart,
-                                            profile.literalValue,
-                                            profile.caseSensitive,
-                                            profile.shape, facts);
-}
+template LiteralFuzzyCandidates collect_terminal_replace_candidates(
+    RecoveryContext &, const TerminalRecoveryProfile &, const char *,
+    const TerminalRecoveryFacts &);
+template LiteralFuzzyCandidates collect_terminal_replace_candidates(
+    ExpectContext &, const TerminalRecoveryProfile &, const char *,
+    const TerminalRecoveryFacts &);
 
 bool run_terminal_local_recovery(RecoveryContext &ctx,
                                  const TerminalRecoveryProfile &profile,

@@ -144,4 +144,14 @@ consider_candidate_envelope(const CandidateEnvelope &candidate,
                             bool incumbentValid,
                             FamilyRedundancyPolicy policy) noexcept;
 
+/// `consider_candidate_envelope` for the two producers whose incumbent is a
+/// live `EditableRecoveryCandidate` rather than a pre-stored envelope
+/// (`consider_iteration_attempt`, `consider_sequence_recovery_candidate`):
+/// projects both sides via `to_candidate_envelope` and takes `incumbent.
+/// matched` as the incumbent-validity flag.
+[[nodiscard]] SelectionVerdict
+consider_editable_candidate(const EditableRecoveryCandidate &candidate,
+                            const EditableRecoveryCandidate &incumbent,
+                            FamilyRedundancyPolicy policy) noexcept;
+
 } // namespace pegium::parser::detail

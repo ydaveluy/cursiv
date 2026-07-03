@@ -237,32 +237,13 @@ cursor_starts_visible_source(const Context &ctx) noexcept {
   return true;
 }
 
+// The cursor sample of `position_starts_structured_visible_source` (defined
+// in RecoveryUtils.hpp) — true iff the cursor is on a non-trivia codepoint
+// that could initiate an identifier or word-like token.
 template <typename Context>
 [[nodiscard]] constexpr bool
 cursor_starts_structured_visible_source(const Context &ctx) noexcept {
-  // True iff the cursor is on a non-trivia codepoint that could initiate
-  // an identifier or word-like token of the target language. Gates fuzzy
-  // substitutions on long keywords and disambiguates insert-vs-delete-scan
-  // candidate selection: a fuzzy keyword swap or a synthetic insert is
-  // only sensible on a word-like codepoint, not on bare punctuation that
-  // is more likely to be stray noise.
-  if (!cursor_starts_visible_source(ctx)) {
-    return false;
-  }
-  // Bounds-check the multi-byte UTF-8 read: `decode_utf8_codepoint`
-  // reads up to 4 bytes from `cursor`, and a lead byte sitting at
-  // `end - 1` would have it read past the buffer. Pegium's text
-  // buffers carry a `\0` sentinel inside the size, but we can't
-  // depend on the runtime arena layout (ASan flagged this on a
-  // truncated multi-byte tail in adversarial fuzz input). When the
-  // codepoint extends past `end`, treat the cursor as not on a
-  // structured visible-source codepoint — same conservative answer
-  // as the lead-byte pre-check elsewhere in the recovery path.
-  if constexpr (ContextCaps<Context>::hasWordCharMask) {
-    return ctx.isWordCharAt(ctx.cursor(), ctx.end);
-  } else {
-    return is_identifier_like_codepoint_at(ctx.cursor(), ctx.end);
-  }
+  return position_starts_structured_visible_source(ctx, ctx.cursor());
 }
 
 template <typename Context>

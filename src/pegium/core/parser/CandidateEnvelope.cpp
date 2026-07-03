@@ -96,4 +96,13 @@ SelectionVerdict consider_candidate_envelope(const CandidateEnvelope &candidate,
              : SelectionVerdict::Keep;
 }
 
+SelectionVerdict
+consider_editable_candidate(const EditableRecoveryCandidate &candidate,
+                            const EditableRecoveryCandidate &incumbent,
+                            FamilyRedundancyPolicy policy) noexcept {
+  return consider_candidate_envelope(to_candidate_envelope(candidate),
+                                     to_candidate_envelope(incumbent),
+                                     incumbent.matched, policy);
+}
+
 } // namespace pegium::parser::detail

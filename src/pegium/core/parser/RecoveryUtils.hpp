@@ -157,6 +157,13 @@ inline void invoke_delete_scan_on_match(OnMatchFn &onMatchFn,
   }
 }
 
+// True iff `position` is on a non-trivia codepoint that could initiate an
+// identifier or word-like token of the target language. Gates fuzzy
+// substitutions on long keywords and disambiguates insert-vs-delete-scan
+// candidate selection: a fuzzy keyword swap or a synthetic insert is only
+// sensible on a word-like codepoint, not on bare punctuation that is more
+// likely to be stray noise. `cursor_starts_structured_visible_source` samples
+// this at `ctx.cursor()`.
 template <typename Context>
 [[nodiscard]] constexpr bool
 position_starts_structured_visible_source(const Context &ctx,
@@ -169,6 +176,14 @@ position_starts_structured_visible_source(const Context &ctx,
       return false;
     }
   }
+  // Bounds-check the multi-byte UTF-8 read: `decode_utf8_codepoint` reads up
+  // to 4 bytes from `position`, and a lead byte sitting at `end - 1` would
+  // have it read past the buffer. Pegium's text buffers carry a `\0` sentinel
+  // inside the size, but we can't depend on the runtime arena layout (ASan
+  // flagged this on a truncated multi-byte tail in adversarial fuzz input).
+  // When the codepoint extends past `end`, treat the position as not on a
+  // structured visible-source codepoint — same conservative answer as the
+  // lead-byte pre-check elsewhere in the recovery path.
   if constexpr (ContextCaps<Context>::hasWordCharMask) {
     return ctx.isWordCharAt(position, ctx.end);
   } else {

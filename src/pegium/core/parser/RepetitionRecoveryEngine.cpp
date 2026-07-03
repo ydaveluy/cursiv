@@ -93,10 +93,8 @@ struct IterationSelectionResult {
 void consider_iteration_attempt(IterationSelectionResult &selection,
                                 const EditableRecoveryCandidate &candidate,
                                 const IterationReplayPlan &plan) {
-  const auto candidateEnvelope = to_candidate_envelope(candidate);
-  const auto bestEnvelope = to_candidate_envelope(selection.bestCandidate);
-  if (consider_candidate_envelope(
-          candidateEnvelope, bestEnvelope, selection.bestCandidate.matched,
+  if (consider_editable_candidate(
+          candidate, selection.bestCandidate,
           FamilyRedundancyPolicy::IterationExtensionFamily) ==
       SelectionVerdict::Take) {
     selection.bestCandidate = candidate;

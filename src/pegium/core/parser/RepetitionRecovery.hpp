@@ -210,11 +210,6 @@ Repetition<min, max, Element>::element_ops() const noexcept {
             return probe_started_without_edits(
                 ctx, static_cast<const Repetition *>(self)->_element);
           },
-      .observeNoEditParse =
-          +[](const void *self, RecoveryContext &ctx) {
-            return observe_no_edit_parse(
-                ctx, static_cast<const Repetition *>(self)->_element);
-          },
       .withElementFollow =
           +[](const void *self, RecoveryContext &ctx,
               pegium::utils::function_ref<bool()> body) {

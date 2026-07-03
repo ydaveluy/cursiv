@@ -62,17 +62,10 @@ template <typename Context> struct ContextCaps {
   static constexpr bool hasWordCharMask = false;
 };
 
-template <> struct ContextCaps<ParseContext> {
-  static constexpr bool hasSkipWithoutBuilder = false;
-  static constexpr bool tracksHadEdits = false;
-  static constexpr bool hasExtendLastDeleteThroughHiddenTrivia = false;
-  static constexpr bool hasAllowBudgetOverflowEdits = false;
-  static constexpr bool hasSkipAfterDeleteField = false;
-  static constexpr bool hasWindowEditCount = false;
-  static constexpr bool hasLiteralFuzzyCandidatesCache = false;
-  static constexpr bool hasScopedLeadingTerminalInsertRecovery = false;
-  static constexpr bool hasWordCharMask = false;
-};
+// `ParseContext` — the plain CST-building context — carries none of the probed
+// members, so it uses the all-false primary template above (its parity is still
+// asserted below). Only the contexts that own at least one probed member get an
+// explicit specialization.
 
 template <> struct ContextCaps<TrackedParseContext> {
   static constexpr bool hasSkipWithoutBuilder = true;

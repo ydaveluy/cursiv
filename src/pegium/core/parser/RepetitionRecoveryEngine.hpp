@@ -48,8 +48,6 @@ struct RepetitionElementOps {
                                       RecoveryContext &ctx) = nullptr;
   bool (*probeStartedWithoutEdits)(const void *self,
                                    RecoveryContext &ctx) = nullptr;
-  NoEditParseObservation (*observeNoEditParse)(const void *self,
-                                               RecoveryContext &ctx) = nullptr;
   /// Runs `body` with the iteration-element follow probes installed (the
   /// per-instantiation `IterationElementFollowProbe` machinery in
   /// Repetition.hpp).

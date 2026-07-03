@@ -47,15 +47,12 @@ void consider_sequence_recovery_candidate(
     EditableRecoveryCandidate &bestCandidate,
     const SequenceRecoveryReplayPlan &candidatePlan,
     const EditableRecoveryCandidate &candidate) noexcept {
-  // Routes both envelopes through the shared `consider_candidate_envelope`
-  // kernel with `FamilyRedundancyPolicy::RankOnly`: Group has no
+  // Routes both candidates through the shared `consider_editable_candidate`
+  // adapter with `FamilyRedundancyPolicy::RankOnly`: Group has no
   // family-redundancy step (each plan is its own family), so the pipeline
   // reduces to admission + `is_better_recovery_key` ranking on the
   // candidate-derived `RecoveryKey`.
-  const auto candidateEnvelope = to_candidate_envelope(candidate);
-  const auto bestEnvelope = to_candidate_envelope(bestCandidate);
-  if (consider_candidate_envelope(candidateEnvelope, bestEnvelope,
-                                  bestCandidate.matched,
+  if (consider_editable_candidate(candidate, bestCandidate,
                                   FamilyRedundancyPolicy::RankOnly) ==
       SelectionVerdict::Take) {
     bestPlan = candidatePlan;

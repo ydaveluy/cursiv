@@ -27,6 +27,7 @@
 #include <type_traits>
 
 #include <pegium/core/grammar/AbstractElement.hpp>
+#include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
 
 namespace pegium::parser::detail {
@@ -82,12 +83,12 @@ static_assert(std::is_trivially_copyable_v<TerminalRecoveryProfile>);
 /// Fuzzy-Replace candidates near `cursorStart`, gated by the profile's
 /// literal metadata and the prior-edits rule (a context that has already
 /// edited keeps the Replace leg only when the shape allows it). Empty when
-/// the Replace leg is disabled.
+/// the Replace leg is disabled. Compiled once per editable context via the
+/// explicit instantiations in TerminalLocalRecovery.cpp — the body stays out
+/// of the grammar translation units.
+template <EditableParseModeContext Context>
 [[nodiscard]] LiteralFuzzyCandidates collect_terminal_replace_candidates(
-    RecoveryContext &ctx, const TerminalRecoveryProfile &profile,
-    const char *cursorStart, const TerminalRecoveryFacts &facts);
-[[nodiscard]] LiteralFuzzyCandidates collect_terminal_replace_candidates(
-    ExpectContext &ctx, const TerminalRecoveryProfile &profile,
+    Context &ctx, const TerminalRecoveryProfile &profile,
     const char *cursorStart, const TerminalRecoveryFacts &facts);
 
 /// Terminal recovery verdict ladder: enumerate the local repair candidates,
