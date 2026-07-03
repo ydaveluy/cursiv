@@ -3,7 +3,7 @@
 /// Out-of-class definitions of `InfixRule`'s recovery-mode members declared
 /// in InfixRule.hpp: `InfixRule::probeRecoverable`, `Model::recover`,
 /// `Model::probeRecoverable`, and the nested `ParseEngine`'s `recover`,
-/// `make_tail_ops`, and `try_match_operator_editable`. A translation unit
+/// `tail_ops`, and `try_match_operator_editable`. A translation unit
 /// that drives an InfixRule through recovery mode must include this header
 /// in addition to InfixRule.hpp.
 
@@ -66,7 +66,7 @@ bool InfixRule<T, Left, Op, Right>::Model<Element, Operators...>::ParseEngine::
   }
   ctx.skip();
   const auto replayResult = detail::infix_parse_tail_editable(
-      ctx, make_tail_ops(model), /*minPrecedence=*/0, expressionStart);
+      ctx, tail_ops(model), /*minPrecedence=*/0, expressionStart);
   return replayResult.matched;
 }
 
@@ -75,7 +75,7 @@ template <typename T, auto Left, auto Op, auto Right>
 template <NonNullableExpression Element, InfixOperatorExpression... Operators>
 detail::InfixTailOps
 InfixRule<T, Left, Op, Right>::Model<Element, Operators...>::ParseEngine::
-    make_tail_ops(const Model *model) noexcept {
+    tail_ops(const Model *model) noexcept {
   return detail::InfixTailOps{
       .model = model,
       .owner = model->_owner,

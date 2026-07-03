@@ -3,7 +3,7 @@
 /// Out-of-class definitions of `OrderedChoice`'s recovery-mode members
 /// declared in OrderedChoice.hpp: `probeRecoverable`, `probeRecoverableAtEntry`,
 /// `probeRecoverableAtEntryConsumesVisible`, `parse_recovery_impl`,
-/// `make_branch_ops`, and the recovery overload of `match_choice`. A
+/// `branch_ops`, and the recovery overload of `match_choice`. A
 /// translation unit that drives an OrderedChoice through recovery mode must
 /// include this header in addition to OrderedChoice.hpp.
 
@@ -47,14 +47,14 @@ bool OrderedChoice<Elements...>::parse_recovery_impl(
     return match_choice(ctx);
   }
   const auto branchOps =
-      make_branch_ops(std::make_index_sequence<sizeof...(Elements)>{});
+      branch_ops(std::make_index_sequence<sizeof...(Elements)>{});
   return detail::run_choice_recovery(ctx, this, branchOps);
 }
 
 template <Expression... Elements>
 template <std::size_t... Is>
 std::array<detail::ChoiceBranchOps, sizeof...(Elements)>
-OrderedChoice<Elements...>::make_branch_ops(
+OrderedChoice<Elements...>::branch_ops(
     std::index_sequence<Is...>) const noexcept {
   return {detail::ChoiceBranchOps{
       .element = std::addressof(std::get<Is>(choices)),

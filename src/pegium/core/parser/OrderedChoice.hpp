@@ -5,7 +5,7 @@
 /// The strict-mode parse path (`parse_strict_impl`, `probe_impl`,
 /// `fast_probe_impl`, and the strict overload of `match_choice`) is defined
 /// in-class below; it is the hot path exercised by clean input. Recovery-mode
-/// members (`parse_recovery_impl`, `make_branch_ops`, `probeRecoverable`,
+/// members (`parse_recovery_impl`, `branch_ops`, `probeRecoverable`,
 /// `probeRecoverableAtEntry`, `probeRecoverableAtEntryConsumesVisible`, and
 /// the recovery overload of `match_choice`) are declared here and defined
 /// out-of-class in OrderedChoiceRecovery.hpp. Expect-mode members
@@ -128,7 +128,7 @@ private:
   /// OrderedChoiceRecovery.hpp.
   template <std::size_t... Is>
   std::array<detail::ChoiceBranchOps, sizeof...(Elements)>
-  make_branch_ops(std::index_sequence<Is...>) const noexcept;
+  branch_ops(std::index_sequence<Is...>) const noexcept;
 
   /// Expect-mode; defined out-of-class in OrderedChoiceExpect.hpp.
   bool parse_expect_impl(ExpectContext &ctx) const;

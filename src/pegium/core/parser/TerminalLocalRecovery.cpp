@@ -349,7 +349,6 @@ probe_profile_delete_scan(RecoveryContext &ctx,
 
 bool literal_probe_recoverable(RecoveryContext &ctx,
                                const TerminalRecoveryProfile &profile) {
-  const auto localRecoveryFacts = local_skip_terminal_recovery_facts(ctx);
   const char *const cursorStart = ctx.cursor();
   if (const char *const matchedEnd = profile_match(profile, cursorStart);
       matchedEnd != nullptr &&
@@ -366,12 +365,12 @@ bool literal_probe_recoverable(RecoveryContext &ctx,
   if (!fuzzyCandidates.empty()) {
     return true;
   }
-  return probe_profile_delete_scan(ctx, profile, localRecoveryFacts);
+  return probe_profile_delete_scan(ctx, profile,
+                                   local_skip_terminal_recovery_facts(ctx));
 }
 
 bool literal_probe_recoverable_at_entry(RecoveryContext &ctx,
                                         const TerminalRecoveryProfile &profile) {
-  const auto localRecoveryFacts = local_skip_terminal_recovery_facts(ctx);
   if (profile.shape.allowsInsert() &&
       allows_terminal_entry_probe(ctx, profile.shape)) {
     return true;
@@ -395,12 +394,12 @@ bool literal_probe_recoverable_at_entry(RecoveryContext &ctx,
           })) {
     return true;
   }
-  return probe_profile_delete_scan(ctx, profile, localRecoveryFacts);
+  return probe_profile_delete_scan(ctx, profile,
+                                   local_skip_terminal_recovery_facts(ctx));
 }
 
 bool literal_probe_recoverable_at_entry_consumes_visible(
     RecoveryContext &ctx, const TerminalRecoveryProfile &profile) {
-  const auto localRecoveryFacts = local_skip_terminal_recovery_facts(ctx);
   if (ctx.hasHadEdits() &&
       !allows_fuzzy_replace_after_prior_edits(profile.shape)) {
     return false;
@@ -422,7 +421,8 @@ bool literal_probe_recoverable_at_entry_consumes_visible(
           })) {
     return true;
   }
-  return probe_profile_delete_scan(ctx, profile, localRecoveryFacts);
+  return probe_profile_delete_scan(ctx, profile,
+                                   local_skip_terminal_recovery_facts(ctx));
 }
 
 bool terminal_rule_probe_recoverable(RecoveryContext &ctx,

@@ -180,7 +180,7 @@ current_recoverable_entry_signal(RecoveryContext &ctx,
 
 bool replay_skip_nullable_attempt(RecoveryContext &ctx,
                                   const SequenceElementOps &ops,
-                                  bool preferTailEntryInsert = false) {
+                                  bool preferTailEntryInsert) {
   const auto parseTail = [&ops, &ctx]() {
     return ops.parseTail(ops.self, ctx, false);
   };
@@ -212,7 +212,7 @@ bool replay_skip_nullable_attempt(RecoveryContext &ctx,
 [[nodiscard]] EditableRecoveryCandidate evaluate_skip_nullable_attempt(
     RecoveryContext &ctx, const SequenceElementOps &ops,
     const RecoveryContext::Checkpoint &checkpoint,
-    bool preferTailEntryInsert = false) {
+    bool preferTailEntryInsert) {
   return evaluate_editable_recovery_candidate(
       ctx, checkpoint, checkpoint.recoveryState.editBudget.editCost,
       checkpoint.recoveryState.editBudget.editCount,

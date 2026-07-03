@@ -121,21 +121,19 @@ struct RecoveryPolicyFingerprint {
   bool hadEdits = false;
   bool insideEditWindow = false;
   bool completedWindowContinuation = false;
-  // Read by Repetition / UnorderedGroup / InfixRule recovery decisions
-  // (`Repetition.hpp:251`, `UnorderedGroup.hpp:102`, `InfixRule.hpp:516`).
+  // Read by the Repetition / UnorderedGroup / InfixRule recovery decisions.
   // A choice attempt cached at one value can replay a wrong winner if the
   // bit flips between visits.
   bool frontierBlocked = false;
-  // Gates `insertSynthetic`/`deleteOneCodepoint`/`replaceLeaf` at every
-  // edit site (`ParseContext.cpp:48,90,134,208`). Flipped by
-  // `EditStateGuard` (e.g. `withEditTrackingDisabled` in `InfixRule`).
+  // Gates `insertSynthetic`/`deleteOneCodepoint`/`replaceLeaf` at every edit
+  // site; flipped by `EditStateGuard` (e.g. `withEditTrackingDisabled`).
   bool trackEditState = false;
-  // Index into committed-recovery-edits replay; controls whether edits
-  // are admissible at the current cursor (`ParseContext.cpp:53,98,142`).
+  // Index into committed-recovery-edits replay; controls whether edits are
+  // admissible at the current cursor, read by `RecoveryContext`'s
+  // `hasPendingCommittedRecoveryEdits()` admission gates.
   std::uint32_t committedRecoveryEditIndex = 0;
-  // Per-attempt edit budgets, mutated by `ExtendedDeleteScanBudgetScope` in
-  // `tryEnable()` (`RecoveryUtils.hpp:46-50`) and `restore()` (`:59-61`);
-  // affects which candidates are admissible.
+  // Per-attempt edit budgets, mutated by `ExtendedDeleteScanBudgetScope`'s
+  // `tryEnable()` / `restore()`; affects which candidates are admissible.
   std::uint32_t remainingEditCount = 0;
   std::uint32_t remainingConsecutiveDeletes = 0;
 

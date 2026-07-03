@@ -17,12 +17,12 @@
 /// `rule`/`parse_tail_strict`/`try_match_operator_strict` (the strict Pratt
 /// loop), and `has_operator_fast_probe` are defined in-class. That last one
 /// is genuinely shared, not strict-only: the erased recovery engine's
-/// `operatorFastProbe` trampoline (built by `make_tail_ops`) calls it too, so
+/// `operatorFastProbe` trampoline (built by `tail_ops`) calls it too, so
 /// it stays wherever both callers can reach it rather than being forced into
 /// either mode-specific partial.
 ///
 /// Recovery-mode members (`InfixRule::probeRecoverable`, `Model::recover`,
-/// `Model::probeRecoverable`, and `ParseEngine::recover`/`make_tail_ops`/
+/// `Model::probeRecoverable`, and `ParseEngine::recover`/`tail_ops`/
 /// `try_match_operator_editable` — the last one is recovery-only despite
 /// living alongside `try_match_operator_strict`, since its only caller is the
 /// `matchOperatorEditable` trampoline feeding the erased tail-recovery engine
@@ -490,7 +490,7 @@ private:
       /// so the table is built on the stack at each recovery descent.
       /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
       [[nodiscard]] static detail::InfixTailOps
-      make_tail_ops(const Model *model) noexcept;
+      tail_ops(const Model *model) noexcept;
 
       /// Expect-mode; defined out-of-class in InfixRuleExpect.hpp.
       static bool expect(const Model *model, ExpectContext &ctx);
@@ -582,7 +582,7 @@ private:
 
       /// Recovery-only despite sitting alongside `try_match_operator_strict`:
       /// its only caller is the `matchOperatorEditable` trampoline built by
-      /// `make_tail_ops`, feeding the erased tail-recovery engine in
+      /// `tail_ops`, feeding the erased tail-recovery engine in
       /// InfixTailRecoveryEngine.cpp. Defined out-of-class in
       /// InfixRuleRecovery.hpp.
       template <std::size_t I = 0>

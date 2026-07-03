@@ -163,7 +163,7 @@ has_visible_remainder_after_current_cursor(const RecoveryContext &ctx) {
 
 bool replay_iteration(RecoveryContext &ctx, const RepetitionElementOps &ops,
                       const IterationReplayPlan &plan, const char *parseStart,
-                      bool allowTrailingDeleteStop = false) {
+                      bool allowTrailingDeleteStop) {
   if (!plan.legal) {
     return false;
   }
