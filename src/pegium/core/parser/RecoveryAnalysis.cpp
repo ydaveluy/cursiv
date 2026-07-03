@@ -10,7 +10,7 @@
 #include <pegium/core/grammar/OrderedChoice.hpp>
 #include <pegium/core/grammar/Repetition.hpp>
 #include <pegium/core/grammar/UnorderedGroup.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/syntax-tree/CstBuilder.hpp>
 
 namespace pegium::parser::detail {

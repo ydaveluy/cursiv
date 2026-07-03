@@ -47,7 +47,7 @@ make_extension_outranks_pair() noexcept {
   current.key.firstEditOffset = 5;
   current.key.editCost = 1;
   current.key.progressAfterEdits = 7;
-  current.replayPrefix = ReplayPrefixClass::SameCommittedPrefix;
+  current.replayPrefix = ReplayPrefixClass::NewLocalPrefix;
   return {next, current};
 }
 
@@ -60,7 +60,7 @@ make_boundary_repair_outranks_pair() noexcept {
   candidate.key.firstEditOffset = 5;
   candidate.key.editCost = 2;
   candidate.key.progressAfterEdits = 12;
-  candidate.replayPrefix = ReplayPrefixClass::SameCommittedPrefix;
+  candidate.replayPrefix = ReplayPrefixClass::NewLocalPrefix;
   CandidateEnvelope committed;
   committed.key.matched = true;
   committed.key.firstEditOffset = 5;
@@ -85,7 +85,7 @@ make_destructive_extension_outranks_pair() noexcept {
   current.key.firstEditOffset = 8;
   current.key.editCost = 2;
   current.key.progressAfterEdits = 10;
-  current.replayPrefix = ReplayPrefixClass::SameCommittedPrefix;
+  current.replayPrefix = ReplayPrefixClass::NewLocalPrefix;
   return {next, current};
 }
 

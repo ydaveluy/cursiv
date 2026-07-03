@@ -132,7 +132,7 @@ struct EntryRecoverableExpression : pegium::grammar::AbstractElement {
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
     ++probeCalls;
-    return ctx.allowInsert;
+    return ctx.editPolicy.allowInsert;
   }
 };
 

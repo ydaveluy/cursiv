@@ -8,7 +8,6 @@
 
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
-#include <pegium/core/parser/Parser.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
 #include <pegium/core/text/TextSnapshot.hpp>

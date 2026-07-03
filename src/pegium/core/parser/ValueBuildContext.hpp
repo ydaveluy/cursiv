@@ -5,9 +5,16 @@
 #include <string>
 #include <vector>
 
-#include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/ParseDiagnostic.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 #include <pegium/core/syntax-tree/Reference.hpp>
+
+namespace pegium {
+class AstArena;
+namespace references {
+class Linker;
+}
+} // namespace pegium
 
 namespace pegium::parser {
 

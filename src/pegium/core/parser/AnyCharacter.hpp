@@ -5,7 +5,7 @@
 #include <pegium/core/grammar/AnyCharacter.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
 #include <pegium/core/utils/TextUtils.hpp>

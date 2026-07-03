@@ -35,13 +35,10 @@ RecoveryPolicyFingerprint reference_fingerprint() noexcept {
   static int dummy = 0;
   RecoveryPolicyFingerprint fp;
   fp.followProbeFn = static_cast<const void *>(&dummy);
-  fp.followProbeData = static_cast<const void *>(&fp);
   fp.recoverableFollowProbeFn = static_cast<const void *>(&fp);
-  fp.recoverableFollowProbeData = static_cast<const void *>(&dummy);
   fp.recoverableFollowConsumesVisibleProbeFn =
       static_cast<const void *>(&dummy);
-  fp.recoverableFollowConsumesVisibleProbeData =
-      static_cast<const void *>(&fp);
+  fp.followChainIdentity = 0x5EED5EED5EED5EEDULL;
   fp.remainingEditBudget = 17;
   fp.consecutiveDeletes = 3;
   fp.editFloorOffset = 42;
@@ -65,20 +62,14 @@ struct AxisMutator {
 const std::array kAxisMutators = {
     AxisMutator{"followProbeFn",
                 [](auto &fp) { fp.followProbeFn = nullptr; }},
-    AxisMutator{"followProbeData",
-                [](auto &fp) { fp.followProbeData = nullptr; }},
     AxisMutator{"recoverableFollowProbeFn",
                 [](auto &fp) { fp.recoverableFollowProbeFn = nullptr; }},
-    AxisMutator{"recoverableFollowProbeData",
-                [](auto &fp) { fp.recoverableFollowProbeData = nullptr; }},
     AxisMutator{"recoverableFollowConsumesVisibleProbeFn",
                 [](auto &fp) {
                   fp.recoverableFollowConsumesVisibleProbeFn = nullptr;
                 }},
-    AxisMutator{"recoverableFollowConsumesVisibleProbeData",
-                [](auto &fp) {
-                  fp.recoverableFollowConsumesVisibleProbeData = nullptr;
-                }},
+    AxisMutator{"followChainIdentity",
+                [](auto &fp) { fp.followChainIdentity += 1; }},
     AxisMutator{"remainingEditBudget",
                 [](auto &fp) { fp.remainingEditBudget += 1; }},
     AxisMutator{"consecutiveDeletes",

@@ -234,7 +234,19 @@ struct Wrapper {
   }
 
   bool probe_match_here(RecoveryContext &ctx) const {
-    return _ops->probeMatchHereRecover(_obj, ctx);
+    // `probeMatchHereRecover` is null whenever recovery is compiled out
+    // (PEGIUM_DISABLE_RECOVERY), and this accessor is reachable directly —
+    // via a rule's `probeMatchHere` (AbstractRule.hpp) — bypassing the
+    // higher-level null checks such as `has_recovery_probe()`. Branching on
+    // the compile-time flag rather than the (always non-null when it is
+    // true) function pointer keeps this identical, instruction for
+    // instruction, to a plain unconditional call in a recovery-capable
+    // build.
+    if constexpr (detail::kRecoveryCompiledIn) {
+      return _ops->probeMatchHereRecover(_obj, ctx);
+    } else {
+      return false;
+    }
   }
 
   const grammar::AbstractElement *element() const noexcept {
@@ -273,7 +285,21 @@ private:
                                       TrackedParseContext>) {
       return _ops->parseTracked(_obj, ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      return _ops->parseRecover(_obj, ctx);
+      // `parseRecover` is null whenever recovery is compiled out; this is
+      // reached both through `ParserRule::recover`/`DataTypeRule`'s
+      // recovery `parse_impl` and through any direct
+      // `parser::parse(rule, recoveryCtx)` call that bypasses those
+      // overrides entirely (e.g. a test constructing a `RecoveryContext` by
+      // hand), so this dispatch has to know about the compiled-out case
+      // itself, not rely only on the rule-level call sites. Gating on the
+      // compile-time flag (rather than a runtime null check on the always
+      // non-null pointer) keeps a recovery-capable build's codegen
+      // unchanged.
+      if constexpr (detail::kRecoveryCompiledIn) {
+        return _ops->parseRecover(_obj, ctx);
+      } else {
+        return false;
+      }
     } else {
       return _ops->parseExpect(_obj, ctx);
     }
@@ -355,23 +381,33 @@ private:
           .parseTracked = &Model::parseTracked,
           .fastProbeTracked = &Model::fastProbeTracked,
           .probeMatchHereTracked = &Model::probeMatchHereTracked,
-          .probeMatchHereRecover = &Model::probeMatchHereRecover,
-          .parseRecover = &Model::parseRecover,
           .parseExpect = &Model::parseExpect,
           .elem = &Model::elem,
           .init = &Model::init,
           .destroy = &Model::destroy,
           .clone = &Model::clone,
       };
-      if constexpr (RecoveryProbeCapableExpression<T>) {
-        result.probeRecoverable = &Model::probeRecoverable;
-      }
-      if constexpr (EntryRecoveryProbeCapableExpression<T>) {
-        result.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
-      }
-      if constexpr (EntryRecoveryConsumesVisibleProbeCapableExpression<T>) {
-        result.probeRecoverableAtEntryConsumesVisible =
-            &Model::probeRecoverableAtEntryConsumesVisible;
+      // Taking the address of `parseRecover`/`probeMatchHereRecover` (and, below,
+      // the three entry-probe members) forces the compiler to instantiate their
+      // bodies, which parse/probe `value` through a `RecoveryContext` — the
+      // choke point that drags in the recovery-mode `parse_impl` chain of the
+      // whole nested combinator tree. Skipping the assignment when recovery is
+      // compiled out leaves the slots null, which every caller already
+      // null-checks (`Wrapper::has_recovery_probe()` and friends) or never
+      // reaches (`ParserRule::recover` short-circuits before touching them).
+      if constexpr (detail::kRecoveryCompiledIn) {
+        result.probeMatchHereRecover = &Model::probeMatchHereRecover;
+        result.parseRecover = &Model::parseRecover;
+        if constexpr (RecoveryProbeCapableExpression<T>) {
+          result.probeRecoverable = &Model::probeRecoverable;
+        }
+        if constexpr (EntryRecoveryProbeCapableExpression<T>) {
+          result.probeRecoverableAtEntry = &Model::probeRecoverableAtEntry;
+        }
+        if constexpr (EntryRecoveryConsumesVisibleProbeCapableExpression<T>) {
+          result.probeRecoverableAtEntryConsumesVisible =
+              &Model::probeRecoverableAtEntryConsumesVisible;
+        }
       }
       if constexpr (TerminalCapableExpression<T>) {
         result.terminal = &Model::terminal;

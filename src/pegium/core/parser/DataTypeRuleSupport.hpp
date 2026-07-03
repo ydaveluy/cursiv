@@ -19,21 +19,69 @@
 
 namespace pegium::parser::detail {
 
+/// Message shown when a rule's converter reports failure without its own
+/// error text.
+[[nodiscard]] inline std::string
+generic_conversion_error_message(std::string_view ruleName) {
+  return "Converter failed for rule " + std::string(ruleName);
+}
+
+/// Message shown when a rule's value type has no default conversion and no
+/// converter was configured for it.
+[[nodiscard]] inline std::string
+missing_converter_message(std::string_view ruleName) {
+  return "ValueConvert not provided for rule " + std::string(ruleName);
+}
+
+/// Records a conversion failure against the build context, when one is
+/// tracking diagnostics.
+inline void report_conversion_failure(const CstNodeView &node,
+                                      const grammar::AbstractElement *element,
+                                      const ValueBuildContext *context,
+                                      std::string message) {
+  if (context == nullptr) {
+    return;
+  }
+  context->addConversionDiagnostic(node, element, std::move(message));
+}
+
+/// Unwraps a converter's result: the converted value on success, or a
+/// reported diagnostic (the converter's own error, falling back to a
+/// generic message when it left none) followed by a value-initialized
+/// default.
+template <typename T>
+[[nodiscard]] T finish_conversion(opt::ConversionResult<T> &&result,
+                                  std::string_view ruleName,
+                                  const grammar::AbstractElement *element,
+                                  const CstNodeView &node,
+                                  const ValueBuildContext *context) {
+  if (result.has_value()) {
+    return std::move(result).value();
+  }
+  report_conversion_failure(
+      node, element, context,
+      result.error().empty() ? generic_conversion_error_message(ruleName)
+                             : std::string(result.error()));
+  return {};
+}
+
+/// Wraps a text-invocable converter into the `(std::string_view) ->
+/// ConversionResult<T>` shape every rule's converter storage normalizes to:
+/// a converter may return opt::ConversionResult<T> (fallible) or a value
+/// convertible to T directly (infallible); as_conversion_result normalizes
+/// both.
+template <typename T, typename Converter>
+[[nodiscard]] auto normalize_text_converter(Converter &&converter) {
+  return [converterFn = std::forward<Converter>(converter)](
+             std::string_view text) mutable -> opt::ConversionResult<T> {
+    return opt::as_conversion_result<T>(std::invoke(converterFn, text));
+  };
+}
+
 template <typename T> struct DataTypeRuleValueSupport {
   static void append_text_fragment(std::string &out,
                                    std::string_view text) {
     out.append(text.data(), text.size());
-  }
-
-  template <typename Rule>
-  [[nodiscard]] static std::string
-  generic_conversion_error_message(const Rule &rule) {
-    return "Converter failed for rule " + std::string(rule.getName());
-  }
-
-  template <typename Rule>
-  [[nodiscard]] static std::string missing_converter_message(const Rule &rule) {
-    return "ValueConvert not provided for rule " + std::string(rule.getName());
   }
 
   [[nodiscard]] static std::string
@@ -43,17 +91,6 @@ template <typename T> struct DataTypeRuleValueSupport {
            "kind " +
            std::to_string(static_cast<int>(kind)) +
            "); flatten it to those, or provide a with_converter(...)";
-  }
-
-  template <typename Rule>
-  static void report_conversion_failure(const Rule &rule, const CstNodeView &node,
-                                        const ValueBuildContext *context,
-                                        std::string message) {
-    if (context == nullptr) {
-      return;
-    }
-    context->addConversionDiagnostic(node, std::addressof(rule),
-                                     std::move(message));
   }
 
   template <typename Rule>
@@ -103,7 +140,7 @@ template <typename T> struct DataTypeRuleValueSupport {
           } else if (const auto *view = std::get_if<std::string_view>(&nested)) {
             append_text_fragment(value, *view);
           } else {
-            report_conversion_failure(rule, node, context,
+            report_conversion_failure(node, std::addressof(rule), context,
                                       "a string data-type rule can only "
                                       "concatenate string-valued sub-rules");
             return {};
@@ -112,15 +149,15 @@ template <typename T> struct DataTypeRuleValueSupport {
         }
         default:
           report_conversion_failure(
-              rule, node, context,
+              node, std::addressof(rule), context,
               unsupported_element_conversion_message(grammarElement->getKind()));
           return {};
         }
       }
       return value;
     } else {
-      report_conversion_failure(rule, node, context,
-                                missing_converter_message(rule));
+      report_conversion_failure(node, std::addressof(rule), context,
+                                missing_converter_message(rule.getName()));
       return {};
     }
   }
@@ -133,15 +170,8 @@ template <typename T> struct DataTypeRuleValueSupport {
     if (!hasCustomValueConverter) {
       return convert_default_value(rule, node, context);
     }
-    auto result = value_converter(node, context);
-    if (result.has_value()) {
-      return std::move(result).value();
-    }
-    report_conversion_failure(
-        rule, node, context,
-        result.error().empty() ? generic_conversion_error_message(rule)
-                               : std::string(result.error()));
-    return {};
+    return finish_conversion<T>(value_converter(node, context), rule.getName(),
+                                std::addressof(rule), node, context);
   }
 
   template <typename ConverterStorage, typename Converter>
@@ -162,11 +192,11 @@ template <typename T> struct DataTypeRuleValueSupport {
       hasCustomValueConverter = true;
     } else if constexpr (std::is_nothrow_invocable_v<ConverterType &,
                                                      std::string_view>) {
-      storage = [converterFn = std::forward<Converter>(converter)](
+      storage = [textConverter = normalize_text_converter<T>(
+                     std::forward<Converter>(converter))](
                     const CstNodeView &node, const ValueBuildContext *)
                     mutable -> opt::ConversionResult<T> {
-        return opt::as_conversion_result<T>(
-            std::invoke(converterFn, node.getText()));
+        return textConverter(node.getText());
       };
       hasCustomValueConverter = true;
     } else {

@@ -13,7 +13,7 @@
 #include <pegium/core/grammar/Repetition.hpp>
 #include <pegium/core/grammar/UnorderedGroup.hpp>
 #include <pegium/core/parser/EditableRecoverySupport.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryDebug.hpp>
 #include <pegium/core/parser/RecoveryUtils.hpp>
@@ -691,7 +691,7 @@ try_prefix_delete_retry_entry_rule(RecoveryContext &ctx,
     return false;
   }
 
-  const bool savedAllowInsert = ctx.allowInsert;
+  const bool savedAllowInsert = ctx.editPolicy.allowInsert;
   const bool previousSkipAfterDelete = ctx.skipAfterDelete;
   auto deleteOnlyGuard = ctx.withEditPermissions(false, true);
   (void)deleteOnlyGuard;
@@ -789,16 +789,16 @@ execute_recovery_parse(const grammar::ParserRule &entryRule,
       .forwardTokenCount = spec.window.forwardTokenCount,
       .replayForwardTokenCount = std::min(
           spec.window.forwardTokenCount, options.recoveryStabilityTokenCount)});
-  parseCtx.trackEditState = true;
+  parseCtx.editPolicy.trackEditState = true;
   parseCtx.recoveryState.windowReplay.inRecoveryPhase = false;
-  parseCtx.maxConsecutiveCodepointDeletes =
+  parseCtx.editPolicy.maxConsecutiveCodepointDeletes =
       options.maxConsecutiveCodepointDeletes;
   parseCtx.forbidOutOfWindowFuzzyFold = spec.probeAxes.forbidOutOfWindowFuzzyFold;
   parseCtx.forbidWholeKeywordFuzzyReplace =
       spec.probeAxes.forbidWholeKeywordFuzzyReplace;
   parseCtx.stabilityTokenCount = options.recoveryStabilityTokenCount;
-  parseCtx.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
-  parseCtx.maxEditCost = options.maxRecoveryEditCost;
+  parseCtx.editPolicy.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
+  parseCtx.editPolicy.maxEditCost = options.maxRecoveryEditCost;
   parseCtx.maxResyncSkipCodepoints = options.maxResyncSkipCodepoints;
   parseCtx.maxRecoveryRuleEntries = options.maxRecoveryRuleEntries;
   if (cachePool != nullptr) {

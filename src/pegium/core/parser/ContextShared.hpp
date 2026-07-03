@@ -3,6 +3,7 @@
 /// Shared parser-context guards and editable-state utilities.
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <limits>
@@ -11,6 +12,7 @@
 #include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/parser/RecoveryCost.hpp>
 #include <pegium/core/parser/Skipper.hpp>
+#include <pegium/core/parser/TerminalTextClass.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 #include <ranges>
 #include <string_view>
@@ -19,31 +21,6 @@
 
 namespace pegium::parser::detail {
 
-// The identifier-codepoint classifier lives in TextUtils so the parser,
-// recovery and editor-facing (token boundary) code share one definition.
-using utils::is_identifier_like_codepoint;
-using utils::is_identifier_like_codepoint_at;
-
-[[nodiscard]] constexpr bool
-is_word_like_terminal(std::string_view value) noexcept {
-  if (value.empty()) {
-    return false;
-  }
-  const char *cursor = value.data();
-  const char *const end = cursor + value.size();
-  while (cursor < end) {
-    const auto length = utils::utf8_codepoint_length(*cursor);
-    if (length == 0 ||
-        length > static_cast<std::size_t>(end - cursor)) {
-      return false;
-    }
-    if (!is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor))) {
-      return false;
-    }
-    cursor += length;
-  }
-  return true;
-}
 /// Increment a counter at construction (already done by the caller),
 /// decrement it at destruction. Used to maintain a recursion-depth
 /// counter on the recovery context with exception-safe scoping.
@@ -116,16 +93,78 @@ private:
 template <typename Context>
 ProbeRestoreScope(Context &) -> ProbeRestoreScope<Context>;
 
+/// The editable-permission and edit-limit knobs shared verbatim by both
+/// editable contexts: `RecoveryContext` and `ExpectContext` each hold one as
+/// a public `editPolicy` member. A single struct keeps the two surfaces in
+/// lock-step, so the guards that mutate a policy subset (`EditStateGuard`
+/// below, `ExtendedDeleteScanBudgetScope` in RecoveryUtils.hpp) and the
+/// `requires`-gated recovery helpers address the same field spellings on
+/// either context. Recovery-only exploration knobs (skipAfterDelete,
+/// stabilityTokenCount, maxResyncSkipCodepoints, the forbid* probe axes)
+/// deliberately stay direct `RecoveryContext` members.
+struct EditPolicy {
+  bool allowInsert = true;
+  bool allowDelete = true;
+  bool trackEditState = true;
+  std::uint32_t maxConsecutiveCodepointDeletes =
+      kDefaultMaxConsecutiveCodepointDeletes;
+  std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
+  std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
+  TextOffset editFloorOffset = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<EditPolicy>);
+
+/// The word/identifier-character mask driving recovery's "does this
+/// codepoint look like it continues a token" decisions (fuzzy-candidate
+/// gating, delete-scan extension bounds, trailing-garbage resync stops).
+/// Shared verbatim by `RecoveryContext` and `ExpectContext`, mirroring
+/// `EditPolicy` above. Defaults to the historical C-family identifier class
+/// (`utils::is_word_lookup`, i.e. `a-zA-Z0-9_`) so a freshly constructed
+/// context answers `isWordCharAt` identically to the hardcoded
+/// `utils::is_identifier_like_codepoint` classifier until a grammar-derived
+/// mask is installed over it.
+struct WordCharMask {
+  std::array<bool, 256> table = utils::is_word_lookup;
+};
+
+static_assert(std::is_trivially_copyable_v<WordCharMask>);
+
+/// True iff `[p, end)` begins with a complete codepoint `mask` treats as
+/// identifier-like: any codepoint >= 0x80 (every non-ASCII script, matching
+/// `utils::is_identifier_like_codepoint`'s conservative Unicode passthrough)
+/// or an ASCII byte for which `mask.table` holds. A null/at-end pointer or a
+/// truncated multi-byte tail reads as non-identifier, mirroring
+/// `utils::is_identifier_like_codepoint_at`.
+[[nodiscard]] constexpr bool is_word_char_at(const WordCharMask &mask,
+                                             const char *p,
+                                             const char *end) noexcept {
+  if (p == nullptr || p >= end) {
+    return false;
+  }
+  if (const auto length = utils::utf8_codepoint_length(*p);
+      length == 0 || length > static_cast<std::size_t>(end - p)) {
+    return false;
+  }
+  const auto codepoint = utils::decode_utf8_codepoint(p);
+  return codepoint >= 0x80 ||
+         mask.table[static_cast<unsigned char>(codepoint)];
+}
+
+/// Saves and restores exactly the three permission bits it mutates — NOT the
+/// whole `EditPolicy`. `ExtendedDeleteScanBudgetScope` can raise the max*
+/// limits inside an `EditStateGuard` scope; a blanket policy save/restore
+/// here would clobber that interleaved mutation on teardown.
 template <typename Context> class EditStateGuard {
 public:
   EditStateGuard(Context &ctx, bool nextAllowInsert, bool nextAllowDelete,
                  bool nextTrackEditState) noexcept
-      : _ctx(ctx), _prevAllowInsert(ctx.allowInsert),
-        _prevAllowDelete(ctx.allowDelete),
-        _prevTrackEditState(ctx.trackEditState) {
-    _ctx.allowInsert = nextAllowInsert;
-    _ctx.allowDelete = nextAllowDelete;
-    _ctx.trackEditState = nextTrackEditState;
+      : _ctx(ctx), _prevAllowInsert(ctx.editPolicy.allowInsert),
+        _prevAllowDelete(ctx.editPolicy.allowDelete),
+        _prevTrackEditState(ctx.editPolicy.trackEditState) {
+    _ctx.editPolicy.allowInsert = nextAllowInsert;
+    _ctx.editPolicy.allowDelete = nextAllowDelete;
+    _ctx.editPolicy.trackEditState = nextTrackEditState;
   }
 
   EditStateGuard(const EditStateGuard &) = delete;
@@ -141,9 +180,9 @@ public:
 
   ~EditStateGuard() noexcept {
     if (_active) {
-      _ctx.trackEditState = _prevTrackEditState;
-      _ctx.allowInsert = _prevAllowInsert;
-      _ctx.allowDelete = _prevAllowDelete;
+      _ctx.editPolicy.trackEditState = _prevTrackEditState;
+      _ctx.editPolicy.allowInsert = _prevAllowInsert;
+      _ctx.editPolicy.allowDelete = _prevAllowDelete;
     }
   }
 
@@ -219,6 +258,23 @@ next_codepoint_cursor(const char *cursor) noexcept {
              ? cursor + 1
              : utils::advanceOneCodepointLossy(cursor);
 }
+
+/// The mutable per-attempt edit-budget counters, shared verbatim by both
+/// editable contexts: `RecoveryContext` holds one nested in
+/// `recoveryState.editBudget`, `ExpectContext` holds one directly. Keeping a
+/// single struct (rather than two parallel field sets) is what stops the two
+/// from drifting; the budget *logic* is already the shared free functions
+/// below (`can_afford_edit` / `apply_non_delete_edit_state` /
+/// `apply_delete_edit_state`).
+struct EditBudget {
+  std::uint32_t consecutiveDeletes = 0;
+  std::uint32_t editCost = 0;
+  std::uint32_t editCount = 0;
+  bool hadEdits = false;
+  /// Recovery-only: lets a window bypass the per-attempt cost ceiling. Unused
+  /// by `ExpectContext` (left at its `false` default).
+  bool allowBudgetOverflowEdits = false;
+};
 
 /// Shared bookkeeping for non-delete edits (insert and replace). Both
 /// produce a single edit operation that ends any in-progress delete run.

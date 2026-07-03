@@ -323,6 +323,82 @@ TEST(ContextTest, RecoveryDeleteCanBridgeAdjacentHiddenTriviaIntoSameEdit) {
   EXPECT_EQ(diagnostics.front().endOffset, 6u);
 }
 
+TEST(ContextTest, RecoveryContextWordCharMaskDefaultsToHistoricalIdentifierClass) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("x");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  detail::FailureHistoryRecorder recorder(input.begin());
+  const RecoveryContext ctx{builder, skipper, recorder,
+                            pegium::utils::default_cancel_token};
+
+  for (unsigned byteValue = 0; byteValue < 256; ++byteValue) {
+    const char byte = static_cast<char>(byteValue);
+    EXPECT_EQ(ctx.isWordCharAt(&byte, &byte + 1),
+              pegium::utils::is_identifier_like_codepoint_at(&byte, &byte + 1))
+        << "byte=" << byteValue;
+  }
+
+  // A real multi-byte (non-ASCII) codepoint: the >=0x80 passthrough branch,
+  // not just the single-byte truncation short-circuit above.
+  constexpr std::string_view accentedE = "\xC3\xA9"; // U+00E9 'é'
+  EXPECT_EQ(ctx.isWordCharAt(accentedE.data(), accentedE.data() + accentedE.size()),
+            pegium::utils::is_identifier_like_codepoint_at(
+                accentedE.data(), accentedE.data() + accentedE.size()));
+  EXPECT_TRUE(ctx.isWordCharAt(accentedE.data(), accentedE.data() + accentedE.size()));
+}
+
+TEST(ContextTest, ExpectContextWordCharMaskDefaultsToHistoricalIdentifierClass) {
+  const auto skipper = NoOpSkipper();
+  const ExpectContext ctx{"x", skipper, 0};
+
+  for (unsigned byteValue = 0; byteValue < 256; ++byteValue) {
+    const char byte = static_cast<char>(byteValue);
+    EXPECT_EQ(ctx.isWordCharAt(&byte, &byte + 1),
+              pegium::utils::is_identifier_like_codepoint_at(&byte, &byte + 1))
+        << "byte=" << byteValue;
+  }
+}
+
+TEST(ContextTest,
+     PositionStartsStructuredVisibleSourceUsesInstalledWordCharMask) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("+");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  detail::FailureHistoryRecorder recorder(input.begin());
+  RecoveryContext ctx{builder, skipper, recorder,
+                      pegium::utils::default_cancel_token};
+
+  // Default C-family mask: '+' is not identifier-like.
+  EXPECT_FALSE(
+      detail::position_starts_structured_visible_source(ctx, input.begin()));
+
+  // Installing a grammar-specific mask that treats '+' as word-like flips
+  // the decision — proving the gate reads the per-context mask rather than
+  // the hardcoded `utils::is_identifier_like_codepoint` classifier.
+  ctx.wordChars.table[static_cast<unsigned char>('+')] = true;
+  EXPECT_TRUE(
+      detail::position_starts_structured_visible_source(ctx, input.begin()));
+}
+
+TEST(ContextTest,
+     CursorStartsStructuredVisibleSourceUsesInstalledWordCharMask) {
+  auto builderHarness = pegium::test::makeCstBuilderHarness("+");
+  auto &builder = builderHarness.builder;
+  const auto input = builder.getText();
+  const auto skipper = NoOpSkipper();
+  detail::FailureHistoryRecorder recorder(input.begin());
+  RecoveryContext ctx{builder, skipper, recorder,
+                      pegium::utils::default_cancel_token};
+  ctx.skip();
+
+  EXPECT_FALSE(detail::cursor_starts_structured_visible_source(ctx));
+
+  ctx.wordChars.table[static_cast<unsigned char>('+')] = true;
+  EXPECT_TRUE(detail::cursor_starts_structured_visible_source(ctx));
+}
+
 TEST(ContextTest,
      MaterializeRecoveryEditsMergesCompatibleInsertedDiagnosticsAtSameOffset) {
   const std::vector<RecoveryContext::RecoveryEdit> edits{

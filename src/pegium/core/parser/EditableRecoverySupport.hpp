@@ -1,7 +1,9 @@
 #pragma once
 
-/// Helpers for evaluating AND applying recovery candidates in editable parse
-/// modes.
+/// Helpers for evaluating and ranking recovery candidates in editable parse
+/// modes. The terminal-level *apply* helpers (`can_apply_recovery_match`,
+/// `apply_insert_synthetic_gap_and_match_recovery_edit`) live with the
+/// terminal combinators in TerminalRecoverySupport.hpp.
 
 #include <algorithm>
 #include <cstddef>
@@ -9,7 +11,7 @@
 #include <span>
 
 #include <pegium/core/parser/ParseAttempt.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/utils/FunctionRef.hpp>
@@ -71,6 +73,57 @@ post_skip_cursor_offset(RecoveryContext &ctx) {
   return static_cast<TextOffset>(skipped - ctx.begin);
 }
 
+/// Which cursor the candidate's ranking key reads. The per-producer
+/// difference is deliberate (see `EditableRecoveryCandidate::keyProgressOffset`);
+/// making it an explicit axis of the single construction site keeps a
+/// producer from silently inheriting the wrong convention.
+enum class KeyProgressConvention : std::uint8_t {
+  /// OrderedChoice / Group / InfixRule rank on the post-skip cursor.
+  PostSkipCursor,
+  /// Repetition ranks on the RAW iteration cursor (Invariant 2:
+  /// same-start continuing repairs rank on raw progress, not post-skip).
+  RawIterationCursor,
+};
+
+/// The single population site for a matched `EditableRecoveryCandidate`:
+/// progress offsets, the edit-slice summary of [`baseRecoveryEditCount`,
+/// end()), and the replay-prefix classification. Called at the matched
+/// cursor, BEFORE any rewind rolls the speculative edits back.
+[[nodiscard]] inline EditableRecoveryCandidate
+capture_editable_candidate(RecoveryContext &ctx, std::uint32_t baseEditCost,
+                           std::size_t baseRecoveryEditCount,
+                           KeyProgressConvention convention) {
+  EditableRecoveryCandidate candidate;
+  candidate.matched = true;
+  candidate.postSkipCursorOffset = post_skip_cursor_offset(ctx);
+  candidate.keyProgressOffset =
+      convention == KeyProgressConvention::RawIterationCursor
+          ? ctx.cursorOffset()
+          : candidate.postSkipCursorOffset;
+  candidate.editCost = ctx.currentEditCost() - baseEditCost;
+  candidate.editCount = static_cast<std::uint32_t>(ctx.recoveryEditCount() -
+                                                   baseRecoveryEditCount);
+  // Both `Deleted` and `Replaced` commit to a strictly different
+  // replay prefix than an insert-only candidate, so both belong to
+  // the destructive equivalence class consumed by the family-
+  // redundancy filters. Treating Replace as non-destructive here
+  // misclassifies fuzzy keyword recoveries (e.g. `entit -> entity`)
+  // as `NewLocalPrefix`, which silently drops the
+  // `extension_outranks_anchor_base` ratio guard and lets a sibling
+  // insert-only path with the same cost win on enumeration order.
+  bool hasDestructiveEdit = false;
+  if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
+    const auto editSummary = summarize_edits_since(ctx.recoveryEditsView(),
+                                                   baseRecoveryEditCount);
+    candidate.firstEditOffset = editSummary.firstEditBeginOffset;
+    hasDestructiveEdit = editSummary.hasDestructiveEdit;
+    candidate.lastEditEndOffset = editSummary.maxEndOffset;
+  }
+  candidate.replayPrefix =
+      classify_replay_prefix(candidate.editCount != 0u, hasDestructiveEdit);
+  return candidate;
+}
+
 // The candidate-evaluation body, with the attempt closure type-erased to
 // pegium::utils::function_ref<bool()>. Templated on Checkpoint only, so one body
 // is emitted per checkpoint type (one, in practice) instead of one per distinct
@@ -87,31 +140,9 @@ evaluate_editable_recovery_candidate(
   const char *const savedFurthestExploredCursor =
       ctx.maxCursor();
   if (runner()) {
-    candidate.matched = true;
-    candidate.postSkipCursorOffset = post_skip_cursor_offset(ctx);
-    // OrderedChoice / Group / InfixRule rank on the post-skip cursor.
-    candidate.keyProgressOffset = candidate.postSkipCursorOffset;
-    candidate.editCost = ctx.currentEditCost() - baseEditCost;
-    candidate.editCount =
-        static_cast<std::uint32_t>(ctx.recoveryEditCount() -
-                                   baseRecoveryEditCount);
-    if (ctx.recoveryEditCount() > baseRecoveryEditCount) {
-      // Both `Deleted` and `Replaced` commit to a strictly different
-      // replay prefix than an insert-only candidate, so both belong to
-      // the destructive equivalence class consumed by the family-
-      // redundancy filters. Treating Replace as non-destructive here
-      // misclassifies fuzzy keyword recoveries (e.g. `entit -> entity`)
-      // as `NewLocalPrefix`, which silently drops the
-      // `extension_outranks_anchor_base` ratio guard and lets a sibling
-      // insert-only path with the same cost win on enumeration order.
-      const auto editSummary = summarize_edits_since(ctx.recoveryEditsView(),
-                                                     baseRecoveryEditCount);
-      candidate.firstEditOffset = editSummary.firstEditBeginOffset;
-      candidate.hasDestructiveEdit = editSummary.hasDestructiveEdit;
-      candidate.lastEditEndOffset = editSummary.maxEndOffset;
-    }
-    candidate.replayPrefix = classify_replay_prefix(
-        candidate.editCount != 0u, candidate.hasDestructiveEdit);
+    candidate =
+        capture_editable_candidate(ctx, baseEditCost, baseRecoveryEditCount,
+                                   KeyProgressConvention::PostSkipCursor);
   }
   ctx.rewind(entryCheckpoint);
   ctx.restoreMaxCursor(savedFurthestExploredCursor);
@@ -132,33 +163,10 @@ capture_recovery_probe_progress(const RecoveryContext &ctx,
   };
 }
 
-// ---- Recovery-edit application helpers (formerly RecoveryEditSupport.hpp) ----
-
-template <EditableParseModeContext Context>
-[[nodiscard]] constexpr bool
-can_apply_recovery_match(const Context &ctx, const char *endPtr) noexcept {
-  if constexpr (RecoveryParseModeContext<Context>) {
-    (void)ctx;
-    return endPtr != nullptr;
-  } else {
-    return ctx.canTraverseUntil(endPtr);
-  }
-}
-
-template <EditableParseModeContext Context, typename Element>
-[[nodiscard]] constexpr bool
-apply_insert_synthetic_gap_and_match_recovery_edit(
-    Context &ctx, const char *position, const Element *element,
-    const char *message = nullptr) {
-  if (!ctx.insertSyntheticGapAt(position, message)) {
-    return false;
-  }
-  // The source text already matches `element`; the recovery edit only inserts a
-  // synthetic separator at `position` so the existing match can be committed.
-  ctx.leaf(position, element);
-  return true;
-}
-
+// `attempt_parse_without_side_effects` stays with the ranking half (rather than
+// with the terminal-level apply helpers in TerminalRecoverySupport.hpp) because
+// its sole caller is the structural Group combinator, which already includes
+// this header for candidate ranking.
 template <Expression E>
 [[nodiscard]] inline bool
 attempt_parse_without_side_effects(RecoveryContext &ctx, const E &expression) {

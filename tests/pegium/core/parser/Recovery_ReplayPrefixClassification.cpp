@@ -14,12 +14,6 @@
 ///   - edits with at least one delete   -> `ExtendedCommittedPrefix`
 ///   - insert-only edits                -> `NewLocalPrefix`
 ///
-/// `SameCommittedPrefix` is reserved for the `RecoverySearch` driver
-/// that snapshots the committed prefix between attempts; the
-/// per-attempt classifier in `OrderedChoice` does not see that
-/// snapshot and therefore never produces this value. The tests below
-/// verify both the mapping and the `SameCommittedPrefix` exclusion.
-///
 /// Cache neutrality and end-to-end behaviour of the dominance
 /// predicate using this classification are exercised by the
 /// cache-neutrality harness; this suite keeps to the unit-level
@@ -63,23 +57,6 @@ TEST(ReplayPrefixClassification, closed_mapping_over_edit_axes) {
   }
 }
 
-TEST(ReplayPrefixClassification,
-     classifier_never_returns_same_committed_prefix) {
-  // The per-attempt classifier reserves `SameCommittedPrefix` for
-  // sites that compare the candidate against an already-committed
-  // prefix snapshot. The `OrderedChoice` / `Group` / `Repetition`
-  // construction sites do not have such a snapshot at hand and must
-  // never produce this value through the classifier.
-  for (const bool hadEdits : {false, true}) {
-    for (const bool hasDestructiveEdit : {false, true}) {
-      const auto cls = classify_replay_prefix(hadEdits, hasDestructiveEdit);
-      EXPECT_NE(cls, ReplayPrefixClass::SameCommittedPrefix)
-          << "hadEdits=" << hadEdits
-          << " hasDestructiveEdit=" << hasDestructiveEdit;
-    }
-  }
-}
-
 TEST(ReplayPrefixClassification, default_constructed_candidate_is_empty) {
   // The default value of `replayPrefix` on a freshly-constructed
   // candidate must be `Empty`, matching the classifier's mapping for
@@ -90,5 +67,4 @@ TEST(ReplayPrefixClassification, default_constructed_candidate_is_empty) {
   const EditableRecoveryCandidate candidate;
   EXPECT_EQ(candidate.replayPrefix, ReplayPrefixClass::Empty);
   EXPECT_EQ(candidate.editCount, 0u);
-  EXPECT_FALSE(candidate.hasDestructiveEdit);
 }

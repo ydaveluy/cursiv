@@ -58,4 +58,42 @@ bool boundary_repair_outranks_no_edit_iteration(
          candidate.key.progressAfterEdits > committed.key.progressAfterEdits;
 }
 
+SelectionVerdict consider_candidate_envelope(const CandidateEnvelope &candidate,
+                                             const CandidateEnvelope &incumbent,
+                                             bool incumbentValid,
+                                             FamilyRedundancyPolicy policy) noexcept {
+  if (!candidate.key.matched) {
+    return SelectionVerdict::Keep;
+  }
+  if (!incumbentValid) {
+    return SelectionVerdict::Take;
+  }
+  switch (policy) {
+  case FamilyRedundancyPolicy::ChoiceAnchorExtension:
+    if (extension_dominates(candidate, incumbent,
+                            ExtensionDominanceGuard::WhenCurrentProgressedPastAnchor)) {
+      return SelectionVerdict::Take;
+    }
+    break;
+  case FamilyRedundancyPolicy::IterationExtensionFamily:
+    if (extension_dominates(candidate, incumbent,
+                            ExtensionDominanceGuard::WhenCurrentIsExtended)) {
+      return SelectionVerdict::Take;
+    }
+    if (extension_dominates(incumbent, candidate,
+                            ExtensionDominanceGuard::WhenCurrentIsExtended)) {
+      return SelectionVerdict::Keep;
+    }
+    if (boundary_repair_outranks_no_edit_iteration(candidate, incumbent)) {
+      return SelectionVerdict::Take;
+    }
+    break;
+  case FamilyRedundancyPolicy::RankOnly:
+    break;
+  }
+  return is_better_recovery_key(candidate.key, incumbent.key)
+             ? SelectionVerdict::Take
+             : SelectionVerdict::Keep;
+}
+
 } // namespace pegium::parser::detail

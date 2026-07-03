@@ -21,6 +21,8 @@
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/NodeParseHelpers.hpp>
 #include <pegium/core/parser/OrderedChoice.hpp>
+#include <pegium/core/parser/OrderedChoiceExpect.hpp>
+#include <pegium/core/parser/OrderedChoiceRecovery.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RawValueTraits.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
@@ -74,6 +76,46 @@ template <auto feature> struct AssignmentReferenceSupport {
     }
     return nullptr;
   }
+};
+
+/// Reflection metadata for one assigned feature: the assigned AST type (when
+/// the attribute is an AST node) and the reference target type (when the
+/// attribute is a reference). One function-local static per feature,
+/// initialized on first use during grammar bootstrap.
+template <auto feature>
+[[nodiscard]] const AssignmentReflectionInfo &
+assignment_reflection_info() noexcept {
+  static const AssignmentReflectionInfo info = [] {
+    AssignmentReflectionInfo value{};
+    using AssignedType = helpers::AttrType<feature>;
+    if constexpr (std::derived_from<AssignedType, AstNode>) {
+      value.assignedAstType =
+          std::addressof(ast_node_type_info<AssignedType>());
+    }
+    value.referenceTargetType =
+        AssignmentReferenceSupport<feature>::getReferenceTargetTypeInfo();
+    return value;
+  }();
+  return info;
+}
+
+/// Feature-specific operations of one (feature, Element) assignment binding.
+/// The parser-side Assignment element dispatches all feature-dependent
+/// behavior through one static constexpr descriptor (the same shared-table
+/// pattern as Wrapper::Ops), so everything else about the element depends
+/// only on the parse-expression shape.
+template <typename Element> struct AssignmentDescriptor {
+  using ExecuteFn = void (*)(const Element &, AstNode *, const CstNodeView &,
+                             const ValueBuildContext &);
+  using GetValueFn = grammar::FeatureValue (*)(const AstNode *);
+  using ReflectionInfoFn = const AssignmentReflectionInfo &(*)() noexcept;
+
+  std::string_view featureName;
+  bool isReference = false;
+  bool isMultiReference = false;
+  ReflectionInfoFn reflectionInfo = nullptr;
+  ExecuteFn execute = nullptr;
+  GetValueFn getValue = nullptr;
 };
 
 template <typename E, typename = void> struct AssignmentElementValueType {
@@ -520,10 +562,19 @@ public:
   }
 };
 
-template <auto feature, typename Element> struct AssignmentParseSupport {
-private:
-  using ReferenceSupport = AssignmentReferenceSupport<feature>;
+/// The static descriptor of one (feature, Element) assignment binding.
+template <auto feature, typename Element>
+inline constexpr AssignmentDescriptor<Element> assignment_descriptor{
+    .featureName = member_name_v<feature>,
+    .isReference = AssignmentReferenceSupport<feature>::isReference,
+    .isMultiReference = AssignmentReferenceSupport<feature>::isMultiReference,
+    .reflectionInfo = &assignment_reflection_info<feature>,
+    .execute = &AssignmentRuntimeSupport<feature, Element>::execute,
+    .getValue = &AssignmentRuntimeSupport<feature, Element>::getValue,
+};
 
+template <typename Element> struct AssignmentParseSupport {
+private:
   template <ParseModeContext Context>
   [[gnu::always_inline]] static bool
   parse_element(Context &ctx, const grammar::Assignment *assignment,
@@ -538,13 +589,12 @@ public:
   template <ParseModeContext Context>
   [[gnu::always_inline]] static bool
   parse(Context &ctx, const grammar::Assignment *assignment,
-        const Element &element) {
+        const Element &element,
+        [[maybe_unused]] const AssignmentDescriptor<Element> &descriptor) {
     if constexpr (ExpectParseModeContext<Context>) {
-      if constexpr (ReferenceSupport::isReference) {
-        if (ctx.reachedAnchor()) {
-          ctx.addReference(assignment);
-          return true;
-        }
+      if (descriptor.isReference && ctx.reachedAnchor()) {
+        ctx.addReference(assignment);
+        return true;
       }
       auto assignmentGuard = ctx.with_assignment(assignment);
       (void)assignmentGuard;

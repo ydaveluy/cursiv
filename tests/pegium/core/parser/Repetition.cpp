@@ -362,7 +362,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   auto &repeatedBuilder = repeatedHarness.builder;
   detail::FailureHistoryRecorder repeatedRecorder(repeatedBuilder.input_begin());
   RecoveryContext repeatedCtx{repeatedBuilder, skipper, repeatedRecorder};
-  repeatedCtx.trackEditState = true;
+  repeatedCtx.editPolicy.trackEditState = true;
   repeatedCtx.skip();
 
   EXPECT_TRUE(parse(repeatedTransitions, repeatedCtx));
@@ -373,7 +373,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   auto &windowedBuilder = windowedHarness.builder;
   detail::FailureHistoryRecorder windowedRecorder(windowedBuilder.input_begin());
   RecoveryContext windowedCtx{windowedBuilder, skipper, windowedRecorder};
-  windowedCtx.trackEditState = true;
+  windowedCtx.editPolicy.trackEditState = true;
   windowedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -390,7 +390,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   auto &assignedBuilder = assignedHarness.builder;
   detail::FailureHistoryRecorder assignedRecorder(assignedBuilder.input_begin());
   RecoveryContext assignedCtx{assignedBuilder, skipper, assignedRecorder};
-  assignedCtx.trackEditState = true;
+  assignedCtx.editPolicy.trackEditState = true;
   assignedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -412,7 +412,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
   auto &stateBuilder = stateHarness.builder;
   detail::FailureHistoryRecorder stateRecorder(stateBuilder.input_begin());
   RecoveryContext stateCtx{stateBuilder, skipper, stateRecorder};
-  stateCtx.trackEditState = true;
+  stateCtx.editPolicy.trackEditState = true;
   stateCtx.skip();
 
   EXPECT_TRUE(parse(stateRule, stateCtx));
@@ -423,7 +423,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
       stateWindowedBuilder.input_begin());
   RecoveryContext stateWindowedCtx{stateWindowedBuilder, skipper,
                                    stateWindowedRecorder};
-  stateWindowedCtx.trackEditState = true;
+  stateWindowedCtx.editPolicy.trackEditState = true;
   stateWindowedCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 11,
       .editFloorOffset = 11,
@@ -442,7 +442,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
       stateEarlyWindowBuilder.input_begin());
   RecoveryContext stateEarlyWindowCtx{stateEarlyWindowBuilder, skipper,
                                       stateEarlyWindowRecorder};
-  stateEarlyWindowCtx.trackEditState = true;
+  stateEarlyWindowCtx.editPolicy.trackEditState = true;
   stateEarlyWindowCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -461,7 +461,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
       statePartialBuilder.input_begin());
   RecoveryContext statePartialCtx{statePartialBuilder, skipper,
                                   statePartialRecorder};
-  statePartialCtx.trackEditState = true;
+  statePartialCtx.editPolicy.trackEditState = true;
   statePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,
@@ -480,7 +480,7 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
       stateLatePartialBuilder.input_begin());
   RecoveryContext stateLatePartialCtx{stateLatePartialBuilder, skipper,
                                       stateLatePartialRecorder};
-  stateLatePartialCtx.trackEditState = true;
+  stateLatePartialCtx.editPolicy.trackEditState = true;
   stateLatePartialCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 11,
       .editFloorOffset = 11,
@@ -500,10 +500,10 @@ TEST(RepetitionTest, LeadingGarbageCanStillBeLocallyRecoveredByRepeatedRule) {
       stateDefaultBudgetBuilder.input_begin());
   RecoveryContext stateDefaultBudgetCtx{stateDefaultBudgetBuilder, skipper,
                                         stateDefaultBudgetRecorder};
-  stateDefaultBudgetCtx.trackEditState = true;
-  stateDefaultBudgetCtx.maxConsecutiveCodepointDeletes = 8;
-  stateDefaultBudgetCtx.maxEditsPerAttempt = 10;
-  stateDefaultBudgetCtx.maxEditCost = 64;
+  stateDefaultBudgetCtx.editPolicy.trackEditState = true;
+  stateDefaultBudgetCtx.editPolicy.maxConsecutiveCodepointDeletes = 8;
+  stateDefaultBudgetCtx.editPolicy.maxEditsPerAttempt = 10;
+  stateDefaultBudgetCtx.editPolicy.maxEditCost = 64;
   stateDefaultBudgetCtx.setEditWindow(RecoveryContext::EditWindow{
       .beginOffset = 0,
       .editFloorOffset = 0,

@@ -1,6 +1,41 @@
 #pragma once
 
-/// Parser rule template implementing precedence-aware infix parsing.
+/// Parser rule template implementing precedence-aware infix parsing
+/// (Pratt/precedence-climbing).
+///
+/// `InfixOperator<Element, Assoc>` (declaring one operator, e.g. via
+/// `LeftAssociation(...)`) stays entirely in-class below: its `fast_probe_impl`
+/// and `parse_impl` are thin, mode-agnostic calls into
+/// `parser::attempt_fast_probe`/`detail::parse_wrapped_node`/
+/// `detail::parse_overriding_first_child`, shared across every mode, so
+/// splitting it would separate no meaningful logic.
+///
+/// The `InfixRule` wrapper (the type-erased `Ops` table, ctor/copy/move/
+/// reset, and the public grammar::InfixRule API) and its nested
+/// `Model<Element, Operators...>` mostly stay in-class too: `Model::rule`/
+/// `ruleTracked` (the strict entry points), the nested `ParseEngine`'s
+/// `rule`/`parse_tail_strict`/`try_match_operator_strict` (the strict Pratt
+/// loop), and `has_operator_fast_probe` are defined in-class. That last one
+/// is genuinely shared, not strict-only: the erased recovery engine's
+/// `operatorFastProbe` trampoline (built by `make_tail_ops`) calls it too, so
+/// it stays wherever both callers can reach it rather than being forced into
+/// either mode-specific partial.
+///
+/// Recovery-mode members (`InfixRule::probeRecoverable`, `Model::recover`,
+/// `Model::probeRecoverable`, and `ParseEngine::recover`/`make_tail_ops`/
+/// `try_match_operator_editable` — the last one is recovery-only despite
+/// living alongside `try_match_operator_strict`, since its only caller is the
+/// `matchOperatorEditable` trampoline feeding the erased tail-recovery engine
+/// in InfixTailRecoveryEngine.cpp) are declared here and defined out-of-class
+/// in InfixRuleRecovery.hpp. Expect-mode members (`Model::expect` and
+/// `ParseEngine::expect`/`parse_tail_expect`) are declared here and defined
+/// out-of-class in InfixRuleExpect.hpp; the expect-mode operator matching
+/// itself (merging an operator's blocked frontier, replaying the winning
+/// operator) already lives externally in InfixRuleSupport.hpp's
+/// `InfixRuleExpectSupport`, so `parse_tail_expect` is mostly a thin loop
+/// calling into that support struct. A translation unit that drives an
+/// InfixRule through recovery or expect mode must include the matching
+/// partial header in addition to this one.
 
 #include <array>
 #include <concepts>
@@ -12,9 +47,10 @@
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ExpectFrontier.hpp>
 #include <pegium/core/parser/InfixRuleSupport.hpp>
+#include <pegium/core/parser/InfixTailRecoveryEngine.hpp>
 #include <pegium/core/parser/NodeParseHelpers.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/ParserRule.hpp>
@@ -28,25 +64,6 @@
 #include <string>
 #include <type_traits>
 #include <utility>
-
-namespace pegium::parser::detail {
-
-/// Closed list of `Infix` recovery candidate families. Private to
-/// `InfixRule` — no other combinator references this vocabulary.
-///
-/// Strict-path discipline: recovery-side; none of these types are
-/// constructed on the strict-only nominal path.
-enum class InfixCandidateFamily : std::uint8_t {
-  /// The tail continues: a strict operator at the cursor followed
-  /// by RHS strict or recoverable acceptance.
-  ContinueTail,
-  /// The tail recovers from operator-position noise: a bounded
-  /// delete of pre-operator junk, after which a strict RHS primary
-  /// starts.
-  DeleteOperatorNoise,
-};
-
-} // namespace pegium::parser::detail
 
 namespace pegium::parser {
 template <NonNullableExpression Element,
@@ -272,10 +289,8 @@ struct InfixRule final : grammar::InfixRule {
     return _ops.getValue(_obj, node, lhsNode, context);
   }
 
-  bool probeRecoverable(RecoveryContext &ctx) const {
-    assert(_obj && _ops.probeRecoverable && "Missing recovery probe wrapper!");
-    return _ops.probeRecoverable(_obj, ctx);
-  }
+  /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
+  bool probeRecoverable(RecoveryContext &ctx) const;
 
 private:
   friend struct detail::ParseAccess;
@@ -291,8 +306,18 @@ private:
       assert(_obj && _ops.ruleTracked && "Missing tracked infix wrapper!");
       return _ops.ruleTracked(_obj, ctx);
     } else if constexpr (RecoveryParseModeContext<Context>) {
-      assert(_obj && _ops.recover && "Missing element wrapper!");
-      return _ops.recover(_obj, ctx);
+      // `.recover` is null whenever recovery is compiled out; reachable
+      // both via an outer `Wrapper` (already gated) and via a direct
+      // `parser::parse(infixRule, recoveryCtx)` on a raw `InfixRule`
+      // reference, so this dispatch has to know about the compiled-out
+      // case itself. Gating on the compile-time flag keeps a
+      // recovery-capable build's codegen unchanged.
+      if constexpr (detail::kRecoveryCompiledIn) {
+        assert(_obj && _ops.recover && "Missing element wrapper!");
+        return _ops.recover(_obj, ctx);
+      } else {
+        return false;
+      }
     } else {
       assert(_obj && _ops.expect && "Missing element wrapper!");
       return _ops.expect(_obj, ctx);
@@ -369,21 +394,12 @@ private:
       const auto *model = static_cast<const Model *>(self);
       return parser::attempt_fast_probe(ctx, model->primary);
     }
-    static bool recover(const void *self, RecoveryContext &ctx) {
-      return ParseEngine::recover(static_cast<const Model *>(self), ctx);
-    }
-    static bool expect(const void *self, ExpectContext &ctx) {
-      return ParseEngine::expect(static_cast<const Model *>(self), ctx);
-    }
-    static bool probeRecoverable(const void *self, RecoveryContext &ctx) {
-      const auto *model = static_cast<const Model *>(self);
-      detail::ProbeRestoreScope guard{ctx};
-      const auto startOffset = ctx.cursorOffset();
-      ctx.restoreMaxCursor(ctx.cursor());
-      const bool matchedPrimary =
-          parser::attempt_parse_no_edits(ctx, model->primary);
-      return matchedPrimary || ctx.maxCursorOffset() > startOffset;
-    }
+    /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
+    static bool recover(const void *self, RecoveryContext &ctx);
+    /// Expect-mode; defined out-of-class in InfixRuleExpect.hpp.
+    static bool expect(const void *self, ExpectContext &ctx);
+    /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
+    static bool probeRecoverable(const void *self, RecoveryContext &ctx);
     static void init(const void *self, AstReflectionInitContext &ctx) {
       const auto *model = static_cast<const Model *>(self);
       parser::init(model->primary, ctx);
@@ -421,14 +437,12 @@ private:
     using Ops = InfixRule::Ops;
 
     static constexpr Ops make_ops() noexcept {
-      return {
+      Ops result{
           .getValue = &Model::getValue,
           .rule = &Model::rule,
           .ruleTracked = &Model::ruleTracked,
           .fastProbeTracked = &Model::fastProbeTracked,
-          .recover = &Model::recover,
           .expect = &Model::expect,
-          .probeRecoverable = &Model::probeRecoverable,
           .init = &Model::init,
           .elem = &Model::elem,
           .getOperator = &Model::getOperator,
@@ -437,56 +451,25 @@ private:
           .clone = &Model::clone,
           .rebindOwner = &Model::rebindOwner,
       };
+      // Unlike the generic `Wrapper` (ParseExpression.hpp), an `InfixRule` builds
+      // this table eagerly in its own constructor (`_ops = W::opsTable;`), not
+      // lazily through a recursive parse dispatch — so `.recover`/
+      // `.probeRecoverable` get instantiated the moment an `InfixRule` is
+      // constructed, regardless of whether it is ever wrapped by another rule.
+      // Taking their address instantiates their bodies, which drag in the whole
+      // recovery-mode tail-parsing engine for the primary element and every
+      // operator; skip that when recovery is compiled out.
+      if constexpr (detail::kRecoveryCompiledIn) {
+        result.recover = &Model::recover;
+        result.probeRecoverable = &Model::probeRecoverable;
+      }
+      return result;
     }
 
     inline static constexpr Ops opsTable = make_ops();
 
   private:
     struct ParseEngine {
-      struct EditableTailCandidate {
-        detail::InfixCandidateFamily kind =
-            detail::InfixCandidateFamily::DeleteOperatorNoise;
-        std::uint32_t rhsPrefixNoiseDeleteCount = 0;
-        bool rhsPrimaryObservedWithoutEdits = false;
-        bool legal = false;
-      };
-
-      struct EditableTailReplayResult {
-        bool matched = true;
-        // Only `recover_stray_operator_run` ever sets this true (to halt the
-        // tail loop once a stray-operator-run repair has consumed the rest of
-        // the editable expression); every other replay path leaves it false or
-        // forwards a nested result unchanged.
-        bool stopTail = false;
-      };
-
-      struct EditableTailObservation {
-        TextOffset rhsStartOffset = 0;
-        std::uint32_t rhsPrefixNoiseDeleteCount = 0;
-        // Populated before the observation's `ctx.rewind()` so the
-        // caller can still project the speculative match onto a
-        // `RecoveryKey` after the speculative edits have been rolled
-        // back.
-        std::uint32_t immediateEditCount = 0;
-        std::uint32_t immediateEditCost = 0;
-        TextOffset firstImmediateEditOffset =
-            std::numeric_limits<TextOffset>::max();
-        TextOffset postMatchCursorOffset = 0;
-        // Real codepoint-delete count captured by the observable
-        // `observe_stray_operator_run_delete_count` scan from the
-        // pre-operator-match cursor. Used to project a real
-        // `RecoveryKey` for the `DeleteOperatorNoise` candidate.
-        // Empty when the scan would not admit a recovery from this
-        // cursor.
-        std::optional<std::uint32_t> strayOperatorRunDeleteCount;
-        TextOffset strayOperatorRunFirstEditOffset = 0;
-        bool exposedPrimary = true;
-        bool matchedPrimary = false;
-        bool advancedPrimary = false;
-        bool rhsPrimaryObservedWithoutEdits = false;
-        bool multipleImmediateEditsAtStart = false;
-      };
-
       template <StrictParseModeContext Context>
       static bool rule(const Model *model, Context &ctx) {
         const auto expressionStart = ctx.cursor();
@@ -498,29 +481,19 @@ private:
                                  expressionStart);
       }
 
-      static bool recover(const Model *model, RecoveryContext &ctx) {
-        const auto expressionStart = ctx.cursor();
-        if (!parse(model->primary, ctx)) {
-          return false;
-        }
-        ctx.skip();
-        const auto replayResult =
-            parse_tail_editable(model, ctx, /*minPrecedence=*/0, expressionStart);
-        return replayResult.matched;
-      }
+      /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
+      static bool recover(const Model *model, RecoveryContext &ctx);
 
-      static bool expect(const Model *model, ExpectContext &ctx) {
-        const auto expressionStart = ctx.cursor();
-        if (!parse(model->primary, ctx)) {
-          return false;
-        }
-        if (ctx.frontierBlocked()) {
-          return true;
-        }
-        ctx.skip();
-        return parse_tail_expect(model, ctx, /*minPrecedence=*/0,
-                                 expressionStart);
-      }
+      /// Type-erased view consumed by the shared infix tail engine
+      /// (InfixTailRecoveryEngine.cpp). The trampolines are static (one set
+      /// per Model instantiation); the model/owner pointers are per instance,
+      /// so the table is built on the stack at each recovery descent.
+      /// Recovery-mode; defined out-of-class in InfixRuleRecovery.hpp.
+      [[nodiscard]] static detail::InfixTailOps
+      make_tail_ops(const Model *model) noexcept;
+
+      /// Expect-mode; defined out-of-class in InfixRuleExpect.hpp.
+      static bool expect(const Model *model, ExpectContext &ctx);
 
     private:
       template <StrictParseModeContext Context>
@@ -555,127 +528,10 @@ private:
         }
       }
 
-      static EditableTailReplayResult
-      parse_tail_editable(const Model *model, RecoveryContext &ctx,
-                          std::int32_t minPrecedence, const char *lhsStart) {
-        if (minPrecedence > kMaxPrecedence) {
-          return {};
-        }
-        while (true) {
-          if (!has_operator_fast_probe(model, ctx, minPrecedence)) {
-            return {};
-          }
-          const auto nodeCheckpoint = ctx.mark();
-          (void)ctx.enter();
-          std::int32_t nextMinPrecedence = 0;
-          if (!try_match_operator_editable(model, ctx, minPrecedence,
-                                           nextMinPrecedence)) {
-            ctx.rewind(nodeCheckpoint);
-            return {};
-          }
-          ctx.skip();
-          const auto rhsStart = ctx.cursor();
-          const char *const directRhsSavedFurthest =
-              ctx.maxCursor();
-          if (parser::attempt_parse_no_edits(ctx, model->primary) &&
-              ctx.cursor() != rhsStart) {
-            ctx.skip();
-            const auto nestedReplayResult =
-                parse_tail_editable(model, ctx, nextMinPrecedence, rhsStart);
-            assert(model->_owner && "The owner must be set");
-            ctx.exit(lhsStart, model->_owner);
-            if (!nestedReplayResult.matched || nestedReplayResult.stopTail) {
-              return nestedReplayResult;
-            }
-            continue;
-          }
-          ctx.rewind(nodeCheckpoint);
-          ctx.restoreMaxCursor(directRhsSavedFurthest);
-          // Observable stray-operator scan from the pre-operator-match cursor
-          // (the same cursor `recover_stray_operator_run` reads when
-          // committed). It is deliberately lazy: when the RHS primary parses
-          // strictly, no tail-recovery candidate is enumerated, so the scan
-          // would only add recovery-mode cost to a nominal operator chain.
-          const auto strayOperatorRunCursorOffset = ctx.cursorOffset();
-          const auto strayOperatorRunDeleteCount =
-              observe_stray_operator_run_delete_count(model, ctx,
-                                                       minPrecedence);
-          (void)ctx.enter();
-          nextMinPrecedence = 0;
-          if (!try_match_operator_editable(model, ctx, minPrecedence,
-                                           nextMinPrecedence)) {
-            ctx.rewind(nodeCheckpoint);
-            return {};
-          }
-          auto observation = observe_editable_rhs_primary(model, ctx);
-          observation.strayOperatorRunDeleteCount =
-              strayOperatorRunDeleteCount;
-          observation.strayOperatorRunFirstEditOffset =
-              strayOperatorRunCursorOffset;
-          const auto candidates =
-              enumerate_editable_tail_candidates(observation);
-          const auto *selected =
-              select_editable_tail_candidate_by_recovery_key(candidates,
-                                                             observation);
-          if (selected == nullptr) {
-            ctx.rewind(nodeCheckpoint);
-            return {.matched = false, .stopTail = false};
-          }
-          if (selected->kind ==
-              detail::InfixCandidateFamily::DeleteOperatorNoise) {
-            ctx.rewind(nodeCheckpoint);
-            return recover_stray_operator_run(model, ctx, minPrecedence);
-          }
-          const auto replayResult = replay_editable_rhs_primary(
-              model, ctx, *selected, nextMinPrecedence, lhsStart);
-          if (!replayResult.matched || replayResult.stopTail) {
-            return replayResult;
-          }
-        }
-      }
-
+      /// Expect-mode; defined out-of-class in InfixRuleExpect.hpp.
       static bool parse_tail_expect(const Model *model, ExpectContext &ctx,
                                     std::int32_t minPrecedence,
-                                    const char *lhsStart) {
-        if (minPrecedence > kMaxPrecedence) {
-          return true;
-        }
-        while (true) {
-          if (ExpectSupport::try_merge_operator_frontier(model, ctx,
-                                                         minPrecedence)) {
-            ctx.clearFrontierBlock();
-            return true;
-          }
-
-          const auto nodeCheckpoint = ctx.mark();
-          std::int32_t nextMinPrecedence = 0;
-          if (!ExpectSupport::try_match_operator(model, ctx, minPrecedence,
-                                                 nextMinPrecedence)) {
-            ctx.rewind(nodeCheckpoint);
-            return true;
-          }
-          ctx.skip();
-          const auto rhsStart = ctx.cursor();
-          auto rhsNoEditGuard = ctx.withEditTrackingDisabled();
-          (void)rhsNoEditGuard;
-          if (!parse(model->primary, ctx)) {
-            ctx.rewind(nodeCheckpoint);
-            return true;
-          }
-          if (ctx.frontierBlocked()) {
-            return true;
-          }
-          ctx.skip();
-          if (!parse_tail_expect(model, ctx, nextMinPrecedence, rhsStart)) {
-            return false;
-          }
-          if (ctx.frontierBlocked()) {
-            return true;
-          }
-          assert(model->_owner && "The owner must be set");
-          ctx.exit(lhsStart, model->_owner);
-        }
-      }
+                                    const char *lhsStart);
 
       template <std::size_t I = 0, ParseModeContext Context>
       static bool has_operator_fast_probe(const Model *model, Context &ctx,
@@ -724,517 +580,16 @@ private:
         }
       }
 
+      /// Recovery-only despite sitting alongside `try_match_operator_strict`:
+      /// its only caller is the `matchOperatorEditable` trampoline built by
+      /// `make_tail_ops`, feeding the erased tail-recovery engine in
+      /// InfixTailRecoveryEngine.cpp. Defined out-of-class in
+      /// InfixRuleRecovery.hpp.
       template <std::size_t I = 0>
       static bool try_match_operator_editable(const Model *model,
                                               RecoveryContext &ctx,
                                               std::int32_t minPrecedence,
-                                              std::int32_t &nextMinPrecedence) {
-        const auto &op = std::get<I>(model->ops);
-        constexpr auto precedence =
-            static_cast<std::int32_t>(sizeof...(Operators) - I);
-        if (precedence < minPrecedence) {
-          return false;
-        }
-        if (!parser::attempt_fast_probe(ctx, op)) {
-          if constexpr (I + 1 == sizeof...(Operators)) {
-            return false;
-          } else {
-            return try_match_operator_editable<I + 1>(model, ctx, minPrecedence,
-                                                      nextMinPrecedence);
-          }
-        }
-        // RAII restore of the edit permissions: an exception inside
-        // `attempt_parse_editable` (e.g. cancellation) must not leave the
-        // context with both flags pinned to false.
-        auto editGuard = ctx.withEditPermissions(false, false);
-        (void)editGuard;
-        const auto operatorCheckpoint = ctx.mark();
-        if (parser::attempt_parse_editable(ctx, op)) {
-          if (!detail::infix_operator_shadowed<std::remove_cvref_t<decltype(op)>,
-                                               Operators...>(ctx.cursor(),
-                                                             ctx.end)) {
-            nextMinPrecedence =
-                detail::infix_next_min_precedence<decltype(op)>(precedence);
-            return true;
-          }
-          ctx.rewind(operatorCheckpoint);
-        }
-        if constexpr (I + 1 == sizeof...(Operators)) {
-          return false;
-        } else {
-          return try_match_operator_editable<I + 1>(model, ctx, minPrecedence,
-                                                    nextMinPrecedence);
-        }
-      }
-
-      [[nodiscard]] static EditableTailObservation
-      observe_editable_rhs_primary(const Model *model,
-                                   RecoveryContext &ctx) {
-        EditableTailObservation observation;
-        detail::ProbeRestoreScope guard{ctx};
-        ctx.restoreMaxCursor(ctx.cursor());
-        ctx.skip();
-        // Enter the prefix-noise cleanup whenever the RHS primary does not
-        // strictly start here — stray operators OR arbitrary garbage — so the
-        // infix tail resyncs to the operand the same way recovery deletes noise
-        // everywhere else.
-        if (!parser::attempt_fast_probe(ctx, model->primary) &&
-            !observe_rhs_prefix_operator_noise(model, ctx, observation)) {
-          observation.exposedPrimary = false;
-          return observation;
-        }
-        const char *const rhsStart = ctx.cursor();
-        observation.rhsStartOffset = ctx.cursorOffset();
-        const std::size_t baseRecoveryEditCount = ctx.recoveryEditCount();
-        {
-          detail::ProbeRestoreScope noEditGuard{ctx};
-          if (parser::attempt_parse_no_edits(ctx, model->primary) &&
-              ctx.cursor() != rhsStart) {
-            observation.matchedPrimary = true;
-            observation.advancedPrimary = true;
-            observation.rhsPrimaryObservedWithoutEdits = true;
-            observation.postMatchCursorOffset = ctx.cursorOffset();
-            return observation;
-          }
-        }
-        observation.matchedPrimary = parse(model->primary, ctx);
-        observation.advancedPrimary = ctx.cursor() != rhsStart;
-        observation.postMatchCursorOffset = ctx.cursorOffset();
-        if (!observation.matchedPrimary || !observation.advancedPrimary) {
-          return observation;
-        }
-        if (ctx.recoveryEditCount() == baseRecoveryEditCount) {
-          return observation;
-        }
-        const auto edits = ctx.recoveryEditsView();
-        observation.immediateEditCount = static_cast<std::uint32_t>(
-            ctx.recoveryEditCount() - baseRecoveryEditCount);
-        // Capture the first-edit offset and the aggregate edit cost so
-        // the caller can project the ContinueTail candidate onto a
-        // `RecoveryKey` after the rewind has rolled back the edits.
-        observation.firstImmediateEditOffset =
-            edits[baseRecoveryEditCount].offset;
-        for (std::size_t i = baseRecoveryEditCount;
-             i < ctx.recoveryEditCount(); ++i) {
-          observation.immediateEditCost +=
-              detail::default_edit_cost(edits[i].kind);
-        }
-        // The InfixRule tail should match `many(op + Primary)` semantics: the
-        // rhs primary is matched *starting at rhsStart*. Reject the ContinueTail
-        // candidate when the speculative match instead looks like a grammar
-        // reinterpretation, in either of two ways:
-        //  - multiple edits all anchored at rhsStart, or
-        //  - any edit committed *before* rhsStart, which back-edited an earlier
-        //    token of the input to reshape it (e.g. inserting `(` at offset 23
-        //    to reinterpret `c-4+;` as `c(-4)+;`).
-        // Such multi-edit speculative cascades routinely beat the outer
-        // recovery, so they must not win the tail here.
-        observation.multipleImmediateEditsAtStart =
-            (observation.immediateEditCount > 1u &&
-             observation.firstImmediateEditOffset ==
-                 observation.rhsStartOffset) ||
-            observation.firstImmediateEditOffset <
-                observation.rhsStartOffset;
-        return observation;
-      }
-
-
-      [[nodiscard]] static bool
-      continue_editable_tail_candidate_is_legal(
-          const EditableTailObservation &observation) noexcept {
-        return observation.exposedPrimary && observation.matchedPrimary &&
-               observation.advancedPrimary &&
-               !observation.multipleImmediateEditsAtStart;
-      }
-
-      [[nodiscard]] static std::array<EditableTailCandidate, 2>
-      enumerate_editable_tail_candidates(
-          const EditableTailObservation &observation) noexcept {
-        // ContinueTail is admissible exactly when a strict operator at the
-        // cursor is followed by a strict-or-recoverable RHS primary; that
-        // legality is computed by
-        // `continue_editable_tail_candidate_is_legal(observation)`.
-        const bool continueTailLegal =
-            continue_editable_tail_candidate_is_legal(observation);
-        // DeleteOperatorNoise is admissible exactly when the bounded
-        // operator-noise scan committed a real delete count (which already
-        // implies both a following strict RHS primary and an available
-        // delete budget at the pre-operator cursor).
-        const bool deleteNoiseLegal =
-            observation.strayOperatorRunDeleteCount.has_value();
-
-        return {{
-            {.kind = detail::InfixCandidateFamily::ContinueTail,
-             .rhsPrefixNoiseDeleteCount = observation.rhsPrefixNoiseDeleteCount,
-             .rhsPrimaryObservedWithoutEdits =
-                 observation.rhsPrimaryObservedWithoutEdits,
-             .legal = continueTailLegal},
-            {.kind = detail::InfixCandidateFamily::DeleteOperatorNoise,
-             .legal = deleteNoiseLegal},
-        }};
-      }
-
-      /// Project each legal candidate onto the shared `RecoveryKey` and
-      /// select the best — the same comparator used across the rest of
-      /// recovery. Returns a pointer to the winning candidate, or nullptr
-      /// when none is legal.
-      ///
-      /// ContinueTail's key comes from the observation (already computed,
-      /// costs captured before the speculative rewind).
-      ///
-      /// DeleteOperatorNoise's key comes from the bounded, rewound
-      /// observation. The winner path still replays the scan before
-      /// committing edits, so observation and replay stay separate.
-      [[nodiscard]] static const EditableTailCandidate *
-      select_editable_tail_candidate_by_recovery_key(
-          const std::array<EditableTailCandidate, 2> &candidates,
-          const EditableTailObservation &observation) {
-        const EditableTailCandidate *selected = nullptr;
-        detail::RecoveryKey bestKey;
-        bool anySelected = false;
-
-        const auto considerCandidate = [&](const EditableTailCandidate &cand,
-                                           const detail::RecoveryKey &key) {
-          if (!anySelected ||
-              detail::is_better_recovery_key(key, bestKey)) {
-            anySelected = true;
-            bestKey = key;
-            selected = std::addressof(cand);
-          }
-        };
-
-        for (const auto &candidate : candidates) {
-          if (!candidate.legal) {
-            continue;
-          }
-          if (candidate.kind == detail::InfixCandidateFamily::ContinueTail) {
-            const auto effectiveFirstEdit = detail::effective_first_edit_offset(
-                observation.immediateEditCount != 0u,
-                observation.firstImmediateEditOffset,
-                observation.postMatchCursorOffset);
-            const detail::RecoveryKey key{
-                .matched = observation.matchedPrimary,
-                .firstEditOffset = effectiveFirstEdit,
-                .editCost = observation.immediateEditCost,
-                .editCount = observation.immediateEditCount,
-                .progressAfterEdits = observation.postMatchCursorOffset,
-            };
-            considerCandidate(candidate, key);
-          } else {
-            // Real DeleteOperatorNoise cost from the observable scan
-            // (`observe_stray_operator_run_delete_count`). The
-            // candidate's `RecoveryKey` reflects the actual codepoint
-            // count the committed `recover_stray_operator_run` would
-            // produce. The candidate's `legal` flag (already filtered
-            // above) is `strayOperatorRunDeleteCount.has_value()`, so the
-            // optional is guaranteed engaged here.
-            constexpr std::uint32_t kSingleDeleteCost =
-                detail::default_edit_cost(ParseDiagnosticKind::Deleted);
-            const auto deleteCount =
-                *observation.strayOperatorRunDeleteCount;
-            const auto realEditCost = deleteCount * kSingleDeleteCost;
-            const detail::RecoveryKey key{
-                .matched = true,
-                // The scan's first edit lands at the operator position
-                // (cursor at the start of the run, i.e.
-                // `strayOperatorRunFirstEditOffset` captured before
-                // `try_match_operator_editable` advanced the cursor).
-                .firstEditOffset =
-                    observation.strayOperatorRunFirstEditOffset,
-                .editCost = realEditCost,
-                .editCount = deleteCount,
-                .progressAfterEdits = observation.rhsStartOffset,
-            };
-            considerCandidate(candidate, key);
-          }
-        }
-        return selected;
-      }
-
-      static EditableTailReplayResult
-      replay_editable_rhs_primary(const Model *model, RecoveryContext &ctx,
-                                  const EditableTailCandidate &candidate,
-                                  std::int32_t nextMinPrecedence,
-                                  const char *lhsStart) {
-        assert(candidate.kind == detail::InfixCandidateFamily::ContinueTail &&
-               "Only a ContinueTail candidate can replay an infix RHS");
-        ctx.skip();
-        const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
-            model, ctx, candidate.rhsPrefixNoiseDeleteCount);
-        assert(replayedPrefixNoise &&
-               "Infix RHS prefix replay must match observed cleanup");
-        if (!replayedPrefixNoise) {
-          return {.matched = false, .stopTail = false};
-        }
-        const auto rhsStart = ctx.cursor();
-        bool matchedPrimary = false;
-        if (candidate.rhsPrimaryObservedWithoutEdits) {
-          matchedPrimary = parser::attempt_parse_no_edits(ctx, model->primary);
-        } else {
-          matchedPrimary = parse(model->primary, ctx);
-        }
-        if (!matchedPrimary || ctx.cursor() == rhsStart) {
-          // Speculative observation can disagree with replay when a
-          // sibling recovery path mutates state (max cursor, failure
-          // history, fingerprint-affecting edits) between the observation
-          // and the replay. Reject the candidate and let the enclosing
-          // recovery attempt compete normally instead of asserting.
-          return {.matched = false, .stopTail = false};
-        }
-        ctx.skip();
-        const auto nestedReplayResult =
-            parse_tail_editable(model, ctx, nextMinPrecedence, rhsStart);
-        assert(model->_owner && "The owner must be set");
-        ctx.exit(lhsStart, model->_owner);
-        return {.matched = true, .stopTail = nestedReplayResult.stopTail};
-      }
-
-      /// Shared bounded delete-scan over a stray operator run: skip operator
-      /// noise until the operator probe re-accepts, unless a recoverable
-      /// primary hides behind a local trivia gap. The caller owns the
-      /// skip-after-delete policy (and, for observation, the rewind guard) and
-      /// supplies the on-match sink (`recover_by_guarded_delete_scan`
-      /// dispatches the 1- vs 2-argument sink).
-      template <typename OnMatch>
-      [[nodiscard]] static bool
-      scan_stray_operator_run(const Model *model, RecoveryContext &ctx,
-                              std::int32_t minPrecedence, OnMatch &&onMatch) {
-        const auto hidesRecoverablePrimaryBehindLocalGap = [&]() {
-          detail::ProbeRestoreScope guard{ctx};
-          const char *const gapStart = ctx.cursor();
-          const char *const gapEnd = ctx.skip_without_builder(gapStart);
-          ctx.skip();
-          // A "real" separator spans more than a single trivia *codepoint*.
-          // Counting bytes (`gapEnd > gapStart + 1`) wrongly treats one
-          // multi-byte whitespace codepoint (U+00A0, U+3000, …) as a gap; count
-          // codepoints so the test is independent of UTF-8 width. Bounded to two
-          // decodes — we only need "> 1 codepoint" — to stay cheap on this path.
-          std::size_t gapCodepoints = 0u;
-          for (const char *p = gapStart; p < gapEnd && gapCodepoints < 2u;) {
-            const auto length = pegium::utils::utf8_codepoint_length(*p);
-            p += length == 0u ? 1u : length;
-            ++gapCodepoints;
-          }
-          return gapCodepoints > 1u && ctx.cursor() < ctx.end &&
-                 (parser::attempt_fast_probe(ctx, model->primary) ||
-                  parser::probe_locally_recoverable(model->primary, ctx));
-        };
-        return detail::recover_by_guarded_delete_scan(
-            ctx,
-            [&]() {
-              return has_operator_fast_probe(model, ctx, minPrecedence) ||
-                     !hidesRecoverablePrimaryBehindLocalGap();
-            },
-            [&](const char *scanCursor) -> const char * {
-              if (scanCursor == ctx.end ||
-                  has_operator_fast_probe(model, ctx, minPrecedence) ||
-                  hidesRecoverablePrimaryBehindLocalGap()) {
-                return nullptr;
-              }
-              return scanCursor;
-            },
-            std::forward<OnMatch>(onMatch));
-      }
-
-      /// Observable variant of `recover_stray_operator_run`: runs the same
-      /// delete-scan logic against the cursor without committing any mutation
-      /// (cursor, skipAfterDelete, edits all rewound), and returns the number
-      /// of codepoint deletes the scan would produce on commit. `std::nullopt`
-      /// means the scan would not admit a `DeleteOperatorNoise` recovery from
-      /// the current cursor (operator probe fails or the scan runs past its
-      /// budget without matching). Used to project a real `RecoveryKey` for the
-      /// `DeleteOperatorNoise` candidate at selection time.
-      [[nodiscard]] static std::optional<std::uint32_t>
-      observe_stray_operator_run_delete_count(const Model *model,
-                                              RecoveryContext &ctx,
-                                              std::int32_t minPrecedence) {
-        if (!has_operator_fast_probe(model, ctx, minPrecedence)) {
-          return std::nullopt;
-        }
-        std::optional<std::uint32_t> capturedDeleteCount;
-        {
-          detail::ProbeRestoreScope guard{ctx};
-          // Disable `skipAfterDelete` for the duration of the stray-operator-run
-          // probe. Without this flip, the bounded delete scan would absorb a
-          // hidden separator that crosses a logical boundary and commit to a
-          // wrong run length. The mutation is observed by
-          // `RecoveryPolicyFingerprint` so the recovery cache cannot collapse a
-          // hit across the flipped state.
-          detail::ScopedBoolOverride skipPolicy{ctx.skipAfterDelete, false};
-          (void)scan_stray_operator_run(
-              model, ctx, minPrecedence,
-              [&](const char *, std::uint32_t deleteCount) {
-                capturedDeleteCount = deleteCount;
-              });
-        }
-        return capturedDeleteCount;
-      }
-
-      static EditableTailReplayResult
-      recover_stray_operator_run(const Model *model, RecoveryContext &ctx,
-                                 std::int32_t minPrecedence) {
-        detail::ScopedBoolOverride skipPolicy{ctx.skipAfterDelete, false};
-        bool stopTail = false;
-        bool recovered = false;
-        // Short-circuit is load-bearing: the side-effectful stray-operator scan
-        // must run only when the cheap fast probe succeeds. Expressed as an
-        // explicit `if` (rather than `probe && scan(...)`) so the side effect is
-        // not buried in the right-hand operand of `&&`.
-        if (has_operator_fast_probe(model, ctx, minPrecedence)) {
-          recovered = scan_stray_operator_run(
-              model, ctx, minPrecedence, [&](const char *matchedCursor) {
-                stopTail =
-                    ctx.skip_without_builder(matchedCursor) > matchedCursor;
-              });
-        }
-        return {.matched = recovered, .stopTail = recovered && stopTail};
-      }
-
-      static bool observe_rhs_prefix_operator_noise(
-          const Model *model, RecoveryContext &ctx,
-          EditableTailObservation &observation) {
-        const auto deleteCount =
-            observe_rhs_prefix_operator_noise_delete_count(model, ctx);
-        if (!deleteCount.has_value()) {
-          return false;
-        }
-        observation.rhsPrefixNoiseDeleteCount = *deleteCount;
-        const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
-            model, ctx, observation.rhsPrefixNoiseDeleteCount);
-        assert(replayedPrefixNoise &&
-               "Observed infix RHS prefix cleanup must replay during observation");
-        return replayedPrefixNoise;
-      }
-
-      [[nodiscard]] static std::optional<std::uint32_t>
-      observe_rhs_prefix_operator_noise_delete_count(const Model *model,
-                                                     RecoveryContext &ctx) {
-        const auto checkpoint = ctx.mark();
-        std::optional<std::uint32_t> observedDeleteCount;
-        {
-          // LocalRhsNoiseCleanup contract: skipAfterDelete=false (so the
-          // bounded scan does not absorb a hidden separator) AND
-          // allowDelete=true (so the probe works even when an outer
-          // InsertRetry parent disabled deletes — InfixRule's RHS noise
-          // delete is a grammar-driven affordance of the Pratt pattern,
-          // bounded to one short of the global delete budget, not free
-          // delete permission). Both mutations are visible in
-          // `RecoveryPolicyFingerprint`.
-          detail::ScopedBoolOverride skipGuard{ctx.skipAfterDelete, false};
-          auto editGuard = ctx.withEditPermissions(ctx.allowInsert, true);
-          // The scan runs to the FULL delete budget so an operator-noise run
-          // whose primary abuts it exactly at the budget is observed. The
-          // conservative cap (one short of the budget) is re-applied below, but
-          // ONLY to a primary reached across skipper trivia — that primary may
-          // belong to the next construct, so it stays capped (the don't-fold-the-
-          // next-statement invariant). A primary that abuts the noise with no
-          // trivia is the glued operator-typo case and is absorbed up to the
-          // full budget. Derive the cap from the budget so it auto-scales with
-          // whatever budget the grammar/options configure.
-          const auto maxProbeDeletes =
-              ctx.maxConsecutiveCodepointDeletes > 1u
-                  ? ctx.maxConsecutiveCodepointDeletes - 1u
-                  : 1u;
-          bool primaryAbutsNoise = false;
-          // Set once the scan has crossed skipper trivia and landed on a
-          // non-primary token: the deleted run is then no longer contiguous
-          // with what follows, so we stop rather than keep deleting across the
-          // separator (which would swallow a structural token like `;` and fold
-          // the next construct into this RHS — a statement merge).
-          bool crossedSeparatorWithoutPrimary = false;
-          (void)detail::recover_by_guarded_delete_scan(
-              ctx,
-              [&]() {
-                // Delete a codepoint when it is a stray operator OR contiguous
-                // non-primary garbage. Operators are safe to delete across
-                // trivia (a typo operator run is often space-separated and is
-                // never a structural anchor); arbitrary garbage is only deleted
-                // while still contiguous (no separator crossed), so the scan
-                // cannot walk past a `;` into the next construct. The strict-
-                // primary matchFn below stops the scan the instant the operand
-                // becomes reachable.
-                if (ctx.cursor() == ctx.end) {
-                  return false;
-                }
-                if (has_operator_fast_probe(model, ctx, /*minPrecedence=*/0)) {
-                  return true;
-                }
-                return !crossedSeparatorWithoutPrimary &&
-                       !parser::attempt_fast_probe(ctx, model->primary);
-              },
-              [&](const char *) -> const char * {
-                const char *const beforeSkip = ctx.cursor();
-                ctx.skip();
-                // The primary abuts the noise only when no skipper trivia was
-                // crossed to reach it (the cursor did not advance on skip).
-                const bool abutsHere = ctx.cursor() == beforeSkip;
-                // Strict probe only: the purpose of the scan is to find a
-                // position where `primary` strictly starts. Allowing
-                // `probe_locally_recoverable` here would stop after a
-                // single delete on any run of operator-like noise (the
-                // recoverable probe is too permissive at operator
-                // positions), leaving the remaining stray operators
-                // unhandled by ContinueTail.
-                if (parser::attempt_fast_probe(ctx, model->primary)) {
-                  primaryAbutsNoise = abutsHere;
-                  return ctx.cursor();
-                }
-                // Landed on a non-primary token across trivia. If it is not a
-                // stray operator either, it is a structural anchor (a `;`, a
-                // closing token), so stop — the scan must not delete past it
-                // into the next construct. A stray operator across trivia stays
-                // deletable via the canDeleteStep above.
-                if (!abutsHere &&
-                    !has_operator_fast_probe(model, ctx, /*minPrecedence=*/0)) {
-                  crossedSeparatorWithoutPrimary = true;
-                }
-                return nullptr;
-              },
-              [&](const char *, std::uint32_t deleteCount) {
-                observedDeleteCount = deleteCount;
-              },
-              {.maxDeletes = ctx.maxConsecutiveCodepointDeletes,
-               .allowOverflow = false});
-          // Keep an over-cap observation only when the primary abuts the noise:
-          // a glued operator-typo run cannot fold a following construct into
-          // this RHS, whereas a primary reachable only across trivia (a space or
-          // a newline) might, so it stays bounded by the conservative cap.
-          if (observedDeleteCount.has_value() &&
-              *observedDeleteCount > maxProbeDeletes && !primaryAbutsNoise) {
-            observedDeleteCount.reset();
-          }
-        }
-        ctx.rewind(checkpoint);
-        return observedDeleteCount;
-      }
-
-      static bool replay_rhs_prefix_operator_noise(const Model *model,
-                                                   RecoveryContext &ctx,
-                                                   std::uint32_t deleteCount) {
-        if (deleteCount == 0u) {
-          return true;
-        }
-        // Same policy as observe_rhs_prefix_operator_noise_delete_count:
-        // the commit replay must see the same skipAfterDelete=false /
-        // allowDelete=true scope so it commits exactly what the probe
-        // sanctioned.
-        detail::ScopedBoolOverride skipGuard{ctx.skipAfterDelete, false};
-        auto editGuard = ctx.withEditPermissions(ctx.allowInsert, true);
-        return detail::recover_by_guarded_delete_scan(
-            ctx,
-            [&]() {
-              // Mirror observe_rhs_prefix_operator_noise_delete_count's relaxed
-              // predicate so observe/replay delete the exact same run.
-              return ctx.cursor() != ctx.end &&
-                     !parser::attempt_fast_probe(ctx, model->primary);
-            },
-            [&](const char *, std::uint32_t deletedCount) {
-              ctx.skip();
-              return deletedCount == deleteCount ? ctx.cursor() : nullptr;
-            },
-            [](const char *) { /* no per-step progress action */ },
-            {.maxDeletes = deleteCount, .allowOverflow = false});
-      }
+                                              std::int32_t &nextMinPrecedence);
 
     };
 

@@ -104,5 +104,44 @@ extension_dominates(const CandidateEnvelope &next,
     const CandidateEnvelope &candidate,
     const CandidateEnvelope &committed) noexcept;
 
+// -----------------------------------------------------------------------------
+// Selection kernel: admission -> family-redundancy -> ranking
+// -----------------------------------------------------------------------------
+//
+// `OrderedChoice`, `Repetition`, and `Group` each select the better of two
+// candidates through the same three-stage shape, differing only in which
+// family-redundancy filters (if any) run between admission and ranking. The
+// kernel below is the one shared shape; `FamilyRedundancyPolicy` selects the
+// per-combinator middle stage.
+
+/// Selects the per-combinator middle stage of `consider_candidate_envelope`.
+enum class FamilyRedundancyPolicy : std::uint8_t {
+  /// `Group`: no family-redundancy step, admission falls straight through to
+  /// ranking (each plan is its own family).
+  RankOnly,
+  /// `OrderedChoice`: one-directional take-arm only, `extension_dominates`
+  /// with `WhenCurrentProgressedPastAnchor`.
+  ChoiceAnchorExtension,
+  /// `Repetition`: bidirectional `extension_dominates` with
+  /// `WhenCurrentIsExtended` (a take-arm AND a reject-arm), followed by
+  /// `boundary_repair_outranks_no_edit_iteration`.
+  IterationExtensionFamily,
+};
+
+/// The kernel's binary outcome: whether `candidate` replaces `incumbent`.
+enum class SelectionVerdict : std::uint8_t { Keep, Take };
+
+/// The shared admission -> family-redundancy -> ranking pipeline read by
+/// `consider_choice_attempt`, `consider_iteration_attempt`, and
+/// `consider_sequence_recovery_candidate`. `incumbentValid` stands in for
+/// each call site's own "is there a candidate yet" test (`bestAttempt.
+/// envelope.key.matched`, `selection.bestCandidate.matched`,
+/// `bestCandidate.matched`) since a default-constructed `CandidateEnvelope`
+/// is indistinguishable from a genuine unmatched candidate.
+[[nodiscard]] SelectionVerdict
+consider_candidate_envelope(const CandidateEnvelope &candidate,
+                            const CandidateEnvelope &incumbent,
+                            bool incumbentValid,
+                            FamilyRedundancyPolicy policy) noexcept;
 
 } // namespace pegium::parser::detail

@@ -1,11 +1,50 @@
 #pragma once
 
 /// Parser expression representing an ordered sequence of child expressions.
+///
+/// The strict-mode parse path (`parse_elements_strict`, `fast_probe_impl`,
+/// `probe_impl`, `fast_probe_elements`) is defined in-class below, together
+/// with all mode-agnostic plumbing (`terminal`, `skip`/`with_skipper`,
+/// `get`/`size`/`isNullable`, `init_impl`/`init_elements`) and
+/// `parse_elements`, the per-element dispatcher shared by every mode: it is
+/// called by `parse_impl` and, for its recursive tail continuation, by each
+/// mode-specific handler (`parse_elements_strict`/`parse_elements_recovery`/
+/// `parse_elements_expect`), so it must stay reachable from all three and
+/// cannot be classified as belonging to a single mode.
+///
+/// Recovery-mode members are declared here and defined out-of-class in
+/// GroupRecovery.hpp: the public `probeRecoverable`/
+/// `probeRecoverableAtEntry`/`probeRecoverableAtEntryConsumesVisible`
+/// accessors, `element_is_terminal_like_for_missing_insert`,
+/// `note_sequence_transition`, the 4-transition `parse_elements_recovery`
+/// driver, `sequence_ops` (the per-visit type-erased ops-table builder
+/// consumed by SequenceRecoveryEngine.cpp), `with_current_follow_probe`, and
+/// the index-recursive probe walkers that back the driver
+/// (`nullable_element_allows_recovery_skip`, `probe_recoverable_elements`,
+/// `suffix_starts_without_edits`, `probe_recoverable_entry_elements`,
+/// `probe_recoverable_entry_consumes_visible_elements`,
+/// `recoverable_follow_consumes_visible_probe`, `analyze_suffix_entry_facts`,
+/// `probe_recoverable_suffix_after_missing_current`,
+/// `probe_nullable_current_looks_started`, `previous_element_is_terminalish`,
+/// `previous_nullable_sibling_owns_cursor`,
+/// `nullable_current_consumed_visible_since`,
+/// `allows_synthetic_terminal_insert`, `suffix_after_is_fully_nullable`,
+/// `first_required_tail_element`, `tail_supports_single_terminal_recovery`,
+/// `parse_clean_tail_without_edits`). Every one of these is reachable only
+/// from the recovery driver or from each other, never from the strict or
+/// expect paths, despite several sitting textually next to strict/mode-
+/// agnostic members in earlier revisions of this file. `SequenceElementTransition`
+/// and `RecoverableFollowConsumesVisibleProbe` are small recovery-only types
+/// rather than logic, so they stay defined in-class alongside the strict
+/// members instead of being forward-declared and completed out-of-class.
+///
+/// Expect-mode (`parse_elements_expect`) is declared here and defined
+/// out-of-class in GroupExpect.hpp. A translation unit that drives a Group
+/// through recovery or expect mode must include the matching partial header
+/// in addition to this one.
 
 #include <array>
 #include <concepts>
-#include <cstdint>
-#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -16,11 +55,13 @@
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/ParseAttempt.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
+#include <pegium/core/parser/SequenceRecoveryEngine.hpp>
 #include <pegium/core/parser/SkipperBuilder.hpp>
 #include <pegium/core/parser/SkipperWrapped.hpp>
+#include <pegium/core/parser/StepTrace.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 #include <string>
@@ -76,17 +117,14 @@ public:
   constexpr Group &operator=(Group &&) noexcept = default;
   constexpr Group &operator=(const Group &) = default;
 
-  bool probeRecoverable(RecoveryContext &ctx) const {
-    return probe_recoverable_elements<0>(ctx);
-  }
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
+  bool probeRecoverable(RecoveryContext &ctx) const;
 
-  bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
-    return probe_recoverable_entry_elements<0>(ctx);
-  }
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const;
 
-  bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const {
-    return probe_recoverable_entry_consumes_visible_elements<0>(ctx);
-  }
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
+  bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const;
 
   constexpr const char *terminal(const char *begin) const noexcept
     requires(... && TerminalCapableExpression<Elements>)
@@ -154,12 +192,11 @@ public:
   }
   std::tuple<Elements...> elements;
 
+  /// Recovery-mode (called only from recovery-only probes below); defined
+  /// out-of-class in GroupRecovery.hpp.
   [[nodiscard]] static constexpr bool
   element_is_terminal_like_for_missing_insert(
-      const grammar::AbstractElement &element) noexcept {
-    return element.getKind() == ElementKind::Literal ||
-           element.getKind() == ElementKind::TerminalRule;
-  }
+      const grammar::AbstractElement &element) noexcept;
 
   friend struct detail::ParseAccess;
   friend struct detail::ProbeAccess;
@@ -217,209 +254,41 @@ private:
     return parse_elements<Context, I + 1>(ctx);
   }
 
+  /// The four labeled transitions the recovery state machine in
+  /// `parse_elements_recovery` can take at a sequence-element boundary.
+  /// Purely observational — `note_sequence_transition` maps each to a
+  /// step-trace counter (a release no-op unless `PEGIUM_ENABLE_STEP_TRACE`)
+  /// so a differential fuzzer can report *which* transition fired, by name,
+  /// on a given input. `RepairCurrent` exists only in prose (the strict
+  /// attempt's on-failure recovery), not as a distinct branch, and so is
+  /// deliberately absent here.
+  enum class SequenceElementTransition {
+    InsertMissingCurrent,
+    SkipNullable,
+    KeepCurrent,
+    RepairTail,
+  };
+
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
+  static void
+  note_sequence_transition(SequenceElementTransition transition) noexcept;
+
+  /// The 4-transition recovery driver; recovery-mode, defined out-of-class
+  /// in GroupRecovery.hpp.
   template <RecoveryParseModeContext Context, std::size_t I>
   bool parse_elements_recovery(Context &ctx,
                                 const char *cursorBeforeSkip,
-                                bool previousNullableSiblingConsumedVisible) const {
-    if (ctx.recoveryDescentInactive()) {
-      // Track lastVisibleCursorOffset across the strict parse so we can
-      // forward `currentNullableConsumedVisible` to element I+1: if element
-      // I+1's recovery later consults `previous_nullable_sibling_owns_cursor`,
-      // it needs to know whether element I (a nullable sibling) consumed
-      // visible input. The full recovery branch below already does this via
-      // `nullable_current_consumed_visible_since`; the fast-path must too.
-      using CurrentElement =
-          std::remove_cvref_t<decltype(std::get<I>(elements))>;
-      const TextOffset visibleBefore =
-          CurrentElement::nullable ? ctx.lastVisibleCursorOffset() : 0u;
-      if (TrackedParseContext &strictCtx = ctx;
-          !parse(std::get<I>(elements), strictCtx)) {
-        return false;
-      }
-      const bool currentNullableConsumedVisible =
-          CurrentElement::nullable &&
-          ctx.lastVisibleCursorOffset() > visibleBefore;
-      return parse_elements<Context, I + 1>(ctx,
-                                            currentNullableConsumedVisible);
-    }
-    const bool nullableCurrentLooksStarted =
-        this->template probe_nullable_current_looks_started<I>(ctx);
-    const bool previousNullableSiblingOwnsCursor =
-        this->template previous_nullable_sibling_owns_cursor<I>(
-            ctx, previousNullableSiblingConsumedVisible);
-    // Transition: InsertMissingCurrent (early-exit replay path).
-    if (this->template select_missing_element_insert_replay<I>(ctx)) {
-      bool matchedCleanTail = false;
-      return this->template replay_insert_missing_element_attempt<I>(
-          ctx, matchedCleanTail);
-    }
-    const auto checkpoint = ctx.mark();
-    const auto &current = std::get<I>(elements);
-    const auto terminalRecoveryState =
-        (current.getKind() == ElementKind::Literal ||
-         current.getKind() == ElementKind::TerminalRule)
-            ? build_terminal_recovery_state<I>(
-                  ctx, checkpoint, cursorBeforeSkip,
-                  previousNullableSiblingOwnsCursor)
-            : TerminalRecoveryState{};
-    bool strictSuffixStartsAtEntry = false;
-    if constexpr (std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      strictSuffixStartsAtEntry =
-          this->template suffix_starts_without_edits<I + 1>(ctx);
-    }
-    const bool visibleNullableRepairCompetesWithStrictSuffix =
-        this->template nullable_current_visible_repair_competes_with_strict_suffix<
-            I>(ctx, strictSuffixStartsAtEntry);
-    if (visibleNullableRepairCompetesWithStrictSuffix) {
-      ctx.rewind(checkpoint);
-      if (this->template parse_competing_nullable_current_repair<I>(
-              ctx, terminalRecoveryState.facts)) {
-        const bool currentCommittedProgress =
-            ctx.committedProgressSince(checkpoint);
-        if (currentCommittedProgress) {
-          const bool currentNullableConsumedVisible =
-              this->template nullable_current_consumed_visible_since<I>(
-                  ctx, checkpoint);
-          if (parse_elements<Context, I + 1>(ctx,
-                                             currentNullableConsumedVisible)) {
-            return true;
-          }
-        }
-      }
-      ctx.rewind(checkpoint);
-    }
-    // Transition: SkipNullable.
-    if (!visibleNullableRepairCompetesWithStrictSuffix &&
-        this->template try_skip_nullable_transition<Context, I>(
-            ctx, nullableCurrentLooksStarted, strictSuffixStartsAtEntry)) {
-      return true;
-    }
-    // Transition: KeepCurrent (no-edit) when the strict suffix is
-    // already visible at entry, otherwise the regular strict attempt
-    // that may trigger RepairCurrent on failure.
-    if (strictSuffixStartsAtEntry) {
-      auto noEditGuard = ctx.withEditTrackingDisabled();
-      (void)noEditGuard;
-      if (!parse_current_sequence_element<I>(ctx,
-                                              terminalRecoveryState.facts)) {
-        return recover_after_current_parse_failure<Context, I>(
-            ctx, checkpoint, terminalRecoveryState,
-            nullableCurrentLooksStarted);
-      }
-    } else if (!parse_current_sequence_element<I>(
-                    ctx, terminalRecoveryState.facts)) {
-      return recover_after_current_parse_failure<Context, I>(
-          ctx, checkpoint, terminalRecoveryState,
-          nullableCurrentLooksStarted);
-    }
-    const auto checkpointAfterCurrent = ctx.mark();
-    const bool currentCommittedProgress =
-        ctx.committedProgressSince(checkpoint);
-    const bool currentNullableConsumedVisible =
-        this->template nullable_current_consumed_visible_since<I>(
-            ctx, checkpoint);
-    if (parse_elements<Context, I + 1>(
-            ctx, currentNullableConsumedVisible)) {
-      return true;
-    }
-    // Transition: RepairTail — admissible iff Current actually committed
-    // something (cursor advanced or edits accumulated). A nullable
-    // Current that matched ε falls through here without admission so
-    // that the equivalent SkipNullable path (already tried earlier) is
-    // not wastefully retried.
-    if (!currentCommittedProgress) {
-      return false;
-    }
-    return recover_after_tail_parse_failure<Context, I>(
-        ctx, checkpoint, checkpointAfterCurrent, terminalRecoveryState.facts);
-  }
+                                bool previousNullableSiblingConsumedVisible) const;
 
+  /// Expect-mode; defined out-of-class in GroupExpect.hpp.
   template <ParseModeContext Context, std::size_t I>
-  bool parse_elements_expect(Context &ctx) const {
-    const auto checkpoint = ctx.mark();
-    if (!parse(std::get<I>(elements), ctx)) {
-      return false;
-    }
-    if (!ctx.frontierBlocked()) {
-      return parse_elements<Context, I + 1>(ctx);
-    }
-    if constexpr (std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      auto currentFrontier = capture_frontier_since(ctx, checkpoint);
-      ctx.clearFrontierBlock();
-      if (parse_elements<Context, I + 1>(ctx)) {
-        const bool tailBlocked = ctx.frontierBlocked();
-        merge_captured_frontier(ctx, currentFrontier, !tailBlocked);
-        return true;
-      }
-      ctx.rewind(checkpoint);
-      merge_captured_frontier(ctx, currentFrontier, false);
-    }
-    return true;
-  }
-
-  struct SequenceRecoveryReplayPlan {
-    bool valid = false;
-    bool insertCurrentTerminal = false;
-    std::uint32_t currentTerminalDeleteRunCount = 0u;
-    bool currentTerminalDeleteRunEndsAfterHiddenTriviaExtension = false;
-    bool reparseCurrentWithoutDelete = false;
-    bool skipNullable = false;
-    bool preferTailEntryInsert = false;
-    bool allowNullableTailStop = false;
-  };
-
-  struct TerminalDeleteRunObservation {
-    std::uint32_t deleteCount = 0u;
-    bool endsAfterHiddenTriviaExtension = false;
-  };
-
-  struct TerminalRecoveryState {
-    detail::TerminalRecoveryFacts facts{};
-    bool hasRecoveredPrefixBeforeCurrent = false;
-    bool skippedFromRecoveryWindowBeforeCurrent = false;
-    std::uint32_t sequenceEditCountBase = 0u;
-  };
-
-  struct SequenceFacts {
-    bool suffixFullyNullable = false;
-    bool strictSuffixStartsAtCurrentCursor = false;
-    bool recoverableSuffixStartsAtCurrentCursor = false;
-    bool currentOffsetWithinRecoveryWindow = false;
-  };
-
-  struct SequenceSuffixEntryFacts {
-    bool strictStartsAtCurrentCursor = false;
-    bool recoverableStartsAtCurrentCursor = false;
-  };
+  bool parse_elements_expect(Context &ctx) const;
 
   struct RecoverableFollowConsumesVisibleProbe {
     const Group *self = nullptr;
     RecoveryContext::FollowProbeFn outerRecoverableConsumesVisible = nullptr;
     const void *outerRecoverableConsumesVisibleData = nullptr;
   };
-
-  static void consider_sequence_recovery_candidate(
-      SequenceRecoveryReplayPlan &bestPlan,
-      detail::EditableRecoveryCandidate &bestCandidate,
-      const SequenceRecoveryReplayPlan &candidatePlan,
-      const detail::EditableRecoveryCandidate &candidate) noexcept {
-    if (!candidate.matched) {
-      return;
-    }
-    // Ranking via central `is_better_recovery_key` on the
-    // candidate-derived `RecoveryKey`. Group has no family-redundancy
-    // step (each plan is its own family), so the pipeline reduces to
-    // admission + ranking.
-    if (!bestCandidate.matched ||
-        detail::is_better_recovery_key(
-            detail::editable_recovery_key(candidate),
-            detail::editable_recovery_key(bestCandidate))) {
-      bestPlan = candidatePlan;
-      bestCandidate = candidate;
-    }
-  }
 
   template <StrictParseModeContext Context>
   bool probe_impl(Context &ctx) const {
@@ -443,1240 +312,123 @@ private:
     }
   }
 
+  /// Recovery-mode (used only by `sequence_ops`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] constexpr bool
-  nullable_element_allows_recovery_skip() const noexcept {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      // Predicates (NotPredicate / AndPredicate) are nullable — they
-      // consume nothing — but they are guards, not optional content. The
-      // recovery skip-nullable transition would treat them as ε and
-      // bypass them entirely, which silently drops the lookahead check.
-      // For example, `many(!"K"_kw + Item)` would let `Item` swallow `K`
-      // because the surrounding skip-nullable path never evaluates the
-      // NotPredicate. Same hazard applies to AndPredicate guards.
-      return current.getKind() != ElementKind::Create &&
-             current.getKind() != ElementKind::NotPredicate &&
-             current.getKind() != ElementKind::AndPredicate;
-    }
-  }
+  nullable_element_allows_recovery_skip() const noexcept;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
-  bool probe_recoverable_elements(RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (attempt_fast_probe(ctx, current) ||
-          probe_locally_recoverable(current, ctx)) {
-        return true;
-      }
-      if (current.getKind() == ElementKind::AndPredicate) {
-        return false;
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return probe_recoverable_elements<I + 1>(ctx);
-      } else {
-        return probe_recoverable_suffix_after_missing_current<I + 1>(ctx);
-      }
-    }
-  }
+  bool probe_recoverable_elements(RecoveryContext &ctx) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
-  bool suffix_starts_without_edits(RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (attempt_fast_probe(ctx, current)) {
-        return true;
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return suffix_starts_without_edits<I + 1>(ctx);
-      } else {
-        return false;
-      }
-    }
-  }
+  bool suffix_starts_without_edits(RecoveryContext &ctx) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
-  bool probe_recoverable_entry_elements(RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (probe_recoverable_at_entry(current, ctx)) {
-        return true;
-      }
-      if (current.getKind() == ElementKind::AndPredicate) {
-        return false;
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return probe_recoverable_entry_elements<I + 1>(ctx);
-      } else {
-        return false;
-      }
-    }
-  }
+  bool probe_recoverable_entry_elements(RecoveryContext &ctx) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
   bool probe_recoverable_entry_consumes_visible_elements(
       RecoveryContext &ctx,
       bool allowSyntheticLeadingTerminalContinuation = false,
       RecoveryContext::FollowProbeFn outerRecoverableConsumesVisible = nullptr,
-      const void *outerRecoverableConsumesVisibleData = nullptr) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return outerRecoverableConsumesVisible != nullptr &&
-             outerRecoverableConsumesVisible(
-                 ctx, outerRecoverableConsumesVisibleData);
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (attempt_fast_probe(ctx, current) ||
-          probe_recoverable_at_entry_consumes_visible(current, ctx)) {
-        return true;
-      }
-      // Synthetic-leading-terminal insert probe. The continuation variant
-      // additionally allows a sequence-literal insert; allows_synthetic_terminal_insert
-      // with allowSequenceLiteralInsert=false is the strict subset, so the two
-      // former blocks (scoped+strict-insert / continuation+literal-insert)
-      // collapse to one guarded by the gate flag + the matching insert mode.
-      if ((allowSyntheticLeadingTerminalContinuation ||
-           ctx.allowsScopedLeadingTerminalInsertRecovery()) &&
-          element_is_terminal_like_for_missing_insert(current) &&
-          allows_synthetic_terminal_insert(
-              ctx, current,
-              /*allowSequenceLiteralInsert=*/
-              allowSyntheticLeadingTerminalContinuation) &&
-          detail::cursor_starts_visible_source(ctx)) {
-        const bool suffixConsumesVisible =
-            this->template suffix_starts_without_edits<I + 1>(ctx) ||
-            (I + 1 == sizeof...(Elements) &&
-             outerRecoverableConsumesVisible != nullptr &&
-             outerRecoverableConsumesVisible(
-                 ctx, outerRecoverableConsumesVisibleData));
-        if (suffixConsumesVisible) {
-          return true;
-        }
-      }
-      if (current.getKind() == ElementKind::AndPredicate) {
-        return false;
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return probe_recoverable_entry_consumes_visible_elements<I + 1>(
-            ctx, allowSyntheticLeadingTerminalContinuation,
-            outerRecoverableConsumesVisible,
-            outerRecoverableConsumesVisibleData);
-      } else {
-        return false;
-      }
-    }
-  }
+      const void *outerRecoverableConsumesVisibleData = nullptr) const;
 
+  /// Recovery-mode (installed as the recoverable-consumes-visible follow
+  /// probe by `with_current_follow_probe`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
   static bool recoverable_follow_consumes_visible_probe(RecoveryContext &ctx,
-                                                        const void *data) {
-    const auto &probe =
-        *static_cast<const RecoverableFollowConsumesVisibleProbe *>(data);
-    return probe.self
-        ->template probe_recoverable_entry_consumes_visible_elements<I>(
-            ctx, /*allowSyntheticLeadingTerminalContinuation=*/true,
-            probe.outerRecoverableConsumesVisible,
-            probe.outerRecoverableConsumesVisibleData);
-  }
+                                                        const void *data);
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
-  [[nodiscard]] SequenceSuffixEntryFacts
-  analyze_suffix_entry_facts(RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return {};
-    } else {
-      const auto &current = std::get<I>(elements);
-      const bool strictStartsAtCurrentCursor =
-          attempt_fast_probe(ctx, current);
-      const bool recoverableStartsAtCurrentCursor =
-          probe_recoverable_at_entry(current, ctx);
-      if (strictStartsAtCurrentCursor || recoverableStartsAtCurrentCursor) {
-        return {
-            .strictStartsAtCurrentCursor = strictStartsAtCurrentCursor,
-            .recoverableStartsAtCurrentCursor =
-                recoverableStartsAtCurrentCursor,
-        };
-      }
-      if (current.getKind() == ElementKind::AndPredicate) {
-        return {};
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return analyze_suffix_entry_facts<I + 1>(ctx);
-      } else {
-        return {};
-      }
-    }
-  }
+  [[nodiscard]] detail::SequenceSuffixEntryFacts
+  analyze_suffix_entry_facts(RecoveryContext &ctx) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
   bool probe_recoverable_suffix_after_missing_current(
-      RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (attempt_fast_probe(ctx, current) ||
-          probe_recoverable_at_entry(current, ctx) ||
-          probe_locally_recoverable(current, ctx)) {
-        return true;
-      }
-      if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-        return probe_recoverable_suffix_after_missing_current<I + 1>(ctx);
-      } else {
-        return false;
-      }
-    }
-  }
+      RecoveryContext &ctx) const;
 
   /// Probe whether the nullable current element appears to have
   /// started accepting at the cursor. For non-nullable elements,
   /// structurally false. For predicate elements (`AndPredicate`,
   /// `NotPredicate`), false because predicates do not consume input.
   /// Probe is non-mutating: cursor and furthest explored cursor
-  /// are restored.
+  /// are restored. Recovery-mode; defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] bool
-  probe_nullable_current_looks_started(RecoveryContext &ctx) const {
-    if constexpr (!std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      (void)ctx;
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (current.getKind() == ElementKind::AndPredicate ||
-          current.getKind() == ElementKind::NotPredicate) {
-        return false;
-      }
-      detail::ProbeRestoreScope guard{ctx};
-      return attempt_fast_probe(ctx, current);
-    }
-  }
+  probe_nullable_current_looks_started(RecoveryContext &ctx) const;
 
+  /// Recovery-mode (used only by `sequence_ops`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
-  [[nodiscard]] SequenceFacts
-  build_sequence_facts(RecoveryContext &ctx) const {
-    const auto suffixEntryFacts =
-        this->template analyze_suffix_entry_facts<I + 1>(ctx);
-    return {
-        .suffixFullyNullable = suffix_after_is_fully_nullable<I + 1>(),
-        .strictSuffixStartsAtCurrentCursor =
-            suffixEntryFacts.strictStartsAtCurrentCursor,
-        .recoverableSuffixStartsAtCurrentCursor =
-            suffixEntryFacts.recoverableStartsAtCurrentCursor,
-        .currentOffsetWithinRecoveryWindow =
-            ctx.hasPendingRecoveryWindows() &&
-            (ctx.cursorOffset() <= ctx.pendingRecoveryWindowMaxCursorOffset() ||
-             ctx.isInRecoveryPhase()),
-    };
-  }
+  [[nodiscard]] constexpr bool previous_element_is_terminalish() const noexcept;
 
-  template <std::size_t I, typename Checkpoint>
-  [[nodiscard]] TerminalRecoveryState build_terminal_recovery_state(
-      const RecoveryContext &ctx, const Checkpoint &checkpoint,
-      const char *cursorBeforeSkip,
-      bool previousNullableSiblingOwnsCursor) const {
-    const bool hasVisiblePrefixCursor =
-        cursorBeforeSkip != nullptr &&
-        (cursorBeforeSkip > ctx.begin ||
-         ctx.lastVisibleCursorOffset() >=
-             static_cast<TextOffset>(cursorBeforeSkip - ctx.begin));
-    const bool hasCommittedVisiblePrefixBeforeCurrent =
-        hasVisiblePrefixCursor || ctx.lastVisibleCursorOffset() > 0u;
-    const bool hasRecoveredPrefixBeforeCurrent =
-        hasVisiblePrefixCursor || checkpoint.recoveryState.editBudget.hadEdits;
-    const char *const lastVisibleCursor = ctx.begin + ctx.lastVisibleCursorOffset();
-    const char *triviaGapBegin = nullptr;
-    if (cursorBeforeSkip != nullptr && ctx.cursor() > cursorBeforeSkip) {
-      triviaGapBegin = cursorBeforeSkip;
-    } else if (ctx.cursor() > lastVisibleCursor &&
-               ctx.skip_without_builder(lastVisibleCursor) == ctx.cursor()) {
-      triviaGapBegin = lastVisibleCursor;
-    }
-    auto triviaGap = detail::TriviaGapProfile{};
-    if (hasRecoveredPrefixBeforeCurrent) {
-      triviaGap =
-          detail::make_trivia_gap_profile(ctx, triviaGapBegin, ctx.cursor());
-    }
-    bool previousIsTerminalish = false;
-    if constexpr (I > 0) {
-      const auto &previous = std::get<I - 1>(elements);
-      previousIsTerminalish =
-          previous.getKind() == ElementKind::Literal ||
-          previous.getKind() == ElementKind::TerminalRule;
-    }
-    const bool skippedFromRecoveryWindowBeforeCurrent =
-        cursorBeforeSkip != nullptr && ctx.hasPendingRecoveryWindows() &&
-        ctx.cursor() > cursorBeforeSkip &&
-        ctx.skip_without_builder(cursorBeforeSkip) == ctx.cursor() &&
-        static_cast<TextOffset>(cursorBeforeSkip - ctx.begin) <=
-            ctx.pendingRecoveryWindowMaxCursorOffset();
-    return {
-        .facts =
-            {
-                .triviaGap = triviaGap,
-                .previousElementIsTerminalish = previousIsTerminalish,
-                .allowStructuredVisibleContinuationInsert =
-                    hasCommittedVisiblePrefixBeforeCurrent,
-                .localRecoveryBlocked =
-                    previousNullableSiblingOwnsCursor,
-            },
-        .hasRecoveredPrefixBeforeCurrent = hasRecoveredPrefixBeforeCurrent,
-        .skippedFromRecoveryWindowBeforeCurrent =
-            skippedFromRecoveryWindowBeforeCurrent,
-        .sequenceEditCountBase = checkpoint.recoveryState.editBudget.editCount,
-    };
-  }
+  /// Type-erased view of the element-I boundary consumed by the shared
+  /// sequence recovery engine (SequenceRecoveryEngine.cpp). The trampolines
+  /// are static (one set per (Group, I)); `self` and the element pointer are
+  /// per instance, so the table is built on the stack at each recovery
+  /// descent. The follow installation routes back through
+  /// `with_current_follow_probe<I>`, so the installed probe identities stay
+  /// per-instantiation (they feed the choice-cache policy fingerprint).
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
+  template <std::size_t I>
+  [[nodiscard]] detail::SequenceElementOps sequence_ops() const noexcept;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I, typename Fn>
-  bool with_current_follow_probe(RecoveryContext &ctx, Fn &&fn) const {
-    // Install the current element's follow only while the current element
-    // itself is parsed or probed. Keeping this guard alive while parsing the
-    // recursive tail would make a last child pass through to the previous
-    // sibling's local follow instead of the enclosing follow.
-    if constexpr (I + 1 == sizeof...(Elements)) {
-      // Last element: install NO local follow. The previous siblings' follow
-      // guards are RAII-scoped per element and already torn down, so the live
-      // probe is the enclosing scope's follow — exactly the semantic follow the
-      // last element must see. (A pass-through guard used to forward to this
-      // same outer probe; installing nothing is observationally identical on
-      // probe results and avoids fingerprinting a transient guard stack
-      // address into the choice-recover cache.)
-      return std::forward<Fn>(fn)();
-    } else {
-      constexpr auto strictProbeFn =
-          +[](RecoveryContext &c, const void *data) -> bool {
-        const auto *self = static_cast<const Group *>(data);
-        return self->template suffix_starts_without_edits<I + 1>(c);
-      };
-      constexpr auto recoverableProbeFn =
-          +[](RecoveryContext &c, const void *data) -> bool {
-        const auto *self = static_cast<const Group *>(data);
-        return self->template probe_recoverable_entry_elements<I + 1>(c);
-      };
-      constexpr auto recoverableConsumesVisibleProbeFn =
-          &Group::template recoverable_follow_consumes_visible_probe<I + 1>;
-      RecoverableFollowConsumesVisibleProbe recoverableConsumesVisibleProbe{
-          .self = this,
-          .outerRecoverableConsumesVisible =
-              ctx._recoverableFollowConsumesVisibleProbeFn,
-          .outerRecoverableConsumesVisibleData =
-              ctx._recoverableFollowConsumesVisibleProbeData,
-      };
-      auto followGuard = ctx.withFollowProbe(
-          strictProbeFn, this, recoverableProbeFn, this,
-          recoverableConsumesVisibleProbeFn, &recoverableConsumesVisibleProbe);
-      (void)followGuard;
-      return std::forward<Fn>(fn)();
-    }
-  }
+  bool with_current_follow_probe(RecoveryContext &ctx, Fn &&fn) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] bool
   previous_nullable_sibling_owns_cursor(
       RecoveryContext &ctx,
-      bool previousNullableSiblingConsumedVisible) const {
-    if constexpr (I == 0) {
-      (void)ctx;
-      return false;
-    } else {
-      const auto &previous = std::get<I - 1>(elements);
-      using Previous = std::remove_cvref_t<decltype(previous)>;
-      if constexpr (!Previous::nullable) {
-        (void)ctx;
-        (void)previousNullableSiblingConsumedVisible;
-        return false;
-      } else {
-        detail::ProbeRestoreScope guard{ctx};
-        return this->template with_current_follow_probe<I - 1>(ctx, [&]() {
-          auto deleteObservationGuard =
-              ctx.withEditPermissions(ctx.allowInsert, true);
-          (void)deleteObservationGuard;
-          if (previousNullableSiblingConsumedVisible &&
-              !detail::nullable_sibling_allows_recoverable_continuation_v<
-                  Previous>) {
-            return false;
-          }
-          bool previousStrictProgress = false;
-          {
-            detail::ProbeRestoreScope strictGuard{ctx};
-            const TextOffset previousStrictStartOffset = ctx.cursorOffset();
-            previousStrictProgress =
-                attempt_parse_no_edits(ctx, previous) &&
-                ctx.cursorOffset() > previousStrictStartOffset;
-          }
-          if (previousStrictProgress) {
-            return true;
-          }
-          if (const auto &current = std::get<I>(elements);
-              element_is_terminal_like_for_missing_insert(current) &&
-              allows_synthetic_terminal_insert(
-                  ctx, current, /*allowSequenceLiteralInsert=*/true) &&
-              detail::cursor_starts_visible_source(ctx)) {
-            const auto suffixEntryFacts =
-                this->template analyze_suffix_entry_facts<I + 1>(ctx);
-            if (suffix_after_is_fully_nullable<I + 1>() ||
-                suffixEntryFacts.strictStartsAtCurrentCursor ||
-                suffixEntryFacts.recoverableStartsAtCurrentCursor) {
-              return false;
-            }
-          }
-          if (attempt_fast_probe(ctx, previous)) {
-            return true;
-          }
-          return probe_recoverable_at_entry_consumes_visible(previous, ctx);
-        });
-      }
-    }
-  }
+      bool previousNullableSiblingConsumedVisible) const;
 
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] bool nullable_current_consumed_visible_since(
       const RecoveryContext &ctx,
-      const RecoveryContext::Checkpoint &checkpoint) const noexcept {
-    if constexpr (!std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      (void)ctx;
-      (void)checkpoint;
-      return false;
-    } else {
-      return ctx.lastVisibleCursorOffset() >
-             static_cast<TextOffset>(
-                 checkpoint.parseCheckpoint.parseCheckpoint.lastVisibleCursor -
-                 ctx.begin);
-    }
-  }
+      const RecoveryContext::Checkpoint &checkpoint) const noexcept;
 
-  template <std::size_t I>
-  bool parse_current_sequence_element(
-      RecoveryContext &ctx, const detail::TerminalRecoveryFacts &facts) const {
-    return with_current_follow_probe<I>(ctx, [&]() {
-      const auto &current = std::get<I>(elements);
-      if constexpr (requires {
-                      current.parse_terminal_recovery_impl(ctx, facts);
-                    }) {
-        return current.parse_terminal_recovery_impl(ctx, facts);
-      } else {
-        return parse(current, ctx);
-      }
-    });
-  }
-
-  template <std::size_t I>
-  bool parse_competing_nullable_current_repair(
-      RecoveryContext &ctx, const detail::TerminalRecoveryFacts &facts) const {
-    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
-                      elements))>::nullable) {
-      (void)ctx;
-      (void)facts;
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      auto noFollowGuard = ctx.withNoFollowProbe();
-      (void)noFollowGuard;
-      if constexpr (requires {
-                      current.parse_terminal_recovery_impl(ctx, facts);
-                    }) {
-        return current.parse_terminal_recovery_impl(ctx, facts);
-      } else {
-        return parse(current, ctx);
-      }
-    }
-  }
-
-  template <std::size_t I>
-  [[nodiscard]] bool
-  nullable_current_visible_repair_competes_with_strict_suffix(
-      RecoveryContext &ctx, bool strictSuffixStartsAtEntry) const {
-    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
-                      elements))>::nullable) {
-      (void)ctx;
-      (void)strictSuffixStartsAtEntry;
-      return false;
-    } else {
-      if (!strictSuffixStartsAtEntry) {
-        return false;
-      }
-      detail::ProbeRestoreScope guard{ctx};
-      const auto &current = std::get<I>(elements);
-      auto noFollowGuard = ctx.withNoFollowProbe();
-      (void)noFollowGuard;
-      return probe_recoverable_at_entry_consumes_visible(current, ctx);
-    }
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  detail::EditableRecoveryCandidate evaluate_skip_nullable_attempt(
-      Context &ctx, const Checkpoint &checkpoint,
-      bool preferTailEntryInsert = false) const {
-    return detail::evaluate_editable_recovery_candidate(
-        ctx, checkpoint, checkpoint.recoveryState.editBudget.editCost,
-        checkpoint.recoveryState.editBudget.editCount,
-        [this, &ctx, preferTailEntryInsert]() {
-          return this->template replay_skip_nullable_attempt<Context, I>(
-              ctx, preferTailEntryInsert);
-        });
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I>
-  bool replay_skip_nullable_attempt(Context &ctx,
-                                    bool preferTailEntryInsert = false) const {
-    const auto &current = std::get<I>(elements);
-    const auto parseTail = [this, &ctx]() {
-      return this->template parse_elements<Context, I + 1>(ctx);
-    };
-    const auto skipOrParseCurrentThenTail = [&]() {
-      return this->template nullable_element_allows_recovery_skip<I>()
-                 ? parseTail()
-                 : (this->template parse_current_sequence_element<I>(ctx, {}) &&
-                    parseTail());
-    };
-    if (!preferTailEntryInsert) {
-      return skipOrParseCurrentThenTail();
-    }
-    auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
-    (void)noDeleteGuard;
-    const auto *tailFirstRequired = first_required_tail_element<I + 1>();
-    const bool tailStartsWithTerminal =
-        tailFirstRequired != nullptr &&
-        (tailFirstRequired->getKind() == ElementKind::Literal ||
-         tailFirstRequired->getKind() == ElementKind::TerminalRule);
-    if (!tailStartsWithTerminal) {
-      return skipOrParseCurrentThenTail();
-    }
-    detail::ScopedBoolOverride leadingInsertGuard{
-        ctx.allowLeadingTerminalInsertScope, true};
-    (void)leadingInsertGuard;
-    return skipOrParseCurrentThenTail();
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  detail::EditableRecoveryCandidate evaluate_current_without_delete_attempt(
-      Context &ctx, const Checkpoint &checkpoint,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      bool allowDeleteRecovery) const {
-    return detail::evaluate_editable_recovery_candidate(
-        ctx, checkpoint, checkpoint.recoveryState.editBudget.editCost,
-        checkpoint.recoveryState.editBudget.editCount,
-        [this, &ctx, &terminalRecoveryFacts, allowDeleteRecovery]() {
-          return replay_current_without_delete_attempt<Context, I>(
-              ctx, terminalRecoveryFacts, allowDeleteRecovery);
-        });
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I>
-  bool replay_current_without_delete_attempt(
-      Context &ctx,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts,
-      bool allowDeleteRecovery) const {
-    if (allowDeleteRecovery) {
-      return this->template parse_current_sequence_element<I>(
-                 ctx, terminalRecoveryFacts) &&
-             this->template parse_elements<Context, I + 1>(ctx);
-    }
-    {
-      auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
-      (void)noDeleteGuard;
-      if (!this->template parse_current_sequence_element<I>(
-              ctx, terminalRecoveryFacts)) {
-        return false;
-      }
-    }
-    return this->template parse_elements<Context, I + 1>(ctx);
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I>
-  bool replay_tail_after_current_attempt(Context &ctx) const {
-    auto noDeleteGuard = ctx.withEditPermissions(ctx.allowInsert, false);
-    (void)noDeleteGuard;
-    return this->template parse_elements<Context, I + 1>(ctx);
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I>
-  // Shared by the current-failure and tail-failure paths. A tail plan never
-  // sets insertCurrentTerminal and passes allowDeleteRecovery=false; the
-  // current-failure path passes allowDeleteRecovery=true.
-  bool replay_current_failure_sequence_attempt(
-      Context &ctx, const detail::TerminalRecoveryFacts &facts,
-      const SequenceRecoveryReplayPlan &plan, bool allowDeleteRecovery) const {
-    if (!plan.valid) {
-      return false;
-    }
-    if (plan.insertCurrentTerminal) {
-      return replay_insert_current_terminal_attempt<I>(
-          ctx,
-          {.deleteCount = plan.currentTerminalDeleteRunCount,
-           .endsAfterHiddenTriviaExtension =
-               plan.currentTerminalDeleteRunEndsAfterHiddenTriviaExtension},
-          plan.allowNullableTailStop);
-    }
-    if (plan.reparseCurrentWithoutDelete) {
-      return replay_current_without_delete_attempt<Context, I>(
-          ctx, facts, allowDeleteRecovery);
-    }
-    if (plan.skipNullable) {
-      return replay_skip_nullable_attempt<Context, I>(
-          ctx, plan.preferTailEntryInsert);
-    }
-    return false;
-  }
-
-  [[nodiscard]] static bool terminal_allows_nullable_tail_stop(
-      const TerminalRecoveryState &state,
-      const SequenceFacts &sequenceFacts) noexcept {
-    return state.facts.triviaGap.hasHiddenGap ||
-           sequenceFacts.suffixFullyNullable;
-  }
-
-  template <std::size_t I>
-  [[nodiscard]] std::pair<bool, bool> build_terminal_sequence_legality(
-      RecoveryContext &ctx, const TerminalRecoveryState &state,
-      const SequenceFacts &sequenceFacts) const {
-    const auto &current = std::get<I>(elements);
-    const bool cursorStartsVisibleSource =
-        detail::cursor_starts_visible_source(ctx);
-    const bool sequenceLiteralInsertHasContinuation =
-        ctx.cursor() >= ctx.end || sequenceFacts.suffixFullyNullable ||
-        sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-        sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
-    const bool currentAllowsSyntheticInsert =
-        allows_synthetic_terminal_insert(
-            ctx, current, sequenceLiteralInsertHasContinuation);
-    const bool currentSiteWithinRecoveryWindow =
-        sequenceFacts.currentOffsetWithinRecoveryWindow ||
-        state.skippedFromRecoveryWindowBeforeCurrent;
-    const bool hasLocalSequenceEdits =
-        ctx.currentEditCount() != state.sequenceEditCountBase;
-    const bool scopedLeadingInitialInsertAllowed =
-        I == 0u && ctx.currentWindowEditCount() == 0u &&
-        ctx.allowsScopedLeadingTerminalInsertRecovery();
-    const bool visibleSourceAvailableForScopedContinuation =
-        cursorStartsVisibleSource ||
-        state.facts.triviaGap.visibleSourceAfterLocalSkip ||
-        detail::cursor_reaches_visible_source_after_local_skip(ctx);
-    const bool recoveredPrefixImmediateInsertAllowed =
-        ((state.hasRecoveredPrefixBeforeCurrent &&
-          currentSiteWithinRecoveryWindow) ||
-         (state.hasRecoveredPrefixBeforeCurrent &&
-          sequenceFacts.suffixFullyNullable &&
-          (state.facts.triviaGap.hasHiddenGap || cursorStartsVisibleSource ||
-           ctx.cursor() >= ctx.end))) &&
-        (state.facts.triviaGap.hasHiddenGap || !hasLocalSequenceEdits);
-    const bool scopedLeadingContinuationInsertAllowed =
-        I == 0u && ctx.allowsScopedLeadingTerminalInsertRecovery() &&
-        !ctx.allowDelete && sequenceFacts.currentOffsetWithinRecoveryWindow &&
-        visibleSourceAvailableForScopedContinuation;
-    const bool committedPrefixContinuationInsertAllowed =
-        state.facts.allowStructuredVisibleContinuationInsert &&
-        !hasLocalSequenceEdits && visibleSourceAvailableForScopedContinuation &&
-        (sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-         sequenceFacts.recoverableSuffixStartsAtCurrentCursor);
-    const bool continuedRecoveredPrefixInsertAllowed =
-        state.hasRecoveredPrefixBeforeCurrent &&
-        ctx.currentWindowEditCount() > 0u && !hasLocalSequenceEdits &&
-        visibleSourceAvailableForScopedContinuation &&
-        sequenceFacts.strictSuffixStartsAtCurrentCursor &&
-        (I != 0u || (!ctx.allowDelete &&
-                     ctx.allowsScopedLeadingTerminalInsertRecovery()));
-    const bool currentTerminalInsertionAllowed =
-        currentAllowsSyntheticInsert && !state.facts.localRecoveryBlocked;
-    return {
-        currentTerminalInsertionAllowed &&
-            (recoveredPrefixImmediateInsertAllowed ||
-             continuedRecoveredPrefixInsertAllowed ||
-             scopedLeadingInitialInsertAllowed ||
-             scopedLeadingContinuationInsertAllowed ||
-             committedPrefixContinuationInsertAllowed) &&
-            (sequenceFacts.suffixFullyNullable ||
-             sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-             sequenceFacts.recoverableSuffixStartsAtCurrentCursor),
-        currentTerminalInsertionAllowed && I != 0u &&
-            sequenceFacts.suffixFullyNullable &&
-            state.hasRecoveredPrefixBeforeCurrent &&
-            currentSiteWithinRecoveryWindow &&
-            !(cursorStartsVisibleSource && ctx.currentWindowEditCount() > 0u),
-    };
-  }
-
+  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <typename Current>
   [[nodiscard]] static constexpr bool
   allows_synthetic_terminal_insert(
       RecoveryContext &ctx, const Current &current,
-      bool allowSequenceLiteralInsert = false) noexcept {
-    const auto allowsEofLiteralInsert =
-        [&ctx](detail::TerminalShape shape) constexpr noexcept {
-          return ctx.cursor() >= ctx.end && shape.hasCanonicalText;
-        };
-    const auto allowsSequenceLiteralInsert =
-        [allowSequenceLiteralInsert](
-            detail::TerminalShape shape) constexpr noexcept {
-          return allowSequenceLiteralInsert && shape.hasCanonicalText;
-        };
-    const auto allowsScopedCompactInsert =
-        [&ctx](detail::TerminalShape shape) constexpr noexcept {
-          return ctx.allowsScopedLeadingTerminalInsertRecovery() &&
-                 shape.hasCanonicalText &&
-                 shape.canonicalTextLength <=
-                     detail::kMaxScopedSyntheticInsertCanonicalTextLength;
-        };
-    using CurrentType = std::remove_cvref_t<Current>;
-    if constexpr (requires { CurrentType::terminalShape; }) {
-      (void)current;
-      return CurrentType::terminalShape.allowsInsert() ||
-             allowsSequenceLiteralInsert(CurrentType::terminalShape) ||
-             allowsEofLiteralInsert(CurrentType::terminalShape) ||
-             allowsScopedCompactInsert(CurrentType::terminalShape);
-    } else if constexpr (requires {
-                           current._literalRecoveryMetadata;
-                           current._terminalShape;
-                         }) {
-      if (current._literalRecoveryMetadata.has_value() &&
-          !current._terminalShape.allowsInsert() &&
-          !allowsSequenceLiteralInsert(current._terminalShape) &&
-          !allowsEofLiteralInsert(current._terminalShape) &&
-          !allowsScopedCompactInsert(current._terminalShape)) {
-        return false;
-      }
-      return detail::allows_terminal_rule_insert(ctx,
-                                                 current._terminalShape);
-    }
-    return true;
-  }
+      bool allowSequenceLiteralInsert = false) noexcept;
 
-  template <std::size_t I, typename Checkpoint>
-  bool current_recoverable_entry_signal(RecoveryContext &ctx,
-                                        const Checkpoint &checkpoint) const {
-    const auto &current = std::get<I>(elements);
-    ctx.rewind(checkpoint);
-    detail::ProbeRestoreScope guard{ctx};
-    return this->template with_current_follow_probe<I>(ctx, [&]() {
-      return attempt_fast_probe(ctx, current) ||
-             probe_recoverable_at_entry(current, ctx) ||
-             probe_locally_recoverable(current, ctx);
-    });
-  }
-
-  template <std::size_t I, typename Checkpoint>
-  [[nodiscard]] std::pair<bool, bool>
-  build_current_failure_terminal_legality(
-      RecoveryContext &ctx, const Checkpoint &checkpoint,
-      const TerminalRecoveryState &terminalRecoveryState,
-      const SequenceFacts &terminalEntryFacts) const {
-    if (const auto &current = std::get<I>(elements);
-        current.getKind() == ElementKind::Literal ||
-        current.getKind() == ElementKind::TerminalRule) {
-      ctx.rewind(checkpoint);
-      return build_terminal_sequence_legality<I>(
-          ctx, terminalRecoveryState, terminalEntryFacts);
-    }
-    return {};
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  // Shared by the current-failure and tail-failure paths. The tail path passes
-  // allowInsert*=false (no terminal attempts), allowCurrentWithoutDeleteAttempt
-  // =true (unconditional reparse) and allowDeleteRecovery=false.
-  SequenceRecoveryReplayPlan select_current_failure_sequence_attempt(
-      Context &ctx, const Checkpoint &checkpoint,
-      const detail::TerminalRecoveryFacts &facts,
-      bool allowInsertCurrentTerminal,
-      bool allowInsertCurrentAfterDeleteRun,
-      bool allowCurrentWithoutDeleteAttempt,
-      bool allowSkipNullableAttempt,
-      bool preferTailEntryInsert,
-      bool allowTerminalNullableTailStop,
-      bool allowDeleteRecovery) const {
-    SequenceRecoveryReplayPlan bestPlan{};
-    detail::EditableRecoveryCandidate bestCandidate{};
-    if (allowInsertCurrentTerminal || allowInsertCurrentAfterDeleteRun) {
-      ctx.rewind(checkpoint);
-      this->template consider_terminal_current_failure_attempts<I>(
-          bestPlan, bestCandidate, ctx, allowInsertCurrentTerminal,
-          allowInsertCurrentAfterDeleteRun, allowTerminalNullableTailStop);
-    }
-    if constexpr (std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      if (allowCurrentWithoutDeleteAttempt) {
-        ctx.rewind(checkpoint);
-        consider_sequence_recovery_candidate(
-            bestPlan, bestCandidate,
-            {.valid = true,
-             .reparseCurrentWithoutDelete = true},
-            evaluate_current_without_delete_attempt<Context, I>(
-                ctx, checkpoint, facts, allowDeleteRecovery));
-      }
-      if (allowSkipNullableAttempt) {
-        ctx.rewind(checkpoint);
-        consider_sequence_recovery_candidate(
-            bestPlan, bestCandidate,
-            {.valid = true,
-             .skipNullable = true,
-             .preferTailEntryInsert = preferTailEntryInsert},
-            evaluate_skip_nullable_attempt<Context, I>(
-                ctx, checkpoint, preferTailEntryInsert));
-      }
-    }
-    return bestPlan;
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  bool recover_after_current_parse_failure(
-      Context &ctx, const Checkpoint &checkpoint,
-      const TerminalRecoveryState &terminalRecoveryState,
-      bool nullableCurrentLooksStarted) const {
-    const auto &current = std::get<I>(elements);
-    const auto sequenceFacts = build_sequence_facts<I>(ctx);
-    const auto [allowInsertCurrentTerminal, allowInsertCurrentAfterDeleteRun] =
-        this->template build_current_failure_terminal_legality<I>(
-            ctx, checkpoint, terminalRecoveryState, sequenceFacts);
-    const bool preferTailEntryInsert =
-        sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
-    const bool allowTerminalNullableTailStop =
-        terminal_allows_nullable_tail_stop(terminalRecoveryState, sequenceFacts);
-    const bool allowSkipNullableAttempt =
-        (!nullableCurrentLooksStarted ||
-         sequenceFacts.strictSuffixStartsAtCurrentCursor ||
-         sequenceFacts.recoverableSuffixStartsAtCurrentCursor) &&
-        current.getKind() != ElementKind::AndPredicate &&
-        current.getKind() != ElementKind::NotPredicate;
-    bool allowCurrentWithoutDeleteAttempt = false;
-    if constexpr (std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      if (nullableCurrentLooksStarted) {
-        allowCurrentWithoutDeleteAttempt =
-            !allowSkipNullableAttempt ||
-            this->template current_recoverable_entry_signal<I>(
-                ctx, checkpoint);
-      }
-    }
-    if constexpr (!std::remove_cvref_t<decltype(std::get<I>(
-                      elements))>::nullable) {
-      if (allowInsertCurrentTerminal && !allowInsertCurrentAfterDeleteRun) {
-        ctx.rewind(checkpoint);
-        if (this->template replay_insert_current_terminal_attempt<I>(
-                ctx, {}, allowTerminalNullableTailStop)) {
-          return true;
-        }
-        ctx.rewind(checkpoint);
-      }
-    }
-    const auto bestPlan =
-        this->template select_current_failure_sequence_attempt<Context, I>(
-            ctx, checkpoint, terminalRecoveryState.facts,
-            allowInsertCurrentTerminal,
-            allowInsertCurrentAfterDeleteRun,
-            allowCurrentWithoutDeleteAttempt,
-            allowSkipNullableAttempt, preferTailEntryInsert,
-            allowTerminalNullableTailStop, /*allowDeleteRecovery=*/true);
-    ctx.rewind(checkpoint);
-    return replay_current_failure_sequence_attempt<Context, I>(
-        ctx, terminalRecoveryState.facts, bestPlan, /*allowDeleteRecovery=*/true);
-  }
-
-  template <RecoveryParseModeContext Context, std::size_t I,
-            typename Checkpoint>
-  bool recover_after_tail_parse_failure(
-      Context &ctx, const Checkpoint &checkpoint,
-      const Checkpoint &checkpointAfterCurrent,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
-    if constexpr (!std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      return false;
-    } else {
-      ctx.rewind(checkpointAfterCurrent);
-      if (this->template replay_tail_after_current_attempt<Context, I>(ctx)) {
-        return true;
-      }
-      ctx.rewind(checkpointAfterCurrent);
-      const auto sequenceFacts = build_sequence_facts<I>(ctx);
-      const bool recoverableSuffix =
-          sequenceFacts.recoverableSuffixStartsAtCurrentCursor;
-      // The tail path is the current-failure path minus terminal attempts, with
-      // an unconditional reparse and allowDeleteRecovery=false.
-      const auto bestPlan =
-          this->template select_current_failure_sequence_attempt<Context, I>(
-              ctx, checkpoint, terminalRecoveryFacts,
-              /*allowInsertCurrentTerminal=*/false,
-              /*allowInsertCurrentAfterDeleteRun=*/false,
-              /*allowCurrentWithoutDeleteAttempt=*/true,
-              /*allowSkipNullableAttempt=*/recoverableSuffix,
-              /*preferTailEntryInsert=*/recoverableSuffix,
-              /*allowTerminalNullableTailStop=*/false,
-              /*allowDeleteRecovery=*/false);
-      if (!bestPlan.valid) {
-        ctx.rewind(checkpointAfterCurrent);
-        return false;
-      }
-      ctx.rewind(checkpoint);
-      if (replay_current_failure_sequence_attempt<Context, I>(
-              ctx, terminalRecoveryFacts, bestPlan,
-              /*allowDeleteRecovery=*/false)) {
-        return true;
-      }
-      ctx.rewind(checkpointAfterCurrent);
-      return false;
-    }
-  }
-
-
+  /// Recovery-mode (used only by `sequence_ops`,
+  /// `previous_nullable_sibling_owns_cursor`, and
+  /// `tail_supports_single_terminal_recovery`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
-  static constexpr bool suffix_after_is_fully_nullable() noexcept {
-    if constexpr (I >= sizeof...(Elements)) {
-      return true;
-    } else {
-      using Current = std::remove_cvref_t<decltype(std::get<I>(
-          std::declval<const std::tuple<Elements...> &>()))>;
-      if constexpr (!Current::nullable) {
-        return false;
-      } else {
-        return suffix_after_is_fully_nullable<I + 1>();
-      }
-    }
-  }
+  static constexpr bool suffix_after_is_fully_nullable() noexcept;
 
+  /// Recovery-mode (used only by `sequence_ops`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] constexpr const AbstractElement *
-  first_required_tail_element() const noexcept {
-    if constexpr (I >= sizeof...(Elements)) {
-      return nullptr;
-    } else {
-      const auto &current = std::get<I>(elements);
-      using Current = std::remove_cvref_t<decltype(current)>;
-      if constexpr (!Current::nullable) {
-        return std::addressof(current);
-      } else {
-        return first_required_tail_element<I + 1>();
-      }
-    }
-  }
+  first_required_tail_element() const noexcept;
 
+  /// Recovery-mode (used only by `sequence_ops`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
   [[nodiscard]] constexpr bool
-  tail_supports_single_terminal_recovery() const noexcept {
-    if constexpr (I >= sizeof...(Elements)) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      using Current = std::remove_cvref_t<decltype(current)>;
-      if constexpr (!Current::nullable) {
-        return element_is_terminal_like_for_missing_insert(current) &&
-               suffix_after_is_fully_nullable<I + 1>();
-      } else {
-        return tail_supports_single_terminal_recovery<I + 1>();
-      }
-    }
-  }
+  tail_supports_single_terminal_recovery() const noexcept;
 
-  /// Encapsulates the `SkipNullable` transition. Returns `true` iff
-  /// the skip succeeded; returns `false` when the current is non-nullable,
-  /// already started visibly, the strict suffix entry trigger is not
-  /// available, or the skip attempt failed (in which case the cursor
-  /// was rewound).
-  template <ParseModeContext Context, std::size_t I>
-  [[nodiscard]] bool
-  try_skip_nullable_transition(Context &ctx,
-                                bool nullableCurrentLooksStarted,
-                                bool strictSuffixStartsAtEntry) const {
-    if constexpr (!std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      (void)ctx;
-      (void)nullableCurrentLooksStarted;
-      (void)strictSuffixStartsAtEntry;
-      return false;
-    } else {
-      if (nullableCurrentLooksStarted || !strictSuffixStartsAtEntry) {
-        return false;
-      }
-      const auto skipNullableCheckpoint = ctx.mark();
-      const auto &current = std::get<I>(elements);
-      const bool matched =
-          this->template nullable_element_allows_recovery_skip<I>()
-              ? this->template parse_elements<Context, I + 1>(ctx)
-              : (parse(current, ctx) &&
-                 this->template parse_elements<Context, I + 1>(ctx));
-      if (matched) {
-        return true;
-      }
-      ctx.rewind(skipNullableCheckpoint);
-      return false;
-    }
-  }
-
+  /// Recovery-mode (used only by `sequence_ops`); defined out-of-class in
+  /// GroupRecovery.hpp.
   template <std::size_t I>
-  [[nodiscard]] bool
-  select_missing_element_insert_replay(RecoveryContext &ctx) const {
-    if constexpr (std::remove_cvref_t<
-                      decltype(std::get<I>(elements))>::nullable) {
-      return false;
-    } else {
-      const auto &current = std::get<I>(elements);
-      if (element_is_terminal_like_for_missing_insert(current)) {
-        return false;
-      }
-      if constexpr (requires { current.getElement(); }) {
-        const auto &inner = *current.getElement();
-        if (inner.getKind() == ElementKind::Literal) {
-          return false;
-        }
-      }
-      if (const bool currentMatchesStrict =
-              detail::attempt_parse_without_side_effects(ctx, current)) {
-        // When `current` is the last element, analyze_suffix_entry_facts<count>
-        // returns {} (strictStartsAtCurrentCursor=false), so this also covers
-        // the "nothing follows" case without a separate guard.
-        const auto suffixEntryFacts =
-            this->template analyze_suffix_entry_facts<I + 1>(ctx);
-        if (!suffixEntryFacts.strictStartsAtCurrentCursor) {
-          return false;
-        }
-      }
-      const auto checkpoint = ctx.mark();
-      const auto baseEditCost = ctx.currentEditCost();
-      const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-      bool insertMatchedCleanTail = false;
-      const auto insertCandidate = detail::evaluate_editable_recovery_candidate(
-          ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-          [this, &ctx, &insertMatchedCleanTail]() {
-            return this->template replay_insert_missing_element_attempt<I>(
-                ctx, insertMatchedCleanTail);
-          });
-      if (!insertCandidate.matched ||
-          insertCandidate.postSkipCursorOffset <=
-              insertCandidate.firstEditOffset) {
-        return false;
-      }
-      const bool singleInsertedElementWithCleanTail =
-          insertMatchedCleanTail && insertCandidate.editCount == 1u;
-      const auto parseCandidate = detail::evaluate_editable_recovery_candidate(
-          ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-          [this, &ctx, &current, singleInsertedElementWithCleanTail]() {
-            const auto editGuard =
-                singleInsertedElementWithCleanTail
-                    ? ctx.withEditPermissions(ctx.allowInsert, false)
-                    : ctx.withEditPermissions(ctx.allowInsert, ctx.allowDelete);
-            (void)editGuard;
-            return this->template parse_current_sequence_element<I>(ctx, {}) &&
-                   this->template parse_elements<RecoveryContext, I + 1>(ctx);
-          });
-      const bool selectInsertReplay =
-          !parseCandidate.matched ||
-          detail::is_better_recovery_key(
-              detail::editable_recovery_key(insertCandidate),
-              detail::editable_recovery_key(parseCandidate));
-      return selectInsertReplay;
-    }
-  }
-
-  template <std::size_t I>
-  bool replay_insert_missing_element_attempt(RecoveryContext &ctx,
-                                             bool &matchedCleanTail) const {
-    const auto &current = std::get<I>(elements);
-    matchedCleanTail = false;
-    if (!ctx.insertSynthetic(std::addressof(current))) {
-      return false;
-    }
-    if (this->template parse_clean_tail_without_edits<I + 1>(ctx)) {
-      matchedCleanTail = true;
-      return true;
-    }
-    if (!this->template tail_supports_single_terminal_recovery<I + 1>()) {
-      return false;
-    }
-    bool tailRecoverable = false;
-    {
-      detail::ProbeRestoreScope guard{ctx};
-      tailRecoverable =
-          this->template probe_recoverable_entry_elements<I + 1>(ctx);
-    }
-    return tailRecoverable &&
-           this->template parse_elements<RecoveryContext, I + 1>(ctx);
-  }
-
-  template <std::size_t I>
-  bool parse_clean_tail_without_edits(RecoveryContext &ctx) const {
-    if constexpr (I == sizeof...(Elements)) {
-      return true;
-    } else {
-      return attempt_parse_no_edits(ctx, std::get<I>(elements)) &&
-             this->template parse_clean_tail_without_edits<I + 1>(ctx);
-    }
-  }
-
-  template <std::size_t I>
-  bool try_insert_current_terminal_with_clean_tail(
-      RecoveryContext &ctx, bool allowNullableTailStop) const {
-    const auto &current = std::get<I>(elements);
-    const auto checkpoint = ctx.mark();
-    const auto parseStartOffset = ctx.cursorOffset();
-    auto allowLocalInsertGuard =
-        ctx.withEditPermissions(true, ctx.allowDelete);
-    (void)allowLocalInsertGuard;
-    if (const bool inserted = ctx.insertSynthetic(std::addressof(current));
-        !inserted) {
-      ctx.rewind(checkpoint);
-      return false;
-    }
-    ctx.leaf(ctx.cursor(), std::addressof(current), false, true);
-    const auto editCountAfterCurrent = ctx.recoveryEditCount();
-    const auto editCostAfterCurrent = ctx.currentEditCost();
-    if (const bool tailMatched =
-            this->template parse_clean_tail_without_edits<I + 1>(ctx);
-        !tailMatched || ctx.recoveryEditCount() != editCountAfterCurrent ||
-        ctx.currentEditCost() != editCostAfterCurrent) {
-      ctx.rewind(checkpoint);
-      return false;
-    }
-    const auto postMatchCheckpoint = ctx.mark();
-    ctx.skip();
-    const auto postSkipCursorOffset = ctx.cursorOffset();
-    ctx.rewind(postMatchCheckpoint);
-    if (!allowNullableTailStop &&
-        postSkipCursorOffset <= parseStartOffset) {
-      ctx.rewind(checkpoint);
-      return false;
-    }
-    return true;
-  }
-
-  template <std::size_t I>
-  [[nodiscard]] std::optional<TerminalDeleteRunObservation>
-  observe_current_terminal_delete_run(RecoveryContext &ctx) const {
-    const auto checkpoint = ctx.mark();
-    const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-    const char *const cursorStart = ctx.cursor();
-    ctx.skipAfterDelete = false;
-    std::optional<TerminalDeleteRunObservation> observation;
-    (void)detail::visit_guarded_delete_scan_positions(
-        ctx,
-        [&ctx, cursorStart]() noexcept {
-          return detail::allows_extended_terminal_delete_scan_match(
-              ctx, cursorStart, ctx.cursor());
-        },
-        [&observation](const detail::DeleteScanVisitState &state) {
-          observation = {
-              .deleteCount = state.deleteCount,
-              .endsAfterHiddenTriviaExtension = state.hiddenTriviaExtended,
-          };
-          return detail::DeleteScanVisitResult::Continue;
-        },
-        {.extendThroughHiddenTrivia = true,
-         .stopAtHiddenTriviaBoundary = true,
-         .visitAfterHiddenTriviaExtension = true});
-    ctx.skipAfterDelete = previousSkipAfterDelete;
-    ctx.rewind(checkpoint);
-    return observation;
-  }
-
-  template <std::size_t I>
-  bool replay_current_terminal_delete_run(
-      RecoveryContext &ctx,
-      const TerminalDeleteRunObservation &observation) const {
-    if (observation.deleteCount == 0u) {
-      return true;
-    }
-    const bool previousSkipAfterDelete = ctx.skipAfterDelete;
-    const char *const cursorStart = ctx.cursor();
-    ctx.skipAfterDelete = false;
-    const bool replayed =
-        detail::visit_guarded_delete_scan_positions(
-            ctx,
-            [&ctx, cursorStart]() noexcept {
-              return detail::allows_extended_terminal_delete_scan_match(
-                  ctx, cursorStart, ctx.cursor());
-            },
-            [&observation](const detail::DeleteScanVisitState &state) {
-              if (state.deleteCount == observation.deleteCount &&
-                  state.hiddenTriviaExtended ==
-                      observation.endsAfterHiddenTriviaExtension) {
-                return detail::DeleteScanVisitResult::Accept;
-              }
-              return detail::DeleteScanVisitResult::Continue;
-            },
-            {.scan = {.maxDeletes = observation.deleteCount},
-             .extendThroughHiddenTrivia = true,
-             .stopAtHiddenTriviaBoundary = true,
-             .visitAfterHiddenTriviaExtension = true}) ==
-        detail::DeleteScanVisitResult::Accept;
-    ctx.skipAfterDelete = previousSkipAfterDelete;
-    return replayed;
-  }
-
-  template <std::size_t I>
-  bool replay_insert_current_terminal_attempt(
-      RecoveryContext &ctx, const TerminalDeleteRunObservation &deleteRun,
-      bool allowNullableTailStop) const {
-    const auto checkpoint = ctx.mark();
-    if (!this->template replay_current_terminal_delete_run<I>(ctx, deleteRun)) {
-      ctx.rewind(checkpoint);
-      return false;
-    }
-    if (this->template try_insert_current_terminal_with_clean_tail<I>(
-            ctx, allowNullableTailStop)) {
-      return true;
-    }
-    ctx.rewind(checkpoint);
-    return false;
-  }
-
-  template <std::size_t I>
-  void consider_terminal_current_failure_attempts(
-      SequenceRecoveryReplayPlan &bestPlan,
-      detail::EditableRecoveryCandidate &bestCandidate,
-      RecoveryContext &ctx, bool allowInsertCurrentTerminal,
-      bool allowInsertCurrentAfterDeleteRun,
-      bool allowNullableTailStop) const {
-    if (!allowInsertCurrentTerminal && !allowInsertCurrentAfterDeleteRun) {
-      return;
-    }
-    const auto &current = std::get<I>(elements);
-    const auto checkpoint = ctx.mark();
-    const auto baseEditCost = ctx.currentEditCost();
-    const auto baseRecoveryEditCount = ctx.recoveryEditCount();
-    if (allowInsertCurrentTerminal) {
-      consider_sequence_recovery_candidate(
-          bestPlan, bestCandidate,
-          {.valid = true,
-           .insertCurrentTerminal = true,
-           .allowNullableTailStop = allowNullableTailStop},
-          detail::evaluate_editable_recovery_candidate(
-              ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-              [this, &ctx, allowNullableTailStop]() {
-                return this->template replay_insert_current_terminal_attempt<I>(
-                    ctx, {}, allowNullableTailStop);
-              }));
-    }
-    if (allowInsertCurrentAfterDeleteRun) {
-      const auto deleteRun =
-          this->template observe_current_terminal_delete_run<I>(ctx);
-      if (!deleteRun.has_value()) {
-        return;
-      }
-      consider_sequence_recovery_candidate(
-          bestPlan, bestCandidate,
-          {.valid = true,
-           .insertCurrentTerminal = true,
-           .currentTerminalDeleteRunCount = deleteRun->deleteCount,
-           .currentTerminalDeleteRunEndsAfterHiddenTriviaExtension =
-               deleteRun->endsAfterHiddenTriviaExtension,
-           .allowNullableTailStop = allowNullableTailStop},
-          detail::evaluate_editable_recovery_candidate(
-              ctx, checkpoint, baseEditCost, baseRecoveryEditCount,
-              [this, &ctx, deleteRun, allowNullableTailStop]() {
-                return this->template replay_insert_current_terminal_attempt<I>(
-                    ctx, *deleteRun, allowNullableTailStop);
-              }));
-    }
-  }
+  bool parse_clean_tail_without_edits(RecoveryContext &ctx) const;
 
   template <std::size_t I>
   void init_elements(AstReflectionInitContext &ctx) const {

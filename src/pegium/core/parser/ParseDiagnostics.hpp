@@ -3,11 +3,14 @@
 /// Canonical syntax-script helpers and parser-facing diagnostic projection.
 
 #include <algorithm>
+#include <span>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
-#include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/ParseDiagnostic.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
+#include <pegium/core/syntax-tree/RootCstNode.hpp>
 
 namespace pegium::parser::detail {
 

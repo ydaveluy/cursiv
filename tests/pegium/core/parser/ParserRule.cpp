@@ -2,6 +2,7 @@
 #include <pegium/core/ParseJsonTestSupport.hpp>
 #include <pegium/core/TestCstBuilderHarness.hpp>
 #include <pegium/core/TestRuleParser.hpp>
+#include <pegium/core/parser/CstSearch.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/syntax-tree/AstArena.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>

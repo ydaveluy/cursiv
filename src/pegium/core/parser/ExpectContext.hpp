@@ -5,11 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <pegium/core/parser/Parser.hpp>
+#include <pegium/core/parser/ExpectApi.hpp>
 #include <pegium/core/parser/ContextShared.hpp>
 #include <pegium/core/parser/RecoveryConstants.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <span>
+#include <string_view>
 #include <pegium/core/utils/Cancellation.hpp>
 #include <vector>
 
@@ -17,24 +18,19 @@ namespace pegium::parser {
 
 namespace detail {
 
-/// Snapshot of the inline edit-state fields owned by `ExpectContext`. Only
-/// `ExpectContext` keeps these as flat members (recovery's edit budget
-/// lives nested inside `RecoveryContext::recoveryState.editBudget`); this
-/// type and its capture / restore helpers therefore live in the expect
-/// context's own header.
+/// Snapshot of `ExpectContext`'s editable traversal state: the shared edit
+/// policy, the edit-budget counters and the recovery-phase flag, captured
+/// and restored as whole-aggregate copies. Two policy/budget fields ride
+/// along even though `ExpectContext` never mutates them mid-expect
+/// (`policy.editFloorOffset` stays at its initial value;
+/// `budget.allowBudgetOverflowEdits` is recovery-only), so copying them is
+/// a no-op. Only `ExpectContext` checkpoints this shape (recovery's edit
+/// budget lives nested inside `RecoveryContext::recoveryState.editBudget`);
+/// the type therefore lives in the expect context's own header.
 struct EditCheckpointState {
-  bool allowInsert = true;
-  bool allowDelete = true;
-  bool trackEditState = true;
+  EditPolicy policy{};
+  EditBudget budget{};
   bool inRecoveryPhase = true;
-  bool hadEdits = false;
-  std::uint32_t consecutiveDeletes = 0;
-  std::uint32_t editCost = 0;
-  std::uint32_t editCount = 0;
-  std::uint32_t maxConsecutiveCodepointDeletes =
-      kDefaultMaxConsecutiveCodepointDeletes;
-  std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
-  std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
 };
 
 
@@ -107,32 +103,16 @@ struct ExpectContext {
 
   [[nodiscard]] detail::EditCheckpointState captureEditState() const noexcept {
     return {
-        .allowInsert = allowInsert,
-        .allowDelete = allowDelete,
-        .trackEditState = trackEditState,
+        .policy = editPolicy,
+        .budget = editBudget,
         .inRecoveryPhase = inRecoveryPhase,
-        .hadEdits = hadEdits,
-        .consecutiveDeletes = consecutiveDeletes,
-        .editCost = editCost,
-        .editCount = editCount,
-        .maxConsecutiveCodepointDeletes = maxConsecutiveCodepointDeletes,
-        .maxEditsPerAttempt = maxEditsPerAttempt,
-        .maxEditCost = maxEditCost,
     };
   }
 
   void restoreEditState(const detail::EditCheckpointState &state) noexcept {
-    allowInsert = state.allowInsert;
-    allowDelete = state.allowDelete;
-    trackEditState = state.trackEditState;
+    editPolicy = state.policy;
+    editBudget = state.budget;
     inRecoveryPhase = state.inRecoveryPhase;
-    hadEdits = state.hadEdits;
-    consecutiveDeletes = state.consecutiveDeletes;
-    editCost = state.editCost;
-    editCount = state.editCount;
-    maxConsecutiveCodepointDeletes = state.maxConsecutiveCodepointDeletes;
-    maxEditsPerAttempt = state.maxEditsPerAttempt;
-    maxEditCost = state.maxEditCost;
   }
 
   [[nodiscard]] Checkpoint mark() const noexcept {
@@ -168,7 +148,7 @@ struct ExpectContext {
   [[nodiscard]] EditStateGuard
   withEditPermissions(bool nextAllowInsert, bool nextAllowDelete) noexcept {
     return EditStateGuard(*this, nextAllowInsert, nextAllowDelete,
-                          trackEditState);
+                          editPolicy.trackEditState);
   }
 
   [[nodiscard]] EditStateGuard withEditTrackingDisabled() noexcept {
@@ -277,7 +257,8 @@ struct ExpectContext {
   }
 
   [[nodiscard]] constexpr bool canEditAtOffset(TextOffset offset) const noexcept {
-    return inRecoveryPhase && trackEditState && offset >= editFloorOffset &&
+    return inRecoveryPhase && editPolicy.trackEditState &&
+           offset >= editPolicy.editFloorOffset &&
            offset < static_cast<TextOffset>(anchor - begin);
   }
 
@@ -286,40 +267,48 @@ struct ExpectContext {
   }
 
   [[nodiscard]] constexpr bool canInsert() const noexcept {
-    return detail::can_insert(allowInsert, canEdit());
+    return detail::can_insert(editPolicy.allowInsert, canEdit());
   }
 
   [[nodiscard]] constexpr bool canDelete() const noexcept {
     if (_cursor >= anchor) {
       return false;
     }
-    return detail::can_delete(allowDelete, canEdit(), consecutiveDeletes,
-                              maxConsecutiveCodepointDeletes, *cursor());
+    return detail::can_delete(
+        editPolicy.allowDelete, canEdit(), editBudget.consecutiveDeletes,
+        editPolicy.maxConsecutiveCodepointDeletes, *cursor());
+  }
+
+  [[nodiscard]] constexpr bool
+  isWordCharAt(const char *p, const char *codepointEnd) const noexcept {
+    return detail::is_word_char_at(wordChars, p, codepointEnd);
   }
 
   [[nodiscard]] constexpr std::uint32_t currentEditCost() const noexcept {
-    return editCost;
+    return editBudget.editCost;
   }
 
   [[nodiscard]] constexpr std::uint32_t currentEditCount() const noexcept {
-    return editCount;
+    return editBudget.editCount;
   }
 
   [[nodiscard]] constexpr std::uint32_t
   editCostDelta(const Checkpoint &checkpoint) const noexcept {
-    return editCost - checkpoint.editState.editCost;
+    return editBudget.editCost - checkpoint.editState.budget.editCost;
   }
 
   [[nodiscard]] constexpr bool
   canAffordEdit(ParseDiagnosticKind kind) const noexcept {
-    return detail::can_afford_edit(editCount, editCost, maxEditsPerAttempt,
-                                   maxEditCost, kind);
+    return detail::can_afford_edit(editBudget.editCount, editBudget.editCost,
+                                   editPolicy.maxEditsPerAttempt,
+                                   editPolicy.maxEditCost, kind);
   }
 
   [[nodiscard]] constexpr bool
   canAffordEdit(std::uint32_t customCost) const noexcept {
-    return detail::can_afford_edit(editCount, editCost, maxEditsPerAttempt,
-                                   maxEditCost, customCost);
+    return detail::can_afford_edit(editBudget.editCount, editBudget.editCost,
+                                   editPolicy.maxEditsPerAttempt,
+                                   editPolicy.maxEditCost, customCost);
   }
 
   bool insertSynthetic(const grammar::AbstractElement *);
@@ -352,19 +341,14 @@ struct ExpectContext {
   void mergeFrontier(std::span<const ExpectPath> items);
 
   std::vector<ExpectPath> frontier;
-  bool allowInsert = true;
-  bool allowDelete = true;
-  bool trackEditState = true;
   bool inRecoveryPhase = true;
-  bool hadEdits = false;
-  std::uint32_t consecutiveDeletes = 0;
-  std::uint32_t maxConsecutiveCodepointDeletes =
-      kDefaultMaxConsecutiveCodepointDeletes;
-  std::uint32_t maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
-  std::uint32_t maxEditCost = std::numeric_limits<std::uint32_t>::max();
-  TextOffset editFloorOffset = 0;
-  std::uint32_t editCost = 0;
-  std::uint32_t editCount = 0;
+  /// Editable-permission and edit-limit knobs shared field-for-field with
+  /// `RecoveryContext` (see `detail::EditPolicy`).
+  detail::EditPolicy editPolicy;
+  detail::EditBudget editBudget;
+  /// Word/identifier-character classification shared field-for-field with
+  /// `RecoveryContext` (see `detail::WordCharMask`).
+  detail::WordCharMask wordChars;
 
 private:
   static void restore_rule(ExpectContext &ctx,

@@ -24,30 +24,32 @@ void ExpectContext::restore_assignment(
 }
 
 bool ExpectContext::insertSynthetic(const grammar::AbstractElement *) {
-  if (!trackEditState || !canInsert() ||
+  if (!editPolicy.trackEditState || !canInsert() ||
       !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     return false;
   }
   detail::apply_non_delete_edit_state(
-      detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
-      editCount, hadEdits, consecutiveDeletes);
+      detail::default_edit_cost(ParseDiagnosticKind::Inserted),
+      editBudget.editCost, editBudget.editCount, editBudget.hadEdits,
+      editBudget.consecutiveDeletes);
   return true;
 }
 
 bool ExpectContext::insertSyntheticGapAt(const char *position,
                                          const char *message) {
   (void)message;
-  if (!trackEditState || position < begin || position > anchor) {
+  if (!editPolicy.trackEditState || position < begin || position > anchor) {
     return false;
   }
   if (const auto offset = static_cast<TextOffset>(position - begin);
-      !detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
+      !detail::can_insert(editPolicy.allowInsert, canEditAtOffset(offset)) ||
       !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     return false;
   }
   detail::apply_non_delete_edit_state(
-      detail::default_edit_cost(ParseDiagnosticKind::Inserted), editCost,
-      editCount, hadEdits, consecutiveDeletes);
+      detail::default_edit_cost(ParseDiagnosticKind::Inserted),
+      editBudget.editCost, editBudget.editCount, editBudget.hadEdits,
+      editBudget.consecutiveDeletes);
   return true;
 }
 
@@ -55,7 +57,7 @@ bool ExpectContext::deleteOneCodepoint() noexcept {
   // The `_cursor >= anchor` guard is subsumed by canDelete() below, which
   // begins with the same check (and, unlike RecoveryContext, this context has
   // no clearPendingDeleteHiddenTriviaBridge side effect to run at the anchor).
-  if (!trackEditState || !canDelete() ||
+  if (!editPolicy.trackEditState || !canDelete() ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
     return false;
   }
@@ -68,8 +70,9 @@ bool ExpectContext::deleteOneCodepoint() noexcept {
     _maxCursor = _cursor;
   }
   detail::apply_delete_edit_state(
-      detail::default_edit_cost(ParseDiagnosticKind::Deleted), editCost,
-      editCount, hadEdits, consecutiveDeletes);
+      detail::default_edit_cost(ParseDiagnosticKind::Deleted),
+      editBudget.editCost, editBudget.editCount, editBudget.hadEdits,
+      editBudget.consecutiveDeletes);
   skip();
   return true;
 }
@@ -79,12 +82,13 @@ bool ExpectContext::replaceLeaf(const char *endPtr,
                                 std::uint32_t replacementCost, bool hidden,
                                 std::uint32_t fuzzyOperationDistance) {
   (void)fuzzyOperationDistance;
-  if (!trackEditState || endPtr <= cursor() || endPtr > anchor ||
+  if (!editPolicy.trackEditState || endPtr <= cursor() || endPtr > anchor ||
       !canEdit() || !canAffordEdit(replacementCost)) {
     return false;
   }
-  detail::apply_non_delete_edit_state(replacementCost, editCost, editCount,
-                                   hadEdits, consecutiveDeletes);
+  detail::apply_non_delete_edit_state(replacementCost, editBudget.editCost,
+                                      editBudget.editCount, editBudget.hadEdits,
+                                      editBudget.consecutiveDeletes);
   leaf(endPtr, element, hidden, true);
   return true;
 }

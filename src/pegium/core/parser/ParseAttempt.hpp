@@ -6,7 +6,7 @@
 #include <concepts>
 #include <type_traits>
 
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseExpression.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 

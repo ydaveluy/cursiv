@@ -7,8 +7,9 @@
 #include <pegium/core/parser/DataTypeRuleSupport.hpp>
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/RuleOptions.hpp>
+#include <pegium/core/parser/RuleParseSupport.hpp>
 #include <pegium/core/parser/RuleValue.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
@@ -75,40 +76,20 @@ private:
   bool _hasCustomValueConverter = false;
   using ValueSupport = detail::DataTypeRuleValueSupport<T>;
 
+  // The parse bodies are rule-value-type-free; they live in
+  // RuleParseSupport.{hpp,cpp} and see this rule only as its type-erased
+  // wrapper, its local skipper and its grammar identity.
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
-    if constexpr (RecoveryParseModeContext<Context>) {
-      if (ctx.recoveryDescentInactive()) {
-        return parse_impl(static_cast<TrackedParseContext &>(ctx));
-      }
-    }
-    if constexpr (ExpectParseModeContext<Context>) {
-      if (ctx.reachedAnchor()) {
-        ctx.addRule(this);
-        return true;
-      }
-    }
-    if constexpr (!StrictParseModeContext<Context>) {
-      if (ctx.isActiveRecovery(this)) {
-        return false;
-      }
-      auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
-      (void)activeRecoveryGuard;
-    }
-
-    const auto nodeStartCheckpoint = ctx.enter();
-    bool matched = false;
-    if (_localSkipper.has_value()) {
-      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
-      (void)localSkipperGuard;
-      matched = parse(_wrapper, ctx);
+    if constexpr (StrictParseModeContext<Context>) {
+      return detail::parse_data_type_rule_strict(_wrapper, _localSkipper, this,
+                                                 ctx);
+    } else if constexpr (RecoveryParseModeContext<Context>) {
+      return detail::parse_data_type_rule_recover(_wrapper, _localSkipper,
+                                                  this, ctx);
     } else {
-      matched = parse(_wrapper, ctx);
+      return detail::parse_data_type_rule_expect(_wrapper, _localSkipper, this,
+                                                 ctx);
     }
-    if (!matched) {
-      return false;
-    }
-    ctx.exit(nodeStartCheckpoint, this);
-    return true;
   }
 
   T convertValue(const CstNodeView &node,

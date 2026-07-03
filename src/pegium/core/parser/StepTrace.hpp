@@ -31,6 +31,13 @@ enum class StepCounter : std::size_t {
   RepetitionFastAttempts,
   RepetitionFastSuccess,
   RepetitionFastFailures,
+  /// The four labeled transitions `Group::parse_elements_recovery` can take
+  /// at a sequence-element boundary (see `Group::SequenceElementTransition`).
+  /// Instrumentation only, so a differential fuzzer can report which fired.
+  GroupInsertMissingCurrent,
+  GroupSkipNullable,
+  GroupKeepCurrent,
+  GroupRepairTail,
   /// Each `minimize_recovery_edits` invocation increments this
   /// counter. `MinimizeRecoveryEditsRuns` measures *how often* the
   /// global compensation runs; `MinimizeRecoveryEditsDropped` totals
@@ -112,6 +119,14 @@ inline const char *step_trace_name(StepCounter counter) noexcept {
     return "RepetitionFastSuccess";
   case StepCounter::RepetitionFastFailures:
     return "RepetitionFastFailures";
+  case StepCounter::GroupInsertMissingCurrent:
+    return "GroupInsertMissingCurrent";
+  case StepCounter::GroupSkipNullable:
+    return "GroupSkipNullable";
+  case StepCounter::GroupKeepCurrent:
+    return "GroupKeepCurrent";
+  case StepCounter::GroupRepairTail:
+    return "GroupRepairTail";
   case StepCounter::MinimizeRecoveryEditsRuns:
     return "MinimizeRecoveryEditsRuns";
   case StepCounter::MinimizeRecoveryEditsDropped:

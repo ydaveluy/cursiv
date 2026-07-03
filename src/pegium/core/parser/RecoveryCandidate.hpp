@@ -37,10 +37,6 @@ namespace pegium::parser::detail {
 enum class ReplayPrefixClass : std::uint8_t {
   /// The candidate has no edits to replay.
   Empty,
-  /// The candidate's replay prefix matches the committed prefix exactly.
-  /// Reserved for sites that compare against a committed snapshot (the
-  /// `RecoverySearch` driver); the per-attempt classifier never produces it.
-  SameCommittedPrefix,
   /// The candidate's replay prefix is the committed prefix plus strictly later
   /// additional edits.
   ExtendedCommittedPrefix,
@@ -65,7 +61,6 @@ struct TerminalRecoveryCandidate {
 
 struct EditableRecoveryCandidate {
   bool matched = false;
-  bool hasDestructiveEdit = false;
   // Cursor after one skipper pass from the matched position, used by
   // `continues_after_first_edit` to ignore progress that only comes from
   // trailing trivia.
@@ -103,13 +98,6 @@ struct EditableRecoveryCandidate {
 /// of destructive edit commit to a strictly different replay prefix
 /// and therefore belong to the same equivalence class. Editable
 /// candidates derive `hadEdits` as `editCount != 0`.
-///
-/// `SameCommittedPrefix` is reserved for sites that compare the
-/// candidate's replay against an already-committed prefix snapshot
-/// (e.g. the `RecoverySearch` driver between attempts); the
-/// `OrderedChoice` / `Group` / `Repetition` per-attempt classifier
-/// does not have a committed snapshot at hand and keeps to the
-/// three values above.
 [[nodiscard]] ReplayPrefixClass
 classify_replay_prefix(bool hadEdits, bool hasDestructiveEdit) noexcept;
 

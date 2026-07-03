@@ -16,7 +16,12 @@
 
 namespace pegium::parser {
 
-template <auto feature, NonNullableExpression Element>
+/// Feature assignment keyed on the parse-expression shape only: everything
+/// feature-specific (name, reference flags, reflection metadata, execute /
+/// getValue) lives in the static AssignmentDescriptor the factories pass in,
+/// so assignments of different features through the same element type share
+/// one instantiation.
+template <NonNullableExpression Element>
 struct Assignment final : grammar::Assignment {
 private:
   static constexpr bool assignment_has_required_raw_values =
@@ -29,19 +34,21 @@ private:
       "each choice must provide getRawValue(node) with a specific typed value.");
 
 public:
-  using ReferenceSupport = detail::AssignmentReferenceSupport<feature>;
-
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe =
       !IsOrderedChoice<Element>::value &&
       std::remove_cvref_t<Element>::isFailureSafe;
 
-  explicit constexpr Assignment(Element &&element, AssignmentOperator ope)
+  explicit constexpr Assignment(
+      Element &&element, AssignmentOperator ope,
+      const detail::AssignmentDescriptor<Element> &ops)
     requires(!std::is_lvalue_reference_v<Element>)
-      : _element(std::move(element)), _operator{ope} {}
-  explicit constexpr Assignment(Element element, AssignmentOperator ope)
+      : _element(std::move(element)), _ops(&ops), _operator{ope} {}
+  explicit constexpr Assignment(
+      Element element, AssignmentOperator ope,
+      const detail::AssignmentDescriptor<Element> &ops)
     requires(std::is_lvalue_reference_v<Element>)
-      : _element(element), _operator{ope} {}
+      : _element(element), _ops(&ops), _operator{ope} {}
 
   constexpr Assignment(Assignment &&) noexcept = default;
   constexpr Assignment(const Assignment &) = default;
@@ -52,19 +59,19 @@ public:
     return std::addressof(_element);
   }
   std::string_view getFeature() const noexcept override {
-    return detail::member_name_v<feature>;
+    return _ops->featureName;
   }
   constexpr AssignmentOperator getOperator() const noexcept override {
     return _operator;
   }
   [[nodiscard]] bool isReference() const noexcept override {
-    return ReferenceSupport::isReference;
+    return _ops->isReference;
   }
   [[nodiscard]] bool isMultiReference() const noexcept override {
-    return ReferenceSupport::isMultiReference;
+    return _ops->isMultiReference;
   }
   [[nodiscard]] std::type_index getType() const noexcept override {
-    const auto &typeInfo = assignmentReflectionInfo();
+    const auto &typeInfo = _ops->reflectionInfo();
     if (typeInfo.referenceTargetType != nullptr) {
       return typeInfo.referenceTargetType->type;
     }
@@ -97,11 +104,10 @@ public:
 
   void execute(AstNode *current, const CstNodeView &node,
                const ValueBuildContext &context) const override {
-    detail::AssignmentRuntimeSupport<feature, Element>::execute(
-        _element, current, node, context.withAssignment(*this));
+    _ops->execute(_element, current, node, context.withAssignment(*this));
   }
   grammar::FeatureValue getValue(const AstNode *ast) const override {
-    return detail::AssignmentRuntimeSupport<feature, Element>::getValue(ast);
+    return _ops->getValue(ast);
   }
 
 private:
@@ -109,22 +115,8 @@ private:
   friend struct detail::FastProbeAccess;
   friend struct detail::InitAccess;
 
-  [[nodiscard]] static const detail::AssignmentReflectionInfo &
-  assignmentReflectionInfo() noexcept {
-    static const detail::AssignmentReflectionInfo info = [] {
-      detail::AssignmentReflectionInfo value{};
-      using AssignedType = helpers::AttrType<feature>;
-      if constexpr (std::derived_from<AssignedType, AstNode>) {
-        value.assignedAstType =
-            std::addressof(detail::ast_node_type_info<AssignedType>());
-      }
-      value.referenceTargetType = ReferenceSupport::getReferenceTargetTypeInfo();
-      return value;
-    }();
-    return info;
-  }
-
   ExpressionHolder<Element> _element;
+  const detail::AssignmentDescriptor<Element> *_ops;
   AssignmentOperator _operator;
 
   template <StrictParseModeContext Context>
@@ -133,12 +125,12 @@ private:
   }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
-    return detail::AssignmentParseSupport<feature, Element>::parse(ctx, this,
-                                                                   _element);
+    return detail::AssignmentParseSupport<Element>::parse(ctx, this, _element,
+                                                          *_ops);
   }
 
   void init_impl(AstReflectionInitContext &ctx) const {
-    const auto &typeInfo = assignmentReflectionInfo();
+    const auto &typeInfo = _ops->reflectionInfo();
     ctx.registerAssignment(typeInfo);
     if (typeInfo.assignedAstType != nullptr) {
       auto childContext = ctx.withExpectedType(typeInfo.assignedAstType->type);
@@ -159,9 +151,9 @@ template <auto feature, NonNullableExpression Element>
   requires(helpers::IsValidAssignment<feature, Element>::value &&
            !helpers::IsMany<feature>)
 static constexpr auto assign(Element &&element) {
-  return Assignment<feature, Element>(
-      std::forward<Element>(element),
-      pegium::grammar::AssignmentOperator::Assign);
+  return Assignment<Element>(std::forward<Element>(element),
+                             pegium::grammar::AssignmentOperator::Assign,
+                             detail::assignment_descriptor<feature, Element>);
 }
 
 /// Append an element to a member of the current object
@@ -173,9 +165,9 @@ template <auto feature, NonNullableExpression Element>
   requires helpers::IsValidAssignment<feature, Element>::value &&
            helpers::IsMany<feature>
 static constexpr auto append(Element &&element) {
-  return Assignment<feature, Element>(
-      std::forward<Element>(element),
-      pegium::grammar::AssignmentOperator::Append);
+  return Assignment<Element>(std::forward<Element>(element),
+                             pegium::grammar::AssignmentOperator::Append,
+                             detail::assignment_descriptor<feature, Element>);
 }
 
 /// Enable a member of the current object
@@ -186,8 +178,8 @@ static constexpr auto append(Element &&element) {
 template <auto feature, NonNullableExpression Element>
   requires std::same_as<bool, helpers::AttrType<feature>>
 static constexpr auto enable_if(Element &&element) {
-  return Assignment<feature, Element>(
-      std::forward<Element>(element),
-      pegium::grammar::AssignmentOperator::EnableIf);
+  return Assignment<Element>(std::forward<Element>(element),
+                             pegium::grammar::AssignmentOperator::EnableIf,
+                             detail::assignment_descriptor<feature, Element>);
 }
 } // namespace pegium::parser

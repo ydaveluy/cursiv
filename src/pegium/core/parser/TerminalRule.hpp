@@ -1,6 +1,21 @@
 #pragma once
 
 /// Parser rule template producing terminal scalar values.
+///
+/// The strict-mode path (`terminal()`, and the strict branch of `parse_impl`)
+/// is defined in-class below; it is the hot path exercised by clean input.
+/// The value-conversion members (`convertValue` and its helpers) and the
+/// remaining plumbing (constructors, `getValue`/`appendTextValue`,
+/// `operator=`, `setValueConverter`) are mode-agnostic and stay in-class too.
+/// Recovery- and expect-mode members (`terminal_recovery_profile`,
+/// `parse_terminal_recovery_impl`, and `probeRecoverable` /
+/// `probeRecoverableAtEntry` / `probeRecoverableAtEntryConsumesVisible`) are
+/// declared here and defined out-of-class in TerminalRuleRecovery.hpp — one
+/// file rather than a recovery/expect pair, because
+/// `parse_terminal_recovery_impl` is a single template dispatching between
+/// the two modes with `if constexpr`, not two separate members. A
+/// translation unit that drives a TerminalRule through recovery or expect
+/// mode must include that header in addition to this one.
 
 #include <array>
 #include <cassert>
@@ -10,14 +25,16 @@
 #include <optional>
 #include <ranges>
 #include <pegium/core/parser/AbstractRule.hpp>
+#include <pegium/core/parser/DataTypeRuleSupport.hpp>
 #include <pegium/core/parser/ExpectContext.hpp>
 #include <pegium/core/parser/Introspection.hpp>
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryTrace.hpp>
 #include <pegium/core/parser/RuleOptions.hpp>
 #include <pegium/core/parser/RuleValue.hpp>
+#include <pegium/core/parser/TerminalLocalRecovery.hpp>
 #include <pegium/core/parser/TerminalRecoverySupport.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
 #include <string>
@@ -65,70 +82,15 @@ struct TerminalRule final : AbstractRule<grammar::TerminalRule> {
     return terminal(text.c_str());
   }
 
-  bool probeRecoverable(RecoveryContext &ctx) const noexcept {
-    if (probeRecoverableAtEntry(ctx)) {
-      return true;
-    }
-    return fuzzy_candidate_match(
-               ctx, ctx.cursor(),
-               [](const detail::LiteralFuzzyCandidate &) noexcept {
-                 return true;
-               }) ||
-           delete_scan_match(ctx);
-  }
+  /// Recovery-mode; defined out-of-class in TerminalRuleRecovery.hpp.
+  bool probeRecoverable(RecoveryContext &ctx) const noexcept;
 
-  bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept {
-    return fuzzy_candidate_match(ctx, ctx.cursor(),
-                                 detail::allows_entry_probe_fuzzy_candidate) ||
-           detail::allows_terminal_entry_probe(ctx, _terminalShape) ||
-           delete_scan_match(ctx);
-  }
+  /// Recovery-mode; defined out-of-class in TerminalRuleRecovery.hpp.
+  bool probeRecoverableAtEntry(RecoveryContext &ctx) const noexcept;
 
+  /// Recovery-mode; defined out-of-class in TerminalRuleRecovery.hpp.
   bool
-  probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept {
-    const char *const cursorStart = ctx.cursor();
-    if (const char *const matchedEnd = terminal(cursorStart);
-        matchedEnd != nullptr && matchedEnd > cursorStart) {
-      return true;
-    }
-    return fuzzy_candidate_match(
-               ctx, cursorStart,
-               [](const detail::LiteralFuzzyCandidate &candidate) noexcept {
-                 return candidate.consumed > 0u &&
-                        detail::allows_entry_probe_fuzzy_candidate(candidate);
-               }) ||
-           delete_scan_match(ctx);
-  }
-
-private:
-  /// Iterates literal-replace fuzzy candidates near the cursor and returns
-  /// true as soon as `predicate(candidate)` accepts one. Returns false when no
-  /// metadata is available or no candidate matches.
-  template <typename Predicate>
-  bool fuzzy_candidate_match(RecoveryContext &ctx, const char *cursorStart,
-                             Predicate &&predicate) const noexcept {
-    if (!_literalRecoveryMetadata.has_value() ||
-        (ctx.hasHadEdits() &&
-         !detail::allows_fuzzy_replace_after_prior_edits(_terminalShape))) {
-      return false;
-    }
-    const auto replaceCandidates = detail::collect_literal_replace_candidates(
-        ctx, cursorStart, _literalRecoveryMetadata->value,
-        _literalRecoveryMetadata->caseSensitive, _terminalShape);
-    return std::ranges::any_of(replaceCandidates,
-                               std::forward<Predicate>(predicate));
-  }
-
-  bool delete_scan_match(RecoveryContext &ctx) const noexcept {
-    const auto localRecoveryFacts =
-        detail::local_skip_terminal_recovery_facts(ctx);
-    return detail::probe_nearby_delete_scan_match(
-        ctx,
-        [this](const char *scanCursor) noexcept { return terminal(scanCursor); },
-        localRecoveryFacts, _terminalShape);
-  }
-
-public:
+  probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const noexcept;
 
   TerminalRule super() const { return *this; }
   inline T getRawValue(const CstNodeView &node) const {
@@ -184,158 +146,20 @@ private:
   std::optional<detail::DirectLiteralRecoveryMetadata>
       _literalRecoveryMetadata{};
 
+  /// Type-erased view of this rule consumed by the shared terminal
+  /// local-recovery driver (TerminalLocalRecovery.cpp). The matcher
+  /// trampoline is static per instantiation; the shape and direct-literal
+  /// metadata are per instance, so the profile is built on the stack per
+  /// call. Recovery-mode; defined out-of-class in TerminalRuleRecovery.hpp.
+  [[nodiscard]] detail::TerminalRecoveryProfile
+  terminal_recovery_profile() const noexcept;
+
+  /// Recovery- and expect-mode (dispatched by `if constexpr` on `Context`);
+  /// defined out-of-class in TerminalRuleRecovery.hpp.
   template <EditableParseModeContext Context>
   bool parse_terminal_recovery_impl(
       Context &ctx,
-      const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const {
-    const auto effectiveRecoveryFacts =
-        detail::effective_terminal_recovery_facts(ctx, terminalRecoveryFacts);
-    const char *const cursorStart = ctx.cursor();
-    const char *const matchedEnd = terminal(cursorStart);
-    const auto applyRecoveredLeaf = [this, &ctx](const char *matched) {
-      if constexpr (RecoveryParseModeContext<Context>) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] delete-scan match ", getName(),
-                              " offset=", ctx.cursorOffset());
-      }
-      ctx.leaf(matched, this, false, true);
-    };
-    const auto matchRecoverableTerminal =
-        [this, &ctx,
-         cursorStart](const char *scanCursor) noexcept -> const char * {
-      if (!detail::allows_extended_terminal_delete_scan_match(ctx, cursorStart,
-                                                              scanCursor)) {
-        return nullptr;
-      }
-      const char *const matched = terminal(scanCursor);
-      return detail::can_apply_recovery_match(ctx, matched) ? matched : nullptr;
-    };
-    const auto try_local_recovery = [this, &ctx, cursorStart,
-                                     &effectiveRecoveryFacts,
-                                     &matchRecoverableTerminal,
-                                     &applyRecoveredLeaf]() {
-      const auto &facts = effectiveRecoveryFacts;
-      const bool hasHadEdits = detail::context_has_had_edits(ctx);
-      detail::TerminalRecoveryCandidate bestChoice;
-      if (_literalRecoveryMetadata.has_value()) {
-        if (!hasHadEdits ||
-            detail::allows_fuzzy_replace_after_prior_edits(
-                _terminalShape)) {
-          const auto replaceCandidates =
-              detail::collect_literal_replace_candidates(
-                  ctx, cursorStart, _literalRecoveryMetadata->value,
-                  _literalRecoveryMetadata->caseSensitive,
-                  _terminalShape, facts);
-          for (const auto &replaceCandidate : replaceCandidates) {
-            const char *const replaceEnd =
-                cursorStart + replaceCandidate.consumed;
-            if (!detail::can_apply_recovery_match(ctx, replaceEnd)) {
-              continue;
-            }
-            const auto candidate =
-                detail::evaluate_replace_leaf_terminal_candidate(
-                    ctx, cursorStart, replaceEnd, this, replaceCandidate.cost,
-                    replaceCandidate.distance);
-            if (detail::is_better_recovery_key(
-                    detail::terminal_recovery_key(candidate),
-                    detail::terminal_recovery_key(bestChoice))) {
-              bestChoice = candidate;
-            }
-          }
-        }
-      }
-      const bool allowInsert =
-          detail::allows_terminal_rule_insert(ctx, _terminalShape) &&
-          (!_literalRecoveryMetadata.has_value() ||
-           _terminalShape.allowsInsert());
-      const auto choice = detail::complete_terminal_recovery_choice(
-          ctx, cursorStart, this, facts,
-          _terminalShape, allowInsert, bestChoice,
-          matchRecoverableTerminal,
-          [this, &ctx](const char *matched) {
-            ctx.leaf(matched, this, false, true);
-          });
-      return detail::apply_terminal_recovery_choice(
-          ctx, choice, this, []() { return false; },
-          [this, &ctx, cursorStart, choice]() {
-            if (const char *const replaceEnd = cursorStart + choice.consumed;
-                !detail::can_apply_recovery_match(ctx, replaceEnd) ||
-                !ctx.replaceLeaf(replaceEnd, this, choice.cost.budgetCost,
-                                 /*hidden=*/false, choice.distance)) {
-              return false;
-            }
-            if constexpr (RecoveryParseModeContext<Context>) {
-              PEGIUM_RECOVERY_TRACE("[terminal rule] replace-literal ",
-                                    getName(), " offset=", ctx.cursorOffset(),
-                                    " distance=", choice.distance,
-                                    " cost=", choice.cost.budgetCost,
-                                    " rank=", choice.cost.primaryRankCost);
-            }
-            return true;
-          },
-          [this, &ctx]() {
-            if constexpr (RecoveryParseModeContext<Context>) {
-              PEGIUM_RECOVERY_TRACE("[terminal rule] insert-synthetic ",
-                                    getName(), " offset=", ctx.cursorOffset());
-            }
-          },
-          [this, &ctx, &facts, &matchRecoverableTerminal,
-           &applyRecoveredLeaf]() {
-            return detail::recover_by_terminal_delete_scan(
-                ctx, matchRecoverableTerminal, applyRecoveredLeaf,
-                facts, _terminalShape);
-          });
-    };
-
-    if constexpr (RecoveryParseModeContext<Context>) {
-      const bool notInPhase = !ctx.isInRecoveryPhase() &&
-                              !ctx.hasPendingCommittedRecoveryEdits();
-      if (notInPhase) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] enter ", getName(),
-                              " offset=", ctx.cursorOffset());
-      }
-      if (matchedEnd != nullptr) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] direct match ", getName(),
-                              " offset=", ctx.cursorOffset());
-        ctx.leaf(matchedEnd, this);
-        return true;
-      }
-      // Outside an active recovery phase a strict miss stops here (no local
-      // recovery is attempted until a window opens).
-      if (notInPhase) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] strict fail ", getName(),
-                              " offset=", ctx.cursorOffset());
-        return false;
-      }
-      if (effectiveRecoveryFacts.localRecoveryBlocked) {
-        return false;
-      }
-      if (!ctx.canEdit()) {
-        PEGIUM_RECOVERY_TRACE("[terminal rule] no-edit-window fail ", getName(),
-                              " offset=", ctx.cursorOffset());
-        return false;
-      }
-      if (try_local_recovery()) {
-        return true;
-      }
-
-      PEGIUM_RECOVERY_TRACE("[terminal rule] fail ", getName(),
-                            " offset=", ctx.cursorOffset());
-      return false;
-    } else {
-      if (ctx.reachedAnchor()) {
-        ctx.addRule(this);
-        return true;
-      }
-      if (matchedEnd != nullptr && ctx.canTraverseUntil(matchedEnd)) {
-        ctx.leaf(matchedEnd, this);
-        return true;
-      }
-      if (!ctx.canEdit()) {
-        return false;
-      }
-      return try_local_recovery();
-    }
-  }
+      const detail::TerminalRecoveryFacts &terminalRecoveryFacts) const;
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {
     if constexpr (StrictParseModeContext<Context>) {
@@ -383,14 +207,6 @@ private:
   std::function<opt::ConversionResult<T>(std::string_view)> _value_converter;
   bool _hasCustomValueConverter = false;
 
-  [[nodiscard]] std::string genericConversionErrorMessage() const {
-    return "Converter failed for rule " + std::string(getName());
-  }
-
-  [[nodiscard]] std::string missingConverterMessage() const {
-    return "ValueConvert not provided for rule " + std::string(getName());
-  }
-
   static constexpr std::string_view defaultConversionFailureMessage() noexcept {
     return "Conversion failed";
   }
@@ -398,10 +214,8 @@ private:
   void reportConversionFailure(const CstNodeView &node,
                                const ValueBuildContext *context,
                                std::string_view message) const {
-    if (context == nullptr) {
-      return;
-    }
-    context->addConversionDiagnostic(node, this, std::string(message));
+    detail::report_conversion_failure(node, this, context,
+                                      std::string(message));
   }
 
   template <typename V>
@@ -471,7 +285,8 @@ private:
       reportConversionFailure(node, context, defaultConversionFailureMessage());
       return {};
     } else {
-      reportConversionFailure(node, context, missingConverterMessage());
+      reportConversionFailure(node, context,
+                              detail::missing_converter_message(getName()));
       return {};
     }
   }
@@ -496,19 +311,8 @@ private:
       return convertDefaultValue(node, context);
     }
     const auto text = text_value(node);
-    auto result = _value_converter(text);
-    if (result.has_value()) {
-      return std::move(result).value();
-    }
-    if (result.error().empty()) {
-      if (context != nullptr) {
-        context->addConversionDiagnostic(node, this,
-                                         genericConversionErrorMessage());
-      }
-    } else {
-      reportConversionFailure(node, context, result.error());
-    }
-    return {};
+    return detail::finish_conversion<T>(_value_converter(text), getName(),
+                                        this, node, context);
   }
 
   template <typename Option> void applyOption(Option &&option) {
@@ -534,10 +338,7 @@ private:
     // convertible to T directly (infallible); as_conversion_result normalizes
     // both and statically rejects anything else.
     _value_converter =
-        [converterFn = std::forward<Converter>(converter)](
-            std::string_view sv) mutable -> opt::ConversionResult<T> {
-      return opt::as_conversion_result<T>(std::invoke(converterFn, sv));
-    };
+        detail::normalize_text_converter<T>(std::forward<Converter>(converter));
     _hasCustomValueConverter = true;
   }
 };

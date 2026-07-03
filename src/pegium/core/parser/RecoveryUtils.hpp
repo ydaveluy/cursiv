@@ -1,16 +1,26 @@
 #pragma once
 
-/// Shared delete-scan recovery utilities.
+/// Budgeted delete-scan / delete-retry walk primitives shared by every editable
+/// combinator, not just terminals: direct consumers include Repetition, Group,
+/// InfixRule, RecoverySearch and TerminalRecoverySupport (Literal/TerminalRule/
+/// AnyCharacter/CharacterRange reach them transitively via TerminalRecoverySupport).
+/// This is core cross-combinator recovery machinery — weigh its blast radius before
+/// changing anything here.
 
 #include <limits>
 #include <utility>
 
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/ContextCaps.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/utils/FunctionRef.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
 
+/// Saves and restores exactly the three max* limits it raises — NOT the
+/// whole `EditPolicy`. This scope can nest inside an `EditStateGuard` that
+/// flipped the permission bits; a blanket policy save/restore here would
+/// clobber that interleaved mutation on teardown.
 template <typename Context> struct ExtendedDeleteScanBudgetScope {
   Context &ctx;
   std::uint32_t savedMaxConsecutiveDeletes;
@@ -19,10 +29,10 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
   bool enabled = false;
 
   explicit ExtendedDeleteScanBudgetScope(Context &ctx) noexcept
-      : ctx(ctx),
-        savedMaxConsecutiveDeletes(ctx.maxConsecutiveCodepointDeletes),
-        savedMaxEditsPerAttempt(ctx.maxEditsPerAttempt),
-        savedMaxEditCost(ctx.maxEditCost) {}
+      : ctx(ctx), savedMaxConsecutiveDeletes(
+                      ctx.editPolicy.maxConsecutiveCodepointDeletes),
+        savedMaxEditsPerAttempt(ctx.editPolicy.maxEditsPerAttempt),
+        savedMaxEditCost(ctx.editPolicy.maxEditCost) {}
 
   ExtendedDeleteScanBudgetScope(const ExtendedDeleteScanBudgetScope &) = delete;
   ExtendedDeleteScanBudgetScope &
@@ -34,9 +44,11 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     if (enabled) {
       return false;
     }
-    ctx.maxConsecutiveCodepointDeletes = std::numeric_limits<std::uint32_t>::max();
-    ctx.maxEditsPerAttempt = std::numeric_limits<std::uint32_t>::max();
-    ctx.maxEditCost = std::numeric_limits<std::uint32_t>::max();
+    ctx.editPolicy.maxConsecutiveCodepointDeletes =
+        std::numeric_limits<std::uint32_t>::max();
+    ctx.editPolicy.maxEditsPerAttempt =
+        std::numeric_limits<std::uint32_t>::max();
+    ctx.editPolicy.maxEditCost = std::numeric_limits<std::uint32_t>::max();
     enabled = true;
     return true;
   }
@@ -45,9 +57,9 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
     if (!enabled) {
       return;
     }
-    ctx.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
-    ctx.maxEditsPerAttempt = savedMaxEditsPerAttempt;
-    ctx.maxEditCost = savedMaxEditCost;
+    ctx.editPolicy.maxConsecutiveCodepointDeletes = savedMaxConsecutiveDeletes;
+    ctx.editPolicy.maxEditsPerAttempt = savedMaxEditsPerAttempt;
+    ctx.editPolicy.maxEditCost = savedMaxEditCost;
     enabled = false;
   }
 
@@ -56,7 +68,7 @@ template <typename Context> struct ExtendedDeleteScanBudgetScope {
       return;
     }
     restore();
-    if constexpr (requires { ctx.allowBudgetOverflowEdits(); }) {
+    if constexpr (ContextCaps<Context>::hasAllowBudgetOverflowEdits) {
       ctx.allowBudgetOverflowEdits();
     }
   }
@@ -152,12 +164,16 @@ position_starts_structured_visible_source(const Context &ctx,
   if (position == nullptr || position >= ctx.end) {
     return false;
   }
-  if constexpr (requires { ctx.skip_without_builder(position); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     if (ctx.skip_without_builder(position) != position) {
       return false;
     }
   }
-  return is_identifier_like_codepoint_at(position, ctx.end);
+  if constexpr (ContextCaps<Context>::hasWordCharMask) {
+    return ctx.isWordCharAt(position, ctx.end);
+  } else {
+    return is_identifier_like_codepoint_at(position, ctx.end);
+  }
 }
 
 // True iff a hidden-trivia boundary sits at the cursor (the just-deleted
@@ -166,7 +182,7 @@ position_starts_structured_visible_source(const Context &ctx,
 // (none on the recovery path today) report no boundary.
 template <typename Context>
 [[nodiscard]] inline bool detect_hidden_trivia_boundary(Context &ctx) noexcept {
-  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     return ctx.skip_without_builder(ctx.cursor()) > ctx.cursor();
   } else {
     return false;
@@ -224,7 +240,7 @@ visit_guarded_delete_scan_positions(
         continue;
       }
       if (options.extendThroughHiddenTrivia) {
-        if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
+        if constexpr (ContextCaps<Context>::hasExtendLastDeleteThroughHiddenTrivia) {
           if (ctx.extendLastDeleteThroughHiddenTrivia()) {
             if (!options.visitAfterHiddenTriviaExtension) {
               continue;
@@ -355,7 +371,7 @@ visit_guarded_delete_retry_positions(
         continue;
       }
       if (options.extendThroughHiddenTrivia) {
-        if constexpr (requires { ctx.extendLastDeleteThroughHiddenTrivia(); }) {
+        if constexpr (ContextCaps<Context>::hasExtendLastDeleteThroughHiddenTrivia) {
           if (ctx.extendLastDeleteThroughHiddenTrivia()) {
             const auto extendedVisitState = DeleteRetryVisitState{
                 .overflowBudget = overflowBudget,

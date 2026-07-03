@@ -25,7 +25,9 @@ struct Nest final : grammar::Nest {
     ValueBuildContext context{};
     context.arena = &arena;
     using FeatureType = helpers::AttrType<feature>;
-    static_assert(std::derived_from<FeatureType, AstNode>);
+    static_assert(std::derived_from<FeatureType, AstNode>,
+                  "nest<>() requires an AST-pointer feature: the member's "
+                  "attribute type must derive from AstNode");
     assert(current != nullptr);
     auto *featureNode = static_cast<FeatureType *>(current);
     helpers::AssignmentHelper<helpers::MemberType<feature>>{}(
@@ -72,7 +74,8 @@ private:
 /// nested nodes are materialized first and populated afterwards.
 template <typename T, auto feature>
   requires std::is_member_pointer_v<decltype(feature)> &&
-           DefaultConstructibleAstNode<T>
+           DefaultConstructibleAstNode<T> &&
+           std::derived_from<helpers::AttrType<feature>, AstNode>
 static constexpr auto nest() {
   return Nest<T, feature>();
 }
@@ -81,7 +84,8 @@ static constexpr auto nest() {
 /// current value. The instance type is deduced from the feature.
 template <auto feature>
   requires std::is_member_pointer_v<decltype(feature)> &&
-           DefaultConstructibleAstNode<helpers::ClassType<feature>>
+           DefaultConstructibleAstNode<helpers::ClassType<feature>> &&
+           std::derived_from<helpers::AttrType<feature>, AstNode>
 static constexpr auto nest() {
   return Nest<helpers::ClassType<feature>, feature>();
 }

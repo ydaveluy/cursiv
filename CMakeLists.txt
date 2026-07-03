@@ -238,6 +238,7 @@ endif()
 option(PEGIUM_ENABLE_CODECOVERAGE   "Enable code coverage testing support"            OFF)
 option(PEGIUM_ENABLE_RECOVERY_TRACE "Enable verbose recovery traces"                   OFF)
 option(PEGIUM_ENABLE_STEP_TRACE     "Enable step counters for recovery instrumentation" OFF)
+option(PEGIUM_DISABLE_RECOVERY "Compile out the per-grammar error-recovery instantiations (opt-in; parse() of invalid input returns the strict result + an Incomplete diagnostic, same as ParseOptions::recoveryEnabled=false at runtime, but ~83% less template instantiation per rule)" OFF)
 
 if(PEGIUM_ENABLE_RECOVERY_TRACE)
     target_compile_definitions(pegium_internal_build_options INTERFACE
@@ -248,6 +249,12 @@ endif()
 if(PEGIUM_ENABLE_STEP_TRACE)
     target_compile_definitions(pegium_internal_build_options INTERFACE
         PEGIUM_ENABLE_STEP_TRACE
+    )
+endif()
+
+if(PEGIUM_DISABLE_RECOVERY)
+    target_compile_definitions(pegium_internal_build_options INTERFACE
+        PEGIUM_DISABLE_RECOVERY
     )
 endif()
 

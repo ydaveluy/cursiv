@@ -19,6 +19,18 @@ template <typename Context>
 concept RecoveryParseModeContext =
     std::same_as<std::remove_cvref_t<Context>, RecoveryContext>;
 
+/// All four context types enter a combinator through one `parse_impl` template,
+/// but expect mode (completion-frontier construction) is a genuinely different
+/// algorithm per combinator, and that asymmetry is deliberate — do not "fix" it into
+/// false uniformity:
+///   - `Group` handles expect mode with its own dedicated, return-first-match
+///     `parse_elements_expect` (matches "does this sequence match here?");
+///   - `OrderedChoice` and `InfixRule` intentionally fork a *full-enumerate* expect
+///     traversal (visit every branch / tail-operator to build the frontier —
+///     `OrderedChoice::parse_expect_impl`, `InfixRule`'s expect fn-ptrs).
+/// Enumerate-all vs return-first are different algorithms, not an accidental fork;
+/// forcing them into one shared body would either bloat the strict/recovery callers
+/// with expect-only enumeration or silently change completion behavior.
 template <typename Context>
 concept ExpectParseModeContext =
     std::same_as<std::remove_cvref_t<Context>, ExpectContext>;
@@ -33,6 +45,21 @@ concept EditableParseModeContext =
     RecoveryParseModeContext<Context> || ExpectParseModeContext<Context>;
 
 namespace detail {
+
+// When `PEGIUM_DISABLE_RECOVERY` is defined, every combinator's recovery-mode
+// `parse`/`probe*` slot is compiled out (see the `if constexpr` gates in
+// `ParseExpression.hpp`'s `Wrapper::Model::make_ops` and
+// `InfixRule.hpp`'s `Model::make_ops`, plus the matching null-safe dispatch
+// in `Wrapper::probe_match_here`/`parse_impl` and `InfixRule::probeRecoverable`/
+// `parse_impl`): a grammar built this way never instantiates the
+// recovery-mode template chain for any rule, at the cost of `parse()` always
+// reporting the strict result for invalid input (equivalent to running with
+// `ParseOptions::recoveryEnabled = false`).
+#ifdef PEGIUM_DISABLE_RECOVERY
+inline constexpr bool kRecoveryCompiledIn = false;
+#else
+inline constexpr bool kRecoveryCompiledIn = true;
+#endif
 
 template <typename Expr, typename Context>
 concept HasParseImpl = requires(const Expr &expression, Context &ctx) {

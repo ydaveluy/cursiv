@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <pegium/core/parser/ContextShared.hpp>
+#include <pegium/core/parser/TerminalTextClass.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
@@ -286,64 +287,6 @@ prune_dominated_candidates(const LiteralFuzzyCandidates &candidates) {
                       return is_better_candidate(lhs, rhs);
                     });
   return frontier;
-}
-
-[[nodiscard]] constexpr unsigned char
-normalize_char(unsigned char value, bool caseSensitive) noexcept {
-  return caseSensitive ? value
-                       : static_cast<unsigned char>(
-                             pegium::utils::tolower(static_cast<char>(value)));
-}
-
-[[nodiscard]] constexpr bool
-equal_codepoint(unsigned char lhs, unsigned char rhs,
-                bool caseSensitive) noexcept {
-  return normalize_char(lhs, caseSensitive) ==
-         normalize_char(rhs, caseSensitive);
-}
-
-/// Case-folds a decoded codepoint. Only ASCII A-Z are folded (matching the
-/// byte-level `utils::tolower`, which is a no-op outside A-Z); non-ASCII
-/// codepoints pass through unchanged so the codepoint DP preserves the exact
-/// ASCII case-insensitivity contract while comparing whole codepoints.
-[[nodiscard]] constexpr std::uint32_t
-normalize_codepoint(std::uint32_t value, bool caseSensitive) noexcept {
-  if (caseSensitive || value >= 0x80u) {
-    return value;
-  }
-  return static_cast<std::uint32_t>(
-      pegium::utils::tolower(static_cast<char>(value)));
-}
-
-[[nodiscard]] constexpr bool
-equal_decoded_codepoint(std::uint32_t lhs, std::uint32_t rhs,
-                        bool caseSensitive) noexcept {
-  return normalize_codepoint(lhs, caseSensitive) ==
-         normalize_codepoint(rhs, caseSensitive);
-}
-
-[[nodiscard]] bool
-input_window_has_non_identifier_codepoint(std::string_view input,
-                                          std::size_t windowBytes) noexcept {
-  const char *cursor = input.data();
-  const char *const end = cursor + std::min(input.size(), windowBytes);
-  while (cursor < end) {
-    const auto length = utils::utf8_codepoint_length(*cursor);
-    if (length == 0 ||
-        length > static_cast<std::size_t>(end - cursor)) {
-      // Truncated / invalid UTF-8 in the inspected window: keep the same
-      // "treat as identifier-like" heuristic the byte-level predecessor
-      // applied so adversarial inputs don't lose the matcher fast-path.
-      // Invalid bytes can't be decoded into a codepoint anyway; we
-      // defer to the literal-vs-input shared-codepoint scan downstream.
-      return false;
-    }
-    if (!is_identifier_like_codepoint(utils::decode_utf8_codepoint(cursor))) {
-      return true;
-    }
-    cursor += length;
-  }
-  return false;
 }
 
 [[nodiscard]] bool

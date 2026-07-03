@@ -1,4 +1,4 @@
-#include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/parser/RecoveryContext.hpp>
 
 #include <string_view>
 #include <utility>
@@ -45,23 +45,24 @@ void RecoveryContext::refreshRecoveryPhaseSlow() noexcept {
 }
 
 bool RecoveryContext::insertSynthetic(const grammar::AbstractElement *element) {
-  if (!trackEditState) {
+  if (!editPolicy.trackEditState) {
     return false;
   }
   const bool replayingCommittedInsert =
       matches_committed_insert(cursorOffset(), element, {});
   if (hasPendingCommittedRecoveryEdits() && !replayingCommittedInsert) {
-    PEGIUM_RECOVERY_TRACE("[rule] insert blocked pending committed offset=",
-                          cursorOffset(), " floor=", editFloorOffset);
+    PEGIUM_RECOVERY_TRACE(
+        "[rule] insert blocked pending committed offset=", cursorOffset(),
+        " floor=", editPolicy.editFloorOffset);
     return false;
   }
   clearPendingDeleteHiddenTriviaBridge();
   if (const bool canInsertAtCursor =
-          canInsert() ||
-          (allowInsert && allowsCompletedWindowInsertionClusterAtCursor());
+          canInsert() || (editPolicy.allowInsert &&
+                          allowsCompletedWindowInsertionClusterAtCursor());
       !canInsertAtCursor || !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     PEGIUM_RECOVERY_TRACE("[rule] insert blocked offset=", cursorOffset(),
-                          " floor=", editFloorOffset);
+                          " floor=", editPolicy.editFloorOffset);
     return false;
   }
   recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
@@ -86,7 +87,7 @@ bool RecoveryContext::insertSynthetic(const grammar::AbstractElement *element) {
 
 bool RecoveryContext::insertSyntheticGapAt(const char *position,
                                            const char *message) {
-  if (!trackEditState || position < begin || position > end) {
+  if (!editPolicy.trackEditState || position < begin || position > end) {
     return false;
   }
   const auto offset = static_cast<TextOffset>(position - begin);
@@ -96,15 +97,15 @@ bool RecoveryContext::insertSyntheticGapAt(const char *position,
       matches_committed_insert(offset, nullptr, messageView);
   if (hasPendingCommittedRecoveryEdits() && !replayingCommittedInsert) {
     PEGIUM_RECOVERY_TRACE(
-        "[rule] insert synthetic gap blocked pending committed offset=",
-        offset, " floor=", editFloorOffset);
+        "[rule] insert synthetic gap blocked pending committed offset=", offset,
+        " floor=", editPolicy.editFloorOffset);
     return false;
   }
   clearPendingDeleteHiddenTriviaBridge();
-  if (!detail::can_insert(allowInsert, canEditAtOffset(offset)) ||
+  if (!detail::can_insert(editPolicy.allowInsert, canEditAtOffset(offset)) ||
       !canAffordEdit(ParseDiagnosticKind::Inserted)) {
     PEGIUM_RECOVERY_TRACE("[rule] insert synthetic gap blocked offset=", offset,
-                          " floor=", editFloorOffset);
+                          " floor=", editPolicy.editFloorOffset);
     return false;
   }
   recoveryEdits.push_back({.kind = ParseDiagnosticKind::Inserted,
@@ -130,7 +131,7 @@ bool RecoveryContext::insertSyntheticGapAt(const char *position,
 }
 
 bool RecoveryContext::deleteOneCodepoint() noexcept {
-  if (!trackEditState) {
+  if (!editPolicy.trackEditState) {
     return false;
   }
   if (cursor() >= end) {
@@ -140,8 +141,9 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
   const auto *committedDelete = matching_committed_delete(cursorOffset());
   if (hasPendingCommittedRecoveryEdits() && committedDelete == nullptr) {
     clearPendingDeleteHiddenTriviaBridge();
-    PEGIUM_RECOVERY_TRACE("[rule] delete blocked pending committed offset=",
-                          cursorOffset(), " floor=", editFloorOffset);
+    PEGIUM_RECOVERY_TRACE(
+        "[rule] delete blocked pending committed offset=", cursorOffset(),
+        " floor=", editPolicy.editFloorOffset);
     return false;
   }
   auto *mergedDeleteEdit = pendingHiddenTriviaDeleteEdit();
@@ -150,12 +152,11 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
           recoveryState.editBudget.consecutiveDeletes == 0u) ||
       !canAffordEdit(ParseDiagnosticKind::Deleted)) {
     clearPendingDeleteHiddenTriviaBridge();
-    PEGIUM_RECOVERY_TRACE("[rule] delete blocked offset=", cursorOffset(),
-                          " floor=", editFloorOffset,
-                          " consecutive=",
-                          recoveryState.editBudget.consecutiveDeletes,
-                          "/",
-                          maxConsecutiveCodepointDeletes);
+    PEGIUM_RECOVERY_TRACE(
+        "[rule] delete blocked offset=", cursorOffset(),
+        " floor=", editPolicy.editFloorOffset,
+        " consecutive=", recoveryState.editBudget.consecutiveDeletes, "/",
+        editPolicy.maxConsecutiveCodepointDeletes);
     return false;
   }
   const auto beforeOffset = cursorOffset();
@@ -169,7 +170,7 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
   if (mergedDeleteEdit != nullptr) {
     mergedDeleteEdit->endOffset =
         static_cast<TextOffset>(deletedEnd - begin);
-    _deleteBridge = {};
+    recoveryState.deleteBridge = {};
   } else {
     recoveryEdits.push_back({.kind = ParseDiagnosticKind::Deleted,
                              .offset = cursorOffset(),
@@ -204,7 +205,7 @@ bool RecoveryContext::deleteOneCodepoint() noexcept {
 }
 
 bool RecoveryContext::extendLastDeleteThroughHiddenTrivia() noexcept {
-  if (!trackEditState || recoveryEdits.empty() || cursor() >= end) {
+  if (!editPolicy.trackEditState || recoveryEdits.empty() || cursor() >= end) {
     return false;
   }
   const auto *committedDelete = matching_committed_delete(cursorOffset());
@@ -229,8 +230,8 @@ bool RecoveryContext::extendLastDeleteThroughHiddenTrivia() noexcept {
   if (hiddenEnd >= end) {
     return false;
   }
-  _deleteBridge.pendingHiddenTriviaStart = cursor();
-  _deleteBridge.pendingHiddenTriviaEnd = hiddenEnd;
+  recoveryState.deleteBridge.pendingHiddenTriviaStart = cursor();
+  recoveryState.deleteBridge.pendingHiddenTriviaEnd = hiddenEnd;
   _cursor = hiddenEnd;
   if (_cursor > _maxCursor) {
     _maxCursor = _cursor;

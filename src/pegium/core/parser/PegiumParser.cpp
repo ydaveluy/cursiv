@@ -8,6 +8,7 @@
 #include <pegium/core/parser/CstSearch.hpp>
 #include <pegium/core/parser/ParseDiagnostics.hpp>
 #include <pegium/core/parser/AstReflectionBootstrap.hpp>
+#include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoverySearch.hpp>
 #include <pegium/core/parser/StepTrace.hpp>
 #include <pegium/core/parser/ValueBuildContext.hpp>
@@ -74,7 +75,17 @@ ParseResult PegiumParser::parse(text::TextSnapshot text,
   }
   const auto &entryRule = getEntryRule();
   const auto &skipper = getSkipper();
-  const ParseOptions options = getParseOptions();
+  ParseOptions options = getParseOptions();
+  if constexpr (!detail::kRecoveryCompiledIn) {
+    // Every rule's recovery-mode ops slots are null in this build (see
+    // ParseExpression.hpp/InfixRule.hpp), so a recovery attempt would
+    // dereference a null function pointer. Forcing the option off here keeps
+    // this build's observable behavior identical to running a recovery-
+    // capable build with `ParseOptions::recoveryEnabled = false`:
+    // `RecoverySearch.cpp` already bails before ever touching a rule's
+    // recovery path when this flag is false.
+    options.recoveryEnabled = false;
+  }
   ParseResult result;
   const auto inputSize = static_cast<TextOffset>(text.size());
   auto recoverySearch =
@@ -174,9 +185,10 @@ ExpectResult PegiumParser::expect(
   const auto &skipper = getSkipper();
   const auto options = getParseOptions();
   ExpectContext ctx{text, skipper, offset, cancelToken};
-  ctx.maxConsecutiveCodepointDeletes = options.maxConsecutiveCodepointDeletes;
-  ctx.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
-  ctx.maxEditCost = options.maxRecoveryEditCost;
+  ctx.editPolicy.maxConsecutiveCodepointDeletes =
+      options.maxConsecutiveCodepointDeletes;
+  ctx.editPolicy.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
+  ctx.editPolicy.maxEditCost = options.maxRecoveryEditCost;
   ctx.skip();
 
   ExpectResult result;

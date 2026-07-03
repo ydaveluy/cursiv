@@ -12,15 +12,66 @@
 #include <string_view>
 #include <utility>
 
+#include <pegium/core/parser/ContextCaps.hpp>
 #include <pegium/core/parser/LiteralFuzzyMatcher.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
+#include <pegium/core/parser/ParseOptions.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
 #include <pegium/core/parser/RecoveryCost.hpp>
 #include <pegium/core/parser/EditableRecoverySupport.hpp>
 #include <pegium/core/parser/RecoveryUtils.hpp>
 #include <pegium/core/parser/TerminalShape.hpp>
+#include <pegium/core/parser/TerminalTextClass.hpp>
 
 namespace pegium::parser::detail {
+
+// `allows_extended_terminal_delete_scan_match` and
+// `complete_terminal_recovery_choice` read `editPolicy` members
+// unconditionally (both `EditableParseModeContext` types carry the same
+// `detail::EditPolicy`, so no `requires`-guard is needed there). These asserts
+// pin that spelling for both editable context types: a rename must fail to
+// compile here instead of silently breaking those unconditional reads.
+static_assert(requires(const RecoveryContext &ctx) {
+  ctx.editPolicy.maxConsecutiveCodepointDeletes;
+  ctx.editPolicy.maxEditCost;
+  ctx.editPolicy.allowDelete;
+});
+static_assert(requires(const ExpectContext &ctx) {
+  ctx.editPolicy.maxConsecutiveCodepointDeletes;
+  ctx.editPolicy.maxEditCost;
+  ctx.editPolicy.allowDelete;
+});
+
+// ---- Recovery-edit application helpers (formerly RecoveryEditSupport.hpp) ----
+// The terminal combinators (Literal / TerminalRule / AnyCharacter /
+// CharacterRange) apply a matched recovery edit through these; they live here
+// with the terminal-level recovery evaluation rather than in the structural
+// ranking header EditableRecoverySupport.hpp.
+
+template <EditableParseModeContext Context>
+[[nodiscard]] constexpr bool
+can_apply_recovery_match(const Context &ctx, const char *endPtr) noexcept {
+  if constexpr (RecoveryParseModeContext<Context>) {
+    (void)ctx;
+    return endPtr != nullptr;
+  } else {
+    return ctx.canTraverseUntil(endPtr);
+  }
+}
+
+template <EditableParseModeContext Context, typename Element>
+[[nodiscard]] constexpr bool
+apply_insert_synthetic_gap_and_match_recovery_edit(
+    Context &ctx, const char *position, const Element *element,
+    const char *message = nullptr) {
+  if (!ctx.insertSyntheticGapAt(position, message)) {
+    return false;
+  }
+  // The source text already matches `element`; the recovery edit only inserts a
+  // synthetic separator at `position` so the existing match can be committed.
+  ctx.leaf(position, element);
+  return true;
+}
 
 struct TriviaGapProfile {
   bool hasHiddenGap = false;
@@ -104,7 +155,7 @@ allows_terminal_rule_insert(const Context &ctx,
 template <typename Context>
 [[nodiscard]] TriviaGapProfile
 current_local_skip_trivia_gap_profile(const Context &ctx) noexcept {
-  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     const char *const skipped = ctx.skip_without_builder(ctx.cursor());
     return make_trivia_gap_profile(ctx, ctx.cursor(), skipped);
   } else {
@@ -132,7 +183,7 @@ local_skip_terminal_recovery_facts(const Context &ctx) noexcept {
 
 template <typename Context>
 [[nodiscard]] constexpr bool context_has_had_edits(const Context &ctx) noexcept {
-  if constexpr (requires { ctx.hasHadEdits(); }) {
+  if constexpr (ContextCaps<Context>::tracksHadEdits) {
     return ctx.hasHadEdits();
   }
   return false;
@@ -145,7 +196,7 @@ has_immediate_visible_continuation(const Context &ctx,
   if (position == nullptr || position >= ctx.end) {
     return false;
   }
-  if constexpr (requires { ctx.skip_without_builder(position); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     return ctx.skip_without_builder(position) == position;
   }
   return true;
@@ -180,7 +231,7 @@ cursor_starts_visible_source(const Context &ctx) noexcept {
   if (ctx.cursor() >= ctx.end) {
     return false;
   }
-  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     return ctx.skip_without_builder(ctx.cursor()) == ctx.cursor();
   }
   return true;
@@ -207,7 +258,11 @@ cursor_starts_structured_visible_source(const Context &ctx) noexcept {
   // codepoint extends past `end`, treat the cursor as not on a
   // structured visible-source codepoint — same conservative answer
   // as the lead-byte pre-check elsewhere in the recovery path.
-  return is_identifier_like_codepoint_at(ctx.cursor(), ctx.end);
+  if constexpr (ContextCaps<Context>::hasWordCharMask) {
+    return ctx.isWordCharAt(ctx.cursor(), ctx.end);
+  } else {
+    return is_identifier_like_codepoint_at(ctx.cursor(), ctx.end);
+  }
 }
 
 template <typename Context>
@@ -216,7 +271,7 @@ cursor_reaches_visible_source_after_local_skip(const Context &ctx) noexcept {
   if (ctx.cursor() >= ctx.end) {
     return false;
   }
-  if constexpr (requires { ctx.skip_without_builder(ctx.cursor()); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     const char *const skipped = ctx.skip_without_builder(ctx.cursor());
     return skipped > ctx.cursor() && skipped < ctx.end;
   }
@@ -264,15 +319,11 @@ allows_fuzzy_replace_after_prior_edits(const TerminalShape &shape) noexcept {
   // with the literal under the same case-sensitivity contract used by
   // the full matcher. Byte-comparing without honouring `caseSensitive`
   // would miss legitimate fuzzy candidates (`'A'` in input vs `'a'` in
-  // literal). ASCII tolower covers the typical short-keyword shape; the
+  // literal). `ascii_fold` covers the typical short-keyword shape; the
   // matcher itself does the full Unicode work on candidates we let
   // through.
   const auto fold = [caseSensitive](char c) noexcept {
-    const auto byte = static_cast<unsigned char>(c);
-    if (caseSensitive || byte >= 0x80u) {
-      return byte;
-    }
-    return static_cast<unsigned char>(byte | 0x20u);
+    return ascii_fold(static_cast<unsigned char>(c), caseSensitive);
   };
   const auto inspectedInputLength =
       std::min(input.size(), literalValue.size() + 1u);
@@ -356,7 +407,7 @@ template <EditableParseModeContext Context>
         pegium::utils::advanceOneCodepointLossy(boundedLimit);
     boundedLimit = next > limit ? limit : next;
   }
-  if constexpr (requires { ctx.skip_without_builder(cursor); }) {
+  if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
     const char *it = cursor;
     while (it < boundedLimit) {
       if (ctx.skip_without_builder(it) > it) {
@@ -391,10 +442,7 @@ literal_fuzzy_input_limit(const Context &ctx) noexcept {
 template <typename Context>
 [[nodiscard]] LiteralFuzzyCandidatesCache *
 literal_fuzzy_candidates_cache_for(Context &ctx) noexcept {
-  if constexpr (requires {
-                  { ctx.literalFuzzyCandidatesCache() } ->
-                      std::same_as<LiteralFuzzyCandidatesCache &>;
-                }) {
+  if constexpr (ContextCaps<Context>::hasLiteralFuzzyCandidatesCache) {
     return &ctx.literalFuzzyCandidatesCache();
   } else {
     (void)ctx;
@@ -448,37 +496,33 @@ template <EditableParseModeContext Context>
 allows_extended_terminal_delete_scan_match(const Context &ctx,
                                            const char *cursorStart,
                                            const char *scanStart) noexcept {
-  if constexpr (requires { ctx.maxConsecutiveCodepointDeletes; }) {
-    // Byte span of the scanned/deleted region (pointer distance). Compared
-    // conservatively against the codepoint-delete limit: for multibyte input
-    // the byte span is >= the codepoint count, so the gate only ever errs
-    // toward requiring the structured-visible-source check below — never
-    // toward admitting more deletes than intended.
-    const auto deletedByteSpan = static_cast<std::size_t>(scanStart - cursorStart);
-    // `+ 1u` is deliberate one-codepoint slack on the OVERFLOW-probe extent —
-    // this gate decides whether to keep probing past the budget, it is NOT the
-    // budget enforcer. The hard per-codepoint delete cap lives in
-    // deleteOneCodepoint / can_delete; do not "tighten" this to remove the +1.
-    if (const auto localLimit =
-            static_cast<std::size_t>(ctx.maxConsecutiveCodepointDeletes) + 1u;
-        deletedByteSpan <= localLimit) {
-      return true;
-    }
-
-    if (!position_starts_structured_visible_source(ctx, scanStart)) {
-      return true;
-    }
-
-    if constexpr (requires { ctx.maxEditCost; }) {
-      if (ctx.maxEditCost > ParseOptions{}.maxRecoveryEditCost) {
-        return true;
-      }
-    }
-
-    return false;
+  // Byte span of the scanned/deleted region (pointer distance). Compared
+  // conservatively against the codepoint-delete limit: for multibyte input
+  // the byte span is >= the codepoint count, so the gate only ever errs
+  // toward requiring the structured-visible-source check below — never
+  // toward admitting more deletes than intended.
+  const auto deletedByteSpan = static_cast<std::size_t>(scanStart - cursorStart);
+  // `+ 1u` is deliberate one-codepoint slack on the OVERFLOW-probe extent —
+  // this gate decides whether to keep probing past the budget, it is NOT the
+  // budget enforcer. The hard per-codepoint delete cap lives in
+  // deleteOneCodepoint / can_delete; do not "tighten" this to remove the +1.
+  if (const auto localLimit =
+          static_cast<std::size_t>(
+              ctx.editPolicy.maxConsecutiveCodepointDeletes) +
+          1u;
+      deletedByteSpan <= localLimit) {
+    return true;
   }
 
-  return true;
+  if (!position_starts_structured_visible_source(ctx, scanStart)) {
+    return true;
+  }
+
+  if (ctx.editPolicy.maxEditCost > ParseOptions{}.maxRecoveryEditCost) {
+    return true;
+  }
+
+  return false;
 }
 
 template <EditableParseModeContext Context, typename MatchFn>
@@ -489,16 +533,14 @@ probe_nearby_delete_scan_match(Context &ctx, MatchFn &&matchFn,
   if (!allows_nearby_delete_scan(facts, shape)) {
     return false;
   }
-  if constexpr (requires { ctx.canDelete(); }) {
-    if (!ctx.canDelete()) {
-      return false;
-    }
+  if (!ctx.canDelete()) {
+    return false;
   }
 
   const char *const cursorStart = ctx.cursor();
   const char *scanCursor = cursorStart;
   for (; scanCursor < ctx.end; ++scanCursor) {
-    if constexpr (requires { ctx.skip_without_builder(scanCursor); }) {
+    if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
       const char *const skipped = ctx.skip_without_builder(scanCursor);
       if (skipped > scanCursor) {
         if (std::forward<MatchFn>(matchFn)(skipped) != nullptr) {
@@ -581,6 +623,34 @@ evaluate_replace_leaf_terminal_candidate(
   return candidate;
 }
 
+/// Fold every applicable fuzzy-Replace `candidate` (from any source exposing
+/// `.consumed` / `.cost` / `.distance`) at `cursorStart` into `bestChoice`,
+/// keeping the best by `terminal_recovery_key`. This is the inner loop shared by
+/// `Literal::try_local_recovery` (over its precomputed `LiteralFuzzyCandidates`)
+/// and `TerminalRule`'s literal-metadata recovery (over
+/// `collect_literal_replace_candidates`); each caller keeps its own admission
+/// gating, and `Literal` keeps its split-Insert seeding of `bestChoice` outside
+/// this loop (so `TerminalRule` can never acquire it here).
+template <EditableParseModeContext Context, typename Element,
+          typename Candidates>
+void consider_replace_leaf_candidates(Context &ctx, const char *cursorStart,
+                                      const Element *element,
+                                      const Candidates &candidates,
+                                      TerminalRecoveryCandidate &bestChoice) {
+  for (const auto &candidate : candidates) {
+    const char *const endPtr = cursorStart + candidate.consumed;
+    if (!can_apply_recovery_match(ctx, endPtr)) {
+      continue;
+    }
+    const auto evaluated = evaluate_replace_leaf_terminal_candidate(
+        ctx, cursorStart, endPtr, element, candidate.cost, candidate.distance);
+    if (is_better_recovery_key(terminal_recovery_key(evaluated),
+                               terminal_recovery_key(bestChoice))) {
+      bestChoice = evaluated;
+    }
+  }
+}
+
 template <EditableParseModeContext Context, typename MatchFn,
           typename OnMatchFn>
 [[nodiscard]] TerminalRecoveryCandidate evaluate_delete_scan_terminal_candidate(
@@ -607,12 +677,10 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
   const bool cursorStartsStructuredVisibleSource =
       detail::cursor_starts_structured_visible_source(ctx);
   const auto visibleSourceEditCount = [&]() constexpr noexcept {
-    if constexpr (requires { ctx.currentWindowEditCount(); }) {
+    if constexpr (ContextCaps<Context>::hasWindowEditCount) {
       return ctx.currentWindowEditCount();
-    } else if constexpr (requires { ctx.currentEditCount(); }) {
-      return ctx.currentEditCount();
     } else {
-      return 0u;
+      return ctx.currentEditCount();
     }
   }();
   const bool visibleSourceAvailableForScopedContinuation =
@@ -620,12 +688,10 @@ template <EditableParseModeContext Context, typename Element, typename MatchFn,
       facts.triviaGap.visibleSourceAfterLocalSkip ||
       detail::cursor_reaches_visible_source_after_local_skip(ctx);
   const bool scopedLeadingContinuationInsertAllowed = [&]() constexpr noexcept {
-    if constexpr (requires {
-                    ctx.allowsScopedLeadingTerminalInsertRecovery();
-                    ctx.allowDelete;
-                  }) {
+    if constexpr (ContextCaps<Context>::hasScopedLeadingTerminalInsertRecovery) {
       return ctx.allowsScopedLeadingTerminalInsertRecovery() &&
-             !ctx.allowDelete && visibleSourceAvailableForScopedContinuation;
+             !ctx.editPolicy.allowDelete &&
+             visibleSourceAvailableForScopedContinuation;
     } else {
       return false;
     }
@@ -672,12 +738,8 @@ template <EditableParseModeContext Context, typename MatchFn,
   if (!allows_nearby_delete_scan(facts, shape)) {
     return false;
   }
-  bool budgetAllowsDeleteScan = true;
-  if constexpr (requires { ctx.canDelete(); }) {
-    budgetAllowsDeleteScan = ctx.canDelete();
-    if (!budgetAllowsDeleteScan) {
-      return false;
-    }
+  if (!ctx.canDelete()) {
+    return false;
   }
 
   const char *const cursorStart = ctx.cursor();
@@ -687,7 +749,7 @@ template <EditableParseModeContext Context, typename MatchFn,
   // in an optional so the constexpr-branch can omit it for context
   // types that don't expose `skipAfterDelete`.
   std::optional<detail::ScopedBoolOverride> skipAfterDeleteGuard;
-  if constexpr (requires { ctx.skipAfterDelete; }) {
+  if constexpr (ContextCaps<Context>::hasSkipAfterDeleteField) {
     skipAfterDeleteGuard.emplace(ctx.skipAfterDelete, false);
   }
   auto &&match = matchFn;
@@ -702,16 +764,14 @@ template <EditableParseModeContext Context, typename MatchFn,
       },
       [&](const detail::DeleteScanVisitState &state) {
         const char *const scanCursor = ctx.cursor();
-        if constexpr (requires { ctx.skip_without_builder(scanCursor); }) {
+        if constexpr (ContextCaps<Context>::hasSkipWithoutBuilder) {
           if (state.hiddenTriviaBoundary) {
             const char *const skipped = ctx.skip_without_builder(scanCursor);
             if (const char *const visibleMatch =
                     detail::invoke_delete_scan_match(match, skipped,
                                                      state.deleteCount);
                 visibleMatch != nullptr) {
-              if constexpr (requires { ctx.skip(); }) {
-                ctx.skip();
-              }
+              ctx.skip();
               matchedEnd = visibleMatch;
               matchedDeleteCount = state.deleteCount;
               return detail::DeleteScanVisitResult::Accept;
