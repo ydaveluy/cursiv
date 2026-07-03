@@ -17,23 +17,13 @@ std::unique_ptr<const pegium::parser::Parser> createRequirementsParser() {
   return std::make_unique<const parser::RequirementsParser>();
 }
 
-std::unique_ptr<const pegium::parser::Parser>
-createRequirementsParser(const pegium::CoreServices &core) {
-  return std::make_unique<const parser::RequirementsParser>(core);
-}
-
 std::unique_ptr<const pegium::parser::Parser> createTestsParser() {
   return std::make_unique<const parser::TestsParser>();
 }
 
-std::unique_ptr<const pegium::parser::Parser>
-createTestsParser(const pegium::CoreServices &core) {
-  return std::make_unique<const parser::TestsParser>(core);
-}
-
 void installRequirementsCoreModule(pegium::CoreServices &core,
                                    RequirementsAddedServices &added) {
-  core.parser = createRequirementsParser(core);
+  core.parser = std::make_unique<const parser::RequirementsParser>(core);
   core.languageMetaData.fileExtensions = {".req"};
   added.validator =
       std::make_unique<validation::RequirementsValidator>(core.shared);
@@ -42,7 +32,7 @@ void installRequirementsCoreModule(pegium::CoreServices &core,
 
 void installTestsCoreModule(pegium::CoreServices &core,
                             TestsAddedServices &added) {
-  core.parser = createTestsParser(core);
+  core.parser = std::make_unique<const parser::TestsParser>(core);
   core.languageMetaData.fileExtensions = {".tst"};
   added.validator = std::make_unique<validation::TestsValidator>();
   validation::registerTestsValidationChecks(core, *added.validator);

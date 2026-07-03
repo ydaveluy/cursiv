@@ -7,7 +7,7 @@ namespace pegium {
 /// Convenience base class for default LSP feature services bound to one language.
 class DefaultLanguageService {
 public:
-  explicit DefaultLanguageService(const Services &languageServices)
+  explicit DefaultLanguageService(const Services &languageServices) noexcept
       : services(languageServices) {}
   virtual ~DefaultLanguageService() noexcept = default;
 

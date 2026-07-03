@@ -5,7 +5,7 @@
 namespace pegium {
 
 SharedServices::SharedServices() = default;
-SharedServices::~SharedServices() = default;
+SharedServices::~SharedServices() noexcept = default;
 
 bool SharedServices::isComplete() const noexcept {
   return SharedCoreServices::isComplete() && lsp.textDocuments &&

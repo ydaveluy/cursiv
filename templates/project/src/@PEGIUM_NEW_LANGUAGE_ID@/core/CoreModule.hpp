@@ -11,10 +11,6 @@ namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 /// Creates a standalone @PEGIUM_NEW_CLASS@ parser.
 std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser();
 
-/// Creates a @PEGIUM_NEW_CLASS@ parser bound to `core`.
-std::unique_ptr<const pegium::parser::Parser>
-create@PEGIUM_NEW_CLASS@Parser(const pegium::CoreServices &core);
-
 /// Wires the @PEGIUM_NEW_CLASS@ core overrides onto a service container. Every
 /// container is-a `pegium::CoreServices`, so the headless and the LSP bundle both
 /// wire themselves with `install@PEGIUM_NEW_CLASS@CoreModule(*services)`.

@@ -6,9 +6,7 @@
 namespace pegium::grammar {
 
 void TerminalRule::print(std::ostream &os) const {
-  os << "terminal " << getName() << " returns " << getTypeName() << ": ";
-  detail::print_element_reference(os, *getElement());
-  os << ';';
+  detail::print_rule(os, *this, "terminal ");
 }
 
 } // namespace pegium::grammar

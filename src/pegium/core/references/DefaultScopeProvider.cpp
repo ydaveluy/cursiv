@@ -27,9 +27,9 @@ using DescriptionVisitor =
   });
 }
 
-[[nodiscard]] bool visit_owned_entries(
-    const std::deque<AstNodeDescription> &entries,
-    DescriptionVisitor visitor) {
+template <typename Entries>
+[[nodiscard]] bool visit_owned_entries(const Entries &entries,
+                                       DescriptionVisitor visitor) {
   return std::ranges::all_of(
       entries, [&visitor](const auto &entry) { return visitor(entry); });
 }
@@ -183,7 +183,7 @@ bool DefaultScopeProvider::visitScopeEntries(
 
   const auto globalEntries = getGlobalEntries(referenceType);
   if (context.referenceText.empty()) {
-    return visit_entry_pointers(globalEntries->allEntries, visitor);
+    return visit_owned_entries(globalEntries->elements, visitor);
   }
 
   const auto globalIt = globalEntries->entriesByName.find(nameKey);
@@ -195,23 +195,23 @@ bool DefaultScopeProvider::visitScopeEntries(
 
 std::shared_ptr<const DefaultScopeProvider::CompiledGlobalEntries>
 DefaultScopeProvider::getGlobalEntries(std::type_index referenceType) const {
-  return _globalScopeCache.get(referenceType, [this, referenceType] {
-    auto compiled = std::make_shared<CompiledGlobalEntries>();
-    if (referenceType == std::type_index(typeid(void))) {
-      return std::shared_ptr<const CompiledGlobalEntries>(compiled);
-    }
+  return _globalScopeCache.get(
+      referenceType,
+      [this,
+       referenceType]() -> std::shared_ptr<const CompiledGlobalEntries> {
+        auto compiled = std::make_shared<CompiledGlobalEntries>();
+        if (referenceType == std::type_index(typeid(void))) {
+          return compiled;
+        }
 
-    compiled->elements =
-        services.shared.workspace.indexManager->allElements(referenceType);
-    compiled->allEntries.reserve(compiled->elements.size());
-    compiled->entriesByName.reserve(compiled->elements.size());
-    for (const auto &entry : compiled->elements) {
-      const auto *description = std::addressof(entry);
-      compiled->allEntries.push_back(description);
-      compiled->entriesByName[description->name].add(*description);
-    }
-    return std::shared_ptr<const CompiledGlobalEntries>(compiled);
-  });
+        compiled->elements =
+            services.shared.workspace.indexManager->allElements(referenceType);
+        compiled->entriesByName.reserve(compiled->elements.size());
+        for (const auto &entry : compiled->elements) {
+          compiled->entriesByName[entry.name].add(entry);
+        }
+        return compiled;
+      });
 }
 
 } // namespace pegium::references

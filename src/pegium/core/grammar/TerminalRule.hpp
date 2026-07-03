@@ -2,9 +2,11 @@
 
 /// Grammar contract for terminal rules.
 
+#include <concepts>
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/RuleValue.hpp>
 #include <string>
+#include <type_traits>
 
 namespace pegium {
 class CstNodeView;

@@ -78,6 +78,15 @@ struct FoldingRangeData {
   ::lsp::FoldingRangeKind kind = ::lsp::FoldingRangeKind::Region;
 };
 
+/// Builds an LSP range spanning `[begin, end)` of `document`. The end offset is
+/// clamped to `begin` when it precedes it, so the range is never inverted.
+[[nodiscard]] ::lsp::Range offset_to_range(const workspace::TextDocument &document,
+                                           TextOffset begin, TextOffset end);
+
+/// Builds an LSP range spanning `[begin, end)` of `document`'s text document.
+[[nodiscard]] ::lsp::Range offset_to_range(const workspace::Document &document,
+                                           TextOffset begin, TextOffset end);
+
 /// Returns the token covering `offset` in `text`.
 [[nodiscard]] TokenSpan token_at(std::string_view text, TextOffset offset);
 

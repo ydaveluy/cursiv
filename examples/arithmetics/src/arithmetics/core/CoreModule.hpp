@@ -11,10 +11,6 @@ namespace arithmetics {
 /// Creates a standalone arithmetics parser.
 std::unique_ptr<const pegium::parser::Parser> createArithmeticsParser();
 
-/// Creates an arithmetics parser bound to `core`.
-std::unique_ptr<const pegium::parser::Parser>
-createArithmeticsParser(const pegium::CoreServices &core);
-
 /// Wires the arithmetics core overrides onto a service container.
 ///
 /// Takes the pegium core base and the arithmetics graft as two separate

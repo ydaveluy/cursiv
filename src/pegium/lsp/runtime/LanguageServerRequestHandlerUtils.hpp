@@ -40,6 +40,24 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
                       std::optional<std::string_view> uri,
                       ServiceRequirement requiredState);
 
+/// Shared request-handler prelude: ensures the server is initialized and waits
+/// for `uri` (or the whole workspace) to reach `requiredState`. Hoisted out of
+/// the request-handler templates so it is compiled once, not per request type.
+void await_request_phase(const LanguageServerHandlerContext &server,
+                         pegium::SharedServices &sharedServices,
+                         const utils::CancellationToken &cancelToken,
+                         std::optional<std::string_view> uri,
+                         ServiceRequirement requiredState);
+
+/// The document-scoped prelude plus the service-existence gate: runs
+/// `await_request_phase` then reports whether services are registered for `uri`
+/// (false means the caller should yield an empty result).
+[[nodiscard]] bool
+await_request_services(const LanguageServerHandlerContext &server,
+                       pegium::SharedServices &sharedServices,
+                       const utils::CancellationToken &cancelToken,
+                       std::string_view uri, ServiceRequirement requiredState);
+
 /// Builds a stable cancellation key from an in-flight request id.
 std::string request_key_from_message_id(const ::lsp::MessageId &id);
 
@@ -312,10 +330,9 @@ auto create_request_handler(LanguageServerHandlerContext &server,
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
           -> Result {
-        ensure_initialized(server);
         const std::string uri = params.textDocument.uri.toString();
-        wait_until_phase(sharedServices, cancelToken, uri, requiredState);
-        if (get_services(*sharedServices.serviceRegistry, uri) == nullptr) {
+        if (!await_request_services(server, sharedServices, cancelToken, uri,
+                                    requiredState)) {
           return Result{};
         }
         return adapt_result<Result>(server, serviceCall(params, cancelToken),
@@ -340,9 +357,9 @@ auto create_item_request_handler(LanguageServerHandlerContext &server,
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
           -> Result {
-        ensure_initialized(server);
         const std::string uri = params.item.uri.toString();
-        wait_until_phase(sharedServices, cancelToken, uri, requiredState);
+        await_request_phase(server, sharedServices, cancelToken, uri,
+                            requiredState);
         return adapt_result<Result>(server, serviceCall(params, cancelToken),
                                     adapter, cancelToken);
       });
@@ -366,9 +383,8 @@ auto create_server_request_handler(LanguageServerHandlerContext &server,
        adapter = ResultAdapter(std::forward<Adapter>(adapter))](
           const Params &params, const utils::CancellationToken &cancelToken)
           -> Result {
-        ensure_initialized(server);
-        wait_until_phase(sharedServices, cancelToken, std::nullopt,
-                         requiredState);
+        await_request_phase(server, sharedServices, cancelToken, std::nullopt,
+                            requiredState);
         return adapt_result<Result>(server, serviceCall(params, cancelToken),
                                     adapter, cancelToken);
       });

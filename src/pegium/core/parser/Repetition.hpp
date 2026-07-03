@@ -756,7 +756,7 @@ private:
           }
           const auto value =
               static_cast<const grammar::Literal &>(leaf).getValue();
-          return detail::classify_literal_recovery_profile(value).allowsInsert();
+          return detail::make_terminal_shape_from_literal(value).allowsInsert();
         });
   }
 
@@ -1025,7 +1025,8 @@ private:
           ctx._recoverableFollowProbeFn == nullptr;
       return detail::recover_by_guarded_delete_retry(
           ctx,
-          [this, &ctx, canDeleteToEofAsTrailingGarbage]() {
+          [this, &ctx, canDeleteToEofAsTrailingGarbage](
+              const detail::DeleteRetryVisitState &) {
             detail::ProbeRestoreScope guard{ctx};
             return (canDeleteToEofAsTrailingGarbage &&
                     ctx.cursor() == ctx.end) ||
@@ -1034,7 +1035,7 @@ private:
                    probe_locally_recoverable(_element, ctx);
           },
           [&ctx, &parseWithRetryPermissions,
-           canDeleteToEofAsTrailingGarbage]() {
+           canDeleteToEofAsTrailingGarbage](const detail::DeleteRetryVisitState &) {
             detail::ProbeRestoreScope guard{ctx};
             const bool matched = parseWithRetryPermissions();
             const bool cleanedTrailingVisibleGarbage =

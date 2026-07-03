@@ -1,6 +1,5 @@
 #include <pegium/lsp/navigation/AbstractGoToImplementationProvider.hpp>
-#include <pegium/lsp/support/LspProviderUtils.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/lsp/navigation/NavigationProviderSupport.hpp>
 
 namespace pegium {
 
@@ -9,28 +8,13 @@ AbstractGoToImplementationProvider::getImplementation(
     const workspace::Document &document,
     const ::lsp::ImplementationParams &params,
     const utils::CancellationToken &cancelToken) const {
-  utils::throw_if_cancelled(cancelToken);
-  const auto &references = *services.references.references;
-  const auto declarations = provider_detail::find_declarations_at_offset(
-      document, document.textDocument().offsetAt(params.position),
-      references);
-  // Collect links for every resolved declaration (a position can resolve to
-  // several, e.g. a multi-reference), instead of using only the first.
-  std::vector<::lsp::LocationLink> links;
-  for (const auto *declaration : declarations) {
-    utils::throw_if_cancelled(cancelToken);
-    if (auto sublinks =
-            collectGoToImplementationLocationLinks(*declaration, cancelToken);
-        sublinks.has_value()) {
-      for (auto &link : *sublinks) {
-        links.push_back(std::move(link));
-      }
-    }
-  }
-  if (links.empty()) {
-    return std::nullopt;
-  }
-  return links;
+  return navigation_detail::collect_links_per_declaration(
+      services, document, params.position,
+      [this](const AstNode &declaration,
+             const utils::CancellationToken &token) {
+        return collectGoToImplementationLocationLinks(declaration, token);
+      },
+      cancelToken);
 }
 
 } // namespace pegium

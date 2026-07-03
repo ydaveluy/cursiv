@@ -2,8 +2,10 @@
 
 /// Grammar contract for rules producing scalar values.
 
+#include <concepts>
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/RuleValue.hpp>
+#include <type_traits>
 
 namespace pegium {
 class CstNodeView;

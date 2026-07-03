@@ -48,7 +48,7 @@ struct SharedServices : pegium::SharedCoreServices {
   SharedServices &operator=(SharedServices &&) noexcept = delete;
   SharedServices(const SharedServices &) = delete;
   SharedServices &operator=(const SharedServices &) = delete;
-  ~SharedServices() override;
+  ~SharedServices() noexcept override;
 
   /// True when the shared core services and the required shared LSP runtime
   /// services are all present. Optional LSP pieces (languageClient,

@@ -211,11 +211,8 @@ DefaultCompletionProvider::getCompletion(
 
   ::lsp::CompletionList completionList{};
   completionList.isIncomplete = true;
-  completionList.items.reserve(items.size());
-  for (auto &item : items) {
-    utils::throw_if_cancelled(cancelToken);
-    completionList.items.push_back(std::move(item));
-  }
+  utils::throw_if_cancelled(cancelToken);
+  completionList.items = std::move(items);
   return std::optional<::lsp::CompletionList>{std::move(completionList)};
 }
 

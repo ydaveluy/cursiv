@@ -97,6 +97,14 @@ private:
   [[nodiscard]] bool
   shouldRelink(const Document &document,
                const std::unordered_set<DocumentId> &changedDocumentIds) const;
+  // Drops the cached lazy resolution of references that a lazily-linked (and so
+  // un-indexed) document resolved into a document that just changed or was
+  // deleted, so a later access re-resolves instead of dereferencing a raw
+  // target pointer into freed arena memory.
+  void clearStaleLazyLinks(
+      Document &document,
+      const std::unordered_set<DocumentId> &changedDocumentIds,
+      utils::CancellationToken cancelToken) const;
   [[nodiscard]] bool
   hasTextDocument(const std::shared_ptr<Document> &document) const;
 
@@ -117,8 +125,7 @@ private:
   // Per-document phase listeners are NOT notified here: runMergedPhase fires them
   // serially and in document order once the phase has drained.
   void advance(const std::shared_ptr<Document> &document,
-               DocumentState targetState,
-               utils::CancellationToken cancelToken) const;
+               DocumentState targetState) const;
   // Runs @p body once per document whose state is below @p phaseEnd, in
   // parallel, then publishes each workspace state in @p publishStates (in order)
   // once the whole phase has drained. body advances each document through its
@@ -179,7 +186,7 @@ void DefaultDocumentBuilder::runMergedPhase(
     std::initializer_list<DocumentState> publishStates,
     utils::CancellationToken cancelToken, Body &&body) const {
   auto bodyFn = std::forward<Body>(body);
-  auto *taskScheduler = shared.execution.taskScheduler.get();
+  auto *taskScheduler = shared.taskScheduler.get();
 
   std::vector<std::size_t> pendingIndexes;
   std::vector<DocumentState> entryStates;

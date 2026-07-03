@@ -75,10 +75,9 @@ void publish_validation_observation(
              const utils::CancellationToken &cancelToken) {
     try {
       check(rootNode, acceptor, categories, cancelToken);
+    } catch (const utils::OperationCancelled &) {
+      throw;
     } catch (const std::exception &error) {
-      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
-        throw;
-      }
       auto message = errorPrefix + error.what();
       publish_validation_observation(*sink, rootNode, code, message);
       acceptor.error(rootNode, message);
@@ -191,10 +190,9 @@ void DefaultValidationRegistry::runChecks(
     }
     try {
       entry->check(node, acceptor, cancelToken);
+    } catch (const utils::OperationCancelled &) {
+      throw;
     } catch (const std::exception &error) {
-      if (dynamic_cast<const utils::OperationCancelled *>(&error) != nullptr) {
-        throw;
-      }
       auto message = std::string("An error occurred during validation: ") +
                      error.what();
       publish_validation_observation(

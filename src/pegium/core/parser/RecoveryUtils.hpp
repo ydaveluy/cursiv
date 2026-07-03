@@ -2,11 +2,11 @@
 
 /// Shared delete-scan recovery utilities.
 
-#include <concepts>
 #include <limits>
 #include <utility>
 
 #include <pegium/core/parser/ParseContext.hpp>
+#include <pegium/core/utils/FunctionRef.hpp>
 #include <pegium/core/utils/TextUtils.hpp>
 
 namespace pegium::parser::detail {
@@ -123,16 +123,6 @@ struct DeleteRetryOptions {
 
 using DeleteRetryVisitState = DeleteScanVisitState;
 
-template <typename ShouldRetryFn>
-[[nodiscard]] inline bool invoke_delete_retry_predicate(
-    ShouldRetryFn &shouldRetryFn, const DeleteRetryVisitState &state) {
-  if constexpr (requires { shouldRetryFn(state); }) {
-    return shouldRetryFn(state);
-  } else {
-    return shouldRetryFn();
-  }
-}
-
 template <typename MatchFn>
 [[nodiscard]] inline const char *
 invoke_delete_scan_match(MatchFn &matchFn, const char *scanCursor,
@@ -170,25 +160,6 @@ position_starts_structured_visible_source(const Context &ctx,
   return is_identifier_like_codepoint_at(position, ctx.end);
 }
 
-template <typename VisitFn>
-[[nodiscard]] inline DeleteScanVisitResult
-invoke_delete_scan_visit(VisitFn &visitFn, const DeleteScanVisitState &state) {
-  using enum DeleteScanVisitResult;
-  if constexpr (requires {
-                  { visitFn(state) } -> std::same_as<DeleteScanVisitResult>;
-                }) {
-    return visitFn(state);
-  } else if constexpr (requires {
-                         { visitFn() } -> std::same_as<DeleteScanVisitResult>;
-                       }) {
-    return visitFn();
-  } else if constexpr (requires { visitFn(state); }) {
-    return visitFn(state) ? Accept : Continue;
-  } else {
-    return visitFn() ? Accept : Continue;
-  }
-}
-
 // True iff a hidden-trivia boundary sits at the cursor (the just-deleted
 // codepoint abuts hidden trivia). Shared by the delete-scan and delete-retry
 // passes, which compute it identically. Contexts without skip_without_builder
@@ -212,10 +183,12 @@ template <typename Context>
 /// the scan may stop. Any non-Continue result ends the walk: the checkpoint is
 /// rewound unless the result is Accept; reaching the end rewinds and returns
 /// Stop. `recover_by_guarded_delete_scan` is the match / on-match wrapper.
-template <typename Context, typename CanDeleteStepFn, typename VisitFn>
+template <typename Context>
 [[nodiscard]] inline DeleteScanVisitResult
 visit_guarded_delete_scan_positions(
-    Context &ctx, CanDeleteStepFn &&canDeleteStepFn, VisitFn &&visitFn,
+    Context &ctx, utils::function_ref<bool()> canDeleteStep,
+    utils::function_ref<DeleteScanVisitResult(const DeleteScanVisitState &)>
+        visit,
     DeleteScanVisitOptions options = {}) {
   if (!ctx.canDelete()) {
     return DeleteScanVisitResult::Stop;
@@ -223,12 +196,10 @@ visit_guarded_delete_scan_positions(
 
   const auto recoveryCheckpoint = ctx.mark();
   ExtendedDeleteScanBudgetScope overflowBudgetScope{ctx};
-  auto &&canDeleteStep = canDeleteStepFn;
-  auto &&visit = visitFn;
   std::uint32_t deleteCount = 0u;
   const auto try_visit_at_current_position =
       [&](const DeleteScanVisitState &state) {
-        const auto result = invoke_delete_scan_visit(visit, state);
+        const auto result = visit(state);
         if (result == DeleteScanVisitResult::Accept && state.overflowBudget) {
           overflowBudgetScope.commitOverflowEdits();
         }
@@ -332,10 +303,12 @@ template <typename Context, typename CanDeleteStepFn, typename MatchFn,
 /// (Continue) at a position that starts structured visible source once anything
 /// has been deleted, so overflow deletions never cut into real source.
 /// `recover_by_guarded_delete_retry` is the bool wrapper.
-template <typename Context, typename ShouldRetryFn, typename RetryFn>
+template <typename Context>
 [[nodiscard]] inline DeleteRetryVisitResult
 visit_guarded_delete_retry_positions(
-    Context &ctx, ShouldRetryFn &&shouldRetryFn, RetryFn &&retryFn,
+    Context &ctx,
+    utils::function_ref<bool(const DeleteRetryVisitState &)> shouldRetry,
+    utils::function_ref<bool(const DeleteRetryVisitState &)> retry,
     DeleteRetryOptions options = {}) {
   if (!ctx.canDelete()) {
     return DeleteRetryVisitResult::Stop;
@@ -343,15 +316,14 @@ visit_guarded_delete_retry_positions(
 
   const auto recoveryCheckpoint = ctx.mark();
   DeleteRetryReplayScope retryScope{ctx};
-  auto &&shouldRetry = shouldRetryFn;
-  auto &&retry = retryFn;
   std::uint32_t deleteCount = 0u;
   const auto try_retry_at_current_position =
       [&](const DeleteRetryVisitState &state) {
-        if (!invoke_delete_retry_predicate(shouldRetry, state)) {
+        if (!shouldRetry(state)) {
           return DeleteRetryVisitResult::Continue;
         }
-        const auto result = invoke_delete_scan_visit(retry, state);
+        const auto result = retry(state) ? DeleteRetryVisitResult::Accept
+                                         : DeleteRetryVisitResult::Continue;
         if (result == DeleteRetryVisitResult::Accept && state.overflowBudget) {
           retryScope.commitOverflowEdits();
         }

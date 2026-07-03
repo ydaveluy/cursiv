@@ -82,8 +82,13 @@ struct ParseContext {
   inline void exit(const char *checkpoint,
                    const grammar::AbstractElement *element) {
     PEGIUM_STEP_TRACE_INC(detail::StepCounter::ParseContextExit);
-    _builder.exit(static_cast<TextOffset>(checkpoint - begin),
-                  lastVisibleCursorOffset(), element);
+    // A nullable element entered after trailing trivia captures a checkpoint
+    // past the last visible cursor, so clamp the end up to the begin: the node
+    // becomes an empty span at the entry offset rather than an inverted one that
+    // underflows CstNodeView::getText() into an out-of-bounds string_view.
+    const auto beginOffset = static_cast<TextOffset>(checkpoint - begin);
+    _builder.exit(beginOffset,
+                  std::max(beginOffset, lastVisibleCursorOffset()), element);
     // Cancellation is checked at parser-rule granularity (ParserRule
     // calls `throw_if_cancelled(cancellationToken())` after each successful
     // rule exit), not on every Group/Repetition/Choice/Assignment

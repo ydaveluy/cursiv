@@ -1,7 +1,6 @@
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -9,6 +8,7 @@
 #include <unordered_map>
 
 #include <pegium/core/utils/Cancellation.hpp>
+#include <pegium/core/utils/FunctionRef.hpp>
 
 namespace pegium {
 
@@ -403,7 +403,7 @@ find_fitting_move(const ::lsp::Range &range, const FormattingAction &formatting)
       result.append(line.begin(), line.end());
     } else {
       std::size_t trim = 0;
-      auto remaining = static_cast<std::size_t>(std::abs(characterIncrease));
+      auto remaining = static_cast<std::size_t>(-characterIncrease);
       while (trim < line.size() && remaining > 0 &&
              (line[trim] == ' ' || line[trim] == '\t')) {
         ++trim;
@@ -580,8 +580,8 @@ void collect_cst_edits(
     const std::unordered_map<FormattingKey, FormattingAction, FormattingKeyHash>
         &formattings,
     const std::unordered_map<NodeId, std::string> &hiddenReplacements,
-    const std::function<void(const CstNodeView &, const FormattingContext &)>
-        &hiddenFormatter,
+    utils::function_ref<void(const CstNodeView &, const FormattingContext &)>
+        hiddenFormatter,
     FormattingContext &context, const std::optional<::lsp::Range> &requestedRange,
     std::optional<CstNodeView> &lastLeaf, std::vector<PendingEdit> &edits,
     const utils::CancellationToken &cancelToken) {

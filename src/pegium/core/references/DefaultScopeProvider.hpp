@@ -42,7 +42,6 @@ protected:
     using NameIndex = workspace::NamedScopeEntryIndex;
 
     std::vector<workspace::AstNodeDescription> elements;
-    std::vector<const workspace::AstNodeDescription *> allEntries;
     NameIndex entriesByName;
   };
 

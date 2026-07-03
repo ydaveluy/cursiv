@@ -17,14 +17,9 @@ std::unique_ptr<const pegium::parser::Parser> createDomainModelParser() {
   return std::make_unique<const parser::DomainModelParser>();
 }
 
-std::unique_ptr<const pegium::parser::Parser>
-createDomainModelParser(const pegium::CoreServices &core) {
-  return std::make_unique<const parser::DomainModelParser>(core);
-}
-
 void installDomainModelCoreModule(pegium::CoreServices &core,
                                   DomainModelAddedServices &added) {
-  core.parser = createDomainModelParser(core);
+  core.parser = std::make_unique<const parser::DomainModelParser>(core);
   core.languageMetaData.fileExtensions = {".dmodel"};
   added.qualifiedNameProvider =
       std::make_shared<const references::QualifiedNameProvider>();

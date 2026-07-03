@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 
 #include <lsp/connection.h>
 #include <lsp/messagehandler.h>
@@ -33,8 +34,11 @@ public:
   std::optional<::lsp::LSPAny>
   executeCommand(std::string_view name, const ::lsp::LSPArray &arguments,
                  const utils::CancellationToken &) const override {
-    lastCommand = std::string(name);
-    lastArgumentCount = arguments.size();
+    {
+      const std::scoped_lock lock(mutex);
+      lastCommand = std::string(name);
+      lastArgumentCount = arguments.size();
+    }
 
     if (mode == Mode::ReturnsNull) {
       return std::nullopt;
@@ -46,7 +50,21 @@ public:
     return result;
   }
 
+  // Thread-safe accessors: executeCommand runs on a request-processing thread
+  // while the test observes from its own thread.
+  [[nodiscard]] std::string command() const {
+    const std::scoped_lock lock(mutex);
+    return lastCommand;
+  }
+  [[nodiscard]] std::size_t argumentCount() const {
+    const std::scoped_lock lock(mutex);
+    return lastArgumentCount;
+  }
+
   Mode mode;
+
+private:
+  mutable std::mutex mutex;
   mutable std::string lastCommand;
   mutable std::size_t lastArgumentCount = 0;
 };
@@ -56,7 +74,10 @@ public:
   std::vector<::lsp::WorkspaceSymbol>
   getSymbols(const ::lsp::WorkspaceSymbolParams &params,
              const utils::CancellationToken &) const override {
-    lastQuery = params.query;
+    {
+      const std::scoped_lock lock(mutex);
+      lastQuery = params.query;
+    }
 
     ::lsp::WorkspaceSymbol symbol{};
     symbol.name = "value";
@@ -69,6 +90,14 @@ public:
     symbol.location = std::move(location);
     return {std::move(symbol)};
   }
+
+  [[nodiscard]] std::string query() const {
+    const std::scoped_lock lock(mutex);
+    return lastQuery;
+  }
+
+private:
+  mutable std::mutex mutex;
   mutable std::string lastQuery;
 };
 
@@ -133,11 +162,11 @@ TEST_F(LanguageServerWorkspaceHandlersTest,
   harness->handler.processIncomingMessages();
 
   ASSERT_TRUE(test::wait_until([&]() {
-    return recording->lastCommand == "pegium.testCommand" &&
+    return recording->command() == "pegium.testCommand" &&
            !harness->stream.written().empty();
   }, std::chrono::seconds(3)));
-  EXPECT_EQ(recording->lastCommand, "pegium.testCommand");
-  EXPECT_EQ(recording->lastArgumentCount, 2u);
+  EXPECT_EQ(recording->command(), "pegium.testCommand");
+  EXPECT_EQ(recording->argumentCount(), 2u);
 
   const auto response = wait_for_response_object(harness->stream);
   EXPECT_EQ(response.get("id").integer(), 1);
@@ -163,7 +192,7 @@ TEST_F(LanguageServerWorkspaceHandlersTest,
   harness->handler.processIncomingMessages();
 
   ASSERT_TRUE(test::wait_until([&]() {
-    return recording->lastCommand == "pegium.testCommand" &&
+    return recording->command() == "pegium.testCommand" &&
            !harness->stream.written().empty();
   }, std::chrono::seconds(3)));
 
@@ -190,9 +219,9 @@ TEST_F(LanguageServerWorkspaceHandlersTest,
   harness->handler.processIncomingMessages();
 
   ASSERT_TRUE(test::wait_until([&]() {
-    return recording->lastQuery == "val" && !harness->stream.written().empty();
+    return recording->query() == "val" && !harness->stream.written().empty();
   }, std::chrono::seconds(3)));
-  EXPECT_EQ(recording->lastQuery, "val");
+  EXPECT_EQ(recording->query(), "val");
 
   const auto response = wait_for_response_object(harness->stream);
   EXPECT_EQ(response.get("id").integer(), 3);

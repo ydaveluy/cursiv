@@ -76,10 +76,6 @@ template <auto feature> struct AssignmentReferenceSupport {
   }
 };
 
-template <typename T> struct AssignmentIsVariant : std::false_type {};
-template <typename... Ts>
-struct AssignmentIsVariant<std::variant<Ts...>> : std::true_type {};
-
 template <typename E, typename = void> struct AssignmentElementValueType {
   using type = void;
 };
@@ -258,6 +254,18 @@ public:
                          std::same_as<RawValueType, std::nullptr_t>) {
       helpers::AssignmentHelper<AttrType>{}(astNode, member, nullptr, context);
       return true;
+    } else if constexpr (std::convertible_to<RawValueType, TargetValueType>) {
+      // The assign<> admissibility gate accepts any value convertible to the
+      // attribute type (e.g. a NUMBER terminal feeding a wider integer field),
+      // so honour that here by converting explicitly rather than rejecting it.
+      helpers::AssignmentHelper<AttrType>{}(
+          astNode, member,
+          static_cast<TargetValueType>(std::forward<Value>(value)), context);
+      return true;
+    } else if constexpr (std::constructible_from<TargetValueType, RawValueType>) {
+      helpers::AssignmentHelper<AttrType>{}(
+          astNode, member, TargetValueType(std::forward<Value>(value)), context);
+      return true;
     }
     return false;
   }
@@ -379,7 +387,7 @@ public:
     if constexpr (AssignmentIsAstPtr<RawType>::value &&
                   std::derived_from<typename AssignmentIsAstPtr<RawType>::type,
                                     AstNode>) {
-      if constexpr (AssignmentIsVariant<TargetValueType>::value) {
+      if constexpr (IsStdVariant<TargetValueType>::value) {
         TargetValueType converted{};
         if (!assign_variant_from_ast_ptr(astNode, converted,
                                          std::forward<RawValue>(rawValue))) {
@@ -393,7 +401,7 @@ public:
                                       context);
     }
 
-    if constexpr (AssignmentIsVariant<TargetValueType>::value) {
+    if constexpr (IsStdVariant<TargetValueType>::value) {
       TargetValueType converted{};
       bool assigned =
           assign_variant_exact(converted, std::forward<RawValue>(rawValue));

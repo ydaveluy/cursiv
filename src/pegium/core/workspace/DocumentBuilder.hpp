@@ -13,6 +13,7 @@
 #include <pegium/core/utils/Cancellation.hpp>
 #include <pegium/core/utils/Event.hpp>
 #include <pegium/core/validation/ValidationOptions.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
 #include <pegium/core/workspace/Documents.hpp>
 #include <pegium/core/workspace/IndexManager.hpp>
 
@@ -27,6 +28,16 @@ struct BuildOptions {
   std::optional<bool> eagerLinking;
   validation::BuildValidationOption validation;
 };
+
+/// Returns the workspace-default build options: validation enabled for the
+/// built-in and fast categories.
+[[nodiscard]] inline BuildOptions makeDefaultBuildOptions() {
+  BuildOptions options;
+  options.validation = validation::ValidationOptions{
+      .categories = {std::string(validation::kBuiltInValidationCategory),
+                     std::string(validation::kFastValidationCategory)}};
+  return options;
+}
 
 /// Summary of one document update cycle.
 struct DocumentUpdateEvent {

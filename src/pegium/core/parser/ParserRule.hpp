@@ -74,12 +74,8 @@ struct ParserRule final : AbstractRule<grammar::ParserRule, Nullable>,
     }
     auto activeRecoveryGuard = ctx.enterActiveRecovery(this);
     (void)activeRecoveryGuard;
-    if (_localSkipper.has_value()) {
-      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
-      (void)localSkipperGuard;
-      return _wrapper.probe_recoverable(ctx);
-    }
-    return _wrapper.probe_recoverable(ctx);
+    return run_under_local_skipper(
+        ctx, [&] { return _wrapper.probe_recoverable(ctx); });
   }
 
   bool probeRecoverableAtEntry(RecoveryContext &ctx) const {
@@ -94,12 +90,7 @@ struct ParserRule final : AbstractRule<grammar::ParserRule, Nullable>,
       }
       return _wrapper.probe_recoverable_at_entry(ctx);
     };
-    if (_localSkipper.has_value()) {
-      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
-      (void)localSkipperGuard;
-      return probeAtEntry();
-    }
-    return probeAtEntry();
+    return run_under_local_skipper(ctx, probeAtEntry);
   }
 
   bool probeRecoverableAtEntryConsumesVisible(RecoveryContext &ctx) const {
@@ -114,12 +105,7 @@ struct ParserRule final : AbstractRule<grammar::ParserRule, Nullable>,
       }
       return _wrapper.probe_recoverable_at_entry_consumes_visible(ctx);
     };
-    if (_localSkipper.has_value()) {
-      auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
-      (void)localSkipperGuard;
-      return probeAtEntry();
-    }
-    return probeAtEntry();
+    return run_under_local_skipper(ctx, probeAtEntry);
   }
 
   [[nodiscard]] const Skipper *
@@ -135,14 +121,23 @@ private:
 
   std::optional<Skipper> _localSkipper;
 
-  template <StrictParseModeContext Context>
-  bool fast_probe_impl(Context &ctx) const {
+  // Runs `fn` with the rule's optional local skipper installed for its
+  // duration. The skipper guard is released as `fn` returns, before any
+  // surrounding `ctx.exit`.
+  template <typename Context, typename Fn>
+  decltype(auto) run_under_local_skipper(Context &ctx, Fn &&fn) const {
     if (_localSkipper.has_value()) {
       auto localSkipperGuard = ctx.with_skipper(*_localSkipper);
       (void)localSkipperGuard;
-      return _wrapper.fast_probe(ctx);
+      return std::forward<Fn>(fn)();
     }
-    return _wrapper.fast_probe(ctx);
+    return std::forward<Fn>(fn)();
+  }
+
+  template <StrictParseModeContext Context>
+  bool fast_probe_impl(Context &ctx) const {
+    return run_under_local_skipper(
+        ctx, [&] { return _wrapper.fast_probe(ctx); });
   }
 
   template <ParseModeContext Context> bool parse_impl(Context &ctx) const {

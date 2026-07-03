@@ -141,6 +141,24 @@ void wait_until_phase(pegium::SharedServices &sharedServices,
   }
 }
 
+void await_request_phase(const LanguageServerHandlerContext &server,
+                         pegium::SharedServices &sharedServices,
+                         const utils::CancellationToken &cancelToken,
+                         std::optional<std::string_view> uri,
+                         ServiceRequirement requiredState) {
+  ensure_initialized(server);
+  wait_until_phase(sharedServices, cancelToken, uri, requiredState);
+}
+
+bool await_request_services(const LanguageServerHandlerContext &server,
+                            pegium::SharedServices &sharedServices,
+                            const utils::CancellationToken &cancelToken,
+                            std::string_view uri,
+                            ServiceRequirement requiredState) {
+  await_request_phase(server, sharedServices, cancelToken, uri, requiredState);
+  return get_services(*sharedServices.serviceRegistry, uri) != nullptr;
+}
+
 std::string request_key_from_message_id(const ::lsp::MessageId &id) {
   return std::visit(
       []<typename Value>(const Value &value) -> std::string {

@@ -11,10 +11,6 @@ namespace statemachine {
 /// Creates a standalone statemachine parser.
 std::unique_ptr<const pegium::parser::Parser> createStatemachineParser();
 
-/// Creates a statemachine parser bound to `core`.
-std::unique_ptr<const pegium::parser::Parser>
-createStatemachineParser(const pegium::CoreServices &core);
-
 /// Wires the statemachine core overrides onto a service container.
 ///
 /// Takes the pegium core base and the statemachine graft as two separate

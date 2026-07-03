@@ -84,8 +84,7 @@ bool DefaultTextDocuments::set(std::shared_ptr<TextDocument> document) {
   bool inserted = false;
   {
     std::scoped_lock lock(_mutex);
-    inserted = !_documents.contains(document->uri());
-    _documents.insert_or_assign(document->uri(), document);
+    inserted = _documents.insert_or_assign(document->uri(), document).second;
   }
   emitDidOpen(document);
   emitDidChangeContent(document);

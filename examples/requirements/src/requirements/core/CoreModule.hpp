@@ -11,16 +11,8 @@ namespace requirements {
 /// Creates a standalone requirements parser.
 std::unique_ptr<const pegium::parser::Parser> createRequirementsParser();
 
-/// Creates a requirements parser bound to `core`.
-std::unique_ptr<const pegium::parser::Parser>
-createRequirementsParser(const pegium::CoreServices &core);
-
 /// Creates a standalone tests-language parser.
 std::unique_ptr<const pegium::parser::Parser> createTestsParser();
-
-/// Creates a tests-language parser bound to `core`.
-std::unique_ptr<const pegium::parser::Parser>
-createTestsParser(const pegium::CoreServices &core);
 
 /// Wires the requirements-language core overrides onto a service container.
 ///

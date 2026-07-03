@@ -3,10 +3,6 @@
 /// Base grammar element contracts and the shared element kind enumeration.
 #include <ostream>
 
-namespace pegium {
-class CstNodeView;
-}
-
 namespace pegium::grammar {
 
 enum class ElementKind {

@@ -84,12 +84,11 @@ create_item(const Services &services, const AstNode &node,
   item.name = std::move(namedNode->name);
   item.uri = ::lsp::Uri::parse(document.uri);
   const auto &textDocument = document.textDocument();
-  item.range.start = textDocument.positionAt(namedNode->nodeCst.getBegin());
-  item.range.end = textDocument.positionAt(namedNode->nodeCst.getEnd());
-  item.selectionRange.start =
-      textDocument.positionAt(namedNode->selectionNode.getBegin());
-  item.selectionRange.end =
-      textDocument.positionAt(namedNode->selectionNode.getEnd());
+  item.range = provider_detail::offset_to_range(
+      textDocument, namedNode->nodeCst.getBegin(), namedNode->nodeCst.getEnd());
+  item.selectionRange = provider_detail::offset_to_range(
+      textDocument, namedNode->selectionNode.getBegin(),
+      namedNode->selectionNode.getEnd());
   item.data = to_lsp_any(pegium::JsonValue(
       static_cast<std::int64_t>(document.makeSymbolId(node))));
   std::forward<Customize>(customize)(node, item);

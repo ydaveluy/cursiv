@@ -1,5 +1,6 @@
 #include <pegium/lsp/runtime/LanguageServerRuntime.hpp>
 
+#include <cassert>
 #include <charconv>
 #include <csignal>
 #include <exception>
@@ -29,7 +30,6 @@
 #include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
-#include <cassert>
 namespace pegium {
 
 namespace {

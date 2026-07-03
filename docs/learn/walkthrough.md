@@ -201,6 +201,12 @@ Then wire it in one plain function. It takes the Pegium core base and your graft
 
 ```cpp
 // core/CoreModule.hpp — declarations only (no grammar header)
+
+// Hands out a parser as the type-erased `pegium::parser::Parser`, so the TUs
+// that only need to parse (tests, tools) never include the grammar header and
+// never re-instantiate it.
+std::unique_ptr<const pegium::parser::Parser> createStatemachineParser();
+
 void installStatemachineCoreModule(pegium::CoreServices &core,
                                    StatemachineAddedServices &added);
 
@@ -211,8 +217,14 @@ createStatemachineCoreServices(const pegium::SharedCoreServices &shared,
 
 ```cpp
 // core/CoreModule.cpp — the ONE translation unit that includes the grammar
+std::unique_ptr<const pegium::parser::Parser> createStatemachineParser() {
+  return std::make_unique<const parser::StateMachineParser>();
+}
+
 void installStatemachineCoreModule(pegium::CoreServices &core,
                                    StatemachineAddedServices &added) {
+  // CoreModule.cpp owns the grammar, so it builds the core-bound parser
+  // directly; createStatemachineParser() above is for the other TUs.
   core.parser = std::make_unique<const parser::StateMachineParser>(core);
   core.languageMetaData.fileExtensions = {".statemachine"};
   added.validator = std::make_unique<validation::StatemachineValidator>();
@@ -229,7 +241,7 @@ createStatemachineCoreServices(const pegium::SharedCoreServices &shared,
 }
 ```
 
-Because `core/CoreModule.cpp` is the only translation unit that includes the grammar header, the grammar's heavy template instantiations happen there once; the LSP module (`lsp/LspModule.cpp`) reuses the same `installStatemachineCoreModule` through its declaration, without re-instantiating anything. The wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
+Because `core/CoreModule.cpp` is the only translation unit that includes the grammar header, the grammar's heavy template instantiations happen there once. Everything else works through declarations: the LSP module (`lsp/LspModule.cpp`) reuses `installStatemachineCoreModule`, and tests or tools that just need to parse call `createStatemachineParser()` to obtain a ready parser as the type-erased `pegium::parser::Parser` — none of them re-instantiate the grammar. This is what keeps the example's test translation units small and fast to compile. The wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
 
 ## 5. Run it headlessly — `cli/main.cpp`
 

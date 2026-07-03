@@ -2,10 +2,8 @@
 
 /// Base grammar rule contract exposing rule names and produced type names.
 
-#include <concepts>
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <string_view>
-#include <type_traits>
 #include <ostream>
 namespace pegium::grammar {
 

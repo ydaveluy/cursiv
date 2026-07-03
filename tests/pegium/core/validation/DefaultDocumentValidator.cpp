@@ -37,7 +37,7 @@ std::unique_ptr<pegium::SharedCoreServices> make_validation_shared_services(
   sharedServices->observabilitySink =
       std::make_shared<test::RecordingObservabilitySink>();
   if (workerCount.has_value()) {
-    sharedServices->execution.taskScheduler =
+    sharedServices->taskScheduler =
         std::make_shared<execution::TaskScheduler>(*workerCount);
   }
   return sharedServices;
@@ -332,9 +332,15 @@ TEST(DefaultDocumentValidatorTest,
   EXPECT_FALSE(customValidationRan);
 }
 
-TEST(DefaultDocumentValidatorTest,
-     PreservesDiagnosticOrderWhenValidatingDescendantsInParallel) {
-  auto sharedServices = make_validation_shared_services(1);
+// Builds a document with enough descendants to cross the parallelChunked
+// threshold, validates it with a @p workerCount-worker scheduler, and asserts
+// the diagnostics keep document order regardless of how the chunks are
+// scheduled. With several workers the per-node chunks run concurrently, so the
+// thread sanitizer observes the runChecks fan-out.
+void expect_parallel_validation_preserves_diagnostic_order(
+    std::size_t workerCount) {
+  SCOPED_TRACE("workerCount=" + std::to_string(workerCount));
+  auto sharedServices = make_validation_shared_services(workerCount);
   pegium::CoreServices languageServices(*sharedServices);
   languageServices.languageMetaData.languageId = "mini";
   auto registry = std::make_unique<DefaultValidationRegistry>(languageServices);
@@ -365,6 +371,8 @@ TEST(DefaultDocumentValidatorTest,
   ParserRule<ValidationRootNode> rootRule{
       "Root", some(append<&ValidationRootNode::nodes>(nodeRule))};
 
+  // 260 nodes (>= parallelChunked's 256-node threshold) so a multi-worker
+  // scheduler splits the per-node checks into several concurrent chunks.
   workspace::Document document(test::make_text_document(
       "file:///validation-order.pg", "mini", std::string(260, ',')));
   document.id = 5u;
@@ -387,6 +395,20 @@ TEST(DefaultDocumentValidatorTest,
   for (std::size_t index = 1; index < diagnostics.size(); ++index) {
     EXPECT_EQ(diagnostics[index].message, expectedMessages[index - 1U]);
   }
+}
+
+TEST(DefaultDocumentValidatorTest,
+     PreservesDiagnosticOrderWhenValidatingDescendantsInParallel) {
+  // One worker: the chunks run serially, pinning the deterministic ascending
+  // concatenation of the per-chunk diagnostic buffers.
+  expect_parallel_validation_preserves_diagnostic_order(1);
+}
+
+TEST(DefaultDocumentValidatorTest,
+     PreservesDiagnosticOrderWhenChunksRunConcurrently) {
+  // Several workers: the per-node checks fan out across chunks that execute at
+  // the same time, so the order must hold independently of execution order.
+  expect_parallel_validation_preserves_diagnostic_order(4);
 }
 
 } // namespace

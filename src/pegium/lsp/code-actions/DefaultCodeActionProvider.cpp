@@ -4,12 +4,11 @@
 #include <string_view>
 #include <utility>
 
+#include <pegium/core/validation/DefaultCodeActionProtocol.hpp>
 #include <pegium/lsp/support/JsonValue.hpp>
 
 namespace pegium {
 namespace {
-
-constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
 
 bool is_quick_fix_kind(const ::lsp::CodeActionKindEnum &kind) {
   return kind == ::lsp::CodeActionKind::QuickFix;
@@ -99,7 +98,8 @@ DefaultCodeActionProvider::extractDefaultCodeActions(
     return std::nullopt;
   }
 
-  const auto keyIt = data.object().find(std::string(kDefaultCodeActionsKey));
+  const auto keyIt =
+      data.object().find(std::string(validation::kDefaultCodeActionsKey));
   if (keyIt == data.object().end() || !keyIt->second.isArray()) {
     return std::nullopt;
   }
@@ -111,14 +111,15 @@ DefaultCodeActionProvider::extractDefaultCodeActions(
       continue;
     }
     const auto &object = entry.object();
-    auto kind = get_string_field(object, "kind");
-    auto title = get_string_field(object, "title");
-    auto newText = get_string_field(object, "newText");
-    auto begin = get_uint_field(object, "begin");
-    auto end = get_uint_field(object, "end");
-    // `editKind` was required-then-discarded: makeDefaultCodeAction derives
-    // behaviour solely from kind/begin/end/newText, so the read added coupling
-    // without use.
+    auto kind = get_string_field(object, validation::kCodeActionKindField);
+    auto title = get_string_field(object, validation::kCodeActionTitleField);
+    auto newText =
+        get_string_field(object, validation::kCodeActionNewTextField);
+    auto begin = get_uint_field(object, validation::kCodeActionBeginField);
+    auto end = get_uint_field(object, validation::kCodeActionEndField);
+    // makeDefaultCodeAction derives its result solely from
+    // kind/title/newText/begin/end; the editKind field carried in the data
+    // object is not consumed here.
     if (!kind.has_value() || !title.has_value() || !newText.has_value() ||
         !begin.has_value() || !end.has_value()) {
       continue;
@@ -140,7 +141,7 @@ std::optional<::lsp::CodeAction> DefaultCodeActionProvider::makeDefaultCodeActio
     const DefaultCodeActionEdit &edit) {
   const auto &textDocument = document.textDocument();
   if (const auto textSize = static_cast<std::uint32_t>(textDocument.getText().size());
-      edit.kind != "quickfix" || edit.begin > edit.end ||
+      edit.kind != validation::kQuickFixActionKind || edit.begin > edit.end ||
       edit.end > textSize) {
     return std::nullopt;
   }

@@ -16,24 +16,6 @@ struct DummyElement final : pegium::grammar::AbstractElement {
   void print(std::ostream &os) const override { os << "dummy"; }
 };
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-
-pegium::CstNodeView previous_sibling(const pegium::CstNodeView &node) {
-  return node.previousSibling();
-}
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
 } // namespace
 
 namespace pegium {
@@ -85,9 +67,6 @@ TEST(CstNodeViewTest, NavigatesNodesAndSiblings) {
   EXPECT_EQ(leftChild.getText(), "b");
   EXPECT_EQ(rightChild.getText(), "c");
   EXPECT_EQ(leftChild.nextSibling().getText(), "c");
-  EXPECT_EQ(previous_sibling(parent).getText(), "a");
-  EXPECT_EQ(previous_sibling(rightChild).getText(), "b");
-  EXPECT_EQ(previous_sibling(trailing).getText(), "bc");
 }
 
 TEST(CstNodeViewTest, DetectsGapsBeforeAndAfterNodes) {

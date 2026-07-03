@@ -42,8 +42,7 @@ std::vector<::lsp::Location> DefaultReferencesProvider::findReferences(
 
       ::lsp::Location result{};
       result.uri = ::lsp::Uri::parse(targetDocument->uri);
-      result.range.start = textDocument.positionAt(location.begin);
-      result.range.end = textDocument.positionAt(location.end);
+      result.range = offset_to_range(textDocument, location.begin, location.end);
       locations.push_back(std::move(result));
     }
   }

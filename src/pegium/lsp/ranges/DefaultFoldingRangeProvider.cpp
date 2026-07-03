@@ -2,7 +2,6 @@
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <utility>
 
 #include <pegium/core/utils/TransparentStringHash.hpp>
@@ -18,7 +17,9 @@ DefaultFoldingRangeProvider::getFoldingRanges(
   (void)params;
   utils::throw_if_cancelled(cancelToken);
   std::vector<FoldingRangeData> rawRanges;
-  assert(document.parseResult.cst != nullptr);
+  if (document.parseResult.cst == nullptr) {
+    return {};
+  }
   const auto &textDocument = document.textDocument();
 
   utils::TransparentStringSet seen;

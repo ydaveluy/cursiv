@@ -14,8 +14,8 @@
 #include <pegium/core/workspace/Documents.hpp>
 #include <pegium/core/workspace/TextDocument.hpp>
 #include <pegium/core/workspace/WorkspaceManager.hpp>
-#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/support/Diagnostics.hpp>
 #include <pegium/lsp/workspace/TextDocuments.hpp>
@@ -71,7 +71,6 @@ build_document(pegium::SharedServices &shared, std::string_view languageId,
   shared.workspace.documentBuilder->update(changed, {});
   return shared.workspace.documents->getDocument(textDocument->uri());
 }
-
 
 } // namespace
 

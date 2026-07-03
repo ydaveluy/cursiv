@@ -48,10 +48,12 @@ std::ostream &print_nary(std::ostream &os, const Nary &nary,
 }
 
 /// Renders a rule (anything exposing `getName()`/`getTypeName()`/`getElement()`)
-/// as `Name returns Type: <element>;`.
+/// as `<keyword>Name returns Type: <element>;`. `keyword` carries its own
+/// trailing space when present (e.g. `"terminal "`).
 template <typename Rule>
-std::ostream &print_rule(std::ostream &os, const Rule &rule) {
-  os << rule.getName() << " returns " << rule.getTypeName() << ": ";
+std::ostream &print_rule(std::ostream &os, const Rule &rule,
+                         std::string_view keyword = {}) {
+  os << keyword << rule.getName() << " returns " << rule.getTypeName() << ": ";
   print_element_reference(os, *rule.getElement());
   return os << ';';
 }

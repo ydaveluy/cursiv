@@ -14,19 +14,6 @@
 namespace pegium {
 namespace {
 
-std::string assignment_operator_source(grammar::AssignmentOperator op) {
-  using enum grammar::AssignmentOperator;
-  switch (op) {
-  case Assign:
-    return "=";
-  case Append:
-    return "+=";
-  case EnableIf:
-    return "?=";
-  }
-  return "=";
-}
-
 std::string element_source(const grammar::AbstractElement &element);
 
 std::string ordered_choice_source(const grammar::OrderedChoice &choice) {
@@ -68,9 +55,10 @@ std::string element_source(const grammar::AbstractElement &element) {
 }
 
 std::string assignment_source(const grammar::Assignment &assignment) {
-  return std::string(assignment.getFeature()) +
-         assignment_operator_source(assignment.getOperator()) +
-         element_source(*assignment.getElement());
+  std::ostringstream stream;
+  stream << assignment.getFeature() << assignment.getOperator()
+         << element_source(*assignment.getElement());
+  return stream.str();
 }
 
 std::string grammar_source(const grammar::AbstractElement *grammarElement) {

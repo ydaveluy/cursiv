@@ -100,57 +100,48 @@ documentUri(const workspace::Document &document) {
   return ::lsp::DocumentUri(::lsp::Uri::parse(document.uri));
 }
 
-[[nodiscard]] inline ::lsp::TextDocumentPositionParams
-textDocumentPositionParams(const workspace::Document &document,
-                           TextOffset offset) {
-  ::lsp::TextDocumentPositionParams params{};
+/// Fills the `TextDocumentPositionParams` fields every LSP request shares,
+/// directly on a value-initialized `Params` (each result type derives from
+/// `TextDocumentPositionParams`).
+template <typename Params>
+[[nodiscard]] Params positionParams(const workspace::Document &document,
+                                    TextOffset offset) {
+  Params params{};
   params.textDocument.uri = documentUri(document);
   params.position = document.textDocument().positionAt(offset);
   return params;
 }
 
+[[nodiscard]] inline ::lsp::TextDocumentPositionParams
+textDocumentPositionParams(const workspace::Document &document,
+                           TextOffset offset) {
+  return positionParams<::lsp::TextDocumentPositionParams>(document, offset);
+}
+
 [[nodiscard]] inline ::lsp::CompletionParams
 completionParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::CompletionParams params{};
-  const auto base = textDocumentPositionParams(document, offset);
-  params.textDocument = base.textDocument;
-  params.position = base.position;
-  return params;
+  return positionParams<::lsp::CompletionParams>(document, offset);
 }
 
 [[nodiscard]] inline ::lsp::DefinitionParams
 definitionParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::DefinitionParams params{};
-  const auto base = textDocumentPositionParams(document, offset);
-  params.textDocument = base.textDocument;
-  params.position = base.position;
-  return params;
+  return positionParams<::lsp::DefinitionParams>(document, offset);
 }
 
 [[nodiscard]] inline ::lsp::HoverParams
 hoverParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::HoverParams params{};
-  const auto base = textDocumentPositionParams(document, offset);
-  params.textDocument = base.textDocument;
-  params.position = base.position;
-  return params;
+  return positionParams<::lsp::HoverParams>(document, offset);
 }
 
 [[nodiscard]] inline ::lsp::DocumentHighlightParams
 documentHighlightParams(const workspace::Document &document, TextOffset offset) {
-  ::lsp::DocumentHighlightParams params{};
-  const auto base = textDocumentPositionParams(document, offset);
-  params.textDocument = base.textDocument;
-  params.position = base.position;
-  return params;
+  return positionParams<::lsp::DocumentHighlightParams>(document, offset);
 }
 
 [[nodiscard]] inline ::lsp::ReferenceParams
 referenceParams(const workspace::Document &document, TextOffset offset,
                 bool includeDeclaration) {
-  ::lsp::ReferenceParams params{};
-  params.textDocument.uri = documentUri(document);
-  params.position = document.textDocument().positionAt(offset);
+  auto params = positionParams<::lsp::ReferenceParams>(document, offset);
   params.context.includeDeclaration = includeDeclaration;
   return params;
 }

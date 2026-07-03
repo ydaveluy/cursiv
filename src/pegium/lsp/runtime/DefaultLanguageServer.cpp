@@ -1,24 +1,23 @@
 #include <pegium/lsp/runtime/DefaultLanguageServer.hpp>
 
-#include <pegium/lsp/services/LanguageServerFeatures.hpp>
-#include <pegium/lsp/runtime/internal/RuntimeObservability.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
-#include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
-
-#include <future>
-#include <lsp/messages.h>
-
 #include <functional>
+#include <future>
 #include <optional>
-#include <string>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <variant>
 
+#include <lsp/messages.h>
+
 #include <pegium/core/utils/Disposable.hpp>
 #include <pegium/core/utils/Errors.hpp>
+#include <pegium/lsp/runtime/internal/RuntimeObservability.hpp>
+#include <pegium/lsp/services/LanguageServerFeatures.hpp>
+#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 
 namespace pegium {
 

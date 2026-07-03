@@ -77,11 +77,11 @@ make_terminal_shape_from_literal(std::string_view canonicalText) noexcept {
       pegium::utils::utf8_codepoint_count(canonicalText));
   // `singleCodepoint` must compare codepoint count, not byte count: a
   // multi-byte UTF-8 single codepoint (`é`, `→`, …) is still a single
-  // codepoint and should retain `allowsInsert()` semantics.
+  // codepoint and should retain `allowsInsert()` semantics. `.front()` is
+  // safe because the early empty-return above guarantees non-emptiness.
   shape.singleCodepoint =
-      !canonicalText.empty() &&
       pegium::utils::utf8_codepoint_length(canonicalText.front()) ==
-          canonicalText.size();
+      canonicalText.size();
   return shape;
 }
 

@@ -1,6 +1,5 @@
 #include <pegium/core/documentation/DefaultDocumentationProvider.hpp>
 
-#include <cassert>
 #include <cctype>
 #include <string>
 #include <string_view>

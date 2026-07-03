@@ -12,6 +12,7 @@
 #include <pegium/core/parser/ParseContext.hpp>
 #include <pegium/core/parser/ParseMode.hpp>
 #include <pegium/core/parser/RecoveryCandidate.hpp>
+#include <pegium/core/utils/FunctionRef.hpp>
 
 namespace pegium::parser::detail {
 
@@ -70,17 +71,22 @@ post_skip_cursor_offset(RecoveryContext &ctx) {
   return static_cast<TextOffset>(skipped - ctx.begin);
 }
 
-template <typename Checkpoint, typename Runner>
+// The candidate-evaluation body, with the attempt closure type-erased to
+// pegium::utils::function_ref<bool()>. Templated on Checkpoint only, so one body
+// is emitted per checkpoint type (one, in practice) instead of one per distinct
+// attempt closure — collapsing the ~215 near-identical instantiations into one.
+// Call sites pass their temporary attempt closure directly; function_ref binds
+// it for the duration of the call.
+template <typename Checkpoint>
 [[nodiscard]] inline EditableRecoveryCandidate
-evaluate_editable_recovery_candidate(RecoveryContext &ctx,
-                                     const Checkpoint &entryCheckpoint,
-                                     std::uint32_t baseEditCost,
-                                     std::size_t baseRecoveryEditCount,
-                                     Runner &&runner) {
+evaluate_editable_recovery_candidate(
+    RecoveryContext &ctx, const Checkpoint &entryCheckpoint,
+    std::uint32_t baseEditCost, std::size_t baseRecoveryEditCount,
+    pegium::utils::function_ref<bool()> runner) {
   EditableRecoveryCandidate candidate;
   const char *const savedFurthestExploredCursor =
       ctx.maxCursor();
-  if (std::forward<Runner>(runner)()) {
+  if (runner()) {
     candidate.matched = true;
     candidate.postSkipCursorOffset = post_skip_cursor_offset(ctx);
     // OrderedChoice / Group / InfixRule rank on the post-skip cursor.

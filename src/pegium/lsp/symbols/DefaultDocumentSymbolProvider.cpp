@@ -5,6 +5,7 @@
 
 #include <pegium/core/references/NameProvider.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/lsp/support/LspProviderUtils.hpp>
 
 namespace pegium {
 
@@ -59,12 +60,11 @@ std::optional<::lsp::DocumentSymbol> DefaultDocumentSymbolProvider::createSymbol
   symbol.kind = nodeKindProvider.getSymbolKind(node);
   const auto &textDocument = document.textDocument();
 
-  symbol.range.start = textDocument.positionAt(namedNode->nodeCst.getBegin());
-  symbol.range.end = textDocument.positionAt(namedNode->nodeCst.getEnd());
-  symbol.selectionRange.start =
-      textDocument.positionAt(namedNode->selectionNode.getBegin());
-  symbol.selectionRange.end =
-      textDocument.positionAt(namedNode->selectionNode.getEnd());
+  symbol.range = provider_detail::offset_to_range(
+      textDocument, namedNode->nodeCst.getBegin(), namedNode->nodeCst.getEnd());
+  symbol.selectionRange = provider_detail::offset_to_range(
+      textDocument, namedNode->selectionNode.getBegin(),
+      namedNode->selectionNode.getEnd());
 
   for (const auto *child : node.getContent()) {
     utils::throw_if_cancelled(cancelToken);

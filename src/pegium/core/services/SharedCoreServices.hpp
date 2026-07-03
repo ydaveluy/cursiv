@@ -17,12 +17,6 @@
 
 namespace pegium {
 
-/// Shared execution services reused by every language.
-struct SharedCoreExecutionServices {
-  // Shared core service; installed by default for standard Pegium setups.
-  std::shared_ptr<execution::TaskScheduler> taskScheduler;
-};
-
 /// Shared workspace services reused by every language.
 struct SharedCoreWorkspaceServices {
   // Shared core service; installed by default for standard Pegium setups.
@@ -52,7 +46,9 @@ struct SharedCoreServices {
   // Shared core service; installed by default for standard Pegium setups.
   std::unique_ptr<AstReflection> astReflection;
 
-  SharedCoreExecutionServices execution;
+  // Shared core service; installed by default for standard Pegium setups.
+  std::shared_ptr<execution::TaskScheduler> taskScheduler;
+
   SharedCoreWorkspaceServices workspace;
 
   // Shared core service; installed by default for standard Pegium setups.

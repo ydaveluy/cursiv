@@ -520,7 +520,7 @@ TEST(RecoveryTest,
 
 TEST(RecoveryTest,
      WordLikeLiteralFuzzyAdmissibilityUsesSharedLexicalAndTriviaFacts) {
-  const auto profile = detail::classify_literal_recovery_profile("module");
+  const auto profile = detail::make_terminal_shape_from_literal("module");
   // ASCII fixture: consumedCodepoints == consumed (one byte per codepoint).
   // The half-length floor reads consumedCodepoints, so set both in lockstep.
   detail::LiteralFuzzyCandidate candidate{
@@ -554,7 +554,7 @@ TEST(RecoveryTest,
 TEST(
     RecoveryTest,
     OperatorLikeLiteralFuzzyAdmissibilityAllowsOnlySingleNonSubstitutiveRepair) {
-  const auto profile = detail::classify_literal_recovery_profile("=>");
+  const auto profile = detail::make_terminal_shape_from_literal("=>");
   detail::LiteralFuzzyCandidate candidate{
       .consumed = 2u,
       .distance = 1u,
@@ -588,7 +588,7 @@ TEST(RecoveryTest,
   // its primaryRankCost at the limit) but consumes only 2 of 11 codepoints, so
   // it must be rejected; raising consumption to >= len/2 admits the same shape.
   // Only `consumed` differs between the two checks, so this isolates the floor.
-  const auto profile = detail::classify_literal_recovery_profile("environment");
+  const auto profile = detail::make_terminal_shape_from_literal("environment");
   // 11 codepoints -> rank limit min(5, 11+3) = 5; half-length floor = 5.
   // ASCII fixture: consumedCodepoints == consumed; the floor reads
   // consumedCodepoints, so move them in lockstep across the two checks.
@@ -629,7 +629,7 @@ TEST(RecoveryTest,
   };
   EXPECT_TRUE(detail::probe_nearby_delete_scan_match(
       hiddenGapCtx, matchArrow, facts,
-      detail::classify_literal_recovery_profile("=>")));
+      detail::make_terminal_shape_from_literal("=>")));
 }
 
 TEST(RecoveryTest,
@@ -652,7 +652,7 @@ TEST(RecoveryTest,
   };
   EXPECT_FALSE(detail::probe_nearby_delete_scan_match(
       hiddenGapCtx, matchSemicolon, facts,
-      detail::classify_literal_recovery_profile(";")));
+      detail::make_terminal_shape_from_literal(";")));
 }
 
 TEST(RecoveryTest,

@@ -2,7 +2,9 @@
 
 /// Grammar contract for rules producing AST nodes.
 
+#include <concepts>
 #include <pegium/core/grammar/AbstractRule.hpp>
+#include <type_traits>
 
 namespace pegium {
 class AstNode;

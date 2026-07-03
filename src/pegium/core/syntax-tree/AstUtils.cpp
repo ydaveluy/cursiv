@@ -7,13 +7,6 @@
 
 namespace pegium {
 
-CstNodeView AstNode::getCstNode() const noexcept {
-  if (_arena == nullptr || _cstNodeId == kNoNode) {
-    return CstNodeView{};
-  }
-  return CstNodeView{_arena->cstRoot(), _cstNodeId};
-}
-
 const workspace::Document *tryGetDocument(const AstNode &node) noexcept {
   if (const auto *arena = node.arena(); arena != nullptr) {
     return arena->document();

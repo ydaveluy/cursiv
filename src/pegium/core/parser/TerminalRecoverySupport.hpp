@@ -27,11 +27,6 @@ struct TriviaGapProfile {
   bool visibleSourceAfterLocalSkip = false;
 };
 
-[[nodiscard]] constexpr TerminalShape
-classify_literal_recovery_profile(std::string_view value) noexcept {
-  return make_terminal_shape_from_literal(value);
-}
-
 /// A terminal element exposing a string `getValue()` must also expose
 /// `isCaseSensitive()`. The recovery `TerminalShape` is derived from the same
 /// `DirectLiteralRecoveryMetadata` the fuzzy matcher consumes, so the two have

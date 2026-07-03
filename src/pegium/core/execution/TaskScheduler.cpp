@@ -24,6 +24,14 @@ TaskScheduler::TaskScheduler(std::size_t workerCount) {
 
 TaskScheduler::~TaskScheduler() noexcept = default;
 
+bool TaskScheduler::onWorkerThread() const noexcept {
+  return _impl != nullptr && _impl->executor.this_worker_id() >= 0;
+}
+
+std::size_t TaskScheduler::workerCount() const noexcept {
+  return _impl != nullptr ? _impl->executor.num_workers() : 0;
+}
+
 std::size_t TaskScheduler::defaultWorkerCount() noexcept {
   const auto concurrency = std::thread::hardware_concurrency();
   if (concurrency <= 1U) {
@@ -34,7 +42,7 @@ std::size_t TaskScheduler::defaultWorkerCount() noexcept {
 
 void TaskScheduler::parallelForIndexed(
     const utils::CancellationToken &cancelToken, std::size_t count,
-    const std::function<void(std::size_t)> &body) {
+    utils::function_ref<void(std::size_t)> body) {
   std::atomic<bool> failed{false};
   std::exception_ptr firstException;
 

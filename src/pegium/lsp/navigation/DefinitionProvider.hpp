@@ -15,7 +15,7 @@ class DefinitionProvider {
 public:
   virtual ~DefinitionProvider() noexcept = default;
   /// Returns definition links for `params`.
-  [[nodiscard]] virtual std::optional<std::vector<::lsp::LocationLink>>
+  virtual std::optional<std::vector<::lsp::LocationLink>>
   getDefinition(const workspace::Document &document,
                 const ::lsp::DefinitionParams &params,
                 const utils::CancellationToken &cancelToken =

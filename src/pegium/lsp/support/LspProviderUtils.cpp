@@ -23,14 +23,6 @@ namespace pegium::provider_detail {
 
 namespace {
 
-::lsp::Range offset_to_range(const workspace::TextDocument &document,
-                             TextOffset begin, TextOffset end) {
-  ::lsp::Range range{};
-  range.start = document.positionAt(begin);
-  range.end = document.positionAt(end >= begin ? end : begin);
-  return range;
-}
-
 bool has_newline_between(std::string_view text, TextOffset begin,
                          TextOffset end) {
   const auto textSize = static_cast<TextOffset>(text.size());
@@ -78,6 +70,19 @@ bool collect_node_chain_for_offset(const CstNodeView &node, TextOffset offset,
 }
 
 } // namespace
+
+::lsp::Range offset_to_range(const workspace::TextDocument &document,
+                             TextOffset begin, TextOffset end) {
+  ::lsp::Range range{};
+  range.start = document.positionAt(begin);
+  range.end = document.positionAt(end >= begin ? end : begin);
+  return range;
+}
+
+::lsp::Range offset_to_range(const workspace::Document &document,
+                             TextOffset begin, TextOffset end) {
+  return offset_to_range(document.textDocument(), begin, end);
+}
 
 TokenSpan token_at(std::string_view text, TextOffset offset) {
   const auto size = static_cast<TextOffset>(text.size());

@@ -21,11 +21,6 @@ template <auto... Values>
   return std::source_location::current().function_name();
 }
 
-template <class... Types>
-[[nodiscard]] constexpr auto function_name() noexcept -> std::string_view {
-  return std::source_location::current().function_name();
-}
-
 template <auto MemberPointer>
 struct MemberNameExtractor {
   struct REF_STRUCT {

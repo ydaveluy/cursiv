@@ -13,21 +13,6 @@
 namespace pegium {
 using namespace pegium::provider_detail;
 
-
-
-namespace {
-
-::lsp::Range make_range(const workspace::Document &document, TextOffset begin,
-                        TextOffset end) {
-  const auto &textDocument = document.textDocument();
-  ::lsp::Range range{};
-  range.start = textDocument.positionAt(begin);
-  range.end = textDocument.positionAt(end);
-  return range;
-}
-
-} // namespace
-
 std::vector<::lsp::DocumentHighlight>
 DefaultDocumentHighlightProvider::getDocumentHighlight(
     const workspace::Document &document,
@@ -68,7 +53,7 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
       };
       if (seen.insert(document_highlight_key(key)).second) {
         ::lsp::DocumentHighlight highlight{};
-        highlight.range = make_range(document, key.begin, key.end);
+        highlight.range = offset_to_range(document, key.begin, key.end);
         highlight.kind = key.kind;
         highlights.push_back(std::move(highlight));
       }

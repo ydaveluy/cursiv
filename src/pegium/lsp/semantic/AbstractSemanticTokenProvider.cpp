@@ -441,17 +441,22 @@ AbstractSemanticTokenProvider::buildSemanticTokens(
                           supportsMultilineTokens, tokens);
       };
 
-  auto visit = [this, &document, &range, &cancelToken,
+  const auto &textDocument = document.textDocument();
+  TextOffset rangeBegin = 0;
+  TextOffset rangeEnd = 0;
+  if (range.has_value()) {
+    rangeBegin = textDocument.offsetAt(range->start);
+    rangeEnd = textDocument.offsetAt(range->end);
+  }
+
+  auto visit = [this, &range, rangeBegin, rangeEnd, &cancelToken,
                 &acceptor](const auto &self, const AstNode &node) {
     if (!node.hasCstNode()) {
       return;
     }
-    if (range.has_value()) {
-      const auto nodeRange =
-          to_lsp_range(document, node.getCstNode().getBegin(), node.getCstNode().getEnd());
-      if (!ranges_overlap(document, nodeRange, *range)) {
-        return;
-      }
+    if (range.has_value() && (node.getCstNode().getEnd() < rangeBegin ||
+                              node.getCstNode().getBegin() > rangeEnd)) {
+      return;
     }
     utils::throw_if_cancelled(cancelToken);
     highlightElement(node, acceptor);

@@ -153,7 +153,11 @@ through the full document pipeline (parse → index → scope → link → valid
 **byte-identical** generated inputs, averaged over 3 iterations. The workspace
 benchmarks hand many self-contained files of one language to the framework's
 document builder **at once**, as a single small (~250 KB) and large (~12 MB)
-startup build — Pegium parallelizes those builds across all cores.
+startup build — Pegium parallelizes those builds across all cores. Pegium also
+parallelizes a single document's linking and validation across cores, which the
+large single-file build below exercises (at smaller sizes those phases are
+sub-millisecond, so per-document parallelization cannot outrun its own dispatch
+overhead; the gain surfaces only once the document is large).
 
 Each table reports the full build time and the throughput (MiB/s) for both
 engines, plus the Langium-over-Pegium speedup; the workspace tables also report
@@ -162,14 +166,30 @@ lower memory is better. RSS includes each runtime's baseline — Node/V8 carries
 fixed multi-tens-of-MiB heap Pegium's native process does not — so read it
 alongside how it grows with input size. Langium 4.3.0 / Node.js 26.
 
-Single-file full build (64 KiB):
+Single-file full build, small (~64 KiB):
 
 | language | pegium time | pegium throughput | langium time | langium throughput | speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| arithmetics | 2.83 ms | 22.1 MiB/s | 276 ms | 0.2 MiB/s | ~98× |
-| domainmodel | 0.95 ms | 65.8 MiB/s | 153 ms | 0.4 MiB/s | ~161× |
-| requirements | 0.93 ms | 67.3 MiB/s | 39 ms | 1.6 MiB/s | ~42× |
-| statemachine | 1.24 ms | 50.4 MiB/s | 80 ms | 0.8 MiB/s | ~64× |
+| arithmetics | 3.12 ms | 20.0 MiB/s | 279 ms | 0.2 MiB/s | ~90× |
+| domainmodel | 1.17 ms | 53.5 MiB/s | 151 ms | 0.4 MiB/s | ~129× |
+| requirements | 1.30 ms | 48.1 MiB/s | 40 ms | 1.6 MiB/s | ~30× |
+| statemachine | 1.26 ms | 49.6 MiB/s | 79 ms | 0.8 MiB/s | ~62× |
+
+Single-file full build, large (~1 MiB):
+
+| language | pegium time | pegium throughput | langium time | langium throughput | speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| arithmetics | 45 ms | 22.3 MiB/s | 33.6 s | 0.03 MiB/s | ~750× |
+| domainmodel | 15 ms | 66.7 MiB/s | 24.7 s | 0.04 MiB/s | ~1648× |
+| requirements | 18 ms | 54.6 MiB/s | 1.1 s | 0.87 MiB/s | ~63× |
+| statemachine | 17 ms | 58.7 MiB/s | 6.0 s | 0.17 MiB/s | ~354× |
+
+Langium's single-document scope resolution scales superlinearly with
+cross-reference density: the 16× jump from the small to the large single file
+inflates its build time only ~30× for reference-light requirements but up to
+~160× for reference-dense domainmodel, whereas Pegium's grows roughly linearly
+(~13–14×). The workspace tables below, which spread the same volume across many
+files, are the more representative shared-build comparison.
 
 Workspace full build, ~250 KB (all files built simultaneously at startup):
 

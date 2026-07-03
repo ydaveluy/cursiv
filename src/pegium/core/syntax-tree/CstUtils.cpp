@@ -1,6 +1,7 @@
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 
 #include <algorithm>
+#include <limits>
 
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
@@ -63,20 +64,6 @@ bool literal_matches_keyword(const grammar::Literal &literal,
   return text_matches_keyword(expected, keyword);
 }
 
-std::optional<std::string_view>
-terminal_rule_name(const CstNodeView &node) noexcept {
-  if (!node.valid() || !node.isLeaf()) {
-    return std::nullopt;
-  }
-
-  const auto *grammarElement = node.getGrammarElement();
-  if (grammarElement == nullptr ||
-      grammarElement->getKind() != grammar::ElementKind::TerminalRule) {
-    return std::nullopt;
-  }
-  return static_cast<const grammar::TerminalRule *>(grammarElement)->getName();
-}
-
 // True when `child` is a visible Assignment node binding `feature`. Shared by
 // the collect-all (`collect_feature_nodes`) and indexed-lookup
 // (`find_node_for_feature`) walks so the filter lives in one place.
@@ -103,11 +90,16 @@ void collect_feature_nodes(const CstNodeView &node, std::string_view feature,
 }
 
 void collect_keyword_nodes(const CstNodeView &node, std::string_view keyword,
-                           std::vector<CstNodeView> &matches) {
+                           std::vector<CstNodeView> &matches,
+                           std::size_t stopAfter =
+                               std::numeric_limits<std::size_t>::max()) {
   if (!node.valid()) {
     return;
   }
   for (const auto &child : node) {
+    if (matches.size() == stopAfter) {
+      break;
+    }
     if (child.isHidden()) {
       continue;
     }
@@ -211,7 +203,16 @@ std::optional<CstNodeView> find_direct_child_at_offset(const CstNodeView &node,
 
 std::optional<std::string_view>
 get_terminal_rule_name(const CstNodeView &node) noexcept {
-  return terminal_rule_name(node);
+  if (!node.valid() || !node.isLeaf()) {
+    return std::nullopt;
+  }
+
+  const auto *grammarElement = node.getGrammarElement();
+  if (grammarElement == nullptr ||
+      grammarElement->getKind() != grammar::ElementKind::TerminalRule) {
+    return std::nullopt;
+  }
+  return static_cast<const grammar::TerminalRule *>(grammarElement)->getName();
 }
 
 std::optional<CstNodeView> find_node_for_feature(const CstNodeView &node,
@@ -244,8 +245,14 @@ std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView &node,
 std::optional<CstNodeView> find_node_for_keyword(const CstNodeView &node,
                                                  std::string_view keyword,
                                                  std::size_t index) {
+  // Stop collecting once `index` is reached; the tail is never read here. Guard
+  // the rare maximal index so `index + 1` cannot wrap to 0 (which would collect
+  // nothing).
+  const std::size_t stopAfter = index == std::numeric_limits<std::size_t>::max()
+                                    ? std::numeric_limits<std::size_t>::max()
+                                    : index + 1U;
   std::vector<CstNodeView> matches;
-  collect_keyword_nodes(node, keyword, matches);
+  collect_keyword_nodes(node, keyword, matches, stopAfter);
   if (index >= matches.size()) {
     return std::nullopt;
   }

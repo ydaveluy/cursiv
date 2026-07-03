@@ -91,9 +91,7 @@ std::optional<::lsp::PrepareRenameResult> DefaultRenameProvider::prepareRename(
     }
   }
 
-  ::lsp::Range range{};
-  range.start = textDocument.positionAt(begin);
-  range.end = textDocument.positionAt(end);
+  ::lsp::Range range = offset_to_range(textDocument, begin, end);
   ::lsp::PrepareRenameResult result{};
   result = std::move(range);
   return result;

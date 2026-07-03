@@ -15,7 +15,7 @@
 namespace pegium {
 
 bool SharedCoreServices::isComplete() const noexcept {
-  return observabilitySink && astReflection && execution.taskScheduler &&
+  return observabilitySink && astReflection && taskScheduler &&
          serviceRegistry && workspace.configurationProvider &&
          workspace.fileSystemProvider && workspace.documentFactory &&
          workspace.documents && workspace.indexManager &&
@@ -31,8 +31,8 @@ void installDefaultSharedCoreServices(SharedCoreServices &sharedServices) {
   if (!sharedServices.astReflection) {
     sharedServices.astReflection = std::make_unique<AstReflection>();
   }
-  if (!sharedServices.execution.taskScheduler) {
-    sharedServices.execution.taskScheduler =
+  if (!sharedServices.taskScheduler) {
+    sharedServices.taskScheduler =
         std::make_shared<execution::TaskScheduler>();
   }
   if (!sharedServices.serviceRegistry) {

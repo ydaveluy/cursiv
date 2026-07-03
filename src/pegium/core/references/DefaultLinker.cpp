@@ -1,13 +1,14 @@
 #include <pegium/core/references/DefaultLinker.hpp>
 
 #include <cassert>
-#include <cstdint>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
+#include <pegium/core/execution/TaskScheduler.hpp>
 #include <pegium/core/observability/ObservabilitySink.hpp>
 #include <pegium/core/services/CoreServices.hpp>
 #include <pegium/core/services/SharedCoreServices.hpp>
@@ -53,13 +54,21 @@ void DefaultLinker::link(workspace::Document &document,
     return;
   }
 
-  std::uint32_t cancelPollCounter = 0;
-  for (const auto &handle : document.parseResult.references) {
-    if ((++cancelPollCounter & 0x3fU) == 0U) {
-      utils::throw_if_cancelled(cancelToken);
-    }
-    handle.get()->forceResolve();
-  }
+  // Resolve references in parallel only when this build runs standalone (on a
+  // non-worker thread). A multi-document build already saturates the pool via
+  // its cross-document parallelism, so nested dispatch there is pure overhead;
+  // running on a worker signals exactly that case, and a maximal minimum keeps
+  // parallelFor inline. forceResolve reads the immutable post-scope index
+  // without locking and writes only the reference's own target, so distinct
+  // references resolve concurrently without contention.
+  auto &scheduler = *services.shared.taskScheduler;
+  constexpr std::size_t kMinParallelRefs = 32;
+  const std::size_t minParallelCount =
+      scheduler.onWorkerThread() ? std::numeric_limits<std::size_t>::max()
+                                 : kMinParallelRefs;
+  scheduler.parallelFor(
+      cancelToken, document.parseResult.references,
+      [](const auto &handle) { handle.get()->forceResolve(); }, minParallelCount);
 
   utils::throw_if_cancelled(cancelToken);
 }

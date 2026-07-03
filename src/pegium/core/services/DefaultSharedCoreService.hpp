@@ -7,7 +7,7 @@ namespace pegium {
 /// Convenience base class for default services bound to shared core services.
 class DefaultSharedCoreService {
 public:
-  explicit DefaultSharedCoreService(const SharedCoreServices &shared)
+  explicit DefaultSharedCoreService(const SharedCoreServices &shared) noexcept
       : shared(shared) {}
   virtual ~DefaultSharedCoreService() noexcept = default;
 

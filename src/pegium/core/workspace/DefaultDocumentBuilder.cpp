@@ -69,11 +69,7 @@ DefaultDocumentBuilder::DefaultDocumentBuilder(
   assert(sharedServices.workspace.indexManager != nullptr);
   assert(sharedServices.serviceRegistry != nullptr);
 
-  validation::ValidationOptions validationOptions;
-  validationOptions.categories = {
-      std::string(validation::kBuiltInValidationCategory),
-      std::string(validation::kFastValidationCategory)};
-  _updateBuildOptions.validation = std::move(validationOptions);
+  _updateBuildOptions = makeDefaultBuildOptions();
 }
 
 BuildOptions &DefaultDocumentBuilder::updateBuildOptions() noexcept {
@@ -146,15 +142,19 @@ void DefaultDocumentBuilder::update(
     _currentState = DocumentState::Changed;
   }
 
-  std::unordered_set<DocumentId> deletedDocumentIdSet;
-  std::unordered_set<DocumentId> changedDocumentIdSet;
+  // One membership set does both jobs: it deduplicates each id list (while the
+  // vectors keep insertion order) and, once both loops have run, it is exactly
+  // the union of changed and deleted ids used below to decide which other
+  // documents to relink. A changed id that is also a deleted id is dropped by
+  // the same insert() check, since deleted ids are inserted first.
+  std::unordered_set<DocumentId> changedOrDeletedDocumentIds;
   std::vector<DocumentId> orderedDeletedDocumentIds;
   std::vector<DocumentId> orderedChangedDocumentIds;
 
   for (const auto documentId : deletedDocumentIds) {
     utils::throw_if_cancelled(cancelToken);
     if (documentId != InvalidDocumentId &&
-        deletedDocumentIdSet.insert(documentId).second) {
+        changedOrDeletedDocumentIds.insert(documentId).second) {
       orderedDeletedDocumentIds.push_back(documentId);
     }
   }
@@ -162,8 +162,7 @@ void DefaultDocumentBuilder::update(
   for (const auto documentId : changedDocumentIds) {
     utils::throw_if_cancelled(cancelToken);
     if (documentId != InvalidDocumentId &&
-        !deletedDocumentIdSet.contains(documentId) &&
-        changedDocumentIdSet.insert(documentId).second) {
+        changedOrDeletedDocumentIds.insert(documentId).second) {
       orderedChangedDocumentIds.push_back(documentId);
     }
   }
@@ -205,19 +204,19 @@ void DefaultDocumentBuilder::update(
     resetToState(*changedDocument, DocumentState::Changed);
   }
 
-  std::unordered_set<DocumentId> allChangedDocumentIds;
-  allChangedDocumentIds.reserve(orderedChangedDocumentIds.size() +
-                                orderedDeletedDocumentIds.size());
-  allChangedDocumentIds.insert(orderedChangedDocumentIds.begin(),
-                               orderedChangedDocumentIds.end());
-  allChangedDocumentIds.insert(orderedDeletedDocumentIds.begin(),
-                               orderedDeletedDocumentIds.end());
-
   for (const auto &document : documentStore.all()) {
     utils::throw_if_cancelled(cancelToken);
-    if (!allChangedDocumentIds.contains(document->id) &&
-        shouldRelink(*document, allChangedDocumentIds)) {
+    if (changedOrDeletedDocumentIds.contains(document->id)) {
+      continue;
+    }
+    if (shouldRelink(*document, changedOrDeletedDocumentIds)) {
       resetToState(*document, DocumentState::ComputedScopes);
+    } else if (!shouldLink(*document)) {
+      // A lazily-linked document is not in the reference index, so isAffected
+      // (and thus shouldRelink) cannot see a cross-document target it resolved
+      // on demand. Drop any such cached resolution that points into a changed
+      // or deleted document before its raw target pointer dangles.
+      clearStaleLazyLinks(*document, changedOrDeletedDocumentIds, cancelToken);
     }
   }
 
@@ -258,15 +257,20 @@ DefaultDocumentBuilder::getBuildOptions(const Document &document) const {
 }
 
 bool DefaultDocumentBuilder::shouldLink(const Document &document) const {
-  return getBuildOptions(document).eagerLinking.value_or(true);
+  std::scoped_lock lock(_stateMutex);
+  const auto state = _buildStateByDocumentId.find(document.id);
+  return state == _buildStateByDocumentId.end()
+             ? true
+             : state->second.options.eagerLinking.value_or(true);
 }
 
 bool DefaultDocumentBuilder::shouldValidate(const Document &document) const {
-  const auto &validation = getBuildOptions(document).validation;
-  if (const auto *enabled = std::get_if<bool>(&validation)) {
-    return *enabled;
+  std::scoped_lock lock(_stateMutex);
+  const auto state = _buildStateByDocumentId.find(document.id);
+  if (state == _buildStateByDocumentId.end()) {
+    return false;
   }
-  return std::holds_alternative<validation::ValidationOptions>(validation);
+  return validation::is_validation_enabled(state->second.options.validation);
 }
 
 std::vector<std::string>
@@ -337,6 +341,36 @@ bool DefaultDocumentBuilder::shouldRelink(
   }
   return shared.workspace.indexManager->isAffected(
       document, changedDocumentIds);
+}
+
+void DefaultDocumentBuilder::clearStaleLazyLinks(
+    Document &document,
+    const std::unordered_set<DocumentId> &changedDocumentIds,
+    utils::CancellationToken cancelToken) const {
+  const auto &services = shared.serviceRegistry->getServices(document.uri);
+  // createDescriptions reads each resolved reference's owned description copy —
+  // which keeps a valid target document id even after the target's arena is
+  // freed — and skips unresolved references, so it never touches the raw target
+  // pointer that may already dangle.
+  const auto descriptions =
+      services.workspace.referenceDescriptionProvider->createDescriptions(
+          document, cancelToken);
+  const bool dependsOnChanged = std::ranges::any_of(
+      descriptions,
+      [&changedDocumentIds](const ReferenceDescription &description) {
+        return description.targetDocumentId.has_value() &&
+               changedDocumentIds.contains(*description.targetDocumentId);
+      });
+  if (!dependsOnChanged) {
+    return;
+  }
+  if (document.state > DocumentState::ComputedScopes) {
+    // A validated lazy document is reset so the rebuild refreshes its
+    // diagnostics as well as its links.
+    resetToState(document, DocumentState::ComputedScopes);
+  } else {
+    services.references.linker->unlink(document);
+  }
 }
 
 bool DefaultDocumentBuilder::hasTextDocument(
@@ -461,8 +495,7 @@ void DefaultDocumentBuilder::publishWorkspaceState(
 }
 
 void DefaultDocumentBuilder::advance(const std::shared_ptr<Document> &document,
-                                     DocumentState targetState,
-                                     utils::CancellationToken /*cancelToken*/) const {
+                                     DocumentState targetState) const {
   // Only records the document's state; phase listeners are notified separately,
   // serially and in document order, once the phase has drained (runMergedPhase).
   document->state = targetState;
@@ -487,11 +520,11 @@ void DefaultDocumentBuilder::buildDocuments(
              const utils::CancellationToken &phaseToken) {
         if (entry < DocumentState::Parsed) {
           shared.workspace.documentFactory->update(*document, phaseToken);
-          advance(document, DocumentState::Parsed, phaseToken);
+          advance(document, DocumentState::Parsed);
         }
         if (entry < DocumentState::IndexedContent) {
           shared.workspace.indexManager->updateContent(*document, phaseToken);
-          advance(document, DocumentState::IndexedContent, phaseToken);
+          advance(document, DocumentState::IndexedContent);
         }
       });
 
@@ -514,17 +547,17 @@ void DefaultDocumentBuilder::buildDocuments(
           document->localSymbols =
               services.references.scopeComputation->collectLocalSymbols(
                   *document, phaseToken);
-          advance(document, DocumentState::ComputedScopes, phaseToken);
+          advance(document, DocumentState::ComputedScopes);
         }
         if (shouldLink(*document)) {
           if (entry < DocumentState::Linked) {
             services.references.linker->link(*document, phaseToken);
-            advance(document, DocumentState::Linked, phaseToken);
+            advance(document, DocumentState::Linked);
           }
           if (entry < DocumentState::IndexedReferences) {
             shared.workspace.indexManager->updateReferences(*document,
                                                             phaseToken);
-            advance(document, DocumentState::IndexedReferences, phaseToken);
+            advance(document, DocumentState::IndexedReferences);
           }
         }
       });
@@ -555,7 +588,7 @@ void DefaultDocumentBuilder::buildDocuments(
         if (entry < DocumentState::Validated) {
           validate(*document, phaseToken);
           markAsCompleted(*document);
-          advance(document, DocumentState::Validated, phaseToken);
+          advance(document, DocumentState::Validated);
         }
       });
 }
@@ -583,6 +616,13 @@ void DefaultDocumentBuilder::validate(
   }
   validationOptions.categories =
       findMissingValidationCategories(document, options);
+  // The incremental builder validates each category exactly once across builds
+  // and records what it ran. Honouring stop-after here would skip the later
+  // categories while still recording them as executed, permanently suppressing
+  // them on a subsequent build. Stop-after stays available to direct
+  // validateDocument() callers; the build path always validates fully.
+  validationOptions.stopAfterParsingErrors = std::nullopt;
+  validationOptions.stopAfterLinkingErrors = std::nullopt;
   auto diagnostics =
       validator->validateDocument(document, validationOptions, cancelToken);
   if (!document.diagnostics.empty()) {
@@ -661,81 +701,51 @@ DocumentId DefaultDocumentBuilder::awaitDocumentState(
         ", but workspace state is already " +
         std::string(document_state_name(workspaceState)) + "."));
   };
-  const auto check_now =
-      [&](std::exception_ptr &error) {
+  std::unique_lock lock(_stateMutex);
+
+  // Re-evaluated under _stateMutex on every workspace-state advance. The
+  // document reaching `state` is success; the workspace passing `state` while
+  // the document still lags behind is the failure make_failure reports; a
+  // vanished document is an error. publishWorkspaceState notifies _stateCv once
+  // per phase, so this also runs when the workspace advances past a document a
+  // build excluded from the target phase (e.g. with validation disabled) — that
+  // document never reaches `state`, and without this re-check the waiter would
+  // block forever.
+  enum class Outcome { Pending, Reached, Failed };
+  std::exception_ptr error;
+  const auto evaluate = [&]() -> Outcome {
     const auto document =
         shared.workspace.documents->getDocument(documentId);
     if (document == nullptr) {
       error = std::make_exception_ptr(utils::DocumentBuilderError(
           "No document found for id: " + std::to_string(documentId)));
-      return true;
+      return Outcome::Failed;
     }
-    if (document->state >= state) {
-      return true;
+    const DocumentState documentState = document->state;
+    if (documentState >= state) {
+      return Outcome::Reached;
     }
-    std::scoped_lock lock(_stateMutex);
-    if (_currentState >= state && state > document->state) {
-      error = make_failure(document->state, _currentState);
-      return true;
+    if (_currentState >= state && state > documentState) {
+      error = make_failure(documentState, _currentState);
+      return Outcome::Failed;
     }
-    return false;
+    return Outcome::Pending;
   };
 
-  if (std::exception_ptr initialError; check_now(initialError)) {
-    if (initialError != nullptr) {
-      std::rethrow_exception(initialError);
-    }
-    return documentId;
-  }
-  utils::throw_if_cancelled(cancelToken);
-
-  // The wait state is shared with the onDocumentPhase listener registered below.
-  // That listener can be invoked by a build thread off a *snapshot copy* of the
-  // listener list taken before this function returns: notifyDocumentPhase
-  // snapshots the listeners under the lock, then invokes them outside it, so
-  // unregistering the listener (when `listener` is destroyed on return) does not
-  // synchronize with an invocation already in flight. Hold the wait state on the
-  // heap and capture it by value into every continuation, so a late listener
-  // invocation operates on still-alive state instead of a destroyed stack frame.
-  struct WaitState {
-    std::mutex mutex;
-    std::condition_variable cv;
-    bool completed = false;
-    std::exception_ptr error;
-  };
-  const auto waitState = std::make_shared<WaitState>();
-
-  const auto finish = [waitState](std::exception_ptr error = nullptr) {
-    std::scoped_lock lock(waitState->mutex);
-    if (waitState->completed) {
-      return;
-    }
-    waitState->completed = true;
-    waitState->error = std::move(error);
-    waitState->cv.notify_all();
-  };
-
-  auto listener = onDocumentPhase(
-      state, [documentId, finish](const std::shared_ptr<Document> &document,
-                                  utils::CancellationToken) {
-        if (document->id == documentId) {
-          finish();
-        }
-      });
-  (void)listener;
-  std::stop_callback cancelCallback(cancelToken, [finish]() {
-    finish(std::make_exception_ptr(utils::OperationCancelled()));
-  });
+  const auto onCancelled = [this]() { _stateCv.notify_all(); };
+  std::stop_callback cancelCallback(cancelToken, onCancelled);
   (void)cancelCallback;
 
-  if (std::exception_ptr recheckError; check_now(recheckError)) {
-    finish(recheckError);
+  Outcome outcome = Outcome::Pending;
+  _stateCv.wait(lock, [&]() {
+    outcome = evaluate();
+    return outcome != Outcome::Pending || cancelToken.stop_requested();
+  });
+  if (outcome == Outcome::Pending) {
+    utils::throw_if_cancelled(cancelToken);
   }
-
-  std::unique_lock lock(waitState->mutex);
-  waitState->cv.wait(lock, [&waitState] { return waitState->completed; });
-  if (waitState->error != nullptr) {
-    std::rethrow_exception(waitState->error);
+  if (outcome == Outcome::Failed) {
+    std::rethrow_exception(error);
   }
   return documentId;
 }

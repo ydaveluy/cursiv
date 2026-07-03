@@ -89,6 +89,16 @@ TEST(DocCommentTest, RendersInlineLinksToMarkdown) {
             "[shown](https://x/)");
 }
 
+TEST(DocCommentTest, InlineLinkTrimsContentAndFallsBackOnEmptyDisplay) {
+  // Trailing whitespace before `}` must not swallow the display: a single token
+  // becomes both target and display (matching the provider's split_link_content),
+  // so the hook-less path renders it rather than an empty string.
+  EXPECT_EQ(parse_doc_comment("/** {@link Value } */").toMarkdown(), "Value");
+  // A target|display split with surrounding whitespace trims both sides instead
+  // of leaking it into the rendered label.
+  EXPECT_EQ(parse_doc_comment("/** {@link a|b } */").toMarkdown(), "b");
+}
+
 TEST(DocCommentTest, RendersBlockTagToMarkdownAndString) {
   const auto comment = parse_doc_comment("/** @deprecated Since 1.0 */");
   EXPECT_EQ(comment.toMarkdown(), "*@deprecated* — Since 1.0");

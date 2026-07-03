@@ -221,11 +221,8 @@ private:
   build_entries(std::vector<workspace::AstNodeDescription> entries) {
     auto compiled = std::make_shared<CompiledGlobalEntries>();
     compiled->elements = std::move(entries);
-    compiled->allEntries.reserve(compiled->elements.size());
     for (const auto &entry : compiled->elements) {
-      const auto *description = std::addressof(entry);
-      compiled->allEntries.push_back(description);
-      compiled->entriesByName[description->name].add(*description);
+      compiled->entriesByName[entry.name].add(entry);
     }
     return compiled;
   }

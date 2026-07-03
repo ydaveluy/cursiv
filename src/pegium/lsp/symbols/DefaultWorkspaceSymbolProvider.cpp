@@ -9,6 +9,7 @@
 #include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/workspace/Document.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
+#include <pegium/lsp/support/LspProviderUtils.hpp>
 
 namespace pegium {
 
@@ -45,8 +46,8 @@ symbol_location(const pegium::SharedServices &sharedServices,
 
   ::lsp::Location location{};
   location.uri = ::lsp::Uri::parse(document->uri);
-  location.range.start = document->textDocument().positionAt(site->getBegin());
-  location.range.end = document->textDocument().positionAt(site->getEnd());
+  location.range = provider_detail::offset_to_range(*document, site->getBegin(),
+                                                    site->getEnd());
   return location;
 }
 

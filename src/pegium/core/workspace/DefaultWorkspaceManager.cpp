@@ -40,11 +40,7 @@ DefaultWorkspaceManager::DefaultWorkspaceManager(
   _readyPromise = std::make_shared<std::promise<void>>();
   _readyFuture = _readyPromise->get_future().share();
 
-  validation::ValidationOptions validationOptions;
-  validationOptions.categories = {
-      std::string(validation::kBuiltInValidationCategory),
-      std::string(validation::kFastValidationCategory)};
-  _initialBuildOptions.validation = std::move(validationOptions);
+  _initialBuildOptions = makeDefaultBuildOptions();
 }
 
 BuildOptions &DefaultWorkspaceManager::initialBuildOptions() {

@@ -541,7 +541,7 @@ private:
   // Keep generic recovery able to synthesize only compact literals and avoid
   // inventing long grammar keywords.
   static constexpr auto terminalShape =
-      detail::classify_literal_recovery_profile(literalValue);
+      detail::make_terminal_shape_from_literal(literalValue);
   static constexpr bool allow_insert = terminalShape.allowsInsert();
   static constexpr bool allow_replace = terminalShape.allowsReplace();
   // Cache word-likeness per specialization so the strict match hot path does

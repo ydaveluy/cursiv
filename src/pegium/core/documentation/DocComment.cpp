@@ -461,16 +461,22 @@ std::optional<std::string> render_inline_tag(std::string_view name,
   }
   std::string target = content;
   std::string display = content;
-  // Split target|display on '|' first, then on whitespace — matching the
-  // provider's split_link_content so a {@link a|b} renders the same with or
-  // without a renderTag hook installed.
+  // Split target|display on '|' first, then on whitespace, trim both sides and
+  // fall back to the target when the display is empty — matching the provider's
+  // split_link_content so a {@link a|b} renders the same with or without a
+  // renderTag hook installed.
   auto separator = content.find('|');
   if (separator == std::string::npos) {
     separator = content.find_first_of(" \t");
   }
   if (separator != std::string::npos) {
     target = content.substr(0, separator);
-    display = content.substr(skip_whitespace(content, separator + 1));
+    display = content.substr(separator + 1);
+  }
+  target = std::string(trim(target));
+  display = std::string(trim(display));
+  if (display.empty()) {
+    display = target;
   }
   if (name == "linkcode" ||
       (name == "link" && options.link == DocCommentRenderOptions::LinkStyle::Code)) {

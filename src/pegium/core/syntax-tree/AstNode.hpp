@@ -364,26 +364,20 @@ concept DefaultConstructibleAstNode =
 // parser design, not a recommendation to encode semantic invariants in
 // constructors.
 
+template <typename T, typename U>
+  requires std::derived_from<std::remove_cv_t<T>, AstNode> &&
+           std::derived_from<std::remove_cv_t<U>, AstNode>
+[[nodiscard]] T *ast_ptr_cast(U *ptr) noexcept;
+
 /// Returns whether `node` is an instance of `T`.
 ///
-/// Uses the document-bound `AstReflection` registry (O(1) `isSubtype`) when
-/// available, falling back to `dynamic_cast` for standalone nodes that are
-/// not attached to any arena.
+/// Delegates to `ast_ptr_cast`, the single source of the reflection-lookup /
+/// RTTI-fallback dispatch rule. Both are header-inline, so the whole type check
+/// still inlines on this hot path.
 template <typename T>
   requires std::derived_from<T, AstNode>
 [[nodiscard]] bool is_a(const AstNode &node) noexcept {
-  if (const auto *reflection = ast_reflection_of(node);
-      reflection != nullptr &&
-      reflection->isKnown(std::type_index(typeid(T)))) {
-    // Call isSubtype directly (rather than the out-of-line isInstance) so the
-    // whole type check inlines on this hot path; typeid(node) is resolved here,
-    // where AstNode is a complete type.
-    return reflection->isSubtype(std::type_index(typeid(node)),
-                                 std::type_index(typeid(T)));
-  }
-  // No reflection, or `T` is an abstract base the grammar never names: fall back
-  // to C++ RTTI, which can answer where the grammar-derived table cannot.
-  return dynamic_cast<const T *>(&node) != nullptr;
+  return ast_ptr_cast<const T>(&node) != nullptr;
 }
 
 /// Pointer overload.

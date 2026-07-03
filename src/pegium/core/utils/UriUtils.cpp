@@ -18,7 +18,7 @@ bool has_file_scheme(std::string_view uri) {
     return false;
   }
   for (std::size_t index = 0; index < 7; ++index) {
-    if (tolower(static_cast<unsigned char>(uri[index])) != "file://"[index]) {
+    if (utils::tolower(uri[index]) != "file://"[index]) {
       return false;
     }
   }
@@ -61,7 +61,7 @@ std::string percent_encode(std::string_view text) {
 }
 
 int from_hex(char c) {
-  const auto lower = static_cast<unsigned char>(tolower(static_cast<unsigned char>(c)));
+  const auto lower = static_cast<unsigned char>(utils::tolower(c));
   if (lower >= '0' && lower <= '9') {
     return lower - '0';
   }
@@ -141,10 +141,7 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
         !authority.empty()) {
       std::string lowered(authority);
       std::ranges::transform(lowered, lowered.begin(),
-                             [](char c) {
-                               return static_cast<char>(
-                                   tolower(static_cast<unsigned char>(c)));
-                             });
+                             [](char c) { return utils::tolower(c); });
       if (lowered != "localhost") {
         return std::nullopt;
       }

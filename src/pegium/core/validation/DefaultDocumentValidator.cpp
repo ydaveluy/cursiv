@@ -9,23 +9,25 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include <pegium/core/execution/TaskScheduler.hpp>
 #include <pegium/core/grammar/AbstractRule.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/core/parser/ContextShared.hpp>
 #include <pegium/core/parser/Introspection.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 #include <pegium/core/syntax-tree/CstNodeView.hpp>
 #include <pegium/core/syntax-tree/CstUtils.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
+#include <pegium/core/validation/DefaultCodeActionProtocol.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace pegium::validation {
 
 namespace {
-
-constexpr std::string_view kDefaultCodeActionsKey = "pegiumDefaultCodeActions";
 
 struct FoundToken {
   TextOffset begin = 0;
@@ -79,12 +81,16 @@ void append_default_code_action_data(pegium::Diagnostic &diagnostic,
                                      TextOffset begin, TextOffset end,
                                      std::string newText) {
   pegium::JsonValue::Object action;
-  action.try_emplace("kind", "quickfix");
-  action.try_emplace("editKind", std::move(editKind));
-  action.try_emplace("title", std::move(title));
-  action.try_emplace("begin", static_cast<std::int64_t>(begin));
-  action.try_emplace("end", static_cast<std::int64_t>(end));
-  action.try_emplace("newText", std::move(newText));
+  action.try_emplace(std::string(kCodeActionKindField),
+                     std::string(kQuickFixActionKind));
+  action.try_emplace(std::string(kCodeActionEditKindField),
+                     std::move(editKind));
+  action.try_emplace(std::string(kCodeActionTitleField), std::move(title));
+  action.try_emplace(std::string(kCodeActionBeginField),
+                     static_cast<std::int64_t>(begin));
+  action.try_emplace(std::string(kCodeActionEndField),
+                     static_cast<std::int64_t>(end));
+  action.try_emplace(std::string(kCodeActionNewTextField), std::move(newText));
 
   pegium::JsonValue::Array actions;
   actions.emplace_back(std::move(action));
@@ -389,7 +395,6 @@ clamp_span(std::string_view text, TextOffset begin, TextOffset end) {
 make_base_diagnostic(TextOffset begin, TextOffset end, std::string code) {
   pegium::Diagnostic diagnostic;
   diagnostic.severity = pegium::DiagnosticSeverity::Error;
-  diagnostic.source = "parse";
   diagnostic.begin = begin;
   diagnostic.end = end;
   diagnostic.code = pegium::DiagnosticCode(std::move(code));
@@ -560,14 +565,14 @@ parse_expectation_message(std::string_view message, const std::string &expected,
 
 } // namespace
 
-bool DefaultDocumentValidator::run_builtin_validation(
+bool DefaultDocumentValidator::runBuiltinValidation(
     const ValidationOptions &options) const noexcept {
   return options.categories.empty() ||
          std::ranges::find(options.categories, kBuiltInValidationCategory) !=
              options.categories.end();
 }
 
-bool DefaultDocumentValidator::run_custom_validation(
+bool DefaultDocumentValidator::runCustomValidation(
     const ValidationOptions &options) const noexcept {
   if (options.categories.empty()) {
     return true;
@@ -668,12 +673,38 @@ void DefaultDocumentValidator::validateAst(
   }
 
   registry.runChecks(rootNode, acceptor, categories, cancelToken);
-  std::uint32_t cancelPollCounter = 0;
+
+  // Per-node checks: validate the descendants in parallel chunks, each chunk
+  // collecting into its own buffer; the chunks come back in document order so
+  // the merged diagnostics stay deterministic. Checks carry no cross-node state
+  // (the registry is documented safe to share across documents validated in
+  // parallel), so distinct nodes validate concurrently; parallelChunked keeps a
+  // document built among many (on a worker thread) on a single inline chunk.
+  std::vector<const AstNode *> nodes;
   for (const auto *node : rootNode.getAllContent()) {
-    if ((++cancelPollCounter & 0x3fU) == 0U) {
-      utils::throw_if_cancelled(cancelToken);
-    }
-    registry.runChecks(*node, acceptor, categories, cancelToken);
+    nodes.push_back(node);
+  }
+  auto chunkDiagnostics = services.shared.taskScheduler->parallelChunked(
+      cancelToken, nodes.size(), [&](std::size_t begin, std::size_t end) {
+        std::vector<pegium::Diagnostic> local;
+        const auto localCollect =
+            [&local, &source](pegium::Diagnostic diagnostic) {
+              if (diagnostic.source.empty()) {
+                diagnostic.source = source;
+              }
+              local.push_back(std::move(diagnostic));
+            };
+        const ValidationAcceptor localAcceptor{
+            ValidationAcceptor::Callback(localCollect)};
+        for (std::size_t i = begin; i < end; ++i) {
+          registry.runChecks(*nodes[i], localAcceptor, categories, cancelToken);
+        }
+        return local;
+      });
+  for (auto &chunk : chunkDiagnostics) {
+    diagnostics.insert(diagnostics.end(),
+                       std::make_move_iterator(chunk.begin()),
+                       std::make_move_iterator(chunk.end()));
   }
 
   for (const auto &checkAfter : registry.checksAfter()) {
@@ -690,7 +721,7 @@ std::vector<pegium::Diagnostic> DefaultDocumentValidator::validateDocument(
   std::vector<pegium::Diagnostic> diagnostics;
   const auto& source = services.languageMetaData.languageId;
 
-  if (run_builtin_validation(options)) {
+  if (runBuiltinValidation(options)) {
     const auto parsingDiagnosticCount = diagnostics.size();
     processParsingErrors(document, diagnostics, cancelToken);
     if (options.stopAfterParsingErrors.value_or(false) &&
@@ -706,7 +737,7 @@ std::vector<pegium::Diagnostic> DefaultDocumentValidator::validateDocument(
     }
   }
 
-  if (!document.hasAst() || !run_custom_validation(options)) {
+  if (!document.hasAst() || !runCustomValidation(options)) {
     return diagnostics;
   }
 

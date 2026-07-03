@@ -5,6 +5,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 
 #include <pegium/core/CoreTestSupport.hpp>
 #include <pegium/core/TestRuleParser.hpp>
@@ -114,6 +115,32 @@ public:
   }
 };
 
+// Resolves a reference to a single preconfigured (possibly cross-document)
+// target description.
+class SingleEntryScopeProvider final : public references::ScopeProvider {
+public:
+  std::optional<workspace::AstNodeDescription> entry;
+
+  const workspace::AstNodeDescription *
+  getScopeEntry(const ReferenceInfo &context) const override {
+    if (entry.has_value() && entry->name == context.referenceText) {
+      return std::addressof(*entry);
+    }
+    return nullptr;
+  }
+
+  bool visitScopeEntries(
+      const ReferenceInfo &context,
+      utils::function_ref<bool(const workspace::AstNodeDescription &)> visitor)
+      const override {
+    if (entry.has_value() &&
+        (context.referenceText.empty() || entry->name == context.referenceText)) {
+      return visitor(*entry);
+    }
+    return true;
+  }
+};
+
 class CountingLinker final : public references::DefaultLinker {
 public:
   using references::DefaultLinker::DefaultLinker;
@@ -216,6 +243,82 @@ TEST(DefaultDocumentBuilderTest,
 
   EXPECT_EQ(linkerPtr->linkCalls, 2u);
   EXPECT_EQ(document->state, DocumentState::Validated);
+}
+
+TEST(DefaultDocumentBuilderTest,
+     UpdateClearsLazyCrossDocumentLinkWhenTargetDocumentIsDeleted) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  const references::Linker *linkerRef = nullptr;
+  auto services = test::make_uninstalled_core_services(
+      *shared, "relink", {".relink"}, {},
+      make_unresolved_reference_parser(linkerRef));
+  pegium::installDefaultCoreServices(*services);
+  auto scopeProvider = std::make_unique<SingleEntryScopeProvider>();
+  auto *scopeProviderPtr = scopeProvider.get();
+  services->references.scopeProvider = std::move(scopeProvider);
+  auto linker = std::make_unique<CountingLinker>(*services);
+  linkerRef = linker.get();
+  services->references.linker = std::move(linker);
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  // Target document B holds the node the reference in A resolves to.
+  auto documentB = std::make_shared<Document>(test::make_text_document(
+      test::make_file_uri("lazy-target.relink"), "relink", "target"));
+  shared->workspace.documents->addDocument(documentB);
+  auto cstB = std::make_unique<RootCstNode>(
+      text::TextSnapshot::copy(documentB->textDocument().getText()));
+  cstB->attachDocument(*documentB);
+  documentB->parseResult.astArena = std::make_unique<pegium::AstArena>(*cstB);
+  documentB->parseResult.astArena->attachDocument(*documentB);
+  CstBuilder builderB(*cstB);
+  builderB.leaf(0, 6, &dummy_literal());
+  auto *targetNode = documentB->parseResult.astArena->create<RelinkNode>();
+  targetNode->name = "target";
+  targetNode->setCstNode(cstB->get(0));
+  documentB->parseResult.value = targetNode;
+  documentB->parseResult.cst = std::move(cstB);
+  documentB->state = DocumentState::Validated;
+
+  // The fake parser emits a reference whose text is "missing"; resolve it to B.
+  scopeProviderPtr->entry = workspace::AstNodeDescription{
+      .name = "missing",
+      .type = std::type_index(typeid(RelinkNode)),
+      .documentId = documentB->id,
+      .symbolId = documentB->makeSymbolId(*targetNode)};
+
+  // Referring document A, built lazily so its reference is never indexed but is
+  // resolved on demand, caching a raw pointer into B's arena.
+  auto documentA = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("lazy-referrer.relink"));
+  ASSERT_NE(documentA, nullptr);
+  shared->workspace.documents->addDocument(documentA);
+  BuildOptions lazyOptions;
+  lazyOptions.eagerLinking = false;
+  lazyOptions.validation = true;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{documentA}, lazyOptions);
+  ASSERT_EQ(documentA->state, DocumentState::Validated);
+
+  auto *rootBefore =
+      pegium::ast_ptr_cast<RelinkRoot>(documentA->parseResult.value);
+  ASSERT_NE(rootBefore, nullptr);
+  ASSERT_FALSE(rootBefore->referrers.empty());
+  auto &reference = rootBefore->referrers.front()->node;
+  ASSERT_EQ(reference.get(), targetNode);
+  ASSERT_TRUE(reference.isResolved());
+
+  // Delete B. A's cached cross-document resolution now points into freed memory;
+  // the incremental update must drop it so a later access re-resolves instead of
+  // dereferencing the dangling pointer.
+  shared->workspace.documentBuilder->update(
+      {}, std::array<DocumentId, 1>{documentB->id});
+
+  auto *rootAfter =
+      pegium::ast_ptr_cast<RelinkRoot>(documentA->parseResult.value);
+  ASSERT_NE(rootAfter, nullptr);
+  ASSERT_FALSE(rootAfter->referrers.empty());
+  EXPECT_FALSE(rootAfter->referrers.front()->node.isResolved());
 }
 
 TEST(DefaultDocumentBuilderTest,
@@ -1182,6 +1285,51 @@ TEST(DefaultDocumentBuilderTest,
 }
 
 TEST(DefaultDocumentBuilderTest,
+     BuildStripsStopAfterFlagsSoIncrementalValidationStaysComplete) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test", {".test"});
+  pegium::installDefaultCoreServices(*services);
+
+  auto validator = std::make_unique<test::FakeDocumentValidator>();
+  auto *validatorPtr = validator.get();
+  services->validation.documentValidator = std::move(validator);
+
+  auto registry =
+      std::make_unique<validation::DefaultValidationRegistry>(*services);
+  registry->registerCheck<AstNode>(
+      [](const AstNode &, const validation::ValidationAcceptor &) {}, "fast");
+  services->validation.validationRegistry = std::move(registry);
+
+  shared->serviceRegistry->registerServices(std::move(services));
+
+  const auto uri = test::make_file_uri("stop-after-strip.test");
+  auto document =
+      shared->workspace.documentFactory->fromString("content", uri);
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+
+  BuildOptions options;
+  options.validation =
+      validation::ValidationOptions{.categories = {"fast"},
+                                    .stopAfterParsingErrors = true,
+                                    .stopAfterLinkingErrors = true};
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+
+  // The incremental builder records the categories it validated, so it must
+  // validate them fully: the stop-after flags are stripped before the validator
+  // runs. Leaving them would let a skipped category be recorded as executed and
+  // never re-validated on a later build.
+  ASSERT_EQ(validatorPtr->validateCalls, 1u);
+  ASSERT_EQ(validatorPtr->seenOptions.size(), 1u);
+  EXPECT_EQ(validatorPtr->seenOptions[0].categories,
+            (std::vector<std::string>{"fast"}));
+  EXPECT_FALSE(validatorPtr->seenOptions[0].stopAfterParsingErrors.has_value());
+  EXPECT_FALSE(validatorPtr->seenOptions[0].stopAfterLinkingErrors.has_value());
+}
+
+TEST(DefaultDocumentBuilderTest,
      ResetToStateClearsBuildStateBelowIndexedReferences) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
@@ -1354,6 +1502,59 @@ TEST(DefaultDocumentBuilderTest,
     EXPECT_NE(message.find("workspace state is already Validated"),
               std::string::npos);
   }
+}
+
+TEST(DefaultDocumentBuilderTest,
+     WaitUntilDocumentUnblocksWhenWorkspaceAdvancesPastExcludedDocument) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  {
+    auto registeredServices =
+        test::make_uninstalled_core_services(*shared, "test", {".test"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = shared->workspace.documentFactory->fromString(
+      "content", test::make_file_uri("wait-excluded-armed-before.test"));
+  ASSERT_NE(document, nullptr);
+  shared->workspace.documents->addDocument(document);
+  const auto documentId = document->id;
+
+  // Arm the waiter before the build. The document is excluded from validation,
+  // so it never reaches Validated; the waiter must still terminate (reporting
+  // the lag) once the workspace advances past it, not block forever. A
+  // cancellable token lets us release a still-blocked waiter so a regression
+  // does not deadlock the future destructor.
+  std::stop_source stop;
+  auto waiter =
+      std::async(std::launch::async, [&shared, documentId, &stop]() -> std::string {
+        try {
+          (void)shared->workspace.documentBuilder->waitUntil(
+              DocumentState::Validated, documentId, stop.get_token());
+          return "returned-without-error";
+        } catch (const std::exception &error) {
+          return error.what();
+        }
+      });
+  EXPECT_EQ(waiter.wait_for(20ms), std::future_status::timeout);
+
+  BuildOptions options;
+  options.validation = false;
+  shared->workspace.documentBuilder->build(
+      std::array<std::shared_ptr<Document>, 1>{document}, options);
+  ASSERT_EQ(document->state, DocumentState::IndexedReferences);
+
+  const bool resolved = waiter.wait_for(2s) == std::future_status::ready;
+  if (!resolved) {
+    stop.request_stop();
+  }
+  ASSERT_TRUE(resolved)
+      << "awaitDocumentState blocked instead of reporting the lagging document";
+  const std::string message = waiter.get();
+  EXPECT_NE(message.find("requiring Validated"), std::string::npos);
+  EXPECT_NE(message.find("workspace state is already Validated"),
+            std::string::npos);
 }
 
 TEST(DefaultDocumentBuilderTest, WaitUntilDocumentReturnsBuiltDocumentId) {

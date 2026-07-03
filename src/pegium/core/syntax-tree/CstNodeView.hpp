@@ -101,24 +101,6 @@ public:
     return {};
   }
 
-  /// Returns the previous sibling node.
-  ///
-  /// This performs a backward scan and is intentionally marked deprecated
-  /// because it is not efficient on large trees.
-  [[nodiscard, deprecated("not efficient")]] CstNodeView previousSibling() const noexcept {
-
-    if (_id == 0)
-      return {};
-    for (NodeId id = _id - 1;; --id) {
-      if (_root->node(id).nextSiblingId == _id)
-        return {_root, id};
-      if (id == 0)
-        break;
-    }
-
-    return {};
-  }
-
   /// Returns `true` when there is uncovered source text after this node.
   ///
   /// The comparison is done against the next node in allocation order, or

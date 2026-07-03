@@ -14,13 +14,8 @@ std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser() {
   return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>();
 }
 
-std::unique_ptr<const pegium::parser::Parser>
-create@PEGIUM_NEW_CLASS@Parser(const pegium::CoreServices &core) {
-  return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
-}
-
 void install@PEGIUM_NEW_CLASS@CoreModule(pegium::CoreServices &core) {
-  core.parser = create@PEGIUM_NEW_CLASS@Parser(core);
+  core.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
   core.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
 }
 

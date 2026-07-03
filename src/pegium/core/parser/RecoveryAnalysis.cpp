@@ -264,7 +264,36 @@ inline constexpr unsigned kMaxLeadingVisibleEntryDepth = 256u;
 
 [[nodiscard]] LeadingVisibleEntryKind
 classify_leading_visible_entry(const grammar::AbstractElement &element,
-                               unsigned depth = 0u) noexcept {
+                               unsigned depth = 0u) noexcept;
+
+// Shared classification for alternation-shaped grammar nodes (`OrderedChoice`
+// and `UnorderedGroup`), which expose the same `size()` / `get()` interface
+// but share no iterable base: any unguarded alternative makes the whole
+// alternation unguarded; otherwise it is `PredicateGuarded` iff some
+// alternative is, and `None` when every alternative was `None`.
+template <typename Alternation>
+[[nodiscard]] LeadingVisibleEntryKind
+classify_leading_alternation(const Alternation &alt,
+                             unsigned childDepth) noexcept {
+  using enum LeadingVisibleEntryKind;
+  bool sawGuarded = false;
+  for (std::size_t index = 0; index < alt.size(); ++index) {
+    const auto *child = alt.get(index);
+    if (child == nullptr) {
+      continue;
+    }
+    const auto childKind = classify_leading_visible_entry(*child, childDepth);
+    if (childKind == Unguarded) {
+      return Unguarded;
+    }
+    sawGuarded = sawGuarded || childKind == PredicateGuarded;
+  }
+  return sawGuarded ? PredicateGuarded : None;
+}
+
+[[nodiscard]] LeadingVisibleEntryKind
+classify_leading_visible_entry(const grammar::AbstractElement &element,
+                               unsigned depth) noexcept {
   using enum grammar::ElementKind;
   using enum LeadingVisibleEntryKind;
   if (depth >= kMaxLeadingVisibleEntryDepth) {
@@ -315,42 +344,12 @@ classify_leading_visible_entry(const grammar::AbstractElement &element,
     }
     return None;
   }
-  case OrderedChoice: {
-    const auto &choice = static_cast<const grammar::OrderedChoice &>(element);
-    bool sawGuarded = false;
-    for (std::size_t index = 0; index < choice.size(); ++index) {
-      const auto *child = choice.get(index);
-      if (child == nullptr) {
-        continue;
-      }
-      const auto childKind = classify_leading_visible_entry(*child, childDepth);
-      if (childKind == Unguarded) {
-        return Unguarded;
-      }
-      sawGuarded = sawGuarded ||
-                   childKind == PredicateGuarded;
-    }
-    return sawGuarded ? PredicateGuarded
-                      : None;
-  }
-  case UnorderedGroup: {
-    const auto &group = static_cast<const grammar::UnorderedGroup &>(element);
-    bool sawGuarded = false;
-    for (std::size_t index = 0; index < group.size(); ++index) {
-      const auto *child = group.get(index);
-      if (child == nullptr) {
-        continue;
-      }
-      const auto childKind = classify_leading_visible_entry(*child, childDepth);
-      if (childKind == Unguarded) {
-        return Unguarded;
-      }
-      sawGuarded = sawGuarded ||
-                   childKind == PredicateGuarded;
-    }
-    return sawGuarded ? PredicateGuarded
-                      : None;
-  }
+  case OrderedChoice:
+    return classify_leading_alternation(
+        static_cast<const grammar::OrderedChoice &>(element), childDepth);
+  case UnorderedGroup:
+    return classify_leading_alternation(
+        static_cast<const grammar::UnorderedGroup &>(element), childDepth);
   case Create:
   case Nest:
     return None;

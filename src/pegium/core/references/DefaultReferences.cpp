@@ -125,32 +125,30 @@ find_reference_at_offset(const workspace::Document &document,
 // that reference also targets its siblings, so it yields the whole group; for a
 // plain reference (or none) it returns just `node`.
 std::vector<const AstNode *>
-get_self_nodes(const AstNode &node, const pegium::CoreServices &services) {
-  const auto *indexManager = services.shared.workspace.indexManager.get();
+get_self_nodes(const AstNode &node, const pegium::CoreServices &services,
+               const std::vector<workspace::ReferenceDescription> &incoming) {
   const auto &documents = *services.shared.workspace.documents;
-  const auto &document = getDocument(node);
 
-  const auto targetKey = workspace::NodeKey{
-      .documentId = document.id, .symbolId = document.makeSymbolId(node)};
   // `node` may be targeted by several references; only a multi-reference pulls
   // in the sibling group. Scan every incoming reference — not just the first —
   // so a plain reference enumerated ahead of the multi-reference does not mask
   // the siblings.
-  for (const auto &incoming : indexManager->findAllReferences(targetKey)) {
+  for (const auto &reference : incoming) {
     // Only a multi-reference pulls in siblings. The indexed flag lets us skip
     // plain references in O(1); resolving the actual reference (a linear scan of
     // the source document via find_reference_at_offset) is done only for the
     // few multi-references, so this stays O(incoming) instead of O(incoming x
     // references) on a high-fan-in symbol.
-    if (!incoming.multiReference) {
+    if (!reference.multiReference) {
       continue;
     }
-    const auto sourceDocument = documents.getDocument(incoming.sourceDocumentId);
+    const auto sourceDocument =
+        documents.getDocument(reference.sourceDocumentId);
     if (sourceDocument == nullptr) {
       continue;
     }
     const auto *sourceReference =
-        find_reference_at_offset(*sourceDocument, incoming.sourceOffset);
+        find_reference_at_offset(*sourceDocument, reference.sourceOffset);
     if (sourceReference == nullptr || !sourceReference->isMultiReference()) {
       continue;
     }
@@ -161,6 +159,16 @@ get_self_nodes(const AstNode &node, const pegium::CoreServices &services) {
     }
   }
   return {&node};
+}
+
+std::vector<const AstNode *>
+get_self_nodes(const AstNode &node, const pegium::CoreServices &services) {
+  const auto *indexManager = services.shared.workspace.indexManager.get();
+  const auto &document = getDocument(node);
+  const auto targetKey = workspace::NodeKey{
+      .documentId = document.id, .symbolId = document.makeSymbolId(node)};
+  return get_self_nodes(node, services,
+                        indexManager->findAllReferences(targetKey));
 }
 
 } // namespace
@@ -205,11 +213,19 @@ DefaultReferences::findReferences(const AstNode &targetNode,
   const auto *nameProvider = services.references.nameProvider.get();
   const auto &document = getDocument(targetNode);
 
+  // The target's incoming-reference set drives both the self-node expansion and
+  // the final emit loop, so query the index once and reuse the result.
+  const auto targetKey = workspace::NodeKey{
+      .documentId = document.id,
+      .symbolId = document.makeSymbolId(targetNode),
+  };
+  const auto incoming = indexManager->findAllReferences(targetKey);
+
   std::vector<workspace::ReferenceDescription> results;
   if (options.includeDeclaration) {
     // Expand the target into all logical siblings (multi-reference) so each
     // sibling declaration is reported as a self-reference.
-    for (const auto *selfNode : get_self_nodes(targetNode, services)) {
+    for (const auto *selfNode : get_self_nodes(targetNode, services, incoming)) {
       const auto &selfDocument = getDocument(*selfNode);
       // Honor the document filter for self-references too: the indexed-reference
       // loop below filters by options.documentId, so a self-node from another
@@ -231,11 +247,7 @@ DefaultReferences::findReferences(const AstNode &targetNode,
     }
   }
 
-  const auto targetKey = workspace::NodeKey{
-      .documentId = document.id,
-      .symbolId = document.makeSymbolId(targetNode),
-  };
-  for (const auto &reference : indexManager->findAllReferences(targetKey)) {
+  for (const auto &reference : incoming) {
     if (options.documentId.has_value() &&
         reference.sourceDocumentId != *options.documentId) {
       continue;

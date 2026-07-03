@@ -23,9 +23,9 @@ public:
                    const utils::CancellationToken &cancelToken) const override;
 
 private:
-  [[nodiscard]] bool run_builtin_validation(
+  [[nodiscard]] bool runBuiltinValidation(
       const ValidationOptions &options) const noexcept;
-  [[nodiscard]] bool run_custom_validation(
+  [[nodiscard]] bool runCustomValidation(
       const ValidationOptions &options) const noexcept;
   void processParsingErrors(const workspace::Document &document,
                             std::vector<pegium::Diagnostic> &diagnostics,
