@@ -64,6 +64,7 @@ if(EXISTS "${_lsp_main}")
 endif()
 
 enable_testing()
+include(GoogleTest)  # provides gtest_discover_tests
 # pegium already fetches GoogleTest for pegium::testing, so only declare it if a
 # parent project (or pegium) has not provided it. Guard the CRT setting too
 # instead of FORCE-ing it, so a parent project's choice is respected.
@@ -92,5 +93,6 @@ if(_test_sources)
   target_link_libraries(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE ${_test_libs})
   target_compile_definitions(@PEGIUM_NEW_LANGUAGE_ID@-test PRIVATE
       PEGIUM_NEW_SAMPLE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/example/hello@PEGIUM_NEW_EXT@")
-  add_test(NAME @PEGIUM_NEW_LANGUAGE_ID@-parse COMMAND @PEGIUM_NEW_LANGUAGE_ID@-test)
+  # Register each GTest case as its own CTest test (IDE explorers, --gtest_filter).
+  gtest_discover_tests(@PEGIUM_NEW_LANGUAGE_ID@-test DISCOVERY_MODE PRE_TEST)
 endif()
