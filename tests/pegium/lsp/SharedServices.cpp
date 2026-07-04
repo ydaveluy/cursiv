@@ -58,7 +58,10 @@ struct ExtendedServices final : Services {
 
   explicit ExtendedServices(const SharedServices &sharedServices,
                             bool *destroyed = nullptr)
-      : Services(sharedServices), destroyed(destroyed) {}
+      // Services now virtually derives CoreServices, so the most-derived class
+      // must initialize the virtual base explicitly.
+      : pegium::CoreServices(sharedServices), Services(sharedServices),
+        destroyed(destroyed) {}
 
   ~ExtendedServices() noexcept override {
     if (destroyed != nullptr) {

@@ -394,5 +394,43 @@ TEST_F(LanguageServerRuntimeTest,
   EXPECT_EQ(messages[1].object().get("id").integer(), 2);
 }
 
+// A language extends the shared LSP container with its own workspace-wide
+// shared services.
+struct ExtendedSharedServices : pegium::SharedServices {
+  int extraSharedService = 7;
+};
+
+TEST(LanguageServerRuntimeSubclassTest,
+     RunsSharedServicesSubclassThroughInitializeShutdownExit) {
+  auto shared = std::make_unique<ExtendedSharedServices>();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+
+  test::MemoryStream stream;
+  ::lsp::Connection connection(stream);
+  stream.pushInput(test::with_content_length(
+      R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"));
+  stream.pushInput(test::with_content_length(
+      R"({"jsonrpc":"2.0","method":"initialized","params":{}})"));
+  stream.pushInput(test::with_content_length(
+      R"({"jsonrpc":"2.0","id":2,"method":"shutdown"})"));
+  stream.pushInput(
+      test::with_content_length(R"({"jsonrpc":"2.0","method":"exit"})"));
+
+  // The subclass container is driven polymorphically by the runtime, and its
+  // own shared member is untouched by the session.
+  EXPECT_EQ(pegium::startLanguageServer(*shared, connection), 0);
+  EXPECT_EQ(shared->extraSharedService, 7);
+}
+
+TEST(LanguageServerRuntimeSubclassTest,
+     TemplatedEntryInstantiatesForSharedServicesSubclass) {
+  // Odr-using the specialization forces its instantiation, proving
+  // runLanguageServerMain<Subclass> is well-formed without running a server.
+  auto *entry = &pegium::runLanguageServerMain<ExtendedSharedServices>;
+  EXPECT_NE(entry, nullptr);
+}
+
 } // namespace
 } // namespace pegium

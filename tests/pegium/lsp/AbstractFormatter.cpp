@@ -9,7 +9,7 @@
 
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/formatting/AbstractFormatter.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 
 namespace pegium {
@@ -80,7 +80,7 @@ const pegium::Services &lookup_services(const pegium::SharedServices &shared,
         coreServices->languageMetaData.languageId != languageId) {
       continue;
     }
-    const auto *services = as_services(coreServices);
+    const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
     if (services == nullptr) {
       throw std::runtime_error("Invalid formatter test services type.");
     }

@@ -1,9 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
+#include <type_traits>
 
 #include <pegium/lsp/hierarchy/CallHierarchyProvider.hpp>
 #include <pegium/lsp/code-actions/CodeActionProvider.hpp>
@@ -33,58 +31,40 @@ namespace pegium {
 
 struct SharedServices;
 
-/// LSP feature services owned by one language.
+/// LSP feature services owned by one language. Each is installed by default and
+/// overridable, except those marked `// optional`, whose capability is
+/// advertised only when the provider is set.
 struct LspFeatureServices {
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<CompletionProvider> completionProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<HoverProvider> hoverProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<DocumentSymbolProvider> documentSymbolProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<DocumentHighlightProvider> documentHighlightProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<FoldingRangeProvider> foldingRangeProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<DeclarationProvider> declarationProvider;
-  // LSP feature service; installed by default, but overridable.
+  std::unique_ptr<DeclarationProvider> declarationProvider; // optional
   std::unique_ptr<DefinitionProvider> definitionProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<TypeDefinitionProvider> typeProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<ImplementationProvider> implementationProvider;
-  // LSP feature service; installed by default, but overridable.
+  std::unique_ptr<TypeDefinitionProvider> typeProvider; // optional
+  std::unique_ptr<ImplementationProvider> implementationProvider; // optional
   std::unique_ptr<ReferencesProvider> referencesProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<RenameProvider> renameProvider;
-  // LSP feature service; installed by default, but overridable.
   std::unique_ptr<CodeActionProvider> codeActionProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<DocumentLinkProvider> documentLinkProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<SelectionRangeProvider> selectionRangeProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<SignatureHelpProvider> signatureHelp;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<CodeLensProvider> codeLensProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<Formatter> formatter;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<InlayHintProvider> inlayHintProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<SemanticTokenProvider> semanticTokenProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<CallHierarchyProvider> callHierarchyProvider;
-  // Optional LSP feature; capability is advertised only when provided.
-  std::unique_ptr<TypeHierarchyProvider> typeHierarchyProvider;
+  std::unique_ptr<DocumentLinkProvider> documentLinkProvider; // optional
+  std::unique_ptr<SelectionRangeProvider> selectionRangeProvider; // optional
+  std::unique_ptr<SignatureHelpProvider> signatureHelp; // optional
+  std::unique_ptr<CodeLensProvider> codeLensProvider; // optional
+  std::unique_ptr<Formatter> formatter; // optional
+  std::unique_ptr<InlayHintProvider> inlayHintProvider; // optional
+  std::unique_ptr<SemanticTokenProvider> semanticTokenProvider; // optional
+  std::unique_ptr<CallHierarchyProvider> callHierarchyProvider; // optional
+  std::unique_ptr<TypeHierarchyProvider> typeHierarchyProvider; // optional
 };
 
 /// Language service container that extends core services with LSP features.
-struct Services : pegium::CoreServices {
+/// CoreServices is a virtual base so a language can join a core-only and an LSP
+/// container under one diamond.
+struct Services : virtual pegium::CoreServices {
   explicit Services(const SharedServices &sharedServices);
-  // Non-movable: installed default providers hold a back-reference to this
-  // Services, so a member-wise move would leave them dangling. Services is only
-  // ever heap-owned via unique_ptr, so the move ctor is never needed.
+  // Non-movable like its CoreServices base: installed LSP feature providers hold
+  // a back-reference to this Services.
   Services(Services &&) noexcept = delete;
   Services &operator=(Services &&) noexcept = delete;
   Services(const Services &) = delete;
@@ -93,6 +73,36 @@ struct Services : pegium::CoreServices {
 
   const SharedServices &shared;
   LspFeatureServices lsp;
+};
+
+/// LSP container bound to a language's own core container `TCore` and LSP shared
+/// type `TShared`.
+///
+/// Combines `TCore` (the language's core services) with the LSP `Services` over
+/// one shared `CoreServices`, and re-exposes `shared` typed to the LSP
+/// `TShared`. A language derives this and, being the most-derived type, spells
+/// out the constructor that initializes the virtual `CoreServices` base:
+///
+/// ```cpp
+/// struct MyServices final
+///     : pegium::ServicesFor<MyCoreServices, MySharedServices> {
+///   explicit MyServices(const MySharedServices &sharedServices)
+///       : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+/// };
+/// ```
+template <typename TCore, typename TShared> struct ServicesFor : TCore, Services {
+  static_assert(std::is_base_of_v<CoreServices, TCore>,
+                "TCore must derive from pegium::CoreServices.");
+  static_assert(std::is_base_of_v<SharedServices, TShared>,
+                "TShared must derive from pegium::SharedServices.");
+  static_assert(std::is_constructible_v<TCore, const TShared &>,
+                "TCore must be constructible from const TShared&.");
+
+  const TShared &shared;
+
+  explicit ServicesFor(const TShared &sharedServices)
+      : CoreServices(sharedServices), TCore(sharedServices),
+        Services(sharedServices), shared(sharedServices) {}
 };
 
 } // namespace pegium

@@ -26,23 +26,22 @@ void installDefaultLspServices(Services &services);
 /// `installDefaultSharedCoreServices(...)` must already have been called.
 void installDefaultSharedLspServices(SharedServices &sharedServices);
 
-} // namespace pegium
-
-namespace pegium {
-
-template <typename TServices = pegium::Services>
-/// Builds one language service container with the default core and LSP services installed.
+/// Builds one language service container with the default core and LSP services
+/// installed. `TShared` is deduced from `sharedServices`, so passing a custom
+/// `SharedServices` subclass constructs the container from that exact type — its
+/// constructor can take the custom shared reference directly.
+template <typename TServices = pegium::Services, typename TShared>
 [[nodiscard]] std::unique_ptr<TServices>
-makeDefaultServices(const pegium::SharedServices &sharedServices,
-                    const std::string &languageId) {
+makeDefaultServices(const TShared &sharedServices, std::string languageId) {
   static_assert(std::is_base_of_v<pegium::Services, TServices>,
                 "TServices must derive from pegium::Services.");
-  static_assert(
-      std::is_constructible_v<TServices, const pegium::SharedServices &>,
-      "TServices must be constructible from const pegium::SharedServices&.");
+  static_assert(std::is_base_of_v<pegium::SharedServices, TShared>,
+                "TShared must derive from pegium::SharedServices.");
+  static_assert(std::is_constructible_v<TServices, const TShared &>,
+                "TServices must be constructible from const TShared&.");
 
   auto services = std::make_unique<TServices>(sharedServices);
-  services->languageMetaData.languageId = languageId;
+  services->languageMetaData.languageId = std::move(languageId);
   installDefaultCoreServices(*services);
   pegium::installDefaultLspServices(*services);
   return services;

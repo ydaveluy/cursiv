@@ -15,30 +15,26 @@
 
 namespace pegium {
 
-/// Shared LSP services reused by all registered languages.
+/// Shared LSP services reused by all registered languages; installed by default.
 struct SharedLspServices {
-  // Active language client bridge; null outside an active LSP session.
+  // null outside an active LSP session
   std::unique_ptr<pegium::LanguageClient> languageClient;
-  // Shared LSP workspace service; installed by default.
   std::shared_ptr<pegium::TextDocuments> textDocuments;
-  // Shared LSP runtime service; installed by default.
   std::unique_ptr<pegium::DocumentUpdateHandler> documentUpdateHandler;
-  // Optional shared LSP feature; installed only when explicitly provided.
+  // optional
   std::unique_ptr<pegium::ExecuteCommandHandler> executeCommandHandler;
-  // Optional shared LSP feature; installed only when explicitly provided.
+  // optional
   std::unique_ptr<pegium::FileOperationHandler> fileOperationHandler;
-  // Shared LSP runtime service; installed by default.
   std::unique_ptr<FuzzyMatcher> fuzzyMatcher;
-  // Shared LSP runtime service; installed by default.
   std::unique_ptr<pegium::LanguageServer> languageServer;
-  // Shared LSP runtime service; installed by default.
   std::unique_ptr<NodeKindProvider> nodeKindProvider;
-  // Shared LSP runtime service; installed by default.
   std::unique_ptr<WorkspaceSymbolProvider> workspaceSymbolProvider;
 };
 
 /// Root shared service container for Pegium core plus LSP runtime state.
-struct SharedServices : pegium::SharedCoreServices {
+/// SharedCoreServices is a virtual base so a language can join a custom
+/// shared-core and shared-LSP container under one diamond.
+struct SharedServices : virtual pegium::SharedCoreServices {
   SharedLspServices lsp;
 
   SharedServices();

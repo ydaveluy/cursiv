@@ -99,10 +99,10 @@ to_workspace_text_edit(const ::lsp::TextEdit &edit) {
 int run_language_server(
     ::lsp::io::Stream &stream, std::string_view serverName,
     const std::function<bool(pegium::SharedServices &)> &registerLanguageServices,
-    const ServiceRequirements &serviceRequirements) {
+    const ServiceRequirements &serviceRequirements,
+    pegium::SharedServices &services) {
   ::lsp::Connection connection(stream);
 
-  pegium::SharedServices services;
   pegium::initializeSharedServicesForLanguageServer(services, connection);
   if (!registerLanguageServices || !registerLanguageServices(services)) {
     std::cerr << "Failed to register " << serverName << " language services\n";
@@ -405,10 +405,13 @@ int startLanguageServer(pegium::SharedServices &sharedServices,
   return shutdownRequested ? 0 : 1;
 }
 
-int runLanguageServerMain(
+namespace detail {
+
+int runLanguageServerMainOn(
     int argc, char **argv, std::string_view serverName,
     const std::function<bool(pegium::SharedServices &)> &registerLanguageServices,
-    const ServiceRequirements &serviceRequirements) {
+    const ServiceRequirements &serviceRequirements,
+    pegium::SharedServices &sharedServices) {
   try {
     if (const auto port = parse_port_arg(argc, argv); port.has_value()) {
       std::cerr << serverName << " listening on "
@@ -417,16 +420,18 @@ int runLanguageServerMain(
       auto socket = listener.listen();
       std::cerr << serverName << " accepted socket connection\n";
       return run_language_server(socket, serverName, registerLanguageServices,
-                                 serviceRequirements);
+                                 serviceRequirements, sharedServices);
     }
 
     auto &stream = ::lsp::io::standardIO();
     return run_language_server(stream, serverName, registerLanguageServices,
-                               serviceRequirements);
+                               serviceRequirements, sharedServices);
   } catch (const std::exception &error) {
     std::cerr << serverName << " fatal error: " << error.what() << '\n';
     return 2;
   }
 }
+
+} // namespace detail
 
 } // namespace pegium

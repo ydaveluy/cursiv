@@ -15,7 +15,8 @@
 #include <utility>
 
 #include <pegium/lsp/runtime/internal/WorkspaceReadLock.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/core/utils/UriUtils.hpp>
 
@@ -52,7 +53,7 @@ ensure_document_loaded(pegium::SharedServices &sharedServices,
     return document;
   }
   if (const auto *services =
-          get_services(*sharedServices.serviceRegistry, uri);
+          dynamic_cast<const pegium::Services *>((*sharedServices.serviceRegistry).findServices(uri));
       services == nullptr) {
     return nullptr;
   }
@@ -156,7 +157,7 @@ bool await_request_services(const LanguageServerHandlerContext &server,
                             std::string_view uri,
                             ServiceRequirement requiredState) {
   await_request_phase(server, sharedServices, cancelToken, uri, requiredState);
-  return get_services(*sharedServices.serviceRegistry, uri) != nullptr;
+  return dynamic_cast<const pegium::Services *>((*sharedServices.serviceRegistry).findServices(uri)) != nullptr;
 }
 
 std::string request_key_from_message_id(const ::lsp::MessageId &id) {

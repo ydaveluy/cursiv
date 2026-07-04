@@ -6,7 +6,7 @@
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 
 namespace pegium::test {
 
@@ -65,7 +65,7 @@ lookup_services(const pegium::SharedServices &shared,
   for (const auto *coreServices : shared.serviceRegistry->all()) {
     if (coreServices != nullptr &&
         coreServices->languageMetaData.languageId == languageId) {
-      const auto *services = as_services(coreServices);
+      const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
       if (services != nullptr) {
         return services;
       }

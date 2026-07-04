@@ -10,7 +10,6 @@
 #include <pegium/core/grammar/Literal.hpp>
 #include <pegium/lsp/completion/DefaultCompletionProvider.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace pegium {
@@ -446,7 +445,7 @@ TEST_F(DefaultCompletionProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = pegium::as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.completionProvider, nullptr);
 

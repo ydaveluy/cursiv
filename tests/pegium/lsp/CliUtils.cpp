@@ -75,6 +75,25 @@ TEST(CliUtilsTest, MakeSharedServicesReadiesStandaloneConfigurationProvider) {
   EXPECT_TRUE(shared.workspace.configurationProvider->isReady());
 }
 
+// A language extends the shared core container with its own workspace-wide
+// services; make_shared_services<T> must construct that subtype and still
+// install the defaults on its base.
+struct ExtendedSharedCoreServices : pegium::SharedCoreServices {
+  int extraSharedService = 42;
+};
+
+TEST(CliUtilsTest, MakeSharedServicesConstructsSubtypeAndInstallsDefaults) {
+  std::unique_ptr<ExtendedSharedCoreServices> sharedServices =
+      pegium::make_shared_services<ExtendedSharedCoreServices>();
+  ASSERT_NE(sharedServices, nullptr);
+
+  // The language's own shared member survives construction...
+  EXPECT_EQ(sharedServices->extraSharedService, 42);
+  // ...and the default shared core services were installed on the subtype.
+  ASSERT_NE(sharedServices->workspace.configurationProvider, nullptr);
+  EXPECT_TRUE(sharedServices->workspace.configurationProvider->isReady());
+}
+
 TEST(CliUtilsTest, BuildDocumentFromPathReusesExistingDocumentForSameUri) {
   auto sharedServices = pegium::make_shared_services();
   auto &shared = *sharedServices;

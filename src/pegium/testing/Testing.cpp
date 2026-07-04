@@ -16,7 +16,7 @@
 #include <pegium/core/workspace/WorkspaceManager.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 #include <pegium/lsp/services/LanguageServerFeatures.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/lsp/support/Diagnostics.hpp>
 #include <pegium/lsp/workspace/TextDocuments.hpp>
 #include <pegium/testing/LspProbe.hpp>
@@ -31,7 +31,7 @@ const pegium::Services *lookup_services(pegium::SharedServices &shared,
   for (const auto *coreServices : shared.serviceRegistry->all()) {
     if (coreServices != nullptr &&
         coreServices->languageMetaData.languageId == languageId) {
-      return pegium::as_services(coreServices);
+      return dynamic_cast<const pegium::Services *>(coreServices);
     }
   }
   return nullptr;
@@ -78,7 +78,11 @@ build_document(pegium::SharedServices &shared, std::string_view languageId,
 // TestWorkspace
 // ---------------------------------------------------------------------------
 
-TestWorkspace::TestWorkspace() : _shared(std::make_unique<pegium::SharedServices>()) {
+TestWorkspace::TestWorkspace()
+    : TestWorkspace(std::make_unique<pegium::SharedServices>()) {}
+
+TestWorkspace::TestWorkspace(std::unique_ptr<pegium::SharedServices> shared)
+    : _shared(std::move(shared)) {
   pegium::installDefaultSharedCoreServices(*_shared);
   pegium::installDefaultSharedLspServices(*_shared);
   _shared->workspace.workspaceManager->initialize(workspace::InitializeParams{});

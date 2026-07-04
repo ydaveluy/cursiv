@@ -3,14 +3,11 @@
 #include <pegium/lsp/LspExpectTestSupport.hpp>
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
 namespace pegium {
 namespace {
-
-using pegium::as_services;
 using namespace pegium::parser;
 
 struct SymbolEntry : pegium::NamedAstNode {};
@@ -62,7 +59,7 @@ TEST(DefaultDocumentSymbolProviderTest, ReturnsEmptyWithoutAstOrNameProvider) {
   document.id = 1;
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document.uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.documentSymbolProvider, nullptr);
 
@@ -112,7 +109,7 @@ TEST(DefaultDocumentSymbolProviderTest, UsesFullNodeRangeAndNameSelectionRange) 
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   const auto symbols = services->lsp.documentSymbolProvider->getSymbols(

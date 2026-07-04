@@ -19,7 +19,7 @@
 
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/services/LanguageServerFeatures.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/testing/LspProbe.hpp>
 
 /// Provider-unit variant of the LSP feature assertions. It mirrors the public
@@ -38,7 +38,7 @@ lookup_services(const pegium::SharedServices &sharedServices,
   for (const auto *coreServices : sharedServices.serviceRegistry->all()) {
     if (coreServices != nullptr &&
         coreServices->languageMetaData.languageId == languageId) {
-      const auto *services = as_services(coreServices);
+      const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
       if (services != nullptr) {
         return services;
       }

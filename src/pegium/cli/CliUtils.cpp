@@ -84,19 +84,22 @@ void validate_language_path(
 
 namespace pegium {
 
-std::unique_ptr<pegium::SharedCoreServices> make_shared_services() {
-  // Heap-construct so the object stays at a fixed address: installed services
-  // hold back-references to it, and SharedCoreServices is non-movable.
-  auto sharedServices = std::make_unique<pegium::SharedCoreServices>();
-  pegium::installDefaultSharedCoreServices(*sharedServices);
-  sharedServices->workspace.configurationProvider->initialize(
+namespace detail {
+
+// Heap ownership stays with the caller of make_shared_services: the container is
+// non-movable (installed services hold back-references to it), so it must stay
+// at a fixed address.
+void initializeSharedServicesForCli(pegium::SharedCoreServices &sharedServices) {
+  pegium::installDefaultSharedCoreServices(sharedServices);
+  sharedServices.workspace.configurationProvider->initialize(
       workspace::InitializeParams{});
   auto initialized =
-      sharedServices->workspace.configurationProvider->initialized(
+      sharedServices.workspace.configurationProvider->initialized(
           workspace::InitializedParams{});
   initialized.get();
-  return sharedServices;
 }
+
+} // namespace detail
 
 std::shared_ptr<workspace::Document>
 build_document_from_path(std::string_view path,

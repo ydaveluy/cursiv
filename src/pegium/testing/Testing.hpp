@@ -13,6 +13,8 @@
 /// `pegium::testing` library, so consumers never include pegium internals.
 /// Link `pegium::testing` (and `GTest::gtest_main`) from your test target.
 
+#include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -46,16 +48,34 @@ public:
   TestWorkspace(TestWorkspace &&) noexcept;
   TestWorkspace &operator=(TestWorkspace &&) noexcept;
 
+  /// Builds a workspace whose shared runtime is a language's own
+  /// `SharedServices` subclass (must be default-constructible), so
+  /// `shared<TShared>()` hands the language its custom shared services.
+  template <typename TShared>
+    requires std::derived_from<TShared, SharedServices> &&
+             std::default_initializable<TShared>
+  [[nodiscard]] static TestWorkspace withShared() {
+    return TestWorkspace(std::make_unique<TShared>());
+  }
+
   [[nodiscard]] pegium::SharedServices &shared() noexcept { return *_shared; }
 
+  /// Typed view of the shared runtime built via `withShared<TShared>()`.
+  template <typename TShared> [[nodiscard]] TShared &shared() noexcept {
+    assert(dynamic_cast<TShared *>(_shared.get()) != nullptr &&
+           "shared<TShared>() needs a workspace from withShared<TShared>()");
+    return static_cast<TShared &>(*_shared);
+  }
+
   /// Registers a language's services (e.g. the result of your
-  /// `create<Lang>Services(ws.shared())`) on the shared runtime.
+  /// `create<Lang>Services(ws.shared<TShared>())`) on the shared runtime.
   void registerLanguage(std::unique_ptr<pegium::Services> services);
 
   /// Drops all open documents so the next case starts clean.
   void clear();
 
 private:
+  explicit TestWorkspace(std::unique_ptr<pegium::SharedServices> shared);
   std::unique_ptr<pegium::SharedServices> _shared;
 };
 

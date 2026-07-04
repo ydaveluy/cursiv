@@ -7,7 +7,7 @@
 
 #include <pegium/lsp/services/LanguageServerFeatures.hpp>
 #include <pegium/lsp/runtime/LanguageServerRequestHandlerUtils.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 
 namespace pegium {
@@ -17,7 +17,7 @@ namespace {
 bool has_code_lens_resolve_provider(const pegium::SharedServices &sharedServices) {
   return std::ranges::any_of(
       sharedServices.serviceRegistry->all(), [](const auto *coreServices) {
-        const auto *services = as_services(coreServices);
+        const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
         return services != nullptr && services->lsp.codeLensProvider != nullptr &&
                services->lsp.codeLensProvider->supportsResolveCodeLens();
       });

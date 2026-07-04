@@ -3,14 +3,11 @@
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/references/References.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 
 namespace pegium {
 namespace {
-
-using pegium::as_services;
 using namespace pegium::parser;
 
 struct DefinitionType {};
@@ -115,7 +112,7 @@ TEST(DefaultDocumentHighlightProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->references.nameProvider, nullptr);
 

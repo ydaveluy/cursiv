@@ -15,7 +15,7 @@
 #include <pegium/core/utils/Errors.hpp>
 #include <pegium/lsp/runtime/internal/RuntimeObservability.hpp>
 #include <pegium/lsp/services/LanguageServerFeatures.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/lsp/workspace/WorkspaceAdapters.hpp>
 
@@ -95,7 +95,7 @@ LanguageServerCapabilities collect_language_server_capabilities(
   bool semanticTokensRange = true;
 
   for (const auto *coreServices : sharedServices.serviceRegistry->all()) {
-    const auto *services = as_services(coreServices);
+    const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
     if (services == nullptr) {
       continue;
     }

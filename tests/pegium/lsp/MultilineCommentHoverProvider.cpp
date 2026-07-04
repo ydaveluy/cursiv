@@ -4,14 +4,11 @@
 
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/workspace/AstDescriptions.hpp>
 
 namespace pegium {
 namespace {
-
-using pegium::as_services;
 using namespace pegium::parser;
 
 struct HoverEntry : pegium::NamedAstNode {};
@@ -79,7 +76,7 @@ TEST(MultilineCommentHoverProviderTest, ReturnsNoHoverWithoutDocumentation) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -114,7 +111,7 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenAvailable) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -152,7 +149,7 @@ TEST(MultilineCommentHoverProviderTest, UsesDocumentationWhenHoveringNamedRootNo
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -207,7 +204,7 @@ TEST(MultilineCommentHoverProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   ::lsp::HoverParams params{};
@@ -244,7 +241,7 @@ TEST(MultilineCommentHoverProviderTest, RendersDocumentedKeyword) {
 
   const auto *coreServices =
       &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   // Hover inside the documented `use` keyword.
@@ -281,7 +278,7 @@ TEST(MultilineCommentHoverProviderTest, NoKeywordHoverWithoutDoc) {
 
   const auto *coreServices =
       &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   // Hover inside the undocumented `entry` keyword — no keyword documentation,

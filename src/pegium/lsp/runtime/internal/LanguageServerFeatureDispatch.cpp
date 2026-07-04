@@ -8,7 +8,8 @@
 #include <lsp/error.h>
 
 #include <pegium/lsp/runtime/internal/WorkspaceReadLock.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
+#include <pegium/core/services/ServiceRegistry.hpp>
 #include <pegium/lsp/support/JsonValue.hpp>
 
 namespace pegium {
@@ -37,7 +38,7 @@ Result with_document_provider(const pegium::SharedServices &sharedServices,
           return Result{};
         }
         const auto *services =
-            get_services(*sharedServices.serviceRegistry, document->uri);
+            dynamic_cast<const pegium::Services *>((*sharedServices.serviceRegistry).findServices(document->uri));
         assert(services != nullptr);
         const auto *provider = accessor(*services);
         if (provider == nullptr) {
@@ -53,7 +54,7 @@ Result with_item_provider(const pegium::SharedServices &sharedServices,
                           Invoker invoker) {
   return with_workspace_read_lock(
       sharedServices, [&sharedServices, &uri, &accessor, &invoker]() -> Result {
-        const auto *services = get_services(*sharedServices.serviceRegistry, uri);
+        const auto *services = dynamic_cast<const pegium::Services *>((*sharedServices.serviceRegistry).findServices(uri));
         if (services == nullptr) {
           throw ::lsp::RequestError(
               ::lsp::MessageError::RequestFailed,
@@ -191,7 +192,7 @@ resolveCodeLens(const pegium::SharedServices &sharedServices,
         }
 
         const auto *services =
-            get_services(*sharedServices.serviceRegistry, wrappedCodeLens->uri);
+            dynamic_cast<const pegium::Services *>((*sharedServices.serviceRegistry).findServices(wrappedCodeLens->uri));
         if (services == nullptr) {
           throw ::lsp::RequestError(
               ::lsp::MessageError::RequestFailed,

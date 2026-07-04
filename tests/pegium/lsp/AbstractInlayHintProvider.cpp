@@ -4,7 +4,7 @@
 
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/semantic/AbstractInlayHintProvider.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 
@@ -48,7 +48,7 @@ const pegium::Services *lookup_services(const pegium::SharedServices &shared,
   for (const auto *coreServices : shared.serviceRegistry->all()) {
     if (coreServices != nullptr &&
         coreServices->languageMetaData.languageId == languageId) {
-      const auto *services = as_services(coreServices);
+      const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
       if (services != nullptr) {
         return services;
       }

@@ -7,13 +7,10 @@
 #include <pegium/lsp/LspTestSupport.hpp>
 #include <pegium/lsp/semantic/AbstractSemanticTokenProvider.hpp>
 #include <pegium/core/parser/PegiumParser.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace pegium {
 namespace {
-
-using pegium::as_services;
 using namespace pegium::parser;
 
 struct SemanticEntry : AstNode {
@@ -158,7 +155,7 @@ TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -199,7 +196,7 @@ TEST(AbstractSemanticTokenProviderTest, EncodesAsciiTokenLengthInUtf16Units) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestQuotedSemanticTokenProvider provider(*services);
@@ -241,7 +238,7 @@ TEST(AbstractSemanticTokenProviderTest, EncodesAccentTokenLengthInUtf16Units) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestQuotedSemanticTokenProvider provider(*services);
@@ -281,7 +278,7 @@ TEST(AbstractSemanticTokenProviderTest, EncodesEmojiTokenLengthInUtf16Units) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestQuotedSemanticTokenProvider provider(*services);
@@ -322,7 +319,7 @@ TEST(AbstractSemanticTokenProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestQuotedSemanticTokenProvider provider(*services);
@@ -362,7 +359,7 @@ TEST(AbstractSemanticTokenProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestQuotedSemanticTokenProvider provider(*services);
@@ -404,7 +401,7 @@ TEST(AbstractSemanticTokenProviderTest, RangeHighlightFiltersTokens) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -442,7 +439,7 @@ TEST(AbstractSemanticTokenProviderTest, DeltaFallsBackToFullForUnknownSnapshot) 
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);
@@ -480,7 +477,7 @@ TEST(AbstractSemanticTokenProviderTest,
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
 
   TestSemanticTokenProvider provider(*services);

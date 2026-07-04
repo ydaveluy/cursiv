@@ -15,7 +15,7 @@
 
 #include <pegium/lsp/runtime/LanguageServerHandlerContext.hpp>
 #include <pegium/lsp/services/ServiceRequirements.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/core/services/Diagnostic.hpp>
 #include <pegium/lsp/services/SharedServices.hpp>
 #include <pegium/core/utils/Cancellation.hpp>
