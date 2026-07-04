@@ -452,51 +452,113 @@ create_hidden_text_edits(const std::optional<CstNodeView> &previous,
     effectiveContext.indentation += *move->tabs;
   }
 
+  // A comment is anchored by the newlines already surrounding it: the formatter
+  // never rewrites the gap between the previous token and a following comment.
+  // Only the comment's own indentation is adjusted.
   std::vector<PendingEdit> edits;
-  if (move != nullptr) {
-    if (move->characters.has_value()) {
-      edits.push_back(create_space_edit(context.document, begin, end,
-                                        *move->characters, formatting->options));
-    } else if (move->lines.has_value()) {
-      edits.push_back(create_line_edit(context.document, begin, end, *move->lines,
-                                       effectiveContext, formatting->options));
-    } else if (move->tabs.has_value()) {
-      edits.push_back(create_tab_edit(context.document, begin, end,
-                                      previous.has_value(), effectiveContext));
-    }
-  }
 
   const auto hiddenStartChars =
       get_existing_indentation_character_count(hiddenStartText, context);
-  const auto shouldReindentHiddenText =
-      move == nullptr ? !previousEndsOnSameLine : !move->characters.has_value();
+  const auto shouldReindentHiddenText = !previousEndsOnSameLine;
   const auto expectedStartChars =
       shouldReindentHiddenText ? get_indentation_character_count(effectiveContext)
                                : hiddenStartChars;
-  const auto characterIncrease = expectedStartChars - hiddenStartChars;
 
-  if (move == nullptr && !previousEndsOnSameLine && characterIncrease != 0) {
-    edits.push_back(PendingEdit{
-        .begin = lineStartOffset,
-        .end = hidden.getBegin(),
-        .newText = indentation_text(effectiveContext.indentation, context.options),
-    });
-  }
-
-  const auto targetText =
-      replacementText == nullptr ? hidden.getText() : std::string_view(*replacementText);
-  const auto reindentChars =
-      replacementText == nullptr ? characterIncrease : expectedStartChars;
-  const auto normalizedHiddenText =
-      shouldReindentHiddenText
-          ? reindent_hidden_text(targetText, reindentChars, effectiveContext)
-          : std::string(targetText);
-  if (replacementText != nullptr || normalizedHiddenText != hidden.getText()) {
+  // A reformatted comment (onHidden replacement) is rewritten wholesale, its
+  // body reindented and its first-line indentation folded into the replacement
+  // text (a standalone leading-whitespace insertion would collide with the
+  // node-text replacement at the same offset). A trailing comment keeps its
+  // leading whitespace untouched.
+  if (replacementText != nullptr) {
+    const auto characterIncrease = expectedStartChars - hiddenStartChars;
+    const bool commentAtLineStart = lineStartOffset == hidden.getBegin();
+    std::string foldedIndent;
+    if (shouldReindentHiddenText && characterIncrease != 0) {
+      if (commentAtLineStart) {
+        foldedIndent =
+            indentation_text(effectiveContext.indentation, context.options);
+      } else {
+        edits.push_back(PendingEdit{
+            .begin = lineStartOffset,
+            .end = hidden.getBegin(),
+            .newText =
+                indentation_text(effectiveContext.indentation, context.options),
+        });
+      }
+    }
+    auto normalizedHiddenText =
+        shouldReindentHiddenText
+            ? reindent_hidden_text(*replacementText, expectedStartChars,
+                                   effectiveContext)
+            : std::string(*replacementText);
+    if (!foldedIndent.empty()) {
+      normalizedHiddenText.insert(0, foldedIndent);
+    }
     edits.push_back(PendingEdit{
         .begin = hidden.getBegin(),
         .end = hidden.getEnd(),
-        .newText = normalizedHiddenText,
+        .newText = std::move(normalizedHiddenText),
     });
+    return edits;
+  }
+
+  // Indentation only: shift the comment by the delta computed on its first line
+  // and apply that same delta to every line, so the comment's internal relative
+  // indentation (e.g. the ` * ` alignment of a block comment) is preserved. Each
+  // line is adjusted by a column-0 edit — no whole-node replacement, hence no
+  // offset collision to guard against. A trailing comment (same line as its
+  // previous node) is left untouched.
+  if (!shouldReindentHiddenText) {
+    return edits;
+  }
+  const auto characterIncrease = expectedStartChars - hiddenStartChars;
+  if (characterIncrease == 0) {
+    return edits;
+  }
+  const auto hiddenText = hidden.getText();
+  std::int32_t lineIndex = 0;
+  std::size_t cursor = 0;
+  while (cursor <= hiddenText.size()) {
+    const auto next = hiddenText.find('\n', cursor);
+    const auto lineEnd = next == std::string_view::npos ? hiddenText.size() : next;
+    auto line = hiddenText.substr(cursor, lineEnd - cursor);
+    if (!line.empty() && line.back() == '\r') {
+      line.remove_suffix(1);
+    }
+    const auto lineOffset =
+        context.textDocument.offsetAt(text::Position(startLine + lineIndex, 0));
+    if (characterIncrease > 0) {
+      edits.push_back(PendingEdit{
+          .begin = lineOffset,
+          .end = lineOffset,
+          .newText = whitespace_text(characterIncrease, context.options),
+      });
+    } else {
+      // Remove up to `-characterIncrease` leading whitespace characters actually
+      // present on the line (the first line's whitespace lives before
+      // `hidden.begin`, in `hiddenStartText`).
+      const std::string_view lineWs = lineIndex == 0 ? hiddenStartText : line;
+      std::int32_t removable = 0;
+      while (static_cast<std::size_t>(removable) < lineWs.size() &&
+             removable < -characterIncrease &&
+             (lineWs[static_cast<std::size_t>(removable)] == ' ' ||
+              lineWs[static_cast<std::size_t>(removable)] == '\t')) {
+        ++removable;
+      }
+      if (removable > 0) {
+        edits.push_back(PendingEdit{
+            .begin = lineOffset,
+            .end = context.textDocument.offsetAt(
+                text::Position(startLine + lineIndex, removable)),
+            .newText = std::string(),
+        });
+      }
+    }
+    if (next == std::string_view::npos) {
+      break;
+    }
+    ++lineIndex;
+    cursor = next + 1;
   }
   return edits;
 }
@@ -505,8 +567,14 @@ create_hidden_text_edits(const std::optional<CstNodeView> &previous,
 create_text_edits(const std::optional<CstNodeView> &previous,
                   const CstNodeView &node, const FormattingAction &formatting,
                   FormattingContext &context) {
+  // A hidden node reached as the previous token's append target is formatted by
+  // its own visit in collect_cst_edits (its prepend action carries the block
+  // indentation, and its text replacement runs there). Formatting it again from
+  // the append side would only re-derive its indentation from the previous
+  // token's context — which lacks that block indent — and emit a conflicting
+  // leading-whitespace edit. Leave the comment to its owning visit.
   if (node.isHidden()) {
-    return create_hidden_text_edits(previous, node, &formatting, nullptr, context);
+    return {};
   }
   if (previous.has_value() && previous->getEnd() > node.getBegin()) {
     return {};

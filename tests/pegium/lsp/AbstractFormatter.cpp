@@ -795,6 +795,66 @@ TEST(AbstractFormatterTest, PreservesCommentsAndOnlyReindentsHiddenNodes) {
             "}");
 }
 
+TEST(AbstractFormatterTest, PreservesTrailingCommentOnSameLineAsPreviousNode) {
+  // The `// note` sits on the same line as the `T` it trails; formatting must
+  // not reflow its leading gap (that would push it onto its own line) nor
+  // reindent it. The surrounding fields are still reformatted normally.
+  auto parsed = open_mini_document(
+      "entity Alpha {\n"
+      "many first:T // note\n"
+      "second:U\n"
+      "}");
+  ASSERT_NE(parsed.document, nullptr);
+
+  ::lsp::DocumentFormattingParams params{};
+  params.options.insertSpaces = true;
+  params.options.tabSize = 2;
+
+  MiniLayoutFormatter provider(lookup_services(*parsed.shared, "mini"));
+  const auto edits =
+      provider.formatDocument(*parsed.document, params,
+                              utils::default_cancel_token);
+
+  ASSERT_FALSE(edits.empty());
+  EXPECT_EQ(apply_text_edits(*parsed.document, edits),
+            "entity Alpha {\n"
+            "  many first: T // note\n"
+            "  second: U\n"
+            "}");
+}
+
+TEST(AbstractFormatterTest, ReindentsColumnZeroMultilineComment) {
+  // A multi-line comment starting at column 0 is both reindented on its first
+  // line and reflowed on its continuation lines. The first-line indent has an
+  // empty [line start, comment) range, so it must fold into the comment-text
+  // replacement rather than emit a zero-width insertion that races the
+  // replacement at the same offset.
+  auto parsed = open_mini_document(
+      "entity Alpha {\n"
+      "/* a\n"
+      "b */\n"
+      "many first:T\n"
+      "}");
+  ASSERT_NE(parsed.document, nullptr);
+
+  ::lsp::DocumentFormattingParams params{};
+  params.options.insertSpaces = true;
+  params.options.tabSize = 2;
+
+  MiniLayoutFormatter provider(lookup_services(*parsed.shared, "mini"));
+  const auto edits =
+      provider.formatDocument(*parsed.document, params,
+                              utils::default_cancel_token);
+
+  ASSERT_FALSE(edits.empty());
+  EXPECT_EQ(apply_text_edits(*parsed.document, edits),
+            "entity Alpha {\n"
+            "  /* a\n"
+            "  b */\n"
+            "  many first: T\n"
+            "}");
+}
+
 TEST(AbstractFormatterTest, HiddenSelectionsCanFormatCommentsInScopedSubtrees) {
   auto parsed = open_mini_document(
       "entity Alpha {\n"
