@@ -9,9 +9,9 @@ namespace {
 TEST(AstJsonConverterTest, ConvertsBuiltAstToReferenceJson) {
   auto shared = test::make_empty_shared_core_services();
   pegium::installDefaultSharedCoreServices(*shared);
-  ASSERT_TRUE(test_support::register_language(*shared));
+  ASSERT_TRUE(test::register_language(*shared));
 
-  const auto document = test_support::open_reference_document(*shared);
+  const auto document = test::open_reference_document(*shared);
   ASSERT_NE(document, nullptr);
 
   const auto expected = R"({
@@ -43,9 +43,9 @@ TEST(AstJsonConverterTest,
       std::make_shared<pegium::test::RecordingObservabilitySink>();
   shared->observabilitySink = recordingSink;
   pegium::installDefaultSharedCoreServices(*shared);
-  ASSERT_TRUE(test_support::register_language(*shared));
+  ASSERT_TRUE(test::register_language(*shared));
 
-  const auto document = test_support::open_reference_document(*shared);
+  const auto document = test::open_reference_document(*shared);
   ASSERT_NE(document, nullptr);
   for (const auto &handle : document->parseResult.references) {
     handle.get()->clearLinkState();

@@ -23,8 +23,8 @@ namespace pegium::validation {
 namespace {
 
 using namespace pegium::parser;
-using test_support::ValidationNodeA;
-using test_support::ValidationRefNode;
+using test::ValidationNodeA;
+using test::ValidationRefNode;
 
 struct ValidationRootNode : pegium::AstNode {
   vector<pointer<ValidationNodeA>> nodes;

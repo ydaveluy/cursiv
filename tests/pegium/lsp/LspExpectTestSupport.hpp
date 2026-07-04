@@ -22,6 +22,14 @@
 #include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/testing/LspProbe.hpp>
 
+/// Provider-unit variant of the LSP feature assertions. It mirrors the public
+/// `pegium::testing::expect*` shapes but drives a raw `SharedServices` so a test
+/// can inject a specific provider subclass or a deliberately degenerate service
+/// stack (e.g. no AST / no NameProvider) — granularity the end-to-end
+/// `pegium::testing::TestWorkspace` does not expose. Low-level param building and
+/// comparison are already delegated to `pegium::testing` (LspProbe); only the
+/// setup differs. Prefer `pegium::testing::expect*` for end-to-end feature tests;
+/// reach here only when a test needs provider injection. See tests/README.md.
 namespace pegium::test {
 
 inline const pegium::Services *

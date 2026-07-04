@@ -26,8 +26,8 @@ TEST(SimpleCacheTest, SupportsBasicSetGetProviderAndEraseOperations) {
 }
 
 TEST(SimpleCacheTest, SupportsCustomHashAndEqualityForKeys) {
-  SimpleCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
-              test_support::NamedKeyEqual>
+  SimpleCache<test::NamedKey, std::string, test::NamedKeyHash,
+              test::NamedKeyEqual>
       cache;
 
   cache.set({.value = "key"}, "value");

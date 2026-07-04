@@ -7,7 +7,7 @@
 namespace pegium {
 namespace {
 
-using namespace test_navigation;
+using namespace test;
 
 class TestTypeHierarchyProvider final : public AbstractTypeHierarchyProvider {
 public:

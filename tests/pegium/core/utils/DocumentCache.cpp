@@ -13,9 +13,9 @@
 namespace pegium::utils {
 namespace {
 
-using test_support::make_cache_shared_services;
-using test_support::make_document;
-using test_support::replace_document_text;
+using test::make_cache_shared_services;
+using test::make_document;
+using test::replace_document_text;
 
 TEST(DocumentCacheTest, InvalidatesChangedDocumentOnUpdate) {
   test::RecordingEventDocumentBuilder *builder = nullptr;
@@ -112,8 +112,8 @@ TEST(DocumentCacheTest, DisposeRemovesListenersAndRejectsFurtherAccess) {
 TEST(DocumentCacheTest, SupportsCustomHashAndEqualityForKeys) {
   test::RecordingEventDocumentBuilder *builder = nullptr;
   auto shared = make_cache_shared_services(builder);
-  DocumentCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
-                test_support::NamedKeyEqual>
+  DocumentCache<test::NamedKey, std::string, test::NamedKeyHash,
+                test::NamedKeyEqual>
       cache(*shared);
 
   const auto document =

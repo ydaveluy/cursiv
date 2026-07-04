@@ -8,7 +8,7 @@
 #include <pegium/core/syntax-tree/AstUtils.hpp>
 #include <pegium/lsp/services/ServiceAccess.hpp>
 
-namespace pegium::test_navigation {
+namespace pegium::test {
 
 using namespace pegium::parser;
 
@@ -92,4 +92,4 @@ inline ::lsp::LocationLink link_to_element(const AstNode &element) {
   return link;
 }
 
-} // namespace pegium::test_navigation
+} // namespace pegium::test

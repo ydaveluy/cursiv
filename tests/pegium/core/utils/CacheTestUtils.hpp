@@ -7,7 +7,7 @@
 
 #include <pegium/core/CoreTestSupport.hpp>
 
-namespace pegium::utils::test_support {
+namespace pegium::test {
 
 class AttachingDocumentFactory final : public workspace::DocumentFactory {
 public:
@@ -68,4 +68,4 @@ inline void replace_document_text(workspace::Document &document, std::string tex
   factory.attachTextDocument(document, std::move(textDocument));
 }
 
-} // namespace pegium::utils::test_support
+} // namespace pegium::test

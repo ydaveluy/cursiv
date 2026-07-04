@@ -26,10 +26,10 @@ TEST(ContextCacheTest, SeparatesEntriesByContextAndCanClearOneContext) {
 
 TEST(ContextCacheTest, SupportsCustomHashAndEqualityForContextAndKey) {
   using Cache =
-      ContextCache<test_support::NamedKey, test_support::NamedKey, std::string,
-                   test_support::NamedKey, test_support::NamedKeyHash,
-                   test_support::NamedKeyEqual, test_support::NamedKeyHash,
-                   test_support::NamedKeyEqual>;
+      ContextCache<test::NamedKey, test::NamedKey, std::string,
+                   test::NamedKey, test::NamedKeyHash,
+                   test::NamedKeyEqual, test::NamedKeyHash,
+                   test::NamedKeyEqual>;
   Cache cache;
 
   cache.set({.value = "doc-1"}, {.value = "key"}, "first");

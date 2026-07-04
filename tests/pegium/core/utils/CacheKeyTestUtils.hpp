@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace pegium::utils::test_support {
+namespace pegium::test {
 
 struct NamedKey {
   std::string value;
@@ -23,4 +23,4 @@ struct NamedKeyEqual {
   }
 };
 
-} // namespace pegium::utils::test_support
+} // namespace pegium::test

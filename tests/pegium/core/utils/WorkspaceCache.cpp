@@ -11,7 +11,7 @@
 namespace pegium::utils {
 namespace {
 
-using test_support::make_cache_shared_services;
+using test::make_cache_shared_services;
 
 TEST(WorkspaceCacheTest, InvalidatesWholeCacheOnUpdateAndDeletion) {
   test::RecordingEventDocumentBuilder *builder = nullptr;
@@ -51,8 +51,8 @@ TEST(WorkspaceCacheTest, InvalidatesOnTrackedBuildStateAndDisposesCleanly) {
 TEST(WorkspaceCacheTest, SupportsCustomHashAndEqualityForKeys) {
   test::RecordingEventDocumentBuilder *builder = nullptr;
   auto shared = make_cache_shared_services(builder);
-  WorkspaceCache<test_support::NamedKey, std::string, test_support::NamedKeyHash,
-                 test_support::NamedKeyEqual>
+  WorkspaceCache<test::NamedKey, std::string, test::NamedKeyHash,
+                 test::NamedKeyEqual>
       cache(*shared);
 
   cache.set({.value = "key"}, "value");

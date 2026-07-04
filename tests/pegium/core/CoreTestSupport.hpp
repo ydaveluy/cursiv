@@ -37,6 +37,10 @@
 #include <pegium/core/workspace/DocumentFactory.hpp>
 #include <pegium/core/workspace/FileSystemProvider.hpp>
 
+/// `pegium::test` is the internal, non-shipped test support for exercising
+/// pegium's own internals (CST build, parsing, recovery, services). It is the
+/// single namespace for all in-tree fixtures. For feature-level language/LSP
+/// tests, prefer the public `pegium::testing` harness. See tests/README.md.
 namespace pegium::test {
 
 using namespace pegium::parser;
