@@ -22,7 +22,8 @@ pipeline, then assert on diagnostics and the typed AST:
 TEST(MyLanguage, ParsesAndValidates) {
   // 1. Build a shared runtime and register your language on it (the same calls
   //    your cli/lsp main() makes).
-  auto sharedServices = pegium::make_shared_services();
+  auto sharedServices =
+      pegium::make_shared_services<statemachine::StatemachineSharedCoreServices>();
   auto &shared = *sharedServices;
   auto services = statemachine::createStatemachineCoreServices(shared);
   auto &langServices = *services;
@@ -100,8 +101,10 @@ Markers in the source: `<|>` is a cursor index (pick one with `.index`), and
 #include <statemachine/lsp/LspModule.hpp>
 
 TEST(Statemachine, CompletesStateNames) {
-  pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(statemachine::createStatemachineLspServices(ws.shared()));
+  auto ws = pegium::testing::TestWorkspace::withShared<
+      statemachine::StatemachineSharedServices>();
+  ws.registerLanguage(statemachine::createStatemachineLspServices(
+      ws.shared<statemachine::StatemachineSharedServices>()));
 
   pegium::testing::expectValidation(ws, "statemachine", {
       .text = "state idle",

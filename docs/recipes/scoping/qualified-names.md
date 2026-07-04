@@ -45,25 +45,25 @@ std::string QualifiedNameProvider::getQualifiedName(
 
 ## Step 2: export global symbols under qualified names
 
-`QualifiedNameProvider` is a language-added service, so the scope computation — invoked by the framework through a base reference — needs a typed way to reach it. `DomainModelScopeComputation` does this by inheriting `pegium::LanguageServiceMixin<DomainModelAddedServices>`, which captures a typed back-reference at construction so the service is reachable directly as `languageServices.qualifiedNameProvider`, with no `dynamic_cast` and no null branch (see [Adding your own services](../../reference/configuration-services.md#adding-your-own-services)):
+`QualifiedNameProvider` lives directly on the language's typed container, so the scope computation — invoked by the framework through a base reference — needs a typed way to reach it. `DomainModelScopeComputation` derives only `pegium::references::DefaultScopeComputation` and takes the language's own `const DomainModelCoreServices &` in its constructor. It stores that reference in a private `services` member that shadows the base back-reference (`DefaultScopeComputation::services`, typed as the framework's core services) with the typed container, so the service is reachable directly as `services.qualifiedNameProvider`, with no `dynamic_cast` and no null branch (see [Adding your own services](../../reference/configuration-services.md#adding-your-own-services)):
 
 ```cpp
 class DomainModelScopeComputation final
-    : public pegium::references::DefaultScopeComputation,
-      public pegium::LanguageServiceMixin<DomainModelAddedServices> {
+    : public pegium::references::DefaultScopeComputation {
 public:
-  template <typename Container>
-  explicit DomainModelScopeComputation(const Container &services)
+  explicit DomainModelScopeComputation(const DomainModelCoreServices &services)
       : pegium::references::DefaultScopeComputation(services),
-        pegium::LanguageServiceMixin<DomainModelAddedServices>(services) {}
+        services(services) {}
   // ...
+private:
+  const DomainModelCoreServices &services;
 };
 ```
 
 `DomainModelScopeComputation::collectExportedSymbols(...)` then walks every type in the document and prefixes the local name with the enclosing package chain before publishing it:
 
 ```cpp
-const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
+const auto *qualifiedNameProvider = services.qualifiedNameProvider.get();
 // ... for each exported type, with `name` from nameProvider->getName(*type):
 if (const auto *package =
         pegium::ast_ptr_cast<const PackageDeclaration>(type->getContainer());

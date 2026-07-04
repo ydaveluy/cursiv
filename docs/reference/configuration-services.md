@@ -2,7 +2,7 @@
 
 Pegium configures language behavior through explicit service objects. There is one shared service container for runtime-wide concerns, and one language service container per registered language.
 
-For most projects you start from a language container (a `struct MyServices : pegium::Services`, see "Adding your own services" below) and populate it through your own install-module functions:
+For most projects you start from a language container (a `struct MyServices final : pegium::ServicesFor<MyCoreServices, MySharedServices>`, see "Adding your own services" below) and populate it through your own install-module functions:
 
 ```cpp
 auto services = pegium::makeDefaultServices<MyServices>(
@@ -111,74 +111,91 @@ A container is *complete* once every required core service plus the parser is pr
 
 Not every piece of custom logic needs to be a service. If logic has no dependency on the rest of the framework, a plain function or helper class is enough.
 
-When the code depends on other Pegium services, add it as a member of your own container. Every Pegium example follows the same three-part shape:
-
-1. **An `…AddedServices` struct** holding the language-specific members.
-2. **A `final` container** that inherits both `pegium::Services` (or `pegium::CoreServices` for headless) and the added struct.
-3. **A downcast helper** so framework-invoked services — which only ever see a `const pegium::CoreServices &` — can recover the added members.
+When the code depends on other Pegium services, add it as a member of your own container. A language defines four structs — two for the headless core layer, two for the LSP layer — and puts its members **directly on the core container**. There is no separate added-services struct; the container *is* the language container:
 
 ```cpp
-// Services.hpp
-#include <pegium/core/services/ServiceAccess.hpp>
-
-struct MyAddedServices {
-  std::unique_ptr<MySummaryService> summaryService;
+// core/CoreServices.hpp
+struct MySharedCoreServices : virtual pegium::SharedCoreServices {
+  // define here custom shared services
 };
 
-struct MyServices final : pegium::Services, MyAddedServices {
-  using pegium::Services::Services;
-};
+// Core (headless) language services, built from the language's shared-core type.
+struct MyCoreServices : pegium::CoreServicesFor<MySharedCoreServices> {
+  std::unique_ptr<MySummaryService> summaryService; // members go here directly
 
-// Recover the added services from a base container reference.
-[[nodiscard]] inline const MyAddedServices *
-asMyAddedServices(const pegium::CoreServices &services) noexcept {
-  return pegium::service_cast<MyAddedServices>(services);
+  explicit MyCoreServices(const MySharedCoreServices &sharedServices)
+      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+};
+```
+
+```cpp
+// lsp/LspServices.hpp
+struct MySharedServices : MySharedCoreServices, pegium::SharedServices {};
+
+struct MyServices final : pegium::ServicesFor<MyCoreServices, MySharedServices> {
+  explicit MyServices(const MySharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+};
+```
+
+`MyServices` *is-a* `MyCoreServices` through the diamond, so the same core services and members are visible headless and in the LSP. The two-line constructor is irreducible: `CoreServices` is a *virtual* base with no default constructor, so the most-derived container must initialize it — an inherited (`using`) or intermediate constructor cannot. The container is built from the language's *own* shared type, and `shared` is typed to it (shadowing `CoreServices::shared`).
+
+Assign the member in a single-argument install-module — the container already *is* a `MyCoreServices`:
+
+```cpp
+void installMyCoreModule(MyCoreServices &services) {
+  services.parser = std::make_unique<const parser::MyParser>(services);
+  services.summaryService = std::make_unique<MySummaryService>(services);
 }
 ```
 
-Then build the container and assign the member in your install-module:
+The `create` function takes the language's *typed* shared services, and the `register` entry point recovers that type from the base workspace container:
 
 ```cpp
-auto services = pegium::makeDefaultServices<MyServices>(
-    sharedServices, "my-language");
-services->summaryService = std::make_unique<MySummaryService>(*services);
+std::unique_ptr<MyCoreServices>
+createMyCoreServices(const MySharedCoreServices &sharedServices,
+                     std::string languageId = "my-language") {
+  auto services = pegium::makeDefaultCoreServices<MyCoreServices>(
+      sharedServices, std::move(languageId));
+  installMyCoreModule(*services);
+  return services;
+}
+
+bool registerMyCoreServices(pegium::SharedCoreServices &sharedServices) {
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
+  sharedServices.serviceRegistry->registerServices(createMyCoreServices(
+      dynamic_cast<MySharedCoreServices &>(sharedServices)));
+  return true;
+}
 ```
+
+The LSP path mirrors this with `MySharedServices` and `makeDefaultServices`: `createMyLspServices` calls `installMyCoreModule(*services)` then `installMyLspModule(*services)`.
 
 ### Reaching an added service from framework-invoked code
 
-This is the part that makes the `…AddedServices` base necessary. A custom service — say a scope computation — is invoked by the framework through a `const pegium::CoreServices &`, whose static type does **not** carry your added members. There are two ways to recover them.
-
-**Preferred — a typed back-reference.** When a custom service needs *its own* language's siblings, inherit `pegium::LanguageServiceMixin<MyAddedServices>` alongside the Pegium base and construct both from the same container. The added services are then reachable directly as `languageServices.…`, with no cast and no null branch (the reference is as lifetime-safe as the Pegium base's own, since containers are non-movable):
+A custom service — say a scope computation — is invoked by the framework through a base reference whose static type carries only the Pegium base's own back-reference. Take the **typed container** in the constructor and store it as a member named `services`, which *shadows* the base back-reference. There is no cast, no null branch, and no mixin — the reference is as lifetime-safe as the Pegium base's own, since containers are non-movable:
 
 ```cpp
 class MyScopeComputation final
-    : public pegium::references::DefaultScopeComputation,
-      public pegium::LanguageServiceMixin<MyAddedServices> {
+    : public pegium::references::DefaultScopeComputation {
 public:
-  template <typename Container>
-  explicit MyScopeComputation(const Container &services)
+  // `services` shadows the base back-reference with the language's typed
+  // container, so the same computation is wired headless and in the LSP.
+  explicit MyScopeComputation(const MyCoreServices &services)
       : pegium::references::DefaultScopeComputation(services),
-        pegium::LanguageServiceMixin<MyAddedServices>(services) {}
+        services(services) {}
 
-  void use() const { languageServices.summaryService->run(); } // typed, no cast
+  void use() const { services.summaryService->run(); } // typed sibling, no cast
+
+private:
+  const MyCoreServices &services; // shadows the base's typed back-reference
 };
 ```
 
-The `domainmodel` example uses exactly this to reach its `qualifiedNameProvider`; see [Qualified Names](../recipes/scoping/qualified-names.md).
+Because the LSP container *is-a* `MyCoreServices`, the **same** service instance is wired in both the headless and the LSP container. The `domainmodel` example uses exactly this to reach its `qualifiedNameProvider`; see [Qualified Names](../recipes/scoping/qualified-names.md).
 
-**For a cross-language probe — `service_cast`.** When code must decide whether an *arbitrary* container belongs to a particular language (rather than reach its own), recover with `pegium::service_cast<MyAddedServices>(base)` and null-check, since a different language's container can flow through the same path:
-
-```cpp
-const auto *added = asMyAddedServices(services); // wraps service_cast
-if (added == nullptr) {
-  return; // not this language's container
-}
-use(*added->summaryService);
-```
-
-Pegium resolves both at runtime — there is no compile-time service typing — so for the probe form the null-check is the documented norm.
-
-> If a service is reached only by *your own* code and never handed back to the framework through a base reference, you can skip the `…AddedServices` base entirely and use a plain member on your derived container.
+> If a service is reached only by *your own* code and never handed back to the framework, a plain member on the container — reached the same way — is all you need.
 
 ## Related pages
 

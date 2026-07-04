@@ -7,8 +7,9 @@ Hand-writing a PEG grammar is the most error-prone part of building a language: 
 Parse a snippet with the public testing harness and look at the result:
 
 ```cpp
-pegium::testing::TestWorkspace ws;
-ws.registerLanguage(createMyLanguageServices(ws.shared()));
+auto ws = pegium::testing::TestWorkspace::withShared<MyLanguageSharedServices>();
+ws.registerLanguage(
+    createMyLanguageServices(ws.shared<MyLanguageSharedServices>()));
 auto document = pegium::testing::parse(ws, "my-language", "some input");
 // document->parseResult.value : the produced AST node (null if nothing matched)
 // document->parseSucceeded()  : whether the whole input was consumed
