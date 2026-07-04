@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <string>
+#include <string_view>
+
 #include <domainmodel/core/CoreModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
@@ -53,6 +56,38 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
       dynamic_cast<const ast::Entity *>(blog->features.front()->type.get());
   ASSERT_NE(person, nullptr);
   EXPECT_EQ(person->name, "Person");
+}
+
+TEST(DomainModelLanguageTest, RejectsSelfExtendingEntityOnTheExtendsKeyword) {
+  auto shared = pegium::test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  ASSERT_TRUE(domainmodel::registerDomainModelCoreServices(*shared));
+
+  const std::string source = "entity Loop extends Loop {}\n";
+  auto document = pegium::test::open_and_build_document(
+      *shared, pegium::test::make_file_uri("self-extends.dmodel"),
+      "domain-model", source);
+  ASSERT_NE(document, nullptr);
+  ASSERT_TRUE(document->parseSucceeded());
+
+  const auto *diagnostic = [&]() -> const pegium::Diagnostic * {
+    for (const auto &candidate : document->diagnostics) {
+      if (candidate.message == "An entity may not extend itself.") {
+        return &candidate;
+      }
+    }
+    return nullptr;
+  }();
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(diagnostic->severity, pegium::DiagnosticSeverity::Error);
+
+  // The range underlines the `extends` keyword, not the whole entity.
+  const auto keywordBegin = source.find("extends");
+  ASSERT_NE(keywordBegin, std::string::npos);
+  EXPECT_EQ(diagnostic->begin, keywordBegin);
+  EXPECT_EQ(diagnostic->end, keywordBegin + std::string_view("extends").size());
 }
 
 TEST(DomainModelLanguageTest,

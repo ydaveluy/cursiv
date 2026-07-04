@@ -141,6 +141,16 @@ public:
     return derived();
   }
 
+  /// Anchors the diagnostic on the `index`-th `keyword` literal parsed for the
+  /// node (e.g. `.keyword("extends")` underlines just that keyword instead of
+  /// the whole node). Keeps the whole-node range when the keyword is absent
+  /// from the node's CST (an optional keyword that was not written).
+  Derived &keyword(std::string_view keyword, std::size_t index = 0) noexcept {
+    if (const auto *anchorNode = node(); anchorNode != nullptr) {
+      setRange(range_for_keyword(*anchorNode, keyword, index));
+    }
+    return derived();
+  }
 
 protected:
   void emit();

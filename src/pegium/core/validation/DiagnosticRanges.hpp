@@ -64,4 +64,21 @@ range_for_feature(const Node &node, std::size_t index) noexcept {
   return detail::range_for_feature_impl<Feature>(node, index);
 }
 
+/// Returns the range of the `index`-th `keyword` literal parsed for `node`, or
+/// the whole node's range when the keyword is absent from its CST (e.g. an
+/// optional keyword that was not written).
+[[nodiscard]] inline std::pair<TextOffset, TextOffset>
+range_for_keyword(const AstNode &node, std::string_view keyword,
+                  std::size_t index = 0) noexcept {
+  if (!node.hasCstNode()) {
+    return {0u, 0u};
+  }
+  const auto cstNode = node.getCstNode();
+  if (const auto keywordNode = find_node_for_keyword(cstNode, keyword, index);
+      keywordNode.has_value()) {
+    return range_of(*keywordNode);
+  }
+  return {cstNode.getBegin(), cstNode.getEnd()};
+}
+
 } // namespace pegium::validation

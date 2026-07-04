@@ -132,6 +132,48 @@ TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
   EXPECT_EQ(diagnostic.end, 13u);
 }
 
+TEST(ValidationAcceptorTest, AnchorsDiagnosticOnKeyword) {
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
+  auto &node = parse_validation_accept_node(document);
+
+  pegium::Diagnostic diagnostic;
+  auto acceptorCb = [&diagnostic](pegium::Diagnostic value) {
+    diagnostic = std::move(value);
+  };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+
+  // The ":" keyword sits at offsets 5..6 in "alpha:one,two".
+  acceptor.error(node, "Bad separator").keyword(":");
+
+  EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
+  EXPECT_EQ(diagnostic.message, "Bad separator");
+  EXPECT_EQ(diagnostic.begin, 5u);
+  EXPECT_EQ(diagnostic.end, 6u);
+}
+
+TEST(ValidationAcceptorTest, KeepsWholeNodeRangeForAbsentKeyword) {
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
+  auto &node = parse_validation_accept_node(document);
+
+  pegium::Diagnostic diagnostic;
+  auto acceptorCb = [&diagnostic](pegium::Diagnostic value) {
+    diagnostic = std::move(value);
+  };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+
+  // A keyword that never appears falls back to the whole node's range.
+  acceptor.warning(node, "No such keyword").keyword("missing");
+
+  EXPECT_EQ(diagnostic.begin, 0u);
+  EXPECT_EQ(diagnostic.end, 13u);
+}
+
 TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
   workspace::Document document(
       test::make_text_document("file:///validation-acceptor.pg", "mini",

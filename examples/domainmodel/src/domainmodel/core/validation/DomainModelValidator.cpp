@@ -35,4 +35,13 @@ void DomainModelValidator::checkDataTypeNameStartsWithCapital(
       .property<&DataType::name>();
 }
 
+void DomainModelValidator::checkEntityDoesNotExtendItself(
+    const Entity &entity,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (entity.superType.has_value() && entity.superType->get() == &entity) {
+    accept.error(entity, "An entity may not extend itself.")
+        .keyword("extends");
+  }
+}
+
 } // namespace domainmodel::validation

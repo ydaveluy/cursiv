@@ -15,19 +15,20 @@ This is usually a small class plus one registry setup point.
 The `domainmodel` example registers checks like this:
 
 ```cpp
-template <typename TServices>
-void registerValidationChecks(TServices &services) {
+inline void registerValidationChecks(pegium::CoreServices &services,
+                                     DomainModelValidator &validator) {
   auto &registry = *services.validation.validationRegistry;
-  auto &validator = *services.validator;
   registry.registerChecks(
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
        pegium::validation::ValidationRegistry::makeValidationCheck<
-           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator)});
+           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &DomainModelValidator::checkEntityDoesNotExtendItself>(validator)});
 }
 ```
 
-The template runs the same helper on either the core or the LSP service container. Both inherit `validation.validationRegistry` and expose the language's validator via `services.validator`.
+The core module owns the validator instance and registers each method against the core service container's `validation.validationRegistry`. LSP services build on the same core container, so the checks run for both plain document builds and language-server requests.
 
 A validator method then attaches a diagnostic directly to the relevant property:
 
@@ -46,6 +47,27 @@ void DomainModelValidator::checkEntityNameStartsWithCapital(
       .property<&ast::Entity::name>();
 }
 ```
+
+`.property<&Feature>()` narrows the underlined range to a parsed feature. To
+underline a keyword literal instead — handy when the message is about a clause
+introduced by a keyword rather than an assigned value — use `.keyword("name")`
+(optionally `.keyword("name", index)` for a repeated keyword):
+
+```cpp
+void DomainModelValidator::checkEntityDoesNotExtendItself(
+    const ast::Entity &entity,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (entity.superType.has_value() && entity.superType->get() == &entity) {
+    accept.error(entity, "An entity may not extend itself.")
+        .keyword("extends");
+  }
+}
+```
+
+Here the diagnostic underlines the `extends` keyword that introduces the offending
+clause. When the keyword is absent from the node's syntax tree (for instance an
+optional keyword that was not written), the diagnostic keeps the whole node's
+range.
 
 ## Typical workflow
 

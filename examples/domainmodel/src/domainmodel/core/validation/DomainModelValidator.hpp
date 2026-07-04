@@ -15,6 +15,9 @@ public:
   void checkDataTypeNameStartsWithCapital(
       const domainmodel::ast::DataType &dataType,
       const pegium::validation::ValidationAcceptor &accept) const;
+  void checkEntityDoesNotExtendItself(
+      const domainmodel::ast::Entity &entity,
+      const pegium::validation::ValidationAcceptor &accept) const;
 };
 
 inline void registerValidationChecks(pegium::CoreServices &services,
@@ -24,7 +27,9 @@ inline void registerValidationChecks(pegium::CoreServices &services,
       {pegium::validation::ValidationRegistry::makeValidationCheck<
            &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
        pegium::validation::ValidationRegistry::makeValidationCheck<
-           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator)});
+           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator),
+       pegium::validation::ValidationRegistry::makeValidationCheck<
+           &DomainModelValidator::checkEntityDoesNotExtendItself>(validator)});
 }
 
 } // namespace domainmodel::validation
