@@ -184,20 +184,49 @@ ExpectResult PegiumParser::expect(
   const auto &entryRule = getEntryRule();
   const auto &skipper = getSkipper();
   const auto options = getParseOptions();
-  ExpectContext ctx{text, skipper, offset, cancelToken};
-  ctx.editPolicy.maxConsecutiveCodepointDeletes =
-      options.maxConsecutiveCodepointDeletes;
-  ctx.editPolicy.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
-  ctx.editPolicy.maxEditCost = options.maxRecoveryEditCost;
-  ctx.skip();
 
   ExpectResult result;
   result.offset =
       std::min<TextOffset>(offset, static_cast<TextOffset>(text.size()));
   result.reachedAnchor = false;
-  if (entryRule.expect(ctx)) {
+
+  // Runs one expectation-tracing pass, writing the frontier into `result` on a
+  // match. `allowEdits == false` traces the input STRICTLY — no synthetic
+  // insert/delete/replace recovery. This is the correct mode when the text up
+  // to the cursor is well formed, which is the common completion case: it stops
+  // an optional leading element (e.g. `many(Attribute)` before the required
+  // `catalogue` keyword) from fraudulently matching valid prefix text via a
+  // synthetic edit and consuming the tokens the rest of the rule needed —
+  // which would derail the whole parse and discard the frontier collected at
+  // the cursor. `allowEdits == true` restores edit-based recovery so a
+  // genuinely malformed / incomplete prefix can still be bridged up to the
+  // cursor. Mirrors the recovery context's strict-first, lazily-activated
+  // philosophy (`recoveryDescentInactive()`), applied at whole-parse
+  // granularity so the delicate per-combinator edit machinery is untouched.
+  const auto runPass = [&](bool allowEdits) -> bool {
+    ExpectContext ctx{text, skipper, offset, cancelToken};
+    ctx.editPolicy.maxConsecutiveCodepointDeletes =
+        options.maxConsecutiveCodepointDeletes;
+    ctx.editPolicy.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;
+    ctx.editPolicy.maxEditCost = options.maxRecoveryEditCost;
+    ctx.inRecoveryPhase = allowEdits;
+    ctx.skip();
+    if (!entryRule.expect(ctx)) {
+      return false;
+    }
     result.frontier = std::move(ctx.frontier);
     result.reachedAnchor = ctx.reachedAnchor() || !result.frontier.empty();
+    // "Useful" = the trace actually reached the cursor (directly, or by
+    // surfacing at least one expected element there). A strict pass that
+    // matched the whole entry rule without ever reaching the cursor is not
+    // useful and should fall through to the editing pass.
+    return !result.frontier.empty() || ctx.reachedAnchor();
+  };
+
+  if (!runPass(/*allowEdits=*/false)) {
+    result.frontier.clear();
+    result.reachedAnchor = false;
+    runPass(/*allowEdits=*/true);
   }
   return result;
 }
