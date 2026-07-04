@@ -154,7 +154,7 @@ const workspace::AstNodeDescription *DefaultScopeProvider::getScopeEntry(
     }
   }
 
-  const auto globalEntries = getGlobalEntries(referenceType);
+  const auto globalEntries = getGlobalEntries(referenceType, context);
   const auto globalIt = globalEntries->entriesByName.find(nameKey);
   if (globalIt == globalEntries->entriesByName.end()) {
     return nullptr;
@@ -181,7 +181,7 @@ bool DefaultScopeProvider::visitScopeEntries(
     }
   }
 
-  const auto globalEntries = getGlobalEntries(referenceType);
+  const auto globalEntries = getGlobalEntries(referenceType, context);
   if (context.referenceText.empty()) {
     return visit_owned_entries(globalEntries->elements, visitor);
   }
@@ -194,7 +194,8 @@ bool DefaultScopeProvider::visitScopeEntries(
 }
 
 std::shared_ptr<const DefaultScopeProvider::CompiledGlobalEntries>
-DefaultScopeProvider::getGlobalEntries(std::type_index referenceType) const {
+DefaultScopeProvider::getGlobalEntries(std::type_index referenceType,
+                                       const ReferenceInfo & /*context*/) const {
   return _globalScopeCache.get(
       referenceType,
       [this,

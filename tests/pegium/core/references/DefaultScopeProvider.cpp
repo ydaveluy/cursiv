@@ -210,9 +210,23 @@ public:
       : DefaultScopeProvider(services),
         _entries(build_entries(std::move(entries))) {}
 
+  /// The context of the most recent getGlobalEntries call, so a test can check
+  /// that the requesting reference is threaded through to the override.
+  struct ReceivedContext {
+    const AstNode *container = nullptr;
+    std::string referenceText;
+    std::type_index referenceType = std::type_index(typeid(void));
+  };
+  mutable std::optional<ReceivedContext> received;
+
 protected:
   std::shared_ptr<const CompiledGlobalEntries>
-  getGlobalEntries(std::type_index) const override {
+  getGlobalEntries(std::type_index referenceType,
+                   const ReferenceInfo &context) const override {
+    received = ReceivedContext{.container = context.container,
+                               .referenceText =
+                                   std::string(context.referenceText),
+                               .referenceType = referenceType};
     return _entries;
   }
 
@@ -636,6 +650,39 @@ TEST(DefaultScopeProviderTest, AllowsDerivedProviderToOverrideGlobalEntriesHook)
 
   EXPECT_EQ(collect_names(*scopeProvider, info),
             (std::vector<std::string>{"hooked"}));
+}
+
+TEST(DefaultScopeProviderTest, PassesRequestingContextToGlobalEntriesOverride) {
+  auto shared = test::make_empty_shared_core_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  auto services = test::make_uninstalled_core_services(*shared, "test");
+  pegium::installDefaultCoreServices(*services);
+  auto provider = std::make_unique<OverridingGlobalScopeProvider>(
+      *services,
+      std::vector<workspace::AstNodeDescription>{
+          {.name = "hooked",
+           .type = std::type_index(typeid(TargetNode)),
+           .documentId = 1,
+           .symbolId = 1}});
+  auto *providerPtr = provider.get();
+  services->references.scopeProvider = std::move(provider);
+  auto *linker = services->references.linker.get();
+  ASSERT_NE(linker, nullptr);
+
+  auto fixture = make_attached_reference_holder<RefHolder, TargetNode>(
+      *shared, *linker, test::make_file_uri("scope-provider-context.test"),
+      "hooked");
+  TestReferenceAssignment<RefHolder, TargetNode> assignment("ref");
+  const ReferenceInfo info{fixture.holder, "hooked", assignment};
+
+  (void)collect_names(*providerPtr, info);
+
+  // The override was handed the exact reference being resolved, so it can
+  // filter the global scope by the requesting document / container.
+  ASSERT_TRUE(providerPtr->received.has_value());
+  EXPECT_EQ(providerPtr->received->container, info.container);
+  EXPECT_EQ(providerPtr->received->referenceText, "hooked");
+  EXPECT_EQ(providerPtr->received->referenceType, info.getReferenceType());
 }
 
 } // namespace

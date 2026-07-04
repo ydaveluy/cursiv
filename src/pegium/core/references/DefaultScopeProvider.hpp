@@ -46,8 +46,15 @@ protected:
   };
 
   /// Returns the globally indexed entries accepted by `referenceType`.
+  ///
+  /// `context` is the reference being resolved; its requesting document is
+  /// `context.container`. The default implementation ignores `context` and
+  /// returns every indexed export of the type, but an override may use it to
+  /// filter the global scope by the requester — e.g. project or file
+  /// visibility.
   [[nodiscard]] virtual std::shared_ptr<const CompiledGlobalEntries>
-  getGlobalEntries(std::type_index referenceType) const;
+  getGlobalEntries(std::type_index referenceType,
+                   const ReferenceInfo &context) const;
 
   mutable utils::WorkspaceCache<std::type_index,
                                 std::shared_ptr<const CompiledGlobalEntries>>
