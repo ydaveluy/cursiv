@@ -4,7 +4,8 @@
 #include <gtest/gtest.h>
 
 TEST(@PEGIUM_NEW_CLASS@Parsing, SampleParsesWithoutErrors) {
-  auto sharedServices = pegium::make_shared_services();
+  auto sharedServices = pegium::make_shared_services<
+      @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedCoreServices>();
   auto &shared = *sharedServices;
   auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
   auto &langServices = *services;

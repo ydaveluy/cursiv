@@ -4,20 +4,23 @@
 
 #include <statemachine/core/validation/StatemachineValidator.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 
 namespace statemachine {
 
-/// Statemachine-specific services grafted onto any pegium service container.
-/// The `unique_ptr` members already make it move-only; it needs no destructor of
-/// its own — `service_cast` reaches it through the polymorphic `CoreServices`.
-struct StatemachineAddedServices {
-  std::unique_ptr<validation::StatemachineValidator> validator;
+/// Workspace-wide shared services.
+struct StatemachineSharedCoreServices : virtual pegium::SharedCoreServices {
+  // define here custom shared services
 };
 
-/// Core-only language services (used by the CLI and headless scenarios).
-struct StatemachineCoreServices final : pegium::CoreServices,
-                                        StatemachineAddedServices {
-  using pegium::CoreServices::CoreServices;
+/// Core (headless) language services, built from the language's shared-core type.
+struct StatemachineCoreServices
+    : pegium::CoreServicesFor<StatemachineSharedCoreServices> {
+  std::unique_ptr<validation::StatemachineValidator> validator;
+
+  explicit StatemachineCoreServices(
+      const StatemachineSharedCoreServices &sharedServices)
+      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
 };
 
 } // namespace statemachine

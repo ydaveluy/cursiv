@@ -18,9 +18,10 @@ namespace {
 
 // Builds a workspace with the @PEGIUM_NEW_CLASS@ LSP services registered.
 pegium::testing::TestWorkspace make@PEGIUM_NEW_CLASS@Workspace() {
-  pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(
-      @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@LspServices(ws.shared()));
+  auto ws = pegium::testing::TestWorkspace::withShared<
+      @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedServices>();
+  ws.registerLanguage(@PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@LspServices(
+      ws.shared<@PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedServices>()));
   return ws;
 }
 

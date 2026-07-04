@@ -13,8 +13,10 @@
 namespace {
 
 TEST(ArithmeticsCodeActionHarness, NormalizesConstantExpression) {
-  pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(arithmetics::createArithmeticsLspServices(ws.shared()));
+  auto ws = pegium::testing::TestWorkspace::withShared<
+      arithmetics::ArithmeticsSharedServices>();
+  ws.registerLanguage(arithmetics::createArithmeticsLspServices(
+      ws.shared<arithmetics::ArithmeticsSharedServices>()));
 
   const auto result = pegium::testing::testCodeAction(
       ws, "arithmetics",

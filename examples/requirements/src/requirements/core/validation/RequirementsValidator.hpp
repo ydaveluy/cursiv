@@ -6,6 +6,7 @@
 #include <requirements/core/ast.hpp>
 
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/utils/Caching.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
@@ -16,10 +17,12 @@ class Documents;
 
 namespace requirements::validation {
 
-class RequirementsValidator final {
+/// Inherits `pegium::DefaultCoreService` so checks can reach the language
+/// services through `services.*` (parser, references, shared caches, ...); the
+/// covered-requirements cache is keyed off `services.shared`.
+class RequirementsValidator final : public pegium::DefaultCoreService {
 public:
-  explicit RequirementsValidator(
-      const pegium::SharedCoreServices &sharedServices);
+  explicit RequirementsValidator(const pegium::CoreServices &services);
 
   void checkRequirementNameContainsANumber(
       const requirements::ast::Requirement &requirement,

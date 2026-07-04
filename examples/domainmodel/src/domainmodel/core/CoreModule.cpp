@@ -17,30 +17,33 @@ std::unique_ptr<const pegium::parser::Parser> createDomainModelParser() {
   return std::make_unique<const parser::DomainModelParser>();
 }
 
-void installDomainModelCoreModule(pegium::CoreServices &core,
-                                  DomainModelAddedServices &added) {
-  core.parser = std::make_unique<const parser::DomainModelParser>(core);
-  core.languageMetaData.fileExtensions = {".dmodel"};
-  added.qualifiedNameProvider =
+void installDomainModelCoreModule(DomainModelCoreServices &services) {
+  services.parser = std::make_unique<const parser::DomainModelParser>(services);
+  services.languageMetaData.fileExtensions = {".dmodel"};
+  services.qualifiedNameProvider =
       std::make_shared<const references::QualifiedNameProvider>();
-  core.references.scopeComputation =
-      std::make_unique<references::DomainModelScopeComputation>(core, added);
-  added.validator = std::make_unique<validation::DomainModelValidator>();
-  validation::registerValidationChecks(core, *added.validator);
+  services.references.scopeComputation =
+      std::make_unique<references::DomainModelScopeComputation>(services);
+  services.validator =
+      std::make_unique<validation::DomainModelValidator>(services);
+  validation::registerValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<DomainModelCoreServices>
-createDomainModelCoreServices(const pegium::SharedCoreServices &sharedServices,
-                              std::string languageId) {
+createDomainModelCoreServices(
+    const DomainModelSharedCoreServices &sharedServices,
+    std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<DomainModelCoreServices>(
       sharedServices, std::move(languageId));
-  installDomainModelCoreModule(*services, *services);
+  installDomainModelCoreModule(*services);
   return services;
 }
 
 bool registerDomainModelCoreServices(pegium::SharedCoreServices &sharedServices) {
-  sharedServices.serviceRegistry->registerServices(
-      createDomainModelCoreServices(sharedServices));
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
+  sharedServices.serviceRegistry->registerServices(createDomainModelCoreServices(
+      dynamic_cast<DomainModelSharedCoreServices &>(sharedServices)));
   return true;
 }
 

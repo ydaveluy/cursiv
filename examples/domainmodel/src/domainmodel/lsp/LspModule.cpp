@@ -16,20 +16,20 @@ void installDomainModelLspModule(DomainModelServices &services) {
 }
 
 std::unique_ptr<DomainModelServices>
-createDomainModelLspServices(const pegium::SharedServices &sharedServices,
+createDomainModelLspServices(const DomainModelSharedServices &sharedServices,
                           std::string languageId) {
   auto services = pegium::makeDefaultServices<DomainModelServices>(
       sharedServices, std::move(languageId));
-  // The container is-a CoreServices and is-a DomainModelAddedServices, so it
-  // binds both parameters of the (non-template) core wiring.
-  installDomainModelCoreModule(*services, *services);
+  installDomainModelCoreModule(*services);
   installDomainModelLspModule(*services);
   return services;
 }
 
 bool registerDomainModelLspServices(pegium::SharedServices &sharedServices) {
-  sharedServices.serviceRegistry->registerServices(
-      createDomainModelLspServices(sharedServices));
+  // The session container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
+  sharedServices.serviceRegistry->registerServices(createDomainModelLspServices(
+      dynamic_cast<DomainModelSharedServices &>(sharedServices)));
   return true;
 }
 

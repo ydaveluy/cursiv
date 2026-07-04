@@ -4,18 +4,23 @@
 
 #include <arithmetics/core/validation/ArithmeticsValidator.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 
 namespace arithmetics {
 
-/// Arithmetics-specific services grafted onto any pegium service container.
-struct ArithmeticsAddedServices {
-  std::unique_ptr<validation::ArithmeticsValidator> validator;
+/// Workspace-wide shared services.
+struct ArithmeticsSharedCoreServices : virtual pegium::SharedCoreServices {
+  // define here custom shared services
 };
 
-/// Core-only language services (used by the CLI and headless scenarios).
-struct ArithmeticsCoreServices final : pegium::CoreServices,
-                                       ArithmeticsAddedServices {
-  using pegium::CoreServices::CoreServices;
+/// Core (headless) language services, built from the language's shared-core type.
+struct ArithmeticsCoreServices
+    : pegium::CoreServicesFor<ArithmeticsSharedCoreServices> {
+  std::unique_ptr<validation::ArithmeticsValidator> validator;
+
+  explicit ArithmeticsCoreServices(
+      const ArithmeticsSharedCoreServices &sharedServices)
+      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
 };
 
 } // namespace arithmetics

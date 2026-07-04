@@ -126,7 +126,7 @@ std::optional<::lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
 
   WorkspaceEditData editData;
   pegium::utils::TransparentStringSet seen;
-  const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
+  const auto *qualifiedNameProvider = services.qualifiedNameProvider.get();
 
   for (const auto *target : targetNodes) {
     pegium::utils::throw_if_cancelled(cancelToken);

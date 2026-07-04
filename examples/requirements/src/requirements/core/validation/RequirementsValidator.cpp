@@ -23,8 +23,8 @@ bool has_digit(std::string_view value) {
 } // namespace
 
 RequirementsValidator::RequirementsValidator(
-    const pegium::SharedCoreServices &sharedServices)
-    : _coveredCache(sharedServices) {}
+    const pegium::CoreServices &services)
+    : pegium::DefaultCoreService(services), _coveredCache(services.shared) {}
 
 void RequirementsValidator::checkRequirementNameContainsANumber(
     const Requirement &requirement,

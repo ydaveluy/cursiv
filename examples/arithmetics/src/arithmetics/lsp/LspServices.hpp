@@ -1,20 +1,20 @@
 #pragma once
 
 #include <arithmetics/core/CoreServices.hpp>
-#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace arithmetics {
 
-/// LSP-enabled arithmetics language services.
-struct ArithmeticsServices final : pegium::Services,
-                                   arithmetics::ArithmeticsAddedServices {
-  using pegium::Services::Services;
-};
+/// Workspace-wide shared services in an LSP session.
+struct ArithmeticsSharedServices : ArithmeticsSharedCoreServices,
+                                   pegium::SharedServices {};
 
-[[nodiscard]] inline const ArithmeticsServices *
-asArithmeticsServices(const pegium::Services &services) noexcept {
-  return pegium::service_cast<ArithmeticsServices>(services);
-}
+/// LSP-enabled arithmetics language services.
+struct ArithmeticsServices final
+    : pegium::ServicesFor<ArithmeticsCoreServices, ArithmeticsSharedServices> {
+  explicit ArithmeticsServices(const ArithmeticsSharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+};
 
 } // namespace arithmetics

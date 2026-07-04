@@ -1,30 +1,27 @@
 #pragma once
 
 #include <requirements/core/CoreServices.hpp>
-#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace requirements {
 
+/// Workspace-wide shared services in an LSP session, shared by both languages.
+struct RequirementsSharedServices : RequirementsSharedCoreServices,
+                                    pegium::SharedServices {};
+
 /// LSP-enabled requirements language services.
-struct RequirementsServices final : pegium::Services,
-                                    requirements::RequirementsAddedServices {
-  using pegium::Services::Services;
+struct RequirementsServices final
+    : pegium::ServicesFor<RequirementsCoreServices, RequirementsSharedServices> {
+  explicit RequirementsServices(const RequirementsSharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
 };
 
 /// LSP-enabled tests language services.
-struct TestsServices final : pegium::Services, requirements::TestsAddedServices {
-  using pegium::Services::Services;
+struct TestsServices final
+    : pegium::ServicesFor<TestsCoreServices, RequirementsSharedServices> {
+  explicit TestsServices(const RequirementsSharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
 };
-
-[[nodiscard]] inline const RequirementsServices *
-asRequirementsServices(const pegium::Services &services) noexcept {
-  return pegium::service_cast<RequirementsServices>(services);
-}
-
-[[nodiscard]] inline const TestsServices *
-asTestsServices(const pegium::Services &services) noexcept {
-  return pegium::service_cast<TestsServices>(services);
-}
 
 } // namespace requirements

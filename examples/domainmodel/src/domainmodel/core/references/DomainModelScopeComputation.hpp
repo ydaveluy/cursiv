@@ -7,21 +7,17 @@
 #include <domainmodel/core/references/QualifiedNameProvider.hpp>
 
 #include <pegium/core/references/DefaultScopeComputation.hpp>
-#include <pegium/core/services/ServiceAccess.hpp>
 
 namespace domainmodel::references {
 
 class DomainModelScopeComputation final
-    : public pegium::references::DefaultScopeComputation,
-      public pegium::LanguageServiceMixin<DomainModelAddedServices> {
+    : public pegium::references::DefaultScopeComputation {
 public:
-  /// Captures the Pegium core back-reference (for `services.*`) and the typed
-  /// domain-model back-reference (for `languageServices.*`) as explicit
-  /// dependencies, so it works the same for the headless and the LSP container.
-  DomainModelScopeComputation(const pegium::CoreServices &core,
-                              const DomainModelAddedServices &added)
-      : pegium::references::DefaultScopeComputation(core),
-        pegium::LanguageServiceMixin<DomainModelAddedServices>(added) {}
+  /// `services` shadows the base back-reference with the language's typed
+  /// container, so the same computation is wired headless and in the LSP.
+  explicit DomainModelScopeComputation(const DomainModelCoreServices &services)
+      : pegium::references::DefaultScopeComputation(services),
+        services(services) {}
 
   std::vector<pegium::workspace::AstNodeDescription>
   collectExportedSymbols(
@@ -46,6 +42,8 @@ private:
       const ast::PackageDeclaration &package,
       pegium::workspace::AstNodeDescription description,
       const QualifiedNameProvider *qualifiedNameProvider);
+
+  const DomainModelCoreServices &services;
 };
 
 } // namespace domainmodel::references

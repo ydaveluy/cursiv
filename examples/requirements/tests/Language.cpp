@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <requirements/core/CoreModule.hpp>
-#include <requirements/core/CoreModule.hpp>
+#include <requirements/lsp/LspServices.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -26,7 +28,7 @@ TEST(RequirementsLanguageTest, ParsesRequirementModel) {
 }
 
 TEST(RequirementsLanguageTest, LinksEnvironmentMultiReferencesAndReportsUnresolvedOnes) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);

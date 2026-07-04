@@ -13,7 +13,7 @@ void installArithmeticsLspModule(ArithmeticsServices &services);
 
 /// Builds the LSP-enabled arithmetics language services.
 std::unique_ptr<ArithmeticsServices>
-createArithmeticsLspServices(const pegium::SharedServices &sharedServices,
+createArithmeticsLspServices(const ArithmeticsSharedServices &sharedServices,
                              std::string languageId = "arithmetics");
 
 /// Registers the LSP-enabled arithmetics services in `sharedServices`.

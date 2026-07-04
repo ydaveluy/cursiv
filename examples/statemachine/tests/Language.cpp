@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <statemachine/core/CoreModule.hpp>
+#include <statemachine/lsp/LspModule.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 
@@ -25,7 +28,7 @@ TEST(StatemachineLanguageTest, ParsesSimpleStateMachine) {
 }
 
 TEST(StatemachineLanguageTest, LinksInitialStateTransitionAndActionReferences) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);

@@ -16,20 +16,20 @@ void installArithmeticsLspModule(ArithmeticsServices &services) {
 }
 
 std::unique_ptr<ArithmeticsServices>
-createArithmeticsLspServices(const pegium::SharedServices &sharedServices,
+createArithmeticsLspServices(const ArithmeticsSharedServices &sharedServices,
                              std::string languageId) {
   auto services = pegium::makeDefaultServices<ArithmeticsServices>(
       sharedServices, std::move(languageId));
-  // The container is-a CoreServices and is-a ArithmeticsAddedServices, so it
-  // binds both parameters of the (non-template) core wiring.
-  installArithmeticsCoreModule(*services, *services);
+  installArithmeticsCoreModule(*services);
   installArithmeticsLspModule(*services);
   return services;
 }
 
 bool registerArithmeticsLspServices(pegium::SharedServices &sharedServices) {
-  sharedServices.serviceRegistry->registerServices(
-      createArithmeticsLspServices(sharedServices));
+  // The session container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
+  sharedServices.serviceRegistry->registerServices(createArithmeticsLspServices(
+      dynamic_cast<ArithmeticsSharedServices &>(sharedServices)));
   return true;
 }
 

@@ -3,13 +3,18 @@
 #include <statemachine/core/ast.hpp>
 
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace statemachine::validation {
 
-class StatemachineValidator final {
+/// Inherits `pegium::DefaultCoreService` so checks can reach the language
+/// services through `services.*` (parser, references, shared caches, ...).
+class StatemachineValidator final : public pegium::DefaultCoreService {
 public:
+  using pegium::DefaultCoreService::DefaultCoreService;
+
   void checkStateNameStartsWithCapital(
       const statemachine::ast::State &state,
       const pegium::validation::ValidationAcceptor &accept) const;

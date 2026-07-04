@@ -1,20 +1,20 @@
 #pragma once
 
 #include <statemachine/core/CoreServices.hpp>
-#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace statemachine {
 
-/// LSP-enabled statemachine language services.
-struct StatemachineServices final : pegium::Services,
-                                    statemachine::StatemachineAddedServices {
-  using pegium::Services::Services;
-};
+/// Workspace-wide shared services in an LSP session.
+struct StatemachineSharedServices : StatemachineSharedCoreServices,
+                                    pegium::SharedServices {};
 
-[[nodiscard]] inline const StatemachineServices *
-asStatemachineServices(const pegium::Services &services) noexcept {
-  return pegium::service_cast<StatemachineServices>(services);
-}
+/// LSP-enabled statemachine language services.
+struct StatemachineServices final
+    : pegium::ServicesFor<StatemachineCoreServices, StatemachineSharedServices> {
+  explicit StatemachineServices(const StatemachineSharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+};
 
 } // namespace statemachine

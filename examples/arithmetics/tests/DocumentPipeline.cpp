@@ -67,8 +67,8 @@ private:
 
 class BootstrapResumeIntegrationTest : public ::testing::Test {
 protected:
-  std::unique_ptr<pegium::SharedServices> shared =
-      test::make_empty_shared_services();
+  std::unique_ptr<arithmetics::ArithmeticsSharedServices> shared =
+      std::make_unique<arithmetics::ArithmeticsSharedServices>();
   std::shared_ptr<test::FakeFileSystemProvider> fileSystem =
       std::make_shared<test::FakeFileSystemProvider>();
   BlockingBootstrapValidation blockingValidation;
@@ -103,7 +103,7 @@ protected:
 
 class DocumentPipelineIntegrationTest : public ::testing::Test {
 protected:
-  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+  std::unique_ptr<arithmetics::ArithmeticsSharedServices> shared = std::make_unique<arithmetics::ArithmeticsSharedServices>();
 
   DocumentPipelineIntegrationTest() {
     pegium::installDefaultSharedCoreServices(*shared);

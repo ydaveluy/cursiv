@@ -14,29 +14,21 @@ std::unique_ptr<const pegium::parser::Parser> createRequirementsParser();
 /// Creates a standalone tests-language parser.
 std::unique_ptr<const pegium::parser::Parser> createTestsParser();
 
-/// Wires the requirements-language core overrides onto a service container.
-///
-/// Takes the pegium core base and the requirements graft as two separate
-/// references, so it is a plain function rather than a template: every container
-/// is-a `pegium::CoreServices` and is-a `RequirementsAddedServices`, so the
-/// headless and the LSP bundle both wire themselves with
-/// `installRequirementsCoreModule(*services, *services)`.
-void installRequirementsCoreModule(pegium::CoreServices &core,
-                                   RequirementsAddedServices &added);
+/// Wires the requirements-language core overrides. The LSP path reuses it.
+void installRequirementsCoreModule(RequirementsCoreServices &services);
 
-/// Wires the tests-language core overrides onto a service container; see
-/// `installRequirementsCoreModule`.
-void installTestsCoreModule(pegium::CoreServices &core,
-                            TestsAddedServices &added);
+/// Wires the tests-language core overrides. The LSP path reuses it.
+void installTestsCoreModule(TestsCoreServices &services);
 
 /// Builds the core-only requirements language services.
 std::unique_ptr<RequirementsCoreServices>
-createRequirementsCoreServices(const pegium::SharedCoreServices &sharedServices,
-                               std::string languageId = "requirements-lang");
+createRequirementsCoreServices(
+    const RequirementsSharedCoreServices &sharedServices,
+    std::string languageId = "requirements-lang");
 
 /// Builds the core-only tests language services.
 std::unique_ptr<TestsCoreServices>
-createTestsCoreServices(const pegium::SharedCoreServices &sharedServices,
+createTestsCoreServices(const RequirementsSharedCoreServices &sharedServices,
                         std::string languageId = "tests-lang");
 
 /// Aggregate of both languages' core services.
@@ -47,7 +39,7 @@ struct RequirementsAndTestsCoreServices {
 
 /// Builds the requirements and tests core-only language services together.
 RequirementsAndTestsCoreServices createRequirementsAndTestsCoreServices(
-    const pegium::SharedCoreServices &sharedServices);
+    const RequirementsSharedCoreServices &sharedServices);
 
 /// Registers the core-only services for both languages.
 bool registerRequirementsCoreServices(pegium::SharedCoreServices &sharedServices);

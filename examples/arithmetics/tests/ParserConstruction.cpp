@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <arithmetics/lsp/LspModule.hpp>
 #include <arithmetics/core/CoreModule.hpp>
 
@@ -85,7 +87,7 @@ TEST(ArithmeticParserConstructionTest,
 
 TEST(ArithmeticParserConstructionTest,
      OpenAndBuildDocumentRecoversAngleGarbageCluster) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<arithmetics::ArithmeticsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -103,7 +105,7 @@ TEST(ArithmeticParserConstructionTest,
 
 TEST(ArithmeticParserConstructionTest,
      DidChangeContentRecoversAngleGarbageCluster) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<arithmetics::ArithmeticsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -137,7 +139,7 @@ TEST(ArithmeticParserConstructionTest,
 
 TEST(ArithmeticParserConstructionTest,
      ServicesParserRecoversAngleGarbageCluster) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<arithmetics::ArithmeticsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);

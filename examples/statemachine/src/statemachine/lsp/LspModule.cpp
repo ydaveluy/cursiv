@@ -13,20 +13,21 @@ void installStatemachineLspModule(StatemachineServices &services) {
 }
 
 std::unique_ptr<StatemachineServices>
-createStatemachineLspServices(const pegium::SharedServices &sharedServices,
+createStatemachineLspServices(const StatemachineSharedServices &sharedServices,
                               std::string languageId) {
   auto services = pegium::makeDefaultServices<StatemachineServices>(
       sharedServices, std::move(languageId));
-  // The container is-a CoreServices and is-a StatemachineAddedServices, so it
-  // binds both parameters of the (non-template) core wiring.
-  installStatemachineCoreModule(*services, *services);
+  installStatemachineCoreModule(*services);
   installStatemachineLspModule(*services);
   return services;
 }
 
 bool registerStatemachineLspServices(pegium::SharedServices &sharedServices) {
+  // The session container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
   sharedServices.serviceRegistry->registerServices(
-      createStatemachineLspServices(sharedServices));
+      createStatemachineLspServices(
+          dynamic_cast<StatemachineSharedServices &>(sharedServices)));
   return true;
 }
 

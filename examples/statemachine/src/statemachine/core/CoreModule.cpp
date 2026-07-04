@@ -15,27 +15,32 @@ std::unique_ptr<const pegium::parser::Parser> createStatemachineParser() {
   return std::make_unique<const parser::StateMachineParser>();
 }
 
-void installStatemachineCoreModule(pegium::CoreServices &core,
-                                   StatemachineAddedServices &added) {
-  core.parser = std::make_unique<const parser::StateMachineParser>(core);
-  core.languageMetaData.fileExtensions = {".statemachine"};
-  added.validator = std::make_unique<validation::StatemachineValidator>();
-  validation::registerValidationChecks(core, *added.validator);
+void installStatemachineCoreModule(StatemachineCoreServices &services) {
+  services.parser =
+      std::make_unique<const parser::StateMachineParser>(services);
+  services.languageMetaData.fileExtensions = {".statemachine"};
+  services.validator =
+      std::make_unique<validation::StatemachineValidator>(services);
+  validation::registerValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<StatemachineCoreServices>
-createStatemachineCoreServices(const pegium::SharedCoreServices &sharedServices,
-                               std::string languageId) {
+createStatemachineCoreServices(
+    const StatemachineSharedCoreServices &sharedServices,
+    std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
       sharedServices, std::move(languageId));
-  installStatemachineCoreModule(*services, *services);
+  installStatemachineCoreModule(*services);
   return services;
 }
 
 bool registerStatemachineCoreServices(
     pegium::SharedCoreServices &sharedServices) {
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
   sharedServices.serviceRegistry->registerServices(
-      createStatemachineCoreServices(sharedServices));
+      createStatemachineCoreServices(
+          dynamic_cast<StatemachineSharedCoreServices &>(sharedServices)));
   return true;
 }
 

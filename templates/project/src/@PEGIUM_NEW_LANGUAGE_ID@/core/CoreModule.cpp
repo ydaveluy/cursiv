@@ -14,24 +14,31 @@ std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser() {
   return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>();
 }
 
-void install@PEGIUM_NEW_CLASS@CoreModule(pegium::CoreServices &core) {
-  core.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
-  core.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+void install@PEGIUM_NEW_CLASS@CoreModule(@PEGIUM_NEW_CLASS@CoreServices &services) {
+  services.parser =
+      std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(services);
+  services.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+  services.validator =
+      std::make_unique<validation::@PEGIUM_NEW_CLASS@Validator>(services);
+  validation::registerValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
-create@PEGIUM_NEW_CLASS@CoreServices(const pegium::SharedCoreServices &sharedServices,
-                     std::string languageId) {
-  auto services = std::make_unique<@PEGIUM_NEW_CLASS@CoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+create@PEGIUM_NEW_CLASS@CoreServices(
+    const @PEGIUM_NEW_CLASS@SharedCoreServices &sharedServices,
+    std::string languageId) {
+  auto services = pegium::makeDefaultCoreServices<@PEGIUM_NEW_CLASS@CoreServices>(
+      sharedServices, std::move(languageId));
   install@PEGIUM_NEW_CLASS@CoreModule(*services);
   return services;
 }
 
 bool register@PEGIUM_NEW_CLASS@CoreServices(pegium::SharedCoreServices &sharedServices) {
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
   sharedServices.serviceRegistry->registerServices(
-      create@PEGIUM_NEW_CLASS@CoreServices(sharedServices));
+      create@PEGIUM_NEW_CLASS@CoreServices(
+          dynamic_cast<@PEGIUM_NEW_CLASS@SharedCoreServices &>(sharedServices)));
   return true;
 }
 

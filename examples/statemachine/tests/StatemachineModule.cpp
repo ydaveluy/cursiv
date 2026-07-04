@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <type_traits>
 
 #include <statemachine/cli/Generator.hpp>
@@ -18,14 +19,10 @@
 #include <statemachine/core/validation/StatemachineValidator.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace statemachine::tests {
 namespace {
-
-using pegium::as_services;
-
 [[nodiscard]] std::filesystem::path example_root() {
   return pegium::test::current_source_directory().parent_path() / "example";
 }
@@ -70,7 +67,7 @@ TEST(StatemachineModuleTest, SplitsValidationIntoDedicatedClass) {
 }
 
 TEST(StatemachineModuleTest, InstallsFormatterOverride) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -95,7 +92,7 @@ TEST(StatemachineModuleTest, InstallsFormatterOverride) {
 }
 
 TEST(StatemachineModuleTest, ValidatorWarnsOnLowerCaseStateName) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -115,7 +112,7 @@ TEST(StatemachineModuleTest, ValidatorWarnsOnLowerCaseStateName) {
 }
 
 TEST(StatemachineModuleTest, ValidatorReportsDuplicateStatesAndEvents) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -144,7 +141,7 @@ TEST(StatemachineModuleTest, ValidatorReportsDuplicateStatesAndEvents) {
 }
 
 TEST(StatemachineModuleTest, FormatterFormatsCompactMachine) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -162,7 +159,7 @@ TEST(StatemachineModuleTest, FormatterFormatsCompactMachine) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.formatter, nullptr);
 
@@ -191,7 +188,7 @@ TEST(StatemachineModuleTest, FormatterFormatsCompactMachine) {
 }
 
 TEST(StatemachineModuleTest, CreateLanguageServicesReturnsTypedServices) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
 
@@ -199,14 +196,11 @@ TEST(StatemachineModuleTest, CreateLanguageServicesReturnsTypedServices) {
       statemachine::createStatemachineLspServices(*shared, "statemachine");
 
   ASSERT_NE(services, nullptr);
-  EXPECT_NE(services->validator,
-            nullptr);
-  EXPECT_NE(statemachine::asStatemachineServices(*services),
-            nullptr);
+  EXPECT_NE(services->validator, nullptr);
 }
 
 TEST(StatemachineModuleTest, GeneratorMatchesExpectedExampleOutput) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -411,7 +405,7 @@ TEST(StatemachineModuleTest, GeneratorMatchesExpectedExampleOutput) {
 }
 
 TEST(StatemachineModuleTest, GeneratorDedupesTransitionsSharingAnEvent) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<statemachine::StatemachineSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);

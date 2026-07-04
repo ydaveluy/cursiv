@@ -21,50 +21,53 @@ std::unique_ptr<const pegium::parser::Parser> createTestsParser() {
   return std::make_unique<const parser::TestsParser>();
 }
 
-void installRequirementsCoreModule(pegium::CoreServices &core,
-                                   RequirementsAddedServices &added) {
-  core.parser = std::make_unique<const parser::RequirementsParser>(core);
-  core.languageMetaData.fileExtensions = {".req"};
-  added.validator =
-      std::make_unique<validation::RequirementsValidator>(core.shared);
-  validation::registerRequirementsValidationChecks(core, *added.validator);
+void installRequirementsCoreModule(RequirementsCoreServices &services) {
+  services.parser = std::make_unique<const parser::RequirementsParser>(services);
+  services.languageMetaData.fileExtensions = {".req"};
+  services.validator =
+      std::make_unique<validation::RequirementsValidator>(services);
+  validation::registerRequirementsValidationChecks(services,
+                                                   *services.validator);
 }
 
-void installTestsCoreModule(pegium::CoreServices &core,
-                            TestsAddedServices &added) {
-  core.parser = std::make_unique<const parser::TestsParser>(core);
-  core.languageMetaData.fileExtensions = {".tst"};
-  added.validator = std::make_unique<validation::TestsValidator>();
-  validation::registerTestsValidationChecks(core, *added.validator);
+void installTestsCoreModule(TestsCoreServices &services) {
+  services.parser = std::make_unique<const parser::TestsParser>(services);
+  services.languageMetaData.fileExtensions = {".tst"};
+  services.validator = std::make_unique<validation::TestsValidator>(services);
+  validation::registerTestsValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<RequirementsCoreServices>
-createRequirementsCoreServices(const pegium::SharedCoreServices &sharedServices,
-                               std::string languageId) {
+createRequirementsCoreServices(
+    const RequirementsSharedCoreServices &sharedServices,
+    std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<RequirementsCoreServices>(
       sharedServices, std::move(languageId));
-  installRequirementsCoreModule(*services, *services);
+  installRequirementsCoreModule(*services);
   return services;
 }
 
 std::unique_ptr<TestsCoreServices>
-createTestsCoreServices(const pegium::SharedCoreServices &sharedServices,
+createTestsCoreServices(const RequirementsSharedCoreServices &sharedServices,
                         std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<TestsCoreServices>(
       sharedServices, std::move(languageId));
-  installTestsCoreModule(*services, *services);
+  installTestsCoreModule(*services);
   return services;
 }
 
 RequirementsAndTestsCoreServices createRequirementsAndTestsCoreServices(
-    const pegium::SharedCoreServices &sharedServices) {
+    const RequirementsSharedCoreServices &sharedServices) {
   return {.requirements = createRequirementsCoreServices(sharedServices),
           .tests = createTestsCoreServices(sharedServices)};
 }
 
 bool registerRequirementsCoreServices(
     pegium::SharedCoreServices &sharedServices) {
-  auto services = createRequirementsAndTestsCoreServices(sharedServices);
+  // The workspace container is the languages' shared type; recover it to build
+  // the containers with their custom shared services.
+  auto services = createRequirementsAndTestsCoreServices(
+      dynamic_cast<RequirementsSharedCoreServices &>(sharedServices));
   sharedServices.serviceRegistry->registerServices(
       std::move(services.requirements));
   sharedServices.serviceRegistry->registerServices(std::move(services.tests));

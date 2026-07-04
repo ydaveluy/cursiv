@@ -15,26 +15,29 @@ std::unique_ptr<const pegium::parser::Parser> createArithmeticsParser() {
   return std::make_unique<const parser::ArithmeticParser>();
 }
 
-void installArithmeticsCoreModule(pegium::CoreServices &core,
-                                  ArithmeticsAddedServices &added) {
-  core.parser = std::make_unique<const parser::ArithmeticParser>(core);
-  core.languageMetaData.fileExtensions = {".calc"};
-  added.validator = std::make_unique<validation::ArithmeticsValidator>();
-  validation::registerValidationChecks(core, *added.validator);
+void installArithmeticsCoreModule(ArithmeticsCoreServices &services) {
+  services.parser = std::make_unique<const parser::ArithmeticParser>(services);
+  services.languageMetaData.fileExtensions = {".calc"};
+  services.validator =
+      std::make_unique<validation::ArithmeticsValidator>(services);
+  validation::registerValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<ArithmeticsCoreServices>
-createArithmeticsCoreServices(const pegium::SharedCoreServices &sharedServices,
-                              std::string languageId) {
+createArithmeticsCoreServices(
+    const ArithmeticsSharedCoreServices &sharedServices,
+    std::string languageId) {
   auto services = pegium::makeDefaultCoreServices<ArithmeticsCoreServices>(
       sharedServices, std::move(languageId));
-  installArithmeticsCoreModule(*services, *services);
+  installArithmeticsCoreModule(*services);
   return services;
 }
 
 bool registerArithmeticsCoreServices(pegium::SharedCoreServices &sharedServices) {
-  sharedServices.serviceRegistry->registerServices(
-      createArithmeticsCoreServices(sharedServices));
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
+  sharedServices.serviceRegistry->registerServices(createArithmeticsCoreServices(
+      dynamic_cast<ArithmeticsSharedCoreServices &>(sharedServices)));
   return true;
 }
 

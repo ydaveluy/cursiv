@@ -16,12 +16,12 @@ void installTestsLspModule(TestsServices &services);
 
 /// Builds the LSP-enabled requirements language services.
 std::unique_ptr<RequirementsServices>
-createRequirementsLspServices(const pegium::SharedServices &sharedServices,
+createRequirementsLspServices(const RequirementsSharedServices &sharedServices,
                               std::string languageId = "requirements-lang");
 
 /// Builds the LSP-enabled tests language services.
 std::unique_ptr<TestsServices>
-createTestsLspServices(const pegium::SharedServices &sharedServices,
+createTestsLspServices(const RequirementsSharedServices &sharedServices,
                        std::string languageId = "tests-lang");
 
 /// Aggregate of both languages' LSP-enabled services.
@@ -31,8 +31,8 @@ struct RequirementsAndTestsServices {
 };
 
 /// Builds the LSP-enabled requirements and tests language services together.
-RequirementsAndTestsServices
-createRequirementsAndTestsLspServices(const pegium::SharedServices &sharedServices);
+RequirementsAndTestsServices createRequirementsAndTestsLspServices(
+    const RequirementsSharedServices &sharedServices);
 
 /// Registers the LSP-enabled services for both languages.
 bool registerRequirementsLspServices(pegium::SharedServices &sharedServices);

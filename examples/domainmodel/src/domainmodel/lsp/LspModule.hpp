@@ -13,7 +13,7 @@ void installDomainModelLspModule(DomainModelServices &services);
 
 /// Builds the LSP-enabled domain-model language services.
 std::unique_ptr<DomainModelServices>
-createDomainModelLspServices(const pegium::SharedServices &sharedServices,
+createDomainModelLspServices(const DomainModelSharedServices &sharedServices,
                           std::string languageId = "domain-model");
 
 /// Registers the LSP-enabled domain-model services in `sharedServices`.

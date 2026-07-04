@@ -2,13 +2,18 @@
 
 #include <domainmodel/core/ast.hpp>
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
 namespace domainmodel::validation {
 
-class DomainModelValidator final {
+/// Inherits `pegium::DefaultCoreService` so checks can reach the language
+/// services through `services.*` (parser, references, shared caches, ...).
+class DomainModelValidator final : public pegium::DefaultCoreService {
 public:
+  using pegium::DefaultCoreService::DefaultCoreService;
+
   void checkEntityNameStartsWithCapital(
       const domainmodel::ast::Entity &entity,
       const pegium::validation::ValidationAcceptor &accept) const;

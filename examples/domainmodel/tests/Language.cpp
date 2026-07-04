@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 
 #include <domainmodel/core/CoreModule.hpp>
+#include <domainmodel/lsp/LspServices.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
 #include <pegium/examples/RecoverySampleTestSupport.hpp>
@@ -27,7 +29,7 @@ TEST(DomainModelLanguageTest, ParsesEntityModel) {
 }
 
 TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<domainmodel::DomainModelSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -59,7 +61,7 @@ TEST(DomainModelLanguageTest, ResolvesTypeReferenceToEntitySubtype) {
 }
 
 TEST(DomainModelLanguageTest, RejectsSelfExtendingEntityOnTheExtendsKeyword) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<domainmodel::DomainModelSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);

@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultCoreService.hpp>
 #include <pegium/core/validation/ValidationAcceptor.hpp>
 #include <pegium/core/validation/ValidationRegistry.hpp>
 
@@ -17,8 +18,12 @@ inline constexpr std::string_view ExpressionNormalizable =
 
 } // namespace IssueCodes
 
-class ArithmeticsValidator final {
+/// Inherits `pegium::DefaultCoreService` so checks can reach the language
+/// services through `services.*` (parser, references, shared caches, ...).
+class ArithmeticsValidator final : public pegium::DefaultCoreService {
 public:
+  using pegium::DefaultCoreService::DefaultCoreService;
+
   void checkDivByZero(
       const arithmetics::ast::BinaryExpression &expression,
       const pegium::validation::ValidationAcceptor &accept) const;

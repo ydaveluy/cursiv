@@ -16,14 +16,11 @@
 #include <pegium/lsp/LspExpectTestSupport.hpp>
 #include <pegium/lsp/navigation/DefaultReferencesProvider.hpp>
 #include <pegium/lsp/services/LanguageServerFeatures.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
+#include <pegium/lsp/services/Services.hpp>
 #include <pegium/lsp/support/LspProviderUtils.hpp>
 
 namespace pegium::integration {
 namespace {
-
-using pegium::as_services;
-
 bool is_parse_diagnostic(const pegium::Diagnostic &diagnostic) {
   if (diagnostic.source == "parse") {
     return true;
@@ -153,7 +150,7 @@ std::string apply_completion_choice(
 
 class LanguageServerFeaturesIntegrationTest : public ::testing::Test {
 protected:
-  std::unique_ptr<pegium::SharedServices> shared = test::make_empty_shared_services();
+  std::unique_ptr<arithmetics::ArithmeticsSharedServices> shared = std::make_unique<arithmetics::ArithmeticsSharedServices>();
 
   LanguageServerFeaturesIntegrationTest() {
     pegium::installDefaultSharedCoreServices(*shared);
@@ -192,7 +189,7 @@ protected:
   const pegium::Services *arithmeticsServices() const {
     const auto *coreServices =
         &shared->serviceRegistry->getServices(test::make_file_uri("lookup.calc"));
-    return as_services(coreServices);
+    return dynamic_cast<const pegium::Services *>(coreServices);
   }
 
   static std::string completionLabelDump(const ::lsp::CompletionList &completion) {

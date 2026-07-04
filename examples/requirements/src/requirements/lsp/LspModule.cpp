@@ -17,35 +17,36 @@ void installTestsLspModule(TestsServices &services) {
 }
 
 std::unique_ptr<RequirementsServices>
-createRequirementsLspServices(const pegium::SharedServices &sharedServices,
+createRequirementsLspServices(const RequirementsSharedServices &sharedServices,
                               std::string languageId) {
   auto services = pegium::makeDefaultServices<RequirementsServices>(
       sharedServices, std::move(languageId));
-  // The container is-a CoreServices and is-a RequirementsAddedServices, so it
-  // binds both parameters of the (non-template) core wiring.
-  installRequirementsCoreModule(*services, *services);
+  installRequirementsCoreModule(*services);
   installRequirementsLspModule(*services);
   return services;
 }
 
 std::unique_ptr<TestsServices>
-createTestsLspServices(const pegium::SharedServices &sharedServices,
+createTestsLspServices(const RequirementsSharedServices &sharedServices,
                        std::string languageId) {
   auto services = pegium::makeDefaultServices<TestsServices>(
       sharedServices, std::move(languageId));
-  installTestsCoreModule(*services, *services);
+  installTestsCoreModule(*services);
   installTestsLspModule(*services);
   return services;
 }
 
-RequirementsAndTestsServices
-createRequirementsAndTestsLspServices(const pegium::SharedServices &sharedServices) {
+RequirementsAndTestsServices createRequirementsAndTestsLspServices(
+    const RequirementsSharedServices &sharedServices) {
   return {.requirements = createRequirementsLspServices(sharedServices),
           .tests = createTestsLspServices(sharedServices)};
 }
 
 bool registerRequirementsLspServices(pegium::SharedServices &sharedServices) {
-  auto services = createRequirementsAndTestsLspServices(sharedServices);
+  // The session container is the languages' shared type; recover it to build
+  // the containers with their custom shared services.
+  auto services = createRequirementsAndTestsLspServices(
+      dynamic_cast<RequirementsSharedServices &>(sharedServices));
   sharedServices.serviceRegistry->registerServices(
       std::move(services.requirements));
   sharedServices.serviceRegistry->registerServices(std::move(services.tests));

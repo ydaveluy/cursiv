@@ -13,7 +13,7 @@ void installStatemachineLspModule(StatemachineServices &services);
 
 /// Builds the LSP-enabled statemachine language services.
 std::unique_ptr<StatemachineServices>
-createStatemachineLspServices(const pegium::SharedServices &sharedServices,
+createStatemachineLspServices(const StatemachineSharedServices &sharedServices,
                               std::string languageId = "statemachine");
 
 /// Registers the LSP-enabled statemachine services in `sharedServices`.

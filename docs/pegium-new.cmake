@@ -472,7 +472,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   try {
-    auto sharedServices = pegium::make_shared_services();
+    auto sharedServices = pegium::make_shared_services<
+        @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedCoreServices>();
     auto &shared = *sharedServices;
     auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
     auto &langServices = *services;
@@ -558,24 +559,31 @@ std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser() {
   return std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>();
 }
 
-void install@PEGIUM_NEW_CLASS@CoreModule(pegium::CoreServices &core) {
-  core.parser = std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(core);
-  core.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+void install@PEGIUM_NEW_CLASS@CoreModule(@PEGIUM_NEW_CLASS@CoreServices &services) {
+  services.parser =
+      std::make_unique<const parser::@PEGIUM_NEW_CLASS@Parser>(services);
+  services.languageMetaData.fileExtensions = {"@PEGIUM_NEW_EXT@"};
+  services.validator =
+      std::make_unique<validation::@PEGIUM_NEW_CLASS@Validator>(services);
+  validation::registerValidationChecks(services, *services.validator);
 }
 
 std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
-create@PEGIUM_NEW_CLASS@CoreServices(const pegium::SharedCoreServices &sharedServices,
-                     std::string languageId) {
-  auto services = std::make_unique<@PEGIUM_NEW_CLASS@CoreServices>(sharedServices);
-  services->languageMetaData.languageId = std::move(languageId);
-  pegium::installDefaultCoreServices(*services);
+create@PEGIUM_NEW_CLASS@CoreServices(
+    const @PEGIUM_NEW_CLASS@SharedCoreServices &sharedServices,
+    std::string languageId) {
+  auto services = pegium::makeDefaultCoreServices<@PEGIUM_NEW_CLASS@CoreServices>(
+      sharedServices, std::move(languageId));
   install@PEGIUM_NEW_CLASS@CoreModule(*services);
   return services;
 }
 
 bool register@PEGIUM_NEW_CLASS@CoreServices(pegium::SharedCoreServices &sharedServices) {
+  // The workspace container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
   sharedServices.serviceRegistry->registerServices(
-      create@PEGIUM_NEW_CLASS@CoreServices(sharedServices));
+      create@PEGIUM_NEW_CLASS@CoreServices(
+          dynamic_cast<@PEGIUM_NEW_CLASS@SharedCoreServices &>(sharedServices)));
   return true;
 }
 
@@ -594,15 +602,14 @@ namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 /// Creates a standalone @PEGIUM_NEW_CLASS@ parser.
 std::unique_ptr<const pegium::parser::Parser> create@PEGIUM_NEW_CLASS@Parser();
 
-/// Wires the @PEGIUM_NEW_CLASS@ core overrides onto a service container. Every
-/// container is-a `pegium::CoreServices`, so the headless and the LSP bundle both
-/// wire themselves with `install@PEGIUM_NEW_CLASS@CoreModule(*services)`.
-void install@PEGIUM_NEW_CLASS@CoreModule(pegium::CoreServices &core);
+/// Wires the @PEGIUM_NEW_CLASS@ core overrides. The LSP path reuses it directly.
+void install@PEGIUM_NEW_CLASS@CoreModule(@PEGIUM_NEW_CLASS@CoreServices &services);
 
 /// Builds the core-only @PEGIUM_NEW_CLASS@ language services.
 std::unique_ptr<@PEGIUM_NEW_CLASS@CoreServices>
-create@PEGIUM_NEW_CLASS@CoreServices(const pegium::SharedCoreServices &sharedServices,
-                     std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
+create@PEGIUM_NEW_CLASS@CoreServices(
+    const @PEGIUM_NEW_CLASS@SharedCoreServices &sharedServices,
+    std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
 
 /// Registers the core-only @PEGIUM_NEW_CLASS@ services in `sharedServices`.
 bool register@PEGIUM_NEW_CLASS@CoreServices(pegium::SharedCoreServices &sharedServices);
@@ -611,13 +618,29 @@ bool register@PEGIUM_NEW_CLASS@CoreServices(pegium::SharedCoreServices &sharedSe
 ]==])
 _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/CoreServices.hpp]==] [==[always]==] [==[#pragma once
 
+#include <memory>
+
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/validation/@PEGIUM_NEW_CLASS@Validator.hpp>
+
 #include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/SharedCoreServices.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 
-/// Core-only @PEGIUM_NEW_CLASS@ language services.
-struct @PEGIUM_NEW_CLASS@CoreServices final : pegium::CoreServices {
-  using pegium::CoreServices::CoreServices;
+/// Workspace-wide shared services.
+struct @PEGIUM_NEW_CLASS@SharedCoreServices : virtual pegium::SharedCoreServices {
+  // define here custom shared services
+};
+
+/// Core (headless) @PEGIUM_NEW_CLASS@ language services, built from the language's
+/// shared-core type. Add your language services as members.
+struct @PEGIUM_NEW_CLASS@CoreServices
+    : pegium::CoreServicesFor<@PEGIUM_NEW_CLASS@SharedCoreServices> {
+  std::unique_ptr<validation::@PEGIUM_NEW_CLASS@Validator> validator;
+
+  explicit @PEGIUM_NEW_CLASS@CoreServices(
+      const @PEGIUM_NEW_CLASS@SharedCoreServices &sharedServices)
+      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
 };
 
 } // namespace @PEGIUM_NEW_LANGUAGE_ID@
@@ -641,6 +664,63 @@ struct Model : pegium::AstNode {
 
 } // namespace @PEGIUM_NEW_LANGUAGE_ID@::ast
 ]==])
+_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/validation/@PEGIUM_NEW_CLASS@Validator.cpp]==] [==[always]==] [==[#include <@PEGIUM_NEW_LANGUAGE_ID@/core/validation/@PEGIUM_NEW_CLASS@Validator.hpp>
+
+#include <cctype>
+
+namespace @PEGIUM_NEW_LANGUAGE_ID@::validation {
+
+void @PEGIUM_NEW_CLASS@Validator::checkPersonNameStartsWithCapital(
+    const ast::Person &person,
+    const pegium::validation::ValidationAcceptor &accept) const {
+  if (person.name.empty()) {
+    return;
+  }
+  const auto first = person.name.front();
+  if (std::toupper(static_cast<unsigned char>(first)) == first) {
+    return;
+  }
+  accept.warning(person, "Person name should start with a capital.")
+      .property<&ast::Person::name>();
+}
+
+} // namespace @PEGIUM_NEW_LANGUAGE_ID@::validation
+]==])
+_pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/core/validation/@PEGIUM_NEW_CLASS@Validator.hpp]==] [==[always]==] [==[#pragma once
+
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/ast.hpp>
+
+#include <pegium/core/services/CoreServices.hpp>
+#include <pegium/core/services/DefaultCoreService.hpp>
+#include <pegium/core/validation/ValidationAcceptor.hpp>
+#include <pegium/core/validation/ValidationRegistry.hpp>
+
+namespace @PEGIUM_NEW_LANGUAGE_ID@::validation {
+
+/// Language validator. It inherits `pegium::DefaultCoreService` so checks can
+/// reach the language services through `services.*` (parser, references, shared
+/// caches, ...) as the language grows — no refactor needed the first time a
+/// check needs a sibling service or a per-workspace cache.
+class @PEGIUM_NEW_CLASS@Validator final : public pegium::DefaultCoreService {
+public:
+  using pegium::DefaultCoreService::DefaultCoreService;
+
+  void checkPersonNameStartsWithCapital(
+      const ast::Person &person,
+      const pegium::validation::ValidationAcceptor &accept) const;
+};
+
+inline void registerValidationChecks(pegium::CoreServices &services,
+                                     @PEGIUM_NEW_CLASS@Validator &validator) {
+  auto &registry = *services.validation.validationRegistry;
+  registry.registerChecks(
+      {pegium::validation::ValidationRegistry::makeValidationCheck<
+          &@PEGIUM_NEW_CLASS@Validator::checkPersonNameStartsWithCapital>(
+          validator)});
+}
+
+} // namespace @PEGIUM_NEW_LANGUAGE_ID@::validation
+]==])
 _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspModule.cpp]==] [==[lsp]==] [==[#include <@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspModule.hpp>
 
 #include <utility>
@@ -650,20 +730,29 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspModule.cpp]==] [==[lsp]
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 
+void install@PEGIUM_NEW_CLASS@LspModule(@PEGIUM_NEW_CLASS@Services &services) {
+  // Register your LSP overrides here, e.g.:
+  //   services.lsp.formatter = std::make_unique<@PEGIUM_NEW_CLASS@Formatter>(services);
+  (void)services;
+}
+
 std::unique_ptr<@PEGIUM_NEW_CLASS@Services>
-create@PEGIUM_NEW_CLASS@LspServices(const pegium::SharedServices &sharedServices,
-                     std::string languageId) {
+create@PEGIUM_NEW_CLASS@LspServices(
+    const @PEGIUM_NEW_CLASS@SharedServices &sharedServices,
+    std::string languageId) {
   auto services = pegium::makeDefaultServices<@PEGIUM_NEW_CLASS@Services>(
       sharedServices, std::move(languageId));
-  // @PEGIUM_NEW_CLASS@Services is-a pegium::CoreServices, so it binds the
-  // (non-template) core wiring directly.
   install@PEGIUM_NEW_CLASS@CoreModule(*services);
+  install@PEGIUM_NEW_CLASS@LspModule(*services);
   return services;
 }
 
 bool register@PEGIUM_NEW_CLASS@LspServices(pegium::SharedServices &sharedServices) {
+  // The session container is the language's own shared type; recover it to
+  // build the container with its custom shared services.
   sharedServices.serviceRegistry->registerServices(
-      create@PEGIUM_NEW_CLASS@LspServices(sharedServices));
+      create@PEGIUM_NEW_CLASS@LspServices(
+          dynamic_cast<@PEGIUM_NEW_CLASS@SharedServices &>(sharedServices)));
   return true;
 }
 
@@ -679,10 +768,14 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspModule.hpp]==] [==[lsp]
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 
+/// LSP service overrides applied on top of pegium's default LSP services.
+void install@PEGIUM_NEW_CLASS@LspModule(@PEGIUM_NEW_CLASS@Services &services);
+
 /// Builds the LSP-enabled @PEGIUM_NEW_CLASS@ language services.
 std::unique_ptr<@PEGIUM_NEW_CLASS@Services>
-create@PEGIUM_NEW_CLASS@LspServices(const pegium::SharedServices &sharedServices,
-                     std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
+create@PEGIUM_NEW_CLASS@LspServices(
+    const @PEGIUM_NEW_CLASS@SharedServices &sharedServices,
+    std::string languageId = "@PEGIUM_NEW_LANGUAGE_ID@");
 
 /// Registers the LSP-enabled @PEGIUM_NEW_CLASS@ services in `sharedServices`.
 bool register@PEGIUM_NEW_CLASS@LspServices(pegium::SharedServices &sharedServices);
@@ -691,13 +784,23 @@ bool register@PEGIUM_NEW_CLASS@LspServices(pegium::SharedServices &sharedService
 ]==])
 _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/LspServices.hpp]==] [==[lsp]==] [==[#pragma once
 
+#include <@PEGIUM_NEW_LANGUAGE_ID@/core/CoreServices.hpp>
 #include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace @PEGIUM_NEW_LANGUAGE_ID@ {
 
+/// Workspace-wide shared services in an LSP session.
+struct @PEGIUM_NEW_CLASS@SharedServices
+    : @PEGIUM_NEW_CLASS@SharedCoreServices, pegium::SharedServices {};
+
 /// LSP-enabled @PEGIUM_NEW_CLASS@ language services.
-struct @PEGIUM_NEW_CLASS@Services final : pegium::Services {
-  using pegium::Services::Services;
+struct @PEGIUM_NEW_CLASS@Services final
+    : pegium::ServicesFor<@PEGIUM_NEW_CLASS@CoreServices,
+                          @PEGIUM_NEW_CLASS@SharedServices> {
+  explicit @PEGIUM_NEW_CLASS@Services(
+      const @PEGIUM_NEW_CLASS@SharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
 };
 
 } // namespace @PEGIUM_NEW_LANGUAGE_ID@
@@ -707,8 +810,10 @@ _pegium_new_emit([==[src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/main.cpp]==] [==[lsp]==] [
 #include <pegium/lsp/runtime/LanguageServerRuntime.hpp>
 
 int main(int argc, char **argv) {
-  return pegium::runLanguageServerMain(argc, argv, "@PEGIUM_NEW_LANGUAGE_ID@-lsp",
-                                       @PEGIUM_NEW_LANGUAGE_ID@::register@PEGIUM_NEW_CLASS@LspServices);
+  return pegium::runLanguageServerMain<
+      @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedServices>(
+      argc, argv, "@PEGIUM_NEW_LANGUAGE_ID@-lsp",
+      @PEGIUM_NEW_LANGUAGE_ID@::register@PEGIUM_NEW_CLASS@LspServices);
 }
 ]==])
 _pegium_new_emit([==[test/lsp/lsp_features_test.cpp]==] [==[lsp]==] [==[// LSP feature tests using the reusable `pegium::testing` harness. It builds
@@ -731,9 +836,10 @@ namespace {
 
 // Builds a workspace with the @PEGIUM_NEW_CLASS@ LSP services registered.
 pegium::testing::TestWorkspace make@PEGIUM_NEW_CLASS@Workspace() {
-  pegium::testing::TestWorkspace ws;
-  ws.registerLanguage(
-      @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@LspServices(ws.shared()));
+  auto ws = pegium::testing::TestWorkspace::withShared<
+      @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedServices>();
+  ws.registerLanguage(@PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@LspServices(
+      ws.shared<@PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedServices>()));
   return ws;
 }
 
@@ -773,7 +879,8 @@ _pegium_new_emit([==[test/parsing_test.cpp]==] [==[always]==] [==[#include <@PEG
 #include <gtest/gtest.h>
 
 TEST(@PEGIUM_NEW_CLASS@Parsing, SampleParsesWithoutErrors) {
-  auto sharedServices = pegium::make_shared_services();
+  auto sharedServices = pegium::make_shared_services<
+      @PEGIUM_NEW_LANGUAGE_ID@::@PEGIUM_NEW_CLASS@SharedCoreServices>();
   auto &shared = *sharedServices;
   auto services = @PEGIUM_NEW_LANGUAGE_ID@::create@PEGIUM_NEW_CLASS@CoreServices(shared);
   auto &langServices = *services;

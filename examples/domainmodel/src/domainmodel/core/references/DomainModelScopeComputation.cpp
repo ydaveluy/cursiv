@@ -19,7 +19,7 @@ DomainModelScopeComputation::collectExportedSymbols(
   }
 
   std::vector<pegium::workspace::AstNodeDescription> symbols;
-  const auto *qualifiedNameProvider = languageServices.qualifiedNameProvider.get();
+  const auto *qualifiedNameProvider = services.qualifiedNameProvider.get();
   for (const auto *node : document.parseResult.value->getAllContent()) {
     pegium::utils::throw_if_cancelled(cancelToken);
     const auto *type = pegium::ast_ptr_cast<const Type>(node);
@@ -61,7 +61,7 @@ pegium::workspace::LocalSymbols DomainModelScopeComputation::collectLocalSymbols
   }
 
   (void)processContainer(*model, model->elements, document, symbols,
-                         cancelToken, languageServices.qualifiedNameProvider.get());
+                         cancelToken, services.qualifiedNameProvider.get());
   return symbols;
 }
 

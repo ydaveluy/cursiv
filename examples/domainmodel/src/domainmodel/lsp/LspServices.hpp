@@ -1,20 +1,20 @@
 #pragma once
 
 #include <domainmodel/core/CoreServices.hpp>
-#include <pegium/core/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
+#include <pegium/lsp/services/SharedServices.hpp>
 
 namespace domainmodel {
 
-/// LSP-enabled domain-model language services.
-struct DomainModelServices final : pegium::Services,
-                                   domainmodel::DomainModelAddedServices {
-  using pegium::Services::Services;
-};
+/// Workspace-wide shared services in an LSP session.
+struct DomainModelSharedServices : DomainModelSharedCoreServices,
+                                   pegium::SharedServices {};
 
-[[nodiscard]] inline const DomainModelServices *
-asDomainModelServices(const pegium::Services &services) noexcept {
-  return pegium::service_cast<DomainModelServices>(services);
-}
+/// LSP-enabled domain-model language services.
+struct DomainModelServices final
+    : pegium::ServicesFor<DomainModelCoreServices, DomainModelSharedServices> {
+  explicit DomainModelServices(const DomainModelSharedServices &sharedServices)
+      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+};
 
 } // namespace domainmodel

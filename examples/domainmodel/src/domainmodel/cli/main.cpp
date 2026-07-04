@@ -47,7 +47,8 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
 }
 
 int generate_cli(const GenerateOptions &options) {
-  auto sharedServices = pegium::make_shared_services();
+  auto sharedServices =
+      pegium::make_shared_services<domainmodel::DomainModelSharedCoreServices>();
   auto &shared = *sharedServices;
   auto services = domainmodel::createDomainModelCoreServices(shared);
   auto &domainmodelServices = *services;

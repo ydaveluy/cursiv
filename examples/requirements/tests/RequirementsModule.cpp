@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -23,14 +25,10 @@
 #include <pegium/core/references/DefaultNameProvider.hpp>
 
 #include <pegium/examples/ExampleTestSupport.hpp>
-#include <pegium/lsp/services/ServiceAccess.hpp>
 #include <pegium/lsp/services/Services.hpp>
 
 namespace requirements::tests {
 namespace {
-
-using pegium::as_services;
-
 std::filesystem::path fixture_root() {
   return pegium::test::current_source_directory() / "files";
 }
@@ -175,7 +173,7 @@ TEST(RequirementsModuleTest, ExposesTypedServicesAndDedicatedValidators) {
                 requirements::validation::RequirementsValidator>);
   static_assert(std::is_class_v<
                 requirements::validation::TestsValidator>);
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -217,7 +215,7 @@ TEST(RequirementsModuleTest, ExposesTypedServicesAndDedicatedValidators) {
 }
 
 TEST(RequirementsModuleTest, RegistersRequirementsAndTestsLanguages) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -227,21 +225,23 @@ TEST(RequirementsModuleTest, RegistersRequirementsAndTestsLanguages) {
       shared->serviceRegistry->getServices(pegium::test::make_file_uri("model.req"));
   const auto &testsCoreServices =
       shared->serviceRegistry->getServices(pegium::test::make_file_uri("suite.tst"));
-  const auto *requirementsServices = pegium::as_services(&requirementsCoreServices);
-  const auto *testsServices = pegium::as_services(&testsCoreServices);
+  const auto *requirementsServices = dynamic_cast<const pegium::Services *>(&requirementsCoreServices);
+  const auto *testsServices = dynamic_cast<const pegium::Services *>(&testsCoreServices);
   ASSERT_NE(requirementsServices, nullptr);
   ASSERT_NE(testsServices, nullptr);
-  EXPECT_NE(requirements::asRequirementsServices(*requirementsServices),
+  using requirements::RequirementsServices;
+  using requirements::TestsServices;
+  EXPECT_NE(dynamic_cast<const RequirementsServices *>(requirementsServices),
             nullptr);
-  EXPECT_NE(requirements::asTestsServices(*testsServices), nullptr);
+  EXPECT_NE(dynamic_cast<const TestsServices *>(testsServices), nullptr);
   // ...and a container of one language must NOT be mistaken for the other:
-  // service_cast disambiguates the two sibling languages on the same registry.
-  EXPECT_EQ(requirements::asTestsServices(*requirementsServices), nullptr);
-  EXPECT_EQ(requirements::asRequirementsServices(*testsServices), nullptr);
+  // a plain dynamic_cast disambiguates the two sibling languages on the registry.
+  EXPECT_EQ(dynamic_cast<const TestsServices *>(requirementsServices), nullptr);
+  EXPECT_EQ(dynamic_cast<const RequirementsServices *>(testsServices), nullptr);
 }
 
 TEST(RequirementsModuleTest, GoodFixturePublishesNoDiagnosticsAcrossDocuments) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -275,7 +275,7 @@ TEST(RequirementsModuleTest, Bad1FixturePublishesExpectedSingleWarnings) {
 
   for (const auto &testCase : cases) {
     SCOPED_TRACE(testCase.name);
-    auto shared = pegium::test::make_empty_shared_services();
+    auto shared = std::make_unique<requirements::RequirementsSharedServices>();
     pegium::installDefaultSharedCoreServices(*shared);
     pegium::installDefaultSharedLspServices(*shared);
     pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -298,7 +298,7 @@ TEST(RequirementsModuleTest, Bad1FixturePublishesExpectedSingleWarnings) {
 
 TEST(RequirementsModuleTest,
      InvalidEnvironmentFixturePublishesExpectedWarnings) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -332,7 +332,7 @@ TEST(RequirementsModuleTest,
 }
 
 TEST(RequirementsModuleTest, RequirementsFormatterFormatsCompactModel) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -351,7 +351,7 @@ TEST(RequirementsModuleTest, RequirementsFormatterFormatsCompactModel) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.formatter, nullptr);
 
@@ -370,7 +370,7 @@ TEST(RequirementsModuleTest, RequirementsFormatterFormatsCompactModel) {
 }
 
 TEST(RequirementsModuleTest, TestsFormatterFormatsCompactModel) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
@@ -386,7 +386,7 @@ TEST(RequirementsModuleTest, TestsFormatterFormatsCompactModel) {
   ASSERT_NE(document, nullptr);
 
   const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
-  const auto *services = as_services(coreServices);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
   ASSERT_NE(services, nullptr);
   ASSERT_NE(services->lsp.formatter, nullptr);
 
@@ -403,7 +403,7 @@ TEST(RequirementsModuleTest, TestsFormatterFormatsCompactModel) {
 }
 
 TEST(RequirementsModuleTest, GeneratorMatchesExpectedCoverageRows) {
-  auto shared = pegium::test::make_empty_shared_services();
+  auto shared = std::make_unique<requirements::RequirementsSharedServices>();
   pegium::installDefaultSharedCoreServices(*shared);
   pegium::installDefaultSharedLspServices(*shared);
   pegium::test::initialize_shared_workspace_for_tests(*shared);
