@@ -263,7 +263,7 @@ private:
   /// for each unfolded position. Expect-mode; defined out-of-class in
   /// OrderedChoiceExpect.hpp.
   template <typename Action, std::size_t I = 0>
-  [[gnu::always_inline]] bool
+  [[gnu::always_inline]] inline bool
   dispatch_choice_by_index(std::size_t bestIndex, Action &&action) const;
 
   /// Expect-mode; defined out-of-class in OrderedChoiceExpect.hpp.
