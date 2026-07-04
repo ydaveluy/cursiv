@@ -24,6 +24,7 @@ namespace detail {
 struct CompiledValidationCheckEntry {
   std::type_index targetType = std::type_index(typeid(AstNode));
   ValidationCheck check; // unwrapped: try/catch is hoisted to runChecks
+  ValidationCheckMatches matches = nullptr;
   std::string category;
 };
 
@@ -37,6 +38,10 @@ struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;
   std::vector<CompiledValidationCheckEntry> checks;
   CompiledValidationCheckIndex checksByType;
+  // Checks whose target is an abstract base the grammar never named (absent
+  // from reflection): they cannot be pre-indexed by concrete subtype, so
+  // `runChecks` gates them per node with the entry's `matches` predicate.
+  CompiledValidationCheckList fallbackChecks;
   std::shared_ptr<observability::ObservabilitySink> sink;
 };
 
@@ -116,11 +121,23 @@ DefaultValidationRegistry::compiledRegistry() const {
     compiled->checks.push_back(detail::CompiledValidationCheckEntry{
         .targetType = entry.targetType,
         .check = entry.check,
+        .matches = entry.matches,
         .category = entry.category});
   }
 
   const auto &reflection = *services.shared.astReflection;
   for (const auto &entry : compiled->checks) {
+    // A target the grammar never named (an abstract C++ base absent from
+    // reflection) has no known concrete subtypes to index by, so `runChecks`
+    // would never reach it via the dynamic-type lookup. Dispatch it through the
+    // fallback list instead, gated per node by its `matches` predicate — the
+    // dynamic_cast fallback the reflection's `isKnown` contract prescribes.
+    if (!reflection.isKnown(entry.targetType)) {
+      if (entry.matches != nullptr) {
+        compiled->fallbackChecks.push_back(&entry);
+      }
+      continue;
+    }
     compiled->checksByType[entry.targetType].push_back(&entry);
     for (const auto subtype : reflection.getAllSubTypes(entry.targetType)) {
       if (subtype == entry.targetType) {
@@ -150,6 +167,7 @@ void DefaultValidationRegistry::registerTypedCheck(
   _registeredChecks.push_back(RegisteredValidationCheckEntry{
       .targetType = registration.targetType,
       .check = std::move(registration.check),
+      .matches = registration.matches,
       .category = storedCategory});
   if (std::ranges::find(_knownCategories, storedCategory) ==
       _knownCategories.end()) {
@@ -172,7 +190,8 @@ void DefaultValidationRegistry::runChecks(
   const auto &compiled = *_compiled;
   const auto checksIt =
       compiled.checksByType.find(std::type_index(typeid(node)));
-  if (checksIt == compiled.checksByType.end()) {
+  const bool hasTypeChecks = checksIt != compiled.checksByType.end();
+  if (!hasTypeChecks && compiled.fallbackChecks.empty()) {
     return;
   }
 
@@ -182,32 +201,47 @@ void DefaultValidationRegistry::runChecks(
   // so it is safe to share across documents validated in parallel.
   const bool allCategories = categories.empty();
 
-  for (const auto *entry : checksIt->second) {
-    utils::throw_if_cancelled(cancelToken);
-    if (!allCategories &&
-        std::ranges::find(categories, entry->category) == categories.end()) {
-      continue;
+  const auto runEntry =
+      [&](const detail::CompiledValidationCheckEntry *entry) {
+        utils::throw_if_cancelled(cancelToken);
+        if (!allCategories &&
+            std::ranges::find(categories, entry->category) ==
+                categories.end()) {
+          return;
+        }
+        try {
+          entry->check(node, acceptor, cancelToken);
+        } catch (const utils::OperationCancelled &) {
+          throw;
+        } catch (const std::exception &error) {
+          auto message = std::string("An error occurred during validation: ") +
+                         error.what();
+          publish_validation_observation(
+              *compiled.sink, node,
+              observability::ObservationCode::ValidationCheckThrew, message,
+              entry->category);
+          acceptor.error(node, message);
+        } catch (...) {
+          const auto message =
+              std::string("An unknown error occurred during validation.");
+          publish_validation_observation(
+              *compiled.sink, node,
+              observability::ObservationCode::ValidationCheckThrew, message,
+              entry->category);
+          acceptor.error(node, message);
+        }
+      };
+
+  if (hasTypeChecks) {
+    for (const auto *entry : checksIt->second) {
+      runEntry(entry);
     }
-    try {
-      entry->check(node, acceptor, cancelToken);
-    } catch (const utils::OperationCancelled &) {
-      throw;
-    } catch (const std::exception &error) {
-      auto message = std::string("An error occurred during validation: ") +
-                     error.what();
-      publish_validation_observation(
-          *compiled.sink, node,
-          observability::ObservationCode::ValidationCheckThrew, message,
-          entry->category);
-      acceptor.error(node, message);
-    } catch (...) {
-      const auto message =
-          std::string("An unknown error occurred during validation.");
-      publish_validation_observation(
-          *compiled.sink, node,
-          observability::ObservationCode::ValidationCheckThrew, message,
-          entry->category);
-      acceptor.error(node, message);
+  }
+  // Checks whose target is an abstract base absent from reflection could not be
+  // pre-indexed by concrete type; gate each by a runtime is-instance test.
+  for (const auto *entry : compiled.fallbackChecks) {
+    if (entry->matches != nullptr && entry->matches(node)) {
+      runEntry(entry);
     }
   }
 }

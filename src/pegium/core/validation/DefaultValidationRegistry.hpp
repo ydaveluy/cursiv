@@ -52,6 +52,7 @@ private:
   struct RegisteredValidationCheckEntry {
     std::type_index targetType = std::type_index(typeid(AstNode));
     ValidationCheck check;
+    ValidationCheckMatches matches = nullptr;
     std::string category;
   };
 

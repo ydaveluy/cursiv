@@ -172,6 +172,7 @@ public:
       return;
     }
     _finalized = true;
+    finalizeProducedTypeInheritanceEdges();
     finalizeReferenceInducedEdges();
     finalizeNamedMixinEdges();
   }
@@ -216,6 +217,34 @@ private:
       }
       if (is_ast_instance<NamedAstNode>(typeInfo->probe())) {
         addDirectSubtypeEdge(producedType, named_ast_node_type());
+      }
+    }
+  }
+
+  // Two produced types can be related by C++ inheritance without the grammar
+  // ever nesting one where the other is expected — e.g. sibling rules for
+  // `Class` and `Exception : Class`. The grammar then induces no edge between
+  // them, so `isSubtype`/`getAllSubTypes` (and thus `ast_ptr_cast`, name
+  // lookup, and validation dispatch on a base type) would miss the relation.
+  // Probe every produced instance against every other produced type and record
+  // the real is-a edges, so reflection mirrors the true C++ hierarchy rather
+  // than only the grammar-induced subset. O(produced^2) RTTI probes, once at
+  // bootstrap and off the hot path — the same probe finalizeReferenceInduced /
+  // NamedMixin edges already use, generalized to every produced pair.
+  void finalizeProducedTypeInheritanceEdges() {
+    for (const auto &[subtype, subtypeInfo] : _producedTypesByType) {
+      if (subtypeInfo == nullptr || subtypeInfo->probe == nullptr) {
+        continue;
+      }
+      const AstNode &probe = subtypeInfo->probe();
+      for (const auto &[supertype, supertypeInfo] : _producedTypesByType) {
+        if (supertypeInfo == nullptr || subtype == supertype ||
+            supertypeInfo->isInstance == nullptr) {
+          continue;
+        }
+        if (supertypeInfo->isInstance(probe)) {
+          addDirectSubtypeEdge(subtype, supertype);
+        }
       }
     }
   }

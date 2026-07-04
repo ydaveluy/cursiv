@@ -78,6 +78,43 @@ protected:
   Rule<ValidationBaseNode> BaseRule{"Base", DerivedRule};
 };
 
+// An abstract C++ base the grammar never names: only the concrete leaf is a
+// rule result, so reflection knows the leaf but not the base.
+struct UnnamedAbstractBaseNode : pegium::AstNode {};
+struct GrammarProducedLeafNode : UnnamedAbstractBaseNode {};
+
+class UnnamedBaseBootstrapParser final : public PegiumParser {
+protected:
+  const grammar::ParserRule &getEntryRule() const noexcept override {
+    return LeafRule;
+  }
+
+  Rule<GrammarProducedLeafNode> LeafRule{"Leaf", "leaf"_kw};
+};
+
+// Two produced types related by C++ inheritance but produced by sibling rules
+// that never nest one where the other is expected (the Class/Exception shape).
+// Both are known to reflection, yet the grammar induces no edge between them.
+struct SiblingBaseNode : pegium::AstNode {};
+struct SiblingDerivedNode : SiblingBaseNode {};
+struct SiblingRoot : pegium::AstNode {
+  vector<pointer<SiblingBaseNode>> bases;
+  vector<pointer<SiblingDerivedNode>> deriveds;
+};
+
+class SiblingRuleBootstrapParser final : public PegiumParser {
+protected:
+  const grammar::ParserRule &getEntryRule() const noexcept override {
+    return RootRule;
+  }
+
+  Rule<SiblingBaseNode> BaseRule{"Base", "base"_kw};
+  Rule<SiblingDerivedNode> DerivedRule{"Derived", "derived"_kw};
+  Rule<SiblingRoot> RootRule{
+      "Root", append<&SiblingRoot::bases>(BaseRule) +
+                  append<&SiblingRoot::deriveds>(DerivedRule)};
+};
+
 class ValidationNodeABootstrapParser final : public PegiumParser {
 protected:
   const grammar::ParserRule &getEntryRule() const noexcept override {
@@ -647,6 +684,75 @@ TEST(DefaultValidationRegistryTest, BaseTypeChecksApplyToDerivedNodes) {
   EXPECT_TRUE(context.shared.astReflection->isSubtype(
       std::type_index(typeid(ValidationDerivedNode)),
       std::type_index(typeid(ValidationBaseNode))));
+}
+
+TEST(DefaultValidationRegistryTest,
+     ChecksOnAbstractBaseNotNamedByGrammarApplyToProducedNodes) {
+  RegistryTestServices context;
+  DefaultValidationRegistry registry(context.core);
+  UnnamedBaseBootstrapParser parser;
+  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                         *context.shared.astReflection);
+
+  // The grammar produces GrammarProducedLeafNode but never names its abstract
+  // C++ base, so the base is absent from reflection and its subtype edge is
+  // unknown — the exact case the reflection's `isKnown` contract says needs a
+  // dynamic_cast fallback.
+  ASSERT_FALSE(context.shared.astReflection->isKnown(
+      std::type_index(typeid(UnnamedAbstractBaseNode))));
+  ASSERT_TRUE(context.shared.astReflection->isKnown(
+      std::type_index(typeid(GrammarProducedLeafNode))));
+
+  std::size_t baseCalls = 0;
+  registry.registerCheck<UnnamedAbstractBaseNode>(
+      [&baseCalls](const UnnamedAbstractBaseNode &,
+                   const ValidationAcceptor &) { ++baseCalls; });
+
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{
+      ValidationAcceptor::Callback(noopAcceptorCb)};
+  GrammarProducedLeafNode leaf;
+
+  run_checks(registry, leaf, {}, noopAcceptor);
+  run_checks(registry, leaf, {}, noopAcceptor);
+
+  EXPECT_EQ(baseCalls, 2u);
+}
+
+TEST(DefaultValidationRegistryTest,
+     ChecksOnBaseAlsoRunForSiblingRuleDerivedNodes) {
+  RegistryTestServices context;
+  DefaultValidationRegistry registry(context.core);
+  SiblingRuleBootstrapParser parser;
+  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                         *context.shared.astReflection);
+
+  // Both types are produced by real rules, so both are known to reflection.
+  ASSERT_TRUE(context.shared.astReflection->isKnown(
+      std::type_index(typeid(SiblingBaseNode))));
+  ASSERT_TRUE(context.shared.astReflection->isKnown(
+      std::type_index(typeid(SiblingDerivedNode))));
+  // Root cause: the C++ `SiblingDerivedNode : SiblingBaseNode` edge must be in
+  // reflection for a base check (or ast_ptr_cast<SiblingBaseNode>) to reach the
+  // derived node, even though the grammar nests neither rule in the other.
+  EXPECT_TRUE(context.shared.astReflection->isSubtype(
+      std::type_index(typeid(SiblingDerivedNode)),
+      std::type_index(typeid(SiblingBaseNode))));
+
+  std::size_t baseCalls = 0;
+  registry.registerCheck<SiblingBaseNode>(
+      [&baseCalls](const SiblingBaseNode &, const ValidationAcceptor &) {
+        ++baseCalls;
+      });
+
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{
+      ValidationAcceptor::Callback(noopAcceptorCb)};
+  SiblingDerivedNode derived;
+
+  run_checks(registry, derived, {}, noopAcceptor);
+
+  EXPECT_EQ(baseCalls, 1u);
 }
 
 TEST(DefaultValidationRegistryTest,

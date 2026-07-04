@@ -109,7 +109,19 @@ void invokeValidationCheck(Check &check, const Node &node,
   }
 }
 
+/// Runtime "is `node` an instance of `Node`?" test, captured as a plain
+/// function pointer. Used only to dispatch a check whose target is an abstract
+/// base the grammar never named (absent from reflection), where the check
+/// cannot be pre-indexed by concrete subtype.
+template <typename Node>
+[[nodiscard]] bool nodeIsInstanceOf(const AstNode &node) noexcept {
+  return dynamic_cast<const Node *>(&node) != nullptr;
+}
+
 } // namespace detail
+
+/// Runtime is-instance predicate for a check's target type.
+using ValidationCheckMatches = bool (*)(const AstNode &) noexcept;
 
 /// Built-in category for inexpensive validation checks.
 inline constexpr std::string_view kFastValidationCategory = "fast";
@@ -135,6 +147,11 @@ public:
   struct ValidationCheckRegistration {
     std::type_index targetType = std::type_index(typeid(AstNode));
     ValidationCheck check;
+    /// Runtime is-instance test for `targetType`, used only when the target is
+    /// an abstract base the grammar never named (absent from reflection) and
+    /// the check therefore cannot be pre-indexed by concrete subtype. Null for
+    /// the empty registration.
+    ValidationCheckMatches matches = nullptr;
   };
 
   virtual ~ValidationRegistry() noexcept = default;
@@ -170,7 +187,8 @@ public:
           detail::invokeValidationCheck(
               *sharedCheck, static_cast<const TypedNode &>(node), acceptor,
               cancelToken);
-        }};
+        },
+        .matches = &detail::nodeIsInstanceOf<TypedNode>};
   }
 
   // Binds @p Method to a validator owned elsewhere (e.g. by the service
