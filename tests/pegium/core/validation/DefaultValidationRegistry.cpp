@@ -755,6 +755,65 @@ TEST(DefaultValidationRegistryTest,
   EXPECT_EQ(baseCalls, 1u);
 }
 
+TEST(DefaultValidationRegistryTest, ExactCheckRunsOnlyForTheExactType) {
+  RegistryTestServices context;
+  DefaultValidationRegistry registry(context.core);
+  SiblingRuleBootstrapParser parser;
+  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                         *context.shared.astReflection);
+
+  std::size_t exactCalls = 0;
+  registry.registerExactCheck<SiblingBaseNode>(
+      [&exactCalls](const SiblingBaseNode &, const ValidationAcceptor &) {
+        ++exactCalls;
+      });
+
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{
+      ValidationAcceptor::Callback(noopAcceptorCb)};
+  SiblingBaseNode base;
+  SiblingDerivedNode derived;
+
+  run_checks(registry, derived, {}, noopAcceptor); // subtype: must NOT fire
+  EXPECT_EQ(exactCalls, 0u);
+  run_checks(registry, base, {}, noopAcceptor); // exact type: fires
+  EXPECT_EQ(exactCalls, 1u);
+}
+
+TEST(DefaultValidationRegistryTest,
+     ExactAndSubtreeChecksMixInOneRegisterChecks) {
+  RegistryTestServices context;
+  DefaultValidationRegistry registry(context.core);
+  SiblingRuleBootstrapParser parser;
+  bootstrapAstReflection(static_cast<const Parser &>(parser).getEntryRule(),
+                         *context.shared.astReflection);
+
+  std::size_t subtreeCalls = 0;
+  std::size_t exactCalls = 0;
+  registry.registerChecks(
+      {ValidationRegistry::makeValidationCheck<SiblingBaseNode>(
+           [&subtreeCalls](const SiblingBaseNode &,
+                           const ValidationAcceptor &) { ++subtreeCalls; }),
+       ValidationRegistry::makeExactValidationCheck<SiblingBaseNode>(
+           [&exactCalls](const SiblingBaseNode &, const ValidationAcceptor &) {
+             ++exactCalls;
+           })});
+
+  auto noopAcceptorCb = [](pegium::Diagnostic) {};
+  const ValidationAcceptor noopAcceptor{
+      ValidationAcceptor::Callback(noopAcceptorCb)};
+  SiblingBaseNode base;
+  SiblingDerivedNode derived;
+
+  run_checks(registry, base, {}, noopAcceptor);
+  EXPECT_EQ(subtreeCalls, 1u);
+  EXPECT_EQ(exactCalls, 1u);
+
+  run_checks(registry, derived, {}, noopAcceptor);
+  EXPECT_EQ(subtreeCalls, 2u); // subtree also fires on the subtype
+  EXPECT_EQ(exactCalls, 1u);   // exact does not
+}
+
 TEST(DefaultValidationRegistryTest,
      CancellationAwareChecksReceiveTokenAndPropagateCancellation) {
   RegistryTestServices context;

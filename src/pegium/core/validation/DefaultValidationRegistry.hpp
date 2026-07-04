@@ -53,6 +53,7 @@ private:
     std::type_index targetType = std::type_index(typeid(AstNode));
     ValidationCheck check;
     ValidationCheckMatches matches = nullptr;
+    bool exactTypeOnly = false;
     std::string category;
   };
 

@@ -25,6 +25,7 @@ struct CompiledValidationCheckEntry {
   std::type_index targetType = std::type_index(typeid(AstNode));
   ValidationCheck check; // unwrapped: try/catch is hoisted to runChecks
   ValidationCheckMatches matches = nullptr;
+  bool exactTypeOnly = false;
   std::string category;
 };
 
@@ -122,11 +123,18 @@ DefaultValidationRegistry::compiledRegistry() const {
         .targetType = entry.targetType,
         .check = entry.check,
         .matches = entry.matches,
+        .exactTypeOnly = entry.exactTypeOnly,
         .category = entry.category});
   }
 
   const auto &reflection = *services.shared.astReflection;
   for (const auto &entry : compiled->checks) {
+    // Exact-type checks run only for nodes whose dynamic type is exactly the
+    // target, so index them under that one type and never expand to subtypes.
+    if (entry.exactTypeOnly) {
+      compiled->checksByType[entry.targetType].push_back(&entry);
+      continue;
+    }
     // A target the grammar never named (an abstract C++ base absent from
     // reflection) has no known concrete subtypes to index by, so `runChecks`
     // would never reach it via the dynamic-type lookup. Dispatch it through the
@@ -168,6 +176,7 @@ void DefaultValidationRegistry::registerTypedCheck(
       .targetType = registration.targetType,
       .check = std::move(registration.check),
       .matches = registration.matches,
+      .exactTypeOnly = registration.exactTypeOnly,
       .category = storedCategory});
   if (std::ranges::find(_knownCategories, storedCategory) ==
       _knownCategories.end()) {

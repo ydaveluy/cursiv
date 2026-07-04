@@ -152,6 +152,10 @@ public:
     /// the check therefore cannot be pre-indexed by concrete subtype. Null for
     /// the empty registration.
     ValidationCheckMatches matches = nullptr;
+    /// When true, the check runs only for nodes whose dynamic type is exactly
+    /// `targetType`; when false (default), it also runs for every subtype.
+    /// Set by `makeExactValidationCheck` / `registerExactCheck`.
+    bool exactTypeOnly = false;
   };
 
   virtual ~ValidationRegistry() noexcept = default;
@@ -166,29 +170,39 @@ public:
         category);
   }
 
+  /// Like `registerCheck`, but the check runs only for nodes whose dynamic type
+  /// is exactly `Node` — not for its subtypes.
+  template <typename Node, typename Check>
+    requires detail::TypedValidationCheckCallable<std::remove_cvref_t<Node>,
+                                                  std::remove_cvref_t<Check>>
+  void registerExactCheck(Check &&check,
+      std::string_view category = kFastValidationCategory) {
+    registerTypedCheck(
+        makeExactValidationCheck<std::remove_cvref_t<Node>>(
+            std::forward<Check>(check)),
+        category);
+  }
+
   template <typename Node, typename Check>
     requires detail::TypedValidationCheckCallable<std::remove_cvref_t<Node>,
                                                   std::remove_cvref_t<Check>>
   [[nodiscard]] static ValidationCheckRegistration
   makeValidationCheck(Check &&check) {
-    using TypedNode = std::remove_cvref_t<Node>;
-    using StoredCheck = std::remove_cvref_t<Check>;
-    if (!detail::hasValidationCallable(check)) {
-      return {};
-    }
+    return makeTypedCheckRegistration<std::remove_cvref_t<Node>>(
+        std::forward<Check>(check), /*exactTypeOnly=*/false);
+  }
 
-    auto sharedCheck =
-        std::make_shared<StoredCheck>(std::forward<Check>(check));
-    return ValidationCheckRegistration{
-        .targetType = std::type_index(typeid(TypedNode)),
-        .check = [sharedCheck](const AstNode &node,
-                               const ValidationAcceptor &acceptor,
-                               const utils::CancellationToken &cancelToken) {
-          detail::invokeValidationCheck(
-              *sharedCheck, static_cast<const TypedNode &>(node), acceptor,
-              cancelToken);
-        },
-        .matches = &detail::nodeIsInstanceOf<TypedNode>};
+  /// Like `makeValidationCheck`, but the check runs only for nodes whose
+  /// dynamic type is exactly `Node` — not for its subtypes. The result is the
+  /// same `ValidationCheckRegistration` type, so both may be mixed in a single
+  /// `registerChecks({...})` call.
+  template <typename Node, typename Check>
+    requires detail::TypedValidationCheckCallable<std::remove_cvref_t<Node>,
+                                                  std::remove_cvref_t<Check>>
+  [[nodiscard]] static ValidationCheckRegistration
+  makeExactValidationCheck(Check &&check) {
+    return makeTypedCheckRegistration<std::remove_cvref_t<Node>>(
+        std::forward<Check>(check), /*exactTypeOnly=*/true);
   }
 
   // Binds @p Method to a validator owned elsewhere (e.g. by the service
@@ -203,17 +217,19 @@ public:
   makeValidationCheck(Object &validator) {
     using Node =
         std::remove_cvref_t<detail::ValidationCheckMethodNode<Method>>;
-    auto *bound = std::addressof(validator);
-    return makeValidationCheck<Node>(
-        [bound](const Node &node, const ValidationAcceptor &acceptor,
-                const utils::CancellationToken &cancelToken) {
-          if constexpr (detail::kValidationCheckMethodAcceptsCancellation<
-                            Method>) {
-            std::invoke(Method, *bound, node, acceptor, cancelToken);
-          } else {
-            std::invoke(Method, *bound, node, acceptor);
-          }
-        });
+    return makeTypedCheckRegistration<Node>(
+        makeBoundCheckLambda<Method>(validator), /*exactTypeOnly=*/false);
+  }
+
+  /// Exact-type-only variant of the method-binding `makeValidationCheck`.
+  template <auto Method, typename Object>
+    requires detail::BoundValidationCheckMethod<Method, Object>
+  [[nodiscard]] static ValidationCheckRegistration
+  makeExactValidationCheck(Object &validator) {
+    using Node =
+        std::remove_cvref_t<detail::ValidationCheckMethodNode<Method>>;
+    return makeTypedCheckRegistration<Node>(
+        makeBoundCheckLambda<Method>(validator), /*exactTypeOnly=*/true);
   }
 
   void registerChecks(
@@ -255,6 +271,49 @@ public:
                          const utils::CancellationToken &cancelToken) const = 0;
 
 private:
+  // Shared body of the four factory overloads: type-erase `check` for `Node`
+  // and stamp the dispatch scope. The static_cast in the stored check is sound
+  // because dispatch only ever calls it for a node that is-a `Node`.
+  template <typename Node, typename Check>
+  [[nodiscard]] static ValidationCheckRegistration
+  makeTypedCheckRegistration(Check &&check, bool exactTypeOnly) {
+    using StoredCheck = std::remove_cvref_t<Check>;
+    if (!detail::hasValidationCallable(check)) {
+      return {};
+    }
+
+    auto sharedCheck =
+        std::make_shared<StoredCheck>(std::forward<Check>(check));
+    return ValidationCheckRegistration{
+        .targetType = std::type_index(typeid(Node)),
+        .check = [sharedCheck](const AstNode &node,
+                               const ValidationAcceptor &acceptor,
+                               const utils::CancellationToken &cancelToken) {
+          detail::invokeValidationCheck(
+              *sharedCheck, static_cast<const Node &>(node), acceptor,
+              cancelToken);
+        },
+        .matches = &detail::nodeIsInstanceOf<Node>,
+        .exactTypeOnly = exactTypeOnly};
+  }
+
+  // Wraps @p Method bound to @p validator (non-owning) as a check callable,
+  // shared by the subtype and exact-type method-binding factories.
+  template <auto Method, typename Object>
+  [[nodiscard]] static auto makeBoundCheckLambda(Object &validator) {
+    using Node =
+        std::remove_cvref_t<detail::ValidationCheckMethodNode<Method>>;
+    auto *bound = std::addressof(validator);
+    return [bound](const Node &node, const ValidationAcceptor &acceptor,
+                   const utils::CancellationToken &cancelToken) {
+      if constexpr (detail::kValidationCheckMethodAcceptsCancellation<Method>) {
+        std::invoke(Method, *bound, node, acceptor, cancelToken);
+      } else {
+        std::invoke(Method, *bound, node, acceptor);
+      }
+    };
+  }
+
   virtual void registerTypedCheck(ValidationCheckRegistration registration,
                                   std::string_view category) = 0;
 };

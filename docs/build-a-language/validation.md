@@ -6,7 +6,7 @@ This is the subsystem walkthrough. For recipe-style task pages, see [Custom Vali
 
 ## Model
 
-- Register checks by AST node type.
+- Register checks by AST node type — for the type and its subtypes, or the exact type only.
 - Group checks by category such as `fast` and `slow`.
 - Report diagnostics through `ValidationAcceptor`.
 - Run document-level preparation when several checks need the same derived data.
@@ -54,6 +54,26 @@ does not copy or own it, so every check runs on the single instance owned by the
 service container (`services.validator`). That instance must outlive the registry
 — which it does — and it may safely hold per-build state, since it is never
 duplicated.
+
+## Type scope: subtypes included or exact
+
+By default a check registered for a type also runs for every subtype — a check on a base type sees all derived nodes. When a rule must apply to a single concrete type only, register it with the **exact** variants, which run solely for nodes whose dynamic type is exactly the target:
+
+```cpp
+// runs for MyBase and every subtype (e.g. MyDerived : MyBase)
+registry.registerCheck<MyBase>(check);
+registry.registerChecks(
+    {pegium::validation::ValidationRegistry::makeValidationCheck<
+         &MyValidator::checkBase>(validator)});
+
+// runs only for a node whose exact type is MyBase
+registry.registerExactCheck<MyBase>(check);
+registry.registerChecks(
+    {pegium::validation::ValidationRegistry::makeExactValidationCheck<
+         &MyValidator::checkBaseOnly>(validator)});
+```
+
+Both variants produce the same registration type, so subtype-inclusive and exact checks can be mixed in a single `registerChecks({...})` call. Dispatch cost is identical either way — the choice only changes how the check is indexed at registration.
 
 ## What to validate
 

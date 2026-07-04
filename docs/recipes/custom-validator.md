@@ -30,6 +30,20 @@ inline void registerValidationChecks(pegium::CoreServices &services,
 
 The core module owns the validator instance and registers each method against the core service container's `validation.validationRegistry`. LSP services build on the same core container, so the checks run for both plain document builds and language-server requests.
 
+By default a check registered for a type also runs for every subtype: a check on the abstract `Type` base sees both `Entity` and `DataType`. To run a check *only* for nodes whose dynamic type is exactly the target — never its subtypes — register it with the exact variants instead. Both produce the same registration type, so they mix freely in one `registerChecks({...})` call:
+
+```cpp
+registry.registerChecks(
+    {// runs for every Type — both Entity and DataType
+     pegium::validation::ValidationRegistry::makeValidationCheck<
+         &DomainModelValidator::checkType>(validator),
+     // runs only for a node whose exact type is Entity
+     pegium::validation::ValidationRegistry::makeExactValidationCheck<
+         &DomainModelValidator::checkEntityOnly>(validator)});
+```
+
+The single-check helpers `registerCheck<Node>` (subtypes included) and `registerExactCheck<Node>` (exact type only) mirror this.
+
 A validator method then attaches a diagnostic directly to the relevant property:
 
 ```cpp
