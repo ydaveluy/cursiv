@@ -8,6 +8,7 @@
 
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
+#include <pegium/core/parser/ContextShared.hpp>
 #include <pegium/core/parser/Skipper.hpp>
 #include <pegium/core/syntax-tree/RootCstNode.hpp>
 #include <pegium/core/text/TextSnapshot.hpp>
@@ -179,5 +180,36 @@ compute_recovery_window(const FailureSnapshot &snapshot,
 /// which this property is defined).
 [[nodiscard]] bool entry_rule_has_unguarded_leading_visible_entry(
     const grammar::ParserRule &entryRule) noexcept;
+
+/// Derives the recovery word-character mask from the grammar reachable from
+/// `entryRule`: the union of every `CharacterRange` alphabet that repeats
+/// inside a terminal rule's body — the CONTINUATION alphabet, which is what
+/// a boundary check asks ("does the next codepoint continue a token"), not
+/// the start alphabet. Predicate subtrees (`!` / `&`) are pruned wholesale:
+/// a class reachable only through a predicate guards a boundary, it does not
+/// extend the token. Rule references reset the repetition context (repeating
+/// a RULE does not repeat the referenced rule's characters). When the
+/// grammar declares no repeated in-terminal class, falls back to the default
+/// (C-family) mask, making the derivation strictly additive; codepoints
+/// >= 0x80 stay word-like regardless via `is_word_char_at`'s passthrough.
+[[nodiscard]] WordCharMask
+derive_word_char_mask(const grammar::ParserRule &entryRule);
+
+/// The word-character mask to install on a recovery/expect context for
+/// `entryRule`: the table cached on the rule by the reflection bootstrap
+/// when available (registered languages — no per-parse work, no shared
+/// mutation), otherwise derived on the spot (standalone parses without a
+/// service registration; a read-only grammar walk, safe under concurrent
+/// parses).
+[[nodiscard]] inline WordCharMask
+word_char_mask_for(const grammar::ParserRule &entryRule) {
+  if (const auto *table = entryRule.recoveryWordCharTable();
+      table != nullptr) {
+    WordCharMask mask;
+    mask.table = *table;
+    return mask;
+  }
+  return derive_word_char_mask(entryRule);
+}
 
 } // namespace pegium::parser::detail

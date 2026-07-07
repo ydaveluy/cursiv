@@ -380,6 +380,18 @@ observe_iteration(RecoveryContext &ctx, const RepetitionElementOps &ops,
                            recoverableParentBoundaryOwnsFreshLexicalChainTail)
                               ? BoundaryOwnership::Parent
                               : BoundaryOwnership::Local;
+  PEGIUM_RECOVERY_TRACE(
+      "[repeat boundary] offset=", parseStartOffset,
+      " ownership=", sig.boundaryOwnership == BoundaryOwnership::Parent,
+      " atBoundary=", atLocalIterationBoundary,
+      " literalAnchor=", shape.hasRequiredLiteralAnchor,
+      " startedWithoutEdits=", observation.startedWithoutEdits,
+      " noInsertProgressed=", observation.noInsertProgressed,
+      " followStrict=", followStrict,
+      " committedImposes=", committedPrefixImposes,
+      " lexicalChainTail=", localRecoveryBeginsWithLexicalChainTail,
+      " hadEdits=", ctx.hasHadEdits(),
+      " editCountBefore=", recoveryEditCountBefore);
   return sig;
 }
 
@@ -542,7 +554,16 @@ observe_iteration(RecoveryContext &ctx, const RepetitionElementOps &ops,
 /// verdict actually needs it. The probe deliberately leaks `_maxCursor` (no
 /// ProbeRestoreScope) — the caller reads `ctx.maxCursor()` for furthest-error
 /// offsets — so WHEN it fires is observable: it must never become eager.
-[[nodiscard]] IterationPlanList enumerate_iteration_plans(
+struct IterationPlanEnumeration {
+  IterationPlanList plans{};
+  /// Boundary ownership carried out of the signal layer so the caller's
+  /// fallback paths honour a parent deferral: when the parent owns the
+  /// boundary, the last-resort resync skip must not fabricate the local
+  /// candidate the deferral just forbade.
+  BoundaryOwnership boundaryOwnership = BoundaryOwnership::Local;
+};
+
+[[nodiscard]] IterationPlanEnumeration enumerate_iteration_plans(
     RecoveryContext &ctx, const RepetitionElementOps &ops,
     bool skipBetweenIterations, const IterationObservation &observation,
     TextOffset parseStartOffset, std::size_t recoveryEditCountBefore,
@@ -566,9 +587,10 @@ observe_iteration(RecoveryContext &ctx, const RepetitionElementOps &ops,
   if (sig.stopCleanly) {
     return {};
   }
-  return decide_iteration_plans(ctx, ops, sig, skipBetweenIterations,
-                                parseStartAtIterationEntryBoundary,
-                                entryRecoveryConsumesVisible);
+  return {.plans = decide_iteration_plans(ctx, ops, sig, skipBetweenIterations,
+                                          parseStartAtIterationEntryBoundary,
+                                          entryRecoveryConsumesVisible),
+          .boundaryOwnership = sig.boundaryOwnership};
 }
 
 [[nodiscard]] EditableRecoveryCandidate evaluate_retry_iteration_attempt(
@@ -625,6 +647,72 @@ IterationSelectionResult select_iteration_attempt(
   return selection;
 }
 
+/// Pass 1 of the panic-mode resync skip: delete noise until the iteration
+/// element itself re-parses (no destructive edit) from a fresh start.
+[[nodiscard]] bool resync_delete_until_element_restart(
+    RecoveryContext &ctx, const RepetitionElementOps &ops,
+    std::uint32_t codepointBudget,
+    ExtendedDeleteScanBudgetScope<RecoveryContext> &budgetScope) {
+  std::uint32_t deleted = 0u;
+  while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
+    if (ctx.probeFollowAcceptsHere()) {
+      return false;
+    }
+    if (!ctx.deleteOneCodepoint()) {
+      return false;
+    }
+    ++deleted;
+    // Cheap probe first: fast_probe short-circuits without exploring
+    // recovery state. `probe_recoverable_at_entry` is the supercategory.
+    // Mirrors the order in `probeRecoverableAtEntryConsumesVisible`.
+    if (!ops.fastProbe(ops.self, ctx) && !ops.probeAtEntry(ops.self, ctx)) {
+      continue;
+    }
+    const auto parseCheckpoint = ctx.mark();
+    const char *const parseCursor = ctx.cursor();
+    const auto targetRecoveryEditCount = ctx.recoveryEditCount();
+    if ((ops.parseNoEdits(ops.self, ctx) ||
+         ops.withElementFollow(
+             ops.self, ctx,
+             [&]() { return ops.parseEditable(ops.self, ctx); })) &&
+        ctx.cursor() != parseCursor) {
+      if (const auto editSummary = summarize_edits_since(
+              ctx.recoveryEditsView(), targetRecoveryEditCount);
+          editSummary.hasDestructiveEdit) {
+        ctx.rewind(parseCheckpoint);
+        continue;
+      }
+      budgetScope.commitOverflowEdits();
+      return true;
+    }
+    ctx.rewind(parseCheckpoint);
+  }
+  return false;
+}
+
+/// Pass 2 of the panic-mode resync skip: delete until the parent follow
+/// accepts, or until an implicit EOF follow (no installed probes) is
+/// reached at the end of input.
+[[nodiscard]] bool resync_delete_until_parent_follow(
+    RecoveryContext &ctx, std::uint32_t codepointBudget,
+    ExtendedDeleteScanBudgetScope<RecoveryContext> &budgetScope) {
+  std::uint32_t deleted = 0u;
+  while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
+    if (!ctx.deleteOneCodepoint()) {
+      return false;
+    }
+    ++deleted;
+    const bool reachedImplicitEofFollow =
+        ctx.cursor() == ctx.end && ctx._followProbes.strict.fn == nullptr &&
+        ctx._followProbes.recoverable.fn == nullptr;
+    if (ctx.probeFollowAcceptsHere() || reachedImplicitEofFollow) {
+      budgetScope.commitOverflowEdits();
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Last-resort panic-mode resync skip. Pass 1 deletes noise until the
 /// iteration element itself re-parses cleanly (no destructive edit) from a
 /// fresh start. When `allowParentFollowFallback` is set, pass 2 (after
@@ -661,57 +749,15 @@ IterationSelectionResult select_iteration_attempt(
   }
   const std::uint32_t codepointBudget = ctx.maxResyncSkipCodepoints;
 
-  std::uint32_t deleted = 0u;
-  while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
-    if (ctx.probeFollowAcceptsHere()) {
-      break;
-    }
-    if (!ctx.deleteOneCodepoint()) {
-      break;
-    }
-    ++deleted;
-    // Cheap probe first: fast_probe short-circuits without exploring
-    // recovery state. `probe_recoverable_at_entry` is the supercategory.
-    // Mirrors the order in `probeRecoverableAtEntryConsumesVisible`.
-    if (!ops.fastProbe(ops.self, ctx) && !ops.probeAtEntry(ops.self, ctx)) {
-      continue;
-    }
-    const auto parseCheckpoint = ctx.mark();
-    const char *const parseCursor = ctx.cursor();
-    const auto targetRecoveryEditCount = ctx.recoveryEditCount();
-    if ((ops.parseNoEdits(ops.self, ctx) ||
-         ops.withElementFollow(
-             ops.self, ctx,
-             [&]() { return ops.parseEditable(ops.self, ctx); })) &&
-        ctx.cursor() != parseCursor) {
-      if (const auto editSummary = summarize_edits_since(
-              ctx.recoveryEditsView(), targetRecoveryEditCount);
-          editSummary.hasDestructiveEdit) {
-        ctx.rewind(parseCheckpoint);
-        continue;
-      }
-      budgetScope.commitOverflowEdits();
-      return true;
-    }
-    ctx.rewind(parseCheckpoint);
+  if (resync_delete_until_element_restart(ctx, ops, codepointBudget,
+                                          budgetScope)) {
+    return true;
   }
-
   if (allowParentFollowFallback) {
     // Reset to the iteration entry so the parent-follow scan starts clean.
     ctx.rewind(recoveryCheckpoint);
-    deleted = 0u;
-    while (deleted < codepointBudget && ctx.cursor() < ctx.end) {
-      if (!ctx.deleteOneCodepoint()) {
-        break;
-      }
-      ++deleted;
-      const bool reachedImplicitEofFollow =
-          ctx.cursor() == ctx.end && ctx._followProbes.strict.fn == nullptr &&
-          ctx._followProbes.recoverable.fn == nullptr;
-      if (ctx.probeFollowAcceptsHere() || reachedImplicitEofFollow) {
-        budgetScope.commitOverflowEdits();
-        return true;
-      }
+    if (resync_delete_until_parent_follow(ctx, codepointBudget, budgetScope)) {
+      return true;
     }
   }
 
@@ -859,10 +905,13 @@ bool repetition_try_recovery_iteration(RecoveryContext &ctx,
   }
   const auto observation = observe_iteration(ctx, ops, iterationCheckpoint,
                                              parseStart, parseStartOffset);
-  const auto iterationPlans = enumerate_iteration_plans(
+  const auto enumeration = enumerate_iteration_plans(
       ctx, ops, skipBetweenIterations, observation, parseStartOffset,
       recoveryEditCountBefore, parseStartAtIterationEntryBoundary,
       firstStrictAccepts);
+  const auto &iterationPlans = enumeration.plans;
+  const bool parentOwnsBoundary =
+      enumeration.boundaryOwnership == BoundaryOwnership::Parent;
   const bool hasLegalRetryPlan = has_legal_iteration_retry_plan(iterationPlans);
   const char *furthestExploredCursor = ctx.maxCursor();
   // `furthestExploredCursor` is mutated by reference inside
@@ -909,7 +958,12 @@ bool repetition_try_recovery_iteration(RecoveryContext &ctx,
                 furthestExploredCursor, recoveryEditCountBefore,
                 skipBetweenIterations);
   if (!selection.bestCandidate.matched) {
-    if (try_resync_skip(
+    // A parent-owned boundary already decided the next visible token belongs
+    // to the enclosing scope's repair; the panic-mode resync would fabricate
+    // exactly the local candidate the deferral forbade (delete into the
+    // started token, then repair the remainder as an iteration item).
+    if (!parentOwnsBoundary &&
+        try_resync_skip(
             ctx, ops, parseStart, parseStartOffset,
             /*allowParentFollowFallback=*/skipBetweenIterations ||
                 ops.minIsZero)) {

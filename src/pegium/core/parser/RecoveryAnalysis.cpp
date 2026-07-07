@@ -4,11 +4,13 @@
 #include <utility>
 
 #include <pegium/core/grammar/Assignment.hpp>
+#include <pegium/core/grammar/CharacterRange.hpp>
 #include <pegium/core/grammar/DataTypeRule.hpp>
 #include <pegium/core/grammar/Group.hpp>
 #include <pegium/core/grammar/InfixRule.hpp>
 #include <pegium/core/grammar/OrderedChoice.hpp>
 #include <pegium/core/grammar/Repetition.hpp>
+#include <pegium/core/grammar/TerminalRule.hpp>
 #include <pegium/core/grammar/UnorderedGroup.hpp>
 #include <pegium/core/parser/RecoveryContext.hpp>
 #include <pegium/core/syntax-tree/CstBuilder.hpp>
@@ -372,6 +374,154 @@ bool entry_rule_has_unguarded_leading_visible_entry(
   }
   return classify_leading_visible_entry(*entryRule.getElement()) !=
          LeadingVisibleEntryKind::PredicateGuarded;
+}
+
+namespace {
+
+/// Recursion cap of the word-char-mask derivation walk, in the same spirit as
+/// `kMaxLeadingVisibleEntryDepth`: rule-reference indirection is cycle-guarded
+/// by the visited set, but grammar nesting between rule boundaries is not.
+inline constexpr unsigned kMaxWordCharMaskDepth = 256u;
+
+/// DFS state of `derive_word_char_mask`. Rules are visited once (identity on
+/// the grammar node's address); the walk carries whether it is inside a
+/// terminal rule's body and how many REPEATING `Repetition`s (max > 1 — an
+/// option is optionality, not continuation) enclose the current node within
+/// the current token. Parser/datatype/infix rule references reset the count
+/// (repeating a RULE does not repeat the referenced rule's characters); a
+/// terminal referenced from inside another terminal is a lexical fragment of
+/// the same token and keeps it.
+struct WordCharMaskWalk {
+  std::array<bool, 256> accumulated{};
+  bool sawContinuationClass = false;
+  std::vector<const grammar::AbstractElement *> visitedRules;
+
+  [[nodiscard]] bool markVisited(const grammar::AbstractElement &rule) {
+    if (std::ranges::find(visitedRules, &rule) != visitedRules.end()) {
+      return false;
+    }
+    visitedRules.push_back(&rule);
+    return true;
+  }
+
+  void enterRule(const grammar::AbstractElement &rule,
+                 const grammar::AbstractElement *body, bool insideTerminal,
+                 unsigned repetitionDepth, unsigned depth) {
+    if (body == nullptr || !markVisited(rule)) {
+      return;
+    }
+    visit(*body, insideTerminal, repetitionDepth, depth);
+  }
+
+  template <typename Alternation>
+  void visitChildren(const Alternation &parent, bool insideTerminal,
+                     unsigned repetitionDepth, unsigned childDepth) {
+    for (std::size_t index = 0; index < parent.size(); ++index) {
+      if (const auto *child = parent.get(index); child != nullptr) {
+        visit(*child, insideTerminal, repetitionDepth, childDepth);
+      }
+    }
+  }
+
+  void visit(const grammar::AbstractElement &element, bool insideTerminal,
+             unsigned repetitionDepth, unsigned depth) {
+    using enum grammar::ElementKind;
+    if (depth >= kMaxWordCharMaskDepth) {
+      return;
+    }
+    const unsigned childDepth = depth + 1u;
+    switch (element.getKind()) {
+    // Predicates are pruned wholesale: a class reachable only through a
+    // guard defines a boundary (often a negated set), never the token's own
+    // continuation alphabet.
+    case AndPredicate:
+    case NotPredicate:
+      return;
+    case CharacterRange:
+      if (insideTerminal && repetitionDepth > 0u) {
+        const auto &mask =
+            static_cast<const grammar::CharacterRange &>(element)
+                .characterMask();
+        for (std::size_t i = 0; i < mask.size(); ++i) {
+          accumulated[i] = accumulated[i] || mask[i];
+        }
+        sawContinuationClass = true;
+      }
+      return;
+    case Repetition: {
+      const auto &repetition = static_cast<const grammar::Repetition &>(element);
+      // Only a repetition that can match more than once continues the token;
+      // an option (max 1) contributes its classes exactly once, e.g. an
+      // optional sign before digits does not make the sign a word character.
+      const bool repeats = repetition.getMax() > 1u;
+      visit(*repetition.getElement(), insideTerminal,
+            repeats ? repetitionDepth + 1u : repetitionDepth, childDepth);
+      return;
+    }
+    case Assignment:
+      visit(*static_cast<const grammar::Assignment &>(element).getElement(),
+            insideTerminal, repetitionDepth, childDepth);
+      return;
+    case Group:
+      visitChildren(static_cast<const grammar::Group &>(element),
+                    insideTerminal, repetitionDepth, childDepth);
+      return;
+    case OrderedChoice:
+      visitChildren(static_cast<const grammar::OrderedChoice &>(element),
+                    insideTerminal, repetitionDepth, childDepth);
+      return;
+    case UnorderedGroup:
+      visitChildren(static_cast<const grammar::UnorderedGroup &>(element),
+                    insideTerminal, repetitionDepth, childDepth);
+      return;
+    case TerminalRule:
+      // A terminal referenced from inside a terminal is a fragment of the
+      // SAME token: its classes repeat whenever the reference site repeats,
+      // so the repetition context carries through.
+      enterRule(element,
+                static_cast<const grammar::TerminalRule &>(element).getElement(),
+                /*insideTerminal=*/true,
+                insideTerminal ? repetitionDepth : 0u, childDepth);
+      return;
+    case ParserRule:
+      enterRule(element,
+                static_cast<const grammar::ParserRule &>(element).getElement(),
+                /*insideTerminal=*/false, /*repetitionDepth=*/0u, childDepth);
+      return;
+    case DataTypeRule:
+      enterRule(element,
+                static_cast<const grammar::DataTypeRule &>(element).getElement(),
+                /*insideTerminal=*/false, /*repetitionDepth=*/0u, childDepth);
+      return;
+    case InfixRule:
+      // Only the primary: operator alphabets are not identifier continuation.
+      enterRule(element,
+                static_cast<const grammar::InfixRule &>(element).getElement(),
+                /*insideTerminal=*/false, /*repetitionDepth=*/0u, childDepth);
+      return;
+    case AnyCharacter:
+    case Literal:
+    case InfixOperator:
+    case Create:
+    case Nest:
+      return;
+    }
+  }
+};
+
+} // namespace
+
+WordCharMask derive_word_char_mask(const grammar::ParserRule &entryRule) {
+  WordCharMaskWalk walk;
+  walk.visitedRules.reserve(32u);
+  walk.visit(entryRule, /*insideTerminal=*/false, /*repetitionDepth=*/0u,
+             /*depth=*/0u);
+  if (!walk.sawContinuationClass) {
+    return {};
+  }
+  WordCharMask mask;
+  mask.table = walk.accumulated;
+  return mask;
 }
 
 } // namespace pegium::parser::detail

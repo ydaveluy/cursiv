@@ -1156,31 +1156,49 @@ TEST(RecoverySearchTest, ParserResultMatchesGlobalRecoverySearchRunResult) {
   }
 }
 
-// Global recovery-attempt ranking is the 4-axis RecoveryKey
-// (matched > firstEditOffset higher > editCost lower > progressAfterEdits
-// higher). Old heuristics that preferred farther progress over later edits or
-// penalized cost-vs-span asymmetries are intentionally gone.
+// Global recovery-attempt ranking is the RecoveryKey
+// (fullMatch > matched > rank-anchor score higher > faithfulness lower >
+// progressAfterEdits higher), where the rank anchor is the first edit's
+// offset for destructive scripts, while insert-only attempts fold to their
+// own progress (recovery_key_first_edit_score).
 
 TEST(RecoverySearchTest,
-     GlobalRecoveryRankingPrefersLaterEditOverFartherParse) {
+     GlobalRecoveryRankingPrefersLaterDestructiveEditOverFartherParse) {
+  // Non-zero edit spans make the single edit a Deleted, so the rank anchor
+  // is the edit site itself (no insert transparency in play).
   const auto farther = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
-                                           false, 24u, 24u, 1u, 10u, 0u, 1u);
+                                           false, 24u, 24u, 1u, 10u, 1u, 1u);
   const auto laterEdit = make_ranked_attempt(
-      detail::RecoveryAttemptStatus::Selectable, false, 20u, 20u, 1u, 18u, 0u, 1u);
+      detail::RecoveryAttemptStatus::Selectable, false, 20u, 20u, 1u, 18u, 1u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(laterEdit, farther));
   EXPECT_FALSE(detail::is_better_recovery_attempt(farther, laterEdit));
 }
 
 TEST(RecoverySearchTest,
-     GlobalRecoveryRankingPrefersLaterEditWhenAttemptsOtherwiseTie) {
+     GlobalRecoveryRankingPrefersLaterDestructiveEditWhenAttemptsOtherwiseTie) {
   const auto earlier = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
-                                           true, 24u, 24u, 1u, 8u, 0u, 1u);
+                                           true, 24u, 24u, 1u, 8u, 1u, 1u);
   const auto later = make_ranked_attempt(detail::RecoveryAttemptStatus::Selectable,
-                                         true, 24u, 24u, 1u, 12u, 0u, 1u);
+                                         true, 24u, 24u, 1u, 12u, 1u, 1u);
 
   EXPECT_TRUE(detail::is_better_recovery_attempt(later, earlier));
   EXPECT_FALSE(detail::is_better_recovery_attempt(earlier, later));
+}
+
+TEST(RecoverySearchTest,
+     GlobalRecoveryRankingInsertOnlyAttemptFoldsPastDestructiveCascade) {
+  // An insert-only attempt contradicts no source text, so its rank anchor
+  // folds to its own progress and outranks a destructive cascade that pushed
+  // its first edit one reinterpreted token later (the missing-close-delimiter
+  // shape: insert the delimiter vs. reinterpret the next declaration).
+  const auto insertOnly = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Selectable, true, 37u, 37u, 1u, 18u, 0u, 1u);
+  const auto cascade = make_ranked_attempt(
+      detail::RecoveryAttemptStatus::Selectable, true, 37u, 37u, 5u, 27u, 1u, 1u);
+
+  EXPECT_TRUE(detail::is_better_recovery_attempt(insertOnly, cascade));
+  EXPECT_FALSE(detail::is_better_recovery_attempt(cascade, insertOnly));
 }
 
 TEST(RecoverySearchTest,
@@ -1219,30 +1237,54 @@ TEST(RecoverySearchTest, RecoveryKeyRanksByAxisPriority) {
       {"matched beats unmatched despite worse offset/cost/progress",
        {.matched = true,
         .firstEditOffset = 0,
+        .rankAnchorOffset = 0,
         .editCost = 100,
         .progressAfterEdits = 0},
        {.matched = false,
         .firstEditOffset = 100,
+        .rankAnchorOffset = 100,
         .editCost = 0,
         .progressAfterEdits = 100}},
-      {"later first edit offset wins",
+      {"later rank anchor wins",
        {.matched = true,
         .firstEditOffset = 20,
+        .rankAnchorOffset = 20,
         .editCost = 5,
         .progressAfterEdits = 40},
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 5,
         .progressAfterEdits = 40}},
-      {"lower edit cost wins at same offset",
+      {"lower edit cost wins at same anchor",
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 1,
         .progressAfterEdits = 20},
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 5,
         .progressAfterEdits = 40}},
+      // Insert transparency (attempt-level keys): an insert-only attempt's
+      // rank anchor is its own progress, so a destructive token-theft
+      // cascade cannot outrank it by pushing its first edit one
+      // reinterpreted token later. The family anchor (firstEditOffset)
+      // still records the insert site.
+      {"insert-only repair folds past a destructive cascade one token later",
+       {.matched = true,
+        .firstEditOffset = 18,
+        .rankAnchorOffset = 37,
+        .editCost = 1,
+        .editCount = 1,
+        .progressAfterEdits = 37},
+       {.matched = true,
+        .firstEditOffset = 25,
+        .rankAnchorOffset = 25,
+        .editCost = 5,
+        .editCount = 2,
+        .progressAfterEdits = 37}},
       // Axis 4 fuses cost+count into faithfulness = editCost + W*editCount
       // (W = kFirstEditPenaltyStep = 4). The next three rows pin its behavior.
       // (a) Exact-cost tie resolves by parsimony: fewer operations win.
@@ -1250,11 +1292,13 @@ TEST(RecoverySearchTest, RecoveryKeyRanksByAxisPriority) {
       {"exact-cost tie: fewer edit operations win (parsimony)",
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 128,
         .editCount = 1,
         .progressAfterEdits = 40},
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 128,
         .editCount = 2,
         .progressAfterEdits = 40}},
@@ -1265,38 +1309,44 @@ TEST(RecoverySearchTest, RecoveryKeyRanksByAxisPriority) {
       {"near-tie: single faithful edit beats a slightly cheaper two-edit fold",
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 128,
         .editCount = 1,
         .progressAfterEdits = 40},
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 126,
         .editCount = 2,
         .progressAfterEdits = 40}},
       // (c) Count-dominant trap avoided: a genuinely cheaper many-op recovery
       //     still wins, because the tax is additive on top of cost, never a
       //     standalone count tiebreak. faithfulness 2+4*2 = 10 BEATS 8+4*1 = 12.
-      //     Offsets are picked so axis 3 (first-edit score) ties first — the
+      //     Anchors are picked so axis 3 (rank-anchor score) ties first — the
       //     cost-2 cand pays no offset penalty (score 10) and the cost-8 cand
-      //     pays one step at offset 11 (monus(11, 1) = 10) — so axis 4 decides.
+      //     pays one step at anchor 11 (monus(11, 1) = 10) — so axis 4 decides.
       {"count-dominant trap: genuinely cheaper many-op recovery still wins",
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 2,
         .editCount = 2,
         .progressAfterEdits = 40},
        {.matched = true,
         .firstEditOffset = 11,
+        .rankAnchorOffset = 11,
         .editCost = 8,
         .editCount = 1,
         .progressAfterEdits = 40}},
       {"more progress after edits breaks the tie",
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 2,
         .progressAfterEdits = 40},
        {.matched = true,
         .firstEditOffset = 10,
+        .rankAnchorOffset = 10,
         .editCost = 2,
         .progressAfterEdits = 30}},
   };
@@ -1321,18 +1371,18 @@ TEST(RecoverySearchTest, EffectiveFirstEditOffsetFoldsNoEditToProgress) {
 TEST(RecoverySearchTest, FirstEditScorePenaltyCurveStaysDecoupledFromCostTable) {
   using detail::recovery_key_first_edit_score;
   // Edit cost up to one penalty step pays no offset penalty.
-  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 0}),
+  EXPECT_EQ(recovery_key_first_edit_score({.rankAnchorOffset = 100, .editCost = 0}),
             100u);
-  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 4}),
+  EXPECT_EQ(recovery_key_first_edit_score({.rankAnchorOffset = 100, .editCost = 4}),
             100u);
   // Each additional penalty step subtracts one offset unit.
-  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 8}),
+  EXPECT_EQ(recovery_key_first_edit_score({.rankAnchorOffset = 100, .editCost = 8}),
             99u);
   EXPECT_EQ(
-      recovery_key_first_edit_score({.firstEditOffset = 100, .editCost = 12}),
+      recovery_key_first_edit_score({.rankAnchorOffset = 100, .editCost = 12}),
       98u);
   // The penalty saturates at zero and never underflows the offset.
-  EXPECT_EQ(recovery_key_first_edit_score({.firstEditOffset = 1, .editCost = 100}),
+  EXPECT_EQ(recovery_key_first_edit_score({.rankAnchorOffset = 1, .editCost = 100}),
             0u);
 }
 

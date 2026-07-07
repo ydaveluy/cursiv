@@ -5,16 +5,18 @@
 /// Comparison axes (in priority order):
 ///   1. `fullMatch`          (true wins)
 ///   2. `matched`            (true wins)
-///   3. `firstEditOffset`    penalised by excess `editCost` so a
-///                           later-but-expensive candidate does not
-///                           silently outrank a cheaper one at a
-///                           slightly earlier offset
+///   3. `rankAnchorOffset`   (higher wins, penalised by excess `editCost`):
+///                           the effective first-edit offset for local
+///                           candidates; at the attempt level, an
+///                           insert-only script contradicts no source text
+///                           and folds to the attempt's own progress
+///                           instead — so a token-theft cascade cannot
+///                           outrank a pure-insert attempt by pushing its
+///                           first edit past a reinterpreted token
 ///                           (`recovery_key_first_edit_score`)
 ///   4. `faithfulness`       (lower wins): the operation-taxed edit cost
-///                           `editCost + kFirstEditPenaltyStep * editCount`.
-///                           Fuses the former separate `editCost` and
-///                           `editCount` rungs into one scalar so a
-///                           fold that swaps one operation for a slightly
+///                           `editCost + kFirstEditPenaltyStep * editCount`;
+///                           a fold that swaps one operation for a slightly
 ///                           cheaper pair loses to the parsimonious
 ///                           single-operation recovery, while a genuinely
 ///                           cheaper recovery (saving a whole operation)
@@ -133,38 +135,46 @@ struct RecoveryKey {
   /// fullMatch is in scope.
   bool fullMatch = false;
   bool matched = false;
+  /// Family anchor: the first edit's begin offset (with the no-edit fold to
+  /// progress). Read by the family-redundancy predicates
+  /// (`is_extending_anchor_pair`), NOT by the ranking score.
   TextOffset firstEditOffset = std::numeric_limits<TextOffset>::max();
+  /// Ranking anchor of axis 3, read by `recovery_key_first_edit_score`
+  /// only. Local candidate builders set it to the same effective
+  /// first-edit offset as `firstEditOffset` (partial mid-descent slices
+  /// must not rank on progress, or sibling selection becomes a
+  /// consume-more race). The attempt-level builder
+  /// (`recovery_attempt_key`) additionally folds an insert-only script —
+  /// which contradicts no source text — to the attempt's own progress.
+  TextOffset rankAnchorOffset = std::numeric_limits<TextOffset>::max();
   std::uint32_t editCost = 0u;
   std::uint32_t editCount = 0u;
   TextOffset progressAfterEdits = 0;
 };
 
-/// Step size of the graduated first-edit-offset penalty in
+/// Step size of the graduated rank-anchor penalty in
 /// `recovery_key_first_edit_score`, and the per-operation tax weight `W`
-/// in `faithfulness`. This was historically written as
-/// `default_edit_cost(Deleted)`, which silently coupled the ranking
-/// heuristic to the cost table — retuning the Delete cost would rescale
-/// these unrelated curves with no warning. It is kept numerically equal but
-/// DECOUPLED via its own named constant; the `static_assert` pins the
-/// current relationship so a future cost-table change forces a deliberate
-/// decision (follow the cost, or keep the curve fixed).
+/// in `faithfulness`. Deliberately its own named constant rather than a
+/// read of the cost table, so retuning the Delete cost cannot silently
+/// rescale these curves; the `static_assert` pins the current numeric
+/// relationship so a future cost-table change forces a deliberate
+/// decision (follow the cost, or keep the curves fixed).
 inline constexpr std::uint32_t kFirstEditPenaltyStep = 4u;
 static_assert(kFirstEditPenaltyStep ==
                   default_edit_cost(ParseDiagnosticKind::Deleted),
               "kFirstEditPenaltyStep is intentionally decoupled from the Delete "
               "edit cost; if the Delete cost changes, decide deliberately "
-              "whether the first-edit penalty curve should follow before "
+              "whether the penalty curves should follow before "
               "updating this constant or the assertion.");
 
-/// Operation-taxed edit cost: the single fused scalar that axis 4 of the
+/// Operation-taxed edit cost: the single scalar that axis 4 of the
 /// recovery key compares on (lower wins). Adds a per-operation tax of
 /// `W = kFirstEditPenaltyStep` (one Delete's worth) to the raw `editCost`
 /// for every edit operation in the candidate's script:
 ///
 ///   faithfulness(key) = key.editCost + W * key.editCount
 ///
-/// This fuses the former two separate rungs (`editCost` then `editCount`)
-/// into one comparison. `W = Delete-cost` is load-bearing: a delete->replace
+/// `W = Delete-cost` is load-bearing: a delete->replace
 /// fold saves at most Delete-Replace = 2 < W of cost per *added* operation,
 /// so the faithful single-delete recovery still wins on faithfulness; a
 /// genuinely cheaper recovery saves at least one whole Delete = W of cost
@@ -180,7 +190,7 @@ faithfulness(const RecoveryKey &key) noexcept {
   return key.editCost + kFirstEditPenaltyStep * key.editCount;
 }
 
-/// `firstEditOffset` penalised by edit cost: the score that axis 3
+/// `rankAnchorOffset` penalised by edit cost: the score that axis 3
 /// of the recovery key actually compares on.
 ///
 /// A multi-byte delete that only wins on a 2-3 byte offset advantage

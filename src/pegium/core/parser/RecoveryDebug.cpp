@@ -138,6 +138,7 @@ edit_summary_to_json(const RecoveryAttemptEditSummary &summary) {
       {"fullMatch", key.fullMatch},
       {"matched", key.matched},
       {"firstEditOffset", json_int(key.firstEditOffset)},
+      {"rankAnchorOffset", json_int(key.rankAnchorOffset)},
       {"firstEditScore", json_int(recovery_key_first_edit_score(key))},
       {"editCost", json_int(key.editCost)},
       {"editCount", json_int(key.editCount)},

@@ -149,9 +149,14 @@ InfixTailReplayResult recover_stray_operator_run(RecoveryContext &ctx,
   return {.matched = recovered, .stopTail = recovered && stopTail};
 }
 
+/// Single source of truth for the RHS prefix-noise cleanup: scans and
+/// COMMITS the delete run in place, returning the codepoint count, or
+/// rewinds and returns `std::nullopt` when no admissible run exists from
+/// the current cursor. The observation phase calls it inside its own
+/// rewound scope; the winner replay calls it again from the identical
+/// pre-RHS state and therefore commits the identical run.
 [[nodiscard]] std::optional<std::uint32_t>
-observe_rhs_prefix_operator_noise_delete_count(RecoveryContext &ctx,
-                                               const InfixTailOps &ops) {
+scan_rhs_prefix_operator_noise(RecoveryContext &ctx, const InfixTailOps &ops) {
   const auto checkpoint = ctx.mark();
   std::optional<std::uint32_t> observedDeleteCount;
   {
@@ -247,52 +252,23 @@ observe_rhs_prefix_operator_noise_delete_count(RecoveryContext &ctx,
       observedDeleteCount.reset();
     }
   }
-  ctx.rewind(checkpoint);
-  return observedDeleteCount;
-}
-
-bool replay_rhs_prefix_operator_noise(RecoveryContext &ctx,
-                                      const InfixTailOps &ops,
-                                      std::uint32_t deleteCount) {
-  if (deleteCount == 0u) {
-    return true;
+  // Keep the committed run only when the scan admitted one; the capped-out
+  // and no-run cases roll their speculative deletes back.
+  if (!observedDeleteCount.has_value()) {
+    ctx.rewind(checkpoint);
   }
-  // Same policy as observe_rhs_prefix_operator_noise_delete_count:
-  // the commit replay must see the same skipAfterDelete=false /
-  // allowDelete=true scope so it commits exactly what the probe
-  // sanctioned.
-  ScopedBoolOverride skipGuard{ctx.skipAfterDelete, false};
-  auto editGuard = ctx.withEditPermissions(ctx.editPolicy.allowInsert, true);
-  return recover_by_guarded_delete_scan(
-      ctx,
-      [&]() {
-        // Mirror observe_rhs_prefix_operator_noise_delete_count's relaxed
-        // predicate so observe/replay delete the exact same run.
-        return ctx.cursor() != ctx.end &&
-               !ops.fastProbePrimary(ops.model, ctx);
-      },
-      [&](const char *, std::uint32_t deletedCount) {
-        ctx.skip();
-        return deletedCount == deleteCount ? ctx.cursor() : nullptr;
-      },
-      [](const char *) { /* no per-step progress action */ },
-      {.maxDeletes = deleteCount, .allowOverflow = false});
+  return observedDeleteCount;
 }
 
 bool observe_rhs_prefix_operator_noise(RecoveryContext &ctx,
                                        const InfixTailOps &ops,
                                        EditableTailObservation &observation) {
-  const auto deleteCount =
-      observe_rhs_prefix_operator_noise_delete_count(ctx, ops);
+  const auto deleteCount = scan_rhs_prefix_operator_noise(ctx, ops);
   if (!deleteCount.has_value()) {
     return false;
   }
   observation.rhsPrefixNoiseDeleteCount = *deleteCount;
-  const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
-      ctx, ops, observation.rhsPrefixNoiseDeleteCount);
-  assert(replayedPrefixNoise &&
-         "Observed infix RHS prefix cleanup must replay during observation");
-  return replayedPrefixNoise;
+  return true;
 }
 
 [[nodiscard]] EditableTailObservation
@@ -434,6 +410,7 @@ select_editable_tail_candidate_by_recovery_key(
       const RecoveryKey key{
           .matched = observation.matchedPrimary,
           .firstEditOffset = effectiveFirstEdit,
+          .rankAnchorOffset = effectiveFirstEdit,
           .editCost = observation.immediateEditCost,
           .editCount = observation.immediateEditCount,
           .progressAfterEdits = observation.postMatchCursorOffset,
@@ -456,8 +433,10 @@ select_editable_tail_candidate_by_recovery_key(
           // The scan's first edit lands at the operator position
           // (cursor at the start of the run, i.e.
           // `strayOperatorRunFirstEditOffset` captured before
-          // `try_match_operator_editable` advanced the cursor).
+          // `try_match_operator_editable` advanced the cursor). The scan
+          // only deletes, so the rank anchor is the same offset.
           .firstEditOffset = observation.strayOperatorRunFirstEditOffset,
+          .rankAnchorOffset = observation.strayOperatorRunFirstEditOffset,
           .editCost = realEditCost,
           .editCount = deleteCount,
           .progressAfterEdits = observation.rhsStartOffset,
@@ -476,12 +455,24 @@ replay_editable_rhs_primary(RecoveryContext &ctx, const InfixTailOps &ops,
   assert(candidate.kind == InfixCandidateFamily::ContinueTail &&
          "Only a ContinueTail candidate can replay an infix RHS");
   ctx.skip();
-  const bool replayedPrefixNoise = replay_rhs_prefix_operator_noise(
-      ctx, ops, candidate.rhsPrefixNoiseDeleteCount);
-  assert(replayedPrefixNoise &&
-         "Infix RHS prefix replay must match observed cleanup");
-  if (!replayedPrefixNoise) {
-    return {.matched = false, .stopTail = false};
+  // Re-run the single prefix-noise scan from the pre-RHS state the
+  // observation saw; it commits the identical run. An observation that
+  // recorded no cleanup replays none. Fail CLOSED on any divergence
+  // (monotonic state such as probe budgets can shift between observation
+  // and replay): a run that does not match the ranked candidate's recorded
+  // count is rolled back and the candidate reports unmatched, rather than
+  // committing an edit script the ranking never saw.
+  if (candidate.rhsPrefixNoiseDeleteCount != 0u) {
+    const auto replayCheckpoint = ctx.mark();
+    const auto replayedDeleteCount = scan_rhs_prefix_operator_noise(ctx, ops);
+    assert(replayedDeleteCount.has_value() &&
+           *replayedDeleteCount == candidate.rhsPrefixNoiseDeleteCount &&
+           "Infix RHS prefix replay must match observed cleanup");
+    if (!replayedDeleteCount.has_value() ||
+        *replayedDeleteCount != candidate.rhsPrefixNoiseDeleteCount) {
+      ctx.rewind(replayCheckpoint);
+      return {.matched = false, .stopTail = false};
+    }
   }
   const auto rhsStart = ctx.cursor();
   bool matchedPrimary = false;

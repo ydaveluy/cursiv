@@ -20,11 +20,10 @@
 /// driver, `sequence_ops` (the per-visit type-erased ops-table builder
 /// consumed by SequenceRecoveryEngine.cpp), `with_current_follow_probe`, and
 /// the index-recursive probe walkers that back the driver
-/// (`nullable_element_allows_recovery_skip`, `probe_recoverable_elements`,
-/// `suffix_starts_without_edits`, `probe_recoverable_entry_elements`,
+/// (`nullable_element_allows_recovery_skip`, the `walk_suffix_probes`
+/// skeleton with its `detail::Suffix*Policy` table,
 /// `probe_recoverable_entry_consumes_visible_elements`,
 /// `recoverable_follow_consumes_visible_probe`, `analyze_suffix_entry_facts`,
-/// `probe_recoverable_suffix_after_missing_current`,
 /// `probe_nullable_current_looks_started`, `previous_element_is_terminalish`,
 /// `previous_nullable_sibling_owns_cursor`,
 /// `nullable_current_consumed_visible_since`,
@@ -318,17 +317,15 @@ private:
   [[nodiscard]] constexpr bool
   nullable_element_allows_recovery_skip() const noexcept;
 
-  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
-  template <std::size_t I>
-  bool probe_recoverable_elements(RecoveryContext &ctx) const;
-
-  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
-  template <std::size_t I>
-  bool suffix_starts_without_edits(RecoveryContext &ctx) const;
-
-  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
-  template <std::size_t I>
-  bool probe_recoverable_entry_elements(RecoveryContext &ctx) const;
+  /// Shared recursion skeleton of the boolean suffix probe walkers: visit
+  /// elements from `I`, stop with `true` on the first element whose
+  /// `Policy::probe` hits, honour the policy's AndPredicate opacity, fall
+  /// through nullable elements, and at the first required element either
+  /// stop or continue under `Policy::RequiredTail`. Policies live in
+  /// `detail` (GroupRecovery.hpp) next to the definition. Recovery-mode;
+  /// defined out-of-class in GroupRecovery.hpp.
+  template <typename Policy, std::size_t I>
+  bool walk_suffix_probes(RecoveryContext &ctx) const;
 
   /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
   template <std::size_t I>
@@ -349,11 +346,6 @@ private:
   template <std::size_t I>
   [[nodiscard]] detail::SequenceSuffixEntryFacts
   analyze_suffix_entry_facts(RecoveryContext &ctx) const;
-
-  /// Recovery-mode; defined out-of-class in GroupRecovery.hpp.
-  template <std::size_t I>
-  bool probe_recoverable_suffix_after_missing_current(
-      RecoveryContext &ctx) const;
 
   /// Probe whether the nullable current element appears to have
   /// started accepting at the cursor. For non-nullable elements,

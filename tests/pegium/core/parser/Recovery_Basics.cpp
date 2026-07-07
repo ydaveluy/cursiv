@@ -413,6 +413,56 @@ TEST(RecoveryTest, KeywordGluedToShortNameKeepsKeywordAndContinues) {
   EXPECT_EQ(parsedModule->statements.size(), 1u) << parseDump;
 }
 
+TEST(RecoveryTest, MissingCloseDelimiterBeforeNextDeclarationKeepsBothBlocks) {
+  // A block misses its closing delimiter right before the next declaration,
+  // whose leading keyword also lexes as an item name inside the open block.
+  // The parent-owned iteration boundary must defer (no token theft, no
+  // panic-mode delete into the started keyword) so the single close-delimiter
+  // insert wins and BOTH declarations survive as separate nodes.
+  struct FeatureNode : pegium::AstNode {
+    string name;
+    string type;
+  };
+  struct EntityNode : pegium::AstNode {
+    string name;
+    vector<pointer<FeatureNode>> features;
+  };
+  struct ModelNode : pegium::AstNode {
+    vector<pointer<EntityNode>> entities;
+  };
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  ParserRule<FeatureNode> feature{"Feature",
+                                  assign<&FeatureNode::name>(id) + ":"_kw +
+                                      assign<&FeatureNode::type>(id)};
+  ParserRule<EntityNode> entity{
+      "Entity", "entity"_kw + assign<&EntityNode::name>(id) + "{"_kw +
+                    many(append<&EntityNode::features>(feature)) + "}"_kw};
+  ParserRule<ModelNode> model{"Model",
+                              some(append<&ModelNode::entities>(entity))};
+
+  const auto result =
+      parseRule(model, "entity A {\n  x: T\nentity B {\n  y: U\n}", skipper);
+  const auto parseDump = dump_parse_diagnostics(result.parseDiagnostics);
+
+  ASSERT_TRUE(result.value) << parseDump;
+  EXPECT_TRUE(result.fullMatch) << parseDump;
+  ASSERT_EQ(result.parseDiagnostics.size(), 1u) << parseDump;
+  EXPECT_EQ(result.parseDiagnostics[0].kind, ParseDiagnosticKind::Inserted)
+      << parseDump;
+
+  auto *parsedModel = dynamic_cast<ModelNode *>(result.value);
+  ASSERT_NE(parsedModel, nullptr) << parseDump;
+  ASSERT_EQ(parsedModel->entities.size(), 2u) << parseDump;
+  EXPECT_EQ(parsedModel->entities[0]->name, "A") << parseDump;
+  ASSERT_EQ(parsedModel->entities[0]->features.size(), 1u) << parseDump;
+  EXPECT_EQ(parsedModel->entities[0]->features[0]->name, "x") << parseDump;
+  EXPECT_EQ(parsedModel->entities[1]->name, "B") << parseDump;
+  ASSERT_EQ(parsedModel->entities[1]->features.size(), 1u) << parseDump;
+  EXPECT_EQ(parsedModel->entities[1]->features[0]->name, "y") << parseDump;
+}
+
 TEST(RecoveryTest, MissingKeywordCodepointCanRecoverLiteralAndContinue) {
   const auto whitespace = some(s);
   const auto skipper = SkipperBuilder().ignore(whitespace).build();

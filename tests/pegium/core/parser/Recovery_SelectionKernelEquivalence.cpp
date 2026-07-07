@@ -147,6 +147,10 @@ make_envelope(bool matched, ReplayPrefixClass prefix,
   CandidateEnvelope envelope;
   envelope.key.matched = matched;
   envelope.key.firstEditOffset = firstEditOffset;
+  // Local candidate builders set the rank anchor to the same effective
+  // first-edit offset; mirror that so these envelopes model production keys
+  // and the anchor axis stays live in the equivalence grid.
+  envelope.key.rankAnchorOffset = firstEditOffset;
   envelope.key.editCost = editCost;
   envelope.key.editCount = editCount;
   envelope.key.progressAfterEdits = progressAfterEdits;

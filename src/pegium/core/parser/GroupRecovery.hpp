@@ -7,12 +7,12 @@
 /// the 4-transition `parse_elements_recovery` driver, `sequence_ops` (the
 /// per-visit type-erased ops-table builder consumed by
 /// SequenceRecoveryEngine.cpp), `with_current_follow_probe`, and the
-/// index-recursive probe walkers that back the driver
-/// (`nullable_element_allows_recovery_skip`, `probe_recoverable_elements`,
-/// `suffix_starts_without_edits`, `probe_recoverable_entry_elements`,
+/// index-recursive probe walkers that back the driver: the shared
+/// `walk_suffix_probes` skeleton with its `detail::Suffix*Policy` table
+/// (the four boolean suffix walks), plus the walkers with their own shapes
+/// (`nullable_element_allows_recovery_skip`,
 /// `probe_recoverable_entry_consumes_visible_elements`,
 /// `recoverable_follow_consumes_visible_probe`, `analyze_suffix_entry_facts`,
-/// `probe_recoverable_suffix_after_missing_current`,
 /// `probe_nullable_current_looks_started`, `previous_element_is_terminalish`,
 /// `previous_nullable_sibling_owns_cursor`,
 /// `nullable_current_consumed_visible_since`,
@@ -26,14 +26,89 @@
 
 namespace pegium::parser {
 
+namespace detail {
+
+/// Policies of `Group::walk_suffix_probes`, one per boolean suffix walker.
+/// `probe` is the per-element hit test. `stopAtAndPredicate` makes an
+/// AndPredicate guard opaque to the walk once its probe missed (the
+/// predicate consumes nothing, so walking past it would bypass the
+/// lookahead it guards); the strict/after-missing walks deliberately keep
+/// walking instead. `RequiredTail` names the policy the walk continues
+/// with at the first required (non-nullable) element; `void` stops there.
+struct SuffixRecoverableAfterMissingCurrentPolicy {
+  static constexpr bool stopAtAndPredicate = false;
+  using RequiredTail = void;
+  template <typename Element>
+  static bool probe(const Element &current, RecoveryContext &ctx) {
+    return attempt_fast_probe(ctx, current) ||
+           probe_recoverable_at_entry(current, ctx) ||
+           probe_locally_recoverable(current, ctx);
+  }
+};
+
+struct SuffixRecoverablePolicy {
+  static constexpr bool stopAtAndPredicate = true;
+  using RequiredTail = SuffixRecoverableAfterMissingCurrentPolicy;
+  template <typename Element>
+  static bool probe(const Element &current, RecoveryContext &ctx) {
+    return attempt_fast_probe(ctx, current) ||
+           probe_locally_recoverable(current, ctx);
+  }
+};
+
+struct SuffixStartsWithoutEditsPolicy {
+  static constexpr bool stopAtAndPredicate = false;
+  using RequiredTail = void;
+  template <typename Element>
+  static bool probe(const Element &current, RecoveryContext &ctx) {
+    return attempt_fast_probe(ctx, current);
+  }
+};
+
+struct SuffixRecoverableAtEntryPolicy {
+  static constexpr bool stopAtAndPredicate = true;
+  using RequiredTail = void;
+  template <typename Element>
+  static bool probe(const Element &current, RecoveryContext &ctx) {
+    return probe_recoverable_at_entry(current, ctx);
+  }
+};
+
+} // namespace detail
+
+template <Expression... Elements>
+template <typename Policy, std::size_t I>
+bool Group<Elements...>::walk_suffix_probes(RecoveryContext &ctx) const {
+  if constexpr (I == sizeof...(Elements)) {
+    return false;
+  } else {
+    const auto &current = std::get<I>(elements);
+    if (Policy::probe(current, ctx)) {
+      return true;
+    }
+    if constexpr (Policy::stopAtAndPredicate) {
+      if (current.getKind() == ElementKind::AndPredicate) {
+        return false;
+      }
+    }
+    if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
+      return walk_suffix_probes<Policy, I + 1>(ctx);
+    } else if constexpr (std::is_void_v<typename Policy::RequiredTail>) {
+      return false;
+    } else {
+      return walk_suffix_probes<typename Policy::RequiredTail, I + 1>(ctx);
+    }
+  }
+}
+
 template <Expression... Elements>
 bool Group<Elements...>::probeRecoverable(RecoveryContext &ctx) const {
-  return probe_recoverable_elements<0>(ctx);
+  return walk_suffix_probes<detail::SuffixRecoverablePolicy, 0>(ctx);
 }
 
 template <Expression... Elements>
 bool Group<Elements...>::probeRecoverableAtEntry(RecoveryContext &ctx) const {
-  return probe_recoverable_entry_elements<0>(ctx);
+  return walk_suffix_probes<detail::SuffixRecoverableAtEntryPolicy, 0>(ctx);
 }
 
 template <Expression... Elements>
@@ -120,7 +195,7 @@ bool Group<Elements...>::parse_elements_recovery(
   if constexpr (std::remove_cvref_t<
                     decltype(std::get<I>(elements))>::nullable) {
     strictSuffixStartsAtEntry =
-        this->template suffix_starts_without_edits<I + 1>(ctx);
+        this->template walk_suffix_probes<detail::SuffixStartsWithoutEditsPolicy, I + 1>(ctx);
   }
   const bool visibleNullableRepairCompetesWithStrictSuffix =
       detail::sequence_nullable_current_visible_repair_competes_with_strict_suffix(
@@ -216,70 +291,6 @@ Group<Elements...>::nullable_element_allows_recovery_skip() const noexcept {
 
 template <Expression... Elements>
 template <std::size_t I>
-bool Group<Elements...>::probe_recoverable_elements(
-    RecoveryContext &ctx) const {
-  if constexpr (I == sizeof...(Elements)) {
-    return false;
-  } else {
-    const auto &current = std::get<I>(elements);
-    if (attempt_fast_probe(ctx, current) ||
-        probe_locally_recoverable(current, ctx)) {
-      return true;
-    }
-    if (current.getKind() == ElementKind::AndPredicate) {
-      return false;
-    }
-    if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-      return probe_recoverable_elements<I + 1>(ctx);
-    } else {
-      return probe_recoverable_suffix_after_missing_current<I + 1>(ctx);
-    }
-  }
-}
-
-template <Expression... Elements>
-template <std::size_t I>
-bool Group<Elements...>::suffix_starts_without_edits(
-    RecoveryContext &ctx) const {
-  if constexpr (I == sizeof...(Elements)) {
-    return false;
-  } else {
-    const auto &current = std::get<I>(elements);
-    if (attempt_fast_probe(ctx, current)) {
-      return true;
-    }
-    if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-      return suffix_starts_without_edits<I + 1>(ctx);
-    } else {
-      return false;
-    }
-  }
-}
-
-template <Expression... Elements>
-template <std::size_t I>
-bool Group<Elements...>::probe_recoverable_entry_elements(
-    RecoveryContext &ctx) const {
-  if constexpr (I == sizeof...(Elements)) {
-    return false;
-  } else {
-    const auto &current = std::get<I>(elements);
-    if (probe_recoverable_at_entry(current, ctx)) {
-      return true;
-    }
-    if (current.getKind() == ElementKind::AndPredicate) {
-      return false;
-    }
-    if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-      return probe_recoverable_entry_elements<I + 1>(ctx);
-    } else {
-      return false;
-    }
-  }
-}
-
-template <Expression... Elements>
-template <std::size_t I>
 bool Group<Elements...>::probe_recoverable_entry_consumes_visible_elements(
     RecoveryContext &ctx, bool allowSyntheticLeadingTerminalContinuation,
     RecoveryContext::FollowProbeFn outerRecoverableConsumesVisible,
@@ -308,7 +319,7 @@ bool Group<Elements...>::probe_recoverable_entry_consumes_visible_elements(
             allowSyntheticLeadingTerminalContinuation) &&
         detail::cursor_starts_visible_source(ctx)) {
       const bool suffixConsumesVisible =
-          this->template suffix_starts_without_edits<I + 1>(ctx) ||
+          this->template walk_suffix_probes<detail::SuffixStartsWithoutEditsPolicy, I + 1>(ctx) ||
           (I + 1 == sizeof...(Elements) &&
            outerRecoverableConsumesVisible != nullptr &&
            outerRecoverableConsumesVisible(
@@ -374,26 +385,6 @@ Group<Elements...>::analyze_suffix_entry_facts(RecoveryContext &ctx) const {
   }
 }
 
-template <Expression... Elements>
-template <std::size_t I>
-bool Group<Elements...>::probe_recoverable_suffix_after_missing_current(
-    RecoveryContext &ctx) const {
-  if constexpr (I == sizeof...(Elements)) {
-    return false;
-  } else {
-    const auto &current = std::get<I>(elements);
-    if (attempt_fast_probe(ctx, current) ||
-        probe_recoverable_at_entry(current, ctx) ||
-        probe_locally_recoverable(current, ctx)) {
-      return true;
-    }
-    if constexpr (std::remove_cvref_t<decltype(current)>::nullable) {
-      return probe_recoverable_suffix_after_missing_current<I + 1>(ctx);
-    } else {
-      return false;
-    }
-  }
-}
 
 template <Expression... Elements>
 template <std::size_t I>
@@ -518,7 +509,7 @@ detail::SequenceElementOps Group<Elements...>::sequence_ops() const noexcept {
       .suffixProbeRecoverableEntry =
           +[](const void *self, RecoveryContext &ctx) {
             return static_cast<const Group *>(self)
-                ->template probe_recoverable_entry_elements<I + 1>(ctx);
+                ->template walk_suffix_probes<detail::SuffixRecoverableAtEntryPolicy, I + 1>(ctx);
           },
       .parseTail =
           +[](const void *self, RecoveryContext &ctx,
@@ -572,12 +563,12 @@ bool Group<Elements...>::with_current_follow_probe(RecoveryContext &ctx,
     constexpr auto strictProbeFn =
         +[](RecoveryContext &c, const void *data) -> bool {
       const auto *self = static_cast<const Group *>(data);
-      return self->template suffix_starts_without_edits<I + 1>(c);
+      return self->template walk_suffix_probes<detail::SuffixStartsWithoutEditsPolicy, I + 1>(c);
     };
     constexpr auto recoverableProbeFn =
         +[](RecoveryContext &c, const void *data) -> bool {
       const auto *self = static_cast<const Group *>(data);
-      return self->template probe_recoverable_entry_elements<I + 1>(c);
+      return self->template walk_suffix_probes<detail::SuffixRecoverableAtEntryPolicy, I + 1>(c);
     };
     constexpr auto recoverableConsumesVisibleProbeFn =
         &Group::template recoverable_follow_consumes_visible_probe<I + 1>;

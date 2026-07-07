@@ -203,8 +203,10 @@ ExpectResult PegiumParser::expect(
   // cursor. Mirrors the recovery context's strict-first, lazily-activated
   // philosophy (`recoveryDescentInactive()`), applied at whole-parse
   // granularity so the delicate per-combinator edit machinery is untouched.
+  const auto wordChars = detail::word_char_mask_for(entryRule);
   const auto runPass = [&](bool allowEdits) -> bool {
     ExpectContext ctx{text, skipper, offset, cancelToken};
+    ctx.wordChars = wordChars;
     ctx.editPolicy.maxConsecutiveCodepointDeletes =
         options.maxConsecutiveCodepointDeletes;
     ctx.editPolicy.maxEditsPerAttempt = options.maxRecoveryEditsPerAttempt;

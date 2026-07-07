@@ -10,6 +10,7 @@
 #include <pegium/core/grammar/AbstractElement.hpp>
 #include <pegium/core/grammar/Assignment.hpp>
 #include <pegium/core/grammar/ParserRule.hpp>
+#include <pegium/core/parser/RecoveryAnalysis.hpp>
 #include <pegium/core/syntax-tree/AstNode.hpp>
 #include <pegium/core/syntax-tree/AstReflection.hpp>
 #include <pegium/core/utils/TypeIndexHash.hpp>
@@ -347,6 +348,11 @@ inline void bootstrapAstReflection(const grammar::ParserRule &entryRule,
   AstReflectionInitContext initContext{.state = std::addressof(state)};
   entryRule.init(initContext);
   state.finalize();
+  // Cache the grammar-derived word-character table on the entry rule while
+  // registration is still single-threaded: concurrent parses afterwards only
+  // read it (`word_char_mask_for`).
+  entryRule.initializeRecoveryWordCharTable(
+      detail::derive_word_char_mask(entryRule).table);
 }
 
 } // namespace pegium::parser

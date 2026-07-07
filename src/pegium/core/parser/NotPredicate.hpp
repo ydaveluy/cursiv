@@ -91,6 +91,7 @@ private:
       auto probeCtx =
           ExpectContext{remaining, ctx.skipper(),
                         static_cast<TextOffset>(remaining.size())};
+      probeCtx.wordChars = ctx.wordChars;
       probeCtx.setInRecoveryPhase(false);
       return with_no_edits(
           probeCtx, [this, &probeCtx]() {

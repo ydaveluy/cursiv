@@ -100,7 +100,7 @@ struct SequenceElementOps {
   SequenceSuffixEntryFacts (*analyzeSuffixEntryFacts)(const void *self,
                                                       RecoveryContext &ctx) =
       nullptr;
-  /// `probe_recoverable_entry_elements<I + 1>`.
+  /// `walk_suffix_probes<detail::SuffixRecoverableAtEntryPolicy, I + 1>`.
   bool (*suffixProbeRecoverableEntry)(const void *self,
                                       RecoveryContext &ctx) = nullptr;
   /// `parse_elements<RecoveryContext, I + 1>(ctx, currentNullableConsumedVisible)`.

@@ -26,6 +26,9 @@ struct CharacterRange final : grammar::CharacterRange,
       utils::createCharacterRange({range.data(), range.size()});
   static_assert(!lookup[0],
                 "CharacterRange cannot include '\\0'.");
+  const std::array<bool, 256> &characterMask() const noexcept override {
+    return lookup;
+  }
   static constexpr bool nullable = false;
   static constexpr bool isFailureSafe = true;
   using type = std::string_view;

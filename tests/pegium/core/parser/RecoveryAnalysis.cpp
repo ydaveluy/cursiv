@@ -384,4 +384,87 @@ TEST(RecoveryWindowTest, ComputesWindowForScenario) {
   }
 }
 
+TEST(WordCharMaskDerivationTest, CanonicalIdentifierGrammarReproducesDefault) {
+  // The canonical ID shape shared by every in-tree grammar: the continuation
+  // class equals the default C-family word class byte-for-byte.
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(id)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_EQ(mask.table, pegium::utils::is_word_lookup);
+}
+
+TEST(WordCharMaskDerivationTest, OptionalClassIsNotContinuation) {
+  // An option contributes its class at most once: an optional sign before
+  // the digits does not make '+'/'-' word characters.
+  TerminalRule<std::string> number{"NUMBER", option("+-"_cr) + some("0-9"_cr)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(number)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_TRUE(mask.table['0']);
+  EXPECT_FALSE(mask.table['+']);
+  EXPECT_FALSE(mask.table['-']);
+}
+
+TEST(WordCharMaskDerivationTest, TerminalFragmentKeepsRepetitionContext) {
+  // A terminal referenced from inside another terminal's repetition is a
+  // lexical fragment of the same token: its alphabet continues that token.
+  TerminalRule<std::string> digit{"DIGIT", "0-9"_cr};
+  TerminalRule<std::string> id{"ID",
+                               "a-zA-Z_"_cr + many("a-zA-Z_"_cr | digit)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(id)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_TRUE(mask.table['a']);
+  EXPECT_TRUE(mask.table['5']);
+}
+
+TEST(WordCharMaskDerivationTest, ExtendedContinuationAlphabetIsDerived) {
+  // A kebab-case identifier alphabet: '-' continues a token in THIS grammar.
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many("a-zA-Z0-9_-"_cr)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(id)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_TRUE(mask.table['-']);
+  EXPECT_TRUE(mask.table['a']);
+  EXPECT_TRUE(mask.table['0']);
+  EXPECT_TRUE(mask.table['_']);
+  EXPECT_FALSE(mask.table['+']);
+}
+
+TEST(WordCharMaskDerivationTest, StartClassIsNotCollected) {
+  // Only the alphabet under a Repetition contributes: the start class asks
+  // "does a token begin here", while the boundary checks the mask feeds ask
+  // "does the next codepoint CONTINUE a token".
+  TerminalRule<std::string> id{"ID", "A-Z"_cr + many("0-9"_cr)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(id)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_TRUE(mask.table['0']);
+  EXPECT_TRUE(mask.table['9']);
+  EXPECT_FALSE(mask.table['A']);
+  EXPECT_FALSE(mask.table['a']);
+}
+
+TEST(WordCharMaskDerivationTest, PredicateGuardedClassIsPruned) {
+  // A class reachable only through a NotPredicate guard defines a boundary,
+  // not the token's continuation alphabet — the walk must not collect it.
+  TerminalRule<std::string> id{"ID", "x-z"_cr + many(!"a-b"_cr + "x-z"_cr)};
+  ParserRule<RecoveryAnalysisNode> entry{
+      "Entry", "module"_kw + assign<&RecoveryAnalysisNode::name>(id)};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_TRUE(mask.table['x']);
+  EXPECT_TRUE(mask.table['z']);
+  EXPECT_FALSE(mask.table['a']);
+  EXPECT_FALSE(mask.table['b']);
+}
+
+TEST(WordCharMaskDerivationTest, GrammarWithoutRepeatedClassFallsBack) {
+  // No repeated in-terminal class anywhere: the derivation falls back to the
+  // default mask instead of an empty one.
+  ParserRule<RecoveryAnalysisNode> entry{"Entry", "service"_kw};
+  const auto mask = detail::derive_word_char_mask(entry);
+  EXPECT_EQ(mask.table, pegium::utils::is_word_lookup);
+}
+
 } // namespace

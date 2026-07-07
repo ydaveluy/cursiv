@@ -1,10 +1,11 @@
 // Ranking-baseline regression: pins the CHOSEN recovery candidate for a corpus
 // of malformed inputs.
 //
-// This is the quality oracle for a future recovery-ranking change (G1) and a
-// permanent regression asset. Every case below GENUINELY recovers under the
-// current (byte-offset based) ranking. Each case captures a stable,
-// deterministic observable of the chosen recovery candidate:
+// This is the quality oracle for recovery-ranking changes and a permanent
+// regression asset. Every case below GENUINELY recovers under the current
+// ranking (faithfulness-weighted first-edit score, see
+// recovery_key_first_edit_score). Each case captures a stable, deterministic
+// observable of the chosen recovery candidate:
 //
 //   struct Outcome { bool fullMatch; uint32_t parsedLength; std::string edits; };
 //
@@ -363,6 +364,39 @@ Outcome runTopLevelChoiceKeywordRepair(std::string_view input) {
                  dump_ranking_edits(result.parseDiagnostics)};
 }
 
+// Entity block with a feature list, missing its closing delimiter before the
+// next declaration. The next "entity" keyword also lexes as a feature name, so
+// a token-theft cascade (insert ":" after it + delete the following "{") pushes
+// its first edit one token later than the faithful single close-delimiter
+// insert; the ranking must keep the faithful insert.
+Outcome runEntityFeaturesMissingCloseBrace(std::string_view input) {
+  struct FeatureNode : pegium::AstNode {
+    string name;
+    string type;
+  };
+  struct EntityNode : pegium::AstNode {
+    string name;
+    vector<pointer<FeatureNode>> features;
+  };
+  struct ModelNode : pegium::AstNode {
+    vector<pointer<EntityNode>> entities;
+  };
+  const auto whitespace = some(s);
+  const auto skipper = SkipperBuilder().ignore(whitespace).build();
+  TerminalRule<std::string> id{"ID", "a-zA-Z_"_cr + many(w)};
+  ParserRule<FeatureNode> feature{"Feature",
+                                  assign<&FeatureNode::name>(id) + ":"_kw +
+                                      assign<&FeatureNode::type>(id)};
+  ParserRule<EntityNode> entity{
+      "Entity", "entity"_kw + assign<&EntityNode::name>(id) + "{"_kw +
+                    many(append<&EntityNode::features>(feature)) + "}"_kw};
+  ParserRule<ModelNode> model{"Model",
+                              some(append<&ModelNode::entities>(entity))};
+  const auto result = parseRule(model, input, skipper);
+  return Outcome{result.fullMatch, result.parsedLength,
+                 dump_ranking_edits(result.parseDiagnostics)};
+}
+
 // def/optional-args module with statement choice (Recovery_Calls.cpp):
 // missing delimiter / missing colon shapes.
 Outcome runDefModuleStatementChoice(std::string_view input) {
@@ -582,6 +616,19 @@ static const RankingBaselineCase kRankingBaselineCases[] = {
     {"insert_missing_closing_brace", false,
      [] { return runServiceBraces("service{"); },
      {true, 8, "8-8:Inserted"}},
+    // The faithful repair: one inserted "}" ahead of the next "entity". Two
+    // mechanisms cooperate: the parent-owned iteration boundary defers the
+    // feature iteration (including the panic-mode resync skip, which would
+    // otherwise fabricate delete-into-the-started-token + insert-":"), and
+    // the attempt ranking prefers the insert-only script over the token-theft
+    // cascade (pinned by
+    // GlobalRecoveryRankingInsertOnlyAttemptFoldsPastDestructiveCascade).
+    {"insert_missing_close_brace_before_next_declaration", false,
+     [] {
+       return runEntityFeaturesMissingCloseBrace(
+           "entity A {\n  x: T\nentity B {\n  y: U\n}");
+     },
+     {true, 37, "18-18:Inserted"}},
     // ---- ordered-choice branch pick ------------------------------------
     {"ordered_choice_insert_semicolon", false,
      [] { return runOrderedChoiceAb("ab", false); },
@@ -745,7 +792,7 @@ TEST(RecoveryRankingBaselineTest, CorpusCountsAreStable) {
       ++stress;
     }
   }
-  EXPECT_EQ(total, 31u);
+  EXPECT_EQ(total, 32u);
   EXPECT_EQ(stress, 5u);
 }
 
