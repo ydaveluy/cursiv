@@ -618,7 +618,8 @@ TEST(DefaultValidationRegistryTest,
             std::string::npos);
 }
 
-TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
+TEST(DefaultValidationRegistryTest,
+     AstNodeCatchAllRunsAfterTypeSpecificChecksRegardlessOfRegistrationOrder) {
   RegistryTestServices context;
   DefaultValidationRegistry registry(context.core);
   ValidationNodeABootstrapParser parser;
@@ -626,14 +627,17 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
                          *context.shared.astReflection);
 
   std::vector<std::string> order;
-  registry.registerCheck<ValidationNodeA>(
-      [&order](const ValidationNodeA &, const ValidationAcceptor &) {
-        order.push_back("node-fast-1");
-      },
-      "fast");
+  // Registered FIRST, yet must still run LAST: a check targeting the
+  // universal AstNode base matches every node, so it must never preempt a
+  // type-specific check — regardless of registration order.
   registry.registerCheck<pegium::AstNode>(
       [&order](const pegium::AstNode &, const ValidationAcceptor &) {
         order.push_back("ast-fast");
+      },
+      "fast");
+  registry.registerCheck<ValidationNodeA>(
+      [&order](const ValidationNodeA &, const ValidationAcceptor &) {
+        order.push_back("node-fast-1");
       },
       "fast");
   registry.registerCheck<ValidationNodeA>(
@@ -651,8 +655,8 @@ TEST(DefaultValidationRegistryTest, ChecksExecuteInRegistrationOrder) {
 
   EXPECT_EQ(order, (std::vector<std::string>{
                        "node-fast-1",
-                       "ast-fast",
                        "node-fast-2",
+                       "ast-fast",
                    }));
 }
 

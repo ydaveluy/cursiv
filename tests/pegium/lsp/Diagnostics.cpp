@@ -167,5 +167,69 @@ TEST(DiagnosticsTest, RelatedInformationRangeUsesCrossFileTargetDocument) {
   EXPECT_EQ(lsp.range.start.line, 1u);
 }
 
+TEST(DiagnosticsTest,
+     RelatedInformationRangeIsZeroWhenNoCrossFileProviderIsGiven) {
+  const auto uriA = test::make_file_uri("diag-a.test");
+  const auto uriB = test::make_file_uri("diag-b.test");
+  auto docA = workspace::TextDocument::create(uriA, "", 1, "alpha\nbeta\n");
+
+  Diagnostic diagnostic{
+      .severity = pegium::DiagnosticSeverity::Error,
+      .message = "cross-file",
+      .relatedInformation = {{
+          .uri = uriB,
+          .message = "see other file",
+          .begin = 6,
+          .end = 10,
+      }},
+      .begin = 6,
+      .end = 10,
+  };
+
+  // No crossFileProvider at all: reusing docA's offsets for a docB-relative
+  // entry would silently produce a wrong-but-plausible position, so the range
+  // must be {0,0} instead.
+  const auto lsp = to_lsp_diagnostic(docA, diagnostic, nullptr);
+  ASSERT_TRUE(lsp.relatedInformation.has_value());
+  ASSERT_EQ(lsp.relatedInformation->size(), 1u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.start.line, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.start.character, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.end.line, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.end.character, 0u);
+}
+
+TEST(DiagnosticsTest,
+     RelatedInformationRangeIsZeroWhenCrossFileProviderCannotResolveIt) {
+  const auto uriA = test::make_file_uri("diag-a.test");
+  const auto uriB = test::make_file_uri("diag-b.test");
+  const auto uriC = test::make_file_uri("diag-c.test");
+  auto docA = workspace::TextDocument::create(uriA, "", 1, "alpha\nbeta\n");
+  auto docC = std::make_shared<workspace::TextDocument>(
+      workspace::TextDocument::create(uriC, "", 1, "unrelated\n"));
+  // Only knows about uriC, not the uriB the entry names.
+  SingleDocumentProvider provider(docC);
+
+  Diagnostic diagnostic{
+      .severity = pegium::DiagnosticSeverity::Error,
+      .message = "cross-file",
+      .relatedInformation = {{
+          .uri = uriB,
+          .message = "see other file",
+          .begin = 6,
+          .end = 10,
+      }},
+      .begin = 6,
+      .end = 10,
+  };
+
+  const auto lsp = to_lsp_diagnostic(docA, diagnostic, &provider);
+  ASSERT_TRUE(lsp.relatedInformation.has_value());
+  ASSERT_EQ(lsp.relatedInformation->size(), 1u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.start.line, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.start.character, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.end.line, 0u);
+  EXPECT_EQ(lsp.relatedInformation->front().location.range.end.character, 0u);
+}
+
 } // namespace
 } // namespace pegium

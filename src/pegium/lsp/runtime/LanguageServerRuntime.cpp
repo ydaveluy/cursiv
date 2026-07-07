@@ -18,6 +18,7 @@
 #include <lsp/messagehandler.h>
 #include <lsp/messages.h>
 
+#include <pegium/core/workspace/Documents.hpp>
 #include <pegium/lsp/services/DefaultLspModule.hpp>
 #include <pegium/lsp/support/Diagnostics.hpp>
 #include <pegium/lsp/workspace/DocumentUpdateHandler.hpp>
@@ -96,6 +97,43 @@ to_workspace_text_edit(const ::lsp::TextEdit &edit) {
   };
 }
 
+/// Resolves cross-file related-information ranges: tries the live LSP
+/// text-document cache first (freshest content for files open in the editor),
+/// then falls back to the workspace-wide document registry, which also covers
+/// files that have been indexed but are not open in the editor.
+class CrossFileTextDocumentProvider final
+    : public workspace::TextDocumentProvider {
+public:
+  CrossFileTextDocumentProvider(const TextDocuments *openBuffers,
+                                const workspace::Documents *documents)
+      : _openBuffers(openBuffers), _documents(documents) {}
+
+  [[nodiscard]] std::shared_ptr<workspace::TextDocument>
+  getNormalized(std::string_view normalizedUri) const override {
+    if (_openBuffers != nullptr) {
+      if (auto open = _openBuffers->getNormalized(normalizedUri);
+          open != nullptr) {
+        return open;
+      }
+    }
+    if (_documents != nullptr) {
+      if (auto document = _documents->getDocument(normalizedUri);
+          document != nullptr) {
+        // `Documents` exposes only a const view of its TextDocument; this
+        // adapter is read-only (used solely to compute a cross-file
+        // position), so aliasing through a const_cast is safe here.
+        return {document, const_cast<workspace::TextDocument *>(
+                              &document->textDocument())};
+      }
+    }
+    return nullptr;
+  }
+
+private:
+  const TextDocuments *_openBuffers;
+  const workspace::Documents *_documents;
+};
+
 int run_language_server(
     ::lsp::io::Stream &stream, std::string_view serverName,
     const std::function<bool(pegium::SharedServices &)> &registerLanguageServices,
@@ -154,7 +192,8 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
 
   disposables.add(sharedServices.workspace.documentBuilder->onDocumentPhase(
       workspace::DocumentState::Validated,
-      [&messageHandler, textDocuments = sharedServices.lsp.textDocuments](
+      [&messageHandler, textDocuments = sharedServices.lsp.textDocuments,
+       documents = sharedServices.workspace.documents.get()](
           const std::shared_ptr<workspace::Document> &document,
           utils::CancellationToken) {
         assert(document != nullptr);
@@ -165,6 +204,8 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
             return;
           }
         }
+        const CrossFileTextDocumentProvider crossFileProvider(
+            textDocuments.get(), documents);
         publish_diagnostics(&messageHandler,
                             workspace::DocumentDiagnosticsSnapshot{
                                 .uri = document->uri,
@@ -172,7 +213,7 @@ void addDiagnosticsHandler(::lsp::MessageHandler &messageHandler,
                                 .version = document->textDocument().version(),
                                 .diagnostics = document->diagnostics,
                             },
-                            textDocuments.get());
+                            &crossFileProvider);
       }));
 }
 

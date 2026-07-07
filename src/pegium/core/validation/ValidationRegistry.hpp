@@ -130,6 +130,20 @@ inline constexpr std::string_view kSlowValidationCategory = "slow";
 /// Built-in category for parser/linker diagnostics emitted by the runtime.
 inline constexpr std::string_view kBuiltInValidationCategory = "built-in";
 
+// Stable diagnostic codes the runtime itself emits (as opposed to
+// language-specific validation checks) — compare `Diagnostic::code` against
+// these instead of hardcoding the string. `Diagnostic::code` holds a
+// `std::string`, so these are `std::string` rather than `string_view` — every
+// call site builds a `DiagnosticCode`/`std::string` from one directly.
+inline const std::string kParseConversionErrorCode = "parse.conversion";
+inline const std::string kParseIncompleteCode = "parse.incomplete";
+inline const std::string kParseInsertedCode = "parse.inserted";
+inline const std::string kParseDeletedCode = "parse.deleted";
+inline const std::string kParseReplacedCode = "parse.replaced";
+inline const std::string kParseRecoveredCode = "parse.recovered";
+inline const std::string kLinkingUnresolvedReferenceCode =
+    "linking.unresolved-reference";
+
 /// Type-erased validation check runnable on any AST node.
 using ValidationCheck =
     std::function<void(const AstNode &, const ValidationAcceptor &,

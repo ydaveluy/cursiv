@@ -227,12 +227,19 @@ std::optional<CstNodeView> find_node_for_feature(const CstNodeView &node,
     return std::nullopt;
   }
   std::size_t seen = 0;
+  std::optional<CstNodeView> lastMatch;
   for (const auto &child : node) {
-    if (child_assigns_feature(child, feature) && seen++ == index) {
-      return child;
+    if (child_assigns_feature(child, feature)) {
+      if (seen == index) {
+        return child;
+      }
+      lastMatch = child;
+      ++seen;
     }
   }
-  return std::nullopt;
+  // `index` exceeds the actual occurrence count: clamp to the last one instead
+  // of nullopt (nullopt stays reserved for "never assigned at all").
+  return lastMatch;
 }
 
 std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView &node,
@@ -253,10 +260,14 @@ std::optional<CstNodeView> find_node_for_keyword(const CstNodeView &node,
                                     : index + 1U;
   std::vector<CstNodeView> matches;
   collect_keyword_nodes(node, keyword, matches, stopAfter);
-  if (index >= matches.size()) {
+  if (matches.empty()) {
     return std::nullopt;
   }
-  return matches[index];
+  // `index` exceeds the actual occurrence count: clamp to the last one instead
+  // of nullopt (nullopt stays reserved for "never written at all"). `stopAfter`
+  // only truncates collection when there ARE enough matches to reach it, so
+  // `matches` already holds the true count whenever we get here.
+  return matches[std::min(index, matches.size() - 1)];
 }
 
 std::vector<CstNodeView> find_nodes_for_keyword(const CstNodeView &node,

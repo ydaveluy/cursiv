@@ -80,13 +80,11 @@ public:
 
   ~ValidationDiagnosticBuilderBase() noexcept { emitNoexcept(); }
 
+  /// `begin`/`end` are absolute document offsets, not relative to the node —
+  /// same convention as `relatedInformation(begin, end, ...)`.
   Derived &range(TextOffset begin, TextOffset end) noexcept {
-    const auto baseBegin = _begin;
-    const auto baseEnd = _end;
-    const auto selectedBegin = std::min(baseBegin + begin, baseEnd);
-    const auto selectedEnd = std::min(baseBegin + end, baseEnd);
-    _begin = selectedBegin;
-    _end = std::max(selectedBegin, selectedEnd);
+    _begin = begin;
+    _end = std::max(begin, end);
     return derived();
   }
 
@@ -94,9 +92,17 @@ public:
                 std::optional<std::string_view> description =
                     std::nullopt) {
     _code = pegium::DiagnosticCode(std::string(codeValue));
-    _codeDescription =
-        description.has_value() ? std::optional<std::string>(std::string(*description))
-                                : std::nullopt;
+    setCodeDescription(description);
+    return derived();
+  }
+
+  /// Integer overload — `DiagnosticCode` is `variant<int64_t, string>` and LSP
+  /// serialization handles both.
+  Derived &code(std::int64_t codeValue,
+                std::optional<std::string_view> description =
+                    std::nullopt) {
+    _code = pegium::DiagnosticCode(codeValue);
+    setCodeDescription(description);
     return derived();
   }
 
@@ -164,6 +170,12 @@ protected:
 
 private:
   Derived &derived() noexcept { return static_cast<Derived &>(*this); }
+
+  void setCodeDescription(std::optional<std::string_view> description) {
+    _codeDescription =
+        description.has_value() ? std::optional<std::string>(std::string(*description))
+                                : std::nullopt;
+  }
 
   const ValidationAcceptor *_acceptor = nullptr;
   const AstNode *_node = nullptr;

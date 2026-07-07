@@ -39,9 +39,12 @@ struct CompiledValidationRegistry {
   std::vector<std::string> knownCategories;
   std::vector<CompiledValidationCheckEntry> checks;
   CompiledValidationCheckIndex checksByType;
-  // Checks whose target is an abstract base the grammar never named (absent
-  // from reflection): they cannot be pre-indexed by concrete subtype, so
-  // `runChecks` gates them per node with the entry's `matches` predicate.
+  // Checks that cannot be pre-indexed by concrete subtype, so `runChecks`
+  // gates them per node with the entry's `matches` predicate instead: either
+  // the target is an abstract base the grammar never named (absent from
+  // reflection), or it is the universal `AstNode` base, which matches every
+  // node and must therefore always run after every type-specific check in
+  // `checksByType` regardless of registration order.
   CompiledValidationCheckList fallbackChecks;
   std::shared_ptr<observability::ObservabilitySink> sink;
 };
@@ -140,7 +143,13 @@ DefaultValidationRegistry::compiledRegistry() const {
     // would never reach it via the dynamic-type lookup. Dispatch it through the
     // fallback list instead, gated per node by its `matches` predicate — the
     // dynamic_cast fallback the reflection's `isKnown` contract prescribes.
-    if (!reflection.isKnown(entry.targetType)) {
+    //
+    // A check targeting the universal `AstNode` base matches every node, so it
+    // must always run after every type-specific check, regardless of
+    // registration order — the same fallback list, always run after
+    // `checksByType` in `runChecks`, gives that guarantee for free.
+    if (entry.targetType == std::type_index(typeid(AstNode)) ||
+        !reflection.isKnown(entry.targetType)) {
       if (entry.matches != nullptr) {
         compiled->fallbackChecks.push_back(&entry);
       }

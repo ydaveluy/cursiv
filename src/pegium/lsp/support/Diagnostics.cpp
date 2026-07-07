@@ -83,20 +83,32 @@ to_lsp_diagnostic(const workspace::TextDocument &positionDocument,
           entryUri.isValid() ? entryUri : ::lsp::Uri::parse(documentUri);
 
       // Map the entry's offsets against the document it actually points at: a
-      // cross-file entry resolves through `crossFileProvider`; same-document or
-      // unresolvable entries use `positionDocument`.
+      // cross-file entry resolves through `crossFileProvider`. Reusing
+      // `positionDocument`'s offsets for an unresolved cross-file entry would
+      // silently produce a plausible-looking but wrong line/column, so an
+      // entry naming a different file that cannot be resolved reports {0,0}
+      // instead.
       const workspace::TextDocument *rangeDocument = &positionDocument;
       std::shared_ptr<workspace::TextDocument> crossFileHolder;
-      if (!entry.uri.empty() && crossFileProvider != nullptr) {
-        if (auto resolved = crossFileProvider->get(entry.uri);
-            resolved != nullptr && resolved->uri() != documentUri) {
+      if (!entry.uri.empty() && entry.uri != documentUri) {
+        auto resolved = crossFileProvider != nullptr
+                            ? crossFileProvider->get(entry.uri)
+                            : nullptr;
+        if (resolved == nullptr) {
+          rangeDocument = nullptr;
+        } else if (resolved->uri() != documentUri) {
           crossFileHolder = std::move(resolved);
           rangeDocument = crossFileHolder.get();
         }
       }
-      related.location.range.start = rangeDocument->positionAt(entry.begin);
-      related.location.range.end = rangeDocument->positionAt(
-          entry.end >= entry.begin ? entry.end : entry.begin);
+      if (rangeDocument == nullptr) {
+        related.location.range.start = {};
+        related.location.range.end = {};
+      } else {
+        related.location.range.start = rangeDocument->positionAt(entry.begin);
+        related.location.range.end = rangeDocument->positionAt(
+            entry.end >= entry.begin ? entry.end : entry.begin);
+      }
       related.message = entry.message;
       relatedInformation.push_back(std::move(related));
     }

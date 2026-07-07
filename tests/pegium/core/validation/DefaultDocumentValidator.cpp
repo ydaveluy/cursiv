@@ -328,7 +328,8 @@ TEST(DefaultDocumentValidatorTest,
 
   ASSERT_EQ(diagnostics.size(), 1u);
   EXPECT_EQ(diagnostics.front().source, "mini");
-  EXPECT_EQ(std::get<std::string>(*diagnostics.front().code), "parse.inserted");
+  EXPECT_EQ(std::get<std::string>(*diagnostics.front().code),
+            kParseInsertedCode);
   EXPECT_FALSE(customValidationRan);
 }
 

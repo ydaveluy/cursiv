@@ -401,24 +401,20 @@ void AbstractSemanticTokenProvider::highlightKeyword(
   }
   const auto &document = getDocument(node);
 
-  auto emit = [this, &document, &node, keyword, type, &acceptor,
-               modifiers](std::size_t itemIndex) {
-    if (auto cstNode = find_node_for_keyword(node.getCstNode(), keyword, itemIndex);
-        cstNode.has_value()) {
-      highlightRange(
-          to_lsp_range(document, cstNode->getBegin(), cstNode->getEnd()), type,
-          acceptor, modifiers);
-      return true;
-    }
-    return false;
-  };
-
   if (index.has_value()) {
-    (void)emit(*index);
+    const auto nodes = find_nodes_for_keyword(node.getCstNode(), keyword);
+    if (*index >= nodes.size()) {
+      return;
+    }
+    const auto &cstNode = nodes[*index];
+    highlightRange(to_lsp_range(document, cstNode.getBegin(), cstNode.getEnd()),
+                   type, acceptor, modifiers);
     return;
   }
 
-  for (std::size_t itemIndex = 0; emit(itemIndex); ++itemIndex) {
+  for (const auto &cstNode : find_nodes_for_keyword(node.getCstNode(), keyword)) {
+    highlightRange(to_lsp_range(document, cstNode.getBegin(), cstNode.getEnd()),
+                   type, acceptor, modifiers);
   }
 }
 

@@ -81,6 +81,64 @@ protected:
   }
 };
 
+struct RepeatedKeywordEntry : AstNode {};
+
+class RepeatedKeywordParser final : public PegiumParser {
+public:
+  using PegiumParser::PegiumParser;
+
+protected:
+  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
+    return EntryRule;
+  }
+
+  const Skipper &getSkipper() const noexcept override { return skipper; }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+  static constexpr auto WS = some(s);
+  Skipper skipper = SkipperBuilder().ignore(WS).build();
+
+  Rule<RepeatedKeywordEntry> EntryRule{"Entry",
+                                      "mark"_kw + "mark"_kw + "mark"_kw};
+#pragma clang diagnostic pop
+};
+
+class RepeatedKeywordTokenProvider final : public AbstractSemanticTokenProvider {
+public:
+  explicit RepeatedKeywordTokenProvider(const pegium::Services &services)
+      : AbstractSemanticTokenProvider(services) {}
+
+protected:
+  void highlightElement(const AstNode &node,
+                        const SemanticTokenAcceptor &acceptor) const override {
+    if (dynamic_cast<const RepeatedKeywordEntry *>(&node) == nullptr) {
+      return;
+    }
+    // Enumerate-all path (no explicit index): must highlight every occurrence
+    // exactly once and terminate.
+    highlightKeyword(node, "mark", "keyword", acceptor);
+  }
+};
+
+class IndexedKeywordTokenProvider final : public AbstractSemanticTokenProvider {
+public:
+  IndexedKeywordTokenProvider(const pegium::Services &services, std::size_t index)
+      : AbstractSemanticTokenProvider(services), _index(index) {}
+
+protected:
+  void highlightElement(const AstNode &node,
+                        const SemanticTokenAcceptor &acceptor) const override {
+    if (dynamic_cast<const RepeatedKeywordEntry *>(&node) == nullptr) {
+      return;
+    }
+    highlightKeyword(node, "mark", "keyword", acceptor, {}, _index);
+  }
+
+private:
+  std::size_t _index;
+};
+
 class TestQuotedSemanticTokenProvider final : public AbstractSemanticTokenProvider {
 public:
   explicit TestQuotedSemanticTokenProvider(const pegium::Services &services)
@@ -175,6 +233,111 @@ TEST(AbstractSemanticTokenProviderTest, ExposesLegendAndEncodesTokens) {
   ASSERT_TRUE(tokens.has_value());
   EXPECT_TRUE(tokens->resultId.has_value());
   EXPECT_EQ(tokens->data.size(), 10u);
+}
+
+TEST(AbstractSemanticTokenProviderTest,
+     HighlightKeywordEnumeratesEveryRepeatedOccurrenceWithoutHanging) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<RepeatedKeywordParser>(
+        *shared, "repeated-keyword", {".repeated"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("repeated.repeated"), "repeated-keyword",
+      "mark mark mark");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  RepeatedKeywordTokenProvider provider(*services);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+  // 3 occurrences of "mark", 5 uint32 values per token -> 15 total.
+  EXPECT_EQ(tokens->data.size(), 15u);
+}
+
+TEST(AbstractSemanticTokenProviderTest,
+     HighlightKeywordValidIndexHighlightsOnlyThatOccurrence) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<RepeatedKeywordParser>(
+        *shared, "repeated-keyword", {".repeated"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("repeated.repeated"), "repeated-keyword",
+      "mark mark mark");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  IndexedKeywordTokenProvider provider(*services, 1);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+  // Exactly the second "mark" is highlighted: one token.
+  EXPECT_EQ(tokens->data.size(), 5u);
+}
+
+TEST(AbstractSemanticTokenProviderTest,
+     HighlightKeywordOutOfRangeIndexHighlightsNothing) {
+  auto shared = test::make_empty_shared_services();
+  pegium::installDefaultSharedCoreServices(*shared);
+  pegium::installDefaultSharedLspServices(*shared);
+  pegium::test::initialize_shared_workspace_for_tests(*shared);
+  {
+    auto registeredServices = test::make_uninstalled_services<RepeatedKeywordParser>(
+        *shared, "repeated-keyword", {".repeated"});
+    pegium::installDefaultCoreServices(*registeredServices);
+    pegium::installDefaultLspServices(*registeredServices);
+    shared->serviceRegistry->registerServices(std::move(registeredServices));
+  }
+
+  auto document = test::open_and_build_document(
+      *shared, test::make_file_uri("repeated.repeated"), "repeated-keyword",
+      "mark mark mark");
+  ASSERT_NE(document, nullptr);
+
+  const auto *coreServices = &shared->serviceRegistry->getServices(document->uri);
+  const auto *services = dynamic_cast<const pegium::Services *>(coreServices);
+  ASSERT_NE(services, nullptr);
+
+  // Only 3 occurrences exist; index 5 must not fall back to the last one.
+  IndexedKeywordTokenProvider provider(*services, 5);
+
+  ::lsp::SemanticTokensParams params{};
+  params.textDocument.uri = ::lsp::DocumentUri(::lsp::Uri::parse(document->uri));
+
+  const auto tokens =
+      provider.semanticHighlight(*document, params, utils::default_cancel_token);
+  ASSERT_TRUE(tokens.has_value());
+  EXPECT_EQ(tokens->data.size(), 0u);
 }
 
 TEST(AbstractSemanticTokenProviderTest, EncodesAsciiTokenLengthInUtf16Units) {

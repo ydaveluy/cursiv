@@ -278,15 +278,13 @@ Builder &apply_arguments_range(Builder &builder, const FunctionCall &call) {
     return builder;
   }
 
-  const auto [nodeBegin, nodeEndIgnored] = pegium::validation::range_of(call);
-  (void)nodeEndIgnored;
   const auto [firstBegin, firstEndIgnored] =
       pegium::validation::range_for_feature(call, "args", 0u);
   (void)firstEndIgnored;
   const auto [lastBeginIgnored, lastEnd] = pegium::validation::range_for_feature(
       call, "args", call.args.size() - 1u);
   (void)lastBeginIgnored;
-  return builder.range(firstBegin - nodeBegin, lastEnd - nodeBegin);
+  return builder.range(firstBegin, lastEnd);
 }
 
 } // namespace

@@ -66,7 +66,8 @@ range_for_feature(const Node &node, std::size_t index) noexcept {
 
 /// Returns the range of the `index`-th `keyword` literal parsed for `node`, or
 /// the whole node's range when the keyword is absent from its CST (e.g. an
-/// optional keyword that was not written).
+/// optional keyword that was not written). An index past the actual
+/// occurrence count clamps to the last one.
 [[nodiscard]] inline std::pair<TextOffset, TextOffset>
 range_for_keyword(const AstNode &node, std::string_view keyword,
                   std::size_t index = 0) noexcept {

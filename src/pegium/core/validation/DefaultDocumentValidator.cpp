@@ -429,7 +429,7 @@ parse_expectation_message(std::string_view message, const std::string &expected,
     const auto [begin, end] =
         clamp_span(document.textDocument().getText(),
                    parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
-    auto diagnostic = make_base_diagnostic(begin, end, "parse.conversion");
+    auto diagnostic = make_base_diagnostic(begin, end, kParseConversionErrorCode);
     diagnostic.message = parseDiagnostic.message.empty()
                              ? "Value conversion failed."
                              : parseDiagnostic.message;
@@ -455,12 +455,12 @@ parse_expectation_message(std::string_view message, const std::string &expected,
                 expectOffset,
                 static_cast<TextOffset>(document.textDocument().getText().size()));
   auto diagnostic =
-      make_base_diagnostic(zeroWidth, zeroWidth, "parse.incomplete");
+      make_base_diagnostic(zeroWidth, zeroWidth, kParseIncompleteCode);
 
   using enum parser::ParseDiagnosticKind;
   switch (parseDiagnostic.kind) {
   case Inserted:
-    diagnostic.code = pegium::DiagnosticCode(std::string("parse.inserted"));
+    diagnostic.code = pegium::DiagnosticCode(kParseInsertedCode);
     diagnostic.message = parse_expectation_message(
         parseDiagnostic.message, expected, foundToken.image, "Unexpected input.");
     if (parseDiagnostic.element == nullptr && !parseDiagnostic.message.empty()) {
@@ -474,7 +474,7 @@ parse_expectation_message(std::string_view message, const std::string &expected,
       const auto text = std::string_view{document.textDocument().getText()};
       const auto [safeBegin, safeEnd] =
           clamp_span(text, parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
-      diagnostic = make_base_diagnostic(safeBegin, safeEnd, "parse.deleted");
+      diagnostic = make_base_diagnostic(safeBegin, safeEnd, kParseDeletedCode);
       const auto deletedText =
           safeBegin < safeEnd
               ? text.substr(static_cast<std::size_t>(safeBegin),
@@ -486,7 +486,7 @@ parse_expectation_message(std::string_view message, const std::string &expected,
               : "Unexpected token `" + std::string(deletedText) + "`.";
     } else {
       diagnostic =
-          make_base_diagnostic(foundToken.begin, foundToken.end, "parse.deleted");
+          make_base_diagnostic(foundToken.begin, foundToken.end, kParseDeletedCode);
       diagnostic.message = unexpectedMessage;
     }
     maybe_attach_delete_code_action(diagnostic);
@@ -497,7 +497,7 @@ parse_expectation_message(std::string_view message, const std::string &expected,
       const auto [safeBegin, safeEnd] =
           clamp_span(text, parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
       diagnostic =
-          make_base_diagnostic(safeBegin, safeEnd, "parse.replaced");
+          make_base_diagnostic(safeBegin, safeEnd, kParseReplacedCode);
       const auto replacedText =
           safeBegin < safeEnd
               ? text.substr(static_cast<std::size_t>(safeBegin),
@@ -521,7 +521,7 @@ parse_expectation_message(std::string_view message, const std::string &expected,
       break;
     }
     diagnostic =
-        make_base_diagnostic(foundToken.begin, foundToken.end, "parse.replaced");
+        make_base_diagnostic(foundToken.begin, foundToken.end, kParseReplacedCode);
     diagnostic.message = parse_expectation_message(
         parseDiagnostic.message, expected, foundToken.image, unexpectedMessage);
     maybe_attach_replace_code_action(diagnostic, parseDiagnostic, foundToken.begin,
@@ -533,13 +533,13 @@ parse_expectation_message(std::string_view message, const std::string &expected,
           clamp_span(document.textDocument().getText(),
                      parseDiagnostic.beginOffset, parseDiagnostic.endOffset);
       diagnostic =
-          make_base_diagnostic(safeBegin, safeEnd, "parse.incomplete");
+          make_base_diagnostic(safeBegin, safeEnd, kParseIncompleteCode);
     }
     diagnostic.message = parse_expectation_message(
         parseDiagnostic.message, expected, foundToken.image, unexpectedMessage);
     break;
   case Recovered:
-    diagnostic.code = pegium::DiagnosticCode(std::string("parse.recovered"));
+    diagnostic.code = pegium::DiagnosticCode(kParseRecoveredCode);
     diagnostic.message = "Recovered parse node";
     break;
   case ConversionError:
@@ -644,7 +644,7 @@ void DefaultDocumentValidator::processLinkingErrors(
         .message = reference.getErrorMessage(),
         .source = source,
         .code = pegium::DiagnosticCode(
-            std::string("linking.unresolved-reference")),
+            kLinkingUnresolvedReferenceCode),
         .data = pegium::JsonValue(std::move(data)),
         .begin = begin,
         .end = end});

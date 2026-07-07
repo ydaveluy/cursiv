@@ -18,8 +18,10 @@ namespace pegium {
 /// Converts one pegium diagnostic to its LSP form, using `positionDocument` to
 /// turn text offsets into line/character positions. Related-information entries
 /// whose `uri` names another document resolve their range against that document
-/// via `crossFileProvider` (when given), falling back to `positionDocument`.
-/// All arguments are read synchronously and need not outlive the call.
+/// via `crossFileProvider`; when it is absent or cannot resolve the entry, the
+/// range is `{0,0}` rather than a wrong position computed against
+/// `positionDocument`. All arguments are read synchronously and need not
+/// outlive the call.
 [[nodiscard]] ::lsp::Diagnostic
 to_lsp_diagnostic(const workspace::TextDocument &positionDocument,
                   const Diagnostic &diagnostic,

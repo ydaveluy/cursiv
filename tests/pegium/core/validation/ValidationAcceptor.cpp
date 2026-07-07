@@ -66,22 +66,40 @@ ValidationAcceptNode &parse_validation_accept_node(workspace::Document &document
   return *node;
 }
 
-TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
+struct RepeatedKeywordNode : pegium::AstNode {
+  string name;
+};
+
+RepeatedKeywordNode &parse_repeated_keyword_node(workspace::Document &document) {
+  static const ParserRule<RepeatedKeywordNode> root{
+      "Root", assign<&RepeatedKeywordNode::name>("alpha"_kw) + ","_kw + ","_kw +
+                  ","_kw};
+
+  pegium::test::parse_rule(root, document, SkipperBuilder().build());
+  auto *node = dynamic_cast<RepeatedKeywordNode *>(document.parseResult.value);
+  EXPECT_NE(node, nullptr);
+  return *node;
+}
+
+TEST(ValidationAcceptorTest, RangeOverridesSelectionWithAbsoluteOffsets) {
   workspace::Document document(
       test::make_text_document("file:///validation-acceptor.pg", "mini",
                                "alpha:one,two"));
   auto &node = parse_validation_accept_node(document);
 
   pegium::Diagnostic diagnostic;
-  auto acceptorCb = 
+  auto acceptorCb =
       [&diagnostic](pegium::Diagnostic value) {
         diagnostic = std::move(value);      };
 
   const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
 
+  // "alpha:one,two": .property<&name>() selects [0,5) ("alpha"). .range(6, 9)
+  // is "one"'s absolute offsets, entirely outside that selection — proving
+  // range() overrides with absolute document offsets, not ones relative to it.
   acceptor.error(node, "Invalid name")
       .property<&ValidationAcceptNode::name>()
-      .range(1, 4)
+      .range(6, 9)
       .code("7", "https://example.invalid/validation/name")
       .tags({pegium::DiagnosticTag::Unnecessary,
              pegium::DiagnosticTag::Deprecated})
@@ -90,8 +108,8 @@ TEST(ValidationAcceptorTest, EmitsDiagnosticForSelectedPropertySubrange) {
 
   EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Error);
   EXPECT_EQ(diagnostic.message, "Invalid name");
-  EXPECT_EQ(diagnostic.begin, 1u);
-  EXPECT_EQ(diagnostic.end, 4u);
+  EXPECT_EQ(diagnostic.begin, 6u);
+  EXPECT_EQ(diagnostic.end, 9u);
   ASSERT_TRUE(diagnostic.code.has_value());
   ASSERT_TRUE(std::holds_alternative<std::string>(*diagnostic.code));
   EXPECT_EQ(std::get<std::string>(*diagnostic.code), "7");
@@ -128,6 +146,29 @@ TEST(ValidationAcceptorTest, SelectsIndexedVectorPropertyAssignment) {
 
   EXPECT_EQ(diagnostic.severity, pegium::DiagnosticSeverity::Warning);
   EXPECT_EQ(diagnostic.message, "Second tag");
+  EXPECT_EQ(diagnostic.begin, 10u);
+  EXPECT_EQ(diagnostic.end, 13u);
+}
+
+TEST(ValidationAcceptorTest, OutOfRangePropertyIndexClampsToLastAssignment) {
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
+  auto &node = parse_validation_accept_node(document);
+
+  pegium::Diagnostic diagnostic;
+  auto acceptorCb = [&diagnostic](pegium::Diagnostic value) {
+    diagnostic = std::move(value);
+  };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+
+  // Only indices 0 ("one") and 1 ("two") exist; index 5 must clamp to the last
+  // assignment ("two", offsets 10..13) instead of falling back to the whole
+  // node's range (0..13).
+  acceptor.warning(node, "Out of range")
+      .property<&ValidationAcceptNode::tags>(5u);
+
   EXPECT_EQ(diagnostic.begin, 10u);
   EXPECT_EQ(diagnostic.end, 13u);
 }
@@ -174,6 +215,27 @@ TEST(ValidationAcceptorTest, KeepsWholeNodeRangeForAbsentKeyword) {
   EXPECT_EQ(diagnostic.end, 13u);
 }
 
+TEST(ValidationAcceptorTest, OutOfRangeKeywordIndexClampsToLastOccurrence) {
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor-repeated.pg",
+                               "mini", "alpha,,,"));
+  auto &node = parse_repeated_keyword_node(document);
+
+  pegium::Diagnostic diagnostic;
+  auto acceptorCb = [&diagnostic](pegium::Diagnostic value) {
+    diagnostic = std::move(value);
+  };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+
+  // Only indices 0..2 exist (three commas at 5, 6, 7); index 9 must clamp to
+  // the last one (offsets 7..8) instead of falling back to the whole node.
+  acceptor.warning(node, "Out of range").keyword(",", 9);
+
+  EXPECT_EQ(diagnostic.begin, 7u);
+  EXPECT_EQ(diagnostic.end, 8u);
+}
+
 TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
   workspace::Document document(
       test::make_text_document("file:///validation-acceptor.pg", "mini",
@@ -212,6 +274,26 @@ TEST(ValidationAcceptorTest, AppendsRelatedInformationFromListAndSpan) {
   EXPECT_EQ(diagnostic.relatedInformation[1].message, "Referenced elsewhere");
   EXPECT_EQ(diagnostic.relatedInformation[1].begin, 4u);
   EXPECT_EQ(diagnostic.relatedInformation[1].end, 8u);
+}
+
+TEST(ValidationAcceptorTest, CodeAcceptsAnIntegerValue) {
+  workspace::Document document(
+      test::make_text_document("file:///validation-acceptor.pg", "mini",
+                               "alpha:one,two"));
+  auto &node = parse_validation_accept_node(document);
+
+  pegium::Diagnostic diagnostic;
+  auto acceptorCb =
+      [&diagnostic](pegium::Diagnostic value) {
+        diagnostic = std::move(value);      };
+
+  const ValidationAcceptor acceptor{ValidationAcceptor::Callback(acceptorCb)};
+
+  acceptor.error(node, "Invalid name").code(42);
+
+  ASSERT_TRUE(diagnostic.code.has_value());
+  ASSERT_TRUE(std::holds_alternative<std::int64_t>(*diagnostic.code));
+  EXPECT_EQ(std::get<std::int64_t>(*diagnostic.code), 42);
 }
 
 } // namespace

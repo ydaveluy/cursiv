@@ -317,6 +317,64 @@ TEST_F(LanguageServerRuntimeTest,
   EXPECT_EQ(diagnostics.front().object().get("message").string(), "current");
 }
 
+TEST_F(
+    LanguageServerRuntimeTest,
+    AddDiagnosticsHandlerResolvesCrossFileRelatedInformationFromWorkspaceDocuments) {
+  auto builder = std::make_unique<test::RecordingEventDocumentBuilder>();
+  auto *builderPtr = builder.get();
+  shared->workspace.documentBuilder = std::move(builder);
+
+  auto harness = makeHarnessWithDiagnosticsHandler();
+
+  const auto uriA = fileUri("runtime-diagnostics-cross-file-a.test");
+  const auto uriB = fileUri("runtime-diagnostics-cross-file-b.test");
+
+  // `uriB` is known only to the workspace-wide document registry, never opened
+  // via the LSP's editor-buffer cache (`shared->lsp.textDocuments`) — proving
+  // the cross-file resolver reaches beyond open buffers.
+  shared->workspace.documents->addDocument(std::make_shared<workspace::Document>(
+      test::make_text_document(uriB, "test", "x\ny\nz\nWORD\n")));
+
+  auto documentA = std::make_shared<workspace::Document>(
+      test::make_text_document(uriA, "test", "alpha\nbeta\n"));
+  documentA->diagnostics.push_back({
+      .message = "cross-file",
+      .relatedInformation = {{
+          .uri = uriB,
+          .message = "see other file",
+          .begin = 6,
+          .end = 10,
+      }},
+      .begin = 0,
+      .end = 5,
+  });
+
+  builderPtr->emitDocumentPhase(workspace::DocumentState::Validated, documentA);
+
+  const auto message =
+      test::parse_last_written_message(harness->stream.written()).object();
+  const auto &diagnostics =
+      message.get("params").object().get("diagnostics").array();
+  ASSERT_EQ(diagnostics.size(), 1u);
+  const auto &relatedInformation =
+      diagnostics.front().object().get("relatedInformation").array();
+  ASSERT_EQ(relatedInformation.size(), 1u);
+  // Offset 6 is line 3 in uriB's content ("x\ny\nz\nWORD"): the range must
+  // resolve against the workspace-registry document, not documentA's own
+  // 2-line text (which would give a different, wrong line).
+  EXPECT_EQ(relatedInformation.front()
+                .object()
+                .get("location")
+                .object()
+                .get("range")
+                .object()
+                .get("start")
+                .object()
+                .get("line")
+                .integer(),
+            3);
+}
+
 TEST_F(LanguageServerRuntimeTest,
        AddDocumentUpdateHandlerUsesNoOpDefaultsForUnimplementedCallbacks) {
   auto handlerImpl = std::make_unique<PassiveRuntimeDocumentUpdateHandler>();
