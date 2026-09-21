@@ -45,7 +45,7 @@ jobs:
             cd build; gcovr --sonarqube coverage.xml -r .. \
               --gcov-ignore-parse-errors negative_hits.warn_once_per_file
       -  name: SonarQube Scan
-         uses: SonarSource/sonarqube-scan-action@v8.2.0
+         uses: SonarSource/sonarqube-scan-action@v8.2.2
          env:
             GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
             SONAR_TOKEN: ${{secrets.SONAR_TOKEN}}
