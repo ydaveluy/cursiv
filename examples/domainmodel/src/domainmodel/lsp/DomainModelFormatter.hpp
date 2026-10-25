@@ -1,29 +1,28 @@
 #pragma once
 
-#include <domainmodel/core/ast.hpp>
+#include "cursiv/lsp/formatting/AbstractFormatter.hpp"
+#include "domainmodel/core/ast.hpp"
 
-#include <pegium/lsp/formatting/AbstractFormatter.hpp>
+namespace dm {
 
-namespace domainmodel {
+class DomainModelFormatter : public cursiv::AbstractFormatter {
+ public:
+  explicit DomainModelFormatter(const cursiv::CoreServices& services);
 
-class DomainModelFormatter : public pegium::AbstractFormatter {
-public:
-  explicit DomainModelFormatter(const pegium::Services &services);
-
-protected:
-  virtual void formatDomainModel(pegium::FormattingBuilder &builder,
-                                 const ast::DomainModel *model) const;
+ protected:
+  virtual void formatDomainModel(cursiv::FormattingBuilder& builder,
+                                 const ast::DomainModel* model) const;
   virtual void formatPackageDeclaration(
-      pegium::FormattingBuilder &builder,
-      const ast::PackageDeclaration *package) const;
-  virtual void formatEntity(pegium::FormattingBuilder &builder,
-                            const ast::Entity *entity) const;
-  virtual void formatDataType(pegium::FormattingBuilder &builder,
-                              const ast::DataType *dataType) const;
-  virtual void formatFeature(pegium::FormattingBuilder &builder,
-                             const ast::Feature *feature) const;
-  virtual void formatMultilineComment(HiddenNodeFormatter &comment) const;
-  virtual void formatLineComment(HiddenNodeFormatter &comment) const;
+      cursiv::FormattingBuilder& builder,
+      const ast::PackageDeclaration* package) const;
+  virtual void formatEntity(cursiv::FormattingBuilder& builder,
+                            const ast::Entity* entity) const;
+  virtual void formatDataType(cursiv::FormattingBuilder& builder,
+                              const ast::DataType* dataType) const;
+  virtual void formatFeature(cursiv::FormattingBuilder& builder,
+                             const ast::Feature* feature) const;
+  virtual void formatMultilineComment(HiddenNodeFormatter& comment) const;
+  virtual void formatLineComment(HiddenNodeFormatter& comment) const;
 };
 
-} // namespace domainmodel
+}  // namespace dm

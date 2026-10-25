@@ -1,8 +1,12 @@
+// The traffic light, the canonical statemachine document.
 statemachine TrafficLight
 
-events 
+events
     switchCapacity
     next
+
+commands
+    flashAmber
 
 initialState PowerOff
 
@@ -16,6 +20,7 @@ state RedLight
 end
 
 state YellowLight
+    actions { flashAmber }
     switchCapacity => PowerOff
     next => RedLight
 end

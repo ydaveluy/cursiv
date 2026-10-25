@@ -1,4 +1,4 @@
-#include <requirements/cli/Generator.hpp>
+#include "requirements/cli/Generator.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -7,18 +7,19 @@
 #include <stdexcept>
 #include <string>
 
-#include <pegium/core/syntax-tree/AstUtils.hpp>
-#include <pegium/core/utils/UriUtils.hpp>
-#include <pegium/core/workspace/Document.hpp>
+#include "cursiv/core/utils/UriUtils.hpp"
+#include "cursiv/core/workspace/Document.hpp"
+#include "requirements/cli/CliUtils.hpp"
 
-namespace requirements {
+namespace req {
 namespace {
 
-using namespace requirements::ast;
+using namespace req::ast;
 
-[[nodiscard]] std::string document_source_path(const pegium::AstNode &node) {
-  const auto &document = pegium::getDocument(node);
-  return pegium::utils::file_uri_to_path(document.uri).value_or(document.uri);
+[[nodiscard]] std::string document_source_path(const cursiv::AstNode& node) {
+  const cursiv::Document* const document = node.getDocument();
+  if (document == nullptr) return {};
+  return cursiv::file_uri_to_path(document->uri).value_or(document->uri);
 }
 
 // Escapes text for safe inclusion in the generated HTML body (paths can contain
@@ -28,51 +29,52 @@ using namespace requirements::ast;
   out.reserve(text.size());
   for (const char c : text) {
     switch (c) {
-    case '&':
-      out += "&amp;";
-      break;
-    case '<':
-      out += "&lt;";
-      break;
-    case '>':
-      out += "&gt;";
-      break;
-    default:
-      out.push_back(c);
-      break;
+      case '&':
+        out += "&amp;";
+        break;
+      case '<':
+        out += "&lt;";
+        break;
+      case '>':
+        out += "&gt;";
+        break;
+      default:
+        out.push_back(c);
+        break;
     }
   }
   return out;
 }
 
-} // namespace
+}  // namespace
 
 std::string generate_summary_file_html_content(
-    const ast::RequirementModel &model,
-    std::span<const ast::TestModel *const> testModels) {
+    const ast::RequirementModel& model,
+    std::span<const ast::TestModel* const> testModels) {
   std::ostringstream out;
   out << "<html>\n";
   out << "<body>\n";
   out << "<h1>Requirement coverage (demo generator)</h1>\n";
-  out << "<div>Source: " << html_escape(document_source_path(model)) << "</div>\n";
+  out << "<div>Source: " << html_escape(document_source_path(model))
+      << "</div>\n";
   out << "<table border=\"1\">\n";
   out << "<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>\n";
-  for (const auto &requirement : model.requirements) {
+  for (const auto& requirement : model.requirements) {
     if (!requirement) {
       continue;
     }
 
     out << "<TR><TD>" << requirement->name << "</TD><TD>\n";
-    for (const auto *testModel : testModels) {
+    for (const auto* testModel : testModels) {
       if (testModel == nullptr) {
         continue;
       }
-      for (const auto &test : testModel->tests) {
+      for (const auto& test : testModel->tests) {
         if (!test) {
           continue;
         }
-        const bool referencesRequirement = std::ranges::any_of(
-            test->requirements, [&](const auto &reference) {
+        const bool referencesRequirement =
+            std::ranges::any_of(test->requirements, [&](const auto& reference) {
               return reference.get() == requirement;
             });
         if (!referencesRequirement) {
@@ -91,10 +93,10 @@ std::string generate_summary_file_html_content(
   return out.str();
 }
 
-std::string generate_summary(
-    const ast::RequirementModel &model,
-    std::span<const ast::TestModel *const> testModels, std::string_view filePath,
-    std::optional<std::string_view> destination) {
+std::string generate_summary(const ast::RequirementModel& model,
+                             std::span<const ast::TestModel* const> testModels,
+                             std::string_view filePath,
+                             std::optional<std::string_view> destination) {
   const auto data = extract_destination_and_name(filePath, destination);
   std::filesystem::create_directories(data.destination);
   const auto outputPath =
@@ -109,4 +111,4 @@ std::string generate_summary(
   return outputPath.string();
 }
 
-} // namespace requirements
+}  // namespace req

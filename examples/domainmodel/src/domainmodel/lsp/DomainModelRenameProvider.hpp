@@ -3,33 +3,29 @@
 #include <optional>
 #include <string_view>
 
-#include <domainmodel/core/references/QualifiedNameProvider.hpp>
-#include <domainmodel/lsp/LspServices.hpp>
+#include "cursiv/lsp/navigation/DefaultRenameProvider.hpp"
 
-#include <pegium/lsp/navigation/DefaultRenameProvider.hpp>
+// Renaming a package renames what it contains, as far as a reference site is
+// concerned: `foo.bar.E2` written elsewhere must become `foo.baz.E2`, and
+// that is not a substitution the base can make -- it has to recompute the
+// qualified name of every declaration under the renamed one.
 
-namespace domainmodel {
+namespace dm {
 
-class DomainModelRenameProvider final : public pegium::DefaultRenameProvider {
-public:
-  /// `services` shadows the base back-reference with the language's typed LSP
-  /// container, giving typed access to both the LSP and the added services.
-  explicit DomainModelRenameProvider(const DomainModelServices &services)
-      : pegium::DefaultRenameProvider(services), services(services) {}
+struct DomainModelCoreServices;
 
-  std::optional<::lsp::WorkspaceEdit>
-  rename(const pegium::workspace::Document &document,
-         const ::lsp::RenameParams &params,
-         const pegium::utils::CancellationToken &cancelToken) const override;
+class DomainModelRenameProvider final : public cursiv::DefaultRenameProvider {
+ public:
+  explicit DomainModelRenameProvider(
+      const DomainModelCoreServices& services) noexcept;
 
-private:
-  [[nodiscard]] std::optional<std::string>
-  buildQualifiedName(const pegium::AstNode &node, const pegium::AstNode &renamedRoot,
-                     std::string_view replacementName,
-                     const domainmodel::references::QualifiedNameProvider
-                         *qualifiedNameProvider) const;
+  [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
+      const cursiv::Document& document, lsp::Position position,
+      std::string_view newName,
+      const cursiv::CancellationToken& token) const override;
 
-  const DomainModelServices &services;
+ private:
+  const DomainModelCoreServices& _dm;
 };
 
-} // namespace domainmodel
+}  // namespace dm

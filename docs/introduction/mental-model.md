@@ -1,41 +1,68 @@
-# Pegium Mental Model
+# Mental model
 
-A quick high-level model of how Pegium fits together, so the subsystem pages make sense.
+These four concepts help you write a grammar, read its results and customize
+language features.
 
-## The five ideas to keep in mind
+## 1. Your headers define the language
 
-1. The grammar is ordinary C++ code.
-2. The AST is your semantic model.
-3. References are resolved after parsing, not during parsing.
-4. Services assemble the language behavior.
-5. The same document model powers parsing, diagnostics, and editor features.
+You write the abstract syntax tree (AST) structs and the grammar rules that
+fill their members.
+Build with CMake to generate the parser and language module.
 
-## How to translate your intuition
+```
+ast.hpp + MyLangGrammar.hpp → CMake build → parser and language module
+```
 
-If you come from other language tooling frameworks:
+Never edit the generated tree. Change the declaration and build again.
 
-- The parser class is the home of the grammar.
-- Your AST structs are the language model you validate and traverse.
-- Scoping and linking turn names into targets.
-- The service container gives the language its parser, validator, formatter, and editor behavior.
+## 2. Two trees, and they answer different questions
 
-The biggest shift: grammar and language services are ordinary C++ code. You get stronger type coupling with the AST, but less of the declarative grammar-file feel.
+The **CST** (concrete syntax tree) records the parsed syntax and its source
+positions, including comments declared as `hidden`. Editor services use it
+to find text ranges and the token under the cursor.
 
-## What stays similar
+The **AST** (abstract syntax tree) contains your structs and their values:
+names, child nodes, lists and references. Your validation, interpreter or
+code generator usually works with this tree.
 
-The workflow is familiar:
+## 3. A reference is read, then resolved
 
-1. Define the grammar.
-2. Shape the AST.
-3. Compute scopes and link references.
-4. Validate semantics.
-5. Add formatting and editor features.
+A reference connects a written name to a declaration. For example,
+`reference<Person>` records a person's name while parsing. The **linker** then
+finds the declaration among the names visible at that position, called its
+**scope**. Forward and cross-file references are supported.
 
-## Related pages
+```cpp
+struct Greeting : cursiv::Extends<cursiv::AstNode> {
+  reference<Person> person;   // written as a name, resolved later
+};
+```
 
-- [Build a Language End-to-End](../learn/walkthrough.md)
-- [Grammar Essentials](../build-a-language/grammar.md)
-- [References and Scoping](../build-a-language/references-and-scoping.md)
-- [Validation](../build-a-language/validation.md)
-- [LSP Services](../build-a-language/lsp-services.md)
-- [Reference](../reference/index.md) — precise service and document-model terminology.
+The default scope makes every named node visible inside its container. A
+language with packages customizes scoping — see
+[Qualified names and scoping](../recipes/scoping.md).
+
+## 4. Services live in two containers
+
+A service implements a feature, such as parsing, validation or completion.
+The scaffold groups services in two containers:
+
+- **Shared services** manage the workspace's documents and exported names.
+- **Language services** provide one language's parser, references, validation
+  and editor features.
+
+A workspace can hold several languages. To customize a feature, replace or
+add a service in your language's module. See [Services](../reference/services.md).
+
+## Putting it together
+
+```
+source text → parser → CST + AST → linking → validation
+                         │             │          │
+                         └─────────────┴──────────┘
+                             CLI and editor features
+```
+
+Calling the parser alone builds the trees. A document build also prepares
+symbols, resolves references and runs validation. Use the
+[AST consumption guide](../learn/consume-the-ast.md) to choose between them.

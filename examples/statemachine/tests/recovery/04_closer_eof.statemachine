@@ -1,0 +1,33 @@
+// closer_eof: the final 'end' of the last state is missing
+// break: 000501
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+state PowerOff
+    switchCapacity => RedLight
+end
+
+state RedLight
+    actions { flashRed }
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+state YellowLight
+    switchCapacity => PowerOff
+    next => RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight

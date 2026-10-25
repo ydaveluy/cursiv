@@ -1,19 +1,22 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run Requirements Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}/vscode",
-                "${workspaceFolder}/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "npm: compile - vscode"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Requirements and Tests Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode",
+        "${workspaceFolder}/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/requirements/src"
+      },
+      "preLaunchTask": "Prepare Requirements and Tests Extension"
+    }
+  ]
 }

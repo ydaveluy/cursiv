@@ -1,90 +1,145 @@
-# Run a Language Headlessly
+# Read the AST from a program
 
-Once your language parses, the payoff is doing something with the result —
-interpret it, generate code, query it, transform it. The headless path takes a
-source file, builds the typed AST, and walks it, following the statemachine CLI
-([`cli/main.cpp`](https://github.com/ydaveluy/pegium/tree/main/examples/statemachine/src/statemachine/cli/main.cpp)).
+Read the abstract syntax tree (AST) from your own compiler, code generator
+or validator. These examples use the Recipe language from the
+[tutorial](walkthrough.md).
 
-## The headless pipeline
+## Create the language services
 
 ```cpp
-#include <pegium/cli/CliUtils.hpp>
-#include <statemachine/core/CoreModule.hpp>
+#include "cursiv/core/parser/Parser.hpp"       // `parser->parse` needs it
+#include "cursiv/core/services/CoreLanguage.hpp"
+#include "recipe/core/CoreServices.hpp"
+#include "recipe/core/ast.hpp"
 
-int run(const std::string &fileName) {
-  // 1. A shared runtime plus your registered language.
-  auto sharedServices =
-      pegium::make_shared_services<statemachine::StatemachineSharedCoreServices>();
-  auto &shared = *sharedServices;
-  auto services = statemachine::createStatemachineCoreServices(shared);
-  auto &languageServices = *services;
-  shared.serviceRegistry->registerServices(std::move(services));
+const auto language = cursiv::create_language<
+    recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
+    recipe::install_core_module>();
+```
 
-  // 2. Parse + build + validate the file in one call.
-  auto document =
-      pegium::build_document_from_path(fileName, languageServices);
-  if (pegium::has_error_diagnostics(*document)) {
-    pegium::print_error_diagnostics(*document, std::cerr);
-    return 2;
-  }
+`language.language` provides the parser and other Recipe services.
+`language.shared` manages documents and names across the workspace.
 
-  // 3. Get the typed root node and walk it.
-  auto *model = pegium::ast_ptr_cast<statemachine::ast::Statemachine>(
-      document->parseResult.value);
-  if (model == nullptr) {
-    return 2;
-  }
+## Parse only
 
-  for (const auto &state : model->states) {
-    if (!state) {
-      continue;
-    }
-    std::cout << "state " << state->name << "\n";
-    for (const auto &transition : state->transitions) {
-      if (transition && transition->event && transition->state) {
-        std::cout << "  " << transition->event->name << " => "
-                  << transition->state->name << "\n";
-      }
-    }
-  }
-  return 0;
+Call the parser directly when you only need the syntax tree:
+
+```cpp
+const std::string text = "unit gram\nrecipe Pancakes {}\n";
+const cursiv::ParseResult result = language.language.parser->parse(text);
+
+if (const auto* model = cursiv::ast_cast<recipe::ast::Model>(result.value)) {
+  for (const recipe::ast::Recipe* const r : model->recipes)
+    if (r != nullptr)
+      std::printf("%.*s\n", int(r->name.size()), r->name.data());
 }
 ```
 
-## What each step gives you
+The snippet uses `<string>` and `<cstdio>`. `ast_cast<T>` returns a pointer
+when the node has the requested type or a derived type, and null otherwise.
 
-- `make_shared_services()` builds the process-wide runtime; you register your
-  language on it exactly as your `main` would.
-- `build_document_from_path(path, services)` runs the whole core pipeline —
-  parse → index content → compute scopes → link references → validate — and
-  returns the built `Document`.
-- `has_error_diagnostics(document)` is the gate: stop here (and
-  `print_error_diagnostics`) if the input has errors. `document->diagnostics`
-  holds the full list when you need to inspect it.
-- `document->parseResult.value` is the root AST node. `ast_ptr_cast<T>(...)`
-  types it (returning `nullptr` if the actual type does not match).
+Check `result` for parsing or AST construction failure. For a clean parse,
+also require `result.diagnostics.empty()`. Calling the parser alone does not
+resolve references or run your validation checks.
 
-## Working with the tree
+`result.cst().recovered()` reports syntax repair. An AST may be available even
+when syntax or conversion diagnostics are present.
 
-- **Owned children** are `pointer<T>` (raw, arena-owned pointers) inside a
-  `vector<>`. They can be null if recovery produced a partial tree, so guard with
-  `if (!state) continue;`.
-- **Cross-references** are `reference<T>` members. They resolve lazily through the
-  linker: `transition->event` converts to `bool` (false when unresolved) and
-  `transition->event->name` dereferences to the linked node. Because
-  `has_error_diagnostics` already rejected unresolved references, the remaining
-  references are safe to follow — still, guarding (`if (transition->event)`) keeps
-  the code robust against partial results.
+!!! warning "The tree borrows the text"
 
-## This is what a generator does
+    AST text can refer to the input buffer or to memory owned by the
+    `ParseResult`. Keep both alive while reading the tree. A `Document`
+    owns its source text and parse result together.
 
-Walking the typed model is exactly how the statemachine example emits C++: its
-[`cli/Generator.cpp`](https://github.com/ydaveluy/pegium/tree/main/examples/statemachine/src/statemachine/cli/Generator.cpp)
-traverses `model->states` and `state->transitions` to produce a state-pattern
-class hierarchy. Interpreters, linters, and transformers follow the same shape —
-build the document once, then read the AST.
+!!! note "A list member is not a `std::vector`"
 
-## Related pages
+    AST lists use `cursiv::vector<T*>` for nodes. See
+    [AST vocabulary](../reference/ast.md#vectort-is-not-stdvectort) for the
+    available operations.
 
-- [Build a Language End-to-End](walkthrough.md)
-- [Test Your Language](test-your-language.md)
+## Parse, link and validate
+
+To resolve references and run validation, add a document to the workspace
+and build it:
+
+```cpp
+#include "cursiv/core/workspace/DocumentBuilder.hpp"
+#include "cursiv/core/workspace/DocumentFactory.hpp"
+#include "cursiv/core/workspace/Documents.hpp"
+
+auto& shared = *language.shared;
+
+std::shared_ptr<cursiv::Document> document =
+    shared.documentFactory->fromString(
+        "unit gram\ningredient Flour in gram\nrecipe Pancakes { use Flour 200 }\n",
+        "file:///a.recipe");
+shared.documents->addDocument(document);
+
+cursiv::Document* batch[] = {document.get()};
+shared.documentBuilder->build(batch);
+```
+
+Read syntax, reference and validation diagnostics from `document->diagnostics`.
+Access reference targets with `get()`:
+
+```cpp
+if (document->hasAst()) {
+  const auto* model = document->parseResult.value_as<recipe::ast::Model>();
+  for (const recipe::ast::Recipe* r : model->recipes) {
+    if (r == nullptr) continue;
+    for (const recipe::ast::Use* use : r->uses) {
+      if (use == nullptr) continue;
+      if (const auto* target = use->ingredient.get())
+        std::printf("%.*s\n", int(target->name.size()), target->name.data());
+    }
+  }
+}
+```
+
+`get()` returns null for an unresolved name. For a reference with one target
+type, you can also use `operator->`, `operator*` and a boolean test.
+
+`value_as<Model>()` is appropriate here because Recipe's entry rule returns
+a `Model`; it does not check the type.
+
+The URI selects the language: `file:///a.recipe` matches Recipe's configured
+extension. Validation is enabled by default; pass `BuildOptions` with
+`validation = false` to skip it. See
+[Document lifecycle](../reference/services.md#document-lifecycle).
+
+## Several documents
+
+Add the documents to the same workspace and build them together:
+
+```cpp
+std::vector<cursiv::Document*> all;
+for (auto& d : documents) {
+  shared.documents->addDocument(d);
+  all.push_back(d.get());
+}
+shared.documentBuilder->build(all);
+```
+
+From the command line, use `--root <dir>` to load a folder for cross-file
+references.
+
+## Reading a whole folder
+
+`create_language()` installs an `EmptyFileSystemProvider` by default. To read
+files from disk, pass a `LocalFileSystemProvider` and ask the workspace manager
+to scan a folder URI:
+
+```cpp
+#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
+#include "cursiv/core/workspace/WorkspaceManager.hpp"
+
+const auto language = cursiv::create_language<
+    recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
+    recipe::install_core_module>(
+    std::make_unique<cursiv::LocalFileSystemProvider>());
+
+const cursiv::WorkspaceFolder folders[] = {{"file:///path/to/project", "project"}};
+language.shared->workspaceManager->initializeWorkspace(folders);
+```
+
+For tests, `MemoryFileSystemProvider` lets you supply files in memory.

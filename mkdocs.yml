@@ -1,8 +1,8 @@
-site_name: Pegium
-site_description: C++20 toolkit for building parsers, AST/CST pipelines, validation, references, formatting, and language servers.
-site_url: https://ydaveluy.github.io/pegium/
-repo_url: https://github.com/ydaveluy/pegium
-repo_name: ydaveluy/pegium
+site_name: cursiv++
+site_description: A C++20 toolkit for building languages — grammar, AST, validation, references, formatting and a language server, from one declaration.
+site_url: https://ydaveluy.github.io/cursiv/
+repo_url: https://github.com/ydaveluy/cursiv
+repo_name: ydaveluy/cursiv
 edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
@@ -11,9 +11,8 @@ strict: true
 theme:
   name: material
   language: en
-  custom_dir: overrides
-  logo: assets/icon.svg
-  favicon: assets/icon.svg
+  logo: assets/logo.png
+  favicon: assets/logo.png
   features:
     - navigation.tabs
     - navigation.sections
@@ -25,11 +24,21 @@ theme:
     - content.code.copy
     - content.tabs.link
     - content.action.edit
-    - content.action.view
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: blue grey
       accent: light blue
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: light blue
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
 
 plugins:
   - search
@@ -45,67 +54,41 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
-  - pymdownx.snippets:
-      base_path:
-        - .
-
-extra_css:
-  - stylesheets/extra.css
 
 nav:
   - Home: index.md
   - Introduction:
-      - What is Pegium?: introduction/index.md
+      - introduction/index.md
+      - Mental model: introduction/mental-model.md
       - Features: introduction/features.md
-      - Showcases: introduction/showcases.md
-      - Why Pegium: introduction/why-pegium.md
-      - Pegium Mental Model: introduction/mental-model.md
+      - Why cursiv: introduction/why-cursiv.md
   - Learn:
       - learn/index.md
-      - Create a Project: learn/workflow/scaffold.md
-      - Build a Language End-to-End: learn/walkthrough.md
-      - Test Your Language: learn/test-your-language.md
-      - Run a Language Headlessly: learn/consume-the-ast.md
-      - Build a Language:
-          - build-a-language/index.md
-          - Define the AST: build-a-language/ast-and-cst.md
-          - Grammar Essentials: build-a-language/grammar.md
-          - Debugging a Grammar: build-a-language/debugging-grammar.md
-          - References and Scoping: build-a-language/references-and-scoping.md
-          - Validation: build-a-language/validation.md
-          - Formatting: build-a-language/formatting.md
-          - LSP Services: build-a-language/lsp-services.md
-          - Integrate with VS Code: build-a-language/editor-integration.md
-          - Workspace Lifecycle: build-a-language/workspace.md
+      - Create a project: learn/scaffold.md
+      - Build a language end to end: learn/walkthrough.md
+      - Test your language: learn/testing.md
+      - Read the AST from a program: learn/consume-the-ast.md
+      - Ship an editor extension: learn/editor-integration.md
   - Recipes:
       - recipes/index.md
-      - Multiple Languages: recipes/multiple-languages.md
-      - Formatting: recipes/custom-formatter.md
-      - Scoping:
-          - recipes/scoping/index.md
-          - Qualified Names: recipes/scoping/qualified-names.md
-          - Custom Scope Provider: recipes/custom-scope-provider.md
-      - Validation:
-          - recipes/validation/index.md
-          - Dependency Loops: recipes/validation/dependency-loops.md
-          - Custom Validator: recipes/custom-validator.md
-      - Performance:
-          - recipes/performance/index.md
-          - Caches: recipes/performance/caches.md
-      - Custom LSP Features: recipes/custom-lsp-features.md
+      - Qualified names and scoping: recipes/scoping.md
+      - Custom validation: recipes/validation.md
+      - Formatting: recipes/formatting.md
+      - Case-insensitive languages: recipes/case-insensitive.md
+      - Several languages in one project: recipes/multiple-languages.md
+      - Derived grammars: recipes/derived-grammars.md
+      - Cross-compiling to wasm: recipes/wasm.md
   - Reference:
       - reference/index.md
+      - Grammar reference: reference/grammar.md
+      - AST vocabulary: reference/ast.md
+      - Services: reference/services.md
+      - CMake API: reference/cmake.md
+      - Command line: reference/cli.md
+      - Test module: reference/test.md
+      - MCP server: reference/mcp.md
+      - Grammar errors: reference/refusals.md
       - Glossary: reference/glossary.md
-      - Configuration Services: reference/configuration-services.md
-      - Completion Provider: reference/completion-provider.md
-      - Document Lifecycle: reference/document-lifecycle.md
-      - Semantic Model: reference/semantic-model.md
-      - Grammar Reference: reference/grammar-reference.md
-      - Formatter DSL: reference/formatter-dsl.md
+  - Examples: examples/index.md
+  - Benchmarks: benchmarks/README.md
   - FAQ: faq.md
-  - Examples:
-      - examples/index.md
-      - Arithmetics: examples/arithmetics.md
-      - DomainModel: examples/domainmodel.md
-      - Requirements: examples/requirements.md
-      - Statemachine: examples/statemachine.md

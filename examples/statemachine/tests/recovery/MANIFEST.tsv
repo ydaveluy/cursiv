@@ -1,0 +1,13 @@
+file	family	breaks	intent
+valid.statemachine	valid		the base document
+01_typo1.statemachine	typo1	241	'state' written 'stat' -- one deletion
+02_typo2.statemachine	typo2	358	'state' written 'staet' -- one transposition, distance 2
+03_closer_block.statemachine	closer_block	282	the '}' closing an actions block is missing, mid file
+04_closer_eof.statemachine	closer_eof	501	the final 'end' of the last state is missing
+05_intruder.statemachine	intruder	217	'==>' instead of '=>' -- one token too many
+06_truncated.statemachine	truncated	497	the last state is cut in the middle of a transition
+07_two_faults.statemachine	two_faults	217 516	'state' typo near the top AND the final 'end' missing
+08_head_fault.statemachine	head_fault	81	the 'statemachine' keyword at byte 0 is misspelt
+09_list_delim.statemachine	list_delim	447	the '=>' separating the two halves of a transition is gone (the language has no comma list)
+10_noise.statemachine	noise	347	a cluster of garbage bytes between two states
+11_head_typo.statemachine	head_typo	175	'state' written 'tate' -- the FIRST character is gone

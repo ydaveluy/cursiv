@@ -1,27 +1,47 @@
-# Learn Pegium
+# Learn
 
-Pick the path that fits how you like to learn.
+Start by creating a project, then follow the Recipe tutorial. The remaining
+guides cover testing, using the AST and connecting an editor.
 
-Start with the [end-to-end walkthrough](walkthrough.md). It builds a complete, working language — the `statemachine` example — file by file: AST, grammar, validation, service wiring, a CLI, and an optional language server. Every step uses real source you can run and copy. From there, learn how to [test your language](test-your-language.md) and [consume the AST headlessly](consume-the-ast.md).
+<div class="grid cards" markdown>
 
-Prefer a slower, concept-by-concept tour? Read the [Build a Language](../build-a-language/index.md) guides — one subsystem per page:
+-   **[Create a project](scaffold.md)**
 
-- the AST
-- grammar
-- references and scoping
-- validation
-- formatting
-- LSP services
-- the workspace lifecycle
+    ---
 
-To start from a working skeleton, see [Create a Project](workflow/scaffold.md).
+    Generate a project, build it and parse its sample document.
 
-If you learn best from a concrete codebase, keep the [examples overview](../examples/index.md) open as you work through the steps.
+-   **[Build a language end to end](walkthrough.md)**
 
-## Related pages
+    ---
 
-- [End-to-end walkthrough](walkthrough.md) — build the `statemachine` language file by file
-- [Build a Language](../build-a-language/index.md) — concept-by-concept tour, one subsystem per page
-- [Examples overview](../examples/index.md) — concrete codebases to read alongside
-- [Recipes](../recipes/index.md) — targeted customization once you know the workflow
-- [Reference](../reference/index.md) — exact framework concepts
+    From the hello-world grammar to cross references, checks and an editor —
+    changing one thing at a time.
+
+-   **[Test your language](testing.md)**
+
+    ---
+
+    Check parsing, references, diagnostics and editor features.
+
+-   **[Read the AST from a program](consume-the-ast.md)**
+
+    ---
+
+    Parse, link and validate a document from your own program.
+
+-   **[Ship an editor extension](editor-integration.md)**
+
+    ---
+
+    Run the VS Code client, customize a provider and package the extension.
+
+</div>
+
+## Before you start
+
+You need CMake 3.30 or newer and a C++20 compiler with `std::format` and
+guaranteed tail calls (`musttail`). CI tests GCC 16 and Clang 22, and cross-builds
+with wasi-sdk 34; older versions are not validated.
+
+The editor guide lists the additional tools needed for VS Code.

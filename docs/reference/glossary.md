@@ -1,77 +1,64 @@
 # Glossary
 
-Short definitions of the Pegium terms used across the docs. For deeper coverage, follow the links to the workflow and subsystem references.
+**AST (abstract syntax tree)** — your language's parsed objects: C++ structs
+whose members hold names, values, child nodes and references.
 
-## AST
+**CST (concrete syntax tree)** — the parsed tokens and their source positions,
+including comments declared as `hidden`. Editor features use it to locate
+text corresponding to AST nodes and members.
 
-The semantic tree built by parser rules and assignments. AST nodes are regular C++ types derived from `pegium::AstNode`.
+**Data rule** — a rule that returns a value rather than an AST node. By
+default, it joins its tokens' text without trivia.
 
-## CST
+**Directive** — an operation that builds or fills an AST node: `create`,
+`assign`, `append`, `flag` or `nest`. `skip` controls trivia instead.
 
-The concrete syntax tree that preserves source structure and hidden nodes. Use it for formatting and source-aware editor features.
+**Document** — a source text with a URI, parsed trees, diagnostics and symbols
+available for linking to other documents.
 
-## `PegiumParser`
+**Entry** — the rule a document starts at, named by `using entry = R;`.
 
-The user-facing parser base class for defining Pegium grammars in C++.
+**Generated module** — the parser, AST metadata and service setup produced
+from your grammar. These files are build output.
 
-## `Terminal<T>`
+**hidden / ignore** — trivia settings. `hidden` retains tokens in the CST,
+for example to associate comments with declarations. `ignore` discards them.
 
-A named lexical rule that matches contiguous text.
+**Index** — metadata describing exported symbols across the workspace,
+used to resolve cross-document references.
 
-## `Rule<T>`
+**Keyword** — a literal with a word-boundary check. `kw<"if">` matches `if`
+but not the beginning of `iffy`.
 
-A named non-terminal rule. When `T` is an AST type it becomes a parser rule; otherwise it becomes a data-type rule.
+**Linker** — resolves a reference's written name against a scope, after the
+parse.
 
-## Skipper
+**Reference** — a member that reads a name at parse time and is resolved
+afterwards. `reference<T>`, or `multi_reference<T>` for one binding to a group.
 
-The rule set that handles ignored and hidden tokens between parser elements, such as whitespace and comments.
+**Reflection** — metadata that lets services inspect AST types and members
+without knowing each concrete C++ class.
 
-## Reference
+**Refusal** — a grammar rejected during compilation or parser generation.
+See [Grammar errors](refusals.md).
 
-A source-level name stored in the AST that may later resolve to a target node.
+**Formatting region** — syntax nodes selected for a spacing or indentation rule.
 
-## Scope
+**Rule** — an expression that combines tokens, allows trivia between them,
+and returns an AST node or a value. Declare one with `rule<...>`.
 
-The set of visible symbols available at one reference site.
+**Scope** — the symbols available as targets for a reference at a particular
+position. `scopeComputation` collects local and exported symbols;
+`scopeProvider` selects the candidates visible at that position.
 
-## Linking
+**Services** — framework objects such as the parser, linker and validator.
+Shared services operate across a workspace; language services belong to one
+registered language.
 
-Resolving a written reference to a concrete AST target.
+**Terminal** — an expression recognizing one token, with no trivia between
+its parts. Declare one with `terminal<...>`.
 
-## Services
+**Trivia** — whitespace and comments: what `ignore` and `hidden` declare.
 
-The language-specific objects that hold parser, references, validation, workspace, and LSP providers. `CoreServices` covers the semantic layer; `Services` (the LSP variant) extends it with editor-facing providers.
-
-## SharedServices
-
-The runtime services reused by every registered language: workspace manager, document builder, index manager, and the LSP runtime when present.
-
-## Module
-
-A function (often template-based, e.g. `installArithmeticsCoreModule(...)`) that installs language-specific defaults onto a service container. The shipped examples follow the convention `install<Language>CoreModule` and `install<Language>LspModule`.
-
-## Document lifecycle
-
-The staged pipeline that moves a document from changed text to parsed, linked, indexed, and validated state. See [Document Lifecycle](document-lifecycle.md).
-
-## ParseResult
-
-The output of one parser invocation. Contains the AST root, the CST root, the parse diagnostics, and recovery information when the input was not syntactically valid.
-
-## AstNodeDescription
-
-A workspace-level description of one declaration: its name, type, and originating document (documentId + symbolId). The index manager exposes descriptions for cross-document lookups; scope computation produces them.
-
-## LocalSymbols
-
-The per-document container of local declarations, bucketed by enclosing container. `DefaultScopeProvider` reads it during `visitScopeEntries(...)` to walk visibility from the reference site outward.
-
-## DocumentBuilder
-
-The orchestrator that drives a document through the lifecycle states and emits update events when documents change or are deleted. Caches that must invalidate on text change subscribe to `DocumentBuilder::onUpdate`.
-
-## Related pages
-
-- [Reference](index.md)
-- [Document Lifecycle](document-lifecycle.md)
-- [Semantic Model](semantic-model.md)
+**Word boundary** — the character class that can continue a name, so `kw<"if">`
+does not match inside `iffy`. Set with `word_boundary`; its default is `w`.

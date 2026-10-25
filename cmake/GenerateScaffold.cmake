@@ -1,44 +1,42 @@
-# Run: cmake -DPEGIUM_TAG=<tag> -P cmake/GenerateScaffold.cmake
-# Generates the published scaffolder docs/pegium-new.cmake from the skeleton
-# cmake/pegium-new.cmake.in plus every file under templates/project/.
+# Run: cmake -DCURSIV_TAG=<tag> -P cmake/GenerateScaffold.cmake
+# Packs the project templates and shared configuration into docs/cursiv-new.cmake.
 cmake_minimum_required(VERSION 3.14)
 
-if(NOT DEFINED PEGIUM_TAG)
-  set(PEGIUM_TAG "main")
+if(NOT DEFINED CURSIV_TAG)
+  set(CURSIV_TAG "main")
 endif()
 
 set(_root "${CMAKE_CURRENT_LIST_DIR}/..")
 set(_tpl_dir "${_root}/templates/project")
-set(_out "${_root}/docs/pegium-new.cmake")
+# -DOUT=<path> writes elsewhere, which is how the freshness lane compares the
+# committed scaffolder against the templates without touching it.
+if(NOT DEFINED OUT)
+  set(OUT "${_root}/docs/cursiv-new.cmake")
+endif()
 
 file(GLOB_RECURSE _files RELATIVE "${_tpl_dir}" "${_tpl_dir}/*")
-list(SORT _files)
 
 set(_body "")
 foreach(_rel IN LISTS _files)
   file(READ "${_tpl_dir}/${_rel}" _content)
-  # toggle: lsp/ vscode/ .vscode/ the release workflow cli/ are gated; else always
-  set(_toggle "always")
-  if(_rel MATCHES "(^|/)lsp/")
-    set(_toggle "lsp")
-  elseif(_rel MATCHES "(^|/)\\.?vscode/" OR _rel MATCHES "workflows/release")
-    set(_toggle "vscode")
-  elseif(_rel MATCHES "(^|/)cli/")
-    set(_toggle "cli")
-  endif()
   string(APPEND _body
-    "_pegium_new_emit([==[${_rel}]==] [==[${_toggle}]==] [==[${_content}]==])\n")
+    "_cursiv_new_emit([==[${_rel}]==] [==[${_content}]==])\n")
+endforeach()
+foreach(_rel IN ITEMS .clang-format CMakePresets.json cmake/wasi.cmake)
+  file(READ "${_root}/${_rel}" _content)
+  string(APPEND _body
+      "_cursiv_new_emit([==[${_rel}]==] [==[${_content}]==])\n")
 endforeach()
 
-configure_file("${CMAKE_CURRENT_LIST_DIR}/pegium-new.cmake.in" "${_out}" @ONLY)
-file(READ "${_out}" _head)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/cursiv-new.cmake.in" _head)
+string(CONFIGURE "${_head}" _head @ONLY)
 set(_banner
 "# =============================================================================
-# GENERATED FILE — DO NOT EDIT.
-# Produced by cmake/GenerateScaffold.cmake from cmake/pegium-new.cmake.in and the
-# templates under templates/project/. To change the scaffolder, edit those and
-# regenerate:  cmake -DPEGIUM_TAG=main -P cmake/GenerateScaffold.cmake
+# GENERATED FILE -- DO NOT EDIT.
+# Produced by cmake/GenerateScaffold.cmake from cmake/cursiv-new.cmake.in and
+# templates/project/, .clang-format, CMakePresets.json and cmake/wasi.cmake. Edit those
+# and regenerate:  cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
 # =============================================================================
 ")
-file(WRITE "${_out}" "${_banner}${_head}\n${_body}\n_pegium_new_finish()\n")
-message(STATUS "Wrote ${_out} (${PEGIUM_TAG})")
+file(WRITE "${OUT}" "${_banner}${_head}\n${_body}\n_cursiv_new_finish()\n")
+message(STATUS "Wrote ${OUT} (${CURSIV_TAG})")

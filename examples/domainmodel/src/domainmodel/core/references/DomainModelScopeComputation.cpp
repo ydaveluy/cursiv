@@ -1,132 +1,145 @@
-#include <domainmodel/core/references/DomainModelScopeComputation.hpp>
+#include "domainmodel/core/references/DomainModelScopeComputation.hpp"
 
-#include <domainmodel/core/CoreServices.hpp>
-#include <domainmodel/core/references/QualifiedNameProvider.hpp>
+#include <algorithm>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
 
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/utils/Cancellation.hpp>
+#include "cursiv/core/grammar/Conversion.hpp"
+#include "cursiv/core/references/NameProvider.hpp"
+#include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/core/workspace/AstNodeDescriptionProvider.hpp"
+#include "cursiv/core/workspace/Document.hpp"
+#include "domainmodel/core/CoreServices.hpp"
+#include "domainmodel/core/references/QualifiedNameProvider.hpp"
 
-namespace domainmodel::references {
+namespace dm {
 
-using namespace domainmodel::ast;
+namespace {
 
-std::vector<pegium::workspace::AstNodeDescription>
+// The family is asked once, not per node: the erased `isInstance` scans the
+// grammar's classes to find the tag it was handed, and a scope computation
+// visits every node of the document.
+bool in_family(std::span<const cursiv::AstTypeTag* const> family,
+               const cursiv::AstTypeTag* tag) noexcept {
+  return std::ranges::find(family, tag) != family.end();
+}
+
+// A computed name lives in the document's pool, never on this stack: a
+// description borrows its name, and the pool is freed by the same reset that
+// purges the index rows pointing into it.
+std::string_view keep(const cursiv::Document& document,
+                      const std::string& name) {
+  return cursiv::copy_into(document.parseResult.cst().memory(), name);
+}
+
+}  // namespace
+
+DomainModelScopeComputation::DomainModelScopeComputation(
+    const DomainModelCoreServices& services) noexcept
+    : cursiv::DefaultScopeComputation(services), _dm(services) {}
+
+// Every `Type` of the document, wherever it nests: the exported slice is the
+// Type family, not the root's direct children -- so the walk is this one, and
+// only what a member exports as goes through the hook.
+std::vector<cursiv::AstNodeDescription>
 DomainModelScopeComputation::collectExportedSymbols(
-    const pegium::workspace::Document &document,
-    const pegium::utils::CancellationToken &cancelToken) const {
-  if (!document.hasAst()) {
-    return {};
+    const cursiv::Document& document,
+    const cursiv::CancellationToken& cancelToken) const {
+  std::vector<cursiv::AstNodeDescription> exported;
+  if (document.parseResult.value == nullptr) return exported;
+
+  const std::span<const cursiv::AstTypeTag* const> types =
+      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
+  for (cursiv::AstNode* const node : document.parseResult.nodes) {
+    cursiv::throw_if_cancelled(cancelToken);
+    if (in_family(types, node->type))
+      addExportedSymbol(*node, exported, document);
   }
+  return exported;
+}
 
-  std::vector<pegium::workspace::AstNodeDescription> symbols;
-  const auto *qualifiedNameProvider = services.qualifiedNameProvider.get();
-  for (const auto *node : document.parseResult.value->getAllContent()) {
-    pegium::utils::throw_if_cancelled(cancelToken);
-    const auto *type = pegium::ast_ptr_cast<const Type>(node);
-    if (type == nullptr) {
-      continue;
-    }
-
-    auto name = services.references.nameProvider->getName(*type);
-    if (!name.has_value()) {
-      continue;
-    }
-
-    if (const auto *package =
-            pegium::ast_ptr_cast<const PackageDeclaration>(type->getContainer());
-        package != nullptr && qualifiedNameProvider != nullptr) {
-      *name = qualifiedNameProvider->getQualifiedName(*package, *name);
-    }
-    if (auto description =
-            services.workspace.astNodeDescriptionProvider->createDescription(
-                *type, std::move(*name), document);
-        description.has_value()) {
-      symbols.push_back(std::move(*description));
-    }
+void DomainModelScopeComputation::addExportedSymbol(
+    cursiv::AstNode& node, std::vector<cursiv::AstNodeDescription>& exported,
+    const cursiv::Document& document) const {
+  const auto* const package =
+      cursiv::ast_cast<const ast::PackageDeclaration>(node.parent);
+  if (package == nullptr) {
+    cursiv::DefaultScopeComputation::addExportedSymbol(node, exported,
+                                                       document);
+    return;
   }
+  const std::optional<std::string_view> own =
+      services.nameProvider->getName(node);
+  if (!own.has_value() || own->empty()) return;
+  const std::string_view qualified = keep(
+      document,
+      _dm.qualifiedNameProvider->getQualifiedName(document, *package, *own));
+  if (auto description = _dm.astNodeDescriptionProvider->createDescription(
+          node, qualified, &document))
+    exported.push_back(*std::move(description));
+}
+
+// The other direction: the walk descends, and a nested package requalifies what
+// its children returned -- so a name is spelled at every storey it is visible
+// from, and `foo.bar.E2` resolves from the root as `E2` does from inside.
+cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
+    const cursiv::Document& document,
+    const cursiv::CancellationToken& cancelToken) const {
+  cursiv::LocalSymbols symbols;
+  const cursiv::AstNode* const root = document.parseResult.value;
+  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::DomainModel>)
+    return symbols;
+
+  symbols.reserve(document.parseResult.nodes.size() / 4);
+  (void)processContainer(*root,
+                         static_cast<const ast::DomainModel&>(*root).elements,
+                         document, symbols, cancelToken);
+  symbols.seal();
   return symbols;
 }
 
-pegium::workspace::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
-    const pegium::workspace::Document &document,
-    const pegium::utils::CancellationToken &cancelToken) const {
-  pegium::workspace::LocalSymbols symbols;
-  if (!document.hasAst()) {
-    return symbols;
-  }
-
-  const auto *model = pegium::ast_ptr_cast<const DomainModel>(document.parseResult.value);
-  if (model == nullptr) {
-    return symbols;
-  }
-
-  (void)processContainer(*model, model->elements, document, symbols,
-                         cancelToken, services.qualifiedNameProvider.get());
-  return symbols;
-}
-
-std::vector<pegium::workspace::AstNodeDescription>
+std::vector<cursiv::AstNodeDescription>
 DomainModelScopeComputation::processContainer(
-    const pegium::AstNode &container,
-    const std::vector<pegium::AstNode::pointer<AbstractElement>> &elements,
-    const pegium::workspace::Document &document,
-    pegium::workspace::LocalSymbols &symbols,
-    const pegium::utils::CancellationToken &cancelToken,
-    const QualifiedNameProvider *qualifiedNameProvider) const {
-  std::vector<pegium::workspace::AstNodeDescription> localDescriptions;
-  localDescriptions.reserve(elements.size());
+    const cursiv::AstNode& container,
+    std::span<ast::AbstractElement* const> elements,
+    const cursiv::Document& document, cursiv::LocalSymbols& symbols,
+    const cursiv::CancellationToken& cancelToken) const {
+  const QualifiedNameProvider& names = *_dm.qualifiedNameProvider;
+  const std::span<const cursiv::AstTypeTag* const> types =
+      _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
 
-  for (const auto &element : elements) {
-    pegium::utils::throw_if_cancelled(cancelToken);
-    if (!element) {
+  std::vector<cursiv::AstNodeDescription> declared;
+  declared.reserve(elements.size());
+
+  for (ast::AbstractElement* const element : elements) {
+    cursiv::throw_if_cancelled(cancelToken);
+    if (element == nullptr) continue;
+
+    if (in_family(types, element->type)) {
+      if (element->name.empty()) continue;
+      if (auto description = _dm.astNodeDescriptionProvider->createDescription(
+              *element, element->name, &document))
+        declared.push_back(*std::move(description));
       continue;
     }
-
-    if (const auto *type = pegium::ast_ptr_cast<const Type>(element)) {
-      auto name = services.references.nameProvider->getName(*type);
-      if (!name.has_value()) {
-        continue;
-      }
-      if (auto description =
-              services.workspace.astNodeDescriptionProvider->createDescription(
-                  *type, std::move(*name), document);
-          description.has_value()) {
-        localDescriptions.push_back(std::move(*description));
-      }
+    if (element->type != &cursiv::ast_type_tag<ast::PackageDeclaration>)
       continue;
-    }
 
-    const auto *package = pegium::ast_ptr_cast<const PackageDeclaration>(element);
-    if (package == nullptr) {
-      continue;
-    }
-
-    auto nestedDescriptions = processContainer(*package, package->elements, document,
-                                              symbols, cancelToken,
-                                              qualifiedNameProvider);
-    for (auto &nested : nestedDescriptions) {
-      localDescriptions.push_back(
-          createQualifiedDescription(*package, std::move(nested),
-                                     qualifiedNameProvider));
+    const auto& package = static_cast<const ast::PackageDeclaration&>(*element);
+    for (cursiv::AstNodeDescription& nested : processContainer(
+             package, package.elements, document, symbols, cancelToken)) {
+      nested.name =
+          keep(document, names.getQualifiedName(package.name, nested.name));
+      declared.push_back(std::move(nested));
     }
   }
 
-  for (const auto &description : localDescriptions) {
-    symbols.emplace(&container, description);
-  }
-  return localDescriptions;
+  for (const cursiv::AstNodeDescription& description : declared)
+    symbols.add(&container, description);
+  return declared;
 }
 
-pegium::workspace::AstNodeDescription
-DomainModelScopeComputation::createQualifiedDescription(
-    const PackageDeclaration &package,
-    pegium::workspace::AstNodeDescription description,
-    const QualifiedNameProvider *qualifiedNameProvider) {
-  description.name =
-      qualifiedNameProvider != nullptr
-          ? qualifiedNameProvider->getQualifiedName(package.name, description.name)
-          : package.name + "." + description.name;
-  return description;
-}
-
-} // namespace domainmodel::references
+}  // namespace dm

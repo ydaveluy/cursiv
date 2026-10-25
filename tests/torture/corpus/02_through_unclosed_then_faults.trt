@@ -1,0 +1,6 @@
+go A {
+  blueprint X <<<
+  raw content, no closer here
+  kind y = 1;
+  [tag]{1,2}
+}

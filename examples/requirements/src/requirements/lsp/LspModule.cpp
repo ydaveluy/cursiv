@@ -1,56 +1,88 @@
-#include <requirements/lsp/LspModule.hpp>
+#include "requirements/lsp/LspModule.hpp"
 
+#include <memory>
 #include <utility>
 
-#include <requirements/core/CoreModule.hpp>
-#include <requirements/lsp/RequirementsFormatter.hpp>
-#include <pegium/lsp/services/DefaultLspModule.hpp>
+#include "cursiv/core/services/ServiceRegistry.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "requirements/core/CoreModule.hpp"
+#include "requirements/lsp/RequirementsFormatter.hpp"
 
-namespace requirements {
+namespace req {
 
-void installRequirementsLspModule(RequirementsServices &services) {
-  services.lsp.formatter = std::make_unique<RequirementsFormatter>(services);
-}
+namespace {
 
-void installTestsLspModule(TestsServices &services) {
-  services.lsp.formatter = std::make_unique<TestsFormatter>(services);
-}
+// The formatter is the one of the language being built, not of the container:
+// one container type serves both grammars, and a `.tst` laid out by the `.req`
+// rules would be laid out wrong.
+using MakeFormatter =
+    std::unique_ptr<const cursiv::Formatter> (*)(const cursiv::CoreServices&);
 
-std::unique_ptr<RequirementsServices>
-createRequirementsLspServices(const RequirementsSharedServices &sharedServices,
-                              std::string languageId) {
-  auto services = pegium::makeDefaultServices<RequirementsServices>(
-      sharedServices, std::move(languageId));
-  installRequirementsCoreModule(*services);
-  installRequirementsLspModule(*services);
+std::unique_ptr<RequirementsServices> build(
+    RequirementsSharedServices& sharedServices, std::string languageId,
+    void (*installCore)(RequirementsCoreServices&),
+    MakeFormatter makeFormatter) {
+  auto services = std::make_unique<RequirementsServices>(sharedServices);
+  services->languageMetaData.languageId = std::move(languageId);
+  cursiv::install_default_core_services(*services);
+  installCore(*services);
+  install_lsp_module(*services);
+  // Built on the container it will read, and after it: a formatter holds the
+  // services by reference.
+  services->formatter = makeFormatter(*services);
   return services;
 }
 
-std::unique_ptr<TestsServices>
-createTestsLspServices(const RequirementsSharedServices &sharedServices,
-                       std::string languageId) {
-  auto services = pegium::makeDefaultServices<TestsServices>(
-      sharedServices, std::move(languageId));
-  installTestsCoreModule(*services);
-  installTestsLspModule(*services);
-  return services;
+template <class F>
+std::unique_ptr<const cursiv::Formatter> make(
+    const cursiv::CoreServices& services) {
+  return std::make_unique<const F>(services);
 }
 
-RequirementsAndTestsServices createRequirementsAndTestsLspServices(
-    const RequirementsSharedServices &sharedServices) {
-  return {.requirements = createRequirementsLspServices(sharedServices),
-          .tests = createTestsLspServices(sharedServices)};
+}  // namespace
+
+void install_lsp_module(RequirementsServices& services) {
+  cursiv::install_default_lsp_services(services);
 }
 
-bool registerRequirementsLspServices(pegium::SharedServices &sharedServices) {
-  // The session container is the languages' shared type; recover it to build
-  // the containers with their custom shared services.
-  auto services = createRequirementsAndTestsLspServices(
-      dynamic_cast<RequirementsSharedServices &>(sharedServices));
+std::unique_ptr<RequirementsServices> create_requirements_lsp_services(
+    RequirementsSharedServices& sharedServices, std::string languageId) {
+  return build(sharedServices, std::move(languageId),
+               &install_requirements_core_module, &make<RequirementsFormatter>);
+}
+
+std::unique_ptr<RequirementsServices> create_tests_lsp_services(
+    RequirementsSharedServices& sharedServices, std::string languageId) {
+  return build(sharedServices, std::move(languageId),
+               &install_tests_core_module, &make<TestsFormatter>);
+}
+
+RequirementsLanguage create_lsp_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files) {
+  auto shared = std::make_unique<RequirementsSharedServices>();
+  shared->fileSystemProvider =
+      files != nullptr ? std::move(files)
+                       : std::make_unique<cursiv::EmptyFileSystemProvider>();
+  cursiv::install_default_shared_lsp_services(*shared);
+  auto requirements = create_requirements_lsp_services(*shared);
+  auto tests = create_tests_lsp_services(*shared);
+  RequirementsServices& one = *requirements;
+  RequirementsServices& other = *tests;
+  shared->serviceRegistry->registerServices(std::move(requirements));
+  shared->serviceRegistry->registerServices(std::move(tests));
+  return {std::move(shared), one, other};
+}
+
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+  auto& shared = dynamic_cast<RequirementsSharedServices&>(sharedServices);
   sharedServices.serviceRegistry->registerServices(
-      std::move(services.requirements));
-  sharedServices.serviceRegistry->registerServices(std::move(services.tests));
+      create_requirements_lsp_services(shared));
+  sharedServices.serviceRegistry->registerServices(
+      create_tests_lsp_services(shared));
   return true;
 }
 
-} // namespace requirements
+}  // namespace req

@@ -1,219 +1,144 @@
-import * as childProcess from 'node:child_process';
+// The @CURSIV_NEW_ID@ extension: it spawns `@CURSIV_NEW_ID@_lsp` and speaks
+// the protocol to it over stdio.
+
 import * as fs from 'node:fs';
-import * as net from 'node:net';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
-import { LanguageClient } from 'vscode-languageclient/node';
+import {
+    LanguageClient,
+    TransportKind,
+    type Executable,
+    type LanguageClientOptions,
+    type ServerOptions
+} from 'vscode-languageclient/node';
+import { startMcpBridge } from './mcp';
 
-let client: LanguageClient | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
-let serverProcess: childProcess.ChildProcess | undefined;
+const ID = '@CURSIV_NEW_ID@';
+const SERVER = '@CURSIV_NEW_ID@_lsp';
 
-function resolveServerCommand(context: vscode.ExtensionContext): string | undefined {
-    const configured = vscode.workspace
-        .getConfiguration()
-        .get<string>('@PEGIUM_NEW_LANGUAGE_ID@.server.path');
-    if (configured && configured.trim()) {
-        return configured.trim();
-    }
-
-    const defaultName = process.platform === 'win32' ? '@PEGIUM_NEW_LANGUAGE_ID@-lsp.exe' : '@PEGIUM_NEW_LANGUAGE_ID@-lsp';
-
-    // A packaged (published) extension ships the server next to it in bin/.
-    const bundled = path.join(context.extensionPath, 'bin', defaultName);
-    if (fs.existsSync(bundled)) {
-        return makeExecutable(path.resolve(bundled));
-    }
-
-    // In development the server is built by CMake: single-config generators
-    // (Ninja/Make) put it at the build root, multi-config ones (Visual Studio)
-    // in a per-config subdirectory.
-    const buildRoot = path.join(context.extensionPath, '..', 'build');
-    for (const config of ['', 'Debug', 'Release', 'RelWithDebInfo']) {
-        const candidate = path.join(buildRoot, config, defaultName);
-        if (fs.existsSync(candidate)) {
-            return path.resolve(candidate);
-        }
-    }
-
-    return undefined;
+function executableName(): string {
+    return process.platform === 'win32' ? `${SERVER}.exe` : SERVER;
 }
 
-// Packing into a .vsix can drop the executable bit, so restore it for the
-// bundled server on POSIX platforms (no-op on Windows).
-function makeExecutable(file: string): string {
-    if (process.platform !== 'win32') {
-        try {
-            fs.chmodSync(file, 0o755);
-        } catch {
-            // best effort — the file may already be executable
-        }
-    }
-    return file;
+// A native binary is its own command; a wasm module is a file Node runs, and
+// the extension host IS Node, so the wasm route needs no dependency.
+interface ServerCommand {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
 }
 
-async function allocatePort(): Promise<number> {
-    const probe = net.createServer();
-    await new Promise<void>((resolve, reject) => {
-        probe.once('error', reject);
-        probe.listen(0, '127.0.0.1', () => resolve());
-    });
-
-    const address = probe.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-    await new Promise<void>((resolve, reject) => {
-        probe.close((error) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve();
-        });
-    });
-
-    if (!port) {
-        throw new Error('Unable to allocate a localhost port for the @PEGIUM_NEW_CLASS@ server.');
-    }
-    return port;
-}
-
-function delay(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-    });
-}
-
-function stopServerProcess(): void {
-    if (!serverProcess) {
-        return;
-    }
-    const runningProcess = serverProcess;
-    serverProcess = undefined;
-    if (runningProcess.exitCode === null && !runningProcess.killed) {
-        runningProcess.kill();
+// A wasm module opens with `\0asm` and a host binary does not. The cross build
+// names its output exactly like the native one, so the file itself is the only
+// thing that says which of the two runners it needs.
+function isWasm(file: string): boolean {
+    let handle: number | undefined;
+    try {
+        handle = fs.openSync(file, 'r');
+        const head = Buffer.alloc(4);
+        return fs.readSync(handle, head, 0, 4, 0) === 4 &&
+            head.toString('latin1') === '\0asm';
+    } catch {
+        return false;
+    } finally {
+        if (handle !== undefined) fs.closeSync(handle);
     }
 }
 
-function attachServerLogs(process: childProcess.ChildProcess, channel: vscode.OutputChannel): void {
-    process.stdout?.on('data', (chunk: Buffer | string) => {
-        channel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-    });
-    process.stderr?.on('data', (chunk: Buffer | string) => {
-        channel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-    });
-    process.on('exit', (code, signal) => {
-        channel.appendLine(`@PEGIUM_NEW_CLASS@ server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
-        if (serverProcess === process) {
-            serverProcess = undefined;
-        }
-    });
-    process.on('error', (error) => {
-        channel.appendLine(`@PEGIUM_NEW_CLASS@ server process error: ${error.message}`);
-        if (serverProcess === process) {
-            serverProcess = undefined;
-        }
-    });
+// What the active CMake preset just built: `launch.json` hands its binary
+// directory over, so F5 runs the artefact the editor is configured to build
+// rather than whatever a previous cross left under `server/`.
+function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
+    const directory = process.env.CURSIV_SERVER_DIR?.trim();
+    if (!directory) return undefined;
+    const built = path.join(directory, executableName());
+    if (!fs.existsSync(built)) return undefined;
+    if (!isWasm(built)) return { command: built, args: [] };
+    return wasmRun(built, path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
-async function connectToSocket(port: number): Promise<net.Socket> {
-    return await new Promise<net.Socket>((resolve, reject) => {
-        const socket = net.createConnection({ host: '127.0.0.1', port });
-        socket.once('connect', () => {
-            socket.setNoDelay(true);
-            resolve(socket);
-        });
-        socket.once('error', (error) => {
-            socket.destroy();
-            reject(error);
-        });
-    });
+// The wasm server, preferred when it is there: one artefact for every platform,
+// and the sandbox comes with it -- the module reads only what the runner
+// preopens. `cursiv_package_language` refreshes both files under `server/` on a
+// threaded cross build, and a packaged .vsix carries them.
+function wasmCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
+    return wasmRun(path.join(context.extensionPath, 'server', `${SERVER}.wasm`),
+                   path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
-async function waitForServerSocket(
-    port: number,
-    process: childProcess.ChildProcess,
-    channel: vscode.OutputChannel
-): Promise<StreamInfo> {
-    const deadline = Date.now() + 10_000;
-
-    while (Date.now() < deadline) {
-        if (process.exitCode !== null) {
-            throw new Error(`@PEGIUM_NEW_CLASS@ server exited before accepting socket connections (code=${process.exitCode}).`);
-        }
-
-        try {
-            const socket = await connectToSocket(port);
-            channel.appendLine(`Connected to @PEGIUM_NEW_CLASS@ server on 127.0.0.1:${port}`);
-            return { reader: socket, writer: socket };
-        } catch {
-            await delay(100);
-        }
+function wasmRun(module: string, runner: string): ServerCommand | undefined {
+    if (!fs.existsSync(module) || !fs.existsSync(runner)) {
+        return undefined;
     }
-
-    throw new Error(`Timed out while connecting to @PEGIUM_NEW_CLASS@ server on 127.0.0.1:${port}.`);
-}
-
-function createServerOptions(serverCommand: string, channel: vscode.OutputChannel): ServerOptions {
-    return async () => {
-        stopServerProcess();
-
-        const port = await allocatePort();
-        channel.appendLine(`Starting @PEGIUM_NEW_CLASS@ server: ${serverCommand} --port=${port}`);
-
-        const child = childProcess.spawn(serverCommand, [`--port=${port}`], {
-            cwd: path.dirname(serverCommand),
-            env: process.env,
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
-        serverProcess = child;
-        attachServerLogs(child, channel);
-
-        try {
-            return await waitForServerSocket(port, child, channel);
-        } catch (error) {
-            stopServerProcess();
-            throw error;
-        }
+    return {
+        command: process.execPath,
+        args: ['--no-warnings', runner, module],
+        // WASI cannot count the host's cores: `hardware_concurrency()` answers
+        // one there, so the pool would never be built. The host knows.
+        env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
     };
 }
 
+// The extension lives at `<project>/vscode`, so `../build/src/` is where
+// CMake put the native server.
+function nativeCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
+    const name = executableName();
+    for (const candidate of [
+        path.join(context.extensionPath, 'bin', name),
+        path.join(context.extensionPath, '..', 'build', 'src', name)
+    ]) {
+        if (fs.existsSync(candidate)) {
+            return { command: path.resolve(candidate), args: [] };
+        }
+    }
+    return undefined;
+}
+
+let client: LanguageClient | undefined;
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    const serverCommand = resolveServerCommand(context);
-    if (!serverCommand) {
+    const configured = vscode.workspace.getConfiguration()
+        .get<string>(`${ID}.server.path`)?.trim();
+    const server: ServerCommand | undefined = configured
+        ? { command: configured, args: [] }
+        : presetCommand(context) ?? wasmCommand(context) ?? nativeCommand(context);
+    if (!server) {
         void vscode.window.showErrorMessage(
-            'Unable to locate @PEGIUM_NEW_LANGUAGE_ID@-lsp. Build the project and/or set @PEGIUM_NEW_LANGUAGE_ID@.server.path.'
+            `Cannot find ${SERVER}. Build it with ` +
+            `\`cmake --build --preset wasi-release --target ${SERVER}\`, or set ` +
+            `\`${ID}.server.path\`.`
         );
         return;
     }
 
-    outputChannel = vscode.window.createOutputChannel('@PEGIUM_NEW_CLASS@');
+    const outputChannel = vscode.window.createOutputChannel(ID);
     context.subscriptions.push(outputChannel);
-    context.subscriptions.push(new vscode.Disposable(() => {
-        stopServerProcess();
-    }));
+    outputChannel.appendLine(`server: ${server.command} ${server.args.join(' ')}`);
 
-    const serverOptions = createServerOptions(serverCommand, outputChannel);
+    // A native server has no --inspect to add, so the debug configuration is
+    // the run configuration.
+    const executable: Executable = {
+        command: server.command,
+        args: server.args,
+        transport: TransportKind.stdio,
+        ...(server.env ? { options: { env: { ...process.env, ...server.env } } } : {})
+    };
+    const serverOptions: ServerOptions = { run: executable, debug: executable };
     const clientOptions: LanguageClientOptions = {
-        documentSelector: [{ scheme: 'file', language: '@PEGIUM_NEW_LANGUAGE_ID@' }],
+        documentSelector: [{ scheme: 'file', language: ID }],
         outputChannel
     };
 
-    client = new LanguageClient(
-        '@PEGIUM_NEW_LANGUAGE_ID@',
-        '@PEGIUM_NEW_CLASS@',
-        serverOptions,
-        clientOptions
-    );
-
+    client = new LanguageClient(ID, '@CURSIV_NEW_CLASS@', serverOptions, clientOptions);
     await client.start();
+    // The MCP door onto the same session: a model connected here reads what
+    // the editor holds unsaved.
+    context.subscriptions.push(startMcpBridge(ID, '@CURSIV_NEW_CLASS@', client, outputChannel));
 }
 
 export async function deactivate(): Promise<void> {
-    if (client) {
-        const runningClient = client;
-        client = undefined;
-        await runningClient.stop();
-    }
-    stopServerProcess();
+    const running = client;
+    client = undefined;
+    await running?.stop();
 }

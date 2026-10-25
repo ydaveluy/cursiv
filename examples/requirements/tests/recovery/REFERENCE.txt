@@ -1,0 +1,12 @@
+valid.req	acc=1 cov=1 rec=0 tok=37/37 inv=0
+01_typo1.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:req@414<Expecting 'req' but found 'rq'.>
+02_typo2.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:environment@194<Expecting 'environment' but found 'envirnoment'.>
+03_closer_block.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:STRING@314<Expecting STRING but found '"The generator should al...'.>
+04_closer_eof.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:STRING@566<Expecting STRING but found '"A requirement shall be ...'.>
+05_intruder.req	acc=1 cov=1 rec=1 tok=37/37 inv=0 [353,354) del:STRING@353<Unexpected '%', expecting STRING.>
+06_truncated.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 ins:STRING@551<Expecting STRING.>
+07_two_faults.req	acc=1 cov=1 rec=1 tok=37/37 inv=2 rep:environment@123<Expecting 'environment' but found 'envronment'.> rep:STRING@575<Expecting STRING but found '"A requirement shall be ...'.>
+08_head_fault.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:contact@89<Expecting 'contact' but found 'contac'.>
+09_list_delim.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 ins:,@427<Expecting ','.>
+10_noise.req	acc=1 cov=1 rec=1 tok=37/37 inv=0 [537,540) [541,544) [545,548) del:req@537<Unexpected '@@@ ??? @@@', expecting 'req'.>
+11_head_typo.req	acc=1 cov=1 rec=1 tok=37/37 inv=1 rep:environment@66<Expecting 'environment' but found 'nvironment'.>

@@ -1,58 +1,34 @@
-# AGENTS.md
+# Cursiv for Agents
 
-Pegium is a generic C++20 language-engineering toolkit. These are the standing
-expectations for working in this repository.
+This is a C++20 language-engineering framework with LL and LR parser backends.
 
-## Build & test
+For project documentation, read:
 
-- Build with `cmake --build build -j32`. Never prefix `cmake --build` with a
-  timeout.
-- The build is slow: for a multi-step change, batch everything and build once.
-- Never run `ctest` while a build is still running — wait for the active build
-  to finish successfully first.
-- Run the tests with `ctest`, and wrap `ctest` / `gtest` / fuzzer runs in a
-  shell `timeout`.
-- Only build and test when it is relevant to the change.
-- Benchmark hot-path changes with `PegiumBench` under callgrind, not just unit
-  tests.
+- `README.md`: Build, tests, benchmarks, and WebAssembly.
+- `docs/reference/grammar.md`: Grammar DSL and parser contracts.
+- `docs/reference/ast.md`: AST types and construction.
+- `docs/reference/services.md`: Services, linking, workspaces, and LSP.
+- `docs/reference/test.md`: Language testing helpers.
 
-## Code style & API
+Source directories:
 
-- Use C++20 features wherever they help.
-- Match the surrounding code: comment density, naming, and idioms.
-- When an invariant says a value must exist, take it by `const&`, not a nullable
-  pointer; keep pointers only for genuinely optional data.
-- Never add a `nullptr` check for a pointer that is never null by design.
-- `const_cast` is forbidden.
-- Do not use `std::format` / `<format>`. It pulls in heavy formatting machinery
-  that bloats the binary. Build strings with concatenation and `std::to_string`
-  (or a small hand-rolled helper for anything fancier).
-- No `thread_local`.
-- Use `void*` for type erasure.
-- No wrappers that only add one more level of indirection / a trampoline.
-- No IIFE unless it genuinely improves readability.
-- Reduce the public API surface when a helper can be internalized without
-  hurting clarity.
-- Document public APIs: short but useful.
-- `noexcept` must be honest — do not mark `noexcept` anything that can allocate
-  or call a throwing virtual.
+- `src/cursiv/core/`: Grammar model, syntax trees, linking, and workspaces.
+- `src/cursiv/engines/`: LL/LR generators, runtimes, and shared code.
+- `src/cursiv/cli/`: Command-line support for language tools.
+- `src/cursiv/lsp/`: Language-server services.
+- `src/cursiv/mcp/`: Model Context Protocol server and language tools.
+- `src/cursiv/test/`: Parse, validation, and editor test helpers.
+- `src/cursiv/bench/`: Benchmark harness and performance counters.
+- `src/cursiv/fuzz/`: Grammar-based input generation and tree checks.
+- `examples/`: Complete example languages.
+- `tests/`: Framework tests.
+- `bench/`: Benchmark executables and corpora.
+- `bench/recovery_metric/`: Error-recovery quality reports and internal support.
+- `templates/`: Scaffolding templates for new language projects.
+- `cmake/`: Build integration and language generation.
+- `tools/`: Build, packaging, and development scripts.
 
-## Generic engine & performance contracts
+## VS Code extensions
 
-- Pegium is 100% generic. Nothing in the parser or recovery may be hardcoded to
-  a specific language's grammar, and optimizations must stay language-agnostic.
-- The nominal parse path must carry zero overhead from error recovery.
-- The strict-mode parser combinator fast path is off-limits — do not refactor or
-  restyle it.
-- Thread-safety is a hard contract: the Reference / scope / index /
-  document-state read APIs must be safe for concurrent reads without locking.
-- There is intentionally no `Scope` wrapper abstraction; the visitor /
-  `getScopeEntry` design is deliberate and far faster — do not propose one.
-
-## Working approach
-
-- On any error, investigate to find the root cause instead of patching a
-  symptom.
-- Keep solutions proportionate to the problem — do not over-engineer.
-- When relevant, check how Langium does it (`https://github.com/eclipse-langium/langium`) to
-  avoid reinventing or diverging (the main README is the only exception).
+`examples/*/vscode/` contains TypeScript extension projects, built with npm.
+See each extension's `package.json` and `docs/learn/editor-integration.md`.

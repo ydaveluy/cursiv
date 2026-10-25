@@ -1,4 +1,0 @@
-contact:: "team"
-environment prod "Production"
-environment staging:: "Staging"
-req login "Users can login"

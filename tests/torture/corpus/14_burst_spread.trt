@@ -1,0 +1,7 @@
+go Sample {
+  knd width = 10 + 2 * 3;
+  blueprint Shape <<<
+    polygon 3 4 5
+  >>>
+  [layot]{1, 2, (3, 4), "tag", 5)
+}

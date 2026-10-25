@@ -1,8 +1,0 @@
-entity Blog {
-  title: Text
-  author Person
-}
-
-entity Comment {
-  content: String
-}

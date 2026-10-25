@@ -1,29 +1,27 @@
+// The extension is bundled into ONE CommonJS file: `vscode` is injected by the
+// editor and stays external, the language client is bundled in, so the folder
+// VS Code loads needs no node_modules of its own.
 import { rmSync } from 'node:fs';
 import esbuild from 'esbuild';
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
-// Start from a clean output dir so stale artifacts (e.g. a dev sourcemap, or
-// test files compiled by tsc) never leak into a production bundle or the .vsix.
 if (!watch) {
   rmSync('out', { recursive: true, force: true });
 }
 
-// Bundle the extension into a single CommonJS file. Only `vscode` is external
-// (the editor injects it at runtime); everything else — including
-// vscode-languageclient — is bundled in, so the packaged .vsix is self-contained.
 const context = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18',
+  target: 'node18', // VS Code 1.86 supports native servers; WASI needs 1.101.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,
   minify: production,
-  logLevel: 'info',
+  logLevel: 'info'
 });
 
 if (watch) {

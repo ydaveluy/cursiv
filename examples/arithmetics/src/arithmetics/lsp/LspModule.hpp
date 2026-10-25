@@ -3,20 +3,27 @@
 #include <memory>
 #include <string>
 
-#include <arithmetics/lsp/LspServices.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "arithmetics/generated/Arith/Module.hpp"
+#include "arithmetics/lsp/LspServices.hpp"
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
 
-namespace arithmetics {
+namespace arith {
 
-/// LSP service overrides applied on top of pegium's default LSP services.
-void installArithmeticsLspModule(ArithmeticsServices &services);
+void install_lsp_module(ArithmeticsServices& services);
 
-/// Builds the LSP-enabled arithmetics language services.
-std::unique_ptr<ArithmeticsServices>
-createArithmeticsLspServices(const ArithmeticsSharedServices &sharedServices,
-                             std::string languageId = "arithmetics");
+std::unique_ptr<ArithmeticsServices> create_lsp_services(
+    ArithmeticsSharedServices& sharedServices,
+    std::string languageId = std::string(arith::generated::Arith::kLanguageId));
 
-/// Registers the LSP-enabled arithmetics services in `sharedServices`.
-bool registerArithmeticsLspServices(pegium::SharedServices &sharedServices);
+// The same one call, one storey up.
+struct ArithmeticsLanguage {
+  std::unique_ptr<ArithmeticsSharedServices> shared;
+  ArithmeticsServices& language;
+};
 
-} // namespace arithmetics
+ArithmeticsLanguage create_lsp_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
+
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+
+}  // namespace arith

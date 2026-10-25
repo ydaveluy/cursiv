@@ -1,0 +1,7 @@
+// BROKEN ON PURPOSE -- open this file to see the server's diagnostics.
+// `Solaris` is an environment nothing declares.
+contact: "Goofy"
+
+environment Windows10: "our standard PC"
+
+req ReqId100 "A requirement that applies somewhere undeclared" applicable for Solaris

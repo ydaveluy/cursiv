@@ -1,4 +1,4 @@
-#include <domainmodel/cli/Generator.hpp>
+#include "domainmodel/cli/Generator.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -9,10 +9,12 @@
 #include <string_view>
 #include <vector>
 
-namespace domainmodel {
+#include "domainmodel/cli/CliUtils.hpp"
+
+namespace dm {
 namespace {
 
-using namespace domainmodel::ast;
+using namespace dm::ast;
 
 [[nodiscard]] std::string upper_first(std::string_view text) {
   if (text.empty()) {
@@ -24,7 +26,8 @@ using namespace domainmodel::ast;
   return value;
 }
 
-[[nodiscard]] std::string package_path_from_file_path(std::string_view filePath) {
+[[nodiscard]] std::string package_path_from_file_path(
+    std::string_view filePath) {
   std::string packagePath(filePath);
   std::ranges::replace(packagePath, '/', '.');
   while (!packagePath.empty() && packagePath.front() == '.') {
@@ -33,37 +36,38 @@ using namespace domainmodel::ast;
   return packagePath;
 }
 
-[[nodiscard]] std::string resolved_type_name(const Type &type) {
-  if (const auto *entity = pegium::ast_ptr_cast<const Entity>(&type)) {
-    return entity->name;
+[[nodiscard]] std::string resolved_type_name(const Type& type) {
+  if (const auto* entity = cursiv::ast_cast<const Entity>(&type)) {
+    return std::string(entity->name);
   }
-  if (const auto *dataType = pegium::ast_ptr_cast<const DataType>(&type)) {
-    return dataType->name;
+  if (const auto* dataType = cursiv::ast_cast<const DataType>(&type)) {
+    return std::string(dataType->name);
   }
   throw std::runtime_error("Unsupported domainmodel type.");
 }
 
-[[nodiscard]] std::string referenced_type_name(const Feature &feature) {
-  if (!feature.type.getRefText().empty()) {
-    return feature.type.getRefText();
+// The text the author wrote first, the resolved target second: a qualified
+// name is what the Java source should say, and resolution normalises it away.
+[[nodiscard]] std::string referenced_type_name(const Feature& feature) {
+  if (!feature.type.refText.empty()) {
+    return std::string(feature.type.refText);
   }
-  if (feature.type.get()) {
-    return resolved_type_name(*feature.type.get());
+  if (const Type* const target = feature.type.get()) {
+    return resolved_type_name(*target);
   }
   throw std::runtime_error("Cannot generate Java for unresolved feature type.");
 }
 
-[[nodiscard]] std::string super_type_name(const Entity &entity) {
-  if (!entity.superType.has_value()) {
-    return {};
+// A `reference` written nowhere carries no text: that is how an entity with no
+// `extends` is spelled, and it is not an error.
+[[nodiscard]] std::string super_type_name(const Entity& entity) {
+  if (!entity.superType.refText.empty()) {
+    return std::string(entity.superType.refText);
   }
-  if (!entity.superType->getRefText().empty()) {
-    return entity.superType->getRefText();
+  if (const Entity* const target = entity.superType.get()) {
+    return std::string(target->name);
   }
-  if (entity.superType->get()) {
-    return entity.superType->get()->name;
-  }
-  throw std::runtime_error("Cannot generate Java for unresolved super type.");
+  return {};
 }
 
 struct FeatureData {
@@ -71,42 +75,50 @@ struct FeatureData {
   std::string setterAndGetter;
 };
 
-[[nodiscard]] FeatureData generate_feature(const Feature &feature) {
+[[nodiscard]] FeatureData generate_feature(const Feature& feature) {
   auto type = referenced_type_name(feature);
   if (feature.many) {
     type += "[]";
   }
-  const auto upperName = upper_first(feature.name);
+  const std::string name(feature.name);
+  const auto upperName = upper_first(name);
   return {
-      .field = "    private " + type + " " + feature.name + ";",
-      .setterAndGetter =
-          "    public void set" + upperName + "(" + type + " " + feature.name +
-          ") {\n"
-          "        this." + feature.name + " = " + feature.name + ";\n"
-          "    }\n\n"
-          "    public " + type + " get" + upperName + "() {\n"
-          "        return " + feature.name + ";\n"
-          "    }\n",
+      .field = "    private " + type + " " + name + ";",
+      .setterAndGetter = "    public void set" + upperName + "(" + type + " " +
+                         name +
+                         ") {\n"
+                         "        this." +
+                         name + " = " + name +
+                         ";\n"
+                         "    }\n\n"
+                         "    public " +
+                         type + " get" + upperName +
+                         "() {\n"
+                         "        return " +
+                         name +
+                         ";\n"
+                         "    }\n",
   };
 }
 
-[[nodiscard]] std::string generate_entity(const Entity &entity) {
+[[nodiscard]] std::string generate_entity(const Entity& entity) {
   std::vector<FeatureData> featureData;
   featureData.reserve(entity.features.size());
-  for (const auto &feature : entity.features) {
+  for (const auto& feature : entity.features) {
     if (feature) {
       featureData.push_back(generate_feature(*feature));
     }
   }
 
   std::string out;
-  out += "class " + entity.name;
-  if (const auto maybeExtends = super_type_name(entity); !maybeExtends.empty()) {
+  out += "class " + std::string(entity.name);
+  if (const auto maybeExtends = super_type_name(entity);
+      !maybeExtends.empty()) {
     out += " extends " + maybeExtends;
   }
   out += " {\n";
 
-  for (const auto &feature : featureData) {
+  for (const auto& feature : featureData) {
     out += feature.field + "\n";
   }
   if (!featureData.empty()) {
@@ -125,30 +137,33 @@ struct FeatureData {
 }
 
 [[nodiscard]] std::string generate_entity_file_content(
-    const Entity &entity, std::string_view packagePath) {
+    const Entity& entity, std::string_view packagePath) {
   std::string out;
   out += "package " + std::string(packagePath) + ";\n\n";
   out += generate_entity(entity);
   return out;
 }
 
-void generate_abstract_elements(const std::filesystem::path &destination,
-                                const std::vector<AbstractElement*> &elements,
-                                std::string filePath) {
+void generate_abstract_elements(const std::filesystem::path& destination,
+                                std::span<AbstractElement* const> elements,
+                                const std::string& filePath) {
   const auto fullPath = destination / filePath;
   std::filesystem::create_directories(fullPath);
 
   const auto packagePath = package_path_from_file_path(filePath);
-  for (const auto &element : elements) {
-    if (const auto *package = pegium::ast_ptr_cast<const PackageDeclaration>(element)) {
-      auto packagePath = package->name;
+  for (const auto& element : elements) {
+    if (const auto* package =
+            cursiv::ast_cast<const PackageDeclaration>(element)) {
+      // A dotted package becomes a directory path, as Java lays one out.
+      std::string packagePath(package->name);
       std::ranges::replace(packagePath, '.', '/');
-      generate_abstract_elements(destination, package->elements,
-                                 (std::filesystem::path(filePath) /
-                                  std::filesystem::path(packagePath))
-                                     .string());
-    } else if (const auto *entity = pegium::ast_ptr_cast<const Entity>(element)) {
-      const auto filePathValue = fullPath / (entity->name + ".java");
+      generate_abstract_elements(
+          destination, package->elements,
+          (std::filesystem::path(filePath) / std::filesystem::path(packagePath))
+              .string());
+    } else if (const auto* entity = cursiv::ast_cast<const Entity>(element)) {
+      const auto filePathValue =
+          fullPath / (std::string(entity->name) + ".java");
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {
         throw std::runtime_error("Unable to open output file: " +
@@ -159,9 +174,10 @@ void generate_abstract_elements(const std::filesystem::path &destination,
   }
 }
 
-} // namespace
+}  // namespace
 
-std::string generate_java(const ast::DomainModel &model, std::string_view filePath,
+std::string generate_java(const ast::DomainModel& model,
+                          std::string_view filePath,
                           std::optional<std::string_view> destination) {
   const auto data = extract_destination_and_name(filePath, destination);
   std::filesystem::create_directories(data.destination);
@@ -170,4 +186,4 @@ std::string generate_java(const ast::DomainModel &model, std::string_view filePa
   return (std::filesystem::path(data.destination) / data.name).string();
 }
 
-} // namespace domainmodel
+}  // namespace dm

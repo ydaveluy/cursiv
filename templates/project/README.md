@@ -1,96 +1,87 @@
-# @PEGIUM_NEW_LANGUAGE_ID@
+# @CURSIV_NEW_CLASS@
 
-A hello-world language built with [pegium](https://github.com/ydaveluy/pegium).
+A language project created with [Cursiv](https://ydaveluy.github.io/cursiv/).
+Start with the sample, then edit the grammar and AST to define your language.
 
-## Quick start
+## Build and run
 
-### Build
+You need CMake 3.30 or later, Git and a C++20 compiler with `std::format` and
+`musttail` support. Cursiv's CI uses GCC 16 and Clang 22.
 
 ```bash
 cmake -B build
-cmake --build build -j
-```
-
-### Run the CLI
-
-```bash
-./build/@PEGIUM_NEW_LANGUAGE_ID@-cli example/hello@PEGIUM_NEW_EXT@
-```
-
-### Open it in VS Code (press F5)
-
-The recommended way to try the language is in the editor. Open this folder in VS
-Code and press **F5** — that's the whole setup.
-
-The first launch runs everything for you: it configures and builds the C++
-language server, installs the extension's npm dependencies, and compiles the
-TypeScript. Then a second window (the Extension Development Host) opens on the
-`example/` folder with `hello@PEGIUM_NEW_EXT@` already open, so live syntax
-highlighting, diagnostics and the other LSP features are active immediately.
-
-> The first F5 is slow: CMake clones and builds pegium via `FetchContent`.
-> Later launches are incremental.
->
-> If the Extension Development Host shows *"Unable to locate
-> @PEGIUM_NEW_LANGUAGE_ID@-lsp"*, the C++ build failed — check the **Terminal**
-> and **Problems** panels in the main window.
-
-### Run the tests
-
-```bash
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
+./build/src/@CURSIV_NEW_ID@_cli example/hello@CURSIV_NEW_EXT@
 ```
 
-These also run in CI on every push and pull request — see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+CMake generates the parser automatically, including when the grammar changes.
+Generated files are under `build/src/generated-src/`; do not edit them.
 
-### Package & publish the extension
+## The sample language
 
-`npm run package` builds the C++ server **Release and stripped** (in a dedicated
-`build-release/` tree, so it doesn't disturb the Debug build F5 uses), copies it
-into the extension's `bin/`, and produces a **platform-specific** `.vsix` — the
-TypeScript is bundled with [esbuild](https://esbuild.github.io/) and the small,
-optimized native server is bundled in `bin/`, so the result works as soon as it
-is installed, with nothing else to configure:
+```text
+person Alice
+person Bob
+
+Hello Alice!
+Hello Bob!
+```
+
+`person` declares a name and `Hello` refers to it. An unknown name produces a
+diagnostic. The same references support go-to-definition and rename in the
+editor.
+
+Use `--dump` to inspect the concrete syntax tree (CST):
 
 ```bash
-(cd vscode && npm install && npm run package)          # for your platform
-(cd vscode && npm run package -- --target linux-x64)   # for a specific target
+./build/src/@CURSIV_NEW_ID@_cli --dump example/hello@CURSIV_NEW_EXT@
 ```
 
-Because the C++ server cannot be cross-compiled easily, each platform's `.vsix`
-is normally built on that platform. The included
-[`.github/workflows/release.yml`](.github/workflows/release.yml) does exactly that
-— a Linux/Windows/macOS matrix builds and uploads one `.vsix` per target on every
-`v*` tag.
+The CLI returns `0` for no errors, `1` for document errors, `2` for invalid
+arguments or paths, and `3` for an internal or output error.
 
-To publish to the Marketplace, set a real `publisher` in `vscode/package.json`,
-[create a publisher and a Personal Access Token](https://code.visualstudio.com/api/working-with-extensions/publishing-extension),
-then add a `VSCE_PAT` secret and uncomment the publish step in the workflow (or run
-`VSCE_PAT=… npm run publish` locally).
+## Customize the language
 
-## What to edit next
+| To change… | Edit |
+|---|---|
+| Syntax | `src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp` |
+| AST types | `src/@CURSIV_NEW_ID@/core/ast.hpp` |
+| Validation rules | `src/@CURSIV_NEW_ID@/core/validation/` |
+| Language services | `src/@CURSIV_NEW_ID@/core/CoreServices.hpp` and `CoreModule.cpp` |
+| CLI behavior | `src/@CURSIV_NEW_ID@/cli/main.cpp` |
+| Editor features | `src/@CURSIV_NEW_ID@/lsp/LspModule.cpp` |
+| Tests | `tests/grammar_test.cpp` |
 
-| What you want to change     | File(s) to edit                                       |
-|-----------------------------|-------------------------------------------------------|
-| Add a new AST node          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/ast.hpp`                                  |
-| Extend the grammar          | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/@PEGIUM_NEW_CLASS@Parser.hpp`                        |
-| Add validation checks       | `src/@PEGIUM_NEW_LANGUAGE_ID@/core/` (add a validator class)            |
-| Add LSP features (hover, …) | `src/@PEGIUM_NEW_LANGUAGE_ID@/lsp/`                                     |
-| Add a code generator        | `src/@PEGIUM_NEW_LANGUAGE_ID@/cli/main.cpp`            |
-| Add more test cases         | `test/parsing_test.cpp`                               |
+Follow the [language tutorial](https://ydaveluy.github.io/cursiv/learn/walkthrough/)
+to replace the sample with a complete language.
 
-## Grammar at a glance
+## Open the editor
 
+Install Node.js, npm and the recommended VS Code extensions, including CMake
+Tools and clangd. Native servers support VS Code 1.86 or later; WASI servers
+require 1.101 or later. Open this project folder in VS Code, configure the
+CMake build and press **F5**. The launch task builds the server and client,
+then opens `example/` in a development window.
+
+Native GCC/Clang presets run the native server. WASI presets run a WebAssembly
+server through Node. See
+[Editor integration](https://ydaveluy.github.io/cursiv/learn/editor-integration/)
+for customization and packaging.
+
+## Measure performance
+
+```bash
+cmake --build build --target @CURSIV_NEW_ID@_bench
+./build/src/@CURSIV_NEW_ID@_bench example/hello@CURSIV_NEW_EXT@ --iterations 5
 ```
-person John
-person Jane
 
-Hello John!
-Hello Jane!
-```
+The benchmark measures parsing, document builds and installed editor providers.
+Use `--json bench.json` or `--csv bench.csv` to export results, and `--help` for
+all options. Its entry point is `src/@CURSIV_NEW_ID@/bench/main.cpp`.
 
-The grammar defines two kinds of declarations:
+## Optional components
 
-- `person <Name>` — declares a person.
-- `Hello <Name>!` — greets a previously declared person.
+The CLI, server, benchmark and VS Code extension are included by default.
+Remove the component folders you do not need; CMake omits their targets and
+tests. Removing `lsp/` also disables the benchmark, which uses LSP services.

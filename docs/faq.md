@@ -1,67 +1,91 @@
-# FAQ and Common Pitfalls
+# FAQ
 
-Short answers to the questions and silent traps that come up most when building a Pegium language. Several pitfalls compile cleanly but misbehave at runtime, so know them before you hit them.
+### Do I need to write a grammar file?
 
-## Common pitfalls
+Declare a `struct` deriving from `cursiv::GrammarSpec` in a C++ header. See
+the [tutorial](learn/walkthrough.md) for a complete grammar.
 
-**Named declarations must derive `pegium::NamedAstNode`.**
-The default `NameProvider` names only `NamedAstNode`-derived nodes — it reads
-`NamedAstNode::name`. A plain `pegium::AstNode` is unnamed even if its grammar
-assigns a `name` field: it is not exported, scoped, or linked by name. Derive
-`NamedAstNode` for anything with a name; to name a type that cannot derive it,
-override the `NameProvider` service.
+### Where does the generated code go, and do I commit it?
 
-**Pass your own services type to `makeDefaultServices`.**
-`makeDefaultServices<MyServices>(shared, id)` returns your container, which can
-hold language-specific members. The bare `makeDefaultServices(shared, id)`
-defaults to the base `pegium::Services` and cannot hold your additions. Assemble
-the language through your `installMyCoreModule` / `installMyLspModule` functions.
+In the `OUT` directory passed to `cursiv_generate_language`. A relative `OUT`
+is placed under `generated-src/` in the build directory. Generated sources
+are build output: do not edit or commit them. The build regenerates them
+when the grammar changes.
 
-**AST node types must be default-constructible.** The arena builds nodes before
-populating them, so every AST struct needs a usable default constructor (the
-defaults you get from deriving `AstNode` / `NamedAstNode` are fine).
+### Do I have to run a generate step?
 
-**Matching is not assigning.** A grammar element that matches text does nothing to
-the AST unless you wrap it in `assign<&T::field>(...)` (single) or
-`append<&T::vec>(...)` (repeated).
+Build normally with `cmake --build build --parallel`. CMake regenerates the
+parser when needed.
 
-**`Infix` is an in-class alias.** Inside a `PegiumParser` subclass, `Infix<...>`
-aliases `InfixRule<...>`. Outside the class, use `InfixRule<...>`.
+### Why does my rule not build the AST class I expected?
 
-**Choice is ordered.** PEG `|` returns the first matching alternative — order
-matters, and there is no backtracking to a later alternative once one matches. Put
-specific cases first; use `!lookahead` to disambiguate.
+A rule's class is deduced from the members its directives name, including
+members written inside repetitions. An unassigned call to an AST rule returns
+that rule's node instead. To create a node with no assigned members, use
+`create<T>`. You can also use it to select a derived class explicitly. See
+[Building the tree](reference/grammar.md#building-the-tree).
 
-**`reference<T>` resolves lazily.** Dereferencing a reference triggers linking on
-first access. Gate the whole result with `has_error_diagnostics(document)`; before
-following an individual reference, check its `bool` conversion (false when
-unresolved).
+### Can a rule match the empty string?
 
-## Questions
+Yes. A repetition that can run more than once must consume input on each
+iteration (`nullableRepetition`). Cycles of reductions that consume no input
+are also refused (`unitProductionCycle`). For an optional list, let `many`
+allow zero items and make each item consume input:
 
-**Does Pegium generate code from a grammar file?** No — the grammar, AST, and
-services are hand-written C++; there is no external grammar DSL or grammar-to-code
-generation. There *is* an optional project scaffolder (`pegium-new.cmake` — see
-[Create a Project](learn/workflow/scaffold.md)) that generates a complete,
-ready-to-build project by substituting your language name, id, and extension into
-templated CMake/grammar/CLI/LSP/VS Code files.
+```cpp
+struct Item : rule<option(ref<ID>)> {};
+struct List : rule<many(ref<Item>)> {};   // refused
+```
 
-**Do I need to clone Pegium to build my language?** No — pull it in via
-`FetchContent` (see [Create a Project](learn/workflow/scaffold.md)). Clone it
-only to run the examples or to contribute.
+Use a consuming item instead:
 
-**How do I test my language?** Build a document with the `pegium::testing::*` helpers
-and assert on the AST and diagnostics — see
-[Test Your Language](learn/test-your-language.md).
+```cpp
+struct Item : rule<ref<ID>> {};
+struct List : rule<many(ref<Item>)> {};
+```
 
-**How do I run my language without an editor?** Parse a file and walk the AST
-headlessly — see [Run a Language Headlessly](learn/consume-the-ast.md).
+### My keyword matches inside a longer word
 
-**How do I hook it to an editor?** Start the server with `runLanguageServerMain`
-and connect a thin client — see
-[Integrate with VS Code](build-a-language/editor-integration.md).
+Set `word_boundary` to the characters allowed to continue an identifier.
+For example, identifiers containing only uppercase letters need
+`static constexpr auto word_boundary = cr<"A-Z">;`. This controls where
+`kw<>` and `ikw<>` may end, independently of case-insensitive matching.
 
-## Related pages
+### A reference resolves in the editor but not on the command line
 
-- [Build a Language End-to-End](learn/walkthrough.md)
-- [Debugging a Grammar](build-a-language/debugging-grammar.md)
+Pass `--root <dir>` to load the folder containing the target declarations.
+Without it, the CLI loads only the named file; the editor may already have
+loaded the other workspace documents.
+
+### Can a member hold a `std::string`?
+
+No. Use `string_view` and keep the source text and `ParseResult` alive while
+reading the tree.
+
+### Can a list be a `std::vector`?
+
+No. Use `cursiv::vector<T>`. Its elements must be trivially copyable;
+use pointers for a list of nodes.
+
+### How do I test what the editor answers?
+
+Use the editor expectations in `cursiv::test`, with `<|>` marking the cursor
+position. See [Test your language](learn/testing.md).
+
+### Why is my formatter not used?
+
+Formatting is language-specific and has no default implementation. Install a
+formatter in your LSP module; the server then advertises the capability to the
+editor. See [Formatting](recipes/formatting.md).
+
+### Does the server run on Windows and macOS?
+
+You can build a native server or distribute a WebAssembly server with the
+Node runner. See
+[Cross-compiling to wasm](recipes/wasm.md).
+
+### What C++ do I need?
+
+C++20, with a compiler that supports `std::format` and guaranteed tail calls
+(`musttail`). CI tests GCC 16 and Clang 22, and cross-compiles with wasi-sdk 34.
+Older compiler versions are not validated.

@@ -1,14 +1,36 @@
-# What is Pegium?
+# What is cursiv++?
 
-Pegium is an open source language engineering toolkit for C++20. You use it to build textual languages with first-class support for parsing, AST/CST construction, references, validation, formatting, and language-server features.
+cursiv++ helps you turn a language definition into a command-line tool or an
+editor extension. You write the data types for your abstract syntax tree
+(AST), the grammar and the validation checks. Cursiv supplies parsing,
+reference resolution and editor services.
 
-The core idea: language tooling in C++ should feel like framework work, not like assembling unrelated parser, workspace, and editor pieces by hand.
+A grammar is a `struct` deriving from `cursiv::GrammarSpec`. Its rules bind
+directly to members of your AST structs. The C++ compiler and generator check
+that those bindings are valid.
 
-## Related pages
+## Build your language
 
-- [Features](features.md) — the capabilities Pegium provides out of the box.
-- [Showcases](showcases.md) and shipped [examples](../examples/index.md) — see Pegium in action.
-- [Learn Pegium](../learn/index.md) — the recommended step-by-step path for building a language.
-- [Walkthrough](../learn/walkthrough.md) — build a language end-to-end.
-- [Reference](../reference/index.md) — precise concepts once you know the workflow.
-- [Recipes](../recipes/index.md) — targeted guides rather than a linear tutorial.
+Edit your AST and grammar headers, then build with CMake. Parser generation
+is automatic. The generated files go under the build directory; do not edit
+them. See [CMake integration](../reference/cmake.md) when adding a language to
+an existing project.
+
+## Choose the components you need
+
+| Component | Purpose |
+|---|---|
+| Core | Parsing, AST construction, references, scoping and validation |
+| CLI (command-line interface) | Validate files from the terminal or a script |
+| LSP (Language Server Protocol) | Add editor completion, navigation and rename |
+| MCP (Model Context Protocol) | Expose language tools to a model |
+
+The scaffold includes all four. A program that only reads and validates files
+can use the core services directly.
+
+## Next
+
+- [Mental model](mental-model.md): syntax trees, references and services.
+- [Create a project](../learn/scaffold.md): build and run your first language.
+- [Features](features.md): available parser and language-tool capabilities.
+- [Why cursiv](why-cursiv.md): the benefits and costs of a grammar written in C++.

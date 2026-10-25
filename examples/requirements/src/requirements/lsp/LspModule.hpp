@@ -3,38 +3,33 @@
 #include <memory>
 #include <string>
 
-#include <requirements/lsp/LspServices.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "requirements/generated/Requirements/Module.hpp"
+#include "requirements/generated/Tests/Module.hpp"
+#include "requirements/lsp/LspServices.hpp"
 
-namespace requirements {
+namespace req {
 
-/// LSP service overrides for the requirements language.
-void installRequirementsLspModule(RequirementsServices &services);
+void install_lsp_module(RequirementsServices& services);
 
-/// LSP service overrides for the tests language.
-void installTestsLspModule(TestsServices &services);
+std::unique_ptr<RequirementsServices> create_requirements_lsp_services(
+    RequirementsSharedServices& sharedServices,
+    std::string languageId =
+        std::string(req::generated::Requirements::kLanguageId));
+std::unique_ptr<RequirementsServices> create_tests_lsp_services(
+    RequirementsSharedServices& sharedServices,
+    std::string languageId = std::string(req::generated::Tests::kLanguageId));
 
-/// Builds the LSP-enabled requirements language services.
-std::unique_ptr<RequirementsServices>
-createRequirementsLspServices(const RequirementsSharedServices &sharedServices,
-                              std::string languageId = "requirements-lang");
-
-/// Builds the LSP-enabled tests language services.
-std::unique_ptr<TestsServices>
-createTestsLspServices(const RequirementsSharedServices &sharedServices,
-                       std::string languageId = "tests-lang");
-
-/// Aggregate of both languages' LSP-enabled services.
-struct RequirementsAndTestsServices {
-  std::unique_ptr<RequirementsServices> requirements;
-  std::unique_ptr<TestsServices> tests;
+// The same one call, one storey up: both languages of the example.
+struct RequirementsLanguage {
+  std::unique_ptr<RequirementsSharedServices> shared;
+  RequirementsServices& requirements;
+  RequirementsServices& tests;
 };
 
-/// Builds the LSP-enabled requirements and tests language services together.
-RequirementsAndTestsServices createRequirementsAndTestsLspServices(
-    const RequirementsSharedServices &sharedServices);
+RequirementsLanguage create_lsp_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
 
-/// Registers the LSP-enabled services for both languages.
-bool registerRequirementsLspServices(pegium::SharedServices &sharedServices);
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
-} // namespace requirements
+}  // namespace req

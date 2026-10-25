@@ -1,0 +1,6 @@
+go A {
+  blueprint X <<<
+  content here
+  >>
+  kind y = 1;
+}

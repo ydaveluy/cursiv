@@ -1,65 +1,42 @@
 #pragma once
 
-#include <arithmetics/core/ast.hpp>
-
 #include <string_view>
 
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/DefaultCoreService.hpp>
-#include <pegium/core/validation/ValidationAcceptor.hpp>
-#include <pegium/core/validation/ValidationRegistry.hpp>
+#include "arithmetics/core/ast.hpp"
+#include "cursiv/core/services/DefaultCoreService.hpp"
+#include "cursiv/core/utils/Cancellation.hpp"
+#include "cursiv/core/validation/ValidationAcceptor.hpp"
 
-namespace arithmetics::validation {
+// The six checks of this language. The last one folds constants and carries the
+// folded value as diagnostic data, which is what the code action reads to offer
+// the rewrite.
 
-namespace IssueCodes {
+namespace arith {
 
-inline constexpr std::string_view ExpressionNormalizable =
-    "arithmetics.expression-normalizable";
+// The code a quick fix looks for. A string, because that is what crosses the
+// wire in a diagnostic.
+inline constexpr std::string_view kExpressionNormalizable =
+    "expression-normalizable";
 
-} // namespace IssueCodes
+class ArithmeticsValidator final : public cursiv::DefaultCoreService {
+ public:
+  using cursiv::DefaultCoreService::DefaultCoreService;
 
-/// Inherits `pegium::DefaultCoreService` so checks can reach the language
-/// services through `services.*` (parser, references, shared caches, ...).
-class ArithmeticsValidator final : public pegium::DefaultCoreService {
-public:
-  using pegium::DefaultCoreService::DefaultCoreService;
-
-  void checkDivByZero(
-      const arithmetics::ast::BinaryExpression &expression,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkUniqueParameters(
-      const arithmetics::ast::Definition &definition,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkNormalizable(
-      const arithmetics::ast::Definition &definition,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkUniqueDefinitions(
-      const arithmetics::ast::Module &module,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkFunctionRecursion(
-      const arithmetics::ast::Module &module,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkMatchingParameters(
-      const arithmetics::ast::FunctionCall &call,
-      const pegium::validation::ValidationAcceptor &accept) const;
+  // Document-level, not per node: one bounded walk prices every divisor,
+  // and the whole check stays O(divisions), never the call graph.
+  void checkDivisionsByZero(const cursiv::Document& document,
+                            cursiv::ValidationAcceptor& accept,
+                            const cursiv::CancellationToken& token) const;
+  void checkUniqueParameters(const ast::Definition& definition,
+                             cursiv::ValidationAcceptor& accept) const;
+  void checkUniqueDefinitions(const ast::Module& module,
+                              cursiv::ValidationAcceptor& accept) const;
+  void checkMatchingParameters(const ast::FunctionCall& call,
+                               cursiv::ValidationAcceptor& accept) const;
+  void checkFunctionRecursion(const ast::Module& module,
+                              cursiv::ValidationAcceptor& accept) const;
+  void checkNormalizable(const ast::Definition& definition,
+                         cursiv::ValidationAcceptor& accept) const;
 };
 
-inline void registerValidationChecks(pegium::CoreServices &services,
-                                     ArithmeticsValidator &validator) {
-  auto &registry = *services.validation.validationRegistry;
-  registry.registerChecks(
-      {pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkDivByZero>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkUniqueParameters>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkNormalizable>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkUniqueDefinitions>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkFunctionRecursion>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &ArithmeticsValidator::checkMatchingParameters>(validator)});
-}
-
-} // namespace arithmetics::validation
+}  // namespace arith

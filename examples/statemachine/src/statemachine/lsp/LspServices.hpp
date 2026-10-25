@@ -1,20 +1,32 @@
 #pragma once
 
-#include <statemachine/core/CoreServices.hpp>
-#include <pegium/lsp/services/Services.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "cursiv/lsp/services/LspServices.hpp"
+#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "statemachine/core/CoreServices.hpp"
 
-namespace statemachine {
+// The same language one storey up. Both containers derive `CoreServices`
+// virtually, so this holds one of it and the core module wires the same
+// object the LSP providers read.
 
-/// Workspace-wide shared services in an LSP session.
-struct StatemachineSharedServices : StatemachineSharedCoreServices,
-                                    pegium::SharedServices {};
+namespace sm {
 
-/// LSP-enabled statemachine language services.
-struct StatemachineServices final
-    : pegium::ServicesFor<StatemachineCoreServices, StatemachineSharedServices> {
-  explicit StatemachineServices(const StatemachineSharedServices &sharedServices)
-      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+struct StateMachineSharedServices : StateMachineSharedCoreServices,
+                                    cursiv::SharedLspServices {};
+
+struct StateMachineServices final : StateMachineCoreServices,
+                                    cursiv::LspServices {
+  explicit StateMachineServices(StateMachineSharedServices& sharedServices)
+      : cursiv::CoreServices(sharedServices),
+        StateMachineCoreServices(sharedServices),
+        cursiv::LspServices(sharedServices) {}
+
+  // One emission per storey through the diamond: the language rows through
+  // the core side, the LSP rows alone.
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    StateMachineCoreServices::visitServices(yield);
+    cursiv::LspServices::visitOwnServices(yield);
+  }
 };
 
-} // namespace statemachine
+}  // namespace sm

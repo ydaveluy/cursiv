@@ -1,0 +1,178 @@
+#include "cursiv/engines/shared/runtime/GestureRank.hpp"
+#include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
+#include "cursiv/test/Check.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <random>
+#include <vector>
+
+namespace typo_candidates_cases {
+
+// The re-readings a walk emits are kept once each at their fewest faults and
+// ranked as an ordered insertion ranks them, and a token that ends at every
+// byte of a long line costs its number of candidates.
+
+namespace {
+
+using cursiv::Typo;
+
+// One insertion at a time into a ranked list: what the collector replaced.
+std::vector<Typo> by_insertion(const std::vector<Typo>& emitted) {
+  std::vector<Typo> out;
+  const auto before = [](const Typo& a, const Typo& b) {
+    return a.faults != b.faults ? a.faults < b.faults : a.end > b.end;
+  };
+  for (const Typo& candidate : emitted) {
+    const auto same = std::find_if(out.begin(), out.end(), [&](const Typo& o) {
+      return o.term == candidate.term && o.end == candidate.end;
+    });
+    if (same != out.end()) {
+      if (same->faults <= candidate.faults) continue;
+      out.erase(same);
+    }
+    auto last = std::lower_bound(out.begin(), out.end(), candidate, before);
+    while (last != out.end() && last->faults == candidate.faults &&
+           last->end == candidate.end)
+      ++last;
+    out.insert(last, candidate);
+  }
+  return out;
+}
+
+Typo typo(std::uint32_t end, std::uint16_t term, std::uint8_t faults) {
+  Typo t;
+  t.end = end;
+  t.term = term;
+  t.faults = faults;
+  return t;
+}
+
+void ranks_as_an_insertion_does() {
+  std::mt19937 rng(20260929);
+  for (unsigned round = 0; round < 400; ++round) {
+    std::vector<Typo> emitted;
+    const unsigned n = 1 + rng() % (round % 4 == 0 ? 400 : 40);
+    for (unsigned i = 0; i < n; ++i)
+      emitted.push_back(typo(rng() % 30, static_cast<std::uint16_t>(rng() % 4),
+                             static_cast<std::uint8_t>(rng() % 4)));
+    cursiv::TypoCandidates c;
+    for (const Typo& t : emitted) c.add(t);
+    const std::vector<Typo> got = c.ranked();
+    const std::vector<Typo> want = by_insertion(emitted);
+    CHECK(got.size() == want.size());
+    for (std::size_t k = 0; k < got.size() && k < want.size(); ++k)
+      CHECK(got[k].end == want[k].end && got[k].term == want[k].term &&
+            got[k].faults == want[k].faults);
+  }
+}
+
+void a_long_line_costs_its_candidates() {
+  const auto start = std::chrono::steady_clock::now();
+  cursiv::TypoCandidates c;
+  constexpr std::uint32_t kEnds = 400000;
+  for (std::uint32_t end = 1; end <= kEnds; ++end) c.add(typo(end, 15, 1));
+  for (std::uint32_t end = 1; end <= kEnds; ++end) c.add(typo(end, 15, 2));
+  const std::vector<Typo> got = c.ranked();
+  CHECK(got.size() == kEnds && got.front().end == kEnds && got.back().end == 1);
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
+}
+
+}  // namespace
+
+void run() {
+  cursiv::test::count_expectations();
+  ranks_as_an_insertion_does();
+  a_long_line_costs_its_candidates();
+
+}
+
+}  // namespace typo_candidates_cases
+
+namespace gesture_rank_cases {
+
+// Ranking two paths costs the distance to the link they share: paths of two
+// million links that part at their ends rank at once, and small forests rank
+// as the depths say.
+
+namespace {
+
+using cursiv::kNoGestureLink;
+
+struct Link {
+  std::uint32_t parent = kNoGestureLink;
+  std::uint32_t choice = 0;
+};
+
+// The order two paths rank in, by their depths: the lower choice where they
+// part, a prefix first.
+bool ranks_by_depth(const std::vector<Link>& links, std::uint32_t a,
+                    std::uint32_t b) {
+  if (a == b) return false;
+  const auto depth = [&](std::uint32_t x) {
+    std::uint32_t d = 0;
+    for (; x != kNoGestureLink; x = links[x].parent) ++d;
+    return d;
+  };
+  std::uint32_t da = depth(a), db = depth(b);
+  const bool shorter = da < db;
+  for (; da > db; --da) a = links[a].parent;
+  for (; db > da; --db) b = links[b].parent;
+  if (a == b) return shorter;
+  while (links[a].parent != links[b].parent) {
+    a = links[a].parent;
+    b = links[b].parent;
+  }
+  return links[a].choice != links[b].choice ? links[a].choice < links[b].choice
+                                            : a < b;
+}
+
+void small_forests_rank_as_the_depths_say() {
+  std::mt19937 rng(929);
+  for (unsigned round = 0; round < 300; ++round) {
+    cursiv::GestureRank rank;
+    std::vector<Link> links;
+    const std::uint32_t n = 2 + rng() % 40;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const bool root = i == 0 || rng() % 7 == 0;
+      links.push_back(
+          Link{root ? kNoGestureLink : static_cast<std::uint32_t>(rng() % i),
+               static_cast<std::uint32_t>(rng() % 3)});
+    }
+    for (std::uint32_t a = 0; a < n; ++a)
+      for (std::uint32_t b = 0; b < n; ++b)
+        CHECK(rank.before(links, a, b) == ranks_by_depth(links, a, b));
+  }
+}
+
+void long_paths_rank_at_their_divergence() {
+  constexpr std::uint32_t kLong = 2'000'000;
+  cursiv::GestureRank rank;
+  std::vector<Link> links;
+  for (std::uint32_t i = 0; i < kLong; ++i)
+    links.push_back(Link{i == 0 ? kNoGestureLink : i - 1, 0});
+  links.push_back(Link{kLong - 1, 1});
+  links.push_back(Link{kLong - 1, 2});
+  for (unsigned k = 0; k < 100000; ++k) {
+    CHECK(rank.before(links, kLong, kLong + 1));
+    CHECK(!rank.before(links, kLong + 1, kLong));
+  }
+}
+
+}  // namespace
+
+void run() {
+  small_forests_rank_as_the_depths_say();
+  long_paths_rank_at_their_divergence();
+
+}
+
+}  // namespace gesture_rank_cases
+
+int main() {
+  cursiv::test::count_expectations();
+  typo_candidates_cases::run();
+  gesture_rank_cases::run();
+  return cursiv::test::report("TypoCandidates_test");
+}

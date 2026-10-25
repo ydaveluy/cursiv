@@ -1,20 +1,32 @@
 #pragma once
 
-#include <arithmetics/core/CoreServices.hpp>
-#include <pegium/lsp/services/Services.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "arithmetics/core/CoreServices.hpp"
+#include "cursiv/lsp/services/LspServices.hpp"
+#include "cursiv/lsp/services/SharedLspServices.hpp"
 
-namespace arithmetics {
+// The same language one storey up. Both containers derive `CoreServices`
+// virtually, so this holds one of it and the core module wires the same object
+// the LSP providers read.
 
-/// Workspace-wide shared services in an LSP session.
+namespace arith {
+
 struct ArithmeticsSharedServices : ArithmeticsSharedCoreServices,
-                                   pegium::SharedServices {};
+                                   cursiv::SharedLspServices {};
 
-/// LSP-enabled arithmetics language services.
-struct ArithmeticsServices final
-    : pegium::ServicesFor<ArithmeticsCoreServices, ArithmeticsSharedServices> {
-  explicit ArithmeticsServices(const ArithmeticsSharedServices &sharedServices)
-      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+struct ArithmeticsServices final : ArithmeticsCoreServices,
+                                   cursiv::LspServices {
+  explicit ArithmeticsServices(ArithmeticsSharedServices& sharedServices)
+      : cursiv::CoreServices(sharedServices),
+        ArithmeticsCoreServices(sharedServices),
+        cursiv::LspServices(sharedServices) {}
+
+  // One emission per storey through the diamond: the language rows through
+  // the core side, the LSP rows alone.
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    ArithmeticsCoreServices::visitServices(yield);
+    cursiv::LspServices::visitOwnServices(yield);
+  }
 };
 
-} // namespace arithmetics
+}  // namespace arith

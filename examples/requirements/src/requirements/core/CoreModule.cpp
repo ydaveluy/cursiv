@@ -1,77 +1,90 @@
-#include <requirements/core/CoreModule.hpp>
+// What this language installs over the generated module, and the two ways to
+// obtain a container of it: built here, or registered in a workspace. The
+// grammar is not compiled here -- the generated module carries it.
 
+#include "requirements/core/CoreModule.hpp"
+
+#include <memory>
+#include <string>
 #include <utility>
 
-#include <requirements/core/RequirementsParser.hpp>
-#include <requirements/core/validation/RequirementsValidator.hpp>
-#include <requirements/core/validation/TestsValidator.hpp>
+#include "cursiv/core/services/ServiceRegistry.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/core/validation/ValidationRegistry.hpp"
+#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "requirements/core/validation/RequirementsValidator.hpp"
+#include "requirements/core/validation/TestsValidator.hpp"
+#include "requirements/generated/Requirements/Module.hpp"
+#include "requirements/generated/Tests/Module.hpp"
 
-// This is the single translation unit that includes the grammar header
-// (RequirementsParser.hpp), so the heavy grammar template instantiations for
-// both languages happen here once; the lsp module reaches the wiring through the
-// declarations only.
+namespace req {
 
-namespace requirements {
+void install_requirements_core_module(RequirementsCoreServices& services) {
+  req::generated::Requirements::install_generated_module(services);
 
-std::unique_ptr<const pegium::parser::Parser> createRequirementsParser() {
-  return std::make_unique<const parser::RequirementsParser>();
+  using V = RequirementsValidator;
+  services.requirementsValidator = std::make_unique<const V>(services);
+  using R = cursiv::ValidationRegistry;
+  const V& v = *services.requirementsValidator;
+  services.validationRegistry->registerChecks(
+      {R::makeValidationCheck<&V::checkRequirementNameContainsANumber>(v),
+       R::makeValidationCheck<&V::checkRequirementIsCoveredByATest>(v)});
 }
 
-std::unique_ptr<const pegium::parser::Parser> createTestsParser() {
-  return std::make_unique<const parser::TestsParser>();
+void install_tests_core_module(RequirementsCoreServices& services) {
+  req::generated::Tests::install_generated_module(services);
+
+  using V = TestsValidator;
+  services.testsValidator = std::make_unique<const V>(services);
+  using R = cursiv::ValidationRegistry;
+  const V& v = *services.testsValidator;
+  services.validationRegistry->registerChecks(
+      {R::makeValidationCheck<&V::checkTestNameContainsANumber>(v),
+       R::makeValidationCheck<
+           &V::checkTestReferencesOnlyEnvironmentsAlsoReferencedInSomeRequirement>(
+           v)});
 }
 
-void installRequirementsCoreModule(RequirementsCoreServices &services) {
-  services.parser = std::make_unique<const parser::RequirementsParser>(services);
-  services.languageMetaData.fileExtensions = {".req"};
-  services.validator =
-      std::make_unique<validation::RequirementsValidator>(services);
-  validation::registerRequirementsValidationChecks(services,
-                                                   *services.validator);
-}
-
-void installTestsCoreModule(TestsCoreServices &services) {
-  services.parser = std::make_unique<const parser::TestsParser>(services);
-  services.languageMetaData.fileExtensions = {".tst"};
-  services.validator = std::make_unique<validation::TestsValidator>(services);
-  validation::registerTestsValidationChecks(services, *services.validator);
-}
-
-std::unique_ptr<RequirementsCoreServices>
-createRequirementsCoreServices(
-    const RequirementsSharedCoreServices &sharedServices,
-    std::string languageId) {
-  auto services = pegium::makeDefaultCoreServices<RequirementsCoreServices>(
+std::unique_ptr<RequirementsCoreServices> create_requirements_core_services(
+    RequirementsSharedCoreServices& sharedServices, std::string languageId) {
+  auto services = cursiv::make_default_core_services<RequirementsCoreServices>(
       sharedServices, std::move(languageId));
-  installRequirementsCoreModule(*services);
+  install_requirements_core_module(*services);
   return services;
 }
 
-std::unique_ptr<TestsCoreServices>
-createTestsCoreServices(const RequirementsSharedCoreServices &sharedServices,
-                        std::string languageId) {
-  auto services = pegium::makeDefaultCoreServices<TestsCoreServices>(
+std::unique_ptr<RequirementsCoreServices> create_tests_core_services(
+    RequirementsSharedCoreServices& sharedServices, std::string languageId) {
+  auto services = cursiv::make_default_core_services<RequirementsCoreServices>(
       sharedServices, std::move(languageId));
-  installTestsCoreModule(*services);
+  install_tests_core_module(*services);
   return services;
 }
 
-RequirementsAndTestsCoreServices createRequirementsAndTestsCoreServices(
-    const RequirementsSharedCoreServices &sharedServices) {
-  return {.requirements = createRequirementsCoreServices(sharedServices),
-          .tests = createTestsCoreServices(sharedServices)};
+RequirementsCoreLanguage create_core_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files) {
+  auto shared = std::make_unique<RequirementsSharedCoreServices>();
+  shared->fileSystemProvider =
+      files != nullptr ? std::move(files)
+                       : std::make_unique<cursiv::EmptyFileSystemProvider>();
+  cursiv::install_default_shared_core_services(*shared);
+  auto requirements = create_requirements_core_services(*shared);
+  auto tests = create_tests_core_services(*shared);
+  RequirementsCoreServices& one = *requirements;
+  RequirementsCoreServices& other = *tests;
+  shared->serviceRegistry->registerServices(std::move(requirements));
+  shared->serviceRegistry->registerServices(std::move(tests));
+  return {std::move(shared), one, other};
 }
 
-bool registerRequirementsCoreServices(
-    pegium::SharedCoreServices &sharedServices) {
-  // The workspace container is the languages' shared type; recover it to build
-  // the containers with their custom shared services.
-  auto services = createRequirementsAndTestsCoreServices(
-      dynamic_cast<RequirementsSharedCoreServices &>(sharedServices));
+bool register_core_services(cursiv::SharedCoreServices& sharedServices) {
+  auto& shared = dynamic_cast<RequirementsSharedCoreServices&>(sharedServices);
   sharedServices.serviceRegistry->registerServices(
-      std::move(services.requirements));
-  sharedServices.serviceRegistry->registerServices(std::move(services.tests));
+      create_requirements_core_services(shared));
+  sharedServices.serviceRegistry->registerServices(
+      create_tests_core_services(shared));
   return true;
 }
 
-} // namespace requirements
+}  // namespace req

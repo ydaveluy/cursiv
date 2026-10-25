@@ -1,0 +1,7 @@
+// BROKEN ON PURPOSE -- open this file to see the server's diagnostics.
+// The definition below never reaches its `;`.
+module broken
+
+def double(x): x * 2
+
+double(3);

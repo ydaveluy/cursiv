@@ -1,30 +1,39 @@
+// The domainmodel example language: its AST. A bracket filter
+// (`type=[Type]`) is spelled as the base it names: `reference<Type>` accepts
+// a DataType or an Entity through the tag's family test, so one field serves both.
 #pragma once
 
-#include <pegium/core/syntax-tree/AstNode.hpp>
+#include "cursiv/core/syntax-tree/AstNode.hpp"
 
-namespace domainmodel::ast {
+namespace dm::ast {
 
-struct AbstractElement : pegium::NamedAstNode {};
-struct Type : AbstractElement {};
+struct AbstractElement : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
 
-struct Feature : pegium::NamedAstNode {
-  bool many = false;
+struct Type : cursiv::Extends<AbstractElement> {};
+
+struct DataType : cursiv::Extends<Type> {};
+
+// `many` is the fact of a match, not matched text -- the grammar's `?=`
+// (`flag`) sets the flag and stores nothing.
+struct Feature : cursiv::Extends<cursiv::AstNode> {
+  boolean many;
+  string_view name;
   reference<Type> type;
 };
 
-struct DataType : Type {};
-
-struct Entity : Type {
-  optional<reference<Entity>> superType;
-  vector<pointer<Feature>> features;
+struct Entity : cursiv::Extends<Type> {
+  reference<Entity> superType;
+  vector<Feature*> features;
 };
 
-struct PackageDeclaration : AbstractElement {
-  vector<pointer<AbstractElement>> elements;
+struct PackageDeclaration : cursiv::Extends<AbstractElement> {
+  vector<AbstractElement*> elements;
 };
 
-struct DomainModel : pegium::AstNode {
-  vector<pointer<AbstractElement>> elements;
+struct DomainModel : cursiv::Extends<cursiv::AstNode> {
+  vector<AbstractElement*> elements;
 };
 
-} // namespace domainmodel::ast
+}  // namespace dm::ast

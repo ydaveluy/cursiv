@@ -1,0 +1,8 @@
+// The people this document knows about.
+person Alice
+person Bob
+
+/* And the greetings for them. Each name is a cross reference: rename Alice
+   above and this one follows, because the linker resolved it. */
+Hello Alice!
+Hello Bob!

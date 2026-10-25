@@ -1,9 +1,0 @@
-environment prod: "Production"
-environment staging: "Staging"
-<<<<<<< HEAD
-req login "Users can login" applicable for prod, staging
-||||||| base
-req login "Users can login"
-=======
-req login "Users can login" applicable for prod staging
->>>>>>> feature/applicable

@@ -3,20 +3,29 @@
 #include <memory>
 #include <string>
 
-#include <domainmodel/lsp/LspServices.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "domainmodel/generated/DomainModel/Module.hpp"
+#include "domainmodel/lsp/LspServices.hpp"
 
-namespace domainmodel {
+namespace dm {
 
-/// LSP service overrides applied on top of pegium's default LSP services.
-void installDomainModelLspModule(DomainModelServices &services);
+// This storey's overrides, on top of the core module's.
+void install_lsp_module(DomainModelServices& services);
 
-/// Builds the LSP-enabled domain-model language services.
-std::unique_ptr<DomainModelServices>
-createDomainModelLspServices(const DomainModelSharedServices &sharedServices,
-                          std::string languageId = "domain-model");
+std::unique_ptr<DomainModelServices> create_lsp_services(
+    DomainModelSharedServices& sharedServices,
+    std::string languageId =
+        std::string(dm::generated::DomainModel::kLanguageId));
 
-/// Registers the LSP-enabled domain-model services in `sharedServices`.
-bool registerDomainModelLspServices(pegium::SharedServices &sharedServices);
+// The same one call, one storey up.
+struct DomainModelLanguage {
+  std::unique_ptr<DomainModelSharedServices> shared;
+  DomainModelServices& language;
+};
 
-} // namespace domainmodel
+DomainModelLanguage create_lsp_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
+
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+
+}  // namespace dm

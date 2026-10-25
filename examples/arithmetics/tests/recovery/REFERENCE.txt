@@ -1,0 +1,13 @@
+valid.calc	acc=1 cov=1 rec=0 tok=84/84 inv=0
+01_typo1.calc	acc=1 cov=1 rec=1 tok=85/84 inv=3 [156,157) ins:;@145<Expecting one of ';', '(', '%', '^'.> rep:;@156<Expecting one of ';', '*', '/', '+' but found ':'.>
+02_typo2.calc	acc=1 cov=1 rec=1 tok=85/84 inv=3 [190,191) ins:;@182<Expecting one of ';', '(', '%', '^'.> rep:;@190<Expecting one of ';', '%', '^', '*' but found ':'.>
+03_closer_block.calc	acc=1 cov=1 rec=1 tok=84/84 inv=1 ins:)@157<Expecting ')'.>
+04_closer_eof.calc	acc=1 cov=1 rec=1 tok=84/84 inv=1 ins:;@349<Expecting ';'.>
+05_intruder.calc	acc=1 cov=1 rec=1 tok=86/84 inv=2 ins:NUMBER@120<Expecting NUMBER.>
+06_truncated.calc	acc=1 cov=1 rec=1 tok=57/84 inv=3 ins:NUMBER@219<Expecting NUMBER.>
+07_two_faults.calc	acc=1 cov=1 rec=1 tok=85/84 inv=4 [115,116) ins:;@113<Expecting ';'.> rep:;@115<Expecting ';' but found ':'.> ins:;@363<Expecting ';'.>
+08_head_fault.calc	acc=1 cov=1 rec=1 tok=84/84 inv=1 rep:module@88<Expecting 'module' but found 'Modul'.>
+09_list_delim.calc	acc=1 cov=1 rec=1 tok=84/84 inv=1 ins:%@311<Expecting '%'.>
+10_noise.calc	acc=1 cov=1 rec=1 tok=84/84 inv=0 [231,234) [235,238) [239,242) del:ID@231<Unexpected '@@@ ??? @@@', expecting ID.>
+11_head_typo.calc	acc=1 cov=1 rec=1 tok=85/84 inv=3 [32,33) ins:;@30<Expecting ';'.> rep:;@32<Expecting ';' but found ':'.>
+12_open_region_eof.calc	acc=1 cov=1 rec=1 tok=84/84 inv=0 rep:ML_COMMENT@419<Expecting ML_COMMENT but found '/* the region the mode n...'.>

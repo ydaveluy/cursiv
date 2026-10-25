@@ -1,0 +1,49 @@
+// intruder: one ':' too many in a feature declaration
+// break: 000086
+entity Blog {
+    title: : String
+    date: complex.Date
+    many posts: Post
+}
+
+entity HasAuthor {
+    author: String
+}
+
+entity Post extends HasAuthor {
+    title: String
+    content: String
+    many comments: Comment
+}
+
+entity Comment extends HasAuthor {
+    content: String
+}
+
+package foo.bar {
+    datatype Complex
+
+    entity E2 extends Blog {
+        next: E2
+        other: baz.E3
+        nested: baz.nested.E5
+    }
+}
+
+package baz {
+    /* Cross-package references, both fully qualified and relative. */
+    entity E3 {
+        that: E4
+        other: foo.bar.E2
+        nested: nested.E5
+    }
+
+    entity E4 {
+    }
+
+    package nested {
+        entity E5 {
+            ref: E3
+        }
+    }
+}

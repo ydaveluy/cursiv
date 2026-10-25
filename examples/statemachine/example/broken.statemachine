@@ -1,0 +1,16 @@
+// BROKEN ON PURPOSE -- open this file to see the server's diagnostics.
+//   * `statemachin` is one edit away from the keyword, which the repair pass
+//     names in its message;
+//   * the last state never reaches its `end`.
+statemachin Lamp
+
+events toggle
+
+initialState Off
+
+state Off
+    toggle => On
+end
+
+state On
+    toggle => Off

@@ -1,0 +1,72 @@
+# cursiv-new.cmake -- scaffold a new cursiv language. CMake only, no other
+# tool. Usage:
+#   cmake -DNAME=MyLang [-DEXT=.ml] [-DDIR=mylang]
+#         [-DCURSIV_TAG=@CURSIV_TAG@]
+#         -P cursiv-new.cmake
+cmake_minimum_required(VERSION 3.14)
+
+if(NOT DEFINED NAME)
+  message(FATAL_ERROR "NAME is required: cmake -DNAME=MyLang -P cursiv-new.cmake")
+endif()
+# NAME is a C++ identifier because it becomes the grammar type, and its
+# lowercase form becomes the project's namespace as well as the language id.
+if(NOT NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+  message(FATAL_ERROR "NAME must be a valid C++ identifier (got '${NAME}')")
+endif()
+
+set(CURSIV_NEW_CLASS "${NAME}")
+string(TOLOWER "${NAME}" CURSIV_NEW_ID)
+# The namespace is global, so leading underscores and double underscores are
+# reserved as well as C++ keywords. Check both spellings before writing files.
+set(_cursiv_keywords
+    alignas alignof and and_eq asm auto bitand bitor bool break case catch
+    char char8_t char16_t char32_t class compl concept const consteval constexpr
+    constinit const_cast continue co_await co_return co_yield decltype default
+    delete do double dynamic_cast else enum explicit export extern false float
+    for friend goto if inline int long mutable namespace new noexcept not not_eq
+    nullptr operator or or_eq private protected public register reinterpret_cast
+    requires return short signed sizeof static static_assert static_cast struct
+    switch template this thread_local throw true try typedef typeid typename
+    union unsigned using virtual void volatile wchar_t while xor xor_eq)
+if(CURSIV_NEW_ID IN_LIST _cursiv_keywords OR CURSIV_NEW_ID MATCHES "^_|__")
+  message(FATAL_ERROR
+      "NAME and its lowercase namespace must not be reserved C++ identifiers (got '${NAME}')")
+endif()
+if(NOT DEFINED EXT)
+  set(EXT ".${CURSIV_NEW_ID}")
+endif()
+if(NOT EXT MATCHES "^\\.")
+  message(FATAL_ERROR "EXT must start with '.' (got '${EXT}')")
+endif()
+set(CURSIV_NEW_EXT "${EXT}")
+if(NOT DEFINED DIR)
+  set(DIR "${CURSIV_NEW_ID}")
+endif()
+if(NOT DEFINED CURSIV_TAG)
+  set(CURSIV_TAG "@CURSIV_TAG@")
+endif()
+set(CURSIV_NEW_TAG "${CURSIV_TAG}")
+
+get_filename_component(_target "${DIR}" ABSOLUTE)
+file(GLOB _existing LIST_DIRECTORIES true "${_target}/*" "${_target}/.*")
+if(_existing)
+  message(FATAL_ERROR "Target dir '${_target}' is not empty; refusing to overwrite")
+endif()
+
+# The placeholders are substituted in the path as well as in the content, so
+# no template carries a hardcoded language id in a file or directory name.
+function(_cursiv_new_emit rel content)
+  string(CONFIGURE "${rel}" rel @ONLY)
+  string(CONFIGURE "${content}" out @ONLY)
+  file(WRITE "${_target}/${rel}" "${out}")
+  message(STATUS "  + ${rel}")
+endfunction()
+
+function(_cursiv_new_finish)
+  message(STATUS "Created ${CURSIV_NEW_ID} in ${_target}")
+  message(STATUS "Next: cd ${DIR}")
+  message(STATUS "      cmake -B build")
+  message(STATUS "      cmake --build build -j")
+endfunction()
+
+message(STATUS "Scaffolding ${NAME} (id=${CURSIV_NEW_ID}, ext=${EXT})")

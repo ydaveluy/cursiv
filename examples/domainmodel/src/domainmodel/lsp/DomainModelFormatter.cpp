@@ -1,24 +1,24 @@
-#include <domainmodel/lsp/DomainModelFormatter.hpp>
+#include "domainmodel/lsp/DomainModelFormatter.hpp"
 
-namespace domainmodel {
+namespace dm {
 
 namespace {
 
-[[nodiscard]] bool is_doc_comment(std::string_view text) noexcept {
+[[nodiscard]] bool has_doc_marker(std::string_view text) noexcept {
   return text.starts_with("/**");
 }
 
-} // namespace
+}  // namespace
 
-void DomainModelFormatter::formatDomainModel(pegium::FormattingBuilder &builder,
-                                             const ast::DomainModel *model) const {
+void DomainModelFormatter::formatDomainModel(
+    cursiv::FormattingBuilder& builder, const ast::DomainModel* model) const {
   auto formatter = builder.getNodeFormatter(model);
   formatter.properties<&ast::DomainModel::elements>().prepend(noIndent);
 }
 
 void DomainModelFormatter::formatPackageDeclaration(
-    pegium::FormattingBuilder &builder,
-    const ast::PackageDeclaration *package) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::PackageDeclaration* package) const {
   auto formatter = builder.getNodeFormatter(package);
   formatter.keyword("package").append(oneSpace);
   const auto openBrace = formatter.keyword("{");
@@ -26,11 +26,13 @@ void DomainModelFormatter::formatPackageDeclaration(
   formatBlock(openBrace, closeBrace, formatter.interior(openBrace, closeBrace));
 }
 
-void DomainModelFormatter::formatEntity(pegium::FormattingBuilder &builder,
-                                        const ast::Entity *entity) const {
+void DomainModelFormatter::formatEntity(cursiv::FormattingBuilder& builder,
+                                        const ast::Entity* entity) const {
   auto formatter = builder.getNodeFormatter(entity);
   formatter.keyword("entity").append(oneSpace);
-  if (entity->superType.has_value()) {
+  // A reference written nowhere carries no text: that is how an entity with
+  // no `extends` is spelled.
+  if (!entity->superType.refText.empty()) {
     formatter.keyword("extends").prepend(oneSpace).append(oneSpace);
   }
   const auto openBrace = formatter.keyword("{");
@@ -38,14 +40,14 @@ void DomainModelFormatter::formatEntity(pegium::FormattingBuilder &builder,
   formatBlock(openBrace, closeBrace, formatter.interior(openBrace, closeBrace));
 }
 
-void DomainModelFormatter::formatDataType(pegium::FormattingBuilder &builder,
-                                          const ast::DataType *dataType) const {
+void DomainModelFormatter::formatDataType(cursiv::FormattingBuilder& builder,
+                                          const ast::DataType* dataType) const {
   auto formatter = builder.getNodeFormatter(dataType);
   formatter.keyword("datatype").append(oneSpace);
 }
 
-void DomainModelFormatter::formatFeature(pegium::FormattingBuilder &builder,
-                                         const ast::Feature *feature) const {
+void DomainModelFormatter::formatFeature(cursiv::FormattingBuilder& builder,
+                                         const ast::Feature* feature) const {
   auto formatter = builder.getNodeFormatter(feature);
   if (feature->many) {
     formatter.keyword("many").append(oneSpace);
@@ -54,22 +56,22 @@ void DomainModelFormatter::formatFeature(pegium::FormattingBuilder &builder,
 }
 
 void DomainModelFormatter::formatMultilineComment(
-    HiddenNodeFormatter &comment) const {
-  const auto docComment = is_doc_comment(comment.text());
-  comment.replace(AbstractFormatter::formatMultilineComment(
-      comment.text(),
-      {.start = docComment ? "/**" : "/*",
-       .end = "*/",
-       .newLineStart = docComment ? " *" : "",
-       .tagStart = docComment ? std::optional<std::string>{"@"} : std::nullopt}));
+    HiddenNodeFormatter& comment) const {
+  const auto docComment = has_doc_marker(comment.text());
+  comment.replace(cursiv::AbstractFormatter::formatMultilineComment(
+      comment, {.start = docComment ? "/**" : "/*",
+                       .end = "*/",
+                       .newLineStart = docComment ? " *" : "",
+                       .tagStart = docComment ? std::optional<std::string>{"@"}
+                                              : std::nullopt}));
 }
 
-void DomainModelFormatter::formatLineComment(HiddenNodeFormatter &comment) const {
-  comment.replace(AbstractFormatter::formatLineComment(comment));
+void DomainModelFormatter::formatLineComment(
+    HiddenNodeFormatter& comment) const {
+  comment.replace(cursiv::AbstractFormatter::formatLineComment(comment));
 }
 
-DomainModelFormatter::DomainModelFormatter(
-    const pegium::Services &services)
+DomainModelFormatter::DomainModelFormatter(const cursiv::CoreServices& services)
     : AbstractFormatter(services) {
   on<ast::DomainModel>(&DomainModelFormatter::formatDomainModel);
   on<ast::PackageDeclaration>(&DomainModelFormatter::formatPackageDeclaration);
@@ -80,4 +82,4 @@ DomainModelFormatter::DomainModelFormatter(
   onHidden("SL_COMMENT", &DomainModelFormatter::formatLineComment);
 }
 
-} // namespace domainmodel
+}  // namespace dm

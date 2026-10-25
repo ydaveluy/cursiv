@@ -1,62 +1,69 @@
-#include <arithmetics/lsp/ArithmeticsCodeActionProvider.hpp>
-
-#include <arithmetics/core/validation/ArithmeticsValidator.hpp>
+#include "arithmetics/lsp/ArithmeticsCodeActionProvider.hpp"
 
 #include <format>
 #include <string>
-#include <string_view>
+#include <utility>
+#include <vector>
 
-namespace arithmetics {
+#include "arithmetics/core/validation/ArithmeticsValidator.hpp"
+#include "cursiv/core/services/Diagnostic.hpp"
+#include "cursiv/core/services/JsonValue.hpp"
+#include "cursiv/core/utils/Cancellation.hpp"
+#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/core/workspace/TextDocument.hpp"
+#include "cursiv/lsp/text/Position.hpp"
 
+namespace arith {
+
+// The document's own findings, not the request's: what the check attached
+// is a `cursiv::JsonValue`, and it survives here untouched. The request's
+// copies have crossed the wire and carry the protocol's JSON instead.
 void ArithmeticsCodeActionProvider::appendCodeActions(
-    const pegium::workspace::Document &document,
-    const ::lsp::CodeActionParams &params,
-    CodeActionResult &actions,
-    const pegium::utils::CancellationToken &cancelToken) const {
-  pegium::utils::throw_if_cancelled(cancelToken);
+    const cursiv::Document& document, const lsp::CodeActionParams& params,
+    std::vector<lsp::CodeAction>& actions,
+    const cursiv::CancellationToken& cancelToken) const {
+  const cursiv::TextDocument& text = document.textDocument();
+  const cursiv::TextOffset from =
+      text.offsetAt(cursiv::from_lsp(params.range.start));
+  const cursiv::TextOffset to =
+      text.offsetAt(cursiv::from_lsp(params.range.end));
 
-  const auto &textDocument = document.textDocument();
-
-  for (const auto &diagnostic : params.context.diagnostics) {
-    if (!diagnostic.code.has_value() ||
-        !std::holds_alternative<::lsp::String>(*diagnostic.code) ||
-        std::get<::lsp::String>(*diagnostic.code) !=
-            std::string(
-                arithmetics::validation::IssueCodes::ExpressionNormalizable) ||
-        !diagnostic.data.has_value() || !diagnostic.data->isObject()) {
+  for (const cursiv::Diagnostic& diagnostic : document.diagnostics) {
+    cursiv::throw_if_cancelled(cancelToken);
+    if (!diagnostic.code.has_value() || !diagnostic.code->isString() ||
+        diagnostic.code->string() != kExpressionNormalizable)
       continue;
-    }
+    if (diagnostic.range.begin > to || diagnostic.range.end < from) continue;
+    if (!diagnostic.data.has_value() || !diagnostic.data->isObject()) continue;
 
-    const auto *constant = diagnostic.data->object().find("constant");
-    if (constant == nullptr || !constant->isNumber()) {
-      continue;
-    }
+    const cursiv::JsonValue::Object& payload = diagnostic.data->object();
+    const auto constant = payload.find("constant");
+    if (constant == payload.end() || !constant->second.isNumber()) continue;
 
-    // Size the edit from the diagnostic's own range, not the request's
-    // cursor/selection range (which is empty on a cursor-only invocation).
-    const auto replaceBegin = textDocument.offsetAt(diagnostic.range.start);
-    const auto replaceEnd = textDocument.offsetAt(diagnostic.range.end);
-    if (replaceEnd <= replaceBegin ||
-        replaceEnd > static_cast<pegium::TextOffset>(textDocument.getText().size())) {
-      continue;
-    }
+    lsp::TextEdit edit;
+    edit.range = cursiv::to_lsp(
+        text.rangeAt(diagnostic.range.begin, diagnostic.range.end));
+    edit.newText = std::format("{}", constant->second.number());
 
-    ::lsp::CodeAction action{};
-    action.title = std::format("Replace with constant {}", constant->number());
-    action.kind = ::lsp::CodeActionKind::QuickFix;
+    lsp::WorkspaceEdit workspaceEdit;
+    lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
+    changes[lsp::Uri::parse(std::string(document.uri))].push_back(
+        std::move(edit));
+    workspaceEdit.changes = std::move(changes);
+
+    // The squiggle the fix answers, so the lightbulb sits on it.
+    lsp::Diagnostic about;
+    about.range = edit.range;
+    about.message = diagnostic.message;
+
+    lsp::CodeAction action;
+    action.title = std::format("Normalize to {}", constant->second.number());
+    action.kind = lsp::CodeActionKind::QuickFix;
+    action.diagnostics = lsp::Array<lsp::Diagnostic>{std::move(about)};
     action.isPreferred = true;
-
-    ::lsp::WorkspaceEdit edit{};
-    ::lsp::Map<::lsp::DocumentUri, ::lsp::Array<::lsp::TextEdit>> changes;
-    ::lsp::TextEdit textEdit{};
-    textEdit.range = diagnostic.range;
-    textEdit.newText = std::format("{}", constant->number());
-    auto &documentChanges = changes[::lsp::Uri::parse(document.uri)];
-    documentChanges.push_back(std::move(textEdit));
-    edit.changes = std::move(changes);
-    action.edit = std::move(edit);
+    action.edit = std::move(workspaceEdit);
     actions.push_back(std::move(action));
   }
 }
 
-} // namespace arithmetics
+}  // namespace arith

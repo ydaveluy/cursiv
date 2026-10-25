@@ -1,0 +1,135 @@
+--- a/include/mimalloc/atomic.h
++++ b/include/mimalloc/atomic.h
+@@ -15,7 +15,7 @@
+ #endif
+ #include <windows.h>
+ #endif
+-#if MI_TLS_MODEL_PTHREADS || (!defined(_WIN32) && !defined(__wasi__) && (!defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)))
++#if MI_TLS_MODEL_PTHREADS || (!defined(_WIN32) && (!defined(__wasi__) || defined(_REENTRANT)) && (!defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)))
+ #define  MI_USE_PTHREADS        1
+ #include <pthread.h>
+ #endif
+--- a/include/mimalloc/types.h
++++ b/include/mimalloc/types.h
+@@ -528,7 +528,15 @@
+ #define MI_PAGE_MIN_START_BLOCK_ALIGN     MI_MAX_ALIGN_SIZE         // minimal block alignment for the first block in a page (16b)
+ #define MI_PAGE_MAX_START_BLOCK_ALIGN2    (4*MI_KiB)                // maximal block alignment for "power of 2"-sized blocks (such that we guarantee natural alignment)
+ #define MI_PAGE_OSPAGE_BLOCK_ALIGN2       (4*MI_KiB)                // also aligns any multiple of this size to avoid TLB misses.
++#if defined(__wasi__)
++#if MI_PAGE_MAP_FLAT
++#error "WASI arena-aligned allocations require the two-level page map"
++#endif
++// WASM cannot release OS pages. Keep large aligned blocks in recyclable arenas.
++#define MI_PAGE_MAX_OVERALLOC_ALIGN       (MI_ZU(1) << (MI_SIZE_BITS - 1))
++#else
+ #define MI_PAGE_MAX_OVERALLOC_ALIGN       MI_ARENA_SLICE_SIZE       // (64 KiB) limit for which we overallocate in arena pages, beyond this use OS allocation
++#endif
+
+ // Offset the first block in pages with larger blocks (using the unused space at the end of the page) spread across cache sets (issue #1121).
+ #if !defined(MI_PAGE_CACHE_OFFSET)
+--- a/src/prim/wasi/prim.c
++++ b/src/prim/wasi/prim.c
+@@ -245,23 +245,21 @@
+ // Environment
+ //----------------------------------------------------------------
+
++// Referencing environ selects wasi-libc's eager environment initialization.
++// Reading it does not allocate while the allocator initializes its options.
++extern char** environ;
+ int _mi_prim_getenv(const char* name, char* result, size_t result_size) {
+-  // cannot call getenv() when still initializing the C runtime.
+-  if (_mi_preloading()) return -1;  // error, try again later
+-  const char* s = getenv(name);
+-  if (s == NULL) {
+-    // we check the upper case name too.
+-    char buf[64+1];
+-    size_t len = _mi_strnlen(name,sizeof(buf)-1);
+-    for (size_t i = 0; i < len; i++) {
+-      buf[i] = _mi_toupper(name[i]);
+-    }
+-    buf[len] = 0;
+-    s = getenv(buf);
+-  }
+-  if (s == NULL || _mi_strnlen(s,result_size) >= result_size)  return 0; // not found
+-  _mi_strlcpy(result, s, result_size);
+-  return 1; // found
++  if (_mi_preloading()) return -1;
++  const size_t len = _mi_strlen(name);
++  for (char** entry = environ; entry != NULL && *entry != NULL; ++entry) {
++    if (_mi_strnicmp(*entry, name, len) == 0 && (*entry)[len] == '=') {
++      const char* value = *entry + len + 1;
++      if (_mi_strnlen(value, result_size) >= result_size) return 0;
++      _mi_strlcpy(result, value, result_size);
++      return 1;
++    }
++  }
++  return 0;
+ }
+
+ 
+@@ -278,6 +276,44 @@
+ // Thread init/done
+ //----------------------------------------------------------------
+
++#if defined(MI_USE_PTHREADS)
++
++// use pthread local storage keys to detect thread ending
++// (and used with MI_TLS_PTHREADS for the default theap)
++// atomic as a thread may initialize while the process is exiting and deleting the key
++static _Atomic(pthread_key_t) _mi_heap_default_key = MI_ATOMIC_VAR_INIT(MI_PTHREAD_KEY_INVALID);
++
++static void mi_pthread_done(void* value) {
++  if (value!=NULL) {
++    _mi_thread_done((mi_theap_t*)value);
++  }
++}
++
++void _mi_prim_thread_init_auto_done(void) {
++  mi_assert_internal(mi_atomic_load_relaxed(&_mi_heap_default_key) == MI_PTHREAD_KEY_INVALID);
++  pthread_key_t key;
++  if (pthread_key_create(&key, &mi_pthread_done) == 0) {
++    mi_atomic_store_release(&_mi_heap_default_key, key);
++  }
++}
++
++void _mi_prim_thread_done_auto_done(void) {
++  pthread_key_t key = mi_atomic_exchange_relaxed(&_mi_heap_default_key, MI_PTHREAD_KEY_INVALID);
++  if (key != MI_PTHREAD_KEY_INVALID) {  // do not leak the key, see issue #809
++    pthread_key_delete(key);
++  }
++}
++
++void _mi_prim_thread_associate_default_theap(mi_theap_t* theap) {
++  pthread_key_t key = mi_atomic_load_relaxed(&_mi_heap_default_key);
++  if (key != MI_PTHREAD_KEY_INVALID) {  // can happen during recursive invocation on freeBSD
++    pthread_setspecific(key, theap);
++  }
++}
++
++
++#else
++
+ void _mi_prim_thread_init_auto_done(void) {
+   // nothing
+ }
+@@ -290,6 +326,8 @@
+   MI_UNUSED(theap);
+ }
+
++#endif
++
+ bool _mi_prim_thread_is_in_threadpool(void) {
+   return false;
+ }
+--- a/src/heap/page-map.c
++++ b/src/heap/page-map.c
+@@ -463,7 +463,9 @@
+ static size_t mi_page_map_get_idx(mi_page_t* page, size_t* sub_idx, size_t* slice_count) {
+   size_t page_size;
+   uint8_t* page_start = mi_page_area(page, &page_size);
++  #if !defined(__wasi__)
+   if (page_size > MI_LARGE_PAGE_SIZE) { page_size = MI_LARGE_PAGE_SIZE - MI_ARENA_SLICE_SIZE; }  // furthest interior pointer
++  #endif // WASI also aligns large blocks inside arenas; map their entire area.
+   *slice_count = _mi_slice_count_of_size(page_size) + ((page_start - mi_page_slice_start(page))/MI_ARENA_SLICE_SIZE); // add for large aligned blocks
+   return mi_page_map_index(page_start, sub_idx);
+ }

@@ -1,49 +1,53 @@
 #pragma once
 
+#include <span>
 #include <vector>
 
-#include <domainmodel/core/CoreServices.hpp>
-#include <domainmodel/core/ast.hpp>
-#include <domainmodel/core/references/QualifiedNameProvider.hpp>
+#include "cursiv/core/references/DefaultScopeComputation.hpp"
+#include "domainmodel/core/ast.hpp"
 
-#include <pegium/core/references/DefaultScopeComputation.hpp>
+// A declaration inside a package is known by its qualifier -- `foo.bar.E2`,
+// not `E2` -- which is what makes it reachable from another document. What a
+// qualifier is belongs to the grammar, so both halves are overridden here.
 
-namespace domainmodel::references {
+namespace dm {
+
+struct DomainModelCoreServices;
+class QualifiedNameProvider;
 
 class DomainModelScopeComputation final
-    : public pegium::references::DefaultScopeComputation {
-public:
-  /// `services` shadows the base back-reference with the language's typed
-  /// container, so the same computation is wired headless and in the LSP.
-  explicit DomainModelScopeComputation(const DomainModelCoreServices &services)
-      : pegium::references::DefaultScopeComputation(services),
-        services(services) {}
+    : public cursiv::DefaultScopeComputation {
+ public:
+  explicit DomainModelScopeComputation(
+      const DomainModelCoreServices& services) noexcept;
 
-  std::vector<pegium::workspace::AstNodeDescription>
-  collectExportedSymbols(
-      const pegium::workspace::Document &document,
-      const pegium::utils::CancellationToken &cancelToken) const override;
+  [[nodiscard]] std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
+      const cursiv::Document& document,
+      const cursiv::CancellationToken& cancelToken =
+          cursiv::kNoCancel) const override;
 
-  pegium::workspace::LocalSymbols collectLocalSymbols(
-      const pegium::workspace::Document &document,
-      const pegium::utils::CancellationToken &cancelToken) const override;
+  [[nodiscard]] cursiv::LocalSymbols collectLocalSymbols(
+      const cursiv::Document& document,
+      const cursiv::CancellationToken& cancelToken =
+          cursiv::kNoCancel) const override;
 
-private:
-  std::vector<pegium::workspace::AstNodeDescription> processContainer(
-      const pegium::AstNode &container,
-      const std::vector<pegium::AstNode::pointer<ast::AbstractElement>> &elements,
-      const pegium::workspace::Document &document,
-      pegium::workspace::LocalSymbols &symbols,
-      const pegium::utils::CancellationToken &cancelToken,
-      const QualifiedNameProvider *qualifiedNameProvider) const;
+ protected:
+  // Exported under the name the outside world spells: qualified by the
+  // enclosing package, bare anywhere else.
+  void addExportedSymbol(cursiv::AstNode& node,
+                         std::vector<cursiv::AstNodeDescription>& exported,
+                         const cursiv::Document& document) const override;
 
-  [[nodiscard]] static pegium::workspace::AstNodeDescription
-  createQualifiedDescription(
-      const ast::PackageDeclaration &package,
-      pegium::workspace::AstNodeDescription description,
-      const QualifiedNameProvider *qualifiedNameProvider);
+ private:
+  // One container's declarations, returned so the enclosing package can
+  // requalify them: a name climbs one dot per storey on the way out.
+  [[nodiscard]] std::vector<cursiv::AstNodeDescription> processContainer(
+      const cursiv::AstNode& container,
+      std::span<ast::AbstractElement* const> elements,
+      const cursiv::Document& document, cursiv::LocalSymbols& symbols,
+      const cursiv::CancellationToken& cancelToken) const;
 
-  const DomainModelCoreServices &services;
+  const DomainModelCoreServices& _dm;
 };
 
-} // namespace domainmodel::references
+}  // namespace dm

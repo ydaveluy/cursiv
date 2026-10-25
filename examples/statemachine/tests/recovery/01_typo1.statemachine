@@ -1,0 +1,34 @@
+// typo1: 'state' written 'stat' -- one deletion
+// break: 000241
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+state PowerOff
+    switchCapacity => RedLight
+end
+
+stat RedLight
+    actions { flashRed }
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+state YellowLight
+    switchCapacity => PowerOff
+    next => RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight
+end

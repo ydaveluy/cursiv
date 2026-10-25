@@ -1,30 +1,21 @@
 # Reference
 
-The canonical concept documentation for Pegium. Reach for it when you know what you are building and need the stable terms, surfaces, and responsibilities of the framework.
+Use these pages to look up syntax and API contracts while building a
+language. For a first project, follow the [tutorial](../learn/walkthrough.md).
 
-## Concepts and grammar
+| You want to… | Page |
+|---|---|
+| Define tokens, rules and operators | [Grammar reference](grammar.md) |
+| Choose AST member types and read references | [AST vocabulary](ast.md) |
+| Build documents or customize a service | [Services](services.md) |
+| Generate and link a language in CMake | [CMake API](cmake.md) |
+| Run a language tool from the command line | [Command line](cli.md) |
+| Assert parsing, validation and editor results | [Test module](test.md) |
+| Expose language tools through MCP | [MCP server](mcp.md) |
+| Fix a compiler or generator error | [Grammar errors and fixes](refusals.md) |
+| Understand a term | [Glossary](glossary.md) |
 
-- [Glossary](glossary.md) — look up a specific Pegium term or concept.
-- [Grammar reference](grammar-reference.md) — look up a specific grammar feature.
-
-## Architecture
-
-- [Configuration Services](configuration-services.md)
-- [Document Lifecycle](document-lifecycle.md)
-- [Semantic Model](semantic-model.md)
-
-## Pegium-specific DSLs
-
-The exact user-facing surface of a Pegium subsystem:
-
-- [Completion Provider](completion-provider.md)
-- [Formatter DSL](formatter-dsl.md)
-
-For LSP, completion, workspace, and other advanced customization, prefer the task-oriented guides. The reference works best alongside them, not instead of them.
-
-## Related pages
-
-- [Build a Language](../build-a-language/index.md)
-- [Recipes](../recipes/index.md)
-- [Glossary](glossary.md)
-- [Grammar reference](grammar-reference.md)
+Common grammar lookups: [keywords](grammar.md#literals-and-keywords),
+[lists](grammar.md#repetition), [AST assignments](grammar.md#building-the-tree),
+[binary operators](grammar.md#operator-precedence), and
+[indentation](grammar.md#indentation).

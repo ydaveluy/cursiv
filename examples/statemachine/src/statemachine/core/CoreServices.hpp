@@ -2,25 +2,32 @@
 
 #include <memory>
 
-#include <statemachine/core/validation/StatemachineValidator.hpp>
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/SharedCoreServices.hpp>
+#include "cursiv/core/services/CoreServicesFor.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "statemachine/core/validation/StateMachineValidator.hpp"
 
-namespace statemachine {
+// What this language owns beyond what every language owns, and the module
+// that fills its container.
 
-/// Workspace-wide shared services.
-struct StatemachineSharedCoreServices : virtual pegium::SharedCoreServices {
-  // define here custom shared services
+namespace sm {
+
+struct StateMachineSharedCoreServices : virtual cursiv::SharedCoreServices {};
+
+struct StateMachineCoreServices
+    : cursiv::CoreServicesFor<StateMachineSharedCoreServices> {
+  std::unique_ptr<const StateMachineValidator> validator;
+
+  explicit StateMachineCoreServices(
+      StateMachineSharedCoreServices& sharedServices)
+      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    cursiv::CoreServices::visitServices(yield);
+    yield({"validator", true, validator != nullptr});
+  }
 };
 
-/// Core (headless) language services, built from the language's shared-core type.
-struct StatemachineCoreServices
-    : pegium::CoreServicesFor<StatemachineSharedCoreServices> {
-  std::unique_ptr<validation::StatemachineValidator> validator;
+void install_core_module(StateMachineCoreServices& services);
 
-  explicit StatemachineCoreServices(
-      const StatemachineSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
-};
-
-} // namespace statemachine
+}  // namespace sm

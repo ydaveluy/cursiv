@@ -1,44 +1,38 @@
-#include <domainmodel/cli/CliUtils.hpp>
-#include <domainmodel/cli/Generator.hpp>
-#include <domainmodel/core/CoreModule.hpp>
-
-#include <pegium/cli/CliUtils.hpp>
-#include <pegium/core/workspace/Documents.hpp>
+// The domainmodel command line: the usual verdict, plus `generate FILE` -- one
+// Java class per entity, in the directory a package spells.
 
 #include <filesystem>
 #include <iostream>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
+#include "cursiv/cli/cli.hpp"
+#include "cursiv/core/services/CoreLanguage.hpp"
+#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
+#include "domainmodel/cli/Generator.hpp"
+#include "domainmodel/core/CoreServices.hpp"
+
 namespace {
 
+constexpr auto kRegister =
+    &cursiv::register_language<dm::DomainModelCoreServices,
+                               dm::DomainModelSharedCoreServices,
+                               dm::install_core_module>;
+
 struct GenerateOptions {
-  std::string fileName;
+  std::string path;
   std::optional<std::string> destination;
-  std::optional<std::string> root;
-  bool quiet = false;
 };
 
-std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
-  if (argc < 3 || std::string_view(argv[1]) != "generate") {
-    return std::nullopt;
-  }
-
-  GenerateOptions options{.fileName = argv[2]};
-  for (int index = 3; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
-    if ((arg == "-d" || arg == "--destination") && index + 1 < argc) {
-      options.destination = std::string(argv[++index]);
-      continue;
-    }
-    if ((arg == "-r" || arg == "--root") && index + 1 < argc) {
-      options.root = std::string(argv[++index]);
-      continue;
-    }
-    if (arg == "-q" || arg == "--quiet") {
-      options.quiet = true;
+std::optional<GenerateOptions> parse_generate_args(int argc, char** argv) {
+  if (argc < 3 || std::string_view(argv[1]) != "generate") return std::nullopt;
+  GenerateOptions options{.path = argv[2], .destination = std::nullopt};
+  for (int at = 3; at < argc; ++at) {
+    const std::string_view arg(argv[at]);
+    if ((arg == "-d" || arg == "--destination") && at + 1 < argc) {
+      options.destination = std::string(argv[++at]);
       continue;
     }
     return std::nullopt;
@@ -46,65 +40,46 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
   return options;
 }
 
-int generate_cli(const GenerateOptions &options) {
-  auto sharedServices =
-      pegium::make_shared_services<domainmodel::DomainModelSharedCoreServices>();
-  auto &shared = *sharedServices;
-  auto services = domainmodel::createDomainModelCoreServices(shared);
-  auto &domainmodelServices = *services;
-  shared.serviceRegistry->registerServices(std::move(services));
+int generate(const GenerateOptions& options) {
+  dm::DomainModelSharedCoreServices shared;
+  shared.fileSystemProvider =
+      std::make_unique<cursiv::LocalFileSystemProvider>();
+  cursiv::install_default_shared_core_services(shared);
+  if (!kRegister(shared)) return cursiv::kFatal;
 
-  const auto absoluteInputPath = std::filesystem::absolute(options.fileName);
-  domainmodel::set_root_folder(
-      absoluteInputPath.string(), domainmodelServices,
-      options.root.has_value() ? std::optional<std::string_view>(*options.root)
-                               : std::nullopt);
-  auto document = pegium::build_document_from_path(
-      absoluteInputPath.string(), domainmodelServices);
-
-  for (const auto &candidate : shared.workspace.documents->all()) {
-    if (pegium::has_error_diagnostics(*candidate)) {
-      if (!options.quiet) {
-        std::cerr << "There are validation errors:\n";
-        pegium::print_error_diagnostics(*candidate, std::cerr);
-      }
-      return 2;
-    }
+  // The file's folder first: a model that names a declaration from the file
+  // beside it is not invalid, it is unscanned -- and a generator that refused
+  // it would refuse the example this one ships with.
+  cursiv::initialize_root(
+      std::filesystem::path(options.path).parent_path().string(), shared);
+  const cursiv::Document& document =
+      cursiv::build_document_from_path(options.path, shared);
+  if (cursiv::has_error_diagnostics(document)) {
+    std::cerr << "There are validation errors:\n";
+    cursiv::print_diagnostics(document, options.path, std::cerr);
+    return cursiv::kDiagnostics;
+  }
+  const auto* const model =
+      cursiv::ast_cast<const dm::ast::DomainModel>(document.parseResult.value);
+  if (model == nullptr) {
+    std::cerr << "Unable to generate Java for an invalid domain model.\n";
+    return cursiv::kDiagnostics;
   }
 
-  const auto &model = domainmodel::extract_ast_node(*document);
-  const auto generatedDir = domainmodel::generate_java(
-      model, absoluteInputPath.string(),
+  const std::optional<std::string_view> destination =
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)
-          : std::nullopt);
-  if (!options.quiet) {
-    std::cout << "Java classes generated successfully: " << generatedDir << '\n';
-  }
-  return 0;
+          : std::nullopt;
+  std::cout << dm::generate_java(*model, options.path, destination) << '\n';
+  return cursiv::kClean;
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char **argv) {
-  const auto options = parse_generate_args(argc, argv);
-  if (!options.has_value()) {
-    std::cerr
-        << "Usage: pegium-example-domainmodel-cli generate <file.dmodel> [-d dir] [-r root] [-q]\n";
-    return 1;
-  }
-
-  try {
-    return generate_cli(*options);
-  } catch (const std::invalid_argument &error) {
-    if (!options->quiet) {
-      std::cerr << error.what() << '\n';
-    }
-    return 1;
-  } catch (const std::exception &error) {
-    if (!options->quiet) {
-      std::cerr << "Fatal error: " << error.what() << '\n';
-    }
-    return 3;
-  }
+int main(int argc, char** argv) {
+  if (const std::optional<GenerateOptions> options =
+          parse_generate_args(argc, argv))
+    return generate(*options);
+  return cursiv::run_cli<dm::DomainModelSharedCoreServices>(argc, argv,
+                                                            kRegister);
 }

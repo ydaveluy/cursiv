@@ -1,9 +1,0 @@
-module basicMath
-
-def root(x, y):
-    x^(1/y);
-
-def sqrt(x):
-    root(x, 2);
-
-Sqrt(); // 9

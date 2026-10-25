@@ -1,6 +1,0 @@
-entity Post {
-  many comments Comment
-  title: String
-}
-
-entity Comment {}

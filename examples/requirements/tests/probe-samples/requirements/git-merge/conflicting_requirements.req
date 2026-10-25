@@ -1,5 +1,0 @@
-<<<<<<< HEAD
-req login "Users can login"
-=======
-req logout "Users can logout"
->>>>>>> feature/req

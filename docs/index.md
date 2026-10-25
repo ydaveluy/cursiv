@@ -1,89 +1,73 @@
----
-title: Pegium
-template: home.html
----
+# cursiv++
 
-<div class="pegium-hero">
-  <p class="pegium-eyebrow">C++20 language engineering toolkit</p>
-  <h1>Bring language engineering to modern C++.</h1>
-  <p class="pegium-lead">
-    Pegium is an open source toolkit for building textual languages with
-    first-class support for parsing, AST/CST construction, references,
-    validation, formatting, and language-server features.
-  </p>
-  <div class="pegium-actions">
-    <a class="md-button md-button--primary" href="introduction/">Read the introduction</a>
-    <a class="md-button" href="learn/walkthrough/">Build a language</a>
-  </div>
-  <div class="pegium-pills">
-    <span>C++20</span>
-    <span>PEG parser DSL</span>
-    <span>LSP</span>
-  </div>
-</div>
+cursiv++ is a C++20 framework for building languages, compilers and language
+tools, with built-in Language Server Protocol (LSP) support.
 
-## Why Pegium?
+Define the syntax and abstract syntax tree (AST) in C++. Cursiv generates a
+parser and provides services for references, validation and editor features.
+For example, this
+rule reads a `person` declaration and stores its name in an AST member:
 
-<div class="grid cards" markdown>
+```cpp
+struct PersonRule
+    : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
+```
 
--   __Semantics first__
-
-    Shape your language's semantic model directly through C++ AST types and
-    grammar assignments, with CST data still available for source-aware tooling.
-
--   __Lean by default__
-
-    Start from `makeDefaultServices(...)`, keep the default LSP and workspace
-    behavior, and override only the language-specific parts.
-
--   __Parser to editor__
-
-    Use one document model for parsing, linking, diagnostics, formatting,
-    completion, rename, references, and other editor features.
-
--   __Examples that scale__
-
-    Use `arithmetics`, `domainmodel`, `requirements`, and `statemachine` as
-    real starting points, not isolated API snippets.
-
-</div>
+`ID` matches an identifier and `ast::Person` is your AST type. The
+[tutorial](learn/walkthrough.md) shows a complete language with these pieces.
 
 ## Start here
 
 <div class="grid cards" markdown>
 
--   [Introduction](introduction/index.md)
+-   **New to cursiv**
 
-    Get the high-level picture, then branch into features, showcases, or
-    deeper concepts. Want to jump straight in? Build a language end-to-end in
-    the [walkthrough](learn/walkthrough.md).
+    ---
 
--   [Learn](learn/index.md)
+    Understand the grammar, syntax trees and language services.
 
-    Follow the recommended path from repository build to grammar, AST,
-    references, validation, formatting, and editor services.
+    [:octicons-arrow-right-24: Introduction](introduction/index.md)
 
--   [Recipes](recipes/index.md)
+-   **Get a language running**
 
-    Focused guides for common customization tasks: scoping, validation,
-    caching, multiple languages, and LSP overrides.
+    ---
 
--   [Reference](reference/index.md)
+    Scaffold a project, then take it from a grammar to an editor extension.
 
-    Canonical subsystem pages for grammar, semantic model, services,
-    workspace, and document lifecycle concepts.
+    [:octicons-arrow-right-24: Learn](learn/index.md)
 
--   [Examples](examples/index.md)
+-   **Solve one problem**
 
-    Browse complete example languages and pick the best starting point for
-    your project.
+    ---
+
+    Scoping, validation, formatting, several languages in one project.
+
+    [:octicons-arrow-right-24: Recipes](recipes/index.md)
+
+-   **Look something up**
+
+    ---
+
+    Find a grammar operator, AST type, service or CMake function.
+
+    [:octicons-arrow-right-24: Reference](reference/index.md)
 
 </div>
 
-## Related pages
+## Create your first project
 
-Documentation and examples live in the main repository, so the code and docs stay close together.
+Use the compiler and build tools listed in [Create a project](learn/scaffold.md).
 
-- [Repository root](https://github.com/ydaveluy/pegium)
-- [Documentation sources](https://github.com/ydaveluy/pegium/tree/main/docs)
-- [Examples source tree](https://github.com/ydaveluy/pegium/tree/main/examples)
+```bash
+curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
+cmake -DNAME=MyLang -P cursiv-new.cmake
+cd mylang
+cmake -B build
+cmake --build build --parallel
+./build/src/mylang_cli example/hello.mylang
+```
+
+The project includes a working grammar, AST, CLI, language server and VS Code
+extension. The [project guide](learn/scaffold.md) explains which files to edit.
+
+[Create a project :octicons-arrow-right-24:](learn/scaffold.md){ .md-button .md-button--primary }

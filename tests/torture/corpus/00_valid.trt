@@ -1,0 +1,11 @@
+// the base document -- every corruption below cuts from this one
+go Sample {
+  kind width = 10 + 2 * 3;
+  kind height = (4 + 5) * 2;
+  blueprint Shape <<<
+    polygon 3 4 5
+    fill solid
+  >>>
+  [layout]{1, 2, (3, 4), "tag", 5}
+  /* trailing */
+}

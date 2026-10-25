@@ -1,0 +1,124 @@
+// A name refusing words another terminal reads with a frontier of its own,
+// ranked below the name: what stands where the word refuses the name turns on
+// the byte behind the word, which the rival's own frontier answers.
+#pragma once
+
+#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/core/syntax-tree/AstNode.hpp"
+
+namespace tllbound {
+struct Item : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
+struct Flag : cursiv::Extends<cursiv::AstNode> {
+  bool value = false;
+};
+struct Mark : cursiv::Extends<cursiv::AstNode> {
+  string_view one;
+  string_view two;
+};
+struct Doc : cursiv::Extends<cursiv::AstNode> {
+  vector<Item*> items;
+  vector<Flag*> flags;
+  vector<Mark*> marks;
+};
+
+// The boolean's frontier is the word boundary, which holds a byte the name
+// never reads.
+struct Ascii : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  static constexpr auto Chars = cr<"a-zA-Z_"> + many(cr<"a-zA-Z0-9_">);
+  struct NAME : terminal<!(kw<"true"> | kw<"false">) + Chars> {};
+  struct BOOL : terminal<kw<"true"> | kw<"false">, bool> {};
+  struct Name
+      : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
+  struct Lit
+      : rule<create<Flag>(assign<&Flag::value>(ref<BOOL>) + lit<";">)> {};
+  struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
+                                      append<&Doc::flags>(ref<Lit>)))> {};
+  using entry = Root;
+  using ignore = WS;
+  static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
+};
+
+// The same where the boundary is the name's own alphabet.
+struct Equal : Ascii {
+  static constexpr auto word_boundary = cr<"a-zA-Z0-9_">;
+};
+
+// Letters past ASCII the name decodes, every scalar past ASCII the boundary
+// holds.
+struct Wide : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  static constexpr auto Chars =
+      (uc::L | cr<"_">) + many(uc::L | uc::Nd | cr<"_">);
+  struct NAME : terminal<!(kw<"true"> | kw<"false">) + Chars> {};
+  struct BOOL : terminal<kw<"true"> | kw<"false">, bool> {};
+  struct Name
+      : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
+  struct Lit
+      : rule<create<Flag>(assign<&Flag::value>(ref<BOOL>) + lit<";">)> {};
+  struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
+                                      append<&Doc::flags>(ref<Lit>)))> {};
+  using entry = Root;
+  using ignore = WS;
+  static constexpr auto word_boundary = cr<R"(a-zA-Z0-9_\u{80}-\u{10FFFF})">;
+};
+
+// The boolean referenced first, so ranked above the name.
+struct LitFirst : Wide {
+  struct Root : rule<create<Doc>(many(append<&Doc::flags>(ref<Lit>) |
+                                      append<&Doc::items>(ref<Name>)))> {};
+  using entry = Root;
+};
+
+// Rivals whose frontiers refuse the very bytes behind a refused word: inside
+// the words, the letter one of them goes on with; past a word, a byte its
+// boundary leaves out.
+struct Frontier : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct NAME : terminal<!(kw<"do"> | kw<"di">) + cr<"a-z"> + many(w)> {};
+  struct ONE : terminal<cr<"d"> + !cr<"o">> {};
+  struct TWO : terminal<cr<"d"> + cr<"o"> + !cr<"!">> {};
+  struct Name
+      : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
+  struct Marked : rule<create<Mark>((assign<&Mark::one>(ref<ONE>) |
+                                     assign<&Mark::two>(ref<TWO>)) +
+                                    lit<";">)> {};
+  struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
+                                      append<&Doc::marks>(ref<Marked>)))> {};
+  using entry = Root;
+  using ignore = WS;
+  static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
+};
+
+// Two rivals inside the word, apart only before a byte that does not go on
+// with it: there the word is never spelled.
+struct Aside : Frontier {
+  struct NAME : terminal<!kw<"do"> + cr<"a-z"> + many(w)> {};
+  struct ONE : terminal<cr<"d"> + !cr<"!">> {};
+  struct TWO : terminal<cr<"d-e">> {};
+  struct Name
+      : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
+  struct Marked : rule<create<Mark>((assign<&Mark::one>(ref<ONE>) |
+                                     assign<&Mark::two>(ref<TWO>)) +
+                                    lit<";">)> {};
+  struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
+                                      append<&Doc::marks>(ref<Marked>)))> {};
+  using entry = Root;
+  static constexpr auto word_boundary = w;
+};
+
+struct AsciiLl : Ascii {};
+struct AsciiLr : Ascii {};
+struct EqualLl : Equal {};
+struct EqualLr : Equal {};
+struct WideLl : Wide {};
+struct WideLr : Wide {};
+struct LitFirstLl : LitFirst {};
+struct LitFirstLr : LitFirst {};
+struct FrontierLl : Frontier {};
+struct FrontierLr : Frontier {};
+struct AsideLl : Aside {};
+struct AsideLr : Aside {};
+}  // namespace tllbound

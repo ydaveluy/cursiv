@@ -1,12 +1,10 @@
-#include <arithmetics/core/validation/ArithmeticsValidator.hpp>
-
-#include <arithmetics/core/Operator.hpp>
-#include <arithmetics/core/ast.hpp>
+#include "arithmetics/core/validation/ArithmeticsValidator.hpp"
 
 #include <cmath>
 #include <format>
 #include <optional>
-#include <span>
+#include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -14,431 +12,359 @@
 #include <utility>
 #include <vector>
 
-#include <pegium/core/services/JsonValue.hpp>
-#include <pegium/core/validation/DiagnosticRanges.hpp>
+#include "arithmetics/core/Interpreter.hpp"
+#include "arithmetics/core/Operator.hpp"
+#include "cursiv/core/services/JsonValue.hpp"
+#include "cursiv/core/workspace/Document.hpp"
 
-namespace arithmetics::validation {
+namespace arith {
+
 namespace {
 
-using namespace arithmetics::ast;
-
-const Definition *as_definition(const pegium::AstNode *node) {
-  return pegium::ast_ptr_cast<const Definition>(node);
+const ast::Definition* definition_of(const ast::FunctionCall& call) {
+  const cursiv::AstNode* const target = call.func.get();
+  return target != nullptr &&
+                 target->type == &cursiv::ast_type_tag<ast::Definition>
+             ? static_cast<const ast::Definition*>(target)
+             : nullptr;
 }
 
-const Definition *resolved_function_definition(const FunctionCall &call) {
-  return as_definition(call.func.get());
+// Parentheses are transparent to every walk below.
+const ast::Expression* unwrap(const ast::Expression* expression) {
+  while (expression != nullptr &&
+         expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>)
+    expression =
+        static_cast<const ast::GroupedExpression*>(expression)->expression;
+  return expression;
 }
 
-std::optional<double> evaluate_constant_expression(const Expression &expression) {
-  if (const auto *number = pegium::ast_ptr_cast<const NumberLiteral>(&expression)) {
-    return number->value;
-  }
-
-  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
-    if (!grouped->expression) {
-      return std::nullopt;
-    }
-    return evaluate_constant_expression(*grouped->expression);
-  }
-
-  const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(&expression);
-  if (binary == nullptr || !binary->left || !binary->right) {
-    return std::nullopt;
-  }
-
-  const auto left = evaluate_constant_expression(*binary->left);
-  const auto right = evaluate_constant_expression(*binary->right);
-  if (!left.has_value() || !right.has_value()) {
-    return std::nullopt;
-  }
-
-  if ((binary->op == "/" || binary->op == "%") && *right == 0.0) {
-    return std::nullopt;
-  }
-
-  return apply_operator(binary->op)(*left, *right);
-}
-
-std::optional<double> resolve_normalizable_value(
-    const Expression &expression,
-    const std::unordered_map<const Expression *, double> &context) {
-  if (const auto *number = pegium::ast_ptr_cast<const NumberLiteral>(&expression)) {
-    return number->value;
-  }
-
-  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
-    if (!grouped->expression) {
-      return std::nullopt;
-    }
-    return resolve_normalizable_value(*grouped->expression, context);
-  }
-
-  if (const auto it = context.find(&expression); it != context.end()) {
-    return it->second;
-  }
-
-  return std::nullopt;
-}
-
-void erase_normalizable_value(
-    const Expression *expression,
-    std::unordered_map<const Expression *, double> &context) {
-  if (expression == nullptr) {
-    return;
-  }
-
-  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(expression)) {
-    erase_normalizable_value(grouped->expression, context);
-  }
-
-  context.erase(expression);
-}
-
-void evaluate_normalizable_expressions(
-    const Expression &expression,
-    std::unordered_map<const Expression *, double> &context,
-    std::vector<const Expression *> &order) {
-  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(&expression)) {
-    if (grouped->expression) {
-      evaluate_normalizable_expressions(*grouped->expression, context, order);
-    }
-    return;
-  }
-
-  const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(&expression);
-  if (binary == nullptr || !binary->left || !binary->right) {
-    return;
-  }
-
-  evaluate_normalizable_expressions(*binary->left, context, order);
-  evaluate_normalizable_expressions(*binary->right, context, order);
-
-  const auto left = resolve_normalizable_value(*binary->left, context);
-  const auto right = resolve_normalizable_value(*binary->right, context);
-  if (!left.has_value() || !right.has_value()) {
-    return;
-  }
-
-  double result = 0.0;
-  try {
-    result = apply_operator(binary->op)(*left, *right);
-  } catch (const std::runtime_error &) {
-    return;
-  }
-
-  if (!std::isfinite(result) ||
-      std::format("{}", result).size() > 8u) {
-    return;
-  }
-
-  const auto [it, inserted] = context.try_emplace(&expression, result);
-  if (inserted) {
-    order.push_back(&expression);
-  } else {
-    it->second = result;
-  }
-
-  erase_normalizable_value(binary->left, context);
-  erase_normalizable_value(binary->right, context);
-}
-
-template <typename Node>
-std::unordered_map<std::string_view, std::vector<const Node *>>
-group_named_nodes(std::span<Node *const> nodes) {
-  std::unordered_map<std::string_view, std::vector<const Node *>> groups;
-  groups.reserve(nodes.size());
-
-  for (const auto *node : nodes) {
-    if (node == nullptr || node->name.empty()) {
-      continue;
-    }
-    groups[node->name].push_back(node);
-  }
-
-  return groups;
-}
-
-struct NestedFunctionCall {
-  const FunctionCall *call = nullptr;
-  const Definition *host = nullptr;
+// A call, and the definition whose body writes it.
+struct NestedCall {
+  const ast::FunctionCall* call;
+  const ast::Definition* host;
 };
 
-using FunctionCallTree = std::unordered_map<const FunctionCall *, NestedFunctionCall>;
-using FunctionCallCycle = std::vector<NestedFunctionCall>;
+// The call each call was reached from. Walking back through it is what turns a
+// cycle into a path a reader can follow.
+using CallTree = std::unordered_map<const ast::FunctionCall*, NestedCall>;
 
-void collect_nested_function_calls(const Definition &host,
-                                   const Expression *expression,
-                                   std::vector<NestedFunctionCall> &calls) {
-  if (expression == nullptr) {
+// The resolved calls a body writes, source order. Arguments are not descended
+// into: a cycle is made of the calls a body makes, not of what it passes.
+void select_calls(const ast::Definition& host,
+                  const ast::Expression* expression,
+                  std::vector<NestedCall>& out) {
+  expression = unwrap(expression);
+  if (expression == nullptr) return;
+  if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
+    const auto& call = static_cast<const ast::FunctionCall&>(*expression);
+    if (definition_of(call) != nullptr) out.push_back({&call, &host});
     return;
   }
-
-  if (const auto *grouped = pegium::ast_ptr_cast<const GroupedExpression>(expression)) {
-    collect_nested_function_calls(host, grouped->expression, calls);
-    return;
-  }
-
-  if (const auto *call = pegium::ast_ptr_cast<const FunctionCall>(expression)) {
-    if (resolved_function_definition(*call) != nullptr) {
-      calls.push_back({.call = call, .host = &host});
-    }
-    return;
-  }
-
-  if (const auto *binary = pegium::ast_ptr_cast<const BinaryExpression>(expression)) {
-    collect_nested_function_calls(host, binary->left, calls);
-    collect_nested_function_calls(host, binary->right, calls);
+  if (expression->type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+    const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
+    select_calls(host, binary.left, out);
+    select_calls(host, binary.right, out);
   }
 }
 
-std::vector<NestedFunctionCall> select_nested_function_calls(
-    const Definition &host) {
-  std::vector<NestedFunctionCall> calls;
-  collect_nested_function_calls(host, host.expr, calls);
-  return calls;
+// The pair (entry, closing call) when climbing back from `to` re-enters the
+// definition `to` calls, nothing when it enters none.
+std::vector<NestedCall> select_cycle(const NestedCall& to,
+                                     const CallTree& tree) {
+  const ast::Definition* const target = definition_of(*to.call);
+  auto found = tree.find(to.call);
+  while (found != tree.end()) {
+    if (found->second.host == target) return {found->second, to};
+    found = tree.find(found->second.call);
+  }
+  return {};
 }
 
-std::vector<NestedFunctionCall> get_not_traversed_nested_calls(
-    const Definition &host,
-    std::unordered_set<const Definition *> &traversedFunctions) {
-  if (!traversedFunctions.insert(&host).second) {
-    return {};
+// The cycle's calls, its closing one first and its entry last.
+std::vector<NestedCall> iterate_back(const std::vector<NestedCall>& cycle,
+                                     const CallTree& tree) {
+  std::vector<NestedCall> back{cycle.back()};
+  if (cycle.front().call == cycle.back().call) return back;
+  auto found = tree.find(cycle.back().call);
+  while (found != tree.end()) {
+    back.push_back(found->second);
+    if (found->second.call == cycle.front().call) break;
+    found = tree.find(found->second.call);
   }
-  return select_nested_function_calls(host);
+  return back;
 }
 
-std::optional<FunctionCallCycle>
-select_function_call_cycle(const NestedFunctionCall &to,
-                           const FunctionCallTree &tree) {
-  const auto *referencedFunction = resolved_function_definition(*to.call);
-  if (referencedFunction == nullptr) {
-    return std::nullopt;
+// `f()->g()->f()`: the cycle read in call order, which is `back` reversed.
+std::string print_cycle(const std::vector<NestedCall>& back) {
+  std::string path;
+  for (auto at : std::views::reverse(back)) {
+    if (!path.empty()) path += "->";
+    path += definition_of(*at.call)->name;
+    path += "()";
   }
-
-  auto parentIt = tree.find(to.call);
-  while (parentIt != tree.end()) {
-    if (parentIt->second.host == referencedFunction) {
-      return FunctionCallCycle{parentIt->second, to};
-    }
-    parentIt = tree.find(parentIt->second.call);
-  }
-
-  return std::nullopt;
-}
-
-std::vector<NestedFunctionCall> iterate_back(const FunctionCallCycle &cycle,
-                                             const FunctionCallTree &tree) {
-  std::vector<NestedFunctionCall> path;
-  if (cycle.empty()) {
-    return path;
-  }
-
-  const auto &start = cycle.front();
-  const auto &end = cycle.back();
-  path.push_back(end);
-  if (start.call == end.call) {
-    return path;
-  }
-
-  auto parentIt = tree.find(end.call);
-  while (parentIt != tree.end()) {
-    path.push_back(parentIt->second);
-    if (parentIt->second.call == start.call) {
-      break;
-    }
-    parentIt = tree.find(parentIt->second.call);
-  }
-
   return path;
 }
 
-std::string to_string(const NestedFunctionCall &call) {
-  const auto *definition = resolved_function_definition(*call.call);
-  return definition == nullptr ? std::string{} : std::format("{}()", definition->name);
+// The value a sub-expression already stands for: its own if it is a literal,
+// the folded one if the walk below produced it.
+std::optional<double> known(
+    const ast::Expression* expression,
+    const std::unordered_map<const ast::Expression*, double>& folded) {
+  expression = unwrap(expression);
+  if (expression == nullptr) return std::nullopt;
+  if (expression->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
+    return static_cast<const ast::NumberLiteral*>(expression)->value;
+  const auto found = folded.find(expression);
+  return found == folded.end() ? std::nullopt
+                               : std::optional<double>(found->second);
 }
 
-std::string print_cycle(const FunctionCallCycle &cycle,
-                        const FunctionCallTree &tree) {
-  const auto path = iterate_back(cycle, tree);
-  if (path.empty()) {
-    return {};
+// A sub-expression that is already a number, bottom up. A parent that folds
+// takes its children's places: reporting both would offer the author two
+// rewrites for one span.
+void fold(const ast::Expression& expression,
+          std::unordered_map<const ast::Expression*, double>& folded,
+          std::vector<const ast::Expression*>& order) {
+  if (expression.type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
+    if (const ast::Expression* const inner =
+            static_cast<const ast::GroupedExpression&>(expression).expression)
+      fold(*inner, folded, order);
+    return;
   }
+  if (expression.type != &cursiv::ast_type_tag<ast::BinaryExpression>) return;
 
-  std::string text = to_string(path.front());
-  for (std::size_t index = 1; index < path.size(); ++index) {
-    text = to_string(path[index]) + "->" + text;
+  const auto& binary = static_cast<const ast::BinaryExpression&>(expression);
+  if (binary.left == nullptr || binary.right == nullptr) return;
+  fold(*binary.left, folded, order);
+  fold(*binary.right, folded, order);
+
+  const std::optional<double> left = known(binary.left, folded);
+  const std::optional<double> right = known(binary.right, folded);
+  if (!left.has_value() || !right.has_value()) return;
+
+  double value = 0.0;
+  try {
+    value = apply_operator(binary.op)(*left, *right);
+  } catch (const std::runtime_error&) {
+    return;  // a division by zero is the other check's to report
   }
-  return text;
+  if (!std::isfinite(value)) return;
+
+  if (folded.try_emplace(&expression, value).second)
+    order.push_back(&expression);
+  if (const ast::Expression* const child = unwrap(binary.left))
+    folded.erase(child);
+  if (const ast::Expression* const child = unwrap(binary.right))
+    folded.erase(child);
 }
 
-template <typename Builder>
-Builder &apply_arguments_range(Builder &builder, const FunctionCall &call) {
-  if (call.args.empty()) {
-    return builder;
-  }
+}  // namespace
 
-  const auto [firstBegin, firstEndIgnored] =
-      pegium::validation::range_for_feature(call, "args", 0u);
-  (void)firstEndIgnored;
-  const auto [lastBeginIgnored, lastEnd] = pegium::validation::range_for_feature(
-      call, "args", call.args.size() - 1u);
-  (void)lastBeginIgnored;
-  return builder.range(firstBegin, lastEnd);
+namespace {
+
+// The divisor is evaluated, not folded: a name standing for a number is a
+// number, so a call reaching a zero body is a division by zero too. Bounded
+// so the check prices O(divisions), never the whole call graph.
+constexpr std::size_t kDivisorStepLimit = 64;
+
+void say_if_zero(const ast::BinaryExpression& binary,
+                 cursiv::ValidationAcceptor& accept) {
+  if ((binary.op != ast::Operator::divide &&
+       binary.op != ast::Operator::modulo) ||
+      binary.right == nullptr)
+    return;
+  // An unbound name, a cycle, a spent budget: nullopt, not this check's
+  // answer.
+  const std::optional<double> divisor =
+      eval_expression(*binary.right, kDivisorStepLimit);
+  if (!divisor.has_value() || *divisor != 0.0) return;
+  accept.error(binary, "Division by zero is detected.")
+      .property<&ast::BinaryExpression::right>();
 }
 
-} // namespace
+void walk_divisions(const ast::Expression* expression,
+                    cursiv::ValidationAcceptor& accept,
+                    const cursiv::CancellationToken& token) {
+  if (expression == nullptr) return;
+  cursiv::throw_if_cancelled(token);
+  if (expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
+    walk_divisions(
+        static_cast<const ast::GroupedExpression&>(*expression).expression,
+        accept, token);
+    return;
+  }
+  if (expression->type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+    const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
+    say_if_zero(binary, accept);
+    walk_divisions(binary.left, accept, token);
+    walk_divisions(binary.right, accept, token);
+    return;
+  }
+  if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>)
+    for (const ast::Expression* const argument :
+         static_cast<const ast::FunctionCall&>(*expression).args)
+      walk_divisions(argument, accept, token);
+}
 
-void ArithmeticsValidator::checkDivByZero(
-    const BinaryExpression &expression,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if ((expression.op == "/" || expression.op == "%") && expression.right &&
-      evaluate_constant_expression(*expression.right) == 0.0) {
-    accept.error(expression, "Division by zero is detected.")
-        .property<&BinaryExpression::right>();
+}  // namespace
+
+void ArithmeticsValidator::checkDivisionsByZero(
+    const cursiv::Document& document, cursiv::ValidationAcceptor& accept,
+    const cursiv::CancellationToken& token) const {
+  const cursiv::AstNode* const root = document.parseResult.value;
+  if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::Module>)
+    return;
+  for (const ast::Statement* const statement :
+       static_cast<const ast::Module&>(*root).statements) {
+    if (statement == nullptr) continue;
+    if (statement->type == &cursiv::ast_type_tag<ast::Evaluation>)
+      walk_divisions(static_cast<const ast::Evaluation&>(*statement).expression,
+                     accept, token);
+    else if (statement->type == &cursiv::ast_type_tag<ast::Definition>)
+      walk_divisions(static_cast<const ast::Definition&>(*statement).expr,
+                     accept, token);
   }
 }
 
 void ArithmeticsValidator::checkUniqueParameters(
-    const Definition &definition,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  const auto params = group_named_nodes<DeclaredParameter>(std::span(definition.args));
-  for (const auto &[name, symbols] : params) {
-    if (symbols.size() <= 1u) {
-      continue;
-    }
+    const ast::Definition& definition,
+    cursiv::ValidationAcceptor& accept) const {
+  std::unordered_map<std::string_view,
+                     std::vector<const ast::DeclaredParameter*>>
+      byName;
+  for (const ast::DeclaredParameter* const arg : definition.args)
+    if (arg != nullptr && !arg->name.empty()) byName[arg->name].push_back(arg);
 
-    for (const auto *symbol : symbols) {
-      accept.error(*symbol, std::format("Duplicate definition name: {}", name))
-          .property<&DeclaredParameter::name>();
-    }
-  }
-}
-
-void ArithmeticsValidator::checkNormalizable(
-    const Definition &definition,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (!definition.expr ||
-      pegium::ast_ptr_cast<const NumberLiteral>(definition.expr) != nullptr) {
-    return;
-  }
-
-  std::unordered_map<const Expression *, double> context;
-  std::vector<const Expression *> order;
-  evaluate_normalizable_expressions(*definition.expr, context, order);
-
-  for (const auto *expression : order) {
-    const auto it = context.find(expression);
-    if (it == context.end() || it->second == 0.0 || !std::isfinite(it->second)) {
-      continue;
-    }
-
-    pegium::JsonValue::Object payload;
-    payload["constant"] = pegium::JsonValue(it->second);
-    accept
-        .info(*expression, std::format(
-                               "Expression could be normalized to constant {}",
-                               it->second))
-        .code(IssueCodes::ExpressionNormalizable)
-        .data(pegium::JsonValue(std::move(payload)));
+  for (const auto& [name, params] : byName) {
+    if (params.size() <= 1) continue;
+    for (const ast::DeclaredParameter* const param : params)
+      accept.error(*param, std::format("Duplicate definition name: {}", name))
+          .property<&ast::AbstractDefinition::name>();
   }
 }
 
 void ArithmeticsValidator::checkUniqueDefinitions(
-    const Module &module,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  std::unordered_map<std::string_view, std::vector<const Definition *>> names;
-  names.reserve(module.statements.size());
-
-  for (const auto &statement : module.statements) {
-    const auto *definition = pegium::ast_ptr_cast<const Definition>(statement);
-    if (definition == nullptr || definition->name.empty()) {
+    const ast::Module& module, cursiv::ValidationAcceptor& accept) const {
+  std::unordered_map<std::string_view, std::vector<const ast::Definition*>>
+      byName;
+  byName.reserve(module.statements.size());
+  for (const ast::Statement* const statement : module.statements) {
+    if (statement == nullptr ||
+        statement->type != &cursiv::ast_type_tag<ast::Definition>)
       continue;
-    }
-    names[definition->name].push_back(definition);
+    const auto* const definition =
+        static_cast<const ast::Definition*>(statement);
+    if (!definition->name.empty())
+      byName[definition->name].push_back(definition);
   }
 
-  for (const auto &[name, symbols] : names) {
-    if (symbols.size() <= 1u) {
-      continue;
-    }
-
-    for (const auto *symbol : symbols) {
-      accept.error(*symbol, std::format("Duplicate definition name: {}", name))
-          .property<&Definition::name>();
-    }
-  }
-}
-
-void ArithmeticsValidator::checkFunctionRecursion(
-    const Module &module,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  std::unordered_set<const Definition *> traversedFunctions;
-  FunctionCallTree callsTree;
-  std::vector<FunctionCallCycle> callCycles;
-
-  for (const auto &statement : module.statements) {
-    const auto *definition = pegium::ast_ptr_cast<const Definition>(statement);
-    if (definition == nullptr) {
-      continue;
-    }
-
-    auto remainingCalls =
-        get_not_traversed_nested_calls(*definition, traversedFunctions);
-    while (!remainingCalls.empty()) {
-      std::vector<NestedFunctionCall> nextCalls;
-      for (const auto &parent : remainingCalls) {
-        const auto *referencedFunction = resolved_function_definition(*parent.call);
-        if (referencedFunction == nullptr) {
-          continue;
-        }
-
-        if (parent.host == referencedFunction) {
-          callCycles.push_back({parent});
-        }
-
-        for (const auto &child :
-             get_not_traversed_nested_calls(*referencedFunction,
-                                           traversedFunctions)) {
-          callsTree[child.call] = parent;
-          if (auto cycle = select_function_call_cycle(child, callsTree);
-              cycle.has_value()) {
-            callCycles.push_back(std::move(*cycle));
-          } else {
-            nextCalls.push_back(child);
-          }
-        }
-      }
-      remainingCalls = std::move(nextCalls);
-    }
-  }
-
-  for (const auto &cycle : callCycles) {
-    const auto cycleMessage = print_cycle(cycle, callsTree);
-    for (const auto &entry : iterate_back(cycle, callsTree)) {
+  for (const auto& [name, definitions] : byName) {
+    if (definitions.size() <= 1) continue;
+    for (const ast::Definition* const definition : definitions)
       accept
-          .error(*entry.call,
-                 std::format("Recursion is not allowed [{}]", cycleMessage))
-          .property<&FunctionCall::func>();
-    }
+          .error(*definition,
+                 std::format("Duplicate definition name: {}", name))
+          .property<&ast::AbstractDefinition::name>();
   }
 }
 
 void ArithmeticsValidator::checkMatchingParameters(
-    const FunctionCall &call,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  const auto *definition = resolved_function_definition(call);
-  if (definition == nullptr) {
+    const ast::FunctionCall& call, cursiv::ValidationAcceptor& accept) const {
+  const ast::Definition* const definition = definition_of(call);
+  if (definition == nullptr || definition->args.size() == call.args.size())
     return;
+  accept.error(
+      call,
+      std::format("Function {} expects {} parameters, but {} were "
+                  "given.",
+                  definition->name, definition->args.size(), call.args.size()));
+}
+
+// A cycle of calls, said at every call site with its full path: the
+// definition's name alone would not say which call closes the loop. Each
+// definition's calls are expanded once, so a shared cycle is reported once.
+void ArithmeticsValidator::checkFunctionRecursion(
+    const ast::Module& module, cursiv::ValidationAcceptor& accept) const {
+  std::unordered_set<const ast::Definition*> expanded;
+  CallTree tree;
+  std::vector<std::vector<NestedCall>> cycles;
+
+  const auto callsOf = [&expanded](const ast::Definition* host) {
+    std::vector<NestedCall> calls;
+    if (host != nullptr && expanded.insert(host).second)
+      select_calls(*host, host->expr, calls);
+    return calls;
+  };
+
+  // One breadth-first step: what the called body opens, minus what closes.
+  const auto step = [&](const NestedCall& parent) {
+    std::vector<NestedCall> open;
+    const ast::Definition* const target = definition_of(*parent.call);
+    if (parent.host == target) cycles.push_back({parent});
+    for (const NestedCall& child : callsOf(target)) {
+      tree.insert_or_assign(child.call, parent);
+      std::vector<NestedCall> cycle = select_cycle(child, tree);
+      if (cycle.empty())
+        open.push_back(child);
+      else
+        cycles.push_back(std::move(cycle));
+    }
+    return open;
+  };
+
+  for (const ast::Statement* const statement : module.statements) {
+    if (statement == nullptr ||
+        statement->type != &cursiv::ast_type_tag<ast::Definition>)
+      continue;
+    for (const NestedCall& root :
+         callsOf(static_cast<const ast::Definition*>(statement))) {
+      std::vector<NestedCall> open{root};
+      while (!open.empty()) {
+        std::vector<NestedCall> next;
+        for (const NestedCall& parent : open) {
+          const std::vector<NestedCall> children = step(parent);
+          next.insert(next.end(), children.begin(), children.end());
+        }
+        open = std::move(next);
+      }
+    }
   }
 
-  if (definition->args.size() != call.args.size()) {
-    auto diagnostic = accept.error(
-        call, std::format("Function {} expects {} parameters, but {} were given.",
-                          definition->name, definition->args.size(),
-                          call.args.size()));
-    apply_arguments_range(diagnostic, call);
+  for (const std::vector<NestedCall>& cycle : cycles) {
+    const std::vector<NestedCall> back = iterate_back(cycle, tree);
+    const std::string message =
+        std::format("Recursion is not allowed [{}]", print_cycle(back));
+    for (const NestedCall& nested : back)
+      accept.error(*nested.call, message).property<&ast::FunctionCall::func>();
   }
 }
 
-} // namespace arithmetics::validation
+// The value is carried as diagnostic data, not spelled into the message: a
+// quick fix must not have to parse prose to know what to write.
+void ArithmeticsValidator::checkNormalizable(
+    const ast::Definition& definition,
+    cursiv::ValidationAcceptor& accept) const {
+  if (definition.expr == nullptr ||
+      definition.expr->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
+    return;
+
+  std::unordered_map<const ast::Expression*, double> folded;
+  std::vector<const ast::Expression*> order;
+  fold(*definition.expr, folded, order);
+
+  for (const ast::Expression* const expression : order) {
+    const auto found = folded.find(expression);
+    if (found == folded.end()) continue;
+    cursiv::JsonValue::Object payload;
+    payload["constant"] = cursiv::JsonValue(found->second);
+    accept
+        .information(
+            *expression,
+            std::format("Expression could be normalized to constant {}",
+                        found->second),
+            kExpressionNormalizable)
+        .data(cursiv::JsonValue(std::move(payload)));
+  }
+}
+
+}  // namespace arith

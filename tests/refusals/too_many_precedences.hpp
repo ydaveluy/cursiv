@@ -1,0 +1,33 @@
+// A precedence table of more levels than a byte numbers.
+#pragma once
+
+#include <cstddef>
+#include <utility>
+
+#include "refusals/head.hpp"
+
+namespace refuse {
+
+namespace ast {
+struct Bin : cursiv::Extends<cursiv::AstNode> {
+  Bin* left = nullptr;
+  string_view op;
+  Bin* right = nullptr;
+};
+}  // namespace ast
+
+template <std::size_t... Is>
+constexpr auto levels(std::index_sequence<Is...>) {
+  return (((void)Is, cursiv::left(cursiv::lit<"+">)) >> ...);
+}
+
+struct G : Base {
+  struct NUM : terminal<some(d)> {};
+  struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
+  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
+                     levels(std::make_index_sequence<256>{})> {};
+  using entry = Sum;
+  using ignore = WS;
+};
+
+}  // namespace refuse

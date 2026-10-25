@@ -1,4 +1,0 @@
-statemachine Light
-events Start
-initialState Idle
-stat Idle end

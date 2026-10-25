@@ -1,0 +1,30 @@
+name: CMake dependencies
+
+on:
+  schedule:
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dmnq-f/cmake-depcheck@37e4e38626d036f96b698362d69aaa5c530df98d # v3.1.0
+        with:
+          path: CMakeLists.txt
+          # GitHub requires approval before running checks on these automated PRs.
+          create-prs: true

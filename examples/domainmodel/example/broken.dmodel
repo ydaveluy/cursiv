@@ -1,0 +1,8 @@
+// BROKEN ON PURPOSE -- open this file to see the server's diagnostics.
+// `Missing` is a supertype nothing declares: the document parses, and the
+// reference is what fails.
+datatype String
+
+entity Article extends Missing {
+    title: String
+}

@@ -1,39 +1,67 @@
 # Features
 
-Designing a language is hard. You have to parse source text, produce a semantic model, resolve references, manage multi-file workspaces, and provide a good editing experience. Pegium handles that framework work so you can focus on the semantics of your language.
+## Parsing and syntax trees
 
-This chapter covers the main areas Pegium addresses:
+Define syntax with C++ grammar rules and fill your abstract syntax tree (AST)
+with `assign` and `append`. Cursiv provides LL and LR parsers; the default is
+LR. See the [grammar reference](../reference/grammar.md) for operators and
+supported forms.
 
-- grammar and parsing
-- semantic models
-- cross-references and linking
-- workspace management
-- editing support
+## Ambiguity diagnostics
 
-## Grammar and parsing
+The generator reports unsupported grammar constructions before you run the
+language. The LR backend can also report parser conflicts and overlapping
+tokens, with examples that help identify the ambiguity.
 
-You write grammars directly in C++ through `PegiumParser` subclasses. Parser expressions cover terminals, named rules, repetitions, lookahead, skippers, and infix parsing. The runtime includes expectation tracking and recovery-aware behavior, so parsing is more than a one-shot syntax check.
+## Error recovery that reports what it repaired
 
-## Semantic models
+The parsers report syntax errors and attempt to retain a usable tree, so
+editor features can keep working while a document is incomplete. The parse
+result records whether recovery was needed; diagnostics describe the errors.
 
-Pegium does not stop at syntax trees. AST nodes are ordinary C++20 types, so the semantic model of your language stays directly visible in your codebase. The CST remains available for source-aware tasks such as formatting, comment handling, and precise editor selections. Semantic logic, tooling, and source mapping live in one runtime model.
+## Cross references and scoping
 
-## Cross-references and linking
+Connect names to declarations with `reference<Person>`. Cursiv resolves the
+references after parsing. You can customize which declarations are visible,
+for example to support packages and imports. `multi_reference<T>` lets one
+name refer to a group of declarations.
 
-Real languages need names to resolve to declarations. Pegium models references explicitly through the reference pipeline: name computation, scope computation, scope providers, linking, and workspace indexing. Once wired, the same information drives linking, completion, rename, and navigation.
+## Validation
 
-## Workspace management
+Register validation methods for AST types. Diagnostics can target a node or
+a specific member: `.property<&ast::Person::name>()` underlines the name.
 
-Most languages quickly become multi-file. Pegium includes shared workspace services that track documents, indexing, and rebuilds across a project. References and diagnostics work across files instead of one isolated parse result.
+## Editor features
 
-## Editing support
+The Language Server Protocol (LSP) connects your language to editors. Default
+services provide completion, hover, go-to-definition, find-references, rename,
+symbols, folding and semantic tokens. You can replace individual
+providers. A formatter is language-specific and must be supplied separately.
+See [Services](../reference/services.md).
 
-Language servers sit on top of the same document and semantic model. The default service set already covers a broad range of LSP features: completion, hover, definition, references, rename, document symbols, and code actions.
+## A command line
 
-Formatter, validation, completion, hover, and other features remain explicit services. Keep the defaults where they fit and replace only the parts specific to your language.
+The scaffold includes a command-line interface (CLI) that parses, links and
+validates files. It can dump the concrete syntax tree (CST) as text or JSON
+and load a workspace for cross-file references.
+Its exit code makes it suitable for scripts and CI. See
+[Command line](../reference/cli.md).
 
-## Related pages
+## Tools for models
 
-- [Showcases](showcases.md)
-- [Examples](../examples/index.md)
-- [End-to-end walkthrough](../learn/walkthrough.md)
+Model Context Protocol (MCP) tools can validate draft text, inspect a workspace
+and navigate references. Through the editor's bridge they see unsaved buffers;
+a standalone server works with saved files. See
+[MCP server](../reference/mcp.md).
+
+## Native and WebAssembly deployment
+
+The language server can cross-compile to `wasm32-wasip1-threads`, so a VS Code
+extension can ship one module with its runner. Native builds remain available.
+See [WebAssembly](../recipes/wasm.md) for the build and runtime requirements.
+
+## A working project template
+
+`cursiv-new.cmake` creates a project with a grammar, AST, validators, tests,
+CLI and editor client. Follow [Create a project](../learn/scaffold.md) to
+build and run it.

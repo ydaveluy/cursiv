@@ -1,0 +1,33 @@
+// two_faults: 'state' typo near the top AND the final 'end' missing
+// break: 000217 000516
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+stat PowerOff
+    switchCapacity => RedLight
+end
+
+state RedLight
+    actions { flashRed }
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+state YellowLight
+    switchCapacity => PowerOff
+    next => RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight

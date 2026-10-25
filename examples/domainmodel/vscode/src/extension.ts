@@ -1,227 +1,206 @@
-import * as childProcess from 'node:child_process';
+// The Domainmodel extension: it spawns `domainmodel_lsp` and speaks the protocol
+// to it over stdio. Standalone -- no shared client -- so this folder packages on
+// its own.
+
 import * as fs from 'node:fs';
-import * as net from 'node:net';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
-import { LanguageClient } from 'vscode-languageclient/node';
+import {
+    LanguageClient,
+    TransportKind,
+    type Executable,
+    type LanguageClientOptions,
+    type ServerOptions
+} from 'vscode-languageclient/node';
+import { startMcpBridge } from './mcp';
 
-let client: LanguageClient | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
-let serverProcess: childProcess.ChildProcess | undefined;
+const KEY = 'domainmodel';
+const LABEL = 'Domainmodel';
+const SERVER = 'domainmodel_lsp';
+const LANGUAGES = ["domain-model"];
 
-function serverExecutableName(): string {
-    return process.platform === 'win32'
-        ? 'pegium-example-domainmodel-lsp.exe'
-        : 'pegium-example-domainmodel-lsp';
+function executableName(): string {
+    return process.platform === 'win32' ? `${SERVER}.exe` : SERVER;
 }
 
 function addCandidate(candidates: string[], value: string | undefined): void {
-    if (!value) {
-        return;
+    const trimmed = value?.trim();
+    if (trimmed) {
+        candidates.push(trimmed);
     }
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return;
+}
+
+// Where the binary is, in the order the answers are trustworthy: what the user
+// configured, what the environment says, then the default build tree. The
+// extension lives at `examples/domainmodel/vscode`, so the repository root is three
+// levels up and `build/examples/domainmodel/` is where CMake put the server.
+// A native binary is its own command; a wasm module is a file Node runs, and
+// the extension host is Node, so the wasm route needs no dependency.
+interface ServerCommand {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+}
+
+// The wasm server, preferred when it is there: one artefact for every platform,
+// and the sandbox comes with it -- the module reads only what the runner
+// preopens. A packaged .vsix carries the optimized module and the runner under
+// `server/`; a development tree serves them from `build-wasi/` and
+// `tools/`. The module MUST be a threaded build: lsp-framework answers requests
+// on its own thread pool, whose floor is one thread, so a threadless module
+// fails every request with "thread constructor failed". Falls back to the
+// native binary, which is what a build without the WASI toolchain produces.
+function wasmCommand(module: string, runner: string): ServerCommand | undefined {
+    if (!fs.existsSync(module) || !fs.existsSync(runner)) {
+        return undefined;
     }
-    candidates.push(trimmed);
+    return {
+        command: process.execPath,
+        args: ['--no-warnings', runner, module],
+        // Wasi cannot count the host's cores: `hardware_concurrency()`
+        // answers 1 there, so the pool would never be built. The host
+        // knows, and says so. One fewer than the machine, as the
+        // native default does.
+        env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
+    };
+}
+
+function resolveWasmCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
+    const embedded = wasmCommand(
+        path.join(context.extensionPath, 'server', `${SERVER}.wasm`),
+        path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
+    if (embedded) {
+        return embedded;
+    }
+    for (const root of repositoryRoots(context)) {
+        const inTree = wasmCommand(
+            path.join(root, 'build-wasi', 'examples', KEY, 'src', SERVER),
+            path.join(root, 'tools', 'wasi-run.mjs'));
+        if (inTree) {
+            return inTree;
+        }
+    }
+    return undefined;
+}
+
+function repositoryRoots(context: vscode.ExtensionContext): string[] {
+    const roots = [path.resolve(context.extensionPath, '..', '..', '..')];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        roots.push(folder.uri.fsPath, path.resolve(folder.uri.fsPath, '..', '..', '..'));
+    }
+    return roots;
+}
+
+// A wasm module opens with `\0asm` and a host binary does not. The cross build
+// names its output exactly like the native one, so the file itself is the only
+// thing that says which of the two runners it needs.
+function isWasm(file: string): boolean {
+    let handle: number | undefined;
+    try {
+        handle = fs.openSync(file, 'r');
+        const head = Buffer.alloc(4);
+        return fs.readSync(handle, head, 0, 4, 0) === 4 &&
+            head.toString('latin1') === '\0asm';
+    } catch {
+        return false;
+    } finally {
+        if (handle !== undefined) fs.closeSync(handle);
+    }
+}
+
+// What the active CMake preset just built: `launch.json` hands its binary
+// directory over, so F5 runs the artefact the editor is configured to build
+// rather than whatever a previous cross left under `server/`.
+function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
+    const directory = process.env.CURSIV_SERVER_DIR?.trim();
+    if (!directory) return undefined;
+    const built = path.join(directory, executableName());
+    if (!fs.existsSync(built)) return undefined;
+    if (!isWasm(built)) return { command: built, args: [] };
+    for (const root of repositoryRoots(context)) {
+        const run = wasmCommand(built, path.join(root, 'tools', 'wasi-run.mjs'));
+        if (run) return run;
+    }
+    return wasmCommand(built,
+        path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
 function resolveServerCommand(context: vscode.ExtensionContext): string | undefined {
-    const executable = serverExecutableName();
+    const executable = executableName();
     const candidates: string[] = [];
 
-    const configured = vscode.workspace
-        .getConfiguration()
-        .get<string>('pegium.domainmodel.serverPath');
-    addCandidate(candidates, configured);
-    addCandidate(candidates, process.env.PEGIUM_DOMAINMODEL_SERVER);
+    addCandidate(candidates, vscode.workspace.getConfiguration().get<string>(`cursiv.${KEY}.serverPath`));
+    addCandidate(candidates, process.env[`CURSIV_${KEY.replace(/-/g, '_').toUpperCase()}_SERVER`]);
 
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-        const root = folder.uri.fsPath;
-        addCandidate(candidates, path.join(root, 'build', 'examples', 'domainmodel', executable));
-        addCandidate(candidates, path.join(root, '..', 'build', 'examples', 'domainmodel', executable));
-        addCandidate(candidates, path.join(root, '..', '..', 'build', 'examples', 'domainmodel', executable));
+    // The launch configuration opens `examples/domainmodel/example`, so the
+    // repository root is three levels above the workspace folder too.
+    const roots = repositoryRoots(context);
+    for (const root of roots) {
+        addCandidate(candidates, path.join(root, 'build', 'examples', KEY, 'src', executable));
     }
 
-    addCandidate(candidates, path.join(context.extensionPath, '..', '..', 'build', 'examples', 'domainmodel', executable));
-    addCandidate(candidates, path.join(context.extensionPath, '..', '..', '..', 'build', 'examples', 'domainmodel', executable));
-    addCandidate(candidates, executable);
-
-    const deduped = Array.from(new Set(candidates));
-    for (const candidate of deduped) {
-        if (!candidate.includes('/') && !candidate.includes('\\')) {
+    for (const candidate of new Set(candidates)) {
+        // A configured value with no separator in it is a command name, which is
+        // how an installed server on PATH is named; anything else must exist on
+        // disk before it is worth spawning.
+        if (!candidate.includes(path.sep) && !candidate.includes('/')) {
             return candidate;
         }
         if (fs.existsSync(candidate)) {
             return path.resolve(candidate);
         }
     }
-
     return undefined;
 }
 
-async function allocatePort(): Promise<number> {
-    const probe = net.createServer();
-    await new Promise<void>((resolve, reject) => {
-        probe.once('error', reject);
-        probe.listen(0, '127.0.0.1', () => resolve());
-    });
-
-    const address = probe.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-    await new Promise<void>((resolve, reject) => {
-        probe.close((error) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve();
-        });
-    });
-
-    if (!port) {
-        throw new Error('Unable to allocate a localhost port for the Pegium DomainModel server.');
-    }
-    return port;
-}
-
-function delay(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-    });
-}
-
-function stopServerProcess(): void {
-    if (!serverProcess) {
-        return;
-    }
-    const runningProcess = serverProcess;
-    serverProcess = undefined;
-    if (runningProcess.exitCode === null && !runningProcess.killed) {
-        runningProcess.kill();
-    }
-}
-
-function attachServerLogs(process: childProcess.ChildProcess, channel: vscode.OutputChannel): void {
-    process.stdout?.on('data', (chunk: Buffer | string) => {
-        channel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-    });
-    process.stderr?.on('data', (chunk: Buffer | string) => {
-        channel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-    });
-    process.on('exit', (code, signal) => {
-        channel.appendLine(`Pegium DomainModel server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
-        if (serverProcess === process) {
-            serverProcess = undefined;
-        }
-    });
-    process.on('error', (error) => {
-        channel.appendLine(`Pegium DomainModel server process error: ${error.message}`);
-        if (serverProcess === process) {
-            serverProcess = undefined;
-        }
-    });
-}
-
-async function connectToSocket(port: number): Promise<net.Socket> {
-    return await new Promise<net.Socket>((resolve, reject) => {
-        const socket = net.createConnection({ host: '127.0.0.1', port });
-        socket.once('connect', () => {
-            socket.setNoDelay(true);
-            resolve(socket);
-        });
-        socket.once('error', (error) => {
-            socket.destroy();
-            reject(error);
-        });
-    });
-}
-
-async function waitForServerSocket(
-    port: number,
-    process: childProcess.ChildProcess,
-    channel: vscode.OutputChannel
-): Promise<StreamInfo> {
-    const deadline = Date.now() + 10_000;
-
-    while (Date.now() < deadline) {
-        if (process.exitCode !== null) {
-            throw new Error(`Pegium DomainModel server exited before accepting socket connections (code=${process.exitCode}).`);
-        }
-
-        try {
-            const socket = await connectToSocket(port);
-            channel.appendLine(`Connected to Pegium DomainModel server on 127.0.0.1:${port}`);
-            return { reader: socket, writer: socket };
-        } catch {
-            await delay(100);
-        }
-    }
-
-    throw new Error(`Timed out while connecting to Pegium DomainModel server on 127.0.0.1:${port}.`);
-}
-
-function createServerOptions(serverCommand: string, channel: vscode.OutputChannel): ServerOptions {
-    return async () => {
-        stopServerProcess();
-
-        const port = await allocatePort();
-        channel.appendLine(`Starting Pegium DomainModel server: ${serverCommand} --port=${port}`);
-
-        const child = childProcess.spawn(serverCommand, [`--port=${port}`], {
-            cwd: path.dirname(serverCommand),
-            env: process.env,
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
-        serverProcess = child;
-        attachServerLogs(child, channel);
-
-        try {
-            return await waitForServerSocket(port, child, channel);
-        } catch (error) {
-            stopServerProcess();
-            throw error;
-        }
-    };
-}
+let client: LanguageClient | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    const serverCommand = resolveServerCommand(context);
-    if (!serverCommand) {
+    // The active preset first, then the packaged wasm; the setting overrides
+    // both, since a configured `serverPath` names a binary the author chose.
+    const configured = vscode.workspace.getConfiguration().get<string>(`cursiv.${KEY}.serverPath`)?.trim();
+    const found = configured
+        ? undefined
+        : presetCommand(context) ?? resolveWasmCommand(context);
+    const command = found ? found.command : resolveServerCommand(context);
+    if (!command) {
         void vscode.window.showErrorMessage(
-            'Unable to locate pegium-example-domainmodel-lsp. Build the project and/or set pegium.domainmodel.serverPath.'
+            `Cannot find ${executableName()}. Build it with ` +
+            `\`cmake --build build --target ${SERVER}\`, or set \`cursiv.${KEY}.serverPath\`.`
         );
         return;
     }
 
-    outputChannel = vscode.window.createOutputChannel('Pegium DomainModel');
+    const outputChannel = vscode.window.createOutputChannel(`cursiv ${LABEL}`);
     context.subscriptions.push(outputChannel);
-    context.subscriptions.push(new vscode.Disposable(() => {
-        stopServerProcess();
-    }));
+    outputChannel.appendLine(found && found.args.length > 0
+        ? `server: wasm ${found.args[found.args.length - 1]}`
+        : `server: ${command}`);
 
-    const serverOptions = createServerOptions(serverCommand, outputChannel);
+    // One entry for both modes: a native server has no --inspect to add, so the
+    // debug configuration is the run configuration.
+    const executable: Executable = {
+        command,
+        args: found ? found.args : [],
+        transport: TransportKind.stdio,
+        ...(found?.env ? { options: { env: { ...process.env, ...found.env } } } : {}),
+    };
+    const serverOptions: ServerOptions = { run: executable, debug: executable };
     const clientOptions: LanguageClientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'domain-model' }],
+        documentSelector: LANGUAGES.map((language) => ({ scheme: 'file', language })),
         outputChannel
     };
 
-    client = new LanguageClient(
-        'pegium-domainmodel',
-        'Pegium DomainModel',
-        serverOptions,
-        clientOptions
-    );
-
+    client = new LanguageClient(`cursiv-${KEY}`, `cursiv ${LABEL}`, serverOptions, clientOptions);
     await client.start();
+    // The MCP door onto the SAME session: whatever the editor holds unsaved,
+    // a model connected here reads it.
+    context.subscriptions.push(startMcpBridge(KEY, LABEL, client, outputChannel));
 }
 
 export async function deactivate(): Promise<void> {
-    if (client) {
-        const runningClient = client;
-        client = undefined;
-        await runningClient.stop();
-    }
-    stopServerProcess();
+    const running = client;
+    client = undefined;
+    await running?.stop();
 }

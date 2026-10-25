@@ -1,0 +1,13 @@
+/* Two states and one command, written on single lines: the whitespace between
+   the parts of a statemachine carries no meaning. */
+statemachine Doors
+
+events open close
+
+commands lock unlock
+
+initialState Closed
+
+state Closed actions { lock } open => Open end
+
+state Open actions { unlock } close => Closed end

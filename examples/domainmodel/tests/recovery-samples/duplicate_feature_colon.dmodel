@@ -1,9 +1,0 @@
-entity Blog {
-  title: String
-  content:: String
-  many comments: Comment
-}
-
-entity Comment {
-  content: String
-}

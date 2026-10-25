@@ -1,54 +1,38 @@
 # Examples
 
-Start from working code instead of the abstract API docs. Pegium ships four examples covering complementary aspects of the framework.
+Choose an example for the feature you want to add. Each project includes a
+grammar, AST, services, tests, CLI and VS Code extension.
 
-## Overview
+| To learn… | Start with |
+|---|---|
+| Expressions and operator precedence | [Arithmetics](https://github.com/ydaveluy/cursiv/tree/main/examples/arithmetics) |
+| Declarations, references and keyword documentation | [Statemachine](https://github.com/ydaveluy/cursiv/tree/main/examples/statemachine) |
+| Packages, qualified names and formatting | [Domainmodel](https://github.com/ydaveluy/cursiv/tree/main/examples/domainmodel) |
+| Several languages with cross-file references | [Requirements](https://github.com/ydaveluy/cursiv/tree/main/examples/requirements) |
 
-| Example | Highlights |
-| --- | --- |
-| `arithmetics` | compact language, evaluator, formatter, LSP |
-| `domainmodel` | DomainModel DSL, structure-first AST, formatter, rename |
-| `requirements` | multi-language workspace, references, richer scoping |
-| `statemachine` | modeling DSL, validation, formatter, LSP |
+## Run an example
 
-## Choose a starting point
-
-- `arithmetics` — the smallest end-to-end example.
-- `domainmodel` — a DomainModel-style DSL with entities, nesting, and formatting rules.
-- `requirements` — multiple related languages or files.
-- `statemachine` — a graph- or state-oriented domain.
-
-## Practical advice
-
-To reuse an example:
-
-1. Choose the closest domain shape.
-2. Keep the project structure and service wiring.
-3. Shrink the grammar and AST to your actual needs.
-4. Add back domain-specific validation, references, and formatting.
-
-Read them as a progression in this order:
-
-1. `arithmetics` — the smallest full parser-to-editor path.
-2. `domainmodel` — nested declarations, qualified names, and rename.
-3. `statemachine` — validation-heavy modeling.
-4. `requirements` — multiple related languages in one workspace.
-
-## Running them
-
-After building the repository, each example exposes matching CLI and LSP entrypoints under `./build/examples/...`.
+From the Cursiv repository root, with GCC and Ninja installed:
 
 ```bash
-./build/examples/arithmetics/pegium-example-arithmetics-cli \
-  eval examples/arithmetics/example/example.calc
-
-./build/examples/arithmetics/pegium-example-arithmetics-lsp
+cmake --preset gcc-release
+cmake --build --preset gcc-release --target statemachine_cli --parallel
+./build/examples/statemachine/src/statemachine_cli \
+  examples/statemachine/example/doors.statemachine
 ```
 
-The arithmetics CLI takes an `eval` subcommand; the domainmodel, requirements, and statemachine CLIs take a `generate` subcommand instead. Run any CLI with no arguments to see its usage string.
+The CLI reports `: ok` when the document has no error diagnostics. Use
+`--dump` to inspect the syntax tree or `--root <folder>` to load declarations
+from other files.
 
-## Related pages
+For VS Code setup and packaging, see the
+[examples guide](https://github.com/ydaveluy/cursiv/tree/main/examples#try-an-editor-session).
 
-- [Learn Pegium](../learn/index.md)
-- [Recipes](../recipes/index.md)
-- [Arithmetics](arithmetics.md)
+## Adapt an example
+
+Read `core/*Grammar.hpp` and `core/ast.hpp` first. They define the syntax and
+the data it produces. Then read the validation, scoping or formatting service
+that implements the feature you need.
+
+To create your own project, use [Create a project](../learn/scaffold.md).
+To extend another grammar, see [Derived grammars](../recipes/derived-grammars.md).

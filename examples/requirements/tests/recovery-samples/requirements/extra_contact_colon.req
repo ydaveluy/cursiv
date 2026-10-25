@@ -1,3 +1,0 @@
-contact:: "team"
-environment prod: "Production"
-req login "Users can login"

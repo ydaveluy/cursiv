@@ -1,8 +1,6 @@
-entity Blog {
-    title: String
-    date: complex.Date
-    many posts: Post
-}
+// A blog: datatypes, entities, inheritance and a nested package.
+datatype String
+datatype Date
 
 entity HasAuthor {
     author: String
@@ -10,10 +8,18 @@ entity HasAuthor {
 
 entity Post extends HasAuthor {
     title: String
-    content: String
+    published: Date
     many comments: Comment
 }
 
 entity Comment extends HasAuthor {
     content: String
+}
+
+package archive {
+    /* A qualified name reaches out of the package it is written in. */
+    entity Snapshot {
+        taken: Date
+        many posts: Post
+    }
 }

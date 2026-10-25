@@ -1,0 +1,24 @@
+// A section closed by a token its grammar reads itself: where the section
+// ends would be the parse's to say, not the text's.
+#pragma once
+
+#include "refusals/head.hpp"
+
+namespace refuse {
+
+struct Inner : cursiv::GrammarSpec {
+  struct SP : terminal<some(cr<R"( \n)">)> {};
+  struct NUM : terminal<some(d)> {};
+  struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NUM>) +
+                                       option(lit<";">))> {};
+  using entry = Root;
+  using ignore = SP;
+};
+
+struct G : Base {
+  struct Root : rule<section<Inner>(lit<"<">, lit<";">)> {};
+  using entry = Root;
+  using ignore = WS;
+};
+
+}  // namespace refuse

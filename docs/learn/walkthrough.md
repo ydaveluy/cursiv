@@ -1,310 +1,281 @@
-# Build a Language End-to-End
-
-Build a complete, working Pegium language by following the smallest complete language in the repository — AST + grammar + validation + formatter: **`statemachine`**. The code shown here is drawn from [`examples/statemachine/`](https://github.com/ydaveluy/pegium/tree/main/examples/statemachine) — trimmed for brevity but faithful to the on-disk files, so you can read, run, copy, and adapt it.
-
-A statemachine document looks like this:
-
-```text
-statemachine TrafficLight
-
-events
-    switchCapacity
-    next
-
-initialState PowerOff
-
-state PowerOff
-    switchCapacity => RedLight
-end
-```
-
-You will build an AST, a grammar, validation, a CLI that consumes the parsed model, and an optional language server. Pegium is hand-written C++ with **no code-generation or scaffolding step** — each artifact below is a small source file you write yourself.
-
-## 1. Shape the AST — `ast.hpp`
-
-The AST is your semantic model: plain C++ structs deriving from `pegium::AstNode`, or from `pegium::NamedAstNode` for declarations that have a name.
-
-```cpp
-// examples/statemachine/src/statemachine/core/ast.hpp
-#include <pegium/core/syntax-tree/AstNode.hpp>
-
-namespace statemachine::ast {
-
-struct Event : pegium::NamedAstNode {};
-struct Command : pegium::NamedAstNode {};
-
-struct State;
-
-struct Transition : pegium::AstNode {
-  reference<Event> event;
-  reference<State> state;
-};
-
-struct State : pegium::NamedAstNode {
-  vector<reference<Command>> actions;
-  vector<pointer<Transition>> transitions;
-};
-
-struct Statemachine : pegium::NamedAstNode {
-  vector<pointer<Event>> events;
-  vector<pointer<Command>> commands;
-  reference<State> init;
-  vector<pointer<State>> states;
-};
-
-} // namespace statemachine::ast
-```
-
-The member-type aliases come from `AstNode`:
-
-- `NamedAstNode` supplies the `name` field that the default naming, scoping, and linking services read. It is **required** for named declarations: a plain `AstNode` is unnamed even if its grammar assigns a `name` field. (To name a type that cannot derive `NamedAstNode`, override the `NameProvider` service.)
-- `pointer<T>` is an arena-owned child node; `vector<>` holds repeated members.
-- `reference<T>` is a cross-link to another node, resolved later by the linker.
-
-## 2. Write the grammar — `core/StateMachineParser.hpp`
-
-Subclass `pegium::parser::PegiumParser`, override `getEntryRule()` and `getSkipper()`, and declare your terminals and rules with the PEG DSL. The grammar shapes the AST directly through the `assign`/`append` actions.
-
-```cpp
-// From examples/statemachine/src/statemachine/core/StateMachineParser.hpp (comments trimmed).
-#include <statemachine/core/ast.hpp>
-#include <pegium/core/parser/PegiumParser.hpp>
-
-namespace statemachine::parser {
-using namespace pegium::parser;
-
-class StateMachineParser : public PegiumParser {
-public:
-  using PegiumParser::PegiumParser;
-
-protected:
-  const pegium::grammar::ParserRule &getEntryRule() const noexcept override {
-    return StatemachineRule;
-  }
-  const Skipper &getSkipper() const noexcept override { return skipper; }
-
-  // Whitespace is ignored; comments are hidden (kept in the CST for formatting).
-  static constexpr auto WS = some(s);
-  Terminal<> SL_COMMENT{"SL_COMMENT", "//"_kw <=> &(eol | eof)};
-  Terminal<> ML_COMMENT{"ML_COMMENT", "/*"_kw <=> "*/"_kw};
-  Skipper skipper = skip(ignored(WS), hidden(ML_COMMENT, SL_COMMENT));
-
-  Terminal<std::string> ID{"ID", "a-zA-Z_"_cr + many(w)};
-
-  // A name is any ID that is not a reserved section keyword, so a list of names
-  // can never swallow the next section's keyword.
-  Rule<std::string> ReservedKeywords{
-      "ReservedKeywords",
-      "statemachine"_kw.i() | "events"_kw.i() | "commands"_kw.i() |
-          "initialState"_kw.i() | "state"_kw.i() | "actions"_kw.i() |
-          "end"_kw.i()};
-  Rule<std::string> ValidID{"ValidID", !ReservedKeywords + ID};
-
-  Rule<ast::Event> EventRule{"Event", assign<&ast::Event::name>(ValidID)};
-  Rule<ast::Command> CommandRule{"Command", assign<&ast::Command::name>(ValidID)};
-
-  Rule<ast::Transition> TransitionRule{
-      "Transition", assign<&ast::Transition::event>(ValidID) + "=>"_kw +
-                        assign<&ast::Transition::state>(ValidID)};
-
-  Rule<ast::State> StateRule{
-      "State",
-      "state"_kw.i() + assign<&ast::State::name>(ValidID) +
-          option("actions"_kw.i() + "{"_kw +
-                 some(append<&ast::State::actions>(ValidID)) + "}"_kw) +
-          many(append<&ast::State::transitions>(TransitionRule)) +
-          "end"_kw.i()};
-
-  Rule<ast::Statemachine> StatemachineRule{
-      "Statemachine",
-      "statemachine"_kw.i() + assign<&ast::Statemachine::name>(ValidID) +
-          option("events"_kw.i() +
-                 some(append<&ast::Statemachine::events>(EventRule))) +
-          option("commands"_kw.i() +
-                 some(append<&ast::Statemachine::commands>(CommandRule))) +
-          "initialState"_kw.i() + assign<&ast::Statemachine::init>(ValidID) +
-          many(append<&ast::Statemachine::states>(StateRule))};
-};
-
-} // namespace statemachine::parser
-```
-
-The DSL building blocks:
-
-- `assign<&T::member>(...)` writes one value into a field; `append<&T::vec>(...)` adds a repeated member or child.
-- `"kw"_kw` matches a keyword (`.i()` makes it case-insensitive); `"a-zA-Z_"_cr` is a character range; `s`, `w`, `eol`, `eof` are predefined terminals.
-- `+` sequences, `|` chooses, `option(...)` / `many(...)` / `some(...)` repeat, and `!x` is a negative lookahead. `ValidID = !ReservedKeywords + ID` uses it so a section keyword (e.g. `commands`, `initialState`) can never be consumed as a name — that is what bounds the `events`/`commands`/`states` lists.
-- The skipper's `ignored(...)` text disappears from the CST entirely; `hidden(...)` (comments) stays available to source-aware features such as formatting and hover.
-
-## 3. Add validation — `core/validation/`
-
-A validator is a plain class with `check`-style methods. Each receives a node and a `ValidationAcceptor` to report problems on.
-
-```cpp
-// StatemachineValidator.hpp
-class StatemachineValidator final {
-public:
-  void checkStateNameStartsWithCapital(
-      const ast::State &state,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkUniqueStatesAndEvents(
-      const ast::Statemachine &model,
-      const pegium::validation::ValidationAcceptor &accept) const;
-};
-```
-
-```cpp
-// StatemachineValidator.cpp
-void StatemachineValidator::checkStateNameStartsWithCapital(
-    const ast::State &state,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (!state.name.empty() &&
-      std::toupper(static_cast<unsigned char>(state.name.front())) !=
-          state.name.front()) {
-    accept.warning(state, "State name should start with a capital letter.")
-        .property<&ast::State::name>();
-  }
-}
-```
-
-Register the checks on the language's `ValidationRegistry`:
-
-```cpp
-inline void registerValidationChecks(pegium::CoreServices &services,
-                                     StatemachineValidator &validator) {
-  auto &registry = *services.validation.validationRegistry;
-  registry.registerChecks(
-      {pegium::validation::ValidationRegistry::makeValidationCheck<
-           &StatemachineValidator::checkStateNameStartsWithCapital>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &StatemachineValidator::checkUniqueStatesAndEvents>(validator)});
-}
-```
-
-## 4. Assemble the services — `core/CoreServices.hpp` + `core/CoreModule.cpp`
-
-Pegium wires a language through explicit service containers. Define two structs: a workspace-wide *shared* container, and a *core* container that carries your language-specific members directly and derives from `pegium::CoreServicesFor<Shared>`:
-
-```cpp
-// core/CoreServices.hpp
-struct StatemachineSharedCoreServices : virtual pegium::SharedCoreServices {
-  // define here custom shared services
-};
-
-struct StatemachineCoreServices
-    : pegium::CoreServicesFor<StatemachineSharedCoreServices> {
-  std::unique_ptr<validation::StatemachineValidator> validator;
-
-  explicit StatemachineCoreServices(
-      const StatemachineSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
-};
-```
-
-`pegium::CoreServices` is a *virtual* base with no default constructor, so the most-derived container must initialize it — hence the two-init constructor (an inherited or intermediate constructor cannot do it). The container is built from the language's own shared type, so its `shared` member is typed to `StatemachineSharedCoreServices`.
-
-Then wire it in one plain function. It takes the language container by reference — which *is-a* `pegium::CoreServices` — so it is an ordinary function (not a template) that both the headless and the LSP container reuse:
-
-```cpp
-// core/CoreModule.hpp — declarations only (no grammar header)
-
-// Hands out a parser as the type-erased `pegium::parser::Parser`, so the TUs
-// that only need to parse (tests, tools) never include the grammar header and
-// never re-instantiate it.
-std::unique_ptr<const pegium::parser::Parser> createStatemachineParser();
-
-void installStatemachineCoreModule(StatemachineCoreServices &services);
-
-std::unique_ptr<StatemachineCoreServices>
-createStatemachineCoreServices(
-    const StatemachineSharedCoreServices &sharedServices,
-    std::string languageId = "statemachine");
-```
-
-```cpp
-// core/CoreModule.cpp — the ONE translation unit that includes the grammar
-std::unique_ptr<const pegium::parser::Parser> createStatemachineParser() {
-  return std::make_unique<const parser::StateMachineParser>();
-}
-
-void installStatemachineCoreModule(StatemachineCoreServices &services) {
-  // CoreModule.cpp owns the grammar, so it builds the core-bound parser
-  // directly; createStatemachineParser() above is for the other TUs.
-  services.parser =
-      std::make_unique<const parser::StateMachineParser>(services);
-  services.languageMetaData.fileExtensions = {".statemachine"};
-  services.validator =
-      std::make_unique<validation::StatemachineValidator>(services);
-  validation::registerValidationChecks(services, *services.validator);
-}
-
-std::unique_ptr<StatemachineCoreServices>
-createStatemachineCoreServices(
-    const StatemachineSharedCoreServices &sharedServices,
-    std::string languageId) {
-  auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
-      sharedServices, std::move(languageId));
-  installStatemachineCoreModule(*services);
-  return services;
-}
-```
-
-Because `core/CoreModule.cpp` is the only translation unit that includes the grammar header, the grammar's heavy template instantiations happen there once. Everything else works through declarations: the LSP module (`lsp/LspModule.cpp`) reuses `installStatemachineCoreModule`, and tests or tools that just need to parse call `createStatemachineParser()` to obtain a ready parser as the type-erased `pegium::parser::Parser` — none of them re-instantiate the grammar. This is what keeps the example's test translation units small and fast to compile. The wiring is ordinary C++ you can read, so it stays obvious what your language depends on.
-
-## 5. Run it headlessly — `cli/main.cpp`
-
-The CLI parses a file, checks for errors, then walks the typed AST:
-
-```cpp
-auto sharedServices =
-    pegium::make_shared_services<statemachine::StatemachineSharedCoreServices>();
-auto &shared = *sharedServices;
-auto services = statemachine::createStatemachineCoreServices(shared);
-auto &languageServices = *services;
-shared.serviceRegistry->registerServices(std::move(services));
-
-auto document =
-    pegium::build_document_from_path(fileName, languageServices);
-if (pegium::has_error_diagnostics(*document)) {
-  pegium::print_error_diagnostics(*document, std::cerr);
-  return 2;
-}
-
-auto *model =
-    pegium::ast_ptr_cast<ast::Statemachine>(document->parseResult.value);
-for (const auto &state : model->states) {
-  // ... do something with the typed AST
-}
-```
-
-For the full pattern and how cross-references resolve, see [Run a Language Headlessly](consume-the-ast.md).
-
-## 6. (Optional) Add a language server — `lsp/` + `lsp/main.cpp`
-
-For editor features, build the LSP container with `makeDefaultServices<...>` and an LSP module (see [LSP Services](../build-a-language/lsp-services.md)), then start the server with a single call:
-
-```cpp
-// lsp/main.cpp
-int main(int argc, char **argv) {
-  return pegium::runLanguageServerMain<statemachine::StatemachineSharedServices>(
-      argc, argv, "statemachine-lsp",
-      statemachine::registerStatemachineLspServices);
-}
-```
-
-## 7. Build and run
+# Build a language end to end
+
+This tutorial builds a recipe language with declarations, nested blocks,
+references and a validation check. Use the prerequisites from
+[Create a project](scaffold.md), then create a separate project named `Recipe`:
 
 ```bash
-cmake -S . -B build
-cmake --build build -j
-
-./build/examples/statemachine/pegium-example-statemachine-cli \
-  generate examples/statemachine/example/trafficlight.statemachine
+curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
+cmake -DNAME=Recipe -P cursiv-new.cmake
+cd recipe
 ```
 
-## Related pages
+The scaffold starts with the hello-world language. Replace
+`example/hello.recipe` with this sample, then update the source files below
+before building:
 
-- [Test Your Language](test-your-language.md) — assert on the AST and diagnostics
-- [Run a Language Headlessly](consume-the-ast.md) — the full consume-the-AST pattern
-- [References and Scoping](../build-a-language/references-and-scoping.md) — cross-references across files
-- [Validation](../build-a-language/validation.md) — fast vs slow checks
+```text
+unit gram
+unit ml
+
+ingredient Flour in gram
+ingredient Milk in ml
+
+recipe Pancakes {
+  use Flour 200
+  use Milk 300
+}
+```
+
+## 1. Define the AST
+
+The abstract syntax tree (AST) holds the data your program will use. Replace
+`core/ast.hpp` with:
+
+```cpp title="src/recipe/core/ast.hpp"
+#pragma once
+
+#include "cursiv/core/syntax-tree/AstNode.hpp"
+
+namespace recipe::ast {
+
+struct Unit : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
+
+struct Ingredient : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  reference<Unit> unit;
+};
+
+struct Use : cursiv::Extends<cursiv::AstNode> {
+  reference<Ingredient> ingredient;
+  string_view amount;
+};
+
+struct Recipe : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  vector<Use*> uses;
+};
+
+struct Model : cursiv::Extends<cursiv::AstNode> {
+  vector<Unit*> units;
+  vector<Ingredient*> ingredients;
+  vector<Recipe*> recipes;
+};
+
+}  // namespace recipe::ast
+```
+
+`Extends<AstNode>` provides the field aliases `string_view`, `vector` and
+`reference`. A list of nodes uses `vector<T*>`. A `reference<T>` records a name
+while parsing and resolves to a target later. See
+[AST vocabulary](../reference/ast.md) for the complete field types.
+
+## 2. Define the grammar
+
+Replace the grammar header with:
+
+```cpp title="src/recipe/core/RecipeGrammar.hpp"
+#pragma once
+
+#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "recipe/core/ast.hpp"
+
+namespace recipe {
+
+struct Recipe : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
+  struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
+
+  struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
+  struct NUMBER : terminal<some(d)> {};
+
+  struct UnitRule : rule<kw<"unit"> + assign<&ast::Unit::name>(ref<ID>)> {};
+
+  struct IngredientRule
+      : rule<kw<"ingredient"> + assign<&ast::Ingredient::name>(ref<ID>) +
+             kw<"in"> + assign<&ast::Ingredient::unit>(ref<ID>)> {};
+
+  struct UseRule
+      : rule<kw<"use"> + assign<&ast::Use::ingredient>(ref<ID>) +
+             assign<&ast::Use::amount>(ref<NUMBER>)> {};
+
+  struct RecipeRule
+      : rule<kw<"recipe"> + assign<&ast::Recipe::name>(ref<ID>) + lit<"{"> +
+             many(append<&ast::Recipe::uses>(ref<UseRule>)) + lit<"}">> {};
+
+  struct ModelRule
+      : rule<some(append<&ast::Model::units>(ref<UnitRule>) |
+                  append<&ast::Model::ingredients>(ref<IngredientRule>) |
+                  append<&ast::Model::recipes>(ref<RecipeRule>))> {};
+
+  using entry = ModelRule;
+  using ignore = WS;
+  using hidden = list<SL_COMMENT, ML_COMMENT>;
+};
+
+}  // namespace recipe
+```
+
+`kw<"unit">` matches a whole keyword; `lit<"{">` matches punctuation.
+`assign` fills one member, `append` adds a list element, and `ref` calls a
+terminal or rule. `some` requires at least one declaration; `many` allows none.
+
+The members named by the directives determine the AST class. `UnitRule`
+builds a `Unit`, and the `Model::units`, `ingredients` and `recipes` appends
+make `ModelRule` build a `Model`. You may write `create<ast::Model>` explicitly,
+but it is unnecessary here. Replacing `some` with `many` would also accept
+an empty document and build an empty `Model`.
+
+## 3. Replace the sample validator
+
+The scaffold's Hello World validator refers to `Person`, `Model::persons`
+and `Model::greetings`. Replace both validator files so their checks use the
+Recipe AST defined above. Do this before building. The following check rejects
+using the same ingredient twice in one recipe:
+
+```cpp title="src/recipe/core/validation/RecipeValidator.hpp"
+#pragma once
+
+#include "cursiv/core/services/DefaultCoreService.hpp"
+#include "cursiv/core/validation/ValidationAcceptor.hpp"
+#include "recipe/core/ast.hpp"
+
+namespace recipe {
+
+class RecipeValidator final : public cursiv::DefaultCoreService {
+ public:
+  using cursiv::DefaultCoreService::DefaultCoreService;
+
+  void checkNoDuplicateUse(const ast::Recipe& recipe,
+                           cursiv::ValidationAcceptor& accept) const;
+};
+
+struct RecipeCoreServices;
+void register_validation_checks(RecipeCoreServices& services);
+
+}  // namespace recipe
+```
+
+```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
+#include "recipe/core/validation/RecipeValidator.hpp"
+
+#include <memory>
+#include <unordered_set>
+
+#include "cursiv/core/validation/ValidationRegistry.hpp"
+#include "recipe/core/CoreServices.hpp"
+
+namespace recipe {
+
+void RecipeValidator::checkNoDuplicateUse(
+    const ast::Recipe& recipe, cursiv::ValidationAcceptor& accept) const {
+  std::unordered_set<const ast::Ingredient*> seen;
+  for (const ast::Use* const use : recipe.uses) {
+    if (use == nullptr) continue;
+    const ast::Ingredient* const target = use->ingredient.get();
+    if (target != nullptr && !seen.insert(target).second)
+      accept.error(*use, "This ingredient is already used in this recipe.")
+          .property<&ast::Use::ingredient>();
+  }
+}
+
+void register_validation_checks(RecipeCoreServices& services) {
+  using V = RecipeValidator;
+  services.validator = std::make_unique<const V>(services);
+  services.validationRegistry->registerChecks(
+      {cursiv::ValidationRegistry::makeValidationCheck<&V::checkNoDuplicateUse>(
+          *services.validator)});
+}
+
+}  // namespace recipe
+```
+
+The registry runs this method on each `ast::Recipe` node.
+`.property<&ast::Use::ingredient>()` puts the diagnostic under the ingredient
+name. An unresolved reference returns null from `get()`; the linker reports
+it, so this check skips it. See [Custom validation](../recipes/validation.md).
+
+## 4. Update the test and build
+
+The scaffold's test checks the `persons` and `greetings` lists of its Hello
+World sample. In `tests/grammar_test.cpp`, keep the setup and replace that
+final size check with:
+
+```cpp
+if (model.units.size() != 2 || model.ingredients.size() != 2 ||
+    model.recipes.size() != 1)
+  return fail("the model does not hold what the sample declares");
+```
+
+Now configure, build and test:
+
+```bash
+cmake -B build
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./build/src/recipe_cli example/hello.recipe
+./build/src/recipe_cli --dump example/hello.recipe
+```
+
+The tests pass and the CLI reports `example/hello.recipe: ok`. `--dump`
+prints the concrete syntax tree, showing the rules and tokens that matched.
+
+## 5. Try the reference resolution
+
+`ingredient Flour in gram` refers to the `Unit` named `gram`. Each `use`
+refers to an `Ingredient`. The default scoping services expose named children
+inside their container; here the units and ingredients belong to the `Model`,
+so they are visible from nested recipes too.
+
+In the sample's `recipe Pancakes` block, replace `use Flour 200` with
+`use Sugar 200`, then run the CLI again:
+
+```bash
+./build/src/recipe_cli example/hello.recipe
+```
+
+It reports an error containing:
+
+```text
+Could not resolve reference to Ingredient named 'Sugar'.
+```
+
+Restore `Flour`. Forward references work as well: declarations do not have to
+appear before their uses.
+
+## 6. Try the validation
+
+Add a second `use Flour 200` inside the recipe and run the CLI again. The
+syntax is valid, but your check reports:
+
+```text
+This ingredient is already used in this recipe.
+```
+
+Remove the duplicate before running the tests again. To make these two cases
+permanent tests, continue with [Test your language](testing.md).
+
+## 7. Open the editor
+
+Follow [Ship an editor extension](editor-integration.md) to launch the VS Code
+client with **F5**. Completion offers allowed keywords and reference targets;
+go-to-definition and rename use the references you declared. The duplicate
+ingredient check appears as an editor diagnostic too.
+
+To try hover documentation, add `/** The gram unit. */` before `unit gram`.
+The `ML_COMMENT` terminal keeps the comment in the CST so the documentation
+provider can find it. Update the extension's TextMate grammar when you want
+its initial syntax highlighting to recognize the Recipe keywords.
+
+## What to change next
+
+| You want | Go to |
+|---|---|
+| Names qualified by a package | [Qualified names and scoping](../recipes/scoping.md) |
+| Consistent spaces and indentation | [Formatting](../recipes/formatting.md) |
+| Keywords in any case | [Case-insensitive languages](../recipes/case-insensitive.md) |
+| A second language in the same project | [Several languages](../recipes/multiple-languages.md) |
+| Use the AST in your program | [Read the AST](consume-the-ast.md) |

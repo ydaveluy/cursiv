@@ -1,16 +1,20 @@
 #pragma once
 
-#include <pegium/lsp/code-actions/DefaultCodeActionProvider.hpp>
+#include "cursiv/lsp/actions/DefaultCodeActionProvider.hpp"
 
-namespace arithmetics {
+// The quick fix for `checkNormalizable`: replace a foldable expression with the
+// constant the check already computed. What to write is read off the
+// diagnostic's data, never parsed back out of its message.
+
+namespace arith {
 
 class ArithmeticsCodeActionProvider final
-    : public pegium::DefaultCodeActionProvider {
-protected:
+    : public cursiv::DefaultCodeActionProvider {
+ protected:
   void appendCodeActions(
-      const pegium::workspace::Document &document,
-      const ::lsp::CodeActionParams &params, CodeActionResult &actions,
-      const pegium::utils::CancellationToken &cancelToken) const override;
+      const cursiv::Document& document, const ::lsp::CodeActionParams& params,
+      std::vector<::lsp::CodeAction>& actions,
+      const cursiv::CancellationToken& cancelToken) const override;
 };
 
-} // namespace arithmetics
+}  // namespace arith

@@ -1,9 +1,10 @@
 {
-  "name": "pegium-requirements-dsl",
-  "publisher": "pegium",
-  "displayName": "Pegium Requirements DSL",
+  "name": "cursiv-requirements",
+  "displayName": "cursiv Requirements and Tests",
+  "description": "Two DSLs on one server: requirements and the tests that cover them",
   "version": "0.1.0",
-  "description": "Requirements + tests example language powered by Pegium",
+  "publisher": "cursiv",
+  "private": true,
   "license": "MIT",
   "engines": {
     "vscode": "^1.86.0"
@@ -53,44 +54,65 @@
         "path": "./syntaxes/tests.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[requirements-lang]": {
+        "editor.suggest.insertMode": "replace"
+      },
+      "[tests-lang]": {
+        "editor.suggest.insertMode": "replace"
+      }
+    },
     "configuration": {
-      "title": "Pegium Requirements",
+      "title": "cursiv Requirements and Tests",
       "properties": {
-        "pegium.requirements.serverPath": {
+        "cursiv.requirements.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the pegium-example-requirements-lsp executable. If empty, common build locations are probed."
+          "description": "Absolute path to the requirements_lsp executable. Empty means the default build tree, build/examples/requirements/."
         }
       }
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "cursiv.requirements.mcp",
+        "label": "cursiv Requirements and Tests"
+      }
+    ]
   },
   "scripts": {
-    "compile": "tsc -p ./tsconfig.json",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "bundle": "node esbuild.mjs --production",
-    "watch": "tsc -p ./tsconfig.json -w",
-    "test": "npm run compile && node ./out/test/runTest.js",
+    "typecheck": "tsc -p tsconfig.json",
     "vscode:prepublish": "npm run bundle",
-    "package": "vsce package --no-dependencies",
-    "publish": "vsce publish --no-dependencies"
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "files": [
     "package.json",
     "out",
+    "server",
     "language-configuration.json",
     "syntaxes"
   ],
   "dependencies": {
-    "vscode-languageclient": "~9.0.1"
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.17.17",
-    "@types/vscode": "^1.86.0",
-    "@vscode/test-electron": "^2.4.1",
-    "@vscode/vsce": "^3.2.0",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.7.2"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.86.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "@vscode/vsce": "^3.9.2"
   },
   "vsce": {
     "dependencies": false
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "@azure/identity": "4.13.0"
+    },
+    "@azure/msal-node": {
+      "uuid": "^11.1.1"
+    }
   }
 }

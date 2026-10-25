@@ -1,0 +1,12 @@
+valid.dmodel	acc=1 cov=1 rec=0 tok=115/115 inv=0
+01_typo1.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=1 rep:entity@188<Expecting 'entity' but found 'entiy'.>
+02_typo2.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=1 [364,364) [373,373) [373,373) [791,791) ins:package@364<Expecting 'package'.> ins:{@373<Expecting '{'.> ins:}@791<Expecting '}'.>
+03_closer_block.dmodel	acc=1 cov=1 rec=1 tok=111/115 inv=0 [369,369) [377,377) [378,379) [392,392) [412,412) [423,423) [429,430) [506,507) ins::@369<Expecting ':'.> rep:many@378<Expecting 'many' but found '{'.> ins::@392<Expecting ':'.> ins::@412<Expecting ':'.> ins::@423<Expecting ':'.> del:ID@429<Unexpected '{', expecting ID.> del:package@506<Unexpected '}', expecting 'package'.>
+04_closer_eof.dmodel	acc=1 cov=1 rec=1 tok=114/115 inv=0 [784,784) ins:}@784<Expecting '}'.>
+05_intruder.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=0 [97,98) del:ID@97<Unexpected ':', expecting ID.>
+06_truncated.dmodel	acc=1 cov=1 rec=1 tok=102/115 inv=0 [694,694) [694,694) ins:}@694<Expecting '}'.>
+07_two_faults.dmodel	acc=1 cov=1 rec=1 tok=114/115 inv=1 [97,97) [103,103) [798,798) rep:entity@98<Expecting 'entity' but found 'entiy'.> ins:entity@103<Expecting 'entity'.> ins:}@798<Expecting '}'.>
+08_head_fault.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=1 [87,87) [93,93) rep:entity@88<Expecting 'entity' but found 'entty'.> ins:entity@93<Expecting 'entity'.>
+09_list_delim.dmodel	acc=1 cov=1 rec=1 tok=114/115 inv=0 [654,654) [654,654) ins::@654<Expecting ':'.>
+10_noise.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=0 [295,298) [299,302) [303,306) del:entity@295<Unexpected '@@@ ??? @@@', expecting 'entity'.>
+11_head_typo.dmodel	acc=1 cov=1 rec=1 tok=115/115 inv=1 rep:entity@79<Expecting 'entity' but found 'ntity'.>

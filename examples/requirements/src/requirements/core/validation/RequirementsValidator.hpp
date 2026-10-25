@@ -1,68 +1,45 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <unordered_set>
 
-#include <requirements/core/ast.hpp>
+#include "cursiv/core/services/DefaultCoreService.hpp"
+#include "cursiv/core/utils/WorkspaceCache.hpp"
+#include "cursiv/core/validation/ValidationAcceptor.hpp"
+#include "requirements/core/ast.hpp"
 
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/DefaultCoreService.hpp>
-#include <pegium/core/utils/Caching.hpp>
-#include <pegium/core/validation/ValidationAcceptor.hpp>
-#include <pegium/core/validation/ValidationRegistry.hpp>
+// The two checks a `.req` document owes. The second is the reason this
+// example exists: whether a requirement is covered is a fact about the other
+// language's documents, so it is computed once per build and memoised
+// workspace-wide.
 
-namespace pegium::workspace {
-class Documents;
-}
+namespace req {
 
-namespace requirements::validation {
-
-/// Inherits `pegium::DefaultCoreService` so checks can reach the language
-/// services through `services.*` (parser, references, shared caches, ...); the
-/// covered-requirements cache is keyed off `services.shared`.
-class RequirementsValidator final : public pegium::DefaultCoreService {
-public:
-  explicit RequirementsValidator(const pegium::CoreServices &services);
+class RequirementsValidator final : public cursiv::DefaultCoreService {
+ public:
+  explicit RequirementsValidator(const cursiv::CoreServices& services);
 
   void checkRequirementNameContainsANumber(
-      const requirements::ast::Requirement &requirement,
-      const pegium::validation::ValidationAcceptor &accept) const;
-
+      const ast::Requirement& requirement,
+      cursiv::ValidationAcceptor& accept) const;
   void checkRequirementIsCoveredByATest(
-      const requirements::ast::Requirement &requirement,
-      const pegium::validation::ValidationAcceptor &accept,
-      const pegium::workspace::Documents &documents) const;
+      const ast::Requirement& requirement,
+      cursiv::ValidationAcceptor& accept) const;
 
-private:
-  // Requirements referenced by at least one test. This set is identical for
-  // every requirement, so it is computed once per workspace build and reused;
-  // the check runs per requirement, and rescanning every document each time is
-  // O(requirements × documents). Cleared automatically on any workspace update.
-  // Held directly (not by shared_ptr): the registry binds this validator by
-  // pointer, so it is never copied.
-  using CoveredRequirements =
-      std::unordered_set<const requirements::ast::Requirement *>;
-  pegium::utils::WorkspaceCache<int, std::shared_ptr<const CoveredRequirements>>
-      _coveredCache;
+ private:
+  using Covered = std::unordered_set<const ast::Requirement*>;
+
+  [[nodiscard]] std::shared_ptr<const Covered> computeCoverage() const;
+
+  // One key: the answer is the whole workspace's, and every `.req` of a build
+  // asks it. `_owner` holds it and `_covered` hands it out bare: a hit on the
+  // owner would count a reference on one shared line, per requirement, from
+  // every worker. Both empty on the announcements that open a build, so no
+  // check holds the pointer across one.
+  cursiv::WorkspaceCache<int, std::shared_ptr<const Covered>> _owner;
+  cursiv::WorkspaceCache<int, const Covered*> _covered;
+  mutable std::mutex _coverageMutex;
 };
 
-inline void
-registerRequirementsValidationChecks(pegium::CoreServices &services,
-                                     RequirementsValidator &validator) {
-  auto &registry = *services.validation.validationRegistry;
-  auto *documents = services.shared.workspace.documents.get();
-
-  registry.registerChecks(
-      {pegium::validation::ValidationRegistry::makeValidationCheck<
-          &RequirementsValidator::checkRequirementNameContainsANumber>(
-          validator)});
-  registry.registerCheck<requirements::ast::Requirement>(
-      [validator = &validator, documents](
-          const requirements::ast::Requirement &requirement,
-          const pegium::validation::ValidationAcceptor &accept) {
-        validator->checkRequirementIsCoveredByATest(requirement, accept,
-                                                    *documents);
-      });
-}
-
-} // namespace requirements::validation
+}  // namespace req

@@ -1,0 +1,12 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}/../..",
+  "cmake.useCMakePresets": "always",
+  "cmake.copyCompileCommands": "${sourceDirectory}/compile_commands.json",
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.formatting": "disabled",
+  "clangd.enable": true,
+  "clangd.arguments": ["--background-index"],
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  }
+}

@@ -1,9 +1,10 @@
 {
-  "name": "@PEGIUM_NEW_LANGUAGE_ID@-dsl",
-  "publisher": "@PEGIUM_NEW_LANGUAGE_ID@",
-  "displayName": "@PEGIUM_NEW_CLASS@ DSL",
+  "name": "@CURSIV_NEW_ID@",
+  "displayName": "@CURSIV_NEW_CLASS@",
+  "description": "The @CURSIV_NEW_ID@ language, parsed by cursiv",
   "version": "0.1.0",
-  "description": "@PEGIUM_NEW_CLASS@ language powered by Pegium",
+  "publisher": "example",
+  "private": true,
   "license": "MIT",
   "engines": {
     "vscode": "^1.86.0"
@@ -12,67 +13,77 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:@PEGIUM_NEW_LANGUAGE_ID@"
+    "onLanguage:@CURSIV_NEW_ID@"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "@PEGIUM_NEW_LANGUAGE_ID@",
+        "id": "@CURSIV_NEW_ID@",
         "aliases": [
-          "@PEGIUM_NEW_CLASS@",
-          "@PEGIUM_NEW_LANGUAGE_ID@"
+          "@CURSIV_NEW_CLASS@"
         ],
         "extensions": [
-          "@PEGIUM_NEW_EXT@"
+          "@CURSIV_NEW_EXT@"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "@PEGIUM_NEW_LANGUAGE_ID@",
-        "scopeName": "source.@PEGIUM_NEW_LANGUAGE_ID@",
-        "path": "./syntaxes/@PEGIUM_NEW_LANGUAGE_ID@.tmLanguage.json"
+        "language": "@CURSIV_NEW_ID@",
+        "scopeName": "source.@CURSIV_NEW_ID@",
+        "path": "./syntaxes/@CURSIV_NEW_ID@.tmLanguage.json"
       }
     ],
     "configuration": {
-      "title": "@PEGIUM_NEW_CLASS@",
+      "title": "@CURSIV_NEW_CLASS@",
       "properties": {
-        "@PEGIUM_NEW_LANGUAGE_ID@.server.path": {
+        "@CURSIV_NEW_ID@.server.path": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the @PEGIUM_NEW_LANGUAGE_ID@-lsp executable. If empty, it is looked up under ../build relative to the extension directory (including the Debug/ and Release/ subdirectories that multi-config generators use)."
+          "description": "Absolute path to the @CURSIV_NEW_ID@_lsp executable. Empty means the packaged copy, then ../build/."
         }
       }
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "cursiv.@CURSIV_NEW_ID@.mcp",
+        "label": "cursiv @CURSIV_NEW_CLASS@"
+      }
+    ]
   },
   "scripts": {
-    "check-types": "tsc --noEmit -p ./tsconfig.json",
-    "compile": "npm run check-types && node esbuild.mjs",
+    "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "vscode:prepublish": "npm run check-types && node esbuild.mjs --production",
-    "package": "node scripts/package.mjs",
-    "publish": "node scripts/package.mjs --publish"
+    "bundle": "node esbuild.mjs --production",
+    "typecheck": "tsc -p tsconfig.json",
+    "vscode:prepublish": "npm run bundle",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "files": [
     "package.json",
     "out",
-    "bin",
+    "{bin,server}/**",
     "language-configuration.json",
     "syntaxes"
   ],
-  "vsce": {
-    "dependencies": false
-  },
   "dependencies": {
-    "vscode-languageclient": "~9.0.1"
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.17.17",
-    "@types/vscode": "^1.86.0",
-    "@vscode/vsce": "^3.2.0",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.7.2"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.86.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "@vscode/vsce": "^3.9.2"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "@azure/identity": "4.13.0"
+    },
+    "@azure/msal-node": {
+      "uuid": "^11.1.1"
+    }
   }
 }

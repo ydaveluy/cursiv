@@ -1,9 +1,7 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches:
-      - main
   pull_request:
   workflow_dispatch:
 
@@ -14,112 +12,97 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cxx: g++
-            build_type: Debug
-            build_fuzz_targets: OFF
-            fuzztest_fuzzing_mode: OFF
-            run_guided_fuzz: false
-          - compiler: gcc
-            cxx: g++
-            build_type: Release
-            build_fuzz_targets: OFF
-            fuzztest_fuzzing_mode: OFF
-            run_guided_fuzz: false
-          - compiler: clang
-            cxx: clang++
-            build_type: Debug
-            build_fuzz_targets: OFF
-            fuzztest_fuzzing_mode: OFF
-            run_guided_fuzz: false
-          - compiler: clang
-            cxx: clang++
-            build_type: Release
-            build_fuzz_targets: ON
-            fuzztest_fuzzing_mode: ON
-            run_guided_fuzz: true
-    steps:
-      - uses: actions/checkout@v7
-      - name: Configure
-        env:
-          CC: ${{ matrix.compiler }}
-          CXX: ${{ matrix.cxx }}
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DPEGIUM_BUILD_EXAMPLES=ON \
-            -DPEGIUM_BUILD_FUZZ_TARGETS=${{ matrix.build_fuzz_targets }} \
-            -DFUZZTEST_FUZZING_MODE=${{ matrix.fuzztest_fuzzing_mode }}
-      - name: Build
-        run: |
-          targets=(
-            PegiumCoreUnitTest
-            PegiumLspUnitTest
-            PegiumIntegrationTest
-            pegium-example-arithmetics-test
-            pegium-example-domainmodel-test
-            pegium-example-requirements-test
-            pegium-example-statemachine-test
-          )
-          if [ "${{ matrix.build_fuzz_targets }}" = "ON" ]; then
-            targets+=(
-              PegiumWorkspaceFuzzTest
-            )
-          fi
-          cmake --build build --config ${{ matrix.build_type }} -j4 --target "${targets[@]}"
-      - name: Run core tests
-        run: ctest --test-dir build -L core --output-on-failure
-      - name: Run LSP tests
-        run: ctest --test-dir build -L lsp --output-on-failure
-      - name: Run integration tests
-        run: ctest --test-dir build -L integration --output-on-failure
-      - name: Run example tests
-        run: ctest --test-dir build -L example --output-on-failure
-      - name: Run guided fuzz sanity
-        if: ${{ matrix.run_guided_fuzz }}
-        run: ctest --test-dir build -L fuzz-guided --output-on-failure
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  CTEST_PARALLEL_LEVEL: "4"
 
-  sanitizers:
-    runs-on: ubuntu-latest
-    env:
-      TSAN_OPTIONS: halt_on_error=1
-      UBSAN_OPTIONS: print_stacktrace=1
+jobs:
+  gcc:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    container: gcc:16
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: asan
-            cxx: clang++
-            flags: -DPEGIUM_ENABLE_ASAN=ON
-            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer|CrossDocumentReferenceDescriptionSurvivesUnrelatedRebuild
-          - name: tsan
-            cxx: clang++
-            flags: -DPEGIUM_ENABLE_TSAN=ON
-            test_regex: ConcurrentReferenceResolution\.|DefaultWorkspaceLockTest|TaskSchedulerTest|UtilsTest\.(DisposableAndEventEmitterSupportSubscriptionLifecycle|EventEmitterPreservesRegistrationOrder|EventEmitterSupportsConcurrentSubscriptionAndEmit)|DefaultDocumentUpdateHandlerTest\.(DidChangeContentPropagatesWorkspaceLockCancellationToBuilderUpdate|DidChangeContentWaitsForWorkspaceManagerReadyBeforeUpdating)
-          - name: ubsan
-            cxx: clang++
-            flags: -DPEGIUM_ENABLE_UBSAN=ON
-            test_regex: PegiumCoreParserFocusedSanitizer|PegiumLspSemanticTokenSanitizer
+        preset: [gcc-debug, gcc-release]
     steps:
-      - uses: actions/checkout@v7
-      - name: Configure
-        env:
-          CC: clang
-          CXX: ${{ matrix.cxx }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tools
+        run: apt-get update && apt-get install -y --no-install-recommends cmake git ninja-build
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+      - name: build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+  clang:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [clang-debug, clang-release]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_CXX_COMPILER=clang++-22 -DCURSIV_WARNINGS_AS_ERRORS=ON
+      - name: build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+  wasi:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    # CMake's native generator sub-builds use the supported host compiler.
+    env:
+      CC: clang-22
+      CXX: clang++-22
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [wasi-debug, wasi-release]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: cache wasi-sdk
+        id: sdk
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/wasi-sdk-34.0
+          key: wasi-sdk-34.0-x86_64-linux
+      - name: fetch wasi-sdk (pinned, checksummed)
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: tools/fetch-wasi-sdk.sh
+      - name: Install Binaryen
+        if: matrix.preset == 'wasi-release'
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DPEGIUM_BUILD_EXAMPLES=OFF \
-            -DPEGIUM_BUILD_FUZZ_TARGETS=OFF \
-            ${{ matrix.flags }}
-      - name: Build
-        run: cmake --build build --config Debug -j4 --target PegiumCoreUnitTest PegiumLspUnitTest PegiumIntegrationTest
-      - name: Run sanitizer-focused tests
-        run: ctest --test-dir build -R '${{ matrix.test_regex }}' --output-on-failure
+          sudo apt-get update
+          sudo apt-get install -y binaryen
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+      - name: build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: package extensions
+        if: matrix.preset == 'wasi-release'
+        run: |
+          wasm-opt --version
+          tools/package-vsix.sh build-wasi dist-vsix
+      - name: upload extensions
+        if: matrix.preset == 'wasi-release' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vsix-extensions
+          path: dist-vsix/
+          if-no-files-found: error

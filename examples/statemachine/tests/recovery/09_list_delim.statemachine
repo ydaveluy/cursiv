@@ -1,0 +1,34 @@
+// list_delim: the '=>' separating the two halves of a transition is gone (the language has no comma list)
+// break: 000447
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+state PowerOff
+    switchCapacity => RedLight
+end
+
+state RedLight
+    actions { flashRed }
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+state YellowLight
+    switchCapacity => PowerOff
+    next RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight
+end

@@ -1,0 +1,1 @@
+cursiv_example_tests(arithmetics)

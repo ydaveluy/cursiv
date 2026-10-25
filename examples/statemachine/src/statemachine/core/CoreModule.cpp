@@ -1,47 +1,26 @@
-#include <statemachine/core/CoreModule.hpp>
+// What this language installs over the generated module: what its author
+// writes. Everything the grammar derives is in the generated one.
 
-#include <utility>
+#include <memory>
 
-#include <statemachine/core/StateMachineParser.hpp>
-#include <statemachine/core/validation/StatemachineValidator.hpp>
+#include "cursiv/core/validation/ValidationRegistry.hpp"
+#include "statemachine/core/CoreServices.hpp"
+#include "statemachine/core/validation/StateMachineValidator.hpp"
+#include "statemachine/generated/SM/Module.hpp"
 
-// This is the single translation unit that includes the grammar header
-// (StateMachineParser.hpp), so the heavy grammar template instantiation happens
-// here once; the lsp module reaches the wiring through the declaration only.
+namespace sm {
 
-namespace statemachine {
+void install_core_module(StateMachineCoreServices& services) {
+  sm::generated::SM::install_generated_module(services);
 
-std::unique_ptr<const pegium::parser::Parser> createStatemachineParser() {
-  return std::make_unique<const parser::StateMachineParser>();
+  using V = StateMachineValidator;
+  services.validator = std::make_unique<const V>(services);
+  using R = cursiv::ValidationRegistry;
+  const V& v = *services.validator;
+  services.validationRegistry->registerChecks(
+      {R::makeValidationCheck<&V::checkStateNameStartsWithCapital>(v),
+       R::makeValidationCheck<&V::checkUniqueStatesAndEvents>(v),
+       R::makeValidationCheck<&V::checkNamesAreNotKeywords>(v)});
 }
 
-void installStatemachineCoreModule(StatemachineCoreServices &services) {
-  services.parser =
-      std::make_unique<const parser::StateMachineParser>(services);
-  services.languageMetaData.fileExtensions = {".statemachine"};
-  services.validator =
-      std::make_unique<validation::StatemachineValidator>(services);
-  validation::registerValidationChecks(services, *services.validator);
-}
-
-std::unique_ptr<StatemachineCoreServices>
-createStatemachineCoreServices(
-    const StatemachineSharedCoreServices &sharedServices,
-    std::string languageId) {
-  auto services = pegium::makeDefaultCoreServices<StatemachineCoreServices>(
-      sharedServices, std::move(languageId));
-  installStatemachineCoreModule(*services);
-  return services;
-}
-
-bool registerStatemachineCoreServices(
-    pegium::SharedCoreServices &sharedServices) {
-  // The workspace container is the language's own shared type; recover it to
-  // build the container with its custom shared services.
-  sharedServices.serviceRegistry->registerServices(
-      createStatemachineCoreServices(
-          dynamic_cast<StatemachineSharedCoreServices &>(sharedServices)));
-  return true;
-}
-
-} // namespace statemachine
+}  // namespace sm

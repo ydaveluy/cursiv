@@ -1,16 +1,16 @@
-#include <arithmetics/lsp/ArithmeticsFormatter.hpp>
+#include "arithmetics/lsp/ArithmeticsFormatter.hpp"
 
-namespace arithmetics {
-void ArithmeticsFormatter::formatModule(pegium::FormattingBuilder &builder,
-                                        const ast::Module *module) const {
+namespace arith {
+void ArithmeticsFormatter::formatModule(cursiv::FormattingBuilder& builder,
+                                        const ast::Module* module) const {
   auto formatter = builder.getNodeFormatter(module);
   formatter.keyword("module").prepend(noIndent).append(oneSpace);
   formatter.properties<&ast::Module::statements>().prepend(newLine);
 }
 
 void ArithmeticsFormatter::formatDefinition(
-    pegium::FormattingBuilder &builder,
-    const ast::Definition *definition) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::Definition* definition) const {
   auto formatter = builder.getNodeFormatter(definition);
   formatter.keyword("def").append(oneSpace);
 
@@ -27,26 +27,26 @@ void ArithmeticsFormatter::formatDefinition(
 }
 
 void ArithmeticsFormatter::formatEvaluation(
-    pegium::FormattingBuilder &builder,
-    const ast::Evaluation *evaluation) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::Evaluation* evaluation) const {
   auto formatter = builder.getNodeFormatter(evaluation);
   formatter.keyword(";").prepend(noSpace);
 }
 
 void ArithmeticsFormatter::formatBinaryExpression(
-    pegium::FormattingBuilder &builder,
-    const ast::BinaryExpression *binary) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::BinaryExpression* binary) const {
   if (!binary->left || !binary->right) {
     return;
   }
 
   auto formatter = builder.getNodeFormatter(binary);
-  formatter.keyword(binary->op).surround(oneSpace);
+  formatter.property<&ast::BinaryExpression::op>().surround(oneSpace);
 }
 
 void ArithmeticsFormatter::formatGroupedExpression(
-    pegium::FormattingBuilder &builder,
-    const ast::GroupedExpression *grouped) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::GroupedExpression* grouped) const {
   if (!grouped->expression) {
     return;
   }
@@ -59,8 +59,7 @@ void ArithmeticsFormatter::formatGroupedExpression(
 }
 
 void ArithmeticsFormatter::formatFunctionCall(
-    pegium::FormattingBuilder &builder,
-    const ast::FunctionCall *call) const {
+    cursiv::FormattingBuilder& builder, const ast::FunctionCall* call) const {
   if (call->args.empty()) {
     return;
   }
@@ -73,12 +72,11 @@ void ArithmeticsFormatter::formatFunctionCall(
   formatSeparatedList(formatter.keywords(","));
 }
 
-void ArithmeticsFormatter::formatComment(HiddenNodeFormatter &comment) const {
+void ArithmeticsFormatter::formatComment(HiddenNodeFormatter& comment) const {
   comment.replace(formatMultilineComment(comment));
 }
 
-ArithmeticsFormatter::ArithmeticsFormatter(
-    const pegium::Services &services)
+ArithmeticsFormatter::ArithmeticsFormatter(const cursiv::CoreServices& services)
     : AbstractFormatter(services) {
   on<ast::Module>(&ArithmeticsFormatter::formatModule);
   on<ast::Definition>(&ArithmeticsFormatter::formatDefinition);
@@ -89,4 +87,4 @@ ArithmeticsFormatter::ArithmeticsFormatter(
   onHidden("ML_COMMENT", &ArithmeticsFormatter::formatComment);
 }
 
-} // namespace arithmetics
+}  // namespace arith

@@ -1,40 +1,39 @@
 #pragma once
 
-#include <domainmodel/core/ast.hpp>
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/DefaultCoreService.hpp>
-#include <pegium/core/validation/ValidationAcceptor.hpp>
-#include <pegium/core/validation/ValidationRegistry.hpp>
+#include <vector>
 
-namespace domainmodel::validation {
+#include "cursiv/core/services/DefaultCoreService.hpp"
+#include "cursiv/core/utils/DocumentCache.hpp"
+#include "cursiv/core/validation/ValidationAcceptor.hpp"
+#include "domainmodel/core/ast.hpp"
 
-/// Inherits `pegium::DefaultCoreService` so checks can reach the language
-/// services through `services.*` (parser, references, shared caches, ...).
-class DomainModelValidator final : public pegium::DefaultCoreService {
-public:
-  using pegium::DefaultCoreService::DefaultCoreService;
+// A method's first parameter is the type it watches, so the list in
+// `CoreModule.cpp` is the whole registration. The cycle check exists because
+// an `extends` cycle hangs every reader of the hierarchy.
+
+namespace dm {
+
+class DomainModelValidator final : public cursiv::DefaultCoreService {
+ public:
+  using cursiv::DefaultCoreService::DefaultCoreService;
 
   void checkEntityNameStartsWithCapital(
-      const domainmodel::ast::Entity &entity,
-      const pegium::validation::ValidationAcceptor &accept) const;
+      const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const;
   void checkDataTypeNameStartsWithCapital(
-      const domainmodel::ast::DataType &dataType,
-      const pegium::validation::ValidationAcceptor &accept) const;
-  void checkEntityDoesNotExtendItself(
-      const domainmodel::ast::Entity &entity,
-      const pegium::validation::ValidationAcceptor &accept) const;
+      const ast::DataType& dataType, cursiv::ValidationAcceptor& accept) const;
+  void checkEntityDoesNotExtendItself(const ast::Entity& entity,
+                                      cursiv::ValidationAcceptor& accept) const;
+
+ private:
+  // Whether the climb from `entity` ends. `seen` is the current climb, which is
+  // what tells a cycle from a chain already answered.
+  [[nodiscard]] bool terminates(const ast::Entity& entity,
+                                std::vector<const ast::Entity*>& seen) const;
+
+  // Whether the climb from this entity ends, memoised -- unmemoised this
+  // check is quadratic over a document. Keyed by document, so a rebuild
+  // drops exactly the entries it invalidates.
+  cursiv::DocumentCache<const ast::Entity*, bool> _terminates{services.shared};
 };
 
-inline void registerValidationChecks(pegium::CoreServices &services,
-                                     DomainModelValidator &validator) {
-  auto &registry = *services.validation.validationRegistry;
-  registry.registerChecks(
-      {pegium::validation::ValidationRegistry::makeValidationCheck<
-           &DomainModelValidator::checkEntityNameStartsWithCapital>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &DomainModelValidator::checkDataTypeNameStartsWithCapital>(validator),
-       pegium::validation::ValidationRegistry::makeValidationCheck<
-           &DomainModelValidator::checkEntityDoesNotExtendItself>(validator)});
-}
-
-} // namespace domainmodel::validation
+}  // namespace dm

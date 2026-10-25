@@ -1,0 +1,13 @@
+file	family	breaks	intent
+valid.dmodel	valid		the base document
+01_typo1.dmodel	typo1	188	'entity' written 'entiy' -- one deletion
+02_typo2.dmodel	typo2	366	'package' written 'pacakge' -- one transposition, distance 2
+03_closer_block.dmodel	closer_block	341	the '}' closing entity Comment is missing, mid file
+04_closer_eof.dmodel	closer_eof	499	the '}' closing the last package is missing at EOF
+05_intruder.dmodel	intruder	86	one ':' too many in a feature declaration
+06_truncated.dmodel	truncated	694	the file stops just after an entity is opened
+07_two_faults.dmodel	two_faults	98 513	'entity' typo on the first construct AND the last '}' gone
+08_head_fault.dmodel	head_fault	88	the 'entity' keyword of the first construct is misspelt
+09_list_delim.dmodel	list_delim	640	the '.' joining two parts of a qualified name is missing
+10_noise.dmodel	noise	295	a cluster of garbage bytes between two entities
+11_head_typo.dmodel	head_typo	79	'entity' written 'ntity' -- the FIRST character is gone

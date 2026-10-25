@@ -1,5 +1,10 @@
 FormatStyle: file
 
+# WHAT IS OFF, AND WHY. A check the repo has decided against is noise that
+# hides the ones that matter: the cuts below came from a measured run, not from
+# taste -- eleven thousand findings over forty translation units, nine tenths of
+# them four style checks fighting the code's own decrees.
+
 Checks: |
   *bugprone*,
   *performance*,
@@ -24,7 +29,103 @@ Checks: |
   -readability-magic-numbers,
   -readability-identifier-length,
   -readability-named-parameter,
-  
+  -readability-braces-around-statements,
+  -readability-inconsistent-ifelse-braces,
+  -misc-non-private-member-variables-in-classes,
+  -readability-redundant-typename,
+  -readability-uppercase-literal-suffix,
+  -readability-use-concise-preprocessor-directives,
+  -modernize-use-designated-initializers,
+  -modernize-return-braced-init-list,
+  -readability-redundant-member-init,
+  -readability-function-cognitive-complexity,
+  -readability-avoid-nested-conditional-operator,
+  -readability-isolate-declaration,
+  -readability-simplify-boolean-expr,
+  -misc-static-assert,
+  -google-explicit-constructor,
+  -readability-math-missing-parentheses,
+  -modernize-use-auto,
+  -modernize-use-ranges,
+  -misc-const-correctness,
+  -bugprone-crtp-constructor-accessibility,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -readability-simplify-subscript-expr,
+  -readability-convert-member-functions-to-static,
+  -misc-include-cleaner,
+  -misc-use-internal-linkage,
+  -modernize-use-std-print,
+  -modernize-loop-convert,
+  -modernize-avoid-c-style-cast,
+  -readability-qualified-auto,
+
+# The cuts, one line each:
+#   braces-around-statements, inconsistent-ifelse-braces -- a single statement
+#     takes no braces here, and that is the whole tree's spelling (4 199 hits).
+#   non-private-member-variables -- PLAIN DATA IS PLAIN: `CstNode`, `Options`,
+#     `ParseContext`, every services container. Their fields ARE the interface.
+#   redundant-typename -- `typename` stays spelled where C++20 made it optional:
+#     the engine is templates end to end and a reader tells a type by reading it.
+#   uppercase-literal-suffix, use-concise-preprocessor-directives -- one
+#     spelling, and it is the one in the tree.
+#   use-designated-initializers, return-braced-init-list -- an aggregate is
+#     built POSITIONALLY on the hot paths (`ElementRow`, `CstNode`): the order
+#     IS the layout, and naming the fields hides it.
+#   redundant-member-init -- a member states its initial value even when the
+#     default would do: what a record starts as is part of what it is.
+#   function-cognitive-complexity, avoid-nested-conditional-operator,
+#     isolate-declaration -- the engine's hot functions are long by design, one
+#     dispatch and one frame. A cyclomatic budget is not one of this repo's laws.
+#   simplify-boolean-expr -- the explicit form is the one written.
+#
+# ...and four that MISFIRE HERE, each verified by reading what --fix produced:
+#   static-assert -- it turned `assert(_mem != nullptr)` and the document's
+#     NUL-sentinel assert into `static_assert` on RUNTIME values. Neither
+#     compiles; the check cannot tell this codebase's asserts apart.
+#   explicit-constructor -- `fixed_string(const char (&)[N])` is implicit ON
+#     PURPOSE: it is what makes `lit<"foo">` deduce, and `explicit` breaks every
+#     grammar in the tree. Same for `cursiv::vector`'s conversion to `std::span`.
+#   math-missing-parentheses -- `sig * 10 + d` is the horner step, and the
+#     parentheses it adds say nothing a reader of that loop did not know.
+#   use-auto -- `double d = static_cast<double>(sig)` states the type the
+#     cast produces; `auto` there hides the very thing the line is about.
+#   use-ranges -- its rewrite of `std::lower_bound(b, e, v, cmp)` drops the
+#     comparator into a slot with a different signature and does not compile.
+#   const-correctness -- it writes EAST CONST (`std::string const`), which no
+#     line of this tree does, and it constified a `Document*` that a
+#     `vector<Document*>` then refused.
+#   crtp-constructor-accessibility -- it dropped `public:`/`private:` labels
+#     INSIDE `ValidationDiagnosticBuilderBase`'s constructor list; the file no
+#     longer parsed.
+#   implicit-widening-of-multiplication-result -- it writes
+#     `static_cast<const std::size_t>` (it reads the declared type, const and
+#     all), which `-Werror=ignored-qualifiers` refuses.
+#   simplify-subscript-expr -- `text.data()[text.size()]` READS THE SENTINEL,
+#     which is the parser's precondition; `text[text.size()]` is out of bounds
+#     for `string_view` and only a Debug build says so.
+#   convert-member-functions-to-static -- a validation check IS a const member
+#     function by contract (`ValidationRegistry`'s `IsCheck`); making the ones
+#     that touch no member `static` unregisters them.
+#   include-cleaner -- IT REMOVES WHAT INSTANTIATION NEEDS. A grammar header is
+#     required without being spelled (`compiled<arith::Arith>` names `arith`
+#     through a template argument) and a `ServiceSlot`'s `unique_ptr` destructor
+#     names no provider. It found 42 real ones under lsp/ -- run it BY HAND and
+#     read every removal, never as part of a sweep.
+#   use-internal-linkage -- the lanes are ONE TU PER LANGUAGE behind a `main.cpp`
+#     that calls them; `static` on those definitions unlinks the lane.
+#   use-std-print -- its rewrite of `printf` compiles under g++ and NOT under
+#     clang, which rejects the format string as a non-constant expression. Both
+#     compilers are the gate here, so a fix only one accepts is no fix.
+#   loop-convert -- it turned a loop indexing TWO vectors into a range over one
+#     (`first[from][i] && !first[e][i]` became `i && !i`, always false). It
+#     reads the index, never what the body does with it.
+#   avoid-c-style-cast -- on a cast whose target is a template parameter it
+#     writes `static_cast<>(K)`, with no type between the angle brackets.
+#   qualified-auto -- it reads an ITERATOR as a pointer. `std::search` over a
+#     string_view is `const char*` under libstdc++ and a wrapper class under
+#     libc++, so `const auto*` compiles here and not on the wasm cross.
 
 UseColor: true
-HeaderFilterRegex: ''
+# Include diagnostics from the framework headers as well as the main source
+# file: grammar definitions and much of the parser runtime live in headers.
+HeaderFilterRegex: 'src/cursiv/.*\.hpp$'

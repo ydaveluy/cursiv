@@ -1,0 +1,14 @@
+file	family	breaks	intent
+valid.calc	valid		the base document
+01_typo1.calc	typo1	143	'def' written 'de' -- one deletion
+02_typo2.calc	typo2	179	'def' written 'dfe' -- two substitutions
+03_closer_block.calc	closer_block	144	the ')' of a grouped expression is missing, mid file
+04_closer_eof.calc	closer_eof	341	the ';' closing the last statement is missing
+05_intruder.calc	intruder	110	one '+' too many inside a definition body
+06_truncated.calc	truncated	219	the last definition is cut in the middle of its call
+07_two_faults.calc	two_faults	111 355	'def' typo at the top AND the last ';' missing at EOF
+08_head_fault.calc	head_fault	88	the 'Module' keyword of the first construct is misspelt
+09_list_delim.calc	list_delim	305	the ',' between two call arguments is missing
+10_noise.calc	noise	218	a cluster of garbage bytes between two statements
+11_head_typo.calc	head_typo	28	'def' written 'ef' -- the FIRST character is gone, and NOT repairable here: a bare word is a legal expression in this language, so the typo parses as one and the fault is never reached
+12_open_region_eof.calc	open_region_eof	419	a block comment is opened after the last statement and never closed -- the lexer is still inside a token at end of file, so the tail is one unread token and not a rain of skips

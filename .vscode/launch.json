@@ -1,89 +1,73 @@
 {
-    "configurations": [
-        {
-            "name": "Run Arithmetics Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/arithmetics/vscode",
-                "${workspaceFolder}/examples/arithmetics/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/examples/arithmetics/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "Prepare Arithmetics Extension"
-        },
-        {
-            "name": "Run DomainModel Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/domainmodel/vscode",
-                "${workspaceFolder}/examples/domainmodel/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/examples/domainmodel/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "Prepare DomainModel Extension"
-        },
-        {
-            "name": "Run Requirements Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/requirements/vscode",
-                "${workspaceFolder}/examples/requirements/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/examples/requirements/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "Prepare Requirements Extension"
-        },
-        {
-            "name": "Run Statemachine Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--new-window",
-                "--extensionDevelopmentPath=${workspaceFolder}/examples/statemachine/vscode",
-                "${workspaceFolder}/examples/statemachine/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/examples/statemachine/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "Prepare Statemachine Extension"
-        },
-        {
-            "name": "Debug PegiumCoreUnitTest",
-            "type": "cppdbg",
-            "cwd": "${workspaceFolder}",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/PegiumCoreUnitTest",
-            "args": []
-        },
-        {
-            "name": "Debug PegiumLspUnitTest",
-            "type": "cppdbg",
-            "cwd": "${workspaceFolder}",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/PegiumLspUnitTest",
-            "args": []
-        },
-        {
-            "name": "Debug PegiumIntegrationTest",
-            "type": "cppdbg",
-            "cwd": "${workspaceFolder}",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/PegiumIntegrationTest",
-            "args": []
-        }
-    ],
-    "version": "2.0.0"
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Statemachine Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/examples/statemachine/vscode",
+        "${workspaceFolder}/examples/statemachine/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/examples/statemachine/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/statemachine/src"
+      },
+      "preLaunchTask": "Prepare Statemachine Extension"
+    },
+    {
+      "name": "Run Domainmodel Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/examples/domainmodel/vscode",
+        "${workspaceFolder}/examples/domainmodel/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/examples/domainmodel/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/domainmodel/src"
+      },
+      "preLaunchTask": "Prepare Domainmodel Extension"
+    },
+    {
+      "name": "Run Requirements and Tests Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/examples/requirements/vscode",
+        "${workspaceFolder}/examples/requirements/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/examples/requirements/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/requirements/src"
+      },
+      "preLaunchTask": "Prepare Requirements and Tests Extension"
+    },
+    {
+      "name": "Run Arithmetics Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/examples/arithmetics/vscode",
+        "${workspaceFolder}/examples/arithmetics/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/examples/arithmetics/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/arithmetics/src"
+      },
+      "preLaunchTask": "Prepare Arithmetics Extension"
+    }
+  ]
 }

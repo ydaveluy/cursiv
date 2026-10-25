@@ -3,20 +3,27 @@
 #include <memory>
 #include <string>
 
-#include <statemachine/lsp/LspServices.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "statemachine/generated/SM/Module.hpp"
+#include "statemachine/lsp/LspServices.hpp"
 
-namespace statemachine {
+namespace sm {
 
-/// LSP service overrides applied on top of pegium's default LSP services.
-void installStatemachineLspModule(StatemachineServices &services);
+void install_lsp_module(StateMachineServices& services);
 
-/// Builds the LSP-enabled statemachine language services.
-std::unique_ptr<StatemachineServices>
-createStatemachineLspServices(const StatemachineSharedServices &sharedServices,
-                              std::string languageId = "statemachine");
+std::unique_ptr<StateMachineServices> create_lsp_services(
+    StateMachineSharedServices& sharedServices,
+    std::string languageId = std::string(sm::generated::SM::kLanguageId));
 
-/// Registers the LSP-enabled statemachine services in `sharedServices`.
-bool registerStatemachineLspServices(pegium::SharedServices &sharedServices);
+// The same one call, one storey up.
+struct StateMachineLanguage {
+  std::unique_ptr<StateMachineSharedServices> shared;
+  StateMachineServices& language;
+};
 
-} // namespace statemachine
+StateMachineLanguage create_lsp_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
+
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
+
+}  // namespace sm

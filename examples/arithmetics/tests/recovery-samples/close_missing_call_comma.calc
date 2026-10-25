@@ -1,3 +1,0 @@
-module Demo
-def root(x, y): x + y;
-root(1 2);

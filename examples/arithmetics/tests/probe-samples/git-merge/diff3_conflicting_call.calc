@@ -1,9 +1,0 @@
-module Demo
-def root(x, y): x + y;
-<<<<<<< HEAD
-root(1, 2);
-||||||| base
-root(1);
-=======
-root(1 2);
->>>>>>> feature/call

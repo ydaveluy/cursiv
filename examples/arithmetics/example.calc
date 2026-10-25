@@ -1,0 +1,7 @@
+module demo
+
+def pi: 3.14159;
+def area(r): pi * r ^ 2;
+
+area(2 + 3) * 2;
+1 + 2 * 3 - 4 / 2;

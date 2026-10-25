@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "@CURSIV_NEW_CLASS@",
+  "scopeName": "source.@CURSIV_NEW_ID@",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#numbers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.@CURSIV_NEW_ID@",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.@CURSIV_NEW_ID@",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "name": "keyword.control.@CURSIV_NEW_ID@",
+      "match": "\\b(person|age|greet)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.@CURSIV_NEW_ID@",
+      "match": "\\b[0-9]+\\b"
+    }
+  }
+}

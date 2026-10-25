@@ -1,47 +1,59 @@
-#include <domainmodel/core/validation/DomainModelValidator.hpp>
+#include "domainmodel/core/validation/DomainModelValidator.hpp"
 
-#include <domainmodel/core/ast.hpp>
+#include <string_view>
+#include <vector>
 
-#include <cctype>
+#include "cursiv/core/workspace/Document.hpp"
 
-namespace domainmodel::validation {
-using namespace domainmodel::ast;
+namespace dm {
+
+namespace {
+
+bool starts_lower(std::string_view name) {
+  return !name.empty() && name.front() >= 'a' && name.front() <= 'z';
+}
+
+}  // namespace
 
 void DomainModelValidator::checkEntityNameStartsWithCapital(
-    const Entity &entity,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (entity.name.empty()) {
-    return;
-  }
-  const auto first = entity.name.front();
-  if (std::toupper(static_cast<unsigned char>(first)) == first) {
-    return;
-  }
-  accept.warning(entity, "Type name should start with a capital.")
-      .property<&Entity::name>();
+    const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
+  if (starts_lower(entity.name))
+    accept.warning(entity, "Type name should start with a capital.")
+        .property<&ast::AbstractElement::name>();
 }
 
 void DomainModelValidator::checkDataTypeNameStartsWithCapital(
-    const DataType &dataType,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (dataType.name.empty()) {
-    return;
-  }
-  const auto first = dataType.name.front();
-  if (std::toupper(static_cast<unsigned char>(first)) == first) {
-    return;
-  }
-  accept.warning(dataType, "Type name should start with a capital.")
-      .property<&DataType::name>();
+    const ast::DataType& dataType, cursiv::ValidationAcceptor& accept) const {
+  if (starts_lower(dataType.name))
+    accept.warning(dataType, "Type name should start with a capital.")
+        .property<&ast::AbstractElement::name>();
+}
+
+// Whether the climb from `entity` ends; memoized so it stays linear over a
+// document -- unmemoized, this check is quadratic.
+// `seen` is the whole climb, not a single node: `super == &entity` alone
+// never terminates on a cycle `entity` is not part of (`A -> B -> C -> B`).
+bool DomainModelValidator::terminates(
+    const ast::Entity& entity, std::vector<const ast::Entity*>& seen) const {
+  const cursiv::Document* const document = entity.getDocument();
+  const cursiv::DocumentId id =
+      document == nullptr ? cursiv::kNoDocument : document->id;
+  return _terminates.get(id, &entity, [&] {
+    const auto* const super = entity.superType.get();
+    if (super == nullptr) return true;
+    for (const ast::Entity* const on : seen)
+      if (on == super) return false;
+    seen.push_back(&entity);
+    return terminates(*super, seen);
+  });
 }
 
 void DomainModelValidator::checkEntityDoesNotExtendItself(
-    const Entity &entity,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (entity.superType.has_value() && entity.superType->get() == &entity) {
-    accept.error(entity, "An entity may not extend itself.")
-        .keyword("extends");
-  }
+    const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
+  std::vector<const ast::Entity*> seen;
+  if (terminates(entity, seen)) return;
+  accept.error(entity, "Entity extends itself, directly or through a cycle.")
+      .property<&ast::Entity::superType>();
 }
 
-} // namespace domainmodel::validation
+}  // namespace dm

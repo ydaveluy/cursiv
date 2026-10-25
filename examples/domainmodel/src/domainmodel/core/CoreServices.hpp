@@ -2,27 +2,41 @@
 
 #include <memory>
 
-#include <domainmodel/core/references/QualifiedNameProvider.hpp>
-#include <domainmodel/core/validation/DomainModelValidator.hpp>
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/SharedCoreServices.hpp>
+#include "cursiv/core/services/CoreServices.hpp"
+#include "cursiv/core/services/CoreServicesFor.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "domainmodel/core/references/QualifiedNameProvider.hpp"
+#include "domainmodel/core/validation/DomainModelValidator.hpp"
 
-namespace domainmodel {
+// What this language owns beyond what every language owns, and the module
+// that fills its container.
 
-/// Workspace-wide shared services.
-struct DomainModelSharedCoreServices : virtual pegium::SharedCoreServices {
-  // define here custom shared services
-};
+namespace dm {
 
-/// Core (headless) language services, built from the language's shared-core type.
+// Nothing workspace-wide yet; it exists so the language's container is built
+// from its own shared type.
+struct DomainModelSharedCoreServices : virtual cursiv::SharedCoreServices {};
+
 struct DomainModelCoreServices
-    : pegium::CoreServicesFor<DomainModelSharedCoreServices> {
-  std::shared_ptr<const references::QualifiedNameProvider> qualifiedNameProvider;
-  std::unique_ptr<validation::DomainModelValidator> validator;
+    : cursiv::CoreServicesFor<DomainModelSharedCoreServices> {
+  // The qualifier a declaration answers to from outside its package.
+  std::unique_ptr<const QualifiedNameProvider> qualifiedNameProvider;
+  // The class whose methods are this language's checks. Defined once here;
+  // the registry files pointers into it, never copies.
+  std::unique_ptr<const DomainModelValidator> validator;
 
   explicit DomainModelCoreServices(
-      const DomainModelSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+      DomainModelSharedCoreServices& sharedServices)
+      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    cursiv::CoreServices::visitServices(yield);
+    yield({"qualifiedNameProvider", true, qualifiedNameProvider != nullptr});
+    yield({"validator", true, validator != nullptr});
+  }
 };
 
-} // namespace domainmodel
+void install_core_module(DomainModelCoreServices& services);
+
+}  // namespace dm

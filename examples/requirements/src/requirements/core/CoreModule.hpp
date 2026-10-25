@@ -3,45 +3,40 @@
 #include <memory>
 #include <string>
 
-#include <requirements/core/CoreServices.hpp>
-#include <pegium/core/services/SharedCoreServices.hpp>
+#include "cursiv/core/workspace/FileSystemProvider.hpp"
+#include "requirements/core/CoreServices.hpp"
+#include "requirements/generated/Requirements/Module.hpp"
+#include "requirements/generated/Tests/Module.hpp"
 
-namespace requirements {
+// The two languages of this example, each with its own module: the rule set is
+// shared, the entry rule and the checks are not.
 
-/// Creates a standalone requirements parser.
-std::unique_ptr<const pegium::parser::Parser> createRequirementsParser();
+namespace req {
 
-/// Creates a standalone tests-language parser.
-std::unique_ptr<const pegium::parser::Parser> createTestsParser();
+void install_requirements_core_module(RequirementsCoreServices& services);
+void install_tests_core_module(RequirementsCoreServices& services);
 
-/// Wires the requirements-language core overrides. The LSP path reuses it.
-void installRequirementsCoreModule(RequirementsCoreServices &services);
+std::unique_ptr<RequirementsCoreServices> create_requirements_core_services(
+    RequirementsSharedCoreServices& sharedServices,
+    std::string languageId =
+        std::string(req::generated::Requirements::kLanguageId));
+std::unique_ptr<RequirementsCoreServices> create_tests_core_services(
+    RequirementsSharedCoreServices& sharedServices,
+    std::string languageId = std::string(req::generated::Tests::kLanguageId));
 
-/// Wires the tests-language core overrides. The LSP path reuses it.
-void installTestsCoreModule(TestsCoreServices &services);
-
-/// Builds the core-only requirements language services.
-std::unique_ptr<RequirementsCoreServices>
-createRequirementsCoreServices(
-    const RequirementsSharedCoreServices &sharedServices,
-    std::string languageId = "requirements-lang");
-
-/// Builds the core-only tests language services.
-std::unique_ptr<TestsCoreServices>
-createTestsCoreServices(const RequirementsSharedCoreServices &sharedServices,
-                        std::string languageId = "tests-lang");
-
-/// Aggregate of both languages' core services.
-struct RequirementsAndTestsCoreServices {
-  std::unique_ptr<RequirementsCoreServices> requirements;
-  std::unique_ptr<TestsCoreServices> tests;
+// The whole world in one call: the shared container built over `files` -- none
+// meaning no disk under it -- with both languages registered in it.
+struct RequirementsCoreLanguage {
+  std::unique_ptr<RequirementsSharedCoreServices> shared;
+  RequirementsCoreServices& requirements;
+  RequirementsCoreServices& tests;
 };
 
-/// Builds the requirements and tests core-only language services together.
-RequirementsAndTestsCoreServices createRequirementsAndTestsCoreServices(
-    const RequirementsSharedCoreServices &sharedServices);
+RequirementsCoreLanguage create_core_services(
+    std::unique_ptr<cursiv::FileSystemProvider> files = nullptr);
 
-/// Registers the core-only services for both languages.
-bool registerRequirementsCoreServices(pegium::SharedCoreServices &sharedServices);
+// Both, in one call: a binary that served one would refuse half its own
+// example -- a `.tst` names the requirements of the `.req` beside it.
+bool register_core_services(cursiv::SharedCoreServices& sharedServices);
 
-} // namespace requirements
+}  // namespace req

@@ -2,36 +2,38 @@
 
 #include <memory>
 
-#include <requirements/core/validation/RequirementsValidator.hpp>
-#include <requirements/core/validation/TestsValidator.hpp>
-#include <pegium/core/services/CoreServices.hpp>
-#include <pegium/core/services/SharedCoreServices.hpp>
+#include "cursiv/core/services/CoreServicesFor.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "requirements/core/validation/RequirementsValidator.hpp"
+#include "requirements/core/validation/TestsValidator.hpp"
 
-namespace requirements {
+// Two languages over one rule set, so one shared type and one language type:
+// a `.tst` reaches the requirements its `.req` neighbour declares, and it does
+// it through the workspace they share.
 
-/// Workspace-wide shared services, shared by both languages of this example.
-struct RequirementsSharedCoreServices : virtual pegium::SharedCoreServices {
-  // define here custom shared services
-};
+namespace req {
 
-/// Core (headless) requirements-language services, built from the language's
-/// shared-core type.
+struct RequirementsSharedCoreServices : virtual cursiv::SharedCoreServices {};
+
 struct RequirementsCoreServices
-    : pegium::CoreServicesFor<RequirementsSharedCoreServices> {
-  std::unique_ptr<validation::RequirementsValidator> validator;
+    : cursiv::CoreServicesFor<RequirementsSharedCoreServices> {
+  // One container type, two languages: each module fills the slot its own
+  // grammar owns and leaves the other empty.
+  std::unique_ptr<const RequirementsValidator> requirementsValidator;
+  std::unique_ptr<const TestsValidator> testsValidator;
 
   explicit RequirementsCoreServices(
-      const RequirementsSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+      RequirementsSharedCoreServices& sharedServices)
+      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+
+  // Optional both: each of the two languages fills its own and leaves the
+  // other empty.
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    cursiv::CoreServices::visitServices(yield);
+    yield({"requirementsValidator", false, requirementsValidator != nullptr});
+    yield({"testsValidator", false, testsValidator != nullptr});
+  }
 };
 
-/// Core (headless) tests-language services, built from the language's
-/// shared-core type.
-struct TestsCoreServices : pegium::CoreServicesFor<RequirementsSharedCoreServices> {
-  std::unique_ptr<validation::TestsValidator> validator;
-
-  explicit TestsCoreServices(const RequirementsSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
-};
-
-} // namespace requirements
+}  // namespace req

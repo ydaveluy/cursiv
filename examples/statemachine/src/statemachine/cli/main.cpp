@@ -1,31 +1,38 @@
-#include <statemachine/cli/Generator.hpp>
-#include <statemachine/core/CoreModule.hpp>
+// The statemachine command line: the usual verdict, plus `generate FILE` --
+// what this example is for, a model that becomes code.
 
-#include <pegium/cli/CliUtils.hpp>
-
+#include <filesystem>
 #include <iostream>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
+#include "cursiv/cli/cli.hpp"
+#include "cursiv/core/services/CoreLanguage.hpp"
+#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
+#include "statemachine/cli/Generator.hpp"
+#include "statemachine/core/CoreServices.hpp"
+
 namespace {
 
+constexpr auto kRegister =
+    &cursiv::register_language<sm::StateMachineCoreServices,
+                               sm::StateMachineSharedCoreServices,
+                               sm::install_core_module>;
+
 struct GenerateOptions {
-  std::string fileName;
+  std::string path;
   std::optional<std::string> destination;
 };
 
-std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
-  if (argc < 3 || std::string_view(argv[1]) != "generate") {
-    return std::nullopt;
-  }
-
-  GenerateOptions options{.fileName = argv[2]};
-  for (int index = 3; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
-    if ((arg == "-d" || arg == "--destination") && index + 1 < argc) {
-      options.destination = std::string(argv[++index]);
+std::optional<GenerateOptions> parse_generate_args(int argc, char** argv) {
+  if (argc < 3 || std::string_view(argv[1]) != "generate") return std::nullopt;
+  GenerateOptions options{.path = argv[2], .destination = std::nullopt};
+  for (int at = 3; at < argc; ++at) {
+    const std::string_view arg(argv[at]);
+    if ((arg == "-d" || arg == "--destination") && at + 1 < argc) {
+      options.destination = std::string(argv[++at]);
       continue;
     }
     return std::nullopt;
@@ -33,53 +40,49 @@ std::optional<GenerateOptions> parse_generate_args(int argc, char **argv) {
   return options;
 }
 
-int generate_cpp_cli(const GenerateOptions &options) {
-  auto sharedServices =
-      pegium::make_shared_services<statemachine::StatemachineSharedCoreServices>();
-  auto &shared = *sharedServices;
-  auto services = statemachine::createStatemachineCoreServices(shared);
-  auto &statemachineServices = *services;
-  shared.serviceRegistry->registerServices(std::move(services));
+int generate(const GenerateOptions& options) {
+  sm::StateMachineSharedCoreServices shared;
+  shared.fileSystemProvider =
+      std::make_unique<cursiv::LocalFileSystemProvider>();
+  cursiv::install_default_shared_core_services(shared);
+  if (!kRegister(shared)) return cursiv::kFatal;
 
-  auto document = pegium::build_document_from_path(
-      options.fileName, statemachineServices);
-  if (pegium::has_error_diagnostics(*document)) {
+  // The file's folder first: a model that names a declaration from the file
+  // beside it is not invalid, it is unscanned -- and a generator that refused
+  // it would refuse the example this one ships with.
+  cursiv::initialize_root(
+      std::filesystem::path(options.path).parent_path().string(), shared);
+  const cursiv::Document& document =
+      cursiv::build_document_from_path(options.path, shared);
+  if (cursiv::has_error_diagnostics(document)) {
     std::cerr << "There are validation errors:\n";
-    pegium::print_error_diagnostics(*document, std::cerr);
-    return 2;
+    cursiv::print_diagnostics(document, options.path, std::cerr);
+    return cursiv::kDiagnostics;
   }
-
-  auto *model =
-      pegium::ast_ptr_cast<statemachine::ast::Statemachine>(document->parseResult.value);
-  if (model == nullptr) {
+  const cursiv::AstNode* const root = document.parseResult.value;
+  if (root == nullptr ||
+      root->type != &cursiv::ast_type_tag<sm::ast::Statemachine>) {
     std::cerr << "Unable to generate C++ for invalid statemachine.\n";
-    return 2;
+    return cursiv::kDiagnostics;
   }
 
-  // The error-diagnostics gate above rejects unresolved references; the
-  // generator throws (caught in main) for any remaining precondition.
-  const auto outputPath = statemachine::generate_cpp(
-      *model, options.fileName,
+  const std::optional<std::string_view> destination =
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)
-          : std::nullopt);
-  std::cout << "C++ code generated successfully: " << outputPath << '\n';
-  return 0;
+          : std::nullopt;
+  std::cout << sm::generate_cpp(
+                   static_cast<const sm::ast::Statemachine&>(*root),
+                   options.path, destination)
+            << '\n';
+  return cursiv::kClean;
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char **argv) {
-  const auto options = parse_generate_args(argc, argv);
-  if (!options.has_value()) {
-    std::cerr << "Usage: pegium-example-statemachine-cli generate <file.statemachine> [-d dir]\n";
-    return 1;
-  }
-
-  try {
-    return generate_cpp_cli(*options);
-  } catch (const std::exception &error) {
-    std::cerr << "Fatal error: " << error.what() << '\n';
-    return 3;
-  }
+int main(int argc, char** argv) {
+  if (const std::optional<GenerateOptions> options =
+          parse_generate_args(argc, argv))
+    return generate(*options);
+  return cursiv::run_cli<sm::StateMachineSharedCoreServices>(argc, argv,
+                                                             kRegister);
 }

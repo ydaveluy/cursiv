@@ -1,74 +1,59 @@
-#include <requirements/core/validation/TestsValidator.hpp>
-
-#include <requirements/core/ast.hpp>
+#include "requirements/core/validation/TestsValidator.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <string>
 #include <string_view>
-#include <utility>
 
-#include <pegium/core/validation/DiagnosticRanges.hpp>
-#include <pegium/core/validation/ValidationRegistry.hpp>
+namespace req {
 
-namespace requirements::validation {
 namespace {
 
-using namespace requirements::ast;
-
 bool has_digit(std::string_view value) {
-  return std::ranges::any_of(value, [](unsigned char c) {
-    return std::isdigit(c) != 0;
-  });
+  return std::ranges::any_of(
+      value, [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
-} // namespace
+}  // namespace
 
 void TestsValidator::checkTestNameContainsANumber(
-    const Test &test,
-    const pegium::validation::ValidationAcceptor &accept) const {
-  if (!has_digit(test.name)) {
-    accept.warning(test, "Test name " + test.name + " should contain a number.")
-        .property<&Test::name>();
-  }
+    const ast::Test& test, cursiv::ValidationAcceptor& accept) const {
+  if (!has_digit(test.name))
+    accept
+        .warning(test, "Test name " + std::string(test.name) +
+                           " should contain a number.")
+        .property<&ast::Test::name>();
 }
 
 void TestsValidator::
     checkTestReferencesOnlyEnvironmentsAlsoReferencedInSomeRequirement(
-        const Test &test,
-        const pegium::validation::ValidationAcceptor &accept) const {
-  for (std::size_t environmentIndex = 0;
-       environmentIndex < test.environments.size(); ++environmentIndex) {
-    const auto &environment = test.environments[environmentIndex];
-    const auto *resolvedEnvironment = environment.get();
-    if (resolvedEnvironment == nullptr) {
-      continue;
-    }
+        const ast::Test& test, cursiv::ValidationAcceptor& accept) const {
+  for (std::size_t at = 0; at < test.environments.size(); ++at) {
+    const ast::Environment* const environment = test.environments[at].get();
+    if (environment == nullptr) continue;
 
-    bool valid = false;
-    for (const auto &requirementRef : test.requirements) {
-      const auto *resolvedRequirement = requirementRef.get();
-      if (resolvedRequirement == nullptr) {
-        continue;
-      }
-      for (const auto &requiredEnvironment : resolvedRequirement->environments) {
-        if (requiredEnvironment.get() == resolvedEnvironment) {
-          valid = true;
+    bool used = false;
+    for (const auto& reference : test.requirements) {
+      const ast::Requirement* const requirement = reference.get();
+      if (requirement == nullptr) continue;
+      for (const auto& required : requirement->environments)
+        if (required.get() == environment) {
+          used = true;
           break;
         }
-      }
-      if (valid) {
-        break;
-      }
+      if (used) break;
     }
 
-    if (!valid) {
-      accept.warning(
-          test, "Test " + test.name + " references environment " +
-                    resolvedEnvironment->name +
-                    " which is not used by any referenced requirement.")
-          .property<&Test::environments>(environmentIndex);
-    }
+    if (!used)
+      accept
+          .warning(test, "Test " + std::string(test.name) +
+                             " references environment " +
+                             std::string(environment->name) +
+                             " which is not used by any referenced "
+                             "requirement.")
+          .property<&ast::Test::environments>(at);
   }
 }
 
-} // namespace requirements::validation
+}  // namespace req

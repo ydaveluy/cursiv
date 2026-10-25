@@ -1,25 +1,11 @@
 # Recipes
 
-Reach for a recipe when your question is task-shaped rather than workflow-shaped. They answer questions like "How do I wire two languages together?" or "Where should I cache this computation?".
+Choose the task you want to solve:
 
-Pick a recipe once you know which subsystem you want to customize. They cover the common tasks that come up after the basic workflow is in place:
-
-- "How do I register multiple dependent languages?"
-- "How do I add qualified names or package-style scoping?"
-- "How do I detect recursion or dependency loops?"
-- "How do I cache document-local or workspace-wide computations?"
-- "How do I replace one LSP provider?"
-
-## Available recipes
-
-- [Multiple Languages](multiple-languages.md)
-- [Formatting](custom-formatter.md)
-- [Scoping](scoping/index.md)
-- [Validation](validation/index.md)
-- [Performance](performance/index.md)
-- [Custom LSP features](custom-lsp-features.md)
-
-## Related pages
-
-- [Learn](../learn/index.md) — start here if you are building your first language
-- [Reference](../reference/index.md) — keep it nearby for exact subsystem terminology
+- [Qualified names and scoping](scoping.md): reference declarations inside packages.
+- [Custom validation](validation.md): add checks and place diagnostics.
+- [Formatting](formatting.md): define spacing, line breaks and indentation.
+- [Case-insensitive languages](case-insensitive.md): match keywords and names without case.
+- [Several languages in one project](multiple-languages.md): share a workspace and resolve references across languages.
+- [Derived grammars](derived-grammars.md): extend a language without copying its grammar.
+- [Cross-compiling to WebAssembly](wasm.md): build and package a portable language server.

@@ -1,7 +1,0 @@
-statemachine Light
-events Start
-commands Open Close
-initialState Idle
-state Idle actions { Open Close
-Start => Idle
-end

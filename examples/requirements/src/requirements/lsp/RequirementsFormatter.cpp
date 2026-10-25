@@ -1,34 +1,35 @@
-#include <requirements/lsp/RequirementsFormatter.hpp>
+#include "requirements/lsp/RequirementsFormatter.hpp"
 
-namespace requirements {
-void RequirementsFormatter::formatContact(pegium::FormattingBuilder &builder,
-                                          const ast::Contact *contact) const {
+namespace req {
+void RequirementsFormatter::formatContact(cursiv::FormattingBuilder& builder,
+                                          const ast::Contact* contact) const {
   auto formatter = builder.getNodeFormatter(contact);
   formatter.keyword(":").prepend(noSpace).append(oneSpace);
 }
 
 void RequirementsFormatter::formatRequirementModel(
-    pegium::FormattingBuilder &builder,
-    const ast::RequirementModel *model) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::RequirementModel* model) const {
   auto formatter = builder.getNodeFormatter(model);
-  formatter.properties<&ast::RequirementModel::contact,
-                       &ast::RequirementModel::environments,
-                       &ast::RequirementModel::requirements>()
+  formatter
+      .properties<&ast::RequirementModel::contact,
+                  &ast::RequirementModel::environments,
+                  &ast::RequirementModel::requirements>()
       .slice(1)
       .prepend(newLine);
 }
 
 void RequirementsFormatter::formatEnvironment(
-    pegium::FormattingBuilder &builder,
-    const ast::Environment *environment) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::Environment* environment) const {
   auto formatter = builder.getNodeFormatter(environment);
   formatter.keyword("environment").append(oneSpace);
   formatter.keyword(":").prepend(noSpace).append(oneSpace);
 }
 
 void RequirementsFormatter::formatRequirement(
-    pegium::FormattingBuilder &builder,
-    const ast::Requirement *requirement) const {
+    cursiv::FormattingBuilder& builder,
+    const ast::Requirement* requirement) const {
   auto formatter = builder.getNodeFormatter(requirement);
   formatter.keyword("req").append(oneSpace);
   if (!requirement->environments.empty()) {
@@ -38,26 +39,27 @@ void RequirementsFormatter::formatRequirement(
   }
 }
 
-void TestsFormatter::formatContact(pegium::FormattingBuilder &builder,
-                                   const ast::Contact *contact) const {
+void TestsFormatter::formatContact(cursiv::FormattingBuilder& builder,
+                                   const ast::Contact* contact) const {
   auto formatter = builder.getNodeFormatter(contact);
   formatter.keyword(":").prepend(noSpace).append(oneSpace);
 }
 
-void TestsFormatter::formatTestModel(pegium::FormattingBuilder &builder,
-                                     const ast::TestModel *model) const {
+void TestsFormatter::formatTestModel(cursiv::FormattingBuilder& builder,
+                                     const ast::TestModel* model) const {
   auto formatter = builder.getNodeFormatter(model);
   formatter.properties<&ast::TestModel::contact, &ast::TestModel::tests>()
       .slice(1)
       .prepend(newLine);
 }
 
-void TestsFormatter::formatTest(pegium::FormattingBuilder &builder,
-                                const ast::Test *test) const {
+void TestsFormatter::formatTest(cursiv::FormattingBuilder& builder,
+                                const ast::Test* test) const {
   auto formatter = builder.getNodeFormatter(test);
   formatter.keyword("tst").append(oneSpace);
 
-  if (test->testFile.has_value()) {
+  // The optional clause is absent when its view is empty.
+  if (!test->testFile.empty()) {
     formatter.keyword("testfile").prepend(oneSpace);
     formatter.keyword("=").prepend(oneSpace).append(oneSpace);
   }
@@ -72,7 +74,7 @@ void TestsFormatter::formatTest(pegium::FormattingBuilder &builder,
 }
 
 RequirementsFormatter::RequirementsFormatter(
-    const pegium::Services &services)
+    const cursiv::CoreServices& services)
     : AbstractFormatter(services) {
   on<ast::RequirementModel>(&RequirementsFormatter::formatRequirementModel);
   on<ast::Contact>(&RequirementsFormatter::formatContact);
@@ -80,11 +82,11 @@ RequirementsFormatter::RequirementsFormatter(
   on<ast::Requirement>(&RequirementsFormatter::formatRequirement);
 }
 
-TestsFormatter::TestsFormatter(const pegium::Services &services)
+TestsFormatter::TestsFormatter(const cursiv::CoreServices& services)
     : AbstractFormatter(services) {
   on<ast::TestModel>(&TestsFormatter::formatTestModel);
   on<ast::Contact>(&TestsFormatter::formatContact);
   on<ast::Test>(&TestsFormatter::formatTest);
 }
 
-} // namespace requirements
+}  // namespace req

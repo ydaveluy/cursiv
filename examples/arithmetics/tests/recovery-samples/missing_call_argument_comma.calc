@@ -1,3 +1,0 @@
-module Demo
-def root(x, y): x^(1/y);
-root(64 3);

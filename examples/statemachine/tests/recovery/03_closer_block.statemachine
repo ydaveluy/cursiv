@@ -1,0 +1,34 @@
+// closer_block: the '}' closing an actions block is missing, mid file
+// break: 000282
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+state PowerOff
+    switchCapacity => RedLight
+end
+
+state RedLight
+    actions { flashRed
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+state YellowLight
+    switchCapacity => PowerOff
+    next => RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight
+end

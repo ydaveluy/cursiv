@@ -1,9 +1,10 @@
 {
-  "name": "pegium-domainmodel-dsl",
-  "publisher": "pegium",
-  "displayName": "Pegium Domain Model DSL",
+  "name": "cursiv-domainmodel",
+  "displayName": "cursiv Domainmodel",
+  "description": "Domain model DSL, parsed by cursiv",
   "version": "0.1.0",
-  "description": "Domain model example language powered by Pegium",
+  "publisher": "cursiv",
+  "private": true,
   "license": "MIT",
   "engines": {
     "vscode": "^1.86.0"
@@ -12,7 +13,7 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:domain-model"
+    "onLanguage:domainmodel"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -36,44 +37,62 @@
         "path": "./syntaxes/domain-model.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[domain-model]": {
+        "editor.suggest.insertMode": "replace"
+      }
+    },
     "configuration": {
-      "title": "Pegium DomainModel",
+      "title": "cursiv Domainmodel",
       "properties": {
-        "pegium.domainmodel.serverPath": {
+        "cursiv.domainmodel.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the pegium-example-domainmodel-lsp executable. If empty, common build locations are probed."
+          "description": "Absolute path to the domainmodel_lsp executable. Empty means the default build tree, build/examples/domainmodel/."
         }
       }
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "cursiv.domainmodel.mcp",
+        "label": "cursiv Domainmodel"
+      }
+    ]
   },
   "scripts": {
-    "compile": "tsc -p ./tsconfig.json",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "bundle": "node esbuild.mjs --production",
-    "watch": "tsc -p ./tsconfig.json -w",
-    "test": "npm run compile && node ./out/test/runTest.js",
+    "typecheck": "tsc -p tsconfig.json",
     "vscode:prepublish": "npm run bundle",
-    "package": "vsce package --no-dependencies",
-    "publish": "vsce publish --no-dependencies"
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "files": [
     "package.json",
     "out",
+    "server",
     "language-configuration.json",
     "syntaxes"
   ],
   "dependencies": {
-    "vscode-languageclient": "~9.0.1"
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.17.17",
-    "@types/vscode": "^1.86.0",
-    "@vscode/test-electron": "^2.4.1",
-    "@vscode/vsce": "^3.2.0",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.7.2"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.86.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "@vscode/vsce": "^3.9.2"
   },
   "vsce": {
     "dependencies": false
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "@azure/identity": "4.13.0"
+    },
+    "@azure/msal-node": {
+      "uuid": "^11.1.1"
+    }
   }
 }

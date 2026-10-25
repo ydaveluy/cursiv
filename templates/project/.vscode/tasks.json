@@ -1,53 +1,45 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Configure (CMake)",
-            "type": "shell",
-            "command": "cmake",
-            "args": ["-B", "build", "-DCMAKE_BUILD_TYPE=Debug"],
-            "options": { "cwd": "${workspaceFolder}" },
-            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build language server (C++)",
-            "type": "shell",
-            "command": "cmake",
-            "args": ["--build", "build", "--target", "@PEGIUM_NEW_LANGUAGE_ID@-lsp", "-j"],
-            "options": { "cwd": "${workspaceFolder}" },
-            "dependsOn": "Configure (CMake)",
-            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "Install extension deps (npm)",
-            "type": "shell",
-            "command": "npm",
-            "args": ["install"],
-            "options": { "cwd": "${workspaceFolder}/vscode" },
-            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build extension (TypeScript)",
-            "type": "shell",
-            "command": "npm",
-            "args": ["run", "compile"],
-            "options": { "cwd": "${workspaceFolder}/vscode" },
-            "dependsOn": "Install extension deps (npm)",
-            "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
-            "problemMatcher": "$tsc"
-        },
-        {
-            "label": "Build all",
-            "dependsOn": [
-                "Build language server (C++)",
-                "Build extension (TypeScript)"
-            ],
-            "dependsOrder": "parallel",
-            "group": { "kind": "build", "isDefault": true },
-            "problemMatcher": []
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build the server and the extension",
+      "detail": "Build @CURSIV_NEW_ID@_lsp in the active preset's tree, then bundle the TypeScript.",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "build the language server",
+        "install extension dependencies",
+        "compile the extension"
+      ],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "build the language server",
+      "type": "process",
+      "command": "cmake",
+      "args": [
+        "--build", "${command:cmake.buildDirectory}",
+        "--target", "@CURSIV_NEW_ID@_lsp", "--parallel"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "install extension dependencies",
+      "type": "shell",
+      "command": "npm",
+      "args": ["install", "--no-audit", "--no-fund"],
+      "options": { "cwd": "${workspaceFolder}/vscode" },
+      "problemMatcher": []
+    },
+    {
+      "label": "compile the extension",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "compile"],
+      "options": { "cwd": "${workspaceFolder}/vscode" },
+      "problemMatcher": []
+    }
+  ]
 }

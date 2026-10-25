@@ -1,0 +1,25 @@
+// open_region_eof: a block comment opened and never closed -- the lexer is
+// still inside a token when the document ends
+// break: 000419
+Module basicMath
+
+def a: 5;
+def b: 3;
+def c: a + b; // 8
+def d: (a ^ b); // 164
+
+def root(x, y):
+    x^(1/y);
+
+def sqrt(x):
+    root(x, 2);
+
+2 * c; // 16
+b % 2; // 1
+
+// This language is case-insensitive regarding symbol names
+Root(D, 3); // 32
+Root(64, 3); // 4
+Sqrt(81); // 9
+
+/* the region the mode never leaves

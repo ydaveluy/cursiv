@@ -1,61 +1,92 @@
+name: SonarCloud
 
-name: SonarCloud analysis
 on:
-   push:
-      branches:
-      - '**'
-      tags:
-      - '**'
-   pull_request:
-      branches:
-      - main
-   workflow_dispatch: null
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
 permissions:
-   pull-requests: read # allows SonarCloud to decorate PRs with analysis results
-   contents: read # access to check out code and install dependencies
+  contents: read
+  pull-requests: read
+
 concurrency:
-   group: ${{ github.workflow }}-${{ github.ref }}
-   cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  CTEST_PARALLEL_LEVEL: "4"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-   Analysis:
-      runs-on: ubuntu-latest
-      steps:
-      -  uses: actions/checkout@v7
-         with:
-            fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
-      -  name: Set up Python for gcovr
-         uses: actions/setup-python@v6
-         with:
-            python-version: 3.12
-      -  name: install gcovr 
-         run: |
-            pip install gcovr
-      -  name: Configure cmake
-         run: |
-            cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPEGIUM_ENABLE_CODECOVERAGE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -S ${{github.workspace}}
-      -  name: Build
-         run: |
-            cmake --build build --config Debug -j 4
-      -  name: Run tests
-         run: |
-            cd build && ctest -C Debug --output-on-failure
-      -  name: Collect coverage into one XML report
-         run: |
-            cd build; gcovr --sonarqube coverage.xml -r .. \
-              --gcov-ignore-parse-errors negative_hits.warn_once_per_file
-      -  name: SonarQube Scan
-         uses: SonarSource/sonarqube-scan-action@v8.2.0
-         env:
-            GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-            SONAR_TOKEN: ${{secrets.SONAR_TOKEN}}
-         with:
-            args: >
-               -Dsonar.projectKey=ydaveluy_pegium
-               -Dsonar.organization=ydaveluy
-               -Dsonar.cfamily.compile-commands=build/compile_commands.json
-               -Dsonar.coverageReportPaths=build/coverage.xml
-               -Dsonar.sources=src
-               -Dsonar.tests=tests
-               -Dsonar.sourceEncoding=UTF-8
-               -Dsonar.cpp.file.suffixes=.cpp,.hpp
+  analyze:
+    runs-on: ubuntu-26.04
+    container: gcc:16
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install build and coverage tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates cmake curl git gnupg ninja-build python3-venv unzip
+          python3 -m venv .venv-coverage
+          .venv-coverage/bin/python -m pip install gcovr==8.7
+      - name: Configure coverage
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+          -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          -DCURSIV_MIMALLOC=OFF
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Collect coverage
+        run: >-
+          .venv-coverage/bin/gcovr --root . --filter src/
+          --gcov-executable gcov --sonarqube build/coverage.xml build
+      - name: Check SonarCloud configuration
+        id: sonar
+        if: >-
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]'))
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          if [[ -n "$SONAR_TOKEN" && -n "$SONAR_PROJECT_KEY" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Explain skipped SonarCloud upload
+        if: steps.sonar.outputs.enabled != 'true'
+        run: |
+          echo "::notice::Coverage checks passed; SonarCloud upload is unavailable for fork PRs, Dependabot events, or when SONAR_TOKEN / SONAR_PROJECT_KEY is missing."
+          echo "SonarCloud upload skipped. Fork PRs and Dependabot events do not use repository secrets; other runs require SONAR_TOKEN and SONAR_PROJECT_KEY. Build, tests and coverage still run." >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload SonarCloud analysis
+        if: steps.sonar.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >-
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=ydaveluy
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.cfamily.compile-commands=build/compile_commands.json
+            -Dsonar.coverageReportPaths=build/coverage.xml
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.sourceEncoding=UTF-8
+            -Dsonar.cpp.file.suffixes=.cpp,.hpp

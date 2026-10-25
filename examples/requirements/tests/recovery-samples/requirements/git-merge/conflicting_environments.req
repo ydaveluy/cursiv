@@ -1,6 +1,0 @@
-<<<<<<< HEAD
-environment prod: "Production"
-=======
-environment prod "Production"
->>>>>>> feature/env
-req login "Users can login"

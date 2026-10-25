@@ -1,0 +1,5 @@
+go A {
+  lueprint X <<<
+  stuff
+  >>>
+}

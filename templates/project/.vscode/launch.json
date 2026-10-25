@@ -1,20 +1,22 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run @PEGIUM_NEW_CLASS@ Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}/vscode",
-                "${workspaceFolder}/example",
-                "${workspaceFolder}/example/hello@PEGIUM_NEW_EXT@"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "Build all"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run @CURSIV_NEW_CLASS@ Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode",
+        "${workspaceFolder}/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/src"
+      },
+      "preLaunchTask": "build the server and the extension"
+    }
+  ]
 }

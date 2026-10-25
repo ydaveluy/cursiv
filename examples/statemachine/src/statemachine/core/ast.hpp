@@ -1,30 +1,40 @@
+// The statemachine example language: its AST. Deriving `cursiv::AstNode`
+// brings the field vocabulary into scope: `vector`, `string_view`, and
+// `reference` below are the base's aliases. Every `string_view` field
+// borrows a slice of the source buffer, valid only as long as it is.
 #pragma once
 
-#include <pegium/core/syntax-tree/AstNode.hpp>
+#include "cursiv/core/syntax-tree/AstNode.hpp"
 
-namespace statemachine::ast {
+namespace sm::ast {
 
-struct Event : pegium::NamedAstNode {};
+struct Event : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
 
-struct Command : pegium::NamedAstNode {};
+struct Command : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
 
 struct State;
 
-struct Transition : pegium::AstNode {
+struct Transition : cursiv::Extends<cursiv::AstNode> {
   reference<Event> event;
   reference<State> state;
 };
 
-struct State : pegium::NamedAstNode {
+struct State : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
   vector<reference<Command>> actions;
-  vector<pointer<Transition>> transitions;
+  vector<Transition*> transitions;
 };
 
-struct Statemachine : pegium::NamedAstNode {
-  vector<pointer<Event>> events;
-  vector<pointer<Command>> commands;
+struct Statemachine : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  vector<Event*> events;
+  vector<Command*> commands;
   reference<State> init;
-  vector<pointer<State>> states;
+  vector<State*> states;
 };
 
-} // namespace statemachine::ast
+}  // namespace sm::ast

@@ -1,5 +1,0 @@
-Module basicMath
-
-def c: 8;
-
-2 * +c;

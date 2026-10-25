@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Prepare Statemachine Extension",
+      "detail": "Build statemachine_lsp in the active preset's tree, then bundle the client.",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../tools/prepare.sh",
+      "args": [
+        "statemachine"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "env": {
+          "CURSIV_BUILD_DIR": "${command:cmake.buildDirectory}"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "clear": true
+      }
+    }
+  ]
+}

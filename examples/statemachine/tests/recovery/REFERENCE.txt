@@ -1,0 +1,12 @@
+valid.statemachine	acc=1 cov=1 rec=0 tok=51/51 inv=0
+01_typo1.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 rep:state@241<Expecting 'state' but found 'stat'.>
+02_typo2.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 rep:state@358<Expecting 'state' but found 'staet'.>
+03_closer_block.statemachine	acc=1 cov=1 rec=1 tok=52/51 inv=2 ins:}@319<Expecting '}'.>
+04_closer_eof.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 ins:end@524<Expecting 'end'.>
+05_intruder.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 rep:=>@232<Expecting '=>' but found '==>'.>
+06_truncated.statemachine	acc=1 cov=1 rec=1 tok=48/51 inv=2 ins:ID@497<Expecting ID.>
+07_two_faults.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=2 rep:state@217<Expecting 'state' but found 'stat'.> ins:end@539<Expecting 'end'.>
+08_head_fault.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 rep:statemachine@81<Expecting 'statemachine' but found 'statmachine'.>
+09_list_delim.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 ins:=>@455<Expecting '=>'.>
+10_noise.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=0 [347,350) [351,354) [355,358) del:state@347<Unexpected '@@@ ??? @@@', expecting 'state'.>
+11_head_typo.statemachine	acc=1 cov=1 rec=1 tok=51/51 inv=1 rep:state@175<Expecting 'state' but found 'tate'.>

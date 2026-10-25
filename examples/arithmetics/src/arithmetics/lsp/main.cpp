@@ -1,9 +1,9 @@
-#include <arithmetics/lsp/LspModule.hpp>
+// The arithmetics language server: one language, the standard transport.
 
-#include <pegium/lsp/runtime/LanguageServerRuntime.hpp>
+#include "arithmetics/lsp/LspModule.hpp"
+#include "cursiv/lsp/runtime/LanguageServerMain.hpp"
 
-int main(int argc, char **argv) {
-  return pegium::runLanguageServerMain<arithmetics::ArithmeticsSharedServices>(
-      argc, argv, "arithmetics-lsp",
-      arithmetics::registerArithmeticsLspServices);
+int main(int argc, char** argv) {
+  return cursiv::run_language_server_main<arith::ArithmeticsSharedServices>(
+      argc, argv, "arithmetics-lsp", &arith::register_lsp_services);
 }

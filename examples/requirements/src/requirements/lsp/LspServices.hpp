@@ -1,27 +1,28 @@
 #pragma once
 
-#include <requirements/core/CoreServices.hpp>
-#include <pegium/lsp/services/Services.hpp>
-#include <pegium/lsp/services/SharedServices.hpp>
+#include "cursiv/lsp/services/LspServices.hpp"
+#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "requirements/core/CoreServices.hpp"
 
-namespace requirements {
+namespace req {
 
-/// Workspace-wide shared services in an LSP session, shared by both languages.
 struct RequirementsSharedServices : RequirementsSharedCoreServices,
-                                    pegium::SharedServices {};
+                                    cursiv::SharedLspServices {};
 
-/// LSP-enabled requirements language services.
-struct RequirementsServices final
-    : pegium::ServicesFor<RequirementsCoreServices, RequirementsSharedServices> {
-  explicit RequirementsServices(const RequirementsSharedServices &sharedServices)
-      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
+struct RequirementsServices final : RequirementsCoreServices,
+                                    cursiv::LspServices {
+  explicit RequirementsServices(RequirementsSharedServices& sharedServices)
+      : cursiv::CoreServices(sharedServices),
+        RequirementsCoreServices(sharedServices),
+        cursiv::LspServices(sharedServices) {}
+
+  // One emission per storey through the diamond: the language rows through
+  // the core side, the LSP rows alone.
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
+    RequirementsCoreServices::visitServices(yield);
+    cursiv::LspServices::visitOwnServices(yield);
+  }
 };
 
-/// LSP-enabled tests language services.
-struct TestsServices final
-    : pegium::ServicesFor<TestsCoreServices, RequirementsSharedServices> {
-  explicit TestsServices(const RequirementsSharedServices &sharedServices)
-      : pegium::CoreServices(sharedServices), ServicesFor(sharedServices) {}
-};
-
-} // namespace requirements
+}  // namespace req

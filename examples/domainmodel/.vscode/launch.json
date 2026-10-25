@@ -1,19 +1,22 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run DomainModel Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "runtimeExecutable": "${execPath}",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}/vscode",
-                "${workspaceFolder}/example"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/vscode/out/**/*.js"
-            ],
-            "preLaunchTask": "npm: compile - vscode"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Domainmodel Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode",
+        "${workspaceFolder}/example"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode/out/**/*.js"
+      ],
+      "env": {
+        "CURSIV_SERVER_DIR": "${command:cmake.buildDirectory}/examples/domainmodel/src"
+      },
+      "preLaunchTask": "Prepare Domainmodel Extension"
+    }
+  ]
 }

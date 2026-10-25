@@ -1,0 +1,13 @@
+file	family	breaks	intent
+valid.req	valid		the base document
+01_typo1.req	typo1	414	'req' written 'rq' -- one deletion
+02_typo2.req	typo2	194	'environment' written 'envirnoment' -- distance 2
+03_closer_block.req	closer_block	314	the closing '"' of a requirement text is missing, mid file (the language has no braces; a string is its only closer)
+04_closer_eof.req	closer_eof	566	the closing '"' of the LAST requirement text is missing
+05_intruder.req	intruder	334	one '%' token too many between a name and its text
+06_truncated.req	truncated	552	the last requirement is cut after its name
+07_two_faults.req	two_faults	123 575	'environment' typo near the top AND the last quote missing
+08_head_fault.req	head_fault	89	the 'contact' keyword of the first construct is misspelt
+09_list_delim.req	list_delim	403	the ',' between two applicable environments is missing
+10_noise.req	noise	537	a cluster of garbage bytes between two requirements
+11_head_typo.req	head_typo	66	'environment' written 'nvironment' -- the FIRST character is gone

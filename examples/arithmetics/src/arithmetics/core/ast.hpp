@@ -1,45 +1,71 @@
+// The arithmetics example language: its AST.
 #pragma once
 
-#include <pegium/core/syntax-tree/AstNode.hpp>
+#include <cstdint>
 
-namespace arithmetics::ast {
+#include "cursiv/core/syntax-tree/AstNode.hpp"
 
-struct Module;
-struct Expression : pegium::AstNode {};
-struct AbstractDefinition : pegium::NamedAstNode {};
+namespace arith::ast {
 
-struct DeclaredParameter : AbstractDefinition {};
+struct Statement : cursiv::Extends<cursiv::AstNode> {};
 
-struct Definition : AbstractDefinition {
-  vector<pointer<DeclaredParameter>> args;
-  pointer<Expression> expr;
+struct Expression : cursiv::Extends<cursiv::AstNode> {};
+
+// The nameable things a call can point at: `Definition` or
+// `DeclaredParameter` -- a base class, not a union, so a reference needs no
+// downcast. Sits under `Statement`, though no rule creates one there.
+struct AbstractDefinition : cursiv::Extends<Statement> {
+  string_view name;
 };
 
-struct Evaluation : pegium::AstNode {
-  pointer<Expression> expression;
+struct DeclaredParameter : cursiv::Extends<AbstractDefinition> {};
+
+struct Definition : cursiv::Extends<AbstractDefinition> {
+  vector<DeclaredParameter*> args;
+  Expression* expr;
 };
 
-struct Module : pegium::NamedAstNode {
-  vector<pointer<pegium::AstNode>> statements;
+struct Evaluation : cursiv::Extends<Statement> {
+  Expression* expression;
 };
 
-struct BinaryExpression : Expression {
-  pointer<Expression> left;
-  string op;
-  pointer<Expression> right;
+// The operation, not the text that denotes it: each operator token hands its
+// constant over, so no reader downstream compares spellings.
+enum class Operator : std::uint8_t {
+  add,
+  subtract,
+  multiply,
+  divide,
+  exponent,
+  modulo,
 };
 
-struct GroupedExpression : Expression {
-  pointer<Expression> expression;
+struct BinaryExpression : cursiv::Extends<Expression> {
+  Expression* left;
+  Operator op;
+  Expression* right;
 };
 
-struct NumberLiteral : Expression {
-  double value = 0.0;
+// A value, not the text that denotes it: the rule names a number, so the
+// converter runs and the field holds it.
+struct NumberLiteral : cursiv::Extends<Expression> {
+  float64 value;
 };
 
-struct FunctionCall : Expression {
+// Names the definition or parameter it applies -- `func` targets the base
+// so both fit -- and a bare identifier is a call with no argument list.
+struct FunctionCall : cursiv::Extends<Expression> {
   reference<AbstractDefinition> func;
-  vector<pointer<Expression>> args;
+  vector<Expression*> args;
 };
 
-} // namespace arithmetics::ast
+struct GroupedExpression : cursiv::Extends<Expression> {
+  Expression* expression;
+};
+
+struct Module : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  vector<Statement*> statements;
+};
+
+}  // namespace arith::ast

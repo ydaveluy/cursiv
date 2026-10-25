@@ -1,24 +1,29 @@
-/build
-/build*
-site/
-node_modules/
-out/
-.vscode-test/
-package-lock.json
+# Local build trees and CTest output. Keep the general build rule anchored:
+# source directories below the root may also start with "build".
+/b-*/
+/b/
+b-mcdc/
+/build*/
+/Testing/
+build-wasi*/
+compile_commands.json
+
+# Generated parsers can live below any language's source or build directory.
+generated/
+
+# Local editor and Python caches.
 .cache/
-/Testing
-__pycache__
-/dist
-.fuzz/
+.claude/
+__pycache__/
 
-# Agent/process working docs (design specs, audit reports) — not project files.
-docs/superpowers/
+# Packaging and documentation output.
+/dist/
+/dist-vsix/
+/site/
 
-# CMake artifacts from an accidental in-source configure. Always build
-# out-of-tree (cmake -B build); these should never appear in the source tree.
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-CTestTestfile.cmake
-*_include.cmake
-DartConfiguration.tcl
+# VS Code client dependencies and generated files. Keep package-lock.json
+# tracked so npm ci can reproduce the dependency installation.
+node_modules/
+examples/*/vscode/out/
+examples/*/vscode/server/
+examples/*/vscode/*.vsix

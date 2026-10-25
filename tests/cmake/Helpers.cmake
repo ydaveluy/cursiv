@@ -1,0 +1,25 @@
+function(cursiv_test name src)
+  add_executable(${name} ${src})
+  target_link_libraries(${name} PRIVATE cursiv::test ${ARGN})
+  target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+function(cursiv_grammar id header ns)
+  cursiv_test_language(ID ${id} GRAMMAR ${header} NAMESPACE ${ns} ${ARGN})
+endfunction()
+
+function(cursiv_grammar_pair id header lr ll)
+  cursiv_grammar(${id}lr "${header}" "${lr}" ENGINE LR ${ARGN})
+  cursiv_grammar(${id}ll "${header}" "${ll}" ENGINE LL ${ARGN})
+endfunction()
+
+# Force optional positions through auxiliary rules, including in host tools.
+function(cursiv_aux_grammar id header ns)
+  cursiv_grammar(${id} "${header}" "${ns}" ENGINE LR)
+  if(CMAKE_CROSSCOMPILING)
+    cursiv_host_manifest("target_compile_definitions(${id}_gen PRIVATE CURSIV_OPTIONAL_GATE=0)")
+  else()
+    target_compile_definitions(${id}_gen PRIVATE CURSIV_OPTIONAL_GATE=0)
+  endif()
+endfunction()

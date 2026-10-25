@@ -1,3 +1,0 @@
-module Demo
-def broken 1 + 2;
-def kept: 3;

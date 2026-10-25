@@ -1,33 +1,23 @@
 #pragma once
 
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
-#include <domainmodel/core/ast.hpp>
-#include <pegium/core/services/CoreServices.hpp>
+// Where a generated file goes and what it is called. The rest of what a
+// command line needs -- scanning a folder, building one document, printing
+// the verdict -- is `cursiv/cli/cli.hpp`'s, and is not restated here.
 
-namespace pegium::workspace {
-class Document;
-}
-
-namespace domainmodel {
+namespace dm {
 
 struct FilePathData {
   std::string destination;
   std::string name;
 };
 
+// `destination` defaults to `generated`; the name is the input's stem with the
+// characters a file name may not carry removed.
 [[nodiscard]] FilePathData extract_destination_and_name(
-    std::string_view filePath,
-    std::optional<std::string_view> destination);
+    std::string_view filePath, std::optional<std::string_view> destination);
 
-void set_root_folder(std::string_view fileName,
-                     const pegium::CoreServices &services,
-                     std::optional<std::string_view> root = std::nullopt);
-
-[[nodiscard]] const ast::DomainModel &
-extract_ast_node(const pegium::workspace::Document &document);
-
-} // namespace domainmodel
+}  // namespace dm

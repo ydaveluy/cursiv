@@ -1,0 +1,34 @@
+// typo2: 'state' written 'staet' -- one transposition, distance 2
+// break: 000358
+statemachine TrafficLight
+
+events
+    switchCapacity
+    next
+
+commands
+    flashRed
+    flashGreen
+
+initialState PowerOff
+
+state PowerOff
+    switchCapacity => RedLight
+end
+
+state RedLight
+    actions { flashRed }
+    switchCapacity => PowerOff
+    next => GreenLight
+end
+
+staet YellowLight
+    switchCapacity => PowerOff
+    next => RedLight
+end
+
+state GreenLight
+    actions { flashGreen }
+    switchCapacity => PowerOff
+    next => YellowLight
+end

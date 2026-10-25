@@ -1,0 +1,21 @@
+# The shipped languages share the same grammar, fuzz and recovery suites.
+function(cursiv_example_tests name)
+  foreach(_kind IN ITEMS grammar fuzz recovery)
+    set(_target ${name}_${_kind}_test)
+    add_executable(${_target} ${_kind}_test.cpp)
+    target_compile_options(${_target} PRIVATE $<$<CONFIG:Release>:-O1>)
+    if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+      target_link_options(${_target} PRIVATE --no-wasm-opt)
+    endif()
+    target_link_libraries(${_target} PRIVATE ${name}Core)
+    if(_kind STREQUAL "recovery")
+      target_compile_definitions(${_target} PRIVATE
+          CURSIV_RECOVERY_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/recovery")
+    else()
+      target_compile_definitions(${_target} PRIVATE
+          CURSIV_EXAMPLE_DIR="${PROJECT_SOURCE_DIR}")
+    endif()
+    add_test(NAME ${_target} COMMAND ${_target})
+  endforeach()
+  target_link_libraries(${name}_grammar_test PRIVATE cursiv::test cursiv::lsp)
+endfunction()

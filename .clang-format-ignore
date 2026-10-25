@@ -1,0 +1,3 @@
+# The scaffold's templates are not C++ until they are substituted: clang-format
+# reads `@CURSIV_NEW_ID@` as three tokens and splits the placeholder in two.
+templates/project/**

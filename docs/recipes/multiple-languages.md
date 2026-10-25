@@ -1,126 +1,136 @@
-# Multiple Languages
+# Several languages in one project
 
-Integrate several dependent languages in one Pegium workspace. A common driver: one file type defines concepts and another consumes them. Pegium's `requirements` example does exactly that, with `.req` and `.tst` files sharing a workspace.
+A workspace may hold more than one language, served by one binary, with
+references that cross from one to the other. In the `requirements` example,
+`.req` declares requirements, `.tst` declares tests, and a test
+names the requirement it covers.
 
-## Core idea
+## Two generated languages
 
-Both languages share **one** custom shared type. In the requirements example that is `RequirementsSharedCoreServices` (deriving `pegium::SharedCoreServices`), and each concrete language gets its own container built from it. When you need editor features, layer the LSP variant `RequirementsSharedServices` (deriving `pegium::SharedServices`) on top of the same core setup.
+Two calls, two ids, two extensions — and they may share one grammar header:
 
-```cpp
-// One shared type, used by both languages.
-struct RequirementsSharedCoreServices : virtual pegium::SharedCoreServices {
-  // define here custom shared services
-};
+`src/CMakeLists.txt`:
 
-// Each language derives CoreServicesFor<...> with the same shared type.
-struct RequirementsCoreServices
-    : pegium::CoreServicesFor<RequirementsSharedCoreServices> {
-  std::unique_ptr<validation::RequirementsValidator> validator;
-  explicit RequirementsCoreServices(
-      const RequirementsSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
-};
+```cmake
+cursiv_generate_language(ID         requirements-lang
+    GRAMMAR    requirements/core/RequirementsGrammar.hpp
+    NAMESPACE  req::Requirements
+    EXTENSIONS .req
+    OUT        requirements/generated)
 
-struct TestsCoreServices
-    : pegium::CoreServicesFor<RequirementsSharedCoreServices> {
-  std::unique_ptr<validation::TestsValidator> validator;
-  explicit TestsCoreServices(
-      const RequirementsSharedCoreServices &sharedServices)
-      : pegium::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
-};
+cursiv_generate_language(ID         tests-lang
+    GRAMMAR    requirements/core/RequirementsGrammar.hpp
+    NAMESPACE  req::Tests
+    EXTENSIONS .tst
+    OUT        requirements/generated)
+
+file(GLOB_RECURSE _core CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/core/*.cpp)
+add_library(requirementsCore ${_core})
+target_link_libraries(requirementsCore
+    PUBLIC requirements-langGenerated tests-langGenerated)
 ```
 
-The explicit two-init constructor is irreducible: `pegium::CoreServices` is a virtual base with no default constructor, so the most-derived container must initialize it directly.
+The header declares two grammar types: `req::Requirements` and `req::Tests`.
+They can use the same AST declarations. Each generated language has its own
+parser and metadata.
 
-This means:
+## Register both languages
 
-- Documents, indexing, and workspace infrastructure stay shared.
-- Each language chooses its own parser.
-- Each language installs its own validators and reference logic.
-- LSP features such as formatters stay in a dedicated LSP layer.
-- All registered languages become visible to the same service registry.
+Define one installer per language and register both in the shared workspace.
+Using the Requirements example's service types, the registration code is:
 
-## A living example
-
-See `examples/requirements/src/requirements/core/CoreModule.cpp`. It builds one service factory for requirements files and another for test files. Each `create*` factory takes the language's **typed** shared type and installs the language's core module (the container *is-a* `RequirementsCoreServices`, so `install*` is a single-argument function):
+`core/CoreModule.cpp`:
 
 ```cpp
-std::unique_ptr<RequirementsCoreServices>
-createRequirementsCoreServices(
-    const RequirementsSharedCoreServices &sharedServices,
-    std::string languageId) {
-  auto services = pegium::makeDefaultCoreServices<RequirementsCoreServices>(
-      sharedServices, std::move(languageId));
-  installRequirementsCoreModule(*services);
-  return services;
+#include "cursiv/core/services/CoreLanguage.hpp"
+#include "requirements/core/CoreModule.hpp"
+#include "requirements/generated/Requirements/Module.hpp"
+#include "requirements/generated/Tests/Module.hpp"
+
+namespace req {
+
+void install_requirements_core_module(RequirementsCoreServices& services) {
+  req::generated::Requirements::install_generated_module(services);
+}
+
+void install_tests_core_module(RequirementsCoreServices& services) {
+  req::generated::Tests::install_generated_module(services);
+}
+
+bool register_core_services(cursiv::SharedCoreServices& shared) {
+  return cursiv::register_language<
+             RequirementsCoreServices, RequirementsSharedCoreServices,
+             install_requirements_core_module>(shared) &&
+         cursiv::register_language<
+             RequirementsCoreServices, RequirementsSharedCoreServices,
+             install_tests_core_module>(shared);
+}
+
+}  // namespace req
+```
+
+These calls create separate service instances, even though both use the same
+container class. Add each language's validation checks to its installer.
+The registry selects services by the document's URI: `a.req` uses the first
+language, and `a.tst` the second.
+
+A binary that serves both announces both extensions:
+
+```
+$ requirements_cli --help
+  this binary serves .req, .tst
+```
+
+## References across languages
+
+A `reference<Requirement>` in the tests language can resolve to a declaration
+exported by a requirements document. Both documents must be built in the same
+workspace.
+
+From the CLI, pass `--root <dir>` to load the workspace folder before
+validating a file. A single-file run only sees that file's declarations.
+
+## One CLI, one server
+
+The command line takes a registrar that installs several languages:
+
+```cpp
+#include "cursiv/cli/cli.hpp"
+#include "requirements/core/CoreModule.hpp"
+
+int main(int argc, char** argv) {
+  return cursiv::run_cli<req::RequirementsSharedCoreServices>(
+      argc, argv, &req::register_core_services);
 }
 ```
 
-The second factory, `createTestsCoreServices`, follows the same pattern but swaps parser, extensions, and validator for the `tests-lang` language.
+The server uses the same registration pattern: `register_lsp_services` installs
+both containers into the shared one, and the editor sees two languages served
+by one process.
 
-The LSP-specific formatters live separately in `examples/requirements/src/requirements/lsp/LspModule.cpp`, where the same core setup is reused and the formatter is added on top. There the `create*` factories build with `pegium::makeDefaultServices<RequirementsServices>` and call `installRequirementsCoreModule(*services)` followed by `installRequirementsLspModule(*services)`.
+## Advanced: embed a grammar in a document
 
-## Registration
-
-Once each language has its own core service object, register them all in the shared registry. The `register*` function takes the **base** `pegium::SharedCoreServices &` handed to it by the workspace, then `dynamic_cast`s it back to the languages' own shared type to build the containers:
-
-```cpp
-bool registerRequirementsCoreServices(
-    pegium::SharedCoreServices &sharedServices) {
-  auto services = createRequirementsAndTestsCoreServices(
-      dynamic_cast<RequirementsSharedCoreServices &>(sharedServices));
-  sharedServices.serviceRegistry->registerServices(
-      std::move(services.requirements));
-  sharedServices.serviceRegistry->registerServices(std::move(services.tests));
-  return true;
-}
-```
-
-This step makes both languages available to document loading and indexing. The LSP registration function `registerRequirementsLspServices` shares the same shape but takes `pegium::SharedServices &`, downcasts to `RequirementsSharedServices &`, and returns the LSP-enabled service containers.
-
-## Wiring the mains
-
-The CLI seeds one shared container with the languages' shared type and registers both languages against it:
+Several registered languages process separate documents. To parse another
+grammar *inside* a document, use `section<Json>(open, close)` instead:
 
 ```cpp
-auto sharedServices =
-    pegium::make_shared_services<requirements::RequirementsSharedCoreServices>();
-auto &shared = *sharedServices;
-auto services = requirements::createRequirementsAndTestsCoreServices(shared);
-shared.serviceRegistry->registerServices(std::move(services.requirements));
-shared.serviceRegistry->registerServices(std::move(services.tests));
+struct Doc : cursiv::GrammarSpec {
+  struct Block
+      : rule<create<ast::Block>(
+            kw<"json"> + assign<&ast::Block::json>(
+                             section<Json>(lit<"'''">, lit<"'''">)))> {};
+  // ...
+};
 ```
 
-The LSP server hands its shared type to `runLanguageServerMain`, which owns the session container and calls the registration function:
+Here `Json` names a grammar type. The caller reads the opening and closing
+tokens; Json's entry reads the content using its own trivia and lexical
+settings. Its `eof` matches the section boundary. The AST can contain nodes
+from both grammars.
 
-```cpp
-return pegium::runLanguageServerMain<requirements::RequirementsSharedServices>(
-    argc, argv, "requirements-lsp",
-    requirements::registerRequirementsLspServices);
-```
-
-## What changes when you split a language
-
-Review these points for each language:
-
-- Parser type
-- Language id
-- File extensions
-- Validation registration
-- Scoping and reference behavior
-- Formatter or other LSP providers, when you expose editor features
-- Editor integration such as syntax highlighting or VS Code contributions
-
-Keep the shared services common unless you want isolated workspaces.
-
-## When not to split
-
-Do not split a language just because the grammar has several entry rules. Keep one language when the files share the same lifecycle, editor behavior, and symbol space.
-
-Split into multiple languages when the file types have clearly distinct identities, or when separate parsers and editor behavior make the model easier to maintain.
-
-## Related pages
-
-- [Examples: Requirements](../examples/requirements.md)
-- [Scoping](scoping/index.md)
-- [Configuration Services](../reference/configuration-services.md)
+This composes parsers, not service containers. It does not install Json's
+validators or scope services for the embedded nodes. The enclosing language
+must provide the services it needs for them. See
+[Embedded grammars](../reference/grammar.md#embedded-grammars) for delimiter
+restrictions and recovery behavior.
