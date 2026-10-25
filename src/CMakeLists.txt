@@ -30,6 +30,10 @@ foreach(_backend IN ITEMS Ll Lr)
   add_library(cursiv${_backend}Gen STATIC EXCLUDE_FROM_ALL ${_sources})
   add_library(cursiv::${_engine}_gen ALIAS cursiv${_backend}Gen)
   target_link_libraries(cursiv${_backend}Gen PUBLIC cursiv::core cursiv::gen)
+  # These large emitters only write source files. Keep grammar analysis and
+  # parser runtimes at the configured optimisation level.
+  set_property(SOURCE cursiv/engines/${_engine}/gen/${_engine}_emit_parser.cpp
+      APPEND PROPERTY COMPILE_OPTIONS $<$<CONFIG:Release>:-O1>)
 endforeach()
 
 # Protocol types, JSON-RPC and transports from our pinned lsp-framework fork.

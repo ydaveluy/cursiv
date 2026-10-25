@@ -21,6 +21,10 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     container: gcc:16
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
     strategy:
       fail-fast: false
       matrix:
@@ -30,17 +34,37 @@ jobs:
         with:
           persist-credentials: false
       - name: tools
-        run: apt-get update && apt-get install -y --no-install-recommends cmake git ninja-build
+        run: apt-get update && apt-get install -y --no-install-recommends ccache cmake git ninja-build
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-gcc16-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-gcc16-${{ matrix.preset }}-
       - name: configure
-        run: cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+        # Keep shared DWARF separate and compressed across the many binaries.
+        run: >-
+          cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
       - name: build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          sed -n '1,5p' /proc/meminfo
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
       - name: test
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
 
   clang:
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
     strategy:
       fail-fast: false
       matrix:
@@ -49,12 +73,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ccache
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-clang22-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-clang22-${{ matrix.preset }}-
       - name: configure
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_CXX_COMPILER=clang++-22 -DCURSIV_WARNINGS_AS_ERRORS=ON
+        run: >-
+          cmake --preset ${{ matrix.preset }} -DCMAKE_CXX_COMPILER=clang++-22
+          -DCURSIV_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
       - name: build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          sed -n '1,5p' /proc/meminfo
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
       - name: test
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
 
   wasi:
     runs-on: ubuntu-26.04
@@ -63,6 +105,9 @@ jobs:
     env:
       CC: clang-22
       CXX: clang++-22
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +119,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+      - name: Install compilation cache
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ccache
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-wasi-sdk34-hostclang22-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-wasi-sdk34-hostclang22-${{ matrix.preset }}-
       - name: cache wasi-sdk
         id: sdk
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -91,9 +144,16 @@ jobs:
       - name: configure
         run: cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
       - name: build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          sed -n '1,5p' /proc/meminfo
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
       - name: test
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
       - name: package extensions
         if: matrix.preset == 'wasi-release'
         run: |

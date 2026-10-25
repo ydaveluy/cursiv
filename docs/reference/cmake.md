@@ -136,6 +136,12 @@ Generates a language for tests. It accepts the same arguments, but defaults
 parser code in Release builds. Relative output follows the same
 `<current-build-directory>/generated-src/` layout as above.
 
+Test languages compile their generated sources in two translation units
+to avoid parsing the same tables repeatedly. Pass `SEPARATE_UNITS` when a test
+specifically needs the production layout across separate translation units.
+Generated test sources also use `-O1` in WASI Debug builds to fit WebAssembly
+function limits; test code and framework libraries retain their Debug settings.
+
 ```cmake
 cursiv_test_language(ID        toy
     GRAMMAR   fixtures/ToyGrammar.hpp

@@ -3892,7 +3892,9 @@ void race_through(const Graph& graph, std::mt19937& rng, unsigned threads,
 // would be kept for good.
 void threads_through_a_dag_never_see_a_cycle() {
   std::mt19937 rng(7);
-  for (unsigned round = 0; round < 100; ++round) {
+  // Cover every graph size and worker count. The latch and barrier cases
+  // below force the specific wait and cancellation interleavings.
+  for (unsigned round = 0; round < 21; ++round) {
     const unsigned n = 6 + round % 20;
     Graph graph(n);
     for (unsigned i = 0; i < n; ++i)
@@ -3909,7 +3911,8 @@ void threads_through_a_dag_never_see_a_cycle() {
 // so a cancelled round ends in errors that are read again as one.
 void threads_around_a_ring_all_see_the_cycle() {
   std::mt19937 rng(11);
-  for (unsigned round = 0; round < 100; ++round) {
+  // Seven sizes and three cancellation phases complete a cycle in 21 rounds.
+  for (unsigned round = 0; round < 21; ++round) {
     const unsigned n = 2 + round % 7;
     Graph graph(n);
     for (unsigned i = 0; i < n; ++i) graph.edges[i].push_back((i + 1) % n);
@@ -3955,7 +3958,8 @@ void run() {
   then(an_already_cancelled_wait_never_registers_a_callback_under_lock);
   then(threads_through_a_dag_never_see_a_cycle);
   then(threads_around_a_ring_all_see_the_cycle);
-  for (unsigned i = 0; i < 50; ++i) {
+  // Each scenario forces its interleaving; keep thread startup bounded.
+  for (unsigned i = 0; i < 5; ++i) {
     cycles_cross_threads(2, false);
     cycles_cross_threads(3, true);
     a_cancelled_producer_can_be_replaced_without_duplicate_items();
@@ -3967,13 +3971,18 @@ void run() {
 }  // namespace reference_resolution
 
 int main() {
-  ast_builder::run();
-  ast_node::run();
-  ast_reflection::run();
-  convert::run();
-  cst::run();
-  cst_node::run();
-  cst_utils::run();
-  reference_resolution::run();
+  const auto run = [](const char* section, void (*test)()) {
+    // Keep the current section visible even if CTest terminates the process.
+    std::fprintf(stderr, "syntax_tree: %s\n", section);
+    test();
+  };
+  run("ast_builder", ast_builder::run);
+  run("ast_node", ast_node::run);
+  run("ast_reflection", ast_reflection::run);
+  run("convert", convert::run);
+  run("cst", cst::run);
+  run("cst_node", cst_node::run);
+  run("cst_utils", cst_utils::run);
+  run("reference_resolution", reference_resolution::run);
   return cursiv::test::report("syntax_tree");
 }

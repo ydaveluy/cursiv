@@ -47,7 +47,9 @@ cursiv_grammar(convll core/syntax-tree/ConvertGrammars.hpp tconv::Ll ENGINE LL)
 cursiv_grammar(door engines/lr/DoorGrammar.hpp tdoor::G ENGINE LR)
 # ONE LANGUAGE, TWO ENGINES: the same grammar generated twice, so a lane can
 # hold both modules and compare what they wrote.
-cursiv_grammar_pair(parity engines/ll/ParityGrammar.hpp tpar::Lr tpar::Ll)
+# These parsers also check shared state across generated translation units.
+cursiv_grammar_pair(parity engines/ll/ParityGrammar.hpp tpar::Lr tpar::Ll
+    SEPARATE_UNITS)
 cursiv_grammar_pair(menu engines/ll/MenuGrammar.hpp tmenu::Lr tmenu::Ll)
 cursiv_grammar_pair(tag engines/ll/TagGrammar.hpp ttag::Lr ttag::Ll)
 cursiv_grammar(passes engines/lr/PassesGrammar.hpp tpasses::G ENGINE LR)
@@ -69,4 +71,4 @@ cursiv_grammar(aball core/syntax-tree/AstBuilderGrammars.hpp tab::All ENGINE LR)
 cursiv_test(syntax_tree_test core/syntax-tree/syntax_tree_test.cpp cursivLrGen
     abbareGenerated aballGenerated duallrGenerated dualllGenerated convGenerated convllGenerated
     cstlexGenerated cstinfixGenerated)
-set_tests_properties(syntax_tree_test PROPERTIES TIMEOUT 30)
+set_tests_properties(syntax_tree_test PROPERTIES TIMEOUT 30 PROCESSORS 4)

@@ -17,6 +17,9 @@ concurrency:
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: "4"
   CTEST_PARALLEL_LEVEL: "4"
+  CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPILERCHECK: content
 
 defaults:
   run:
@@ -26,7 +29,7 @@ jobs:
   analyze:
     runs-on: ubuntu-26.04
     container: gcc:16
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,23 +39,37 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates cmake curl git gnupg ninja-build python3-venv unzip
+            ca-certificates ccache cmake curl git gnupg ninja-build python3-venv unzip
           python3 -m venv .venv-coverage
           .venv-coverage/bin/python -m pip install gcovr==8.7
+      - name: Cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-gcc16-coverage-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-gcc16-coverage-
       - name: Configure coverage
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
           -DCURSIV_MIMALLOC=OFF
       - name: Build
-        run: cmake --build build
+        run: |
+          sed -n '1,5p' /proc/meminfo
+          df -h .
+          ccache --zero-stats
+          cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Collect coverage
         run: >-
           .venv-coverage/bin/gcovr --root . --filter src/
           --gcov-executable gcov --sonarqube build/coverage.xml build
+      - name: Compilation cache statistics
+        if: always()
+        run: ccache --show-stats
       - name: Check SonarCloud configuration
         id: sonar
         if: >-

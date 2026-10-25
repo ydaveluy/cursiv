@@ -87,7 +87,8 @@ if(cursiv_IS_TOP_LEVEL)
     requirements-langGenerated
     degradedGenerated
     owedGenerated)
-  set_tests_properties(LrRepairBudget_test PROPERTIES TIMEOUT 60)
+  # Its CPU work has a 30s watchdog: reserve all four CI test slots.
+  set_tests_properties(LrRepairBudget_test PROPERTIES TIMEOUT 60 PROCESSORS 4)
 endif()
 # Grammars both lowered in process and generated: what the lowering keeps is
 # what the generated parser reads.

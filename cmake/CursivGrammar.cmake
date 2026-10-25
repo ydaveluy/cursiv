@@ -122,7 +122,7 @@ endfunction()
 
 # Shared implementation: test languages get a default output path and cheaper compilation.
 function(_cursiv_generate_language test_only)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "GRAMMAR;NAMESPACE;ID;OUT;BASE;ENGINE"
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "SEPARATE_UNITS" "GRAMMAR;NAMESPACE;ID;OUT;BASE;ENGINE"
       "EXTENSIONS;FILE_NAMES;INCLUDE_DIRS;GENERATOR_ARGS")
   if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: unknown arguments ${ARG_UNPARSED_ARGUMENTS}")
@@ -225,7 +225,26 @@ function(_cursiv_generate_language test_only)
       COMMENT "${_name}: writing ${_dir}"
       VERBATIM)
   add_custom_target(${_name}_generate DEPENDS ${_written})
+  if(test_only AND NOT ARG_SEPARATE_UNITS)
+    # Share the table and grammar headers between the parser and its module.
+    # Reflection stays separate: both metadata units own an anonymous kTypes.
+    set(_testParser "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_name}Generated.dir/Parser.cpp")
+    set(_testSource "// Generated test language compilation unit.\n")
+    foreach(_unit IN LISTS _parserUnits)
+      string(APPEND _testSource "#include \"${_dir}/${_unit}\"\n")
+    endforeach()
+    string(APPEND _testSource
+        "#include \"${_dir}/Grammar.cpp\"\n"
+        "#include \"${_dir}/Module.cpp\"\n")
+    file(GENERATE OUTPUT "${_testParser}" CONTENT "${_testSource}")
+    set_source_files_properties("${_testParser}" PROPERTIES GENERATED TRUE)
+    set(_generatedSources "${_testParser}" "${_dir}/AstReflection.cpp")
+    set(_parserSources "${_testParser}")
+  endif()
   add_library(${_name}Generated STATIC ${_generatedSources})
+  if(test_only)
+    add_dependencies(${_name}Generated ${_name}_generate)
+  endif()
   if(BUILD_SHARED_LIBS AND NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
     set_property(TARGET ${_name}Generated PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
@@ -237,7 +256,10 @@ function(_cursiv_generate_language test_only)
   set(_parserOptimization -O2)
   if(test_only)
     set(_parserOptimization -O1)
-    target_compile_options(${_name}Generated PRIVATE $<$<CONFIG:Release>:-O1>)
+    # WASI engines limit function size and locals; unoptimised generated
+    # parsers can exceed those limits even in otherwise Debug builds.
+    target_compile_options(${_name}Generated PRIVATE
+        $<$<OR:$<CONFIG:Release>,$<PLATFORM_ID:WASI>>:-O1>)
   endif()
   # WASI needs tail calls between parser groups, but not for by-value C++ calls.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
