@@ -12,6 +12,33 @@
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
+// A literal's guard names a terminal: the dialect's override is the one it
+// asks, in both engines.
+namespace tguard {
+
+namespace ast {
+
+struct Doc : cursiv::Extends<cursiv::AstNode> {
+  vector<string_view> items;
+};
+
+}  // namespace ast
+
+struct Base : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct WORDCH : terminal<cr<"a-z">> {};
+  struct IN : terminal<lit<"in", !ref<WORDCH>>> {};
+  struct NUM : terminal<some(d)> {};
+  struct DocRule : rule<create<ast::Doc>(
+                       many(append<&ast::Doc::items>(ref<IN> | ref<NUM>)))> {};
+
+  using entry = DocRule;
+  using ignore = WS;
+};
+
+}  // namespace tguard
+
+
 namespace tderive {
 
 namespace ast {
@@ -38,8 +65,13 @@ struct Base : cursiv::GrammarSpec {
   struct ItemRule : rule<!ref<KW> + assign<&ast::Item::name>(ref<ID>) +
                          lit<"="> + assign<&ast::Item::value>(ref<NUM>)> {};
   struct DocRule : rule<many(append<&ast::Doc::items>(ref<ItemRule>))> {};
+  struct Entry
+      : rule<ref<DocRule> |
+             (lit<"guard:"> +
+              skip(ignored<tguard::Base::WS>, hide<>,
+                   ref<tguard::Base::DocRule> + eof))> {};
 
-  using entry = DocRule;
+  using entry = Entry;
   using ignore = WS;
 };
 
@@ -67,6 +99,10 @@ struct Dialect : cursiv::extends<Base> {
     requires std::same_as<T, Base::KW>
   struct override<T> : terminal<kw<"var">> {};
 
+  template <class T>
+    requires std::same_as<T, tguard::Base::WORDCH>
+  struct override<T> : terminal<cr<"a-z0-9">> {};
+
   struct COMMENT : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
 
   using hidden = list<COMMENT>;
@@ -85,55 +121,12 @@ struct RuleDialect : cursiv::extends<Base> {
                  lit<"*"> + assign<&ast::Item::name>(ref<Base::ID>) + lit<"="> +
                  assign<&ast::Item::value>(ref<Base::NUM>)) |
              super> {};
+  // This variant tests a node-rule override; the terminal guard variants
+  // are already exercised by Base and Dialect.
+  using entry = Base::DocRule;
 };
 
 }  // namespace tderive
-
-// A literal's guard names a terminal: the dialect's override is the one it
-// asks, in both engines.
-namespace tguard {
-
-namespace ast {
-
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<string_view> items;
-};
-
-}  // namespace ast
-
-struct Base : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct WORDCH : terminal<cr<"a-z">> {};
-  struct IN : terminal<lit<"in", !ref<WORDCH>>> {};
-  struct NUM : terminal<some(d)> {};
-  struct DocRule : rule<create<ast::Doc>(
-                       many(append<&ast::Doc::items>(ref<IN> | ref<NUM>)))> {};
-
-  using entry = DocRule;
-  using ignore = WS;
-};
-
-struct Dialect : cursiv::extends<Base> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::WORDCH>
-  struct override<T> : terminal<cr<"a-z0-9">> {};
-};
-
-struct BaseLl : Base {};
-
-struct DialectLl : cursiv::extends<BaseLl> {
-  template <class>
-  struct override;
-
-  template <class T>
-    requires std::same_as<T, Base::WORDCH>
-  struct override<T> : terminal<cr<"a-z0-9">> {};
-};
-
-}  // namespace tguard
 
 // A dialect restating a terminal's text converter: a data rule joining its
 // parts reads each through the dialect's converter.

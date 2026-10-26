@@ -8,24 +8,24 @@
 
 namespace telect::ast {
 
-struct XN : cursiv::AstNode {};
-struct YN : cursiv::AstNode {};
-struct Top : cursiv::AstNode {
+struct XN : cursiv::Extends<cursiv::AstNode> {};
+struct YN : cursiv::Extends<cursiv::AstNode> {};
+struct Top : cursiv::Extends<cursiv::AstNode> {
   XN* x = nullptr;
   YN* y = nullptr;
 };
 
-struct RN : cursiv::AstNode {};
+struct RN : cursiv::Extends<cursiv::AstNode> {};
 struct RX : cursiv::Extends<RN> {};
 struct RY : cursiv::Extends<RN> {};
-struct Hold : cursiv::AstNode {
+struct Hold : cursiv::Extends<cursiv::AstNode> {
   RN* r = nullptr;
 };
 
-struct Group : cursiv::AstNode {};
+struct Group : cursiv::Extends<cursiv::AstNode> {};
 struct Pair : cursiv::Extends<Group> {};
 struct Triple : cursiv::Extends<Group> {};
-struct List : cursiv::AstNode {
+struct List : cursiv::Extends<cursiv::AstNode> {
   cursiv::vector<Group*> groups;
 };
 

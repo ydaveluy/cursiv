@@ -46,8 +46,6 @@ endif()
 cursiv_test(navigation_test lsp/navigation_test.cpp cursiv::lsp wsLsp multirefGenerated)
 
 cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore)
-cursiv_grammar(outlinelr lsp/OutlineGrammar.hpp toutline::Lr ENGINE LR)
-cursiv_test(outline_test lsp/outline_test.cpp cursiv::lsp outlinelrGenerated)
 cursiv_test(code_action_test lsp/code_action_test.cpp cursiv::lsp)
 
 cursiv_test(TextDocumentCursor_test core/workspace/TextDocumentCursor_test.cpp cursiv::core)

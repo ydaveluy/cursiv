@@ -1,7 +1,6 @@
 #include <algorithm>
 #include "cursiv/core/grammar/Grammar.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
-#include "termcondll/generated/Ll/Module.hpp"
 #include "termcondlr/generated/Lr/Module.hpp"
 #include "termcondlr/generated/Lr/Parser.hpp"
 #include <cstdint>
@@ -26,6 +25,7 @@
 #include "rcondll/generated/Ll/Module.hpp"
 #include "rcondnest/generated/Nested/Module.hpp"
 
+namespace rule_condition_cases {
 namespace {
 
 void expect(bool ok, const std::string& what) {
@@ -35,8 +35,10 @@ void expect(bool ok, const std::string& what) {
 }
 
 // The items read, `name name(tag)` each, or `<refused>`.
-std::string items(const cursiv::Parser& p, std::string_view text) {
-  const auto r = p.parse(text);
+std::string items(const cursiv::Parser& p, std::string_view text,
+                  std::string_view prefix = "rules:") {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = p.parse(source);
   const auto* d = r.value_as<tllrcond::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || d == nullptr) return "<refused>";
   std::string out;
@@ -55,7 +57,8 @@ bool reads(const cursiv::Parser& ll, const std::string& text) {
 
 // The hidden leaves of the tree a parse of `text` keeps.
 unsigned hidden(const cursiv::Parser& p, std::string_view text) {
-  const auto r = p.parse(text);
+  const std::string source = "rules:" + std::string(text);
+  const auto r = p.parse(source);
   unsigned n = 0;
   for (cursiv::NodeId i = 0; i < r.cst().size(); ++i)
     n += r.cst()[i].hidden ? 1u : 0u;
@@ -107,8 +110,10 @@ namespace terminal_condition {
 namespace {
 
 // The items read, or `<refused>`.
-std::string items(const cursiv::Parser& p, std::string_view text) {
-  const auto r = p.parse(text);
+std::string items(const cursiv::Parser& p, std::string_view text,
+                  std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = p.parse(source);
   const auto* d = r.value_as<tllterm::Doc>();
   if (!r.accepted || !r.diagnostics.empty() || d == nullptr) return "<refused>";
   std::string out;
@@ -118,9 +123,10 @@ std::string items(const cursiv::Parser& p, std::string_view text) {
 
 // Whether the completion at the end of `text` offers the terminal `name`.
 bool offers(const cursiv::Parser& p, std::string_view text,
-            std::string_view name) {
-  const auto r = p.parse(text);
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
+            std::string_view name, std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = p.parse(source);
+  const auto at = static_cast<cursiv::TextOffset>(source.size());
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at, out);
   for (const auto& f : out)
@@ -131,9 +137,11 @@ bool offers(const cursiv::Parser& p, std::string_view text,
 // The members the completion at the end of `text` names for `name`.
 std::vector<std::string_view> members(const cursiv::Parser& p,
                                       std::string_view text,
-                                      std::string_view name) {
-  const auto r = p.parse(text);
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
+                                      std::string_view name,
+                                      std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = p.parse(source);
+  const auto at = static_cast<cursiv::TextOffset>(source.size());
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at, out);
   std::vector<std::string_view> found;
@@ -146,7 +154,7 @@ std::vector<std::string_view> members(const cursiv::Parser& p,
 }  // namespace
 
 void check_terminal_conditions() {
-  const auto ll = tllterm::generated::Ll::create_parser();
+  const auto ll = tllguardcases::generated::Ll::create_parser();
   const auto lr = tllterm::generated::Lr::create_parser();
   for (const auto& [text, want] : {
            std::pair{"no x1;", "x1 "},
@@ -170,23 +178,24 @@ void check_terminal_conditions() {
            std::pair{"pair nb;", " "},
            std::pair{"pair x;", "<refused>"},
        }) {
-    CHECK(items(*ll, text) == want);
+    CHECK(items(*ll, text, "terms:") == want);
     CHECK(items(*lr, text) == want);
   }
   // A completion asks the terminal it would insert of the condition, its
   // body where no spelling stands for it.
   for (const cursiv::Parser* p : {ll.get(), lr.get()}) {
-    CHECK(offers(*p, "bare ", "NAME") && !offers(*p, "bare ", "NOTE"));
-    CHECK(offers(*p, "no ", "NAME") && !offers(*p, "no ", "NUM"));
-    CHECK(offers(*p, "is ", "DOTTED"));
+    const std::string_view prefix = p == ll.get() ? "terms:" : "";
+    CHECK(offers(*p, "bare ", "NAME", prefix) && !offers(*p, "bare ", "NOTE", prefix));
+    CHECK(offers(*p, "no ", "NAME", prefix) && !offers(*p, "no ", "NUM", prefix));
+    CHECK(offers(*p, "is ", "DOTTED", prefix));
     // A name glued to a keyword reads as one word with it; after `{` it
     // stands alone.
-    CHECK(!offers(*p, "no", "NAME"));
-    CHECK(offers(*p, "group {", "NAME"));
+    CHECK(!offers(*p, "no", "NAME", prefix));
+    CHECK(offers(*p, "group {", "NAME", prefix));
   }
   // Each word a reading admits is asked: the member is the one every reading
   // fills, and the two branches of `pair` fill two.
-  CHECK(members(*ll, "pair ", "NAME") == std::vector<std::string_view>{""});
+  CHECK(members(*ll, "pair ", "NAME", "terms:") == std::vector<std::string_view>{""});
   // A caret measures a phrase that opens on its gap from where the gap
   // begins: it reads on to the `;` standing where its last name would.
   {
@@ -204,9 +213,9 @@ void check_terminal_conditions() {
 }
 }
 
-int main() {
+void run() {
   terminal_condition::check_terminal_conditions();
-  const auto llp = tllrcond::generated::Ll::create_parser();
+  const auto llp = tllguardcases::generated::Ll::create_parser();
   const cursiv::Parser& ll = *llp;
   const auto read = [&](const std::string& text, bool want) {
     expect(reads(ll, text) == want,
@@ -280,9 +289,9 @@ int main() {
     read(text, want);
   // A comment that nests is skipped whole.
   const auto nest = tllrcond::generated::Nested::create_parser();
-  CHECK(items(*nest, "a {- x {- y -} z -} b;") == "<refused>");
-  CHECK(items(*nest, "a {- x {- b -} -} c;") == "a c ;");
-  CHECK(items(*nest, "a {- -} {--} b;") == "<refused>");
+  CHECK(items(*nest, "a {- x {- y -} z -} b;", {}) == "<refused>");
+  CHECK(items(*nest, "a {- x {- b -} -} c;", {}) == "a c ;");
+  CHECK(items(*nest, "a {- -} {--} b;", {}) == "<refused>");
   // A hidden comment between the two stays in the tree.
   CHECK(hidden(ll, "r2 a /*k*/ c;") == 1);
 
@@ -383,5 +392,6 @@ int main() {
   CHECK((!tl_has<tllrcond::Base::Dotted, LrRules>::value &&
          !tl_has<tllrcond::Base::QName, LrRules>::value &&
          !tl_has<tllrcond::Base::DOTS, LrRules>::value));
-  return cursiv::test::report("LlRuleCondition_test");
 }
+
+}  // namespace rule_condition_cases

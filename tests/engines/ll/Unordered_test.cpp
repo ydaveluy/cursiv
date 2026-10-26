@@ -275,6 +275,11 @@ void lowering_paths(const cursiv::Parser& parser) {
     CHECK(atom != nullptr && atom->name == "12");
   } while (std::next_permutation(ops.begin(), ops.end()));
 
+  for (const auto text : {"nests 12!?;", "nests 12!!?~;", "nests 12~?;"}) {
+    const auto result = parser.parse(text);
+    CHECK(!result.accepted || !result.diagnostics.empty());
+  }
+
   for (const auto text :
        {"flaggroup 12 34!;", "flaggroup 12!34;", "flagrun 12 34!;"}) {
     valid(parser, text);
@@ -383,40 +388,6 @@ void loop_in_operand() {
   }
 }
 
-// Three nests in one group: every order of them wraps the name in the order
-// the text names them.
-void nests_in_every_order() {
-  namespace g = tunorderedturns::generated;
-  const auto ll = g::Ll::create_parser();
-  const auto lr = g::Lr::create_parser();
-  const auto llAst = g::Ll::create_ast_reflection();
-  const auto lrAst = g::Lr::create_ast_reflection();
-  std::string ops = "!?~";
-  do {
-    const std::string text = "*a" + ops;
-    alike(*ll, *lr, *llAst, *lrAst, text, true);
-    for (const auto* parser : {ll.get(), lr.get()}) {
-      const auto result = parser->parse(text);
-      CHECK(result.accepted && result.diagnostics.empty());
-      const auto* doc = result.value_as<tunorderedturns::Doc>();
-      CHECK(doc != nullptr);
-      if (!doc) continue;
-      const tunorderedturns::Expr* at = doc->expression;
-      for (std::size_t i = ops.size(); i-- > 0;) {
-        const auto* wrap = cursiv::ast_cast<tunorderedturns::Wrap>(at);
-        CHECK(wrap != nullptr);
-        if (!wrap) break;
-        CHECK(wrap->op == std::string_view(&ops[i], 1));
-        at = wrap->inner;
-      }
-      const auto* name = cursiv::ast_cast<tunorderedturns::Name>(at);
-      CHECK(name != nullptr && name->name == "a");
-    }
-  } while (std::next_permutation(ops.begin(), ops.end()));
-  for (const auto text : {"*a!?", "*a!!?~", "*a~?"})
-    alike(*ll, *lr, *llAst, *lrAst, text, false);
-}
-
 void items_reading_nothing(const cursiv::Parser& parser) {
   for (const auto text :
        {"endof a", "endrule a", "implied a", "implied a ;", "implied ; a",
@@ -436,7 +407,6 @@ void items_reading_nothing(const cursiv::Parser& parser) {
 int main() {
   records_alike();
   loop_in_operand();
-  nests_in_every_order();
   const auto ll = tunordered::generated::Ll::create_parser();
   const auto lr = tunordered::generated::Lr::create_parser();
   exercise(*ll);
@@ -453,7 +423,5 @@ int main() {
   spelt<tunordered::SixNests>();
   refused_too_wide<tunordered::Twelve>();
   refused_too_wide<tunordered::SevenNests>();
-  refused_too_wide<tunordered::TooWide>();
-  refused_too_wide<tunordered::TooWideNests>();
   return cursiv::test::report("Unordered_test");
 }

@@ -1,15 +1,9 @@
-#include "electionll/generated/Ll/Module.hpp"
-#include "electionlr/generated/Lr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/InfixOperatorsGrammar.hpp"
 #include "infixoperatorsll/generated/Ll/Module.hpp"
 #include "infixoperatorslr/generated/Lr/Module.hpp"
-#include "infixoperatorssharedll/generated/SharedLl/Module.hpp"
-#include "infixoperatorssharedlr/generated/SharedLr/Module.hpp"
-#include "nonassocll/generated/Ll/Module.hpp"
-#include "nonassoclr/generated/Lr/Module.hpp"
 #include <cstdio>
 #include <initializer_list>
 #include <iostream>
@@ -140,11 +134,11 @@ void a_region_stays_with_its_sequence(const cursiv::Parser& p) {
 }
 
 void sequences_sharing_a_first_token_are_told_apart(const cursiv::Parser& p) {
-  check(p, "shared:", "a NOT EQUAL b", "(a NOTEQUAL b)");
-  check(p, "shared:", "a NOT LIKE b", "(a NOTLIKE b)");
-  check(p, "shared:", "a NOT LIKE b NOT EQUAL c", "(a NOTLIKE (b NOTEQUAL c))");
-  check(p, "shared:", "a NOT EQUAL b NOT LIKE c", "((a NOTEQUAL b) NOTLIKE c)");
-  check(p, "shared:", "a NOT LIKE b NOT LIKE c", "((a NOTLIKE b) NOTLIKE c)");
+  check(p, "shared:", "a IS EQUAL b", "(a ISEQUAL b)");
+  check(p, "shared:", "a IS LIKE b", "(a ISLIKE b)");
+  check(p, "shared:", "a IS LIKE b IS EQUAL c", "(a ISLIKE (b ISEQUAL c))");
+  check(p, "shared:", "a IS EQUAL b IS LIKE c", "((a ISEQUAL b) ISLIKE c)");
+  check(p, "shared:", "a IS LIKE b IS LIKE c", "((a ISLIKE b) ISLIKE c)");
 }
 
 void a_sequence_is_one_arm_of_a_choice(const cursiv::Parser& p) {
@@ -153,7 +147,7 @@ void a_sequence_is_one_arm_of_a_choice(const cursiv::Parser& p) {
   check(p, "arm:", "a + b NOT EQUAL c + d", "(((a + b) NOTEQUAL c) + d)");
 }
 
-void every_engine(const cursiv::Parser& p, const cursiv::Parser& shared) {
+void every_engine(const cursiv::Parser& p) {
   a_sequence_hands_over_its_parts_joined(p);
   trivia_stands_inside_the_sequence(p);
   a_chain_of_the_sequence_groups_by_the_level(p);
@@ -163,7 +157,7 @@ void every_engine(const cursiv::Parser& p, const cursiv::Parser& shared) {
   conditions_stand_inside_the_sequence(p);
   adjacency_holds_inside_the_sequence(p);
   a_region_stays_with_its_sequence(p);
-  sequences_sharing_a_first_token_are_told_apart(shared);
+  sequences_sharing_a_first_token_are_told_apart(p);
   a_sequence_is_one_arm_of_a_choice(p);
 }
 
@@ -171,11 +165,9 @@ void every_engine(const cursiv::Parser& p, const cursiv::Parser& shared) {
 
 void run() {
   engine = "Ll";
-  every_engine(*tinfixop::generated::Ll::create_parser(),
-               *tinfixop::generated::SharedLl::create_parser());
+  every_engine(*toperators::generated::Ll::create_parser());
   engine = "Lr";
-  every_engine(*tinfixop::generated::Lr::create_parser(),
-               *tinfixop::generated::SharedLr::create_parser());
+  every_engine(*toperators::generated::Lr::create_parser());
 
 }
 
@@ -202,7 +194,7 @@ void spell(const tnonassoc::ast::Expr& expr, std::string& out) {
 }
 
 std::string read(const cursiv::Parser& parser, std::string_view text) {
-  const std::string source(text);
+  const std::string source = "nonassoc:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
   const auto* const doc = r.value_as<tnonassoc::ast::Document>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
@@ -226,28 +218,28 @@ void check(const cursiv::Parser& parser, std::string_view text,
 }
 
 void one_operator_of_the_level_reads(const cursiv::Parser& parser) {
-  check(parser, "a < b", "(a<b)");
-  check(parser, "a > b", "(a>b)");
-  check(parser, "a + b < c * d", "((a+b)<(c*d))");
+  check(parser, "a <~ b", "(a<~b)");
+  check(parser, "a >~ b", "(a>~b)");
+  check(parser, "a +~ b <~ c *~ d", "((a+~b)<~(c*~d))");
 }
 
 void a_chain_of_the_level_is_refused(const cursiv::Parser& parser) {
-  check(parser, "a < b < c", "<refused>");
-  check(parser, "a < b > c", "<refused>");
-  check(parser, "a > b > c", "<refused>");
-  check(parser, "a + b < c < d", "<refused>");
-  check(parser, "a < b * c < d", "<refused>");
+  check(parser, "a <~ b <~ c", "<refused>");
+  check(parser, "a <~ b >~ c", "<refused>");
+  check(parser, "a >~ b >~ c", "<refused>");
+  check(parser, "a +~ b <~ c <~ d", "<refused>");
+  check(parser, "a <~ b *~ c <~ d", "<refused>");
 }
 
 void a_chain_behind_a_looser_operator_is_refused(const cursiv::Parser& parser) {
-  check(parser, "a & b < c < d", "<refused>");
-  check(parser, "a < b & c < d", "((a<b)&(c<d))");
-  check(parser, "a < b & c & d", "(((a<b)&c)&d)");
+  check(parser, "a &~ b <~ c <~ d", "<refused>");
+  check(parser, "a <~ b &~ c <~ d", "((a<~b)&~(c<~d))");
+  check(parser, "a <~ b &~ c &~ d", "(((a<~b)&~c)&~d)");
 }
 
 void parentheses_group_the_chain(const cursiv::Parser& parser) {
-  check(parser, "(a < b) < c", "((a<b)<c)");
-  check(parser, "a < (b < c)", "(a<(b<c))");
+  check(parser, "(a <~ b) <~ c", "((a<~b)<~c)");
+  check(parser, "a <~ (b <~ c)", "(a<~(b<~c))");
 }
 
 void every_engine(const cursiv::Parser& parser) {
@@ -261,9 +253,9 @@ void every_engine(const cursiv::Parser& parser) {
 
 void run() {
   engine = "Ll";
-  every_engine(*tnonassoc::generated::Ll::create_parser());
+  every_engine(*toperators::generated::Ll::create_parser());
   engine = "Lr";
-  every_engine(*tnonassoc::generated::Lr::create_parser());
+  every_engine(*toperators::generated::Lr::create_parser());
 
 }
 
@@ -341,7 +333,8 @@ void agree(std::string_view prefix, Ll ll, LlAst llAst, Lr lr, LrAst lrAst,
   const auto check = [&](const auto& parser, const auto& ast,
                          std::string_view engine, std::string_view text,
                          std::string_view want) {
-    const std::string source = std::string(prefix) + std::string(text);
+    const std::string source = "election:" + std::string(prefix) +
+                               std::string(text);
     const auto result = parser->parse(source);
     CHECK(result.accepted && result.diagnostics.empty() && result.value);
     if (!result.value) return;
@@ -361,7 +354,7 @@ void agree(std::string_view prefix, Ll ll, LlAst llAst, Lr lr, LrAst lrAst,
 }  // namespace
 
 void run() {
-  namespace gen = telectionloop::generated;
+  namespace gen = toperators::generated;
   agree("", gen::Ll::create_parser(), gen::Ll::create_ast_reflection(),
         gen::Lr::create_parser(), gen::Lr::create_ast_reflection(),
         {{"x", "x"}, {"x y", "ns(x)"}, {"x y y", "ns(xy)"}});
@@ -386,18 +379,6 @@ void run() {
          {"a+a+a+a", "(((a+a)+a)+a)"},
          {"(a+a)*a", "((a+a)*a)"},
          {"a*(a+a)", "(a*(a+a))"},
-         {"fn=>a*a+a", "fn(((a*a)+a))"},
-         {"a*fn=>a+a", "(a*fn((a+a)))"},
-         {"include a*a+a", "include(((a*a)+a))"},
-         {"a*include a+a", "(a*include((a+a)))"},
-         {"cast a*a+a", "cast(((a*a)+a))"},
-         {"a*cast a+a", "(a*cast((a+a)))"}});
-  agree("infix:", gen::Ll::create_parser(), gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(), gen::Lr::create_ast_reflection(),
-        {{"a+a+a", "((a+a)+a)"},
-         {"a+a+a+a", "(((a+a)+a)+a)"},
-         {"a+a*a", "(a+(a*a))"},
-         {"a*a+a", "((a*a)+a)"},
          {"fn=>a*a+a", "fn(((a*a)+a))"},
          {"a*fn=>a+a", "(a*fn((a+a)))"},
          {"include a*a+a", "include(((a*a)+a))"},

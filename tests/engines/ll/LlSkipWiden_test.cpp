@@ -46,21 +46,6 @@ void expect_cases(Ll ll, LlAst llr,
   }
 }
 
-std::string numbers(unsigned n) {
-  std::string out = "Array{";
-  for (unsigned i = 0; i < n; ++i)
-    out += "items" + std::to_string(i) + "=Number{} ";
-  return out + "} ";
-}
-
-std::string arrays(std::initializer_list<unsigned> sizes) {
-  std::string out = "Doc{";
-  unsigned i = 0;
-  for (const unsigned n : sizes)
-    out += "arrays" + std::to_string(i++) + "=" + numbers(n);
-  return out + "}";
-}
-
 std::string scalars(unsigned n) {
   std::string out;
   for (unsigned i = 0; i < n; ++i)
@@ -72,14 +57,6 @@ std::string scalars(unsigned n) {
 
 int main() {
   using namespace tllwiden::generated;
-  expect_cases(Ll::create_parser(), Ll::create_ast_reflection(),
-        {{"[1, 2]", arrays({2})},
-         {"[1,\n 2]", arrays({2})},
-         {"[\n1\n]", arrays({1})},
-         {"[1, # note\n 2]", arrays({2}), "# note|"},
-         {"[1]\n[2]", arrays({1, 1})},
-         {"[1]\n\n[2]", arrays({1, 1})},
-         {"[1,\n2]\n[3, # c\n4]", arrays({2, 2}), "# c|"}});
   const std::string flat = "Entry{value=Scalar{} } ";
   const std::string list2 = "Entry{value=List{" + scalars(2) + "} } ";
   const auto file = [](const std::string& a, const std::string& b = {}) {

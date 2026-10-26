@@ -132,6 +132,5 @@ struct G : cursiv::GrammarSpec {
   using hidden = CM;
 };
 
-struct Ll : G {};
 
 }  // namespace tconv

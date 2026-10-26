@@ -6,6 +6,8 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/BoundaryGrammar.hpp"
+#include "engines/lr/NewlineGrammar.hpp"
 
 namespace topt {
 
@@ -136,7 +138,11 @@ struct OptionalsG : cursiv::GrammarSpec {
   struct Entry : rule<(kw<"optionals"> + ref<Block>) |
                       (kw<"storey"> + ref<StoreyBlock>) |
                       (kw<"entangled"> + ref<RecsRule>) |
-                      (kw<"recycle"> + ref<VarsRule>)> {};
+                      (kw<"recycle"> + ref<VarsRule>) |
+                      ref<tbnd::BoundaryG::Root> |
+                      (lit<"newline:"> +
+                       skip(ignored<tnl::NlG::WS>, hide<>,
+                            ref<tnl::NlG::Root> + eof))> {};
 
   using entry = Entry;
   using ignore = WS;

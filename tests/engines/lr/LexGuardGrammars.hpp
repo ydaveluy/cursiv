@@ -6,6 +6,7 @@
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "engines/lr/AlikeCandidatesGrammar.hpp"
+#include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"
 #include "engines/lr/TypoAlternativesGrammar.hpp"
 
@@ -274,7 +275,8 @@ struct G : Cases {
                       (kw<"typomulti"> + ref<typomulti::G::Root>) |
                       ref<ttyporead::G::Root> |
                       (kw<"heads"> + ref<trefusedheads::G::Root>) |
-                      (kw<"shifted"> + ref<talike::Shifted::Root>)> {};
+                      (kw<"shifted"> + ref<talike::Shifted::Root>) |
+                      (kw<"handoff"> + ref<tkeyword::Behind::Root>)> {};
   using entry = Entry;
 };
 

@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include "caretclimbll/generated/Ll/Module.hpp"
+#include "indirectfoldll/generated/Ll/Module.hpp"
 #include "cursiv/core/grammar/Conversion.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
@@ -1257,7 +1257,7 @@ void a_caret_inside_a_token_answers_in_its_place() {
 // A spelling the lexer would run on into a comment is no answer, however far
 // past the caret that comment closes.
 void a_spelling_is_judged_by_the_text_as_far_as_it_runs() {
-  const auto ll = tcaretcases::generated::Ll::create_parser();
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   const std::string text = "tail:a * bbbbbbbbbbbb /* c */";
   const cursiv::ParseResult b = ll->parse(text);
   CHECK(b.accepted && b.diagnostics.empty() && b.value);

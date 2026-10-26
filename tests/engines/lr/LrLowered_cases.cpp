@@ -289,8 +289,8 @@ int run() {
 
 // A rule only a region reaches is read there, where a skipped terminal is a
 // token of its own: the reading outside is never entered, so it refuses
-// nothing. A rule read outside too does name the terminal where no text can
-// match it.
+// nothing. The corresponding refusal outside a region is covered by
+// refusals/skipped_terminal_shared.hpp.
 namespace region_rule {
 
 namespace {
@@ -306,25 +306,12 @@ struct Inside : cursiv::GrammarSpec {
   using ignore = WS;
 };
 
-struct Both : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct ID : terminal<some(cr<"a-z">)> {};
-  struct Pair : rule<ref<ID> + ref<WS> + ref<ID>> {};
-  struct Root : rule<create<Doc>((lit<"p"> + ref<Pair>) |
-                                 tight(lit<"["> + ref<Pair> + lit<"]">))> {};
-  using entry = Root;
-  using ignore = WS;
-};
-
 }  // namespace
 
 int run() {
   const cursiv::LrLowered& inside = cursiv::LrLowering<Inside>::table();
   CHECK(!inside.fault);
   CHECK(!cursiv::lr_build_automaton(inside).cfg.lowerFail());
-  const cursiv::LrLowered& both = cursiv::LrLowering<Both>::table();
-  CHECK(both.fault.code == cursiv::GrammarFaultCode::skippedTerminal);
-  CHECK(both.cfg.nt_name(both.fault.rule) == "Pair");
   return 0;
 }
 
@@ -468,10 +455,6 @@ struct Between : Base {
 };
 
 // Each of these reads its text one way.
-struct Flat : Base {
-  struct Root : rule<create<Doc>(many(ref<X>) + lit<";">)> {};
-  using entry = Root;
-};
 struct Words : Base {
   struct Word : rule<ref<X> + lit<"w">> {};
   struct Root : rule<create<Doc>(many(ref<Word>) + lit<";">)> {};
@@ -569,7 +552,7 @@ int run() {
   CHECK(found<Twice>().size() == 1 && found<Between>().size() == 1);
   CHECK(says<Twice>("rule `Root` reads a run of `X` twice in a row"));
   CHECK(says<Between>("a run of `X` twice"));
-  CHECK(found<Flat>().empty());
+  CHECK(found<nested_repeat::Flat>().empty());
   CHECK(found<Words>().empty());
   CHECK(found<Apart>().empty());
   CHECK(found<Others>().empty());

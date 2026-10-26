@@ -4,11 +4,13 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/PrefixFactorGrammar.hpp"
-#include "prefixfactorll/generated/Ll/Module.hpp"
+#include "indirectfoldll/generated/Ll/Module.hpp"
 
+namespace prefix_factor_cases {
 namespace {
 
 using namespace tllprefix;
+constexpr std::string_view kPrefix = "factor:";
 
 // Fixed shapes and preorder spans exercise the LL prefix rewrite without
 // building another backend. Shared conformance suites compare both engines.
@@ -19,8 +21,10 @@ std::string node_shape(const Expression* value, const cursiv::AstNode* parent,
   CHECK(value->parent == parent && value->cstNodeId < tree.size());
   if (value->cstNodeId < tree.size()) {
     const auto& span = tree[value->cstNodeId];
+    CHECK(span.begin >= kPrefix.size());
     if (!spans.empty()) spans += ' ';
-    spans += std::to_string(span.begin) + '-' + std::to_string(span.end);
+    spans += std::to_string(span.begin - kPrefix.size()) + '-' +
+             std::to_string(span.end - kPrefix.size());
     CHECK(span.begin <= span.end && span.end <= tree.text().size());
     if (parent != nullptr && parent->cstNodeId < tree.size()) {
       const auto& outer = tree[parent->cstNodeId];
@@ -60,7 +64,8 @@ std::string node_shape(const Expression* value, const cursiv::AstNode* parent,
 
 void expect_shape(const cursiv::Parser& parser, std::string_view source,
                   std::string_view expected, std::string_view expectedSpans) {
-  const auto parsed = parser.parse(source);
+  const std::string input = std::string(kPrefix) + std::string(source);
+  const auto parsed = parser.parse(input);
   CHECK(parsed.accepted && parsed.diagnostics.empty());
   const auto* doc = parsed.value_as<Document>();
   CHECK(doc != nullptr && doc->parent == nullptr);
@@ -76,7 +81,8 @@ void expect_shape(const cursiv::Parser& parser, std::string_view source,
 
 void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
   for (const std::string_view text : {"x", "x y", "x y y", "rc x y"}) {
-    const auto result = parser.parse(text);
+    const std::string input = std::string(kPrefix) + std::string(text);
+    const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
     const auto* document = result.value_as<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
@@ -98,21 +104,24 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
     if (child->cstNodeId < result.cst().size()) {
       const auto& span = result.cst()[child->cstNodeId];
       // DirectRc adopts RC, so its record includes the leading `rc`.
-      CHECK(span.begin == 0);
-      CHECK(span.end == (text == "x y y" ? 3u : text == "rc x y" ? 6u : 1u));
+      CHECK(span.begin == kPrefix.size());
+      CHECK(span.end == kPrefix.size() +
+                            (text == "x y y" ? 3u : text == "rc x y" ? 6u : 1u));
     }
     if (wrapped != nullptr) {
       CHECK(wrapped->y && wrapped->parent == document);
       CHECK(wrapped->cstNodeId < result.cst().size());
       if (wrapped->cstNodeId < result.cst().size()) {
         const auto& outer = result.cst()[wrapped->cstNodeId];
-        CHECK(outer.begin == 0 && outer.end == text.size());
+        CHECK(outer.begin == kPrefix.size() &&
+              outer.end == kPrefix.size() + text.size());
       }
     }
   }
   // Appending the shared child preserves the same outer priority.
   for (const std::string_view text : {"append x y", "append x y y"}) {
-    const auto result = parser.parse(text);
+    const std::string input = std::string(kPrefix) + std::string(text);
+    const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
     const auto* document = result.value_as<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
@@ -132,7 +141,8 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
   // on x y y to reach the explicit end of this construct.
   for (const std::string_view text :
        {"reverse x;", "reverse x y;", "reverse x y y;"}) {
-    const auto result = parser.parse(text);
+    const std::string input = std::string(kPrefix) + std::string(text);
+    const auto result = parser.parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
     const auto* document = result.value_as<Document>();
     CHECK(document != nullptr && document->values.size() == 1);
@@ -155,8 +165,8 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
 
 }  // namespace
 
-int main() {
-  const auto ll = tllprefix::generated::Ll::create_parser();
+void run() {
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   outer_choice_keeps_its_priority(*ll);
   struct Case {
     std::string_view text, shape, spans;
@@ -204,5 +214,6 @@ int main() {
     const std::string source = "[" + std::string(c.text) + "]";
     expect_shape(*ll, source, c.shape, c.spans);
   }
-  return cursiv::test::report("LlPrefixFactor_test");
 }
+
+}  // namespace prefix_factor_cases

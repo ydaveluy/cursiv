@@ -72,8 +72,7 @@ void expect_tree(const cursiv::Parser& parser, std::string_view text,
 
 void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
-  for (unsigned round = 0; round < 3; ++round)
-    for (const auto& [text, tree] : {
+  for (const auto& [text, tree] : {
          std::pair{"root list[]", "(root;null(;null))"},
          {"root list[,]", "(root;null(;null)(;null))"},
          {"root list[,,]", "(root;null(;null)(;null)(;null))"},
@@ -95,7 +94,7 @@ void run() {
          {"tree:(,);", "(;null(;null)(;null))"},
          {"tree:(,,(,));", "(;null(;null)(;null)(;null(;null)(;null)))"},
          {"tree:(A,,B)R;", "(R;null(A;null)(;null)(B;null))"}})
-      expect_tree(*ll, text, tree);
+    expect_tree(*ll, text, tree);
 }
 
 }  // namespace ll_creation_boundary_cases

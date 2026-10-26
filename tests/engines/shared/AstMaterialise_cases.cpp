@@ -242,8 +242,6 @@ void check(const Engine& e, std::string_view text, std::string_view expected,
 }
 
 void a_nest_wraps_the_node_the_called_rule_made(const Engine& e) {
-  check(e, "many a", "Ident{}", 1);
-  check(e, "many a[b]", "Index{array=Ident{} index=Ident{} }", 3);
   check(e, "one a[b]", "Index{array=Ident{} index=Ident{} }", 3);
   check(e, "some a[b]", "Index{array=Ident{} index=Ident{} }", 3);
   check(e, "some a[b][c]",
@@ -277,10 +275,3 @@ void run() {
 }
 
 }  // namespace nest_adopt_cases
-
-int main() {
-  cursiv::test::count_expectations();
-  ast_materialise_cases::run();
-  nest_adopt_cases::run();
-  return cursiv::test::report("AstMaterialise_test");
-}

@@ -14,13 +14,11 @@ cursiv_test(LrEdges_test engines/lr/LrEdges_test.cpp
 cursiv_grammar(skiplr engines/lr/RegionSkipGrammar.hpp tskip::Lr ENGINE LR)
 # Twenty optional positions on a region's edge or an end assertion.
 cursiv_grammar(wideoptionallr engines/lr/WideOptionalGrammar.hpp twide::Lr ENGINE LR)
-# Embedded grammars in both engines, with one standalone JSON oracle.
+# Embedded grammars in both engines, checked against fixed expectations.
 cursiv_grammar_pair(embed engines/lr/EmbedGrammar.hpp tembed::DocLr tembed::DocLl)
-cursiv_grammar(embedjsonlr engines/lr/EmbedGrammar.hpp tembed::JsonLr ENGINE LR)
 cursiv_test(Embed_test engines/lr/Embed_test.cpp
     embedlrGenerated
-    embedllGenerated
-    embedjsonlrGenerated)
+    embedllGenerated)
 cursiv_grammar_pair(sectiontail engines/lr/SectionTailGrammar.hpp tsection::Lr tsection::Ll)
 cursiv_grammar(lraudit engines/lr/AuditGrammar.hpp taudit::G ENGINE LR)
 cursiv_grammar(peekcaret engines/lr/PeekCaretGrammar.hpp tpeekcaret::G ENGINE LR)
@@ -34,6 +32,8 @@ cursiv_test(LrStates_test engines/lr/LrStates_test.cpp
     continuedlrGenerated
     trivialrGenerated
     rulerefusalGenerated)
+target_sources(LrStates_test PRIVATE engines/lr/LrRuleRefusal_cases.cpp)
+set_target_properties(LrStates_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 # The cases of the passes grammar: construction passes, ranked cells and soft
 # keywords.
 # Only the master project builds what the shipped languages' own documents ask.
@@ -61,7 +61,7 @@ if(cursiv_IS_TOP_LEVEL)
     domain-modelGenerated
     indentGenerated
     ambtailGenerated
-    danglingGenerated
+    electionGenerated
     astfusedlrGenerated
     opentokenGenerated
     asiGenerated

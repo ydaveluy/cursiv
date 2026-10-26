@@ -86,7 +86,7 @@ void run() {
 
   // One `*` both an operator and a glob's suffix: an operand is a call of its
   // own, whose turns win over stopping.
-  namespace fold = tllindirect::generated;
+  namespace fold = tllexpressions::generated;
   auto foldParser = fold::Ll::create_parser();
   auto foldReflection = fold::Ll::create_ast_reflection();
   expect_tree("", foldParser, foldReflection,

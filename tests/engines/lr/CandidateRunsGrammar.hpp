@@ -2,6 +2,7 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/AsciiRunsGrammar.hpp"
 
 namespace tcandrun {
 
@@ -21,7 +22,10 @@ struct G : cursiv::GrammarSpec {
                     (ref<Quoted> + lit<"!">) | (ref<OtherQuoted> + lit<"?">) |
                     (ref<Longer> + lit<"!">) | (kw<"while"> + lit<";">) |
                     (ref<Bounded> + lit<"!">) | (ref<OtherBounded> + lit<"?">)))> {};
-  using entry = Root;
+  struct Entry : rule<ref<Root> |
+                      (lit<"runs:"> +
+                       tight(ref<tasciiruns::AsciiRunsGrammar::Entry> + eof))> {};
+  using entry = Entry;
   using ignore = WS;
 };
 

@@ -20,13 +20,13 @@
 #include "engines/ll/ReservedRefusedGlrGrammar.hpp"
 #include "engines/ll/ReservedRefusedGrammar.hpp"
 #include "engines/ll/ReservedRefusedPeekGrammar.hpp"
-#include "refusedglrll/generated/Ll/Module.hpp"
+#include "rcondll/generated/Ll/Module.hpp"
 #include "refusedll/generated/Ll/Module.hpp"
 #include "refusedll/generated/Ll/Table.hpp"
 #include "refusedlr/generated/Lr/Module.hpp"
 #include "refusedlr/generated/Lr/Table.hpp"
-#include "refusedpeekll/generated/Ll/Module.hpp"
 
+namespace reserved_refused_cases {
 namespace {
 
 using Cases = std::span<const std::pair<std::string_view, std::string_view>>;
@@ -64,9 +64,10 @@ std::string peek_items(const cursiv::ParseResult& r) {
 }
 
 void check(const cursiv::Parser& ll, const cursiv::Parser* lr, Spell spell,
-           Cases cases) {
+           Cases cases, std::string_view prefix = {}) {
   for (const auto& [text, expected] : cases) {
-    const auto a = ll.parse(text);
+    const std::string source = std::string(prefix) + std::string(text);
+    const auto a = ll.parse(source);
     bool same = a.diagnostics.empty() && spell(a) == expected;
     if (lr) {
       const auto b = lr->parse(text);
@@ -146,7 +147,7 @@ void a_refused_keyword_reserves_nothing_from_a_misspelling() {
 // A keyword refused at a position is off it and reserves nothing there: the
 // bytes read as a name, in either engine, and in a mode that reads several
 // candidates.
-int main() {
+void run() {
   a_refused_keyword_reserves_nothing_from_a_misspelling();
   constexpr std::pair<std::string_view, std::string_view> plain[] = {
       {"in x", "IN x "},
@@ -167,8 +168,8 @@ int main() {
       {"inx-", "t:inx "},
       {"x- in-place.", "t:x t:in n:place "},
   };
-  check(*tllrefusedpeek::generated::Ll::create_parser(),
-        nullptr, peek_items, peek);
+  check(*tllguardcases::generated::Ll::create_parser(),
+        nullptr, peek_items, peek, "peek:");
   constexpr std::pair<std::string_view, std::string_view> several[] = {
       {"in place.", "IN n:place "},
       {"in-place.", "t:in n:place "},
@@ -177,7 +178,8 @@ int main() {
       {"inx-", "t:inx "},
       {"x- in-place.", "t:x t:in n:place "},
   };
-  check(*tllrefusedglr::generated::Ll::create_parser(),
-        nullptr, several_items, several);
-  return cursiv::test::report("LlReservedRefused_test");
+  check(*tllguardcases::generated::Ll::create_parser(),
+        nullptr, several_items, several, "several:");
 }
+
+}  // namespace reserved_refused_cases

@@ -56,7 +56,6 @@
 #include "guard/generated/G/Table.hpp"
 #include "guardtrivia/generated/G/Module.hpp"
 #include "guardtrivia/generated/G/Table.hpp"
-#include "keywordbehindlr/generated/BehindLr/Module.hpp"
 
 #include "lraudit/generated/G/Module.hpp"
 #include "lraudit/generated/G/Table.hpp"
@@ -76,8 +75,6 @@
 #ifdef CURSIV_LR_LEXER_CONTRACT
 #include "arithmetics/generated/Arith/Parser.hpp"
 #include "arithmetics/generated/Arith/Table.hpp"
-#include "asciiruns/generated/AsciiRunsGrammar/Parser.hpp"
-#include "asciiruns/generated/AsciiRunsGrammar/Table.hpp"
 #endif
 
 // The lexer's tables: candidate runs, typo alternatives, guards and
@@ -916,7 +913,7 @@ void guard_rows_are_packed(const char* lang) {
 
 void the_hard_shapes_answer_the_same_from_every_form() {
   LANE(arith::generated::Arith, "arithmetics");
-  LANE(tasciiruns::generated::AsciiRunsGrammar, "asciiruns");
+  LANE(tcandrun::generated::G, "candidate and ASCII runs");
   LANE(tnestedlex::overlap::generated::G, "relayoverlap");
   LANE(tonemode::generated::G, "onemode");
   // One mode lexes as every other table does, through the walk of all.
@@ -936,7 +933,6 @@ void an_echo_answers_the_same_from_every_form() {
 // reserved -- and every form must hand back the same one.
 void a_refused_keyword_hands_the_spelling_back_the_same_way() {
   LANE(tguard::generated::G, "guard");
-  LANE(tguard::generated::G, "behind");
   // A refused word behind a head takes its terminal off the position, and
   // what stands without it is the answer. Exercise each lexer form
   // explicitly: random bytes seldom spell a guard.
@@ -1061,8 +1057,8 @@ void the_reading_ends_where_the_lexer_does(const char* lang,
 
 int run() {
   const auto tested =
-      long_runs_agree<tasciiruns::generated::AsciiRunsGrammar::kTable>(
-          "asciiruns", tasciiruns::generated::AsciiRunsGrammar::kDrive);
+      long_runs_agree<tcandrun::generated::G::kTable>(
+          "candidate and ASCII runs", tcandrun::generated::G::kDrive);
   for (const std::string_view terminal : {"Hex", "High", "Asymmetric", "Byte", "Nul"})
     CHECK(std::ranges::find(tested, terminal) != tested.end());
   long_runs_agree<arith::generated::Arith::kTable>(
@@ -1852,9 +1848,8 @@ void reads_the_keyword(Lr& lr, const char* head) {
 }  // namespace
 
 int run() {
-  namespace gen = tkeyword::generated;
-  const auto blr = gen::BehindLr::create_parser();
-  reads_the_keyword(blr, "p ");
+  const auto blr = tguard::generated::G::create_parser();
+  reads_the_keyword(blr, "handoff p ");
   return 0;
 }
 }  // namespace case_keywordhandoff

@@ -124,25 +124,33 @@ struct Gaps : cursiv::GrammarSpec {
   using ignore = Blank;
 };
 
-// A word boundary that is a complement holds the bytes that start no scalar.
-struct Bounds : cursiv::GrammarSpec {
-  struct WS : terminal<some(cr<" ">)> {};
-  struct Word : terminal<kw<"if">> {};
-  struct Other : terminal<some(~cr<" ;">)> {};
-  struct Semi : terminal<lit<";">> {};
-  template <class T>
-  struct Pick : rule<create<ast::Item> + assign<&ast::Item::text>(ref<T>)> {};
-  struct Root : rule<create<ast::Doc> +
-                     some(append<&ast::Doc::items>(ref<Pick<Word>>) |
-                          append<&ast::Doc::items>(ref<Pick<Other>>) |
-                          append<&ast::Doc::items>(ref<Pick<Semi>>))> {};
-  using entry = Root;
-  using ignore = WS;
-  static constexpr auto word_boundary = ~cr<" ;">;
+// Unicode decoding and class membership use the shared lexical machinery.
+// The full catalogue runs in Lr; this smaller entry exercises LL's token and
+// condition boundaries without duplicating all Unicode-property tables.
+struct Integration : Base {
+  struct Entry
+      : rule<(create<ast::Doc> +
+              (arm<"one:", One> | arm<"two:", Two> |
+               then<"rna:", RunNotA> | then<"rne:", RunNotAcute> |
+               then<"xa:", XThenAcute> | then<"xo:", XThenOther> |
+               then<"xg:", XGuarded> | arm<"first:", AcuteFirst> |
+               (lit<"rn1:"> + !~cr<"é"> + item<Acute>) |
+               (lit<"rn2:"> + &~cr<"é"> + item<One>) |
+               (lit<"bytes:"> + some(item<Raw>)) |
+               (lit<"rb:"> + lit<"a"> + byte + lit<"b">) |
+               (lit<"rc1:"> + &byte + lit<"x">) |
+               (lit<"rc2:"> + &byte + lit<"é">) |
+               (lit<"rc3:"> + &any + lit<"é">) |
+               (lit<"rc4:"> + &cr<"})"> + lit<"}">) |
+               (lit<"rc5:"> + &any + lit<"\xE9">) |
+               (lit<"rc6:"> + &byte + lit<"\xE9">) |
+               (lit<"rt1:"> + &byte + item<One>) |
+               (lit<"rt3:"> + &any + item<One>)) +
+              eof) |
+             (lit<"gaps:"> + skip(ignored<Gaps::Blank>, hide<>,
+                                   ref<Gaps::Root> + eof))> {};
+  using entry = Entry;
 };
-
-struct BoundsLl : Bounds {};
-struct BoundsLr : Bounds {};
 
 }  // namespace tchars
 
@@ -188,8 +196,8 @@ struct Suite : Base {
                           hide<>, ref<trepeatedunicode::Base::Root> + eof))> {};
   using entry = Entry;
 };
-struct Ll : Suite {};
-// Scalar guard competition belongs to LR; shared decoding still runs in LL.
+// The complete Unicode/byte catalogue runs once; LL keeps its own integration
+// cases through Integration in the lexical-backends language.
 struct Lr : Suite {
   struct Decimal : terminal<some(uc::Nd)> {};
   struct Where : terminal<kw<"où">> {};

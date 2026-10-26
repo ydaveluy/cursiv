@@ -12,7 +12,7 @@
 #include <tuple>
 #include <vector>
 
-#include "caretclimbll/generated/Ll/Module.hpp"
+#include "indirectfoldll/generated/Ll/Module.hpp"
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
@@ -188,7 +188,7 @@ void statements_ended_by_a_gap_or_a_semicolon() {
 // other, and both go on from it: `do:` is as sound as `do?`, so the caret that
 // replaces the `?` is offered the `:`.
 void a_word_read_as_two_terminals_goes_on_as_either() {
-  const auto ll = tcaretcases::generated::Ll::create_parser();
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
     const auto offered =
         spellings(features_between(*parser, "do?", 2, 3, "reading:"));
@@ -199,7 +199,7 @@ void a_word_read_as_two_terminals_goes_on_as_either() {
 // A literal takes its spelling from the name at the same point: behind `do` the
 // caret is offered what the literal goes on with, and not the `:` of the name.
 void a_literal_takes_its_spelling_from_the_name() {
-  const auto ll = tcaretcases::generated::Ll::create_parser();
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
     const auto offered =
         spellings(features_between(*parser, "do?", 2, 3, "spelled:"));
@@ -215,7 +215,7 @@ void a_literal_takes_its_spelling_from_the_name() {
 // twin, yet the operand goes on from the operator: the `<` that opens an
 // operand, typed there, would make the operator the twin and is not offered.
 void the_twin_of_the_operator_is_not_offered_behind_it() {
-  const auto ll = tcaretcases::generated::Ll::create_parser();
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
     for (const auto& [at, resume] : {std::pair{2u, 2u}, std::pair{2u, 3u}}) {
       const auto offered =

@@ -204,30 +204,4 @@ struct SevenNests : cursiv::GrammarSpec {
 };
 #undef TUNORDERED_NEST
 
-// Groups far past both: fourteen positions, and nine nests.
-struct TooWide : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct Root : rule<kw<"a"> & kw<"b"> & kw<"c"> & kw<"d"> & kw<"e"> & kw<"f"> &
-                     kw<"g"> & kw<"h"> & kw<"i"> & kw<"j"> & kw<"k"> & kw<"l"> &
-                     kw<"m"> & kw<"n">> {};
-  using entry = Root;
-  using ignore = WS;
-};
-struct TooWideNests : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct ID : terminal<some(d)> {};
-  struct Root : rule<create<Name>(assign<&Name::name>(ref<ID>)) +
-                     (nest<&Wrap::inner>(assign<&Wrap::op>(lit<"1">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"2">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"3">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"4">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"5">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"6">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"7">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"8">)) &
-                      nest<&Wrap::inner>(assign<&Wrap::op>(lit<"9">)))> {};
-  using entry = Root;
-  using ignore = WS;
-};
-
 }  // namespace tunordered

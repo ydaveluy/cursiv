@@ -232,8 +232,6 @@ struct Backward : Parts {
   using ignore = WS;
 };
 
-struct ForwardLr : Forward {};
-struct ForwardLl : Forward {};
 struct BackwardLr : Backward {};
 
 }  // namespace tmember
@@ -344,6 +342,7 @@ struct Combined : Base {
               skip(ignored<>, hide<>,
                    ref<tcyclicadopt::Grammar::Expression> + eof)) |
              (lit<"run:"> + ref<tnestedrun::Suite::Root>) |
+             (lit<"members:"> + ref<tmember::Forward::Root>) |
              section<QuickStart>(lit<"quick:">, lit<"@END@">) |
              (lit<"mat:"> + ref<tmaterialise::Combined::Entry>) |
              (lit<"dir:"> + ref<tdirseq::Combined::Entry>)> {};
@@ -351,6 +350,14 @@ struct Combined : Base {
 };
 struct Ll : Combined {};
 struct Lr : Combined {};
-struct Aux : Combined {};
+// Only cyclic adoption needs forced auxiliary optionals. Keep that lowering
+// independent without regenerating the unrelated tree/directive families.
+struct Aux : Base {
+  struct Entry
+      : rule<lit<"cyclic:"> +
+             skip(ignored<>, hide<>,
+                  ref<tcyclicadopt::Grammar::Expression> + eof)> {};
+  using entry = Entry;
+};
 
 }  // namespace ttree

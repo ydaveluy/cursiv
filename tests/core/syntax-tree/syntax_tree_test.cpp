@@ -39,7 +39,6 @@
 #include "abbare/generated/G/AstReflection.hpp"
 #include "abbare/generated/G/Module.hpp"
 #include "conv/generated/G/Module.hpp"
-#include "convll/generated/Ll/Module.hpp"
 #include "core/syntax-tree/AstBuilderGrammars.hpp"
 #include "core/syntax-tree/ConvertGrammars.hpp"
 #include "core/syntax-tree/CstNodeGrammars.hpp"
@@ -2058,10 +2057,11 @@ const cursiv::Parser& engine() {
 }
 
 void keyword_template_converters_compile_and_parse() {
-  const auto ll = tconv::generated::Ll::create_parser();
+  const auto ll = tdual::generated::Ll::create_parser();
   for (const auto* parser :
        std::array<const cursiv::Parser*, 2>{&engine(), ll.get()}) {
-    const auto result = parser->parse("keyword is");
+    const auto result = parser->parse(parser == ll.get() ? "$conv:keyword is"
+                                                        : "keyword is");
     CHECK(result.accepted && !result.cst().recovered() &&
           result.diagnostics.empty());
     const auto* value = result.value_as<tconv::comp::N>();

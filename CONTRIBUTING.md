@@ -31,63 +31,23 @@ The build fetches its dependencies. Use `gcc-debug`, `clang-release` or
 `clang-debug` for another configuration. Clang presets use `clang++`; pass
 `-DCMAKE_CXX_COMPILER=clang++-22` when your installation uses that name.
 
-These options control builds of the framework repository:
+`CURSIV_BUILD_TESTS` builds the framework tests; `CURSIV_WARNINGS_AS_ERRORS`
+treats warnings as errors. Both default to `ON` for repository builds and
+`OFF` when Cursiv is a dependency.
 
-| Option | Default | Effect |
-|---|---|---|
-| `CURSIV_BUILD_TESTS` | `ON` when Cursiv is the top-level project | Build the framework's tests and their example-language dependencies. |
-| `CURSIV_WARNINGS_AS_ERRORS` | `ON` for the top-level project, `OFF` as a dependency | Treat compiler warnings in Cursiv as errors. |
+Add a regression test for each bug fix. Shared LL/LR contracts belong in
+`tests/engines/shared/`. Reuse grammars and executables for related cases;
+keep separate fixtures for distinct global policies or compiler contracts.
+Generate only the rules a variant tests, and keep stress cases just beyond
+the boundary they exercise. Keep input text alive while inspecting its AST/CST.
 
-Cross builds provide the `cursiv_host_tools` target for native parser
-generators. These use Release mode and the language project's C++ standard;
-the regular build invokes them automatically.
+Internal fixtures use `cursiv_test_language`; `SEPARATE_UNITS` preserves
+independent generated translation units when that is the contract under test.
 
-The test suite includes both LL and LR grammars. Add a regression test for a
-bug fix; shared parser contracts belong in `tests/engines/shared/`.
+In VS Code, use the recommended CMake Tools and clangd extensions. Select a
+preset and configure; CMake Tools supplies `compile_commands.json` for clangd.
 
-Framework fixtures use `cursiv_test_language` internally. It accepts the
-arguments of `cursiv_generate_language`, defaults `OUT` to
-`generated/<ID>/generated`, and compiles the generated parser, metadata and
-reflection together. Pass `SEPARATE_UNITS` when a fixture needs the production
-layout across separate translation units. Native generated test code uses
-`-O0` in Release; WASI uses `-O1`, including in Debug, to fit WebAssembly
-function limits.
-
-Reuse an existing test grammar when adding another input or AST scenario.
-Compatible variants can share entry rules; keep separate grammars when the
-global word boundary, indentation policy or an isolated lexer table is the
-contract under test. Avoid generating another backend solely as an oracle when
-the expected tree, diagnostics and source spans can be stated directly.
-Related cases share a test executable and parser instances. Keep a prefixed
-input string alive for as long as its parse result or CST is inspected.
-
-Keep stress fixtures just beyond the boundary they exercise. Large runtime
-tables can be built as test data: the wide-position completion test still
-crosses position 16384 without compiling thousands of repeated parser functions.
-The bounded-repeat cases cover interval boundaries and directive shapes rather
-than a Cartesian product of equivalent intervals.
-
-The framework's test build shares generated parser and generator compilation
-across groups of four languages. Fixtures checking separate translation units,
-compiler limits or namespace/include isolation retain independent compilation.
-On Linux and WASI, thin archives reference each shared test object once, and
-unused modules are removed when linking a test executable.
-Each CI configuration runs its complete test suite. The example languages
-retain their production compilation and optimisation settings.
-
-In VS Code, install the recommended CMake Tools and clangd extensions, select a
-configure preset, and configure the project. CMake Tools copies the active
-build's `compile_commands.json` to the source root, where clangd reads its
-compiler flags and generated include paths. Clangd also formats the sources
-using `.clang-format`. Microsoft C/C++ language services are disabled for this
-workspace to avoid duplicate completion and diagnostics.
-
-For WASI Release builds, install Binaryen 120 or later and put `wasm-opt` on
-`PATH`; CI uses the Ubuntu 26.04 package. SDK Clang runs it automatically after
-linking at the selected optimization level (`-O3` for Release), including for
-benchmarks and CLI tools. Unit test executables pass `--no-wasm-opt` to skip it.
-WASI Debug builds do not run it with their default flags. Native builds and
-native parser generators are unaffected.
+For WebAssembly prerequisites, see [WebAssembly](docs/recipes/wasm.md).
 
 To package the example extensions, build the `wasi-release` preset and run
 `tools/package-vsix.sh build-wasi dist-vsix`. Packaging also requires Node.js

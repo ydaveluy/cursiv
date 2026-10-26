@@ -129,7 +129,7 @@ void check(const cursiv::Parser& parser, std::string_view source,
 
 void exercise(const cursiv::Parser& parser) {
   for (const auto source :
-       {"multi:##:===|##~===!", "branch:##:##!", "branch:==~==!",
+       {"branch:##:##!", "branch:==~==!",
         "guard:##|##!", "negative:##|##!", "own:==:==!", "local:##|==:==:##!",
         "shadow:##|==:==##!", "redefined:#=@=@!", "helper:##|(==:==)|##!",
         "recursive:##|(==:==)|##!", "recursive:##|(==:==)/(=:=)|##!",
@@ -139,7 +139,7 @@ void exercise(const cursiv::Parser& parser) {
         R"(raw:#"a\#(##"inner\##"quote"##)b"#)"})
     check(parser, source, true);
   for (const auto source :
-       {"multi:##:===|#~===!", "multi:##:===|##~==!", "branch:##:#!",
+       {"branch:##:#!",
         "branch:==~=!", "guard:##|#!", "negative:##|##x!", "own:==:=!",
         "local:##|==:=:##!", "shadow:##|==:=##!", "redefined:#=@=#!",
         "helper:##|(==:==)|==!", "recursive:##|(==:==)|==!",

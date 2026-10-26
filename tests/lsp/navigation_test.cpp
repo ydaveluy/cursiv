@@ -1032,6 +1032,18 @@ void the_outline_nests_and_points_at_the_name() {
   (void)ct::expectSymbols(*world.ws, outline);
 }
 
+// An unnamed root exposes each named child directly in source order.
+void an_unnamed_root_lists_its_named_children() {
+  const World world;
+  const cursiv::Document* const document =
+      world.built("file:///w/a.ws", "datatype a\ndatatype b\n");
+  const auto symbols = world.ws->documentSymbolProvider->getSymbols(
+      *document, cursiv::kNoCancel);
+  CHECK(symbols.size() == 2);
+  CHECK(symbols.size() == 2 && symbols[0].name == "a" &&
+        symbols[1].name == "b");
+}
+
 // The workspace query answers off the index, and a query nothing answers is an
 // empty list rather than everything.
 void a_query_that_matches_nothing_answers_nothing() {
@@ -1201,6 +1213,7 @@ void a_declared_name_that_matched_nothing_keeps_its_row() {
 
 void run() {
   the_outline_nests_and_points_at_the_name();
+  an_unnamed_root_lists_its_named_children();
   a_declared_name_that_matched_nothing_keeps_its_row();
   a_query_that_matches_nothing_answers_nothing();
   one_symbol_is_shaped_through_the_seam();

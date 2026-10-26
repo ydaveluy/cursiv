@@ -40,8 +40,8 @@
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/test/Check.hpp"
-#include "dangling/generated/DeepIf/Parser.hpp"
-#include "dangling/generated/DeepIf/Table.hpp"
+#include "election/generated/Election/Parser.hpp"
+#include "election/generated/Election/Table.hpp"
 #include "domainmodel/generated/DomainModel/Parser.hpp"
 #include "domainmodel/generated/DomainModel/Table.hpp"
 #include "indent/generated/G/Parser.hpp"
@@ -70,7 +70,7 @@ namespace ga = ::arith::generated::Arith;
 namespace gdm = ::dm::generated::DomainModel;
 namespace gi = ::tindent::generated::G;
 namespace gt = ::tambtail::generated::G;
-namespace gd = ::tdang::generated::DeepIf;
+namespace gd = ::telect::generated::Election;
 
 // A context standing where a parse of `text` stands before a byte is read.
 template <const auto& A>

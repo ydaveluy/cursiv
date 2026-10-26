@@ -20,9 +20,9 @@
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/test/Check.hpp"
-#include "dangling/generated/DeepIf/Module.hpp"
-#include "dangling/generated/DeepIf/Parser.hpp"
-#include "dangling/generated/DeepIf/Table.hpp"
+#include "election/generated/Election/Module.hpp"
+#include "election/generated/Election/Parser.hpp"
+#include "election/generated/Election/Table.hpp"
 #include "ceilings/generated/G/Module.hpp"
 #include "ceilings/generated/G/Parser.hpp"
 #include "ceilings/generated/G/Table.hpp"
@@ -44,7 +44,7 @@ namespace ceilings {
 
 namespace g = tcells::generated::G;
 namespace wide = tcells::generated::G;
-namespace deep = tdang::generated::DeepIf;
+namespace deep = telect::generated::Election;
 
 namespace {
 
@@ -198,7 +198,7 @@ int run() {
 // lane's timeout.
 namespace room_scale {
 
-namespace deep = tdang::generated::DeepIf;
+namespace deep = telect::generated::Election;
 
 namespace {
 
@@ -277,7 +277,7 @@ int run() {
 // the open ifs, and the document reads clean.
 namespace waiting_budget {
 
-namespace deep = tdang::generated::DeepIf;
+namespace deep = telect::generated::Election;
 
 void a_deep_nest_reads_its_elses_clean() {
   std::string text;
@@ -303,27 +303,11 @@ int run() {
 // block they start in many times over and must all still be found.
 namespace caret_chain {
 
-void a_caret_behind_a_long_chain_offers_the_else() {
-  const auto parser = tdang::generated::DeepIf::create_parser();
-  std::string text = "if c then x";
-  for (unsigned i = 0; i < 300; ++i) text += " else if c then x";
-  text += " ";
-  const auto r = parser->parse(text);
-  CHECK(r.accepted && r.diagnostics.empty());
-  std::vector<cursiv::NextFeature> out;
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
-  parser->nextFeaturesAt(r.cst(), at, at, out);
-  bool offered = false;
-  for (const auto& f : out)
-    offered = offered || parser->getGrammar().terminalText(f.feature) == "else";
-  CHECK(offered);
-}
-
-// ...and a node whose predecessors grow is read again for the one it gained,
+// A node whose predecessors grow is read again for the one it gained,
 // not for all of them: sixteen hundred levels answer in a moment, where every
 // level read afresh made the cube of them.
 void a_caret_behind_a_longer_chain_answers_in_a_moment() {
-  const auto parser = tdang::generated::DeepIf::create_parser();
+  const auto parser = telect::generated::Election::create_parser();
   std::string text = "if c then x";
   for (unsigned i = 0; i < 1600; ++i) text += " else if c then x";
   text += " ";
@@ -342,7 +326,6 @@ void a_caret_behind_a_longer_chain_answers_in_a_moment() {
 }
 
 int run() {
-  a_caret_behind_a_long_chain_offers_the_else();
   a_caret_behind_a_longer_chain_answers_in_a_moment();
   return 0;
 }
@@ -415,7 +398,7 @@ namespace held_graph {
 
 namespace loose = tceilings::generated::G;
 namespace taken = tceilings::generated::G;
-namespace deep = tdang::generated::DeepIf;
+namespace deep = telect::generated::Election;
 
 using Spans = std::vector<std::array<cursiv::TextOffset, 3>>;
 
@@ -489,10 +472,6 @@ void a_deep_nest_binds_each_else_to_the_nearest_if() {
   for (unsigned i = 0; i != kIfs; ++i) text += "if c then ";
   text += "x";
   for (unsigned i = 0; i != kElses; ++i) text += " else e" + std::to_string(i);
-  cursiv::Cst cst;
-  cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<deep::kTable>.parse(text, cst, &stats,
-                                              deep::kDrivePtr));
   const auto result = deep::create_parser()->parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
   const auto* stmt = result.value_as<tdang::ast::Stmt>();

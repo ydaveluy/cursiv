@@ -22,9 +22,6 @@ cursiv_grammar(indentimplied engines/lr/IndentGrammar.hpp tindent::laid::Cases E
 cursiv_grammar(adopt engines/lr/AdoptEntryGrammar.hpp tadopt::G ENGINE LR)
 cursiv_grammar(rulerefusal engines/lr/RuleRefusalGrammars.hpp trefuse::head::G ENGINE LR)
 cursiv_grammar(wideterms engines/lr/WideTerminalsGrammar.hpp twide::G ENGINE LR)
-# Lookaheads on the token in hand, and past it as far as a completion reads.
-cursiv_test(LrRuleRefusal_test engines/lr/LrRuleRefusal_test.cpp
-    rulerefusalGenerated)
 cursiv_grammar(asi engines/lr/AsiGrammar.hpp tasi::G ENGINE LR GENERATOR_ARGS --group-lines=64)
 cursiv_grammar(asicases engines/lr/AsiGrammar.hpp tasi::cases::G ENGINE LR)
 cursiv_test(LrAsi_test engines/lr/LrAsi_test.cpp

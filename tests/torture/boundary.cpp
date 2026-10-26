@@ -7,15 +7,15 @@
 #include <string>
 #include <string_view>
 
-#include "boundary/generated/BoundaryG/Parser.hpp"
-#include "boundary/generated/BoundaryG/Table.hpp"
+#include "optionals/generated/OptionalsG/Parser.hpp"
+#include "optionals/generated/OptionalsG/Table.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/lr/runtime/lr_rescan.hpp"
 #include "cursiv/test/Check.hpp"
 
-namespace g = tbnd::generated::BoundaryG;
+namespace g = topt::generated::OptionalsG;
 
 namespace {
 

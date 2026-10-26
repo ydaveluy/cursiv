@@ -49,7 +49,4 @@ struct Behind : Base {
                      eof> {};
   using entry = Root;
 };
-struct BehindLl : Behind {};
-struct BehindLr : Behind {};
-
 }  // namespace tkeyword

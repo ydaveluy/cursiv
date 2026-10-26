@@ -7,12 +7,13 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "torture/DanglingAst.hpp"
+#include "torture/DeepIfGrammar.hpp"
 #include "torture/ElectionAst.hpp"
 
 namespace telect {
 
 namespace ast {
-struct Case : cursiv::AstNode {
+struct Case : cursiv::Extends<cursiv::AstNode> {
   Top* top = nullptr;
   Hold* hold = nullptr;
   tdang::ast::Stmt* stmt = nullptr;
@@ -137,7 +138,8 @@ struct Election : cursiv::GrammarSpec {
              create<ast::Case>(kw<"deepifrev"> +
                                assign<&ast::Case::stmt>(ref<DeepIfRev>)) |
              create<ast::Case>(kw<"overlap"> +
-                               assign<&ast::Case::list>(ref<Overlap>))> {};
+                               assign<&ast::Case::list>(ref<Overlap>)) |
+             ref<tdang::DeepIf::Stmt>> {};
 
   using entry = Entry;
   using ignore = WS;

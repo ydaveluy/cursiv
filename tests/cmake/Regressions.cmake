@@ -15,7 +15,7 @@ cursiv_grammar(alikereduced engines/lr/AlikeCandidatesGrammar.hpp
 cursiv_grammar(ceilings engines/lr/CeilingsGrammar.hpp tceilings::G ENGINE LR)
 cursiv_test(LrCeilings_test engines/lr/LrCeilings_test.cpp
     cellsGenerated
-    danglingGenerated
+    electionGenerated
     room221Generated
     ambtailGenerated
     ceilingsGenerated)
@@ -24,8 +24,6 @@ cursiv_grammar(runonlr engines/lr/RunOnEquationsGrammar.hpp trunon::Lr ENGINE LR
 cursiv_test(RunOnEquations_test engines/lr/RunOnEquations_test.cpp
     runonlrGenerated)
 set_tests_properties(RunOnEquations_test PROPERTIES TIMEOUT 120)
-cursiv_grammar(keywordbehindlr engines/lr/KeywordHandoffGrammar.hpp
-    tkeyword::BehindLr ENGINE LR)
 cursiv_grammar(room221 engines/lr/FrozenRoomGrammars.hpp troom::seed221::G ENGINE LR)
 cursiv_grammar(repaircost engines/lr/RepairCostGrammar.hpp trepair::G ENGINE LR)
 # Repairs over long documents: their cost, their ledger, and the arms a repaired

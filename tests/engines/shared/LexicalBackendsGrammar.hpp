@@ -3,6 +3,7 @@
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "RecursiveTerminalsGrammar.hpp"
+#include "CharactersGrammar.hpp"
 namespace tlexbackends {
 struct Document : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> items;
@@ -75,9 +76,6 @@ struct B {};
 struct Hashes {};
 
 struct Base : cursiv::GrammarSpec {
-  struct Multi
-      : terminal<mark<A>(some(lit<"#">)) + lit<":"> + mark<B>(some(lit<"=">)) +
-                 lit<"|"> + same<A> + lit<"~"> + same<B> + lit<"!">> {};
   struct Branch : terminal<((mark<A>(some(lit<"#">)) + lit<":">) |
                             (mark<A>(some(lit<"=">)) + lit<"~">)) +
                            same<A> + lit<"!">> {};
@@ -140,7 +138,6 @@ struct Base : cursiv::GrammarSpec {
 
   struct Root
       : rule<create<Node>(
-            (lit<"multi:"> + assign<&Node::text>(ref<Multi>)) |
             (lit<"branch:"> + assign<&Node::text>(ref<Branch>)) |
             (lit<"guard:"> + assign<&Node::text>(ref<Guard>)) |
             (lit<"negative:"> + assign<&Node::text>(ref<Negative>)) |
@@ -267,6 +264,11 @@ struct Suite : cursiv::GrammarSpec {
                       ref<trecursive::Suite::Entry>> {};
   using entry = Entry;
 };
-struct Ll : Suite {};
+struct Ll : Suite {
+  // These entries use no keywords, so they need no global Unicode boundary.
+  struct Entry : rule<ref<Suite::Entry> |
+                      (lit<"chars:"> + ref<tchars::Integration::Entry>)> {};
+  using entry = Entry;
+};
 struct Lr : Suite {};
 }  // namespace tlexbackends

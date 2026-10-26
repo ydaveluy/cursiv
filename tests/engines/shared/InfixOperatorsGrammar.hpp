@@ -103,7 +103,7 @@ struct Shared : Base {
                         (lit<"("> + ref<E> + lit<")">)> {};
   struct E
       : infix<Primary, &ast::Text::left, &ast::Text::op, &ast::Text::right,
-              (left(kw<"NOT"> + kw<"EQUAL">) >> left(kw<"NOT"> + kw<"LIKE">))> {
+              (left(kw<"IS"> + kw<"EQUAL">) >> left(kw<"IS"> + kw<"LIKE">))> {
   };
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
   };
@@ -164,16 +164,6 @@ struct Suite : Base {
                      (lit<"lead:"> + ref<Lead::Root>)> {};
   using entry = Root;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
-
-// NOTEQUAL has a different precedence here than in the one-level tables.
-struct SharedSuite : Base {
-  struct Root : rule<lit<"shared:"> + ref<Shared::Root>> {};
-  using entry = Root;
-};
-struct SharedLl : SharedSuite {};
-struct SharedLr : SharedSuite {};
 
 }  // namespace tinfixop
 
@@ -205,8 +195,8 @@ struct Base : cursiv::GrammarSpec {
                         (lit<"("> + ref<E> + lit<")">)> {};
   struct E : infix<Primary, &ast::Binary::left, &ast::Binary::op,
                    &ast::Binary::right,
-                   (left(lit<"*">) >> left(lit<"+">) >>
-                    nonassoc(lit<"<"> | lit<">">) >> left(lit<"&">))> {};
+                   (left(lit<"*~">) >> left(lit<"+~">) >>
+                    nonassoc(lit<"<~"> | lit<">~">) >> left(lit<"&~">))> {};
   struct Root
       : rule<create<ast::Document>(assign<&ast::Document::value>(ref<E>)) +
              eof> {};
@@ -214,8 +204,6 @@ struct Base : cursiv::GrammarSpec {
   using ignore = WS;
 };
 
-struct Lr : Base {};
-struct Ll : Base {};
 
 }  // namespace tnonassoc
 
@@ -311,23 +299,6 @@ struct Multi : Common {
   using entry = Root;
 };
 
-struct Infix : Common {
-  struct E;
-  struct Primary
-      : rule<create<Atom>(lit<"a">) |
-             create<Function>(kw<"fn"> + lit<"=>"> +
-                              assign<&Function::body>(ref<E>)) |
-             create<Include>(kw<"include"> + assign<&Include::body>(ref<E>)) |
-             create<Cast>(kw<"cast"> + assign<&Cast::body>(ref<E>)) |
-             (lit<"("> + ref<E> + lit<")">)> {};
-  struct E : infix<Primary, &Binary::left, &Binary::op, &Binary::right,
-                   (left(lit<"*">) >> left(lit<"+">))> {};
-  struct Root : rule<create<ExpressionDocument>(
-                         assign<&ExpressionDocument::value>(ref<E>)) +
-                     eof> {};
-  using entry = Root;
-};
-
 struct Statements : Common {
   struct S;
   struct IfRule
@@ -351,12 +322,22 @@ struct Suite : Common {
   struct Root : rule<ref<Choice::Root> |
                      (lit<"direct:"> + ref<Direct::Root>) |
                      (lit<"multi:"> + ref<Multi::Root>) |
-                     (lit<"infix:"> + ref<Infix::Root>) |
                      (lit<"statement:"> + ref<Statements::Root>) |
                      (lit<"loop:"> + ref<StatementLoop::Root>)> {};
   using entry = Root;
 };
+}  // namespace telectionloop
+
+// All operator contracts have the same whitespace and word-boundary policy.
+// Prefixes choose the original entries while sharing one pair of parsers.
+namespace toperators {
+struct Suite : tinfixop::Base {
+  struct Root : rule<ref<tinfixop::Suite::Root> |
+                     (lit<"shared:"> + ref<tinfixop::Shared::Root>) |
+                     (lit<"nonassoc:"> + ref<tnonassoc::Base::Root>) |
+                     (lit<"election:"> + ref<telectionloop::Suite::Root>)> {};
+  using entry = Root;
+};
 struct Ll : Suite {};
 struct Lr : Suite {};
-
-}  // namespace telectionloop
+}  // namespace toperators

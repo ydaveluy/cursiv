@@ -9,8 +9,9 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/InfixLoopGrammar.hpp"
-#include "infixloopll/generated/Ll/Module.hpp"
+#include "indirectfoldll/generated/Ll/Module.hpp"
 
+namespace infix_loop_cases {
 namespace {
 
 struct Case {
@@ -140,15 +141,16 @@ void expect_cases(const Case (&cases)[N], MakeLl makeLl,
 
 }  // namespace
 
-int main() {
-  namespace g = tinfixloop::generated;
+void run() {
+  namespace g = tllexpressions::generated;
   expect_cases(kSum, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "sum:");
+               "loop:sum:");
   expect_cases(kLadder, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "ladder:");
+               "loop:ladder:");
   expect_cases(kVia, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "via:");
+               "loop:via:");
   expect_cases(kMixed, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "mixed:");
-  return cursiv::test::report("LlInfixLoop_test");
+               "loop:mixed:");
 }
+
+}  // namespace infix_loop_cases

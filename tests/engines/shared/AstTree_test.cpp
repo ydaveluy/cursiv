@@ -1,5 +1,3 @@
-#include "forwardll/generated/ForwardLl/Module.hpp"
-#include "forwardlr/generated/ForwardLr/Module.hpp"
 #include "backwardlr/generated/BackwardLr/Module.hpp"
 #include "asttreell/generated/Ll/Module.hpp"
 #include "asttreelr/generated/Lr/Module.hpp"
@@ -206,10 +204,11 @@ using tmember::ast::Unnamed;
 struct Engine {
   std::unique_ptr<cursiv::Parser> parser;
   std::unique_ptr<cursiv::AstReflection> reflection;
+  std::string_view prefix;
 };
 
 std::string tree(const Engine& e, std::string_view text) {
-  const std::string source(text);
+  const std::string source = std::string(e.prefix) + std::string(text);
   const cursiv::ParseResult r = e.parser->parse(source);
   std::string out;
   if (!r.accepted || !r.diagnostics.empty() || r.value == nullptr)
@@ -263,14 +262,14 @@ void every_engine(const Engine& e) {
 }  // namespace
 
 void run() {
-  every_engine({tmember::generated::ForwardLl::create_parser(),
-                tmember::generated::ForwardLl::create_ast_reflection()});
-  every_engine({tmember::generated::ForwardLr::create_parser(),
-                tmember::generated::ForwardLr::create_ast_reflection()});
+  every_engine({ttree::generated::Ll::create_parser(),
+                ttree::generated::Ll::create_ast_reflection(), "members:"});
+  every_engine({ttree::generated::Lr::create_parser(),
+                ttree::generated::Lr::create_ast_reflection(), "members:"});
   // Both backends parse every input ordering above. One reversed grammar is
   // enough to challenge their shared metadata emitter's encounter order.
   every_engine({tmember::generated::BackwardLr::create_parser(),
-                tmember::generated::BackwardLr::create_ast_reflection()});
+                tmember::generated::BackwardLr::create_ast_reflection(), ""});
 
 }
 
@@ -436,11 +435,26 @@ void run() {
 
 }  // namespace nested_run_cases
 
+namespace ast_materialise_cases { void run(); }
+
+namespace nest_adopt_cases { void run(); }
+
+namespace directive_sequence_cases { void run(); }
+
+namespace data_parts_cases { void run(); }
+
+namespace flag_operand_cases { void run(); }
+
 int main() {
   cursiv::test::count_expectations();
   ast_tree_cases::run();
   member_order_cases::run();
   cyclic_adopt_cases::run();
   nested_run_cases::run();
+  ast_materialise_cases::run();
+  nest_adopt_cases::run();
+  directive_sequence_cases::run();
+  data_parts_cases::run();
+  flag_operand_cases::run();
   return cursiv::test::report("AstTree_test");
 }

@@ -1,4 +1,4 @@
-#include "operatorconditionll/generated/Ll/Module.hpp"
+#include "indirectfoldll/generated/Ll/Module.hpp"
 #include <cstdio>
 #include <memory>
 #include <span>
@@ -11,9 +11,10 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/OperatorConditionGrammar.hpp"
 
+namespace operator_condition_cases {
 namespace {
 
-namespace g = toperatorcondition::generated;
+namespace g = tllexpressions::generated;
 
 struct Reader {
   const char* engine;
@@ -132,11 +133,12 @@ void the_operator_text_leaves_the_condition_out() {
 
 }  // namespace
 
-int main() {
+void run() {
   a_condition_after_the_operator_reads_the_gap_behind_it();
   conditions_on_both_sides_of_the_operator_each_read_their_own_gap();
   a_guarded_operator_among_plain_ones_reads_its_own_gap();
   a_break_behind_the_operator_parts_what_it_would_join();
   the_operator_text_leaves_the_condition_out();
-  return cursiv::test::report("LlOperatorCondition_test");
 }
+
+}  // namespace operator_condition_cases

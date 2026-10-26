@@ -6,15 +6,6 @@
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
 namespace tllwiden {
-struct Number : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
-struct Array : cursiv::Extends<cursiv::AstNode> {
-  vector<Number*> items;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Array*> arrays;
-};
 struct Value : cursiv::Extends<cursiv::AstNode> {};
 struct Scalar : cursiv::Extends<Value> {
   string_view text;
@@ -28,24 +19,6 @@ struct Entry : cursiv::Extends<cursiv::AstNode> {
 };
 struct File : cursiv::Extends<cursiv::AstNode> {
   vector<Entry*> entries;
-};
-
-struct Lines : cursiv::GrammarSpec {
-  struct WS : terminal<some(cr<R"( \t)">)> {};
-  struct NL : terminal<some(option(lit<"\r">) + lit<"\n">)> {};
-  struct COMMENT : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
-  struct INT : terminal<some(d)> {};
-  struct NumberRule : rule<create<Number>(assign<&Number::text>(ref<INT>))> {};
-  struct ArrayRule
-      : rule<create<Array>(skip(
-            ignored<WS, NL>, hide<COMMENT>,
-            lit<"["> + many(append<&Array::items>(ref<NumberRule>), lit<",">) +
-                lit<"]">))> {};
-  struct Root : rule<create<Doc>(
-                    append<&Doc::arrays>(ref<ArrayRule>) +
-                    many(ref<NL> + append<&Doc::arrays>(ref<ArrayRule>)))> {};
-  using entry = Root;
-  using ignore = WS;
 };
 
 struct Toml : cursiv::GrammarSpec {
@@ -77,11 +50,5 @@ struct Toml : cursiv::GrammarSpec {
   using ignore = WS;
 };
 
-// A leading '[' selects a run of arrays; a key selects a TOML document. Both
-// entries keep their own skip regions and AST, in one generated language.
-struct Ll : cursiv::GrammarSpec {
-  struct Root : rule<ref<Lines::Root> | ref<Toml::Root>> {};
-  using entry = Root;
-  using ignore = Lines::WS;
-};
+struct Ll : Toml {};
 }  // namespace tllwiden

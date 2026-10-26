@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "ConvertGrammars.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
 namespace tdual {
@@ -150,6 +151,15 @@ struct D2 : cursiv::extends<D1> {
   struct override<T> : terminal<lit<"0Y"> + some(cr<"0-9a-fA-F">)> {};
 };
 struct Lr : D2 {};
-struct Ll : D2 {};
+struct Ll : D2 {
+  // A keyword in a converter's template argument must remain qualified in
+  // LL output as well as LR output, without generating all converters twice.
+  struct Root
+      : rule<ref<G::Root> |
+             (lit<"$conv:"> +
+              skip(ignored<tconv::G::WS>, hide<tconv::G::CM>,
+                   ref<tconv::G::KeywordRoot> + eof))> {};
+  using entry = Root;
+};
 
 }  // namespace tdual

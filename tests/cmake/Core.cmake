@@ -12,7 +12,7 @@ cursiv_test(LowerCase_test core/text/LowerCase_test.cpp)
 
 cursiv_test(grammar_test core/grammar/grammar_test.cpp duallrGenerated dualllGenerated spellplainGenerated
     spelldashedGenerated sentblobGenerated sentwordGenerated sentfreeGenerated derivebaseGenerated
-    derivedialectGenerated deriveruleGenerated deriveguardbaseGenerated deriveguarddialectGenerated
+    derivedialectGenerated deriveruleGenerated
     derivetextdialectGenerated derivetextdialectllGenerated docswideGenerated docswidellGenerated
     cursivLrGen)
 cursiv_grammar(docswide engines/lr/WideDocsGrammar.hpp tdocs::G ENGINE LR)
@@ -20,8 +20,6 @@ cursiv_grammar(docswidell engines/lr/WideDocsGrammar.hpp tdocs::Ll ENGINE LL)
 cursiv_grammar(derivebase core/grammar/DerivedGrammar.hpp tderive::Base)
 cursiv_grammar(derivedialect core/grammar/DerivedGrammar.hpp tderive::Dialect BASE derivebase)
 cursiv_grammar(deriverule core/grammar/DerivedGrammar.hpp tderive::RuleDialect BASE derivebase)
-cursiv_grammar(deriveguardbase core/grammar/DerivedGrammar.hpp tguard::Base)
-cursiv_grammar(deriveguarddialect core/grammar/DerivedGrammar.hpp tguard::Dialect BASE deriveguardbase)
 cursiv_grammar(derivetextdialect core/grammar/DerivedGrammar.hpp ttext::Dialect)
 cursiv_grammar(derivetextdialectll core/grammar/DerivedGrammar.hpp ttext::DialectLl ENGINE LL)
 
@@ -42,7 +40,6 @@ endif()
 # The grammars a core lane parses with, one generated language each: a lane
 # that needs a parser links the languages it names and instantiates nothing.
 cursiv_grammar(conv core/syntax-tree/ConvertGrammars.hpp tconv::G)
-cursiv_grammar(convll core/syntax-tree/ConvertGrammars.hpp tconv::Ll ENGINE LL)
 # Small languages the lanes read through the parser, one case each.
 cursiv_grammar(door engines/lr/DoorGrammar.hpp tdoor::G ENGINE LR)
 # ONE LANGUAGE, TWO ENGINES: the same grammar generated twice, so a lane can
@@ -69,6 +66,6 @@ cursiv_grammar(cstinfix core/syntax-tree/CstNodeGrammars.hpp tcstn::InfixG ENGIN
 cursiv_grammar(abbare core/syntax-tree/AstBuilderGrammars.hpp tab::bare::G ENGINE LR)
 cursiv_grammar(aball core/syntax-tree/AstBuilderGrammars.hpp tab::All ENGINE LR)
 cursiv_test(syntax_tree_test core/syntax-tree/syntax_tree_test.cpp cursivLrGen
-    abbareGenerated aballGenerated duallrGenerated dualllGenerated convGenerated convllGenerated
+    abbareGenerated aballGenerated duallrGenerated dualllGenerated convGenerated
     cstlexGenerated cstinfixGenerated)
 set_tests_properties(syntax_tree_test PROPERTIES TIMEOUT 30 PROCESSORS 4)

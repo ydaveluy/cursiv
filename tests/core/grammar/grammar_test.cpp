@@ -34,8 +34,6 @@
 #include "cursiv/test/Check.hpp"
 #include "derivebase/generated/Base/Module.hpp"
 #include "derivedialect/generated/Dialect/Module.hpp"
-#include "deriveguardbase/generated/Base/Module.hpp"
-#include "deriveguarddialect/generated/Dialect/Module.hpp"
 #include "deriverule/generated/RuleDialect/Module.hpp"
 #include "derivetextdialect/generated/Dialect/Module.hpp"
 #include "derivetextdialectll/generated/DialectLl/Module.hpp"
@@ -2359,11 +2357,12 @@ void a_refusal_asks_the_dialects_terminal() {
 // dialect.
 void a_literal_guard_asks_the_dialects_terminal() {
   const auto clean = [](const cursiv::Parser& p, std::string_view text) {
-    const cursiv::ParseResult r = p.parse(text);
+    const std::string source = "guard:" + std::string(text);
+    const cursiv::ParseResult r = p.parse(source);
     return r.accepted && r.diagnostics.empty();
   };
-  const auto base = tguard::generated::Base::create_parser();
-  const auto dialect = tguard::generated::Dialect::create_parser();
+  const auto base = tderive::generated::Base::create_parser();
+  const auto dialect = tderive::generated::Dialect::create_parser();
   CHECK(clean(*base, "in1") && clean(*base, "in 1") && !clean(*base, "ina"));
   CHECK(!clean(*dialect, "in1") && clean(*dialect, "in 1") &&
         !clean(*dialect, "ina"));

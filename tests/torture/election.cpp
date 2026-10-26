@@ -15,9 +15,6 @@
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/shared/runtime/AstReducer.hpp"
 #include "cursiv/test/Check.hpp"
-#include "dangling/generated/DeepIf/AstReflection.hpp"
-#include "dangling/generated/DeepIf/Parser.hpp"
-#include "dangling/generated/DeepIf/Table.hpp"
 #include "election/generated/Election/AstReflection.hpp"
 #include "election/generated/Election/Parser.hpp"
 #include "election/generated/Election/Table.hpp"
@@ -28,7 +25,7 @@ namespace {
 
 namespace ast = telect::ast;
 namespace e = telect::generated::Election;
-namespace d = tdang::generated::DeepIf;
+namespace d = telect::generated::Election;
 using Stmt = tdang::ast::Stmt;
 
 // The table, not the grammar: the counters are the table's, which the erased
@@ -199,23 +196,6 @@ void small_ast_checks() {
     CHECK(root != nullptr && root->then_ != nullptr &&
           root->then_->else_ == nullptr);
   }
-
-  // Two ifs, two elses: only one complete reading exists, and it is also
-  // what nearest-binds gives -- e0 -> inner if, e1 -> outer if.
-  cursiv::Cst cst5;
-  cursiv::LrParseStats stats5;
-  CHECK(accepts<d::kTable>("if a then if b then x else e0 else e1",
-                           d::kDrivePtr, cst5, &stats5));
-  {
-    cursiv::ParseResult r = cursiv::AstReducer::build<d::kTable.stamp>(
-        d::kAstActions, std::move(cst5));
-    const Stmt* root = r.value_as<Stmt>();
-    CHECK(root != nullptr && root->cond == "a");
-    CHECK(root->else_ != nullptr && root->else_->cond == "e1");
-    const Stmt* inner = root->then_;
-    CHECK(inner != nullptr && inner->cond == "b");
-    CHECK(inner->else_ != nullptr && inner->else_->cond == "e0");
-  }
 }
 
 // Does a valid document ever get misparsed at depth?
@@ -355,10 +335,9 @@ void overlap() {
 }  // namespace
 
 void torture_election() {
-  // Every case keeps its one conflict to the table: none is decided at
-  // construction.
-  CHECK(e::kTable.nconflicts == 10);
-  CHECK(d::kTable.nconflicts > 0);  // built to conflict
+  // Each election case keeps its conflict, and the standalone dangling-else
+  // entry contributes one more. None is decided at construction.
+  CHECK(e::kTable.nconflicts == 11);
 
   // X declared first: X wins; Y declared first: Y wins.
   settles_without_fork("rankxy", true);

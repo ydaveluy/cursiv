@@ -172,4 +172,12 @@ void torture_optionals() {
   optionals(*parser);
   storey(*parser);
   entangled(*parser);
+
+  // The emitter must escape a literal newline in its generated C++ text.
+  // It remains a real token here, even though the other cases ignore it.
+  const auto newline = parser->parse("newline:sample\n");
+  CHECK(clean(newline));
+  const auto* doc = newline.value_as<tnl::ast::Doc>();
+  CHECK(doc != nullptr && doc->name == "sample");
+  CHECK(!clean(parser->parse("newline:sample")));
 }

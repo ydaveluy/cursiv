@@ -13,6 +13,7 @@
 #include "openingll/generated/Ll/Module.hpp"
 #include "openingshiftlr/generated/ShiftLr/Module.hpp"
 
+namespace opening_token_cases {
 namespace {
 
 using namespace topening;
@@ -126,7 +127,7 @@ void swarm(Pair p, std::initializer_list<std::string_view> ops) {
 
 }  // namespace
 
-int main() {
+void run() {
   const auto ll = topening::generated::Ll::create_parser();
   const auto shiftLr = topening::generated::ShiftLr::create_parser();
   const Pair shift{*ll, shiftLr.get(), "shift:"},
@@ -214,5 +215,6 @@ int main() {
                            {"1~2 a b 3", "((1 ~ 2) ab 3)"},
                            {"1 a b 2~3", "(1 ab (2 ~ 3))"}});
 
-  return cursiv::test::report("LlOpeningToken_test");
 }
+
+}  // namespace opening_token_cases

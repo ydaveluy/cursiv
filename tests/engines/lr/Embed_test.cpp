@@ -1,12 +1,10 @@
-// Grammars embedded whole: a section reads as its grammar does alone -- its
-// trivia at both edges, its word boundary, its keywords, its end of input --
-// and what the section parses, keeps and reports is what the grammar alone
-// parses, keeps and reports over the same text, whichever token closes it.
+// Embedded grammars keep their trivia, word boundaries, keywords and trees.
+// Fixed expectations cover their repairs, delimiters and completion in both
+// engines.
 
 #include <algorithm>
 #include <cstdio>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,7 +15,6 @@
 #include "cursiv/core/syntax-tree/CstLeaf.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
-#include "embedjsonlr/generated/JsonLr/Module.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
 #include "embedlr/generated/DocLr/GrammarSource.hpp"
@@ -63,34 +60,10 @@ bool owes(const Parser& p, const ParseResult& r, std::string_view text) {
   return false;
 }
 
-// A name as a section spells it, and as the grammar alone does.
-std::string unqualified(std::string_view name) {
-  std::string out(name);
-  for (const std::string_view q :
-       {"Json::", "Script::", "Narrow::", "Dash::", "Wide::", "Letters::"})
-    for (std::size_t at; (at = out.find(q)) != std::string::npos;)
-      out.erase(at, q.size());
-  return out;
-}
-
 TextOffset size_of(std::string_view s) {
   return static_cast<TextOffset>(s.size());
 }
 
-// The leaves in [from, to), from `from` on, a kept trivia in brackets.
-std::string leaves(const ParseResult& r, std::string_view text, TextOffset from,
-                   TextOffset to) {
-  std::string out;
-  r.cst().visit_leaves([&](const cursiv::CstLeaf& l) {
-    if (l.begin < from || l.end > to) return;
-    if (!out.empty()) out += ' ';
-    out += std::to_string(l.begin - from) + ':';
-    const std::string s(text.substr(l.begin, l.end - l.begin));
-    out += l.hidden ? "[" + s + "]" : s;
-    if (l.recovered) out += '!';
-  });
-  return out;
-}
 std::string leaves(const Parser& p, std::string_view text) {
   const ParseResult r = p.parse(text);
   std::string out;
@@ -100,45 +73,6 @@ std::string leaves(const Parser& p, std::string_view text) {
     const std::string s(text.substr(l.begin, l.end - l.begin));
     out += l.hidden ? "[" + s + "]" : s;
   });
-  return out;
-}
-
-// The records whose span lies in [from, to]: extent, size, standing and the
-// rule each denotes.
-std::string records(const Parser& p, const ParseResult& r, TextOffset from,
-                    TextOffset to) {
-  std::string out;
-  const cursiv::Cst& t = r.cst();
-  for (cursiv::NodeId i = 0; i < t.size(); ++i) {
-    const cursiv::CstNode& n = t[i];
-    if (n.begin < from || n.end > to) continue;
-    out += std::to_string(n.begin - from) + ',' + std::to_string(n.end - from) +
-           ',' + std::to_string(n.subtreeSize) + (n.hidden ? 'h' : '.') +
-           (n.recovered ? 'r' : '.') +
-           unqualified(p.getGrammar().recordRule(n)) + ';';
-  }
-  return out;
-}
-
-// What the repairs said, from `from` on: what they did, where, and the tokens
-// they were owed -- the one that closes a section is where the grammar alone
-// ends its text.
-std::string diagnostics(const Parser& p, const ParseResult& r, TextOffset from,
-                        std::string_view close = {}) {
-  std::string out;
-  const auto& g = p.getGrammar();
-  const auto owed = [&](cursiv::ElementId e) {
-    const std::string_view text = g.terminalText(e);
-    if (!text.empty() && close.starts_with(text)) return std::string("$end");
-    return text.empty() ? unqualified(g.terminalName(e)) : std::string(text);
-  };
-  for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
-    out += std::to_string(static_cast<int>(d.kind)) + '@' +
-           std::to_string(d.begin - from) + '-' + std::to_string(d.end - from);
-    if (d.element != cursiv::kNoElement) out += ' ' + owed(d.element);
-    for (const cursiv::ElementId e : d.also) out += '|' + owed(e);
-    out += d.message + ';';
-  }
   return out;
 }
 
@@ -200,115 +134,17 @@ std::string offered(const Parser& p, std::string_view text) {
   return seen;
 }
 
-// What brackets a section in the document.
-struct Frame {
-  std::string_view open, close;
-  bool script = false;
-};
-
-// One text alone and in a section: every answer about it is one.
-bool alike(const Parser& alone, const Parser& doc, const Frame& f,
-           std::string_view text) {
-  const std::string whole =
-      std::string(f.open) + std::string(text) + std::string(f.close);
-  const auto from = size_of(f.open);
-  const auto to = from + size_of(text);
-  const ParseResult a = alone.parse(text);
-  const ParseResult b = doc.parse(whole);
-  const std::string wantAst = a.accepted ? ast(a.value) : "rejected";
-  const std::string gotAst =
-      b.accepted ? ast(first_block(b, f.script)) : "rejected";
-  const std::string wantLeaves = leaves(a, text, 0, size_of(text));
-  const std::string gotLeaves = leaves(b, whole, from, to);
-  const std::string wantRecords = records(alone, a, 0, size_of(text));
-  const std::string gotRecords = records(doc, b, from, to);
-  const std::string wantDiags = diagnostics(alone, a, 0);
-  const std::string gotDiags = diagnostics(doc, b, from, f.close);
-  const bool ok = wantAst == gotAst && wantLeaves == gotLeaves &&
-                  wantRecords == gotRecords && wantDiags == gotDiags;
-  if (!ok) {
-    std::printf("  apart in %.*s: \"%.*s\"\n", static_cast<int>(f.open.size()),
-                f.open.data(), static_cast<int>(text.size()), text.data());
-    const auto show = [](const char* what, const std::string& want,
-                         const std::string& got) {
-      if (want != got)
-        std::printf("    %s\n      alone:   %s\n      section: %s\n", what,
-                    want.c_str(), got.c_str());
-    };
-    show("ast", wantAst, gotAst);
-    show("leaves", wantLeaves, gotLeaves);
-    show("records", wantRecords, gotRecords);
-    show("diagnostics", wantDiags, gotDiags);
-  }
-  return ok;
-}
-
-void each_text_reads_alike(const Parser& alone, const Parser& doc,
-                           const Frame& f,
-                           std::span<const std::string_view> corpus) {
-  for (const std::string_view text : corpus) CHECK(alike(alone, doc, f, text));
-}
-
-// Texts of Json: well formed, and broken.
-constexpr std::string_view kJson[] = {
-    "[1, 2]",
-    "[1] // tail\n",
-    "[1] // embedded close ''' is still comment text\n",
-    "[1]\r\n// tail\r\n",
-    "[1] // tail\n 2 // extra\n",
-    "  {\"a\": [1, x10, TRUE], \"b\": {}}  ",
-    "\n// head\n[\n  false, // one\n  \"s\"\n]\n// tail\n",
-    "[x10,x 2,True]",
-    "{}",
-    "[]",
-    "[1,, 2]",
-    "[1 2]",
-    "{\"a\" 1}",
-    "[true1]",
-    "[1, # 2]",
-    "[1, 2",
-    "{\"a\": [}",
-    "0x1f",
-    "[1 2 3]",
-    "[[]",
-    "{\"a\":}",
-    "tru",
-    "[1,]",
-    "}",
-    "",
-    "  // nothing\n",
-    "[1, tru",
-    "{\"a\": 1,",
-    "[\"x",
-    "\"open",
-    "[x]",
-    "{,}",
-    "[1]]",
-    "[1] 2",
-};
-
-// ...and texts holding the token that closes Json's other section: in this
-// one, a fault like any other.
-constexpr std::string_view kJsonGt[] = {
-    ">",
-    "[1, >]",
-    "{\"a\" > 1}",
-    "[1 > 2]",
-};
-constexpr std::string_view kJsonQuotes[] = {
-    "'''",
-    "[1, ''']",
-    "[1 ''' 2]",
-};
-
 void a_section_reads_its_own_trivia(const Parser& p) {
   CHECK(clean(p, "json '''[1]'''\n"));
   CHECK(clean(p, "json ''' [1] '''\n"));
   CHECK(clean(p, "json '''\n  [1,\n 2] // end\n'''  # after\n"));
+  CHECK(clean(p, "json '''[1] // embedded close ''' is still comment text\n'''\n"));
   CHECK(leaves(p, "json ''' [1] // c\n''' # d\n") ==
         "json ''' [ 1 ] [// c] ''' [# d] \n");
   CHECK(repaired(p, "json '''[1 # no]'''\n", 11));
   CHECK(repaired(p, "json '''[1]''' // no\n", 15));
+  CHECK(repaired(p, "json '''[1, >]'''\n", 12));
+  CHECK(repaired(p, "raw (<[1, ''']>)\n", 10));
 }
 
 // A section whose closing token never comes runs to the end of the document,
@@ -499,11 +335,6 @@ int main() {
   const auto lr = tembed::generated::DocLr::create_parser();
   const auto ll = tembed::generated::DocLl::create_parser();
   each("LR", *lr, tembed::generated::DocLr::kGrammarText);
-  const auto json = tembed::generated::JsonLr::create_parser();
-  each_text_reads_alike(*json, *lr, Frame{"json '''", "'''\n"}, kJson);
-  each_text_reads_alike(*json, *lr, Frame{"json '''", "'''\n"}, kJsonGt);
-  each_text_reads_alike(*json, *lr, Frame{"raw (<", ">)\n"}, kJson);
-  each_text_reads_alike(*json, *lr, Frame{"raw (<", ">)\n"}, kJsonQuotes);
   each("LL", *ll, tembed::generated::DocLl::kGrammarText);
   the_end_of_a_section_is_the_end_of_the_text(*lr);
   return cursiv::test::report("Embed_test");

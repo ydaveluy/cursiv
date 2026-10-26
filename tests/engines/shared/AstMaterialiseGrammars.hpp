@@ -245,7 +245,6 @@ struct Base : cursiv::GrammarSpec {
   static constexpr auto Step = nest<ast::Index, &ast::Index::array>(
       lit<"["> + assign<&ast::Index::index>(ref<Name>) + lit<"]">);
 
-  struct Many : rule<ref<Name> + many(Step)> {};
   struct One : rule<ref<Name> + Step> {};
   struct Some : rule<ref<Name> + some(Step)> {};
   struct Chosen : rule<ref<Some> | ref<Name>> {};
@@ -257,7 +256,7 @@ struct Base : cursiv::GrammarSpec {
   struct Semi : rule<ref<Name> + nest<ast::Stmt, &ast::Stmt::value>(lit<";">)> {
   };
 
-  struct Root : rule<(kw<"many"> + ref<Many>) | (kw<"one"> + ref<One>) |
+  struct Root : rule<(kw<"one"> + ref<One>) |
                      (kw<"some"> + ref<Some>) | (kw<"assign"> + ref<Assigned>) |
                      (kw<"semi"> + ref<Semi>)> {};
   using entry = Root;

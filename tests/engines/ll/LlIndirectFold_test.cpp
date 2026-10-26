@@ -7,6 +7,7 @@
 #include "engines/ll/IndirectFoldGrammar.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
 
+namespace indirect_fold_cases {
 namespace {
 
 using namespace tllindirect;
@@ -134,8 +135,8 @@ void public_entries_keep_their_own_required_suffix(
 
 }  // namespace
 
-int main() {
-  const auto ll = tllindirect::generated::Ll::create_parser();
+void run() {
+  const auto ll = tllexpressions::generated::Ll::create_parser();
   public_entries_keep_their_own_required_suffix(
       *ll, "primary:", {"1+2", "1*2", "1*2+3"});
   public_entries_keep_their_own_required_suffix(
@@ -195,5 +196,6 @@ int main() {
       CHECK(node.begin <= node.end && node.end <= text.size());
     }
   }
-  return cursiv::test::report("LlIndirectFold_test");
 }
+
+}  // namespace indirect_fold_cases

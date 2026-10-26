@@ -1,7 +1,6 @@
 cursiv_grammar_pair(lexicalbackends engines/shared/LexicalBackendsGrammar.hpp tlexbackends::Lr tlexbackends::Ll)
 
-cursiv_grammar_pair(characters engines/shared/CharactersGrammar.hpp tchars::Lr tchars::Ll)
-cursiv_grammar_pair(characterbounds engines/shared/CharactersGrammar.hpp tchars::BoundsLr tchars::BoundsLl)
+cursiv_grammar(characterslr engines/shared/CharactersGrammar.hpp tchars::Lr ENGINE LR)
 
 # Trivia: two ignored terminals reading one text are no tie, and a terminal
 # read as trivia is no bracket.
@@ -10,37 +9,29 @@ cursiv_grammar_pair(characterbounds engines/shared/CharactersGrammar.hpp tchars:
 
 cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia::Ll)
 
-# A chain of a nonassoc level's operators is an error, in both engines.
-cursiv_grammar_pair(nonassoc engines/shared/InfixOperatorsGrammar.hpp tnonassoc::Lr tnonassoc::Ll)
-
 # An operator written in place as a sequence reads as an unnamed data rule, in
 # both engines.
-cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp tinfixop::Lr tinfixop::Ll)
-cursiv_grammar_pair(infixoperatorsshared engines/shared/InfixOperatorsGrammar.hpp tinfixop::SharedLr tinfixop::SharedLl)
+cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp toperators::Lr toperators::Ll)
 
 # A class's members are visited in its declaration order, whichever order the
 # arms of the grammar name them in, in both engines.
-cursiv_grammar_pair(forward engines/shared/AstTreeGrammars.hpp tmember::ForwardLr tmember::ForwardLl)
 # The reversed first encounter exercises the shared metadata emitter once.
 cursiv_grammar(backwardlr engines/shared/AstTreeGrammars.hpp tmember::BackwardLr ENGINE LR)
 
 # Every grammar the build ships, and the lane's own: those carry the guards,
 # the reserves and the wide tables no shipped grammar reaches.
 cursiv_grammar(onemode engines/lr/OneModeGrammar.hpp tonemode::G ENGINE LR)
-if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
-  cursiv_grammar(asciiruns engines/lr/AsciiRunsGrammar.hpp tasciiruns::AsciiRunsGrammar ENGINE LR)
-endif()
 cursiv_grammar(candidateruns engines/lr/CandidateRunsGrammar.hpp tcandrun::G ENGINE LR)
 # The lexer's tables: candidate runs, typo alternatives, guards and conversions,
 # wide terminal sets and converters that read memory.
 cursiv_test(LrLexicon_test engines/lr/LrLexicon_test.cpp alikereducedGenerated
     backrefGenerated candidaterunsGenerated guardGenerated
-    guardtriviaGenerated keywordbehindlrGenerated
+    guardtriviaGenerated
     lrauditGenerated astfusedlrGenerated onemodeGenerated relayoverlapGenerated
     rulerefusalGenerated shorterlrGenerated
     widetermsGenerated cursivLrGen)
 if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
-  target_link_libraries(LrLexicon_test PRIVATE arithmeticsGenerated asciirunsGenerated)
+  target_link_libraries(LrLexicon_test PRIVATE arithmeticsGenerated)
   target_compile_definitions(LrLexicon_test PRIVATE CURSIV_LR_LEXER_CONTRACT=1
       CURSIV_EXAMPLE_DIR="${PROJECT_SOURCE_DIR}/examples")
 endif()
@@ -64,7 +55,6 @@ cursiv_grammar_pair(eofpure engines/shared/EofRegionGrammar.hpp teofregion::Pure
 cursiv_grammar_pair(guardedclimb engines/shared/GuardedClimbGrammar.hpp tguardedclimb::Lr tguardedclimb::Ll)
 
 cursiv_grammar_pair(sectionpredicate engines/shared/SectionPredicateGrammar.hpp tsecpred::Lr tsecpred::Ll)
-cursiv_grammar_pair(election engines/shared/InfixOperatorsGrammar.hpp telectionloop::Lr telectionloop::Ll)
 
 cursiv_grammar_pair(asttree engines/shared/AstTreeGrammars.hpp ttree::Lr ttree::Ll)
 cursiv_aux_grammar(asttreeaux engines/shared/AstTreeGrammars.hpp ttree::Aux)
@@ -86,28 +76,22 @@ cursiv_test(RecursiveTerminals_test engines/shared/RecursiveTerminals_test.cpp
 cursiv_test(LexicalBackends_test engines/shared/LexicalBackends_test.cpp
     lexicalbackendslrGenerated lexicalbackendsllGenerated)
 cursiv_test(Characters_test engines/shared/Characters_test.cpp
-    charactersllGenerated characterslrGenerated
-    characterboundsllGenerated characterboundslrGenerated
-    cursivLlGen cursivLrGen)
+    characterslrGenerated lexicalbackendsllGenerated)
 cursiv_test(Trivia_test engines/shared/Trivia_test.cpp
     triviallGenerated trivialrGenerated)
 cursiv_test(InfixOperators_test engines/shared/InfixOperators_test.cpp
-    infixoperatorsllGenerated infixoperatorslrGenerated infixoperatorssharedllGenerated
-    infixoperatorssharedlrGenerated nonassocllGenerated nonassoclrGenerated
-    electionllGenerated electionlrGenerated)
-cursiv_test(DirectiveSequence_test engines/shared/DirectiveSequence_test.cpp
-    asttreellGenerated asttreelrGenerated)
+    infixoperatorsllGenerated infixoperatorslrGenerated)
 cursiv_test(EofRegion_test engines/shared/EofRegion_test.cpp
     eofregionllGenerated eofregionlrGenerated eofregionauxGenerated
     eofpurellGenerated eofpurelrGenerated)
 cursiv_test(GuardedClimb_test engines/shared/GuardedClimb_test.cpp
     guardedclimbllGenerated guardedclimblrGenerated)
 cursiv_test(LexSuffixSession_test engines/shared/LexSuffixSession_test.cpp)
-cursiv_test(AstMaterialise_test engines/shared/AstMaterialise_test.cpp
-    cursivLlGen cursivLrGen asttreellGenerated asttreelrGenerated)
-cursiv_test(AstTree_test engines/shared/AstTree_test.cpp
-    asttreellGenerated asttreelrGenerated asttreeauxGenerated
-    forwardllGenerated forwardlrGenerated backwardlrGenerated)
+cursiv_test(AstTree_test
+    "engines/shared/AstTree_test.cpp;engines/shared/AstMaterialise_cases.cpp;engines/shared/DirectiveSequence_cases.cpp"
+    cursivLlGen cursivLrGen asttreellGenerated asttreelrGenerated
+    asttreeauxGenerated backwardlrGenerated)
+set_target_properties(AstTree_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 cursiv_test(Conformance_test
     "engines/shared/Conformance_test.cpp;engines/shared/ConditionContract_cases.cpp;engines/shared/SectionPredicate_cases.cpp"
     conformancellGenerated conformancelrGenerated

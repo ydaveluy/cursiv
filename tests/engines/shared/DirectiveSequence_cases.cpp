@@ -464,11 +464,3 @@ void run() {
 }
 
 }  // namespace flag_operand_cases
-
-int main() {
-  cursiv::test::count_expectations();
-  directive_sequence_cases::run();
-  data_parts_cases::run();
-  flag_operand_cases::run();
-  return cursiv::test::report("DirectiveSequence_test");
-}

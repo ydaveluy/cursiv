@@ -530,8 +530,10 @@ int run() {
 }
 }  // namespace case_lrconditionrefs
 
+int run_lr_rule_refusal_cases();
+
 int main() {
-  int movedStatus = 0;
+  int movedStatus = run_lr_rule_refusal_cases();
   movedStatus |= case_lrcaretkeywords::run();
   movedStatus |= case_lrcarettrivia::run();
   movedStatus |= case_lrbracketcaret::run();

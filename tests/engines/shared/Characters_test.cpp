@@ -1,6 +1,4 @@
-#include "characterboundsll/generated/BoundsLl/Module.hpp"
-#include "characterboundslr/generated/BoundsLr/Module.hpp"
-#include "charactersll/generated/Ll/Module.hpp"
+#include "lexicalbackendsll/generated/Ll/Module.hpp"
 #include "characterslr/generated/Lr/Module.hpp"
 #include "characterslr/generated/Lr/Table.hpp"
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
@@ -34,8 +32,9 @@ bool accepted(const cursiv::ParseResult& r) {
   return r.accepted && r.diagnostics.empty();
 }
 
-std::string read(const cursiv::Parser& parser, std::string_view text) {
-  const std::string source(text);
+std::string read(const cursiv::Parser& parser, std::string_view text,
+                 std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
   const auto* const doc = r.value_as<tchars::ast::Doc>();
   if (!accepted(r) || doc == nullptr) return "<refused>";
@@ -48,8 +47,8 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
 }
 
 void check(const cursiv::Parser& parser, std::string_view text,
-           std::string_view expected) {
-  const std::string got = read(parser, text);
+           std::string_view expected, std::string_view prefix = {}) {
+  const std::string got = read(parser, text, prefix);
   if (got != expected)
     std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
                 static_cast<int>(text.size()), text.data(), got.c_str(),
@@ -281,9 +280,9 @@ void any_text(const cursiv::Parser& p) {
   }
 }
 
-void gaps(const cursiv::Parser& p) {
+void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
   const auto holds = [&](std::string_view text, bool expected) {
-    const std::string source = "gaps:" + std::string(text);
+    const std::string source = std::string(prefix) + "gaps:" + std::string(text);
     const cursiv::ParseResult r = p.parse(source);
     if (accepted(r) != expected)
       std::printf("  [%s] %.*s expected %s\n", engine,
@@ -404,40 +403,6 @@ void a_run_and_a_mark_read_characters(const cursiv::Parser& p) {
   check(p, "run:<\xC3\xA9\xC3\xA9>x<\xC3\xA9>", "<refused>");
 }
 
-// The keyword stands where no character of the boundary follows; a stray byte
-// is one, for a boundary that is a complement.
-void a_complement_boundary_holds_a_stray_byte(const cursiv::Parser& p) {
-  const auto items = [&](std::string_view text) {
-    const std::string source(text);
-    const cursiv::ParseResult r = p.parse(source);
-    const auto* const doc = r.value_as<tchars::ast::Doc>();
-    if (!accepted(r) || doc == nullptr) return std::string("<refused>");
-    std::string out;
-    for (const tchars::ast::Item* const item : doc->items) {
-      if (!out.empty()) out += '|';
-      out += item->text;
-    }
-    return out;
-  };
-  const auto expect = [&](std::string_view text, std::string_view want) {
-    const std::string got = items(text);
-    if (got != want)
-      std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                  static_cast<int>(text.size()), text.data(), got.c_str(),
-                  static_cast<int>(want.size()), want.data());
-    CHECK(got == want);
-  };
-  expect("if", "if");
-  expect("if x", "if|x");
-  expect("if;", "if|;");
-  expect("ifx", "ifx");
-  expect("if\xFF", "if\xFF");
-  expect("if\xC3(", "if\xC3(");
-  expect("if\xC3\xA9", "if\xC3\xA9");
-  expect("if\xE2\x82", "if\xE2\x82");
-  expect("if \xFF", "if|\xFF");
-}
-
 void exercise(const cursiv::Parser& p) {
   whole_scalars(p);
   quotes(p);
@@ -451,19 +416,60 @@ void exercise(const cursiv::Parser& p) {
   any_text(p);
 }
 
+// LexDfaBuild, LexTape and scalar_at supply both backends' Unicode matching.
+// Keep the full codec/class corpus above on LR and cover the LL adapter's
+// first-token conditions, longest match and trivia with this smaller entry.
+void ll_integration(const cursiv::Parser& parser) {
+  for (const auto& [text, want] : {
+           std::pair<std::string_view, std::string_view>{"one:é", "é"},
+           {"one:𝒳", "𝒳"},
+           {"two:é", "<refused>"},
+           {"two:éa", "éa"},
+           {"bytes:é", "\xC3|\xA9"},
+           {"bytes:a\xFF", "a|\xFF"},
+           {"rb:a\xC3" "b", ""},
+           {"rb:ab", "<refused>"},
+           {"rc1:x", ""},
+           {"rc2:é", "<refused>"},
+           {"rc3:é", ""},
+           {"rc4:}", ""},
+           {"rc5:\xE9", ""},
+           {"rc6:\xE9", ""},
+           {"rt1:x", "x"},
+           {"rt1:é", "<refused>"},
+           {"rt1:\xE9", "\xE9"},
+           {"rt3:é", "é"},
+           {"rt3:\xE9", "\xE9"},
+           {"xa:xé", "x|é"},
+           {"xa:xe", "<refused>"},
+           {"xa:x\xC3", "<refused>"},
+           {"xo:xe", "x|e"},
+           {"xo:xé", "<refused>"},
+           {"xo:x\xC3", "x|\xC3"},
+           {"xg:xé", "x|é"},
+           {"xg:xe", "<refused>"},
+           {"rn1:é", "é"},
+           {"rn1:e", "<refused>"},
+           {"rn2:e", "e"},
+           {"rn2:é", "<refused>"},
+           {"first:é", "é"},
+           {"first:\xE9", "<refused>"},
+           {"rna:é日a", "é日|a"},
+           {"rne:aé", "a|é"},
+           {"rne:éa", "<refused>"},
+       })
+    check(parser, text, want, "chars:");
+  gaps(parser, "chars:");
+}
+
 }  // namespace
 
 void run() {
   engine = "LL";
-  exercise(*tchars::generated::Ll::create_parser());
-  gaps(*tchars::generated::Ll::create_parser());
-  a_complement_boundary_holds_a_stray_byte(
-      *tchars::generated::BoundsLl::create_parser());
+  ll_integration(*tlexbackends::generated::Ll::create_parser());
   engine = "LR";
   exercise(*tchars::generated::Lr::create_parser());
   gaps(*tchars::generated::Lr::create_parser());
-  a_complement_boundary_holds_a_stray_byte(
-      *tchars::generated::BoundsLr::create_parser());
 
 }
 
@@ -527,7 +533,6 @@ void exercise(const cursiv::Parser& parser) {
 }  // namespace
 
 void run() {
-  exercise(*tchars::generated::Ll::create_parser());
   exercise(*tchars::generated::Lr::create_parser());
 
 }

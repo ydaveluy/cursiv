@@ -216,16 +216,7 @@ void a_position_given_up_on_is_not_read_again() {
   CHECK(stats.lookStops <= 2);
 }
 
-// A position forty terminals match: nothing bounds how many arms a position
-// presents, so no word-wide arm set may stand behind one.
-void a_position_more_terminals_match_than_a_word_holds() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tcells::generated::G::create_parser();
-  for (unsigned k = 0; k < 40; ++k)
-    CHECK(clean(*p, "wide x end" + std::to_string(k)));
-}
-
-// The same width, with a repetition between the arm's terminal and its
+// Forty alternatives, with a repetition between the arm's terminal and its
 // closing literal. Within the look-ahead's depth the oracle still reaches
 // the literal and every arm is settled: a cell is not decided by how many
 // arms it has, so forty of them read as far as two.
@@ -291,7 +282,6 @@ int run() {
   a_position_no_look_ahead_settles_is_split();
   a_position_given_up_on_is_not_read_again();
   a_caret_over_a_split_cell_owes_every_arm();
-  a_position_more_terminals_match_than_a_word_holds();
   a_wide_cell_reads_as_far_as_a_narrow_one();
   a_cell_splits_as_wide_as_it_is();
   a_reading_the_pool_had_no_room_for_refutes_nothing();

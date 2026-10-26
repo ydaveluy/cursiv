@@ -249,10 +249,10 @@ int run() {
 
 }  // namespace caret_run
 
-int main() {
+int run_lr_rule_refusal_cases() {
   int status = 0;
   status |= rule_refusal::run();
   status |= caret_look::run();
   status |= caret_run::run();
-  return cursiv::test::report("LrRuleRefusal_test") | status;
+  return status;
 }

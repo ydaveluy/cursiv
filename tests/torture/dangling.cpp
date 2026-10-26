@@ -20,7 +20,7 @@
 #include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
-#include "dangling/generated/DeepIf/Module.hpp"
+#include "election/generated/Election/Module.hpp"
 
 namespace {
 
@@ -42,8 +42,8 @@ struct World {
     cursiv::install_default_shared_lsp_services(shared);
     auto language = std::make_unique<Language>(shared);
     language->languageMetaData = {"dangling", {".dangling"}, {}};
-    language->parser = tdang::generated::DeepIf::create_parser();
-    language->astReflection = tdang::generated::DeepIf::create_ast_reflection();
+    language->parser = telect::generated::Election::create_parser();
+    language->astReflection = telect::generated::Election::create_ast_reflection();
     cursiv::install_default_core_services(*language);
     cursiv::install_default_lsp_services(*language);
     lang = language.get();
@@ -109,7 +109,7 @@ const Case kCases[] = {
 // span sits inside the text.
 void recovery() {
   const std::unique_ptr<cursiv::Parser> engine =
-      tdang::generated::DeepIf::create_parser();
+      telect::generated::Election::create_parser();
   for (const Case& c : kCases) {
     const cursiv::ParseResult r = engine->parse(c.text);  // must not crash
     const cursiv::Cst& cst = r.cst();
