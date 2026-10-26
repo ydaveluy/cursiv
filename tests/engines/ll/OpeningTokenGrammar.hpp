@@ -44,7 +44,6 @@ struct Shift : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct ShiftLl : Shift {};
 struct ShiftLr : Shift {};
 
 struct Negated : cursiv::GrammarSpec {
@@ -66,18 +65,17 @@ struct Negated : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct NegatedLl : Negated {};
-struct NegatedLr : Negated {};
 
 // Two tables, the inner one tighter: the shift of the outer table opens on the
-// `>` the inner table's comparison is.
+// `=` the inner table's comparison is. Its spelling differs from Shift's
+// operators because each spelling has one precedence across a language.
 struct Tables : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NUMBER : terminal<some(d)> {};
-  struct ShiftOp : rule<lit<">"> + lit<">">> {};
+  struct ShiftOp : rule<lit<"="> + lit<"=">> {};
   struct Atom : rule<assign<&ast::Number::text>(ref<NUMBER>)> {};
   struct Compare : infix<Atom, &ast::Binary::left, &ast::Binary::op,
-                         &ast::Binary::right, left(lit<">"> | lit<"<">)> {};
+                         &ast::Binary::right, left(lit<"="> | lit<"!">)> {};
   struct Expr
       : infix<Compare, &ast::Binary::left, &ast::Binary::op,
               &ast::Binary::right, (left(ref<ShiftOp>) >> left(lit<"?">))> {};
@@ -85,27 +83,35 @@ struct Tables : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct TablesLl : Tables {};
-struct TablesLr : Tables {};
 
 // Operators a rule says whole: one behind a condition, one that is a choice,
-// one of two tokens behind the same `*` as a token of its own.
+// one of two tokens behind the same `@` as a token of its own.
 struct Composite : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NUMBER : terminal<some(d)> {};
-  struct SameLine : rule<!gap::line + lit<"+">> {};
-  struct Words : rule<lit<"-"> | (lit<"a"> + lit<"b">)> {};
-  struct Starred : rule<lit<"*"> + (lit<"x"> | lit<"y">)> {};
+  struct SameLine : rule<!gap::line + lit<"~">> {};
+  struct Words : rule<lit<":"> | (lit<"a"> + lit<"b">)> {};
+  struct Starred : rule<lit<"@"> + (lit<"x"> | lit<"y">)> {};
   struct Atom : rule<assign<&ast::Number::text>(ref<NUMBER>)> {};
   struct Expr
       : infix<Atom, &ast::Binary::left, &ast::Binary::op, &ast::Binary::right,
-              (left(ref<Starred>) >> left(lit<"*">) >> left(ref<SameLine>) >>
+              (left(ref<Starred>) >> left(lit<"@">) >> left(ref<SameLine>) >>
                left(ref<Words>))> {};
   struct Root : rule<assign<&ast::Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
   using ignore = WS;
 };
-struct CompositeLl : Composite {};
-struct CompositeLr : Composite {};
+
+// All four operator contracts share the same whitespace and AST. Distinct
+// entry tags keep their precedence tables independent in one generated LL
+// language; ShiftLr remains the oracle for the shift and arrow cases.
+struct Ll : cursiv::GrammarSpec {
+  struct Root : rule<(lit<"shift:"> + ref<Shift::Root>) |
+                     (lit<"negated:"> + ref<Negated::Root>) |
+                     (lit<"tables:"> + ref<Tables::Root>) |
+                     (lit<"composite:"> + ref<Composite::Root>)> {};
+  using entry = Root;
+  using ignore = Shift::WS;
+};
 
 }  // namespace topening

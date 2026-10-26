@@ -28,6 +28,36 @@ struct Clone : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct RequiredLr : Required {};
-struct CloneLr : Clone {};
+
+// A blank is both trivia and a visible token of the same length.
+struct Name : cursiv::Extends<cursiv::AstNode> {
+  string_view text;
+};
+struct Stmts : cursiv::Extends<cursiv::AstNode> {
+  vector<Name*> stmts;
+};
+struct Blank : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct GAP : terminal<some(s)> {};
+  struct WORD : terminal<some(cr<"a-z">)> {};
+  struct GapRule : rule<assign<&Name::text>(ref<GAP>)> {};
+  struct WordRule : rule<assign<&Name::text>(ref<WORD>)> {};
+  struct Root : rule<some(append<&Stmts::stmts>(ref<GapRule> | ref<WordRule>)) + eof> {};
+  using entry = Root;
+  using ignore = WS;
+};
+
+// Visible blanks, counted character units and an identical trivia terminal
+// share one parser. Each entry retains its own whitespace configuration.
+struct Ll : cursiv::GrammarSpec {
+  struct Root
+      : rule<(lit<"required:"> +
+              skip(ignored<Required::WS>, hide<>, ref<Required::Root>)) |
+             (lit<"clone:"> +
+              skip(ignored<Clone::WS>, hide<>, ref<Clone::Root>)) |
+             (lit<"blank:"> +
+              skip(ignored<Blank::WS>, hide<>,
+                   ref<Blank::Root>))> {};
+  using entry = Root;
+};
 }  // namespace tllunit

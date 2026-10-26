@@ -9,36 +9,19 @@
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
 // Two runs, each of a kind, a token, a floor and a ceiling: the kinds P, S and
-// G read no rule, C and X call one.
+// G read no rule, C and X call one. The paired bounds below cover each
+// interval in both positions, optional/required neighbours, both call orders
+// and every directive shape. A Cartesian product of the same five intervals
+// only repeated the bounded-repeat checks from CountedRepeatGrammar.hpp.
 #define TSCOPE_PAIRS(ROW)              \
   ROW(k00, P, 'a', 0, 3, C, 'b', 0, 3) \
   ROW(k01, P, 'a', 0, 3, C, 'b', 2, 4) \
-  ROW(k02, P, 'a', 0, 3, C, 'b', 0, 1) \
-  ROW(k03, P, 'a', 0, 3, C, 'b', 2, 3) \
-  ROW(k04, P, 'a', 0, 3, C, 'b', 1, 2) \
   ROW(k05, P, 'a', 2, 4, C, 'b', 0, 3) \
   ROW(k06, P, 'a', 2, 4, C, 'b', 2, 4) \
-  ROW(k07, P, 'a', 2, 4, C, 'b', 0, 1) \
-  ROW(k08, P, 'a', 2, 4, C, 'b', 2, 3) \
-  ROW(k09, P, 'a', 2, 4, C, 'b', 1, 2) \
-  ROW(k10, P, 'a', 0, 1, C, 'b', 0, 3) \
-  ROW(k11, P, 'a', 0, 1, C, 'b', 2, 4) \
   ROW(k12, P, 'a', 0, 1, C, 'b', 0, 1) \
-  ROW(k13, P, 'a', 0, 1, C, 'b', 2, 3) \
-  ROW(k14, P, 'a', 0, 1, C, 'b', 1, 2) \
-  ROW(k15, P, 'a', 2, 3, C, 'b', 0, 3) \
-  ROW(k16, P, 'a', 2, 3, C, 'b', 2, 4) \
-  ROW(k17, P, 'a', 2, 3, C, 'b', 0, 1) \
   ROW(k18, P, 'a', 2, 3, C, 'b', 2, 3) \
-  ROW(k19, P, 'a', 2, 3, C, 'b', 1, 2) \
-  ROW(k20, P, 'a', 1, 2, C, 'b', 0, 3) \
-  ROW(k21, P, 'a', 1, 2, C, 'b', 2, 4) \
-  ROW(k22, P, 'a', 1, 2, C, 'b', 0, 1) \
-  ROW(k23, P, 'a', 1, 2, C, 'b', 2, 3) \
   ROW(k24, P, 'a', 1, 2, C, 'b', 1, 2) \
-  ROW(k25, P, 'a', 0, 3, C, 'b', 2, 4) \
   ROW(k26, C, 'b', 0, 3, P, 'a', 2, 4) \
-  ROW(k27, P, 'a', 2, 4, C, 'b', 0, 3) \
   ROW(k28, C, 'b', 2, 4, P, 'a', 0, 3) \
   ROW(k29, P, 'a', 0, 3, X, 'b', 2, 4) \
   ROW(k30, X, 'b', 0, 3, P, 'a', 2, 4) \

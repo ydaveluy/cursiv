@@ -1,3 +1,4 @@
+#include "ConformanceTest.hpp"
 // The conformance cases of the grammar reference, on both engines.
 
 #include <array>
@@ -8,6 +9,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "conformancell/generated/Ll/Module.hpp"
+#include "conformancelr/generated/Lr/Module.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstBuildError.hpp"
@@ -16,40 +20,25 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
-#include "conformancell/generated/Ll/Module.hpp"
-#include "conformancelr/generated/Lr/Module.hpp"
+namespace condition_contract_cases {
+void run();
+}
+namespace template_tail_cases {
+void run();
+}
+namespace section_predicate_cases {
+void run();
+}
+namespace conformance_section_close_cases {
+void run();
+}
+
 namespace {
 
-struct Pair {
-  std::array<std::unique_ptr<cursiv::Parser>, 2> engines;
-  std::string_view prefix;
-  Pair(std::unique_ptr<cursiv::Parser> ll, std::unique_ptr<cursiv::Parser> lr,
-       std::string_view tag = {}) : engines{std::move(ll), std::move(lr)}, prefix(tag) {}
-  const auto& operator[](std::size_t i) const { return engines[i]; }
-  auto begin() const { return engines.begin(); }
-  auto end() const { return engines.end(); }
-  std::string source(std::string_view text) const {
-    return std::string(prefix) + std::string(text);
-  }
-};
-constexpr const char* kEngine[] = {"LL", "LR"};
-
-bool clean(const cursiv::ParseResult& r) {
-  return r.accepted && r.diagnostics.empty() &&
-         r.error == cursiv::AstBuildError::none;
-}
-
-void expect(const Pair& pair, std::string_view text, bool want) {
-  for (unsigned i = 0; i < 2; ++i) {
-    const std::string source = pair.source(text);
-    const bool got = clean(pair[i]->parse(source));
-    if (got != want)
-      std::printf("%s [%.*s]: wanted %s\n", kEngine[i],
-                  static_cast<int>(text.size()), text.data(),
-                  want ? "read" : "refused");
-    CHECK(got == want);
-  }
-}
+using conformance_test::clean;
+using conformance_test::expect;
+using conformance_test::kEngine;
+using conformance_test::Pair;
 
 template <class T>
 const T* exactly(const cursiv::ParseResult& r) {
@@ -76,29 +65,28 @@ void tree(const Pair& pair, std::string_view text, Check&& check,
 }  // namespace
 
 int main() {
-  namespace g = tconformance::generated;
   namespace ast = tconformance::ast;
   cursiv::test::count_expectations();
 
-  const Pair keyword{g::Ll::create_parser(), g::Lr::create_parser(), "keyword:"};
+  const Pair keyword{"keyword:"};
   expect(keyword, "if", true);
   expect(keyword, "ifx", false);
 
   // A keyword and a literal of one spelling tie: the arm written first wins.
-  const Pair keywordTie{g::Ll::create_parser(), g::Lr::create_parser(), "keywordtie:"};
+  const Pair keywordTie{"keywordtie:"};
   tree<ast::Pick>(keywordTie, "if(", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
-  const Pair keywordTieBoundary{g::Ll::create_parser(), g::Lr::create_parser(), "keywordtieboundary:"};
+  const Pair keywordTieBoundary{"keywordtieboundary:"};
   tree<ast::Pick>(keywordTieBoundary, "if x", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
   tree<ast::Pick>(keywordTieBoundary, "ifx", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
-  const Pair firstArm{g::Ll::create_parser(), g::Lr::create_parser(), "firstarm:"};
+  const Pair firstArm{"firstarm:"};
   tree<ast::First>(firstArm, "if then", [](const ast::First&) { return true; });
-  const Pair elected{g::Ll::create_parser(), g::Lr::create_parser(), "elected:"};
+  const Pair elected{"elected:"};
   const auto won = [&](std::string_view text, std::string_view token,
                        std::string_view name) {
     tree<ast::Won>(elected, text, [&](const ast::Won& n) {
@@ -127,7 +115,7 @@ int main() {
     CHECK(ok);
   }
 
-  const Pair literalsRank{g::Ll::create_parser(), g::Lr::create_parser(), "literalsrank:"};
+  const Pair literalsRank{"literalsrank:"};
   tree<ast::Won>(literalsRank, "if", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
@@ -137,12 +125,12 @@ int main() {
   tree<ast::Won>(literalsRank, "iff", [](const ast::Won& n) {
     return n.name == "iff" && n.token.empty();
   });
-  const Pair literalsRankRefuses{g::Ll::create_parser(), g::Lr::create_parser(), "literalsrankrefuses:"};
+  const Pair literalsRankRefuses{"literalsrankrefuses:"};
   expect(literalsRankRefuses, "if", false);
   expect(literalsRankRefuses, "if;", true);
   expect(literalsRankRefuses, "x", true);
 
-  const Pair literalConditionRank{g::Ll::create_parser(), g::Lr::create_parser(), "literalconditionrank:"};
+  const Pair literalConditionRank{"literalconditionrank:"};
   tree<ast::Won>(literalConditionRank, "if;", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
@@ -153,7 +141,7 @@ int main() {
     return n.name == "x" && n.token.empty();
   });
 
-  const Pair mixedRank{g::Ll::create_parser(), g::Lr::create_parser(), "mixedrank:"};
+  const Pair mixedRank{"mixedrank:"};
   tree<ast::Pick>(mixedRank, "if(", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
@@ -161,14 +149,14 @@ int main() {
     return n.keyword == "x" && n.literal.empty();
   });
 
-  const Pair conditionedRank{g::Ll::create_parser(), g::Lr::create_parser(), "conditionedrank:"};
+  const Pair conditionedRank{"conditionedrank:"};
   tree<ast::Pick>(conditionedRank, "if;", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
   tree<ast::Pick>(conditionedRank, "if:", [](const ast::Pick& n) {
     return n.literal == "if" && n.keyword.empty();
   });
-  const Pair conditionedSwapped{g::Ll::create_parser(), g::Lr::create_parser(), "conditionedrankswapped:"};
+  const Pair conditionedSwapped{"conditionedrankswapped:"};
   tree<ast::Pick>(conditionedSwapped, "if;", [](const ast::Pick& n) {
     return n.keyword == "if" && n.literal.empty();
   });
@@ -176,16 +164,16 @@ int main() {
     return n.keyword == "if" && n.literal.empty();
   });
 
-  const Pair patternsTie{g::Ll::create_parser(), g::Lr::create_parser(), "patternstie:"};
+  const Pair patternsTie{"patternstie:"};
   tree<ast::Won>(patternsTie, "if", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
-  const Pair patternsTieSwapped{g::Ll::create_parser(), g::Lr::create_parser(), "patternstieswapped:"};
+  const Pair patternsTieSwapped{"patternstieswapped:"};
   tree<ast::Won>(patternsTieSwapped, "if", [](const ast::Won& n) {
     return n.name == "if" && n.token.empty();
   });
 
-  const Pair mixedRefused{g::Ll::create_parser(), g::Lr::create_parser(), "mixedrefused:"};
+  const Pair mixedRefused{"mixedrefused:"};
   tree<ast::Won>(mixedRefused, "if;", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
@@ -193,7 +181,7 @@ int main() {
     return n.name == "x" && n.token.empty();
   });
 
-  const Pair mixedLeading{g::Ll::create_parser(), g::Lr::create_parser(), "mixedleading:"};
+  const Pair mixedLeading{"mixedleading:"};
   tree<ast::Won>(mixedLeading, "if;", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
@@ -201,32 +189,32 @@ int main() {
     return n.name == "x" && n.token.empty();
   });
 
-  const Pair keywordTrivia{g::Ll::create_parser(), g::Lr::create_parser(), "keywordtrivia:"};
+  const Pair keywordTrivia{"keywordtrivia:"};
   tree<ast::Won>(keywordTrivia, "if", [](const ast::Won& n) {
     return n.name == "if" && n.token.empty();
   });
   tree<ast::Won>(keywordTrivia, "iff", [](const ast::Won& n) {
     return n.name == "iff" && n.token.empty();
   });
-  const Pair literalTrivia{g::Ll::create_parser(), g::Lr::create_parser(), "literaltrivia:"};
+  const Pair literalTrivia{"literaltrivia:"};
   tree<ast::Won>(literalTrivia, "if", [](const ast::Won& n) {
     return n.name == "if" && n.token.empty();
   });
   tree<ast::Won>(literalTrivia, "iff", [](const ast::Won& n) {
     return n.name == "iff" && n.token.empty();
   });
-  const Pair conditionedTrivia{g::Ll::create_parser(), g::Lr::create_parser(), "conditionedtrivia:"};
+  const Pair conditionedTrivia{"conditionedtrivia:"};
   tree<ast::Won>(conditionedTrivia, "if;", [](const ast::Won& n) {
     return n.name == "if" && n.token.empty();
   });
-  const Pair guardedLiteral{g::Ll::create_parser(), g::Lr::create_parser(), "guardedliteral:"};
+  const Pair guardedLiteral{"guardedliteral:"};
   tree<ast::Won>(guardedLiteral, "if;", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
   tree<ast::Won>(guardedLiteral, "if(", [](const ast::Won& n) {
     return n.name == "if" && n.token.empty();
   });
-  const Pair literalBesideGuard{g::Ll::create_parser(), g::Lr::create_parser(), "literalbesideguard:"};
+  const Pair literalBesideGuard{"literalbesideguard:"};
   tree<ast::Won>(literalBesideGuard, "if", [](const ast::Won& n) {
     return n.token == "if" && n.name.empty();
   });
@@ -235,15 +223,15 @@ int main() {
   });
   // The lexer tries what the readings take, not what the state merged from
   // its callers would: `TEXT` is no rival of `.` where a path is a key.
-  const Pair mergedLookahead{g::Ll::create_parser(), g::Lr::create_parser(), "mergedlookahead:"};
+  const Pair mergedLookahead{"mergedlookahead:"};
   expect(mergedLookahead, "a.b", true);
   expect(mergedLookahead, "a.b: [@c.d e.f]", true);
-  const Pair expectedKeyword{g::Ll::create_parser(), g::Lr::create_parser(), "expectedkeyword:"};
+  const Pair expectedKeyword{"expectedkeyword:"};
   tree<ast::Won>(expectedKeyword, "REM ; REM junk\nabc", [](const ast::Won& n) {
     return n.token == "REM" && n.name == "abc";
   });
 
-  const Pair arms{g::Ll::create_parser(), g::Lr::create_parser(), "arms:"};
+  const Pair arms{"arms:"};
   tree<ast::Arms>(arms, "abc:", [](const ast::Arms& n) {
     return n.name == "abc" && n.low.empty();
   });
@@ -251,7 +239,7 @@ int main() {
     return n.low == "abc" && n.name.empty();
   });
 
-  const Pair separated{g::Ll::create_parser(), g::Lr::create_parser(), "separated:"};
+  const Pair separated{"separated:"};
   tree<ast::List>(separated, "",
                   [](const ast::List& n) { return n.items.empty(); });
   tree<ast::List>(separated, "a , a",
@@ -259,25 +247,25 @@ int main() {
   expect(separated, ",", false);
   expect(separated, "a ,", false);
 
-  const Pair trailing{g::Ll::create_parser(), g::Lr::create_parser(), "trailing:"};
+  const Pair trailing{"trailing:"};
   tree<ast::List>(trailing, "a,",
                   [](const ast::List& n) { return n.items.size() == 1; });
   tree<ast::List>(trailing, "a , a ,",
                   [](const ast::List& n) { return n.items.size() == 2; });
   expect(trailing, ",", false);
 
-  const Pair grouped{g::Ll::create_parser(), g::Lr::create_parser(), "grouped:"};
+  const Pair grouped{"grouped:"};
   tree<ast::S>(grouped, "x y z", [](const ast::S& n) {
     return n.a != nullptr && n.a->letters.size() == 2 && n.b == nullptr &&
            n.c != nullptr;
   });
-  const Pair repeated{g::Ll::create_parser(), g::Lr::create_parser(), "repeated:"};
+  const Pair repeated{"repeated:"};
   tree<ast::S>(repeated, "x y z", [](const ast::S& n) {
     return n.a != nullptr && n.a->letters.size() == 1 && n.b != nullptr &&
            n.b->letters.size() == 2 && n.c == nullptr;
   });
 
-  const Pair turn{g::Ll::create_parser(), g::Lr::create_parser(), "turn:"};
+  const Pair turn{"turn:"};
   tree<ast::Turns>(turn, "aa", [](const ast::Turns& n) {
     return n.turns.size() == 1 && n.turns[0]->letters.size() == 2;
   });
@@ -286,36 +274,36 @@ int main() {
            n.turns[1]->letters.size() == 1;
   });
 
-  const Pair turnShortFirst{g::Ll::create_parser(), g::Lr::create_parser(), "turnshortfirst:"};
+  const Pair turnShortFirst{"turnshortfirst:"};
   tree<ast::Turns>(turnShortFirst, "aa", [](const ast::Turns& n) {
     return n.turns.size() == 2 && n.turns[0]->letters.size() == 1 &&
            n.turns[1]->letters.size() == 1;
   });
 
-  const Pair tight{g::Ll::create_parser(), g::Lr::create_parser(), "tight:"};
+  const Pair tight{"tight:"};
   expect(tight, "[name]", true);
   expect(tight, "[ name ]", false);
 
-  const Pair adjacent{g::Ll::create_parser(), g::Lr::create_parser(), "adjacent:"};
+  const Pair adjacent{"adjacent:"};
   expect(adjacent, ">>", true);
   expect(adjacent, "> >", false);
 
-  const Pair closers{g::Ll::create_parser(), g::Lr::create_parser(), "closers:"};
+  const Pair closers{"closers:"};
   expect(closers, "<a>x", true);
   expect(closers, "<a>y>x", false);
 
-  const Pair longString{g::Ll::create_parser(), g::Lr::create_parser(), "longstring:"};
+  const Pair longString{"longstring:"};
   expect(longString, "[[x]]", true);
   expect(longString, "[=[x]=]", true);
   expect(longString, "[=[x]==]", false);
 
-  const Pair split{g::Ll::create_parser(), g::Lr::create_parser(), "split:"};
+  const Pair split{"split:"};
   expect(split, "ab", false);
   expect(split, "a b", true);
   expect(split, "ab c", true);
 
-  const Pair many{g::Ll::create_parser(), g::Lr::create_parser(), "callermany:"};
-  const Pair ladder{g::Ll::create_parser(), g::Lr::create_parser(), "ladder:"};
+  const Pair many{"callermany:"};
+  const Pair ladder{"ladder:"};
   for (const Pair* shared : {&many, &ladder}) {
     for (const std::string_view text :
          {"xab", "xaxab", "xa xab", "xaxa xab", "xaxaxab"})
@@ -332,14 +320,11 @@ int main() {
           parser->getGrammar().terminalText(next[0].feature) == "ab");
   }
 
-  const Pair atEnd{g::Ll::create_parser(), g::Lr::create_parser(), "atendhost:"};
-  expect(atEnd, "[a]", true);
-
-  const Pair word{g::Ll::create_parser(), g::Lr::create_parser(), "wordhost:"};
+  const Pair word{"wordhost:"};
   tree<ast::Leaf>(word, "[x]",
                   [](const ast::Leaf& n) { return n.text == "x"; });
 
-  const Pair calls{g::Ll::create_parser(), g::Lr::create_parser(), "calls:"};
+  const Pair calls{"calls:"};
   tree<ast::Program>(calls, "a\n(b)", [](const ast::Program& n) {
     return n.statements.size() == 1 &&
            n.statements[0]->type == &cursiv::ast_type_tag<ast::Call>;
@@ -349,5 +334,9 @@ int main() {
            n.statements[0]->type == &cursiv::ast_type_tag<ast::Name>;
   });
 
+  condition_contract_cases::run();
+  template_tail_cases::run();
+  section_predicate_cases::run();
+  conformance_section_close_cases::run();
   return cursiv::test::report("Conformance_test");
 }

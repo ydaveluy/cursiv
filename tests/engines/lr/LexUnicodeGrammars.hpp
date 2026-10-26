@@ -2,8 +2,8 @@
 
 // Classes of code points in a token: identifier properties, a general
 // category, a complement, and the word boundary of a keyword beside them.
-// The shapes are cases of two tables, behind an opening keyword each: the
-// narrow keyword boundaries keep their own, which few classes exhaust.
+// Character decoding and category tests live in CharactersGrammar.hpp. These
+// remaining cases exercise rival scalar guards and intersected reservations.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
@@ -21,39 +21,6 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace ast
 
-namespace scalars {
-struct G : cursiv::GrammarSpec {
-  struct ID : terminal<(uc::XID_Start | cr<"_$">) +
-                       many(uc::XID_Continue | cr<"$">)> {};
-  struct NUM : terminal<some(uc::Nd)> {};
-  struct SYM : terminal<some(~(uc::L | uc::Nd | uc::Zs | uc::Cc | uc::Pc |
-                               cr<"$">))> {};
-  struct Item : rule<create<ast::Item> +
-                     (assign<&ast::Item::name>(ref<ID> | ref<NUM> | ref<SYM>) |
-                      flag<&ast::Item::cond>(kw<"if">) |
-                      flag<&ast::Item::where>(kw<"où">))> {};
-  struct Doc : rule<create<ast::Doc> + many(append<&ast::Doc::items>(ref<Item>))> {};
-};
-}  // namespace scalars
-
-// A spelled range of scalars.
-namespace letters {
-struct G : cursiv::GrammarSpec {
-  struct ID : terminal<some(cr<"a-zA-ZÀ-ÖØ-öø-ÿ">)> {};
-  struct Item : rule<create<ast::Item> + assign<&ast::Item::name>(ref<ID>)> {};
-  struct Doc : rule<create<ast::Doc> + many(append<&ast::Doc::items>(ref<Item>))> {};
-};
-}  // namespace letters
-// The complement of a few characters: a word is every character but a blank
-// and a comma, however many bytes each takes, a stray byte included.
-namespace except {
-struct G : cursiv::GrammarSpec {
-  struct WORD : terminal<some(~cr<R"( \t\r\n,)">)> {};
-  struct Item : rule<create<ast::Item> + assign<&ast::Item::name>(ref<WORD>)> {};
-  struct Doc : rule<create<ast::Doc> +
-                    some(append<&ast::Doc::items>(ref<Item>), lit<",">)> {};
-};
-}  // namespace except
 // A guard of code points: `1.` is a number only where no identifier starts
 // and no second dot follows, and `#` only where no identifier starts. Both
 // end a match, so the scalar behind it is decoded and may not be one of them.
@@ -161,27 +128,16 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace escape
 
-namespace wide {
-struct G : cursiv::GrammarSpec {
+// These scalar guard cases share the LR character table.
+struct Cases : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct Entry : rule<(kw<"scalars"> + ref<scalars::G::Doc>) |
-                      (kw<"inside"> + ref<inside::G::Doc>) |
+  struct Entry : rule<(kw<"inside"> + ref<inside::G::Doc>) |
                       (kw<"intersect"> + ref<intersect::G::Doc>) |
                       (kw<"dot"> + ref<dot::G::Doc>) |
                       (kw<"cased"> + ref<cased::G::Doc>) |
                       (kw<"trailing"> + ref<trailing::G::Doc>) |
                       (kw<"rawlead"> + ref<rawlead::G::Doc>) |
-                      (kw<"letters"> + ref<letters::G::Doc>) |
-                      (kw<"escape"> + ref<escape::G::Doc>) |
-                      (kw<"except"> + ref<except::G::Doc>)> {};
-  using entry = Entry;
-  using ignore = WS;
-  // A keyword's boundary is the name's own alphabet, `$` lifted among the
-  // code points.
-  static constexpr auto word_boundary = uc::XID_Continue | cr<"$">;
+                      (kw<"escape"> + ref<escape::G::Doc>)> {};
 };
-}  // namespace wide
-
-
 
 }  // namespace tunicode

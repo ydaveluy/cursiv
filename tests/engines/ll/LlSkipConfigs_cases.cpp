@@ -11,6 +11,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_skip_configs_cases {
+
 namespace {
 
 constexpr unsigned kRegions = 80;
@@ -49,12 +51,13 @@ void read(const cursiv::Parser& ll, const std::string& source, bool expected) {
 
 }  // namespace
 
-int main() {
+void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   read(*ll, text(kRegions, 0), true);
   for (const unsigned i : {0u, 1u, 31u, 32u, 63u, 64u, 65u, 79u}) {
     read(*ll, text(i, i), true);
     read(*ll, text(i, (i + 1) % kRegions), false);
   }
-  return cursiv::test::report("LlSkipConfigs_test");
 }
+
+}  // namespace ll_skip_configs_cases

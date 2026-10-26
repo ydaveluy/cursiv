@@ -1,15 +1,16 @@
 cursiv_test(TapeAudit_test engines/lr/TapeAudit_test.cpp
     tortureGenerated
     cellsGenerated
-    unsettledGenerated)
+    edgesGenerated)
 target_compile_definitions(TapeAudit_test PRIVATE
     CURSIV_TAPE_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/torture/corpus")
+# Guards, refused word heads and shifting candidates use the same lexical policy.
 cursiv_grammar(guard engines/lr/LexGuardGrammars.hpp tguard::G ENGINE LR)
 cursiv_grammar(guardtrivia engines/lr/LexGuardGrammars.hpp tguard::trivia::G ENGINE LR)
-foreach(_n IN ITEMS Reduced Shifted)
-  string(TOLOWER ${_n} _id)
-  cursiv_grammar(alike${_id} engines/lr/AlikeCandidatesGrammar.hpp talike::${_n} ENGINE LR)
-endforeach()
+# Unlike the shared guard table, every mode of Reduced elects one candidate.
+# Keep its candidate-free generated parser as an independent contract.
+cursiv_grammar(alikereduced engines/lr/AlikeCandidatesGrammar.hpp
+    talike::Reduced ENGINE LR)
 # The ceilings a parse meets, counted: look-ahead, graph and repair budgets.
 cursiv_grammar(ceilings engines/lr/CeilingsGrammar.hpp tceilings::G ENGINE LR)
 cursiv_test(LrCeilings_test engines/lr/LrCeilings_test.cpp

@@ -2,6 +2,7 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/BracketCaretGrammar.hpp"
 // What a terminal read as trivia is: two ignored terminals may read the same
 // text, a literal outranks a tied pattern, and one is no bracket of the
 // indentation.
@@ -136,5 +137,15 @@ struct Suite : cursiv::GrammarSpec {
   static constexpr auto indent_close = lit<")">;
 };
 struct Ll : Suite {};
-struct Lr : Suite {};
+// Newline completion without INDENT/DEDENT shares this bracket-aware table.
+struct Lr : Suite {
+  struct Entry
+      : rule<ref<Suite::Entry> |
+             skip(ignored<tbracketcaret::G::WS, tbracketcaret::G::NL>, hide<>,
+                  lit<"bracket:"> + ref<tbracketcaret::G::Root> + eof)> {};
+  using entry = Entry;
+  using indent_newline = tbracketcaret::G::NEWLINE;
+  static constexpr auto indent_open = tbracketcaret::G::indent_open;
+  static constexpr auto indent_close = tbracketcaret::G::indent_close;
+};
 }  // namespace ttrivia

@@ -13,7 +13,9 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
-int main() {
+namespace ll_data_text_cases {
+
+void run() {
   auto ll = tllsemantic::generated::Ll::create_parser();
   constexpr std::array cases{
       std::pair{"symbol `weird name`;", "weird name"},
@@ -75,5 +77,6 @@ int main() {
     CHECK(parsed.diagnostics.size() == 1);
     if (parsed.diagnostics.size() == 1) CHECK(parsed.diagnostics[0].kind == kind);
   }
-  return cursiv::test::report("LlDataText_test");
 }
+
+}  // namespace ll_data_text_cases

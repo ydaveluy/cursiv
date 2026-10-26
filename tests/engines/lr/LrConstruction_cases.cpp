@@ -42,6 +42,8 @@
 #include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/test/Check.hpp"
 
+namespace lr_construction_cases {
+
 namespace action_rows {
 
 namespace {
@@ -1257,7 +1259,7 @@ void substituted_reductions_keep_the_returned_row() {
 }
 }  // namespace fold_contract
 
-int main() {
+int run() {
   fold_contract::precomposition_keeps_bare_records_through_renames();
   fold_contract::substituted_reductions_keep_the_returned_row();
   lexical_derived::owed_terminals_stop_at_the_first_acceptance();
@@ -1271,3 +1273,5 @@ int main() {
   status |= lower_limits::run();
   return cursiv::test::report("LrConstruction_test") | status;
 }
+
+}  // namespace lr_construction_cases

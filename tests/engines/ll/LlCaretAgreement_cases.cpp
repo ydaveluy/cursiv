@@ -15,6 +15,8 @@
 #include "semanticll/generated/Ll/Module.hpp"
 #include "semanticll/generated/Ll/Table.hpp"
 
+namespace ll_caret_agreement_cases {
+
 namespace {
 
 struct Feature {
@@ -178,11 +180,12 @@ void the_guarded_reference_keeps_its_member() {
 
 }  // namespace
 
-int main() {
+void run() {
   the_guarded_reference_keeps_its_member();
   every_reading_must_agree_on_the_complete_metadata();
   an_unnamed_reading_prevents_member_attribution();
   an_unstamped_tree_does_not_supply_engine_positions();
   generated_return_nodes_match_the_call_graph();
-  return cursiv::test::report("LlCaretAgreement_test");
 }
+
+}  // namespace ll_caret_agreement_cases

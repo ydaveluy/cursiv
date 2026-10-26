@@ -87,5 +87,5 @@ Node runner. See
 ### What C++ do I need?
 
 C++20, with a compiler that supports `std::format` and guaranteed tail calls
-(`musttail`). CI tests GCC 16 and Clang 22, and cross-compiles with wasi-sdk 34.
-Older compiler versions are not validated.
+(`musttail`). The tested native compilers are GCC 16 and Clang 22;
+WebAssembly builds use wasi-sdk 34. Older compiler versions are not validated.

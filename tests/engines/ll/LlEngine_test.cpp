@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include "carettailll/generated/Ll/Module.hpp"
+#include "caretclimbll/generated/Ll/Module.hpp"
 #include "cursiv/core/grammar/Conversion.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
@@ -432,32 +432,46 @@ void an_abandon_replays_equivalent_returns_without_collapsing_frames() {
   }
 }
 
+constexpr std::uint16_t parity_terminal(std::string_view name) {
+  constexpr const auto& table = tpar::generated::Ll::kTable;
+  for (std::uint16_t t = 1; t < table.nterms; ++t)
+    if (table.term_name(t) == name) return t;
+  return cursiv::kInvalidSymbol;
+}
+
 void a_search_reads_keywords_in_the_shared_alphabet() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
+  constexpr auto keyword = parity_terminal("export"),
+                 identifier = parity_terminal("ID");
+  static_assert(keyword != cursiv::kInvalidSymbol &&
+                identifier != cursiv::kInvalidSymbol);
   std::array<cursiv::LlConfig, 2> cfg;
   for (std::uint32_t s = 0; s < table.atn.nstates; ++s)
     for (const auto& atom : cursiv::ll_atoms<table>().at(s)) {
-      if (atom.label == 6) cfg[0].state = s;  // export
-      if (atom.label == 4) cfg[1].state = s;  // ID
+      if (atom.label == keyword) cfg[0].state = s;
+      if (atom.label == identifier) cfg[1].state = s;
     }
   cursiv::Cst tree("export");
   cursiv::CstBuilder builder(tree);
   cursiv::LlContext c("export", builder);
   cursiv::LlSearch search(table.atn, c.len);
   search.limit = 10000;
-  const cursiv::Token token{0, 6, 6};
+  const cursiv::Token token{0, 6, keyword};
   std::vector<std::uint16_t> terms;
   cursiv::ll_search_terms<table>(c, search, cfg.data(), 2, token, terms);
-  CHECK(terms == std::vector<std::uint16_t>{6});
+  CHECK(terms == std::vector<std::uint16_t>{keyword});
   cursiv::ll_search_terms<table>(c, search, cfg.data() + 1, 1, token, terms);
-  CHECK(terms == std::vector<std::uint16_t>{4});
+  CHECK(terms == std::vector<std::uint16_t>{identifier});
 }
 
 // A state after an optional prefix is also reachable from the rule's entry.
 // Its required child owes a token only when that call really read the prefix.
 void an_optional_prefix_keeps_owing_across_a_required_call() {
   static constexpr const auto& base = tpar::generated::Ll::kTable;
-  static_assert(base.term_name(6) == "export" && base.term_name(4) == "ID");
+  constexpr auto keyword = parity_terminal("export"),
+                 identifier = parity_terminal("ID");
+  static_assert(keyword != cursiv::kInvalidSymbol &&
+                identifier != cursiv::kInvalidSymbol);
   static constexpr cursiv::LlAtnState states[] = {
       {.rule = 0, .edge = 0, .nedges = 2},
       {.rule = 0, .edge = 2, .nedges = 1},
@@ -466,9 +480,9 @@ void an_optional_prefix_keeps_owing_across_a_required_call() {
       {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1}};
   static constexpr cursiv::LlAtnEdge edges[] = {
       {.kind = cursiv::LlEdgeKind::epsilon, .target = 1},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 6, .target = 1},
+      {.kind = cursiv::LlEdgeKind::atom, .label = keyword, .target = 1},
       {.kind = cursiv::LlEdgeKind::rule, .label = 1, .target = 3, .follow = 2},
-      {.kind = cursiv::LlEdgeKind::atom, .label = 4, .target = 4}};
+      {.kind = cursiv::LlEdgeKind::atom, .label = identifier, .target = 4}};
   static constexpr std::uint32_t starts[] = {0, 3}, callers[] = {0, 0, 1},
                                  returns[] = {2};
   static constexpr std::uint16_t edgeNodes[] = {
@@ -503,13 +517,13 @@ void an_optional_prefix_keeps_owing_across_a_required_call() {
     }
     s.sim.seed(0, ctx);
     cursiv::LlReading r;
-    if (source != 0) CHECK(s.sim.step(6));
+    if (source != 0) CHECK(s.sim.step(keyword));
     r.tokens = source == 1 ? 1 : 0;
     cursiv::ll_search_keep<table>(s, r);
     s.nodes.push_back(r);
     const auto& due = cursiv::ll_search_facts<table>(c, s, 0).due;
     CHECK((source == 1 || source == 2)
-              ? due == std::vector<std::uint16_t>{4}
+              ? due == std::vector<std::uint16_t>{identifier}
               : due.empty());
   }
 }
@@ -1243,10 +1257,11 @@ void a_caret_inside_a_token_answers_in_its_place() {
 // A spelling the lexer would run on into a comment is no answer, however far
 // past the caret that comment closes.
 void a_spelling_is_judged_by_the_text_as_far_as_it_runs() {
-  const auto ll = tlltail::generated::Ll::create_parser();
-  const std::string text = "a * bbbbbbbbbbbb /* c */";
+  const auto ll = tcaretcases::generated::Ll::create_parser();
+  const std::string text = "tail:a * bbbbbbbbbbbb /* c */";
   const cursiv::ParseResult b = ll->parse(text);
-  const auto offered = spelled_at(*ll, b.cst(), 2);
+  CHECK(b.accepted && b.diagnostics.empty() && b.value);
+  const auto offered = spelled_at(*ll, b.cst(), 7);
   CHECK(std::find(offered.begin(), offered.end(), "/") == offered.end());
   CHECK(std::find(offered.begin(), offered.end(), "*") != offered.end());
 }

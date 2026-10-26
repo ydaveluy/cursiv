@@ -10,6 +10,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_keyword_relay_cases {
+
 namespace {
 
 std::string shown(const cursiv::ParseResult& r) {
@@ -102,7 +104,7 @@ void run(std::unique_ptr<cursiv::Parser> ll,
     faulty(pair, "relay:" + std::string(prefix) + std::string(text));
 }
 
-int main() {
+void run() {
   namespace g = tllsemantic::generated;
   run(g::Ll::create_parser(), "choice:", false,
       {{kWords, kKeywords}, {"if x; while y;", "if(x) while(y) "},
@@ -124,5 +126,6 @@ int main() {
       {{"*( *(", "1:* 1:* "}});
   run(g::Ll::create_parser(), "called:", true,
       {{"foo( bar(", "1:foo 1:bar "}});
-  return cursiv::test::report("LlKeywordRelay_test");
 }
+
+}  // namespace ll_keyword_relay_cases

@@ -59,16 +59,15 @@ struct Base : cursiv::GrammarSpec {
   using ignore = WS;
   using hidden = COMMENT;
 };
-struct Ll : Base {};
-struct Lr : Base {};
 
 // An operator written as a rule, alone on its first token: no prediction
 // chooses it.
 struct Plain : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NUMBER : terminal<some(d)> {};
-  struct Add : terminal<lit<"+">, value<Op::add>> {};
-  struct NotIn : rule<kw<"not"> + kw<"in">, value<Op::not_in>> {};
+  // Distinct spellings allow different precedence levels in the shared table.
+  struct Add : terminal<lit<"++">, value<Op::add>> {};
+  struct NotIn : rule<kw<"not"> + kw<"within">, value<Op::not_in>> {};
   struct Atom : rule<assign<&Number::text>(ref<NUMBER>)> {};
   struct Expr : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
                       (left(ref<Add>) >> left(ref<NotIn>))> {};
@@ -76,7 +75,20 @@ struct Plain : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct PlainLl : Plain {};
-struct PlainLr : Plain {};
+
+// Preserve each mode's lexer policy while sharing generated parsers and AST
+// metadata: comments are hidden only in the compound-operator mode.
+struct Suite : cursiv::GrammarSpec {
+  struct Root
+      : rule<(lit<"compound:"> +
+              skip(ignored<Base::WS>, hide<Base::COMMENT>, ref<Base::Root>)) |
+             (lit<"plain:"> +
+              skip(ignored<Plain::WS>, hide<>, ref<Plain::Root>))> {};
+  using entry = Root;
+  using ignore = Base::WS;
+  using hidden = Base::COMMENT;
+};
+struct Ll : Suite {};
+struct Lr : Suite {};
 
 }  // namespace tllcompound

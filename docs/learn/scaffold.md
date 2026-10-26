@@ -1,8 +1,7 @@
 # Create a project
 
-Use CMake 3.30 or newer, Git and a C++20 compiler with `std::format` and
-`musttail` support. CI tests GCC 16 and Clang 22. The first build downloads
-Cursiv and its dependencies.
+Install the [required tools](index.md#before-you-start) first. The first build
+downloads Cursiv and its dependencies.
 
 ## Create, build and run
 

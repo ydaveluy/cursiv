@@ -1,9 +1,12 @@
-// Lexical guards belong to individual acceptances. Their keyword, word and
-// typo cases share one table; the competing-trivia policy stays separate.
+// Lexical guards belong to individual acceptances. Keyword, word, typo and
+// candidate cases share one table and keep their own modes. The competing-
+// trivia policy has its own table.
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/AlikeCandidatesGrammar.hpp"
+#include "engines/lr/RefusedHeadWordsGrammar.hpp"
 #include "engines/lr/TypoAlternativesGrammar.hpp"
 
 namespace tguard {
@@ -269,7 +272,9 @@ struct G : Cases {
                       (kw<"deep"> + ref<deep::G::Root>) |
                       (kw<"behind"> + ref<behind::G::Root>) |
                       (kw<"typomulti"> + ref<typomulti::G::Root>) |
-                      ref<ttyporead::G::Root>> {};
+                      ref<ttyporead::G::Root> |
+                      (kw<"heads"> + ref<trefusedheads::G::Root>) |
+                      (kw<"shifted"> + ref<talike::Shifted::Root>)> {};
   using entry = Entry;
 };
 

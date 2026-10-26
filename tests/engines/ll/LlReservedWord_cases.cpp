@@ -12,6 +12,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_reserved_word_cases {
+
 namespace {
 
 std::string names(const cursiv::ParseResult& r) {
@@ -44,7 +46,7 @@ cursiv::TextOffset reach(const cursiv::ParseResult& r) {
 
 // A word a terminal refuses is a word only where no word byte follows it,
 // however short a match of that terminal may end.
-int main() {
+void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   const std::string_view text =
       "reserved:i; if x; iff; if_; whil; while_; w; ifwhile; if i; cas; cases; Loops;";
@@ -97,5 +99,6 @@ int main() {
     CHECK(result.accepted && result.diagnostics.empty());
     CHECK(reserved(result) == "? x iff if_ ifx ? whilex i ");
   }
-  return cursiv::test::report("LlReservedWord_test");
 }
+
+}  // namespace ll_reserved_word_cases

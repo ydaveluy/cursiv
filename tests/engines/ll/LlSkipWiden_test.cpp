@@ -6,8 +6,7 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "skipwidenlinesll/generated/LinesLl/Module.hpp"
-#include "skipwidentomlll/generated/TomlLl/Module.hpp"
+#include "skipwidenll/generated/Ll/Module.hpp"
 
 namespace {
 
@@ -73,7 +72,7 @@ std::string scalars(unsigned n) {
 
 int main() {
   using namespace tllwiden::generated;
-  expect_cases(LinesLl::create_parser(), LinesLl::create_ast_reflection(),
+  expect_cases(Ll::create_parser(), Ll::create_ast_reflection(),
         {{"[1, 2]", arrays({2})},
          {"[1,\n 2]", arrays({2})},
          {"[\n1\n]", arrays({1})},
@@ -86,7 +85,7 @@ int main() {
   const auto file = [](const std::string& a, const std::string& b = {}) {
     return "File{entries0=" + a + (b.empty() ? "" : "entries1=" + b) + "}";
   };
-  expect_cases(TomlLl::create_parser(), TomlLl::create_ast_reflection(),
+  expect_cases(Ll::create_parser(), Ll::create_ast_reflection(),
         {{"a=1", file(flat)},
          {"a=[1,\n2]\nb=3", file(list2, flat)},
          {"a=[1, # c\n2,\n]\nb=3", file(list2, flat), "# c|"},

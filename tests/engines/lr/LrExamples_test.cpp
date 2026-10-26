@@ -22,11 +22,11 @@
 #include "cursiv/test/Check.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 #include "domainmodel/generated/DomainModel/Table.hpp"
+#include "edges/generated/G/Module.hpp"
 #include "requirements/generated/Requirements/Module.hpp"
 #include "requirements/generated/Requirements/Table.hpp"
 #include "statemachine/generated/SM/Module.hpp"
 #include "statemachine/generated/SM/Table.hpp"
-#include "unsettled/generated/G/Module.hpp"
 
 // What a repair did, applied. A reading that repaired a document laid its
 // edits on the tape -- a note names a fault, not each token of it; making
@@ -371,9 +371,9 @@ void an_abandon_to_the_start_state_replays() {
 // A record whose rule the drive read off text past the caret is walked: the
 // other rule's continuation stands too.
 void a_record_the_text_has_not_decided_is_walked() {
-  const auto parser = tunsettled::generated::G::create_parser();
+  const auto parser = tedges::generated::G::create_parser();
   bool o0 = false;
-  for (const cursiv::ElementId e : offered(*parser, "p x a a o1", 8))
+  for (const cursiv::ElementId e : offered(*parser, "cell:p x a a o1", 13))
     o0 = o0 || parser->getGrammar().terminalText(e) == "o0";
   CHECK(o0);
 }

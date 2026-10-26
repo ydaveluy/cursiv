@@ -1,7 +1,7 @@
 // A state of the lexer may accept several terminals, each with a frontier of
 // its own. A misspelling read again as one of them is judged on the frontier of
-// THAT terminal, as the LR engine judges it: the frontier of the one the state
-// elects is no answer for the others.
+// that terminal: the frontier of the one the state elects is no answer for
+// the others. Fixed recovery oracles pin the cases independently of a backend.
 
 #include <array>
 #include <cstdint>
@@ -17,10 +17,8 @@
 #include "engines/ll/RescanBoundGrammar.hpp"
 #include "rescannarrowll/generated/NarrowLl/Module.hpp"
 #include "rescannarrowll/generated/NarrowLl/Table.hpp"
-#include "rescannarrowlr/generated/NarrowLr/Module.hpp"
 #include "rescanshadowll/generated/ShadowLl/Module.hpp"
 #include "rescanshadowll/generated/ShadowLl/Table.hpp"
-#include "rescanshadowlr/generated/ShadowLr/Module.hpp"
 
 namespace {
 
@@ -88,12 +86,17 @@ void hinted_readings_agree(std::string_view first, std::string_view second) {
     }
 }
 
-using Marks = std::vector<std::array<unsigned, 3>>;
+struct Mark {
+  cursiv::DiagnosticKind kind;
+  cursiv::TextOffset begin, end;
+  bool operator==(const Mark&) const = default;
+};
+using Marks = std::vector<Mark>;
 
 Marks marks(const cursiv::ParseResult& r) {
   Marks out;
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-    out.push_back({static_cast<unsigned>(d.kind), d.begin, d.end});
+    out.push_back({d.kind, d.begin, d.end});
   return out;
 }
 
@@ -120,21 +123,45 @@ int main() {
   CHECK(owed_after<shadow>("abc", "abc.", {"BOUNDED", "SPELLED"}) ==
         term_of<shadow>("BOUNDED"));
 
+  struct Case {
+    std::string_view text;
+    Marks diagnostics;
+    std::vector<std::string_view> items;
+  };
+  const auto check = [](const cursiv::Parser& parser, const Case& test) {
+    const auto parsed = parser.parse(test.text);
+    CHECK(parsed.accepted);
+    CHECK(marks(parsed) == test.diagnostics);
+    const auto* doc = parsed.value_as<tllrescan::Doc>();
+    CHECK(doc != nullptr);
+    if (doc == nullptr) return;
+    std::vector<std::string_view> items;
+    for (const auto* item : doc->items) items.push_back(item->text);
+    CHECK(items == test.items);
+  };
+  using enum cursiv::DiagnosticKind;
   const auto nll = gen::NarrowLl::create_parser();
-  const auto nlr = gen::NarrowLr::create_parser();
+  for (const Case& test : {
+           Case{".a bd ac;", {{inserted, 0, 0}, {replaced, 1, 8}}, {"", ""}},
+           Case{"bb.a.c;", {{replaced, 0, 2}, {replaced, 3, 6}}, {"", "a.c"}},
+           Case{";aa;bc;", {{inserted, 0, 0}, {replaced, 1, 6}}, {"", "aa;bc"}},
+           Case{"c;a;bc;da", {{replaced, 0, 1}, {replaced, 2, 6}, {deleted, 7, 9}},
+                {"", "a;bc"}},
+           Case{". a;bc;.", {{inserted, 0, 0}, {replaced, 2, 6}, {inserted, 7, 7}},
+                {"", "a;bc", ""}}})
+    check(*nll, test);
   const auto sll = gen::ShadowLl::create_parser();
-  const auto slr = gen::ShadowLr::create_parser();
-  for (const std::string_view text :
-       {".a bd ac;", "bb.a.c;", ";aa;bc;", "c;a;bc;da", ". a;bc;."}) {
-    const auto a = nll->parse(text), b = nlr->parse(text);
-    CHECK(a.accepted && b.accepted && !a.diagnostics.empty());
-    CHECK(marks(a) == marks(b));
-  }
-  for (const std::string_view text :
-       {" .ac;c b;", "c;axc;c z", " .a;c;a", "b.ab;z zb", ";ba;a.c;"}) {
-    const auto a = sll->parse(text), b = slr->parse(text);
-    CHECK(a.accepted && b.accepted && !a.diagnostics.empty());
-    CHECK(marks(a) == marks(b));
-  }
+  for (const Case& test : {
+           Case{" .ac;c b;", {{inserted, 0, 0}, {replaced, 2, 4}, {replaced, 5, 8}},
+                {"", "ac", ""}},
+           Case{"c;axc;c z", {{replaced, 0, 1}, {replaced, 2, 5}, {deleted, 6, 9}},
+                {"", "axc"}},
+           Case{" .a;c;a", {{inserted, 0, 0}, {replaced, 2, 5}, {deleted, 6, 7}},
+                {"", "a;c"}},
+           Case{"b.ab;z zb", {{replaced, 0, 1}, {replaced, 2, 4}, {deleted, 5, 9}},
+                {"", "ab"}},
+           Case{";ba;a.c;", {{inserted, 0, 0}, {replaced, 1, 3}, {replaced, 4, 7}},
+                {"", "", "a.c"}}})
+    check(*sll, test);
   return cursiv::test::report("LlRescanBound_test");
 }

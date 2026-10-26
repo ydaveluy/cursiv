@@ -55,10 +55,7 @@ target_link_libraries(recipe_validation_test
 add_test(NAME recipe_validation_test COMMAND recipe_validation_test)
 ```
 
-!!! note "Why `cursiv::lsp` for a validation test"
-
-    The expectation helpers use LSP types, so this test also links the LSP
-    library.
+Link `cursiv::lsp` when using the diagnostic expectation helpers.
 
 ```cpp title="tests/validation_test.cpp"
 #include "cursiv/core/services/CoreLanguage.hpp"
@@ -153,7 +150,7 @@ Available expectations:
 Set `disposeAfterCheck = true` to remove the test document immediately after
 the check. Otherwise, call `dispose()` on the returned result.
 
-## The harness
+## Report test failures
 
 Use `cursiv/test/Check.hpp` for assertions and a test exit code.
 
@@ -162,10 +159,9 @@ CHECK(model->recipes.size() == 1);
 return cursiv::test::report("recipe_grammar_test");
 ```
 
-`report` prints the verdict and returns the exit code ctest reads. Call
-`count_expectations()` first in `main` when you use the `expect*` helpers —
-without it a mismatch throws instead of being counted, and the test stops at
-the first one instead of reporting all of them.
+`report` prints the verdict and returns the exit code CTest reads. Call
+`count_expectations()` first in `main` to collect all `expect*` failures before
+reporting them.
 
 ## Further checks
 

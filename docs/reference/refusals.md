@@ -200,63 +200,51 @@ their order also matters.
 
 ??? note "Detailed LL restrictions for indirect recursion"
 
-    The LL engine also refuses some indirect left recursions that LR reads, when
-    one of two limits is broken. The message names the cycle, not the limit. The
-    words are those of [Left recursion](grammar.md#left-recursion): head, walk,
-    turn of a rule's loop.
+    Some indirect cycles work with LR but require a rewrite for LL. The message
+    names the cycle. Check these two restrictions:
 
-    **An alternative that only calls.** Some rule of the recursion needs an alternative that is
-    only a call to another rule of it:
+    **A call-only alternative.** At least one rule in the cycle needs an
+    alternative consisting only of a call to another rule in that cycle:
 
     ```text
     A := B "x" | "a" "x"       B := A "y" | "a"       refused: no call-only alternative
     A := B | "a" "x"           B := A "x" | "a"       read
     ```
 
-    Give a rule of the cycle such an alternative, or inline one rule into the other so
-    that the recursion is direct (the nodes of the inlined rule go with it).
+    Add such an alternative, or inline one rule into the other to make the
+    recursion direct. Inlining must preserve the original AST construction.
 
-    **Competing nested loops.** The LL engine nests the loops of a walk and tries a
-    turn of an inner loop before a turn of an outer one; the parse selection rules
-    try them in written order. They agree only where the two turns cannot meet one token.
-    So a walk is refused when a turn of the loop of a rule is written before a
-    turn of the loop of a rule the walk descended into from it (the inner one),
-    unless the two turns are apart. One head is enough: the walk is taken from
-    every rule a call can start the recursion at.
-
-    Each turn is judged by a token, the first literal after a leading call: for
-    the inner turn, in its own alternative. For the outer turn, in the alternative by which the
-    walk descended into the inner rule -- when that alternative is only a call, in the alternative
-    by which it descended into its caller, and so up to the outer rule -- and only
-    if none of them has one, in the outer turn's own alternative.
-
-    The tokens are apart when both are literals (a terminal whose body is one
-    literal counts) that differ at a character both have: `"y"` and `"z"`, `"ya"`
-    and `"yb"`. They are not apart when they spell the same text (two terminals
-    matching `"y"` are one token here), when one begins the other (`"y"`, `"yy"`),
-    when the alternatives part only after the first literal (`"y" "z"`, `"y" "w"`), or
-    when either starts on something else than a literal, a class or a rule. The
-    operators of one `infix` at different levels are apart.
+    **Competing recursive alternatives.** When a rule in the cycle also calls
+    itself directly, put that alternative before an indirect recursive
+    alternative with a competing prefix:
 
     ```text
     A := B                     B := A "y" | B "y" | "b"
     ```
 
-    From `A` the alternatives of `B` are met in place. `A "y"` is a turn of `A`'s loop,
-    `B "y"` one of `B`'s, written after it, and both start on `y`: refused. LR
-    reads `b y y` as two turns of `A`'s loop, written first; `B "y"` never
-    applies. Delete it (`B := A "y" | "b"`) and the LL engine reads the same trees.
-    Where the alternatives part after the shared token, write the inner turn first (with
-    `A := B` as above):
+    This is refused by LL. Here the direct alternative `B "y"` is redundant;
+    removing it preserves the selected trees. Where the alternatives differ
+    after their shared prefix, put the direct alternative first:
 
     ```text
     B := A "y" "z" | B "y" "w" | "b"       refused
     B := B "y" "w" | A "y" "z" | "b"       read, with the same trees
     ```
 
-    A recursion of more than 100 rules, a rule of it with more than 16 alternatives, or a
-    walk of more than 48 places (the head and each rule descended into) also gives
-    this refusal.
+    Distinct first literals can avoid this conflict: `"y"` and `"z"`, or
+    `"ya"` and `"yb"`. A terminal containing just one literal counts too.
+    Identical spellings, prefixes such as `"y"` and `"yy"`, or a difference
+    only in a later token do not distinguish the alternatives for this check.
+    Neither does a character class or rule call in place of the literal.
+    Operators at distinct levels of one `infix` are already distinguished.
+
+    Larger cycles can have the same ordering conflict even without direct
+    self-calls. Factor them into explicit precedence levels, inline a rule, or
+    use LR when the original recursive structure is required.
+
+    LL also limits a recursive cycle to 100 rules, each with at most 16
+    alternatives, and a path of leading calls to 48 rules. Simplify the cycle
+    or use LR if one of these limits is reached.
 
 ### `selfBoundedArm`
 
@@ -722,9 +710,9 @@ recursive branch whose calls can never return.
 
 An item repeated more than once in a recursive terminal must consume input.
 For example, use `many(lit<"b">)` instead of `many(option(lit<"b">))`.
-An optional item remains valid outside a repetition. Elsewhere in a terminal
-the lexer keeps the longest match, so an empty turn is harmless; only the
-recursive recognizer refuses it.
+An optional item remains valid outside a repetition. This restriction applies
+to recursive terminals; non-recursive terminals allow nullable repeated items
+and select the longest match.
 
 ### `terminalReadsRule`
 
@@ -802,10 +790,10 @@ part it must read after the refusal, as in `!lit<"/"> + any`.
 > terminal `W` ends a match exactly where the word it refuses ends, past its
 > head, and `_` rescues that word
 
-The frontier states which class the byte behind a match may not be, never
-which it must be -- and where the document ends there is no byte to rescue
-the word with. Refuse the word at the token's head or behind literals and
-classes alone, or let the body read on over the rescuing bytes.
+The reported guard cannot be combined with that word boundary at the token's
+end. Put the guard at the start of the terminal, or after a prefix consisting
+only of literals and character classes. Alternatively, make the token consume
+the characters that allow the longer word.
 
 ### `refusalIntoRelay`
 
@@ -850,11 +838,10 @@ through a rule or a choice:
 > group or as several and the election picks one -- write one repetition
 > unless the groups are wanted
 
-`many(some(ref<X>))`, or `many(ref<Items>)` where `Items` is, or may be,
-`some(...)`: a run splits into groups in as many ways as it has cuts, and each
-cut is a tree of its own. The inner run takes another turn before stopping, so
-the items make one group unless the grammar forces a cut. Write the repetition
-once, or put `append` inside the repetition to collect one child per turn.
+`many(some(ref<X>))`, or `many(ref<Items>)` where `Items` can match
+`some(...)`, can group the same input in several ways. Parse selection prefers
+one group unless the grammar requires more. Write one repetition, or put
+`append` inside it to collect one child per item.
 
 LR warns of two runs of one item side by side:
 
@@ -864,12 +851,11 @@ LR warns of two runs of one item side by side:
 `many(ref<NL>) + many(ref<NL>)`, or the same with an option between them that
 may be absent: put the option inside one repetition.
 
-A condition whose reach has no end is warned of by both engines: the parse is
-unchanged, completion slows down.
+Both engines warn about an unbounded repetition in a condition. It is valid,
+but can slow completion on long inputs.
 
 > warning: rule `Arrow` asks a condition of the token in hand that reads
-> `('-')+` to any length: a completion then replays every token before the
-> caret, one by one -- bound the run (`repeat<0, N>`)
+> `('-')+` to any length …
 
 For `!(some(lit<"-">) + lit<">">)`, use a bounded run such as
 `repeat<1, 8>(lit<"-">)` when the language permits it, or a named terminal
@@ -908,14 +894,14 @@ between LL and LR; generation capacity also depends on the complete grammar.
 | One terminal's match behind two refusals of different classes | [`boundaryDisagrees`](#boundarydisagrees) | reads it |
 | More than 32 implied tokens | [`gapTooMany`](#counts-a-program-cannot-hold) | has no such bound |
 | An indirect left recursion where no rule has an alternative that is only a call to another rule of it | reads it | [`leftRecursion`](#leftrecursion) |
-| An indirect left recursion where a turn of an outer rule's loop is written before a turn of an inner rule's loop and the two turns are not apart | reads it | [`leftRecursion`](#leftrecursion) |
+| Indirect left recursion whose competing alternatives need a different order for LL | reads it | [`leftRecursion`](#leftrecursion) |
 | Large grammar | [`tooManyProductions`](#counts-a-program-cannot-hold) or [capacity refusal](#refused-for-want-of-room) | [`tooManyPositions`](#counts-a-program-cannot-hold) |
 
 **A grammar both refuse, in different words**
 
 | Shape | LR | LL |
 |---|---|---|
-| A cycle of reductions that read no text | [`unitProductionCycle`](#unitproductioncycle) | [`leftRecursion`](#leftrecursion) |
+| A recursive cycle that consumes no input | [`unitProductionCycle`](#unitproductioncycle) | [`leftRecursion`](#leftrecursion) |
 | A left-recursive call behind an item that may match nothing, or behind more than seven optional items | [`hiddenLeftRecursion`](#hiddenleftrecursion) | [`leftRecursion`](#leftrecursion) |
 
 **A warning only one engine gives**
@@ -937,19 +923,19 @@ not just the declarations you wrote.
 | `tooManyRules` | declares more than 32 767 rules, auxiliaries included |
 | `tooManyConfigurations` | reads under more than 255 skip configurations: the grammar's own, one for every distinct pair of lists a `skip()` names and one for every `section<>` |
 | `gapTooMany` | states more than 255 gap conditions, or (LR only) more than 32 implied tokens |
-| `gapLeafPool` | asks too many distinct questions in its conditions |
-| `tokenGraphTooLarge` | exceeds lexical complexity limits, or uses a repetition bound past 32 bits |
+| `gapLeafPool` | declares too many distinct condition expressions |
+| `tokenGraphTooLarge` | has tokens too complex to generate, or uses a repetition bound above 4 294 967 295 |
 | `tooManyPositions` | exceeds LL's grammar size limit |
-| `tooManyProductions` | (LR only) lowers to more than 65 535 productions |
-| `productionTooWide` | (LR only) spells a right-hand side of more than 65 535 positions |
+| `tooManyProductions` | has too many alternatives after LR generation |
+| `productionTooWide` | has an alternative too long for LR generation |
 | `tableTooLarge` | exceeds LR's grammar size limit |
 
-Counted repetitions expand the generated program. LL counts their positions;
-LR also needs auxiliary rules and productions. The largest accepted bound
-therefore depends on the item's body and the rest of the grammar, not just on
-the number passed to `repeat`. For example, even `repeat<65535>(lit<"a">)`
-exceeds LL's position capacity. Use an unbounded repetition and validate the
-count afterwards when a very large bound would make generation too expensive.
+Large counted repetitions and unordered groups can reach these limits even
+with few rule declarations. The largest supported repetition bound depends
+on the item's body and the rest of the grammar. Use an unbounded repetition
+and validate the count afterwards when a very large bound makes generation
+too expensive. Reduce alternatives, factor shared expressions, or split a
+large grammar into separate languages.
 
 ## Generator capacity limits {#refused-for-want-of-room}
 
@@ -963,8 +949,10 @@ LL also reports the exceeded limit:
 
 Reduce the grammar's size or split it into separate languages.
 
-## Generated record capacity {#refused-by-the-records-stamp}
+## Other generated grammar limits {#refused-by-the-records-stamp}
 
 > refused by the record's stamp …
 
-Both engines can report this capacity limit. Reduce the grammar's size.
+This message also means the generated grammar exceeds a supported capacity.
+Both engines can report it. Reduce repetitions or alternatives as described
+under [Grammar size limits](#counts-a-program-cannot-hold).

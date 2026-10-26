@@ -6,8 +6,6 @@
 #include "compoundll/generated/Ll/Module.hpp"
 #include "compoundll/generated/Ll/Table.hpp"
 #include "compoundlr/generated/Lr/Module.hpp"
-#include "compoundplainll/generated/PlainLl/Module.hpp"
-#include "compoundplainlr/generated/PlainLr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/engines/ll/runtime/ll_search.hpp"
@@ -67,7 +65,8 @@ int main() {
         "1->2->3", "1 - > 2", "1,2", "{a:1}", "{a:1,b:2}", "{a:(1,2),b:3}",
         "{a:{b:1,c:2},d:3}", "1 not/* comment */ in 2+3",
         "1+2 not like 3 not in 4", "1\nnot in 2", "1 not", "1 not other 2"}) {
-    const auto a = ll->parse(text), b = lr->parse(text);
+    const std::string source = "compound:" + std::string(text);
+    const auto a = ll->parse(source), b = lr->parse(source);
     const bool cleanA = a.accepted && a.diagnostics.empty();
     const bool cleanB = b.accepted && b.diagnostics.empty();
     if (cleanA != cleanB)
@@ -86,17 +85,22 @@ int main() {
   // no complete arm at EOF. It must stop the infix, preserving the operand
   // for the caller's local repair rather than consuming EOF as an operator.
   for (const std::string_view text : {"{a:1", "{a:(1", "(1", "{a:1 not"}) {
-    const auto parsed = ll->parse(text);
+    const std::string source = "compound:" + std::string(text);
+    const auto parsed = ll->parse(source);
     CHECK(!parsed.diagnostics.empty());
     CHECK(parsed.cst().size() != 0 && parsed.cst().size() < 256);
     for (cursiv::NodeId i = 0; i < parsed.cst().size(); ++i) {
       const auto& node = parsed.cst()[i];
-      CHECK(node.begin <= node.end && node.end <= text.size());
+      CHECK(node.begin <= node.end && node.end <= source.size());
       CHECK(node.subtreeSize != 0 && node.subtreeSize <= i + 1u);
     }
   }
   for (const auto& parser : {ll.get(), lr.get()}) {
-    const auto result = parser->parse("1 not in 2+3");
+    const auto hidden = parser->parse("compound:1/* comment */+2");
+    CHECK(hidden.accepted && hidden.diagnostics.empty());
+    const auto visible = parser->parse("plain:1/* comment */+2");
+    CHECK(!visible.diagnostics.empty());
+    const auto result = parser->parse("compound:1 not in 2+3");
     const auto* doc = cursiv::ast_cast<tllcompound::Document>(result.value);
     CHECK(doc != nullptr);
     if (doc == nullptr) continue;
@@ -105,7 +109,7 @@ int main() {
     if (outer == nullptr) continue;
     const auto* inner = cursiv::ast_cast<tllcompound::Binary>(outer->right);
     CHECK(inner != nullptr && inner->op == tllcompound::Op::add);
-    const auto arrow = parser->parse("1-2->3");
+    const auto arrow = parser->parse("compound:1-2->3");
     const auto* arrowDoc = cursiv::ast_cast<tllcompound::Document>(arrow.value);
     CHECK(arrow.accepted && arrow.diagnostics.empty() && arrowDoc != nullptr);
     if (arrowDoc == nullptr) continue;
@@ -117,7 +121,7 @@ int main() {
     const auto* subtraction =
         cursiv::ast_cast<tllcompound::Binary>(implication->left);
     CHECK(subtraction != nullptr && subtraction->op == tllcompound::Op::sub);
-    const auto object = parser->parse("{a:(1,2),b:3}");
+    const auto object = parser->parse("compound:{a:(1,2),b:3}");
     const auto* objectDoc =
         cursiv::ast_cast<tllcompound::Document>(object.value);
     CHECK(object.accepted && object.diagnostics.empty() &&
@@ -136,8 +140,9 @@ int main() {
   // fault, of one kind over one span, and one tree.
   const auto same = [](const cursiv::Parser& ll, const cursiv::Parser& lr,
                        const cursiv::AstReflection& reflection,
-                       std::string_view text) {
-    const auto a = ll.parse(text), b = lr.parse(text);
+                       std::string_view prefix, std::string_view text) {
+    const std::string source = std::string(prefix) + std::string(text);
+    const auto a = ll.parse(source), b = lr.parse(source);
     bool alike = a.diagnostics.size() == b.diagnostics.size();
     for (std::size_t i = 0; alike && i < a.diagnostics.size(); ++i)
       alike = a.diagnostics[i].kind == b.diagnostics[i].kind &&
@@ -152,19 +157,16 @@ int main() {
                   text.data());
     CHECK(alike && x == y);
   };
-  const auto plainLl = tllcompound::generated::PlainLl::create_parser();
-  const auto plainLr = tllcompound::generated::PlainLr::create_parser();
-  const auto plainReflection =
-      tllcompound::generated::PlainLl::create_ast_reflection();
   for (const std::string_view text :
-       {"1 not in 2", "1+2 not in 3+4", "1 not in 2 not in 3", "1 not 2",
-        "1 not in", "1 in 2", "1 2", "1 2 3", "1 in 2 3", "1 in", "1 in in"})
-    same(*plainLl, *plainLr, *plainReflection, text);
+       {"1 not within 2", "1++2 not within 3++4", "1 not within 2 not within 3",
+        "1 not 2", "1 not within", "1 within 2", "1 2", "1 2 3", "1 within 2 3",
+        "1 within", "1 within within"})
+    same(*ll, *lr, *reflection, "plain:", text);
   for (const std::string_view text :
        {"1 in 2", "1 2", "1 2 3", "1+2 3", "(1 2)", "1 in", "1 in in", "1 )",
         "1 ) )", "{a:1 b:2}"})
-    same(*ll, *lr, *reflection, text);
-  const auto plain = plainLl->parse("1+2 not in 3");
+    same(*ll, *lr, *reflection, "compound:", text);
+  const auto plain = ll->parse("plain:1++2 not within 3");
   CHECK(plain.diagnostics.empty());
   const auto* plainDoc = cursiv::ast_cast<tllcompound::Document>(plain.value);
   CHECK(plainDoc != nullptr);

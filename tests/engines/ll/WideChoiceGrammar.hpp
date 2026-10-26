@@ -1,8 +1,8 @@
 #pragma once
 
-// A choice of 201 keywords at three sites exceeds both the template-depth
+// A choice of 101 keywords at three sites exceeds both the template-depth
 // budget of 100 and a byte-sized position count. Folding once per element
-// still fails, without repeating this stress seven times.
+// still fails, without growing the generated parser beyond those boundaries.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
@@ -25,8 +25,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 };
 
 struct Base : cursiv::GrammarSpec {
-  static constexpr auto Words =
-      ikw<"w"> TWIDE_100(TWIDE_OR, a) TWIDE_100(TWIDE_OR, b);
+  static constexpr auto Words = ikw<"w"> TWIDE_100(TWIDE_OR, a);
 
   struct WS : terminal<some(s)> {};
   struct ID : terminal<!Words + cr<"a-z"> + many(w)> {};

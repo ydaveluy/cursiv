@@ -279,7 +279,8 @@ priority.
     In a terminal, all matching alternatives remain possible until the whole
     token's longest match is selected. In rules, compare complete parses'
     decisions from left to right, with each expression's decision before its
-    nested expressions. [Left recursion](#left-recursion) is ordered as a loop.
+    nested expressions. [Left recursion](#left-recursion) has additional
+    ordering rules.
     The first different decision determines the selected parse.
 
     Factoring `A B | A C` into `A (B | C)` preserves accepted input but can
@@ -639,7 +640,7 @@ than one byte.
     - **First match:** the first token `e` reads, if any, must match the current
       token's whole text, regardless of the chosen terminal's identity. Named and
       inline terminals behave alike; guards may inspect text beyond that token.
-    - **Continuation:** later tokens are selected by the condition's own lexer,
+    - **Continuation:** later tokens match independently of the consuming rule,
       under the [Tokens](#tokens) rules and the active trivia.
 
     `!!e` and `&(&e)` mean `&e`; `!&e` and `&!e` mean `!e`. `!(e + !f)` holds
@@ -667,17 +668,15 @@ allowed in a condition.
 
 ??? note "Exact commitment and token selection rules"
 
-    Before Max, once the minimum is met, the quantifier may stop only if its
-    **prefix probe fails**:
+    Once the minimum count is met and before the maximum is reached, a matching
+    prefix prevents the quantifier from stopping:
 
-    - The probe's first token must read the token in hand and be one the
+    - The prefix's first token must match the current token and be one the
       consuming rule can take there, after [lexical selection](#tokens).
     - The rest of the prefix reads as a [condition](#conditions).
-    - In a separated list, the first probe is `prefix`; later probes are
-      `sep + prefix`. Only the first token of the whole probe is checked in the
+    - In a separated list, the first item checks `prefix`; later items check
+      `sep + prefix`. Only the first token of that expression is checked in the
       consuming context.
-
-    The prefix accepts condition operands and must consume input.
 
     Thus `many(commit(a, b)) + a + c` refuses `a c`: the prefix opens an item
     whose body is missing. Commitment affects only that quantifier: an outer
@@ -853,10 +852,9 @@ cycle fails to generate with LL, see the
 
 ??? note "Exact ordering of recursive alternatives"
 
-    The [parse selection rules](#choosing-between-parses) treat left recursion as
-    **a base followed by turns**. The base is decided first, among the other alternatives in written order,
-    wherever the recursive alternatives stand; then another turn wins over stopping, and
-    turns follow written order. For example:
+    The non-recursive alternative is selected first, in written order,
+    wherever the recursive alternatives appear. The parser then prefers another
+    recursive suffix over stopping, again in written order. For example:
 
     ```text
     S := S x | a x | a          means (a x | a) many(x)
@@ -865,19 +863,15 @@ cycle fails to generate with LL, see the
 
     `S` reads `a x` as its base `a x`. Both the displayed `E` and
     `E := "-" E | E "!" | a` read `-a!` as `-(a!)`. For `(-a)!`, separate levels:
-    `E := E "!" | N`, `N := "-" N | a`. This loop only orders parses: each
-    turn retains its rule call, node, writes and conversion.
+    `E := E "!" | N`, `N := "-" N | a`. These ordering rules preserve each
+    rule's AST construction and conversion.
 
-    **Indirect recursion.** The initially invoked rule is called the **head**.
-    Leading calls retain that head; a call after a consumed token starts its own
-    parse and head, even inside the same recursion. Other callers do not change
-    this head or its base and turn ordering.
-
-    Walk the head's alternatives in written order. A leading call to another rule of the
-    recursion descends into its alternatives in place. Returning to a rule already on the
-    active path forms a turn of **that rule's loop**, kept where that rule
-    stands; other alternatives are bases. Bases and turns are ordered as the walk meets
-    them, under the same parse selection rules:
+    **Indirect recursion.** Selection starts from the rule initially called.
+    Before any token is consumed, a call to another rule in the cycle considers
+    that rule's alternatives in place. A call back to an already active rule
+    supplies a recursive suffix; the other alternatives supply the base.
+    Their written order determines priority. A call after a consumed token
+    makes its own selection, independently of the caller. For example:
 
     ```text
     A := B "x" | "a" "x"       B := A "y" | "a"
@@ -885,14 +879,9 @@ cycle fails to generate with LL, see the
     Call B on a x y:   B → A y → a x y
     ```
 
-    An [`infix`](#operator-precedence) in such a recursion counts as its levels,
-    one rule per level (`E_k := E_k op E_{k-1} | E_{k-1}` for `left`, mirrored for
-    `right`), with the primary as level 0.
-
-    The LL engine needs, in an indirect left recursion, an alternative consisting solely
-    of a call to the next rule of the cycle, and it refuses some competing nested
-    loops; both limits are reported as [`leftRecursion`](refusals.md#leftrecursion),
-    which states them exactly.
+    `infix` keeps its declared precedence and associativity. Some indirect cycles
+    are unsupported by LL; see [`leftRecursion`](refusals.md#leftrecursion) for
+    restrictions and rewrites.
 
 **Refused forms:**
 

@@ -10,7 +10,6 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/InfixLoopGrammar.hpp"
 #include "infixloopll/generated/Ll/Module.hpp"
-#include "infixloopsumll/generated/SumLl/Module.hpp"
 
 namespace {
 
@@ -129,8 +128,8 @@ void expect(const char* engine, const Case& c, const std::string& got) {
 }
 
 template <std::size_t N, class MakeLl, class MakeLlReflection>
-void expect_cases(const Case (&cases)[N], MakeLl makeLl, MakeLlReflection makeLlr,
-           std::string_view prefix = {}) {
+void expect_cases(const Case (&cases)[N], MakeLl makeLl,
+                  MakeLlReflection makeLlr, std::string_view prefix = {}) {
   const auto ll = makeLl();
   const auto llr = makeLlr();
   for (const Case& c : cases) {
@@ -143,9 +142,13 @@ void expect_cases(const Case (&cases)[N], MakeLl makeLl, MakeLlReflection makeLl
 
 int main() {
   namespace g = tinfixloop::generated;
-  expect_cases(kSum, g::SumLl::create_parser, g::SumLl::create_ast_reflection);
-  expect_cases(kLadder, g::Ll::create_parser, g::Ll::create_ast_reflection, "ladder:");
-  expect_cases(kVia, g::Ll::create_parser, g::Ll::create_ast_reflection, "via:");
-  expect_cases(kMixed, g::Ll::create_parser, g::Ll::create_ast_reflection, "mixed:");
+  expect_cases(kSum, g::Ll::create_parser, g::Ll::create_ast_reflection,
+               "sum:");
+  expect_cases(kLadder, g::Ll::create_parser, g::Ll::create_ast_reflection,
+               "ladder:");
+  expect_cases(kVia, g::Ll::create_parser, g::Ll::create_ast_reflection,
+               "via:");
+  expect_cases(kMixed, g::Ll::create_parser, g::Ll::create_ast_reflection,
+               "mixed:");
   return cursiv::test::report("LlInfixLoop_test");
 }

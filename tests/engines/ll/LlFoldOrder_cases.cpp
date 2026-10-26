@@ -10,6 +10,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_fold_order_cases {
+
 namespace {
 
 struct Case {
@@ -48,9 +50,10 @@ std::string read(const cursiv::Parser& parser, const cursiv::AstReflection& r,
 
 }  // namespace
 
-int main() {
+void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   const auto llr = tllsemantic::generated::Ll::create_ast_reflection();
   for (const Case& c : kCases) CHECK(read(*ll, *llr, c.text) == c.tree);
-  return cursiv::test::report("LlFoldOrder_test");
 }
+
+}  // namespace ll_fold_order_cases

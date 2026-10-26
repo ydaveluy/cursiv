@@ -47,8 +47,6 @@ struct Lines : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct LinesLl : Lines {};
-struct LinesLr : Lines {};
 
 struct Toml : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
@@ -78,6 +76,12 @@ struct Toml : cursiv::GrammarSpec {
   using entry = Root;
   using ignore = WS;
 };
-struct TomlLl : Toml {};
-struct TomlLr : Toml {};
+
+// A leading '[' selects a run of arrays; a key selects a TOML document. Both
+// entries keep their own skip regions and AST, in one generated language.
+struct Ll : cursiv::GrammarSpec {
+  struct Root : rule<ref<Lines::Root> | ref<Toml::Root>> {};
+  using entry = Root;
+  using ignore = Lines::WS;
+};
 }  // namespace tllwiden

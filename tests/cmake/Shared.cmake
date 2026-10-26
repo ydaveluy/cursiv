@@ -21,7 +21,8 @@ cursiv_grammar_pair(infixoperatorsshared engines/shared/InfixOperatorsGrammar.hp
 # A class's members are visited in its declaration order, whichever order the
 # arms of the grammar name them in, in both engines.
 cursiv_grammar_pair(forward engines/shared/AstTreeGrammars.hpp tmember::ForwardLr tmember::ForwardLl)
-cursiv_grammar_pair(backward engines/shared/AstTreeGrammars.hpp tmember::BackwardLr tmember::BackwardLl)
+# The reversed first encounter exercises the shared metadata emitter once.
+cursiv_grammar(backwardlr engines/shared/AstTreeGrammars.hpp tmember::BackwardLr ENGINE LR)
 
 # Every grammar the build ships, and the lane's own: those carry the guards,
 # the reserves and the wide tables no shipped grammar reaches.
@@ -32,12 +33,12 @@ endif()
 cursiv_grammar(candidateruns engines/lr/CandidateRunsGrammar.hpp tcandrun::G ENGINE LR)
 # The lexer's tables: candidate runs, typo alternatives, guards and conversions,
 # wide terminal sets and converters that read memory.
-cursiv_test(LrLexicon_test engines/lr/LrLexicon_test.cpp alikereducedGenerated alikeshiftedGenerated
+cursiv_test(LrLexicon_test engines/lr/LrLexicon_test.cpp alikereducedGenerated
     backrefGenerated candidaterunsGenerated guardGenerated
     guardtriviaGenerated keywordbehindlrGenerated
     lrauditGenerated astfusedlrGenerated onemodeGenerated relayoverlapGenerated
-    rulerefusalGenerated refusedheadsGenerated shorterlrGenerated
-    unicodewideGenerated widetermsGenerated cursivLrGen)
+    rulerefusalGenerated shorterlrGenerated
+    widetermsGenerated cursivLrGen)
 if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
   target_link_libraries(LrLexicon_test PRIVATE arithmeticsGenerated asciirunsGenerated)
   target_compile_definitions(LrLexicon_test PRIVATE CURSIV_LR_LEXER_CONTRACT=1
@@ -101,18 +102,18 @@ cursiv_test(EofRegion_test engines/shared/EofRegion_test.cpp
     eofpurellGenerated eofpurelrGenerated)
 cursiv_test(GuardedClimb_test engines/shared/GuardedClimb_test.cpp
     guardedclimbllGenerated guardedclimblrGenerated)
-cursiv_test(SectionPredicate_test engines/shared/SectionPredicate_test.cpp
-    sectionpredicatellGenerated sectionpredicatelrGenerated conformancellGenerated conformancelrGenerated)
 cursiv_test(LexSuffixSession_test engines/shared/LexSuffixSession_test.cpp)
 cursiv_test(AstMaterialise_test engines/shared/AstMaterialise_test.cpp
     cursivLlGen cursivLrGen asttreellGenerated asttreelrGenerated)
 cursiv_test(AstTree_test engines/shared/AstTree_test.cpp
     asttreellGenerated asttreelrGenerated asttreeauxGenerated
-    forwardllGenerated forwardlrGenerated backwardllGenerated backwardlrGenerated)
-cursiv_test(Conformance_test engines/shared/Conformance_test.cpp
-    conformancellGenerated conformancelrGenerated)
-cursiv_test(ConditionContract_test engines/shared/ConditionContract_test.cpp
-    conformancellGenerated conformancelrGenerated)
+    forwardllGenerated forwardlrGenerated backwardlrGenerated)
+cursiv_test(Conformance_test
+    "engines/shared/Conformance_test.cpp;engines/shared/ConditionContract_cases.cpp;engines/shared/SectionPredicate_cases.cpp"
+    conformancellGenerated conformancelrGenerated
+    sectionpredicatellGenerated sectionpredicatelrGenerated)
+set_target_properties(Conformance_test PROPERTIES
+    UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 set_tests_properties(LexicalBackends_test PROPERTIES TIMEOUT 30)
 set_tests_properties(RecursiveTerminals_test PROPERTIES TIMEOUT 30)
 set_tests_properties(TypoCandidates_test PROPERTIES TIMEOUT 30)

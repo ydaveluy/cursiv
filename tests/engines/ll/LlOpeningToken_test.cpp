@@ -10,11 +10,7 @@
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/OpeningTokenGrammar.hpp"
-
-#include "openingshiftll/generated/ShiftLl/Module.hpp"
-#include "openingnegatedll/generated/NegatedLl/Module.hpp"
-#include "openingtablesll/generated/TablesLl/Module.hpp"
-#include "openingcompositell/generated/CompositeLl/Module.hpp"
+#include "openingll/generated/Ll/Module.hpp"
 #include "openingshiftlr/generated/ShiftLr/Module.hpp"
 
 namespace {
@@ -34,8 +30,10 @@ std::string show(const ast::Expression* e) {
   return "(" + show(b->left) + " " + op + " " + show(b->right) + ")";
 }
 
-std::string read(const cursiv::Parser& parser, std::string_view text) {
-  const auto r = parser.parse(text);
+std::string read(const cursiv::Parser& parser, std::string_view text,
+                 std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = parser.parse(source);
   if (!r.accepted || !r.diagnostics.empty()) return "refused";
   const auto* doc = cursiv::ast_cast<ast::Document>(r.value);
   return doc == nullptr ? "?" : show(doc->value);
@@ -48,26 +46,29 @@ struct Case {
 struct Pair {
   const cursiv::Parser& ll;
   const cursiv::Parser* lr;
+  std::string_view prefix;
 };
 
 void expect_cases(Pair p, std::initializer_list<Case> cases) {
   for (const auto& [text, tree] : cases)
     for (const auto* parser : {&p.ll, p.lr}) {
       if (!parser) continue;
-      const auto got = read(*parser, text);
+      const auto got = read(*parser, text, parser == &p.ll ? p.prefix : "");
       if (got != tree)
-        std::printf("%.*s: got %s, want %.*s\n", int(text.size()),
-                    text.data(), got.c_str(), int(tree.size()), tree.data());
+        std::printf("%.*s: got %s, want %.*s\n", int(text.size()), text.data(),
+                    got.c_str(), int(tree.size()), tree.data());
       CHECK(got == tree);
     }
 }
 
 // What the grammar may spell at the end of `text`, each spelling once.
 std::vector<std::string> spellings_after(const cursiv::Parser& parser,
-                                         std::string_view text) {
-  const auto r = parser.parse(text);
+                                         std::string_view text,
+                                         std::string_view prefix = {}) {
+  const std::string source = std::string(prefix) + std::string(text);
+  const auto r = parser.parse(source);
   std::vector<cursiv::NextFeature> next;
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
+  const auto at = static_cast<cursiv::TextOffset>(source.size());
   parser.nextFeaturesAt(r.cst(), at, at, next);
   std::vector<std::string> out;
   for (const auto& feature : next)
@@ -79,7 +80,8 @@ std::vector<std::string> spellings_after(const cursiv::Parser& parser,
 
 void same_spellings(Pair p, std::initializer_list<std::string_view> texts) {
   for (const std::string_view text : texts) {
-    const auto a = spellings_after(p.ll, text), b = spellings_after(*p.lr, text);
+    const auto a = spellings_after(p.ll, text, p.prefix);
+    const auto b = spellings_after(*p.lr, text);
     if (a != b) {
       std::printf("[%.*s] LL:", static_cast<int>(text.size()), text.data());
       for (const auto& x : a) std::printf(" '%s'", x.c_str());
@@ -114,7 +116,7 @@ void swarm(Pair p, std::initializer_list<std::string_view> ops) {
       if (next() % 12 == 0) text += ' ';
     }
     if (next() % 20 == 0) text.erase(next() % text.size(), 1);
-    const std::string a = read(p.ll, text);
+    const std::string a = read(p.ll, text, p.prefix);
     const std::string b = read(*p.lr, text);
     if (a != b && shown++ < 8)
       std::printf("[%s] LL %s, LR %s\n", text.c_str(), a.c_str(), b.c_str());
@@ -125,94 +127,92 @@ void swarm(Pair p, std::initializer_list<std::string_view> ops) {
 }  // namespace
 
 int main() {
-  const auto shiftLl = topening::generated::ShiftLl::create_parser();
+  const auto ll = topening::generated::Ll::create_parser();
   const auto shiftLr = topening::generated::ShiftLr::create_parser();
-  const auto negatedLl = topening::generated::NegatedLl::create_parser();
-  const auto tablesLl = topening::generated::TablesLl::create_parser();
-  const auto compositeLl = topening::generated::CompositeLl::create_parser();
-  const Pair shift{*shiftLl, shiftLr.get()}, negated{*negatedLl, nullptr},
-      tables{*tablesLl, nullptr}, composite{*compositeLl, nullptr};
+  const Pair shift{*ll, shiftLr.get(), "shift:"},
+      negated{*ll, nullptr, "negated:"}, tables{*ll, nullptr, "tables:"},
+      composite{*ll, nullptr, "composite:"};
 
   expect_cases(shift, {{"1>2", "(1 > 2)"},
-                {"1>>2", "(1 >> 2)"},
-                {"1 > > 2", "(1 >> 2)"},
-                {"1<<2", "(1 << 2)"},
-                {"1<2", "(1 < 2)"},
-                {"1<2>>3", "(1 < (2 >> 3))"},
-                {"1>>2>3", "((1 >> 2) > 3)"},
-                {"1>2>>3", "(1 > (2 >> 3))"},
-                {"1>>2>>3", "((1 >> 2) >> 3)"},
-                {"1>2>3", "((1 > 2) > 3)"},
-                {"1<2<<3", "(1 < (2 << 3))"},
-                {"1<<2<3", "((1 << 2) < 3)"},
-                {"1<<2>>3", "((1 << 2) >> 3)"},
-                {"1+2>>3", "((1 + 2) >> 3)"},
-                {"1>>2+3", "(1 >> (2 + 3))"},
-                {"1*2>>3*4", "((1 * 2) >> (3 * 4))"},
-                {"1>2>>3+4>5", "((1 > (2 >> (3 + 4))) > 5)"},
-                {"(1>>2)>3", "((1 >> 2) > 3)"},
-                {"1-2", "(1 - 2)"},
-                {"1->2", "(1 -> 2)"},
-                {"1-2->3", "((1 - 2) -> 3)"},
-                {"1->2->3", "(1 -> (2 -> 3))"},
-                {"1->2-3", "(1 -> (2 - 3))"},
-                {"1>2->3", "((1 > 2) -> 3)"},
-                {"1->2>3", "(1 -> (2 > 3))"},
-                {"1->2>>3", "(1 -> (2 >> 3))"},
-                {"1>>2->3->4", "((1 >> 2) -> (3 -> 4))"},
-                {"1 - > 2", "(1 -> 2)"}});
+                       {"1>>2", "(1 >> 2)"},
+                       {"1 > > 2", "(1 >> 2)"},
+                       {"1<<2", "(1 << 2)"},
+                       {"1<2", "(1 < 2)"},
+                       {"1<2>>3", "(1 < (2 >> 3))"},
+                       {"1>>2>3", "((1 >> 2) > 3)"},
+                       {"1>2>>3", "(1 > (2 >> 3))"},
+                       {"1>>2>>3", "((1 >> 2) >> 3)"},
+                       {"1>2>3", "((1 > 2) > 3)"},
+                       {"1<2<<3", "(1 < (2 << 3))"},
+                       {"1<<2<3", "((1 << 2) < 3)"},
+                       {"1<<2>>3", "((1 << 2) >> 3)"},
+                       {"1+2>>3", "((1 + 2) >> 3)"},
+                       {"1>>2+3", "(1 >> (2 + 3))"},
+                       {"1*2>>3*4", "((1 * 2) >> (3 * 4))"},
+                       {"1>2>>3+4>5", "((1 > (2 >> (3 + 4))) > 5)"},
+                       {"(1>>2)>3", "((1 >> 2) > 3)"},
+                       {"1-2", "(1 - 2)"},
+                       {"1->2", "(1 -> 2)"},
+                       {"1-2->3", "((1 - 2) -> 3)"},
+                       {"1->2->3", "(1 -> (2 -> 3))"},
+                       {"1->2-3", "(1 -> (2 - 3))"},
+                       {"1>2->3", "((1 > 2) -> 3)"},
+                       {"1->2>3", "(1 -> (2 > 3))"},
+                       {"1->2>>3", "(1 -> (2 >> 3))"},
+                       {"1>>2->3->4", "((1 >> 2) -> (3 -> 4))"},
+                       {"1 - > 2", "(1 -> 2)"}});
   same_spellings(shift, {"1 ", "1-", "1>", "1<"});
   swarm(shift,
         {">", "<", ">>", "<<", "->", "-", "+", "*", "> >", "- >", "->", ">>"});
 
-  expect_cases(negated,
-        {{"1 in 2", "(1 in 2)"},
-         {"1 like 2", "(1 like 2)"},
-         {"1 not in 2", "(1 notin 2)"},
-         {"1 not like 2", "(1 notlike 2)"},
-         {"not 1", "(not 1)"},
-         {"not 1 in 2", "((not 1) in 2)"},
-         {"not 1 not in 2", "((not 1) notin 2)"},
-         {"1 in not 2", "(1 in (not 2))"},
-         {"1 not in not 2", "(1 notin (not 2))"},
-         {"1 not in 2 like 3", "(1 notin (2 like 3))"},
-         {"1 not like 2 in 3", "((1 notlike 2) in 3)"},
-         {"1 like 2 not in 3", "((1 like 2) notin 3)"},
-         {"1 in 2 not like 3", "(1 in (2 notlike 3))"},
-         {"1 not like 2 not in 3", "((1 notlike 2) notin 3)"},
-         {"1 not in 2 not like 3", "(1 notin (2 notlike 3))"},
-         {"1 not in 2 not in 3", "((1 notin 2) notin 3)"},
-         {"1 + 2 not like 3 + 4", "((1 + 2) notlike (3 + 4))"},
-         {"1 and 2 not in 3", "(1 and (2 notin 3))"},
-         {"1 not in 2 and 3 not like 4", "((1 notin 2) and (3 notlike 4))"},
-         {"1 not\nin 2", "(1 notin 2)"}});
+  expect_cases(negated, {{"1 in 2", "(1 in 2)"},
+                         {"1 like 2", "(1 like 2)"},
+                         {"1 not in 2", "(1 notin 2)"},
+                         {"1 not like 2", "(1 notlike 2)"},
+                         {"not 1", "(not 1)"},
+                         {"not 1 in 2", "((not 1) in 2)"},
+                         {"not 1 not in 2", "((not 1) notin 2)"},
+                         {"1 in not 2", "(1 in (not 2))"},
+                         {"1 not in not 2", "(1 notin (not 2))"},
+                         {"1 not in 2 like 3", "(1 notin (2 like 3))"},
+                         {"1 not like 2 in 3", "((1 notlike 2) in 3)"},
+                         {"1 like 2 not in 3", "((1 like 2) notin 3)"},
+                         {"1 in 2 not like 3", "(1 in (2 notlike 3))"},
+                         {"1 not like 2 not in 3", "((1 notlike 2) notin 3)"},
+                         {"1 not in 2 not like 3", "(1 notin (2 notlike 3))"},
+                         {"1 not in 2 not in 3", "((1 notin 2) notin 3)"},
+                         {"1 + 2 not like 3 + 4", "((1 + 2) notlike (3 + 4))"},
+                         {"1 and 2 not in 3", "(1 and (2 notin 3))"},
+                         {"1 not in 2 and 3 not like 4",
+                          "((1 notin 2) and (3 notlike 4))"},
+                         {"1 not\nin 2", "(1 notin 2)"}});
 
-  expect_cases(tables, {{"1>2", "(1 > 2)"},
-                 {"1>>2", "(1 >> 2)"},
-                 {"1>2>>3", "((1 > 2) >> 3)"},
-                 {"1>>2>3", "(1 >> (2 > 3))"},
-                 {"1>>2>>3", "((1 >> 2) >> 3)"},
-                 {"1>2>3", "((1 > 2) > 3)"},
-                 {"1<2>>3", "((1 < 2) >> 3)"},
-                 {"1>>2?3>>4", "((1 >> 2) ? (3 >> 4))"},
-                 {"1?2>>3", "(1 ? (2 >> 3))"},
-                 {"1>2?3>4", "((1 > 2) ? (3 > 4))"}});
+  expect_cases(tables, {{"1=2", "(1 = 2)"},
+                        {"1==2", "(1 == 2)"},
+                        {"1=2==3", "((1 = 2) == 3)"},
+                        {"1==2=3", "(1 == (2 = 3))"},
+                        {"1==2==3", "((1 == 2) == 3)"},
+                        {"1=2=3", "((1 = 2) = 3)"},
+                        {"1!2==3", "((1 ! 2) == 3)"},
+                        {"1==2?3==4", "((1 == 2) ? (3 == 4))"},
+                        {"1?2==3", "(1 ? (2 == 3))"},
+                        {"1=2?3=4", "((1 = 2) ? (3 = 4))"}});
 
-  expect_cases(composite, {{"1+2", "(1 + 2)"},
-                    {"1+\n2", "(1 + 2)"},
-                    {"1\n+2", "refused"},
-                    {"1-2", "(1 - 2)"},
-                    {"1 a b 2", "(1 ab 2)"},
-                    {"1 a 2", "refused"},
-                    {"1*x2", "(1 *x 2)"},
-                    {"1 * y 2", "(1 *y 2)"},
-                    {"1*2", "(1 * 2)"},
-                    {"1*2*y3", "(1 * (2 *y 3))"},
-                    {"1*x2*3", "((1 *x 2) * 3)"},
-                    {"1+2*x3", "(1 + (2 *x 3))"},
-                    {"1-2 a b 3", "((1 - 2) ab 3)"},
-                    {"1+2 a b 3", "((1 + 2) ab 3)"},
-                    {"1 a b 2+3", "(1 ab (2 + 3))"}});
+  expect_cases(composite, {{"1~2", "(1 ~ 2)"},
+                           {"1~\n2", "(1 ~ 2)"},
+                           {"1\n~2", "refused"},
+                           {"1:2", "(1 : 2)"},
+                           {"1 a b 2", "(1 ab 2)"},
+                           {"1 a 2", "refused"},
+                           {"1@x2", "(1 @x 2)"},
+                           {"1 @ y 2", "(1 @y 2)"},
+                           {"1@2", "(1 @ 2)"},
+                           {"1@2@y3", "(1 @ (2 @y 3))"},
+                           {"1@x2@3", "((1 @x 2) @ 3)"},
+                           {"1~2@x3", "(1 ~ (2 @x 3))"},
+                           {"1:2 a b 3", "((1 : 2) ab 3)"},
+                           {"1~2 a b 3", "((1 ~ 2) ab 3)"},
+                           {"1 a b 2~3", "(1 ab (2 ~ 3))"}});
 
   return cursiv::test::report("LlOpeningToken_test");
 }

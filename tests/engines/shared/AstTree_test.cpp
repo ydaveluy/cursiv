@@ -1,6 +1,5 @@
 #include "forwardll/generated/ForwardLl/Module.hpp"
 #include "forwardlr/generated/ForwardLr/Module.hpp"
-#include "backwardll/generated/BackwardLl/Module.hpp"
 #include "backwardlr/generated/BackwardLr/Module.hpp"
 #include "asttreell/generated/Ll/Module.hpp"
 #include "asttreelr/generated/Lr/Module.hpp"
@@ -268,8 +267,8 @@ void run() {
                 tmember::generated::ForwardLl::create_ast_reflection()});
   every_engine({tmember::generated::ForwardLr::create_parser(),
                 tmember::generated::ForwardLr::create_ast_reflection()});
-  every_engine({tmember::generated::BackwardLl::create_parser(),
-                tmember::generated::BackwardLl::create_ast_reflection()});
+  // Both backends parse every input ordering above. One reversed grammar is
+  // enough to challenge their shared metadata emitter's encounter order.
   every_engine({tmember::generated::BackwardLr::create_parser(),
                 tmember::generated::BackwardLr::create_ast_reflection()});
 

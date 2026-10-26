@@ -14,8 +14,6 @@
 
 #include "alikereduced/generated/Reduced/Module.hpp"
 #include "alikereduced/generated/Reduced/Table.hpp"
-#include "alikeshifted/generated/Shifted/Module.hpp"
-#include "alikeshifted/generated/Shifted/Table.hpp"
 #include "backref/generated/G/Parser.hpp"
 #include "backref/generated/G/Table.hpp"
 #include "candidateruns/generated/G/Module.hpp"
@@ -47,7 +45,6 @@
 #include "engines/lr/AuditGrammar.hpp"
 #include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/LexGuardGrammars.hpp"
-#include "engines/lr/LexUnicodeGrammars.hpp"
 #include "engines/lr/MemConvGrammar.hpp"
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"
 #include "engines/lr/RefusedShorterGrammar.hpp"
@@ -71,13 +68,9 @@
 #include "relayoverlap/generated/G/Parser.hpp"
 #include "relayoverlap/generated/G/Table.hpp"
 #include "rulerefusal/generated/G/Module.hpp"
-#include "refusedheads/generated/G/Module.hpp"
 #include "shorterlr/generated/Lr/Module.hpp"
 #include "shorterlr/generated/Lr/Parser.hpp"
 #include "shorterlr/generated/Lr/Table.hpp"
-#include "unicodewide/generated/G/Module.hpp"
-#include "unicodewide/generated/G/Parser.hpp"
-#include "unicodewide/generated/G/Table.hpp"
 #include "wideterms/generated/G/Module.hpp"
 
 #ifdef CURSIV_LR_LEXER_CONTRACT
@@ -921,27 +914,9 @@ void guard_rows_are_packed(const char* lang) {
   (grammar_agrees<ns::kTable>(name, ns::kDrive),       \
    guard_rows_are_packed<ns::kTable, ns::kCold>(name))
 
-// The shared word reader keeps the grammar's XID_Continue | "$" boundary,
-// including refusals and an incomplete UTF-8 scalar.
-void the_word_class_obeys_the_declared_boundary() {
-  for (const auto& [text, word] : {std::pair<std::string_view, bool>{"a", true},
-                                   {"$", true},
-                                   {"\xC3\xA9", true},
-                                   {"\xE6\x97\xA5", true},
-                                   {"\xF0\x9D\x92\xB3", true},
-                                   {"\xC2\xAC", false},
-                                   {"\xC3", false},
-                                   {"!", false}}) {
-    const auto len = static_cast<cursiv::TextOffset>(text.size());
-    CHECK(cursiv::lex_boundary(tunicode::wide::generated::G::kTable.cfg)
-              .word_at(text.data(), 0, len) == word);
-  }
-}
-
 void the_hard_shapes_answer_the_same_from_every_form() {
   LANE(arith::generated::Arith, "arithmetics");
   LANE(tasciiruns::generated::AsciiRunsGrammar, "asciiruns");
-  LANE(tunicode::wide::generated::G, "unicodewide");
   LANE(tnestedlex::overlap::generated::G, "relayoverlap");
   LANE(tonemode::generated::G, "onemode");
   // One mode lexes as every other table does, through the walk of all.
@@ -1096,7 +1071,6 @@ int run() {
       "arithmetics", "module m /* body */ def f(x): x + 123; f(2);");
   a_refused_keyword_hands_the_spelling_back_the_same_way();
   the_hard_shapes_answer_the_same_from_every_form();
-  the_word_class_obeys_the_declared_boundary();
   an_echo_answers_the_same_from_every_form();
   return 0;
 }
@@ -1104,232 +1078,7 @@ int run() {
 
 #endif
 
-namespace case_lexunicode {
-// A class lexes exactly the scalars it names, in well-formed UTF-8, and a
-// complement also the bytes that start no scalar.
 
-namespace {
-
-const cursiv::Parser& wide() {
-  static const auto p = tunicode::wide::generated::G::create_parser();
-  return *p;
-}
-
-// A case's document: its opening keyword, then what the case reads.
-std::string in(std::string_view lead, std::string_view text) {
-  return std::string(lead) + " " + std::string(text);
-}
-
-// The items of a clean reading, a keyword in brackets; `<refused>` otherwise.
-std::vector<std::string> items(std::string_view text) {
-  const std::string whole = in("scalars", text);
-  const cursiv::ParseResult r = wide().parse(whole);
-  if (!r.accepted || !r.diagnostics.empty()) return {"<refused>"};
-  const auto* const doc = r.value_as<tunicode::ast::Doc>();
-  if (doc == nullptr) return {"<no doc>"};
-  std::vector<std::string> out;
-  for (const tunicode::ast::Item* const it : doc->items)
-    out.emplace_back(it->cond    ? "<if>"
-                     : it->where ? "<où>"
-                                 : std::string(it->name));
-  return out;
-}
-
-std::vector<std::string> dot_items(const cursiv::Parser& p,
-                                   std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  if (!r.accepted || !r.diagnostics.empty()) return {"<refused>"};
-  std::vector<std::string> out;
-  for (const tunicode::ast::Item* const it :
-       r.value_as<tunicode::ast::Doc>()->items)
-    out.emplace_back(it->name);
-  return out;
-}
-
-// The guarded scalar acceptances are cases of the shared wide table.
-bool dot(std::string_view text, std::vector<std::string> want) {
-  return dot_items(wide(), in("dot", text)) == want;
-}
-
-bool cased(std::string_view text, std::vector<std::string> want) {
-  const std::string document = in("cased", text);
-  const auto result = wide().parse(document);
-  std::vector<std::string> got;
-  if (!result.accepted || !result.diagnostics.empty()) return want == std::vector<std::string>{"<refused>"};
-  for (const auto* item : result.value_as<tunicode::ast::Doc>()->items)
-    got.emplace_back(item->cond ? "<if>" : item->where ? "<où>" : std::string(item->name));
-  return got == want;
-}
-
-bool same(std::string_view text, std::vector<std::string> want) {
-  const std::vector<std::string> got = items(text);
-  if (got == want) return true;
-  std::printf("  %s ->", std::string(text).c_str());
-  for (const std::string& g : got) std::printf(" [%s]", g.c_str());
-  std::printf("\n");
-  return false;
-}
-
-// The names of a clean reading of a document; `<refused>` otherwise.
-bool names(const cursiv::Parser& p, const std::string& doc,
-           std::vector<std::string> want) {
-  const cursiv::ParseResult r = p.parse(doc);
-  std::vector<std::string> got;
-  if (!r.accepted || !r.diagnostics.empty()) {
-    got = {"<refused>"};
-  } else {
-    for (const tunicode::ast::Item* const it :
-         r.value_as<tunicode::ast::Doc>()->items)
-      got.emplace_back(it->name);
-  }
-  if (got == want) return true;
-  std::printf("  %s ->", doc.c_str());
-  for (const std::string& g : got) std::printf(" [%s]", g.c_str());
-  std::printf("\n");
-  return false;
-}
-
-}  // namespace
-
-int run() {
-  cursiv::test::count_expectations();
-  // A guard of code points reads the scalar behind the match, at every
-  // encoding length.
-  CHECK(dot("1.", {"1."}));
-  CHECK(dot("1.2", {"1.2"}));
-  CHECK(dot("1. x", {"1.", "x"}));
-  CHECK(dot("1.x", {"1", ".", "x"}));
-  CHECK(dot("1.\xC3\xA9", {"1", ".", "\xC3\xA9"}));
-  CHECK(dot("1.\xE6\x97\xA5", {"1", ".", "\xE6\x97\xA5"}));
-  CHECK(dot("1.\xF0\x9D\x92\xB3", {"1", ".", "\xF0\x9D\x92\xB3"}));
-  CHECK(dot("1..2", {"1", "..", "2"}));
-  // `_` starts a name in the grammar but is no XID_Start: the guard says so.
-  CHECK(dot("1._", {"1.", "_"}));
-  CHECK(dot("#1", {"#", "1"}));
-  CHECK(dot("#_", {"#_"}));
-  CHECK(dot("# \xC3\xA9", {"#", "\xC3\xA9"}));
-  CHECK(dot("#x", {"<refused>"}));
-  CHECK(dot("#\xC3\xA9", {"<refused>"}));
-  CHECK(dot("#\xE6\x97\xA5", {"<refused>"}));
-  CHECK(dot("#\xF0\x9D\x92\xB3", {"<refused>"}));
-  CHECK(dot("# \xF0\x9D\x92\xB3", {"#", "\xF0\x9D\x92\xB3"}));
-  // Refused by its class, the first terminal leaves the spelling to the
-  // second where that one's class allows it, at every encoding length.
-  CHECK(cased("a", {"<if>"}));
-  CHECK(cased("a B", {"<if>", "B"}));
-  CHECK(cased("aB", {"<où>", "B"}));
-  CHECK(cased("a\xC3\x80", {"<où>", "\xC3\x80"}));
-  CHECK(cased("a\xCE\xA3", {"<où>", "\xCE\xA3"}));
-  CHECK(cased("a\xF0\x9D\x90\x80", {"<où>", "\xF0\x9D\x90\x80"}));
-  CHECK(cased("a\xC3\xA9", {"<if>", "\xC3\xA9"}));
-  // Identifier properties, at every encoding length.
-  CHECK(same("été x_1 日本語 Ωmega", {"été", "x_1", "日本語", "Ωmega"}));
-  CHECK(same("𝒳 𐐀b", {"𝒳", "𐐀b"}));
-  // A combining mark continues a name and starts none.
-  CHECK(same("e\xCC\x81t\xC3\xA9", {"e\xCC\x81t\xC3\xA9"}));
-  // Digits of any script are one category.
-  CHECK(same("42 ٣٤ ๑", {"42", "٣٤", "๑"}));
-  // The complement takes what the others leave: punctuation, symbols.
-  CHECK(same("… €", {"…", "€"}));
-  // A letter beside a symbol is two tokens, in either order.
-  CHECK(same("a€", {"a", "€"}));
-  CHECK(same("€a", {"€", "a"}));
-  // Well-formed UTF-8 is a scalar, nothing else is a letter or a digit: a
-  // truncated lead, an overlong, a surrogate, a continuation on its own are
-  // single bytes, which the complement takes.
-  CHECK(same("\xC3(", {"\xC3("}));
-  CHECK(same("\xC0\x80", {"\xC0\x80"}));
-  CHECK(same("\xED\xA0\x80", {"\xED\xA0\x80"}));
-  CHECK(same("\x80", {"\x80"}));
-  CHECK(same("a\xC3 b", {"a", "\xC3", "b"}));
-  // The keyword's boundary is a class of code points: a name goes on over a
-  // letter, a mark or a digit of any script at every encoding length, and
-  // ends before a symbol, `¬` as much as `+`.
-  CHECK(same("if é ifé", {"<if>", "é", "ifé"}));
-  CHECK(same("if+ if¬ if€ if…",
-             {"<if>", "+", "<if>", "¬", "<if>", "€", "<if>", "…"}));
-  CHECK(same("if· if٣ if日 if𝒳 ife\xCC\x81",
-             {"if·", "if٣", "if日", "if𝒳", "ife\xCC\x81"}));
-  CHECK(same("if$ $if $", {"if$", "$if", "$"}));
-  CHECK(same("où oùx où€ oùé", {"<où>", "oùx", "<où>", "€", "oùé"}));
-  // What is no scalar is in no word class: the keyword stands, and the bytes
-  // are symbols.
-  CHECK(same("if\xC3(", {"<if>", "\xC3("}));
-  CHECK(same("if\xC3", {"<if>", "\xC3"}));
-  for (const std::string_view t : {"if\xFF", "if\x80", "if\xC3(", "if\xC0\x80",
-                                   "if\xED\xA0\x80", "if\xF0\x9D"})
-    CHECK(same(t, {"<if>", std::string(t.substr(2))}));
-  CHECK(same("ifx", {"ifx"}));
-  // A `cr<>` spelling scalars: the Latin-1 letters, and not a CJK one.
-  {
-    const auto ok = [&](std::string_view t) {
-      const cursiv::ParseResult r = wide().parse(in("letters", t));
-      return r.accepted && r.diagnostics.empty();
-    };
-    CHECK(ok("été Ærø"));
-    CHECK(!ok("日"));
-    CHECK(!ok("a×b"));
-  }
-  // The boundary inside a token: the token goes on past `¬`, never past a
-  // scalar the class holds.
-  CHECK(names(wide(), in("inside", "if¬ if¬"), {"if¬", "if¬"}));
-  CHECK(names(wide(), in("inside", "ifé"), {"<refused>"}));
-  CHECK(names(wide(), in("inside", "if"), {"<refused>"}));
-  // The boundary joined by a byte class: still the class past ASCII.
-  CHECK(names(wide(), in("trailing", "if¬ if"), {"if", "¬", "if"}));
-  CHECK(names(wide(), in("trailing", "if €"), {"if", "€"}));
-  CHECK(names(wide(), in("trailing", "if!"), {"<refused>"}));
-  CHECK(names(wide(), in("trailing", "ifé"), {"<refused>"}));
-  // Two reservations of one word: the name comes back where both refuse it.
-  CHECK(names(wide(), in("intersect", "ifé"), {"if"}));
-  CHECK(names(wide(), in("intersect", "ifé abé"), {"if", "ab"}));
-  CHECK(names(wide(), in("intersect", "if é"), {"<refused>"}));
-  // The complement of a few characters reads every character but them, a
-  // byte that starts no scalar included.
-  CHECK(names(wide(), in("except", "ab, c"), {"ab", "c"}));
-  CHECK(names(wide(), in("except", "\xC3\xA9\xF0\x9D\x92\xB3, \xE6\x97\xA5x"),
-              {"\xC3\xA9\xF0\x9D\x92\xB3", "\xE6\x97\xA5x"}));
-  CHECK(names(wide(),
-              in("except",
-                 "a\xFF"
-                 "b"),
-              {"a\xFF"
-               "b"}));
-  // A guard refusing every scalar past ASCII beside a keyword of the same
-  // word: the keyword stands before `€`, and the name before `·`, a word.
-  // Where the guard passes, the literal and the keyword tie, and the rule's
-  // first arm, the literal's, is elected.
-  {
-    static constexpr auto& A = tunicode::wide::generated::G::kTable;
-    std::uint16_t mode = 0xFFFF;
-    for (unsigned s = 0; s < A.nstates; ++s) {
-      const auto t = A.derived.expect.shiftTerm[s];
-      if (t < A.cfg.nterms && A.cfg.term_text(t) == "rawlead") mode = A.mode[s];
-    }
-    CHECK(mode != 0xFFFF);
-    const auto at = [&](std::string_view t) {
-      const cursiv::Scan s = cursiv::lr_match_text<A>(
-          t.data(), static_cast<cursiv::TextOffset>(t.size()), mode, 0);
-      return s.term == cursiv::kInvalidSymbol
-                 ? std::string("<none>")
-                 : std::string(A.cfg.term_name(s.term)) + "@" +
-                       std::to_string(s.end);
-    };
-    CHECK(at("if\xE2\x82\xAC") == "K@2");
-    CHECK(at("if\xC2\xB7") == "ID@2");
-    CHECK(at("if!") == "P@2");
-    CHECK(names(wide(), in("rawlead", "if\xE2\x82\xAC"), {"", "\xE2\x82\xAC"}));
-    CHECK(names(wide(), in("rawlead", "if\xC2\xB7"), {"if", "\xC2\xB7"}));
-    CHECK(names(wide(), in("rawlead", "if!"), {"if", "!"}));
-  }
-  // `\xNN` spells one scalar, in a class of ASCII or beside a letter past it.
-  CHECK(names(wide(), in("escape", "b:ABC u:CAB"), {"b:ABC", "u:CAB"}));
-  CHECK(names(wide(), in("escape", "u:A\u00e9B"), {"u:A\u00e9B"}));
-  for (const char* t : {"u:x41", "u:5", "u:w", "u:x", "b:x41"})
-    CHECK(names(wide(), in("escape", t), {"<refused>"}));
-  return 0;
-}
-}  // namespace case_lexunicode
 
 namespace case_lexguard {
 // A candidate the priority outranks is refused by its own guard and by
@@ -1826,11 +1575,11 @@ bool is_word(const std::vector<std::string>& all, const std::string& s) {
 }  // namespace
 
 int run() {
-  const auto parser = trefusedheads::generated::G::create_parser();
+  const auto parser = tguard::generated::G::create_parser();
   const std::vector<std::string> all = split(kWords);
   CHECK(all.size() > 80);
 
-  std::string doc;
+  std::string doc = "heads ";
   std::vector<std::string> want;
   const auto add = [&](const std::string& s) {
     const bool word = is_word(all, s);
@@ -1867,9 +1616,9 @@ int run() {
     }
 
   for (const std::string& w : all) {
-    CHECK(!parser->parse("=" + w + ";").diagnostics.empty());
-    CHECK(parser->parse("=" + w + "x;").diagnostics.empty());
-    CHECK(parser->parse("= " + w + "_ ;").diagnostics.empty());
+    CHECK(!parser->parse("heads =" + w + ";").diagnostics.empty());
+    CHECK(parser->parse("heads =" + w + "x;").diagnostics.empty());
+    CHECK(parser->parse("heads = " + w + "_ ;").diagnostics.empty());
   }
   return 0;
 }
@@ -2036,7 +1785,10 @@ std::string items(const cursiv::ParseResult& r) {
 
 int run() {
   static_assert(!talike::generated::Reduced::kTable.multiCand);
-  static_assert(talike::generated::Shifted::kTable.multiCand);
+  static_assert(tguard::generated::G::kTable.multiCand);
+  const auto mode =
+      case_lexguard::mode_of<tguard::generated::G::kTable>("shifted");
+  CHECK(tguard::generated::G::kTable.modeMulti[mode] != 0);
 
   const auto reduced = talike::generated::Reduced::create_parser();
   const auto r = reduced->parse(
@@ -2047,14 +1799,16 @@ int run() {
        {"type enum yes", "type enum \"d\" no", "type enum one yes"})
     CHECK(!reduced->parse(bad).diagnostics.empty());
 
-  const auto shifted = talike::generated::Shifted::create_parser();
-  const auto s = shifted->parse(
-      "a: b= yes: yesx= c: nox: yes0123456789abcdef= abcdefghijklmnop0123456789:");
+  const auto shifted = tguard::generated::G::create_parser();
+  const std::string source =
+      "shifted a: b= yes: yesx= c: nox: yes0123456789abcdef= "
+      "abcdefghijklmnop0123456789:";
+  const auto s = shifted->parse(source);
   CHECK(s.accepted && s.diagnostics.empty());
   CHECK(items(s) ==
         "a b= yes yesx= c nox yes0123456789abcdef= abcdefghijklmnop0123456789 ");
   for (const std::string_view bad : {"yes=", "no=", "a: yes="})
-    CHECK(!shifted->parse(bad).diagnostics.empty());
+    CHECK(!shifted->parse("shifted " + std::string(bad)).diagnostics.empty());
   return 0;
 }
 }  // namespace case_alikecandidates
@@ -2244,7 +1998,6 @@ int main() {
 #ifdef CURSIV_LR_LEXER_CONTRACT
   movedStatus |= case_lexercontract::run();
 #endif
-  movedStatus |= case_lexunicode::run();
   movedStatus |= case_lexguard::run();
   movedStatus |= case_refusedheadwords::run();
   movedStatus |= case_refusedshorter::run();

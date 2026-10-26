@@ -1,5 +1,11 @@
-#include "sectionpredicatell/generated/Ll/Module.hpp"
-#include "sectionpredicatelr/generated/Lr/Module.hpp"
+#include <array>
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include "ConformanceTest.hpp"
 #include "conformancell/generated/Ll/Module.hpp"
 #include "conformancelr/generated/Lr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
@@ -8,12 +14,8 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
 #include "engines/shared/SectionPredicateGrammar.hpp"
-#include <array>
-#include <cstdio>
-#include <memory>
-#include <string>
-#include <string_view>
-#include <utility>
+#include "sectionpredicatell/generated/Ll/Module.hpp"
+#include "sectionpredicatelr/generated/Lr/Module.hpp"
 
 namespace section_predicate_cases {
 
@@ -43,32 +45,37 @@ std::string diagnostics(const cursiv::ParseResult& r, int shift) {
 }
 
 struct Reader {
-  std::unique_ptr<cursiv::Parser> parser;
+  const cursiv::Parser& parser;
   std::string_view prefix;
+
+  std::string source(std::string_view text) const {
+    return std::string(prefix) + std::string(text);
+  }
 };
 
 std::string alone(const Reader& p, std::string_view text) {
-  const std::string source = std::string(p.prefix) + std::string(text);
-  const auto r = p.parser->parse(source);
+  const std::string source = p.source(text);
+  const auto r = p.parser.parse(source);
   return items(r.value_as<ast::Items>()) + diagnostics(r, p.prefix.size());
 }
 
 std::string embedded(const Reader& p, std::string_view text) {
-  const std::string host = std::string(p.prefix) + '<' + std::string(text) + '>';
-  const auto r = p.parser->parse(host);
+  const std::string host = p.source('<' + std::string(text) + '>');
+  const auto r = p.parser.parse(host);
   const auto* d = r.value_as<ast::Doc>();
-  const std::string tree =
-      d == nullptr || d->blocks.size() != 1 ? "-" : items((*d->blocks.begin())->items);
+  const std::string tree = d == nullptr || d->blocks.size() != 1
+                               ? "-"
+                               : items((*d->blocks.begin())->items);
   return tree + diagnostics(r, p.prefix.size() + 1);
 }
 
-void same(const Reader& one, const Reader& host,
-          std::string_view text) {
+void same(const Reader& one, const Reader& host, std::string_view text) {
   const auto a = alone(one, text);
   const auto b = embedded(host, text);
   if (a != b)
-    std::printf("\"%.*s\": alone %s, embedded %s\n", static_cast<int>(text.size()),
-                text.data(), a.c_str(), b.c_str());
+    std::printf("\"%.*s\": alone %s, embedded %s\n",
+                static_cast<int>(text.size()), text.data(), a.c_str(),
+                b.c_str());
   CHECK(a == b);
 }
 
@@ -76,14 +83,16 @@ void same(const Reader& one, const Reader& host,
 
 void run() {
   namespace gen = tsecpred::generated;
-  const Reader lastLl{gen::Ll::create_parser(), ""};
-  const Reader lastLr{gen::Lr::create_parser(), ""};
-  const Reader inLastLl{gen::Ll::create_parser(), "inlast:"};
-  const Reader inLastLr{gen::Lr::create_parser(), "inlast:"};
-  const Reader reachLl{gen::Ll::create_parser(), "reach:"};
-  const Reader reachLr{gen::Lr::create_parser(), "reach:"};
-  const Reader inReachLl{gen::Ll::create_parser(), "inreach:"};
-  const Reader inReachLr{gen::Lr::create_parser(), "inreach:"};
+  const auto ll = gen::Ll::create_parser();
+  const auto lr = gen::Lr::create_parser();
+  const Reader lastLl{*ll, ""};
+  const Reader lastLr{*lr, ""};
+  const Reader inLastLl{*ll, "inlast:"};
+  const Reader inLastLr{*lr, "inlast:"};
+  const Reader reachLl{*ll, "reach:"};
+  const Reader reachLr{*lr, "reach:"};
+  const Reader inReachLl{*ll, "inreach:"};
+  const Reader inReachLr{*lr, "inreach:"};
   for (const std::string_view text : {"a", "a b", "a b c", "ab cd", " a b "}) {
     same(lastLl, inLastLl, text);
     same(lastLr, inLastLr, text);
@@ -94,6 +103,14 @@ void run() {
   }
   CHECK(alone(lastLl, "a b") == "a,b!,");
   CHECK(alone(reachLl, "a b") == "a,b,");
+  // These predicates retain their space-only policy, including the first gap.
+  for (const Reader* reader : {&lastLl, &lastLr}) {
+    for (const std::string_view text : {"\ta b", "\na b", "a\tb", "a\nb"}) {
+      const std::string source = reader->source(text);
+      const auto parsed = reader->parser.parse(source);
+      CHECK(!parsed.accepted || !parsed.diagnostics.empty());
+    }
+  }
   // A delimiter inside a longer token does not end the section, even when
   // the guard's own reading stops before that token does.
   for (const std::string_view text : {"a > b !", "a > b > c !"}) {
@@ -110,7 +127,6 @@ void run() {
   same(lastLl, inLastLl, words);
   same(lastLr, inLastLr, words);
   CHECK(alone(lastLl, words) == alone(lastLr, words));
-
 }
 
 }  // namespace section_predicate_cases
@@ -121,71 +137,33 @@ namespace conformance_section_close_cases {
 // the host spells the token that closes it: `lit<"a"> + &lit<"]">` refuses
 // `[a]`, `lit<"a"> + &eof` reads it.
 
-namespace {
-
-struct Pair {
-  std::array<std::unique_ptr<cursiv::Parser>, 2> engines;
-  std::string_view prefix;
-  Pair(std::unique_ptr<cursiv::Parser> ll, std::unique_ptr<cursiv::Parser> lr,
-       std::string_view tag = {}) : engines{std::move(ll), std::move(lr)}, prefix(tag) {}
-  const auto& operator[](std::size_t i) const { return engines[i]; }
-  auto begin() const { return engines.begin(); }
-  auto end() const { return engines.end(); }
-  std::string source(std::string_view text) const {
-    return std::string(prefix) + std::string(text);
-  }
-};
-constexpr const char* kEngine[] = {"LL", "LR"};
-
-void expect(const Pair& pair, std::string_view text, bool want) {
-  for (unsigned i = 0; i < 2; ++i) {
-    const std::string source = pair.source(text);
-    const auto r = pair[i]->parse(source);
-    const bool got = r.accepted && r.diagnostics.empty() &&
-                     r.error == cursiv::AstBuildError::none;
-    if (got != want)
-      std::printf("%s [%.*s]: wanted %s\n", kEngine[i],
-                  static_cast<int>(text.size()), text.data(),
-                  want ? "read" : "refused");
-    CHECK(got == want);
-  }
-}
-
-}  // namespace
+using conformance_test::expect;
+using conformance_test::Pair;
 
 void run() {
-  namespace g = tconformance::generated;
   cursiv::test::count_expectations();
 
-  const Pair atClose{g::Ll::create_parser(), g::Lr::create_parser(), "atclosehost:"};
+  const Pair atClose{"atclosehost:"};
   expect(atClose, "[a]", false);
 
-  const Pair namedClose{g::Ll::create_parser(), g::Lr::create_parser(), "namedclosehost:"};
+  const Pair namedClose{"namedclosehost:"};
   expect(namedClose, "[a]", false);
 
-  const Pair atEnd{g::Ll::create_parser(), g::Lr::create_parser(), "atendhost:"};
+  const Pair atEnd{"atendhost:"};
   expect(atEnd, "[a]", true);
 
-  const Pair namedEnd{g::Ll::create_parser(), g::Lr::create_parser(), "namedendhost:"};
+  const Pair namedEnd{"namedendhost:"};
   expect(namedEnd, "[a]", true);
 
-  const Pair bare{g::Ll::create_parser(), g::Lr::create_parser(), "barehost:"};
+  const Pair bare{"barehost:"};
   expect(bare, "[a]", true);
 
-  const Pair absentClose{g::Ll::create_parser(), g::Lr::create_parser(), "absentclosehost:"};
+  const Pair absentClose{"absentclosehost:"};
   expect(absentClose, "[a]", true);
 
-  const Pair followed{g::Ll::create_parser(), g::Lr::create_parser(), "followedhost:"};
+  const Pair followed{"followedhost:"};
   expect(followed, "[a];", true);
   expect(followed, "[a]", false);
-
 }
 
 }  // namespace conformance_section_close_cases
-
-int main() {
-  cursiv::test::count_expectations();
-  section_predicate_cases::run();
-  conformance_section_close_cases::run();
-  return cursiv::test::report("SectionPredicate_test");
-}

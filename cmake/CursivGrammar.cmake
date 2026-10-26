@@ -226,19 +226,20 @@ function(_cursiv_generate_language test_only)
       VERBATIM)
   add_custom_target(${_name}_generate DEPENDS ${_written})
   if(test_only AND NOT ARG_SEPARATE_UNITS)
-    # Share the table and grammar headers between the parser and its module.
-    # Reflection stays separate: both metadata units own an anonymous kTypes.
+    # Compile each test language once: its parser, metadata and reflection
+    # share the grammar's templates and headers in the same translation unit.
     set(_testParser "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_name}Generated.dir/Parser.cpp")
     set(_testSource "// Generated test language compilation unit.\n")
     foreach(_unit IN LISTS _parserUnits)
       string(APPEND _testSource "#include \"${_dir}/${_unit}\"\n")
     endforeach()
     string(APPEND _testSource
+        "#include \"${_dir}/AstReflection.cpp\"\n"
         "#include \"${_dir}/Grammar.cpp\"\n"
         "#include \"${_dir}/Module.cpp\"\n")
     file(GENERATE OUTPUT "${_testParser}" CONTENT "${_testSource}")
     set_source_files_properties("${_testParser}" PROPERTIES GENERATED TRUE)
-    set(_generatedSources "${_testParser}" "${_dir}/AstReflection.cpp")
+    set(_generatedSources "${_testParser}")
     set(_parserSources "${_testParser}")
   endif()
   add_library(${_name}Generated STATIC ${_generatedSources})
@@ -255,11 +256,15 @@ function(_cursiv_generate_language test_only)
   set_target_properties(${_name}Generated PROPERTIES CXX_SCAN_FOR_MODULES OFF)
   set(_parserOptimization -O2)
   if(test_only)
-    set(_parserOptimization -O1)
+    set(_parserOptimization -O0)
+    if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+      set(_parserOptimization -O1)
+    endif()
     # WASI engines limit function size and locals; unoptimised generated
     # parsers can exceed those limits even in otherwise Debug builds.
     target_compile_options(${_name}Generated PRIVATE
-        $<$<OR:$<CONFIG:Release>,$<PLATFORM_ID:WASI>>:-O1>)
+        $<$<CONFIG:Release>:${_parserOptimization}>
+        $<$<PLATFORM_ID:WASI>:-O1>)
   endif()
   # WASI needs tail calls between parser groups, but not for by-value C++ calls.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
@@ -271,6 +276,8 @@ function(_cursiv_generate_language test_only)
   target_compile_definitions(${_name}Generated PUBLIC CURSIV_ENGINE_${ARG_ENGINE}=1)
   set_target_properties(${_name}Generated PROPERTIES
       CURSIV_GENERATED_DIR ${_dir}
+      CURSIV_GENERATED_NAMESPACE ${_gns}
+      CURSIV_GRAMMAR_HEADER ${ARG_GRAMMAR}
       CURSIV_GENERATED_PARSER_SOURCES "${_parserSources}"
       CURSIV_ENGINE ${ARG_ENGINE})
   if(NOT "${ARG_BASE}" STREQUAL "")

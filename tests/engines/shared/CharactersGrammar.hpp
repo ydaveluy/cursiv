@@ -2,6 +2,7 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/LexUnicodeGrammars.hpp"
 // A class reads one character: a well-formed scalar whole, or the byte where
 // none starts. Each reading is a terminal behind a tag, so a document names
 // the one it asks.
@@ -188,5 +189,17 @@ struct Suite : Base {
   using entry = Entry;
 };
 struct Ll : Suite {};
-struct Lr : Suite {};
+// Scalar guard competition belongs to LR; shared decoding still runs in LL.
+struct Lr : Suite {
+  struct Decimal : terminal<some(uc::Nd)> {};
+  struct Where : terminal<kw<"où">> {};
+  struct Entry : rule<ref<Suite::Entry> |
+      (lit<"lex:"> + skip(ignored<tunicode::Cases::WS>, hide<>,
+                          ref<tunicode::Cases::Entry> + eof)) |
+      (create<ast::Doc> + ((lit<"digits:"> + item<Decimal>) |
+                           (lit<"where:"> + item<Where> + many(item<One>))) +
+       eof)> {};
+  using entry = Entry;
+  static constexpr auto word_boundary = uc::XID_Continue | cr<"_$">;
+};
 }  // namespace tchars

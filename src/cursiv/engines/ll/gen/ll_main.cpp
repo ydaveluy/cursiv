@@ -31,7 +31,16 @@
 #include "cursiv/engines/shared/gen/write_source.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 
+#ifdef CURSIV_GEN_INCLUDE
+#include CURSIV_GEN_INCLUDE
+#else
 #include CURSIV_GEN_HEADER
+#endif
+
+#ifndef CURSIV_GEN_SCOPE
+#define CURSIV_GEN_SCOPE cursiv_generator
+#endif
+namespace CURSIV_GEN_SCOPE {
 
 using G = CURSIV_GEN_GRAMMAR;
 using View = cursiv::LlView<G>;
@@ -85,7 +94,7 @@ std::string_view empty_match_terminal(const cursiv::LlBuiltProgram& a) {
 
 }  // namespace
 
-int main(int argc, char** argv) try {
+int run(int argc, char** argv) try {
   cursiv::LlBuildOptions buildOpt;
   const char* dir = nullptr;
   bool bad = false;
@@ -197,3 +206,11 @@ int main(int argc, char** argv) try {
   std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, error.what());
   return exit_status(GenCode::refused);
 }
+
+}  // namespace CURSIV_GEN_SCOPE
+
+#ifndef CURSIV_GEN_NO_MAIN
+int main(int argc, char** argv) {
+  return CURSIV_GEN_SCOPE::run(argc, argv);
+}
+#endif

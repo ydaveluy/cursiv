@@ -58,6 +58,8 @@
 #include "passes/generated/G/Table.hpp"
 #include "torture/ElectionGrammar.hpp"
 
+namespace lr_identity_cases {
+
 // The construction run natively: the identity it picks and the completion
 // sites it agrees on.
 
@@ -773,7 +775,7 @@ int run() {
 }
 }  // namespace case_lrdeferredchoice
 
-int main() {
+int run() {
   // Naming an empty guarded creation preserves the lowered condition program.
   const auto& inlineGuards = cursiv::LrLowering<tguardedchoice::Inline>::cfg();
   const auto& namedGuards = cursiv::LrLowering<tguardedchoice::Named>::cfg();
@@ -796,3 +798,5 @@ int main() {
   status |= completion_sites::run();
   return (cursiv::test::report("LrIdentity_test") | status) | movedStatus;
 }
+
+}  // namespace lr_identity_cases

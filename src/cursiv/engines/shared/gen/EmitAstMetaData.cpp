@@ -142,31 +142,31 @@ std::string emit_ast_metadata(const AstRegistry& registry) {
 
 std::string emit_ast_metadata_record(const AstRegistry& registry) {
   return std::format(R"(constexpr ::cursiv::AstMetaData kAstMetaData{{
-    .types = ::kTypes,
-    .subtypes = ::kSubtypes,
-    .derivesBits = ::kDerives,
+    .types = ast_detail::kTypes,
+    .subtypes = ast_detail::kSubtypes,
+    .derivesBits = ast_detail::kDerives,
     .typeCount = {0}u,
     .typeWords = {1}u,
     .fields = {2},
     .refOps = {3},
-    .acceptBits = ::kAccepts,
-    .properties = ::kProperties,
-    .propertyRows = ::kPropertyRows,
-    .referenceTags = ::kReferenceTags,
-    .complete = ::kComplete,
-    .memberVisitors = ::kMemberVisitors,
-    .unknownMembers = &::UnknownMembers::visitUnknown,
-    .referenceFields = {{::kReferenceFields, ::kReferenceFieldCount}},
-    .referenceRows = ::kReferenceRows,
+    .acceptBits = ast_detail::kAccepts,
+    .properties = ast_detail::kProperties,
+    .propertyRows = ast_detail::kPropertyRows,
+    .referenceTags = ast_detail::kReferenceTags,
+    .complete = ast_detail::kComplete,
+    .memberVisitors = ast_detail::kMemberVisitors,
+    .unknownMembers = &ast_detail::UnknownMembers::visitUnknown,
+    .referenceFields = {{ast_detail::kReferenceFields, ast_detail::kReferenceFieldCount}},
+    .referenceRows = ast_detail::kReferenceRows,
     .fieldCount = {4}u,
     .anyVariantField = {5},
-    .anyMultiReference = ::kAnyMultiReference,
+    .anyMultiReference = ast_detail::kAnyMultiReference,
 }};
 
 )",
                      registry.types.size(), registry.typeWords,
-                     registry.fields.empty() ? "nullptr" : "::kFields",
-                     registry.fields.empty() ? "nullptr" : "::kRefOps",
+                     registry.fields.empty() ? "nullptr" : "ast_detail::kFields",
+                     registry.fields.empty() ? "nullptr" : "ast_detail::kRefOps",
                      registry.fields.size(), registry.anyVariantField);
 }
 

@@ -3,49 +3,74 @@
 #include <string_view>
 
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/IndirectFoldGrammar.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
-#include "indirectfoldlr/generated/Lr/Module.hpp"
 
 namespace {
 
 using namespace tllindirect;
 
-void same_payload(const Expression* a, const Expression* b,
-                  std::string_view input, const cursiv::Cst& ca,
-                  const cursiv::Cst& cb) {
-  CHECK((a == nullptr) == (b == nullptr));
-  if (a == nullptr || b == nullptr) return;
-  CHECK(a->type == b->type);
-  if (a->type != b->type) return;
-  CHECK(a->cstNodeId < ca.size() && b->cstNodeId < cb.size());
-  if (a->cstNodeId < ca.size() && b->cstNodeId < cb.size()) {
-    const auto& x = ca[a->cstNodeId];
-    const auto& y = cb[b->cstNodeId];
-    CHECK(x.begin == y.begin && x.end == y.end);
+// N carries a name, W is a wrapper, and GL/GT carry leading/trailing glob
+// flags. Fixed trees and preorder spans preserve the LR reference without
+// building a second generated backend.
+std::string shape(const Expression* value, const cursiv::AstNode* parent,
+                  const cursiv::Cst& tree, std::string& spans) {
+  if (value == nullptr) return "_";
+  CHECK(value->parent == parent && value->cstNodeId < tree.size());
+  if (value->cstNodeId < tree.size()) {
+    const auto& span = tree[value->cstNodeId];
+    if (!spans.empty()) spans += ' ';
+    spans += std::to_string(span.begin) + '-' + std::to_string(span.end);
+    CHECK(span.begin <= span.end && span.end <= tree.text().size());
+    if (parent != nullptr && parent->cstNodeId < tree.size()) {
+      const auto& outer = tree[parent->cstNodeId];
+      CHECK(outer.begin <= span.begin && span.end <= outer.end);
+    }
   }
-  if (const auto* x = cursiv::ast_cast<Name>(a)) {
-    CHECK(x->text == cursiv::ast_cast<Name>(b)->text);
-  } else if (const auto* x = cursiv::ast_cast<Number>(a)) {
-    CHECK(x->text == cursiv::ast_cast<Number>(b)->text);
-  } else if (const auto* x = cursiv::ast_cast<Binary>(a)) {
-    const auto* y = cursiv::ast_cast<Binary>(b);
-    CHECK(x->op == y->op);
-    same_payload(x->left, y->left, input, ca, cb);
-    same_payload(x->right, y->right, input, ca, cb);
-  } else if (const auto* x = cursiv::ast_cast<Wrapped>(a)) {
-    same_payload(x->value, cursiv::ast_cast<Wrapped>(b)->value, input, ca, cb);
-  } else if (const auto* x = cursiv::ast_cast<Glob>(a)) {
-    const auto* y = cursiv::ast_cast<Glob>(b);
-    if (x->leading != y->leading || x->trailing != y->trailing)
-      std::printf("glob flags for '%.*s': LL=%d/%d LR=%d/%d\n",
-                  int(input.size()), input.data(), x->leading, x->trailing,
-                  y->leading, y->trailing);
-    CHECK(x->leading == y->leading && x->trailing == y->trailing);
-    same_payload(x->value, y->value, input, ca, cb);
+  const auto child = [&](const Expression* node) {
+    return shape(node, value, tree, spans);
+  };
+  if (const auto* node = cursiv::ast_cast<Name>(value))
+    return "N(" + std::string(node->text) + ")";
+  if (const auto* node = cursiv::ast_cast<Number>(value))
+    return std::string(node->text);
+  if (const auto* node = cursiv::ast_cast<Binary>(value)) {
+    const auto left = child(node->left);
+    const auto right = child(node->right);
+    return "(" + left + std::string(node->op) + right + ")";
   }
+  if (const auto* node = cursiv::ast_cast<Wrapped>(value))
+    return "W(" + child(node->value) + ")";
+  if (const auto* node = cursiv::ast_cast<Glob>(value))
+    return "G" + std::string(node->leading ? "L" : "") +
+           std::string(node->trailing ? "T" : "") + "(" + child(node->value) +
+           ")";
+  CHECK(false);
+  return "unknown";
+}
+
+struct Case {
+  std::string_view text, tree, spans;
+};
+
+void expect_tree(const cursiv::Parser& parser, const Case& c) {
+  const auto parsed = parser.parse(c.text);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  const auto* document = parsed.value_as<Document>();
+  CHECK(document != nullptr && document->parent == nullptr);
+  if (document == nullptr) return;
+  std::string actual, spans;
+  for (const auto* node : document->values) {
+    if (!actual.empty()) actual += ' ';
+    actual += shape(node, document, parsed.cst(), spans);
+  }
+  if (actual != c.tree)
+    std::printf("indirect fold '%.*s': got %s, expected %.*s\n",
+                static_cast<int>(c.text.size()), c.text.data(), actual.c_str(),
+                static_cast<int>(c.tree.size()), c.tree.data());
+  CHECK(actual == c.tree);
+  CHECK(spans == c.spans);
 }
 
 void typed_payload_survives_the_rewrite(const cursiv::Parser& parser) {
@@ -97,38 +122,6 @@ void typed_payload_survives_the_rewrite(const cursiv::Parser& parser) {
   CHECK(number != nullptr && number->text == "1");
 }
 
-void public_entries_keep_the_complete_expression(
-    const cursiv::Parser& ll, const cursiv::Parser& lr,
-    std::string_view prefix, std::initializer_list<std::string_view> texts) {
-  for (const std::string_view text : texts) {
-    const std::string source = std::string(prefix) + std::string(text);
-    const auto a = ll.parse(source), b = lr.parse(source);
-    if (!a.diagnostics.empty() || !b.diagnostics.empty())
-      std::printf("external entry '%.*s': LL diagnostics=%zu, LR=%zu\n",
-                  int(text.size()), text.data(), a.diagnostics.size(),
-                  b.diagnostics.size());
-    CHECK(a.accepted && b.accepted);
-    CHECK(a.diagnostics.empty() && b.diagnostics.empty());
-    const auto* x = a.value_as<Document>();
-    const auto* y = b.value_as<Document>();
-    CHECK(x && y && x->values.size() == 1 && y->values.size() == 1);
-    if (!x || !y || x->values.size() != 1 || y->values.size() != 1) continue;
-    same_payload(x->values[0], y->values[0], text, a.cst(), b.cst());
-    if (text == "1+2*") {
-      for (const auto* doc : {x, y}) {
-        const auto* glob = cursiv::ast_cast<Glob>(doc->values[0]);
-        CHECK(glob && glob->trailing && !glob->leading);
-        const auto* sum =
-            glob ? cursiv::ast_cast<Binary>(glob->value) : nullptr;
-        CHECK(sum && sum->op == "+");
-        const auto* one = sum ? cursiv::ast_cast<Number>(sum->left) : nullptr;
-        const auto* two = sum ? cursiv::ast_cast<Number>(sum->right) : nullptr;
-        CHECK(one && one->text == "1" && two && two->text == "2");
-      }
-    }
-  }
-}
-
 void public_entries_keep_their_own_required_suffix(
     const cursiv::Parser& ll, std::string_view prefix,
     std::initializer_list<std::string_view> texts) {
@@ -143,46 +136,56 @@ void public_entries_keep_their_own_required_suffix(
 
 int main() {
   const auto ll = tllindirect::generated::Ll::create_parser();
-  const auto lr = tllindirect::generated::Lr::create_parser();
-  const auto llReflection = tllindirect::generated::Ll::create_ast_reflection();
-  const auto lrReflection = tllindirect::generated::Lr::create_ast_reflection();
-  public_entries_keep_the_complete_expression(
-      *ll, *lr, "primary:",
-      {"1", "1!", "1!!", "1+2*", "*1+2", "1*2+3*", "1*2+3!", "(1+2)",
-       "(1+2)!"});
-  public_entries_keep_the_complete_expression(
-      *ll, *lr, "wrapper:",
-      {"id*", "*id", "*", "1+2*", "*1+2", "1*2+3*", "*(1+2)*"});
   public_entries_keep_their_own_required_suffix(
       *ll, "primary:", {"1+2", "1*2", "1*2+3"});
   public_entries_keep_their_own_required_suffix(
       *ll, "wrapper:", {"1", "id", "1+2", "(1+2)"});
   typed_payload_survives_the_rewrite(*ll);
-  typed_payload_survives_the_rewrite(*lr);
-  for (const std::string_view text :
-       {"1", "1!", "1!!", "1+2*3", "1*2+3", "1!+2!", "1*2!+3!", "(1+2)*3",
-        "(1+2)*3!", "((1+2!))!!", "id*", "*id", "*id*", "*(1+2)*", "*",
-        "id* other", "1+2*3 other", "1! other", "1*+2!", "1*2*3", "1*2*",
-        "*1*2*", "**1", "1*2**", "1*2*3*", "1*2*3*4"}) {
-    const auto a = ll->parse(text);
-    const auto b = lr->parse(text);
-    CHECK(a.accepted && b.accepted);
-    CHECK(a.diagnostics.empty() && b.diagnostics.empty());
-    CHECK(a.value != nullptr && b.value != nullptr);
-    if (a.value == nullptr || b.value == nullptr) continue;
-    std::string x, y;
-    cursiv::test::ast_of(*llReflection, *a.value, x);
-    cursiv::test::ast_of(*lrReflection, *b.value, y);
-    CHECK(x == y);
-    const auto* docA = a.value_as<tllindirect::Document>();
-    const auto* docB = b.value_as<tllindirect::Document>();
-    CHECK(docA != nullptr && docB != nullptr);
-    if (docA == nullptr || docB == nullptr) continue;
-    CHECK(docA->values.size() == docB->values.size());
-    if (docA->values.size() != docB->values.size()) continue;
-    for (std::size_t i = 0; i < docA->values.size(); ++i)
-      same_payload(docA->values[i], docB->values[i], text, a.cst(), b.cst());
-  }
+  constexpr Case cases[] = {
+      {"1", "1", "0-1"},
+      {"1!", "W(1)", "0-2 0-1"},
+      {"1!!", "W(W(1))", "0-3 0-2 0-1"},
+      {"1+2*3", "(1+(2*3))", "0-5 0-1 2-5 2-3 4-5"},
+      {"1*2+3", "((1*2)+3)", "0-5 0-3 0-1 2-3 4-5"},
+      {"1!+2!", "(W(1)+W(2))", "0-5 0-2 0-1 3-5 3-4"},
+      {"1*2!+3!", "(1*W((W(2)+3)))", "0-7 0-1 2-7 2-6 2-4 2-3 5-6"},
+      {"(1+2)*3", "((1+2)*3)", "0-7 0-5 1-2 3-4 6-7"},
+      {"(1+2)*3!", "((1+2)*W(3))", "0-8 0-5 1-2 3-4 6-8 6-7"},
+      {"((1+2!))!!", "W(W((1+W(2))))", "0-10 0-9 0-8 2-3 4-6 4-5"},
+      {"id*", "GT(N(id))", "0-3 0-2"},
+      {"*id", "GL(N(id))", "0-3 1-3"},
+      {"*id*", "GL(GT(N(id)))", "0-4 1-4 1-3"},
+      {"*(1+2)*", "GL(GT((1+2)))", "0-7 1-7 1-6 2-3 4-5"},
+      {"*", "GL(_)", "0-1"},
+      {"id* other", "(N(id)*N(other))", "0-9 0-2 4-9"},
+      {"1+2*3 other", "(1+(2*3)) N(other)", "0-5 0-1 2-5 2-3 4-5 6-11"},
+      {"1! other", "W(1) N(other)", "0-2 0-1 3-8"},
+      {"1*+2!", "(GT(1)+W(2))", "0-5 0-2 0-1 3-5 3-4"},
+      {"1*2*3", "(1*GT(2)) 3", "0-4 0-1 2-4 2-3 4-5"},
+      {"1*2*", "(1*GT(2))", "0-4 0-1 2-4 2-3"},
+      {"*1*2*", "GL((1*GT(2)))", "0-5 1-5 1-2 3-5 3-4"},
+      {"**1", "GL(GL(1))", "0-3 1-3 2-3"},
+      {"1*2**", "(1*GT(GT(2)))", "0-5 0-1 2-5 2-4 2-3"},
+      {"1*2*3*", "(1*GT((2*3)))", "0-6 0-1 2-6 2-5 2-3 4-5"},
+      {"1*2*3*4", "(1*GT((2*3))) 4", "0-6 0-1 2-6 2-5 2-3 4-5 6-7"},
+      {"primary:1", "1", "8-9"},
+      {"primary:1!", "W(1)", "8-10 8-9"},
+      {"primary:1!!", "W(W(1))", "8-11 8-10 8-9"},
+      {"primary:1+2*", "GT((1+2))", "8-12 8-11 8-9 10-11"},
+      {"primary:*1+2", "GL((1+2))", "8-12 9-12 9-10 11-12"},
+      {"primary:1*2+3*", "GT(((1*2)+3))", "8-14 8-13 8-11 8-9 10-11 12-13"},
+      {"primary:1*2+3!", "W(((1*2)+3))", "8-14 8-13 8-11 8-9 10-11 12-13"},
+      {"primary:(1+2)", "(1+2)", "8-13 9-10 11-12"},
+      {"primary:(1+2)!", "W((1+2))", "8-14 8-13 9-10 11-12"},
+      {"wrapper:id*", "GT(N(id))", "8-11 8-10"},
+      {"wrapper:*id", "GL(N(id))", "8-11 9-11"},
+      {"wrapper:*", "GL(_)", "8-9"},
+      {"wrapper:1+2*", "GT((1+2))", "8-12 8-11 8-9 10-11"},
+      {"wrapper:*1+2", "GL((1+2))", "8-12 9-12 9-10 11-12"},
+      {"wrapper:1*2+3*", "GT(((1*2)+3))", "8-14 8-13 8-11 8-9 10-11 12-13"},
+      {"wrapper:*(1+2)*", "GL(GT((1+2)))", "8-15 9-15 9-14 10-11 12-13"},
+  };
+  for (const auto& c : cases) expect_tree(*ll, c);
   for (const std::string_view text :
        {"", "!", "1+", "1!+!2", "1((", "(1!", "1*+!2", "((()))"}) {
     const auto result = ll->parse(text);

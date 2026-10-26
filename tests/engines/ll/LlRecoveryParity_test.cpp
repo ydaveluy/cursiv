@@ -8,12 +8,12 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "declsll/generated/DeclsLl/Module.hpp"
-#include "declslr/generated/DeclsLr/Module.hpp"
+#include "engines/ll/ParityGrammar.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "paritylr/generated/Lr/Module.hpp"
 
@@ -118,13 +118,27 @@ void a_stray_token_costs_one_repair() {
 // Declarations that open alike and part on their second word: a misspelling of
 // it is read again, not made up for by a construct invented in front of it.
 void a_misspelt_second_word_is_read_again() {
-  const auto ll = tpar::generated::DeclsLl::create_parser();
-  const auto lr = tpar::generated::DeclsLr::create_parser();
-  const auto llr = tpar::generated::DeclsLl::create_ast_reflection();
-  const auto lrr = tpar::generated::DeclsLr::create_ast_reflection();
-  for (const std::string_view text :
-       {"pub strcut a {}", "pub strut a {}", "pub struct a {} pub strcut b {}"})
+  const auto ll = tpar::generated::Ll::create_parser();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto llr = tpar::generated::Ll::create_ast_reflection();
+  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  for (const auto& [text, count] :
+       {std::pair{"decl:pub strcut a {}", 1u},
+        std::pair{"decl:pub strut a {}", 1u},
+        std::pair{"decl:pub struct a {} pub strcut b {}", 2u}}) {
     agree(*ll, *lr, *llr, *lrr, text);
+    const auto parsed = ll->parse(text);
+    const auto* unit = parsed.value_as<tpar::ast::Unit>();
+    CHECK(unit && unit->lets.size() == count && unit->shows.empty());
+    if (unit != nullptr)
+      for (std::size_t i = 0; i < unit->lets.size(); ++i)
+        CHECK(unit->lets[i] && unit->lets[i]->exported &&
+              unit->lets[i]->name == (i == 0 ? "a" : "b"));
+  }
+  agree(*ll, *lr, *llr, *lrr, "decl:pub struct a {}", false);
+  agree(*ll, *lr, *llr, *lrr, "decl:pub class a extends b {}", false);
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()})
+    CHECK(!parser->parse("decl:/* gap */pub struct a {}").diagnostics.empty());
 }
 
 }  // namespace

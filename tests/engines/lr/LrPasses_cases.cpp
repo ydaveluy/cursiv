@@ -17,6 +17,8 @@
 #include "engines/lr/PassesGrammar.hpp"
 #include "passes/generated/G/Module.hpp"
 
+namespace lr_passes_cases {
+
 // The cases of the passes grammar: construction passes, ranked cells and
 // soft keywords.
 
@@ -801,7 +803,7 @@ int run() {
 }
 }  // namespace case_lrdoor
 
-int main() {
+int run() {
   int movedStatus = 0;
   movedStatus |= case_lrdoor::run();
   int status = 0;
@@ -811,3 +813,5 @@ int main() {
   status |= settle_phase::run();
   return (cursiv::test::report("LrPasses_test") | status) | movedStatus;
 }
+
+}  // namespace lr_passes_cases

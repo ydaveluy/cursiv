@@ -10,6 +10,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_creation_boundary_cases {
+
 namespace {
 
 void check_source(const cursiv::ParseResult& result,
@@ -68,7 +70,7 @@ void expect_tree(const cursiv::Parser& parser, std::string_view text,
 
 }  // namespace
 
-int main() {
+void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   for (unsigned round = 0; round < 3; ++round)
     for (const auto& [text, tree] : {
@@ -94,5 +96,6 @@ int main() {
          {"tree:(,,(,));", "(;null(;null)(;null)(;null(;null)(;null)))"},
          {"tree:(A,,B)R;", "(R;null(A;null)(;null)(B;null))"}})
       expect_tree(*ll, text, tree);
-  return cursiv::test::report("LlCreationBoundary_test");
 }
+
+}  // namespace ll_creation_boundary_cases

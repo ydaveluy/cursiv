@@ -11,8 +11,8 @@
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "lextieblankll/generated/BlankLl/Module.hpp"
-#include "lextieblankll/generated/BlankLl/Table.hpp"
+#include "unitsll/generated/Ll/Module.hpp"
+#include "unitsll/generated/Ll/Table.hpp"
 #include "lextiereservedll/generated/ReservedLl/Module.hpp"
 #include "lextiereservedll/generated/ReservedLl/Table.hpp"
 
@@ -53,7 +53,7 @@ void a_reserved_spelling_ties_no_mode_that_reserves_it() {
 // The token of a lookahead across a blank is the blank when a visible token
 // reads it at equal length.
 void a_visible_token_beats_the_blank_in_a_lookahead() {
-  constexpr auto& T = tlllextie::generated::BlankLl::kTable;
+  constexpr auto& T = tllunit::generated::Ll::kTable;
   cursiv::Cst tree(" a");
   cursiv::CstBuilder builder(tree);
   builder.bind_stream();
@@ -127,7 +127,8 @@ int main() {
           "clauses1=Fuzzed{primary=Number{} } "
           "clauses2=Fuzzed{primary=Name{} } }"}}, "clauses:");
 
-  expect_cases(BlankLl::create_parser(), BlankLl::create_ast_reflection(),
-        {{"a b", "Stmts{stmts0=Name{} stmts1=Name{} stmts2=Name{} }"}});
+  expect_cases(tllunit::generated::Ll::create_parser(),
+        tllunit::generated::Ll::create_ast_reflection(),
+        {{"a b", "Stmts{stmts0=Name{} stmts1=Name{} stmts2=Name{} }"}}, "blank:");
   return cursiv::test::report("LlLexTie_test");
 }

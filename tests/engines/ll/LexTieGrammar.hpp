@@ -166,28 +166,6 @@ struct Clauses : cursiv::GrammarSpec {
   using ignore = WS;
 };
 
-// A signed digit run is a number and a bareword.
-
-struct Stmts : cursiv::Extends<cursiv::AstNode> {
-  vector<Value*> stmts;
-};
-
-// A blank run is trivia and a token of the same spelling: the token wins.
-struct Blank : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct GAP : terminal<some(s)> {};
-  struct WORD : terminal<some(cr<"a-z">)> {};
-  struct GapRule : rule<create<Name>(assign<&Name::text>(ref<GAP>))> {};
-  struct WordRule : rule<create<Name>(assign<&Name::text>(ref<WORD>))> {};
-  struct Root
-      : rule<create<Stmts>(some(append<&Stmts::stmts>(ref<GapRule> |
-                                                      ref<WordRule>))) +
-             eof> {};
-  using entry = Root;
-  using ignore = WS;
-};
-struct BlankLl : Blank {};
-struct BlankLr : Blank {};
 struct Suite : Members {
   struct Root : rule<(lit<"cell:"> + ref<Cell::Root>) |
                      (lit<"ctor:"> + ref<CtorFirst::Root>) |

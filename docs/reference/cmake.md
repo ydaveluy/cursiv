@@ -55,7 +55,7 @@ cursiv_generate_language(ID         mylang
 | `GRAMMAR` | yes | the header, spelled as an include path |
 | `NAMESPACE` | yes | the grammar type, qualified: `ns::Type` |
 | `OUT` | yes | absolute output directory, or a path under the caller's build tree |
-| `EXTENSIONS` | no | served extensions, stored in `languageMetaData.fileExtensions` |
+| `EXTENSIONS` | no | file extensions associated with the language |
 | `FILE_NAMES` | no | exact file names it claims, for a language like `Makefile` |
 | `BASE` | no | id of a language declared earlier in CMake; adds its generated library and include roots as dependencies |
 | `ENGINE` | no | `LL` or `LR`, the engine this language is generated with |
@@ -79,6 +79,12 @@ if you need to override the default chosen by `BUILD_SHARED_LIBS`.
 
 Defines two targets: the library `<ID>Generated`, and `<ID>_generate`, which
 writes the sources without compiling them.
+
+Your [language tests](../learn/testing.md) use the same grammar and generated
+module as your application.
+
+Cross builds automatically build the native parser generator too; see
+[WebAssembly](../recipes/wasm.md).
 
 ## `cursiv_package_language`
 
@@ -110,7 +116,7 @@ Creates `mylang_bench` and adds it to the aggregate `bench` target. Declare
 | `CURSIV_MIMALLOC` | `ON` | Enable the mimalloc allocator; use `OFF` to disable it. |
 | `CURSIV_SOURCE_DIR` | — | Select a local checkout in the FetchContent setup above. |
 | `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WASI target required by the language server. Use it only with the WASI toolchain. |
-| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory addressing limit in bytes; memory grows on demand. Existing caches keep their configured value. |
+| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes; memory grows on demand. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
 
 Global sanitizer flags disable mimalloc automatically. For sanitizers enabled
@@ -126,44 +132,3 @@ For example, configure a language project to use LL:
 ```bash
 cmake -B build -DCURSIV_DEFAULT_ENGINE=LL
 ```
-
-## Advanced: test grammars
-
-### `cursiv_test_language`
-
-Generates a language for tests. It accepts the same arguments, but defaults
-`OUT` to `generated/<ID>/generated` and uses lower optimization for generated
-parser code in Release builds. Relative output follows the same
-`<current-build-directory>/generated-src/` layout as above.
-
-Test languages compile their generated sources in two translation units
-to avoid parsing the same tables repeatedly. Pass `SEPARATE_UNITS` when a test
-specifically needs the production layout across separate translation units.
-Generated test sources also use `-O1` in WASI Debug builds to fit WebAssembly
-function limits; test code and framework libraries retain their Debug settings.
-
-```cmake
-cursiv_test_language(ID        toy
-    GRAMMAR   fixtures/ToyGrammar.hpp
-    NAMESPACE toy::Toy)
-```
-
-Use this helper when a test needs its own grammar. For testing a language's
-parsing and validation, start with [Test your language](../learn/testing.md).
-
-## Advanced: cross-compilation tools
-
-### `cursiv_host_tools` target
-
-Cross builds automatically provide this target for native parser generators.
-Use the normal configure and build commands; a native build is not required
-first. Host generators use Release mode and the language project's C++ standard.
-
-## Contributing to Cursiv
-
-These options control builds of the framework repository:
-
-| Option | Default | Effect |
-|---|---|---|
-| `CURSIV_BUILD_TESTS` | `ON` when Cursiv is the top-level project | Build the framework's tests and their example-language dependencies. |
-| `CURSIV_WARNINGS_AS_ERRORS` | `ON` for the top-level project, `OFF` as a dependency | Treat compiler warnings in Cursiv as errors. |

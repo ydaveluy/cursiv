@@ -41,7 +41,16 @@
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 
+#ifdef CURSIV_GEN_INCLUDE
+#include CURSIV_GEN_INCLUDE
+#else
 #include CURSIV_GEN_HEADER
+#endif
+
+#ifndef CURSIV_GEN_SCOPE
+#define CURSIV_GEN_SCOPE cursiv_generator
+#endif
+namespace CURSIV_GEN_SCOPE {
 
 using G = CURSIV_GEN_GRAMMAR;
 using View = cursiv::LrView<G>;
@@ -271,7 +280,7 @@ void report_each_conflict(const Built& a) {
 
 }  // namespace
 
-int main(int argc, char** argv) try {
+int run(int argc, char** argv) try {
   const Args args = parse_args(argc, argv);
   if (args.bad || args.dir == nullptr) {
     usage(argv[0]);
@@ -338,3 +347,11 @@ int main(int argc, char** argv) try {
   std::fprintf(stderr, "%s: %s\n", CURSIV_GEN_NAME, e.what());
   return exit_status(GenCode::refused);
 }
+
+}  // namespace CURSIV_GEN_SCOPE
+
+#ifndef CURSIV_GEN_NO_MAIN
+int main(int argc, char** argv) {
+  return CURSIV_GEN_SCOPE::run(argc, argv);
+}
+#endif

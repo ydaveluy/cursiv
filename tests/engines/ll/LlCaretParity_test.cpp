@@ -13,8 +13,6 @@
 #include <vector>
 
 #include "caretclimbll/generated/Ll/Module.hpp"
-#include "caretreadingll/generated/Ll/Module.hpp"
-#include "caretspelledll/generated/SpelledLl/Module.hpp"
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
@@ -37,10 +35,15 @@ struct Entry {
 std::vector<Entry> features_between(const cursiv::Parser& parser,
                                     const std::string& text,
                                     cursiv::TextOffset at,
-                                    cursiv::TextOffset resume) {
-  const cursiv::ParseResult parsed = parser.parse(text);
+                                    cursiv::TextOffset resume,
+                                    std::string_view prefix = {}) {
+  const std::string input = std::string(prefix) + text;
+  const cursiv::ParseResult parsed = parser.parse(input);
+  if (!prefix.empty())
+    CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
   std::vector<cursiv::NextFeature> next;
-  parser.nextFeaturesAt(parsed.cst(), at, resume, next);
+  const auto offset = static_cast<cursiv::TextOffset>(prefix.size());
+  parser.nextFeaturesAt(parsed.cst(), at + offset, resume + offset, next);
   std::vector<Entry> out;
   for (const cursiv::NextFeature& f : next) {
     const std::string_view spelled =
@@ -185,15 +188,10 @@ void statements_ended_by_a_gap_or_a_semicolon() {
 // other, and both go on from it: `do:` is as sound as `do?`, so the caret that
 // replaces the `?` is offered the `:`.
 void a_word_read_as_two_terminals_goes_on_as_either() {
-  const auto ll = tcaretreading::generated::Ll::create_parser();
+  const auto ll = tcaretcases::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
-    const cursiv::ParseResult parsed = parser->parse("do?");
-    std::vector<cursiv::NextFeature> next;
-    parser->nextFeaturesAt(parsed.cst(), 2, 3, next);
-    std::vector<std::string> offered;
-    for (const cursiv::NextFeature& f : next)
-      offered.emplace_back(parser->getGrammar().terminalText(f.feature));
-    std::sort(offered.begin(), offered.end());
+    const auto offered =
+        spellings(features_between(*parser, "do?", 2, 3, "reading:"));
     CHECK((offered == std::vector<std::string>{":", "?"}));
   }
 }
@@ -201,14 +199,10 @@ void a_word_read_as_two_terminals_goes_on_as_either() {
 // A literal takes its spelling from the name at the same point: behind `do` the
 // caret is offered what the literal goes on with, and not the `:` of the name.
 void a_literal_takes_its_spelling_from_the_name() {
-  const auto ll = tcaretreading::generated::SpelledLl::create_parser();
+  const auto ll = tcaretcases::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
-    const cursiv::ParseResult parsed = parser->parse("do?");
-    std::vector<cursiv::NextFeature> next;
-    parser->nextFeaturesAt(parsed.cst(), 2, 3, next);
-    std::vector<std::string> offered;
-    for (const cursiv::NextFeature& f : next)
-      offered.emplace_back(parser->getGrammar().terminalText(f.feature));
+    const auto offered =
+        spellings(features_between(*parser, "do?", 2, 3, "spelled:"));
     CHECK((offered == std::vector<std::string>{"?"}));
   }
 }
@@ -221,10 +215,11 @@ void a_literal_takes_its_spelling_from_the_name() {
 // twin, yet the operand goes on from the operator: the `<` that opens an
 // operand, typed there, would make the operator the twin and is not offered.
 void the_twin_of_the_operator_is_not_offered_behind_it() {
-  const auto ll = tcaretclimb::generated::Ll::create_parser();
+  const auto ll = tcaretcases::generated::Ll::create_parser();
   for (const cursiv::Parser* parser : {ll.get()}) {
     for (const auto& [at, resume] : {std::pair{2u, 2u}, std::pair{2u, 3u}}) {
-      const auto offered = features_between(*parser, "a<b;", at, resume);
+      const auto offered =
+          features_between(*parser, "a<b;", at, resume, "climb:");
       CHECK((spellings(offered) == std::vector<std::string>{"!", "ID"}));
     }
   }

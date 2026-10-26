@@ -76,14 +76,6 @@ struct Base : cursiv::GrammarSpec {
                                 append<&Record::values>(kw<"b">) &
                                 append<&Record::values>(kw<"c">) &
                                 append<&Record::values>(kw<"d">))) |
-                 (kw<"wide"> + (append<&Record::values>(kw<"a">) &
-                                append<&Record::values>(kw<"b">) &
-                                append<&Record::values>(kw<"c">) &
-                                append<&Record::values>(kw<"d">) &
-                                append<&Record::values>(kw<"e">) &
-                                append<&Record::values>(kw<"f">) &
-                                append<&Record::values>(kw<"g">) &
-                                append<&Record::values>(kw<"h">))) |
                  (kw<"blocks"> + (some(append<&Record::values>(kw<"a">)) &
                                   flag<&Record::flag>(kw<"b">))) |
                  (kw<"bounded"> +

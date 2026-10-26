@@ -12,6 +12,8 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/Check.hpp"
 
+namespace ll_caret_depth_cases {
+
 namespace {
 
 struct Entry {
@@ -81,8 +83,9 @@ void a_caret_deep_in_blocks_answers_as_a_shallow_one_does() {
 
 }  // namespace
 
-int main() {
+void run() {
   a_caret_deep_in_parentheses_names_the_outermost_member();
   a_caret_deep_in_blocks_answers_as_a_shallow_one_does();
-  return cursiv::test::report("LlCaretDepth_test");
 }
+
+}  // namespace ll_caret_depth_cases

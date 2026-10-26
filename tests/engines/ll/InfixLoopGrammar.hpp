@@ -43,8 +43,6 @@ struct Sum : Common {
   using entry = Root;
   using ignore = WS;
 };
-struct SumLl : Sum {};
-struct SumLr : Sum {};
 
 // Two left levels, a prefix and a postfix.
 struct Ladder : Common {
@@ -93,10 +91,11 @@ struct Mixed : Common {
   using entry = Root;
   using ignore = WS;
 };
-// These three tables use the same trivia and operator levels. Select their
+// These tables use the same trivia and operator levels. Select their
 // entry rules in one generated language instead of generating each separately.
 struct Combined : Common {
-  struct Root : rule<(lit<"ladder:"> + ref<Ladder::Root>) |
+  struct Root : rule<(lit<"sum:"> + ref<Sum::Root>) |
+                     (lit<"ladder:"> + ref<Ladder::Root>) |
                      (lit<"via:"> + ref<Via::Root>) |
                      (lit<"mixed:"> + ref<Mixed::Root>)> {};
   using entry = Root;

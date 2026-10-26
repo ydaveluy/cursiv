@@ -116,12 +116,13 @@ std::string emit_records(std::string_view ns, std::string_view header,
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 {1}
 
-namespace {{
+namespace {2} {{
+namespace grammar_detail {{
 
 )",
                                 header, registry.boundTypes
                                     ? "#include \"cursiv/engines/shared/gen/GrammarBindings.hpp\""
-                                    : "");
+                                    : "", ns);
   out += funs;
   out += '\n';
   const auto table = [&](std::string_view type, std::string_view name,
@@ -135,7 +136,7 @@ namespace {{
   table("SayFn", "kFeatures", g);
   table("SayFn", "kRules", r);
   out += emit_table(
-      "constexpr const ::cursiv::AstTypeTag* kTypes[]", records,
+      "constexpr const ::cursiv::AstTypeTag* kRecordTypes[]", records,
       [&](const RecordGen& rec) {
         const auto& type = rec.typeSlot < registry.types.size()
             ? registry.types[rec.typeSlot].source : std::string{};
@@ -164,21 +165,18 @@ namespace {{
       },
       "{}");
   out += std::format(R"(
-}}  // namespace
-
-namespace {} {{
+}}  // namespace grammar_detail
 
 constexpr ::cursiv::GrammarMetaData kGrammarMetaData{{
-    .writes = ::kWrites,
-    .fills = ::kFills,
-    .features = ::kFeatures,
-    .rules = ::kRules,
-    .types = ::kTypes,
-)",
-                     ns);
-  if (anyNarrow) out += "    .narrows = ::kNarrows,\n";
+    .writes = grammar_detail::kWrites,
+    .fills = grammar_detail::kFills,
+    .features = grammar_detail::kFeatures,
+    .rules = grammar_detail::kRules,
+    .types = grammar_detail::kRecordTypes,
+)");
+  if (anyNarrow) out += "    .narrows = grammar_detail::kNarrows,\n";
   out += std::format(R"(    .recordCount = {0}u,
-    .terminals = ::kTerminals,
+    .terminals = grammar_detail::kTerminals,
     .terminalCount = {1}u,
 }};
 

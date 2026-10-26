@@ -7,6 +7,11 @@ endfunction()
 
 function(cursiv_grammar id header ns)
   cursiv_test_language(ID ${id} GRAMMAR ${header} NAMESPACE ${ns} ${ARGN})
+  if(CMAKE_CROSSCOMPILING)
+    cursiv_host_manifest("set_property(GLOBAL APPEND PROPERTY CURSIV_TEST_GENERATORS ${id}_gen)")
+  else()
+    set_property(GLOBAL APPEND PROPERTY CURSIV_TEST_GENERATORS ${id}_gen)
+  endif()
 endfunction()
 
 function(cursiv_grammar_pair id header lr ll)

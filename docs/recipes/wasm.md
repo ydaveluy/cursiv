@@ -23,10 +23,7 @@ You can also pass `-DWASI_SDK=/path/to/wasi-sdk` when configuring CMake.
 For Release builds, install [Binaryen 120 or later](https://github.com/WebAssembly/binaryen/releases)
 and make `wasm-opt` available on `PATH` before building. SDK Clang invokes it
 automatically after linking at the selected optimization level (`-O3` for
-Release). Benchmarks keep this pass; unit test executables use `--no-wasm-opt`
-to skip it. Without `wasm-opt` on `PATH`, Clang skips the pass. Native builds,
-native parser generators and WASI Debug builds with their default flags do
-not run it.
+Release). Without `wasm-opt` on `PATH`, Clang skips the pass.
 
 ## Build the server
 
@@ -45,9 +42,8 @@ for the client setup.
 
 ## Package the extension
 
-The server's post-build step copies the built module, `wasi-run.mjs` and the
-Cursiv, lsp-framework and mimalloc license notices into `vscode/server/`.
-Release modules are already optimized; packaging does not optimize them again.
+Building the server copies the module, `wasi-run.mjs` and the Cursiv,
+lsp-framework and mimalloc license notices into `vscode/server/`.
 Include that directory in the extension's `package.json` file list.
 
 After building the server:
@@ -64,15 +60,14 @@ Check the package contents as described in
 
 ## Advanced: build configuration
 
-Use separate native and WASI build directories. Every target requested in the
-WASI tree, including a CLI or test executable, is compiled for WASI; requesting
-`--target mylang_lsp` builds just the server and its dependencies.
+Use separate native and WASI build directories. The `--target mylang_lsp`
+command above builds the server and its dependencies.
 
 The threaded toolchain allows shared memory to grow up to 2 GiB; this is an
 addressing limit, not an upfront allocation. Set `CURSIV_WASI_MAX_MEMORY` when
 configuring to choose another limit. Existing caches retain their saved value.
 
-To disable the Binaryen pass for a particular executable:
+To skip the Binaryen optimization pass for an executable during development:
 
 ```cmake
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")

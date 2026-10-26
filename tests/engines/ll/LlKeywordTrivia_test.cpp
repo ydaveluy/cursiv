@@ -14,8 +14,7 @@
 #include "keywordtriviabarell/generated/BareLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Table.hpp"
-#include "keywordtriviacapturedll/generated/CapturedLl/Module.hpp"
-#include "keywordtriviarecognizedll/generated/RecognizedLl/Module.hpp"
+#include "keywordtriviacapturedll/generated/VariantsLl/Module.hpp"
 #include "keywordtriviawidell/generated/WideLl/Module.hpp"
 
 namespace {
@@ -37,8 +36,10 @@ std::string value_of(const Value* v) {
 }
 
 template <class Parser>
-std::string read(const Parser& p, std::string_view text) {
-  const auto result = p->parse(text);
+std::string read(const Parser& p, std::string_view text,
+                 std::string_view prefix = "") {
+  const std::string input = std::string(prefix) + std::string(text);
+  const auto result = p->parse(input);
   CHECK(result.diagnostics.empty());
   std::string out;
   if (const auto* doc = result.template value_as<Doc>())
@@ -51,15 +52,16 @@ std::string read(const Parser& p, std::string_view text) {
   for (cursiv::NodeId i = 0; i < result.cst().size(); ++i) {
     const auto& n = result.cst()[i];
     if (n.hidden)
-      out += std::string(text.substr(n.begin, n.end - n.begin)) + '|';
+      out += input.substr(n.begin, n.end - n.begin) + '|';
   }
   return out;
 }
 
 template <class Ll>
-void expect_cases(const Ll& ll, std::initializer_list<Case> cases) {
+void expect_cases(const Ll& ll, std::initializer_list<Case> cases,
+                  std::string_view prefix = "") {
   for (const Case& k : cases) {
-    const auto a = read(ll, k.text);
+    const auto a = read(ll, k.text, prefix);
     if (a != k.want)
       std::cerr << k.text << "\nwant: " << k.want << "\nLL: " << a
                 << '\n';
@@ -137,14 +139,14 @@ std::string random_document(std::mt19937& rng, bool slashes) {
 
 // The grammars that spell one comment in different ways read every valid
 // document alike, in both engines.
-void comments_spelled_alike_read_alike(
-    const std::vector<const cursiv::Parser*>& parsers) {
+void comments_spelled_alike_read_alike(const cursiv::Parser& basic,
+                                      const cursiv::Parser& variants) {
   std::mt19937 rng(20261020);
   for (unsigned n = 0; n < 64; ++n) {
     const std::string text = random_document(rng, true);
-    const std::string want = read(parsers[0], text);
-    for (const cursiv::Parser* p : parsers) {
-      const std::string got = read(p, text);
+    const std::string want = read(&basic, text);
+    for (const std::string_view prefix : {"recognized:", "captured:"}) {
+      const std::string got = read(&variants, text, prefix);
       if (got != want)
         std::cerr << text << "\nwant: " << want << "\ngot:  " << got << '\n';
       CHECK(got == want);
@@ -174,6 +176,7 @@ int main() {
   hinted_trivia_keeps_keyword_cuts();
   namespace g = tllkwtrivia::generated;
   const auto ll = g::BasicLl::create_parser();
+  const auto variants = g::VariantsLl::create_parser();
   for (const auto* parser : {&ll}) expect_cases(*parser,
         {{"x.REM = a;", "x.REM=a;#"}, {"x.rem=a;", "x.rem=a;#"},
          {"x.y.Rem = a;", "x.y.Rem=a;#"}, {"x.REMARK = a;", "x.REMARK=a;#"},
@@ -182,18 +185,15 @@ int main() {
          {"a = b //c\n / d;", "a=b/d;#//c|"},
          {"a = b /* c */ / d;", "a=b/d;#/* c */|"},
          {"x.REM = a / b; REM tail\n", "x.REM=a/b;#REM tail|"}});
-  const auto recognizedLl = g::RecognizedLl::create_parser();
-  const auto capturedLl = g::CapturedLl::create_parser();
-  expect_cases(recognizedLl,
+  expect_cases(variants,
         {{"x.y = a; rem (a (b)) again\nz = b;",
-          "x.y=a;z=b;#rem (a (b)) again|"}});
-  comments_spelled_alike_read_alike(
-      {ll.get(), recognizedLl.get(), capturedLl.get()});
+          "x.y=a;z=b;#rem (a (b)) again|"}}, "recognized:");
+  comments_spelled_alike_read_alike(*ll, *variants);
   const auto wideLl = g::WideLl::create_parser();
   expect_cases(wideLl,
         {{"x.REM\u00a0= a;", "x.REM=a;#"},
          {"REM\u00a0note\nx.y = a;", "x.y=a;#REM\u00a0note|"},
-         {"x.y = a;\u00a0rem tail\nz = b;", "x.y=a;z=b;#rem tail|"}});
+         {"x.y = a;\u00a0rem tail\nz = b;", "x.y=a;z=b;#rem tail|"}}, "");
   no_break_spaces_are_blanks(*wideLl);
   const auto bareLl = g::BareLl::create_parser();
   for (const auto* parser : {&bareLl}) {

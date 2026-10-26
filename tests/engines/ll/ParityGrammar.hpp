@@ -127,8 +127,8 @@ struct Base : cursiv::GrammarSpec {
 
 // Declarations that open alike and part on their second word.
 struct Decls : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
+  using WS = Base::WS;
+  using ID = Base::ID;
   struct StructRule
       : rule<create<ast::Let>(option(flag<&ast::Let::exported>(kw<"pub">)) +
                               kw<"struct"> + assign<&ast::Let::name>(ref<ID>) +
@@ -145,11 +145,18 @@ struct Decls : cursiv::GrammarSpec {
   using ignore = WS;
 };
 
+// The declaration recovery cases use the same identifier and whitespace as
+// the expression language. Their own scope keeps comments out of declarations.
+struct Suite : Base {
+  struct Root : rule<ref<Base::UnitRule> |
+                     skip(ignored<WS>, hide<>,
+                          lit<"decl:"> + ref<Decls::UnitRule> + eof)> {};
+  using entry = Root;
+};
+
 // The table engine's reading of it, and the descent's. Nothing distinguishes
 // them but the type: two names, one language, two modules.
-struct Lr : Base {};
-struct Ll : Base {};
-struct DeclsLr : Decls {};
-struct DeclsLl : Decls {};
+struct Lr : Suite {};
+struct Ll : Suite {};
 
 }  // namespace tpar

@@ -56,8 +56,8 @@ a standalone server works with saved files. See
 
 ## Native and WebAssembly deployment
 
-The language server can cross-compile to `wasm32-wasip1-threads`, so a VS Code
-extension can ship one module with its runner. Native builds remain available.
+The language server can compile to WebAssembly for distribution in a VS Code
+extension with a Node.js runner. Native builds remain available.
 See [WebAssembly](../recipes/wasm.md) for the build and runtime requirements.
 
 ## A working project template

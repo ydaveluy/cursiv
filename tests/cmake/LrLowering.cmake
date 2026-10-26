@@ -1,8 +1,7 @@
 # The construction, piece by piece: action and close rows, programs, ordered
 # reduces, the stamp split and the lowering's limits.
-cursiv_test(LrConstruction_test engines/lr/LrConstruction_test.cpp
-    cursivLrGen)
-cursiv_grammar(edges engines/lr/EdgesGrammar.hpp tedges::G ENGINE LR)
+cursiv_grammar(edges engines/lr/EdgesGrammar.hpp tedges::G ENGINE LR
+    GENERATOR_ARGS --group-lines=64)
 # Where a reading commits and where a token ends: committed repetitions, region
 # edges and guarded alternatives.
 cursiv_test(LrEdges_test engines/lr/LrEdges_test.cpp
@@ -29,21 +28,14 @@ cursiv_grammar(peekcaret engines/lr/PeekCaretGrammar.hpp tpeekcaret::G ENGINE LR
 # states split in groups.
 cursiv_test(LrStates_test engines/lr/LrStates_test.cpp
     peekcaretGenerated
-    caretspliceGenerated
+    edgesGenerated
     widetermsGenerated
     indentGenerated
-    groupguardGenerated
-    carettriviaGenerated
-    bracketcaretGenerated
     continuedlrGenerated
+    trivialrGenerated
     rulerefusalGenerated)
-cursiv_grammar(caretsplice engines/lr/PeekCaretGrammar.hpp tpeekcaret::Splice ENGINE LR)
 # The cases of the passes grammar: construction passes, ranked cells and soft
 # keywords.
-cursiv_test(LrPasses_test engines/lr/LrPasses_test.cpp
-    passesGenerated
-    doorGenerated)
-cursiv_grammar(deferrednested engines/lr/DeferredChoiceGrammars.hpp tdeferred::NestedFirst ENGINE LR)
 # Only the master project builds what the shipped languages' own documents ask.
 if(cursiv_IS_TOP_LEVEL)
   # The shipped examples under repair and at the caret.
@@ -55,7 +47,7 @@ if(cursiv_IS_TOP_LEVEL)
     domain-modelGenerated
     arithmeticsGenerated
     asicasesGenerated
-    unsettledGenerated)
+    edgesGenerated)
   target_compile_definitions(LrExamples_test PRIVATE
       CURSIV_EXAMPLE_DIR="${PROJECT_SOURCE_DIR}/examples")
 
@@ -95,8 +87,13 @@ endif()
 # The small languages of the door grammar, read through the parser.
 # Grammars lowered in process: where an infix step rides, how a directive
 # distributes, and the boundary a region hands back.
-cursiv_test(LrLowered_test engines/lr/LrLowered_test.cpp
-    cursivLrGen
-    doorGenerated
-    passesGenerated
-    asicasesGenerated)
+
+set(_lowering_cases
+    engines/lr/LrLowering_test.cpp
+    engines/lr/LrConstruction_cases.cpp
+    engines/lr/LrLowered_cases.cpp
+    engines/lr/LrPasses_cases.cpp
+)
+cursiv_test(LrLowering_test "${_lowering_cases}"
+    asicasesGenerated cursivLrGen doorGenerated passesGenerated)
+set_target_properties(LrLowering_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)

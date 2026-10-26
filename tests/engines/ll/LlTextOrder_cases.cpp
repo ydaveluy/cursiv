@@ -11,6 +11,8 @@
 
 #include "semanticll/generated/Ll/Module.hpp"
 
+namespace ll_text_order_cases {
+
 namespace {
 
 template <class Parser, class Reflection>
@@ -74,7 +76,7 @@ void expect_tree(std::string_view prefix, Parser& parser, Reflection& reflection
 
 }  // namespace
 
-int main() {
+void run() {
   const auto parser = tllsemantic::generated::Ll::create_parser();
   const auto reflection = tllsemantic::generated::Ll::create_ast_reflection();
 
@@ -276,5 +278,6 @@ int main() {
          {"x x", tailed},
          {"x x x", tailed},
          {"x x x x", tailed}});
-  return cursiv::test::report("LlTextOrder_test");
 }
+
+}  // namespace ll_text_order_cases

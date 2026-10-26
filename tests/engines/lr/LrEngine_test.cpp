@@ -1,6 +1,3 @@
-#include "cells/generated/G/Module.hpp"
-#include "cells/generated/G/Parser.hpp"
-#include "cells/generated/G/Table.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
@@ -10,6 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include "cells/generated/G/Module.hpp"
+#include "cells/generated/G/Parser.hpp"
+#include "cells/generated/G/Table.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
@@ -29,14 +29,11 @@
 #include "edges/generated/G/Module.hpp"
 #include "edges/generated/G/Parser.hpp"
 #include "edges/generated/G/Table.hpp"
-#include "guardfallback/generated/G/Module.hpp"
+#include "guard/generated/G/Table.hpp"
 #include "lexicalpredicateslr/generated/Lr/Table.hpp"
-#include "refusedheads/generated/G/Table.hpp"
 #include "nested/generated/G/Table.hpp"
 #include "shadowll/generated/Ll/Module.hpp"
 #include "shadowlr/generated/Lr/Module.hpp"
-#include "unsettled/generated/G/Module.hpp"
-#include "unsettled/generated/G/Table.hpp"
 
 // Cells and positions no look-ahead settles, split rather than guessed.
 
@@ -102,22 +99,22 @@ void a_table_may_stand_inside_a_region() {
 // look-ahead uses owes the same answer, so the `x q` entry asks it there too.
 void a_refused_guard_leaves_the_reading_it_outranked() {
   const std::unique_ptr<cursiv::Parser> p =
-      tfallback::generated::G::create_parser();
-  CHECK(clean(*p, "a_"));
-  CHECK(clean(*p, "b_"));
-  CHECK(clean(*p, "aa_"));
-  CHECK(clean(*p, "a;"));
-  CHECK(clean(*p, "x z"));
-  CHECK(clean(*p, "x q b_"));
-  CHECK(clean(*p, "x q aa_"));
-  CHECK(clean(*p, "x q a_"));
-  CHECK(clean(*p, "x q a;"));
+      tedges::generated::G::create_parser();
+  CHECK(clean(*p, "fallback:a_"));
+  CHECK(clean(*p, "fallback:b_"));
+  CHECK(clean(*p, "fallback:aa_"));
+  CHECK(clean(*p, "fallback:a;"));
+  CHECK(clean(*p, "fallback:x z"));
+  CHECK(clean(*p, "fallback:x q b_"));
+  CHECK(clean(*p, "fallback:x q aa_"));
+  CHECK(clean(*p, "fallback:x q a_"));
+  CHECK(clean(*p, "fallback:x q a;"));
   // A keyword choice hides a same-width literal choice while its word guard
   // holds. Named-terminal probes must also account for the fallback.
-  CHECK(clean(*p, "[ax]"));
-  CHECK(clean(*p, "[bx]"));
-  CHECK(clean(*p, "[a x]"));
-  CHECK(repaired(*p, "[ay]"));
+  CHECK(clean(*p, "fallback:[ax]"));
+  CHECK(clean(*p, "fallback:[bx]"));
+  CHECK(clean(*p, "fallback:[a x]"));
+  CHECK(repaired(*p, "fallback:[ay]"));
 }
 
 // What the drive read past a refused guard, the caret reads too: the leaf
@@ -126,13 +123,13 @@ void a_refused_guard_leaves_the_reading_it_outranked() {
 // identifier where it stands: `;` is offered and `_` is not.
 void a_refused_guard_leaves_the_caret_its_reading() {
   const std::unique_ptr<cursiv::Parser> p =
-      tfallback::generated::G::create_parser();
+      tedges::generated::G::create_parser();
   const auto offers = [&](std::string_view text, cursiv::TextOffset from,
                           cursiv::TextOffset to, std::string_view literal) {
-    const std::string doc(text);
+    const std::string doc = "fallback:" + std::string(text);
     const cursiv::ParseResult r = p->parse(doc);
     std::vector<cursiv::NextFeature> out;
-    p->nextFeaturesAt(r.cst(), from, to, out);
+    p->nextFeaturesAt(r.cst(), 9 + from, 9 + to, out);
     for (const cursiv::NextFeature& f : out)
       if (p->getGrammar().terminalText(f.feature) == literal) return true;
     return false;
@@ -149,8 +146,8 @@ void a_refused_guard_leaves_the_caret_its_reading() {
 // is split rather than guessed: the text refutes the loser.
 void a_cell_no_look_ahead_settles_is_split() {
   const std::unique_ptr<cursiv::Parser> p =
-      tunsettled::generated::G::create_parser();
-  std::string b = "x", c = "x";
+      tedges::generated::G::create_parser();
+  std::string b = "cell:x", c = "cell:x";
   for (unsigned i = 0; i < 40; ++i) {
     b += " a";
     c += " a";
@@ -164,9 +161,9 @@ void a_cell_no_look_ahead_settles_is_split() {
 // states they stand in.
 void a_caret_over_a_split_cell_owes_every_arm() {
   const std::unique_ptr<cursiv::Parser> p =
-      tunsettled::generated::G::create_parser();
+      tedges::generated::G::create_parser();
   for (const std::string_view text : {"x", "x a", "x a a", "x a b", "x a c"}) {
-    const std::string doc(text);
+    const std::string doc = "cell:" + std::string(text);
     const cursiv::ParseResult r = p->parse(doc);
     std::vector<cursiv::NextFeature> out;
     // Also inspect the same split inside each clean, complete reading:
@@ -630,7 +627,7 @@ void unmatched_text_is_read_once() {
 int run() {
   cursiv::test::count_expectations();
   a_failed_walk_is_the_walk();
-  a_failed_walk_halts_as_the_lexer<trefusedheads::generated::G::kTable>(
+  a_failed_walk_halts_as_the_lexer<tguard::generated::G::kTable>(
       "refused heads",
       {"a", "an", "and", "if", "in", "x", "_", "9", " ", "\n", "!"}, 7);
   a_failed_walk_halts_as_the_lexer<tnestedlex::generated::G::kTable>(

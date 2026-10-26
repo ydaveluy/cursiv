@@ -30,6 +30,8 @@
 #include "engines/lr/PassesGrammar.hpp"
 #include "passes/generated/G/Module.hpp"
 
+namespace lr_lowered_cases {
+
 // Grammars lowered in process: where an infix step rides, how a directive
 // distributes, and the boundary a region hands back.
 
@@ -880,7 +882,7 @@ int run() {
 }
 }  // namespace case_lrloweredmodules
 
-int main() {
+int run() {
   int movedStatus = 0;
   movedStatus |= case_lrambiguity::run();
   movedStatus |= case_lrloweredmodules::run();
@@ -893,3 +895,5 @@ int main() {
   status |= section_end::run();
   return (cursiv::test::report("LrLowered_test") | status) | movedStatus;
 }
+
+}  // namespace lr_lowered_cases

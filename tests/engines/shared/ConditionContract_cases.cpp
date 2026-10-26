@@ -1,13 +1,15 @@
+#include <cstdio>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include "ConformanceTest.hpp"
 #include "conformancell/generated/Ll/Module.hpp"
 #include "conformancelr/generated/Lr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/ConditionContractGrammar.hpp"
-#include <cstdio>
-#include <string>
-#include <string_view>
-#include <utility>
 
 namespace condition_contract_cases {
 
@@ -54,12 +56,8 @@ void reads_as(const char* engine, const cursiv::Parser& p,
 }  // namespace
 
 void run() {
-  const auto ll = tconformance::generated::Ll::create_parser();
-  const auto lr = tconformance::generated::Lr::create_parser();
-  const auto ownLl = tconformance::generated::Ll::create_parser();
-  const auto ownLr = tconformance::generated::Lr::create_parser();
-  const auto tieLl = tconformance::generated::Ll::create_parser();
-  const auto tieLr = tconformance::generated::Lr::create_parser();
+  const auto& ll = conformance_test::engines()[0];
+  const auto& lr = conformance_test::engines()[1];
   const std::pair<const char*, const cursiv::Parser*> engines[] = {
       {"LL", ll.get()}, {"LR", lr.get()}};
   for (const auto& [name, parser] : engines) {
@@ -145,9 +143,7 @@ void run() {
     reads(name, p, "expand <<", true);
     reads(name, p, "expand < x <<", true);
   }
-  const std::pair<const char*, const cursiv::Parser*> owns[] = {
-      {"LL", ownLl.get()}, {"LR", ownLr.get()}};
-  for (const auto& [name, parser] : owns) {
+  for (const auto& [name, parser] : engines) {
     const auto r = parser->parse("abc");
     const auto* holder = r.value_as<tcondcontract::Holder>();
     const bool got = r.accepted && r.diagnostics.empty() && holder != nullptr &&
@@ -162,41 +158,26 @@ void run() {
                   holder ? holder->name.data() : "");
     CHECK(got);
   }
-  const auto spelledLl = tconformance::generated::Ll::create_parser();
-  const auto spelledLr = tconformance::generated::Lr::create_parser();
-  const auto classedLl = tconformance::generated::Ll::create_parser();
-  const auto classedLr = tconformance::generated::Lr::create_parser();
-  const std::pair<const char*, const cursiv::Parser*> classes[] = {
-      {"LL", classedLl.get()}, {"LR", classedLr.get()}};
-  for (const auto& [name, parser] : classes) {
+  for (const auto& [name, parser] : engines) {
     reads(name, *parser, "classed:{a}", true);
     reads(name, *parser, "classed:{a b}", false);
     reads(name, *parser, "classed:a", true);
   }
-  const std::pair<const char*, const cursiv::Parser*> spelled[] = {
-      {"LL", spelledLl.get()}, {"LR", spelledLr.get()}};
-  for (const auto& [name, parser] : spelled) {
+  for (const auto& [name, parser] : engines) {
     reads(name, *parser, "spelled:{a}", true);
     reads(name, *parser, "spelled:{a b}", false);
     reads(name, *parser, "spelled:a", true);
   }
-  const auto remarkLl = tconformance::generated::Ll::create_parser();
-  const auto remarkLr = tconformance::generated::Lr::create_parser();
-  const std::pair<const char*, const cursiv::Parser*> remarks[] = {
-      {"LL", remarkLl.get()}, {"LR", remarkLr.get()}};
-  for (const auto& [name, parser] : remarks) {
+  for (const auto& [name, parser] : engines) {
     reads(name, *parser, "@ REM hi\nx", false);
     reads(name, *parser, "@ REM\nx", false);
     reads(name, *parser, "% REM hi\nx", true);
     reads(name, *parser, "% REM\nx", true);
   }
-  const std::pair<const char*, const cursiv::Parser*> ties[] = {
-      {"LL", tieLl.get()}, {"LR", tieLr.get()}};
-  for (const auto& [name, parser] : ties) {
+  for (const auto& [name, parser] : engines) {
     reads(name, *parser, "tie:if", true);
     reads(name, *parser, "tie:if ;", true);
   }
-
 }
 
 }  // namespace condition_contract_cases
@@ -221,8 +202,8 @@ void reads(const char* engine, const cursiv::Parser& p, std::string_view text,
 }  // namespace
 
 void run() {
-  const auto ll = tconformance::generated::Ll::create_parser();
-  const auto lr = tconformance::generated::Lr::create_parser();
+  const auto& ll = conformance_test::engines()[0];
+  const auto& lr = conformance_test::engines()[1];
   const std::pair<const char*, const cursiv::Parser*> engines[] = {
       {"LL", ll.get()}, {"LR", lr.get()}};
   for (const auto& [name, parser] : engines) {
@@ -236,14 +217,6 @@ void run() {
           true);
     reads(name, p, "function f { x = 1 }\nfunction g { x = `a${1` }", false);
   }
-
 }
 
 }  // namespace template_tail_cases
-
-int main() {
-  cursiv::test::count_expectations();
-  condition_contract_cases::run();
-  template_tail_cases::run();
-  return cursiv::test::report("ConditionContract_test");
-}

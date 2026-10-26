@@ -74,22 +74,37 @@ struct BasicLr : Basic {};
 struct Recognized : Basic {
   struct Group
       : terminal<lit<"("> + many(ref<Group> | cr<R"(^()\r\n)">) + lit<")">> {};
-  struct REMARK : terminal<ikw<"REM"> + some(cr<R"( \t)">) +
-                           option(ref<Group>) + many(cr<R"(^\r\n)">)> {};
-  using hidden = list<REMARK, LINE, BLOCK>;
+  struct RecursiveRemark
+      : terminal<ikw<"REM"> + some(cr<R"( \t)">) + option(ref<Group>) +
+                 many(cr<R"(^\r\n)">)> {};
+  using hidden = list<RecursiveRemark, LINE, BLOCK>;
 };
 struct RecognizedLl : Recognized {};
 struct RecognizedLr : Recognized {};
 
 struct Run {};
 struct Captured : Basic {
-  struct REMARK
+  struct CapturedRemark
       : terminal<ikw<"REM"> + some(cr<R"( \t)">) + mark<Run>(many(lit<"x">)) +
                  same<Run> + many(cr<R"(^\r\n)">)> {};
-  using hidden = list<REMARK, LINE, BLOCK>;
+  using hidden = list<CapturedRemark, LINE, BLOCK>;
 };
 struct CapturedLl : Captured {};
 struct CapturedLr : Captured {};
+
+// Recursive and captured comments use the same word boundary. Local skip
+// scopes keep their trivia independent inside one generated parser.
+struct Variants : cursiv::GrammarSpec {
+  struct Root
+      : rule<skip(ignored<Basic::WS>,
+                  hide<Recognized::RecursiveRemark, Basic::LINE, Basic::BLOCK>,
+                  lit<"recognized:"> + ref<Basic::Root> + eof) |
+             skip(ignored<Basic::WS>,
+                  hide<Captured::CapturedRemark, Basic::LINE, Basic::BLOCK>,
+                  lit<"captured:"> + ref<Basic::Root> + eof)> {};
+  using entry = Root;
+};
+struct VariantsLl : Variants {};
 
 // A word boundary of code points: a no-break space ends the keyword, and the
 // comment that would go on behind it does not take the keyword with it.

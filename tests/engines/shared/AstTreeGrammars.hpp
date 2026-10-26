@@ -235,7 +235,6 @@ struct Backward : Parts {
 struct ForwardLr : Forward {};
 struct ForwardLl : Forward {};
 struct BackwardLr : Backward {};
-struct BackwardLl : Backward {};
 
 }  // namespace tmember
 

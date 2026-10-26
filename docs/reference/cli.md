@@ -75,5 +75,5 @@ One registration function may install several languages in the workspace. See
 
 ## Document size
 
-The CLI rejects documents larger than `cursiv::kMaxDocument` bytes because
-source offsets use 32 bits. This is a usage error (exit code `2`).
+Documents must be smaller than 4 GiB. Larger inputs are rejected with exit
+code `2`.

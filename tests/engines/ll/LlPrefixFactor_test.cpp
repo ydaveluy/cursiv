@@ -5,58 +5,73 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/PrefixFactorGrammar.hpp"
 #include "prefixfactorll/generated/Ll/Module.hpp"
-#include "prefixfactorlr/generated/Lr/Module.hpp"
 
 namespace {
 
 using namespace tllprefix;
 
-void same_node(const Expression* a, const Expression* b,
-               const cursiv::AstNode* parentA, const cursiv::AstNode* parentB,
-               const cursiv::Cst& treeA, const cursiv::Cst& treeB) {
-  CHECK(a != nullptr && b != nullptr);
-  if (a == nullptr || b == nullptr) return;
-  CHECK(a->parent == parentA && b->parent == parentB);
-  CHECK(a->cstNodeId < treeA.size() && b->cstNodeId < treeB.size());
-  if (a->cstNodeId < treeA.size() && b->cstNodeId < treeB.size()) {
-    const auto& spanA = treeA[a->cstNodeId];
-    const auto& spanB = treeB[b->cstNodeId];
-    CHECK(spanA.begin == spanB.begin && spanA.end == spanB.end);
+// Fixed shapes and preorder spans exercise the LL prefix rewrite without
+// building another backend. Shared conformance suites compare both engines.
+std::string node_shape(const Expression* value, const cursiv::AstNode* parent,
+                       const cursiv::Cst& tree, std::string& spans) {
+  CHECK(value != nullptr);
+  if (value == nullptr) return "null";
+  CHECK(value->parent == parent && value->cstNodeId < tree.size());
+  if (value->cstNodeId < tree.size()) {
+    const auto& span = tree[value->cstNodeId];
+    if (!spans.empty()) spans += ' ';
+    spans += std::to_string(span.begin) + '-' + std::to_string(span.end);
+    CHECK(span.begin <= span.end && span.end <= tree.text().size());
+    if (parent != nullptr && parent->cstNodeId < tree.size()) {
+      const auto& outer = tree[parent->cstNodeId];
+      CHECK(outer.begin <= span.begin && span.end <= outer.end);
+    }
   }
-  CHECK(a->type == b->type);
-  if (a->type != b->type) return;
-  if (const auto* x = cursiv::ast_cast<Name>(a)) {
-    CHECK(x->text == cursiv::ast_cast<Name>(b)->text);
-  } else if (const auto* x = cursiv::ast_cast<Unary>(a)) {
-    const auto* y = cursiv::ast_cast<Unary>(b);
-    CHECK(x->enabled == y->enabled);
-    same_node(x->value, y->value, x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<Wrapped>(a)) {
-    const auto* y = cursiv::ast_cast<Wrapped>(b);
-    same_node(x->value, y->value, x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<Bag>(a)) {
-    const auto* y = cursiv::ast_cast<Bag>(b);
-    CHECK(x->values.size() == 1 && y->values.size() == 1);
-    if (x->values.size() == 1 && y->values.size() == 1)
-      same_node(x->values[0], y->values[0], x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<LeftTag>(a)) {
-    const auto* y = cursiv::ast_cast<LeftTag>(b);
-    CHECK(x->enabled && y->enabled);
-    same_node(x->operand, y->operand, x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<RightTag>(a)) {
-    const auto* y = cursiv::ast_cast<RightTag>(b);
-    CHECK(x->enabled && y->enabled);
-    CHECK(x->parts.size() == 1 && y->parts.size() == 1);
-    if (x->parts.size() == 1 && y->parts.size() == 1)
-      same_node(x->parts[0], y->parts[0], x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<Let>(a)) {
-    const auto* y = cursiv::ast_cast<Let>(b);
-    same_node(x->value, y->value, x, y, treeA, treeB);
-  } else if (const auto* x = cursiv::ast_cast<Maybe>(a)) {
-    const auto* y = cursiv::ast_cast<Maybe>(b);
-    CHECK(x->enabled == y->enabled);
-    same_node(x->value, y->value, x, y, treeA, treeB);
+  const auto child = [&](const Expression* node) {
+    return node_shape(node, value, tree, spans);
+  };
+  if (const auto* node = cursiv::ast_cast<Name>(value))
+    return "Name(" + std::string(node->text) + ")";
+  if (const auto* node = cursiv::ast_cast<Unary>(value)) {
+    CHECK(node->enabled);
+    return "Unary(" + child(node->value) + ")";
   }
+  if (const auto* node = cursiv::ast_cast<Wrapped>(value))
+    return "Wrapped(" + child(node->value) + ")";
+  if (const auto* node = cursiv::ast_cast<Bag>(value)) {
+    CHECK(node->values.size() == 1);
+    return "Bag(" + (node->values.empty() ? "null" : child(node->values[0])) +
+           ")";
+  }
+  if (const auto* node = cursiv::ast_cast<LeftTag>(value)) {
+    CHECK(node->enabled);
+    return "LeftTag(" + child(node->operand) + ")";
+  }
+  if (const auto* node = cursiv::ast_cast<RightTag>(value)) {
+    CHECK(node->enabled && node->parts.size() == 1);
+    return "RightTag(" +
+           (node->parts.empty() ? "null" : child(node->parts[0])) + ")";
+  }
+  if (const auto* node = cursiv::ast_cast<Let>(value))
+    return "Let(" + child(node->value) + ")";
+  CHECK(false);
+  return "unknown";
+}
+
+void expect_shape(const cursiv::Parser& parser, std::string_view source,
+                  std::string_view expected, std::string_view expectedSpans) {
+  const auto parsed = parser.parse(source);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  const auto* doc = parsed.value_as<Document>();
+  CHECK(doc != nullptr && doc->parent == nullptr);
+  if (doc == nullptr) return;
+  std::string shape, spans;
+  for (const auto* node : doc->values) {
+    if (!shape.empty()) shape += ' ';
+    shape += node_shape(node, doc, parsed.cst(), spans);
+  }
+  CHECK(shape == expected);
+  CHECK(spans == expectedSpans);
 }
 
 void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
@@ -142,43 +157,52 @@ void outer_choice_keeps_its_priority(const cursiv::Parser& parser) {
 
 int main() {
   const auto ll = tllprefix::generated::Ll::create_parser();
-  const auto lr = tllprefix::generated::Lr::create_parser();
   outer_choice_keeps_its_priority(*ll);
-  outer_choice_keeps_its_priority(*lr);
-  for (const std::string_view text :
-       {"name", "name!", "name?", "name!?", "name$", "name!$", "name?$",
-        "name!?$", "name%", "name&", "name!?$%", "name!?$&",
-        "one two! three? four!?$ five% six!?$&", "let a;", "let a!;",
-        "let a!; b? let c;"}) {
-    const auto a = ll->parse(text);
-    const auto b = lr->parse(text);
-    CHECK(a.accepted && b.accepted);
-    CHECK(a.diagnostics.empty() && b.diagnostics.empty());
-    const auto* x = a.value_as<tllprefix::Document>();
-    const auto* y = b.value_as<tllprefix::Document>();
-    CHECK(x != nullptr && y != nullptr);
-    if (x == nullptr || y == nullptr) continue;
-    CHECK(x->parent == nullptr && y->parent == nullptr);
-    CHECK(x->values.size() == y->values.size());
-    if (x->values.size() != y->values.size()) continue;
-    for (std::size_t i = 0; i < x->values.size(); ++i)
-      same_node(x->values[i], y->values[i], x, y, a.cst(), b.cst());
-  }
-  for (const std::string_view text :
-       {"name", "name!", "name?", "one two! three? four", "a! b? c! d? e"}) {
-    const std::string source = "[" + std::string(text) + "]";
-    const auto a = ll->parse(source);
-    const auto b = lr->parse(source);
-    CHECK(a.accepted && b.accepted);
-    CHECK(a.diagnostics.empty() && b.diagnostics.empty());
-    const auto* x = a.value_as<tllprefix::Document>();
-    const auto* y = b.value_as<tllprefix::Document>();
-    CHECK(x != nullptr && y != nullptr);
-    if (x == nullptr || y == nullptr) continue;
-    CHECK(x->values.size() == y->values.size());
-    if (x->values.size() != y->values.size()) continue;
-    for (std::size_t i = 0; i < x->values.size(); ++i)
-      same_node(x->values[i], y->values[i], x, y, a.cst(), b.cst());
+  struct Case {
+    std::string_view text, shape, spans;
+  };
+  constexpr Case cases[] = {
+      {"name", "Name(name)", "0-4"},
+      {"name!", "Unary(Name(name))", "0-5 0-4"},
+      {"name?", "Wrapped(Name(name))", "0-5 0-4"},
+      {"name!?", "Wrapped(Unary(Name(name)))", "0-6 0-5 0-4"},
+      {"name$", "Bag(Name(name))", "0-5 0-4"},
+      {"name!$", "Bag(Unary(Name(name)))", "0-6 0-5 0-4"},
+      {"name?$", "Bag(Wrapped(Name(name)))", "0-6 0-5 0-4"},
+      {"name!?$", "Bag(Wrapped(Unary(Name(name))))", "0-7 0-6 0-5 0-4"},
+      {"name%", "LeftTag(Name(name))", "0-5 0-4"},
+      {"name&", "RightTag(Name(name))", "0-5 0-4"},
+      {"name!?$%", "LeftTag(Bag(Wrapped(Unary(Name(name)))))",
+       "0-8 0-7 0-6 0-5 0-4"},
+      {"name!?$&", "RightTag(Bag(Wrapped(Unary(Name(name)))))",
+       "0-8 0-7 0-6 0-5 0-4"},
+      {"one two! three? four!?$ five% six!?$&",
+       "Name(one) Unary(Name(two)) Wrapped(Name(three)) "
+       "Bag(Wrapped(Unary(Name(four)))) LeftTag(Name(five)) "
+       "RightTag(Bag(Wrapped(Unary(Name(six)))))",
+       "0-3 4-8 4-7 9-15 9-14 16-23 16-22 16-21 16-20 24-29 24-28 30-37 30-36 "
+       "30-35 30-34 30-33"},
+      {"let a;", "Let(Name(a))", "0-6 4-5"},
+      {"let a!;", "Let(Unary(Name(a)))", "0-7 4-6 4-5"},
+      {"let a!; b? let c;", "Let(Unary(Name(a))) Wrapped(Name(b)) Let(Name(c))",
+       "0-7 4-6 4-5 8-10 8-9 11-17 15-16"},
+  };
+  for (const auto& c : cases) expect_shape(*ll, c.text, c.shape, c.spans);
+  constexpr Case appended[] = {
+      {"name", "Name(name)", "1-5"},
+      {"name!", "Unary(Name(name))", "1-6 1-5"},
+      {"name?", "Wrapped(Name(name))", "1-6 1-5"},
+      {"one two! three? four",
+       "Name(one) Unary(Name(two)) Wrapped(Name(three)) Name(four)",
+       "1-4 5-9 5-8 10-16 10-15 17-21"},
+      {"a! b? c! d? e",
+       "Unary(Name(a)) Wrapped(Name(b)) Unary(Name(c)) Wrapped(Name(d)) "
+       "Name(e)",
+       "1-3 1-2 4-6 4-5 7-9 7-8 10-12 10-11 13-14"},
+  };
+  for (const auto& c : appended) {
+    const std::string source = "[" + std::string(c.text) + "]";
+    expect_shape(*ll, source, c.shape, c.spans);
   }
   return cursiv::test::report("LlPrefixFactor_test");
 }

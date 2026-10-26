@@ -40,8 +40,8 @@ guides cover testing, using the AST and connecting an editor.
 
 ## Before you start
 
-You need CMake 3.30 or newer and a C++20 compiler with `std::format` and
-guaranteed tail calls (`musttail`). CI tests GCC 16 and Clang 22, and cross-builds
-with wasi-sdk 34; older versions are not validated.
+You need Git, CMake 3.30 or newer and a C++20 compiler with `std::format` and
+guaranteed tail calls (`musttail`). GCC 16 and Clang 22 are tested versions.
 
-The editor guide lists the additional tools needed for VS Code.
+The [editor guide](editor-integration.md) lists the additional tools needed for
+VS Code. For WebAssembly, follow the [WASI setup](../recipes/wasm.md).

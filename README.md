@@ -29,7 +29,8 @@ editor extension.
 ## Get started
 
 You need **CMake 3.30 or later**, **Git**, and a C++20 compiler with
-`std::format` and `musttail` support. CI tests **GCC 16** and **Clang 22**.
+`std::format` and `musttail` support. Tested compilers are **GCC 16** and
+**Clang 22**.
 
 Create a language project, build it and parse its sample document:
 

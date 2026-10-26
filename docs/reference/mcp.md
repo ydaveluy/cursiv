@@ -35,9 +35,9 @@ JSON-RPC.
 | `scope-candidates` | what a cross reference could bind to |
 | `format` | the full formatted document text, without applying it |
 
-`format` is added by `LspMcpService` in both transports. It requires a formatter
-installed for the document's language. `rename` returns proposed edit spans;
-it does not check language-specific naming rules. Neither tool applies edits.
+`format` requires a formatter installed for the document's language.
+`rename` returns proposed edit spans without checking language-specific naming
+rules. Neither tool applies edits.
 
 `validate` parses draft text against the current workspace, runs the checks
 and removes its temporary document afterwards. It does not save the text.
@@ -64,9 +64,8 @@ units and end-exclusive ranges.
 You only need a custom service when adding your own MCP tools. The scaffold
 uses the standard service automatically.
 
-The runner keeps an existing `mcpService` or installs `LspMcpService` when the
-slot is empty. Derive from `LspMcpService` to retain all the tools above and
-add another in `createServer`:
+Derive from `LspMcpService` and override `createServer` to retain the standard
+tools and add your own:
 
 ```cpp
 #include <memory>

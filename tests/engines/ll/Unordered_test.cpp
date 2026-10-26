@@ -105,6 +105,9 @@ void exercise(const cursiv::Parser& parser) {
     valid(parser, text);
   } while (std::next_permutation(fields.begin(), fields.end()));
 
+  // Exhaust every order once. An eight-item copy only repeats these runtime
+  // paths while expanding the generated LR automaton exponentially; the
+  // Eleven/SixNests lowering checks below cover the supported width limits.
   std::string order = "abcd";
   do {
     std::string text = "four ";
@@ -141,9 +144,6 @@ void exercise(const cursiv::Parser& parser) {
     if (node && node->child)
       CHECK(node->child->name == name && node->child->parent == node);
   }
-  valid(parser, "wide a b c d e f g h;", "abcdefgh");
-  valid(parser, "wide h g f e d c b a;", "hgfedcba");
-  valid(parser, "wide c a h e b g d f;", "cahebgdf");
 
   for (const auto text :
        {"maybe a a;", "maybe a b a;", "maybe b b;", "maybe b a b;",
@@ -352,7 +352,7 @@ void records_alike() {
         "child flag node 12;", "optional b a;", "tight [ba];",
         "wrapwords 12(?)(!);", "edges ba ;", "fields value 34 flag name 12;",
         "four d b c a ;", "blocks b a a;", "bounded b a a;",
-        "wide c a h e b g d f;", "pair a a;", "nested a c b;", "maybe;",
+        "pair a a;", "nested a c b;", "maybe;",
         "maybe b a;", "maybe a a;", "gather b b a a;",
         "modifiers final 12 static;", "emptychild y;", "emptychild y 12;",
         "order y 12;", "order 12 34 y;", "order y 12 34;", "order 12;",

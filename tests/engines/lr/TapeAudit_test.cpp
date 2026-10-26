@@ -1,6 +1,3 @@
-#include "cells/generated/G/Module.hpp"
-#include "cells/generated/G/Parser.hpp"
-#include "cells/generated/G/Table.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +10,9 @@
 #include <string_view>
 #include <vector>
 
+#include "cells/generated/G/Module.hpp"
+#include "cells/generated/G/Parser.hpp"
+#include "cells/generated/G/Table.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
@@ -22,8 +22,8 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/CstAudit.hpp"
+#include "edges/generated/G/Module.hpp"
 #include "torture/generated/Torture/Module.hpp"
-#include "unsettled/generated/G/Module.hpp"
 
 // Domain A audit lane: CST integrity invariants over LR.
 
@@ -194,7 +194,7 @@ int run() {
   const std::unique_ptr<cursiv::Parser> nest =
       tcells::generated::G::create_parser();
   const std::unique_ptr<cursiv::Parser> uns =
-      tunsettled::generated::G::create_parser();
+      tedges::generated::G::create_parser();
 
   const std::unique_ptr<cursiv::Parser> nsRc =
       tcells::generated::G::create_parser();
@@ -405,7 +405,8 @@ int run() {
         const std::string wideText = "wide " + d, nestText = "nested " + d;
         audit("wideunsettled-mut", wideText, wide->parse(wideText));
         audit("nestedcands-mut", nestText, nest->parse(nestText));
-        audit("unsettled-mut", d, uns->parse(d));
+        const std::string unsettledText = "cell:" + d;
+        audit("unsettled-mut", unsettledText, uns->parse(unsettledText));
       }
 
   // What a caret reads off a split tree: the state a record settled in. Asked

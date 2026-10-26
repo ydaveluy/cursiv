@@ -31,8 +31,49 @@ The build fetches its dependencies. Use `gcc-debug`, `clang-release` or
 `clang-debug` for another configuration. Clang presets use `clang++`; pass
 `-DCMAKE_CXX_COMPILER=clang++-22` when your installation uses that name.
 
+These options control builds of the framework repository:
+
+| Option | Default | Effect |
+|---|---|---|
+| `CURSIV_BUILD_TESTS` | `ON` when Cursiv is the top-level project | Build the framework's tests and their example-language dependencies. |
+| `CURSIV_WARNINGS_AS_ERRORS` | `ON` for the top-level project, `OFF` as a dependency | Treat compiler warnings in Cursiv as errors. |
+
+Cross builds provide the `cursiv_host_tools` target for native parser
+generators. These use Release mode and the language project's C++ standard;
+the regular build invokes them automatically.
+
 The test suite includes both LL and LR grammars. Add a regression test for a
 bug fix; shared parser contracts belong in `tests/engines/shared/`.
+
+Framework fixtures use `cursiv_test_language` internally. It accepts the
+arguments of `cursiv_generate_language`, defaults `OUT` to
+`generated/<ID>/generated`, and compiles the generated parser, metadata and
+reflection together. Pass `SEPARATE_UNITS` when a fixture needs the production
+layout across separate translation units. Native generated test code uses
+`-O0` in Release; WASI uses `-O1`, including in Debug, to fit WebAssembly
+function limits.
+
+Reuse an existing test grammar when adding another input or AST scenario.
+Compatible variants can share entry rules; keep separate grammars when the
+global word boundary, indentation policy or an isolated lexer table is the
+contract under test. Avoid generating another backend solely as an oracle when
+the expected tree, diagnostics and source spans can be stated directly.
+Related cases share a test executable and parser instances. Keep a prefixed
+input string alive for as long as its parse result or CST is inspected.
+
+Keep stress fixtures just beyond the boundary they exercise. Large runtime
+tables can be built as test data: the wide-position completion test still
+crosses position 16384 without compiling thousands of repeated parser functions.
+The bounded-repeat cases cover interval boundaries and directive shapes rather
+than a Cartesian product of equivalent intervals.
+
+The framework's test build shares generated parser and generator compilation
+across groups of four languages. Fixtures checking separate translation units,
+compiler limits or namespace/include isolation retain independent compilation.
+On Linux and WASI, thin archives reference each shared test object once, and
+unused modules are removed when linking a test executable.
+Each CI configuration runs its complete test suite. The example languages
+retain their production compilation and optimisation settings.
 
 In VS Code, install the recommended CMake Tools and clangd extensions, select a
 configure preset, and configure the project. CMake Tools copies the active
