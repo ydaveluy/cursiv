@@ -308,9 +308,7 @@ void LrGssGraph::prune(Id u) {
   bool dropped = false;
   for (std::size_t i = 0; i < _group.size();) {
     std::size_t j = i + 1;
-    while (j < _group.size() && key(_group[j]) == key(_group[i])) {
-      ++j;
-    }
+    while (j < _group.size() && key(_group[j]) == key(_group[i])) ++j;
     for (std::size_t best = i, k = i + 1; k < j; ++k) {
       if (!alike(_group[best].edge, _group[k].edge)) continue;
       _strict = true;
@@ -430,20 +428,17 @@ Id LrGssGraph::best(Id v) {
       _unranked.pop_back();
       continue;
     }
-    bool ready = true;
+    const std::size_t waiting = _unranked.size();
     for (Id e = _vertices[x].edges; e != none; e = _edges[e].next) {
       const Vertex& y = _vertices[_edges[e].previous];
-      if (y.edges != none && y.best == none) {
+      if (y.edges != none && y.best == none)
         _unranked.push_back(_edges[e].previous);
-        ready = false;
-      }
     }
-    if (!ready) continue;
+    if (_unranked.size() != waiting) continue;
     _unranked.pop_back();
     Id b = _vertices[x].edges;
-    for (Id e = _edges[b].next; e != none; e = _edges[e].next) {
+    for (Id e = _edges[b].next; e != none; e = _edges[e].next)
       if (written(e, b) < 0) b = e;
-    }
     set_best(x, b);
   }
   return _vertices[v].best;
@@ -579,16 +574,14 @@ void LrGssGraph::load(std::size_t side, const Climb& stack, Id shared) {
   Stream& s = _streams[side];
   std::size_t count = 0;
   s.total = 0;
-  if (const Rope::Id below = _vertices[stack.from].forks; below != Rope::none) {
-    s.held[count++] = below;
-    s.total += _digest.forks().length(below);
-  }
-  if (const Rope::Id top = _digest.of(_forest, _edges[stack.edge].forest,
-                                      [this](Id step) { return facts(step); });
-      top != Rope::none) {
-    s.held[count++] = top;
-    s.total += _digest.forks().length(top);
-  }
+  for (const Rope::Id rope :
+       {_vertices[stack.from].forks,
+        _digest.of(_forest, _edges[stack.edge].forest,
+                   [this](Id step) { return facts(step); })})
+    if (rope != Rope::none) {
+      s.held[count++] = rope;
+      s.total += _digest.forks().length(rope);
+    }
   s.frames = std::span(s.held).first(count);
   s.skip = _digest.forks().length(_vertices[shared].forks);
 }
@@ -810,9 +803,7 @@ std::vector<LrGssGraph::Id> LrGssGraph::elected() {
 
 bool LrGssGraph::close() {
   settle(std::numeric_limits<TextOffset>::max(), true);
-  for (const auto& [v, s] : _accepts) {
-    accept(v, s);
-  }
+  for (const auto& [v, s] : _accepts) accept(v, s);
   return _accepted;
 }
 
@@ -888,9 +879,7 @@ TextOffset LrGssGraph::read_past() {
     }
   }
   TextOffset most = 0;
-  for (const Ends& e : ends) {
-    most = std::max(most, e.back());
-  }
+  for (const Ends& e : ends) most = std::max(most, e.back());
   return most;
 }
 

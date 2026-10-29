@@ -32,6 +32,9 @@ class function_ref<R(A...)> {
   };
 
  public:
+  // `A` is the stored signature, not a deduced type: `static_cast<A&&>` passes
+  // each argument on as declared -- moved when taken by value, unchanged when
+  // a reference.
   template <class F>
     requires(std::is_function_v<F> && std::is_invocable_r_v<R, F*, A...>)
   function_ref(F* callable) noexcept
@@ -39,10 +42,10 @@ class function_ref<R(A...)> {
         _call(+[](Bound bound, A... args) -> R {
           if constexpr (std::is_void_v<R>)
             std::invoke(reinterpret_cast<F*>(bound.function),
-                        std::forward<A>(args)...);
+                        static_cast<A&&>(args)...);
           else
             return std::invoke(reinterpret_cast<F*>(bound.function),
-                               std::forward<A>(args)...);
+                               static_cast<A&&>(args)...);
         }) {}
 
   template <class F>
@@ -57,13 +60,13 @@ class function_ref<R(A...)> {
           auto& callable =
               *bound.template object_as<std::remove_reference_t<F>>();
           if constexpr (std::is_void_v<R>)
-            std::invoke(callable, std::forward<A>(args)...);
+            std::invoke(callable, static_cast<A&&>(args)...);
           else
-            return std::invoke(callable, std::forward<A>(args)...);
+            return std::invoke(callable, static_cast<A&&>(args)...);
         }) {}
 
   constexpr R operator()(A... args) const {
-    return _call(_bound, std::forward<A>(args)...);
+    return _call(_bound, static_cast<A&&>(args)...);
   }
 
  private:

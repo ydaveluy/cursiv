@@ -59,17 +59,13 @@ std::uint16_t lr_elect_twin(std::uint16_t prod,
   return prod;
 }
 
-// The decisions of run `run` on `side` of its callee: before (0), after (1).
-template <const auto& A>
-void lr_elect_chain(std::uint32_t run, std::uint16_t side, std::uint16_t q,
-                    std::vector<std::uint32_t>& out,
-                    std::vector<std::uint16_t>& at) {
+// The decisions of run `run` on `side` of its callee, before (0) or after
+// (1), each to `each`.
+template <const auto& A, class Each>
+void lr_elect_chain(std::uint32_t run, std::uint16_t side, Each&& each) {
   for (std::uint32_t k = A.cold.electChainAt[run];
        k < A.cold.electChainAt[run + 1u]; ++k)
-    if (A.cold.electChainPos[k] == side) {
-      out.push_back(A.cold.electChainWord[k]);
-      at.push_back(q);
-    }
+    if (A.cold.electChainPos[k] == side) each(A.cold.electChainWord[k]);
 }
 
 // `words` with the decisions of the runs skipped under children standing on
@@ -100,15 +96,16 @@ bool lr_elect_restore(std::uint16_t prod, std::span<const std::uint32_t> words,
   // production's own words, then the run under the child after it opens.
   // The last position may be 65 535: the walk stops there, not past it.
   for (std::uint16_t q = 0;; ++q) {
-    if (open != kLrNoRun) lr_elect_chain<A>(open, 1, q, out, at);
-    open = kLrNoRun;
-    for (; k != words.size() && pos[k] == q; ++k) {
-      out.push_back(words[k]);
+    const auto put = [&](std::uint32_t word) {
+      out.push_back(word);
       at.push_back(q);
-    }
+    };
+    if (open != kLrNoRun) lr_elect_chain<A>(open, 1, put);
+    open = kLrNoRun;
+    for (; k != words.size() && pos[k] == q; ++k) put(words[k]);
     if (w != end && (A.cold.electWatch[w] >> 16) == q) {
       open = skipped(A.cold.electWatch[w++]);
-      if (open != kLrNoRun) lr_elect_chain<A>(open, 0, q, out, at);
+      if (open != kLrNoRun) lr_elect_chain<A>(open, 0, put);
     }
     if (q == len) break;
   }

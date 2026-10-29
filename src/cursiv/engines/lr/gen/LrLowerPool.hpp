@@ -174,12 +174,6 @@ struct LrLowerPool : LowerPool {
     return e.size() - 1;
   }
 
-  LrShapeId push_sym(std::uint16_t sym, std::uint8_t cfg) {
-    const LrShapeId at = push(LrLowerNode{LrShape::sym, sym});
-    e[at].cfg = cfg;
-    return at;
-  }
-
   LrShapeId copy(LrShapeId at) {
     LrLowerNode n = e[at];
     if (n.kind == LrShape::rep || n.kind == LrShape::scope) {

@@ -50,10 +50,6 @@ TwinReader TwinReader::resolved(GrammarImage& image) {
   });
 }
 
-ImageId TwinReader::kid(ImageId id, std::uint32_t i) const {
-  return _im.kids[_im.nodes[id].first + i];
-}
-
 std::vector<ImageId> TwinReader::kids(ImageId id) const {
   const ImageNode& n = _im.nodes[id];
   return {_im.kids.begin() + n.first, _im.kids.begin() + n.first + n.count};
@@ -458,24 +454,12 @@ std::vector<TwinBranch> twin_branches(WarningFound& found) {
       if (hit.item) {
         t.earlier = found.spell(part(hit.over.front()));
       } else {
-        // A branch's place as the dump prints its choice: `implied` prints
-        // two as one.
-        const auto merged = [&](std::uint32_t j) {
-          if (j + 1 >= at.count) return false;
-          const ImageNode& next = image.nodes[part(j + 1)];
-          return next.kind == ImageKind::implied &&
-                 image.kids[next.first] == part(j);
-        };
-        const auto place = [&](std::uint32_t i) {
-          std::uint16_t p = 0;
-          for (std::uint32_t j = 0; j <= i; ++j) p += merged(j) ? 0 : 1;
-          return p;
-        };
-        t.arm = place(hit.arm);
-        t.arms = place(at.count - 1);
+        const std::vector<std::uint16_t> places = printed_places(image, at);
+        t.arm = places[hit.arm];
+        t.arms = places.back();
         for (const std::uint32_t o : hit.over)
-          if (std::ranges::find(t.over, place(o)) == t.over.end())
-            t.over.push_back(place(o));
+          if (std::ranges::find(t.over, places[o]) == t.over.end())
+            t.over.push_back(places[o]);
       }
       if (std::ranges::find(out, t) == out.end()) out.push_back(std::move(t));
     }

@@ -67,19 +67,7 @@ class LrGssRope {
       _depth = 0;
       _leaf = none;
       if (root == none || index >= rope._nodes[root].len) return;
-      Id n = root;
-      while (rope._nodes[n].right != none) {
-        const Node& x = rope._nodes[n];
-        const Length before = rope._nodes[x.left].len;
-        if (index < before) {
-          push(x.right);
-          n = x.left;
-        } else {
-          index -= before;
-          n = x.right;
-        }
-      }
-      _leaf = n;
+      _leaf = rope.down(root, index, [&](Id right) { push(right); });
     }
     [[nodiscard]] bool done() const { return _leaf == none; }
     [[nodiscard]] std::uint32_t value() const {
@@ -159,17 +147,7 @@ class LrGssRope {
   }
 
   [[nodiscard]] std::uint32_t at(Id r, Length index) const {
-    while (_nodes[r].right != none) {
-      const Node& x = _nodes[r];
-      const Length before = _nodes[x.left].len;
-      if (index < before) {
-        r = x.left;
-      } else {
-        index -= before;
-        r = x.right;
-      }
-    }
-    return _nodes[r].left;
+    return _nodes[down(r, index, [](Id) {})].left;
   }
 
   // The first index whose value, with all those before it, satisfies `holds`
@@ -287,18 +265,25 @@ class LrGssRope {
   }
 
   void descend(Front& f, Id n, Length offset) const {
+    f.push(down(n, offset, [&f](Id right) { f.push(right); }));
+  }
+
+  // The leaf at `index` under `n`, `right` handed the right subtree of every
+  // node the walk goes left at.
+  template <class Right>
+  Id down(Id n, Length index, Right&& right) const {
     while (_nodes[n].right != none) {
       const Node& x = _nodes[n];
       const Length before = _nodes[x.left].len;
-      if (offset < before) {
-        f.push(x.right);
+      if (index < before) {
+        right(x.right);
         n = x.left;
       } else {
-        offset -= before;
+        index -= before;
         n = x.right;
       }
     }
-    f.push(n);
+    return n;
   }
 
   // Whether `f` has a value to read, moving on to the next root where the

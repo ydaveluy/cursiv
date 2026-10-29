@@ -58,20 +58,15 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
       reached, c.reads, [&c] { c.stop.poll(); });
 }
 
-template <const auto& T>
-inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from) {
-  TextOffset reached = from;
-  return ll_unmatched_end<T>(c, from, c.len, reached);
-}
-
 // What a deletion of the token `t` takes: the token, or of bytes no terminal
 // matches the run of them as one -- and of a token left open, only its opener.
 template <const auto& T>
 inline TextOffset ll_drop_end(LlContext& c, const Token& t) {
   if (t.end != t.begin) return t.end;
   const LexReading r = ll_open_reading<T>(c, t.begin);
-  return r.term != kInvalidSymbol ? lex_cut(t.begin, r)
-                                  : ll_unmatched_end<T>(c, t.begin);
+  if (r.term != kInvalidSymbol) return lex_cut(t.begin, r);
+  TextOffset reached = t.begin;
+  return ll_unmatched_end<T>(c, t.begin, c.len, reached);
 }
 
 }  // namespace cursiv

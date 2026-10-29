@@ -117,18 +117,13 @@ struct TextValues {
   std::unordered_map<NodeId, Value> calls;
 };
 
-inline void text_children(const Cst& cst, NodeId id,
-                          std::vector<NodeId>& pending) {
-  for (const NodeId child : cst.reverse_children(id)) pending.push_back(child);
-}
-
 // Text thunks only depend on the calls below their record. Discover that
 // frontier without running converters, then evaluate it in source order.
 inline void text_dependencies(AstBuildCtx& ctx, NodeId id,
                               std::vector<NodeId>& dependencies) {
   const Cst& cst = *ctx.cst;
   std::vector<NodeId> pending;
-  text_children(cst, id, pending);
+  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
   while (!pending.empty()) {
     const auto child = pending.back();
     pending.pop_back();
@@ -141,7 +136,7 @@ inline void text_dependencies(AstBuildCtx& ctx, NodeId id,
         ctx.actions->call_at(row) != nullptr) {
       dependencies.push_back(child);
     } else if (!leaf) {
-      text_children(cst, child, pending);
+      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
     }
   }
 }
@@ -205,7 +200,7 @@ template <bool Text>
 bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   const Cst& cst = *ctx.cst;
   std::vector<NodeId> pending;
-  text_children(cst, id, pending);
+  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
   while (!pending.empty()) {
     const auto child = pending.back();
     pending.pop_back();
@@ -226,7 +221,7 @@ bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
     if (leaf)
       out.push_back(cst.text(child));
     else
-      text_children(cst, child, pending);
+      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
   }
   return true;
 }
@@ -238,7 +233,7 @@ template <bool Text>
 bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   const Cst& cst = *ctx.cst;
   std::vector<NodeId> pending;
-  text_children(cst, id, pending);
+  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
   while (!pending.empty()) {
     const auto child = pending.back();
     pending.pop_back();
@@ -247,7 +242,7 @@ bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
     if (n.subtreeSize == 1 && !part_leaf(ctx, n)) continue;
     if (n.subtreeSize != 1 && n.recovered &&
         !ctx.actions->is_call(ctx.stamp.row(n))) {
-      text_children(cst, child, pending);
+      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
       continue;
     }
     if (texting<Text>(ctx))

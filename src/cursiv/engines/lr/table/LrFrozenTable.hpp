@@ -81,8 +81,7 @@ struct LrFrozenTable : LrTableFacts {
   std::array<std::uint16_t, S.dfa> dfaBound{};
   // The head of a state's relay list, or `kNoRelay`; laid only where a token
   // echoes a mark.
-  std::array<std::uint16_t, S.relays != 0 ? S.dfa : 0>
-      dfaRelay{};
+  std::array<std::uint16_t, S.relays != 0 ? S.dfa : 0> dfaRelay{};
   std::array<LexRelay, S.relays> relays{};
   static constexpr std::uint16_t nrelays = S.relays;
 

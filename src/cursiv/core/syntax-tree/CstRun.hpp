@@ -27,16 +27,7 @@ class CstRun {
   CstRun() = default;
   // A move carries the records, never a watch: the stop belongs to the
   // parse writing the source.
-  CstRun(CstRun&& other) noexcept
-      : _r(std::exchange(other._r, nullptr)),
-        _cap(std::exchange(other._cap, 0)),
-        _mark(_cap),
-        _records(std::exchange(other._records, 0)),
-        _reserveHint(std::exchange(other._reserveHint, 0)),
-        _mem(std::exchange(other._mem, nullptr)) {
-    other._mark = 0;
-    other._stop = nullptr;
-  }
+  CstRun(CstRun&& other) noexcept { *this = std::move(other); }
   CstRun& operator=(CstRun&& other) noexcept {
     if (this == &other) return *this;
     if (_mem == nullptr) delete[] _r;

@@ -143,8 +143,6 @@ static_assert(sizeof(void*) != 8 || sizeof(vector<int>) == 16,
 // the transitive closure of its own bases, which `cursiv::Extends` states and
 // a consteval walk closes. A grammar's type list answers the downward
 // question -- every subtype of T -- and keeps it.
-struct AstNode;
-
 struct AstTypeTag {
   // The hot half first: a subtype test reads these two words and nothing
   // else, so the name and the reader sit after them.
@@ -198,9 +196,7 @@ consteval std::string_view (*name_reader() noexcept)(const AstNode&) noexcept {
   else
     return nullptr;
 }
-}  // namespace detail
 
-namespace detail {
 // Declared here, defined below: the tag's initialiser names it, and its own
 // definition names tags. A class template breaks the knot -- both are only
 // instantiated at a point where each is complete.

@@ -265,7 +265,7 @@ class PredicateEmitter {
   // of a commit's exit the rule has a terminal for.
   std::vector<bool> _head, _turn;
   std::vector<std::uint16_t> _order;
-  // `turn_terms` of each terminal a turn token names.
+  // What `turns_of` answers, by terminal a turn token names.
   std::map<unsigned, DynSet> _turns;
   // The mode each node that leaves a reading in a cursor lexed, and its set.
   std::vector<std::pair<std::uint16_t, DynSet>> _reads;
@@ -484,21 +484,14 @@ class PredicateEmitter {
         _nruns++, at, at, between, rest);
     // The rounds it must read before the free ones: every round but the
     // first reads the trivia between rounds.
-    const auto must = [&](std::uint32_t rounds, bool skipped) {
-      if (rounds == 0) return std::string();
-      return std::format(
-          "  for (::std::uint32_t k = 0; k < {}u && !in.empty(); ++k) {{\n"
-          "    auto next = {};\n"
-          "    if (next == in) break;\n"
-          "    in = ::std::move(next);\n"
-          "  }}\n",
-          rounds, call(e.a, skipped ? call(e.b, "in") : "in"));
-    };
-    if (!between) return must(e.min, false) + "  return " + free + ";\n";
+    if (!between)
+      return must_rounds("in", e.min, call(e.a, "in")) + "  return " + free +
+             ";\n";
     if (e.min != 0)
       return std::format("  in = {};\n  if (in.empty()) return false;\n",
                          call(e.a, "::std::move(in)")) +
-             must(e.min - 1u, true) + "  return " + free + ";\n";
+             must_rounds("in", e.min - 1u, call(e.a, call(e.b, "in"))) +
+             "  return " + free + ";\n";
     // No round at all: the cursors are read in the run's mode as they stand.
     return "  ::cursiv::PredicateState first;\n"
            "  for (::std::size_t i = 0; i < in.size(); ++i) {\n"
@@ -554,6 +547,18 @@ class PredicateEmitter {
   std::string call(std::uint16_t at, std::string_view input) const {
     return std::format("predicate_node_{}(src, len, {}, seen)", at, input);
   }
+  // `n` rounds of `step` from the cursors in `var`, up to one that moves none.
+  static std::string must_rounds(std::string_view var, std::uint32_t n,
+                                 const std::string& step) {
+    if (n == 0) return {};
+    return std::format(
+        "  for (::std::uint32_t k = 0; k < {1}u && !{0}.empty(); ++k) {{\n"
+        "    auto next = {2};\n"
+        "    if (next == {0}) break;\n"
+        "    {0} = ::std::move(next);\n"
+        "  }}\n",
+        var, n, step);
+  }
   // Whether `p` read nothing in a mode covering `want`: no read there finds
   // a token either.
   std::string read_nothing(const DynSet& want) const {
@@ -592,24 +597,20 @@ class PredicateEmitter {
         return false;
     }
   }
-  const DynSet& turns_of(unsigned t) {
-    const auto [at, fresh] = _turns.try_emplace(t);
-    if (fresh) at->second = turn_terms(t);
-    return at->second;
-  }
   // The terminals the rule reads as `t`: itself, or for a spelling only a
   // condition names, the anonymous terminal a rule spells alike.
-  DynSet turn_terms(unsigned t) const {
-    DynSet out;
-    if (!_g.termBuild[t].predicateOnly) {
+  const DynSet& turns_of(unsigned t) {
+    const auto [at, fresh] = _turns.try_emplace(t);
+    DynSet& out = at->second;
+    if (!fresh) return out;
+    if (!_g.termBuild[t].predicateOnly)
       out.set(t);
-      return out;
-    }
-    for (unsigned u = 1; u < _g.nterms; ++u)
-      if (!_g.termBuild[u].predicateOnly &&
-          _g.terms[u].nameOff == _g.terms[u].textOff &&
-          alike(_g.termBuild[u].lex, _g.termBuild[t].lex))
-        out.set(u);
+    else
+      for (unsigned u = 1; u < _g.nterms; ++u)
+        if (!_g.termBuild[u].predicateOnly &&
+            _g.terms[u].nameOff == _g.terms[u].textOff &&
+            alike(_g.termBuild[u].lex, _g.termBuild[t].lex))
+          out.set(u);
     return out;
   }
 
@@ -618,18 +619,10 @@ class PredicateEmitter {
   std::string rounds(std::uint16_t at, std::uint16_t skip, std::uint32_t min,
                      std::uint32_t max, const std::string& item) const {
     const LexNode e = _g.lex[at];
-    const auto skipped = [&](std::string_view input) {
-      return skip == kNoLexNode ? std::string(input) : call(skip, input);
-    };
-    std::string out = "  auto cur = ::std::move(in);\n";
-    if (min != 0)
-      out += std::format(
-          "  for (::std::uint32_t k = 0; k < {}u && !cur.empty(); ++k) {{\n"
-          "    auto next = {};\n"
-          "    if (next == cur) break;\n"
-          "    cur = ::std::move(next);\n"
-          "  }}\n",
-          min, call(e.a, skipped("cur")));
+    std::string out =
+        "  auto cur = ::std::move(in);\n" +
+        must_rounds("cur", min,
+                    call(e.a, skip == kNoLexNode ? "cur" : call(skip, "cur")));
     if (min == max) return out + "  return cur;\n}\n";
     out += "  auto visited = cur;\n";
     return out +
@@ -640,11 +633,7 @@ class PredicateEmitter {
                "    ::cursiv::PredicateState active;\n"
                "    for (::std::size_t i = 0; i < cur.size(); ++i) {{\n"
                "      auto p = {};\n"
-               "      if (p.held == ::cursiv::kUnread) {{\n"
-               "        const auto sc = predicate_lex(src, len, p.at, {}u, "
-               "seen);\n"
-               "        p.held = sc.term; p.end = sc.end; p.mode = {}u;\n"
-               "      }}\n"
+               "{}"
                "      out.add({});\n"
                "      active.add(p);\n"
                "    }}\n"
@@ -657,8 +646,7 @@ class PredicateEmitter {
                skip == kNoLexNode
                    ? std::string("cur[i]")
                    : call(skip, "::cursiv::PredicateState{cur[i]}") + "[0]",
-               _g.lexMode[at], _g.lexMode[at],
-               skip == kNoLexNode ? "p" : "cur[i]", item,
+               prelex(at, "      "), skip == kNoLexNode ? "p" : "cur[i]", item,
                "    cur = next.without(visited);\n"
                "    visited.unite(cur);\n");
   }

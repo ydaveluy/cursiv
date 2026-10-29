@@ -29,7 +29,7 @@ class WarningFound {
   // ...and the operator tables, for a walk of their operators.
   const std::vector<std::uint32_t>& tables() const { return _tables; }
   // The body of a rule, as the pipeline resolved it.
-  ImageId body(std::uint32_t rule);
+  ImageId body(std::uint32_t rule) { return _image.ready(rule).face[1].body; }
 
   std::string name(std::uint32_t rule) { return _printer.name_for(rule); }
   std::string spell(ImageId node) { return _printer.spell(node); }
@@ -65,6 +65,22 @@ class WarningFound {
   std::vector<std::uint32_t> _seen;
   std::vector<ImageId> _todo;
 };
+
+// Each branch's place among the branches of `choice` as the dump prints them,
+// from one: `implied` prints a branch and the next as one.
+inline std::vector<std::uint16_t> printed_places(const GrammarImage& image,
+                                                 const ImageNode& choice) {
+  std::vector<std::uint16_t> out(choice.count);
+  std::uint16_t place = 0;
+  for (std::uint32_t i = 0; i < choice.count; ++i) {
+    const ImageId* const arm = &image.kids[choice.first + i];
+    const bool merged = i + 1 < choice.count &&
+                        image.nodes[arm[1]].kind == ImageKind::implied &&
+                        image.kids[image.nodes[arm[1]].first] == arm[0];
+    out[i] = merged ? place : ++place;
+  }
+  return out;
+}
 
 // `W{rule, spelling}` for each node `hit(found, node)` names under the rules
 // walked, once each.

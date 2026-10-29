@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
-#include <vector>
 
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"

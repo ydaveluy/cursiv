@@ -25,16 +25,7 @@ ParseResult::ParseResult(Cst&& tree)
 
 // Hand-written so the source reports itself empty, as an assignment leaves it:
 // `= default` would keep `value` over a tree it no longer owns.
-ParseResult::ParseResult(ParseResult&& src) noexcept
-    : _grammarOwner(std::move(src._grammarOwner)),
-      _cst(std::move(src._cst)),
-      arena(std::move(src.arena)),
-      value(std::exchange(src.value, nullptr)),
-      references(std::move(src.references)),
-      diagnostics(std::move(src.diagnostics)),
-      error(src.error),
-      accepted(src.accepted),
-      nodes(std::move(src.nodes)) {}
+ParseResult::ParseResult(ParseResult&& src) noexcept { *this = std::move(src); }
 
 ParseResult::~ParseResult() = default;
 

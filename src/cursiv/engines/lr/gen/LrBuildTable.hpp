@@ -245,6 +245,19 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     f(mergeState, std::uint16_t{0xffff});
   }
 
+  // The states action `x` lands in: its shift's, or each its guard picks.
+  template <class F>
+  void each_landing(const LrAction& x, F&& f) const {
+    if (x.kind == LrActionKind::shift) f(x.arg);
+    if (x.kind == LrActionKind::guard) guards[x.arg].each_landing(f);
+  }
+  // The same for a goto edge: its own, and each its guard picks.
+  template <class Edge, class F>
+  void each_goto_landing(const Edge& e, F&& f) const {
+    f(e.to);
+    if (e.guard != 0) guards[e.guard - 1u].each_landing(f);
+  }
+
   std::uint16_t next_dfa(std::uint16_t s, std::uint8_t c) const {
     return dfaNext[std::size_t{s} * ncls + c];
   }

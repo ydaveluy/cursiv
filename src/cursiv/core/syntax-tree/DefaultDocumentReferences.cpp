@@ -163,20 +163,6 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
   out.clear();
   const Linker* const l = linker.load(std::memory_order_acquire);
   if (l == nullptr || rank >= handles.size()) return RefState::ErrorNotFound;
-  std::vector<MultiRefItem> found_targets;
-  const auto append = [&](AstNode* target, std::uint8_t which) {
-    found_targets.push_back(MultiRefItem{target, which});
-  };
-  const auto keep = [&] {
-    if (found_targets.empty()) return;
-    const std::lock_guard<std::mutex> lock(_targetsLock);
-    auto* const slice = static_cast<MultiRefItem*>(_targets.allocate(
-        found_targets.size() * sizeof(MultiRefItem), alignof(MultiRefItem)));
-    std::memcpy(slice, found_targets.data(),
-                found_targets.size() * sizeof(MultiRefItem));
-    out.data = slice;
-    out.count = static_cast<std::uint32_t>(found_targets.size());
-  };
   const RefHandle& h = handles[rank];
   if (h.owner == nullptr) return RefState::ErrorNotFound;
   const RefOps& ops = _f.refOps[h.field];
@@ -189,16 +175,20 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
   if (!found.has_value()) return RefState::ErrorNotFound;
 
   const RefFilter filter{&ops, narrow};
-  bool any = false;
+  std::vector<MultiRefItem> found_targets;
   for (const AstNodeDescription* const entry : *found) {
     if (entry == nullptr || entry->node == nullptr) continue;
     const std::uint8_t which = filter.branch(entry->node->type);
-    if (which == kNoBranch) continue;
-    append(entry->node, which);
-    any = true;
+    if (which != kNoBranch) found_targets.push_back({entry->node, which});
   }
-  if (!any) return RefState::ErrorNotFound;
-  keep();
+  if (found_targets.empty()) return RefState::ErrorNotFound;
+  const std::lock_guard<std::mutex> lock(_targetsLock);
+  auto* const slice = static_cast<MultiRefItem*>(_targets.allocate(
+      found_targets.size() * sizeof(MultiRefItem), alignof(MultiRefItem)));
+  std::memcpy(slice, found_targets.data(),
+              found_targets.size() * sizeof(MultiRefItem));
+  out.data = slice;
+  out.count = static_cast<std::uint32_t>(found_targets.size());
   return RefState::Resolved;
 }
 

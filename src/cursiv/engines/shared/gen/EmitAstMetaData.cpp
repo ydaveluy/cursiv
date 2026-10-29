@@ -15,15 +15,12 @@
 
 namespace cursiv {
 
-std::string emit_ast_metadata(const AstRegistry& registry) {
-  std::vector<std::string> types, tags, narrows;
+std::string emit_ast_metadata(const AstRegistry& registry,
+                              const std::vector<std::string>& tags) {
+  std::vector<std::string> types, narrows;
   for (const auto& type : registry.types) types.push_back(type.source);
-  for (const auto& field : registry.fields) {
-    const auto& owner = registry.types[field.owner];
-    tags.push_back("::cursiv::detail::field_tag<&" + owner.source + "::" +
-                   std::string(field.name) + ">");
+  for (const auto& field : registry.fields)
     narrows.push_back(narrow_list(field.narrows));
-  }
   const std::span<const AstRegistry::Field> fields = registry.fields;
   const std::span<const std::uint64_t> derives = registry.derives;
   const std::span<const std::uint64_t> accepts = registry.accepts;

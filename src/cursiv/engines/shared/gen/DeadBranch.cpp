@@ -178,22 +178,10 @@ class Dead {
     return found;
   }
 
-  // A branch's place as the dump prints its choice: `implied` prints two as
-  // one.
-  bool printed_by_next(const ImageNode& choice, std::uint32_t i) const {
-    if (i + 1 >= choice.count) return false;
-    const ImageNode& next = node(kid(choice, i + 1));
-    return next.kind == ImageKind::implied &&
-           _im.kids[next.first] == kid(choice, i);
-  }
   std::vector<Arm> arms_of(const ImageNode& choice) const {
-    std::vector<Arm> arms(choice.count);
-    std::uint16_t of = 0;
-    for (std::uint32_t i = 0; i < choice.count; ++i) {
-      if (!printed_by_next(choice, i)) ++of;
-      arms[i].at = of;
-    }
-    for (Arm& a : arms) a.of = of;
+    const std::vector<std::uint16_t> places = printed_places(_im, choice);
+    std::vector<Arm> arms;
+    for (const std::uint16_t at : places) arms.push_back({at, places.back()});
     return arms;
   }
 

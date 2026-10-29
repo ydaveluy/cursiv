@@ -50,7 +50,8 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
   result.document = before.document;
   result.diagnosticsAll = before.diagnostics;
   if (relevant.empty()) {
-    static_cast<Disposable&>(result) = std::move(before);
+    static_cast<Disposable&>(result) =
+        std::move(static_cast<Disposable&>(before));
     return result;
   }
   result.diagnosticRelevant = relevant.front();

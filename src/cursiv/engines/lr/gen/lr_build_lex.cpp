@@ -247,24 +247,14 @@ std::string lr_dfa_text(const LrBuildTable& A, const LexAlphabet& alpha,
 // The DFA of every mode over the alphabet's classes, minimised.
 void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
                 const LexModes& modes) {
-  const std::vector<DynSet>& modeSet = modes.set;
   auto& g = A.cfg;
-  const LexNfaPool& nfa = alpha.nfa;
-  const std::vector<unsigned>& repByte = alpha.repByte;
-  const unsigned ncls = alpha.ncls;
   LexKeywordCut cut = alpha.cut;
-  const std::vector<std::uint8_t> words = lex_word_flags(g);
-  LexDfaBuild dfa(nfa, g.sets.data(), g.sets.size(), repByte, ncls, cut,
-                  g.terms.data(), words);
-
-  LexRelayChains relayChains;
   const auto push_relay = [&A](const LexRelayGen& row) {
     A.relays[A.nrelays] = row;
     return std::size_t{A.nrelays++};
   };
   const auto write = [&](std::uint16_t self, const LexDfaReading& r) {
     A.dfaAccept[self] = r.best < 0 ? 0 : static_cast<std::uint16_t>(r.best + 1);
-    A.dfaRelay[self] = relayChains.launched(g, cut, r, A.relays, push_relay);
     A.dfaAcc[self] = r.acc;
     A.accBoundBase[self] = static_cast<std::uint32_t>(A.accBound.size());
     std::size_t rank = 0;
@@ -285,16 +275,8 @@ void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
       A.accStand[A.accBoundBase[self] + rank] = stand;
     }
   };
-
-  for (unsigned m = 0; m < A.nmodes; ++m)
-    A.modeStart[m] = dfa.start(modeSet[m], alpha.startOf);
-  lex_relay_seed(dfa, nfa.relays, push_relay);
-  dfa.fill(A, write);
+  lex_build_dfa(A, alpha, cut, modes.set, push_relay, write);
   A.accBoundBase[A.ndfa] = static_cast<std::uint32_t>(A.accBound.size());
-  for (unsigned m = 0; m < A.nmodes; ++m)
-    A.modeStart[m] = dfa.final_of(A.modeStart[m]);
-  for (unsigned k = 0; k < A.nrelays; ++k)
-    A.relays[k].resume = dfa.final_of(A.relays[k].resume);
   // A state that accepts nothing still has its sets.
   A.dfaAcc.row(0, A.ndfa);
   A.dfaRes.row(0, A.ndfa);
@@ -714,7 +696,6 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
   rows.lexElseBase.clear();
   rows.lexElseRows.clear();
   rows.lexElseBase.reserve(a.ndfa + 1u);
-  LexSuccessors successors(a.ndfa);
   const ByteSet& leads = a.cfg.wordLeads;
   for (unsigned s = 0; s < a.ndfa; ++s) {
     const auto first = static_cast<std::uint32_t>(rows.lexElseRows.size());
@@ -811,10 +792,9 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
         }
       }
     }
-    successors.append(
-        std::span{a.dfaNext.data() + std::size_t{s} * a.ncls, a.ncls});
   }
   rows.lexElseBase.push_back(static_cast<std::uint32_t>(rows.lexElseRows.size()));
+  LexSuccessors successors(a.dfaNext.data(), a.ndfa, a.ncls);
   rows.typoSuccBase = std::move(successors.base);
   rows.typoSucc = std::move(successors.states);
 }

@@ -114,6 +114,10 @@ struct Emit : EmitOutput {
     fields.emplace_back(std::string(type), name(stem));
     return "f." + fields.back().second;
   }
+  // A field where the scope may suspend, a local otherwise.
+  std::string local(bool held, std::string_view type, std::string_view stem) {
+    return held ? field(type, stem) : name(stem);
+  }
 
   // Open while one position's code is written: the fields taken meanwhile go
   // back to the pool when it closes.
@@ -137,11 +141,16 @@ struct Emit : EmitOutput {
   // bytes would grow with the square of a nest's depth.
   static constexpr unsigned kMaxIndent = 48;
   void pad() { out.append(std::min(ind, kMaxIndent), ' '); }
-  void open() { ind += 2; }
-  void close() {
+  // A block, with the line that opens it and the one that closes it, if any.
+  void open(std::string_view t = {}) {
+    if (!t.empty()) line(t);
+    ind += 2;
+  }
+  void close(std::string_view t = {}) {
     if (ind < 2)
       throw std::logic_error("cursiv: unbalanced LL source indentation");
     ind -= 2;
+    if (!t.empty()) line(t);
   }
   void line(std::string_view t) {
     pad();
@@ -270,18 +279,14 @@ void Emit::call_site(std::uint16_t id) {
   // locals do.
   const bool held = may_suspend(id);
   const bool scoped = !held && (count != 0 || section != 0);
-  if (scoped) {
-    line("{");
-    open();
-  }
-  const std::string was = count == 0 ? std::string{}
-                          : held     ? field("::cursiv::NodeId", "w")
-                                     : name("w");
+  if (scoped) open("{");
+  const std::string was =
+      count == 0 ? std::string{} : local(held, "::cursiv::NodeId", "w");
   if (count != 0)
     put("{}{} = c.last;", held ? "" : "const ::cursiv::NodeId ", was);
   std::string outer;
   if (section != 0) {
-    outer = held ? field("::cursiv::LlSection", "sec") : name("sec");
+    outer = local(held, "::cursiv::LlSection", "sec");
     put("{}{} = ::cursiv::ll_section_open<kTable>(c, {}u);",
         held ? "" : "const ::cursiv::LlSection ", outer, section);
   }
@@ -290,10 +295,7 @@ void Emit::call_site(std::uint16_t id) {
   line("::cursiv::ll_return(c);");
   if (section != 0) put("::cursiv::ll_section_close<kTable>(c, {});", outer);
   join(base, count, was);
-  if (scoped) {
-    close();
-    line("}");
-  }
+  if (scoped) close("}");
 }
 
 // Whether a position calls, anywhere inside, a rule that is not plain: the
@@ -409,22 +411,16 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   const bool folds = n.kind == LlShape::seq && n.count == 2 &&
                      a.cfg.nodeBuild[kid(n, 1)].leftFold;
   const bool counted = oc != 0 || region || folds;
-  const std::string o =
-      held ? field("::cursiv::CstBuilder::Open", "o") : name("o");
-  const std::string b = held ? field("::cursiv::TextOffset", "b") : name("b");
-  const std::string f =
-      held && counted ? field("::cursiv::NodeCount", "f") : name("f");
-  const std::string l = !turn  ? std::string("0")
-                        : held ? field("::std::uint16_t", "l")
-                               : name("l");
+  const std::string o = local(held, "::cursiv::CstBuilder::Open", "o");
+  const std::string b = local(held, "::cursiv::TextOffset", "b");
+  const std::string f = local(held && counted, "::cursiv::NodeCount", "f");
+  const std::string l =
+      !turn ? std::string("0") : local(held, "::std::uint16_t", "l");
   if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
   line("::cursiv::ll_flush_trivia<kTable>(c);");
   // Its locals end with it: a label further on in the block may not cross
   // their initialisation.
-  if (!held) {
-    line("{");
-    open();
-  }
+  if (!held) open("{");
   if (turn) {
     put("{}{} = ::cursiv::ll_nest_receiver<kTable>(c, {}, {}, {});",
         held ? "" : "const ::std::uint16_t ", l, regionAt.open, regionAt.begin,
@@ -489,10 +485,7 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
         n.row, l);
     close();
   }
-  if (!held) {
-    close();
-    line("}");
-  }
+  if (!held) close("}");
 }
 
 // Only the first position stands where the token was read. A head reaches
@@ -520,13 +513,12 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
     if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
     line("::cursiv::ll_flush_trivia<kTable>(c);");
     if (!held) {
-      line("{");
-      open();
+      open("{");
       scoped = true;
     }
-    start.open = held ? field("::cursiv::CstBuilder::Open", "o") : name("o");
-    start.begin = held ? field("::cursiv::TextOffset", "b") : name("b");
-    start.count = held ? field("::cursiv::NodeCount", "f") : name("f");
+    start.open = local(held, "::cursiv::CstBuilder::Open", "o");
+    start.begin = local(held, "::cursiv::TextOffset", "b");
+    start.count = local(held, "::cursiv::NodeCount", "f");
     const std::string decl =
         held ? "" : region ? "[[maybe_unused]] const " : "const ";
     put("{}{}{} = c.tape.enter();", decl, held ? "" : "auto ", start.open);
@@ -546,10 +538,7 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
     group(x, k == 0 ? hand : kNoRow);
     held = held || turns(x);
   }
-  if (scoped) {
-    close();
-    line("}");
-  }
+  if (scoped) close("}");
 }
 
 // The arms of a choice, and the token that picks one. What one token settles
@@ -610,30 +599,26 @@ void Emit::decision(std::uint16_t id) {
       std::format("::cursiv::ll_choice_fix<kTable>(c, {}u, {}u)",
                   dec.mode, n.decision);
   if (direct) {
-    put("switch ({}) {{", fix);
-    open();
+    open(std::format("switch ({}) {{", fix));
     for (std::uint16_t i = 0; i < db.nalts; ++i) {
       if (byArm[i].empty()) continue;
       entry[i] = name("A");
       put("case {}u: goto {};", i, entry[i]);
     }
     line("default: break;");
-    close();
-    line("}");
+    close("}");
   } else {
     put("{} = {};", k, fix);
   }
   if (asks)
     put("{} = !kTable.holds(kTable.dec_first({}u), c.la.sym);", none,
         n.decision);
-  close();
-  line("}");
+  close("}");
   if (direct) {
-    line("switch (c.la.sym) {");
+    open("switch (c.la.sym) {");
   } else {
-    line(ended ? "switch (c.la.end == c.len ? 0xFFFFu : c.la.sym) {"
+    open(ended ? "switch (c.la.end == c.len ? 0xFFFFu : c.la.sym) {"
                : "switch (c.la.sym) {");
-    open();
     for (std::uint16_t i = 0; i < db.nalts; ++i)
       for (std::uint16_t t : byArm[i])
         put("case {}u: {} = {}u; break;", t, k, i);
@@ -645,31 +630,27 @@ void Emit::decision(std::uint16_t id) {
       put("default: if ({} == 0xFFFFu) {} = "
           "::cursiv::ll_predict<kTable>(c, {}u); break;",
           k, k, n.decision);
-    close();
-    line("}");
-    put("switch ({}) {{", k);
+    close("}");
+    open(std::format("switch ({}) {{", k));
   }
-  open();
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     if (direct) {
       if (byArm[i].empty()) continue;
       std::string labels;
       for (std::uint16_t t : byArm[i]) labels += std::format("case {}u: ", t);
       if (!entry[i].empty()) labels += entry[i] + ": ";
-      put("{}{{", labels);
+      open(labels + "{");
     } else {
       entry[i] = name("R");
-      put("case {}u: {}: {{", i, entry[i]);
+      open(std::format("case {}u: {}: {{", i, entry[i]));
     }
-    open();
     // One label, one terminal: the arm knows which token it holds. Several,
     // and it knows only that it holds one.
     const std::uint16_t hand =
         direct ? (byArm[i].size() == 1 ? byArm[i][0] : kAnyToken) : kAnyToken;
     group(kid(n, i), hand);
     line("break;");
-    close();
-    line("}");
+    close("}");
   }
   // A choice no arm answers, even after the skip. One invented token is a
   // repair -- the member the choice stood for gets its value; a whole
@@ -684,8 +665,7 @@ void Emit::decision(std::uint16_t id) {
     for (std::uint16_t i = 0; i < db.nalts; ++i)
       put("case {}u: goto {};", i, entry[i]);
     line("default: break;");
-    close();
-    line("}");
+    close("}");
   };
   // The arm invented is entered where the switch spells it, if it does.
   const auto invent = [&] {
@@ -695,45 +675,36 @@ void Emit::decision(std::uint16_t id) {
       group(kid(n, dec.repair), kNoRow);
   };
   if (db.repairCost <= 1) {
-    line("default: {");
-    open();
+    open("default: {");
     reread();
-    line("if (c.invented < ::cursiv::kLlInventRun) {");
-    open();
+    open("if (c.invented < ::cursiv::kLlInventRun) {");
     invent();
-    close();
-    line("}");
+    close("}");
     line("break;");
-    close();
-    line("}");
+    close("}");
   } else {
     // ...and a choice too dear to invent still owes the caller a step.
     // Reading nothing leaves the loop it stands in with nothing to turn on,
     // so one member no arm could name would cost every member after it. The
     // token goes instead, and what stands behind it is read. Where the text
     // has ended no token is left to go: the arm is invented whole.
-    line("default:");
-    open();
+    open("default:");
     reread();
     if (db.repairCost != kLlRepairCostless) {
-      line("if (::cursiv::ll_ends<kTable>(c, c.la.sym) && "
+      open("if (::cursiv::ll_ends<kTable>(c, c.la.sym) && "
            "c.invented < ::cursiv::kLlInventRun) {");
-      open();
       invent();
       close();
-      line("} else {");
-      open();
+      open("} else {");
       line("::cursiv::ll_drop<kTable>(c);");
-      close();
-      line("}");
+      close("}");
     } else {
       line("::cursiv::ll_drop<kTable>(c);");
     }
     line("break;");
     close();
   }
-  close();
-  line("}");
+  close("}");
 }
 
 // One turn of a loop, or with `body` the turn of a flat chain: the choice to
@@ -758,28 +729,21 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   // The turns are counted wherever a bound reads them: a floor guards the
   // choice, a ceiling ends the loop.
   const bool counts = !flat && (n.min != 0 || n.max != kEndless);
-  const std::string i = held && counts ? field("unsigned", "i") : name("i");
-  if (!held) {
-    line("{");
-    open();
-  }
+  const std::string i = local(held && counts, "unsigned", "i");
+  if (!held) open("{");
   if (counts) put("{}{} = 0;", held ? "" : "unsigned ", i);
   // The first turn's gap may be read under another configuration than the
   // gap between two turns.
   const std::uint16_t head = a.headMode[n.decision];
   const bool split = !flat && n.min == 0 && head != dec.mode;
-  const std::string first = !split ? std::string{}
-                            : held ? field("bool", "first")
-                                   : name("first");
+  const std::string first =
+      !split ? std::string{} : local(held, "bool", "first");
   if (split) put("{}{} = true;", held ? "" : "bool ", first);
   const std::string mode =
       flat    ? std::format("{}u", head)
       : split ? std::format("({} ? {}u : {}u)", first, head, dec.mode)
               : std::format("{}u", dec.mode);
-  if (!flat) {
-    line("for (;;) {");
-    open();
-  }
+  if (!flat) open("for (;;) {");
   if (!flat && n.max != kEndless) put("if ({} == {}u) break;", i, n.max);
   const bool guarded = n.min != 0;
   if (guarded) put("if ({} >= {}u) {{", i, n.min);
@@ -800,23 +764,20 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   open();
   put("fix = ::cursiv::ll_loop_fix<kTable>(c, {}, {}u);", mode, n.decision);
   line("if (fix == ::cursiv::kLlLoopLeave) break;");
-  close();
-  line("}");
+  close("}");
   line("bool mend;");
   line("mend = fix == ::cursiv::kLlLoopTurn;");
   // Arm 0 takes a turn, arm 1 leaves: the sets were written in that order.
   const auto byToken = [&] {
     line("bool go;");
     line("go = false;");
-    line("switch (c.la.sym) {");
-    open();
+    open("switch (c.la.sym) {");
     std::string labels;
     for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
       if (a.laSet[dec.set].test(t)) labels += std::format("case {}u: ", t);
     if (!labels.empty()) put("{}go = true; break;", labels);
     line("default: break;");
-    close();
-    line("}");
+    close("}");
     line("if (!go && mend) go = true;");
     line("if (!go) break;");
   };
@@ -828,8 +789,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     // where a turn would have started. LEAVING IS ONLY AN ANSWER WHERE A RULE
     // ABOVE CAN CARRY ON FROM THE TOKEN -- otherwise it costs the author
     // every construct below, so the loop turns and its body repairs.
-    put("if ({} != 0) {{", k);
-    open();
+    open(std::format("if ({} != 0) {{", k));
     put("if ({} == ::cursiv::kNoRow && !mend &&", k);
     put("    !::cursiv::ll_loop_leaves<kTable>(c, {}u)) {{", n.decision);
     open();
@@ -839,45 +799,34 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     line("mend = fix == ::cursiv::kLlLoopTurn;");
     put("{} = ::cursiv::ll_predict<kTable>(c, {}u);", k, n.decision);
     put("if ({} == ::cursiv::kNoRow) mend = true;", k);
-    close();
-    line("}");
+    close("}");
     put("if ({} != 0 && !mend) break;", k);
-    close();
-    line("}");
+    close("}");
   };
   if (dec.how != LlPredict::single) {
     byPrediction();
   } else if (a.decEnded[n.decision] != 0) {
-    line("if (c.la.end == c.len) {");
-    open();
+    open("if (c.la.end == c.len) {");
     byPrediction();
     close();
-    line("} else {");
-    open();
+    open("} else {");
     byToken();
-    close();
-    line("}");
+    close("}");
   } else {
     byToken();
   }
-  if (guarded) {
-    close();
-    line("}");
-  }
+  if (guarded) close("}");
   if (flat) {
     if (inStep) over_fold();
     group(body, kAnyToken);
-    close();
-    line("}");
+    close("}");
     return;
   }
   if (split) put("{} = false;", first);
-  const std::string at =
-      held ? field("::cursiv::TextOffset", "at") : name("at");
+  const std::string at = local(held, "::cursiv::TextOffset", "at");
   put("{}{} = c.at;", held ? "" : "const ::cursiv::TextOffset ", at);
-  const std::string level = !levels ? std::string{}
-                            : held  ? field("::cursiv::IndentAt", "lv")
-                                    : name("lv");
+  const std::string level =
+      !levels ? std::string{} : local(held, "::cursiv::IndentAt", "lv");
   if (levels) put("{}{} = c.indent;", held ? "" : "const auto ", level);
   if (inStep) over_fold();
   group(n.sym, guarded ? kNoRow : kAnyToken);
@@ -890,12 +839,8 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   put("if (c.at == {}{}) break;", at,
       levels ? std::format(" && c.indent == {}", level) : std::string{});
   if (counts) put("++{};", i);
-  close();
-  line("}");
-  if (!held) {
-    close();
-    line("}");
-  }
+  close("}");
+  if (!held) close("}");
 }
 
 // The optional tail of a counted repetition is nested options, each turn one
@@ -928,15 +873,11 @@ void Emit::ladder(std::uint16_t id) {
     if (!more) break;
     id = kid(at(next), 1);
   }
-  const std::string taken = held ? field("bool", "t") : name("t");
+  const std::string taken = local(held, "bool", "t");
   const Anchored regionHere(regionAt);
-  if (!held) {
-    line("{");
-    open();
-  }
+  if (!held) open("{");
   put("{}{} = false;", held ? "" : "bool ", taken);
-  line("for (;;) {");
-  open();
+  open("for (;;) {");
   for (std::size_t k = 0; k < turns.size(); ++k) {
     if (k == 1) regionAt = {};
     repetition(turns[k].first, turns[k].second);
@@ -944,13 +885,9 @@ void Emit::ladder(std::uint16_t id) {
     if (k == 0) put("{} = true;", taken);
   }
   line("break;");
-  close();
-  line("}");
+  close("}");
   put("if ({0} && c.abandonDepth == ~::std::size_t{{0}}) c.give = false;", taken);
-  if (!held) {
-    close();
-    line("}");
-  }
+  if (!held) close("}");
 }
 
 // The token the point that read it pinned down is taken as read; anything
@@ -1024,11 +961,14 @@ void Emit::climb(std::uint16_t r) {
   // turn only an operator on a looser step goes on. Without a right-grouping
   // operator the operand is always one step tighter, and the frame keeps no
   // flag for it.
-  bool anyNon = false, anyRight = false;
+  bool anyNon = false, anyRight = false, bodies = false, lays = false;
   for (std::uint16_t k = 0; k < cl.opCount; ++k) {
-    const Association assoc = a.cfg.climbOps[cl.opBase + k].assoc;
-    anyNon = anyNon || assoc == Association::non;
-    anyRight = anyRight || assoc == Association::right;
+    const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
+    anyNon = anyNon || op.assoc == Association::non;
+    anyRight = anyRight || op.assoc == Association::right;
+    const bool atomic = a.cfg.atomic_operator(op.body) != kNoRow;
+    bodies = bodies || !atomic;
+    lays = lays || atomic;
   }
   for (const auto& [type, n] : {std::pair{"unsigned", "least"},
                                 {"::cursiv::CstBuilder::Open", "o"},
@@ -1075,8 +1015,7 @@ void Emit::climb(std::uint16_t r) {
   }
   exits = true;
   line("if (c.give) goto done;");
-  line("for (;;) {");
-  open();
+  open("for (;;) {");
   const std::uint16_t selectDec =
       cl.selectNode != kNoRow ? a.cfg.nodes[cl.selectNode].decision : kNoRow;
   line("f.before = c.at;");
@@ -1090,14 +1029,6 @@ void Emit::climb(std::uint16_t r) {
   line("f.prec = 0;");
   if (anyRight) line("f.right = false;");
   if (anyNon) line("f.non = false;");
-  bool bodies = false;
-  for (std::uint16_t k = 0; k < cl.opCount; ++k)
-    bodies = bodies || a.cfg.atomic_operator(
-                           a.cfg.climbOps[cl.opBase + k].body) == kNoRow;
-  bool lays = false;
-  for (std::uint16_t k = 0; k < cl.opCount; ++k)
-    lays = lays ||
-           a.cfg.atomic_operator(a.cfg.climbOps[cl.opBase + k].body) != kNoRow;
   lays = lays && selectDec != kNoRow;
   const std::string invented = name("M");
   // The operator a repair invents: a terminal is laid where the text stops
@@ -1107,8 +1038,7 @@ void Emit::climb(std::uint16_t r) {
     put("{} = ::cursiv::ll_climb_fix<kTable>(c, {}u, {}u);", into, cl.mode,
         selectDec);
     put("if ({} == ::cursiv::kLlClimbAgain) continue;", into);
-    put("switch ({}) {{", into);
-    open();
+    open(std::format("switch ({}) {{", into));
     for (std::uint16_t k = 0; k < cl.opCount; ++k) {
       const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
       const auto leaf = a.cfg.atomic_operator(op.body);
@@ -1118,8 +1048,7 @@ void Emit::climb(std::uint16_t r) {
               grouping(op), k);
         continue;
       }
-      put("case {}u:", k);
-      open();
+      open(std::format("case {}u:", k));
       put("f.prec = {}u;", op.prec);
       if (const std::string stated = grouping(op); !stated.empty())
         line(std::string_view(stated).substr(1));
@@ -1132,8 +1061,7 @@ void Emit::climb(std::uint16_t r) {
       close();
     }
     line("default: break;");
-    close();
-    line("}");
+    close("}");
   };
   if (!select) {
     line("::cursiv::ElementId row;");
@@ -1144,28 +1072,23 @@ void Emit::climb(std::uint16_t r) {
       line("::std::uint16_t body;");
       line("body = ::cursiv::kNoRow;");
     }
-    line("switch (c.la.sym) {");
+    open("switch (c.la.sym) {");
   } else {
     line("::std::uint16_t op;");
     line("bool bad;");
     put("bad = !kTable.holds(kTable.dec_first({}u), c.la.sym);", selectDec);
-    line("if (!bad) {");
-    open();
+    open("if (!bad) {");
     put("op = ::cursiv::ll_predict<kTable>(c, {}u);", selectDec);
     put("if (op >= {}u && !::cursiv::ll_climb_exits<kTable>(c, c.la.sym))",
         cl.opCount);
     put("  op = ::cursiv::ll_reading_fix<kTable>(c, {}u);", selectDec);
     line("bad = false;");
-    close();
-    line("}");
-    line("if (bad) {");
-    open();
+    close("}");
+    open("if (bad) {");
     mend("op");
-    close();
-    line("}");
-    line("switch (op) {");
+    close("}");
+    open("switch (op) {");
   }
-  open();
   for (std::uint16_t k = 0; k < cl.opCount; ++k) {
     const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
     if (select) {
@@ -1197,8 +1120,7 @@ void Emit::climb(std::uint16_t r) {
   } else {
     // A token neither an operator nor one a caller goes on from: the climb
     // is where an operator missing in front of it is invented.
-    line("default:");
-    open();
+    open("default:");
     put("if (kTable.holds(kTable.dec_first({}u), c.la.sym) && "
         "::cursiv::ll_climb_exits<kTable>(c, c.la.sym)) break;",
         selectDec);
@@ -1207,8 +1129,7 @@ void Emit::climb(std::uint16_t r) {
     line("break;");
     close();
   }
-  close();
-  line("}");
+  close("}");
   line(anyNon
            ? "if (f.prec == 0 || f.prec < f.least || f.prec > f.limit) break;"
            : "if (f.prec == 0 || f.prec < f.least) break;");
@@ -1216,14 +1137,12 @@ void Emit::climb(std::uint16_t r) {
   if (!select && !bodies) {
     line("::cursiv::ll_consume<kTable>(c, row, pos);");
   } else {
-    line(select ? "switch (op) {" : "switch (body) {");
-    open();
+    open(select ? "switch (op) {" : "switch (body) {");
     for (std::uint16_t k = 0; k < cl.opCount; ++k) {
       const auto& op = a.cfg.climbOps[cl.opBase + k];
       const auto leaf = a.cfg.atomic_operator(op.body);
       if (!select && leaf != kNoRow) continue;
-      put("case {}u: {{", k);
-      open();
+      open(std::format("case {}u: {{", k));
       if (leaf != kNoRow) {
         // Prediction chooses an operator arm but does not replace the token
         // held by the wider climb alphabet. Its terminal position reads the
@@ -1235,13 +1154,11 @@ void Emit::climb(std::uint16_t r) {
         group(op.body, kAnyToken);
       }
       line("break;");
-      close();
-      line("}");
+      close("}");
     }
     line(select ? "default: break;"
                 : "default: ::cursiv::ll_consume<kTable>(c, row, pos); break;");
-    close();
-    line("}");
+    close("}");
   }
   line("if (c.give || c.at == f.before) break;");
   if (lays) put("{}:;", invented);
@@ -1253,8 +1170,7 @@ void Emit::climb(std::uint16_t r) {
       "0));",
       cl.node);
   line("if (c.give || c.at == f.before) break;");
-  close();
-  line("}");
+  close("}");
 }
 
 // One rule, as a step: its frame holds what outlives a call, and the step
@@ -1359,7 +1275,6 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   constexpr unsigned units = 8;
   constexpr std::string_view banner =
       "// GENERATED by the predictive engine -- do not edit.\n";
-  const std::vector<bool>& live = a.liveRules;
   bool levels = false;
   for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
     levels = levels || a.cfg.terms[t].laid == kLaidIndent ||
@@ -1380,7 +1295,7 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   // a plain rule is only ever called in place.
   std::vector<bool> stepped(a.cfg.nrules, false);
   for (std::uint16_t r = 1; r < a.cfg.nrules; ++r)
-    if (live[r]) {
+    if (a.liveRules[r]) {
       Emit e{{}, a, plan, memo};
       e.levels = levels;
       e.rule(r);

@@ -16,7 +16,6 @@
 #include "cursiv/engines/shared/gen/LexAlphabet.hpp"
 #include "cursiv/engines/shared/gen/LexBacktrack.hpp"
 #include "cursiv/engines/shared/gen/LexDfaBuild.hpp"
-#include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/engines/shared/gen/LexModes.hpp"
 #include "cursiv/engines/shared/gen/LexOwedRows.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
@@ -210,11 +209,6 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
                 const LexModes& modes, std::vector<DynSet>& modeTie) {
   auto& g = built.cfg;
   const std::vector<DynSet>& modeSet = modes.set;
-  LexKeywordCut& cut = alpha.cut;
-  const std::vector<std::uint8_t> words = lex_word_flags(g);
-  LexDfaBuild dfa(alpha.nfa, g.sets.data(), g.sets.size(), alpha.repByte,
-                  alpha.ncls, cut, g.terms.data(), words);
-  LexRelayChains relayChains;
   const auto push_relay = [&built](const LexRelayGen& row) {
     built.relays.push_back(row);
     return built.relays.size() - 1;
@@ -251,22 +245,9 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
             r.accepts,
             [&](const auto& a) { return a.bound != built.dfaBound[self]; }) ||
         !r.stands.empty();
-    built.dfaRelay[self] =
-        relayChains.launched(g, cut, r, built.relays, push_relay);
   };
-
-  for (unsigned m = 0; m < built.nmodes; ++m)
-    built.modeStart[m] = dfa.start(modeSet[m], alpha.startOf);
-  lex_relay_seed(dfa, alpha.nfa.relays, push_relay);
-  dfa.fill(built, write);
-  for (unsigned m = 0; m < built.nmodes; ++m)
-    built.modeStart[m] = dfa.final_of(built.modeStart[m]);
-  for (LexRelayGen& relay : built.relays)
-    relay.resume = dfa.final_of(relay.resume);
-  LexSuccessors successors(built.ndfa);
-  for (unsigned s = 0; s < built.ndfa; ++s)
-    successors.append(
-        {built.dfaNext.data() + std::size_t{s} * built.ncls, built.ncls});
+  lex_build_dfa(built, alpha, alpha.cut, modeSet, push_relay, write);
+  LexSuccessors successors(built.dfaNext.data(), built.ndfa, built.ncls);
   built.typoSuccBase = std::move(successors.base);
   built.typoSucc = std::move(successors.states);
   {

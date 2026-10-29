@@ -7,8 +7,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <span>
 #include <utility>
 #include <vector>
@@ -142,11 +140,6 @@ int lr_trail_elect(LrContext& c, std::uint32_t top, std::uint32_t ta,
     r.events.push_back(v);
     ++r.nodes.back().size;
   };
-  const auto chain = [&](std::uint32_t run, std::uint16_t side) {
-    for (std::uint32_t k = A.cold.electChainAt[run];
-         k < A.cold.electChainAt[run + 1u]; ++k)
-      if (A.cold.electChainPos[k] == side) event(A.cold.electChainWord[k]);
-  };
   const std::uint32_t seeded = c.stack.size();
   // Frame `k` of the cell's stack, its subtree unread.
   const auto unread = [&](std::uint32_t k) {
@@ -211,9 +204,9 @@ int lr_trail_elect(LrContext& c, std::uint32_t top, std::uint32_t ta,
         if (run != kLrNoRun) {
           const std::uint32_t under = n;
           n = open(e, A.cold.electSym[st.state]);
-          chain(run, 0);
+          lr_elect_chain<A>(run, 0, event);
           event(kChild | under);
-          chain(run, 1);
+          lr_elect_chain<A>(run, 1, event);
         }
       }
       r.frames.push_back({n, head, kept});
@@ -282,10 +275,10 @@ int lr_trail_elect(LrContext& c, std::uint32_t top, std::uint32_t ta,
       const bool marked = rule == kLrNoStateSym && kLrRunEnds<A>[sym];
       r.region.push_back(open(0, sym));
       if (marked) event(mark);
-      if (run != kLrNoRun) chain(run, 0);
+      if (run != kLrNoRun) lr_elect_chain<A>(run, 0, event);
       event(kChild | x);
       event(kGap | std::uint64_t{d} << 1);
-      if (run != kLrNoRun) chain(run, 1);
+      if (run != kLrNoRun) lr_elect_chain<A>(run, 1, event);
       if (marked) event(mark | 1u);
       event(kGap | std::uint64_t{d} << 1 | 1u);
     }

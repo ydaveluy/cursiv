@@ -2,7 +2,6 @@
 // a closed value: no template of the grammar survives in it.
 #pragma once
 
-#include "cursiv/core/grammar/ImageOf.hpp"
 #include "cursiv/engines/lr/gen/LrLowered.hpp"
 #include "cursiv/engines/lr/gen/LrRewrite.hpp"
 #include "cursiv/engines/shared/gen/LowerDescOf.hpp"
@@ -19,12 +18,7 @@ template <class G>
 inline constexpr LowerDesc kLrLower = detail::lower_desc<LrView<G>>();
 
 template <class G>
-struct LrLowering
-    : detail::LoweringShell<LrLowering<G>, G, LrRewrite, LrLowered> {
-  static LrLowered lower() {
-    GrammarImage image = grammar_image<LrView<G>>();
-    return lr_lower(image, kLrLower<G>);
-  }
-};
+using LrLowering =
+    detail::LoweringShell<LrView<G>, LrLowered, lr_lower, kLrLower<G>>;
 
 }  // namespace cursiv

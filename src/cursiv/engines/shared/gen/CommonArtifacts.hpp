@@ -1,9 +1,12 @@
-// The units both generators write alike: the grammar's text, its AST and
-// record facets, and its module. An engine writes its table and its parser.
+// The units a generator writes: the engine's table and parser, then what both
+// engines write alike -- the grammar's text, its AST and record facets, and its
+// module.
 #pragma once
 
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/GrammarDump.hpp"
@@ -16,14 +19,19 @@
 namespace cursiv {
 
 struct CommonArtifacts {
+  // The engine's table, its parser's declaration, and the units the parser is
+  // spelled in, each a file name and its text.
+  std::string table;
+  std::string parser;
+  std::span<const std::pair<std::string, std::string>> parserUnits;
   std::string_view ns;
   std::string_view header;
-  const GrammarDump& dump;
+  GrammarDump dump;
   const AstRegistry& registry;
   const AstEntryTable& entries;
   const std::vector<RecordGen>& records;
-  const std::vector<TerminalGen>& terminals;
-  const LanguageIdentity& lang;
+  std::vector<TerminalGen> terminals;
+  LanguageIdentity lang;
   // The engine's parser the module installs: its header and its class.
   std::string_view parserHeader;
   std::string_view parserClass;

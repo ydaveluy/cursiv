@@ -6,67 +6,12 @@
 
 namespace cursiv {
 
-LrShapeId LrLowerer::mark(unsigned cfg, LrShapeId at) {
-  _p.e[at].cfg = static_cast<std::uint8_t>(cfg);
-  return at;
-}
-
-LrShapeId LrLowerer::gather(unsigned cfg, LrShape kind,
-                            const std::vector<LrShapeId>& kids) {
-  const auto base = _p.kid.size();
-  _p.kid.insert(_p.kid.end(), kids.begin(), kids.end());
-  return mark(cfg, _p.push(LrLowerNode{kind, base, kids.size()}));
-}
-
-LrShapeId LrLowerer::lay_kids(unsigned cfg, LrShape kind,
-                              const std::vector<ImageId>& es) {
-  std::vector<LrShapeId> kids;
-  for (const ImageId e : es) kids.push_back(lay(cfg, e));
-  return gather(cfg, kind, kids);
-}
-
-LrShapeId LrLowerer::lay_ref(unsigned cfg, std::uint32_t rule) {
-  if (_im.rules[rule].grammar) {
-    const std::uint32_t entry = _im.ready(rule).face[0].entry;
-    const LrShapeId at = lay_ref(cfg, entry);
-    _cfg.cfgEntry[cfg] = nt_index(static_cast<std::uint16_t>(_p.e[at].sym));
-    return at;
-  }
-  // A rule read in place lays its body here, its conversion over what that
-  // reads, as the rule's own definition would.
-  if (stage(rule).inPlace) {
-    const LrShapeId at = lay(cfg, body_in(cfg, rule));
-    convert_over(_p, at, row_id(stage(rule).convertRow));
-    return at;
-  }
-  const std::uint16_t sym = sym_of(cfg, rule);
-  if (cfg != 0 && !is_term(sym)) _cfg.cloneNeeded[nt_index(sym)] = true;
-  return _p.push_sym(sym, static_cast<std::uint8_t>(cfg));
-}
-
-LrShapeId LrLowerer::lay_embed(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
-  const ImageNode inner = at(kid(n, 0));
-  if (inner.kind != ImageKind::seq || inner.count != 3)
-    refuse_lowering(
-        "this combinator has no lowering: a body reaching here would "
-        "become a right-hand side nobody wrote");
-  const ImageId open = kid(inner, 0);
-  const ImageId entry = kid(inner, 1);
-  const ImageId close = kid(inner, 2);
-  const unsigned in = section_of(n.a, token_core(close));
-  const LrShapeId o = lay(cfg, open);
-  const LrShapeId m = lay(in, entry);
-  const LrShapeId c = lay(in, close);
-  _p.e[c].trail = static_cast<std::uint8_t>(cfg + 1u);
-  _cfg.cfgEnd[in] = static_cast<std::uint16_t>(_p.e[c].sym);
-  return gather(cfg, LrShape::seq, {o, m, c});
-}
-
-LrShapeId LrLowerer::lay_seq(unsigned cfg, ImageId e) {
-  const std::vector<ImageId> runs = gap_runs(kids_of(at(e)));
-  if (runs.size() == 1) return lay(cfg, runs.front());
-  return lay_kids(cfg, LrShape::seq, runs);
+// An embed's close, read under the section it ends: the boundary after it is
+// the caller's.
+LrShapeId LrLowerer::lay_close(unsigned cfg, unsigned in, ImageId e) {
+  const LrShapeId close = lay(in, e);
+  _p.e[close].trail = static_cast<std::uint8_t>(cfg + 1u);
+  return close;
 }
 
 LrShapeId LrLowerer::lay_repeat(unsigned cfg, ImageId e) {
@@ -210,7 +155,7 @@ LrShapeId LrLowerer::lay_flag(unsigned cfg, ImageId e) {
   // A flag over a repetition that may read nothing sets on the empty path
   // too: the row stands on a sequence around it, not on the item.
   if (_p.e[node].kind == LrShape::rep && _p.e[node].min == 0)
-    node = gather(cfg, LrShape::seq, {node});
+    node = wrap(cfg, node);
   _p.e[node].row.push_back(row_id(n.row));
   return node;
 }
@@ -231,12 +176,8 @@ LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
     case ImageKind::choice:
       return gap(e) ? lay_gap(cfg, e)
                     : lay_kids(cfg, LrShape::alt, kids_of(n));
-    case ImageKind::unordered: {
-      const std::vector<ImageId> ks = kids_of(n);
-      const LrShapeId node = lay_kids(cfg, LrShape::unordered, ks);
-      present_optional_items(_p, node, ks);
-      return node;
-    }
+    case ImageKind::unordered:
+      return lay_unordered(cfg, e);
     case ImageKind::repeat:
       return lay_repeat(cfg, e);
     case ImageKind::skip:
@@ -263,18 +204,8 @@ LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
     }
     case ImageKind::implied:
       return lay_implied(cfg, e);
-    case ImageKind::lit:
-    case ImageKind::cpset:
-    case ImageKind::byte:
-    case ImageKind::doc:
-    case ImageKind::through:
-    case ImageKind::indent:
-    case ImageKind::dedent:
-      return _p.push_sym(terminal_sym(cfg, e), static_cast<std::uint8_t>(cfg));
-    default:
-      refuse_lowering(
-          "this combinator has no lowering: a body reaching here would "
-          "become a right-hand side nobody wrote");
+    default:  // a token, or a combinator `terminal_sym` refuses
+      return push_sym(terminal_sym(cfg, e), cfg);
   }
 }
 
@@ -289,7 +220,7 @@ LrShapeId LrLowerer::lay_gap(unsigned cfg, ImageId e) {
       _cfg.prods[before].gap = static_cast<std::uint8_t>(k + 1u);
     _p.gapNt[k] = static_cast<std::uint16_t>(aux + 1u);
   }
-  return _p.push_sym(nt_sym(_p.gapNt[k] - 1u), static_cast<std::uint8_t>(cfg));
+  return push_sym(nt_sym(_p.gapNt[k] - 1u), cfg);
 }
 
 LrShapeId LrLowerer::lay_stop(unsigned cfg, ImageId e, const Cut& cut) {
@@ -308,19 +239,14 @@ LrShapeId LrLowerer::lay_stop(unsigned cfg, ImageId e, const Cut& cut) {
       _cfg.prodBuild[before].stop = static_cast<std::uint16_t>(_cfg.stopCuts.size());
     _p.stopNt.push_back(static_cast<std::uint16_t>(aux + 1u));
   }
-  return _p.push_sym(nt_sym(_p.stopNt[at_->second] - 1u),
-                     static_cast<std::uint8_t>(cfg));
+  return push_sym(nt_sym(_p.stopNt[at_->second] - 1u), cfg);
 }
 
 LrShapeId LrLowerer::lay_implied(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
-  if (!implied_token_ok(cfg, kid(n, 0)))
-    refuse_lowering(
-        "cursiv: `implied(tok, cond)` lays a token of no width, so "
-        "`tok` is an unguarded literal or a terminal whose body is "
-        "one -- where it is no literal, write `tok | eof`");
+  check_implied_token(cfg, kid(n, 0));
   const std::uint16_t k = gap_cond(cfg, kid(n, 1));
-  return _p.push_sym(implied_term(e, k), static_cast<std::uint8_t>(cfg));
+  return push_sym(implied_term(e, k), cfg);
 }
 
 }  // namespace cursiv

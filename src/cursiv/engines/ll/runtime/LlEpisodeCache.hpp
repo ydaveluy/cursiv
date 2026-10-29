@@ -57,24 +57,16 @@ inline LlEpisodeCache& ll_episode_cache() {
   return cache;
 }
 
+// A pool of the parse's cache, made at its first ask: `exact`, or `lent`.
 template <const auto& T>
-inline LlReturnPool& ll_exact_pool() {
-  auto& exact = ll_episode_cache<T>().exact;
-  if (!exact) {
-    exact.emplace();
-    exact->read_returns_by_class(T.atn.returnClass);
+inline LlReturnPool& ll_pool(bool exact) {
+  LlEpisodeCache& cache = ll_episode_cache<T>();
+  auto& pool = exact ? cache.exact : cache.lent;
+  if (!pool) {
+    pool.emplace();
+    pool->read_returns_by_class(T.atn.returnClass);
   }
-  return *exact;
-}
-
-template <const auto& T>
-inline LlReturnPool& ll_lent_pool() {
-  auto& lent = ll_episode_cache<T>().lent;
-  if (!lent) {
-    lent.emplace();
-    lent->read_returns_by_class(T.atn.returnClass);
-  }
-  return *lent;
+  return *pool;
 }
 
 // The sim of the parse's episodes, over the pool they read in.
@@ -83,7 +75,7 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
   auto& cache = ll_episode_cache<T>();
   auto& slot = tracked ? cache.tracked : cache.plain;
   if (!slot) {
-    slot.emplace(T.atn, ll_lent_pool<T>(), tracked);
+    slot.emplace(T.atn, ll_pool<T>(false), tracked);
     slot->rank_arms_over_lexes(T.repeatScopes);
     slot->share_calls(T.sharedRules);
   }
@@ -136,9 +128,10 @@ template <const auto& T>
 struct LlExactWalk {
   explicit LlExactWalk(const LlContext& c)
       : _cache(&ll_episode_cache<T>()),
-        _pool(ll_lent_pool<T>()),
-        key(c.stack.context(ll_exact_pool<T>(),
-                             ll_document_context<T>(ll_exact_pool<T>(), c.document))),
+        _pool(ll_pool<T>(false)),
+        key(c.stack.context(
+            ll_pool<T>(true),
+            ll_document_context<T>(ll_pool<T>(true), c.document))),
         context(ll_lend_stack(*_cache, key)),
         _holds(_pool.contexts().begin_scratch()) {}
   ~LlExactWalk() {

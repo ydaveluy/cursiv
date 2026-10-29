@@ -48,9 +48,9 @@ class OwnedCursor {
 // member may open the node it holds -- and anything else after it: a keyword
 // that is a nested node's only record is that node's.
 template <bool kWriterFirst, class Match, class Take>
-void walk(const Cst& cst, OwnedCursor& owned, NodeId root, const Match& matches,
-          const Take& take) {
+void walk(const Cst& cst, NodeId root, const Match& matches, const Take& take) {
   if (root == kNoNode || root >= cst.size()) return;
+  OwnedCursor owned(cst.owned(), root);
   const NodeId begin = cst.subtree_begin(root);
   for (NodeId cursor = root; cursor > begin;) {
     const NodeId child = cursor - 1;
@@ -82,8 +82,7 @@ std::vector<CstNodeView> collect(const CstNodeView& node,
                                  const Match& matches) {
   std::vector<CstNodeView> found;
   const Cst& cst = *node.cst;
-  OwnedCursor owned(cst.owned(), node.id);
-  walk<kWriterFirst>(cst, owned, node.id, matches, [&](NodeId id) {
+  walk<kWriterFirst>(cst, node.id, matches, [&](NodeId id) {
     found.push_back(CstNodeView{&cst, id});
   });
   std::reverse(found.begin(), found.end());
@@ -96,8 +95,7 @@ std::optional<CstNodeView> first_of(const CstNodeView& node,
                                     const Match& matches) {
   std::optional<CstNodeView> first;
   const Cst& cst = *node.cst;
-  OwnedCursor owned(cst.owned(), node.id);
-  walk<kWriterFirst>(cst, owned, node.id, matches,
+  walk<kWriterFirst>(cst, node.id, matches,
                      [&](NodeId id) { first = CstNodeView{&cst, id}; });
   return first;
 }

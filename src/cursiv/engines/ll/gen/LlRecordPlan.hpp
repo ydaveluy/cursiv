@@ -130,9 +130,7 @@ class LlRecordPlan {
   }
 
   static void add(std::vector<std::uint16_t>& out, std::uint16_t row) {
-    for (const auto x : out)
-      if (x == row) return;
-    out.push_back(row);
+    if (std::ranges::find(out, row) == out.end()) out.push_back(row);
   }
   static void append(std::vector<std::uint16_t>& out,
                      const std::vector<std::uint16_t>& rows) {
@@ -199,9 +197,8 @@ class LlRecordPlan {
         users[u.body].push_back(rule(r));
       }
     }
-    // Keep the former scan's rounds and position order: rule rows retain the
-    // order in which joins first reach them. Only changed dependencies ask a
-    // position to run again; aliases no longer rescan unrelated rules.
+    // Positions run in rounds, by id, so rule rows keep the order in which
+    // joins first reach them; only a changed dependency runs one again.
     std::priority_queue<std::uint64_t, std::vector<std::uint64_t>,
                         std::greater<>>
         todo;

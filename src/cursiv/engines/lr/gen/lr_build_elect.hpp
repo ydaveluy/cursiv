@@ -2,7 +2,6 @@
 // meets them: what a merge compares two derivations by.
 #pragma once
 
-
 #include "cursiv/engines/lr/gen/LrBuildTable.hpp"
 
 namespace cursiv {

@@ -153,12 +153,15 @@ struct level_rule<S, G, InfixRun<I, K>> {
   using type = InfixRun<I, K>;
 };
 
-template <class S, class Reached = reached_of<S>>
-struct InfixLevelStage : S {
+// A stage whose rules `Rule` answers over the lead graph of the rules `S`
+// reaches: the levels of an infix here, and the LL loop folds over them.
+template <template <class, class, class> class Rule, class S,
+          class Reached = reached_of<S>>
+struct LeadGraphStage : S {
   // A class of its own, so the rules keyed on the graph are named by the stage.
   struct graph : LeadGraph<S, typename Reached::type> {};
   template <class R>
-  using rule = typename level_rule<S, graph, R>::type;
+  using rule = typename Rule<S, graph, R>::type;
   template <class R>
   using body = typename ov::stage_body<rule<R>>::type;
   using entry = rule<typename S::entry>;

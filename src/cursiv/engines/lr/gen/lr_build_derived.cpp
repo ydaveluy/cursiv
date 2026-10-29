@@ -69,11 +69,8 @@ struct LrDeriving {
       for (const LrAction& x : a.action_row(s)) {
         // The runtime reader visits only action cells in this state's follow.
         if (!a.follow[s].test(x.term)) continue;
-        if (x.kind == LrActionKind::shift) after[x.term] |= a.follow[x.arg];
-        // These are the destinations emitted in guardOps after the conditions.
-        if (x.kind == LrActionKind::guard)
-          for (const auto to : a.guards[x.arg].to)
-            if (to != 0xffffu) after[x.term] |= a.follow[to];
+        a.each_landing(
+            x, [&](std::uint16_t to) { after[x.term] |= a.follow[to]; });
       }
     }
     rows.typoReach = SetPool(reach.data(), static_cast<unsigned>(n));

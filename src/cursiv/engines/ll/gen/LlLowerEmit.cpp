@@ -42,11 +42,8 @@ std::uint16_t put_group(LlLowered& o, LlShape kind,
                   b);
 }
 
-// A choice the parse makes, minted where the shape holds one. What separates
-// its arms is the construction's to settle; the lowering only says where a
-// decision stands.
 std::uint16_t new_decision(LlLowered& o, std::uint16_t node,
-                                  std::uint16_t nalts, std::uint16_t owner) {
+                           std::uint16_t nalts, std::uint16_t owner) {
   if (o.cfg.ndecisions >= kNoRow) too_many_positions();
   const auto id = static_cast<std::uint16_t>(o.cfg.ndecisions);
   o.cfg.decisionBuild[o.cfg.ndecisions].nalts = nalts;
@@ -251,6 +248,11 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
       return emit_unordered(o, p, e, made, row, owner);
     case Shape::rep: {
       refuse_item(o, p, e, owner);
+      const auto body = [&] {
+        const auto copy = emit_item(o, p, e.sym, owner);
+        if (e.max > 1) o.cfg.nodeBuild[copy].repeatOwner = owner;
+        return copy;
+      };
       if ((e.max != kEndless && (e.max > 1 || e.min == e.max)) ||
           e.min > 1) {
         // Each counted occurrence is a different call site. Expanding only
@@ -262,11 +264,6 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
         const std::uint64_t spelt = turns + (optional == 0 ? 1 : 2 * optional);
         if (o.cfg.nnodes + spelt > kNoRow)
           return refuse_node(o, LowerFail::tooManyPositions, owner);
-        const auto body = [&] {
-          const auto copy = emit_item(o, p, e.sym, owner);
-          if (e.max > 1) o.cfg.nodeBuild[copy].repeatOwner = owner;
-          return copy;
-        };
         const auto sequence = [&](const std::vector<std::uint16_t>& ids,
                                   std::uint16_t chain, bool outer = false) {
           return put_group(o, ids.empty() ? LlShape::empty : LlShape::seq, ids,
@@ -306,8 +303,7 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
         }
         return sequence(ids, o.writes.intern_cat(made, row), true);
       }
-      const std::uint16_t kid = emit_item(o, p, e.sym, owner);
-      if (e.max > 1) o.cfg.nodeBuild[kid].repeatOwner = owner;
+      const std::uint16_t kid = body();
       const std::uint16_t id = put_node(
           o,
           LlNode{.kind = LlShape::rep,
@@ -367,8 +363,6 @@ void lay_own_records(LlLowered& o, const LlRecordPlan& plan) {
   }
 }
 
-// A condition reads the gap on its own side of the token: those in front of it
-// stay in front, those behind it stay behind.
 void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
                          std::uint16_t row, std::uint8_t prec,
                          Association group, std::uint8_t cfg,
@@ -430,6 +424,5 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
   // Losing an operator silently changes the language and precedence.
   o.fault.raise(GrammarFaultCode::infixOperatorNotText, p.owner);
 }
-
 
 }  // namespace cursiv::detail::llow

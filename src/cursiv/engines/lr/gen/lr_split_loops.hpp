@@ -21,17 +21,10 @@ namespace cursiv {
 inline void lr_split_loops(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   const unsigned nN = c.nnts, nP = c.nprods;
-  const auto loop = [&](unsigned nt) -> std::uint16_t {
-    return nt < c.leftLoop.size() ? c.leftLoop[nt] : std::uint16_t{kNoRow};
-  };
   std::vector<unsigned> lead(nP, nN);
   const auto by_lhs = lr_by_lhs(c);
-  for (unsigned p = 0; p < nP; ++p) {
-    const LrLowProd& q = c.prods[p];
-    if (q.len == 0 || is_term(c.sym_at(q, 0))) continue;
-    const unsigned x = nt_index(c.sym_at(q, 0));
-    if (loop(x) != kNoRow && loop(x) == loop(q.lhs)) lead[p] = x;
-  }
+  for (unsigned p = 0; p < nP; ++p)
+    if (c.turns(p)) lead[p] = nt_index(c.sym_at(c.prods[p], 0));
 
   const auto live = lr_reachable(c, by_lhs);
   std::vector<std::uint8_t> head(nN, 0);
@@ -40,16 +33,16 @@ inline void lr_split_loops(LrLowered& o) {
     if (!live[q.lhs]) continue;
     for (unsigned i = lead[p] == nN ? 0u : 1u; i < q.len; ++i)
       if (const std::uint16_t s = c.sym_at(q, i);
-          !is_term(s) && loop(nt_index(s)) != kNoRow)
+          !is_term(s) && c.loop_of(nt_index(s)) != kNoRow)
         head[nt_index(s)] = 1;
   }
   std::map<std::uint16_t, std::vector<std::uint16_t>> members, heads;
   std::uint16_t next = 0;
   for (unsigned n = 0; n < nN; ++n) {
-    if (loop(n) == kNoRow) continue;
-    members[loop(n)].push_back(static_cast<std::uint16_t>(n));
-    if (head[n]) heads[loop(n)].push_back(static_cast<std::uint16_t>(n));
-    next = std::max(next, static_cast<std::uint16_t>(loop(n) + 1u));
+    if (c.loop_of(n) == kNoRow) continue;
+    members[c.loop_of(n)].push_back(static_cast<std::uint16_t>(n));
+    if (head[n]) heads[c.loop_of(n)].push_back(static_cast<std::uint16_t>(n));
+    next = std::max(next, static_cast<std::uint16_t>(c.loop_of(n) + 1u));
   }
 
   struct Place {

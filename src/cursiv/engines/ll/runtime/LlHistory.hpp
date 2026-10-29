@@ -557,37 +557,13 @@ class LlHistory {
     if (weight(a) != weight(b) ||
         _trees.rows[a].digest != _trees.rows[b].digest)
       return false;
-    auto& x = _walkA;
-    auto& y = _walkB;
-    x.clear();
-    y.clear();
-    if (a != 0) x.push_back({a, 0, {}});
-    if (b != 0) y.push_back({b, 0, {}});
-    while (!x.empty() && !y.empty()) {
-      Piece& p = x.back();
-      Piece& q = y.back();
-      if (p.tree != 0 && p.tree == q.tree) {
-        x.pop_back();
-        y.pop_back();
-      } else if (p.tree != 0 &&
-                 (q.tree == 0 || weight(p.tree) >= weight(q.tree))) {
-        const Id t = p.tree;
-        x.pop_back();
-        open(x, t);
-      } else if (q.tree != 0) {
-        const Id t = q.tree;
-        y.pop_back();
-        open(y, t);
-      } else {
-        if (!(p.event == q.event)) return false;
-        const auto both = p.count < q.count ? p.count : q.count;
-        p.count -= both;
-        q.count -= both;
-        if (p.count == 0) x.pop_back();
-        if (q.count == 0) y.pop_back();
-      }
-    }
-    return x.empty() && y.empty();
+    _walkA.clear();
+    _walkB.clear();
+    if (a != 0) _walkA.push_back({a, 0, {}});
+    if (b != 0) _walkB.push_back({b, 0, {}});
+    std::uint32_t shared = 0;
+    Event x, y;
+    return !part(shared, x, y);
   }
   // How many events `a` and `b` share first, and where they part the event
   // each has there: false where one runs into the other. Identical shared
@@ -607,11 +583,16 @@ class LlHistory {
         }
       return false;
     }
+    lay(_walkA, a);
+    lay(_walkB, b);
+    shared = 0;
+    return part(shared, eventA, eventB);
+  }
+  // The pieces laid in `_walkA` and `_walkB` walked side by side, as `diverge`
+  // walks two histories.
+  bool part(std::uint32_t& shared, Event& eventA, Event& eventB) const {
     std::vector<Piece>& x = _walkA;
     std::vector<Piece>& y = _walkB;
-    lay(x, a);
-    lay(y, b);
-    shared = 0;
     while (!x.empty() && !y.empty()) {
       Piece& p = x.back();
       Piece& q = y.back();

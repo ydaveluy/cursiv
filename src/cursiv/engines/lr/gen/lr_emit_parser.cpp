@@ -53,9 +53,10 @@ namespace cursiv {
 
 namespace {
 
-struct LrParserEmitter : EmitOutput {
+struct LrParserEmitter : LexWalkRungs<LrLexView> {
   explicit LrParserEmitter(const LrFinalTable& done)
-      : a(done.table()),
+      : LexWalkRungs(LrLexView{done.table()}),
+        a(done.table()),
         gotos(a.gotoRows, a.cfg.nnts),
         dfa(a.cls, {a.dfaNext.data(), a.dfaNext.size()}, a.ncls, a.ndfa),
         programs(done.programs()) {}
@@ -243,10 +244,7 @@ struct LrParserEmitter : EmitOutput {
           h = e;
           if (implied(x.term)) laidInto[to] = true;
         };
-        if (x.kind == LrActionKind::shift) into(x.arg);
-        if (x.kind == LrActionKind::guard)
-          for (const std::uint16_t to : a.guards[x.arg].to)
-            if (to != LrGuard::kNoState) into(to);
+        a.each_landing(x, into);
       }
   }
   // A probe's shift is written once per target and element, the token's
@@ -472,8 +470,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
         stamp_args());
     // The gap starts where the last token with a width ended.
     if (conds()) line("  if (e != b) c.virt.from = e;");
-    line("}");
-    line("");
+    raw("}\n\n");
     // An implied token is laid where the last token ended, and the trivia
     // past it is read again behind it. A dedent is shifted: the trivia of its
     // suite's last line is the suite's.
@@ -485,8 +482,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
 )",
           stamp_args());
       if (recorded) line("  c.pending.clear();");
-      line("}");
-      line("");
+      raw("}\n\n");
     }
   }
 
@@ -818,8 +814,7 @@ full:
     }
     line("    default: break;");
     line("  }");
-    line("}");
-    line("");
+    raw("}\n\n");
   }
 
   void emit_pick_cand() {
@@ -875,18 +870,9 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 )");
   }
 
-  LexRunEmitter runs;
-
-  // Advance `var` over the run of `stay` bytes, eight at a time where the set
-  // has a SWAR shape.
-  void emit_run_adv(const ByteSet& stay, std::string_view var,
-                    std::string_view setName, bool content = true) {
-    runs.advance(*this, stay, var, setName, content);
-  }
-
   // Only an unguarded one-byte literal with no continuation bypasses the lexer.
   bool byte_literal(unsigned m, unsigned t) const {
-    return lex_byte_literal(LrLexView{a}, m, t);
+    return lex_byte_literal(view, m, t);
   }
 
   mutable std::unordered_map<unsigned, DynSet> reachedTerms{};
@@ -908,20 +894,6 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   bool walk_partial(unsigned m) const {
     return dfa.ladder_from(a.modeStart[m]).size() !=
            dfa.states_from(a.modeStart[m]).size();
-  }
-
-  void emit_match(unsigned st, std::string_view ind) {
-    if (a.dfaAccept[st] != 0)
-      fmt("{}match.take(kTape, {}u, src, i, len, far);\n", ind, st);
-  }
-
-  bool plain_run(unsigned st) const {
-    return lex_plain_run(LrLexView{a}, static_cast<std::uint16_t>(st));
-  }
-
-  int continuation_of(unsigned st, const std::uint8_t* spelled) const {
-    return lex_continuation_of(LrLexView{a}, static_cast<std::uint16_t>(st),
-                               spelled);
   }
 
   void emit_bound_exit(unsigned st, const std::uint8_t* spelled) {
@@ -949,16 +921,6 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     fmt("  term = {};\n", a.dfaAccept[st] - 1u);
     fmt("  match.state = {};\n", st);
     line("  goto Wdone;");
-  }
-
-  bool blind(unsigned st) const {
-    return lex_run_blind(LrLexView{a}, static_cast<std::uint16_t>(st));
-  }
-
-  // The relays launched at a state, to compete with the walk's own match.
-  void emit_relay_call(unsigned st, std::string_view ind) {
-    for (auto k = a.dfaRelay[st]; k != kNoRelay; k = a.relays[k].next)
-      fmt("{}relays.launch(kTape, {}u, src, len, start, i);\n", ind, k);
   }
 
   void walk_foot() {
@@ -1023,8 +985,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
                "kTable.modeStart[mode], start, ::cursiv::Scan{end, term},\n"
                "      match.state);"
              : "  return ::cursiv::Scan{end, term};");
-    line("}");
-    line("");
+    raw("}\n\n");
   }
 
   std::string_view done(unsigned st) const {
@@ -1038,9 +999,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     if (a.dfaBacktrack.empty() || a.dfaBacktrack[st] == 0) return;
     std::string check = "term != ::cursiv::kInvalidSymbol";
     if (!self) check += " && (i & 63u) == 0";
-    if (a.nrelays != 0) {
-      check += " && !relays.any()";
-    }
+    if (a.nrelays != 0) check += " && !relays.any()";
     check += " && ::cursiv::LexSuffixSession<"
              "::cursiv::LrLexTape<kTable>>::has_backtracked()";
     check += sharing();
@@ -1160,8 +1119,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
       fmt("  if (kTable.flagged({0}, c.la.sym)) [[unlikely]] "
           "::cursiv::lr_drive_exact<kTable>(c, {0});\n",
           m);
-    line("}");
-    line("");
+    raw("}\n\n");
   }
 
   void emit_lengthen() {
@@ -1335,8 +1293,7 @@ again:
     line("done:");
     fmt("  c.laMode = {};\n", mode);
     fmt("  c.la.mode = {};\n", mode);
-    line("}");
-    line("");
+    raw("}\n\n");
   }
 
   // Equivalent production plans share one reduction entry. The common move
@@ -1442,12 +1399,7 @@ again:
         live[to] = true;
         work.push_back(to);
       };
-      for (const auto e : gotos[lhs]) {
-        reach(e.to);
-        if (e.guard != 0)
-          for (const std::uint16_t to : a.guards[e.guard - 1u].to)
-            if (to != LrGuard::kNoState) reach(to);
-      }
+      for (const auto e : gotos[lhs]) a.each_goto_landing(e, reach);
     };
     for (unsigned q = 0; q < a.cfg.nprods; ++q)
       if (a.cfg.prods[q].node != kNoRow) spread(a.cfg.prods[q].lhs);
@@ -2254,9 +2206,8 @@ again:
     line("#include \"cursiv/engines/lr/runtime/lr_matcher.hpp\"");
     if (a.modeFlagPool.sets.size() != 0)
       line("#include \"cursiv/engines/lr/runtime/lr_lex_exact.hpp\"");
-    if (a.nrelays != 0) {
+    if (a.nrelays != 0)
       line("#include \"cursiv/engines/shared/runtime/LexRelayRun.hpp\"");
-    }
     if (conds() || a.nrelays != 0)
       line("#include \"cursiv/engines/shared/runtime/GapPositions.hpp\"");
     line("#include \"cursiv/engines/lr/runtime/lr_reduce.hpp\"");
@@ -2279,7 +2230,7 @@ again:
       for (unsigned st = 0; st < a.nstates; ++st) done[a.mode[st]] = 1;
       emit_walk();
       if (a.nrelays != 0)
-        lex_emit_relay_runs(*this, dfa, runs, LrLexView{a},
+        lex_emit_relay_runs(*this, dfa, runs, view,
                             std::span(a.relays.data(), a.nrelays),
                             "Table::relay_run");
       if (conds()) {
@@ -2306,22 +2257,15 @@ again:
     };
     for (unsigned s = 0; s < ns; ++s) {
       for (const LrAction& x : a.action_row(s)) {
-        if (x.kind == LrActionKind::shift) link(s, x.arg);
         if (x.kind == LrActionKind::reduce) link(s, ns + reduceOf[x.arg]);
-        if (x.kind == LrActionKind::guard)
-          for (const std::uint16_t to : a.guards[x.arg].to)
-            if (to != LrGuard::kNoState) link(s, to);
+        a.each_landing(x, [&](unsigned to) { link(s, to); });
       }
     }
     for (unsigned q = 0; q < a.cfg.nprods; ++q) {
       if (weight[ns + q] == 0) continue;
       const unsigned lhs = a.cfg.prods[q].lhs;
-      for (const auto e : gotos[lhs]) {
-        link(ns + q, e.to);
-        if (e.guard != 0)
-          for (const std::uint16_t to : a.guards[e.guard - 1u].to)
-            if (to != LrGuard::kNoState) link(ns + q, to);
-      }
+      for (const auto e : gotos[lhs])
+        a.each_goto_landing(e, [&](unsigned to) { link(ns + q, to); });
     }
     // States that read one dispatch go to one group: the jump into the lead's
     // reading stays inside one function, as the weights above assumed.
@@ -2549,8 +2493,7 @@ again:
       line("};");
       line("  goto* kIn[e];");
       raw(bodies[g]);
-      line("}");
-      line("");
+      raw("}\n\n");
     }
     // A lone group's entries are the states in order.
     if (ngroups > 1)

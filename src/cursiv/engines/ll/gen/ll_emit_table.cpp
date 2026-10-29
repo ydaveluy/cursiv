@@ -38,6 +38,13 @@ namespace {
 using Built = LlBuiltProgram;
 
 std::string u(std::uint64_t v) { return std::format("{}u", v); }
+std::string byte_set(const ByteSet& s) {
+  return std::format("{{{{{}u,{}u,{}u,{}u}}}}", s.w[0], s.w[1], s.w[2], s.w[3]);
+}
+std::string range(const unicode::Range& r) {
+  return std::format("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
+                     static_cast<std::uint32_t>(r.hi));
+}
 
 struct Out : EmitOutput {
   // The arrays left out, empty or not wanted: a reference to one is null.
@@ -172,21 +179,11 @@ struct ClimbExits {
   }
 };
 
-bool reserves(const Built& a) {
-  return a.dfaResSet.size() >= a.ndfa &&
-         std::any_of(a.dfaResSet.data(), a.dfaResSet.data() + a.ndfa,
+// Whether a state of the automaton has a terminal in `sets`.
+bool any_set(const Built& a, const Vec<DynSet>& sets) {
+  return sets.size() >= a.ndfa &&
+         std::any_of(sets.data(), sets.data() + a.ndfa,
                      [](const DynSet& set) { return set.any(); });
-}
-
-bool longer_modes(const Built& a) {
-  return std::any_of(a.modeLonger.begin(), a.modeLonger.end(),
-                     [](std::uint16_t m) { return m != kNoMode; });
-}
-
-// Whether the modes' joined trivia differs from their plain trivia: with no
-// `joins` terminal both are one array.
-bool joined_trivia_apart(const Built& a) {
-  return a.modeJoinedTrivia != a.modeTrivia;
 }
 
 // Per mode, the one-byte literal each first byte reads whole: rows of 256,
@@ -223,12 +220,6 @@ struct ByteTerms {
     }
   }
 };
-
-bool relay_reserves(const Built& a) {
-  return a.dfaRelayResSet.size() >= a.ndfa &&
-         std::any_of(a.dfaRelayResSet.data(), a.dfaRelayResSet.data() + a.ndfa,
-                     [](const DynSet& set) { return set.any(); });
-}
 
 std::string staged_source(const Built& a) {
   Out o;
@@ -315,29 +306,6 @@ std::string staged_source(const Built& a) {
   return o.out;
 }
 
-// Per position, the operator step it reads in a climb with a step that groups
-// nothing (`LlTable::nodeStep`); empty where no climb has one. An operator of
-// several tokens names none.
-std::vector<std::uint32_t> node_steps(const Built& a) {
-  const auto& g = a.cfg;
-  std::vector<std::uint32_t> steps;
-  for (std::uint16_t k = 0; k < g.nclimbs; ++k) {
-    const auto ops = std::span(g.climbOps.data() + g.climbs[k].opBase,
-                               g.climbs[k].opCount);
-    if (std::ranges::none_of(ops, [](const LlClimbOp& op) {
-          return op.assoc == Association::non;
-        }))
-      continue;
-    steps.resize(a.nodeAfter.size());
-    for (const LlClimbOp& op : ops)
-      if (const std::uint16_t n = g.atomic_operator(op.body); n != kNoRow)
-        steps[n] = (std::uint32_t(k + 1u) << 16) |
-                   (std::uint32_t{op.prec} << 1) |
-                   (op.assoc == Association::non ? 1u : 0u);
-  }
-  return steps;
-}
-
 }  // namespace
 
 std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
@@ -356,7 +324,13 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const bool staged = std::ranges::any_of(
       g.decisions.v,
       [](const LlDecision& d) { return d.how == LlPredict::staged; });
-  const bool reserving = reserves(a);
+  const bool reserving = any_set(a, a.dfaResSet);
+  const bool relayReserving = any_set(a, a.dfaRelayResSet);
+  // With no `joins` terminal the modes' joined trivia is their plain trivia.
+  const bool joinedApart = a.modeJoinedTrivia != a.modeTrivia;
+  const bool longer = std::ranges::any_of(
+      a.modeLonger, [](std::uint16_t m) { return m != kNoMode; });
+  const std::uint32_t words = (g.nterms + 63u) / 64u;
   const std::vector<std::uint64_t> skipSet = lex_skip_set(LlLexView{a});
   const ByteTerms byteTerms(a);
   const bool classes = g.scalarRanges.size() != 0;
@@ -422,10 +396,7 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
 
   o.array("::cursiv::ByteSet", "kSets", std::span(g.sets.data(), g.nsets),
-          [](const ByteSet& s) {
-            return std::format("{{{{{}u,{}u,{}u,{}u}}}}", s.w[0], s.w[1],
-                               s.w[2], s.w[3]);
-          });
+          byte_set);
   if (decoding)
     o.array("::std::uint16_t", "kSetDecode", g.setDecode.v);
   else
@@ -475,72 +446,60 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
                            static_cast<unsigned>(x.how), x.mode, x.state);
       });
   o.array("::std::uint8_t", "kCls", std::span(a.cls));
-  {
-    o.array("::std::uint16_t", "kModeStart",
-            std::span(a.modeStart.data(), a.nmodes));
-    o.array("::std::uint8_t", "kModeMulti",
-            std::span(a.modeMulti.data(), a.nmodes));
-    if (!a.modeBacktrack.empty())
-      o.array("::std::uint8_t", "kModeBacktrack", a.modeBacktrack);
-    if (longer_modes(a))
-      o.array("::std::uint16_t", "kModeLonger", a.modeLonger);
-    o.array("::std::uint16_t", "kModeTrivia", a.modeTrivia);
-    if (joined_trivia_apart(a))
-      o.array("::std::uint16_t", "kModeJoinedTrivia", a.modeJoinedTrivia);
-    o.array("::std::uint64_t", "kModeTerms", a.modeTerms);
-    o.array("::std::uint64_t", "kModeSub", a.modeSub);
-    if (std::ranges::any_of(skipSet, [](std::uint64_t w) { return w != 0; }))
-      o.array("::std::uint64_t", "kSkipSet", skipSet);
-    else
-      o.omit("kSkipSet");
-    o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
-    o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
+  o.array("::std::uint16_t", "kModeStart",
+          std::span(a.modeStart.data(), a.nmodes));
+  o.array("::std::uint8_t", "kModeMulti",
+          std::span(a.modeMulti.data(), a.nmodes));
+  o.array("::std::uint8_t", "kModeBacktrack", a.modeBacktrack);
+  if (longer) o.array("::std::uint16_t", "kModeLonger", a.modeLonger);
+  o.array("::std::uint16_t", "kModeTrivia", a.modeTrivia);
+  if (joinedApart)
+    o.array("::std::uint16_t", "kModeJoinedTrivia", a.modeJoinedTrivia);
+  o.array("::std::uint64_t", "kModeTerms", a.modeTerms);
+  o.array("::std::uint64_t", "kModeSub", a.modeSub);
+  if (std::ranges::any_of(skipSet, [](std::uint64_t w) { return w != 0; }))
+    o.array("::std::uint64_t", "kSkipSet", skipSet);
+  else
+    o.omit("kSkipSet");
+  o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
+  o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
+  o.array("::std::uint16_t", "kLexNext",
+          std::span(a.dfaNext.data(), std::size_t{a.ndfa} * a.ncls));
+  o.array("::std::uint32_t", "kTypoSuccBase", a.typoSuccBase);
+  o.array("::std::uint16_t", "kTypoSucc", a.typoSucc);
+  o.array("::std::uint8_t", "kLexBodies", a.lexBodies);
+  o.array("::std::uint16_t", "kLexOwed", a.lexOwed);
+  o.array("::cursiv::ByteSet", "kLexOpeners", a.lexOpeners, byte_set);
+  o.array("::std::uint16_t", "kLexAccept",
+          std::span(a.dfaAccept.data(), a.ndfa));
+  o.array("::std::uint16_t", "kLexBound", std::span(a.dfaBound.data(), a.ndfa));
+  o.array("::std::uint32_t", "kLexChoiceAt", a.lexChoiceAt.v);
+  o.array("::cursiv::LlLexAccept", "kLexChoices", a.lexChoices,
+          [](const LlLexAccept& x) {
+            return std::format("{{{}u,{}u,{}u}}", x.term, x.bound, x.tier);
+          });
+  if (lexChecks) o.array("::std::uint8_t", "kLexChecks", a.lexChecks.v);
+  if (!a.relays.empty()) {
+    o.array("::std::uint16_t", "kLexRelay",
+            std::span(a.dfaRelay.data(), a.ndfa));
+    o.array("::cursiv::LexRelay", "kRelays", a.relays,
+            [&](const LexRelayGen& x) { return lex_relay_source(x, pool); });
   }
-  {
-    o.array("::std::uint16_t", "kLexNext",
-            std::span(a.dfaNext.data(), std::size_t{a.ndfa} * a.ncls));
-    o.array("::std::uint32_t", "kTypoSuccBase", a.typoSuccBase);
-    o.array("::std::uint16_t", "kTypoSucc", a.typoSucc);
-    o.array("::std::uint8_t", "kLexBodies", a.lexBodies);
-    o.array("::std::uint16_t", "kLexOwed", a.lexOwed);
-    o.array("::cursiv::ByteSet", "kLexOpeners", a.lexOpeners,
-            [](const ByteSet& x) {
-              return std::format("{{{{{}u,{}u,{}u,{}u}}}}", x.w[0], x.w[1],
-                                 x.w[2], x.w[3]);
-            });
-    o.array("::std::uint16_t", "kLexAccept",
-            std::span(a.dfaAccept.data(), a.ndfa));
-    o.array("::std::uint16_t", "kLexBound",
-            std::span(a.dfaBound.data(), a.ndfa));
-    o.array("::std::uint32_t", "kLexChoiceAt", a.lexChoiceAt.v);
-    o.array("::cursiv::LlLexAccept", "kLexChoices", a.lexChoices,
-            [](const LlLexAccept& x) {
-              return std::format("{{{}u,{}u,{}u}}", x.term, x.bound, x.tier);
-            });
-    if (lexChecks) o.array("::std::uint8_t", "kLexChecks", a.lexChecks.v);
-    if (!a.relays.empty()) {
-      o.array("::std::uint16_t", "kLexRelay",
-              std::span(a.dfaRelay.data(), a.ndfa));
-      o.array("::cursiv::LexRelay", "kRelays", a.relays,
-              [&](const LexRelayGen& x) { return lex_relay_source(x, pool); });
-    }
-    const std::uint32_t words = (g.nterms + 63u) / 64u;
-    const TermRows acc(std::span(a.dfaAccSet.data(), a.ndfa), words);
-    o.array("::std::uint64_t", "kLexAcc", acc.pool);
-    o.array("::std::uint32_t", "kLexAccAt", acc.at);
-    const TermRows live(lex_live(a), words);
-    o.array("::std::uint64_t", "kLexLive", live.pool);
-    o.array("::std::uint32_t", "kLexLiveAt", live.at);
-    if (reserving) {
-      const TermRows res(std::span(a.dfaResSet.data(), a.ndfa), words);
-      o.array("::std::uint64_t", "kLexRes", res.pool);
-      o.array("::std::uint32_t", "kLexResAt", res.at);
-    }
-    if (relay_reserves(a)) {
-      const TermRows held(std::span(a.dfaRelayResSet.data(), a.ndfa), words);
-      o.array("::std::uint64_t", "kLexRelayRes", held.pool);
-      o.array("::std::uint32_t", "kLexRelayResAt", held.at);
-    }
+  const TermRows acc(std::span(a.dfaAccSet.data(), a.ndfa), words);
+  o.array("::std::uint64_t", "kLexAcc", acc.pool);
+  o.array("::std::uint32_t", "kLexAccAt", acc.at);
+  const TermRows live(lex_live(a), words);
+  o.array("::std::uint64_t", "kLexLive", live.pool);
+  o.array("::std::uint32_t", "kLexLiveAt", live.at);
+  if (reserving) {
+    const TermRows res(std::span(a.dfaResSet.data(), a.ndfa), words);
+    o.array("::std::uint64_t", "kLexRes", res.pool);
+    o.array("::std::uint32_t", "kLexResAt", res.at);
+  }
+  if (relayReserving) {
+    const TermRows held(std::span(a.dfaRelayResSet.data(), a.ndfa), words);
+    o.array("::std::uint64_t", "kLexRelayRes", held.pool);
+    o.array("::std::uint32_t", "kLexRelayResAt", held.at);
   }
   o.array("::cursiv::LlAtnState", "kAtnStates",
           std::span(a.states.data(), a.nstates), [](const LlAtnState& x) {
@@ -563,7 +522,7 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     const ClimbExits exits(a);
     std::vector<DynSet> rows(a.nstates);
     for (const std::uint32_t r : a.callerAt) rows[r] = exits.reads[r];
-    const TermRows pool(rows, (g.nterms + 63u) / 64u);
+    const TermRows pool(rows, words);
     std::vector<std::uint32_t> at(a.nstates);
     for (std::uint32_t s = 0; s < a.nstates; ++s) at[s] = pool.at[s] << 1;
     for (const std::uint32_t r : a.callerAt) at[r] |= exits.ends[r];
@@ -572,26 +531,38 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.array("::std::uint8_t", "kSharedRules", a.sharedRules);
   o.array("::std::uint8_t", "kRepeatScopes", a.repeatScopes);
-  {
-    const std::uint32_t words = (g.nterms + 63u) / 64u;
-    std::vector<std::uint64_t> first(std::size_t{g.ndecisions} * words, 0);
-    for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
-      const LlDecision& dec = g.decisions[d];
-      for (std::uint16_t i = 0; i < g.decisionBuild[d].nalts; ++i)
-        for (std::uint32_t k = 0; k < words; ++k)
-          first[std::size_t{d} * words + k] |= a.laSet[dec.set + i].word(k);
-    }
-    o.array("::std::uint64_t", "kDecFirst", first);
+  std::vector<std::uint64_t> first(std::size_t{g.ndecisions} * words, 0);
+  for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
+    const LlDecision& dec = g.decisions[d];
+    for (std::uint16_t i = 0; i < g.decisionBuild[d].nalts; ++i)
+      for (std::uint32_t k = 0; k < words; ++k)
+        first[std::size_t{d} * words + k] |= a.laSet[dec.set + i].word(k);
   }
+  o.array("::std::uint64_t", "kDecFirst", first);
   o.array("::std::uint32_t", "kNodeAfter", a.nodeAfter);
-  if (!a.afterGap.empty()) {
-    std::vector<std::uint16_t> gaps = a.afterGap;
-    for (std::size_t id = 0; id < gaps.size(); ++id)
-      if (opMode[id] != kNoRow) gaps[id] = kNoRow;
-    o.array("::std::uint16_t", "kNodeAfterGap", gaps);
+  std::vector<std::uint16_t> afterGap = a.afterGap;
+  for (std::size_t id = 0; id < afterGap.size(); ++id)
+    if (opMode[id] != kNoRow) afterGap[id] = kNoRow;
+  o.array("::std::uint16_t", "kNodeAfterGap", afterGap);
+  // Per position, the operator step it reads in a climb with a step that
+  // groups nothing (`LlTable::nodeStep`). An operator of several tokens names
+  // none.
+  std::vector<std::uint32_t> steps;
+  for (std::uint16_t k = 0; k < g.nclimbs; ++k) {
+    const auto ops = std::span(g.climbOps.data() + g.climbs[k].opBase,
+                               g.climbs[k].opCount);
+    if (std::ranges::none_of(ops, [](const LlClimbOp& op) {
+          return op.assoc == Association::non;
+        }))
+      continue;
+    steps.resize(a.nodeAfter.size());
+    for (const LlClimbOp& op : ops)
+      if (const std::uint16_t n = g.atomic_operator(op.body); n != kNoRow)
+        steps[n] = (std::uint32_t(k + 1u) << 16) |
+                   (std::uint32_t{op.prec} << 1) |
+                   (op.assoc == Association::non ? 1u : 0u);
   }
-  const std::vector<std::uint32_t> steps = node_steps(a);
-  if (!steps.empty()) o.array("::std::uint32_t", "kNodeStep", steps);
+  o.array("::std::uint32_t", "kNodeStep", steps);
   o.array("::std::uint16_t", "kEdgeNode", a.edgeNode);
   o.array("::std::uint16_t", "kReturnNode", a.returnNode);
   if (fuseTable)
@@ -605,22 +576,14 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.array("::std::uint16_t", "kSectionEnd", a.sectionEnd);
   }
   o.array("::std::uint16_t", "kWordBounds", a.wordBounds);
-  o.array("::cursiv::unicode::Range", "kWordRanges", g.wordRanges.v,
-          [](const unicode::Range& r) {
-            return std::format("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
-                               static_cast<std::uint32_t>(r.hi));
-          });
+  o.array("::cursiv::unicode::Range", "kWordRanges", g.wordRanges.v, range);
   if (classes) {
     std::vector<std::uint32_t> scalars(g.nsets);
     for (std::uint16_t i = 0; i < g.nsets; ++i)
       scalars[i] = lex_set_scalars(g, i);
     o.array("::std::uint32_t", "kSetScalars", scalars);
     o.array("::cursiv::unicode::Range", "kScalarRanges", g.scalarRanges.v,
-            [](const unicode::Range& r) {
-              return std::format("{{{}u,{}u}}",
-                                 static_cast<std::uint32_t>(r.lo),
-                                 static_cast<std::uint32_t>(r.hi));
-            });
+            range);
   }
   o.line(predicates.declarations());
   // A head leaf a terminal's body decides answers a caret with no bytes.
@@ -746,16 +709,15 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("decFirst", "kDecFirst");
   o.ptr("nodeAfter", "kNodeAfter");
-  if (!a.afterGap.empty()) o.ptr("nodeAfterGap", "kNodeAfterGap");
-  if (!steps.empty()) o.ptr("nodeStep", "kNodeStep");
+  o.ptr("nodeAfterGap", "kNodeAfterGap");
+  o.ptr("nodeStep", "kNodeStep");
   o.fmt("    .nafter = {}u,\n", (unsigned)a.nodeAfter.size());
   o.ptr("edgeNode", "kEdgeNode");
   o.ptr("returnNode", "kReturnNode");
   o.fmt("    .atnStart = {}u,\n", a.atnEntry);
   o.ptr("sets", "kSets");
   o.ptr("setDecode", "kSetDecode");
-  o.fmt("    .wordBytes = {{{{{}u,{}u,{}u,{}u}}}},\n", g.wordBytes.w[0],
-        g.wordBytes.w[1], g.wordBytes.w[2], g.wordBytes.w[3]);
+  o.fmt("    .wordBytes = {},\n", byte_set(g.wordBytes));
   o.ptr("wordRanges", "kWordRanges");
   o.fmt("    .nwordRanges = {}u,\n", g.wordRanges.size());
   if (classes) {
@@ -774,13 +736,10 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (!a.lookMode.empty()) o.ptr("lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
   o.ptr("modeMulti", "kModeMulti");
-  if (!a.modeBacktrack.empty()) o.ptr("modeBacktrack", "kModeBacktrack");
-  if (longer_modes(a)) o.ptr("modeLonger", "kModeLonger");
-  if (!a.modeTrivia.empty()) {
-    o.ptr("modeTrivia", "kModeTrivia");
-    o.ptr("modeJoinedTrivia",
-          joined_trivia_apart(a) ? "kModeJoinedTrivia" : "kModeTrivia");
-  }
+  o.ptr("modeBacktrack", "kModeBacktrack");
+  if (longer) o.ptr("modeLonger", "kModeLonger");
+  o.ptr("modeTrivia", "kModeTrivia");
+  o.ptr("modeJoinedTrivia", joinedApart ? "kModeJoinedTrivia" : "kModeTrivia");
   o.ptr("modeTerms", "kModeTerms");
   o.ptr("modeSub", "kModeSub");
   o.fmt("    .subWords = {}u,\n", a.subWords);
@@ -813,13 +772,13 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("lexLive", "kLexLive");
   o.ptr("lexLiveAt", "kLexLiveAt");
-  if (relay_reserves(a)) {
+  if (relayReserving) {
     o.ptr("lexRelayRes", "kLexRelayRes");
     o.ptr("lexRelayResAt", "kLexRelayResAt");
   }
   o.ptr("wordBounds", "kWordBounds");
   if (reserving) o.line("    .reserves = true,");
-  o.fmt("    .termWords = {}u,\n", (g.nterms + 63u) / 64u);
+  o.fmt("    .termWords = {}u,\n", words);
   o.fmt("    .atn = {{.states = {},\n", o.ref("kAtnStates"));
   o.fmt("            .nstates = {}u,\n", a.nstates);
   o.fmt("            .edges = {},\n", o.ref("kAtnEdges"));

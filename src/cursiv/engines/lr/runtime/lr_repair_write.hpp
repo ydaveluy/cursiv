@@ -32,10 +32,7 @@ namespace cursiv {
 // The trivia before the token in hand, laid as the drive lays it.
 template <const auto& A>
 inline void lr_write_trivia(LrContext& c) {
-  if constexpr (kLrAnyRecorded<A>)
-    lr_record_trivia<true, A.stamp>(c, kLrTermElem<A>.data());
-  else
-    lr_record_trivia<false, A.stamp>(c, nullptr);
+  lr_record_trivia<kLrAnyRecorded<A>, A.stamp>(c, kLrTermElem<A>.data());
 }
 
 // The goto decides first -- a guarded one by the tag of the span's first

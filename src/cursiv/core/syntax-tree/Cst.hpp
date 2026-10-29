@@ -52,23 +52,7 @@ class Cst {
   // Hand-written so a moved-from tree reports itself empty: `= default` copies
   // the scalars, leaving the source claiming a size over storage it no longer
   // owns.
-  Cst(Cst&& other) noexcept
-      : _text(other._text),
-        _pool(std::move(other._pool)),
-        _entryBegin(other._entryBegin),
-        _entryEnd(other._entryEnd),
-        _entryRoot(other._entryRoot),
-        _accepted(other._accepted),
-        _diagnostics(std::move(other._diagnostics)),
-        _stream(std::move(other._stream)),
-        _enginesTape(other._enginesTape),
-        _grammar(other._grammar),
-        _owned(other._owned),
-        _leaves(std::move(other._leaves)),
-        _leafIndex(other._leafIndex),
-        _translation(std::move(other._translation)) {
-    other.clear();
-  }
+  Cst(Cst&& other) noexcept { *this = std::move(other); }
   Cst& operator=(Cst&& other) noexcept {
     if (this == &other) return *this;
     _text = other._text;
@@ -296,8 +280,8 @@ class Cst {
   }
   // The index a second caret question finds ready.
   CURSIV_NOINLINE void index_leaves() const {
-    // Released from a destructor: `build_leaf_index` allocates, and a byte held
-    // past a throw blocks every later caret question.
+    // Released from a destructor: the build allocates, and a byte held past a
+    // throw blocks every later caret question.
     struct Held {
       std::atomic_ref<std::uint8_t> lock;
       ~Held() {
@@ -310,17 +294,14 @@ class Cst {
       lock.wait(1, std::memory_order_relaxed);
     const Held held{lock};
     if (!published(_leafIndex)) {
-      build_leaf_index();
+      // Cleared, not appended to: a build cut short leaves the flag unpublished
+      // and this list half-written.
+      _leaves.clear();
+      _leaves.reserve(size());
+      for (NodeId id = 0; id < size(); ++id)
+        if (node(id).subtreeSize == 1) _leaves.push_back(id);
       publish(_leafIndex);
     }
-  }
-  CURSIV_NOINLINE void build_leaf_index() const {
-    // Cleared, not appended to: a build cut short leaves the flag unpublished
-    // and this list half-written.
-    _leaves.clear();
-    _leaves.reserve(size());
-    for (NodeId id = 0; id < size(); ++id)
-      if (node(id).subtreeSize == 1) _leaves.push_back(id);
   }
 
   // Whether the index a reader depends on is already visible to it. A plain

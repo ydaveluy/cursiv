@@ -23,16 +23,6 @@
 
 namespace cursiv::detail::llow {
 
-template <class L>
-struct fold_choice;
-template <class E>
-struct fold_choice<TypeList<E>> {
-  using type = E;
-};
-template <class... Es>
-struct fold_choice<TypeList<Es...>> {
-  using type = Choice<Es...>;
-};
 template <class E>
 struct fold_alts {
   using type = TypeList<E>;
@@ -300,9 +290,6 @@ consteval void operator_key(LoopKey& k) {
   }
 }
 
-constexpr char loop_fold_case(char c) {
-  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
 constexpr bool loop_keys_apart(const LoopKey& a, const LoopKey& b) {
   if (a.infix != nullptr && a.infix == b.infix && a.level != b.level)
     return true;
@@ -310,8 +297,8 @@ constexpr bool loop_keys_apart(const LoopKey& a, const LoopKey& b) {
   const bool ci = a.ci || b.ci;
   const std::size_t n = a.len < b.len ? a.len : b.len;
   for (std::size_t i = 0; i < n; ++i) {
-    const char x = ci ? loop_fold_case(a.text[i]) : a.text[i];
-    const char y = ci ? loop_fold_case(b.text[i]) : b.text[i];
+    const char x = ci ? to_lower(a.text[i]) : a.text[i];
+    const char y = ci ? to_lower(b.text[i]) : b.text[i];
     if (x != y) return true;
   }
   return false;
@@ -621,11 +608,11 @@ template <class F, std::size_t P>
 struct loop_of {
   static constexpr std::size_t count = F::turns_to(P).count;
   using list = typename excursions<F, P, std::make_index_sequence<count>>::type;
-  using type = cond_t<
-      count == 0, Epsilon,
-      Turns<Repeat<0, kUnbounded,
-                   Closed<typename F::template declared_at<P>,
-                          typename fold_choice<list>::type, true, P == 0>>>>;
+  using type =
+      cond_t<count == 0, Epsilon,
+             Turns<Repeat<0, kUnbounded,
+                          Closed<typename F::template declared_at<P>,
+                                 typename or_of<list>::type, true, P == 0>>>>;
 };
 
 template <class F, std::size_t P>
@@ -634,7 +621,7 @@ struct reading {
       typename alts_of<F, P, std::make_index_sequence<F::plan.arms[P]>>::type;
   static constexpr bool reads = tl_size<alts>::value != 0;
   using group = Closed<typename F::template declared_at<P>,
-                       typename fold_choice<alts>::type, false, true>;
+                       typename or_of<alts>::type, false, true>;
   using type = join_t<group, typename loop_of<F, P>::type>;
 };
 
@@ -744,17 +731,6 @@ struct loop_fold_rule<S, G, R, true> {
     static constexpr bool ll_folded = true;
     using fold_members = typename LoopFold<S, G, declared_of_t<R>>::members;
   };
-};
-
-template <class S, class Reached = reached_of<S>>
-struct LoopFoldStage : S {
-  // A class of its own, so the rules keyed on the graph are named by the stage.
-  struct graph : LeadGraph<S, typename Reached::type> {};
-  template <class R>
-  using rule = typename loop_fold_rule<S, graph, R>::type;
-  template <class R>
-  using body = typename ov::stage_body<rule<R>>::type;
-  using entry = rule<typename S::entry>;
 };
 
 }  // namespace cursiv::detail::llow

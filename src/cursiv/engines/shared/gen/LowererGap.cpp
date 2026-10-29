@@ -235,12 +235,6 @@ Lowerer::Cut Lowerer::cut_prefix(ImageId p) {
   return out;
 }
 
-void Lowerer::gap_op(std::uint16_t v) { _c.gapOps[_c.ngapOps++] = v; }
-
-std::uint16_t Lowerer::phrase_skip(std::uint16_t skip) {
-  return _lex.push(_c.lex[skip]);
-}
-
 std::uint16_t Lowerer::skip_node(unsigned cfg) {
   if (_pool.skipNode.size() <= cfg) _pool.skipNode.resize(cfg + 1u, kNoLexNode);
   if (_pool.skipNode[cfg] != kNoLexNode) return _pool.skipNode[cfg];
@@ -271,14 +265,8 @@ std::uint16_t Lowerer::phrase_private_token(unsigned cfg, ImageId e,
     }
     ++_nterms;
     _c.terms[t] = {};
-    if (n.kind == ImageKind::ref) {
-      std::uint16_t len = 0;
-      const std::uint16_t off = name_of(n.a, len);
-      _c.terms[t].nameOff = off;
-      _c.terms[t].nameLen = len;
-    }
-    const std::uint16_t lex = phrase_lexical(cfg, e);
-    _c.termBuild[t].lex = lex;
+    if (n.kind == ImageKind::ref) name_row(_c.terms[t], _im.rules[n.a].name);
+    _c.termBuild[t].lex = phrase_lexical(cfg, e);
     _c.termBuild[t].predicateOnly = true;
     const ImageNode b = at(body);
     if (b.kind == ImageKind::lit) spell_literal(t, b);
@@ -289,10 +277,8 @@ std::uint16_t Lowerer::phrase_private_token(unsigned cfg, ImageId e,
 std::uint16_t Lowerer::phrase_token(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   if (n.kind != ImageKind::ref) return phrase_private_token(cfg, e, e);
-  if (_termIdx.contains(n.a)) {
-    const std::uint16_t t = sym_of(cfg, n.a);
-    return _lex.push(LexNode{LexKind::token, t});
-  }
+  if (_termIdx.contains(n.a))
+    return _lex.push(LexNode{LexKind::token, sym_of(cfg, n.a)});
   return phrase_private_token(cfg, e, body_in(cfg, n.a));
 }
 
@@ -507,18 +493,16 @@ std::uint16_t Lowerer::gap_cond(unsigned cfg, ImageId e) {
   return out;
 }
 
-bool Lowerer::implied_token_ok(unsigned cfg, ImageId e) {
+void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
-  switch (n.kind) {
-    case ImageKind::lit:
-      return (n.flags & (kLitGuardWord | kLitGuardExpr)) == 0;
-    case ImageKind::doc:
-      return implied_token_ok(cfg, kid(n, 0));
-    case ImageKind::ref:
-      return terminal_rule(n.a) && implied_token_ok(cfg, body_in(cfg, n.a));
-    default:
-      return false;
-  }
+  if (n.kind == ImageKind::doc) return check_implied_token(cfg, kid(n, 0));
+  if (n.kind == ImageKind::ref && terminal_rule(n.a))
+    return check_implied_token(cfg, body_in(cfg, n.a));
+  if (n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
+    refuse_lowering(
+        "cursiv: `implied(tok, cond)` lays a token of no width, so "
+        "`tok` is an unguarded literal or a terminal whose body is "
+        "one -- where it is no literal, write `tok | eof`");
 }
 
 std::uint16_t Lowerer::implied_term(ImageId e, std::uint16_t k) {

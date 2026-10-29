@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -27,7 +26,6 @@
 #include "cursiv/engines/shared/gen/LanguageIdentity.hpp"
 #include "cursiv/engines/shared/gen/LexRecursion.hpp"
 #include "cursiv/engines/shared/gen/gen_report.hpp"
-#include "cursiv/engines/shared/gen/write_source.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 
 #ifdef CURSIV_GEN_INCLUDE
@@ -75,21 +73,12 @@ bool fits(std::size_t n, const char* what) {
 
 int run(int argc, char** argv) try {
   cursiv::LlBuildOptions buildOpt;
-  const char* dir = nullptr;
-  bool bad = false;
-  for (int i = 1; i < argc && !bad; ++i) {
-    const std::string_view arg = argv[i];
-    if (arg == "--no-staged")
-      buildOpt.staticPredict = false;
-    else if (arg.starts_with("-"))
-      bad = true;
-    else
-      dir = argv[i];
-  }
-  if (bad || dir == nullptr) {
-    std::fprintf(stderr, "usage: %s [--no-staged] <out-dir>\n", argv[0]);
-    return exit_status(GenCode::usage);
-  }
+  const char* const dir = cursiv::gen_out_dir(
+      argc, argv, "[--no-staged]", [&](std::string_view arg) {
+        buildOpt.staticPredict = false;
+        return arg == "--no-staged";
+      });
+  if (dir == nullptr) return exit_status(GenCode::usage);
 
   cursiv::GrammarImage image = cursiv::grammar_image<View>();
   if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
@@ -121,48 +110,33 @@ int run(int argc, char** argv) try {
   // refused before anything is written.
   const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS);
 
-  const std::string out(dir);
-  if (!cursiv::write_source(out + "/Table.hpp",
-                            cursiv::ll_emit_table(*done, CURSIV_GEN_NS)))
-    return exit_status(GenCode::table);
-  if (!cursiv::write_source(out + "/Parser.hpp",
-                            cursiv::ll_emit_parser_decl(CURSIV_GEN_NS)))
-    return exit_status(GenCode::parser);
-  for (const auto& [fname, text] : steps) {
-    if (!cursiv::write_source(out + "/" + fname, text))
-      return exit_status(GenCode::parserFiles);
-  }
-
   const auto registry = cursiv::ll_ast_registry<G>(CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
   std::vector<cursiv::RecordGen> records;
   const auto entries = cursiv::ll_entry_table(*done, registry.rows, records);
-  const auto terminals = cursiv::record_terminals(a.cfg);
-  const auto dump = cursiv::dump_compiled_indexed<View>();
-  const cursiv::LanguageIdentity lang{CURSIV_GEN_ID,
-                                      cursiv::split(CURSIV_GEN_EXTENSIONS),
-                                      cursiv::split(CURSIV_GEN_FILE_NAMES)};
   if (const auto wrote = cursiv::write_common_artifacts(
-          out,
-          {.ns = CURSIV_GEN_NS,
+          dir,
+          {.table = cursiv::ll_emit_table(*done, CURSIV_GEN_NS),
+           .parser = cursiv::ll_emit_parser_decl(CURSIV_GEN_NS),
+           .parserUnits = steps,
+           .ns = CURSIV_GEN_NS,
            .header = CURSIV_GEN_HEADER,
-           .dump = dump,
+           .dump = cursiv::dump_compiled_indexed<View>(),
            .registry = registry,
            .entries = entries,
            .records = records,
-           .terminals = terminals,
-           .lang = lang,
+           .terminals = cursiv::record_terminals(a.cfg),
+           .lang = {CURSIV_GEN_ID, cursiv::split(CURSIV_GEN_EXTENSIONS),
+                    cursiv::split(CURSIV_GEN_FILE_NAMES)},
            .parserHeader = "cursiv/engines/ll/runtime/LlLanguageParser.hpp",
            .parserClass = "LlLanguageParser"});
       wrote != GenCode::ok)
     return exit_status(wrote);
 
   report(a);
-  cursiv::report_unbounded_conditions(
-      CURSIV_GEN_NAME, a.cfg, [&](std::uint16_t r) {
+  cursiv::report_warnings(
+      CURSIV_GEN_NAME, image, a.cfg, a.cfg, [&](std::uint16_t r) {
         return r < a.cfg.nrules ? a.cfg.rule_name(r) : std::string_view{};
       });
-  cursiv::report_incomplete_lex_checks(CURSIV_GEN_NAME, a.cfg);
-  cursiv::report_grammar_warnings(CURSIV_GEN_NAME, image);
   return exit_status(GenCode::ok);
 } catch (const std::exception& error) {
   std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, error.what());

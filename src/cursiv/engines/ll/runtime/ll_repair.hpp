@@ -344,10 +344,6 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlGesture& g) {
   ++c.search->next;
 }
 
-// The plan in hand no longer says what this position owes: the next pause
-// asks a search of its own.
-inline void ll_unplan(LlContext& c) { c.search->planned = false; }
-
 // One terminal, matched or repaired. A position that reads on after a
 // gesture is filled, and the descent carries on -- a rule that gave up here
 // would cost the tree everything after it.
@@ -386,7 +382,7 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
       // A step another position owes: the search is asked again from here.
       if (again && pos != 0) {
         again = false;
-        ll_unplan(c);
+        c.search->planned = false;
         continue;
       }
     } else if (!pause.degraded) {
@@ -485,13 +481,8 @@ inline int ll_climb_reads(LlContext& c, std::uint16_t decision,
                           std::uint16_t sym) {
   if (ll_ends<T>(c, sym)) return 2;
   LlSearch& s = ll_search_of<T>(c);
-  s.sim.resume();
-  s.sim.share_epsilon_contexts();
-  s.sim.track_calls();
-  s.sim.at_token(0);
-  s.sim.keep_steps();
   const std::uint32_t state = T.decisions[decision].state;
-  s.sim.start(state, ll_search_stack(c, s.sim, kLlSearchFrames));
+  s.sim.start(state, ll_search_open(c, s.sim, kLlSearchFrames));
   if (!s.sim.step(sym)) return 0;
   const auto exitArm = T.atn.state(state).nedges - 1u;
   for (const LlConfig& x : s.sim.configs())

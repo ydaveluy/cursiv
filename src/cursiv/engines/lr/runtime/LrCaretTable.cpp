@@ -197,8 +197,7 @@ class CaretStacks {
           // the mode that read it and the reductions it was read through.
           if (token.begin == leaf.begin && token.end == leaf.end) {
             const LeafRead read{_table.mode[_frames[from].state], token.sym};
-            if (std::find(_leafReads.begin(), _leafReads.end(), read) ==
-                _leafReads.end())
+            if (std::ranges::find(_leafReads, read) == _leafReads.end())
               _leafReads.push_back(read);
             add(_next, action.arg, token.end, from, {}, kDeadState,
                 Laid{.indent = levels_after(_frames[from].laid.indent, token),
@@ -294,13 +293,9 @@ class CaretStacks {
     condition_text(at, to, word);
     typed_as(term, at, word);
     const bool known = std::exchange(_known, !word.empty());
-    bool alike = true;
-    for (const Answer& a : _answers) {
-      if (spliced(a.gap, a.from, a.token) != a.holds) {
-        alike = false;
-        break;
-      }
-    }
+    const bool alike = std::ranges::all_of(_answers, [&](const Answer& a) {
+      return spliced(a.gap, a.from, a.token) == a.holds;
+    });
     _known = known;
     return alike;
   }
@@ -334,13 +329,11 @@ class CaretStacks {
     at = levels_after(at, t);
   }
   bool reads_blanks_to(TextOffset at) {
-    for (const Id head : _heads) {
+    return std::ranges::any_of(_heads, [&](Id head) {
       const Frame& f = _frames[head];
-      if (f.at <= at &&
-          trivia_to(_table.mode[f.state], f.at, at, f.laid.indent.depth))
-        return true;
-    }
-    return false;
+      return f.at <= at &&
+             trivia_to(_table.mode[f.state], f.at, at, f.laid.indent.depth);
+    });
   }
   // The modes the last leaf was read in, with the terminal each read it as:
   // those of the states that shifted it, since the reductions between two
@@ -465,12 +458,9 @@ class CaretStacks {
         _seen[head] = _epoch;
         // copy() may grow _frames; the parent walk still needs this frame.
         const Frame frame = _frames[head];
-        if (frame.rank == from && frame.state == state) {
-          if (held.sym == kInvalidSymbol)
-            copy(_next, head, end, {}, kDeadState, indent, assumes);
-          else
-            copy(_next, head, end, held, mode, indent, assumes);
-        }
+        if (frame.rank == from && frame.state == state)
+          copy(_next, head, end, held.sym == kInvalidSymbol ? Token{} : held,
+               held.sym == kInvalidSymbol ? kDeadState : mode, indent, assumes);
         each_parent(frame, [&](Id parent) { _todo.push_back(parent); });
       }
     }
@@ -1013,9 +1003,9 @@ class CaretStacks {
           const auto sole = _table.soleReduce[state];
           auto assumes = laid.assumes;
           if (sole != kLrNoProd && _table.prods[sole].gap != 0 &&
-              take(_table.prods[sole].gap, token, assumes)) {
-            if (reduce_by(sole, assumes)) viable = true;
-          }
+              take(_table.prods[sole].gap, token, assumes) &&
+              reduce_by(sole, assumes))
+            viable = true;
         }
         if (!Repair && !viable && via == kNoParent) error(head, token);
       }
@@ -1507,7 +1497,7 @@ class CaretStacks {
   bool ends_before_word(std::uint16_t mode, TextOffset at, TextOffset to,
                         SymbolId term) {
     return StampedGrammar::ends_before_word(
-        _probe, _text.substr(at, to - at), term, _table.terms, _table.names,
+        _text.substr(at, to - at), term, _table.terms, _table.names,
         [&](std::string_view s) {
           TextOffset halt = 0;
           return _table.lex(s.data(), static_cast<TextOffset>(s.size()), mode,
@@ -1685,7 +1675,6 @@ class CaretStacks {
   };
   std::vector<Crossed> _crossed;
   std::vector<Token> _tokens;
-  std::string _probe;
 };
 
 // The tape read as a forest. What stands before the caret is every record
@@ -1891,19 +1880,8 @@ void lr_next_features_at(const LrCaretTable& table,
                          const StampedGrammar& grammar, const Cst& cst,
                          TextOffset at, TextOffset resume,
                          std::vector<NextFeature>& out) {
-  if (!cst.engine_stamped() || at > resume || resume > cst.text().size())
-    return;
-  // A caret inside a token, a comment or dropped text is asked at that leaf's
-  // start: the answer replaces the leaf.
+  if (!StampedGrammar::caret_in(cst, at, resume)) return;
   NodeCount rank = cst.leaves_before(at);
-  if (rank < cst.leaf_count()) {
-    const CstLeaf inside = cst.leaf(rank);
-    if (inside.begin < at) {
-      at = inside.begin;
-      resume = std::max(resume, inside.end);
-      rank = cst.leaves_before(at);
-    }
-  }
   CstLeaf leaf = read_leaf_before(cst, table.stamp, rank, nullptr);
   step_before_invented(table, cst, at, leaf, rank);
   const NodeCount leafRank = rank;
@@ -1992,6 +1970,7 @@ void lr_next_features_at(const LrCaretTable& table,
       bool asked = false;
       const auto ask = [&](std::uint16_t m) {
         TextOffset h = 0;
+        asked = true;
         // A word the repair read as another is no token of its reading: read
         // under the alphabet that admits everything, the candidate only must
         // not make one word with it.
@@ -2001,7 +1980,6 @@ void lr_next_features_at(const LrCaretTable& table,
                                    table.errMode, 0, h);
           ok = ok || s.term == kInvalidSymbol || s.end <= at - leaf.begin;
           halt = std::max(halt, h);
-          asked = true;
           return;
         }
         Scan s = reads(m, reading, h);
@@ -2016,7 +1994,6 @@ void lr_next_features_at(const LrCaretTable& table,
           s = Scan{la.end - leaf.begin, la.sym};
         if (s.term == reading && s.end == at - leaf.begin) ok = true;
         halt = std::max(halt, h);
-        asked = true;
       };
       if (mode != kNoMode)
         ask(mode);
@@ -2138,22 +2115,6 @@ void lr_next_features_at(const LrCaretTable& table,
       return s.term == comment.scan.term && s.end == at - comment.begin;
     });
   };
-  // A candidate with no spelling is typed as some word its terminal reads:
-  // the comment lets it through where the word ends it, and where no sample
-  // word is read the terminal is left as offered.
-  const auto comment_lets_word = [&](std::uint16_t mode, SymbolId term) {
-    if (comment.scan.term == kInvalidSymbol) return true;
-    bool known = false;
-    for (const std::string_view word : StampedGrammar::samples) {
-      splice.assign(word);
-      TextOffset halt = 0;
-      const Scan s = reads(mode, term, halt);
-      if (s.term != term || s.end != word.size()) continue;
-      known = true;
-      if (comment_ends(word)) return true;
-    }
-    return !known;
-  };
   // The sample words a terminal that spells none is read as under a mode.
   constexpr std::uint32_t kKnown = 0x80000000u;
   const auto sampled_in = [&](std::uint16_t mode, SymbolId term) {
@@ -2176,6 +2137,17 @@ void lr_next_features_at(const LrCaretTable& table,
     }
     if (kept != nullptr) kept->store(found | kKnown, std::memory_order_relaxed);
     return found;
+  };
+  // A candidate with no spelling is typed as some word its terminal reads:
+  // the comment lets it through where the word ends it, and where no sample
+  // word is read the terminal is left as offered.
+  const auto comment_lets_word = [&](std::uint16_t mode, SymbolId term) {
+    const std::uint32_t read =
+        comment.scan.term == kInvalidSymbol ? 0u : sampled_in(mode, term);
+    for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i)
+      if (((read >> i) & 1u) != 0 && comment_ends(StampedGrammar::samples[i]))
+        return true;
+    return read == 0;
   };
   // Each candidate supplies its own lookahead and must reach a real shift on
   // one of the stacks the prefix admits. Whether it glues to the leaf is
@@ -2241,9 +2213,7 @@ void lr_next_features_at(const LrCaretTable& table,
             },
             [&](std::uint16_t st, std::uint16_t landing) {
               const std::uint32_t shift = std::uint32_t{st} << 16 | landing;
-              if (std::find(emitted.begin(), emitted.end(), shift) !=
-                  emitted.end())
-                return;
+              if (std::ranges::find(emitted, shift) != emitted.end()) return;
               emitted.push_back(shift);
               const auto items = table.expectItems.begin();
               const auto end = items + table.expectBase[st + 1u];

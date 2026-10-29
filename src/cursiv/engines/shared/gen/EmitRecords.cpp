@@ -58,37 +58,31 @@ std::string emit_records(std::string_view ns,
                          const std::vector<TerminalGen>& terminals,
                          const std::vector<RecordGen>& records,
                          const AstRegistry& registry) {
-  // One function per distinct set of members.
+  // One function per distinct set of members. The comparison is a set: the
+  // same members, in any order and however often listed, give one function.
   std::map<std::string, std::string> bodies;
   std::string funs;
-  const auto take = [&](const std::string& body, const std::string& prefix) {
-    auto found = bodies.find(body);
-    if (found == bodies.end()) {
-      const std::string fn = prefix + std::to_string(bodies.size());
-      std::string text = body;
-      text.replace(text.find('@'), 1, fn);
-      funs += text + "\n";
-      found = bodies.emplace(body, fn).first;
-    }
-    return found->second;
-  };
-  // The comparison is a set: the same members, in any order and however often
-  // listed, give one function.
   const auto ask = [&](std::vector<std::string_view> set,
                        const std::string& prefix) {
     std::ranges::sort(set);
     set.erase(std::ranges::unique(set).begin(), set.end());
-    std::string body;
-    if (set.empty()) {
-      body = "bool @(::std::string_view) { return false; }";
-    } else {
-      body =
-          "bool @(::std::string_view f) {\n  return " +
-          join(set, " || ",
-               [](std::string_view s) { return "f == " + record_literal(s); }) +
-          ";\n}";
+    const std::string body =
+        set.empty()
+            ? std::string("bool @(::std::string_view) { return false; }")
+            : "bool @(::std::string_view f) {\n  return " +
+                  join(set, " || ",
+                       [](std::string_view s) {
+                         return "f == " + record_literal(s);
+                       }) +
+                  ";\n}";
+    const auto [found, fresh] =
+        bodies.try_emplace(body, prefix + std::to_string(bodies.size()));
+    if (fresh) {
+      std::string text = body;
+      text.replace(text.find('@'), 1, found->second);
+      funs += text + "\n";
     }
-    return take(body, prefix);
+    return found->second;
   };
   // One pool of the names answers give, the empty one first.
   std::map<std::string_view, std::size_t> nameIds{{std::string_view{}, 0}};

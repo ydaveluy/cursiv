@@ -10,12 +10,12 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/dump.hpp"
 #include "cursiv/engines/lr/gen/LrAmbiguity.hpp"
 #include "cursiv/engines/lr/gen/LrFinalTable.hpp"
-#include "cursiv/engines/lr/gen/LrGuard.hpp"
 #include "cursiv/engines/lr/gen/LrIdentity.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
 #include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
@@ -35,7 +35,6 @@
 #include "cursiv/engines/shared/gen/LexRecursion.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/gen_report.hpp"
-#include "cursiv/engines/shared/gen/write_source.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
@@ -81,39 +80,20 @@ struct Args {
   // The lines a group of states holds, which a lane may force down.
   unsigned groupLines = cursiv::kLrGroupLines;
   unsigned optionalGate = cursiv::kOptionalGate;
-  const char* dir = nullptr;
-  bool bad = false;
-};
 
-Args parse_args(int argc, char** argv) {
-  Args args;
-  for (int i = 1; i < argc && !args.bad; ++i) {
-    const std::string_view arg = argv[i];
+  // A lane's option: false where it is none, or its count is out of range.
+  bool take(std::string_view arg) {
     if (arg.starts_with(kStampRowBits))
-      args.bad = !count_to(arg.substr(kStampRowBits.size()),
-                           cursiv::StampLayout{}.rowBits, args.stampRowBits);
-    else if (arg.starts_with(kGroupLines))
-      args.bad =
-          !count_to(arg.substr(kGroupLines.size()),
-                    std::numeric_limits<unsigned>::max(), args.groupLines);
-    else if (arg.starts_with(kOptionalGate))
-      args.bad = !count_to(arg.substr(kOptionalGate.size()), 15,
-                           args.optionalGate, 0);
-    else if (arg.starts_with("-"))
-      args.bad = true;
-    else
-      args.dir = argv[i];
+      return count_to(arg.substr(kStampRowBits.size()),
+                      cursiv::StampLayout{}.rowBits, stampRowBits);
+    if (arg.starts_with(kGroupLines))
+      return count_to(arg.substr(kGroupLines.size()),
+                      std::numeric_limits<unsigned>::max(), groupLines);
+    if (arg.starts_with(kOptionalGate))
+      return count_to(arg.substr(kOptionalGate.size()), 15, optionalGate, 0);
+    return false;
   }
-  return args;
-}
-
-void usage(const char* argv0) {
-  std::fprintf(stderr,
-               "usage: %s [--stamp-row-bits=1..16] [--group-lines=N] "
-               "[--optional-gate=0..15] "
-               "<out-dir>\n",
-               argv0);
-}
+};
 
 // The wider graph is built where the core's merge arbitrated or mixed implied
 // tokens, and stands on `lr_wider_stands`.
@@ -160,24 +140,6 @@ bool refuse_graph(Built& a, unsigned stampRowBits) {
          cursiv::refuse_unstamped(CURSIV_GEN_NAME, a.stamp,
                                   a.writes.nchains + a.nfused, a.nstates,
                                   stampRowBits);
-}
-
-// The generated units: the first that fails names the exit code.
-GenCode write_artifacts(const cursiv::LrFinalTable& done,
-                        const std::string& out,
-                        const cursiv::CommonArtifacts& common,
-                        unsigned groupLines, unsigned& probeCuts) {
-  if (!cursiv::write_source(out + "/Table.hpp",
-                            cursiv::lr_emit_table(done, CURSIV_GEN_NS)))
-    return GenCode::table;
-  if (!cursiv::write_source(out + "/Parser.hpp",
-                            cursiv::lr_emit_parser_decl(done, CURSIV_GEN_NS)))
-    return GenCode::parser;
-  if (!cursiv::write_source(out + "/ParserStates.cpp",
-                            cursiv::lr_emit_parser_states(
-                                done, CURSIV_GEN_NS, &probeCuts, groupLines)))
-    return GenCode::parserFiles;
-  return cursiv::write_common_artifacts(out, common);
 }
 
 // What the build found, in one line, and why a grammar is not deterministic
@@ -244,21 +206,13 @@ void report_each_conflict(const Built& a) {
     via[to] = sym;
     queue.push_back(to);
   };
-  const auto land = [&](std::uint32_t from, std::uint32_t guard,
-                        std::uint32_t sym) {
-    for (const std::uint16_t to : a.guards[guard].to)
-      if (to != cursiv::LrGuard::kNoState) reach(from, to, sym);
-  };
   for (std::size_t i = 0; i < queue.size(); ++i) {
     const std::uint32_t s = queue[i];
-    for (const cursiv::LrAction& x : a.action_row(s)) {
-      if (x.kind == cursiv::LrActionKind::shift) reach(s, x.arg, x.term);
-      if (x.kind == cursiv::LrActionKind::guard) land(s, x.arg, x.term);
-    }
-    for (const auto& e : a.gotoRows[s]) {
-      reach(s, e.to, cursiv::nt_sym(e.nt));
-      if (e.guard != 0) land(s, e.guard - 1u, cursiv::nt_sym(e.nt));
-    }
+    for (const cursiv::LrAction& x : a.action_row(s))
+      a.each_landing(x, [&](std::uint16_t to) { reach(s, to, x.term); });
+    for (const auto& e : a.gotoRows[s])
+      a.each_goto_landing(
+          e, [&](std::uint16_t to) { reach(s, to, cursiv::nt_sym(e.nt)); });
   }
   const auto prefix = [&](std::uint32_t st) {
     std::vector<std::uint16_t> path;
@@ -296,11 +250,12 @@ void report_each_conflict(const Built& a) {
 }  // namespace
 
 int run(int argc, char** argv) try {
-  const Args args = parse_args(argc, argv);
-  if (args.bad || args.dir == nullptr) {
-    usage(argv[0]);
-    return exit_status(GenCode::usage);
-  }
+  Args args;
+  const char* const dir = cursiv::gen_out_dir(
+      argc, argv,
+      "[--stamp-row-bits=1..16] [--group-lines=N] [--optional-gate=0..15]",
+      [&](std::string_view arg) { return args.take(arg); });
+  if (dir == nullptr) return exit_status(GenCode::usage);
   cursiv::GrammarImage image = cursiv::grammar_image<View>();
   if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
@@ -321,37 +276,37 @@ int run(int argc, char** argv) try {
       std::move(automaton), cursiv::lr_completion_sites(records));
   const Built& a = done.table();
 
-  const auto terminals = cursiv::record_terminals(a.cfg);
-  const auto dump = cursiv::dump_compiled_indexed<View>();
-  const cursiv::LanguageIdentity lang{CURSIV_GEN_ID,
-                                      cursiv::split(CURSIV_GEN_EXTENSIONS),
-                                      cursiv::split(CURSIV_GEN_FILE_NAMES)};
   unsigned probeCuts = 0;
-  if (const GenCode wrote = write_artifacts(
-          done, args.dir,
-          {.ns = CURSIV_GEN_NS,
+  const std::pair<std::string, std::string> states[] = {
+      {"ParserStates.cpp",
+       cursiv::lr_emit_parser_states(done, CURSIV_GEN_NS, &probeCuts,
+                                     args.groupLines)}};
+  if (const GenCode wrote = cursiv::write_common_artifacts(
+          dir,
+          {.table = cursiv::lr_emit_table(done, CURSIV_GEN_NS),
+           .parser = cursiv::lr_emit_parser_decl(done, CURSIV_GEN_NS),
+           .parserUnits = states,
+           .ns = CURSIV_GEN_NS,
            .header = CURSIV_GEN_HEADER,
-           .dump = dump,
+           .dump = cursiv::dump_compiled_indexed<View>(),
            .registry = registry,
            .entries = entries,
            .records = records,
-           .terminals = terminals,
-           .lang = lang,
+           .terminals = cursiv::record_terminals(a.cfg),
+           .lang = {CURSIV_GEN_ID, cursiv::split(CURSIV_GEN_EXTENSIONS),
+                    cursiv::split(CURSIV_GEN_FILE_NAMES)},
            .parserHeader = "cursiv/engines/lr/runtime/LrLanguageParser.hpp",
-           .parserClass = "LrLanguageParser"},
-          args.groupLines, probeCuts);
+           .parserClass = "LrLanguageParser"});
       wrote != GenCode::ok)
     return exit_status(wrote);
 
   report(a, probeCuts);
   report_ambiguities(low.cfg);
   const auto& cfg = low.cfg;
-  cursiv::report_unbounded_conditions(
-      CURSIV_GEN_NAME, cfg, [&](std::uint16_t r) {
+  cursiv::report_warnings(
+      CURSIV_GEN_NAME, image, cfg, a.cfg, [&](std::uint16_t r) {
         return r < cfg.nnts ? cfg.nt_name(r) : std::string_view{};
       });
-  cursiv::report_incomplete_lex_checks(CURSIV_GEN_NAME, a.cfg);
-  cursiv::report_grammar_warnings(CURSIV_GEN_NAME, image);
   if (std::getenv("CURSIV_CONFLICTS") != nullptr) report_each_conflict(a);
   return exit_status(GenCode::ok);
 } catch (const cursiv::LowerRefused& e) {

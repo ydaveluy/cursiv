@@ -82,39 +82,19 @@ class LlEpisodeSim {
 
   // Between two episodes.
   void reset() {
-    _arms.clear();
-    _lexes.clear();
-    _reduces.clear();
+    clear(_arms, _lexes, _reduces, _stacks, _below, _relatedProcessed,
+          _relatedFlags, _heads, _stack, _words, _side, _shared, _joins);
     _reduceUp.assign(1, 0);
     _reduceState.assign(1, 0);
-    _stacks.clear();
-    _below.clear();
-    _relatedProcessed.clear();
-    _relatedFlags.clear();
-    _heads.clear();
-    _stack.clear();
-    _words.clear();
-    _side.clear();
-    _shared.clear();
-    _joins.clear();
     _log = nullptr;
     _stopped = false;
   }
 
   // ...and an episode that grew large gives its room back.
   void trim() {
-    _arms.trim();
-    _lexes.trim();
-    _reduces.trim();
-    _seen.trim();
-    _at.trim();
-    _held.trim();
-    _crossed.trim();
-    _calls.trim();
-    _flat.trim();
-    _below.trim();
-    _relatedProcessed.trim();
-    _relatedFlags.trim();
+    const auto each = [](auto&... x) { (x.trim(), ...); };
+    each(_arms, _lexes, _reduces, _seen, _at, _held, _crossed, _calls, _flat,
+         _below, _relatedProcessed, _relatedFlags);
   }
 
   // Whether one reading precedes another: the lexical choices first, then the
@@ -162,15 +142,8 @@ class LlEpisodeSim {
   // edges, so the order of the readings needs no comparing. Only a reading
   // that returns past a cell leaves it, and those wait their turn.
   void close(const std::vector<LlThread>& origins, std::vector<LlThread>& out) {
-    out.clear();
-    _seen.clear();
-    _at.clear();
-    _calls.clear();
-    _relatedProcessed.clear();
-    _relatedFlags.clear();
-    _stack.clear();
-    _words.clear();
-    _side.clear();
+    clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags, _stack,
+          _words, _side);
     _base = _stacks.size();
     std::size_t next = 0;
     for (;;) {
@@ -213,10 +186,8 @@ class LlEpisodeSim {
       const auto cell = LlStackSet::kCellBit | static_cast<std::uint32_t>(k);
       for (auto& m : _stacks.members(cell)) m.stack = flat(m.stack);
     }
-    for (std::size_t k = _base; k < _stacks.size(); ++k) {
-      const auto cell = LlStackSet::kCellBit | static_cast<std::uint32_t>(k);
-      _stacks.seal(cell);
-    }
+    for (std::size_t k = _base; k < _stacks.size(); ++k)
+      _stacks.seal(LlStackSet::kCellBit | static_cast<std::uint32_t>(k));
   }
 
   // The readings that take `terms`, each at the state its edge leads to, to be
@@ -312,10 +283,8 @@ class LlEpisodeSim {
     while (!cells.empty()) {
       const std::uint32_t cell = cells.back();
       cells.pop_back();
-      for (std::size_t k = 0; k < _stacks.members(cell).size(); ++k) {
-        const LlStackSet::Member m = _stacks.members(cell)[k];
+      for (const LlStackSet::Member& m : _stacks.members(cell))
         if (!take(m.stack, m.arm)) return false;
-      }
     }
     const auto key = [](const LlHistory::Event& e) {
       return std::tuple{e.word, e.at, e.lull};
@@ -648,6 +617,8 @@ class LlEpisodeSim {
   }
 
   static constexpr std::uint32_t kNoWord = ~std::uint32_t{0};
+
+  static void clear(auto&... x) { (x.clear(), ...); }
 
   void push(const LlThread& t, std::uint32_t word = kNoWord) {
     _stack.push_back(t);

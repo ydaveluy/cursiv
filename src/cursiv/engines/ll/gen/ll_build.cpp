@@ -340,12 +340,9 @@ void refuse_unproductive(Built& b) {
         }
         return true;
       }
-      case LlShape::alt: {
-        const auto k = c.children(n);
-        for (unsigned i = 0; i < k.size(); ++i)
-          if (node[k[i]]) return true;
-        return false;
-      }
+      case LlShape::alt:
+        return std::ranges::any_of(c.children(n),
+                                   [&](auto k) { return node[k] != 0; });
       case LlShape::rep:
         return n.min == 0 || node[n.sym] != 0;
       default:
@@ -418,16 +415,13 @@ OperatorWords words_of(const Built& b, std::uint16_t id,
       return OperatorWords::token(n.sym);
     case LlShape::seq: {
       OperatorWords out = OperatorWords::nothing();
-      const auto k = b.cfg.children(n);
-      for (unsigned i = 0; i < k.size(); ++i)
-        out = out.then(words_of(b, k[i], calling));
+      for (const auto k : b.cfg.children(n))
+        out = out.then(words_of(b, k, calling));
       return out;
     }
     case LlShape::alt: {
       OperatorWords out = OperatorWords::none();
-      const auto k = b.cfg.children(n);
-      for (unsigned i = 0; i < k.size(); ++i)
-        out.unite(words_of(b, k[i], calling));
+      for (const auto k : b.cfg.children(n)) out.unite(words_of(b, k, calling));
       return out;
     }
     case LlShape::rep: {
@@ -718,12 +712,9 @@ void settle_gaps(Built& b) {
       b.climbCfg[b.cfg.rules[r].climb] = b.cfg.ruleCfg[r];
   if (b.cfg.cfgTriviaAt.size() <= 2) return;
   Gaps g{b};
-  g.silent.assign(nn, 0);
-  g.consumes.assign(nn, 0);
-  g.freshOut.assign(nn, 0);
-  g.ruleSilent.assign(nr, 0);
-  g.ruleConsumes.assign(nr, 0);
-  g.ruleFreshOut.assign(nr, 0);
+  g.silent = g.consumes = g.freshOut = std::vector<std::uint8_t>(nn, 0);
+  g.ruleSilent = g.ruleConsumes = g.ruleFreshOut =
+      std::vector<std::uint8_t>(nr, 0);
   while (g.settle_shape()) {
   }
   // The document opens and ends under the grammar's own configuration.
@@ -743,11 +734,8 @@ void settle_gaps(Built& b) {
   settle(g);
   // A call site peeks its callee's first token: callers that cross the gap
   // in front of it under different configurations share no point inside it.
-  Gaps local{b};
-  local.silent = g.silent;
-  local.consumes = g.consumes;
-  local.freshOut = g.freshOut;
-  local.entries = false;
+  Gaps local{.b = b, .silent = g.silent, .consumes = g.consumes,
+             .freshOut = g.freshOut, .entries = false};
   settle(local);
 
   const auto lowest = [](const DynSet& s) {
@@ -921,9 +909,8 @@ void settle_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
         // follows the climb.
         const LlClimb& cl = c.climbs[u.climb];
         DynSet ops = ruleFollow[r];
-        for (unsigned i = 0; i < cl.opCount; ++i) {
+        for (unsigned i = 0; i < cl.opCount; ++i)
           ops |= first[c.climbOps[cl.opBase + i].body];
-        }
         if (cl.primary != kNoRow)
           f.moved = ruleFollow[cl.primary].add(ops) || f.moved;
         else
@@ -1254,11 +1241,9 @@ std::vector<LlConfig> set_key(const std::vector<LlConfig>& cs) {
 // Every token the readings of one set could read next.
 DynSet viable_terms(const LlAtnView& atn, const std::vector<LlConfig>& cs) {
   DynSet t;
-  for (const LlConfig& c : cs) {
-    for (const LlAtnEdge& e : atn.outgoing(c.state)) {
+  for (const LlConfig& c : cs)
+    for (const LlAtnEdge& e : atn.outgoing(c.state))
       if (e.kind == LlEdgeKind::atom) t.set(e.label);
-    }
-  }
   return t;
 }
 
@@ -1285,10 +1270,8 @@ bool explore_decision(Built& b, LlDecision& dec, const LlBuildOptions& opt) {
   std::map<std::vector<LlConfig>, std::uint32_t> index;
   std::vector<std::vector<LlConfig>> setOf;
   std::vector<std::vector<LlDfaEdge>> out;
-  std::vector<std::uint8_t> depthOf;
-  std::vector<std::uint16_t> nodeOf;
-  std::vector<std::uint16_t> armOf;
-  std::vector<std::uint8_t> apart;
+  std::vector<std::uint8_t> depthOf, apart;
+  std::vector<std::uint16_t> nodeOf, armOf;
   // The readings of a set cross the gap before their next token under one
   // configuration, or the set is the parse's to read.
   const bool regions = b.cfg.cfgTriviaAt.size() > 2;
@@ -1333,8 +1316,7 @@ bool explore_decision(Built& b, LlDecision& dec, const LlBuildOptions& opt) {
   for (std::uint32_t at = 0; at < setOf.size(); ++at) {
     // A set naming one arm is an answer; one naming none is a reading no arm
     // survives, which the parse reports rather than predicts.
-    if (setOf[at].empty()) continue;
-    if (armOf[at] != kNoRow) continue;
+    if (setOf[at].empty() || armOf[at] != kNoRow) continue;
     if (apart[at]) return false;
     if (depthOf[at] >= opt.depth || setOf.size() >= kExploreCap) return false;
     const DynSet terms = viable_terms(atn, setOf[at]);

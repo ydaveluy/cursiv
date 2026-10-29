@@ -39,10 +39,6 @@ AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
   }
 }
 
-std::string AstEmitter::u(unsigned long long v) {
-  return std::to_string(v) + "u";
-}
-
 bool AstEmitter::derives(std::uint16_t base, std::uint16_t sub) const {
   return ((reg.derives[std::size_t{base} * reg.typeWords + sub / 64] >>
            (sub % 64)) &
@@ -665,7 +661,7 @@ namespace {1} {{
 namespace ast_detail {{
 )",
                      header, ns);
-  out += emit_ast_metadata(reg);
+  out += emit_ast_metadata(reg, tags);
   emit_types();
   emit_fields();
   plan_held();

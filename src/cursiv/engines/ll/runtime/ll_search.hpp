@@ -41,6 +41,8 @@
 
 namespace cursiv {
 
+inline void ll_search_clear(auto&... x) { (x.clear(), ...); }
+
 inline std::uint32_t ll_search_link(LlSearch& s, const LlGesture& g) {
   s.links.push_back(g);
   return static_cast<std::uint32_t>(s.links.size()) - 1;
@@ -284,6 +286,15 @@ bool ll_search_condition(const LlContext& c, LlSearch& s,
   return !ll_search_walked(c, s, from, end, reached) && holds;
 }
 
+// The positions loaded, past the conditions on the gap before `tok`.
+template <const auto& T>
+bool ll_search_filter(const LlContext& c, LlSearch& s, const Token& tok,
+                      TextOffset gapFrom) {
+  return s.sim.filter([&](std::uint16_t condition) {
+    return ll_search_condition<T>(c, s, condition, tok, gapFrom);
+  });
+}
+
 template <const auto& T>
 std::vector<Scan>& ll_search_row(LlSearch& s, TextOffset p) {
   std::vector<Scan>& row = s.scans[p];
@@ -525,18 +536,11 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
   f.reading = i;
   f.cfg = r.cfg;
   f.n = r.ncfg;
-  f.viable.clear();
-  f.due.clear();
-  f.rest.clear();
-  f.modes.clear();
-  f.bits.clear();
-  f.written.clear();
+  ll_search_clear(f.viable, f.due, f.rest, f.modes, f.bits, f.written);
   ll_search_load(s, r);
   if constexpr (T.ngapConds != 0) {
     const Token tok = ll_search_peek<T>(c, s, s.nodes[i]);
-    if (!s.sim.filter([&](std::uint16_t condition) {
-          return ll_search_condition<T>(c, s, condition, tok, r.gapFrom);
-        })) {
+    if (!ll_search_filter<T>(c, s, tok, r.gapFrom)) {
       if (ll_search_spent(s)) f.cfg = kLlNoNode;
       return f;
     }
@@ -643,11 +647,8 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
   }
   const bool ends = ll_ends<T>(c, tok.sym);
   bool passed = true;
-  if constexpr (T.ngapConds != 0) {
-    passed = s.sim.filter([&](std::uint16_t condition) {
-      return ll_search_condition<T>(c, s, condition, tok, r.gapFrom);
-    });
-  }
+  if constexpr (T.ngapConds != 0)
+    passed = ll_search_filter<T>(c, s, tok, r.gapFrom);
   if (passed && !ends)
     ll_search_terms<T>(c, s, s.sim.configs().data(), s.sim.configs().size(),
                        tok, s.terms);
@@ -744,20 +745,17 @@ void ll_search_each_insert(const LlContext& c, LlSearch& s,
 
 // A terminal invented in front of the token in hand: the positions that read
 // it carry on, and an owed one that follows an owed one costs nothing. Its
-// readings go to `s.out`.
+// readings are admitted, and what they leave is given back.
 template <const auto& T>
 void ll_search_insert(LlContext& c, LlSearch& s, std::uint32_t bi,
                       std::uint16_t term, std::uint32_t choice, bool owed,
                       TextOffset begin) {
-  s.out.clear();
+  const LlSearchLaid pools(s);
   const LlReading b = s.nodes[bi];
   ll_search_load(s, b);
   if constexpr (T.ngapConds != 0) {
     const Token tok = ll_search_peek<T>(c, s, s.nodes[bi]);
-    if (ll_search_spent(s) ||
-        !s.sim.filter([&](std::uint16_t condition) {
-          return ll_search_condition<T>(c, s, condition, tok, b.gapFrom);
-        }))
+    if (ll_search_spent(s) || !ll_search_filter<T>(c, s, tok, b.gapFrom))
       return;
   }
   if (!s.sim.step(term)) return;
@@ -776,7 +774,8 @@ void ll_search_insert(LlContext& c, LlSearch& s, std::uint32_t bi,
                                Token{b.gapFrom, b.gapFrom, term});
       r.inHand = false;
     }
-  ll_search_read<T>(c, s, e);
+  ll_search_lay<T>(c, s, e);
+  ll_search_trim(s, pools);
 }
 
 // The insertions that are not owed, laid as the entry that stood for them is
@@ -792,10 +791,7 @@ void ll_search_inserts(LlContext& c, LlSearch& s, std::uint32_t gi) {
       c, s, from, [&](std::uint16_t t, unsigned k, bool owed) {
         if (ll_search_spent(s)) return false;
         if (owed || !ll_search_insertable<T>(c, t, atEnd)) return true;
-        const LlSearchLaid pools(s);
         ll_search_insert<T>(c, s, from, t, rank + k, false, tok.begin);
-        for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
-        ll_search_trim(s, pools);
         return true;
       });
 }
@@ -844,10 +840,7 @@ void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
   } else {
     ll_search_load(s, r);
     if constexpr (T.ngapConds != 0)
-      if (!s.sim.filter([&](std::uint16_t condition) {
-            return ll_search_condition<T>(c, s, condition, read, r.gapFrom);
-          }))
-        return;
+      if (!ll_search_filter<T>(c, s, read, r.gapFrom)) return;
     s.sim.at_token(r.tokens + 1);
     if (!s.sim.step(term)) return;
     ++r.tokens;
@@ -1153,10 +1146,7 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
             deferred = true;
             return true;
           }
-          const LlSearchLaid pools(s);
           ll_search_insert<T>(c, s, bi, t, insertRank + k, true, tok.begin);
-          for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
-          ll_search_trim(s, pools);
           return true;
         });
     // Ranks need order, not consecutive values: two terminal-sized ranges put
@@ -1373,15 +1363,12 @@ std::uint32_t ll_search_elect(LlContext& c, LlSearch& s, bool& raced) {
 // A plan names the pool of the search that laid it: a search that lays another
 // drops it.
 inline void ll_search_reset(LlSearch& s) {
-  const auto clear = [](auto&... x) { (x.clear(), ...); };
-  clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed, s.scans,
-        s.readings, s.ends, s.typos, s.drops, s.plan, s.also, s.tied);
+  ll_search_clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed,
+                  s.scans, s.readings, s.ends, s.typos, s.drops, s.plan, s.also,
+                  s.tied, s.depths, s.sourceTokens);
   s.facts.cfg = kLlNoNode;
-  s.depths.clear();
-  s.sourceTokens.clear();
-  s.sourceScanned = s.sourceCount = 0;
+  s.sourceScanned = s.sourceCount = s.seq = 0;
   s.next = 0;
-  s.seq = 0;
   s.planned = false;
   s.limit = s.work < s.budget
                 ? s.work + std::min(s.perSearch, s.budget - s.work)
@@ -1457,10 +1444,15 @@ inline void ll_search_plan(LlSearch& s, std::uint32_t ci) {
 // ones are read only while a reading returns out of the ones it knows.
 inline constexpr std::size_t kLlSearchFrames = 256;
 
-// The context of the descent, the top `frames` frames of its stack, below
-// them an unknown caller.
-inline std::uint32_t ll_search_stack(const LlContext& c, LlSimulation& sim,
-                              std::size_t frames) {
+// The simulation opened over the context of the descent: the top `frames`
+// frames of its stack, below them an unknown caller.
+inline std::uint32_t ll_search_open(const LlContext& c, LlSimulation& sim,
+                                    std::size_t frames) {
+  sim.resume();
+  sim.share_epsilon_contexts();
+  sim.track_calls();
+  sim.at_token(0);
+  sim.keep_steps();
   sim.truncated(frames < c.stack.size());
   std::uint32_t ctx = kLlCtxNone;
   for (std::size_t i = c.stack.size() > frames ? c.stack.size() - frames : 0;
@@ -1468,16 +1460,6 @@ inline std::uint32_t ll_search_stack(const LlContext& c, LlSimulation& sim,
     ctx = sim.contexts().push(ctx, c.stack[i],
                               -1 - static_cast<std::int64_t>(i));
   return ctx;
-}
-
-inline std::uint32_t ll_search_open(LlContext& c, LlSimulation& sim,
-                             std::size_t frames) {
-  sim.resume();
-  sim.share_epsilon_contexts();
-  sim.track_calls();
-  sim.at_token(0);
-  sim.keep_steps();
-  return ll_search_stack(c, sim, frames);
 }
 
 // The root reading: the positions the descent stands in, and the text from
@@ -1557,10 +1539,7 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
     if (ll_search_spent(s)) return arm;
     sim.at_token(tokens);
     if constexpr (T.ngapConds != 0)
-      if (!sim.filter([&](std::uint16_t condition) {
-            return ll_search_condition<T>(c, s, condition, tok, gap);
-          }))
-        return arm;
+      if (!ll_search_filter<T>(c, s, tok, gap)) return arm;
     if (k < s.plan.size() && s.plan[k].at == gap &&
         s.plan[k].begin == tok.begin) {
       const LlGesture& g = s.plan[k++];

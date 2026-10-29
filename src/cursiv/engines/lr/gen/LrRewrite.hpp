@@ -12,7 +12,8 @@ namespace cursiv {
 struct LrRewrite {
   template <class Materialized, class Declared>
   struct stages {
-    using stage = detail::InfixLevelStage<Materialized, Declared>;
+    using stage =
+        detail::LeadGraphStage<detail::level_rule, Materialized, Declared>;
     using rules = detail::reached_t<stage>;
   };
   template <class St, class Op, auto P>

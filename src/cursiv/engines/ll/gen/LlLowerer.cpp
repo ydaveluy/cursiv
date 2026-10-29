@@ -13,37 +13,16 @@ using detail::llow::emit;
 using detail::llow::put_node;
 using detail::llow::too_many_positions;
 
-LlLowerer::LlLowerer(GrammarImage& image, const LowerDesc& desc)
-    : Lowerer(image, desc, lowered.cfg, lowered.cfg.nterms,
-              lowered.cfg.wordBytes, lowered.writes, lowered.fault, pool),
-      _o(lowered),
-      _p(pool),
-      _cfg(lowered.cfg) {}
-
 std::uint16_t LlLowerer::intern_name(std::string_view text) {
   return _cfg.intern_name(text);
 }
 
 void LlLowerer::declare_start() {
   _cfg.nrules = 1;
-  constexpr std::string_view start = "$start";
-  const std::uint16_t name = _cfg.intern_name(start);
-  _cfg.rules[0].nameOff = name;
-  _cfg.rules[0].nameLen = static_cast<std::uint16_t>(start.size());
+  name_row(_cfg.rules[0], "$start");
 }
 
-void LlLowerer::declare_rules() {
-  for (const std::uint32_t rule : _ntRule) {
-    std::uint16_t len = 0;
-    const std::uint16_t off = name_of(rule, len);
-    _cfg.rules[_cfg.nrules++] = LlRuleInfo{.nameOff = off, .nameLen = len};
-  }
-  for (std::size_t k = 1; k < _cfgs.size(); ++k)
-    for (std::size_t i = 0; i < _ntRule.size(); ++i) {
-      const auto row = _cfg.rules[1 + i];
-      _cfg.rules[_cfg.nrules++] = row;
-    }
-}
+void LlLowerer::declare_rules() { name_rules(_cfg.rules, _cfg.nrules); }
 
 ImageId LlLowerer::ended(ImageId id) { return ended_in(id, false); }
 
@@ -166,17 +145,8 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
   cl.leftRow = climb_chain(st.leftRow);
   cl.rightRow = climb_chain(st.rightRow);
   cl.opBase = _cfg.nclimbOps;
-  for (std::uint32_t i = 0; i < st.levelCount; ++i) {
-    const ImageStageLevelDesc& level = st.levels[i];
-    const auto prec = static_cast<std::uint8_t>(st.levelCount - i);
-    const Association group = level.group == ImageGroup::right
-                                   ? Association::right
-                               : level.group == ImageGroup::non
-                                   ? Association::non
-                                   : Association::left;
-    for (std::uint32_t j = 0; j < level.count; ++j)
-      emit_op(cfg, _im.node(*level.ops[j].op), level.ops[j].row, prec, group);
-  }
+  each_op(st, [&](ImageId op, const void* row, std::uint8_t prec,
+                  Association group) { emit_op(cfg, op, row, prec, group); });
   cl.opCount = static_cast<std::uint16_t>(_cfg.nclimbOps - cl.opBase);
   if (cl.opCount != 0) {
     std::vector<std::uint16_t> arms;
@@ -208,17 +178,7 @@ void LlLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
     return;
   }
   const std::uint16_t at_ = lay(cfg, body_in(cfg, rule));
-  if (st.kind == ImageRuleKind::node) {
-    bool opens = false;
-    for (const unsigned short i : _p.e[at_].made) {
-      const WriteKind k = _rowKind[i];
-      opens = opens || k == WriteKind::create || k == WriteKind::climb ||
-              k == WriteKind::close;
-    }
-    if (!opens) _p.e[at_].made.push_back(row_id(st.closeRow));
-  }
-  if (st.kind == ImageRuleKind::data && !st.folded)
-    _p.e[at_].made.push_back(row_id(st.convertRow));
+  close_body(st, at_);
   _cfg.rules[lhs].body = emit(_o, _p, at_, _p.e[at_].made, _p.e[at_].row, lhs);
 }
 

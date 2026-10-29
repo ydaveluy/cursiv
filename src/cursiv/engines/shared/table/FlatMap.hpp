@@ -1,6 +1,6 @@
 // An insert-only map from 64-bit keys, open-addressed, for the generator, the
-// repair search and the runs of conditions. A reference it hands out holds
-// until the next insertion. The key `~0` is not for use.
+// repair search, the runs of conditions and the nested searches. A reference
+// it hands out holds until the next insertion. The key `~0` is not for use.
 #pragma once
 
 #include <cstddef>

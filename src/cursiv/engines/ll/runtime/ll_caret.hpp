@@ -23,13 +23,14 @@
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
 #include "cursiv/engines/ll/runtime/ll_spine.hpp"
-#include "cursiv/engines/ll/runtime/ll_trivia.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/ll/table/LlTable.hpp"
 #include "cursiv/engines/shared/runtime/IndentLevel.hpp"
+#include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/engines/shared/runtime/token_end_from.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
+#include "cursiv/engines/shared/table/Token.hpp"
 
 namespace cursiv {
 
@@ -107,39 +108,32 @@ template <const auto& T>
 inline bool ll_chains_nothing(const Cst& cst, StampLayout stamp,
                               const LlSpine& spine, const CstLeaf& leaf,
                               std::uint16_t hop) {
-  if constexpr (T.nodeStep == nullptr) {
-    (void)cst, (void)stamp, (void)spine, (void)leaf, (void)hop;
-    return false;
-  } else {
-    const std::uint32_t step = hop != kNoRow ? T.nodeStep[hop] : 0u;
-    if ((step & 1u) == 0 || !leaf) return false;
-    const auto records = spine.records();
-    bool joined = false;
-    for (std::size_t i = records.size(); i-- > 0;) {
-      // The token ends the record: no later leaf, invented or not, is in it.
-      NodeId last = records[i];
-      do --last;
-      while (cst[last].subtreeSize != 1 || cst[last].hidden);
-      if (last != leaf.id) break;
-      std::uint32_t op = 0;
-      for (const NodeId kid : cst.reverse_children(records[i])) {
-        const std::uint16_t pos =
-            cst[kid].subtreeSize == 1 ? stamp.state(cst[kid]) : 0;
-        if (pos != 0 && pos <= T.nafter &&
-            (T.nodeStep[pos - 1] >> 16) == (step >> 16))
-          op = T.nodeStep[pos - 1];
-      }
-      if (op == 0) {
-        if (joined) break;
-        continue;
-      }
-      joined = true;
-      // One climb: the step's number orders the rest.
-      if ((op >> 1) > (step >> 1)) continue;
-      return (op >> 1) == (step >> 1);
+  if constexpr (T.nodeStep == nullptr) return false;
+  const std::uint32_t step = hop != kNoRow ? T.nodeStep[hop] : 0u;
+  if ((step & 1u) == 0 || !leaf) return false;
+  const auto records = spine.records();
+  bool joined = false;
+  for (std::size_t i = records.size(); i-- > 0;) {
+    // The token ends the record: no later leaf, invented or not, is in it.
+    NodeId last = records[i];
+    do --last;
+    while (cst[last].subtreeSize != 1 || cst[last].hidden);
+    if (last != leaf.id) break;
+    std::uint32_t op = 0;
+    for (const NodeId kid : cst.reverse_children(records[i])) {
+      const std::uint16_t pos =
+          cst[kid].subtreeSize == 1 ? stamp.state(cst[kid]) : 0;
+      if (pos != 0 && pos <= T.nafter &&
+          (T.nodeStep[pos - 1] >> 16) == (step >> 16))
+        op = T.nodeStep[pos - 1];
     }
-    return false;
+    // One climb: the step's number orders the rest. Past a join, a record
+    // that joins nothing ends the chain.
+    if (op == 0 ? joined : (op >> 1) <= (step >> 1))
+      return op != 0 && (op >> 1) == (step >> 1);
+    joined = joined || op != 0;
   }
+  return false;
 }
 
 template <const auto& T>
@@ -577,21 +571,44 @@ inline bool ll_step_token(LlSimulation& sim, std::uint16_t term,
   });
 }
 
+// Whether the token `mode` reads at `from` still ends at `to` with a word typed
+// right behind, as `StampedGrammar::ends_before_word` asks it.
+template <const auto& T>
+inline bool ll_ends_before_word(std::string_view text, std::uint16_t mode,
+                                TextOffset from, TextOffset to, SymbolId term) {
+  return StampedGrammar::ends_before_word(
+      text.substr(from, to - from), term, {T.terms, T.nterms}, T.names,
+      [&](std::string_view s) {
+        return ll_match_text<T>(s.data(), static_cast<TextOffset>(s.size()),
+                                mode, 0);
+      });
+}
+
+// Whether `mode` reads the text from `from` to `to` as trivia and arrives at
+// `to`. `tail` takes the last whole token read, `begin` where it starts.
+template <const auto& T>
+inline bool ll_trivia_to(std::string_view text, std::uint16_t mode,
+                         TextOffset from, TextOffset to, TextOffset& begin,
+                         Scan& tail) {
+  tail = {};
+  while (from < to) {
+    const Scan s = ll_match_text<T>(
+        text.data(), static_cast<TextOffset>(text.size()), mode, from);
+    if (s.term == kInvalidSymbol || s.end <= from || !T.terms[s.term].trivia)
+      return false;
+    if (s.end > to) return ll_ends_before_word<T>(text, mode, from, to, s.term);
+    begin = from;
+    tail = s;
+    from = s.end;
+  }
+  return true;
+}
+
 template <const auto& T>
 inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
                                 TextOffset at, TextOffset resume,
                                 std::vector<NextFeature>& out) {
-  if (!cst.engine_stamped() || at > resume || resume > cst.text().size())
-    return;
-  // A caret inside a token, a comment or dropped text is asked at that leaf's
-  // start: the answer replaces the leaf.
-  if (const NodeCount rank = cst.leaves_before(at); rank < cst.leaf_count()) {
-    const CstLeaf inside = cst.leaf(rank);
-    if (inside.begin < at) {
-      at = inside.begin;
-      resume = std::max(resume, inside.end);
-    }
-  }
+  if (!StampedGrammar::caret_in(cst, at, resume)) return;
   const StampLayout stamp = grammar.stamp();
   NodeCount rank = 0;
   const CstLeaf leaf = ll_leaf_before<T>(cst, stamp, at, rank);
@@ -632,9 +649,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // not hide it. It is read under the alphabet of the last token, and where
   // there is none under the candidate's.
   NodeCount behind = cst.leaves_before(at);
-  while (behind > 0 && cst.leaf(behind - 1).begin == cst.leaf(behind - 1).end) {
+  while (behind > 0 && cst.leaf(behind - 1).begin == cst.leaf(behind - 1).end)
     --behind;
-  }
   const CstLeaf prior = behind > 0 ? cst.leaf(behind - 1) : CstLeaf{};
   const TextOffset gapFrom = ll_gap_from(cst, at);
   // What the blanks and comments between the last token and the caret come
@@ -1060,7 +1076,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
         bool answer = false, known = !spellings.empty();
         for (const std::string_view spelling : spellings)
           answer = accepts(spelling) || answer;
-        if (!known) {
+        if (!known)
           for (const std::string_view sample : StampedGrammar::samples) {
             const Scan scanned = ll_match_text<T>(
                 sample.data(), static_cast<TextOffset>(sample.size()), mode, 0);
@@ -1068,7 +1084,6 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
             known = true;
             answer = accepts(sample) || answer;
           }
-        }
         // A terminal no sample spells is answered by its body where it decides
         // a condition, and kept otherwise.
         if (!known)

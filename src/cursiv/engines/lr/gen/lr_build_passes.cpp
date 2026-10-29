@@ -107,23 +107,6 @@ std::vector<std::uint32_t> lr_kept_cells(LrBuildTable& A, std::uint32_t n,
   return out;
 }
 
-// A guard's program as a key, each landing as `name` gives it.
-template <class F>
-void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
-  key.assign(p.conds.begin(), p.conds.end());
-  key.push_back(0xffffffffu);
-  for (const std::uint16_t to : p.to)
-    key.push_back(to == LrGuard::kNoState ? 0xffffffffu : name(to));
-  key.insert(key.end(), p.site.begin(), p.site.end());
-  key.insert(key.end(), p.outer.begin(), p.outer.end());
-}
-
-template <class F>
-void lr_each_landing(const LrBuildTable& A, std::uint32_t k, F&& f) {
-  for (const std::uint16_t to : A.guards[k].to)
-    if (to != LrGuard::kNoState) f(to);
-}
-
 // The states the start reaches through shifts and gotos.
 std::vector<std::uint8_t> lr_live_states(const LrBuildTable& A,
                                          const LrGotoRows& go) {
@@ -139,14 +122,8 @@ std::vector<std::uint8_t> lr_live_states(const LrBuildTable& A,
   while (!work.empty()) {
     const std::uint32_t s = work.back();
     work.pop_back();
-    for (const LrAction& x : A.action_row(s)) {
-      if (x.kind == LrActionKind::shift) reach(x.arg);
-      if (x.kind == LrActionKind::guard) lr_each_landing(A, x.arg, reach);
-    }
-    for (const LrGotoRows::Edge& e : go[s]) {
-      reach(e.to);
-      if (e.guard != 0) lr_each_landing(A, e.guard - 1u, reach);
-    }
+    for (const LrAction& x : A.action_row(s)) A.each_landing(x, reach);
+    for (const LrGotoRows::Edge& e : go[s]) A.each_goto_landing(e, reach);
   }
   return lv;
 }
@@ -312,8 +289,7 @@ std::vector<std::uint16_t> lr_shift_terms(const LrBuildTable& a) {
               "LR: a shifted state lost its terminal identity");
         term = x.term;
       };
-      if (x.kind == LrActionKind::shift) stamp(x.arg);
-      if (x.kind == LrActionKind::guard) lr_each_landing(a, x.arg, stamp);
+      a.each_landing(x, stamp);
     }
   return terms;
 }
@@ -395,15 +371,8 @@ void lr_minimize_states(LrBuildTable& A) {
       const auto moved = [&](std::uint16_t to) {
         dirty[cls[s]] = dirty[cls[s]] || cls[to] != next[to];
       };
-      for (unsigned i = 0; i < acount[s]; ++i) {
-        const LrAction& x = acts[abase[s] + i];
-        if (x.kind == LrActionKind::shift) moved(x.arg);
-        if (x.kind == LrActionKind::guard) lr_each_landing(A, x.arg, moved);
-      }
-      for (const auto& e : go[s]) {
-        moved(e.to);
-        if (e.guard != 0) lr_each_landing(A, e.guard - 1u, moved);
-      }
+      for (const LrAction& x : A.action_row(s)) A.each_landing(x, moved);
+      for (const auto& e : go[s]) A.each_goto_landing(e, moved);
     }
     auto count = nclasses;
     std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>

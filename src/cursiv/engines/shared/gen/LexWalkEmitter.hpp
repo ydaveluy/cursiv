@@ -448,6 +448,40 @@ int lex_continuation_of(const View& v, std::uint16_t st,
   return -1;
 }
 
+// The rungs both engines spell alike over the automaton `View` names: the runs
+// a state crosses, the match it takes and the relays it launches, to compete
+// with that match. An engine's emitter adds the walk around them.
+template <class View>
+struct LexWalkRungs : EmitOutput {
+  explicit LexWalkRungs(View v) : view(v) {}
+
+  const View view;
+  LexRunEmitter runs;
+
+  bool blind(unsigned st) const {
+    return lex_run_blind(view, static_cast<std::uint16_t>(st));
+  }
+  bool plain_run(unsigned st) const {
+    return lex_plain_run(view, static_cast<std::uint16_t>(st));
+  }
+  int continuation_of(unsigned st, const std::uint8_t* spelled) const {
+    return lex_continuation_of(view, static_cast<std::uint16_t>(st), spelled);
+  }
+  void emit_match(unsigned st, std::string_view ind) {
+    if (view.accept(static_cast<std::uint16_t>(st)) != 0)
+      fmt("{}match.take(kTape, {}u, src, i, len, far);\n", ind, st);
+  }
+  void emit_relay_call(unsigned st, std::string_view ind) {
+    for (auto k = view.relay(static_cast<std::uint16_t>(st)); k != kNoRelay;
+         k = view.relay_of(k).next)
+      fmt("{}relays.launch(kTape, {}u, src, len, start, i);\n", ind, k);
+  }
+  void emit_run_adv(const ByteSet& stay, std::string_view var,
+                    std::string_view setName, bool content = true) {
+    runs.advance(*this, stay, var, setName, content);
+  }
+};
+
 // The relay rests' runs as the function `name` (`relay_run` of a table): per
 // state a rest reaches and crosses blind, the advance over the bytes that keep
 // it there; `relays` are the table's relays, `v` its automaton.

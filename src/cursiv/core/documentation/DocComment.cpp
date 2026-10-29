@@ -568,9 +568,8 @@ namespace {
 }  // namespace
 
 const DocCommentNode* DocComment::getTag(std::string_view name) const {
-  for (const DocCommentNode& element : tags_named(elements, name))
-    return &element;
-  return nullptr;
+  auto tags = tags_named(elements, name);
+  return tags.empty() ? nullptr : &tags.front();
 }
 
 std::vector<const DocCommentNode*> DocComment::getTags(

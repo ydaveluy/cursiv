@@ -144,6 +144,13 @@ inline void lr_search_admit(LrSearch& s, std::uint32_t i) {
   lr_search_queue(s, r.cost + h, r, i);
 }
 
+// The readings in `s.out` admitted, and what the gesture laid trimmed.
+CURSIV_ALWAYS_INLINE inline void lr_search_admit_out(LrSearch& s,
+                                                     const LrSearchLaid& m) {
+  for (const std::uint32_t q : s.out) lr_search_admit(s, q);
+  lr_search_trim(s, m);
+}
+
 // A fork is a reading of its own at no cost, ranked by the arm it takes.
 template <const auto& A>
 struct LrSearchPool {
@@ -266,12 +273,6 @@ void lr_search_read(LrContext& c, LrSearch& s, std::uint32_t start,
   lr_search_pay(c, s);
 }
 
-template <const auto& A>
-void lr_search_lay(LrContext& c, LrSearch& s, std::uint32_t e) {
-  lr_search_read<A>(c, s, e);
-  for (const std::uint32_t q : s.out) lr_search_admit(s, q);
-}
-
 // The author's tokens under frozen frame `f`, counted from the top frame down
 // and only past `most` as a floor.
 inline std::int64_t lr_search_src_tokens(const LrContext& c, LrSearch& s,
@@ -384,11 +385,10 @@ LrChain lr_search_chain(const LrCactus& cactus, std::uint32_t top,
     if (prod.len + 1u > size) return LrChain::refused;
     size -= prod.len;
     for (std::uint32_t k = prod.len; k != 0; --k) {
-      if (above != 0) {
+      if (above != 0)
         --above;
-      } else {
+      else
         node = cactus.parent(node);
-      }
     }
     const std::uint32_t below =
         above != 0 ? ch.above[above - 1] : cactus.state(node);
@@ -509,8 +509,7 @@ void lr_search_inserts(LrContext& c, LrSearch& s, std::uint32_t gi) {
     bool due = false;
     const LrSearchLaid pools(s);
     lr_search_insert<A>(c, s, from, term, rank + k, due);
-    for (const std::uint32_t q : s.out) lr_search_admit(s, q);
-    lr_search_trim(s, pools);
+    lr_search_admit_out(s, pools);
     return true;
   });
 }
@@ -550,12 +549,9 @@ void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
       lr_pin(x, r.term, true, end, written, mode);
     }
     lr_search_read<A>(c, s, e);
-    bool holds = false;
-    for (const std::uint32_t q : s.out) {
-      holds = holds || lr_search_goal(s.configs[q]);
-      lr_search_admit(s, q);
-    }
-    lr_search_trim(s, pools);
+    const bool holds = std::ranges::any_of(
+        s.out, [&](std::uint32_t q) { return lr_search_goal(s.configs[q]); });
+    lr_search_admit_out(s, pools);
     return holds;
   };
   if (r.closed) {
@@ -621,8 +617,8 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
       lr_pin(r, t.term, true, t.end, written, mode);
       r.cost += kRepairReread;
       r.freeInserts = 0;
-      lr_search_lay<A>(c, s, e);
-      lr_search_trim(s, pools);
+      lr_search_read<A>(c, s, e);
+      lr_search_admit_out(s, pools);
     }
   }
   // Bytes no mode reads refuse every reading alike: insertions in front of
@@ -649,8 +645,7 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
       const std::uint32_t link =
           lr_search_insert<A>(c, s, bi, term, insertRank + k, due);
       if (!due && link != kNoGestureLink) s.links[link].choice += A.cfg.nterms;
-      for (const std::uint32_t q : s.out) lr_search_admit(s, q);
-      lr_search_trim(s, pools);
+      lr_search_admit_out(s, pools);
       return true;
     });
     // Ranks need order, not consecutive values: two terminal-sized ranges
@@ -677,8 +672,8 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     r.lost += laid ? 0u : 1u;
     r.phase = LrRepairPhase::discardOnly;
     r.freeInserts = 0;
-    lr_search_lay<A>(c, s, e);
-    lr_search_trim(s, pools);
+    lr_search_read<A>(c, s, e);
+    lr_search_admit_out(s, pools);
   }
   if (b.mayAbandon() && b.run.size() > 1) {
     LrConfig g = LrConfig::abandonGenerator(
@@ -744,8 +739,8 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
     r.lost = lostAll;
     r.phase = LrRepairPhase::afterAbandon;
     r.freeInserts = 0;
-    lr_search_lay<A>(c, s, e);
-    lr_search_trim(s, pools);
+    lr_search_read<A>(c, s, e);
+    lr_search_admit_out(s, pools);
     if (keep > 1)
       requeue(keep - 1, s.cactus.parent(node), s.cactus.begin_parent(begin),
               cost, lostAll);
@@ -966,14 +961,14 @@ inline void lr_search_reset(LrSearch& s) {
 
 // A root is refused, so it owes at least one gesture.
 template <class Reading>
-void lr_search_root(LrSearch& s, const Reading& v, const LrStack& frames,
-                    NodeCount len, std::uint32_t choice,
+void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
+                    const LrStack& frames, NodeCount len, std::uint32_t choice,
                     bool fresh) {
   const auto src = static_cast<std::uint32_t>(s.sources.size());
   const LrCactus::Top top = s.cactus.add(frames, src);
   LrConfig root;
   root.run = LrCactusClimb(s.cactus, top);
-  root.at = v.committed;
+  root.at = at;
   root.la = v.la;
   root.laMode = v.laMode;
   root.virt = v.virt;
@@ -991,7 +986,7 @@ inline void lr_search_start(const LrContext& c, LrSearch& s) {
   lr_search_reset(s);
   s.paidBase = c.cost;
   // A fault a stopped search left open goes on.
-  lr_search_root(s, c, c.stack, c.tape.len(), 0, !s.fault.open);
+  lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 0, !s.fault.open);
 }
 
 // With no goal before the work ran out, the reading that got furthest.
@@ -1136,12 +1131,6 @@ inline void lr_search_note(LrContext& c, LrSearch& s) {
   if (s.bounded && n.begin < s.boundedBegin) s.boundedBegin = n.begin;
   c.notes.push_back(std::move(n));
   f = RepairFault{};
-}
-
-// The open fault, noted where the reading has gone on from it: no gesture
-// joins it now, and what a span laid next says comes after it.
-inline void lr_search_settle(LrContext& c, LrSearch& s) {
-  if (c.shifts != s.wroteShifts) lr_search_note(c, s);
 }
 
 // What a construct abandoned in `state` owed: nothing named where its row is
@@ -1432,8 +1421,7 @@ LrExit lr_search_pause(LrContext& c) {
     lr_search_bounded(c, s);
   }
   s.openAt = kLrNoOpen;
-  bool exhausted = false;
-  bool raced = false;
+  bool exhausted = false, raced = false;
   lr_search_start(c, s);
   const std::uint32_t elected = lr_search_run<A>(c, s, exhausted, raced);
   return lr_search_take<A>(c, s, elected, exhausted, raced, true);

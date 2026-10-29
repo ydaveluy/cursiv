@@ -11,7 +11,6 @@
 #include <optional>
 #include <ranges>
 #include <span>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -113,6 +112,12 @@ void lr_room(auto& pool, std::size_t want) {
 void lr_append(auto& pool, const auto& row) {
   lr_room(pool, pool.size() + row.size());
   pool.insert(pool.end(), row.begin(), row.end());
+}
+
+// `v` sorted, each value once.
+void lr_sort_unique(auto& v) {
+  std::ranges::sort(v);
+  v.erase(std::unique(v.begin(), v.end()), v.end());
 }
 
 // What `. B` adds, once per nonterminal: the lookahead fixed by a follower or
@@ -342,6 +347,9 @@ struct LrGraph {
   std::vector<LrGuard> progs;
 
   unsigned states() const { return static_cast<unsigned>(kernAt.size()); }
+  std::span<const LrItem> kernel(unsigned s) const {
+    return {kernPool.data() + kernAt[s], kernLen[s]};
+  }
   LrPoolRows<LrItem> clos() const {
     return {closPool.data(), closAt.data(), closLen.data()};
   }
@@ -386,7 +394,6 @@ std::vector<std::uint32_t> lr_back(
 template <bool WithLa>
 LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
                  const LrFirstSets& fs, const LrClosures& cl) {
-  constexpr bool withLa = WithLa;
   const auto& g = A.cfg;
   const ChainPool& writes = A.writes;
   const LrLowProd* const prods = g.prods.data();
@@ -400,10 +407,10 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   LrBitWords seen;
   std::vector<std::uint64_t> seenWords(dom.words, std::uint64_t{});
   seen.init(seenWords.data(), dom.words);
-  std::vector<DynSet> laS(withLa ? dom.n : 0);
+  std::vector<DynSet> laS(WithLa ? dom.n : 0);
 
   std::vector<LrItem> harv(dom.n);
-  std::vector<DynSet> harvLa(withLa ? dom.n : 0);
+  std::vector<DynSet> harvLa(WithLa ? dom.n : 0);
   auto harvest = [&]() -> std::uint32_t {
     std::uint32_t out = 0;
     const std::size_t klo = seen.lo, khi = seen.hi;
@@ -418,7 +425,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         bits &= bits - 1;
         const std::uint16_t p = dom.prodOf[i];
         harv[out] = LrItem{p, static_cast<std::uint16_t>(i - dom.base[p])};
-        if (withLa) {
+        if (WithLa) {
           harvLa[out] = laS[i];
           laS[i] = DynSet{};
         }
@@ -430,7 +437,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
 
   // The lookahead a call site hands its callee, gathered per nonterminal:
   // both unions are idempotent, so one walk of its closure list serves all.
-  std::vector<DynSet> ntLa(withLa ? nN : 0);
+  std::vector<DynSet> ntLa(WithLa ? nN : 0);
   std::vector<char> ntMark(nN, char{});
   std::vector<unsigned> ntList(nN, unsigned{});
   std::uint32_t nNtList = 0;
@@ -440,7 +447,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       const LrItem& it = kernel[j];
       const std::size_t i = dom.base[it.prod] + it.dot;
       seen.set(i);
-      if (withLa) laS[i] |= kla[j];
+      if (WithLa) laS[i] |= kla[j];
     }
     nNtList = 0;
     for (std::size_t j = 0; j < kn; ++j) {
@@ -452,15 +459,15 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       const unsigned B = nt_index(x);
       if (!ntMark[B]) {
         ntMark[B] = 1;
-        if (withLa) ntLa[B] = DynSet{};
+        if (WithLa) ntLa[B] = DynSet{};
         ntList[nNtList++] = B;
         seen.merge(cl.mask[B]);
       }
-      if (withLa) ntLa[B] |= fs.after(it.prod, it.dot + 1, kla[j]);
+      if (WithLa) ntLa[B] |= fs.after(it.prod, it.dot + 1, kla[j]);
     }
     for (std::uint32_t z = 0; z < nNtList; ++z) {
       const unsigned B = ntList[z];
-      if (withLa) {
+      if (WithLa) {
         const DynSet& s = ntLa[B];
         for (const LrClosEntry& e : cl.of(B)) {
           DynSet& d = laS[dom.base[e.prod]];
@@ -481,7 +488,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   shifts.pool.reserve(poolHint);
   gotos.pool.reserve(poolHint);
   kernPool.reserve(poolHint);
-  if (withLa) {
+  if (WithLa) {
     closLaPool.reserve(poolHint);
     kernLaPool.reserve(poolHint);
   }
@@ -494,11 +501,11 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     kernAt.push_back(0);
     kernLen.push_back(1);
     kernPool.push_back(LrItem{g.startProd, 0});
-    if (withLa) kernLaPool.push_back(la0);
+    if (WithLa) kernLaPool.push_back(la0);
     tagKnown.emplace_back();
     tagTruth.emplace_back();
     kernIx.add(lr_kernel_hash(kernPool.data(), 1,
-                              withLa ? kernLaPool.data() : nullptr),
+                              WithLa ? kernLaPool.data() : nullptr),
                0);
   }
 
@@ -506,22 +513,18 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   auto find_or_add = [&](std::uint32_t n, bool& fresh, const DynSet& known,
                          const DynSet& held) -> unsigned {
     std::uint64_t h =
-        lr_kernel_hash(harv.data(), n, withLa ? harvLa.data() : nullptr);
+        lr_kernel_hash(harv.data(), n, WithLa ? harvLa.data() : nullptr);
     for (const std::uint64_t x : known.w) h = hash_mix(h, x);
     for (const std::uint64_t x : held.w) h = hash_mix(h, x);
     const LrItem* const kp = kernPool.data();
-    const DynSet* const klp = withLa ? kernLaPool.data() : nullptr;
+    const DynSet* const klp = WithLa ? kernLaPool.data() : nullptr;
     for (unsigned i = kernIx.first(h); i != ChainIndex::kNone;
          i = kernIx.after(i)) {
       if (!(tagKnown[i] == known) || !(tagTruth[i] == held)) continue;
       // Under `core` a kernel is its core: lookaheads are propagated later.
-      if (!withLa) {
-        if (!lr_same_core(kp + kernAt[i], kernLen[i], harv.data(), n)) continue;
-        fresh = false;
-        return i;
-      }
-      if (lr_same_full(kp + kernAt[i], kernLen[i], harv.data(), n,
-                       klp + kernAt[i], harvLa.data())) {
+      if (WithLa ? lr_same_full(kp + kernAt[i], kernLen[i], harv.data(), n,
+                                klp + kernAt[i], harvLa.data())
+                 : lr_same_core(kp + kernAt[i], kernLen[i], harv.data(), n)) {
         fresh = false;
         return i;
       }
@@ -539,7 +542,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     kernAt.push_back(static_cast<std::uint32_t>(kb));
     kernLen.push_back(n);
     lr_append(kernPool, std::span(harv).first(n));
-    if (withLa) lr_append(kernLaPool, std::span(harvLa).first(n));
+    if (WithLa) lr_append(kernLaPool, std::span(harvLa).first(n));
     tagKnown.push_back(known);
     tagTruth.push_back(held);
     kernIx.add(h, id);
@@ -601,15 +604,15 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       const std::uint32_t kb = kernAt[s];
       const std::uint32_t c0n =
           closure(kernPool.data() + kb, kernLen[s],
-                  withLa ? kernLaPool.data() + kb : nullptr);
+                  WithLa ? kernLaPool.data() + kb : nullptr);
       const std::size_t cb = closPool.size();
       closAt[s] = static_cast<std::uint32_t>(cb);
       closLen[s] = c0n;
       lr_append(closPool, std::span(harv).first(c0n));
-      if (withLa) lr_append(closLaPool, std::span(harvLa).first(c0n));
+      if (WithLa) lr_append(closLaPool, std::span(harvLa).first(c0n));
     }
     const LrItem* const cs = closPool.data() + closAt[s];
-    const DynSet* const csLa = withLa ? closLaPool.data() + closAt[s] : nullptr;
+    const DynSet* const csLa = WithLa ? closLaPool.data() + closAt[s] : nullptr;
     const std::uint32_t csn = closLen[s];
 
     // A rule's requirement gathers its calls', each its own guard joined to
@@ -754,7 +757,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         const LrLowProd& p = prods[it.prod];
         const std::size_t ni = dom.base[it.prod] + it.dot + 1;
         seen.set(ni);
-        if (withLa) laS[ni] |= csLa[symItem[k]];
+        if (WithLa) laS[ni] |= csLa[symItem[k]];
         if (!terminal) return;
         const ElementId row = g.row_at(p, it.dot);
         lr_agree(writes, site, seenSite, row);
@@ -872,17 +875,14 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   const unsigned ns = gr.states();
   closAt.resize(ns, 0);
   closLen.resize(ns, 0);
-  if (!withLa) closLaPool.resize(closPool.size());
+  if (!WithLa) closLaPool.resize(closPool.size());
   // Terminal rows are already sorted. Gotos are ordered by (state, symbol):
   // their pool indices are also the lookback transition identities.
   auto unordered = std::move(gotos.pool);
   gotos.pool.reserve(unordered.size());
   for (unsigned s = 0; s < ns; ++s) {
     LrEdge* const row = unordered.data() + gotos.at[s];
-    std::stable_sort(row, row + gotos.len[s],
-                     [](const LrEdge& a, const LrEdge& b) {
-                       return a.sym < b.sym;
-                     });
+    std::ranges::stable_sort(std::span(row, gotos.len[s]), {}, &LrEdge::sym);
     gotos.at[s] = static_cast<std::uint32_t>(gotos.pool.size());
     gotos.pool.insert(gotos.pool.end(), row, row + gotos.len[s]);
   }
@@ -935,10 +935,10 @@ struct LrLookback {
   }
 
   // The terminals state `st` offers that read over a terminal one of its
-  // callers takes: `over(merged, mine)` asks it of the merged row against each
-  // caller's own lookahead beside the shifts.
-  template <class Over>
-  DynSet lex_flagged(unsigned st, const DynSet& shifted, Over&& over) const {
+  // callers takes: the merged row asked against each caller's own lookahead
+  // beside the shifts.
+  DynSet lex_flagged(unsigned st, const DynSet& shifted,
+                     LexOvertakes<LrBuildCfg>& overtakes) const {
     const std::span<const std::uint32_t> row = byState.of(st);
     struct Run {
       std::vector<DynSet> parts;
@@ -964,11 +964,10 @@ struct LrLookback {
     DynSet merged = shifted;
     for (const Run& run : runs) merged |= run.all;
     DynSet flagged;
-    for (std::size_t k = 0; k < runs.size(); ++k) {
-      if (runs[k].parts.size() < 2) continue;
-      for (const DynSet& part : runs[k].parts)
-        flagged |= over(merged, part | shifted);
-    }
+    for (const Run& run : runs)
+      if (run.parts.size() > 1)
+        for (const DynSet& part : run.parts)
+          flagged |= overtakes.overtaking(merged, part | shifted);
     return flagged;
   }
 
@@ -1287,10 +1286,7 @@ std::vector<DynSet> lr_lex_flags(const LrGraph& gr, const LrLookback& lb,
   for (unsigned s = 0; s < gr.states(); ++s) {
     DynSet shifted;
     for (const LrEdge& e : gr.shifts[s]) shifted.set(e.sym);
-    flagged[s] = lb.lex_flagged(s, shifted,
-                                [&](const DynSet& all, const DynSet& mine) {
-                                  return overtakes.overtaking(all, mine);
-                                });
+    flagged[s] = lb.lex_flagged(s, shifted, overtakes);
   }
   return flagged;
 }
@@ -1601,8 +1597,7 @@ class LrWrittenOrder {
   Decision operator()(unsigned s, const LrAction& a, const LrAction& b,
                       unsigned t) {
     open();
-    const Decision d = decide(s, reading(s, a, t), reading(s, b, t));
-    return d;
+    return decide(s, reading(s, a, t), reading(s, b, t));
   }
 
  private:
@@ -1628,7 +1623,7 @@ class LrWrittenOrder {
     _nexts.resize(_gr.states());
     _nextsMade.assign(_gr.states(), 0);
     for (unsigned s = 0; s < _gr.states(); ++s)
-      for (const LrItem& k : kernel(s))
+      for (const LrItem& k : _gr.kernel(s))
         _maxDot = std::max<std::uint32_t>(_maxDot, k.dot);
     _reach.resize(_maxDot + 2u);
     _climbOf.assign(std::size_t{_g.nprods} * _g.nterms, kNone);
@@ -1905,10 +1900,6 @@ class LrWrittenOrder {
     }
   }
 
-  std::span<const LrItem> kernel(unsigned s) const {
-    return {_gr.kernPool.data() + _gr.kernAt[s], _gr.kernLen[s]};
-  }
-
   // The states `n` frames under `s`, ascending.
   const std::vector<std::uint32_t>& back(unsigned s, unsigned n) {
     const std::uint64_t k = std::uint64_t{s} << 32 | n;
@@ -1973,7 +1964,7 @@ class LrWrittenOrder {
     std::vector<Next>& v = _nexts[o];
     if (_nextsMade[o]) return v;
     _nextsMade[o] = 1;
-    for (const LrItem& k : kernel(o)) {
+    for (const LrItem& k : _gr.kernel(o)) {
       const LrLowProd& pr = _g.prods[k.prod];
       if (k.dot < pr.len && !is_term(_g.sym_at(pr, k.dot)))
         v.push_back({k, static_cast<std::uint16_t>(
@@ -1988,7 +1979,7 @@ class LrWrittenOrder {
     const unsigned at = _dom.base[p];
     const std::uint64_t bit = std::uint64_t{1} << (at & 63);
     for (const Next& n : nexts(o))
-      if ((_cl.mask[n.nt].w[at >> 6] & bit) != 0) f(n.item, n.nt);
+      if ((_cl.mask[n.nt].w[at >> 6] & bit) != 0) f(n.item);
   }
 
   bool has_parent(unsigned o, unsigned p) {
@@ -2007,18 +1998,18 @@ class LrWrittenOrder {
   bool each_chosen(std::vector<std::int8_t>* row, unsigned o, unsigned p,
                    std::uint32_t t, F&& f) {
     if (row == nullptr) {
-      each_parent(o, p, [&](const LrItem& k, unsigned) { f(k); });
+      each_parent(o, p, f);
       return false;
     }
     int most = 0;
     std::size_t all = 0;
-    each_parent(o, p, [&](const LrItem& k, unsigned) {
+    each_parent(o, p, [&](const LrItem& k) {
       most = std::max(most, score(*row, k, p, t));
       ++all;
     });
     if (most == 0) return all != 0;
     std::size_t kept = 0;
-    each_parent(o, p, [&](const LrItem& k, unsigned) {
+    each_parent(o, p, [&](const LrItem& k) {
       if (score(*row, k, p, t) != most) return;
       f(k);
       ++kept;
@@ -2221,10 +2212,9 @@ class LrWrittenOrder {
     _byDot.resize(_maxDot + 1u);
     for (auto& run : _byDot) run.clear();
     for (std::uint32_t i = 0; i < md.over.size(); ++i)
-      each_parent(first_of(md.over[i]), md.up.prod,
-                  [&](const LrItem& k, unsigned) {
-                    _byDot[k.dot].push_back(std::uint64_t{item_ix(k)} << 32 | i);
-                  });
+      each_parent(first_of(md.over[i]), md.up.prod, [&](const LrItem& k) {
+        _byDot[k.dot].push_back(std::uint64_t{item_ix(k)} << 32 | i);
+      });
     md.parentOff.resize(_maxDot + 2u);
     for (unsigned d = 0; d <= _maxDot; ++d) {
       std::ranges::sort(_byDot[d]);
@@ -2352,7 +2342,7 @@ class LrWrittenOrder {
   void build_shifts(unsigned s, Row& r) {
     r.shifted = true;
     r.shifts.assign(r.terms.size(), Reading{});
-    const auto kern = kernel(s);
+    const auto kern = _gr.kernel(s);
     const auto each = [&](const LrItem& k, auto&& f) {
       const LrLowProd& pr = _g.prods[k.prod];
       if (k.dot >= pr.len) return;
@@ -2402,7 +2392,7 @@ class LrWrittenOrder {
     int most = 0;
     std::vector<LrItem> picked;
     std::vector<std::int8_t>& scored = scores(x.arg, t);
-    for (const LrItem& k : kernel(s)) {
+    for (const LrItem& k : _gr.kernel(s)) {
       const int sc = score(scored, k, x.arg, t);
       if (sc > most) {
         most = sc;
@@ -2631,7 +2621,12 @@ class LrWrittenOrder {
       ensure_tops(B, height);
       Live live{&a, &A, &b, &B, &at};
       p.at[height].clear();
-      p.done[height] = lay_meets(A, B, height, p.at[height], live);
+      _sink = &p.at[height];
+      _live = &live;
+      _meetAt.reset();
+      p.done[height] = join_meets(A, B, height);
+      _sink = nullptr;
+      _live = nullptr;
       if (!p.done[height]) {
         p.at[height].clear();
         return;
@@ -2652,19 +2647,8 @@ class LrWrittenOrder {
   }
 
   // The pairs of chains of two and three of two layouts whose tops are one
-  // node at `height`, and the ways their states stand, in `out`; `live` says
-  // each as it is met, and may stop the join: False where it did.
-  bool lay_meets(const Layout& A, const Layout& B, std::uint32_t height,
-                 std::vector<Meet>& out, Live& live) {
-    _sink = &out;
-    _live = &live;
-    _meetAt.reset();
-    const bool whole = join_meets(A, B, height);
-    _sink = nullptr;
-    _live = nullptr;
-    return whole;
-  }
-
+  // node at `height`, and the ways their states stand, in `_sink`; `_live`
+  // says each as it is met, and may stop the join: False where it did.
   bool join_meets(const Layout& A, const Layout& B, std::uint32_t height) {
     for (const std::uint64_t packed : A.shortAt[height]) {
       const Chain& ca = A.chains[static_cast<std::uint32_t>(packed)];
@@ -2770,13 +2754,12 @@ class LrWrittenOrder {
     std::vector<std::uint32_t>& out = at->second;
     for (const std::uint32_t x : back(a, d1))
       for (const std::uint32_t st : reach(p, x, d2))
-        for (const LrItem& k : kernel(st))
+        for (const LrItem& k : _gr.kernel(st))
           if (k.prod == p && k.dot == d2) {
             out.push_back(st);
             break;
           }
-    std::ranges::sort(out);
-    out.erase(std::unique(out.begin(), out.end()), out.end());
+    lr_sort_unique(out);
     return out;
   }
 
@@ -3139,9 +3122,7 @@ class LrWrittenOrder {
       for (std::uint32_t k = c.from; k < c.to; ++k)
         st.shorts.push_back(packed >> 32 << 32 | first_of(lay.states[k]));
     }
-    std::ranges::sort(st.shorts);
-    st.shorts.erase(std::unique(st.shorts.begin(), st.shorts.end()),
-                    st.shorts.end());
+    lr_sort_unique(st.shorts);
     return st.shorts;
   }
 
@@ -3162,9 +3143,7 @@ class LrWrittenOrder {
               first_of(md.over[static_cast<std::uint32_t>(md.parents[q])]));
       }
     }
-    std::ranges::sort(st.talls);
-    st.talls.erase(std::unique(st.talls.begin(), st.talls.end()),
-                   st.talls.end());
+    lr_sort_unique(st.talls);
     return st.talls;
   }
 
@@ -3202,8 +3181,7 @@ class LrWrittenOrder {
       for (const std::uint32_t st : _reach[_reachMade])
         for (const LrEdge& e : _gr.edges(st, _g.sym_at(pr, _reachMade)))
           to.push_back(e.to);
-      std::ranges::sort(to);
-      to.erase(std::unique(to.begin(), to.end()), to.end());
+      lr_sort_unique(to);
     }
     return _reach[d];
   }
@@ -3230,7 +3208,7 @@ class LrWrittenOrder {
           b.roots[i].prod != p)
         continue;
       if (!std::ranges::binary_search(reach(p, x, height), s)) continue;
-      for (const LrItem& kk : kernel(s))
+      for (const LrItem& kk : _gr.kernel(s))
         if (kk.prod == p && kk.dot == height) return true;
     }
     return false;
@@ -3251,9 +3229,7 @@ class LrWrittenOrder {
       for (const std::uint64_t e : _midPool[s.chains[*it].over].over)
         at->second.push_back(first_of(e));
     }
-    std::ranges::sort(at->second);
-    at->second.erase(std::unique(at->second.begin(), at->second.end()),
-                     at->second.end());
+    lr_sort_unique(at->second);
     return at->second;
   }
 
@@ -3296,7 +3272,7 @@ class LrWrittenOrder {
         if (i != 0 && first_of(over[i - 1]) == a) continue;
         if (seek(theirs, seen, a)) continue;
         bool whole = true;
-        each_parent(a, mc.top.prod, [&](const LrItem& k, unsigned) {
+        each_parent(a, mc.top.prod, [&](const LrItem& k) {
           if (!whole) return;
           const std::uint32_t height = mc.height + k.dot;
           const std::vector<std::uint64_t>& mine = shorts_at(c, height);
@@ -3347,10 +3323,8 @@ class LrWrittenOrder {
       }
     }
     if (verdict == 0) return {};
-    return {verdict,
-            all.complete && !all.tied && all.lower != all.upper};
+    return {verdict, all.complete && !all.tied && all.lower != all.upper};
   }
-
 
   const LrBuildCfg& _g;
   const LrItemDomain& _dom;
@@ -3423,7 +3397,6 @@ class LrWrittenOrder {
                      SegHash>
       _links;
 };
-
 
 // A shift/reduce both sides of which sit on a precedence step: the tighter
 // step wins, and at equal steps the associativity -- which a non-associative
@@ -3513,23 +3486,17 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
                         [&](std::uint32_t s) { return newId[s]; });
   LrGotoRows lanes;
   // A guard's program landing on fused entries, interned.
-  std::unordered_map<std::vector<std::uint16_t>, std::uint32_t, VecHash>
+  std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       guardIx;
+  std::vector<std::uint32_t> guardKey;
   const auto intern_guard = [&](const LrGuard& p) -> std::uint32_t {
-    LrGuard q{p.conds, {}, p.site, p.outer};
-    q.to.reserve(p.to.size());
-    for (const std::uint16_t t : p.to)
-      q.to.push_back(t == LrGuard::kNoState
-                         ? t
-                         : static_cast<std::uint16_t>(newId[t]));
-    std::vector<std::uint16_t> key(q.conds.begin(), q.conds.end());
-    key.push_back(LrGuard::kNoState);
-    key.insert(key.end(), q.to.begin(), q.to.end());
-    key.insert(key.end(), q.site.begin(), q.site.end());
-    key.insert(key.end(), q.outer.begin(), q.outer.end());
+    lr_guard_key(p, [&](std::uint16_t t) { return newId[t]; }, guardKey);
     const auto [at, fresh] = guardIx.try_emplace(
-        std::move(key), static_cast<std::uint32_t>(A.guards.size()));
-    if (fresh) A.guards.push_back(std::move(q));
+        guardKey, static_cast<std::uint32_t>(A.guards.size()));
+    if (!fresh) return at->second;
+    LrGuard& q = A.guards.emplace_back(p);
+    for (std::uint16_t& t : q.to)
+      if (t != LrGuard::kNoState) t = static_cast<std::uint16_t>(newId[t]);
     return at->second;
   };
 
@@ -3752,28 +3719,24 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
     const std::size_t mrn = merged.size();
     LrAction* const wrow = A.actions.row(A.nactions, mrn);
     DynSet& frow = A.follow[f];
-    std::uint16_t prev = 0xffff;
-    const LrAction* prevAct = nullptr;
     for (std::size_t z = 0; z < mrn; ++z) {
       const LrAction& a = merged[z];
-      if (a.term == prev) {
+      if (z != 0 && a.term == merged[z - 1].term) {
         ++A.nconflicts;
         // The pair (this terminal, that reduction) is what stays undecided.
-        const LrAction& red = a.kind == LrActionKind::reduce ? a : *prevAct;
+        const LrAction& red =
+            a.kind == LrActionKind::reduce ? a : merged[z - 1];
         owedKeys.push_back((std::uint64_t{2} << 62) |
                            (static_cast<std::uint64_t>(a.term) << 16) |
                            red.arg);
       }
-      prev = a.term;
-      prevAct = &a;
       wrow[z] = a;
       frow.set(a.term);
     }
     A.nactions += static_cast<std::uint32_t>(mrn);
     A.actionCount[f] = static_cast<std::uint16_t>(mrn);
   }
-  std::sort(owedKeys.data(), owedKeys.data() + owedKeys.size());
-  owedKeys.erase(std::unique(owedKeys.begin(), owedKeys.end()), owedKeys.end());
+  lr_sort_unique(owedKeys);
   A.nOwed = static_cast<std::uint32_t>(owedKeys.size());
 
   A.set_gotos(std::move(lanes));
@@ -3858,10 +3821,6 @@ class LrInsertOrder {
   static constexpr std::uint64_t kUnread = ~std::uint64_t{0};
   static constexpr std::uint64_t kStays = std::uint64_t{1} << 32;
 
-  std::span<const LrItem> kernel(unsigned s) const {
-    return {_gr.kernPool.data() + _gr.kernAt[s], _gr.kernLen[s]};
-  }
-
   // Each production's place in a reading of the grammar from its start, a
   // nonterminal opened where it is first met; a turn of a left recursion
   // ranks before the rules that read what it grew.
@@ -3889,16 +3848,8 @@ class LrInsertOrder {
     }
     for (unsigned p = 0; p < g.nprods; ++p)
       if (_rank[p] == kUnread) _rank[p] = count++;
-    const auto loop = [&](unsigned nt) {
-      return nt < g.leftLoop.size() ? g.leftLoop[nt] : std::uint16_t{kNoRow};
-    };
-    for (unsigned p = 0; p < g.nprods; ++p) {
-      const LrLowProd& q = g.prods[p];
-      const bool turn = q.len != 0 && !is_term(g.sym_at(q, 0)) &&
-                        loop(q.lhs) != kNoRow &&
-                        loop(nt_index(g.sym_at(q, 0))) == loop(q.lhs);
-      if (!turn) _rank[p] |= kStays;
-    }
+    for (unsigned p = 0; p < g.nprods; ++p)
+      if (!g.turns(p)) _rank[p] |= kStays;
   }
 
   // Every item in the order it reads, and the place of each.
@@ -3930,10 +3881,9 @@ class LrInsertOrder {
     std::vector<std::uint32_t> key;
     for (unsigned s = 0; s < _gr.states(); ++s) {
       key.clear();
-      for (const LrItem& k : kernel(s))
+      for (const LrItem& k : _gr.kernel(s))
         key.push_back(_placeOf[_dom.base[k.prod] + k.dot]);
-      std::ranges::sort(key);
-      key.erase(std::unique(key.begin(), key.end()), key.end());
+      lr_sort_unique(key);
       const auto [at, fresh] =
           ids.try_emplace(key, static_cast<std::uint32_t>(_cores.size()));
       if (fresh) _cores.push_back(key);
@@ -3985,7 +3935,7 @@ class LrInsertOrder {
     ++_stamp;
     const std::uint64_t mine = _stamp;
     _asked.clear();
-    for (const LrItem& k : kernel(s)) {
+    for (const LrItem& k : _gr.kernel(s)) {
       if (k.dot < _nullFrom[k.prod]) continue;
       const std::uint16_t lhs = _g.prods[k.prod].lhs;
       const std::uint32_t ask = std::uint32_t{lhs} << 16 | k.dot;

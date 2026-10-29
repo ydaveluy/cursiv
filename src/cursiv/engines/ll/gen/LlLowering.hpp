@@ -35,12 +35,7 @@ template <class G>
 inline constexpr LowerDesc kLlLower = detail::lower_desc<LlView<G>>();
 
 template <class G>
-struct LlLowering : detail::LoweringShell<LlLowering<G>, G,
-                                          detail::llow::Rewrite, LlLowered> {
-  static LlLowered lower() {
-    GrammarImage image = grammar_image<LlView<G>>();
-    return ll_lower(image, kLlLower<G>);
-  }
-};
+using LlLowering =
+    detail::LoweringShell<LlView<G>, LlLowered, ll_lower, kLlLower<G>>;
 
 }  // namespace cursiv

@@ -20,6 +20,24 @@ struct LrGuard {
   std::vector<ElementId> outer;
 
   bool operator==(const LrGuard&) const = default;
+
+  // Each outcome's landing, in outcome order.
+  template <class F>
+  void each_landing(F&& f) const {
+    for (const std::uint16_t t : to)
+      if (t != kNoState) f(t);
+  }
 };
+
+// A guard's program as a key, each landing as `name` gives it.
+template <class F>
+void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
+  key.assign(p.conds.begin(), p.conds.end());
+  key.push_back(0xffffffffu);
+  for (const std::uint16_t to : p.to)
+    key.push_back(to == LrGuard::kNoState ? 0xffffffffu : name(to));
+  key.insert(key.end(), p.site.begin(), p.site.end());
+  key.insert(key.end(), p.outer.begin(), p.outer.end());
+}
 
 }  // namespace cursiv

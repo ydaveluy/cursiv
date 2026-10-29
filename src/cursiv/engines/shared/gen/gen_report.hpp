@@ -26,26 +26,44 @@ struct GrammarImage;
 // grammar spells: a warning each.
 void report_grammar_warnings(std::string_view grammar, GrammarImage& image);
 
-// A condition read to the end of an unbounded run, a warning each: it makes
-// parsing quadratic in the run and a completion replay the tokens before the
-// caret. `rule_name` answers the name of a rule index, empty where none stands.
-template <class Cfg, class RuleName>
-void report_unbounded_conditions(std::string_view grammar, const Cfg& c,
-                                 RuleName rule_name) {
-  for (const UnboundedCondition& u : c.unbounded)
-    std::fprintf(stderr, "%.*s: warning: %s\n", static_cast<int>(grammar.size()),
-                 grammar.data(),
-                 unbounded_condition_text(c, rule_name(u.rule), u).c_str());
+// A warning each, in this order: a condition of `conds` read to the end of an
+// unbounded run, which makes parsing quadratic in the run and a completion
+// replay the tokens before the caret (`rule_name` answers a rule index's name,
+// empty where none stands); a lexical check of `lex` that could not conclude,
+// generated as if it found nothing; then the warnings of `image`.
+template <class CondCfg, class LexCfg, class RuleName>
+void report_warnings(std::string_view grammar, GrammarImage& image,
+                     const CondCfg& conds, const LexCfg& lex,
+                     RuleName rule_name) {
+  const int n = static_cast<int>(grammar.size());
+  for (const UnboundedCondition& u : conds.unbounded)
+    std::fprintf(stderr, "%.*s: warning: %s\n", n, grammar.data(),
+                 unbounded_condition_text(conds, rule_name(u.rule), u).c_str());
+  for (const LexCheckIncomplete& k : lex.lexIncomplete)
+    std::fprintf(stderr, "%.*s: warning: %s\n", n, grammar.data(),
+                 lex_check_incomplete_text(lex, k).c_str());
+  report_grammar_warnings(grammar, image);
 }
 
-// A lexical check that could not conclude, a warning each: the grammar is
-// generated as if the check found nothing.
-template <class Cfg>
-void report_incomplete_lex_checks(std::string_view grammar, const Cfg& c) {
-  for (const LexCheckIncomplete& k : c.lexIncomplete)
-    std::fprintf(stderr, "%.*s: warning: %s\n",
-                 static_cast<int>(grammar.size()), grammar.data(),
-                 lex_check_incomplete_text(c, k).c_str());
+// The output directory a generator's arguments name. Each argument that
+// starts with a dash goes to `option`, false where it is wrong; a wrong
+// argument or no directory prints the usage, `options` its flags, and answers
+// null.
+template <class Option>
+const char* gen_out_dir(int argc, char** argv, const char* options,
+                        Option&& option) {
+  const char* dir = nullptr;
+  bool bad = false;
+  for (int i = 1; i < argc && !bad; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg.starts_with("-"))
+      bad = !option(arg);
+    else
+      dir = argv[i];
+  }
+  if (!bad && dir != nullptr) return dir;
+  std::fprintf(stderr, "usage: %s %s <out-dir>\n", argv[0], options);
+  return nullptr;
 }
 
 // An arm that begins and ends with its own rule, a refusal each: true where

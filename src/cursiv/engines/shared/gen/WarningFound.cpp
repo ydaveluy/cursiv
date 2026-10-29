@@ -17,8 +17,4 @@ WarningFound::WarningFound(GrammarImage& image)
   }
 }
 
-ImageId WarningFound::body(std::uint32_t rule) {
-  return _image.ready(rule).face[1].body;
-}
-
 }  // namespace cursiv

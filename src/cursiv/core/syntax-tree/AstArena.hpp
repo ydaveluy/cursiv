@@ -25,11 +25,7 @@ class AstArena {
   // The chunk moves with the pool it came from and the source keeps none: a
   // defaulted move would copy `_cur`/`_end`, leaving two arenas bumping the
   // same block and handing one address to two nodes.
-  AstArena(AstArena&& src) noexcept
-      : _mem(src._mem), _cur(src._cur), _end(src._end) {
-    src._cur = nullptr;
-    src._end = nullptr;
-  }
+  AstArena(AstArena&& src) noexcept { *this = std::move(src); }
   AstArena& operator=(AstArena&& src) noexcept {
     _mem = src._mem;
     // The chunk belongs to the incoming `_mem`: taking one without the other

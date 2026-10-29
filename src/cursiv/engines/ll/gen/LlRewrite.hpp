@@ -13,9 +13,9 @@ namespace cursiv::detail::llow {
 struct Rewrite {
   template <class Materialized, class Declared>
   struct stages {
-    using leveled = InfixLevelStage<Materialized, Declared>;
+    using leveled = LeadGraphStage<level_rule, Materialized, Declared>;
     using rules = reached_t<leveled>;
-    using stage = LoopFoldStage<leveled>;
+    using stage = LeadGraphStage<loop_fold_rule, leveled>;
   };
   template <class St, class Op, auto P>
   using infix_src = pay_text<infix_op_src<Op, P>>;

@@ -17,6 +17,8 @@
 #include "cursiv/core/grammar/GrammarMetaData.hpp"
 #include "cursiv/core/syntax-tree/AstMetaData.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/core/syntax-tree/Cst.hpp"
+#include "cursiv/core/syntax-tree/CstLeaf.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/core/utils/CaseFold.hpp"
@@ -81,6 +83,21 @@ struct StampedGrammar final : Grammar {
     return {};
   }
 
+  // Whether a caret at `at`, its candidate replacing the text to `resume`, has
+  // an answer in the tree. A caret inside a token, a comment or dropped text
+  // is asked at that leaf's start: the answer replaces the leaf.
+  static bool caret_in(const Cst& cst, TextOffset& at, TextOffset& resume) {
+    if (!cst.engine_stamped() || at > resume || resume > cst.text().size())
+      return false;
+    const NodeCount rank = cst.leaves_before(at);
+    if (rank < cst.leaf_count() && cst.leaf(rank).begin < at) {
+      const CstLeaf inside = cst.leaf(rank);
+      at = inside.begin;
+      resume = std::max(resume, inside.end);
+    }
+    return true;
+  }
+
   // The words a caret types for a terminal that spells none, to ask of it what
   // only a word can answer.
   static constexpr std::array<std::string_view, 9> samples{
@@ -108,28 +125,23 @@ struct StampedGrammar final : Grammar {
   // does with a word typed behind it: a blank run does, a line comment does
   // not. The word is the first spelling of `terms`, else sample, that `lex`
   // reads whole as no trivia.
-  static bool ends_before_word(std::string& probe, std::string_view run,
-                               std::uint16_t term,
+  static bool ends_before_word(std::string_view run, std::uint16_t term,
                                std::span<const TermInfo> terms,
                                const char* names, auto&& lex) {
-    // -1 where `word` is no word here.
-    const auto ends = [&](std::string_view word) {
+    const auto whole = [&](std::string_view word) {
       const auto read = lex(word);
-      if (read.end != word.size() || read.term >= terms.size() ||
-          terms[read.term].trivia)
-        return -1;
-      probe.assign(run);
-      probe.append(word);
-      const auto s = lex(std::string_view(probe));
-      return s.term == term && s.end == run.size() ? 1 : 0;
+      return read.end == word.size() && read.term < terms.size() &&
+             !terms[read.term].trivia;
     };
+    std::string_view word;
     for (const TermInfo& t : terms)
-      if (t.spelled)
-        if (const int e = ends({names + t.textOff, t.textLen}); e >= 0)
-          return e != 0;
+      if (word.empty() && t.spelled && whole({names + t.textOff, t.textLen}))
+        word = {names + t.textOff, t.textLen};
     for (const std::string_view sample : samples)
-      if (const int e = ends(sample); e >= 0) return e != 0;
-    return true;
+      if (word.empty() && whole(sample)) word = sample;
+    if (word.empty()) return true;
+    const auto s = lex(std::string(run).append(word));
+    return s.term == term && s.end == run.size();
   }
 
   StampLayout stamp() const noexcept { return _stamp; }

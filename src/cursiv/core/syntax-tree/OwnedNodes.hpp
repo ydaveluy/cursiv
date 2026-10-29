@@ -2,7 +2,6 @@
 
 #include <span>
 
-
 namespace cursiv {
 
 struct AstNode;

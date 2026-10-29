@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/core/utils/ctstring.hpp"
+
 namespace cursiv {
 
 namespace {
@@ -107,16 +109,13 @@ class Speller {
   std::vector<std::uint32_t> _calling;
 };
 
-char lower(char c) {
-  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
 bool same_token(const Token& a, const Token& b) {
   if (a.rule != b.rule) return false;
   if (a.rule != kNoImage) return true;
   if (!a.folded && !b.folded) return a.text == b.text;
-  return std::ranges::equal(
-      a.text, b.text, [](char x, char y) { return lower(x) == lower(y); });
+  return std::ranges::equal(a.text, b.text, [](char x, char y) {
+    return to_lower(x) == to_lower(y);
+  });
 }
 
 // The first string both operators spell.

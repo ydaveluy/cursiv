@@ -25,38 +25,16 @@ void lr_note_lead(ChainPool& w, std::span<const WriteKind> kind) {
 
 }  // namespace
 
-LrLowerer::LrLowerer(GrammarImage& image, const LowerDesc& desc)
-    : Lowerer(image, desc, lowered.cfg, lowered.cfg.nterms,
-              lowered.cfg.wordBytes, lowered.writes, lowered.fault, pool),
-      _o(lowered),
-      _p(pool),
-      _cfg(lowered.cfg) {}
-
 std::uint16_t LrLowerer::intern_name(std::string_view text) {
   return lr_intern_name(_cfg, text);
 }
 
 void LrLowerer::declare_start() {
   _cfg.nnts = 1;
-  const std::uint16_t startName = lr_intern_name(_cfg, "$accept");
-  _cfg.nts[0].nameOff = startName;
-  _cfg.nts[0].nameLen = 7;
+  name_row(_cfg.nts[0], "$accept");
 }
 
-void LrLowerer::declare_rules() {
-  for (const std::uint32_t rule : _ntRule) {
-    std::uint16_t len = 0;
-    const std::uint16_t off = name_of(rule, len);
-    _cfg.nts[_cfg.nnts].nameOff = off;
-    _cfg.nts[_cfg.nnts].nameLen = len;
-    ++_cfg.nnts;
-  }
-  for (std::size_t k = 1; k < _cfgs.size(); ++k)
-    for (std::size_t i = 0; i < _ntRule.size(); ++i) {
-      const auto row = _cfg.nts[1 + i];
-      _cfg.nts[_cfg.nnts++] = row;
-    }
-}
+void LrLowerer::declare_rules() { name_rules(_cfg.nts, _cfg.nnts); }
 
 ImageId LrLowerer::ended(ImageId id) {
   if (const auto it = _ended.find(id); it != _ended.end()) return it->second;

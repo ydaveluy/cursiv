@@ -13,6 +13,10 @@ GenCode write_common_artifacts(const std::string& dir,
   const auto put = [&](const char* file, const std::string& text) {
     return write_source(dir + "/" + file, text);
   };
+  if (!put("Table.hpp", what.table)) return GenCode::table;
+  if (!put("Parser.hpp", what.parser)) return GenCode::parser;
+  for (const auto& [file, text] : what.parserUnits)
+    if (!put(file.c_str(), text)) return GenCode::parserFiles;
   if (!put("GrammarSource.hpp", emit_grammar_source(what.ns, what.dump)) ||
       !put("GRAMMAR.txt", dump_wrapped(what.dump.text)))
     return GenCode::grammarText;

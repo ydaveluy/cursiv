@@ -3,12 +3,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
 
 namespace cursiv {
 
-std::string emit_ast_metadata(const AstRegistry& registry);
+std::string emit_ast_metadata(const AstRegistry& registry,
+                              const std::vector<std::string>& tags);
 
 std::string emit_ast_metadata_record(const AstRegistry& registry);
 

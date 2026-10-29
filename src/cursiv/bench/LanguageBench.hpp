@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -16,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -153,8 +155,12 @@ struct Row {
 // different amount of text.
 enum class Shape : std::size_t { ManySmall, Medium, FewLarge, Mixed, Count };
 
-inline constexpr const char* kShapeName[] = {"many-small", "medium",
-                                             "few-large", "mixed"};
+inline constexpr const char* shape_name(Shape shape) {
+  constexpr const char* kName[] = {"many-small", "medium", "few-large",
+                                   "mixed"};
+  static_assert(std::size(kName) == static_cast<std::size_t>(Shape::Count));
+  return shape < Shape::Count ? kName[static_cast<std::size_t>(shape)] : "";
+}
 
 // How the reference graph of a shape's corpus is wired. Both regimes drive
 // the link phase for real -- an intra-document reference through local
@@ -306,6 +312,47 @@ inline double ms_since(std::chrono::steady_clock::time_point t0) {
   std::fprintf(stderr, "[bench] %s: the corpus was %s -- no figure\n", name,
                what);
   std::exit(1);
+}
+
+// A string from the command line, the environment or the disk, made safe to
+// print: control characters are escaped, so no input forges a line.
+inline std::string printable(std::string_view text) {
+  constexpr char kHex[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    const auto byte = static_cast<unsigned char>(c);
+    if (byte >= 0x20 && byte != 0x7f) {
+      out += c;
+      continue;
+    }
+    out += "\\x";
+    out += kHex[byte >> 4];
+    out += kHex[byte & 0xf];
+  }
+  return out;
+}
+
+// Every file the bench opens: the path is resolved, symlinks and `..`
+// included, and must name a regular file, a directory or nothing yet -- a
+// device or a pipe is neither an input nor an output. A path that does not
+// resolve is opened as given, and the open says why it fails.
+inline std::filesystem::path checked_path(const std::string& path) {
+  std::error_code ec;
+  std::filesystem::path resolved = std::filesystem::weakly_canonical(path, ec);
+  if (ec) resolved = path;
+  const std::filesystem::file_status status =
+      std::filesystem::status(resolved, ec);
+  if (std::filesystem::exists(status) &&
+      !std::filesystem::is_regular_file(status) &&
+      !std::filesystem::is_directory(status)) {
+    std::fprintf(stderr,
+                 "language_bench: refusing '%s': not a regular file or a "
+                 "directory\n",
+                 printable(path).c_str());
+    std::exit(1);
+  }
+  return resolved;
 }
 
 // A descriptor for one language, used by single-language executables and
@@ -482,7 +529,7 @@ inline void dump_build(const std::string& name,
   const char* const dir = std::getenv("CURSIV_BENCH_DUMP");
   if (dir == nullptr) return;
   const std::string path = std::string(dir) + "/" + name + ".txt";
-  std::FILE* const out = std::fopen(path.c_str(), "w");
+  std::FILE* const out = std::fopen(checked_path(path).string().c_str(), "w");
   if (out == nullptr) refused(name.c_str(), "not dumped: the file won't open");
   for (const cursiv::Document* d : documents) dump_document(out, *d);
   std::fclose(out);

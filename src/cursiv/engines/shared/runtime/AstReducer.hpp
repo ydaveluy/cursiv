@@ -135,10 +135,9 @@ class AstReducer {
     }
     // A node costs at least one record, so the tape's count bounds the list;
     // what is reserved past the need is never written, so never resident.
-    const std::size_t records = out.cst().size();
-    out.nodes.reserve(records);
+    out.nodes.reserve(cst.size());
     if (actions.meta->referenceBound != 0)
-      out.references->handles.reserve(records / 2u);
+      out.references->handles.reserve(cst.size() / 2u);
 
     AstReducer self(actions, out, L, cancelToken);
     self.run<L>();
@@ -654,16 +653,10 @@ class AstReducer {
       w.repair = repair_between(_stack[w.at].root, owner);
       if (w.repair != kNoNode) _wrapAncestors.push_back({w.repair});
     }
-    const auto before = [](const WrapAbove& a, const WrapAbove& b) {
-      return a.root < b.root;
-    };
-    std::sort(_wrapAncestors.begin(), _wrapAncestors.end(), before);
-    _wrapAncestors.erase(
-        std::unique(_wrapAncestors.begin(), _wrapAncestors.end(),
-                    [](const WrapAbove& a, const WrapAbove& b) {
-                      return a.root == b.root;
-                    }),
-        _wrapAncestors.end());
+    std::ranges::sort(_wrapAncestors, {}, &WrapAbove::root);
+    const auto repeats =
+        std::ranges::unique(_wrapAncestors, {}, &WrapAbove::root);
+    _wrapAncestors.erase(repeats.begin(), repeats.end());
     const Cst& c = *_ctx.cst;
     std::vector<NodeId> open;
     std::size_t w = _wraps.size();
@@ -727,9 +720,8 @@ class AstReducer {
         holding(owner, _stack[wrap.at].root) == kNoNode)
       return false;
     if (origin >= c.subtree_begin(wrap.repair)) return true;
-    const auto at = std::lower_bound(
-        _wrapAncestors.begin(), _wrapAncestors.end(), wrap.repair,
-        [](const WrapAbove& a, NodeId root) { return a.root < root; });
+    const auto at = std::ranges::lower_bound(_wrapAncestors, wrap.repair, {},
+                                             &WrapAbove::root);
     return at != _wrapAncestors.end() && at->root == wrap.repair &&
            at->above < owner;
   }
@@ -765,21 +757,15 @@ class AstReducer {
         }
         if (_ctx.failed()) break;
       }
-      switch (p.kind) {
-        case ActKind::assign:
-        case ActKind::append:
-        case ActKind::flag: {
-          // Only a wrap moves the region to another class.
-          const bool direct =
-              Ap != nullptr && (!Nest || current.type == owner.type);
-          const bool landed = direct
-                                  ? Ap(*this, p, current)
-                                  : _f.applies[current.type](*this, p, current);
-          if (!landed && !under_repair(p.root)) broken(p.root);
-          break;
-        }
-        default:
-          break;
+      if (p.kind == ActKind::assign || p.kind == ActKind::append ||
+          p.kind == ActKind::flag) {
+        // Only a wrap moves the region to another class.
+        const bool direct =
+            Ap != nullptr && (!Nest || current.type == owner.type);
+        const bool landed = direct
+                                ? Ap(*this, p, current)
+                                : _f.applies[current.type](*this, p, current);
+        if (!landed && !under_repair(p.root)) broken(p.root);
       }
       if (_ctx.failed()) break;
     }

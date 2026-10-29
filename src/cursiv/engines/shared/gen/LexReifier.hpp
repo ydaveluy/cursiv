@@ -44,11 +44,13 @@ class LexReifier {
                std::uint8_t flags = 0, std::uint32_t a = kNoImage,
                std::uint64_t m = 0, std::uint64_t n = 0,
                std::string_view text = {});
-  ImageId make_not(ImageId kid);
+  ImageId make_not(ImageId k) {
+    return make(ImageKind::notOf, std::span(&k, 1));
+  }
   ImageId make_class(const ImageClassDesc& cls);
 
-  std::uint16_t push(LexNode node);
-  std::uint16_t push_kid(std::uint16_t kid);
+  std::uint16_t push(LexNode node) { return _c.push_lex(node); }
+  std::uint16_t push_kid(std::uint16_t kid) { return _c.push_lex_kid(kid); }
   std::uint16_t group(LexKind kind, std::span<const std::uint16_t> kids,
                       std::uint32_t min = 0);
   std::uint16_t intern(const ByteSet& set, std::uint16_t decode = kNoSet);
@@ -130,7 +132,9 @@ class LexReifier {
   void refusals(const Guard& g, std::vector<std::uint16_t>& out);
   void class_refusals(ImageId cls, std::vector<std::uint16_t>& out);
   std::uint16_t refused(ImageId word, std::uint16_t node);
-  std::uint16_t echo_side(ImageId side);
+  std::uint16_t echo_side(ImageId side) {
+    return side == kNoImage ? kNoLexNode : reify(side);
+  }
   bool mark_run(ImageId id) const;
 
   Lowerer& _lowerer;

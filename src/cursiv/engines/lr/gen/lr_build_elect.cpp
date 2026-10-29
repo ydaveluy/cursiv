@@ -16,7 +16,6 @@
 #include "cursiv/engines/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/engines/lr/gen/LrGuard.hpp"
 #include "cursiv/engines/lr/gen/lr_build_passes.hpp"
-#include "cursiv/engines/lr/table/LrActionKind.hpp"
 #include "cursiv/engines/lr/table/LrColdTables.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
@@ -43,21 +42,16 @@ void lr_state_symbols(LrBuildTable& A) {
   // Each way into a state, `f(from, to, symbol)`: a shift, a goto, or one
   // landing of a guard's.
   const auto each_entry = [&](auto&& f) {
-    const auto land = [&](unsigned s, std::uint32_t guard, std::uint16_t x) {
-      for (const std::uint16_t to : A.guards[guard].to)
-        if (to != LrGuard::kNoState) f(s, to, x);
-    };
     for (unsigned s = 0; s < A.nstates; ++s) {
-      for (const LrAction& action : A.action_row(s)) {
-        if (action.kind == LrActionKind::shift) f(s, action.arg, action.term);
-        if (action.kind == LrActionKind::guard) land(s, action.arg, action.term);
-      }
+      for (const LrAction& action : A.action_row(s))
+        A.each_landing(action, [&](unsigned to) { f(s, to, action.term); });
       for (const auto& e : A.gotoRows[s]) {
         const auto x = static_cast<std::uint16_t>(g.nterms + e.nt);
+        const auto land = [&](unsigned to) { f(s, to, x); };
         if (e.guard == 0)
-          f(s, e.to, x);
+          land(e.to);
         else
-          land(s, e.guard - 1u, x);
+          A.guards[e.guard - 1u].each_landing(land);
       }
     }
   };
@@ -82,20 +76,13 @@ void lr_state_symbols(LrBuildTable& A) {
 void lr_elect_words(LrBuildTable& A) {
   const LrBuildCfg& g = A.cfg;
   const unsigned nP = g.nprods, nN = g.nnts;
-  const auto loop = [&](unsigned nt) -> std::uint16_t {
-    return nt < g.leftLoop.size() ? g.leftLoop[nt] : std::uint16_t{kNoRow};
-  };
   const auto lead = [&](unsigned p) -> unsigned {
     const LrLowProd& q = g.prods[p];
     if (q.len == 0 || is_term(g.sym_at(q, 0))) return nN;
     return nt_index(g.sym_at(q, 0));
   };
-  // A turn: the production goes on from a left operand of its own recursion.
   std::vector<std::uint8_t> turn(nP, 0);
-  for (unsigned p = 0; p < nP; ++p) {
-    const auto l = loop(g.prods[p].lhs);
-    turn[p] = lead(p) != nN && l != kNoRow && loop(lead(p)) == l;
-  }
+  for (unsigned p = 0; p < nP; ++p) turn[p] = g.turns(p);
   const std::vector<unsigned> order = productions_by_rule(g);
   std::vector<unsigned> from(nN + 1u, 0);
   for (unsigned p = 0; p < nP; ++p) ++from[g.prods[p].lhs + 1u];
@@ -107,7 +94,7 @@ void lr_elect_words(LrBuildTable& A) {
   std::vector<std::uint32_t> word(nP, kNoWord);
   // Outside a recursion an arm ranks among its rule's, where there are two.
   for (unsigned n = 0; n < nN; ++n) {
-    if (loop(n) != kNoRow || from[n] == from[n + 1]) continue;
+    if (g.loop_of(n) != kNoRow || from[n] == from[n + 1]) continue;
     std::uint32_t rank = 0;
     for (unsigned i = from[n]; i < from[n + 1]; ++i) {
       if (i != from[n] && alt(i) != alt(i - 1)) ++rank;
@@ -129,7 +116,7 @@ void lr_elect_words(LrBuildTable& A) {
   // no copy splits, has several and keeps the first.
   std::vector<unsigned> entry(nN, nN);
   for (unsigned n = 0; n < nN; ++n)
-    if (const auto l = loop(n); l != kNoRow) {
+    if (const auto l = g.loop_of(n); l != kNoRow) {
       unsigned& e = entry[l];
       if (e == nN || (outside[n] && !outside[e])) e = n;
     }
@@ -162,9 +149,10 @@ void lr_elect_words(LrBuildTable& A) {
     }
   };
   for (unsigned n = 0; n < nN; ++n)
-    if (loop(n) != kNoRow && entry[loop(n)] == n && !seen[n]) visit(n);
+    if (g.loop_of(n) != kNoRow && entry[g.loop_of(n)] == n && !seen[n])
+      visit(n);
   for (unsigned n = 0; n < nN; ++n)
-    if (loop(n) != kNoRow && !seen[n]) visit(n);
+    if (g.loop_of(n) != kNoRow && !seen[n]) visit(n);
 
   // At one position: the exit of the loop the child before it closes, the
   // arm, then the options and turns the arm decides there.
@@ -187,7 +175,7 @@ void lr_elect_words(LrBuildTable& A) {
           {std::max(g.decisions[d] >> 16, armAt), 2, g.decisions[d] & 0xffffu});
     for (unsigned i = turn[p] ? 1u : 0u; i < q.len; ++i)
       if (const std::uint16_t s = g.sym_at(q, i);
-          !is_term(s) && loop(nt_index(s)) != kNoRow)
+          !is_term(s) && g.loop_of(nt_index(s)) != kNoRow)
         laid.push_back({i + 1u, 0, kLrExitWord});
     std::ranges::stable_sort(laid, [](const Laid& x, const Laid& y) {
       return std::pair(x.pos, x.kind) < std::pair(y.pos, y.kind);

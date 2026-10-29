@@ -384,38 +384,19 @@ CURSIV_ALWAYS_INLINE inline std::size_t lr_seed_arms(LrContext& c,
   return n;
 }
 
-// A state whose look-ahead ran out on a cell, or on a position, goes to the
-// graph on its later visits until the cursor passes what that look-ahead read:
-// the memo spares reading the same text again, it proves nothing about the
-// next occurrence. A cell that ran out says nothing of a position in its
-// state.
-inline constexpr unsigned kLrCellGaveUp = 0;
-inline constexpr unsigned kLrCandsGaveUp = 1;
-
-inline bool lr_gave_up(const LrContext& c, std::uint32_t state,
-                       unsigned kind) {
-  const std::size_t at = std::size_t{state} * 2 + kind;
-  return at < c.unsettled.size() && c.unsettled[at] > c.la.begin;
-}
-
-template <const auto& A>
-inline void lr_give_up(LrContext& c, std::uint32_t state, unsigned answer,
-                       unsigned kind) {
-  if (answer != kLrUnsettled) return;
-  if (c.unsettled.empty()) c.unsettled.assign(std::size_t{A.nstates} * 2, 0);
-  const std::size_t at = std::size_t{state} * 2 + kind;
-  if (c.lookReach > c.unsettled[at]) c.unsettled[at] = c.lookReach;
-}
-
 // A cell or a lexical position: the seed differs, while exhaustion and the
-// fallback to the graph follow the same path.
+// fallback to the graph follow the same path. A state whose look-ahead ran out
+// on a cell, or on a position, goes to the graph on its later visits until the
+// cursor passes what that look-ahead read: the memo spares reading the same
+// text again, it proves nothing about the next occurrence. A cell that ran out
+// says nothing of a position in its state.
 template <const auto& A, LrSplit Split, class Seed>
 CURSIV_ALWAYS_INLINE inline unsigned lr_resolve_seeded(
     LrContext& c, std::uint32_t state, unsigned count, Seed seed) {
   assert(c.drive != nullptr);
-  constexpr unsigned kind =
-      Split == LrSplit::cell ? kLrCellGaveUp : kLrCandsGaveUp;
-  if (!lr_gave_up(c, state, kind)) {
+  const std::size_t at =
+      std::size_t{state} * 2 + (Split == LrSplit::cell ? 0 : 1);
+  if (at >= c.unsettled.size() || c.unsettled[at] <= c.la.begin) {
     const std::size_t levels = c.indentArena.size();
     const std::size_t n = lr_seed_arms<A>(c, count, seed);
     const unsigned r = lr_settle_arm<A>(c, n, count);
@@ -423,7 +404,11 @@ CURSIV_ALWAYS_INLINE inline unsigned lr_resolve_seeded(
     // indices, and the parse's own pushes must find the arena they would have.
     if constexpr (kIndented<A.cfg>) c.indentArena.resize(levels);
     if (r < kLrMerged) return r;
-    lr_give_up<A>(c, state, r, kind);
+    if (r == kLrUnsettled) {
+      if (c.unsettled.empty())
+        c.unsettled.assign(std::size_t{A.nstates} * 2, 0);
+      if (c.lookReach > c.unsettled[at]) c.unsettled[at] = c.lookReach;
+    }
   }
   c.split = Split;
   return kLrSplitCell;

@@ -93,7 +93,7 @@ void parse_probe(const char* name, const cursiv::Parser& engine,
       if (!r) refused(name, "refused mid-measurement");
       sink += reinterpret_cast<std::uintptr_t>(r.value) & 1u;
     }
-    std::printf("[ir] %s %s reps=%d sink=%zu\n", name, stage, reps, sink);
+    std::printf("[ir] %s api reps=%d sink=%zu\n", name, reps, sink);
     return;
   }
 }
@@ -138,7 +138,7 @@ std::size_t parse_size(std::string_view text) {
 }
 
 [[noreturn]] void usage_error(const std::string& message) {
-  std::fprintf(stderr, "language_bench: %s\n", message.c_str());
+  std::fprintf(stderr, "language_bench: %s\n", printable(message).c_str());
   std::fprintf(stderr,
                "usage: language_bench [--full] [--sizes L] [--iterations N]"
                " [--json P] [--csv P] [--dump-corpus D] [--corpus D]"
@@ -339,10 +339,10 @@ std::string corpus_path(const Options& o, const Language& language,
 }
 
 std::string read_file(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
+  std::ifstream in(checked_path(path), std::ios::binary);
   if (!in) {
-    std::fprintf(stderr, "language_bench: cannot read '%s': %s\n", path.c_str(),
-                 std::strerror(errno));
+    std::fprintf(stderr, "language_bench: cannot read '%s': %s\n",
+                 printable(path).c_str(), std::strerror(errno));
     std::exit(1);
   }
   std::ostringstream out;
@@ -351,10 +351,10 @@ std::string read_file(const std::string& path) {
 }
 
 void write_file(const std::string& path, std::string_view content) {
-  std::ofstream out(path, std::ios::binary);
+  std::ofstream out(checked_path(path), std::ios::binary);
   if (!out) {
     std::fprintf(stderr, "language_bench: cannot write '%s': %s\n",
-                 path.c_str(), std::strerror(errno));
+                 printable(path).c_str(), std::strerror(errno));
     std::exit(1);
   }
   out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -407,7 +407,7 @@ void print_perf(const Row& row) {
 // Each resident delta is an interval of the same cold build.
 void print_rss_row(const Row& row) {
   std::printf("\n[rss] %s-%s  %s B  one cold build\n", row.language.c_str(),
-              row.label.c_str(), grouped(row.bytes).c_str());
+              printable(row.label).c_str(), grouped(row.bytes).c_str());
   std::printf("\n  %-14s %16s\n", "Stage", "resident (MiB)");
   for (std::size_t stage = 0; stage < kStageCount; ++stage) {
     if (!row.rss[stage].valid) continue;
@@ -428,8 +428,8 @@ void print_rss_row(const Row& row) {
 
 void print_row(const Row& row) {
   std::printf("\n[bench] %s-%s  %s B  %d iteration%s\n", row.language.c_str(),
-              row.label.c_str(), grouped(row.bytes).c_str(), row.iterations,
-              row.iterations == 1 ? "" : "s");
+              printable(row.label).c_str(), grouped(row.bytes).c_str(),
+              row.iterations, row.iterations == 1 ? "" : "s");
   const bool hardware =
       row.bytes != 0 && std::ranges::any_of(row.perf, [](const PerfSample& p) {
         return p.valid;
@@ -750,8 +750,7 @@ void write_lsp_csv(const std::string& path, const std::vector<Row>& rows) {
 }
 
 std::string multi_set_dir(const Language& language, Shape shape) {
-  return std::string("multi/") + language.name + "-" +
-         kShapeName[static_cast<std::size_t>(shape)];
+  return std::string("multi/") + language.name + "-" + shape_name(shape);
 }
 
 std::string multi_file_path(const std::string& root, const Language& language,
@@ -781,10 +780,10 @@ std::vector<std::string> multi_texts(const Options& o, const Language& language,
 // read it rather than reconstructing a file name.
 int dump_corpus(const Options& o, std::span<const Language> languages) {
   std::error_code ec;
-  std::filesystem::create_directories(o.dumpDir, ec);
+  std::filesystem::create_directories(checked_path(o.dumpDir), ec);
   if (ec) {
     std::fprintf(stderr, "language_bench: cannot create '%s': %s\n",
-                 o.dumpDir.c_str(), ec.message().c_str());
+                 printable(o.dumpDir).c_str(), ec.message().c_str());
     return 1;
   }
   std::string manifest =
@@ -797,7 +796,8 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
       const std::string text = language.corpus(bytes);
       const std::string path = corpus_path(o, language, label);
       write_file(path, text);
-      std::fprintf(stderr, "  wrote %s (%zu B)\n", path.c_str(), text.size());
+      std::fprintf(stderr, "  wrote %s (%zu B)\n", printable(path).c_str(),
+                   text.size());
       if (!first) manifest += ",\n";
       first = false;
       manifest += R"(    {"language": ")" + std::string(language.name) +
@@ -823,10 +823,10 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
         const Shape shape = static_cast<Shape>(s);
         const std::string dir =
             o.dumpDir + "/" + multi_set_dir(language, shape);
-        std::filesystem::create_directories(dir, ec);
+        std::filesystem::create_directories(checked_path(dir), ec);
         if (ec) {
           std::fprintf(stderr, "language_bench: cannot create '%s': %s\n",
-                       dir.c_str(), ec.message().c_str());
+                       printable(dir).c_str(), ec.message().c_str());
           return 1;
         }
         const std::vector<std::string> files = multi_texts(o, language, shape);
@@ -835,17 +835,16 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
           write_file(multi_file_path(o.dumpDir, language, shape, i), files[i]);
           bytes += files[i].size();
         }
-        std::fprintf(stderr, "  wrote %s (%zu files, %zu B)\n", dir.c_str(),
-                     files.size(), bytes);
+        std::fprintf(stderr, "  wrote %s (%zu files, %zu B)\n",
+                     printable(dir).c_str(), files.size(), bytes);
         if (!firstSet) manifest += ",\n";
         firstSet = false;
         manifest += R"(    {"language": ")" + std::string(language.name) +
                     R"(", "languageId": ")" + language.languageId +
                     R"(", "extension": ")" + language.extension +
-                    R"(", "shape": ")" +
-                    kShapeName[static_cast<std::size_t>(shape)] +
-                    R"(", "refs": ")" + refs_name(language.multiRefs) +
-                    R"(", "files": )" + std::to_string(files.size()) +
+                    R"(", "shape": ")" + shape_name(shape) + R"(", "refs": ")" +
+                    refs_name(language.multiRefs) + R"(", "files": )" +
+                    std::to_string(files.size()) +
                     ", \"bytes\": " + std::to_string(bytes) + R"(, "dir": ")" +
                     multi_set_dir(language, shape) + "\"}";
       }
@@ -853,7 +852,8 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
   }
   manifest += "\n  ]\n}\n";
   write_file(o.dumpDir + "/manifest.json", manifest);
-  std::fprintf(stderr, "  wrote %s/manifest.json\n", o.dumpDir.c_str());
+  std::fprintf(stderr, "  wrote %s/manifest.json\n",
+               printable(o.dumpDir).c_str());
   return 0;
 }
 
@@ -910,7 +910,7 @@ int cursiv::bench::run(int argc, char** argv,
         std::printf("  input: file [file ...]\n");
     } else {
       for (const std::string& path : o.files)
-        std::printf("  file %s\n", path.c_str());
+        std::printf("  file %s\n", printable(path).c_str());
     }
     if (o.multi) {
       std::printf("  multi budget %s, workers",
@@ -918,8 +918,9 @@ int cursiv::bench::run(int argc, char** argv,
       for (const std::size_t w : o.workers) std::printf(" %zu", w);
       std::printf("\n");
       for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const auto files = shape_files(static_cast<Shape>(s), o.multiBytes);
-        std::printf("    %-12s %zu files\n", kShapeName[s], files.size());
+        const Shape shape = static_cast<Shape>(s);
+        std::printf("    %-12s %zu files\n", shape_name(shape),
+                    shape_files(shape, o.multiBytes).size());
       }
     }
     return 0;
@@ -999,7 +1000,7 @@ int cursiv::bench::run(int argc, char** argv,
         const std::vector<std::string> files = multi_texts(o, language, shape);
         MultiRow row;
         row.language = language.name;
-        row.shape = kShapeName[s];
+        row.shape = shape_name(shape);
         row.refs = language.multiRefs;
         row.files = files.size();
         for (const std::string& text : files) row.bytes += text.size();

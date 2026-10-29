@@ -77,13 +77,11 @@ class LlLanguageParser final : public Parser {
     LlContext c(text, builder, _budget);
     c.stop = CancellationPoll(cancelToken);
     if constexpr (kLlAnyRecorded<T>) c.pending.reserve(8);
-    const NodeId first = 0;
     _drive(c);
     ll_finish<T>(c);
     // What the predictions read goes to the thread's count, as the searches'.
-    const LlPredictionWork read = predictionSession.work();
-    LlPredictionWork::current().tokens += read.tokens;
-    builder.bind_entry(first, static_cast<NodeId>(cst.size()), c.last);
+    LlPredictionWork::current().tokens += predictionSession.work().tokens;
+    builder.bind_entry(0, static_cast<NodeId>(cst.size()), c.last);
     // Converting the tree is another phase; answer a stop requested after
     // the descent's last periodic poll before materialising the AST.
     throw_if_cancelled(cancelToken);

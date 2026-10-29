@@ -62,14 +62,6 @@ LexReifier::LexReifier(Lowerer& lowerer, ByteSet& wordBytes,
     : _lowerer(lowerer), _im(lowerer._im), _c(lowerer._c),
       _wordBytes(wordBytes), _x(sets) {}
 
-std::uint16_t LexReifier::push(LexNode node) {
-  return _c.push_lex(node);
-}
-
-std::uint16_t LexReifier::push_kid(std::uint16_t k) {
-  return _c.push_lex_kid(k);
-}
-
 std::uint16_t LexReifier::intern(const ByteSet& set, std::uint16_t decode) {
   return detail::intern_set(_c, _x, set, decode);
 }
@@ -98,10 +90,6 @@ ImageId LexReifier::make(ImageKind kind, std::span<const ImageId> kids,
   const ImageNode shape{
       .kind = kind, .flags = flags, .a = a, .m = m, .n = n, .text = text};
   return _im.derive(shape, kids);
-}
-
-ImageId LexReifier::make_not(ImageId k) {
-  return make(ImageKind::notOf, std::span(&k, 1));
 }
 
 ImageId LexReifier::make_class(const ImageClassDesc& cls) {
@@ -199,9 +187,8 @@ ImageId LexReifier::resolve_in(unsigned cfg, ImageId id, Path& path) {
       break;
   }
   const auto shape = _im.shape_kids(id);
-  const std::vector<ImageId> kids(shape.begin(), shape.end());
-  std::vector<ImageId> ks;
-  for (const ImageId k : kids) ks.push_back(resolve_in(cfg, k, path));
+  std::vector<ImageId> ks(shape.begin(), shape.end());
+  for (ImageId& k : ks) k = resolve_in(cfg, k, path);
   return rebuilt(id, ks);
 }
 
@@ -773,10 +760,6 @@ LexReifier::Echo LexReifier::echo_closer(ImageId close) const {
   e.echoes = bare(e.before) && bare(e.after) &&
              spelled(e.before) + spelled(e.after) != 0;
   return e;
-}
-
-std::uint16_t LexReifier::echo_side(ImageId side) {
-  return side == kNoImage ? kNoLexNode : reify(side);
 }
 
 std::uint16_t LexReifier::reify_through_lit(ImageId open,

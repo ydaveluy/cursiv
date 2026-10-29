@@ -5,12 +5,12 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <vector>
 
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/core/utils/macros.hpp"
+#include "cursiv/engines/shared/table/FlatMap.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 
 namespace cursiv {
@@ -36,8 +36,8 @@ class LexNestedSearch {
     TextOffset end;
     if (from >= _dry)
       end = 0;
-    else if (const Slot* s = find(from))
-      end = s->end;
+    else if (const TextOffset* known = find(from))
+      end = *known;
     else
       end = r.several ? scan_many<true>(this, r, names, src, len, from)
                       : scan<true, false>(this, r, names, src, len, from);
@@ -46,11 +46,6 @@ class LexNestedSearch {
 
  private:
   static constexpr TextOffset kFree = ~TextOffset{0};
-  struct Slot {
-    TextOffset key = kFree;
-    // Past the group's closer; zero where it has none.
-    TextOffset end = 0;
-  };
 
   struct Lit {
     const char* text;
@@ -147,12 +142,12 @@ class LexNestedSearch {
         const TextOffset b = static_cast<TextOffset>(o - src) + n;
         q = o + n;
         if constexpr (Remember) {
-          if (const Slot* s = self->find(b)) {
-            if (s->end == 0) {
+          if (const TextOffset* known = self->find(b)) {
+            if (*known == 0) {
               self->give_up();
               return 0;
             }
-            q = src + s->end;
+            q = src + *known;
             continue;
           }
           self->_open.push_back(b);
@@ -185,45 +180,15 @@ class LexNestedSearch {
     _open.clear();
   }
 
-  static std::size_t slot_of(TextOffset key, std::size_t mask) {
-    return static_cast<std::size_t>(
-               (std::uint64_t{key} * 0x9E3779B97F4A7C15ull) >> 32) &
-           mask;
+  // Past the closer of the group opened at `key`; zero where it has none.
+  const TextOffset* find(TextOffset key) {
+    return key == kFree ? nullptr : _ends.find(key);
   }
-
-  const Slot* find(TextOffset key) const {
-    if (_slots.empty() || key == kFree) return nullptr;
-    const std::size_t mask = _slots.size() - 1u;
-    for (std::size_t i = slot_of(key, mask);; i = (i + 1u) & mask) {
-      if (_slots[i].key == key) return &_slots[i];
-      if (_slots[i].key == kFree) return nullptr;
-    }
-  }
-
   void put(TextOffset key, TextOffset end) {
-    if (key == kFree) return;
-    if ((_used + 1u) * 2u > _slots.size()) grow();
-    const std::size_t mask = _slots.size() - 1u;
-    std::size_t i = slot_of(key, mask);
-    while (_slots[i].key != kFree && _slots[i].key != key) i = (i + 1u) & mask;
-    if (_slots[i].key == kFree) ++_used;
-    _slots[i] = Slot{key, end};
+    if (key != kFree) _ends.emplace(key).first = end;
   }
 
-  void grow() {
-    std::vector<Slot> wider(_slots.empty() ? 16u : _slots.size() * 2u);
-    const std::size_t mask = wider.size() - 1u;
-    for (const Slot& s : _slots) {
-      if (s.key == kFree) continue;
-      std::size_t i = slot_of(s.key, mask);
-      while (wider[i].key != kFree) i = (i + 1u) & mask;
-      wider[i] = s;
-    }
-    _slots.swap(wider);
-  }
-
-  std::vector<Slot> _slots;
-  std::size_t _used = 0;
+  FlatMap<TextOffset> _ends;
   // The groups the search in hand has opened and not closed, by boundary.
   std::vector<TextOffset> _open;
   TextOffset _dry = kFree;

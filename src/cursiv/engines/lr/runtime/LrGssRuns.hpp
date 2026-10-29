@@ -18,14 +18,12 @@ class LrGssRuns {
 
   // The offset of the run just appended.
   std::size_t append(std::span<const T> run) {
-    const std::size_t at = room(run.size());
+    const std::size_t at = reserve(run.size());
     for (std::size_t i = 0; i != run.size(); ++i) (*this)[at + i] = run[i];
     return at;
   }
-  // The offset of `n` values left for the caller to write.
-  std::size_t reserve(std::size_t n) { return room(n); }
   std::size_t append(std::size_t count, const T& value) {
-    const std::size_t at = room(count);
+    const std::size_t at = reserve(count);
     for (std::size_t i = 0; i != count; ++i) (*this)[at + i] = value;
     return at;
   }
@@ -46,14 +44,10 @@ class LrGssRuns {
     _appended = 0;
   }
 
- private:
-  static constexpr std::size_t kChunk = std::size_t{1} << Shift;
-  static constexpr std::size_t kMask = kChunk - 1;
-
-  // Where `n` values fit in one piece: the rest of the chunk, or the chunks
-  // that follow, made where they are missing. A run past one chunk takes
-  // several, side by side.
-  std::size_t room(std::size_t n) {
+  // The offset of `n` values left for the caller to write, in one piece: the
+  // rest of the chunk, or the chunks that follow, made where they are
+  // missing. A run past one chunk takes several, side by side.
+  std::size_t reserve(std::size_t n) {
     std::size_t at = _end;
     if (n > kChunk || (at & kMask) + n > kChunk) at = (at + kMask) & ~kMask;
     if (n != 0) {
@@ -71,6 +65,10 @@ class LrGssRuns {
     _appended += n;
     return at;
   }
+
+ private:
+  static constexpr std::size_t kChunk = std::size_t{1} << Shift;
+  static constexpr std::size_t kMask = kChunk - 1;
 
   std::vector<T*> _slots;
   std::vector<std::unique_ptr<T[]>> _owned;

@@ -51,12 +51,9 @@ class LlAtoms {
   // is missing.
   std::span<const std::pair<std::uint16_t, std::uint32_t>> reading(
       std::uint16_t node) const {
-    const auto lo = std::ranges::lower_bound(
-        _reads, std::pair<std::uint16_t, std::uint32_t>{node, 0});
-    auto hi = lo;
-    while (hi != _reads.end() && hi->first == node) ++hi;
-    return {_reads.data() + (lo - _reads.begin()),
-            static_cast<std::size_t>(hi - lo)};
+    const auto [lo, hi] = std::ranges::equal_range(
+        _reads, node, {}, &std::pair<std::uint16_t, std::uint32_t>::first);
+    return {lo, hi};
   }
 
  private:

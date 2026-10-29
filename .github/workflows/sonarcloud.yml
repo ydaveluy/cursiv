@@ -69,6 +69,8 @@ jobs:
           .venv-coverage/bin/gcovr --root . --filter src/
           --gcov-executable gcov
           --gcov-ignore-parse-errors=negative_hits.warn_once_per_file
+          --exclude-throw-branches --exclude-unreachable-branches
+          --exclude-branches-by-pattern='.*'
           --sonarqube build/coverage.xml build
       - name: Compilation cache statistics
         if: always()

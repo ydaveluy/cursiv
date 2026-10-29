@@ -81,12 +81,6 @@ struct Pool : LowerPool {
     e.push_back(std::move(x));
     return static_cast<std::uint16_t>(e.size() - 1);
   }
-
-  std::uint16_t push_sym(std::uint16_t sym, std::uint8_t cfg) {
-    const std::uint16_t at = push(Node{Shape::sym, sym});
-    e[at].cfg = cfg;
-    return at;
-  }
 };
 
 Acts cat(const Acts& a, const Acts& b);

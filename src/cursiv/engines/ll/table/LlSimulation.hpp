@@ -500,9 +500,7 @@ class LlSimulation : public LlReturnPool {
 
   // Carry on from a set an exploration kept: the contexts it names are this
   // simulation's own, so only the walk is resumed, never the pool.
-  void load(const std::vector<LlConfig>& cs) {
-    _cur.assign(cs.begin(), cs.end());
-  }
+  void load(const std::vector<LlConfig>& cs) { _cur = cs; }
   void load(const LlConfig* cs, std::size_t n) { _cur.assign(cs, cs + n); }
 
   // Replay a call abandon over every stack the reading still carries.

@@ -6,58 +6,31 @@
 #include <cstdint>
 #include <span>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "cursiv/engines/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLexView.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
 #include "cursiv/engines/shared/gen/LexWalkEmitter.hpp"
-#include "cursiv/engines/shared/table/ByteSet.hpp"
-#include "cursiv/engines/shared/table/LexRelay.hpp"
 
 namespace cursiv {
 namespace {
 
-struct LlWalkEmitter : EmitOutput {
+struct LlWalkEmitter : LexWalkRungs<LlLexView> {
   explicit LlWalkEmitter(const LlBuiltProgram& built)
-      : a(built),
-        view{built},
+      : LexWalkRungs(LlLexView{built}),
+        a(built),
         dfa(std::span<const std::uint8_t, 256>(built.cls),
             {built.dfaNext.data(), std::size_t{built.ndfa} * built.ncls},
             built.ncls, built.ndfa) {}
 
   const LlBuiltProgram& a;
-  const LlLexView view;
   LexDfaEmitter dfa;
-  LexRunEmitter runs;
 
   bool relays() const { return !a.relays.empty(); }
 
-  // What the rungs ask.
-  bool blind(unsigned st) const {
-    return lex_run_blind(view, static_cast<std::uint16_t>(st));
-  }
-  bool plain_run(unsigned st) const {
-    return lex_plain_run(view, static_cast<std::uint16_t>(st));
-  }
-  int continuation_of(unsigned st, const std::uint8_t* spelled) const {
-    return lex_continuation_of(view, static_cast<std::uint16_t>(st), spelled);
-  }
+  // What the rungs ask beyond the shared ones.
   void emit_bound_exit(unsigned, const std::uint8_t*) {}
-  void emit_match(unsigned st, std::string_view ind) {
-    if (a.dfaAccept[st] != 0)
-      fmt("{}match.take(kTape, {}u, src, i, len, far);\n", ind, st);
-  }
-  void emit_relay_call(unsigned st, std::string_view ind) {
-    if (!relays()) return;
-    for (auto k = a.dfaRelay[st]; k != kNoRelay; k = a.relays[k].next)
-      fmt("{}relays.launch(kTape, {}u, src, len, start, i);\n", ind, k);
-  }
-  void emit_run_adv(const ByteSet& stay, std::string_view var,
-                    std::string_view set) {
-    runs.advance(*this, stay, var, set);
-  }
 
   // What the walk around them asks.
   void walk_before(bool) {}

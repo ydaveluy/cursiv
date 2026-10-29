@@ -66,6 +66,16 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   std::uint8_t guard_at(const LrLowProd& p, unsigned i) const {
     return i == p.len ? p.gap : slotGuard[p.at + i];
   }
+  // `leftLoop`, read past its end as `kNoRow`.
+  std::uint16_t loop_of(unsigned nt) const {
+    return nt < leftLoop.size() ? leftLoop[nt] : std::uint16_t{kNoRow};
+  }
+  // Whether production `p` goes on from a left operand of its own recursion.
+  bool turns(unsigned p) const {
+    const LrLowProd& q = prods[p];
+    return q.len != 0 && !is_term(sym_at(q, 0)) && loop_of(q.lhs) != kNoRow &&
+           loop_of(nt_index(sym_at(q, 0))) == loop_of(q.lhs);
+  }
 
   std::string_view nt_name(std::uint16_t n) const {
     return name_view(nts[n].nameOff, nts[n].nameLen);

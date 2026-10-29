@@ -59,7 +59,9 @@ class TwinReader {
   };
   using Reading = std::vector<std::uint32_t>;
 
-  ImageId kid(ImageId id, std::uint32_t i) const;
+  ImageId kid(ImageId id, std::uint32_t i) const {
+    return _im.kids[_im.nodes[id].first + i];
+  }
   std::vector<ImageId> kids(ImageId id) const;
   std::uint32_t intern(std::vector<std::uint64_t> shape);
   std::uint32_t text(std::string_view s);

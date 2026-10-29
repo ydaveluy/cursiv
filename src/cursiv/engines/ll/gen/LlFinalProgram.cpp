@@ -35,14 +35,6 @@ bool refuse_build_fault(std::string_view grammar, const LlBuiltProgram& a,
   return true;
 }
 
-// What a record's stamp holds: the chain it names, and the position that read
-// it -- a node of the program or an operator of a precedence table. The split
-// found is kept on the program. True where none holds.
-bool refuse_stamp(std::string_view grammar, LlBuiltProgram& a) {
-  return refuse_unstamped(grammar, a.stamp, a.writes.nchains,
-                          a.cfg.nnodes + 1u);
-}
-
 // The first terminal whose match is empty, empty where there is none.
 std::string_view ll_empty_match_terminal(const LlBuiltProgram& a) {
   return empty_match_terminal(a, [&](std::uint16_t state) {
@@ -67,7 +59,9 @@ std::optional<LlFinalProgram> LlFinalProgram::make(LlBuiltProgram built,
   if (refuse_build_fault(grammar, built, asWritten) ||
       refuse_unbuilt(grammar, built,
                      rule_name_of(built, built.cfg.lowerRule)) ||
-      refuse_stamp(grammar, built) ||
+      // A stamp's position is a node or an operator of a precedence table.
+      refuse_unstamped(grammar, built.stamp, built.writes.nchains,
+                       built.cfg.nnodes + 1u) ||
       refuse_empty_match(grammar, ll_empty_match_terminal(built)))
     return std::nullopt;
   return LlFinalProgram(

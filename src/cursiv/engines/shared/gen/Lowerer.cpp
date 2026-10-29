@@ -66,39 +66,10 @@ std::uint16_t Lowerer::row_id(const void* row) const {
   return it->second;
 }
 
-const ImageStageDesc& Lowerer::stage(std::uint32_t rule) const {
-  return _im.stage(rule);
-}
-
-bool Lowerer::rule_is(std::uint32_t rule, ImageRuleKind kind) const {
-  const ImageStageDesc* const st = _im.rules[rule].desc->stage;
-  return st != nullptr && st->kind == kind;
-}
-
-bool Lowerer::terminal_rule(std::uint32_t rule) const {
-  return rule_is(rule, ImageRuleKind::terminal);
-}
-
-bool Lowerer::data_rule(std::uint32_t rule) const {
-  return rule_is(rule, ImageRuleKind::data);
-}
-
-bool Lowerer::node_rule(std::uint32_t rule) const {
-  return rule_is(rule, ImageRuleKind::node);
-}
-
-bool Lowerer::infix_rule(std::uint32_t rule) const {
-  return rule_is(rule, ImageRuleKind::infix);
-}
-
 std::uint8_t Lowerer::role_in(unsigned cfg, std::uint32_t rule) const {
   if (has(_cfgs[cfg].ignore, rule)) return 1;
   if (has(_cfgs[cfg].hide, rule)) return 2;
   return 0;
-}
-
-std::uint16_t Lowerer::role_sym(std::size_t at) const {
-  return static_cast<std::uint16_t>(1 + _d.terms.size() + at);
 }
 
 std::uint16_t Lowerer::sym_of(unsigned cfg, std::uint32_t rule) {
@@ -118,14 +89,8 @@ std::uint16_t Lowerer::sym_of(unsigned cfg, std::uint32_t rule) {
   refuse_lowering("the lowering names a rule it did not number");
 }
 
-std::uint16_t Lowerer::name_of(std::uint32_t rule, std::uint16_t& len) {
-  const std::string_view nm = _im.rules[rule].name;
-  len = static_cast<std::uint16_t>(nm.size());
-  return intern_name(nm);
-}
-
 ImageId Lowerer::body_in(unsigned cfg, std::uint32_t rule) {
-  const bool section = section_cfg(cfg);
+  const bool section = _cfgs[cfg].end != kNoImage;
   const std::uint64_t k = std::uint64_t{rule} << 1 | (section ? 1u : 0u);
   if (const auto it = _bodies.find(k); it != _bodies.end()) return it->second;
   ImageId out = _im.node(*stage(rule).body);
@@ -372,10 +337,7 @@ void Lowerer::declare_term(std::uint32_t rule) {
   const ImageId bodyId = body_in(0, rule);
   const ImageNode body = at(bodyId);
   const std::uint16_t t = _nterms++;
-  std::uint16_t len = 0;
-  const std::uint16_t off = name_of(rule, len);
-  _c.terms[t].nameOff = off;
-  _c.terms[t].nameLen = len;
+  name_row(_c.terms[t], _im.rules[rule].name);
   if (body.kind == ImageKind::lit) spell_literal(t, body);
   // A choice of words spells none of them alone, but each is a spelling.
   std::vector<std::string_view> words;
@@ -479,8 +441,7 @@ void Lowerer::declare() {
     refuse_lowering("cursiv: declared symbols exceed their 15-bit domain");
   if (_cfgs.size() > 255) lower_refuse(_c, LowerFail::tooManyConfigurations);
   _nterms = 1;
-  const std::uint16_t endName = intern_name("$end");
-  _c.terms[0].nameOff = endName;
+  _c.terms[0].nameOff = intern_name("$end");
   _c.terms[0].nameLen = 4;
   declare_start();
   for (unsigned k = 0; k < _cfgs.size(); ++k)
@@ -504,7 +465,6 @@ void Lowerer::declare() {
 }
 
 bool Lowerer::clone_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs) {
-  if (!reads_under(cfg, rule)) return false;
   if (!_c.cloneNeeded[lhs] || _c.cloneDone[lhs]) return false;
   _c.cloneDone[lhs] = true;
   define_one(cfg, rule, lhs, 0);
@@ -580,16 +540,9 @@ void Lowerer::define() {
     ++lhs;
     if (reads_under(0, rule)) define_one(0, rule, lhs, 0);
   }
-  const auto n = static_cast<std::uint16_t>(_ntRule.size());
   for (bool grew = _cfgs.size() > 1; grew;) {
-    grew = false;
-    for (unsigned k = 1; k < _cfgs.size(); ++k) {
-      auto i = static_cast<std::uint16_t>(k * n);
-      for (const std::uint32_t rule : _ntRule) {
-        ++i;
-        grew = clone_one(k, rule, i) || grew;
-      }
-    }
+    grew = define_pass(
+        1, [this](auto k, auto rule, auto i) { return clone_one(k, rule, i); });
     grew = define_open() || grew;
   }
   // The brackets once the rules numbered what they read: a spelling no rule
@@ -622,11 +575,9 @@ std::uint16_t Lowerer::intern_spelled(
   _c.terms[t].nameLen = static_cast<std::uint16_t>(text.size());
   _c.terms[t].textOff = name;
   _c.terms[t].textLen = _c.terms[t].nameLen;
-  const std::uint16_t node = lex();
-  TermBuild& build = _c.termBuild[t];
-  build.lex = node;
-  build.folded = folded;
-  build.charset = charset;
+  _c.termBuild[t].lex = lex();
+  _c.termBuild[t].folded = folded;
+  _c.termBuild[t].charset = charset;
   _c.terms[t].spelled = true;
   return t;
 }

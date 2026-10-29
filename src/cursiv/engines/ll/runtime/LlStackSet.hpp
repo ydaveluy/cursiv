@@ -40,22 +40,17 @@ class LlStackSet {
   // A cell of two stacks; `first` leads, and is the reading whose words the
   // cell's readings go on extending.
   std::uint32_t fork(const Member& first, const Member& second) {
-    if (_used == _cells.size()) _cells.emplace_back();
-    Cell& c = _cells[_used];
-    c.members.clear();
-    c.members.push_back(first);
-    c.members.push_back(second);
-    c.byCall = false;
-    c.sealed = false;
-    return kCellBit | static_cast<std::uint32_t>(_used++);
+    const std::uint32_t cell = open(first);
+    _cells[index(cell)].byCall = false;
+    add(cell, second);
+    return cell;
   }
 
   // A cell of one stack, which every later caller of its rule joins.
   std::uint32_t open(const Member& only) {
     if (_used == _cells.size()) _cells.emplace_back();
     Cell& c = _cells[_used];
-    c.members.clear();
-    c.members.push_back(only);
+    c.members.assign(1, only);
     c.byCall = true;
     c.sealed = false;
     return kCellBit | static_cast<std::uint32_t>(_used++);

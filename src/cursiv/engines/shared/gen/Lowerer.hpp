@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/core/grammar/Association.hpp"
 #include "cursiv/core/grammar/GrammarImage.hpp"
 #include "cursiv/engines/shared/gen/ChainPool.hpp"
 #include "cursiv/engines/shared/gen/GrammarFault.hpp"
@@ -92,44 +93,68 @@ class Lowerer {
     }
     return changed ? _im.derive(n, next) : id;
   }
-  // Over a choice of tokens, a conversion rides the record of each token, as a
-  // directive over a choice rides each alternative: none opens over the
-  // choice. `p` is the engine's pool of laid nodes.
-  template <class Pool, class Id>
-  static bool one_token(const Pool& p, Id at) {
-    const auto& n = p.e[at];
-    using Kind = decltype(n.kind);
-    if (n.kind == Kind::sym) return is_term(static_cast<std::uint16_t>(n.sym));
-    if (n.kind != Kind::alt || !n.made.empty() || !n.row.empty()) return false;
-    for (decltype(n.count) k = 0; k < n.count; ++k)
-      if (!one_token(p, p.kid[n.sym + k])) return false;
-    return true;
-  }
-  template <class Pool, class Id>
-  static void convert_over(Pool& p, Id at, std::uint16_t row) {
-    auto& n = p.e[at];
-    if (n.kind != decltype(n.kind)::alt || !one_token(p, at)) {
-      n.made.push_back(row);
-      return;
-    }
-    for (decltype(n.count) k = 0; k < n.count; ++k)
-      convert_over(p, p.kid[n.sym + k], row);
-  }
   // `&close | eof`: where a section's text ends, or the document's.
   ImageId section_end();
   std::uint64_t key(Key kind, unsigned cfg, ImageId node);
   std::uint16_t row_id(const void* row) const;
-  const ImageStageDesc& stage(std::uint32_t rule) const;
-  bool rule_is(std::uint32_t rule, ImageRuleKind kind) const;
-  bool terminal_rule(std::uint32_t rule) const;
-  bool data_rule(std::uint32_t rule) const;
-  bool node_rule(std::uint32_t rule) const;
-  bool infix_rule(std::uint32_t rule) const;
-  bool section_cfg(unsigned cfg) const { return _cfgs[cfg].end != kNoImage; }
+  const ImageStageDesc& stage(std::uint32_t rule) const {
+    return _im.stage(rule);
+  }
+  bool rule_is(std::uint32_t rule, ImageRuleKind kind) const {
+    const ImageStageDesc* const st = _im.rules[rule].desc->stage;
+    return st != nullptr && st->kind == kind;
+  }
+  bool terminal_rule(std::uint32_t rule) const {
+    return rule_is(rule, ImageRuleKind::terminal);
+  }
+  bool data_rule(std::uint32_t rule) const {
+    return rule_is(rule, ImageRuleKind::data);
+  }
+  bool node_rule(std::uint32_t rule) const {
+    return rule_is(rule, ImageRuleKind::node);
+  }
+  bool infix_rule(std::uint32_t rule) const {
+    return rule_is(rule, ImageRuleKind::infix);
+  }
   std::uint8_t role_in(unsigned cfg, std::uint32_t rule) const;
   std::uint16_t sym_of(unsigned cfg, std::uint32_t rule);
-  std::uint16_t role_sym(std::size_t at) const;
-  std::uint16_t name_of(std::uint32_t rule, std::uint16_t& len);
+  std::uint16_t role_sym(std::size_t at) const {
+    return static_cast<std::uint16_t>(1 + _d.terms.size() + at);
+  }
+  // `name` interned, on `row`.
+  template <class Row>
+  void name_row(Row& row, std::string_view name) {
+    row.nameOff = intern_name(name);
+    row.nameLen = static_cast<std::uint16_t>(name.size());
+  }
+  // Each rule's row named, from `n` on, then copied for each other
+  // configuration.
+  template <class Rows>
+  void name_rules(Rows& rows, std::uint16_t& n) {
+    for (const std::uint32_t rule : _ntRule)
+      name_row(rows[n++], _im.rules[rule].name);
+    for (std::size_t k = 1; k < _cfgs.size(); ++k)
+      for (std::size_t i = 0; i < _ntRule.size(); ++i) {
+        const auto row = rows[1 + i];
+        rows[n++] = row;
+      }
+  }
+  // Each operator of an infix rule, with its precedence, the first level
+  // binding tightest, and its grouping.
+  template <class Op>
+  void each_op(const ImageStageDesc& st, Op&& op) {
+    for (std::uint32_t i = 0; i < st.levelCount; ++i) {
+      const ImageStageLevelDesc& level = st.levels[i];
+      const auto prec = static_cast<std::uint8_t>(st.levelCount - i);
+      const Association group = level.group == ImageGroup::right
+                                    ? Association::right
+                                : level.group == ImageGroup::non
+                                    ? Association::non
+                                    : Association::left;
+      for (std::uint32_t j = 0; j < level.count; ++j)
+        op(_im.node(*level.ops[j].op), level.ops[j].row, prec, group);
+    }
+  }
   ImageId body_in(unsigned cfg, std::uint32_t rule);
   bool has_rows(ImageId id) const;
   bool creates(ImageId id, const void* row) const;
@@ -140,30 +165,24 @@ class Lowerer {
   std::uint32_t op_rule_of(ImageId op) const;
   bool buries(ImageId id) const;
   ImageId optional_item(ImageId item) const;
-  // An unordered group laid from `items`: each optional item is read in its
-  // present form, `x` for `option(x)` and one turn at least for any other
-  // repetition, and marked, one bit each, as one the text may leave out.
-  template <class Pool>
-  void present_optional_items(Pool& p, std::size_t group,
-                              const std::vector<ImageId>& items) const {
-    std::uint32_t optional = 0;
-    for (std::size_t i = 0; i < items.size() && i < 32; ++i) {
-      auto& laid = p.kid[p.e[group].sym + i];
-      auto& item = p.e[laid];
-      if (optional_item(items[i]) == kNoImage ||
-          item.kind != decltype(item.kind)::rep)
-        continue;
-      optional |= std::uint32_t{1} << i;
-      if (item.max == 1)
-        laid = item.sym;
-      else
-        item.min = 1;
-    }
-    p.e[group].unorderedOptional = optional;
-  }
   void index();
   void declare();
   void define();
+  // One pass of `one` over each rule read under each configuration from
+  // `from` on, by its number there: true where one defined anything.
+  template <class One>
+  bool define_pass(unsigned from, One&& one) {
+    bool grew = false;
+    const auto n = static_cast<std::uint16_t>(_ntRule.size());
+    for (unsigned k = from; k < _cfgs.size(); ++k) {
+      auto i = static_cast<std::uint16_t>(k * n);
+      for (const std::uint32_t rule : _ntRule) {
+        ++i;
+        if (reads_under(k, rule)) grew = one(k, rule, i) || grew;
+      }
+    }
+    return grew;
+  }
 
   std::uint16_t terminal_sym(unsigned cfg, ImageId e);
   std::uint16_t term_of(unsigned cfg, ImageId e);
@@ -174,7 +193,7 @@ class Lowerer {
   bool list_words(ImageId id, std::vector<std::string_view>& words) const;
   std::uint16_t lay_laid(ImageId e, std::uint8_t laid, std::string_view name);
   void unspell(std::uint16_t t, std::uint8_t laid);
-  bool implied_token_ok(unsigned cfg, ImageId e);
+  void check_implied_token(unsigned cfg, ImageId e);
   std::uint16_t implied_term(ImageId e, std::uint16_t k);
 
   bool lexical(ImageId id);
@@ -188,7 +207,7 @@ class Lowerer {
 
   std::uint16_t gap_cond(unsigned cfg, ImageId e);
   void gap_ops(unsigned cfg, ImageId e);
-  void gap_op(std::uint16_t v);
+  void gap_op(std::uint16_t v) { _c.gapOps[_c.ngapOps++] = v; }
   void gap_join(unsigned cfg, std::uint16_t op,
                 const std::vector<ImageId>& es);
   std::uint16_t gap_leaf(std::uint64_t key,
@@ -197,7 +216,9 @@ class Lowerer {
   std::uint16_t phrase_lexical(unsigned cfg, ImageId e);
   std::uint16_t phrase(unsigned cfg, ImageId e, std::uint16_t skip,
                        std::vector<std::uint32_t>& path);
-  std::uint16_t phrase_skip(std::uint16_t skip);
+  std::uint16_t phrase_skip(std::uint16_t skip) {
+    return _lex.push(_c.lex[skip]);
+  }
   std::uint16_t phrase_token(unsigned cfg, ImageId e);
   std::uint16_t phrase_private_token(unsigned cfg, ImageId e, ImageId body);
   std::uint16_t cut_node(unsigned cfg, ImageId token);
@@ -241,6 +262,156 @@ class Lowerer {
   friend class LexReifier;
   std::unordered_map<ImageId, std::uint8_t> _lexicalMemo;
   std::unordered_map<ImageId, std::uint8_t> _gapMemo;
+};
+
+// What a lowering fills, made before the walk that fills it.
+template <class Lowered, class Pool>
+struct LowerState {
+  Lowered lowered{};
+  Pool pool{};
+};
+
+// The walk both lowerings lay a body with, into the tree of laid nodes `Pool`
+// holds. `Self` lays each node its own way, an embed's close and the call of a
+// grammar's entry with them.
+template <class Self, class Lowered, class Pool>
+class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
+ public:
+  LowerWalk(GrammarImage& image, const LowerDesc& desc)
+      : Lowerer(image, desc, this->lowered.cfg, this->lowered.cfg.nterms,
+                this->lowered.cfg.wordBytes, this->lowered.writes,
+                this->lowered.fault, this->pool),
+        _o(this->lowered),
+        _p(this->pool),
+        _cfg(this->lowered.cfg) {}
+
+ protected:
+  using Node = typename decltype(Pool::e)::value_type;
+  using Shape = decltype(Node::kind);
+  using Id = typename decltype(Pool::kid)::value_type;
+
+  Id mark(unsigned cfg, Id at) {
+    _p.e[at].cfg = static_cast<std::uint8_t>(cfg);
+    return at;
+  }
+  Id push_sym(std::uint16_t sym, unsigned cfg) {
+    return mark(cfg, _p.push(Node{Shape::sym, sym}));
+  }
+  Id gather(unsigned cfg, Shape kind, const std::vector<Id>& kids) {
+    // Kids numbered in 16 bits are refused past them.
+    if constexpr (sizeof(Id) == sizeof(std::uint16_t))
+      if (_p.kid.size() + kids.size() > kNoRow)
+        throw LowerRefused(LowerFail::tooManyPositions);
+    const auto base = static_cast<Id>(_p.kid.size());
+    _p.kid.insert(_p.kid.end(), kids.begin(), kids.end());
+    return mark(cfg, _p.push(Node{kind, base, static_cast<Id>(kids.size())}));
+  }
+  Id wrap(unsigned cfg, Id at) { return gather(cfg, Shape::seq, {at}); }
+  Id lay_kids(unsigned cfg, Shape kind, const std::vector<ImageId>& es) {
+    std::vector<Id> kids;
+    for (const ImageId e : es) kids.push_back(self().lay(cfg, e));
+    return gather(cfg, kind, kids);
+  }
+  Id lay_seq(unsigned cfg, ImageId e) {
+    const std::vector<ImageId> runs = gap_runs(kids_of(at(e)));
+    if (runs.size() == 1) return self().lay(cfg, runs.front());
+    return lay_kids(cfg, Shape::seq, runs);
+  }
+  Id lay_ref(unsigned cfg, std::uint32_t rule) {
+    if (_im.rules[rule].grammar) {
+      const Id at = lay_ref(cfg, _im.ready(rule).face[0].entry);
+      self().enter(cfg, at);
+      return at;
+    }
+    // A rule read in place lays its body here, its conversion over what that
+    // reads, as the rule's own definition would.
+    if (stage(rule).inPlace) {
+      const Id at = self().lay(cfg, body_in(cfg, rule));
+      convert_over(at, row_id(stage(rule).convertRow));
+      return at;
+    }
+    const std::uint16_t sym = sym_of(cfg, rule);
+    if (cfg != 0 && !is_term(sym)) _c.cloneNeeded[nt_index(sym)] = true;
+    return push_sym(sym, cfg);
+  }
+  Id lay_embed(unsigned cfg, ImageId e) {
+    const ImageNode n = at(e);
+    const ImageNode inner = at(kid(n, 0));
+    if (inner.kind != ImageKind::seq || inner.count != 3)
+      refuse_lowering(
+          "this combinator has no lowering: a body reaching here would "
+          "become a right-hand side nobody wrote");
+    const unsigned in = section_of(n.a, token_core(kid(inner, 2)));
+    const Id open = self().lay(cfg, kid(inner, 0));
+    const Id entry = self().lay(in, kid(inner, 1));
+    const Id close = self().lay_close(cfg, in, kid(inner, 2));
+    _c.cfgEnd[in] = static_cast<std::uint16_t>(_p.e[close].sym);
+    return gather(cfg, Shape::seq, {open, entry, close});
+  }
+  // An unordered group: each optional item is read in its present form, `x`
+  // for `option(x)` and one turn at least for any other repetition, and
+  // marked, one bit each, as one the text may leave out.
+  Id lay_unordered(unsigned cfg, ImageId e) {
+    const std::vector<ImageId> items = kids_of(at(e));
+    const Id group = lay_kids(cfg, Shape::unordered, items);
+    std::uint32_t optional = 0;
+    for (std::size_t i = 0; i < items.size() && i < 32; ++i) {
+      Id& laid = _p.kid[_p.e[group].sym + i];
+      Node& item = _p.e[laid];
+      if (optional_item(items[i]) == kNoImage || item.kind != Shape::rep)
+        continue;
+      optional |= std::uint32_t{1} << i;
+      if (item.max == 1)
+        laid = item.sym;
+      else
+        item.min = 1;
+    }
+    _p.e[group].unorderedOptional = optional;
+    return group;
+  }
+  // What a rule's body owes its rule: a data rule's conversion, unless a fold
+  // reads it, and a node rule's close, where the body opens no record -- true
+  // where that close was laid.
+  bool close_body(const ImageStageDesc& st, Id at) {
+    if (st.kind == ImageRuleKind::data && !st.folded)
+      _p.e[at].made.push_back(row_id(st.convertRow));
+    if (st.kind != ImageRuleKind::node) return false;
+    for (const std::uint16_t r : _p.e[at].made) {
+      const WriteKind k = _rowKind[r];
+      if (k == WriteKind::create || k == WriteKind::climb ||
+          k == WriteKind::close)
+        return false;
+    }
+    _p.e[at].made.push_back(row_id(st.closeRow));
+    return true;
+  }
+
+  Lowered& _o;
+  Pool& _p;
+  decltype(Lowered::cfg)& _cfg;
+
+ private:
+  Self& self() { return static_cast<Self&>(*this); }
+  // Over a choice of tokens, a conversion rides the record of each token, as a
+  // directive over a choice rides each alternative: none opens over the
+  // choice.
+  bool one_token(Id at) const {
+    const Node& n = _p.e[at];
+    if (n.kind == Shape::sym) return is_term(static_cast<std::uint16_t>(n.sym));
+    if (n.kind != Shape::alt || !n.made.empty() || !n.row.empty()) return false;
+    for (decltype(n.count) k = 0; k < n.count; ++k)
+      if (!one_token(_p.kid[n.sym + k])) return false;
+    return true;
+  }
+  void convert_over(Id at, std::uint16_t row) {
+    Node& n = _p.e[at];
+    if (n.kind != Shape::alt || !one_token(at)) {
+      n.made.push_back(row);
+      return;
+    }
+    for (decltype(n.count) k = 0; k < n.count; ++k)
+      convert_over(_p.kid[n.sym + k], row);
+  }
 };
 
 }  // namespace cursiv

@@ -38,10 +38,8 @@ bool lr_graph_takes(Id vertex, State&& state, Below&& below, Act&& act,
           above.size() != 0 ? above.back() : state(p.vertex);
       std::uint32_t prod = 0, len = 0;
       const int taken = act(top, prod, len);
-      if (taken >= 0) {
-        if (taken != 0) return true;
-        break;
-      }
+      if (taken > 0) return true;
+      if (taken == 0) break;
       if (len <= above.size()) {
         above.pop(len);
         const std::uint32_t to =

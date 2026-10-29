@@ -78,20 +78,9 @@ class LrGss {
     c.stats.tableElections += g.tabled();
     c.stats.alternatives = std::max(
         c.stats.alternatives, static_cast<std::uint32_t>(g.alternatives()));
-    switch (end) {
-      case Ending::accepted:
-        graph.say_bounded();
-        return LrExit::accept;
-      case Ending::frozen: {
-        const LrExit exit = graph.repair();
-        graph.say_bounded();
-        return exit;
-      }
-      case Ending::handed:
-        break;
-    }
+    const LrExit exit = end == Ending::frozen ? graph.repair() : LrExit::accept;
     graph.say_bounded();
-    return lr_resume(c);
+    return end == Ending::handed ? lr_resume(c) : exit;
   }
 
  private:
@@ -129,10 +118,7 @@ class LrGss {
     // reach: a reduction below them reads the episode again, seeded wider.
     bool collapsed = false;
     for (std::uint32_t window = kLrSeedWindow;;) {
-      if constexpr (A.cold.electSym.size() != 0)
-        _g.seed(_c.stack, start, A.cold.electSym, window);
-      else
-        _g.seed(_c.stack, start, {}, window);
+      _g.seed(_c.stack, start, A.cold.electSym, window);
       _c.stats.seeded += _c.stack.size() - _g.seed_base();
       collapsed = false;
       TextOffset openedAt = start.at;
@@ -161,8 +147,7 @@ class LrGss {
       window = window > depth / 4 ? depth : window * 4;
     }
     if (!collapsed && !_g.close()) return Ending::frozen;
-    const auto chosen = _g.elected();
-    for (const Id s : chosen) {
+    for (const Id s : _g.elected()) {
       _c.stop.poll();
       replay(_g.step(s));
     }
@@ -175,7 +160,9 @@ class LrGss {
   // said once the episode has written its path.
   void say_bounded() {
     if (_g.cut() == 0) return;
-    lr_search_settle(_c, *_c.search);
+    // The open fault is noted where the reading has gone on from it: what the
+    // span says comes after it.
+    if (_c.shifts != _c.search->wroteShifts) lr_search_note(_c, *_c.search);
     RepairNote note{};
     note.kind = DiagnosticKind::bounded;
     note.begin = _g.cut_begin();
@@ -206,27 +193,16 @@ class LrGss {
     for (std::uint32_t k = 0; k < sources.size(); ++k) {
       _c.stop.poll();
       const Reading& r = sources[k].reading;
-      const Frozen at{r.at, r.la, r.laMode, r.virt, r.indent};
       const NodeCount len = frames_of(sources[k], frames[k]);
-      lr_search_root(s, at, frames[k], len, k, true);
+      lr_search_root(s, r, r.at, frames[k], len, k, true);
     }
-    bool exhausted = false;
-    bool raced = false;
+    bool exhausted = false, raced = false;
     const std::uint32_t elected = lr_search_run<A>(_c, s, exhausted, raced);
     install(sources[elected == kLrNoConfig
                         ? 0
                         : lr_search_root_of(s.links, s.configs[elected].link)]);
     return lr_search_take<A>(_c, s, elected, exhausted, raced, false);
   }
-
-  // What a search reads of a frozen reading: its position and token in hand.
-  struct Frozen {
-    TextOffset committed;
-    Token la;
-    std::uint16_t laMode;
-    LrVirtualAt virt;
-    IndentAt indent;
-  };
 
   // The frames under `s`: the context's own up to where the graph took over,
   // then one per graph frame, its records past the tape. The records' count.
@@ -373,30 +349,27 @@ class LrGss {
   }
 
   // The token of `r`, a flagged winner of `mode`, read again while no stack
-  // under `v` takes it.
+  // under `v` takes it after the reductions the table lays for it, the
+  // graph's paths popped as a reduction pops them. What the gap decides counts
+  // as taken.
   CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode) {
     return lr_lex_refused<A>(
-        [&](const Token& t) { return takes(v, t.sym, r); }, mode, r.la,
+        [&](const Token& t) {
+          return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
+        },
+        mode, r.la,
         [&](const LrSkipped<A>& skip, TextOffset from) {
           return lr_scan_skipping<A>(_c, mode, from, r.indent.depth, skip,
                                      [](TextOffset, const Token*) {});
         });
   }
 
-  // Whether a stack under `v` takes `term` after the reductions the table lays
-  // for it, the graph's paths popped as a reduction pops them. What the gap
-  // decides counts as taken.
-  bool takes(Id v, SymbolId term, const Reading& r) {
-    return lr_gss_takes<A>(_g, v, term, lr_shadow_holds(_c, r));
-  }
-
   // The nearest unopened vertex, once the shifts from every place before it
   // are settled: of the tokens shifted from one place, only the one the lexer
   // elects stands.
   bool next_vertex(Id& v, TextOffset& at) {
-    while (_g.next_vertex(v, at)) {
+    while (_g.next_vertex(v, at))
       if (_shifts.empty() || !elected_stand(at)) return true;
-    }
     return false;
   }
 

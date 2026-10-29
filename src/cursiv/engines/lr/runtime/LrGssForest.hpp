@@ -105,9 +105,8 @@ class LrGssForest {
         throw std::logic_error("cursiv: GSS forest node has no alternative");
       n.alternative = n.first;
       for (Id id = _alternatives[n.first].next; id != none;
-           id = _alternatives[id].next) {
+           id = _alternatives[id].next)
         if (precedes(id, n.alternative)) n.alternative = id;
-      }
       n.mark = kElected;
       const Lead lead = lead_of(n.alternative);
       n.lead = lead.word;
@@ -443,15 +442,11 @@ class LrGssForest {
       while (i != n && a.words[oa + i] == b.words[ob + i]) ++i;
       return i;
     }
+    const bool ropeA = a.words == nullptr;
+    const std::uint32_t* words = ropeA ? b.words + ob : a.words + oa;
     Spell::Cursor c;
-    if (a.words == nullptr) {
-      c.seek(_spell, a.rank, oa);
-      for (; i != n && c.value() == b.words[ob + i]; ++i, c.next()) {
-      }
-    } else {
-      c.seek(_spell, b.rank, ob);
-      for (; i != n && c.value() == a.words[oa + i]; ++i, c.next()) {
-      }
+    c.seek(_spell, ropeA ? a.rank : b.rank, ropeA ? oa : ob);
+    for (; i != n && c.value() == words[i]; ++i, c.next()) {
     }
     return i;
   }
@@ -471,9 +466,8 @@ class LrGssForest {
       const Spell::Length n =
           std::min(length(left[i]) - oi, length(right[j]) - oj);
       const Spell::Length same = agree(left[i], oi, right[j], oj, n);
-      if (same != n) {
+      if (same != n)
         return value(left[i], oi + same) < value(right[j], oj + same) ? -1 : 1;
-      }
       oi += n;
       oj += n;
     }

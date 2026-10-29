@@ -93,7 +93,7 @@ struct AstEmitter : EmitOutput {
   AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
              std::string n, std::string h);
 
-  static std::string u(unsigned long long v);
+  static std::string u(unsigned long long v) { return std::to_string(v) + "u"; }
 
   bool derives(std::uint16_t base, std::uint16_t sub) const;
   // A write whose declaring class the created node satisfies fills that node;

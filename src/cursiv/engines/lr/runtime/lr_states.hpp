@@ -206,10 +206,7 @@ inline constexpr std::array<ElementId, A.cfg.nterms> kLrTermElem = [] {
 
 template <const auto& A>
 inline void lr_flush_trivia(LrContext& c) {
-  if constexpr (kLrAnyRecorded<A>)
-    lr_flush<true, A.stamp>(c, kLrTermElem<A>.data());
-  else
-    lr_flush<false, A.stamp>(c, nullptr);
+  lr_flush<kLrAnyRecorded<A>, A.stamp>(c, kLrTermElem<A>.data());
 }
 
 template <const auto& A>

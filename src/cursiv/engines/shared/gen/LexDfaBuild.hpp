@@ -16,11 +16,14 @@
 
 #include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/gen/ChainIndex.hpp"
+#include "cursiv/engines/shared/gen/LexAlphabet.hpp"
 #include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
 #include "cursiv/engines/shared/gen/LexNfaSubsets.hpp"
+#include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/bit_words.hpp"
+#include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
 #include "cursiv/engines/shared/table/TermInfo.hpp"
@@ -685,5 +688,32 @@ struct LexDfaBuild {
     }
   }
 };
+
+// The DFA of every mode of `modeSet` over the alphabet's classes, into `b`: a
+// state's relay chain stands in `b.dfaRelay` before `write(state, reading)`
+// lays what it accepts; `push` appends a row to `b.relays` and answers its
+// index. Each mode's start and each relay's resume end as the state their
+// subset became.
+template <class Built, class Push, class Write>
+void lex_build_dfa(Built& b, const LexAlphabet& alpha, LexKeywordCut& cut,
+                   const std::vector<DynSet>& modeSet, Push&& push,
+                   Write&& write) {
+  auto& g = b.cfg;
+  const std::vector<std::uint8_t> words = lex_word_flags(g);
+  LexDfaBuild dfa(alpha.nfa, g.sets.data(), g.sets.size(), alpha.repByte,
+                  alpha.ncls, cut, g.terms.data(), words);
+  LexRelayChains chains;
+  for (unsigned m = 0; m < b.nmodes; ++m)
+    b.modeStart[m] = dfa.start(modeSet[m], alpha.startOf);
+  lex_relay_seed(dfa, alpha.nfa.relays, push);
+  dfa.fill(b, [&](std::uint16_t self, const LexDfaReading& r) {
+    b.dfaRelay[self] = chains.launched(g, cut, r, b.relays, push);
+    write(self, r);
+  });
+  for (unsigned m = 0; m < b.nmodes; ++m)
+    b.modeStart[m] = dfa.final_of(b.modeStart[m]);
+  for (std::size_t k = 0; k < b.relays.size(); ++k)
+    b.relays[k].resume = dfa.final_of(b.relays[k].resume);
+}
 
 }  // namespace cursiv

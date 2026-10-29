@@ -253,7 +253,7 @@ void merged_path_keeps_its_source_rank() {
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
   cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
-  cursiv::lr_search_root(s, c, c.stack, c.tape.len(), 1, true);
+  cursiv::lr_search_root(s, c, c.committed, c.stack, c.tape.len(), 1, true);
   s.heap.clear();
   auto owed = gdm::kTable.cold.close_row(c.stack.top().state);
   const auto term = static_cast<cursiv::SymbolId>(owed.take());

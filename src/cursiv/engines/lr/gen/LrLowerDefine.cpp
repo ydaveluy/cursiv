@@ -7,21 +7,6 @@
 
 namespace cursiv {
 
-namespace {
-
-Association group_of(ImageGroup g) {
-  switch (g) {
-    case ImageGroup::right:
-      return Association::right;
-    case ImageGroup::non:
-      return Association::non;
-    default:
-      return Association::left;
-  }
-}
-
-}  // namespace
-
 LrLowerSlot LrLowerer::infix_side(unsigned cfg, const void* row,
                                   std::uint16_t sym) {
   LrLowerSlot s;
@@ -94,13 +79,10 @@ void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
   const LrActs node{row_id(st.climbRow)};
   const LrLowerSlot left = infix_side(cfg, st.leftRow, nt_sym(lhs));
   const LrLowerSlot right = infix_side(cfg, st.rightRow, nt_sym(lhs));
-  for (std::uint32_t i = 0; i < st.levelCount; ++i) {
-    const ImageStageLevelDesc& level = st.levels[i];
-    const auto prec = static_cast<std::uint8_t>(st.levelCount - i);
-    for (std::uint32_t j = 0; j < level.count; ++j)
-      emit_op(cfg, lhs, _im.node(*level.ops[j].op), level.ops[j].row, left,
-              right, node, prec, group_of(level.group));
-  }
+  each_op(st, [&](ImageId op, const void* row, std::uint8_t prec,
+                  Association group) {
+    emit_op(cfg, lhs, op, row, left, right, node, prec, group);
+  });
   const std::uint32_t primary = _im.rule(*st.primary);
   const LrLowerSlot base{.sym = sym_of(cfg, primary),
                          .cfg = static_cast<std::uint8_t>(cfg)};
@@ -119,22 +101,9 @@ void LrLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
   }
   const LrShapeId at_ = lay(cfg, body_in(cfg, rule));
   if (tail != 0) ambient(at_, false, tail);
-  if (st.kind == ImageRuleKind::node) {
-    bool opens = false;
-    for (const unsigned short i : _p.e[at_].made) {
-      const WriteKind k = _p.rowKind[i];
-      opens = opens || k == WriteKind::create || k == WriteKind::climb ||
-              k == WriteKind::close;
-    }
-    if (!opens) {
-      _p.e[at_].made.push_back(row_id(st.closeRow));
-      const bool writes =
-          has_rows(body_in(cfg, rule)) || rule == _im.rule(*_d.entry);
-      if (!writes) _p.passClose = _p.e[at_].made.back();
-    }
-  }
-  if (st.kind == ImageRuleKind::data)
-    _p.e[at_].made.push_back(row_id(st.convertRow));
+  if (close_body(st, at_) && !has_rows(body_in(cfg, rule)) &&
+      rule != _im.rule(*_d.entry))
+    _p.passClose = _p.e[at_].made.back();
   lr_emit_alts(_o, _p, lhs, at_, _p.e[at_].made, _p.e[at_].row);
   _p.passClose = kNoRow;
 }
@@ -142,7 +111,6 @@ void LrLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
 bool LrLowerer::open_one(unsigned cfg, std::uint32_t rule,
                          std::uint16_t reading) {
   bool grew = false;
-  if (!reads_under(cfg, rule)) return false;
   for (auto at_ = _p.openTail.lower_bound({reading, 0});
        at_ != _p.openTail.end() && at_->first.first == reading;) {
     const auto [key, nt] = *at_;
@@ -158,16 +126,8 @@ bool LrLowerer::open_one(unsigned cfg, std::uint32_t rule,
 }
 
 bool LrLowerer::define_open() {
-  bool grew = false;
-  const auto n = static_cast<std::uint16_t>(_ntRule.size());
-  for (unsigned k = 0; k < _cfgs.size(); ++k) {
-    auto i = static_cast<std::uint16_t>(k * n);
-    for (const std::uint32_t rule : _ntRule) {
-      ++i;
-      grew = open_one(k, rule, i) || grew;
-    }
-  }
-  return grew;
+  return define_pass(
+      0, [this](auto k, auto rule, auto i) { return open_one(k, rule, i); });
 }
 
 }  // namespace cursiv

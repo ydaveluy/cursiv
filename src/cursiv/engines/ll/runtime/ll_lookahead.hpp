@@ -44,6 +44,10 @@ class LlMask {
               const std::array<std::uint64_t, Words>& mask) {
     for (std::size_t k = 0; k < Words; ++k) _w[k] = row[k] & mask[k];
   }
+  void add(const LlMask& other) {
+    for (std::size_t k = 0; k < Words; ++k) _w[k] |= other._w[k];
+  }
+  bool operator==(const LlMask&) const = default;
 
  private:
   std::array<std::uint64_t, Words> _w{};
@@ -121,15 +125,17 @@ inline bool ll_wants_ahead(std::uint16_t st,
 // Longest match, restricted, and ALL of it: at the longest accepting state
 // every terminal the readings still admit is a reading of this spelling.
 // Naming one of them would kill the arms that wanted another -- a guarded `=`
-// and a bare one are two terminals over one byte. `lengths`, where asked,
-// takes the readings at that longest extent.
-template <const auto& T, bool Collect>
-inline TextOffset ll_match_in_impl(
-    const char* src, TextOffset len, TextOffset from,
-    const LlMask<T.termWords>& wanted, std::vector<std::uint16_t>& out,
-    TextOffset* inspected, bool* ended, bool* different,
-    std::vector<LlLexReading>* lengths, std::uint16_t mode = T.errMode,
-    std::size_t* top = nullptr) {
+// and a bare one are two terminals over one byte. `lengths`, where `Collect`
+// asks for them, takes the readings at that longest extent.
+template <const auto& T, bool Collect = false>
+inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
+                              const LlMask<T.termWords>& wanted,
+                              std::vector<std::uint16_t>& out,
+                              TextOffset* inspected = nullptr,
+                              bool* ended = nullptr, bool* different = nullptr,
+                              std::uint16_t mode = T.errMode,
+                              std::size_t* top = nullptr,
+                              std::vector<LlLexReading>* lengths = nullptr) {
   LlMask<T.termWords> room;
   const LlMask<T.termWords>& viable =
       ll_unrefused_mask<T>(wanted, src, from, len, room);
@@ -377,30 +383,6 @@ inline TextOffset ll_match_in_impl(
   return end;
 }
 
-template <const auto& T>
-inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
-                              const LlMask<T.termWords>& viable,
-                              std::vector<std::uint16_t>& out,
-                              TextOffset* inspected = nullptr,
-                              bool* ended = nullptr, bool* different = nullptr,
-                              std::uint16_t mode = T.errMode,
-                              std::size_t* top = nullptr) {
-  return ll_match_in_impl<T, false>(src, len, from, viable, out, inspected,
-                                    ended, different, nullptr, mode, top);
-}
-
-template <const auto& T>
-inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
-                              const LlMask<T.termWords>& viable,
-                              std::vector<std::uint16_t>& out,
-                              TextOffset* inspected, bool* ended,
-                              bool* different,
-                              std::vector<LlLexReading>* lengths,
-                              std::uint16_t mode = T.errMode) {
-  return ll_match_in_impl<T, true>(src, len, from, viable, out, inspected,
-                                   ended, different, lengths, mode);
-}
-
 struct LlLookRead {
   Token token{};
   TextOffset inspected = 0;
@@ -454,12 +436,7 @@ inline void ll_first_read(const LlContext& c, const LlTable::Decision& dec,
   std::size_t top = 0;
   ll_match_in<T>(c.src, c.len, c.la.begin, viable, read, &inspected, &ended,
                  &different, dec.mode, &top);
-  if (details != nullptr) {
-    details->inspected = inspected;
-    details->ended = ended;
-    details->different = different;
-    details->top = top;
-  }
+  if (details != nullptr) *details = {c.la, inspected, ended, different, top};
   if (read.empty()) read.assign(1, c.la.sym);
 }
 

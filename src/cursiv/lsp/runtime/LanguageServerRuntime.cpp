@@ -276,7 +276,7 @@ Result serve(NotificationQueue& queue, std::uint64_t behind,
   queue.wait_served(behind, token);
   Result result;
   try {
-    result = call(std::move(params), token);
+    result = call(std::forward<Params>(params), token);
   } catch (const OperationCancelled&) {
     throw_request_cancelled();
   }
@@ -299,7 +299,8 @@ auto request(Session& session, Call call) {
     const std::uint64_t behind = session.queue.posted();
     if (!session.pooled)
       return lsp::RequestResult<Result>(
-          serve<Result>(session.queue, behind, kNoCancel, call, params));
+          serve<Result>(session.queue, behind, kNoCancel, call,
+                        std::forward<decltype(params)>(params)));
     auto task = lsp::TaskFunction<Result>(
         [&queue = session.queue, &requests = session.pending,
          call, behind, token = lsp::RequestContext::get().stopToken(),
