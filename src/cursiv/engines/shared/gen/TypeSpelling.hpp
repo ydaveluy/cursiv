@@ -21,8 +21,7 @@ inline std::string gen_enclose(std::string_view s) {
   std::string out;
   std::size_t i = 0;
   while (i < s.size()) {
-    const auto quoted = detail::cpp_literal_end(s, i);
-    if (quoted != i) {
+    if (const auto quoted = detail::cpp_literal_end(s, i); quoted != i) {
       out += s.substr(i, quoted - i);
       i = quoted;
       continue;
@@ -31,8 +30,8 @@ inline std::string gen_enclose(std::string_view s) {
     if (s[i - 1] != '<') continue;
     std::size_t start = i - 1;
     while (start != 0) {
-      const char c = s[start - 1];
-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+      if (const char c = s[start - 1];
+          !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
             (c >= '0' && c <= '9') || c == '_' || c == ':'))
         break;
       --start;
@@ -44,13 +43,11 @@ inline std::string gen_enclose(std::string_view s) {
     for (;;) {
       std::size_t j = i, depth = 0;
       while (j < s.size()) {
-        const auto quoted = detail::cpp_literal_end(s, j);
-        if (quoted != j) {
+        if (const auto quoted = detail::cpp_literal_end(s, j); quoted != j) {
           j = quoted;
           continue;
         }
-        const char c = s[j];
-        if (c == '<' || c == '(' || c == '{' || c == '[') {
+        if (const char c = s[j]; c == '<' || c == '(' || c == '{' || c == '[') {
           ++depth;
         } else if (c == '>' || c == ')' || c == '}' || c == ']') {
           if (depth == 0) break;
@@ -78,8 +75,8 @@ inline std::string gen_enclose(std::string_view s) {
         }
       }
       ++argument;
-      const std::size_t e = arg.find_last_not_of(' ');
-      if (e != std::string::npos && e >= 1 && arg[e] == ')' &&
+      if (const std::size_t e = arg.find_last_not_of(' ');
+          e != std::string::npos && e >= 1 && arg[e] == ')' &&
           arg[e - 1] == '(')
         arg = "(" + arg + ")";
       out += arg;
@@ -94,8 +91,7 @@ inline std::string gen_enclose(std::string_view s) {
 // Wide integer template arguments need literals both compilers can read.
 inline std::string gen_widen(std::string text) {
   for (std::size_t i = 0; i < text.size();) {
-    const auto quoted = detail::cpp_literal_end(text, i);
-    if (quoted != i) {
+    if (const auto quoted = detail::cpp_literal_end(text, i); quoted != i) {
       i = quoted;
       continue;
     }

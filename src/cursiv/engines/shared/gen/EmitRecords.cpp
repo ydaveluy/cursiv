@@ -86,7 +86,7 @@ std::string emit_records(std::string_view ns,
   };
   // One pool of the names answers give, the empty one first.
   std::map<std::string_view, std::size_t> nameIds{{std::string_view{}, 0}};
-  std::vector<std::string_view> names{std::string_view{}};
+  std::vector names{std::string_view{}};
   const auto name_of = [&](std::string_view text) {
     const auto [at, fresh] = nameIds.try_emplace(text, names.size());
     if (fresh) names.push_back(text);
@@ -141,7 +141,7 @@ std::string emit_records(std::string_view ns,
 #include "AstReflection.hpp"
 #include "cursiv/core/grammar/GrammarMetaData.hpp"
 
-namespace {0} {{
+namespace {} {{
 namespace grammar_detail {{
 
 )",
@@ -203,12 +203,12 @@ constexpr ::cursiv::GrammarMetaData kGrammarMetaData{{
     .ast = &kAstMetaData,
 )");
   if (anyNarrow) out += "    .narrows = grammar_detail::kNarrows,\n";
-  out += std::format(R"(    .recordCount = {0}u,
+  out += std::format(R"(    .recordCount = {}u,
     .terminals = grammar_detail::kTerminals,
-    .terminalCount = {1}u,
+    .terminalCount = {}u,
 }};
 
-}}  // namespace {2}
+}}  // namespace {}
 )",
                      records.size(), terminals.size(), ns);
   return out;

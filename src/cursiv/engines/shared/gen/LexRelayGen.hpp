@@ -72,7 +72,7 @@ struct LexRelayGen : LexRelay {
   template <class Cfg>
   static std::optional<std::size_t> literal_size(const Cfg& g,
                                                  std::uint16_t node) {
-    return walk_literal(g, node, [](char) {});
+    return walk_literal(g, node, [](char) { /* only the length is wanted */ });
   }
 };
 

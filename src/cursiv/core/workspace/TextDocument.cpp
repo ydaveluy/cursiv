@@ -82,8 +82,9 @@ struct Decoded {
   }
   for (std::uint32_t i = 1; i <= need; ++i) {
     if (i >= left) return {1, i, false};
-    const auto next = static_cast<unsigned char>(p[i]);
-    if (next < lo || next > hi) return {1, i, false};
+    if (const auto next = static_cast<unsigned char>(p[i]);
+        next < lo || next > hi)
+      return {1, i, false};
     lo = 0x80U;
     hi = 0xBFU;
   }
@@ -216,7 +217,7 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
       const std::uint32_t step = utf16_in_word(load_word(p + at));
       if (units + step > position.character) break;
       units += step;
-      at = static_cast<TextOffset>(at + 8);
+      at += 8;
     }
   while (at < end && units < position.character) {
     const Decoded step = decode_one(p + at, _text.size() - at);
@@ -253,7 +254,7 @@ std::uint32_t TextDocument::advanceUtf16(TextOffset& from, TextOffset to,
     while (to - at >= 8 &&
            (static_cast<unsigned char>(p[at + 8]) & 0xC0U) != 0x80U) {
       units += utf16_in_word(load_word(p + at));
-      at = static_cast<TextOffset>(at + 8);
+      at += 8;
     }
   while (at < to) {
     const Decoded step = decode_one(p + at, _text.size() - at);
@@ -274,14 +275,14 @@ void TextDocument::ensureLineIndex() const {
   _wellFormedLines.clear();
   const char* const p = _text.data();
   const TextOffset n = size();
-  const TextOffset words = n >= 8 ? static_cast<TextOffset>(n - 7) : 0;
+  const TextOffset words = n >= 8 ? n - 7 : 0;
   // The high bits of what the line being filled has read.
   std::uint64_t high = 0;
   // The next "\n" or "\r" at or after `at`, with what it passed folded in: a
   // word holding neither opens no line, so the byte walk only ever finishes
   // one.
   const auto nextBreak = [&](TextOffset at) {
-    for (; at < words; at = static_cast<TextOffset>(at + 8)) {
+    for (; at < words; at += 8) {
       const std::uint64_t w = load_word(p + at);
       if ((zero_byte(w ^ (kOnes * '\n')) | zero_byte(w ^ (kOnes * '\r'))) != 0)
         break;
@@ -310,7 +311,7 @@ void TextDocument::ensureLineIndex() const {
   for (TextOffset at = 0; at < n;) {
     const TextOffset brk = nextBreak(at);
     if (brk == n) break;
-    at = static_cast<TextOffset>(brk + 1);
+    at = brk + 1;
     if (p[brk] == '\r' && at < n && p[at] == '\n') ++at;
     markLine(brk);
     _lineStarts.push_back(at);
@@ -384,8 +385,8 @@ Position TextDocument::Cursor::positionAt(TextOffset offset) {
   offset = std::min(offset, _document.size());
   assert(offset >= _lastOffset);
   _lastOffset = offset;
-  const auto& starts = _document._lineStarts;
-  if (_line + 1 < starts.size() && offset >= starts[_line + 1]) {
+  if (const auto& starts = _document._lineStarts;
+      _line + 1 < starts.size() && offset >= starts[_line + 1]) {
     ++_line;
     // Adjacent tokens stay on this or the next line; a sparse jump searches.
     if (_line + 1 < starts.size() && offset >= starts[_line + 1])

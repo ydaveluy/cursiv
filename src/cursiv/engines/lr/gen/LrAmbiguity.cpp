@@ -27,7 +27,7 @@ bool spells_only(const LrBuildCfg& c, const LrLowProd& q, std::uint16_t sym) {
 // one too.
 std::vector<std::uint16_t> find_runs(const LrBuildCfg& c,
                                      const LrBuckets<std::uint16_t>& ix) {
-  std::vector<std::uint16_t> runs(c.nnts, kNoRow);
+  std::vector runs(c.nnts, kNoRow);
   for (std::uint16_t nt = 0; nt < c.nnts; ++nt) {
     for (const std::uint16_t k : ix.of(nt)) {
       const LrLowProd& q = c.prods[k];

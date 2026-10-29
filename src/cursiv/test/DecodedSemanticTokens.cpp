@@ -60,12 +60,11 @@ DecodedSemanticTokensWithRanges highlightHelper(
 void expectSemanticToken(
     const DecodedSemanticTokensWithRanges& tokensWithRanges,
     const DecodedTokenOptions& options) {
-  const std::pair<TextOffset, TextOffset>& range =
-      tokensWithRanges.ranges[options.rangeIndex];
+  const auto& [begin, end] = tokensWithRanges.ranges[options.rangeIndex];
   std::size_t found = 0;
   for (const DecodedSemanticToken& token : tokensWithRanges.tokens)
-    if (token.tokenType == options.tokenType && token.offset == range.first &&
-        token.offset + token.text.size() == range.second)
+    if (token.tokenType == options.tokenType && token.offset == begin &&
+        token.offset + token.text.size() == end)
       ++found;
   expectedFunction(std::to_string(found), "1",
                    "expected one token with the specified options but found " +

@@ -55,11 +55,11 @@ namespace {
   if (expected.isObject() && actual.isObject()) {
     if (expected.object().size() != actual.object().size()) return false;
     // The server's keys are unique; client objects can contain duplicates.
-    for (const auto& [key, value] : expected.object()) {
+    return std::ranges::all_of(expected.object(), [&](const auto& entry) {
+      const auto& [key, value] = entry;
       const auto* other = actual.object().find(key);
-      if (other == nullptr || !same_json_payload(value, *other)) return false;
-    }
-    return true;
+      return other != nullptr && same_json_payload(value, *other);
+    });
   }
   return expected == actual;
 }
@@ -67,8 +67,8 @@ namespace {
 [[nodiscard]] bool matches_diagnostic(const Diagnostic& diagnostic,
                                       const lsp::Range& range,
                                       const lsp::Diagnostic& candidate) {
-  const auto* message = std::get_if<lsp::String>(&candidate.message);
-  if (message == nullptr || *message != diagnostic.message ||
+  if (const auto* message = std::get_if<lsp::String>(&candidate.message);
+      message == nullptr || *message != diagnostic.message ||
       from_lsp(candidate.range) != from_lsp(range) ||
       !candidate.severity.has_value() ||
       candidate.severity->value() !=
@@ -148,8 +148,7 @@ namespace {
   edit.newText = newText->string();
   lsp::WorkspaceEdit workspaceEdit;
   lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
-  changes[lsp::Uri::parse(std::string(document.uri))].push_back(
-      std::move(edit));
+  changes[lsp::Uri::parse(document.uri)].push_back(std::move(edit));
   workspaceEdit.changes = std::move(changes);
   action.edit = std::move(workspaceEdit);
   return action;
@@ -205,6 +204,8 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
 
 void DefaultCodeActionProvider::appendCodeActions(
     const Document&, const lsp::CodeActionParams&,
-    std::vector<lsp::CodeAction>&, const CancellationToken&) const {}
+    std::vector<lsp::CodeAction>&, const CancellationToken&) const {
+  // a language with no actions of its own adds nothing
+}
 
 }  // namespace cursiv

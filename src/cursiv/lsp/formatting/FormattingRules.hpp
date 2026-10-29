@@ -95,7 +95,8 @@ struct LineCommentFormatOptions {
   bool ensureSpaceAfterStart = true;
 };
 
-// Javadoc by default: `/** ... */`, ` *` per line, `@tag` continuation.
+// Javadoc by default: the `start` and `end` below, ` *` per line, `@tag`
+// continuation.
 struct MultilineCommentFormatOptions {
   std::string start = "/**";
   std::string end = "*/";

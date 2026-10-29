@@ -262,10 +262,11 @@ void DefaultDocumentBuilder::prepareBuild(std::span<Document* const> documents,
                                           const BuildOptions& options) const {
   const std::scoped_lock lock(_stateMutex);
   for (const Document* const d : documents) {
-    const auto at = _buildOptions.find(d->id);
     // An unfinished request survives: a document keeps what it was asked
     // until a build honours it, so an interrupted ask is never replaced.
-    if (at != _buildOptions.end() && !at->second.completed) continue;
+    if (const auto at = _buildOptions.find(d->id);
+        at != _buildOptions.end() && !at->second.completed)
+      continue;
     _buildOptions[d->id] = {options, false};
   }
 }
@@ -355,19 +356,19 @@ void DefaultDocumentBuilder::buildDocuments(
     _shared.workspaceLock->settle();
   };
 
-  runPhase(
-      work,
-      {{DocumentState::Parsed,
-        [&](Document& d, const CoreServices&,
-            const CancellationToken& phase) { factory.update(d, phase); }},
-       {DocumentState::IndexedContent,
-        [&](Document& d, const CoreServices&,
-            const CancellationToken& phase) {
-          index.updateContent(d, phase);
-        }}},
-      token, prepareContent
-                 ? std::optional<cursiv::function_ref<void()>>{publishContent}
-                 : std::nullopt);
+  runPhase(work,
+           {{DocumentState::Parsed,
+             [&](Document& d, const CoreServices&,
+                 const CancellationToken& phase) { factory.update(d, phase); }},
+            {DocumentState::IndexedContent,
+             [&](const Document& d, const CoreServices&,
+                 const CancellationToken& phase) {
+               index.updateContent(d, phase);
+             }}},
+           token,
+           prepareContent
+               ? std::optional<cursiv::function_ref<void()>>{publishContent}
+               : std::nullopt);
 
   try {
     // A barrier, not a stage of the linking phase: a derived scope provider
@@ -389,7 +390,7 @@ void DefaultDocumentBuilder::buildDocuments(
                  language.linker->link(d, phase);
                }},
               {DocumentState::IndexedReferences,
-               [&](Document& d, const CoreServices&,
+               [&](const Document& d, const CoreServices&,
                    const CancellationToken& phase) {
                  index.updateReferences(d, phase);
                }}},
@@ -530,6 +531,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
         try {
           texts[i] = files.readFile(normalize_uri(fresh[i]));
         } catch (const FileSystemError&) {
+          // the text stays empty: the loop below reports the file as lost
         }
       });
   const DocumentFactory& factory = *_shared.documentFactory;

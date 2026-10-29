@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <string_view>
 #include <type_traits>
@@ -109,8 +110,7 @@ constexpr std::string_view after(std::string_view pretty,
   const std::string_view rest = pretty.substr(at + prefix.size());
   std::size_t end = rest.size();
   for (std::size_t i = 0; i < rest.size(); ++i) {
-    const auto quoted = cpp_literal_end(rest, i);
-    if (quoted != i) {
+    if (const auto quoted = cpp_literal_end(rest, i); quoted != i) {
       i = quoted - 1;
       continue;
     }
@@ -161,11 +161,10 @@ constexpr bool is_identifier(std::string_view s) {
   if (!((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z') ||
         s[0] == '_'))
     return false;
-  for (const char c : s)
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '_'))
-      return false;
-  return true;
+  return std::ranges::all_of(s, [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+  });
 }
 
 // The window of values an enumerator may have, probed one instantiation each:
@@ -192,8 +191,7 @@ constexpr std::string_view last_component(std::string_view full) {
   int depth = 0;
   std::size_t last = 0;
   for (std::size_t i = 0; i + 1 < full.size(); ++i) {
-    const auto quoted = cpp_literal_end(full, i);
-    if (quoted != i) {
+    if (const auto quoted = cpp_literal_end(full, i); quoted != i) {
       i = quoted - 1;
       continue;
     }

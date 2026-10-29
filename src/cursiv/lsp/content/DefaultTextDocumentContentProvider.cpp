@@ -29,8 +29,8 @@ std::optional<lsp::TextDocumentContentResult>
 DefaultTextDocumentContentProvider::provideTextDocumentContent(
     const lsp::TextDocumentContentParams& params) const {
   // A scheme has no case, and the URI type lowers the one the client sent.
-  const auto scheme = params.uri.scheme();
-  if (scheme.empty() || std::ranges::none_of(_schemes, [&](const auto& own) {
+  if (const auto scheme = params.uri.scheme();
+      scheme.empty() || std::ranges::none_of(_schemes, [&](const auto& own) {
         return folded_equal(own, scheme);
       }))
     return std::nullopt;

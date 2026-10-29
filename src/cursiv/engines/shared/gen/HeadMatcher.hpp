@@ -401,8 +401,8 @@ void lex_spine(const LexNfaPool& n, const Cfg& g, int start, At&& at,
     }
     if (st.accept >= 0 && st.t1 < 0 && st.t2 < 0) end(head);
     if (st.set < 0 && st.t2 >= 0) {
-      std::vector<std::size_t> leaves;
-      if (lex_split_refusals(n, x, leaves) &&
+      if (std::vector<std::size_t> leaves;
+          lex_split_refusals(n, x, leaves) &&
           std::ranges::all_of(leaves, [&](std::size_t j) {
             return n.guards[j].node == n.guards[leaves[0]].node;
           }))
@@ -420,7 +420,7 @@ void lex_spine(const LexNfaPool& n, const Cfg& g, int start, At&& at,
 template <class Cfg>
 std::vector<int> lex_spine_offsets(const LexNfaPool& n, const Cfg& g,
                                    const std::vector<int>& startOf) {
-  std::vector<int> out(n.guards.size(), -1);
+  std::vector out(n.guards.size(), -1);
   for (const int start : startOf)
     lex_spine(
         n, g, start,
@@ -429,7 +429,9 @@ std::vector<int> lex_spine_offsets(const LexNfaPool& n, const Cfg& g,
           if (e.min > 1 || e.a != kNoSet)
             out[k] = static_cast<int>(head.size());
         },
-        [](const std::vector<HeadMatcher::Step>&) {});
+        [](const std::vector<HeadMatcher::Step>&) {
+          /* the spine's end adds no offset */
+        });
   return out;
 }
 

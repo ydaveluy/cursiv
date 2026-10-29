@@ -181,7 +181,7 @@ inline LrLowerSlot lr_slot_for_alt(LrLowered& o, LrLowerPool& p, LrShapeId at,
 // only the last at its tail unless something follows.
 inline std::vector<LrLowerSlot> lr_turns(const LrLowerSlot& in, std::uint32_t n,
                                          bool last = true) {
-  std::vector<LrLowerSlot> items(n, in);
+  std::vector items(n, in);
   for (std::uint32_t i = 0; i < n; ++i) {
     if (i != 0) items[i].lead = 0;
     if (i + 1 != n || !last) items[i].trail = 0;
@@ -190,7 +190,7 @@ inline std::vector<LrLowerSlot> lr_turns(const LrLowerSlot& in, std::uint32_t n,
 }
 
 // `R -> R X | X`, the actions riding the item.
-inline void lr_emit_left_recursion(LrLowered& o, LrLowerPool& p,
+inline void lr_emit_left_recursion(LrLowered& o, const LrLowerPool& p,
                                    std::uint16_t aux, const LrLowerSlot& in,
                                    std::uint32_t min) {
   // Only the base case stands at the head of the run, and only the item at
@@ -205,7 +205,7 @@ inline void lr_emit_left_recursion(LrLowered& o, LrLowerPool& p,
 
 // Each optional turn owns its empty alternative, the turn written first: left
 // recursion would put the decision to stop on the caller's reduce.
-inline void lr_emit_chained_repeat(LrLowered& o, LrLowerPool& p,
+inline void lr_emit_chained_repeat(LrLowered& o, const LrLowerPool& p,
                                    std::uint16_t aux, const LrLowerSlot& in,
                                    const LrLowerNode& e) {
   const std::uint32_t floor = std::max(e.min, 1u);
@@ -289,8 +289,7 @@ inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
 
 inline LrLowerSlot lr_slot_for(LrLowered& o, LrLowerPool& p, LrShapeId at,
                                const LrActs& made, const LrActs& row) {
-  const LrLowerNode& e = p.e[at];
-  switch (e.kind) {
+  switch (const LrLowerNode& e = p.e[at]; e.kind) {
     case LrShape::sym:
       // A turn over one symbol is a production of its own: riding that
       // symbol's record, it could not reach back over its receiver.

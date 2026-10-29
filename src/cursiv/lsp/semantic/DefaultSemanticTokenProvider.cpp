@@ -88,9 +88,9 @@ void emit(std::vector<lsp::Uint>& data, TextDocument::Cursor& cursor,
     type = SemanticTokenType::String;
     return true;
   }
-  const bool signedNumber = (head == '-' || head == '+' || head == '.') &&
-                            text.size() > 1 && is_digit(text[1]);
-  if (is_digit(head) || signedNumber) {
+  if (const bool signedNumber = (head == '-' || head == '+' || head == '.') &&
+                                text.size() > 1 && is_digit(text[1]);
+      is_digit(head) || signedNumber) {
     type = SemanticTokenType::Number;
     return true;
   }

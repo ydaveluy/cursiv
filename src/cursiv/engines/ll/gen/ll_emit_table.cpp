@@ -201,7 +201,7 @@ struct ByteTerms {
     std::map<std::vector<std::uint16_t>, std::uint32_t> seen;
     bool any = false;
     for (unsigned m = 0; m < a.nmodes; ++m) {
-      std::vector<std::uint16_t> row(256, kInvalidSymbol);
+      std::vector row(256, kInvalidSymbol);
       for (const unsigned t : spelled)
         if (ll_byte_term(a, m, t)) {
           row[static_cast<unsigned char>(
@@ -411,7 +411,7 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
           });
   // A climb reads its operator's token, and the gap behind it, under its own
   // alphabet, and so does a caret that reads that token again.
-  std::vector<std::uint16_t> opMode(g.nnodes, kNoRow);
+  std::vector opMode(g.nnodes, kNoRow);
   for (std::uint16_t k = 0; k < g.nclimbs; ++k)
     for (std::uint16_t i = 0; i < g.climbs[k].opCount; ++i)
       if (const auto leaf =

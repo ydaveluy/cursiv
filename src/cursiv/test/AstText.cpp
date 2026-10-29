@@ -21,13 +21,14 @@ void ast_of(const AstReflection& r, const AstNode& n, std::string& out) {
   const auto meta = r.getTypeMetaData(n.type);
   out += meta.name;
   out += '{';
-  r.visitMembers(n, [&](std::string_view p, std::uint32_t i, AstNode& kid) {
-    out += p;
-    if (i != AstReflection::kNoIndex) out += std::to_string(i);
-    out += '=';
-    ast_of(r, kid, out);
-    out += ' ';
-  });
+  r.visitMembers(n,
+                 [&](std::string_view p, std::uint32_t i, const AstNode& kid) {
+                   out += p;
+                   if (i != AstReflection::kNoIndex) out += std::to_string(i);
+                   out += '=';
+                   ast_of(r, kid, out);
+                   out += ' ';
+                 });
   out += '}';
 }
 
@@ -36,7 +37,7 @@ void spans_of(const AstReflection& r, const Cst& cst, const AstNode& n,
   const CstNode& at = cst[n.cstNodeId];
   out += r.getTypeMetaData(n.type).name;
   out += '[' + std::to_string(at.begin) + ',' + std::to_string(at.end) + ')';
-  r.visitMembers(n, [&](std::string_view, std::uint32_t, AstNode& kid) {
+  r.visitMembers(n, [&](std::string_view, std::uint32_t, const AstNode& kid) {
     out += ' ';
     spans_of(r, cst, kid, out);
   });

@@ -481,8 +481,8 @@ std::string render_link_default(std::string_view target,
   if (!scheme) return std::string(target);
   std::string_view path = target.substr(colon + 1);
   if (path.starts_with("//")) {
-    const auto end = path.find_first_of("/?#", 2);
-    if ((end == std::string_view::npos ? path.size() : end) > 2)
+    if (const auto end = path.find_first_of("/?#", 2);
+        (end == std::string_view::npos ? path.size() : end) > 2)
       return std::format("[{}]({})", display, target);
     path.remove_prefix(2);
   }

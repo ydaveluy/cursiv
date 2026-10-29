@@ -168,8 +168,7 @@ std::uint64_t lr_kernel_hash(const LrItem* k, std::size_t n, const DynSet* la) {
   for (std::size_t j = 0; j < n; ++j) {
     h = hash_mix(h, (static_cast<std::uint64_t>(k[j].prod) << 16) | k[j].dot);
     if (la)
-      for (std::size_t w = 0; w < la[j].w.size(); ++w)
-        h = hash_mix(h, la[j].w[w]);
+      for (const std::uint64_t w : la[j].w) h = hash_mix(h, w);
   }
   return h;
 }
@@ -406,13 +405,13 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
 
   // Scratch rows cleared by the enumeration that reads them, never swept.
   LrBitWords seen;
-  std::vector<std::uint64_t> seenWords(dom.words, std::uint64_t{});
+  std::vector seenWords(dom.words, std::uint64_t{});
   seen.init(seenWords.data(), dom.words);
   std::vector<DynSet> laS(WithLa ? dom.n : 0);
 
   std::vector<LrItem> harv(dom.n);
   std::vector<DynSet> harvLa(WithLa ? dom.n : 0);
-  auto harvest = [&]() -> std::uint32_t {
+  auto harvest = [&]() {
     std::uint32_t out = 0;
     const std::size_t klo = seen.lo, khi = seen.hi;
     seen.lo = dom.words;
@@ -439,8 +438,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   // The lookahead a call site hands its callee, gathered per nonterminal:
   // both unions are idempotent, so one walk of its closure list serves all.
   std::vector<DynSet> ntLa(WithLa ? nN : 0);
-  std::vector<char> ntMark(nN, char{});
-  std::vector<unsigned> ntList(nN, unsigned{});
+  std::vector ntMark(nN, char{});
+  std::vector ntList(nN, unsigned{});
   std::uint32_t nNtList = 0;
 
   auto closure = [&](const LrItem* kernel, std::size_t kn, const DynSet* kla) {
@@ -557,8 +556,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   std::vector<LrReq> req(guarded ? dom.n : 0);
   std::vector<DynSet> own(guarded ? dom.n : 0);
   std::vector<LrReq> gamma(guarded ? nN : 0);
-  std::vector<std::uint32_t> gammaGen(guarded ? nN : 0, std::uint32_t{});
-  std::vector<std::uint32_t> kernGen(guarded ? dom.n : 0, std::uint32_t{});
+  std::vector gammaGen(guarded ? nN : 0, std::uint32_t{});
+  std::vector kernGen(guarded ? dom.n : 0, std::uint32_t{});
   std::uint32_t visitGen = 0;
   std::vector<std::uint32_t> openers;
   std::vector<DynSet> left(guarded ? nN : 0);
@@ -575,19 +574,19 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   std::vector<LrEdge> edgeRow;
 
   // A state reached again is a state already done.
-  std::vector<unsigned> work{0u};
+  std::vector work{0u};
   std::vector<ElementId> entrySite(nN);
   // The call that names a rule outright: it outranks a transitive reading.
   std::vector<ElementId> nearSite(nN);
-  std::vector<std::uint32_t> entrySeen(nN, std::uint32_t{});
-  std::vector<std::uint32_t> nearSeen(nN, std::uint32_t{});
+  std::vector entrySeen(nN, std::uint32_t{});
+  std::vector nearSeen(nN, std::uint32_t{});
   std::uint32_t gen = 0;
-  std::vector<std::uint16_t> ntSyms(nN, std::uint16_t{});
+  std::vector ntSyms(nN, std::uint16_t{});
   std::uint32_t nNtSyms = 0;
   // Items bucketed by the symbol after the dot, each bucket in closure order.
   const std::size_t nSym = static_cast<std::size_t>(nT) + nN;
   std::vector<std::uint32_t> symAt(nSym + 1);
-  std::vector<std::uint32_t> symCnt(nSym, std::uint32_t{});
+  std::vector symCnt(nSym, std::uint32_t{});
   std::vector<std::uint32_t> symFill(nSym);
   std::vector<std::uint32_t> symItem(dom.n);
   while (!work.empty() && !A.overflow) {
@@ -699,9 +698,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         const ElementId row = g.row_at(p, it.dot);
         // The nearest site: the slot's chain, or a unit production's own
         // where the call and its caller each lay a record.
-        const ElementId near =
-            row != kNoElement || p.len != 1 ? row : ElementId{p.node};
-        if (near != kNoElement) {
+        if (const ElementId near =
+                row != kNoElement || p.len != 1 ? row : ElementId{p.node};
+            near != kNoElement) {
           bool seen = std::exchange(nearSeen[Bx], gen) == gen;
           lr_agree(writes, nearSite[Bx], seen, near);
         }
@@ -1016,8 +1015,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
 
   // The goto that closes a span: the landing its guard picks off the tag of
   // the state the span's first step landed in.
-  const auto closing = [&](std::uint32_t s0, std::uint32_t s1,
-                           unsigned first) -> std::uint32_t {
+  const auto closing = [&](std::uint32_t s0, std::uint32_t s1, unsigned first) {
     if (s0 == s1 || gt.pool[s0].prog == 0) return s0 == s1 ? 0xffffffffu : s0;
     const LrGuard& pg = gr.progs[gt.pool[s0].prog - 1u];
     std::size_t v = 0;
@@ -1036,7 +1034,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
                               const std::vector<std::uint32_t>& from) {
     const LrBuckets<> out(ntr, static_cast<std::uint32_t>(from.size()),
                           [&](std::uint32_t k) { return from[k]; });
-    std::vector<char> queued(ntr, char{1});
+    std::vector queued(ntr, char{1});
     std::vector<std::uint32_t> fw(ntr);
     std::iota(fw.begin(), fw.end(), 0u);
     std::uint32_t nfw = ntr;
@@ -1096,7 +1094,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   inclSrc.reserve(inclCap);
   // A walk takes every landing a guard may pick; each path is closed by the
   // goto its first landing picks, an empty rule by every one.
-  std::vector<unsigned> path(maxLen, unsigned{});
+  std::vector path(maxLen, unsigned{});
   std::vector<std::span<const LrEdge>> step(maxLen);
   const auto close_path = [&](unsigned p, std::uint16_t prod) {
     const LrLowProd& pr = prods[prod];
@@ -1444,11 +1442,11 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions) {
   // Each group split greedily in place. A group is re-asked only where a
   // successor left a group that split: the same first-fit remakes it.
   std::vector<Class> classes;
-  std::vector<unsigned> ng(ns, unsigned{});
-  std::vector<char> dirty(ns + 1, char{1});
-  std::vector<char> nextDirty(ns + 1, char{});
-  std::vector<char> split(ns + 1, char{});
-  std::vector<char> moved(ns, char{});
+  std::vector ng(ns, unsigned{});
+  std::vector dirty(ns + 1, char{1});
+  std::vector nextDirty(ns + 1, char{});
+  std::vector split(ns + 1, char{});
+  std::vector moved(ns, char{});
   for (bool changed = true; changed;) {
     unsigned before = 0;
     for (unsigned s = 0; s < ns; ++s) before = std::max(before, grp[s] + 1);
@@ -1811,7 +1809,7 @@ class LrWrittenOrder {
     if (!best.empty()) return best[c];
     best.assign(_g.nnts, kNone);
     best[b] = 0;
-    std::vector<unsigned> todo{b};
+    std::vector todo{b};
     std::vector<std::uint32_t> key;
     while (!todo.empty()) {
       const unsigned x = todo.back();
@@ -1866,7 +1864,7 @@ class LrWrittenOrder {
     return r;
   }
 
-  void build_row(unsigned s, Row& r) {
+  void build_row(unsigned s, Row& r) const {
     r.built = true;
     r.slot.assign(_g.nterms, 0);
     const auto shifts = _gr.shifts[s];
@@ -1894,7 +1892,7 @@ class LrWrittenOrder {
   const LrClosEntry* entry(unsigned b, unsigned p) const {
     const std::span<const LrClosEntry> of = _cl.of(b);
     const auto it = std::ranges::lower_bound(of, p, {}, &LrClosEntry::prod);
-    return it != of.end() && it->prod == p ? &*it : nullptr;
+    return it != of.end() && it->prod == p ? std::to_address(it) : nullptr;
   }
 
   // Whether kernel item `k` reads `t` past production `p` it opens: 2 where
@@ -1962,9 +1960,9 @@ class LrWrittenOrder {
   bool has_parent(unsigned o, unsigned p) {
     const unsigned at = _dom.base[p];
     const std::uint64_t bit = std::uint64_t{1} << (at & 63);
-    for (const Next& n : nexts(o))
-      if ((_cl.mask[n.nt].w[at >> 6] & bit) != 0) return true;
-    return false;
+    return std::ranges::any_of(nexts(o), [&](const Next& n) {
+      return (_cl.mask[n.nt].w[at >> 6] & bit) != 0;
+    });
   }
 
   // The parents a reading of `t` climbs through from a node, whose `row` of
@@ -2070,7 +2068,7 @@ class LrWrittenOrder {
   // `states`, ascending.
   std::uint32_t add_chain(Layout& sh, std::uint32_t parent, const LrItem& top,
                           std::span<const std::uint64_t> states,
-                          std::uint16_t root) {
+                          std::uint16_t root) const {
     Chain c;
     c.top = top;
     c.height = top.dot;
@@ -2141,7 +2139,7 @@ class LrWrittenOrder {
       sh.low = std::min(sh.low, c.height);
       sh.high = std::max(sh.high, c.height);
     }
-    sh.high += static_cast<std::uint32_t>(_maxDot);
+    sh.high += _maxDot;
     std::ranges::sort(sh.mids, [&](std::uint32_t x, std::uint32_t y) {
       const Chain &cx = sh.chains[x], &cy = sh.chains[y];
       if (cx.height != cy.height) return cx.height < cy.height;
@@ -2306,7 +2304,7 @@ class LrWrittenOrder {
   // The list of `r` that has these roots and reads `t`. Its shape numbers the
   // roots in sixteen bits.
   std::uint32_t list_of(Row& r, std::span<const LrItem> roots,
-                        std::uint32_t t) {
+                        std::uint32_t t) const {
     for (std::uint32_t i = 0; i < r.lists.size(); ++i)
       if (r.lists[i].t == t && std::ranges::equal(r.lists[i].roots, roots))
         return i;
@@ -2922,9 +2920,10 @@ class LrWrittenOrder {
              std::uint16_t yRoot, Meeting& at) {
     const Say say = say_of(sx, sy, o);
     if (say.kind == 2) {
-      const Tie tie{xRoot, yRoot, say.x, say.y};
-      if (_tieSeen
-              .insert({say.x, say.y, std::uint32_t{tie.xRoot} << 16 | tie.yRoot})
+      if (const Tie tie{xRoot, yRoot, say.x, say.y};
+          _tieSeen
+              .insert(
+                  {say.x, say.y, std::uint32_t{tie.xRoot} << 16 | tie.yRoot})
               .second)
         at.ties.push_back(tie);
       return false;
@@ -3092,7 +3091,7 @@ class LrWrittenOrder {
   // What stands over a node at `height`:
   // each a top of a chain of `lay`, as item and state, ascending.
   const std::vector<std::uint64_t>& shorts_at(Layout& lay,
-                                              std::uint32_t height) {
+                                              std::uint32_t height) const {
     Stand& st = lay.stand[height];
     if (st.shortMade) return st.shorts;
     st.shortMade = true;
@@ -3459,7 +3458,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   std::vector<std::uint64_t> owedKeys;
   constexpr std::uint32_t kNoMerged = 0xffffffffu;
   std::vector<std::uint32_t> headTerm(nT);
-  std::vector<std::uint32_t> headGen(nT, std::uint32_t{});
+  std::vector headGen(nT, std::uint32_t{});
   std::uint32_t entryGen = 0;
   const LrBuckets<> mem(A.nstates, ns,
                         [&](std::uint32_t s) { return newId[s]; });
@@ -3468,7 +3467,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       guardIx;
   std::vector<std::uint32_t> guardKey;
-  const auto intern_guard = [&](const LrGuard& p) -> std::uint32_t {
+  const auto intern_guard = [&](const LrGuard& p) {
     lr_guard_key(p, [&](std::uint16_t t) { return newId[t]; }, guardKey);
     const auto [at, fresh] = guardIx.try_emplace(
         guardKey, static_cast<std::uint32_t>(A.guards.size()));
@@ -3503,8 +3502,8 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
     exact = true;
     std::size_t m = 0;
     for (const std::uint32_t s : members) {
-      const std::vector<std::uint64_t>& has = heldBy[m++];
-      if (!std::ranges::binary_search(has, held(x)) ||
+      if (const std::vector<std::uint64_t>& has = heldBy[m++];
+          !std::ranges::binary_search(has, held(x)) ||
           !std::ranges::binary_search(has, held(y)))
         continue;
       const auto [v, certain] = order(s, x, y, x.term);
@@ -3527,7 +3526,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
   std::vector<LrAction> merged, mtmp;
   std::vector<char> drop;
   std::vector<std::uint32_t> nextMerged;
-  std::vector<std::uint32_t> mcnt(nT + 1, std::uint32_t{});
+  std::vector mcnt(nT + 1, std::uint32_t{});
   for (unsigned f = 0; f < A.nstates; ++f) {
     merged.clear();
     nextMerged.clear();
@@ -4017,8 +4016,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   std::vector<unsigned> newId;
   std::vector<unsigned> pick;  // final state -> representative old state
   const std::vector<DynSet> followers = lr_terminal_follow(g, fs);
-  LexOvertakes<LrBuildCfg> overtakes(alpha.nfa, A.cfg, alpha.startOf,
-                                     followers);
+  LexOvertakes overtakes(alpha.nfa, A.cfg, alpha.startOf, followers);
   std::vector<DynSet> flagged;
   {
     const LrLookback lb = lr_lookaheads(g, gr, fs, !WithLa);
@@ -4037,8 +4035,9 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
     A.nstates = static_cast<std::uint16_t>(pick.size());
 
     lr_elect_words(A);
-    LrWrittenOrder order{g, dom, gr, cl, fs, pn, A};
-    if (!lr_merge_entries(A, gr, actions, newId, lb, order)) return std::nullopt;
+    if (LrWrittenOrder order{g, dom, gr, cl, fs, pn, A};
+        !lr_merge_entries(A, gr, actions, newId, lb, order))
+      return std::nullopt;
     if (!WithLa) flagged = lr_lex_flags(gr, lb, overtakes);
   }
   // What the wider graph is judged on is settled by the merge.

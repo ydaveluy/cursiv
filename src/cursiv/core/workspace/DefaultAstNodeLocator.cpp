@@ -29,12 +29,12 @@ struct Slot {
 std::optional<Slot> slot_of(const AstReflection& reflection,
                             const AstNode& container, const AstNode& child) {
   std::optional<Slot> found;
-  reflection.visitMembers(
-      container,
-      [&](std::string_view property, std::uint32_t index, AstNode& candidate) {
-        if (!found.has_value() && &candidate == &child)
-          found = Slot{property, index};
-      });
+  reflection.visitMembers(container,
+                          [&](std::string_view property, std::uint32_t index,
+                              const AstNode& candidate) {
+                            if (!found.has_value() && &candidate == &child)
+                              found = Slot{property, index};
+                          });
   return found;
 }
 

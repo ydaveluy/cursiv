@@ -28,7 +28,9 @@ DefaultWorkspaceManager::~DefaultWorkspaceManager() noexcept = default;
 
 void DefaultWorkspaceManager::loadAdditionalDocuments(
     std::span<const WorkspaceFolder>,
-    cursiv::function_ref<void(std::string_view, std::string)>) {}
+    cursiv::function_ref<void(std::string_view, std::string)>) {
+  // no additional document by default: a language adds its library here
+}
 
 bool DefaultWorkspaceManager::shouldIncludeEntry(
     const FileSystemNode& entry) const {
@@ -83,7 +85,7 @@ std::vector<std::string> DefaultWorkspaceManager::searchFolder(
     std::string_view folderUri, const CancellationToken& cancelToken) const {
   const FileSystemProvider& files = *shared.fileSystemProvider;
   std::vector<std::string> kept;
-  std::vector<std::string> pending{std::string(folderUri)};
+  std::vector pending{std::string(folderUri)};
   while (!pending.empty()) {
     const std::string folder = std::move(pending.back());
     pending.pop_back();
@@ -174,6 +176,7 @@ void DefaultWorkspaceManager::initializeWorkspace(
                .uri = uri,
                .languageId = {}});
         } catch (const ServiceRegistryError&) {
+          // no language claims this file: skip it
         }
       }
     }

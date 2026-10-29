@@ -25,8 +25,7 @@ class LexRightLinear {
       if (root >= visited.size() || visited[root]) continue;
       visited[root] = true;
       std::vector<std::uint16_t> prefix;
-      const LexNode e = _g.lex[root];
-      if (e.kind == LexKind::seq) {
+      if (const LexNode e = _g.lex[root]; e.kind == LexKind::seq) {
         if (!tail(root, root, true, prefix)) continue;
       } else if (e.kind == LexKind::alt && e.b == 2) {
         const auto a = _g.lexKid[e.a], b = _g.lexKid[e.a + 1];
@@ -44,10 +43,11 @@ class LexRightLinear {
           std::ranges::all_of(prefix,
                               [&](auto kid) { return facts(kid).nullable; }))
         continue;
-      const unsigned needed = prefix.size() == 1 ? 1 : 2;
       // A full graph keeps its original recognizer; an optimization must not
       // introduce a new size refusal or leave a partly rewritten prefix.
-      if (std::size_t{_g.nlex} + needed > kNoLexNode) continue;
+      if (const unsigned needed = prefix.size() == 1 ? 1 : 2;
+          std::size_t{_g.nlex} + needed > kNoLexNode)
+        continue;
       std::uint16_t one;
       if (prefix.size() == 1) {
         one = prefix[0];
@@ -135,8 +135,8 @@ class LexRightLinear {
         return false;
       last = opt.a;
     }
-    const LexNode call = _g.lex[last];
-    if (call.kind != LexKind::call || lex_callee(_g, call) != root)
+    if (const LexNode call = _g.lex[last];
+        call.kind != LexKind::call || lex_callee(_g, call) != root)
       return false;
     for (unsigned i = 0; i + 1 < e.b; ++i) prefix.push_back(_g.lexKid[e.a + i]);
     _prefixSeq = at;

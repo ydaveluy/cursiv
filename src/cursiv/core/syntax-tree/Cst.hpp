@@ -7,6 +7,7 @@
 #include <iterator>
 #include <memory>
 #include <memory_resource>
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -222,7 +223,7 @@ class Cst {
     ensure_leaf_index();
     NodeCount lo = 0, hi = static_cast<NodeCount>(_leaves.size());
     while (lo < hi) {
-      const NodeCount mid = lo + (hi - lo) / 2;
+      const NodeCount mid = std::midpoint(lo, hi);
       if (node(_leaves[mid]).end <= offset)
         lo = mid + 1;
       else
@@ -289,7 +290,7 @@ class Cst {
         lock.notify_all();
       }
     };
-    std::atomic_ref<std::uint8_t> lock(_leafLock);
+    std::atomic_ref lock(_leafLock);
     while (lock.exchange(1, std::memory_order_acquire) != 0)
       lock.wait(1, std::memory_order_relaxed);
     const Held held{lock};

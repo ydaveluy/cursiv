@@ -39,7 +39,9 @@ class Parser {
   // ending at `at`, not run on into the text at `resume`. Answering nothing is
   // legal, and is what a tree no engine stamped gets.
   virtual void nextFeaturesAt(const Cst&, TextOffset, TextOffset,
-                              std::vector<NextFeature>&) const {}
+                              std::vector<NextFeature>&) const {
+    // no stamps to read: no answer
+  }
 };
 
 // `parser` reading the text `translate` makes of each document, while every

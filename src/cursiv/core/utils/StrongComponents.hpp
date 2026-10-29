@@ -102,7 +102,7 @@ struct StrongComponents {
   {
     constexpr auto none = ~std::uint32_t{};
     const auto n = static_cast<std::uint32_t>(component.size());
-    std::vector<std::uint32_t> back(n, none), queue{from};
+    std::vector back(n, none), queue{from};
     auto last = none;
     for (std::size_t i = 0; i < queue.size() && last == none; ++i) {
       const auto u = queue[i];

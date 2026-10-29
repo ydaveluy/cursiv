@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cfenv>
 #include <charconv>
 #include <concepts>
@@ -190,11 +191,9 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
     return ConversionResult<M>::ok(text);
   else if constexpr (std::is_same_v<M, bool>) {
     const auto spells = [text](std::string_view expected) {
-      if (text.size() != expected.size()) return false;
-      for (std::size_t i = 0; i < text.size(); ++i)
-        if (text[i] != expected[i] && text[i] != expected[i] - 'a' + 'A')
-          return false;
-      return true;
+      return std::ranges::equal(text, expected, [](char t, char e) {
+        return t == e || t == e - 'a' + 'A';
+      });
     };
     return spells("true") ? ConversionResult<M>::ok(true)
            : spells("false")
@@ -231,8 +230,8 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
   // enumerator list is a static array, so the loop is unrolled and each
   // comparison is against a literal.
   else if constexpr (std::is_enum_v<M>) {
-    M found{};
-    if (detail::find_enumerator<M>(text, found, detail::enum_probes{}))
+    if (M found{};
+        detail::find_enumerator<M>(text, found, detail::enum_probes{}))
       return ConversionResult<M>::ok(found);
     return ConversionResult<M>::err("not an enumerator of " +
                                     std::string(detail::type_name<M>()));

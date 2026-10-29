@@ -34,8 +34,8 @@ class GapProgramEmitter {
   void add(std::uint16_t id) {
     if (_used[id]) return;
     _used[id] = true;
-    const auto& e = _cfg.lex[id];
-    if (e.kind == LexKind::seq || e.kind == LexKind::alt)
+    if (const auto& e = _cfg.lex[id];
+        e.kind == LexKind::seq || e.kind == LexKind::alt)
       for (unsigned i = 0; i < e.b; ++i) add(_cfg.lexKid[e.a + i]);
     else if (e.kind == LexKind::rep && e.max != 0)
       add(e.a);
@@ -231,14 +231,13 @@ class GapEmitter : EmitOutput {
 
   using GapWord = std::vector<std::uint16_t>;
   bool gap_patterns(std::uint16_t node, std::vector<GapWord>& patterns) const {
-    const auto& e = _cfg.lex[node];
-    if (e.kind == LexKind::alt) {
+    if (const auto& e = _cfg.lex[node]; e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i)
         if (!gap_patterns(_cfg.lexKid[e.a + i], patterns)) return false;
       return patterns.size() <= 16;
     }
     GapWord bytes;
-    const auto sequence = [&](auto&& self, std::uint16_t n) -> bool {
+    const auto sequence = [&](auto&& self, std::uint16_t n) {
       const auto& part = _cfg.lex[n];
       if (part.kind == LexKind::chars) {
         bytes.push_back(part.a);

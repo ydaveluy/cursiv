@@ -328,7 +328,7 @@ struct LexDfaBuild {
           reach(gate.resume);
       }
     }
-    std::vector<std::uint16_t> idOf(nblocks, kDeadState);
+    std::vector idOf(nblocks, kDeadState);
     std::vector<std::uint32_t> rep;
     _final.assign(n, kDeadState);
     for (std::size_t s = 0; s < n; ++s) {
@@ -467,7 +467,7 @@ struct LexDfaBuild {
     for (unsigned c = 0; c < _ncls; ++c)
       (_wide[c] ? wide : narrow).push_back(c);
     if (wide.empty()) return;
-    std::vector<std::uint32_t> head(nblocks, kNoLocal);
+    std::vector head(nblocks, kNoLocal);
     for (std::size_t s = n; s-- > 0;)
       head[blk[s]] = static_cast<std::uint32_t>(s);
     const auto to = [&](std::uint32_t b, unsigned c) {
@@ -527,7 +527,7 @@ struct LexDfaBuild {
         if (edges[e] == kNoLocal || scc.component[edges[e]] != own)
           join(region[own], reach(edges[e]));
     }
-    std::vector<std::uint32_t> target(nblocks, kNoLocal);
+    std::vector target(nblocks, kNoLocal);
     for (std::uint32_t x = 0; x < nblocks; ++x) {
       if (!clean(x)) continue;
       Region r = reach(edges[starts[x]]);

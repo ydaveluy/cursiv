@@ -79,7 +79,7 @@ class LexDfaEmitter {
     const auto [at, fresh] = _ladders.try_emplace(lo);
     if (!fresh) return at->second;
     std::vector<std::uint8_t> keep(_ndfa, 0);
-    std::vector<unsigned> front{lo};
+    std::vector front{lo};
     keep[lo] = 1;
     for (unsigned k = 0; k < _ncls; ++k) {
       const std::uint16_t to = next(lo, k);
@@ -304,8 +304,8 @@ struct LexRunShape {
     if (count <= 4) return r;
     // Below lo every byte must be absent; above it at most four are absent.
     // Removing lo bytes from the complement gives its first possible bound.
-    const unsigned lo = count < 252 ? 252 - count : 0;
-    if (lo <= kSwarBelowMax) {
+    if (const unsigned lo = count < 252 ? 252 - count : 0;
+        lo <= kSwarBelowMax) {
       bool below = false;
       for (unsigned x = 0; x < lo; ++x)
         below = below || stay.has(static_cast<unsigned char>(x));
@@ -431,8 +431,8 @@ int lex_continuation_of(const View& v, std::uint16_t st,
     bool same = true;
     for (unsigned b = 0; b < 256; ++b) {
       const auto edge = v.next(st, v.cls(b));
-      const auto run = v.next(to, v.cls(b));
-      if ((edge == kDeadState) != (run == kDeadState)) {
+      if (const auto run = v.next(to, v.cls(b));
+          (edge == kDeadState) != (run == kDeadState)) {
         same = false;
         break;
       }

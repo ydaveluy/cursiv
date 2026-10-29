@@ -24,9 +24,15 @@ class FileOperationHandler {
 
   // Every arm already has a body: the options are what selects an arm, so
   // a handler that announces two answers two and inherits the rest.
-  virtual void didCreateFiles(const lsp::CreateFilesParams&) {}
-  virtual void didRenameFiles(const lsp::RenameFilesParams&) {}
-  virtual void didDeleteFiles(const lsp::DeleteFilesParams&) {}
+  virtual void didCreateFiles(const lsp::CreateFilesParams&) {
+    // nothing to do by default
+  }
+  virtual void didRenameFiles(const lsp::RenameFilesParams&) {
+    // nothing to do by default
+  }
+  virtual void didDeleteFiles(const lsp::DeleteFilesParams&) {
+    // nothing to do by default
+  }
 
   /**
    * The edit the client applies before it moves the files, and waits for:

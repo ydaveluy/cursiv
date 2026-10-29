@@ -134,11 +134,11 @@ RefState wait_for_reference(RefState& state) {
   });
   std::unique_lock lock(shared.mutex);
   throw_if_cancelled(request.token);
-  const std::atomic_ref<RefState> st(state);
-  RefState expected = RefState::Resolving;
-  if (!st.compare_exchange_strong(expected, kRefObserved,
-                                   std::memory_order_acq_rel,
-                                   std::memory_order_acquire) &&
+  const std::atomic_ref st(state);
+  if (RefState expected = RefState::Resolving;
+      !st.compare_exchange_strong(expected, kRefObserved,
+                                  std::memory_order_acq_rel,
+                                  std::memory_order_acquire) &&
       expected != kRefObserved)
     return expected;
 
@@ -166,10 +166,10 @@ RefState wait_for_reference(RefState& state) {
 }
 
 void publish(RefState& state, RefState result) noexcept {
-  const std::atomic_ref<RefState> st(state);
-  RefState expected = RefState::Resolving;
-  if (st.compare_exchange_strong(expected, result, std::memory_order_release,
-                                  std::memory_order_relaxed))
+  const std::atomic_ref st(state);
+  if (RefState expected = RefState::Resolving;
+      st.compare_exchange_strong(expected, result, std::memory_order_release,
+                                 std::memory_order_relaxed))
     return;
   // A reader announced itself first. Publishing under the same lock makes
   // both the state check before sleep and the cycle search observe one order.
@@ -182,7 +182,7 @@ void publish(RefState& state, RefState result) noexcept {
 
 template <class Compute, class Clear>
 RefState resolve_guarded(RefState& state, Compute compute, Clear clear) {
-  const std::atomic_ref<RefState> st(state);
+  const std::atomic_ref st(state);
   RefState current = st.load(std::memory_order_acquire);
   for (;;) {
     if (ref_running(current)) {

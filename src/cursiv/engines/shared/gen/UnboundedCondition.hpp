@@ -63,8 +63,8 @@ bool phrase_kept_run(const Cfg& c, std::uint16_t node) {
 // Whether a phrase reads a kept run through its sequences and choices alone.
 template <class Cfg>
 bool phrase_keeps_runs(const Cfg& c, std::uint16_t node) {
-  const LexNode& e = c.lex[node];
-  if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+  if (const LexNode& e = c.lex[node];
+      e.kind == LexKind::seq || e.kind == LexKind::alt) {
     for (unsigned i = 0; i < e.b; ++i)
       if (phrase_keeps_runs(c, c.lexKid[e.a + i])) return true;
     return false;

@@ -15,6 +15,6 @@ namespace cursiv::test {
 // ECMAScript grammar, searched anywhere in the text; the pattern is compiled
 // once, at the factory call.
 [[nodiscard]] std::function<bool(std::string_view)> matches(
-    std::string ecmaPattern);
+    const std::string& ecmaPattern);
 
 }  // namespace cursiv::test

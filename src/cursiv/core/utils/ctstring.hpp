@@ -65,7 +65,7 @@ struct CharSet {
 namespace detail {
 // Not constexpr on purpose: reached from a constant evaluation, its name is the
 // diagnostic.
-inline void malformed_cr_spec() {}
+inline void malformed_cr_spec() { /* the call is the diagnostic */ }
 
 // The bytes of a spelling of ASCII characters, on its text rather than on its
 // `str` type: one body for every spelling instead of one instantiation each.

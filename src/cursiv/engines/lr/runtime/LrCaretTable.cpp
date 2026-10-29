@@ -913,7 +913,9 @@ class CaretStacks {
   }
 
   template <bool Repair = false, class Reads, class Shift,
-            class Error = decltype([](Id, const Token&) {})>
+            class Error = decltype([](Id, const Token&) {
+              /* by default an error goes unreported */
+            })>
   void close(Reads&& reads, Shift&& shift, Error&& error = {}) {
     Stage& stage = _closure;
     stage.reset(_rank, _heads);
@@ -1495,7 +1497,7 @@ class CaretStacks {
   // Whether the token read at `at` still ends at `to` with a word right
   // behind, as `StampedGrammar::ends_before_word` asks it.
   bool ends_before_word(std::uint16_t mode, TextOffset at, TextOffset to,
-                        SymbolId term) {
+                        SymbolId term) const {
     return StampedGrammar::ends_before_word(
         _text.substr(at, to - at), term, _table.terms, _table.names,
         [&](std::string_view s) {

@@ -168,9 +168,9 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
       const unsigned h = owner(kind, n);
       if (h == g) continue;
       auto label = std::format("{}{}", kind, n);
-      const auto fresh = entryAt[h].try_emplace(
+      const auto [at, fresh] = entryAt[h].try_emplace(
           label, static_cast<unsigned>(entries[h].size()));
-      if (fresh.second) entries[h].push_back(std::move(label));
+      if (fresh) entries[h].push_back(std::move(label));
     }
   }
   std::string resolved(std::string_view text, unsigned g) const {
@@ -600,7 +600,9 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
     bool blind(unsigned st) const { return emit.candidate_blind(st); }
     bool plain_run(unsigned) const { return false; }
     int continuation_of(unsigned, const std::uint8_t*) const { return -1; }
-    void emit_bound_exit(unsigned, const std::uint8_t*) {}
+    void emit_bound_exit(unsigned, const std::uint8_t*) const {
+      /* a candidate scan has no bound exit */
+    }
     void emit_run_adv(const ByteSet& stay, std::string_view var,
                       std::string_view set) {
       emit.emit_run_adv(stay, var, set);
@@ -631,8 +633,8 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
         raw("      static constexpr ::std::array<::std::uint64_t, 4> kStay{");
         set64(stay);
         line("};");
-        const auto shape = LexRunShape::of(stay);
-        if (shape.swar || shape.ranges)
+        if (const auto shape = LexRunShape::of(stay);
+            shape.swar || shape.ranges)
           line(
               "      if (at >= len || !in_set<kStay>("
               "static_cast<unsigned char>(src[at]))) break;");
@@ -1036,7 +1038,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 
 )");
   }
-  void walk_entry() {}
+  void walk_entry() const { /* the walk needs no setup here */ }
 
   void emit_walk() {
     lex_emit_walk(*this, dfa, *this, {a.modeStart.data(), a.nmodes},
@@ -1485,7 +1487,7 @@ again:
             ? ""
             : "rec = ",
         prod);
-    if (shared)
+    if (shared.has_value())
       fmt("      goto T{};\n", *shared);
     else
       raw(tail);
@@ -1579,8 +1581,8 @@ again:
       // Terminals that answer the same way share their labels: gcc and clang
       // do not merge identical arms alike.
       if (run == 1) {
-        std::string body = capture([&] { emit_arm(x); });
-        if (body != pendBody) {
+        if (std::string body = capture([&] { emit_arm(x); });
+            body != pendBody) {
           flush_cases();
           raw(pendBody);
           pendBody = std::move(body);
@@ -1694,8 +1696,8 @@ again:
     // decides; a flagged terminal's reduce is the lexer's to read again, since
     // no stack may take it past the reduction.
     const auto plain = [&](unsigned t) -> const LrAction* {
-      const auto& term = a.cfg.terms[t];
-      if (term.trivia || term.laid != 0) return nullptr;
+      if (const auto& term = a.cfg.terms[t]; term.trivia || term.laid != 0)
+        return nullptr;
       const auto [lo, n] =
           lr_term_run(row, a.actionCount[s], static_cast<std::uint16_t>(t));
       if (n != 1) return nullptr;
@@ -1804,8 +1806,8 @@ again:
             case_rows([&](auto&& put) {
               for (unsigned u = t; u < a.cfg.nterms; ++u) {
                 if (!named.test(u) || done[u]) continue;
-                const LrAction& y = *plain(u);
-                if (u != t && (x.kind != LrActionKind::reduce ||
+                if (const LrAction& y = *plain(u);
+                    u != t && (x.kind != LrActionKind::reduce ||
                                y.kind != x.kind || y.arg != x.arg))
                   continue;
                 done[u] = true;
@@ -1919,13 +1921,11 @@ again:
     return a.cfg.terms[term].laid == kLaidImplied;
   }
   bool guards(unsigned s) const {
-    for (const LrAction& x : a.action_row(s)) {
-      if (x.kind == LrActionKind::guard ||
-          (x.kind == LrActionKind::reduce &&
-           (a.cfg.prods[x.arg].gap != 0 || may_land_nowhere(s, x.arg))))
-        return true;
-    }
-    return false;
+    return std::ranges::any_of(a.action_row(s), [&](const LrAction& x) {
+      return x.kind == LrActionKind::guard ||
+             (x.kind == LrActionKind::reduce &&
+              (a.cfg.prods[x.arg].gap != 0 || may_land_nowhere(s, x.arg)));
+    });
   }
   bool conds() const { return a.cfg.ngapConds != 0; }
 
@@ -2336,7 +2336,7 @@ again:
       }
     ngroups = static_cast<unsigned>((total + groupLines - 1) / groupLines);
     ngroups = std::max(1u, std::min<unsigned>(ngroups, ns));
-    std::vector<unsigned> part(n, ~0u);
+    std::vector part(n, ~0u);
     if (ngroups == 1)
       for (const unsigned v : nodes) part[v] = 0;
     else

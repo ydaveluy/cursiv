@@ -30,7 +30,7 @@ std::optional<std::string> DefaultDocumentationProvider::getDocumentation(
   if (home == nullptr) home = node.getDocument();
   if (home == nullptr) return std::nullopt;
   const Document& document = *home;
-  // The author's comment, rendered rather than raw: a `/** ... */` above a
+  // The author's comment, rendered rather than raw: a doc comment above a
   // declaration reaches its reader as markdown, its tags rendered and its
   // {@link} targets resolved through the hooks below. Nothing else answers
   // this arm.

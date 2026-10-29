@@ -66,8 +66,8 @@ struct LlLowCfg : LowerPools {
   // A one-token operator may have one conjoined condition in front of it.
   // Its terminal keeps the direct-switch path; other bodies are descended.
   std::uint16_t atomic_operator(std::uint16_t body) const {
-    const auto& n = nodes[body];
-    if (n.kind == LlShape::seq && n.count == 2 &&
+    if (const auto& n = nodes[body];
+        n.kind == LlShape::seq && n.count == 2 &&
         nodes[kids[n.sym]].kind == LlShape::condition)
       body = kids[n.sym + 1];
     return nodes[body].kind == LlShape::term ? body : kNoRow;

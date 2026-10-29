@@ -1304,8 +1304,9 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
       e.rule(r);
       stepped[r] = !e.frame.empty();
       if (stepped[r])
-        declarations += e.frame + std::format(
-            "::std::uint16_t s{}(::cursiv::LlContext&, void*);\n", r);
+        declarations +=
+            std::format("{}::std::uint16_t s{}(::cursiv::LlContext&, void*);\n",
+                        e.frame, r);
       else
         declarations += std::format("void s{}(::cursiv::LlContext&);\n", r);
       bytes += e.out.size();
@@ -1330,26 +1331,26 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   files.emplace_back("ParserRules.hpp", std::move(declarations));
   files.emplace_back(
       "ParserStates.cpp",
-      std::string(banner) +
-          "#include <cstdint>\n\n#include \"ParserRules.hpp\"\n" +
-          "#include \"cursiv/engines/ll/runtime/LlContext.hpp\"\n" +
-          "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n" +
-          ll_emit_walk_includes(a) + "\n" +
-          std::format("namespace {} {{\n\n", ns) + ll_emit_walk(a) +
-          std::format(
-              "\nnamespace {{\n"
-              "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
-              "[[maybe_unused]] void* f) {{\n  switch (r) {{\n{}"
-              "    default: return ::cursiv::kLlDone;\n  }}\n}}\n"
-              "constexpr ::std::uint32_t kFrameBytes[] = {{{}}};\n"
-              "}}  // namespace\n"
-              "void parse_entry(::cursiv::LlContext& c) {{\n{}"
-              "  c.document = true;\n"
-              "  ::cursiv::LlMachine machine;\n"
-              "  machine.run<&step>(c, {}u, kFrameBytes);\n"
-              "  c.document = false;\n}}\n"
-              "}}  // namespace {}\n",
-              steps, sizes, "  c.stack.reserve(64);\n", entry, ns));
+      std::format(
+          "{}#include <cstdint>\n\n#include \"ParserRules.hpp\"\n"
+          "#include \"cursiv/engines/ll/runtime/LlContext.hpp\"\n"
+          "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n"
+          "{}\n"
+          "namespace {} {{\n\n{}"
+          "\nnamespace {{\n"
+          "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
+          "[[maybe_unused]] void* f) {{\n  switch (r) {{\n{}"
+          "    default: return ::cursiv::kLlDone;\n  }}\n}}\n"
+          "constexpr ::std::uint32_t kFrameBytes[] = {{{}}};\n"
+          "}}  // namespace\n"
+          "void parse_entry(::cursiv::LlContext& c) {{\n{}"
+          "  c.document = true;\n"
+          "  ::cursiv::LlMachine machine;\n"
+          "  machine.run<&step>(c, {}u, kFrameBytes);\n"
+          "  c.document = false;\n}}\n"
+          "}}  // namespace {}\n",
+          banner, ll_emit_walk_includes(a), ns, ll_emit_walk(a), steps, sizes,
+          "  c.stack.reserve(64);\n", entry, ns));
   std::size_t next = 0;
   for (unsigned u = 0; u < units; ++u) {
     std::string source(banner);

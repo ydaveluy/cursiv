@@ -91,9 +91,9 @@ std::string dump_wrapped(std::string_view text, std::size_t width) {
   std::size_t i = 0;
   while (i <= text.size()) {
     const std::size_t e = text.find('\n', i);
-    const std::string_view line =
-        text.substr(i, e == std::string_view::npos ? e : e - i);
-    if (!line.empty()) {
+    if (const std::string_view line =
+            text.substr(i, e == std::string_view::npos ? e : e - i);
+        !line.empty()) {
       if (line.size() <= width) {
         out += line;
         out += '\n';

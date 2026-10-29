@@ -176,8 +176,7 @@ struct LexAlphabet {
     // A byte's signature names every set it belongs to, one bit each, as
     // wide as the sets are many: a class of code points cuts hundreds.
     const std::size_t words = (g.nsets + 63u) / 64u;
-    std::vector<std::vector<std::uint64_t>> sig(
-        256, std::vector<std::uint64_t>(words));
+    std::vector sig(256, std::vector<std::uint64_t>(words));
     const ByteSet* const bs = g.sets.data();
     for (unsigned i = 0; i < g.nsets; ++i)
       each_bit(bs[i].w, 4, [&](std::size_t b) {

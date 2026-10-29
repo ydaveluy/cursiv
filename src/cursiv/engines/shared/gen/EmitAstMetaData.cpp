@@ -221,38 +221,39 @@ std::string emit_ast_metadata(const AstRegistry& registry,
 std::string emit_ast_metadata_record(const AstRegistry& registry) {
   const std::size_t bound = registry.reference_bound();
   const bool ref = bound != 0;
-  return std::format(R"(constexpr ::cursiv::AstMetaData kAstMetaData{{
+  return std::format(
+      R"(constexpr ::cursiv::AstMetaData kAstMetaData{{
     .types = ast_detail::kTypes,
     .subtypes = ast_detail::kSubtypes,
     .derivesBits = ast_detail::kDerives,
-    .typeCount = {0}u,
-    .typeWords = {1}u,
-    .fields = {2},
-    .refOps = {3},
-    .acceptBits = {4},
+    .typeCount = {}u,
+    .typeWords = {}u,
+    .fields = {},
+    .refOps = {},
+    .acceptBits = {},
     .propertyRows = ast_detail::kPropertyRows,
-    .referenceTags = {5},
+    .referenceTags = {},
     .complete = ast_detail::kComplete,
     .memberVisitors = ast_detail::kMemberVisitors,
     .unknownMembers = &ast_detail::UnknownMembers::visitUnknown,
-    .referenceFields = {6},
-    .referenceRows = {7},
-    .fieldCount = {8}u,
-    .referenceBound = {9}u,
+    .referenceFields = {},
+    .referenceRows = {},
+    .fieldCount = {}u,
+    .referenceBound = {}u,
     .anyMultiReference = ast_detail::kAnyMultiReference,
 }};
 
 )",
-                     registry.types.size(), registry.typeWords,
-                     registry.fields.empty() ? "nullptr" : "ast_detail::kFields",
-                     ref ? "ast_detail::kRefOps" : "nullptr",
-                     ref ? "ast_detail::kAccepts" : "nullptr",
-                     ref ? "ast_detail::kReferenceTags" : "nullptr",
-                     ref ? "{ast_detail::kReferenceFields, "
-                           "ast_detail::kReferenceFieldCount}"
-                         : "{}",
-                     ref ? "ast_detail::kReferenceRows" : "nullptr",
-                     registry.fields.size(), bound);
+      registry.types.size(), registry.typeWords,
+      registry.fields.empty() ? "nullptr" : "ast_detail::kFields",
+      ref ? "ast_detail::kRefOps" : "nullptr",
+      ref ? "ast_detail::kAccepts" : "nullptr",
+      ref ? "ast_detail::kReferenceTags" : "nullptr",
+      ref ? "{ast_detail::kReferenceFields, "
+            "ast_detail::kReferenceFieldCount}"
+          : "{}",
+      ref ? "ast_detail::kReferenceRows" : "nullptr", registry.fields.size(),
+      bound);
 }
 
 }  // namespace cursiv

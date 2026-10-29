@@ -55,9 +55,9 @@ void lr_state_symbols(LrBuildTable& A) {
       }
     }
   };
-  std::vector<std::uint16_t> sym(A.nstates, kLrNoStateSym);
+  std::vector sym(A.nstates, kLrNoStateSym);
   each_entry([&](unsigned, unsigned to, std::uint16_t x) { sym[to] = x; });
-  std::vector<std::uint16_t> below(A.nstates, kLrNoStateSym);
+  std::vector below(A.nstates, kLrNoStateSym);
   std::vector<std::uint8_t> seen(A.nstates, 0);
   each_entry([&](unsigned from, unsigned to, std::uint16_t) {
     if (!seen[to]) {
@@ -76,7 +76,7 @@ void lr_state_symbols(LrBuildTable& A) {
 void lr_elect_words(LrBuildTable& A) {
   const LrBuildCfg& g = A.cfg;
   const unsigned nP = g.nprods, nN = g.nnts;
-  const auto lead = [&](unsigned p) -> unsigned {
+  const auto lead = [&](unsigned p) {
     const unsigned b = g.nt_after(p, 0);
     return b == kNoRow ? nN : b;
   };
@@ -90,7 +90,7 @@ void lr_elect_words(LrBuildTable& A) {
     return g.prodBuild[order[i]].priorityAlt;
   };
 
-  std::vector<std::uint32_t> word(nP, kNoWord);
+  std::vector word(nP, kNoWord);
   // Outside a recursion an arm ranks among its rule's, where there are two.
   for (unsigned n = 0; n < nN; ++n) {
     if (g.loop_of(n) != kNoRow || from[n] == from[n + 1]) continue;
@@ -113,7 +113,7 @@ void lr_elect_words(LrBuildTable& A) {
   }
   // The entry is the rule called from outside the loop; a climb's loop, which
   // no copy splits, has several and keeps the first.
-  std::vector<unsigned> entry(nN, nN);
+  std::vector entry(nN, nN);
   for (unsigned n = 0; n < nN; ++n)
     if (const auto l = g.loop_of(n); l != kNoRow) {
       unsigned& e = entry[l];

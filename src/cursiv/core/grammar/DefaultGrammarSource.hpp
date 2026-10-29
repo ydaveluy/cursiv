@@ -13,7 +13,7 @@ namespace cursiv {
 
 class DefaultGrammarSource : public GrammarSource {
  public:
-  explicit DefaultGrammarSource(GrammarSourceData data) : _data(data) {}
+  explicit DefaultGrammarSource(const GrammarSourceData& data) : _data(data) {}
   DefaultGrammarSource(const DefaultGrammarSource&) = delete;
   DefaultGrammarSource& operator=(const DefaultGrammarSource&) = delete;
 

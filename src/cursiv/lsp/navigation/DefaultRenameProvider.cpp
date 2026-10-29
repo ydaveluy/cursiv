@@ -136,9 +136,9 @@ bool DefaultRenameProvider::isNameOfLanguage(
     copied = span.end;
     const std::optional<NameRole> was =
         name_role_at(before.cst(), span.begin, span.end);
-    const std::optional<NameRole> now =
-        name_role_at(reparsed.cst(), at, at + length);
-    if (!was || !now || now->repaired || now->feature != was->feature ||
+    if (const std::optional<NameRole> now =
+            name_role_at(reparsed.cst(), at, at + length);
+        !was || !now || now->repaired || now->feature != was->feature ||
         now->owner != was->owner)
       return false;
     at += length;
@@ -181,9 +181,10 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   const CoreServices* declaring = home->language;
   const NameProvider* names =
       declaring == nullptr ? nullptr : declaring->nameProvider.get();
-  const std::optional<CstNodeView> declared =
-      names == nullptr ? std::nullopt : names->getNameNode(*target, home);
-  if (!declared || !*declared) return std::nullopt;
+  if (const std::optional<CstNodeView> declared =
+          names == nullptr ? std::nullopt : names->getNameNode(*target, home);
+      !declared || !*declared)
+    return std::nullopt;
 
   const std::vector<ReferenceDescription> rows =
       collect_references_per_declaration(

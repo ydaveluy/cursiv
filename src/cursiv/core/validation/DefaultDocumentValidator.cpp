@@ -81,10 +81,9 @@ void DefaultDocumentValidator::validateDocument(
   if (builtIn) processParsingErrors(document, diagnostics, token);
   // The stops belong to built-in validation, so a filtered pass runs only
   // its selected checks.
-  const bool stopOnParse =
-      builtIn && options.stopAfterParsingErrors &&
-      parseLeftRepairs(document, token);
-  if (!stopOnParse) {
+  if (const bool stopOnParse = builtIn && options.stopAfterParsingErrors &&
+                               parseLeftRepairs(document, token);
+      !stopOnParse) {
     const std::size_t beforeLinking = diagnostics.size();
     if (builtIn) processLinkingErrors(document, diagnostics, token);
     // The linking stop is a count: a broken reference is exactly what the half
@@ -109,9 +108,9 @@ void DefaultDocumentValidator::validateDocument(
   // on sibling nodes often emit in document order, and then the permutation,
   // the second vector and its n moves buy nothing. Equal positions keep their
   // emission order either way, so the result is the same.
-  const auto begin = [](const Diagnostic& d) { return d.range.begin; };
   if (diagnostics.size() > 1 &&
-      !std::ranges::is_sorted(diagnostics, {}, begin)) {
+      !std::ranges::is_sorted(
+          diagnostics, {}, [](const Diagnostic& d) { return d.range.begin; })) {
     std::vector<std::pair<TextOffset, std::uint32_t>> order;
     order.reserve(diagnostics.size());
     for (std::uint32_t i = 0; i < diagnostics.size(); ++i)
@@ -134,11 +133,10 @@ bool DefaultDocumentValidator::parseLeftRepairs(
   // The reflection's word, last: a clean-looking tree may still hold a node
   // whose mandatory members were never written.
   const AstReflection& reflection = *_core.astReflection;
-  for (const AstNode* const node : parsed.nodes) {
+  return std::ranges::any_of(parsed.nodes, [&](const AstNode* node) {
     throw_if_cancelled(token);
-    if (!reflection.isComplete(*node)) return true;
-  }
-  return false;
+    return !reflection.isComplete(*node);
+  });
 }
 
 // What the recovery inserted or replaced, as edit rows the code-action provider

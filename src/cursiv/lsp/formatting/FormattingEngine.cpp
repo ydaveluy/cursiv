@@ -657,6 +657,7 @@ std::vector<lsp::TextEdit> run_formatting(
             actions.find(id, FormattingMode::Append);
         append != nullptr) {
       if (const NodeId next = next_node(); next == kNoNode) {
+        // nothing follows: there is no gap to format
       } else if (cst[next].hidden != 0) {
         pendingAppend = PendingAppend{.target = next,
                                       .source = id,

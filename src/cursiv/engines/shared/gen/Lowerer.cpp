@@ -74,8 +74,8 @@ std::uint8_t Lowerer::role_in(unsigned cfg, std::uint32_t rule) const {
 
 std::uint16_t Lowerer::sym_of(unsigned cfg, std::uint32_t rule) {
   if (const auto t = _termIdx.find(rule); t != _termIdx.end()) {
-    const std::uint8_t role = role_in(cfg, rule);
-    if (role != role_in(0, rule)) {
+    if (const std::uint8_t role = role_in(cfg, rule);
+        role != role_in(0, rule)) {
       const auto at = std::ranges::find(
           _roles, std::pair<std::uint32_t, std::uint8_t>{rule, role});
       return role_sym(static_cast<std::size_t>(at - _roles.begin()));
@@ -114,11 +114,10 @@ bool Lowerer::has_rows(ImageId id) const {
 }
 
 bool Lowerer::creates(ImageId id, const void* row) const {
-  const ImageNode& n = at(id);
-  if (n.kind == ImageKind::create && n.row == row) return true;
-  for (const ImageId k : _im.shape_kids(id))
-    if (creates(k, row)) return true;
-  return false;
+  if (const ImageNode& n = at(id); n.kind == ImageKind::create && n.row == row)
+    return true;
+  return std::ranges::any_of(_im.shape_kids(id),
+                             [&](ImageId k) { return creates(k, row); });
 }
 
 bool Lowerer::reads_under(unsigned cfg, std::uint32_t rule) const {
@@ -252,8 +251,7 @@ void Lowerer::open_configs() {
     }
   };
   walk = [&](ImageId id, unsigned home) {
-    const ImageNode n = at(id);
-    if (n.kind == ImageKind::skip) {
+    if (const ImageNode n = at(id); n.kind == ImageKind::skip) {
       const auto ignore = listed(n.a, n.m),
                  hide = listed(static_cast<std::uint32_t>(n.a + n.m), n.n);
       Config c;
@@ -341,8 +339,8 @@ void Lowerer::declare_term(std::uint32_t rule) {
   name_row(_c.terms[t], _im.rules[rule].name);
   if (body.kind == ImageKind::lit) spell_literal(t, body);
   // A choice of words spells none of them alone, but each is a spelling.
-  std::vector<std::string_view> words;
-  if (body.kind == ImageKind::choice && list_words(bodyId, words))
+  if (std::vector<std::string_view> words;
+      body.kind == ImageKind::choice && list_words(bodyId, words))
     _c.termBuild[t].words = std::move(words);
   const bool predicateOnly = has(_predicate, rule);
   if (!predicateOnly) {
@@ -419,8 +417,7 @@ void Lowerer::delimit(ImageId spelled, std::int8_t d) {
         refuse_lowering(
             "`indent_open` and `indent_close` must name terminals that a "
             "rule uses, not rules or unused terminals");
-      const ImageId body = body_in(0, n.a);
-      if (at(body).kind == ImageKind::lit)
+      if (const ImageId body = body_in(0, n.a); at(body).kind == ImageKind::lit)
         delimit(body, d);
       else if (!_c.terms[sym_of(0, n.a)].trivia)
         _c.terms[sym_of(0, n.a)].delim = d;
@@ -476,9 +473,8 @@ bool Lowerer::clone_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs) {
 
 bool Lowerer::buries(ImageId id) const {
   if (at(id).kind == ImageKind::nest) return true;
-  for (const ImageId k : _im.shape_kids(id))
-    if (buries(k)) return true;
-  return false;
+  return std::ranges::any_of(_im.shape_kids(id),
+                             [&](ImageId k) { return buries(k); });
 }
 
 // An unordered item the text may leave out: `option(x)`, `many(x)` or
@@ -647,12 +643,11 @@ std::uint16_t Lowerer::terminal_sym(unsigned cfg, ImageId e) {
       if (at(kid(n, 0)).kind != ImageKind::lit)
         refuse_lowering(
             "a `doc` goes on a word a reader can hover, such as "
-            "`kw<\"if\">` or `lit<\"if\">`: only a token shows hover "
+            R"(`kw<"if">` or `lit<"if">`: only a token shows hover )"
             "text, so a `doc` cannot go on a rule reference or on another "
             "expression");
       const std::uint16_t sym = terminal_sym(cfg, kid(n, 0));
-      std::string_view& doc = _c.termBuild[sym].doc;
-      if (doc.empty())
+      if (std::string_view& doc = _c.termBuild[sym].doc; doc.empty())
         doc = n.text;
       else if (doc != n.text)
         _fault.raise(GrammarFaultCode::docConflict, _pool.owner);

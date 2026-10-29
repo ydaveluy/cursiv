@@ -99,6 +99,7 @@ Document& DefaultDocumentFactory::update(
             std::move(text));
       }
     } catch (const FileSystemError&) {
+      // nothing readable: keep the current text
     }
   }
   const CoreServices& services =

@@ -400,8 +400,8 @@ constexpr bool loop_nests(const LoopPlan& pl, const LoopTable<N>& t) {
           LoopKey outer = t.unit[ma][i] ? LoopKey{} : t.key[ma][i];
           for (std::size_t x = ub; x != ua;) {
             const auto up = static_cast<std::size_t>(pl.parent[x]);
-            const std::size_t mu = pl.member[up];
-            if (!t.unit[mu][pl.armUp[x]]) {
+            if (const std::size_t mu = pl.member[up];
+                !t.unit[mu][pl.armUp[x]]) {
               outer = t.key[mu][pl.armUp[x]];
               break;
             }

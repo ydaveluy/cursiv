@@ -323,8 +323,8 @@ class PredicateEmitter {
     std::vector<std::uint8_t> out(_g.nterms, 0);
     bool any = false;
     for (unsigned t = 1; t < _g.nterms; ++t) {
-      const TermInfo& info = _g.terms[t];
-      if (info.trivia || info.laid != 0) continue;
+      if (const TermInfo& info = _g.terms[t]; info.trivia || info.laid != 0)
+        continue;
       const std::string_view text = _g.term_text(static_cast<std::uint16_t>(t));
       ByteSet first;
       if (literal(t)) {
@@ -397,8 +397,8 @@ class PredicateEmitter {
     std::string body = head + " {\n  (void)src; (void)len; (void)seen;\n";
     for (std::size_t i = k; i < parts.size(); ++i) {
       const std::uint16_t at = parts[i];
-      const bool run = phrase_kept_run(_g, at);
-      if (run ||
+      if (const bool run = phrase_kept_run(_g, at);
+          run ||
           (_g.lex[at].kind == LexKind::alt && phrase_keeps_runs(_g, at))) {
         std::string rest = cont;
         if (i + 1 < parts.size()) {
@@ -413,9 +413,8 @@ class PredicateEmitter {
       body += std::format("  in = {};\n  if (in.empty()) return false;\n",
                           call(at, "::std::move(in)"));
     }
-    _runDefs +=
-        body + std::format(
-                   "  return {}(src, len, ::std::move(in), seen);\n}}\n", cont);
+    _runDefs += std::format(
+        "{}  return {}(src, len, ::std::move(in), seen);\n}}\n", body, cont);
   }
 
   // A choice whose arms read kept runs: each arm asks the rest itself, and
@@ -507,8 +506,8 @@ class PredicateEmitter {
   void visit(std::uint16_t at) {
     if (_used[at]) return;
     _used[at] = true;
-    const LexNode e = _g.lex[at];
-    if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
+    if (const LexNode e = _g.lex[at];
+        e.kind == LexKind::seq || e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i) visit(_g.lexKid[e.a + i]);
     } else if (e.kind == LexKind::rep) {
       if (e.max != 0) visit(e.a);

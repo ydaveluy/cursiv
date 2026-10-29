@@ -91,7 +91,7 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
   std::vector<std::uint32_t> reading;
   const std::uint16_t laid = lay(cfg, operator_body(cfg, op, reading));
-  const auto atomic = [&](const auto& self, std::uint16_t id) -> bool {
+  const auto atomic = [&](const auto& self, std::uint16_t id) {
     const Node& n = _p.e[id];
     if (n.kind == Shape::sym) return is_term(n.sym);
     if (n.kind == Shape::alt) {
@@ -135,9 +135,8 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
     return;
   }
   LlClimb cl;
-  const std::uint16_t base =
-      _p.e[lay_ref(cfg, _im.rule(*st.primary))].sym;
-  if (is_term(base))
+  if (const std::uint16_t base = _p.e[lay_ref(cfg, _im.rule(*st.primary))].sym;
+      is_term(base))
     cl.primaryNode = put_node(_o, LlNode{.kind = LlShape::term, .sym = base});
   else
     cl.primary = nt_index(base);

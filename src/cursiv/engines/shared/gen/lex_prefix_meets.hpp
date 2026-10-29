@@ -310,7 +310,7 @@ inline std::vector<std::vector<int>> lex_scalar_ends(
   const int root = intern(std::move(from));
   if (root < 0) return {};
   for (const LexCodePoints::Seq& q : seqs) {
-    std::vector<int> cur{root};
+    std::vector cur{root};
     for (unsigned k = 0; k < q.len && !cur.empty(); ++k) {
       std::vector<int> next;
       for (const int s : cur)

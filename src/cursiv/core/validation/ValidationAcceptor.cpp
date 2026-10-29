@@ -54,8 +54,8 @@ TextRange ValidationAcceptor::spanOfName(std::string_view borrowed,
   const std::string_view text =
       translation != nullptr ? translation->text() : _text;
   const char* const begin = text.data();
-  const char* const end = begin + text.size();
-  if (borrowed.data() == nullptr || text.data() == nullptr ||
+  if (const char* const end = begin + text.size();
+      borrowed.data() == nullptr || text.data() == nullptr ||
       std::less<const char*>{}(borrowed.data(), begin) ||
       std::less<const char*>{}(end, borrowed.data() + borrowed.size()))
     return spanOf(node);

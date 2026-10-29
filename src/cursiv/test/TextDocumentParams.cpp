@@ -12,7 +12,7 @@
 namespace cursiv::test {
 
 lsp::TextDocumentIdentifier textDocumentParams(const Document& document) {
-  return {lsp::Uri::parse(std::string(document.textDocument().uri()))};
+  return {lsp::Uri::parse(document.textDocument().uri())};
 }
 
 lsp::TextDocumentPositionParams textDocumentPositionParams(

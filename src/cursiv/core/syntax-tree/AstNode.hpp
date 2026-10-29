@@ -101,8 +101,10 @@ class vector {
     // The element count and byte count must both fit, including on wasm32.
     constexpr std::size_t byBytes =
         std::numeric_limits<std::size_t>::max() / sizeof(T);
-    constexpr std::size_t max = byBytes < 0xFFFFFFFFu ? byBytes : 0xFFFFFFFFu;
-    if (_cap > max / 2 || kFirst > max) overflowed();
+    if (constexpr std::size_t max =
+            byBytes < 0xFFFFFFFFu ? byBytes : 0xFFFFFFFFu;
+        _cap > max / 2 || kFirst > max)
+      overflowed();
     const std::size_t want = _cap == 0 ? kFirst : std::size_t{_cap} * 2;
     const std::size_t bytes = want * sizeof(T);
     // The block is still the top of the bump: move the bump, keep the pointer.

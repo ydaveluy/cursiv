@@ -444,6 +444,7 @@ class LrGssForest {
     Spell::Cursor c;
     c.seek(_spell, ropeA ? a.rank : b.rank, ropeA ? oa : ob);
     for (; i != n && c.value() == words[i]; ++i, c.next()) {
+      // the loop header does the work: count the equal words
     }
     return i;
   }

@@ -30,10 +30,12 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
   bool relays() const { return !a.relays.empty(); }
 
   // What the rungs ask beyond the shared ones.
-  void emit_bound_exit(unsigned, const std::uint8_t*) {}
+  void emit_bound_exit(unsigned, const std::uint8_t*) const {
+    /* the LL walk has no bound exit */
+  }
 
   // What the walk around them asks.
-  void walk_before(bool) {}
+  void walk_before(bool) const { /* nothing to emit before the walk */ }
   // A session that backtracked reads the table's walk, which checkpoints.
   void walk_entry() {
     line("  (void)end;\n  (void)term;");

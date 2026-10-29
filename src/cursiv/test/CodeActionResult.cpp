@@ -82,7 +82,7 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
       expectedFunction(converted.empty() ? "false" : "true", "true",
                        "the code action carries no edit");
       const std::string updated = TextDocument::applyEdits(text, converted);
-      expectedFunction(updated, std::string(*outputAfterFix));
+      expectedFunction(updated, *outputAfterFix);
 
       after = validationHelper(services, updated, asked);
       expectedFunction(

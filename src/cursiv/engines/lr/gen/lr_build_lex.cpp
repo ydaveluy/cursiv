@@ -377,9 +377,10 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
           nextRow + static_cast<std::size_t>(s) * ncls;
       keys.clear();
       each_bit(v.acc[s].w.data(), v.acc[s].w.size(), [&](std::size_t t) {
-        const std::uint16_t own =
-            t < nT ? A.dfa_acc_bound(s, static_cast<unsigned>(t)) : kNoSet;
-        if (own != kNoSet && lex_word_set(g, own)) keys.push_back(own);
+        if (const std::uint16_t own =
+                t < nT ? A.dfa_acc_bound(s, static_cast<unsigned>(t)) : kNoSet;
+            own != kNoSet && lex_word_set(g, own))
+          keys.push_back(own);
         const std::uint16_t stand =
             t < nT ? A.dfa_acc_stand(s, static_cast<unsigned>(t)) : kNoSet;
         if (stand != kNoSet && lex_word_set(g, stand)) keys.push_back(stand);
@@ -529,8 +530,8 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
           if (x.term == win) theirs.emplace_back(x.kind, x.arg);
         }
         if (mine != theirs) return false;
-        for (const auto& action : mine)
-          if (action.first != LrActionKind::reduce) return false;
+        for (const auto& [kind, arg] : mine)
+          if (kind != LrActionKind::reduce) return false;
         answered = answered || !mine.empty();
       }
       return at->second = answered;
@@ -643,8 +644,9 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
   for (std::uint16_t s = 0; s < A.ndfa; ++s) {
     acc[s] = A.dfaAcc[s];
     each_bit(A.dfaAcc[s].w.data(), A.dfaAcc[s].w.size(), [&](std::size_t t) {
-      const std::uint16_t b = A.dfa_acc_bound(s, static_cast<unsigned>(t));
-      if (!lex_bound_ends(g, b)) return;
+      if (const std::uint16_t b = A.dfa_acc_bound(s, static_cast<unsigned>(t));
+          !lex_bound_ends(g, b))
+        return;
       acc[s].reset(static_cast<unsigned>(t));
       ends = true;
     });
@@ -703,8 +705,9 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
         each_bit(open.w.data(), open.w.size(), [&](std::size_t bit) {
           const auto t = static_cast<unsigned>(bit);
           if (t >= a.cfg.nterms || (reserved && closed.test(t))) return;
-          const auto own = a.dfa_acc_bound(s, t);
-          if (own != kNoSet && refuses(own)) return;
+          if (const auto own = a.dfa_acc_bound(s, t);
+              own != kNoSet && refuses(own))
+            return;
           if (best == kInvalidSymbol || a.dfa_before(s, t, best))
             best = static_cast<SymbolId>(t);
         });

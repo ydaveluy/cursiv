@@ -81,8 +81,7 @@ void LocalSymbols::seal() {
   const AstNode* last = nullptr;
   std::uint32_t lastMet = 0;
   for (std::size_t i = 0; i < count; ++i) {
-    const AstNode* container = _containerOf[i];
-    if (container != last) {
+    if (const AstNode* container = _containerOf[i]; container != last) {
       std::size_t at = static_cast<std::size_t>(mix(container)) & wideMask;
       while (isTaken(at) && met[metAt[at]].container != container)
         at = (at + 1) & wideMask;

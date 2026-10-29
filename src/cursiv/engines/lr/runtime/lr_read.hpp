@@ -295,9 +295,12 @@ CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
             LrOverlayClimb<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
             lr_shadow_holds(c, s), c.walkMemo);
       },
-      mode, s.la, [&](const LrSkipped<A>& skip, TextOffset from) {
+      mode, s.la,
+      [&](const LrSkipped<A>& skip, TextOffset from) {
         return lr_scan_skipping<A>(c, mode, from, s.indent.depth, skip,
-                                   [](TextOffset, const Token*) {});
+                                   [](TextOffset, const Token*) {
+                                     /* the crossed trivia is not wanted */
+                                   });
       });
 }
 

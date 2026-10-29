@@ -15,8 +15,8 @@ namespace cursiv {
 // The bytes spelled as an escape; `??=` is a trigraph to a compiler that still
 // reads them.
 constexpr std::string_view kPlain = "\\\"?\n\r\t";
-constexpr std::string_view kEscaped[] = {"\\\\", "\\\"", "\\?",
-                                         "\\n",  "\\r",  "\\t"};
+constexpr std::string_view kEscaped[] = {R"(\\)", R"(\")", R"(\?)",
+                                         R"(\n)", R"(\r)", R"(\t)"};
 
 inline std::string c_literal(std::string_view s) {
   std::string q = "\"";
@@ -29,9 +29,9 @@ inline std::string c_literal(std::string_view s) {
       continue;
     }
     std::size_t len = 0;
-    const char32_t scalar =
-        c >= 0x80 ? scalar_at(s.data() + i, s.size() - i, len) : kNoScalar;
-    if (scalar != kNoScalar) {
+    if (const char32_t scalar =
+            c >= 0x80 ? scalar_at(s.data() + i, s.size() - i, len) : kNoScalar;
+        scalar != kNoScalar) {
       // A bidirectional control is escaped: a compiler warns of one in a
       // source file, and a reader cannot see what it does to the text around
       // it.
@@ -48,7 +48,7 @@ inline std::string c_literal(std::string_view s) {
       // Hex runs on: the next byte closes the string and reopens it, so a
       // digit after an escape is a digit and not part of it. A byte that
       // starts no scalar is escaped too: a source file is UTF-8.
-      q += std::format("\\x{:02x}\"\"", c);
+      q += std::format(R"(\x{:02x}"")", c);
       ++i;
       continue;
     }

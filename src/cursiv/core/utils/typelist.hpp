@@ -97,7 +97,7 @@ struct tl_has;
 // and this is asked of every rule against every list it may be in.
 template <class T, class... Ts>
 struct tl_has<T, TypeList<Ts...>>
-    : std::bool_constant<(std::is_same<T, Ts>::value || ...)> {};
+    : std::bool_constant<(std::is_same_v<T, Ts> || ...)> {};
 
 // The elements of `L` that `Held` does not hold, in order.
 template <class L, class Held>

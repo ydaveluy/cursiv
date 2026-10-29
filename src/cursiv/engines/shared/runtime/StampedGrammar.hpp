@@ -31,18 +31,20 @@ struct StampedGrammar final : Grammar {
   StampedGrammar(const GrammarMetaData& meta, StampLayout stamp) noexcept
       : _f(&meta), _stamp(stamp) {}
 
-  bool recordWrites(const CstNode& n, std::string_view f) const noexcept final {
+  bool recordWrites(const CstNode& n,
+                    std::string_view f) const noexcept override {
     const ElementId e = _stamp.row(n);
     return holds(e) && !f.empty() && answer(e).writes(f);
   }
-  bool recordFills(const CstNode& n, std::string_view f) const noexcept final {
+  bool recordFills(const CstNode& n,
+                   std::string_view f) const noexcept override {
     const ElementId e = _stamp.row(n);
     return holds(e) && !f.empty() && answer(e).fills(f);
   }
-  std::string_view recordFeature(const CstNode& n) const noexcept final {
+  std::string_view recordFeature(const CstNode& n) const noexcept override {
     return rowFeature(_stamp.row(n));
   }
-  std::string_view recordRule(const CstNode& n) const noexcept final {
+  std::string_view recordRule(const CstNode& n) const noexcept override {
     const ElementId e = _stamp.row(n);
     return holds(e) ? _f->names[answer(e).rule] : std::string_view{};
   }
@@ -60,18 +62,18 @@ struct StampedGrammar final : Grammar {
   }
 
   std::span<const std::string_view> terminalSpellings(
-      std::uint16_t t) const noexcept final {
+      std::uint16_t t) const noexcept override {
     return t < _f->terminalCount ? _f->terminals[t].spellings
                                  : std::span<const std::string_view>{};
   }
-  std::string_view terminalName(std::uint16_t t) const noexcept final {
+  std::string_view terminalName(std::uint16_t t) const noexcept override {
     return t < _f->terminalCount ? _f->terminals[t].name : std::string_view{};
   }
-  std::string_view terminalDoc(std::uint16_t t) const noexcept final {
+  std::string_view terminalDoc(std::uint16_t t) const noexcept override {
     return t < _f->terminalCount ? _f->terminals[t].doc : std::string_view{};
   }
   // A linear scan: a hover is a keystroke.
-  std::string_view spellingDoc(std::string_view text) const noexcept final {
+  std::string_view spellingDoc(std::string_view text) const noexcept override {
     if (text.empty()) return {};
     for (std::uint16_t t = 0; t < _f->terminalCount; ++t) {
       const auto& term = _f->terminals[t];

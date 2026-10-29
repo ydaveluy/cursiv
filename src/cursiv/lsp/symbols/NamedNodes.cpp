@@ -29,8 +29,8 @@ NamedNodes collect_named_nodes(const Document& document,
   // A record is not a key: `wrap` builds its wrapper at the record its content
   // already sits on. The id opens a run of nodes, and the node is picked out
   // of that run by identity.
-  std::vector<std::uint32_t> opens(document.parseResult.cst().size(), kNone);
-  std::vector<std::uint32_t> rankAt(all.size(), kNone);
+  std::vector opens(document.parseResult.cst().size(), kNone);
+  std::vector rankAt(all.size(), kNone);
   for (std::uint32_t at = 0; at < all.size(); ++at) {
     throw_if_cancelled(token);
     const AstNode* const node = all[at];

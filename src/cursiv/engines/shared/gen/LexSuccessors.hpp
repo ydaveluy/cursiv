@@ -14,7 +14,7 @@ namespace cursiv {
 // bounded typo search retains.
 struct LexSuccessors {
   LexSuccessors(const std::uint16_t* next, std::size_t count, unsigned ncls) {
-    std::vector<std::uint16_t> seen(count, kDeadState);
+    std::vector seen(count, kDeadState);
     base.reserve(count + 1u);
     for (std::size_t s = 0; s < count; ++s) {
       const auto state = static_cast<std::uint16_t>(s);

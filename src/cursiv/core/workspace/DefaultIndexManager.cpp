@@ -268,10 +268,9 @@ bool DefaultIndexManager::isAffected(
     return false;
   // A local edge is the document's own: its change resets it whole, and it
   // does not affect itself.
-  for (const ReferenceDescription& reference : edges)
-    if (!reference.local && changed.contains(reference.targetDocumentId))
-      return true;
-  return false;
+  return std::ranges::any_of(edges, [&](const ReferenceDescription& reference) {
+    return !reference.local && changed.contains(reference.targetDocumentId);
+  });
 }
 
 // No lock across the visitor: it is the caller's code and it reaches back into
@@ -315,13 +314,11 @@ bool DefaultIndexManager::visitByName(
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
   if (name.empty()) return true;
   const auto view = exportsView();
-  for (const auto* const entry : view->named(name)) {
+  return std::ranges::all_of(view->named(name), [&](const auto* entry) {
     if (caseSensitive ? entry->name != name : !folded_equal(entry->name, name))
-      continue;
-    if (reflection.acceptsTag(accepts, entry->type) && !visitor(*entry))
-      return false;
-  }
-  return true;
+      return true;
+    return !reflection.acceptsTag(accepts, entry->type) || visitor(*entry);
+  });
 }
 
 bool DefaultIndexManager::visitReferences(
@@ -333,9 +330,7 @@ bool DefaultIndexManager::visitReferences(
   const auto view = incomingView();
   const auto it = view->byTarget.find(Target{targetDocument, targetSymbol});
   if (it == view->byTarget.end()) return true;
-  for (const ReferenceDescription& row : it->second)
-    if (!visitor(row)) return false;
-  return true;
+  return std::ranges::all_of(it->second, visitor);
 }
 
 cursiv::Published<DefaultIndexManager::Exports>::Read

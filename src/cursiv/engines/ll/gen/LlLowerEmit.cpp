@@ -260,8 +260,9 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
         // Nested options keep a single ordered prefix of the body.
         const std::uint64_t turns = e.max == kEndless ? e.min : e.max;
         const std::uint64_t optional = e.max == kEndless ? 0 : e.max - e.min;
-        const std::uint64_t spelt = turns + (optional == 0 ? 1 : 2 * optional);
-        if (o.cfg.nnodes + spelt > kNoRow)
+        if (const std::uint64_t spelt =
+                turns + (optional == 0 ? 1 : 2 * optional);
+            o.cfg.nnodes + spelt > kNoRow)
           return refuse_node(o, LowerFail::tooManyPositions, owner);
         const auto sequence = [&](const std::vector<std::uint16_t>& ids,
                                   std::uint16_t chain, bool outer = false) {

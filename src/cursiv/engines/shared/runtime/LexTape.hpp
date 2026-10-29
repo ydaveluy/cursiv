@@ -77,7 +77,7 @@ struct LexTape {
     return lex_boundary(cfg).at(T.dfaBound[s], src, i, len);
   }
   std::uint16_t relay(std::uint16_t s) const
-    requires(kRelays)
+    requires kRelays
   {
     return T.dfaRelay[s];
   }
@@ -85,7 +85,7 @@ struct LexTape {
   std::size_t relay_count() const { return T.nrelays; }
   TextOffset run(std::uint16_t state, const char* src, TextOffset len,
                  TextOffset at) const
-    requires(kRelays)
+    requires kRelays
   {
     return T.relay_run(state, src, len, at);
   }

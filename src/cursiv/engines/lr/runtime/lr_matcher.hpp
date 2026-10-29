@@ -138,7 +138,7 @@ struct LrLexTape : LexTape<A> {
   }
   SymbolId qualified(std::uint16_t s, const char* src, TextOffset i,
                      TextOffset len, TextOffset& far) const
-    requires(Skips)
+    requires Skips
   {
     auto t = static_cast<SymbolId>(A.dfaAccept[s] - 1u);
     if (i < len && A.dfa_bounded(s)) {

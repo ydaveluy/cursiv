@@ -281,7 +281,7 @@ void lr_peek_oracle(LrBuildTable& A) {
 }
 
 std::vector<std::uint16_t> lr_shift_terms(const LrBuildTable& a) {
-  std::vector<std::uint16_t> terms(a.nstates, kInvalidSymbol);
+  std::vector terms(a.nstates, kInvalidSymbol);
   for (unsigned s = 0; s < a.nstates; ++s)
     for (const LrAction& x : a.action_row(s)) {
       const auto stamp = [&](std::uint16_t to) {
@@ -337,7 +337,7 @@ void lr_minimize_states(LrBuildTable& A) {
   const LrAction* const acts = A.actions.data();
   const LrGotoRows& go = A.gotoRows;
   // A guard is read by the classes it lands in.
-  std::vector<std::uint32_t> guardCls(A.guards.size(), 0u);
+  std::vector guardCls(A.guards.size(), std::uint32_t{0});
   const std::vector<std::uint8_t> live = lr_live_states(A, go);
   const std::uint8_t* const lv = live.data();
 
@@ -554,7 +554,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   const auto add = [](std::uint64_t a, std::uint64_t b) {
     return a > kInf - b ? kInf : a + b;
   };
-  std::vector<std::uint64_t> yieldN(nN, kInf);
+  std::vector yieldN(nN, kInf);
   const auto yieldSym = [&](std::uint16_t x) {
     return is_term(x) ? std::uint64_t{1} : yieldN[nt_index(x)];
   };
@@ -606,8 +606,9 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   const auto owed = [&](const LrItem& it) {
     const LrLowProd& p = prods[it.prod];
     if (it.dot == 0 && it.prod != g.startProd) return kInf;
-    const std::uint16_t head = p.len != 0 ? g.sym_at(p, 0) : kNtBase;
-    if (it.dot == 1 && !is_term(head) && nt_index(head) == p.lhs) return kInf;
+    if (const std::uint16_t head = p.len != 0 ? g.sym_at(p, 0) : kNtBase;
+        it.dot == 1 && !is_term(head) && nt_index(head) == p.lhs)
+      return kInf;
     return yieldFrom(p, it.dot);
   };
   DynSet implied;

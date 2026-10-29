@@ -204,8 +204,8 @@ DefaultLanguageServer::~DefaultLanguageServer() noexcept {
 // session starts. This is the first moment the installed builder is
 // the session's.
 void DefaultLanguageServer::hookServices() {
-  DocumentBuilder* const builder = _shared.documentBuilder.get();
-  if (builder != _hookedBuilder) {
+  if (DocumentBuilder* const builder = _shared.documentBuilder.get();
+      builder != _hookedBuilder) {
     builder->addBuildPhaseListener(*this);
     _hookedBuilder = builder;
   }
@@ -494,9 +494,9 @@ void DefaultLanguageServer::initialized() {
   }
 }
 
-// `**/*`, not the languages' extensions: a watcher narrowed to one
-// suffix would miss directory events -- a rename, a tree deleted --
-// which move the most documents. Filtering happens when events arrive.
+// A glob for every file, not the languages' extensions: a watcher narrowed to
+// one suffix would miss directory events -- a rename, a tree deleted -- which
+// move the most documents. Filtering happens when events arrive.
 void DefaultLanguageServer::registerFileWatcher() const {
   LanguageClient* client = _shared.languageClient.get();
   if (client == nullptr || !_dynamicFileWatching) return;
@@ -688,8 +688,9 @@ void DefaultLanguageServer::didChangeWatchedFiles(
         // An open buffer outranks the watcher, and a tracked URI whose file
         // is gone is a removal whatever the event said.
         const auto settle = [&](std::string uri) {
-          const std::shared_ptr<Document> existing = documents.getDocument(uri);
-          if (existing != nullptr) {
+          if (const std::shared_ptr<Document> existing =
+                  documents.getDocument(uri);
+              existing != nullptr) {
             if (existing->isOpen) return;
             if (!files.exists(existing->uri)) {
               removed.push_back(std::move(uri));
@@ -821,7 +822,7 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willDeleteFiles(
 void DefaultLanguageServer::stampVersion(lsp::CodeAction& action,
                                          const Document& document) {
   if (!action.edit.has_value() || !action.edit->changes.has_value()) return;
-  const lsp::DocumentUri self = lsp::Uri::parse(std::string(document.uri));
+  const lsp::DocumentUri self = lsp::Uri::parse(document.uri);
   // The protocol mixes file creations and renames into this list; a quick
   // fix only ever edits text, so only that arm is ever built.
   std::vector<std::variant<lsp::TextDocumentEdit, lsp::CreateFile,
@@ -1416,8 +1417,7 @@ void DefaultLanguageServer::publishMovedSnapshots() {
 // last time owes the client no second empty publication.
 void DefaultLanguageServer::announceDocument(const Document& document) {
   const Announced now{document.buildRevision, document.diagnostics.size()};
-  const auto it = _announced.find(document.id);
-  if (it != _announced.end()) {
+  if (const auto it = _announced.find(document.id); it != _announced.end()) {
     const bool bothClean = it->second.count == 0 && now.count == 0;
     const bool same =
         it->second.revision == now.revision && it->second.count == now.count;

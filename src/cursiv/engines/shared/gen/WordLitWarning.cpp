@@ -26,8 +26,10 @@ std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
           !detail::word_final_in(n.text, bound.props, bound.complement,
                                  bound.scalars, (n.flags & kLitFolded) != 0))
         return false;
-      WordLitWarning w{found.name(rule), found.spell(id), std::string(n.text)};
-      if (std::ranges::find(out, w) == out.end()) out.push_back(std::move(w));
+      if (WordLitWarning w{found.name(rule), found.spell(id),
+                           std::string(n.text)};
+          std::ranges::find(out, w) == out.end())
+        out.push_back(std::move(w));
       return false;
     });
   };

@@ -102,7 +102,7 @@ void quote_text(std::ostream& out, std::string_view text) {
         out << "\\'";
         break;
       case '\\':
-        out << "\\\\";
+        out << R"(\\)";
         break;
       default: {
         const auto byte = static_cast<unsigned char>(ch);
@@ -201,8 +201,8 @@ Document& build_document_from_path(std::string_view path,
   // could be spelled as two different URIs.
   const std::string uri = cursiv::path_to_file_uri(absolute.generic_string());
 
-  const ServiceRegistry& registry = *shared.serviceRegistry;
-  if (registry.findServices(uri) == nullptr)
+  if (const ServiceRegistry& registry = *shared.serviceRegistry;
+      registry.findServices(uri) == nullptr)
     throw UsageError(absolute.string() +
                      ": no language here claims this extension -- this binary "
                      "serves " +
@@ -210,8 +210,8 @@ Document& build_document_from_path(std::string_view path,
 
   // `TextOffset` is 32 bits; a document past this bound would parse into a
   // tree whose offsets have wrapped.
-  const std::uintmax_t bytes = std::filesystem::file_size(absolute, error);
-  if (!error && bytes > cursiv::kMaxDocument)
+  if (const std::uintmax_t bytes = std::filesystem::file_size(absolute, error);
+      !error && bytes > cursiv::kMaxDocument)
     throw UsageError(absolute.string() + " is larger than the " +
                      std::to_string(cursiv::kMaxDocument) +
                      " byte limit a document offset can address");
@@ -402,10 +402,10 @@ static void write_json_string(std::ostream& out, std::string_view text) {
     writePlain(index);
     switch (ch) {
       case '"':
-        out << "\\\"";
+        out << R"(\")";
         break;
       case '\\':
-        out << "\\\\";
+        out << R"(\\)";
         break;
       case '\n':
         out << "\\n";

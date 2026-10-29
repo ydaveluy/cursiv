@@ -52,8 +52,9 @@ class CstBuilder {
     // Recovery may insert a child before the token at which its parent was
     // opened. The parent still covers that child, including an insertion
     // before ignored trailing whitespace at the end of a partial document.
-    const TextOffset first = _cst._stream.at(from._count).begin;
-    if (begin > first) begin = first;
+    if (const TextOffset first = _cst._stream.at(from._count).begin;
+        begin > first)
+      begin = first;
     const TextOffset end = _cst._stream.at(lastVisibleNodeId).end;
     const NodeCount extent = id - from._count + 1;
     if (id == _cst.size()) [[likely]]

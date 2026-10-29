@@ -22,7 +22,7 @@ void quote(std::string& out, std::string_view text, char q) {
     }
     switch (ch) {
       case '\\':
-        out += "\\\\";
+        out += R"(\\)";
         break;
       case '\n':
         out += "\\n";
@@ -66,7 +66,7 @@ void charset(std::string& out, const CharSet& set) {
         out += "\\]";
         break;
       case '\\':
-        out += "\\\\";
+        out += R"(\\)";
         break;
       case '-':
         out += "\\-";
@@ -268,7 +268,7 @@ void GrammarPrinter::emit_lit(std::string& out, const ImageNode& n) {
   }
 }
 
-void GrammarPrinter::emit_class(std::string& out, const ImageNode& n) {
+void GrammarPrinter::emit_class(std::string& out, const ImageNode& n) const {
   const bool complement = (n.flags & kCpNot) != 0;
   if (n.m == 0 && complement && n.text.empty()) {
     out += '.';
@@ -295,8 +295,8 @@ void GrammarPrinter::emit_choice(std::string& out, const ImageNode& n) {
 }
 
 void GrammarPrinter::emit_repeat(std::string& out, const ImageNode& n) {
-  const ImageId kid = _image.kids[n.first];
-  if (_image.nodes[kid].kind == ImageKind::repeat) {
+  if (const ImageId kid = _image.kids[n.first];
+      _image.nodes[kid].kind == ImageKind::repeat) {
     out += '(';
     emit(out, kid);
     out += ')';

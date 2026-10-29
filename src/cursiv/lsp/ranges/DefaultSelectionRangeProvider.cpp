@@ -154,8 +154,8 @@ DefaultSelectionRangeProvider::getSelectionRanges(
     // once per step, and a client expands a handful. An outermost step short of
     // the root is what the protocol allows for.
     // Innermost first in `spans`, so the cap drops the outer steps.
-    constexpr std::size_t kMaxDepth = 64;
-    if (spans.size() > kMaxDepth) spans.resize(kMaxDepth);
+    if (constexpr std::size_t kMaxDepth = 64; spans.size() > kMaxDepth)
+      spans.resize(kMaxDepth);
     // Outermost first into the protocol's nesting: the value is the innermost
     // range and every `parent` is one step out.
     std::unique_ptr<lsp::SelectionRange> parent;

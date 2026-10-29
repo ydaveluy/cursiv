@@ -93,7 +93,7 @@ class WorkerPool {
   };
 
   // Coarse slices while the range is long, then one at a time at the tail.
-  void drain(Job& job) noexcept;
+  void drain(Job& job) const noexcept;
   void runTask(Task& task) noexcept;
   // Null when nothing was found. `self` is the worker index, or the worker
   // count for a caller that is not one.
@@ -109,7 +109,7 @@ class WorkerPool {
   // never leaves it: blocking one would hold a thread the parts it is waiting
   // for may need. A caller that is not a worker gives up after a short while
   // and sleeps, which is what keeps it off a core the parts are using.
-  void corun(Job& job, std::size_t self) noexcept;
+  void corun(const Job& job, std::size_t self) noexcept;
   [[nodiscard]] std::size_t selfIndex() const noexcept;
   // Publishes `parts` copies of `task`, which is what makes them stealable.
   void submit(Task& task, std::size_t self, std::size_t parts);

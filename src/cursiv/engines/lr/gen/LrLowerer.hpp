@@ -56,7 +56,8 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
   void emit_op(unsigned cfg, std::uint16_t lhs, ImageId op, const void* opRow,
                const LrLowerSlot& left, const LrLowerSlot& right,
                const LrActs& node, std::uint8_t prec, Association group);
-  LrLowerSlot infix_side(unsigned cfg, const void* row, std::uint16_t sym);
+  LrLowerSlot infix_side(unsigned cfg, const void* row,
+                         std::uint16_t sym) const;
 };
 
 }  // namespace cursiv

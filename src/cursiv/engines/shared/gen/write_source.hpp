@@ -11,8 +11,8 @@
 namespace cursiv {
 
 inline bool write_source(const std::string& path, const std::string& text) {
-  std::error_code unread;
-  if (std::filesystem::file_size(path, unread) == text.size()) {
+  if (std::error_code unread;
+      std::filesystem::file_size(path, unread) == text.size()) {
     std::ifstream in(path, std::ios::binary);
     std::string old(text.size(), '\0');
     if (in.read(old.data(), static_cast<std::streamsize>(old.size())) &&

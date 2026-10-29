@@ -1,5 +1,6 @@
 #include "cursiv/core/syntax-tree/DefaultDocumentReferences.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -123,11 +124,10 @@ void DefaultDocumentReferences::visitResolved(
 }
 
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
-  for (const RefHandle& h : handles)
-    if (h.owner != nullptr &&
-        has_error(_f.refOps[h.field].state(*h.owner, h.index)))
-      return true;
-  return false;
+  return std::ranges::any_of(handles, [&](const RefHandle& h) {
+    return h.owner != nullptr &&
+           has_error(_f.refOps[h.field].state(*h.owner, h.index));
+  });
 }
 
 void DefaultDocumentReferences::visitUnresolved(
@@ -154,7 +154,7 @@ void DefaultDocumentReferences::visitUnresolved(
 void DefaultDocumentReferences::reset() noexcept {
   for (const RefHandle& h : handles)
     if (h.owner != nullptr) _f.refOps[h.field].reset(*h.owner, h.index);
-  const std::lock_guard<std::mutex> lock(_targetsLock);
+  const std::lock_guard lock(_targetsLock);
   _targets.release();
 }
 
@@ -182,7 +182,7 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
     if (which != kNoBranch) found_targets.push_back({entry->node, which});
   }
   if (found_targets.empty()) return RefState::ErrorNotFound;
-  const std::lock_guard<std::mutex> lock(_targetsLock);
+  const std::lock_guard lock(_targetsLock);
   auto* const slice = static_cast<MultiRefItem*>(_targets.allocate(
       found_targets.size() * sizeof(MultiRefItem), alignof(MultiRefItem)));
   std::memcpy(slice, found_targets.data(),

@@ -75,7 +75,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
   std::map<std::pair<const AstTypeDesc*, std::string_view>, std::string_view>
       spelt;
   const auto rule_source = [&](const AstTypeDesc* type,
-                                std::string_view alias) -> std::string_view {
+                               std::string_view alias) {
     std::string_view& spelling = spelt[{type, alias}];
     if (spelling.empty()) {
       const auto at = ruleAt.find(type);

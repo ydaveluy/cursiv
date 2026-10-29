@@ -37,8 +37,7 @@ bool node_nullable(const Cfg& c, std::uint16_t id,
                    std::span<const std::uint8_t> nullable,
                    std::span<const std::uint8_t> ruleNullable,
                    bool endMarkNullable = false) {
-  const LlNode& n = c.nodes[id];
-  switch (n.kind) {
+  switch (const LlNode& n = c.nodes[id]; n.kind) {
     case LlShape::term:
       return false;
     // The assertion matches no token and still refuses every input that has
@@ -218,8 +217,8 @@ bool refuse_left_recursion(Built& b, const std::vector<std::uint8_t>& empty) {
   std::vector<std::vector<std::uint16_t>> edge(n);
   std::vector<bool> seen(n, false);
   for (std::uint16_t r = 1; r < n; ++r) {
-    const LlRuleInfo& u = b.cfg.rules[r];
-    if (u.climb != kNoRow && b.cfg.climbs[u.climb].primary != kNoRow)
+    if (const LlRuleInfo& u = b.cfg.rules[r];
+        u.climb != kNoRow && b.cfg.climbs[u.climb].primary != kNoRow)
       edge[r].push_back(b.cfg.climbs[u.climb].primary);
     else if (u.body != kNoRow)
       left_calls(b, empty, u.body, seen, edge[r]);
@@ -288,7 +287,7 @@ std::vector<bool> reached_from(const Cfg& c, std::uint16_t from) {
 // never hands it over there. Walked without recursion: a counted repetition
 // nests as deep as its bound.
 bool names_skipped(const Cfg& c, std::uint16_t id) {
-  std::vector<std::uint16_t> nodes{id};
+  std::vector nodes{id};
   while (!nodes.empty()) {
     const LlNode& n = c.nodes[nodes.back()];
     nodes.pop_back();
@@ -331,9 +330,9 @@ void refuse_unproductive(Built& b) {
       case LlShape::seq: {
         const auto k = c.children(n);
         bool ended = false;
-        for (unsigned i = 0; i < k.size(); ++i) {
-          const LlShape s = c.nodes[k[i]].kind;
-          if (!node[k[i]] ||
+        for (const auto kid : k) {
+          const LlShape s = c.nodes[kid].kind;
+          if (!node[kid] ||
               (ended && (s == LlShape::term || s == LlShape::implied)))
             return false;
           ended = ended || s == LlShape::endMark;
@@ -365,7 +364,7 @@ void refuse_unproductive(Built& b) {
     }
   }
   // The rule to name is the one the others wait on.
-  const auto waits_on = [&](std::uint16_t r) -> std::uint16_t {
+  const auto waits_on = [&](std::uint16_t r) {
     const LlRuleInfo& u = c.rules[r];
     std::vector<std::uint16_t> nodes;
     if (u.climb != kNoRow) {
@@ -716,6 +715,7 @@ void settle_gaps(Built& b) {
   g.ruleSilent = g.ruleConsumes = g.ruleFreshOut =
       std::vector<std::uint8_t>(nr, 0);
   while (g.settle_shape()) {
+    // the call does the work; repeat until it changes nothing
   }
   // The document opens and ends under the grammar's own configuration.
   const auto settle = [&](Gaps& x) {
@@ -729,6 +729,7 @@ void settle_gaps(Built& b) {
         x.ruleAfter[b.cfg.entryRule] = Gaps::bit(0);
     x.note_later();
     while (x.settle_sets()) {
+      // the call does the work; repeat until it changes nothing
     }
   };
   settle(g);
@@ -1049,8 +1050,7 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
         call(from, n.sym, to, id);
         break;
       case LlShape::seq: {
-        const auto k = b.cfg.children(n);
-        if (k.empty()) {
+        if (const auto k = b.cfg.children(n); k.empty()) {
           eps(from, to);
         } else {
           const unsigned i = visit.child;
@@ -1067,10 +1067,10 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
         const std::uint32_t tail = add(LlAtnKind::basic, rule);
         pending.push_back({kNoRow, tail, to});
         const auto begin = pending.size();
-        for (unsigned i = 0; i < k.size(); ++i) {
+        for (const auto kid : k) {
           const auto arm = add(LlAtnKind::basic, rule);
           eps(from, arm);
-          pending.push_back({k[i], arm, tail});
+          pending.push_back({kid, arm, tail});
         }
         std::reverse(pending.begin() + begin, pending.end());
         break;
@@ -1384,8 +1384,7 @@ struct LlEntry {
 LlEntry entry_cost(const Built& b, std::uint16_t id,
                    const std::vector<std::uint32_t>& rule, bool opened,
                    bool whole = false) {
-  const LlNode& n = b.cfg.nodes[id];
-  switch (n.kind) {
+  switch (const LlNode& n = b.cfg.nodes[id]; n.kind) {
     case LlShape::term:
       return {1, false};
     case LlShape::empty:
@@ -1431,7 +1430,7 @@ LlEntry entry_cost(const Built& b, std::uint16_t id,
 }
 
 void settle_repair(Built& b) {
-  std::vector<std::uint32_t> rule(b.cfg.nrules, kLlCostless);
+  std::vector rule(b.cfg.nrules, kLlCostless);
   for (bool moved = true; moved;) {
     moved = false;
     for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
@@ -1552,7 +1551,7 @@ void settle_cuts(Built& b) {
 // What a commit's exit refuses where it follows a loop, by the loop's
 // decision: the exit stands right behind the loop in its sequence.
 std::vector<std::uint16_t> loop_exits(const Built& b) {
-  std::vector<std::uint16_t> exits(b.cfg.ndecisions, kNoRow);
+  std::vector exits(b.cfg.ndecisions, kNoRow);
   const auto last_loop = [&](std::uint16_t id) {
     for (const LlNode* n = &b.cfg.nodes[id]; n->kind == LlShape::seq;
          n = &b.cfg.nodes[id]) {
@@ -1595,9 +1594,9 @@ void settle_decisions(Built& b, const LlBuildOptions& opt) {
       if (exits[d] != kNoRow) b.laSet.back().andnot(b.cut[exits[d]]);
     } else {
       const auto k = b.cfg.children(n);
-      for (unsigned i = 0; i < k.size(); ++i) {
-        b.laSet.push_back(b.lookahead(k[i], after));
-        const LlNode& arm = b.cfg.nodes[k[i]];
+      for (const auto kid : k) {
+        b.laSet.push_back(b.lookahead(kid, after));
+        const LlNode& arm = b.cfg.nodes[kid];
         if (arm.kind == LlShape::condition)
           b.laSet.back().andnot(b.cut[arm.sym]);
       }
@@ -1817,8 +1816,8 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
       todo.pop_back();
       if (seen[at] != 0) continue;
       seen[at] = 1;
-      const auto& state = atn.state(at);
-      if (state.kind == LlAtnKind::ruleStop && nullable[state.rule] == 0) {
+      if (const auto& state = atn.state(at);
+          state.kind == LlAtnKind::ruleStop && nullable[state.rule] == 0) {
         nullable[state.rule] = 1;
         const auto& calls = waiting[state.rule];
         todo.insert(todo.end(), calls.begin(), calls.end());
@@ -1867,7 +1866,7 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
     }
   };
   std::vector<std::vector<std::uint32_t>> heads(live.size());
-  for (std::uint16_t r = 0; r < live.size(); ++r) {
+  for (std::size_t r = 0; r < live.size(); ++r) {
     scan(atn.ruleStart[live[r]],
          [&](auto called) { heads[r].push_back(called); });
     auto& row = heads[r];
@@ -1879,8 +1878,9 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
       live.empty() ? 0u : *std::ranges::max_element(scc.component) + 1u;
   std::vector<std::vector<std::uint16_t>> members(count);
   std::vector<std::uint64_t> region(std::size_t{count} * words, 0);
-  for (std::uint16_t r = 0; r < live.size(); ++r) {
-    members[scc.component[r]].push_back(r);
+  // Rule indices fit 16 bits: a grammar with more rules is refused.
+  for (std::size_t r = 0; r < live.size(); ++r) {
+    members[scc.component[r]].push_back(static_cast<std::uint16_t>(r));
     region[std::size_t{scc.component[r]} * words + (r >> 6)] |=
         std::uint64_t{1} << (r & 63u);
   }
@@ -1917,7 +1917,7 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
       }
     }
   }
-  for (std::uint16_t r = 0; r < live.size(); ++r)
+  for (std::size_t r = 0; r < live.size(); ++r)
     if (((twice[r >> 6] >> (r & 63u)) & 1u) != 0 && nullable[live[r]] == 0)
       shared[live[r]] = 1;
   return shared;

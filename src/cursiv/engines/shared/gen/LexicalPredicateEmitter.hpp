@@ -76,8 +76,8 @@ class LexicalPredicateEmitter {
     std::string out;
     for (const auto id : _order) {
       if (recursive(id)) {
-        const auto kind = _g.lex[id].kind;
-        if (kind == LexKind::through_lit || kind == LexKind::through_same)
+        if (const auto kind = _g.lex[id].kind;
+            kind == LexKind::through_lit || kind == LexKind::through_same)
           out += node(id, true);
         continue;
       }
@@ -290,7 +290,7 @@ class LexicalPredicateEmitter {
         indent, id, ascii >= 0 ? " & 0x7fu" : "");
     for (unsigned i = 0; i < e.b; ++i)
       out += std::format(
-          "{0}    case {1}u: read = lexical_fixed_{2}(src, len, p.at, seen); "
+          "{}    case {}u: read = lexical_fixed_{}(src, len, p.at, seen); "
           "break;\n",
           indent, i, _g.lexKid[e.a + i]);
     out += std::format("{0}    default: break;\n{0}  }}\n", indent);
@@ -357,8 +357,8 @@ class LexicalPredicateEmitter {
       return fixed(e.a) ? 0 : kVariableWidth;
     if (e.kind == LexKind::rep) {
       if (e.max == 0) return 0;
-      const auto part = _width[e.a];
-      if (e.min == e.max && fixed(e.a) &&
+      if (const auto part = _width[e.a];
+          e.min == e.max && fixed(e.a) &&
           (part == 0 || e.min <= (kVariableWidth - 1) / part))
         return part * e.min;
       return kVariableWidth;
@@ -476,8 +476,7 @@ class LexicalPredicateEmitter {
     for (const auto id : _order) {
       if (!recursive(id) || (_used[id] & kNode) == 0) continue;
       out += std::format("    case {}u: {{\n", id);
-      const LexNode& e = _g.lex[id];
-      switch (e.kind) {
+      switch (const LexNode& e = _g.lex[id]; e.kind) {
         case LexKind::seq:
           out +=
               "      if (f.stage) {\n"
@@ -620,13 +619,12 @@ class LexicalPredicateEmitter {
                        e.min, e.max, call(e.a, "cur"));
     out += "  ::cursiv::LexicalState out;\n";
     if (fixed(id))
-      return out +
-             std::format(
-                 "  for (::std::size_t k = 0; k < in.size(); ++k) {{\n"
-                 "    auto c = in[k];\n"
-                 "    if (lexical_fixed_{}(src, len, c.at, seen)) out.add(c);\n"
-                 "  }}\n  return out;\n}}\n",
-                 id);
+      return std::format(
+          "{}  for (::std::size_t k = 0; k < in.size(); ++k) {{\n"
+          "    auto c = in[k];\n"
+          "    if (lexical_fixed_{}(src, len, c.at, seen)) out.add(c);\n"
+          "  }}\n  return out;\n}}\n",
+          out, id);
     if (e.kind == LexKind::alt) {
       if (dispatched(id)) {
         out +=

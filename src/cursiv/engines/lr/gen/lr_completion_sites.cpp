@@ -23,7 +23,7 @@ std::vector<ElementId> lr_completion_sites(
     const std::vector<RecordGen>& records) {
   using Key = std::tuple<std::string_view, std::uint16_t, std::uint8_t>;
   std::map<Key, ElementId> canonical;
-  std::vector<ElementId> result(records.size(), kNoElement);
+  std::vector result(records.size(), kNoElement);
   for (unsigned i = 0; i < records.size(); ++i) {
     const RecordGen& r = records[i];
     if (r.feature.empty()) continue;

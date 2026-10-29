@@ -135,10 +135,10 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
     }
     if (placed) format(builder, node);
     children.clear();
-    reflection.visitMembers(
-        *node, [&children](std::string_view, std::uint32_t, AstNode& child) {
-          children.push_back(&child);
-        });
+    reflection.visitMembers(*node, [&children](std::string_view, std::uint32_t,
+                                               const AstNode& child) {
+      children.push_back(&child);
+    });
     pending.insert(pending.end(), children.rbegin(), children.rend());
   }
 

@@ -2,8 +2,8 @@
 
 // Structured documentation comment model: tokenizer, parser and renderers.
 // A comment parses into a tree of paragraphs, tags and lines, each carrying
-// its source range; the markers (`/**`, `*`, `*/`) are configurable through
-// `DocCommentParseOptions`.
+// its source range; the markers (start, line prefix, end) are configurable
+// through `DocCommentParseOptions`.
 
 #include <cstdint>
 #include <functional>

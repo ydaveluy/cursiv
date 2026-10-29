@@ -362,7 +362,7 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   });
 
   // Empty, but not optional: the endpoint's hook on it is what ends the loop.
-  endpoint.onExit([] {});
+  endpoint.onExit([] { /* the hook alone ends the loop */ });
 }
 
 lsp::TextDocumentDefinitionResult navigation_result(
@@ -393,7 +393,7 @@ std::vector<lsp::SymbolInformation> flat_symbols(
   };
   std::vector<Pending> pending;
   for (auto it = symbols.rbegin(); it != symbols.rend(); ++it)
-    pending.push_back({&*it, kTopLevel});
+    pending.push_back({std::to_address(it), kTopLevel});
   std::vector<lsp::SymbolInformation> flat;
   while (!pending.empty()) {
     const Pending next = pending.back();
@@ -410,7 +410,7 @@ std::vector<lsp::SymbolInformation> flat_symbols(
     if (symbol.children.has_value())
       for (auto it = symbol.children->rbegin(); it != symbol.children->rend();
            ++it)
-        pending.push_back({&*it, flat.size() - 1});
+        pending.push_back({std::to_address(it), flat.size() - 1});
   }
   return flat;
 }

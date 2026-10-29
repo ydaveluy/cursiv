@@ -92,8 +92,8 @@ struct LexCodePoints {
     const auto make = [](std::initializer_list<Span> leads,
                          std::initializer_list<Span> rest) {
       StrayLead out;
-      for (const Span& s : leads) out.lead.add(s.first, s.second);
-      for (const Span& s : rest) out.rest[out.len++].add(s.first, s.second);
+      for (const auto& [lo, hi] : leads) out.lead.add(lo, hi);
+      for (const auto& [lo, hi] : rest) out.rest[out.len++].add(lo, hi);
       return out;
     };
     constexpr Span k{0x80, 0xBF};

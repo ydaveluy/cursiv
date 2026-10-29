@@ -213,8 +213,8 @@ Declaration DefaultReferences::findDeclaration(
   throw_if_cancelled(cancelToken);
   if (!document.hasAst() || document.parseResult.references == nullptr)
     return {};
-  const DocumentState state = document.state.load();
-  if (state >= DocumentState::ComputedScopes && state < DocumentState::Linked)
+  if (const DocumentState state = document.state.load();
+      state >= DocumentState::ComputedScopes && state < DocumentState::Linked)
     document.parseResult.references->forceAt(document.parseResult.cst(), offset,
                                              cancelToken);
   Declaration found = at(document, offset, cancelToken);

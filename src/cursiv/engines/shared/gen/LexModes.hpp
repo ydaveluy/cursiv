@@ -89,7 +89,7 @@ struct LexModes {
   std::vector<std::uint16_t> section_modes(const Cfg& g,
                                            std::vector<DynSet> own,
                                            std::uint16_t err) {
-    std::vector<std::uint16_t> out(own.size(), err);
+    std::vector out(own.size(), err);
     for (std::size_t k = 0; k < own.size(); ++k)
       for (std::uint32_t i = g.cfgTriviaAt[k]; i < g.cfgTriviaAt[k + 1]; ++i)
         own[g.cfgHome[k]].set(g.cfgTrivia[i]);

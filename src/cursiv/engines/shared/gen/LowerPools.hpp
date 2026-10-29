@@ -114,7 +114,7 @@ struct LowerPools : LowerVerdicts {
       lower_refuse(*this, LowerFail::gapTooMany);
       return kNoRow;
     }
-    const auto out = static_cast<std::uint16_t>(ngapConds);
+    const auto out = ngapConds;
     gapCondAt[out] = ngapOps;
     for (const std::uint16_t k : conds)
       for (std::uint32_t i = gapCondAt[k]; i < gapCondAt[k + 1u]; ++i) {

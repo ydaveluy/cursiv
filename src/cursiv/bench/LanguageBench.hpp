@@ -350,9 +350,9 @@ inline std::filesystem::path checked_path(const std::string& path) {
   std::error_code ec;
   std::filesystem::path resolved = std::filesystem::weakly_canonical(path, ec);
   if (ec) resolved = path;
-  const std::filesystem::file_status status =
-      std::filesystem::status(resolved, ec);
-  if (std::filesystem::exists(status) &&
+  if (const std::filesystem::file_status status =
+          std::filesystem::status(resolved, ec);
+      std::filesystem::exists(status) &&
       !std::filesystem::is_regular_file(status) &&
       !std::filesystem::is_directory(status)) {
     std::fprintf(stderr,
@@ -698,7 +698,7 @@ void ws_stages(int iterations, bool resident, const char* languageId,
 inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
   if (workers == 0) return;
   const cursiv::CancellationToken token;
-  const std::vector<int> range(64, 0);
+  const std::vector range(64, 0);
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(2);
   for (;;) {
@@ -708,6 +708,7 @@ inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
       const auto until =
           std::chrono::steady_clock::now() + std::chrono::microseconds(500);
       while (std::chrono::steady_clock::now() < until) {
+        // busy-wait: keep this worker occupied until `until`
       }
       const std::lock_guard guard(lock);
       seen.insert(std::this_thread::get_id());

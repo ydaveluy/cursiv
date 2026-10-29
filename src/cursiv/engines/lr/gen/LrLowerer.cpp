@@ -15,8 +15,9 @@ void lr_note_lead(ChainPool& w, std::span<const WriteKind> kind) {
   for (std::uint16_t i = 0; i < w.nchains; ++i) {
     const Chain& ch = w.chains[i];
     for (std::uint16_t k = 0; k < ch.count; ++k) {
-      const WriteKind what = kind[w.acts[ch.off + k]];
-      if (what != WriteKind::assign && what != WriteKind::append) continue;
+      if (const WriteKind what = kind[w.acts[ch.off + k]];
+          what != WriteKind::assign && what != WriteKind::append)
+        continue;
       w.chainBuild[i].lead = w.acts[ch.off + k];
       break;
     }

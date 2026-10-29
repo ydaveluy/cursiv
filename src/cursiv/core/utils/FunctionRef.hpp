@@ -18,9 +18,9 @@ class function_ref<R(A...)> {
     void* object;
     void (*function)();
 
-    constexpr Bound(const void* p) : constObject(p) {}
-    constexpr Bound(void* p) : object(p) {}
-    constexpr Bound(void (*p)()) : function(p) {}
+    constexpr explicit Bound(const void* p) : constObject(p) {}
+    constexpr explicit Bound(void* p) : object(p) {}
+    constexpr explicit Bound(void (*p)()) : function(p) {}
 
     template <class F>
     F* object_as() const {

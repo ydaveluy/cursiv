@@ -57,8 +57,7 @@ inline bool rss_reset() noexcept {
   if (page <= 0) return s;
   s.current =
       static_cast<std::ptrdiff_t>(resident) * static_cast<std::ptrdiff_t>(page);
-  rusage r{};
-  if (::getrusage(RUSAGE_SELF, &r) == 0)
+  if (rusage r{}; ::getrusage(RUSAGE_SELF, &r) == 0)
     s.peak = static_cast<std::size_t>(r.ru_maxrss) * 1024u;
   s.valid = true;
 #endif

@@ -143,7 +143,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   // section, no token its grammar does not read.
   b.lookMode.clear();
   if (skips.size() > 1) {
-    std::vector<std::uint16_t> byCfg(skips.size(), kNoRow);
+    std::vector byCfg(skips.size(), kNoRow);
     b.lookMode.assign(g.ndecisions, b.errMode);
     for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
       const std::uint8_t k = b.gapCfg[g.decisions[d].node];
@@ -188,6 +188,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   }
   b.modeTrivia.clear();
   b.modeJoinedTrivia.clear();
+  // By index: interning a trivia set may append a mode while it is read.
   for (std::size_t m = 0; m < modes.set.size(); ++m) {
     DynSet blank, joined;
     for (std::uint16_t t = 1; t < g.nterms; ++t) {

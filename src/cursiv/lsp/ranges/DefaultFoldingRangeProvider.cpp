@@ -45,7 +45,7 @@ void DefaultFoldingRangeProvider::collectFolding(
     const auto enter = [&](const AstNode& node) {
       const std::size_t first = pending.size();
       reflection.visitMembers(
-          node, [&](std::string_view, std::uint32_t, AstNode& child) {
+          node, [&](std::string_view, std::uint32_t, const AstNode& child) {
             pending.push_back(&child);
           });
       std::reverse(pending.begin() + static_cast<std::ptrdiff_t>(first),

@@ -21,7 +21,7 @@ namespace cursiv {
 inline void lr_split_loops(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   const unsigned nN = c.nnts, nP = c.nprods;
-  std::vector<unsigned> lead(nP, nN);
+  std::vector lead(nP, nN);
   const auto by_lhs = lr_by_lhs(c);
   for (unsigned p = 0; p < nP; ++p)
     if (c.turns(p)) lead[p] = nt_index(c.sym_at(c.prods[p], 0));
@@ -56,7 +56,7 @@ inline void lr_split_loops(LrLowered& o) {
     std::vector<std::uint16_t> loops;
     // One active place per rule on the DFS path. A sibling must see its own
     // path again, so entries leave this index when their frame is popped.
-    std::vector<int> active(nN, -1);
+    std::vector active(nN, -1);
     struct Visit {
       int place;
       std::size_t arm = 0;
@@ -103,8 +103,8 @@ inline void lr_split_loops(LrLowered& o) {
     std::vector<std::uint8_t> kept(nN, 0);
     for (std::size_t at = 0; at < places.size(); ++at) {
       Place& place = places[at];
-      const std::uint16_t rule = place.rule;
-      if (place.parent < 0 || (!head[rule] && !kept[rule])) {
+      if (const std::uint16_t rule = place.rule;
+          place.parent < 0 || (!head[rule] && !kept[rule])) {
         place.nt = rule;
         kept[rule] = 1;
       } else {

@@ -152,7 +152,7 @@ ImageId TwinReader::expanded(std::uint32_t rule) {
 bool TwinReader::calls_itself(std::uint32_t rule) {
   if (const auto it = _selfCalls.find(rule); it != _selfCalls.end())
     return it->second;
-  std::vector<ImageId> todo{_dataBody(rule)};
+  std::vector todo{_dataBody(rule)};
   std::unordered_set<ImageId> seen;
   std::unordered_set<std::uint32_t> called;
   bool self = false;
@@ -416,7 +416,7 @@ ImageId TwinReader::drop_sequence(ImageId id) {
 ImageId TwinReader::first_present(const std::vector<ImageId>& run) {
   std::vector<ImageId> arms;
   for (std::size_t k = 0; k < run.size(); ++k) {
-    std::vector<ImageId> parts{kid(run[k], 0)};
+    std::vector parts{kid(run[k], 0)};
     parts.insert(parts.end(), run.begin() + static_cast<std::ptrdiff_t>(k + 1),
                  run.end());
     arms.push_back(parts.size() == 1

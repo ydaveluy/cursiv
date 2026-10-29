@@ -843,8 +843,8 @@ struct terminal_of<Body, Choice<As<Cs, Es>...>> {
                 "terminal<as<X>(...)>");
   static_assert((word_of<Es> && ...),
                 "inside a terminal, an alternative with its own as<V>(e) "
-                "may only match words: lit<\"...\">, kw<\"...\">, "
-                "ikw<\"...\"> or a choice of those. For other text, write a "
+                R"(may only match words: lit<"...">, kw<"...">, )"
+                R"(ikw<"..."> or a choice of those. For other text, write a )"
                 "data rule");
   static_assert(one_value_type<Cs...>,
                 "inside a terminal, the constants of the alternatives' "
@@ -907,7 +907,7 @@ struct slot_conv<void> {
   using type = void;
 };
 template <class O>
-  requires std::is_base_of<made_conv, O>::value
+  requires std::is_base_of_v<made_conv, O>
 struct slot_conv<O> {
   using type = O;
 };

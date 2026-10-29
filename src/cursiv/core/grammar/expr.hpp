@@ -33,10 +33,9 @@ struct GrammarNode {};
 // every variable it instantiates a symbol name -- one per operand an operator
 // meets, each spelling the whole expression built so far.
 template <class T>
-concept Expr =
-    std::is_base_of<GrammarNode, std::remove_cvref_t<T>>::value &&
-    std::is_convertible<const volatile std::remove_cvref_t<T>*,
-                        const volatile GrammarNode*>::value;
+concept Expr = std::is_base_of_v<GrammarNode, std::remove_cvref_t<T>> &&
+               std::is_convertible_v<const volatile std::remove_cvref_t<T>*,
+                                     const volatile GrammarNode*>;
 
 inline constexpr std::size_t kUnbounded =
     std::numeric_limits<std::size_t>::max();
@@ -87,7 +86,7 @@ struct Lit : GrammarNode {
                     std::derived_from<Guard, GrammarNode>,
                 "lit<S, G>: the guard G must be a grammar expression, "
                 "checked right after the text, such as "
-                "`lit<\"toto\", !lit<\"titi\">>`. For a keyword that must not "
+                R"(`lit<"toto", !lit<"titi">>`. For a keyword that must not )"
                 "run into the next word, write `kw<S>` instead");
 
   // The prose a hover shows over this word. Spelled on the element, the only
@@ -115,7 +114,7 @@ struct Doc : GrammarNode {
 
 // The doc a grammar element carries, empty for everything that carries none.
 // One reader for the whole pipeline: the element table's doc column and the
-// dump's `/** ... */` prefix both ask here.
+// doc comment the dump writes before the element both ask here.
 template <class E>
 struct doc_of {
   static constexpr std::string_view value{};
@@ -839,7 +838,7 @@ consteval void class_refused() {
   static_assert(Fault != ClassFault::lone_backslash,
                 "cursiv: this character class ends with a lone backslash. A "
                 "backslash starts an escape, as in std::regex: write a "
-                "backslash itself as `\\\\`, or R\"(\\\\)\" in C++");
+                R"msg(backslash itself as `\\`, or R"(\\)" in C++)msg");
   static_assert(Fault != ClassFault::unknown_escape,
                 "cursiv: this character class holds an escape that "
                 "std::regex does not accept in a class. A backslash followed "
@@ -847,7 +846,7 @@ consteval void class_refused() {
                 "`u{H...}`, `n`, `r`, `t`, `f`, `v`, `b`, `0` (not followed "
                 "by a digit), `cX` with X a letter, or one of the classes "
                 "`d` `D` `s` `S` `w` `W`; a backslash before any other "
-                "character stands for that character: `\\-`, `\\^`, `\\\\`");
+                R"(character stands for that character: `\-`, `\^`, `\\`)");
   static_assert(Fault != ClassFault::class_endpoint,
                 "cursiv: this character class uses a class escape (`\\d`, "
                 "`\\s`, `\\w` or their complements) as an end of a range, but "
@@ -868,7 +867,8 @@ template <str Spec>
 consteval ClassFault class_fault() {
   constexpr bool negated = Spec.size() > 1 && Spec[0] == '^';
   constexpr ClassFault fault = for_class_ranges(
-      Spec.view().substr(negated ? 1 : 0), [](char32_t, char32_t) {});
+      Spec.view().substr(negated ? 1 : 0),
+      [](char32_t, char32_t) { /* only the fault is wanted */ });
   class_refused<fault>();
   return fault;
 }

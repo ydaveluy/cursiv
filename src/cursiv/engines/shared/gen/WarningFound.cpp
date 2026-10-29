@@ -72,8 +72,7 @@ class Reach {
 
   // The rules an expression names where it is read.
   void plain(ImageId id) {
-    const ImageNode n = _image.nodes[id];
-    switch (n.kind) {
+    switch (const ImageNode n = _image.nodes[id]; n.kind) {
       case ImageKind::ref:
         call(n.a);
         return;

@@ -1,6 +1,7 @@
 #include "cursiv/core/documentation/DefaultCommentProvider.hpp"
 
 #include <algorithm>
+#include <numeric>
 #include <optional>
 #include <string>
 
@@ -36,7 +37,7 @@ std::optional<std::string> DefaultCommentProvider::getComment(
   // remains eligible. This needs no auxiliary CST index.
   NodeId lo = 0, hi = nodeId;
   while (lo < hi) {
-    const NodeId mid = lo + (hi - lo) / 2;
+    const NodeId mid = std::midpoint(lo, hi);
     if (cst[mid].end <= nodeStart)
       lo = mid + 1;
     else

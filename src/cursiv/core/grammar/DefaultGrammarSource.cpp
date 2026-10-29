@@ -24,7 +24,7 @@ std::string DefaultGrammarSource::ruleClosure(std::string_view name) const {
   const auto* first = find(name);
   if (first == nullptr) return {};
   const auto start = static_cast<std::size_t>(first - _data.rules.data());
-  std::vector<std::size_t> queue{start};
+  std::vector queue{start};
   std::vector<bool> seen(_data.rules.size());
   seen[start] = true;
   std::string out;

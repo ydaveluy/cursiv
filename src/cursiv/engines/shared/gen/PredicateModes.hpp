@@ -52,8 +52,7 @@ struct PredicateModes {
 
   std::vector<bool> trace() {
     std::vector<bool> reached(g.nlex);
-    const auto visit = [&](auto&& self, std::uint16_t at,
-                           const DynSet& after) -> void {
+    const auto visit = [&](auto&& self, std::uint16_t at, const DynSet& after) {
       if (reached[at] && follow[at].covers(after)) return;
       reached[at] = true;
       follow[at] |= after;

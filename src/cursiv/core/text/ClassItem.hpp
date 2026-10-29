@@ -41,8 +41,8 @@ struct ClassItem {
 constexpr ClassAtom class_atom_at(std::string_view s, std::size_t i) {
   const auto raw = [&](std::size_t p) -> ClassAtom {
     const std::size_t lead = p - i;
-    const auto b = static_cast<unsigned char>(s[p]);
-    if (b < 0x80) return {b, lead + 1};
+    if (const auto b = static_cast<unsigned char>(s[p]); b < 0x80)
+      return {b, lead + 1};
     std::size_t len = 0;
     const char32_t cp = scalar_at(s.data() + p, s.size() - p, len);
     if (cp == kNoScalar) return {0, lead + 1, 0, ClassFault::malformed};

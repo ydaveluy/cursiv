@@ -112,8 +112,8 @@ struct UriParts {
 UriParts split_uri(std::string_view uri) {
   uri = uri.substr(0, uri.find_first_of("?#"));
   UriParts parts;
-  const std::size_t colon = uri.find(':');
-  if (colon != 0 && colon < uri.find('/')) {
+  if (const std::size_t colon = uri.find(':');
+      colon != 0 && colon < uri.find('/')) {
     parts.scheme = uri.substr(0, colon);
     uri.remove_prefix(colon + 1);
   }
@@ -173,8 +173,8 @@ std::string normalize_uri(std::string_view uri) {
     // A Windows drive letter is a syntactic fact of the URI, not of the host:
     // the same document arrives as `/c:/`, `/C:/` or `/c%3A/` and must land
     // on one spelling whatever platform the server runs on.
-    constexpr std::size_t at = 8;  // past "file:///"
-    if (out.size() > at + 3 && out.compare(at + 1, 3, "%3A") == 0)
+    if (constexpr std::size_t at = 8;  // past "file:///"
+        out.size() > at + 3 && out.compare(at + 1, 3, "%3A") == 0)
       out[at] = to_lower(out[at]);
     if (const std::size_t suffix = uri.find_first_of("?#");
         suffix != std::string_view::npos)
@@ -205,10 +205,10 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
     // file this process cannot open, so it is not a path at all.
     if (!remainder.empty() && remainder.front() != '/') {
       const auto slash = remainder.find('/');
-      const std::string_view authority = slash == std::string_view::npos
-                                             ? remainder
-                                             : remainder.substr(0, slash);
-      if (!authority.empty() &&
+      if (const std::string_view authority = slash == std::string_view::npos
+                                                 ? remainder
+                                                 : remainder.substr(0, slash);
+          !authority.empty() &&
           !std::ranges::equal(authority, std::string_view("localhost"), {},
                               [](char c) { return to_lower(c); }))
         return std::nullopt;

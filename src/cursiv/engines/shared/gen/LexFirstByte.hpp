@@ -59,8 +59,9 @@ std::vector<std::uint64_t> lex_skip_set(const Dfa& d) {
       if (s1 == kDeadState || d.accept(s1) == 0 || d.bounded(s1) ||
           d.relay(s1) != kNoRelay)
         continue;
-      const TermInfo& term = d.term(d.accept(s1) - 1u);
-      if (!term.trivia || term.recorded || term.refuses) continue;
+      if (const TermInfo& term = d.term(d.accept(s1) - 1u);
+          !term.trivia || term.recorded || term.refuses)
+        continue;
       bool loops = true;
       for (unsigned c = 0; c < d.classes() && loops; ++c) {
         const std::uint16_t n = d.next(s1, c);

@@ -39,9 +39,9 @@ class LlRecordPlan {
     std::uint16_t only = kNoRow;
     for (unsigned i = 0; i < n.count; ++i) {
       const auto k = _cfg.kids[n.sym + i];
-      const auto kind = _cfg.nodes[k].kind;
-      if (kind == LlShape::empty || kind == LlShape::endMark ||
-          kind == LlShape::condition)
+      if (const auto kind = _cfg.nodes[k].kind; kind == LlShape::empty ||
+                                                kind == LlShape::endMark ||
+                                                kind == LlShape::condition)
         continue;
       if (only != kNoRow) return kNoRow;
       only = k;
@@ -92,8 +92,9 @@ class LlRecordPlan {
       const LlRuleInfo& u = _cfg.rules[r];
       const auto id = rule(r);
       if (u.climb != kNoRow) {
-        const auto primary = _cfg.climbs[u.climb].primary;
-        if (primary != kNoRow) supplies(rule(primary), id);
+        if (const auto primary = _cfg.climbs[u.climb].primary;
+            primary != kNoRow)
+          supplies(rule(primary), id);
         opens[id] = true;
         doesOpen.push_back(id);
       } else if (u.body != kNoRow) {

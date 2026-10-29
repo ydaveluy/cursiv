@@ -83,9 +83,9 @@ class TaskQueue {
   [[nodiscard]] T steal() {
     std::int64_t top = _top.load(std::memory_order_acquire);
     std::atomic_thread_fence(std::memory_order_seq_cst);
-    const std::int64_t bottom = _bottom.load(std::memory_order_acquire);
-
-    if (top >= bottom) return nullptr;
+    if (const std::int64_t bottom = _bottom.load(std::memory_order_acquire);
+        top >= bottom)
+      return nullptr;
 
     Array* const array = _array.load(std::memory_order_acquire);
     T item = array->get(top);

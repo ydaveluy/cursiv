@@ -64,7 +64,7 @@ class GrammarPrinter {
   void emit(std::string& out, ImageId node);
   void item(std::string& out, ImageId node, Prec here);
   void emit_lit(std::string& out, const ImageNode& n);
-  void emit_class(std::string& out, const ImageNode& n);
+  void emit_class(std::string& out, const ImageNode& n) const;
   void emit_choice(std::string& out, const ImageNode& n);
   void emit_repeat(std::string& out, const ImageNode& n);
   void emit_write(std::string& out, const ImageNode& n, std::string_view op);

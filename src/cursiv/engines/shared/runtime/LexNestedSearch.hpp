@@ -56,10 +56,10 @@ class LexNestedSearch {
 
   // One pass: where each literal's first byte next stands is found once and
   // kept until the cursor passes it. The earlier start wins, and an opener
-  // starting before a closer deepens even where the two overlap -- `/*/`
-  // deepens before `*/` closes; a closer wins a tie. `Many`: several literals
-  // a side, the nearest of a side standing for it, and of two a side spells at
-  // one byte, the longer read.
+  // starting before a closer deepens even where the two overlap -- with `(*`
+  // and `*)`, `(*)` deepens before it closes; a closer wins a tie. `Many`:
+  // several literals a side, the nearest of a side standing for it, and of two
+  // a side spells at one byte, the longer read.
   template <bool Remember, bool Many>
   CURSIV_ALWAYS_INLINE static TextOffset scan(LexNestedSearch* self,
                                               const LexRelay& r,
@@ -69,7 +69,7 @@ class LexNestedSearch {
     const char* const open = names + r.beforeOff;
     const char* const close = names + r.afterOff;
     const char* const stop = src + len;
-    const auto next = [&](const char* q, char b) -> const char* {
+    const auto next = [&](const char* q, char b) {
       return q < stop ? static_cast<const char*>(std::memchr(
                             q, b, static_cast<std::size_t>(stop - q)))
                       : nullptr;

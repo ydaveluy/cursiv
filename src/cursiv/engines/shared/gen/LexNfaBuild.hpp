@@ -117,8 +117,8 @@ struct LexNfaBuild {
       if (before == kNoLexNode || p.kind != LexKind::rep ||
           g.lex[p.a].kind != LexKind::chars)
         return false;
-      const ByteSet& padBytes = g.sets[g.lex[p.a].a];
-      if (!LexRelayGen::pad_final(padBytes, g.sets[markSet], run.min == 0,
+      if (const ByteSet& padBytes = g.sets[g.lex[p.a].a];
+          !LexRelayGen::pad_final(padBytes, g.sets[markSet], run.min == 0,
                                   shape.after))
         return false;
       row.padSet = g.lex[p.a].a;
@@ -150,8 +150,7 @@ struct LexNfaBuild {
 
   // The shape checked before reification contains only literal leaves.
   void lit_list(std::uint16_t node, std::vector<std::string>& out) const {
-    const LexNode& e = g.lex[node];
-    if (e.kind == LexKind::alt) {
+    if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i) lit_list(g.lexKid[e.a + i], out);
       return;
     }
@@ -324,7 +323,7 @@ struct LexNfaBuild {
     std::vector<std::uint32_t> marks;
     std::vector<std::uint16_t> guards;
     std::vector<bool> visited(g.nlex);
-    const auto collect = [&](auto&& self, std::uint16_t at) -> void {
+    const auto collect = [&](auto&& self, std::uint16_t at) {
       if (at == kNoLexNode || visited[at]) return;
       visited[at] = true;
       const LexNode& e = g.lex[at];
@@ -338,11 +337,11 @@ struct LexNfaBuild {
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
     visited.assign(visited.size(), false);
-    const auto reads = [&](auto&& self, std::uint16_t at) -> bool {
+    const auto reads = [&](auto&& self, std::uint16_t at) {
       if (at == kNoLexNode || visited[at]) return false;
       visited[at] = true;
-      const LexNode& e = g.lex[at];
-      if ((e.kind == LexKind::same &&
+      if (const LexNode& e = g.lex[at];
+          (e.kind == LexKind::same &&
            std::ranges::find(marks, e.min) != marks.end()) ||
           (e.kind == LexKind::through_same &&
            std::ranges::find(marks, e.max) != marks.end()))
@@ -386,8 +385,7 @@ struct LexNfaBuild {
 
   // One branch of the terminal, to the accept its tier asks for.
   int branch(std::uint16_t node, int out) {
-    const LexNode& e = g.lex[node];
-    if (e.kind == LexKind::alt) {
+    if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt) {
       int s = branch(g.lexKid[e.a], out);
       for (unsigned i = 1; i < e.b; ++i)
         s = n.split(branch(g.lexKid[e.a + i], out), s);
@@ -405,8 +403,8 @@ struct LexNfaBuild {
   // An arm the graph cannot spell is recognized apart from the others, at its
   // own tier.
   int arms(std::uint16_t node, int out) {
-    const LexNode& e = g.lex[node];
-    if (e.kind == LexKind::alt && recognized(node)) {
+    if (const LexNode& e = g.lex[node];
+        e.kind == LexKind::alt && recognized(node)) {
       int s = arms(g.lexKid[e.a], out);
       for (unsigned i = 1; i < e.b; ++i)
         s = n.split(arms(g.lexKid[e.a + i], out), s);
@@ -431,11 +429,10 @@ struct LexNfaBuild {
   bool echoes_marked(std::uint16_t node) const {
     using Tags = std::vector<std::uint32_t>;
     std::vector<bool> callsChecked(g.nlex);
-    const auto scope = [&](auto&& self, std::uint16_t root) -> bool {
+    const auto scope = [&](auto&& self, std::uint16_t root) {
       std::vector<std::uint16_t> callsHere;
       bool bound = true;
-      const auto walk = [&](auto&& walkSelf, std::uint16_t at,
-                            Tags& marks) -> void {
+      const auto walk = [&](auto&& walkSelf, std::uint16_t at, Tags& marks) {
         if (at == kNoLexNode) return;
         const LexNode& e = g.lex[at];
         switch (e.kind) {
@@ -532,8 +529,7 @@ struct LexNfaBuild {
 
   // Thompson, built backwards from the fragment's exit.
   int run(std::uint16_t node, int out) {
-    const LexNode& e = g.lex[node];
-    switch (e.kind) {
+    switch (const LexNode& e = g.lex[node]; e.kind) {
       case LexKind::chars:
         return n.chars(e.a, out);
       case LexKind::seq: {

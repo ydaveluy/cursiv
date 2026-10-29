@@ -8,7 +8,7 @@
 namespace cursiv {
 
 LrLowerSlot LrLowerer::infix_side(unsigned cfg, const void* row,
-                                  std::uint16_t sym) {
+                                  std::uint16_t sym) const {
   return LrLowerSlot{
       .sym = sym, .cfg = static_cast<std::uint8_t>(cfg), .row = {row_id(row)}};
 }
@@ -21,7 +21,7 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
   const bool buildsNode =
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
   const LrShapeId laid = lay(cfg, op);
-  std::vector<LrShapeId> kids{laid};
+  std::vector kids{laid};
   if (_p.e[laid].kind == LrShape::seq && _p.e[laid].made.empty())
     kids.assign(_p.kid.begin() + _p.e[laid].sym,
                 _p.kid.begin() + _p.e[laid].sym + _p.e[laid].count);

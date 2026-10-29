@@ -251,8 +251,8 @@ struct declared_bound {
   static_assert(
       sizeof(WB) == 0,
       "a grammar's `word_boundary` must be a character class, such as "
-      "`static constexpr auto word_boundary = cr<\"a-zA-Z0-9_-\">;`, "
-      "`uc::XID_Continue`, or `cr<\"a-zA-Z0-9_$\"> | uc::XID_Continue`");
+      R"(`static constexpr auto word_boundary = cr<"a-zA-Z0-9_-">;`, )"
+      R"(`uc::XID_Continue`, or `cr<"a-zA-Z0-9_$"> | uc::XID_Continue`)");
 };
 template <std::uint64_t M, bool N, str S>
 struct declared_bound<CpSet<M, N, S>> {
@@ -263,8 +263,8 @@ struct declared_bound<Choice<Es...>> {
   static_assert(sizeof...(Es) == 0,
                 "a grammar's `word_boundary` must be one character class, "
                 "and this is a choice of other expressions: join classes "
-                "only, with `|`, as in `cr<\"a-z\"> | cr<\"_\">` or "
-                "`uc::XID_Continue | cr<\"_$\">`");
+                R"(only, with `|`, as in `cr<"a-z"> | cr<"_">` or )"
+                R"(`uc::XID_Continue | cr<"_$">`)");
 };
 template <class G>
 consteval auto bound_of() {

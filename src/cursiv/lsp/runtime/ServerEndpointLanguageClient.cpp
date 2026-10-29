@@ -21,6 +21,7 @@ void send_in_session(Send&& send) {
   try {
     send();
   } catch (const lsp::RequestError&) {
+    // outside the session: drop the message
   }
 }
 
@@ -41,7 +42,9 @@ void ServerEndpointLanguageClient::registerCapability(
     lsp::RegistrationParams params) {
   send_in_session([&] {
     (void)_endpoint.clientRegisterCapability(
-        params, [](lsp::ClientRegisterCapabilityResult&&) {});
+        params, [](lsp::ClientRegisterCapabilityResult&&) {
+          /* the reply is always null */
+        });
   });
 }
 

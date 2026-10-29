@@ -97,7 +97,7 @@ std::size_t WorkerPool::selfIndex() const noexcept {
 // then a tight `fetch_add` of one at the tail. The two regimes are the point
 // -- a compare-exchange per item would cost the tail, a fixed slice would
 // strand whoever drew the last big cut.
-void WorkerPool::drain(Job& job) noexcept {
+void WorkerPool::drain(Job& job) const noexcept {
   const std::size_t fineBelow = 4 * job.parties;
   std::size_t first = job.next.load(std::memory_order_relaxed);
 
@@ -241,7 +241,7 @@ void WorkerPool::submit(Task& task, std::size_t self, std::size_t parts) {
 // The publisher's own scheduling loop: it takes tasks -- its own first, then
 // anyone's -- until its run is done. It never blocks, which is what lets a body
 // call `run` again without a worker waiting on a worker.
-void WorkerPool::corun(Job& job, std::size_t self) noexcept {
+void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
   const std::size_t victims = victimCount();
   const bool isWorker = self < _workers.size();
   const Cell& cell = *job.cell;

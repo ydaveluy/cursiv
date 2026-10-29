@@ -85,7 +85,7 @@ class TranslatingParser final : public Parser {
     // A caret strictly inside a replaced piece would split its spelling.
     const auto from = translation->translated(at);
     const auto to = translation->translated(resume);
-    if (from && to)
+    if (from.has_value() && to.has_value())
       _parser->nextFeaturesAt(engine_tree(cst, *translation), *from, *to, out);
   }
 

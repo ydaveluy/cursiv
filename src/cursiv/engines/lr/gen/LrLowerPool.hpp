@@ -138,10 +138,9 @@ struct LrLowerPool : LowerPool {
   // creation around it, which would open the node the nest wraps.
   bool turns(const LrActs& made) const {
     if (made.empty() || rowKind[made.front()] != WriteKind::nest) return false;
-    for (const std::uint16_t r : made)
-      if (rowKind[r] == WriteKind::create || rowKind[r] == WriteKind::climb)
-        return false;
-    return true;
+    return std::ranges::none_of(made, [&](std::uint16_t r) {
+      return rowKind[r] == WriteKind::create || rowKind[r] == WriteKind::climb;
+    });
   }
   // A position whose first reading is a nest turn.
   bool head_turns(LrShapeId at) const {
@@ -199,8 +198,7 @@ struct LrLowerPool : LowerPool {
 inline bool lr_shape_nullable(const LrLowerPool& p, LrShapeId at,
                               const LrBuildCfg& cfg,
                               const std::vector<std::uint8_t>& nullable) {
-  const LrLowerNode& n = p.e[at];
-  switch (n.kind) {
+  switch (const LrLowerNode& n = p.e[at]; n.kind) {
     case LrShape::none:
     case LrShape::end:
       return true;

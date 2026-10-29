@@ -27,11 +27,11 @@ std::uint8_t lr_guard_lay(LrBuildCfg& g, std::uint8_t a, std::uint8_t b) {
 bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   const unsigned nN = g.nnts;
   const unsigned nP = g.nprods;
-  std::vector<unsigned> count(nN, 0u);
+  std::vector count(nN, 0u);
   for (unsigned p = 0; p < nP; ++p) ++count[g.prods[p].lhs];
   // The rules that are a condition: one empty, gated production. A record
   // that states nothing only gave a directive a span to ride.
-  std::vector<std::uint8_t> cond(nN, std::uint8_t{});
+  std::vector cond(nN, std::uint8_t{});
   for (unsigned p = 0; p < nP; ++p) {
     const LrLowProd& q = g.prods[p];
     const bool bare = q.node == kNoRow || writes.chains[q.node].count == 0;
@@ -44,7 +44,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   // One id per conjunction.
   std::vector<std::vector<std::uint8_t>> joined(g.ngapConds + 1u);
   bool ok = true;
-  const auto join = [&](std::uint8_t a, std::uint8_t b) -> std::uint8_t {
+  const auto join = [&](std::uint8_t a, std::uint8_t b) {
     if (a == 0 || a == b) return b;
     if (b == 0) return a;
     if (joined[a].size() <= b) joined[a].resize(b + 1u, 0);
@@ -133,7 +133,7 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   }
   // A condition no position names waits on nothing: its empty rule must not
   // flag the grammar as one that gates reductions.
-  std::vector<std::uint8_t> named(nN, std::uint8_t{});
+  std::vector named(nN, std::uint8_t{});
   for (const std::uint16_t s : sym)
     if (!is_term(s)) named[nt_index(s)] = 1;
   for (unsigned p = 0; p < nP; ++p) {

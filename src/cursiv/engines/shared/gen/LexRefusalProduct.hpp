@@ -210,9 +210,9 @@ struct LexRefusalProduct {
   // behind. A longer stretch, a rescue class or a decoded class is not one
   // byte.
   int relay_refusal(std::size_t k, const LexNode& e, unsigned lvl, int r) {
-    const bool ends = n.relays[static_cast<std::size_t>(r)].row.nested &&
-                      e.a == kNoSet && lvl + 1 == e.min;
-    if (!ends || lex_decode_bytes(g, g.lexKid[e.b + lvl]).any()) {
+    if (const bool ends = n.relays[static_cast<std::size_t>(r)].row.nested &&
+                          e.a == kNoSet && lvl + 1 == e.min;
+        !ends || lex_decode_bytes(g, g.lexKid[e.b + lvl]).any()) {
       refuse(LexRefusalFault::intoRelay, k, ByteSet{});
       return -1;
     }

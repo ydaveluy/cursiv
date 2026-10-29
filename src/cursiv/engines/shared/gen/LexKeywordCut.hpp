@@ -90,7 +90,7 @@ struct LexKeywordCut {
     cut.trivia.assign(n, 0);
     for (std::size_t t = 1; t < startOf.size(); ++t) {
       if (!g.terms[t].trivia || startOf[t] < 0) continue;
-      std::vector<int> todo{startOf[t]};
+      std::vector todo{startOf[t]};
       while (!todo.empty()) {
         const int x = todo.back();
         todo.pop_back();

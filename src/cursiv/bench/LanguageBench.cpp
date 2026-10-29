@@ -449,8 +449,7 @@ void print_row(const Row& row) {
     if (stage == kBuild) std::printf("\n");
     std::printf("    %-14s %12.3f %12.1f", kStageName[stage], row.ms[stage],
                 throughput(row.bytes, row.ms[stage]));
-    const PerfSample& p = row.perf[stage];
-    if (hardware && p.valid)
+    if (const PerfSample& p = row.perf[stage]; hardware && p.valid)
       std::printf(
           " %12.2f %12.2f",
           static_cast<double>(p.cycles) / static_cast<double>(row.bytes),
@@ -484,8 +483,7 @@ void print_row(const Row& row) {
 // shares the pinned CPUs. Zero where the platform cannot say.
 std::size_t usable_cpus() {
 #ifdef __linux__
-  cpu_set_t set;
-  if (sched_getaffinity(0, sizeof set, &set) == 0)
+  if (cpu_set_t set; sched_getaffinity(0, sizeof set, &set) == 0)
     return static_cast<std::size_t>(CPU_COUNT(&set));
 #endif
   return 0;
@@ -600,8 +598,8 @@ void write_multi_csv(const std::string& path,
 std::string companion_csv_path(const std::string& path,
                                std::string_view suffix) {
   const std::size_t dot = path.find_last_of('.');
-  const std::size_t slash = path.find_last_of('/');
-  if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+  if (const std::size_t slash = path.find_last_of('/');
+      dot == std::string::npos || (slash != std::string::npos && dot < slash))
     return path + std::string(suffix);
   return path.substr(0, dot) + std::string(suffix) + path.substr(dot);
 }
@@ -665,14 +663,14 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
     for (std::size_t s = 0; s < row.lsp.size(); ++s) {
       const auto& service = row.lsp[s];
       if (s != 0) out += ", ";
-      out += "\"" + json_escape(service.name) + "\": {\"available\": ";
+      out += '"' + json_escape(service.name) + R"(": {"available": )";
       out += service.ms < 0
-                 ? "false, \"min_ms\": null, \"ms\": null, \"worst_ms\": null"
+                 ? R"(false, "min_ms": null, "ms": null, "worst_ms": null)"
                  : "true";
       if (service.ms >= 0) {
         char buf[192];
         std::snprintf(buf, sizeof buf,
-                      ", \"min_ms\": %.6f, \"ms\": %.6f, \"worst_ms\": %.6f",
+                      R"(, "min_ms": %.6f, "ms": %.6f, "worst_ms": %.6f)",
                       service.min, service.ms, service.worst);
         out += buf;
       }

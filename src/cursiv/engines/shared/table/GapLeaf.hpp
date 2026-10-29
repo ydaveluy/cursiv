@@ -45,8 +45,7 @@ inline constexpr std::uint16_t kGapConds =
 template <class Cfg>
 DynSet gap_cut_terms(const Cfg& c, const GapLeaf& leaf) {
   DynSet out;
-  const LexNode& e = c.lex[leaf.node];
-  if (e.kind == LexKind::token) {
+  if (const LexNode& e = c.lex[leaf.node]; e.kind == LexKind::token) {
     out.set(e.a);
   } else {
     for (unsigned i = 0; i < e.b; ++i) out.set(c.lex[c.lexKid[e.a + i]].a);

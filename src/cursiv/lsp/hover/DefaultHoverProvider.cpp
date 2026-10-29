@@ -28,8 +28,9 @@ namespace {
 // A gap between leaves reaches no record, as does text outside the entry.
 [[nodiscard]] NodeId leaf_at(const Cst& cst, TextOffset offset) {
   if (!cst.has_entry()) return kNoNode;
-  const CstNode& entry = cst[cst.entry_root()];
-  if (offset < entry.begin || offset >= entry.end) return kNoNode;
+  if (const CstNode& entry = cst[cst.entry_root()];
+      offset < entry.begin || offset >= entry.end)
+    return kNoNode;
   const NodeCount rank = cst.leaves_before(offset);
   if (rank == cst.leaf_count()) return kNoNode;
   const CstLeaf leaf = cst.leaf(rank);

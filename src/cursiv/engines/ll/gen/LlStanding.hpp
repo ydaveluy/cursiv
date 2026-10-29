@@ -24,7 +24,7 @@ struct LlStanding {
     // from, freed once it is.
     std::vector<DynSet> lead(g.nnodes);
     std::vector<std::uint8_t> done(g.nnodes, 0);
-    const auto walk = [&](auto&& self, std::uint16_t id) -> void {
+    const auto walk = [&](auto&& self, std::uint16_t id) {
       if (done[id] != 0) return;
       done[id] = 1;
       const LlNode& n = g.nodes[id];

@@ -214,8 +214,8 @@ ScratchInput scratch_input(const json::Value& arguments,
     return input;
   }
   if (language != nullptr) {
-    const LanguageMetaData& meta = language->languageMetaData;
-    if (!meta.fileExtensions.empty())
+    if (const LanguageMetaData& meta = language->languageMetaData;
+        !meta.fileExtensions.empty())
       input.name = "text" + normalize_extension(meta.fileExtensions.front());
     else if (!meta.fileNames.empty())
       input.name = meta.fileNames.front();
@@ -547,9 +547,10 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                       out += description.type->name;
                       out += ')';
                     }
-                    const std::shared_ptr<Document> home =
-                        shared.documents->getDocument(description.documentId);
-                    if (home != nullptr) {
+                    if (const std::shared_ptr<Document> home =
+                            shared.documents->getDocument(
+                                description.documentId);
+                        home != nullptr) {
                       out += "  ";
                       out += home->uri;
                       out += ':';
@@ -877,7 +878,7 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
             [&](const Document& document, const CoreServices&,
                 std::string& out) {
               const auto walk = [&](auto&& self, const AstNode* container,
-                                    std::size_t depth) -> void {
+                                    std::size_t depth) {
                 if (depth > 16) return;
                 for (const AstNodeDescription& entry :
                      document.localSymbols.forContainer(container)) {

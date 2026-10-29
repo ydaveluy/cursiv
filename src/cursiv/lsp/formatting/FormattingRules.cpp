@@ -223,12 +223,13 @@ std::string do_format_line_comment(std::string_view text,
 std::string do_format_multiline_comment(
     std::string_view text, const MultilineCommentFormatOptions& options) {
   const std::string_view body = unwrap_body(text, options);
-  // Not this comment's shape: a `/* ... */` asked to be formatted as a `/** */`
-  // is left exactly as written rather than half-converted.
+  // Not this comment's shape: a plain block comment asked to be formatted as a
+  // doc comment is left exactly as written rather than half-converted.
   if (body.data() == nullptr) return std::string(text);
 
-  const bool hasLineBreak = body.find_first_of("\n\r") != std::string_view::npos;
-  if (!options.forceMultiline && !hasLineBreak) {
+  if (const bool hasLineBreak =
+          body.find_first_of("\n\r") != std::string_view::npos;
+      !options.forceMultiline && !hasLineBreak) {
     const std::string content =
         normalize_tag_line(strip_line_prefix(body, options), options);
     std::string result = options.start;

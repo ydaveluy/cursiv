@@ -56,7 +56,7 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
   bool full = false;
   // The pairs already minted, by their halves.
   std::unordered_map<std::uint32_t, std::uint16_t> fx;
-  const auto fold = [&](ElementId r, ElementId over) -> ElementId {
+  const auto fold = [&](ElementId r, ElementId over) {
     if (over == kNoRow || r == kNoRow) return over;
     const std::uint32_t key = (std::uint32_t{r} << 16) | over;
     if (const auto it = fx.find(key); it != fx.end())
@@ -93,12 +93,12 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
       if (pr.len != 1) continue;
       const std::uint16_t site = g.row_at(pr, 0);
       const std::uint16_t sym = g.sym_at(pr, 0);
-      const bool risk = is_term(sym)
-                            ? g.terms[sym].element == kNoRow &&
-                                  ((pr.node == kNoRow && site == kNoRow) ||
-                                   (pr.node != kNoRow && site != kNoRow))
-                            : unsafe[nt_index(sym)];
-      if (risk && !unsafe[pr.lhs]) {
+      if (const bool risk = is_term(sym)
+                                ? g.terms[sym].element == kNoRow &&
+                                      ((pr.node == kNoRow && site == kNoRow) ||
+                                       (pr.node != kNoRow && site != kNoRow))
+                                : unsafe[nt_index(sym)];
+          risk && !unsafe[pr.lhs]) {
         unsafe[pr.lhs] = true;
         grew = true;
       }

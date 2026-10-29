@@ -178,7 +178,7 @@ class Lowerer {
   // One pass of `one` over each rule read under each configuration from
   // `from` on, by its number there: true where one defined anything.
   template <class One>
-  bool define_pass(unsigned from, One&& one) {
+  bool define_pass(unsigned from, One&& one) const {
     bool grew = false;
     const auto n = static_cast<std::uint16_t>(_ntRule.size());
     for (unsigned k = from; k < _cfgs.size(); ++k) {

@@ -141,9 +141,11 @@ AstNodeDescriptionOrError DefaultLinker::getCandidate(
   if (reference.referenceText.empty())
     return createLinkingError(reference);
 
-  const AstNodeDescription* const found =
-      services.scopeProvider->getScopeEntry(reference, reference.referenceText);
-  if (found != nullptr) return found;
+  if (const AstNodeDescription* const found =
+          services.scopeProvider->getScopeEntry(reference,
+                                                reference.referenceText);
+      found != nullptr)
+    return found;
 
   return createLinkingError(reference);
 }

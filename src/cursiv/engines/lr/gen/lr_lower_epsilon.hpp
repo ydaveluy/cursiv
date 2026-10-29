@@ -30,8 +30,9 @@ inline bool lr_holds_position(const LrLowerSlot& s) {
 inline std::size_t lr_required_end(const std::vector<LrLowerSlot>& slots) {
   std::size_t end = slots.size();
   while (end != 0) {
-    const LrLowerSlot& s = slots[end - 1];
-    if (!s.optional && !s.none && !s.end && is_term(s.sym)) break;
+    if (const LrLowerSlot& s = slots[end - 1];
+        !s.optional && !s.none && !s.end && is_term(s.sym))
+      break;
     --end;
   }
   return end;
@@ -45,7 +46,7 @@ inline bool lr_subset_bit(const LrLowerSlot& s) {
 
 // An optional position as a rule of its own, `O -> X | <nothing>`: its
 // actions belong to X alone, never to O's empty production.
-inline std::uint16_t lr_optional_aux(LrLowered& o, LrLowerPool& p,
+inline std::uint16_t lr_optional_aux(LrLowered& o, const LrLowerPool& p,
                                      LrLowerSlot& s) {
   const std::uint16_t aux = lr_new_aux(o.cfg);
   LrLowerSlot inner = s;
@@ -244,8 +245,7 @@ inline void lr_emit_sequence(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
 
 inline void lr_emit_one(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                         LrShapeId at, const LrActs& made, const LrActs& row) {
-  const LrLowerNode& e = p.e[at];
-  if (e.kind == LrShape::seq) {
+  if (const LrLowerNode& e = p.e[at]; e.kind == LrShape::seq) {
     lr_emit_sequence(o, p, lhs, std::span(p.kid).subspan(e.sym, e.count), e,
                      made, row);
     return;
@@ -258,8 +258,7 @@ inline void lr_emit_one(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
   if (turn) p.inTurn = true;
   const bool apart = turning && turn && !row.empty();
   p.turning = turning && !turn;
-  std::vector<LrLowerSlot> slots{
-      lr_slot_for(o, p, at, LrActs{}, apart ? row : LrActs{})};
+  std::vector slots{lr_slot_for(o, p, at, LrActs{}, apart ? row : LrActs{})};
   p.turning = turning;
   p.inTurn = inTurn;
   lr_emit_subsets(o, p, lhs, std::move(slots), apart ? made : lr_cat(made, row),
@@ -346,7 +345,7 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
   // Where only optional items are left, the group may end.
   const auto ends = [&](std::size_t mask) { return (mask & ~optional) == 0; };
   // Spelt to the right: the election compares readings from the first item.
-  std::vector<std::uint16_t> states(end, kNoRow);
+  std::vector states(end, kNoRow);
   for (std::size_t mask = 1; mask <= full; ++mask)
     if (!std::has_single_bit(mask) || ends(mask))
       states[mask] = mask == full ? lhs : lr_new_aux(o.cfg);

@@ -110,8 +110,9 @@ inline void lr_no_rule_without_production(LrLowered& o) {
     const LrLowProd& q = c.prods[k];
     if (!live[q.lhs]) continue;
     for (unsigned i = 0; i < q.len; ++i) {
-      const std::uint16_t sym = c.sym_at(q, i);
-      if (!is_term(sym) || !c.terms[sym].trivia) continue;
+      if (const std::uint16_t sym = c.sym_at(q, i);
+          !is_term(sym) || !c.terms[sym].trivia)
+        continue;
       o.fault.raise(GrammarFaultCode::skippedTerminal, c.prodBuild[k].owner);
       return;
     }

@@ -54,8 +54,7 @@ class FlatMap {
   }
 
   void grow() {
-    std::vector<std::uint64_t> keys(_keys.empty() ? 64 : _keys.size() * 2,
-                                    kFree);
+    std::vector keys(_keys.empty() ? 64 : _keys.size() * 2, kFree);
     std::vector<V> vals(keys.size());
     const std::size_t mask = keys.size() - 1;
     for (std::size_t k = 0; k < _keys.size(); ++k) {

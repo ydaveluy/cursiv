@@ -75,8 +75,9 @@ class AstArena {
   bool try_extend(void* p, std::size_t oldBytes, std::size_t newBytes) {
     const auto* const q = static_cast<const char*>(p);
     if (q + oldBytes != _cur) return false;
-    const std::size_t more = newBytes - oldBytes;
-    if (std::cmp_greater(more, _end - _cur)) return false;
+    if (const std::size_t more = newBytes - oldBytes;
+        std::cmp_greater(more, _end - _cur))
+      return false;
     _cur = align_up(q + newBytes, kBumpAlign);
     if (_cur > _end) _cur = _end;
     return true;

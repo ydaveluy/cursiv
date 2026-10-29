@@ -147,7 +147,8 @@ class LrGssRope {
   }
 
   [[nodiscard]] std::uint32_t at(Id r, Length index) const {
-    return _nodes[down(r, index, [](Id) {})].left;
+    return _nodes[down(r, index, [](Id) { /* only the leaf is wanted */ })]
+        .left;
   }
 
   // The first index whose value, with all those before it, satisfies `holds`

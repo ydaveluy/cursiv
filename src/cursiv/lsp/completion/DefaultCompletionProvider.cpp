@@ -49,8 +49,8 @@ namespace {
 }
 
 // A hidden leaf is a comment, a recovered one is what a repair discarded --
-// even an unclosed `/*` counts, matching no terminal. The caret must sit
-// strictly inside the leaf: `begin < caret < end`.
+// even an unclosed block comment counts, matching no terminal. The caret must
+// sit strictly inside the leaf: `begin < caret < end`.
 [[nodiscard]] bool caret_in_unread_text(const Cst& cst, TextOffset caret) {
   // The first leaf ending past the caret is the only one that can hold it:
   // ends never decrease, so every earlier leaf closed before it.
@@ -271,7 +271,7 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
     // grammar without cross references -- must not pay for it.
     AstNode* container = nullptr;
     bool climbed = false;
-    const auto container_here = [&]() -> AstNode* {
+    const auto container_here = [&]() {
       if (!climbed) {
         climbed = true;
         container = container_at(document, cst, caret);

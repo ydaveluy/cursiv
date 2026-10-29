@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <numeric>
 
 namespace cursiv::unicode {
 
@@ -15,7 +16,7 @@ struct Range {
 constexpr bool within(const Range* r, std::size_t n, char32_t cp) {
   std::size_t lo = 0, hi = n;
   while (lo < hi) {
-    const std::size_t mid = lo + (hi - lo) / 2;
+    const std::size_t mid = std::midpoint(lo, hi);
     if (r[mid].hi < cp)
       lo = mid + 1;
     else

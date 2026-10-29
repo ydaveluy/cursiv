@@ -72,7 +72,7 @@ std::uint16_t Lowerer::gap_leaf(std::uint64_t id,
        (leaf.skip != kNoLexNode && !gap_readable(_c, leaf.skip, true))))
     lower_refuse(_c, LowerFail::gapShape);
   _c.gapLeaves[_c.ngapLeaves] = leaf;
-  return static_cast<std::uint16_t>(_c.ngapLeaves++);
+  return _c.ngapLeaves++;
 }
 
 bool Lowerer::lexical(ImageId id) {
@@ -129,8 +129,7 @@ bool Lowerer::gap(ImageId id) {
       break;
     case ImageKind::notOf: {
       const ImageId k = kid(n, 0);
-      const ImageNode kn = at(k);
-      if (kn.kind == ImageKind::trigger) {
+      if (const ImageNode kn = at(k); kn.kind == ImageKind::trigger) {
         const ImageId p = kid(kn, 0);
         out = lexical(p) && !cut_prefix(p).ok;
       } else {
@@ -372,8 +371,7 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
 }
 
 void Lowerer::cut_terms(unsigned cfg, ImageId token, DynSet& out) {
-  const ImageNode n = at(token);
-  if (n.kind == ImageKind::choice) {
+  if (const ImageNode n = at(token); n.kind == ImageKind::choice) {
     for (const ImageId k : kids_of(n)) cut_terms(cfg, k, out);
     return;
   }

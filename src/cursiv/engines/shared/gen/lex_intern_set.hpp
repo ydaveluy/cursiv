@@ -18,7 +18,9 @@ namespace cursiv {
 
 inline constexpr ByteSet kAllBytes{{~0ull, ~0ull, ~0ull, ~0ull}};
 
-inline ByteSet lex_not(ByteSet s) { return ByteSet{kAllBytes}.andnot(s); }
+inline ByteSet lex_not(const ByteSet& s) {
+  return ByteSet{kAllBytes}.andnot(s);
+}
 
 // Where a decoded set lists the scalars it tests: `at << 16 | count` into
 // `scalarRanges`, zero for the word class's.

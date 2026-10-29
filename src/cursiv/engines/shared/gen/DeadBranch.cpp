@@ -154,8 +154,8 @@ class Dead {
 
   // The choice an `either` element stands for, under what keeps it one.
   ImageId choice_of(ImageId id) const {
-    const ImageNode& n = node(id);
-    if (n.kind == ImageKind::skip || n.kind == ImageKind::doc ||
+    if (const ImageNode& n = node(id);
+        n.kind == ImageKind::skip || n.kind == ImageKind::doc ||
         (n.kind == ImageKind::repeat && n.m == 1 && n.n == 1))
       return choice_of(kid(n, 0));
     return id;

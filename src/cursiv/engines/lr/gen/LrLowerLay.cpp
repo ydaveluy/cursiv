@@ -173,8 +173,7 @@ LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
     case ImageKind::nest:
       return lay_made(cfg, e);
     case ImageKind::notOf: {
-      const ImageNode k = at(kid(n, 0));
-      if (k.kind == ImageKind::trigger) {
+      if (const ImageNode k = at(kid(n, 0)); k.kind == ImageKind::trigger) {
         const Cut cut = cut_prefix(kid(k, 0));
         if (cut.ok && cut.guards.empty()) return lay_stop(cfg, e, cut);
       }
