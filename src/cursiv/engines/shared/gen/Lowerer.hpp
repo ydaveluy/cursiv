@@ -425,23 +425,9 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
     return true;
   }
 
-  Lowered& _o;
-  Pool& _p;
-  decltype(Lowered::cfg)& _cfg;
-
- private:
-  Self& self() { return static_cast<Self&>(*this); }
-  // Over a choice of tokens, a conversion rides the record of each token, as a
-  // directive over a choice rides each alternative: none opens over the
-  // choice.
-  bool one_token(Id at) const {
-    const Node& n = _p.e[at];
-    if (n.kind == Shape::sym) return is_term(static_cast<std::uint16_t>(n.sym));
-    if (n.kind != Shape::alt || !n.made.empty() || !n.row.empty()) return false;
-    for (decltype(n.count) k = 0; k < n.count; ++k)
-      if (!one_token(_p.kid[n.sym + k])) return false;
-    return true;
-  }
+  // A data rule's conversion over what it reads in place. Over a choice of
+  // tokens, it rides the record of each token, as a directive over a choice
+  // rides each alternative: none opens over the choice.
   void convert_over(Id at, std::uint16_t row) {
     Node& n = _p.e[at];
     if (n.kind != Shape::alt || !one_token(at)) {
@@ -450,6 +436,22 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
     }
     for (decltype(n.count) k = 0; k < n.count; ++k)
       convert_over(_p.kid[n.sym + k], row);
+  }
+
+  Lowered& _o;
+  Pool& _p;
+  decltype(Lowered::cfg)& _cfg;
+
+ private:
+  Self& self() { return static_cast<Self&>(*this); }
+  // A token, or a choice of tokens no row stands over.
+  bool one_token(Id at) const {
+    const Node& n = _p.e[at];
+    if (n.kind == Shape::sym) return is_term(static_cast<std::uint16_t>(n.sym));
+    if (n.kind != Shape::alt || !n.made.empty() || !n.row.empty()) return false;
+    for (decltype(n.count) k = 0; k < n.count; ++k)
+      if (!one_token(_p.kid[n.sym + k])) return false;
+    return true;
   }
 };
 

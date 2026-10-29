@@ -10,6 +10,11 @@ namespace tinfixop {
 
 enum class Op : std::uint8_t { equal, NOTEQUAL };
 enum class Vis : std::uint8_t { Public, Protected, Private };
+// No operator gives `unset`: a member left at it was never written.
+enum class Mark : std::uint8_t {
+  unset, power, slash, divide, plus, minus, le, ge,
+  less,  more,  MOD,   REM,    neg,  inv,   bang, query
+};
 
 namespace ast {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};
@@ -35,6 +40,23 @@ struct Decl : cursiv::Extends<cursiv::AstNode> {
   Vis vis = Vis::Private;
   string_view name;
   bool seen = false;
+};
+struct Marked : cursiv::Extends<Expr> {
+  Expr* left = nullptr;
+  Mark op = Mark::unset;
+  Expr* right = nullptr;
+};
+struct MarkedPrefix : cursiv::Extends<Expr> {
+  Mark op = Mark::unset;
+  Expr* operand = nullptr;
+};
+struct MarkedPostfix : cursiv::Extends<Expr> {
+  Expr* operand = nullptr;
+  Mark op = Mark::unset;
+};
+struct MarkedDoc : cursiv::Extends<cursiv::AstNode> {
+  Mark direct = Mark::unset;
+  Expr* value = nullptr;
 };
 }  // namespace ast
 
@@ -273,6 +295,44 @@ struct Lengthened : Base {
   };
 };
 
+// An operator a data rule spells takes the constant of the alternative it
+// read, at every kind of level, as a member written directly does: a terminal
+// giving a constant per alternative, a rule calling rules that give one each,
+// read in place or not, and alternatives of two words. Beside them, the
+// operators that already name their value: a whole body converted, a keyword
+// read as its enumerator and a literal given its constant in place.
+struct Marking : Base {
+  struct E;
+  struct SLASH
+      : terminal<as<Mark::slash>(lit<"/">) | as<Mark::divide>(lit<"÷">)> {};
+  struct NEG : terminal<as<Mark::neg>(lit<"~">) | as<Mark::inv>(lit<"¬">)> {};
+  struct BANG
+      : terminal<as<Mark::bang>(lit<"!">) | as<Mark::query>(lit<"?">)> {};
+  struct Plus : rule<as<Mark::plus>(lit<"+">)> {};
+  struct Minus : rule<as<Mark::minus>(lit<"-">)> {};
+  struct Sign : rule<ref<Plus> | ref<Minus>> {};
+  struct LessEqual : rule<as<Mark::le>(lit<"<"> + lit<"=">)> {};
+  struct MoreEqual : rule<as<Mark::ge>(lit<">"> + lit<"=">)> {};
+  struct Bound : rule<ref<LessEqual> | ref<MoreEqual>> {};
+  struct Order : rule<as<Mark::less>(kw<"IS"> + kw<"LESS">) |
+                      as<Mark::more>(kw<"IS"> + kw<"MORE">)> {};
+  struct POWER : terminal<as<Mark::power>(lit<"^"> | lit<"**">)> {};
+  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
+                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct E : infix<Primary, ast::Marked,
+                   levels(postfix<&ast::MarkedPostfix::operand,
+                                  &ast::MarkedPostfix::op>(ref<BANG>),
+                          prefix<&ast::MarkedPrefix::op,
+                                 &ast::MarkedPrefix::operand>(ref<NEG>),
+                          right(ref<POWER>), left(ref<SLASH>), left(ref<Sign>),
+                          left(kw<"MOD"> | as<Mark::REM>(lit<"%">)),
+                          nonassoc(ref<Bound> | ref<Order>))> {};
+  struct Root : rule<create<ast::MarkedDoc>(
+                         assign<&ast::MarkedDoc::direct>(ref<SLASH>) +
+                         lit<";"> + assign<&ast::MarkedDoc::value>(ref<E>)) +
+                     eof> {};
+};
+
 // Two tables give `+` a level and a grouping each. A table whose operand ends
 // with the other's expression leaves `+` to that expression.
 struct Tables : Base {
@@ -312,7 +372,8 @@ struct Suite : Base {
                      (lit<"derived:"> + ref<Derived::Root>) |
                      (lit<"recursive:"> + ref<Recursive::Root>) |
                      (lit<"lengthened:"> + ref<Lengthened::Root>) |
-                     (lit<"tables:"> + ref<Tables::Root>)> {};
+                     (lit<"tables:"> + ref<Tables::Root>) |
+                     (lit<"marking:"> + ref<Marking::Root>)> {};
   using entry = Root;
 };
 

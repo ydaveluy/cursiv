@@ -362,15 +362,17 @@ void lay_own_records(LlLowered& o, const LlRecordPlan& plan) {
 }
 
 void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
-                         std::uint16_t row, std::uint8_t prec,
+                         const Acts& made, const Acts& row, std::uint8_t prec,
                          Association group, std::uint8_t cfg,
                          std::vector<std::uint16_t> before,
                          std::vector<std::uint16_t> after) {
   const Node& n = p.e[at];
   if (n.kind == Shape::sym && is_term(n.sym)) {
-    const auto token =
-        put_node(o, LlNode{.kind = LlShape::term, .sym = n.sym, .row = row},
-                 LlNodeBuild{cfg});
+    const auto token = put_node(o,
+                                LlNode{.kind = LlShape::term,
+                                       .sym = n.sym,
+                                       .row = o.writes.intern_cat(made, row)},
+                                LlNodeBuild{cfg});
     const auto guard = [&](const std::vector<std::uint16_t>& conditions) {
       if (conditions.empty()) return kNoRow;
       const auto condition = conditions.size() == 1
@@ -399,9 +401,11 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
     return;
   }
   if (n.kind == Shape::alt) {
-    for (unsigned i = 0; i < n.count; ++i)
-      emit_operator_nodes(o, p, p.kid[n.sym + i], row, prec, group, cfg, before,
-                          after);
+    for (unsigned i = 0; i < n.count; ++i) {
+      const auto k = p.kid[n.sym + i];
+      emit_operator_nodes(o, p, k, cat(p.e[k].made, made), cat(p.e[k].row, row),
+                          prec, group, cfg, before, after);
+    }
     return;
   }
   if (n.kind == Shape::seq) {
@@ -414,8 +418,9 @@ void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
         token = k;
     }
     if (token != kNoRow) {
-      emit_operator_nodes(o, p, token, row, prec, group, cfg, std::move(before),
-                          std::move(after));
+      emit_operator_nodes(o, p, token, cat(p.e[token].made, made),
+                          cat(p.e[token].row, row), prec, group, cfg,
+                          std::move(before), std::move(after));
       return;
     }
   }

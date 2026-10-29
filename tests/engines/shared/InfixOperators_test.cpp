@@ -302,6 +302,89 @@ void each_table_reads_its_own_level(const cursiv::Parser& p) {
   check(p, "tables:", "type: @a * b | c", "((a * b) | c)");
 }
 
+std::string_view name_of(Mark mark) {
+  static constexpr std::string_view kNames[] = {
+      "unset", "power", "slash", "divide", "plus", "minus", "le", "ge",
+      "less",  "more",  "MOD",   "REM",    "neg",  "inv",   "bang", "query"};
+  return kNames[static_cast<unsigned>(mark)];
+}
+
+void spell_marked(const ast::Expr& expr, std::string& out) {
+  if (const auto* const name = cursiv::ast_cast<ast::Name>(&expr)) {
+    out += name->name;
+  } else if (const auto* const pre =
+                 cursiv::ast_cast<ast::MarkedPrefix>(&expr)) {
+    out += '(';
+    out += name_of(pre->op);
+    out += ' ';
+    spell_marked(*pre->operand, out);
+    out += ')';
+  } else if (const auto* const post =
+                 cursiv::ast_cast<ast::MarkedPostfix>(&expr)) {
+    out += '(';
+    spell_marked(*post->operand, out);
+    out += ' ';
+    out += name_of(post->op);
+    out += ')';
+  } else {
+    const auto& marked = static_cast<const ast::Marked&>(expr);
+    out += '(';
+    spell_marked(*marked.left, out);
+    out += ' ';
+    out += name_of(marked.op);
+    out += ' ';
+    spell_marked(*marked.right, out);
+    out += ')';
+  }
+}
+
+// The member written directly, then the expression.
+void check_marked(const cursiv::Parser& p, std::string_view text,
+                  std::string_view expected) {
+  const std::string source = "marking:" + std::string(text);
+  const cursiv::ParseResult r = p.parse(source);
+  const auto* const doc = r.value_as<ast::MarkedDoc>();
+  std::string got = "<refused>";
+  if (r.accepted && r.diagnostics.empty() && doc != nullptr &&
+      doc->value != nullptr) {
+    got = std::string(name_of(doc->direct)) + ' ';
+    spell_marked(*doc->value, got);
+  }
+  same_text(engine, text, got, expected);
+}
+
+// Each word of a data rule's alternatives gives its constant to the operator
+// it spells, as to the member it is assigned to directly.
+void an_operator_takes_the_constant_of_its_alternative(
+    const cursiv::Parser& p) {
+  check_marked(p, "/; a / b", "slash (a slash b)");
+  check_marked(p, "÷; a ÷ b", "divide (a divide b)");
+  check_marked(p, "/; a ÷ b / c", "slash ((a divide b) slash c)");
+  check_marked(p, "÷; a + b - c", "divide ((a plus b) minus c)");
+  check_marked(p, "/; a <= b", "slash (a le b)");
+  check_marked(p, "/; a > = b", "slash (a ge b)");
+  check_marked(p, "/; a IS LESS b", "slash (a less b)");
+  check_marked(p, "/; a IS MORE b", "slash (a more b)");
+  check_marked(p, "/; a <= b >= c", "<refused>");
+  check_marked(p, "/; ~a", "slash (neg a)");
+  check_marked(p, "/; ¬a", "slash (inv a)");
+  check_marked(p, "/; a!", "slash (a bang)");
+  check_marked(p, "/; a?", "slash (a query)");
+  check_marked(p, "÷; ~a! ÷ ¬b?",
+               "divide ((neg (a bang)) divide (inv (b query)))");
+  check_marked(p, "/; a + b / c IS LESS d - e",
+               "slash ((a plus (b slash c)) less (d minus e))");
+}
+
+// Operators that name their value themselves keep it: a terminal converting
+// its whole body, a keyword read as the enumerator it spells and a literal
+// given its constant in place.
+void an_operator_naming_its_value_keeps_it(const cursiv::Parser& p) {
+  check_marked(p, "/; a ^ b ** c", "slash (a power (b power c))");
+  check_marked(p, "/; a MOD b % c", "slash ((a MOD b) REM c)");
+  check_marked(p, "÷; a MOD b ^ c / d", "divide (a MOD ((b power c) slash d))");
+}
+
 void every_engine(const cursiv::Parser& p) {
   a_sequence_hands_over_its_parts_joined(p);
   trivia_stands_inside_the_sequence(p);
@@ -324,6 +407,8 @@ void every_engine(const cursiv::Parser& p) {
   a_recursive_data_rule_spells_an_operator(p);
   a_condition_in_an_operator_reads_the_lengthened_token(p);
   each_table_reads_its_own_level(p);
+  an_operator_takes_the_constant_of_its_alternative(p);
+  an_operator_naming_its_value_keeps_it(p);
 }
 
 }  // namespace

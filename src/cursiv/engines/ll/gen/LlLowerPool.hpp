@@ -106,10 +106,12 @@ std::uint16_t put_group(LlLowered& o, LlShape kind,
 std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
                    const Acts& made, const Acts& row, std::uint16_t owner);
 
-// A condition reads the gap on its own side of the token: those in front of it
-// stay in front, those behind it stay behind.
+// One climb operator per token of an atomic operator, `made` and `row` the
+// chain over `at` as `emit` takes them. A condition reads the gap on its own
+// side of the token: those in front of it stay in front, those behind it stay
+// behind.
 void emit_operator_nodes(LlLowered& o, const Pool& p, std::uint16_t at,
-                         std::uint16_t row, std::uint8_t prec,
+                         const Acts& made, const Acts& row, std::uint8_t prec,
                          Association group, std::uint8_t cfg,
                          std::vector<std::uint16_t> before = {},
                          std::vector<std::uint16_t> after = {});

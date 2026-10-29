@@ -30,8 +30,8 @@ class LlLowerer : public LowerWalk<LlLowerer, LlLowered, detail::llow::Pool> {
   void declare_rules() override;
 
   ImageId ended_in(ImageId id, bool inPredicate);
-  ImageId operator_body(unsigned cfg, ImageId op,
-                        std::vector<std::uint32_t>& reading);
+  std::uint16_t lay_operator(unsigned cfg, ImageId op,
+                             std::vector<std::uint32_t>& reading);
 
   std::uint16_t lay(unsigned cfg, ImageId e);
   // An embed's close, read under the caller's configuration.
