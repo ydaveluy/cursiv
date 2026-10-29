@@ -80,7 +80,7 @@ struct LlStanding {
             unsigned run = 0;
             for (unsigned i = 0; i < n.count; ++i) {
               const auto kid = g.kids[n.sym + i];
-              pending.push_back({kid, run == 0 ? point[visit.id] : from[run]});
+              pending.emplace_back(kid, run == 0 ? point[visit.id] : from[run]);
               if (!b.nullable[kid]) run = i + 1;
             }
             std::reverse(pending.begin() + begin, pending.end());
@@ -90,7 +90,7 @@ struct LlStanding {
           case LlShape::rep: {
             const auto children = g.children(n);
             for (auto kid = children.rbegin(); kid != children.rend(); ++kid)
-              pending.push_back({*kid, point[visit.id]});
+              pending.emplace_back(*kid, point[visit.id]);
             break;
           }
           default:

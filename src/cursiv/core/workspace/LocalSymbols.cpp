@@ -154,7 +154,7 @@ void LocalSymbols::seal() {
     for (std::uint32_t i = begin + _groups[g].count; i-- > begin;) {
       const std::string_view name = _entries[i].name;
       const std::uint64_t hash = containerHash ^ hash_name(name);
-      const std::uint32_t tag = static_cast<std::uint32_t>(hash >> 32u);
+      const auto tag = static_cast<std::uint32_t>(hash >> 32u);
       std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
       for (;;) {
         NameSlot& slot = _names[at];
@@ -186,7 +186,7 @@ LocalSymbols::NameMatches LocalSymbols::find_held(
   assert((_entries.empty() || !_names.empty()) &&
          "LocalSymbols::seal() has to run before the first lookup");
   const std::uint64_t hash = mix(container) ^ nameHash;
-  const std::uint32_t tag = static_cast<std::uint32_t>(hash >> 32u);
+  const auto tag = static_cast<std::uint32_t>(hash >> 32u);
   std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
   for (;;) {
     const NameSlot& slot = _names[at];

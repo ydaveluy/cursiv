@@ -128,8 +128,8 @@ class ValidationDiagnosticBuilderBase {
   // rows one by one or in bulk. `uri` empty means this same document.
   Derived& relatedInformation(TextRange span, std::string_view message,
                               std::string_view uri = {}) {
-    _relatedInformation.push_back(DiagnosticRelatedInformation{
-        std::string(uri), std::string(message), span});
+    _relatedInformation.emplace_back(std::string(uri), std::string(message),
+                                     span);
     return derived();
   }
   Derived& relatedInformation(const AstNode& node, std::string_view message,

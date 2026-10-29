@@ -185,7 +185,7 @@ struct LexAlphabet {
       });
     std::vector<std::vector<std::uint64_t>> seen;
     for (unsigned b = 0; b < 256; ++b) {
-      const auto at = std::find(seen.begin(), seen.end(), sig[b]);
+      const auto at = std::ranges::find(seen, sig[b]);
       A.cls[b] = static_cast<std::uint8_t>(at - seen.begin());
       if (at == seen.end()) seen.push_back(sig[b]);
     }

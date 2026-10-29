@@ -49,10 +49,10 @@ DecodedSemanticTokensWithRanges highlightHelper(
     const TextOffset begin = textDocument.offsetAt(Position{line, character});
     const TextOffset end =
         textDocument.offsetAt(Position{line, character + length});
-    out.tokens.push_back({begin,
-                          static_cast<SemanticTokenType>(encoded.data[at + 3]),
-                          static_cast<std::uint32_t>(encoded.data[at + 4]),
-                          textDocument.getText().substr(begin, end - begin)});
+    out.tokens.emplace_back(
+        begin, static_cast<SemanticTokenType>(encoded.data[at + 3]),
+        static_cast<std::uint32_t>(encoded.data[at + 4]),
+        textDocument.getText().substr(begin, end - begin));
   }
   return out;
 }

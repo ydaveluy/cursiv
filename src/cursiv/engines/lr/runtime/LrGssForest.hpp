@@ -64,7 +64,7 @@ class LrGssForest {
                              static_cast<std::uint16_t>(children.size()));
     else
       (void)_choiceAt.append(at);
-    const Id id = static_cast<Id>(
+    const auto id = static_cast<Id>(
         _alternatives.push_back({childRange, choiceRange, step, none, kind}));
     Node& n = _nodes[node];
     if (n.alternative == none)

@@ -82,9 +82,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       if (at == ruleAt.end())
         throw std::logic_error(
             "a conversion rule is absent from its grammar bindings");
-      out.sources.push_back(std::format("::cursiv::detail::{}<{}, {}>", alias,
-                                        qualified, at->second));
-      spelling = out.sources.back();
+      spelling = out.sources.emplace_front(std::format(
+          "::cursiv::detail::{}<{}, {}>", alias, qualified, at->second));
     }
     return spelling;
   };
@@ -153,7 +152,7 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
                        at->second);
   };
   for (std::size_t t = 0; t < typeKeys.size(); ++t)
-    out.types.push_back({t < built, source(typeKeys[t])});
+    out.types.emplace_back(t < built, source(typeKeys[t]));
 
   out.typeWords = (typeKeys.size() + 63) / 64;
   out.derives.assign(typeKeys.size() * out.typeWords, 0);

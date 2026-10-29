@@ -78,7 +78,7 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
       if (action.edit.has_value() && action.edit->changes.has_value())
         for (const auto& [uri, edits] : *action.edit->changes)
           for (const lsp::TextEdit& edit : edits)
-            converted.push_back({from_lsp(edit.range), edit.newText});
+            converted.emplace_back(from_lsp(edit.range), edit.newText);
       expectedFunction(converted.empty() ? "false" : "true", "true",
                        "the code action carries no edit");
       const std::string updated = TextDocument::applyEdits(text, converted);

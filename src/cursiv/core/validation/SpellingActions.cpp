@@ -58,8 +58,8 @@ JsonValue::Array near_names(const Document& document,
         // An outer scope re-surfaces what an inner one already gave.
         for (const Near& held : near)
           if (held.name == entry.name) return true;
-        near.push_back(Near{entry.name, distance,
-                            entry.documentId != document.id});
+        near.emplace_back(entry.name, distance,
+                          entry.documentId != document.id);
         return true;
       });
   std::ranges::sort(near, [](const Near& a, const Near& b) {

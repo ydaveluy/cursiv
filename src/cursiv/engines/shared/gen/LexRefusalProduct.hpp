@@ -102,8 +102,9 @@ struct LexRefusalProduct {
     bool scalars = false;
     LexCodePoints all;
     std::size_t steps = 0;
-    for (int j = front[k]; j >= 0 && steps++ < n.guards.size();
+    for (int j = front[k]; j >= 0 && steps < n.guards.size();
          j = front[static_cast<std::size_t>(j)]) {
+      ++steps;
       Laid& word = laid[static_cast<std::size_t>(j)];
       if (!word.known) {
         word.known = true;
@@ -131,7 +132,7 @@ struct LexRefusalProduct {
   // a byte its bound neither refuses nor decodes at: where the bound decodes,
   // the scalar there may be one it refuses, so the walk reads on.
   bool total(std::vector<int> start) const {
-    std::sort(start.begin(), start.end());
+    std::ranges::sort(start);
     std::vector<std::vector<int>> work{start};
     std::set<std::vector<int>> seen{std::move(start)};
     for (std::size_t i = 0; i < work.size(); ++i) {
@@ -167,7 +168,7 @@ struct LexRefusalProduct {
   }
 
   template <class Whole>
-  bool scalars_total(const std::vector<int>& cl, Whole&& whole,
+  bool scalars_total(const std::vector<int>& cl, const Whole& whole,
                      std::uint16_t rescue) const {
     const LexCodePoints word = word_of(rescue);
     bool dies = false;
@@ -219,8 +220,8 @@ struct LexRefusalProduct {
     if (!off.any()) return -1;
     LexRelayBuild shifted = n.relays[static_cast<std::size_t>(r)];
     shifted.row.back = 1;
-    const auto same = std::find_if(
-        n.relays.begin(), n.relays.end(), [&](const LexRelayBuild& x) {
+    const auto same =
+        std::ranges::find_if(n.relays, [&](const LexRelayBuild& x) {
           return x.row == shifted.row && x.resumeOut == shifted.resumeOut;
         });
     const int at = same == n.relays.end()
@@ -313,9 +314,10 @@ struct LexRefusalProduct {
         // the frontier, and so is a whole word of one scalar, decoded; more
         // is text past the token.
         LexCodePoints own;
-        if (st.bound < 0 ? !g.sets[wantIdx].any() &&
-                               !lex_decode_bytes(g, wantIdx).any()
-                         : lex_bound_covers(g, st.bound, wantIdx)) {
+        if (st.bound < 0
+                ? !g.sets[wantIdx].any() && !lex_decode_bytes(g, wantIdx).any()
+                : lex_bound_covers(g, static_cast<std::uint16_t>(st.bound),
+                                   wantIdx)) {
           add(x);
         } else if (lvl == 0 && e.a == kNoSet &&
                    (e.min == 1 ? ahead(k) : one_scalar(e, own))) {
@@ -328,7 +330,7 @@ struct LexRefusalProduct {
           }
           if (st.bound >= 0) {
             bytes |= g.sets[st.bound];
-            own.unite(lex_set_cps(g, st.bound));
+            own.unite(lex_set_cps(g, static_cast<std::uint16_t>(st.bound)));
           }
           const std::uint16_t to = lex_intern_cps_bound(g, bytes, own);
           add(to == st.bound ? x : n.match_bounded(st.accept, to, st.lit));
@@ -337,8 +339,10 @@ struct LexRefusalProduct {
         } else if (st.bound < 0) {
           add(n.match_bounded(st.accept, wantIdx, st.lit));
         } else {
-          add(n.match_bounded(st.accept, lex_bound_union(g, st.bound, wantIdx),
-                              st.lit));
+          add(n.match_bounded(
+              st.accept,
+              lex_bound_union(g, static_cast<std::uint16_t>(st.bound), wantIdx),
+              st.lit));
         }
       } else {
         if (st.relay >= 0) {

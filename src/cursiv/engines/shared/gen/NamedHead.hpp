@@ -71,7 +71,7 @@ class NamedHead {
   }
 
  private:
-  ByteSet decodes(unsigned set) const { return lex_decode_bytes(_g, set); }
+  ByteSet decodes(std::uint16_t set) const { return lex_decode_bytes(_g, set); }
 
   // Per terminal, 1 where it is not named.
   const std::vector<std::uint8_t>& answers_of(std::uint16_t root) const {
@@ -143,7 +143,7 @@ class NamedHead {
         // first byte and nothing rescues a word of one class.
         unsigned start = std::min(in.start, 1u);
         if (e.min != 0) {
-          const unsigned c0 = _g.lexKid[e.b];
+          const std::uint16_t c0 = _g.lexKid[e.b];
           if (!first.intersects(_g.sets[c0] | decodes(c0)))
             start = in.start;
           else if (e.min == 1 && e.a == kNoSet && _g.sets[c0].covers(first))

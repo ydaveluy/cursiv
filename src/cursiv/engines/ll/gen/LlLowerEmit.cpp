@@ -32,7 +32,7 @@ std::uint16_t put_group(LlLowered& o, LlShape kind,
                         const LlNodeBuild& b) {
   if (std::uint64_t{o.cfg.nkids} + ids.size() > kNoRow) too_many_positions();
   const auto base = static_cast<std::uint16_t>(o.cfg.nkids);
-  std::copy(ids.begin(), ids.end(), o.cfg.kids.row(o.cfg.nkids, ids.size()));
+  std::ranges::copy(ids, o.cfg.kids.row(o.cfg.nkids, ids.size()));
   o.cfg.nkids += ids.size();
   return put_node(o,
                   LlNode{.kind = kind,
@@ -134,7 +134,10 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
                          bool foldStep = false) {
     const auto id = put_group(o, kind, ids, chain,
                               LlNodeBuild{.cfg = e.cfg, .foldStep = foldStep});
-    return kind == LlShape::alt ? with_decision(o, id, ids.size(), rule) : id;
+    return kind == LlShape::alt
+               ? with_decision(o, id, static_cast<std::uint16_t>(ids.size()),
+                               rule)
+               : id;
   };
   const auto tooWide = [&] {
     return refuse_node(o, LowerFail::unorderedTooWide, owner);
@@ -150,7 +153,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
       for (const auto i : order)
         ids.push_back(emit_item(o, p, p.kid[e.sym + i], owner));
       arms.push_back(group(LlShape::seq, ids, owner, chain, e.foldStep));
-    } while (std::next_permutation(order.begin(), order.end()));
+    } while (std::ranges::next_permutation(order).found);
     return group(LlShape::alt, arms, owner);
   }
   if (std::uint32_t{o.cfg.nrules} + (1u << e.count) - 1u > kNtBase)

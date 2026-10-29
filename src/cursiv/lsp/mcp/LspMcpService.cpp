@@ -90,7 +90,7 @@ void LspMcpService::registerFormatTool(McpServer& server) const {
               std::vector<TextEdit> converted;
               converted.reserve(edits.size());
               for (const lsp::TextEdit& edit : edits)
-                converted.push_back({from_lsp(edit.range), edit.newText});
+                converted.emplace_back(from_lsp(edit.range), edit.newText);
               out =
                   TextDocument::applyEdits(document.textDocument(), converted);
             });

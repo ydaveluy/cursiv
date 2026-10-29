@@ -626,8 +626,9 @@ GrammarDump GrammarPrinter::render() {
     _current = i;
     // Printing may append to the entries, so keep no reference across it.
     line(result.text, _entries[i].rule);
-    result.rules.push_back({_entries[i].name, begin, result.text.size() - begin,
-                            std::move(_entries[i].dependencies)});
+    result.rules.emplace_back(_entries[i].name, begin,
+                              result.text.size() - begin,
+                              std::move(_entries[i].dependencies));
   }
   return result;
 }

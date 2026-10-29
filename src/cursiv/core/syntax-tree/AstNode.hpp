@@ -112,7 +112,7 @@ class vector {
       _cap = static_cast<size_type>(want);
       return;
     }
-    T* const q = static_cast<T*>(a.carve_bytes(bytes, alignof(T)));
+    auto* const q = static_cast<T*>(a.carve_bytes(bytes, alignof(T)));
     if (_size != 0) std::memcpy(q, _data, std::size_t{_size} * sizeof(T));
     _data = q;
     _cap = static_cast<size_type>(want);
@@ -545,9 +545,9 @@ struct multi_reference {
 
   multi_reference() = default;
   multi_reference(const multi_reference&) = default;
-  multi_reference(multi_reference&&) = default;
+  multi_reference(multi_reference&&) noexcept = default;
   multi_reference& operator=(const multi_reference&) = default;
-  multi_reference& operator=(multi_reference&&) = default;
+  multi_reference& operator=(multi_reference&&) noexcept = default;
 
   // Same rule and same return contract as `reference::resolve`.
   [[nodiscard]] RefState resolve() const {

@@ -354,7 +354,7 @@ class LrGssRope {
       if (m.left == n.left && m.right == n.right && m.agg == n.agg)
         return _slots[at];
     }
-    const Id id = static_cast<Id>(_nodes.push_back(n));
+    const auto id = static_cast<Id>(_nodes.push_back(n));
     _slots[at] = id;
     return id;
   }

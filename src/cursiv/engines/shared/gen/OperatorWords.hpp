@@ -114,15 +114,14 @@ class OperatorWords {
   }
   void settle() {
     std::ranges::sort(_words);
-    _words.erase(std::unique(_words.begin(), _words.end()), _words.end());
+    _words.erase(std::ranges::unique(_words).begin(), _words.end());
     if (_words.size() > kLimit) {
       _open = true;
       _opening = opening();
       _words.clear();
     }
     std::ranges::sort(_opening);
-    _opening.erase(std::unique(_opening.begin(), _opening.end()),
-                   _opening.end());
+    _opening.erase(std::ranges::unique(_opening).begin(), _opening.end());
   }
 
   std::vector<std::vector<std::uint16_t>> _words{};

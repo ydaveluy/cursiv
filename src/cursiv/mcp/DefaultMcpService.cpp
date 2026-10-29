@@ -402,9 +402,9 @@ void DefaultMcpService::registerDiagnosticsTool(McpServer& server) const {
                       ? shared.documents->getDocuments(
                             tool_file_uri(directory->string()))
                       : shared.documents->all();
-              std::sort(
-                  documents.begin(), documents.end(),
-                  [](const auto& a, const auto& b) { return a->uri < b->uri; });
+              std::ranges::sort(documents, [](const auto& a, const auto& b) {
+                return a->uri < b->uri;
+              });
               for (const std::shared_ptr<Document>& document : documents) {
                 if (document == nullptr || document->diagnostics.empty())
                   continue;
@@ -536,12 +536,10 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
                       return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32)
                                                   : c;
                     };
-                    const auto matched = std::search(
-                        description.name.begin(), description.name.end(),
-                        needle.begin(), needle.end(),
+                    const auto matched = std::ranges::search(
+                        description.name, needle,
                         [&](char a, char b) { return lower(a) == lower(b); });
-                    if (matched == description.name.end() && !needle.empty())
-                      return true;
+                    if (matched.empty() && !needle.empty()) return true;
                     if (++matches > kMaxLines) return false;
                     out += description.name;
                     if (description.type != nullptr) {
@@ -747,8 +745,8 @@ void DefaultMcpService::registerRenameTool(McpServer& server) const {
               std::vector<std::pair<DocumentId, TextOffset>> seen;
               const auto edit = [&](const Document& home, TextOffset begin,
                                     TextOffset end) {
-                if (std::find(seen.begin(), seen.end(),
-                              std::pair{home.id, begin}) != seen.end())
+                if (std::ranges::find(seen, std::pair{home.id, begin}) !=
+                    seen.end())
                   return;
                 seen.emplace_back(home.id, begin);
                 out += home.uri;
@@ -793,9 +791,9 @@ void DefaultMcpService::registerDocumentsTool(McpServer& server) const {
             [&] {
               std::vector<std::shared_ptr<Document>> documents =
                   shared.documents->all();
-              std::sort(
-                  documents.begin(), documents.end(),
-                  [](const auto& a, const auto& b) { return a->uri < b->uri; });
+              std::ranges::sort(documents, [](const auto& a, const auto& b) {
+                return a->uri < b->uri;
+              });
               for (const std::shared_ptr<Document>& document : documents) {
                 if (document == nullptr) continue;
                 out += document->uri;
@@ -991,8 +989,7 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
                 }
                 for (std::string& line : heads) {
                   line += tail;
-                  if (std::find(lines.begin(), lines.end(), line) ==
-                      lines.end())
+                  if (std::ranges::find(lines, line) == lines.end())
                     lines.push_back(std::move(line));
                 }
               }

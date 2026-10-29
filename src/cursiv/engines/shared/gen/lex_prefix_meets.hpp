@@ -45,7 +45,7 @@ std::vector<int> lex_nfa_leads(const LexNfaPool& n,
     if (s.set >= 0 && takes(s)) work.push_back(s.t1);
   }
   std::vector<int> to = n.eclose(work);
-  std::sort(to.begin(), to.end());
+  std::ranges::sort(to);
   return to;
 }
 
@@ -91,8 +91,8 @@ inline std::vector<std::vector<int>> lex_assertion_worlds(const LexNfaPool& n,
       std::vector<int> held = out[w];
       const std::vector<int> rest = n.eclose(relay.resumeOut);
       held.insert(held.end(), rest.begin(), rest.end());
-      std::sort(held.begin(), held.end());
-      held.erase(std::unique(held.begin(), held.end()), held.end());
+      std::ranges::sort(held);
+      held.erase(std::ranges::unique(held).begin(), held.end());
       if (held.size() == out[w].size()) continue;
       if (seen.empty()) seen.insert(out.front());
       if (!seen.insert(held).second) continue;
@@ -151,8 +151,8 @@ inline std::vector<LexWalkSide> lex_side_worlds(const LexNfaPool& n,
         unsure = true;
       }
     }
-    std::sort(runs.begin(), runs.end());
-    runs.erase(std::unique(runs.begin(), runs.end()), runs.end());
+    std::ranges::sort(runs);
+    runs.erase(std::ranges::unique(runs).begin(), runs.end());
     out.emplace_back(std::move(at), std::move(runs));
   }
   return out;
@@ -191,13 +191,11 @@ inline LexWalkSide lex_side_step(const LexNfaPool& n, const ByteSet* sets,
   if (!resumed.empty()) {
     const std::vector<int> rest = n.eclose(resumed);
     to.first.insert(to.first.end(), rest.begin(), rest.end());
-    std::sort(to.first.begin(), to.first.end());
-    to.first.erase(std::unique(to.first.begin(), to.first.end()),
-                   to.first.end());
+    std::ranges::sort(to.first);
+    to.first.erase(std::ranges::unique(to.first).begin(), to.first.end());
   }
-  std::sort(to.second.begin(), to.second.end());
-  to.second.erase(std::unique(to.second.begin(), to.second.end()),
-                  to.second.end());
+  std::ranges::sort(to.second);
+  to.second.erase(std::ranges::unique(to.second).begin(), to.second.end());
   return to;
 }
 
@@ -233,8 +231,8 @@ LexOverlap lex_pair_search(const LexNfaPool& n, const ByteSet* sets, int a,
   };
   std::vector<int> first = n.eclose(a);
   std::vector<int> second = n.eclose(b);
-  std::sort(first.begin(), first.end());
-  std::sort(second.begin(), second.end());
+  std::ranges::sort(first);
+  std::ranges::sort(second);
   enter({std::move(first), {}}, {std::move(second), {}}, false);
   const auto stuck = [](const LexWalkSide& side) {
     return side.first.empty() && side.second.empty();
@@ -297,7 +295,7 @@ inline LexOverlap lex_prefix_meets(const LexNfaPool& n, const ByteSet* sets,
 inline std::vector<std::vector<int>> lex_scalar_ends(
     const LexNfaPool& n, const ByteSet* sets, std::vector<int> from,
     const std::vector<LexCodePoints::Seq>& seqs, bool& dies) {
-  std::sort(from.begin(), from.end());
+  std::ranges::sort(from);
   std::map<std::vector<int>, int> ids;
   std::vector<std::vector<int>> subs;
   std::map<std::pair<int, unsigned>, int> steps;
@@ -324,15 +322,13 @@ inline std::vector<std::vector<int>> lex_scalar_ends(
                 static_cast<unsigned char>(b)));
           if (at->second < 0)
             dies = true;
-          else if (std::find(next.begin(), next.end(), at->second) ==
-                   next.end())
+          else if (std::ranges::find(next, at->second) == next.end())
             next.push_back(at->second);
         }
       cur = std::move(next);
     }
     for (const int s : cur)
-      if (std::find(ends.begin(), ends.end(), s) == ends.end())
-        ends.push_back(s);
+      if (std::ranges::find(ends, s) == ends.end()) ends.push_back(s);
   }
   std::vector<std::vector<int>> out;
   for (const int s : ends) out.push_back(subs[static_cast<std::size_t>(s)]);

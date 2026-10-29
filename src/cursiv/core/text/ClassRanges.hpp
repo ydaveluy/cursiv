@@ -42,8 +42,7 @@ struct ClassRanges {
     const auto before = [](const unicode::Range& a, const unicode::Range& b) {
       return a.lo < b.lo;
     };
-    if (!std::is_sorted(r.begin(), r.end(), before))
-      std::sort(r.begin(), r.end(), before);
+    if (!std::ranges::is_sorted(r, before)) std::ranges::sort(r, before);
     std::vector<unicode::Range> out;
     out.reserve(r.size());
     for (const unicode::Range& x : r) {

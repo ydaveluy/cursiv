@@ -187,7 +187,7 @@ struct LrPeekWalk {
   void open(std::uint32_t nactions) {
     if (seen.size() < nactions) seen.resize(nactions, 0);
     if (++gen == 0) {
-      std::fill(seen.begin(), seen.end(), 0u);
+      std::ranges::fill(seen, 0u);
       gen = 1;
     }
     wl.clear();
@@ -270,7 +270,9 @@ void lr_peek_oracle(LrBuildTable& A) {
                 [&](std::size_t i, std::size_t j) {
                   LrPeek pk{.state = static_cast<std::uint16_t>(s),
                             .term = A.actions[b + i].term};
-                  if (j - i == 2 && lr_peek_arms(A, go, walk, b + i, pk) &&
+                  if (j - i == 2 &&
+                      lr_peek_arms(A, go, walk,
+                                   static_cast<std::uint32_t>(b + i), pk) &&
                       pk.mode[0] != 0xffffu && pk.mode[1] != 0xffffu &&
                       !pk.set[0].intersects(pk.set[1]))
                     A.peeks[A.npeeks++] = pk;
@@ -446,7 +448,7 @@ void lr_minimize_states(LrBuildTable& A) {
   const auto remap = [&](std::uint32_t s) {
     return static_cast<std::uint16_t>(newIdx[cls[s]]);
   };
-  const std::uint32_t k = static_cast<std::uint32_t>(reps.size());
+  const auto k = static_cast<std::uint32_t>(reps.size());
   const std::uint32_t* const rp = reps.data();
 
   if (k < n) {
@@ -668,7 +670,7 @@ bool lr_unit_passes(const LrBuildCfg& g, unsigned p) {
 // where the substitution cannot be proven exact.
 void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
                          const std::vector<std::uint8_t>& cfgS) {
-  auto& g = A.cfg;
+  const auto& g = A.cfg;
   const LrLowProd* const prods = g.prods.data();
   const unsigned nN = g.nnts;
   const unsigned nP = g.nprods;
@@ -895,7 +897,7 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
       ++readGen;
       unminted = false;
       const std::uint32_t id = compose(F, X);
-      memo[X].push_back({reads, id, unminted});
+      memo[X].emplace_back(reads, id, unminted);
       return id;
     };
 

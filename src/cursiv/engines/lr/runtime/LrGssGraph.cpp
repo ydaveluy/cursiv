@@ -120,7 +120,7 @@ void LrGssGraph::seed(const LrStack& stack, const Reading& start,
     Reading r;
     r.run.state = stack[i].state;
     r.at = stack[i].begin;
-    const Id v = static_cast<Id>(_vertices.size());
+    const auto v = static_cast<Id>(_vertices.size());
     _vertices.push_back(Vertex{r});
     if (previous != none) {
       const Id f = _forest.node();
@@ -146,7 +146,7 @@ std::uint32_t LrGssGraph::stood(Id v) const {
 Id LrGssGraph::vertex(Reading r) {
   r.virt = r.virt.seen_from(r.at);
   const auto k = key(r);
-  const Id fresh = static_cast<Id>(_vertices.size());
+  const auto fresh = static_cast<Id>(_vertices.size());
   const Id id = _index.intern(
       hash(r), fresh, [&](Id at) { return key(_vertices[at].reading) == k; },
       [&](Id at) { return _vertices[at].reading.at < _settled; });
@@ -196,7 +196,7 @@ std::uint64_t LrGssGraph::edge_hash(Id to, Id from,
 Id LrGssGraph::intern(Id to, Id from, std::uint32_t symbol, bool held,
                       bool& made) {
   const auto h = edge_hash(to, from, symbol);
-  const Id fresh = static_cast<Id>(_edges.size());
+  const auto fresh = static_cast<Id>(_edges.size());
   const Id e = _edgeIndex.intern(
       h, fresh,
       [&](Id at) {

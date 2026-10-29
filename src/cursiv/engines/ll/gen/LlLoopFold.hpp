@@ -341,7 +341,7 @@ constexpr void loop_walk(LoopPlan& pl, const LoopTable<N>& t, std::size_t at) {
       pl.rank[at][j] = static_cast<std::uint16_t>(pl.order++);
       continue;
     }
-    int to = static_cast<int>(at);
+    auto to = static_cast<int>(at);
     while (to >= 0 && pl.member[to] != t.lead[m][j]) to = pl.parent[to];
     if (to >= 0) {
       pl.kind[at][j] = 1;

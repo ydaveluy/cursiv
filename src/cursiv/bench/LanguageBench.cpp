@@ -113,8 +113,14 @@ void print_binary_age() {
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           t - std::filesystem::file_time_type::clock::now());
   const std::time_t tt = std::chrono::system_clock::to_time_t(sys);
+  std::tm local{};
+#ifdef _WIN32
+  if (localtime_s(&local, &tt) != 0) return;
+#else
+  if (localtime_r(&tt, &local) == nullptr) return;
+#endif
   char buf[32];
-  if (std::strftime(buf, sizeof buf, "%F %T", std::localtime(&tt)) != 0)
+  if (std::strftime(buf, sizeof buf, "%F %T", &local) != 0)
     std::printf(
         "binary built %s -- stale unless newer than your last change"
         " (`cmake --build build --target bench`)\n",
@@ -127,7 +133,7 @@ std::size_t parse_size(std::string_view text) {
   char* end = nullptr;
   const std::string owned(text);
   const unsigned long long n = std::strtoull(owned.c_str(), &end, 10);
-  std::size_t bytes = static_cast<std::size_t>(n);
+  auto bytes = static_cast<std::size_t>(n);
   if (end != nullptr && (*end == 'k' || *end == 'K'))
     bytes <<= 10;
   else if (end != nullptr && (*end == 'm' || *end == 'M'))
@@ -388,7 +394,7 @@ void print_document_counts(std::size_t references, std::size_t resolved,
 void print_perf(const Row& row) {
   const PerfSample& p = row.perf[kBuild];
   if (!p.valid || row.bytes == 0) return;
-  const double bytes = static_cast<double>(row.bytes);
+  const auto bytes = static_cast<double>(row.bytes);
   std::printf("\n  Hardware (build)%s\n",
               p.scaled ? " — multiplexed counters, scaled" : "");
   std::printf("    %-22s %18s\n", "cycles", grouped(p.cycles).c_str());
@@ -820,7 +826,7 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
       if (!selected(o, language.name) || language.multiFile == nullptr)
         continue;
       for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const Shape shape = static_cast<Shape>(s);
+        const auto shape = static_cast<Shape>(s);
         const std::string dir =
             o.dumpDir + "/" + multi_set_dir(language, shape);
         std::filesystem::create_directories(checked_path(dir), ec);
@@ -918,7 +924,7 @@ int cursiv::bench::run(int argc, char** argv,
       for (const std::size_t w : o.workers) std::printf(" %zu", w);
       std::printf("\n");
       for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const Shape shape = static_cast<Shape>(s);
+        const auto shape = static_cast<Shape>(s);
         std::printf("    %-12s %zu files\n", shape_name(shape),
                     shape_files(shape, o.multiBytes).size());
       }
@@ -996,7 +1002,7 @@ int cursiv::bench::run(int argc, char** argv,
     for (const Language& language : languages) {
       if (!selected(o, language.name) || language.multi == nullptr) continue;
       for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const Shape shape = static_cast<Shape>(s);
+        const auto shape = static_cast<Shape>(s);
         const std::vector<std::string> files = multi_texts(o, language, shape);
         MultiRow row;
         row.language = language.name;

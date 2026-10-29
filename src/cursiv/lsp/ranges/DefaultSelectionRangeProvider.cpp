@@ -131,7 +131,7 @@ DefaultSelectionRangeProvider::getSelectionRanges(
             token_at(document.textDocument().getText(), offset);
         word.end > word.begin)
       spans.push_back(TextRange{word.begin, word.end});
-    for (unsigned int& it : std::views::reverse(chain)) {
+    for (const unsigned int it : std::views::reverse(chain)) {
       const CstNode& node = cst[it];
       if (!spans.empty()) {
         const TextRange& last = spans.back();
@@ -159,7 +159,7 @@ DefaultSelectionRangeProvider::getSelectionRanges(
     // Outermost first into the protocol's nesting: the value is the innermost
     // range and every `parent` is one step out.
     std::unique_ptr<lsp::SelectionRange> parent;
-    for (auto& span : std::views::reverse(spans)) {
+    for (const auto& span : std::views::reverse(spans)) {
       auto next = std::make_unique<lsp::SelectionRange>();
       next->range =
           to_lsp(document.textDocument().rangeAt(span.begin, span.end));

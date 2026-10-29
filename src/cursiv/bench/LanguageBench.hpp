@@ -136,7 +136,7 @@ struct Row {
                    const std::array<PerfSample, kStageCount>& samples) {
     if (!samples[kBuild].valid || (perfBuildMs >= 0 && buildMs >= perfBuildMs))
       return;
-    std::copy(samples.begin(), samples.end(), perf);
+    std::ranges::copy(samples, perf);
     perfBuildMs = buildMs;
   }
 
@@ -410,7 +410,7 @@ class PhaseClock final : public cursiv::BuildPhaseListener {
   void onBuildPhase(cursiv::DocumentState reached,
                     std::span<cursiv::Document* const>,
                     const cursiv::CancellationToken&) override {
-    const std::size_t rung = static_cast<std::size_t>(reached);
+    const auto rung = static_cast<std::size_t>(reached);
     _at[rung] = Clock::now();
     if (_perf != nullptr) _sample[rung] = _perf->read();
     if (_resident) _rss[rung] = rss_now();
@@ -578,7 +578,7 @@ void ws_stages(int iterations, bool resident, const char* languageId,
     const std::shared_ptr<Document> held = unparsed_input(
         core, std::string("file:///bench/main") + extension, src);
     docs.addDocument(held);
-    Document& d = *held;
+    const Document& d = *held;
     Document* one = held.get();
     const std::span<Document* const> all(&one, 1);
 

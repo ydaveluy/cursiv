@@ -316,7 +316,8 @@ auto request(Session& session, Call call) {
 void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
-  endpoint.onInitialize([&session, &server](lsp::InitializeParams&& params) {
+  endpoint.onInitialize([&session,
+                         &server](const lsp::InitializeParams& params) {
     if (params.capabilities.textDocument.has_value()) {
       const auto& text = *params.capabilities.textDocument;
       session.definitionLinks =
@@ -373,7 +374,8 @@ lsp::TextDocumentDefinitionResult navigation_result(
     std::vector<lsp::Location> locations;
     locations.reserve(links.size());
     for (auto& link : links)
-      locations.push_back({std::move(link.targetUri), link.targetSelectionRange});
+      locations.emplace_back(std::move(link.targetUri),
+                             link.targetSelectionRange);
     result = std::move(locations);
   }
   return result;
@@ -384,7 +386,7 @@ lsp::TextDocumentDefinitionResult navigation_result(
 // recursion: an outline is as deep as the document nests.
 std::vector<lsp::SymbolInformation> flat_symbols(
     const lsp::DocumentUri& uri, std::vector<lsp::DocumentSymbol> symbols) {
-  constexpr std::size_t kTopLevel = static_cast<std::size_t>(-1);
+  constexpr auto kTopLevel = static_cast<std::size_t>(-1);
   struct Pending {
     lsp::DocumentSymbol* symbol;
     std::size_t parent;
@@ -434,9 +436,9 @@ void add_text_document_handlers(Session& session) {
   // The hierarchical arm of the answer for a client that reads it: the
   // outline this storey builds is a tree. Any other client gets the flat
   // `SymbolInformation` list.
-  endpoint.onTextDocumentDocumentSymbol(
-      request(session, [&session, &server](lsp::DocumentSymbolParams&& params,
-                                           const CancellationToken& token) {
+  endpoint.onTextDocumentDocumentSymbol(request(
+      session, [&session, &server](const lsp::DocumentSymbolParams& params,
+                                   const CancellationToken& token) {
         lsp::TextDocumentDocumentSymbolResult result;
         std::vector<lsp::DocumentSymbol> symbols =
             server.documentSymbol(params, token);
@@ -449,45 +451,45 @@ void add_text_document_handlers(Session& session) {
 
   // Keep the richer links only when the client supports them.
   endpoint.onTextDocumentDefinition(
-      request(session, [&session, &server](lsp::DefinitionParams&& params,
-                                 const CancellationToken& token) {
+      request(session, [&session, &server](const lsp::DefinitionParams& params,
+                                           const CancellationToken& token) {
         return navigation_result(server.definition(params, token),
                                  session.definitionLinks);
       }));
 
   endpoint.onTextDocumentDeclaration(
-      request(session, [&session, &server](lsp::DeclarationParams&& params,
-                                 const CancellationToken& token) {
+      request(session, [&session, &server](const lsp::DeclarationParams& params,
+                                           const CancellationToken& token) {
         return navigation_result(server.declaration(params, token),
                                  session.declarationLinks);
       }));
 
-  endpoint.onTextDocumentTypeDefinition(
-      request(session, [&session, &server](lsp::TypeDefinitionParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onTextDocumentTypeDefinition(request(
+      session, [&session, &server](const lsp::TypeDefinitionParams& params,
+                                   const CancellationToken& token) {
         return navigation_result(server.typeDefinition(params, token),
                                  session.typeDefinitionLinks);
       }));
 
-  endpoint.onTextDocumentImplementation(
-      request(session, [&session, &server](lsp::ImplementationParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onTextDocumentImplementation(request(
+      session, [&session, &server](const lsp::ImplementationParams& params,
+                                   const CancellationToken& token) {
         return navigation_result(server.implementation(params, token),
                                  session.implementationLinks);
       }));
 
   // The array arm, empty and not null: an empty list is "nothing names
   // this", while null reads as "the server could not answer".
-  endpoint.onTextDocumentReferences(request(
-      session,
-      [&server](lsp::ReferenceParams&& params, const CancellationToken& token) {
+  endpoint.onTextDocumentReferences(
+      request(session, [&server](const lsp::ReferenceParams& params,
+                                 const CancellationToken& token) {
         lsp::TextDocumentReferencesResult result;
         result = server.references(params, token);
         return result;
       }));
 
   endpoint.onTextDocumentDocumentHighlight(
-      request(session, [&server](lsp::DocumentHighlightParams&& params,
+      request(session, [&server](const lsp::DocumentHighlightParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentDocumentHighlightResult result;
         result = server.documentHighlight(params, token);
@@ -498,7 +500,7 @@ void add_text_document_handlers(Session& session) {
   // its own message. The other two arms -- a placeholder, a default --
   // would both promise a rename this server may refuse.
   endpoint.onTextDocumentPrepareRename(
-      request(session, [&server](lsp::PrepareRenameParams&& params,
+      request(session, [&server](const lsp::PrepareRenameParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentPrepareRenameResult result;
         if (const std::optional<lsp::Range> span =
@@ -509,9 +511,9 @@ void add_text_document_handlers(Session& session) {
 
   // Null again for a refused rename: a client with no edit applies
   // nothing, with no message worth an error's interruption.
-  endpoint.onTextDocumentRename(request(
-      session,
-      [&server](lsp::RenameParams&& params, const CancellationToken& token) {
+  endpoint.onTextDocumentRename(
+      request(session, [&server](const lsp::RenameParams& params,
+                                 const CancellationToken& token) {
         lsp::TextDocumentRenameResult result;
         if (std::optional<lsp::WorkspaceEdit> edit =
                 server.rename(params, token))
@@ -520,7 +522,7 @@ void add_text_document_handlers(Session& session) {
       }));
 
   endpoint.onTextDocumentSemanticTokensFull(
-      request(session, [&server](lsp::SemanticTokensParams&& params,
+      request(session, [&server](const lsp::SemanticTokensParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentSemanticTokensFullResult result;
         result = server.semanticTokensFull(params, token);
@@ -528,23 +530,23 @@ void add_text_document_handlers(Session& session) {
       }));
 
   endpoint.onTextDocumentSemanticTokensRange(
-      request(session, [&server](lsp::SemanticTokensRangeParams&& params,
+      request(session, [&server](const lsp::SemanticTokensRangeParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentSemanticTokensRangeResult result;
         result = server.semanticTokensRange(params, token);
         return result;
       }));
 
-  endpoint.onTextDocumentInlayHint(request(
-      session,
-      [&server](lsp::InlayHintParams&& params, const CancellationToken& token) {
+  endpoint.onTextDocumentInlayHint(
+      request(session, [&server](const lsp::InlayHintParams& params,
+                                 const CancellationToken& token) {
         lsp::TextDocumentInlayHintResult result;
         result = server.inlayHint(params, token);
         return result;
       }));
 
   endpoint.onTextDocumentFoldingRange(
-      request(session, [&server](lsp::FoldingRangeParams&& params,
+      request(session, [&server](const lsp::FoldingRangeParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentFoldingRangeResult result;
         result = server.foldingRange(params, token);
@@ -552,7 +554,7 @@ void add_text_document_handlers(Session& session) {
       }));
 
   endpoint.onTextDocumentSelectionRange(
-      request(session, [&server](lsp::SelectionRangeParams&& params,
+      request(session, [&server](const lsp::SelectionRangeParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentSelectionRangeResult result;
         result = server.selectionRange(params, token);
@@ -561,9 +563,9 @@ void add_text_document_handlers(Session& session) {
 
   // Null is the protocol's "nothing to show", and the default of the
   // result: a position on no documented word leaves it untouched.
-  endpoint.onTextDocumentHover(request(
-      session,
-      [&server](lsp::HoverParams&& params, const CancellationToken& token) {
+  endpoint.onTextDocumentHover(
+      request(session, [&server](const lsp::HoverParams& params,
+                                 const CancellationToken& token) {
         lsp::TextDocumentHoverResult result;
         if (std::optional<lsp::Hover> hover = server.hover(params, token))
           result = std::move(*hover);
@@ -574,7 +576,7 @@ void add_text_document_handlers(Session& session) {
   // the frontier was computed at one anchor, and the next keystroke
   // must ask again rather than filter what it already has.
   endpoint.onTextDocumentCompletion(
-      request(session, [&server](lsp::CompletionParams&& params,
+      request(session, [&server](const lsp::CompletionParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentCompletionResult result;
         result = server.completion(params, token);
@@ -584,7 +586,7 @@ void add_text_document_handlers(Session& session) {
   // Null when there is no signature under the caret: the popup closes rather
   // than showing an empty frame.
   endpoint.onTextDocumentSignatureHelp(
-      request(session, [&server](lsp::SignatureHelpParams&& params,
+      request(session, [&server](const lsp::SignatureHelpParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentSignatureHelpResult result;
         if (std::optional<lsp::SignatureHelp> help =
@@ -598,7 +600,7 @@ void add_text_document_handlers(Session& session) {
   // literals reads commands only: an action that is just a command goes as
   // that command, and one with an edit or marked disabled is left out.
   endpoint.onTextDocumentCodeAction(
-      request(session, [&session, &server](lsp::CodeActionParams&& params,
+      request(session, [&session, &server](const lsp::CodeActionParams& params,
                                            const CancellationToken& token) {
         lsp::TextDocumentCodeActionResult result;
         std::vector<lsp::CodeAction> actions = server.codeAction(params, token);
@@ -618,40 +620,40 @@ void add_text_document_handlers(Session& session) {
   // edits" and "cannot format this" are the same thing to an editor,
   // and the empty list leaves the document alone.
   endpoint.onTextDocumentFormatting(
-      request(session, [&server](lsp::DocumentFormattingParams&& params,
+      request(session, [&server](const lsp::DocumentFormattingParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentFormattingResult result;
         result = server.formatting(params, token);
         return result;
       }));
 
-  endpoint.onTextDocumentRangeFormatting(
-      request(session, [&server](lsp::DocumentRangeFormattingParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onTextDocumentRangeFormatting(request(
+      session, [&server](const lsp::DocumentRangeFormattingParams& params,
+                         const CancellationToken& token) {
         lsp::TextDocumentRangeFormattingResult result;
         result = server.rangeFormatting(params, token);
         return result;
       }));
 
-  endpoint.onTextDocumentOnTypeFormatting(
-      request(session, [&server](lsp::DocumentOnTypeFormattingParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onTextDocumentOnTypeFormatting(request(
+      session, [&server](const lsp::DocumentOnTypeFormattingParams& params,
+                         const CancellationToken& token) {
         lsp::TextDocumentOnTypeFormattingResult result;
         result = server.onTypeFormatting(params, token);
         return result;
       }));
 
   endpoint.onTextDocumentDocumentLink(
-      request(session, [&server](lsp::DocumentLinkParams&& params,
+      request(session, [&server](const lsp::DocumentLinkParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentDocumentLinkResult result;
         result = server.documentLink(params, token);
         return result;
       }));
 
-  endpoint.onTextDocumentCodeLens(request(
-      session,
-      [&server](lsp::CodeLensParams&& params, const CancellationToken& token) {
+  endpoint.onTextDocumentCodeLens(
+      request(session, [&server](const lsp::CodeLensParams& params,
+                                 const CancellationToken& token) {
         lsp::TextDocumentCodeLensResult result;
         result = server.codeLens(params, token);
         return result;
@@ -660,47 +662,47 @@ void add_text_document_handlers(Session& session) {
   // The two hierarchies, three arms each. The client walks the tree one level
   // at a time, so an expansion is its own request carrying the item it expands.
   endpoint.onTextDocumentPrepareCallHierarchy(
-      request(session, [&server](lsp::CallHierarchyPrepareParams&& params,
+      request(session, [&server](const lsp::CallHierarchyPrepareParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentPrepareCallHierarchyResult result;
         result = server.prepareCallHierarchy(params, token);
         return result;
       }));
 
-  endpoint.onCallHierarchyIncomingCalls(
-      request(session, [&server](lsp::CallHierarchyIncomingCallsParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onCallHierarchyIncomingCalls(request(
+      session, [&server](const lsp::CallHierarchyIncomingCallsParams& params,
+                         const CancellationToken& token) {
         lsp::CallHierarchyIncomingCallsResult result;
         result = server.incomingCalls(params, token);
         return result;
       }));
 
-  endpoint.onCallHierarchyOutgoingCalls(
-      request(session, [&server](lsp::CallHierarchyOutgoingCallsParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onCallHierarchyOutgoingCalls(request(
+      session, [&server](const lsp::CallHierarchyOutgoingCallsParams& params,
+                         const CancellationToken& token) {
         lsp::CallHierarchyOutgoingCallsResult result;
         result = server.outgoingCalls(params, token);
         return result;
       }));
 
   endpoint.onTextDocumentPrepareTypeHierarchy(
-      request(session, [&server](lsp::TypeHierarchyPrepareParams&& params,
+      request(session, [&server](const lsp::TypeHierarchyPrepareParams& params,
                                  const CancellationToken& token) {
         lsp::TextDocumentPrepareTypeHierarchyResult result;
         result = server.prepareTypeHierarchy(params, token);
         return result;
       }));
 
-  endpoint.onTypeHierarchySupertypes(
-      request(session, [&server](lsp::TypeHierarchySupertypesParams&& params,
-                                 const CancellationToken& token) {
+  endpoint.onTypeHierarchySupertypes(request(
+      session, [&server](const lsp::TypeHierarchySupertypesParams& params,
+                         const CancellationToken& token) {
         lsp::TypeHierarchySupertypesResult result;
         result = server.supertypes(params, token);
         return result;
       }));
 
   endpoint.onTypeHierarchySubtypes(
-      request(session, [&server](lsp::TypeHierarchySubtypesParams&& params,
+      request(session, [&server](const lsp::TypeHierarchySubtypesParams& params,
                                  const CancellationToken& token) {
         lsp::TypeHierarchySubtypesResult result;
         result = server.subtypes(params, token);
@@ -710,7 +712,7 @@ void add_text_document_handlers(Session& session) {
   // An unknown URI answers empty text rather than an error: the request has
   // no null arm, and "no such document" is not a protocol fault.
   endpoint.onWorkspaceTextDocumentContent(
-      request(session, [&server](lsp::TextDocumentContentParams&& params,
+      request(session, [&server](const lsp::TextDocumentContentParams& params,
                                  const CancellationToken& token) {
         return server.textDocumentContent(params, token)
             .value_or(lsp::TextDocumentContentResult{});
@@ -736,7 +738,7 @@ void add_workspace_handlers(Session& session) {
                    }));
 
   endpoint.onWorkspaceSymbol(
-      request(session, [&server](lsp::WorkspaceSymbolParams&& params,
+      request(session, [&server](const lsp::WorkspaceSymbolParams& params,
                                  const CancellationToken& token) {
         lsp::WorkspaceSymbolResult result;
         result = server.workspaceSymbol(params, token);
@@ -745,16 +747,16 @@ void add_workspace_handlers(Session& session) {
 
   // Registered whether or not the provider resolves: the capability says
   // which, and a symbol nobody resolves goes back as it came.
-  endpoint.onWorkspaceSymbolResolve(request(
-      session,
-      [&server](lsp::WorkspaceSymbol&& params, const CancellationToken& token) {
+  endpoint.onWorkspaceSymbolResolve(
+      request(session, [&server](const lsp::WorkspaceSymbol& params,
+                                 const CancellationToken& token) {
         return server.workspaceSymbolResolve(params, token);
       }));
 
   // Null is "no result", also the answer for an unknown name: a
   // command nobody registered is not worth an error across the wire.
   endpoint.onWorkspaceExecuteCommand(
-      request(session, [&server](lsp::ExecuteCommandParams&& params,
+      request(session, [&server](const lsp::ExecuteCommandParams& params,
                                  const CancellationToken& token) {
         lsp::WorkspaceExecuteCommandResult result;
         if (std::optional<lsp::LSPAny> answer =
@@ -798,7 +800,7 @@ void add_file_operation_handlers(Session& session,
   // nothing to say.
   if (options.willCreate.has_value())
     endpoint.onWorkspaceWillCreateFiles(
-        request(session, [&server](lsp::CreateFilesParams&& params,
+        request(session, [&server](const lsp::CreateFilesParams& params,
                                    const CancellationToken& token) {
           lsp::WorkspaceWillCreateFilesResult result;
           if (std::optional<lsp::WorkspaceEdit> edit =
@@ -809,7 +811,7 @@ void add_file_operation_handlers(Session& session,
 
   if (options.willRename.has_value())
     endpoint.onWorkspaceWillRenameFiles(
-        request(session, [&server](lsp::RenameFilesParams&& params,
+        request(session, [&server](const lsp::RenameFilesParams& params,
                                    const CancellationToken& token) {
           lsp::WorkspaceWillRenameFilesResult result;
           if (std::optional<lsp::WorkspaceEdit> edit =
@@ -820,7 +822,7 @@ void add_file_operation_handlers(Session& session,
 
   if (options.willDelete.has_value())
     endpoint.onWorkspaceWillDeleteFiles(
-        request(session, [&server](lsp::DeleteFilesParams&& params,
+        request(session, [&server](const lsp::DeleteFilesParams& params,
                                    const CancellationToken& token) {
           lsp::WorkspaceWillDeleteFilesResult result;
           if (std::optional<lsp::WorkspaceEdit> edit =

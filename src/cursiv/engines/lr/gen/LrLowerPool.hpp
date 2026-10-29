@@ -204,10 +204,12 @@ inline bool lr_shape_nullable(const LrLowerPool& p, LrShapeId at,
     case LrShape::none:
     case LrShape::end:
       return true;
-    case LrShape::sym:
-      return is_term(n.sym) ? cfg.terms[n.sym].laid == kLaidImplied
-                            : nt_index(n.sym) < nullable.size() &&
-                                  nullable[nt_index(n.sym)] != 0;
+    case LrShape::sym: {
+      const auto sym = static_cast<std::uint16_t>(n.sym);
+      return is_term(sym) ? cfg.terms[sym].laid == kLaidImplied
+                          : nt_index(sym) < nullable.size() &&
+                                nullable[nt_index(sym)] != 0;
+    }
     case LrShape::scope:
       return lr_shape_nullable(p, n.sym, cfg, nullable);
     case LrShape::rep:

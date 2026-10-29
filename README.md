@@ -27,6 +27,8 @@ Define your grammar and abstract syntax tree (AST) as C++ types. Cursiv
 generates the parser and provides services for a command-line tool or an
 editor extension.
 
+![The Statemachine example in an editor: completion, an error and its fix, hover and rename](docs/assets/demo.gif)
+
 [Documentation](docs/index.md) ·
 [Getting started](docs/learn/scaffold.md) ·
 [Benchmark results](docs/benchmarks/README.md)
@@ -79,6 +81,11 @@ Each example includes a grammar, AST, services, tests, a CLI and an editor clien
 - [Statemachine](examples/statemachine): named declarations and cross references.
 - [Domainmodel](examples/domainmodel): packages, qualified names, custom scoping and formatting.
 - [Requirements](examples/requirements): two languages sharing a server and cross-document references.
+
+For more languages, see [cursiv-grammar](https://github.com/ydaveluy/cursiv-grammar):
+more than 300 languages implemented with Cursiv, mostly adapted from
+[ANTLR grammars-v4](https://github.com/antlr/grammars-v4). Each one builds on
+its own, with a CLI, a language server and tests.
 
 ## Performance
 

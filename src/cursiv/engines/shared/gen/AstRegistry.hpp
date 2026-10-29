@@ -5,7 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <forward_list>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,8 +18,8 @@ namespace cursiv {
 
 struct AstRegistry {
   AstRegistry() = default;
-  AstRegistry(AstRegistry&&) = default;
-  AstRegistry& operator=(AstRegistry&&) = default;
+  AstRegistry(AstRegistry&&) noexcept = default;
+  AstRegistry& operator=(AstRegistry&&) noexcept = default;
 
   // Every spelling here, the rows' rule aliases included, is qualified from
   // global scope when the registry is built: the emitters write it as is.
@@ -53,8 +53,9 @@ struct AstRegistry {
   std::vector<std::uint64_t> accepts;
   std::size_t typeWords = 0;
   std::size_t convCount = 0;
-  // Emitted rule spellings borrowed by rows; deque growth preserves their views.
-  std::deque<std::string> sources;
+  // Emitted rule spellings borrowed by rows; list nodes never move, so their
+  // views survive growth and a move of the registry.
+  std::forward_list<std::string> sources;
   bool anyNest = false;
 
   // Whether type `sub` derives from type `base`, itself included.

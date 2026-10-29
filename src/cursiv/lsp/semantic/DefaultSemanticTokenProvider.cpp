@@ -214,12 +214,11 @@ lsp::SemanticTokens DefaultSemanticTokenProvider::highlight(
   // Sorted so overlaps resolve correctly: the wider span comes first at an
   // equal start, and a name outranks the leaf inside it. `stable_sort` keeps
   // equal tokens in collection order, so the answer is reproducible.
-  std::stable_sort(tokens.begin(), tokens.end(),
-                   [](const Token& a, const Token& b) {
-                     if (a.begin != b.begin) return a.begin < b.begin;
-                     if (a.end != b.end) return a.end > b.end;
-                     return a.named && !b.named;
-                   });
+  std::ranges::stable_sort(tokens, [](const Token& a, const Token& b) {
+    if (a.begin != b.begin) return a.begin < b.begin;
+    if (a.end != b.end) return a.end > b.end;
+    return a.named && !b.named;
+  });
 
   if (tokens.empty()) return answer;
   TextDocument::Cursor cursor(document.textDocument(),

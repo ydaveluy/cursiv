@@ -618,7 +618,7 @@ class LlSimulation : public LlReturnPool {
   // pending until the caller supplies the next token and its gap.
   template <class F>
   bool filter(F&& accepts) {
-    expand_conditions(accepts);
+    expand_conditions(std::forward<F>(accepts));
     _cur.clear();
     // Intermediate closure positions are bookkeeping, not surviving arms.
     // Keep only positions that can consume or have completed the reading.

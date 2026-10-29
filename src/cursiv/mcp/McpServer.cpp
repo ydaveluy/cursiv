@@ -65,12 +65,12 @@ McpServer::McpServer(std::string name, std::string version)
     : _name(std::move(name)), _version(std::move(version)) {}
 
 void McpServer::registerTool(McpTool tool, McpToolFunction execute) {
-  _tools.push_back({std::move(tool), std::move(execute)});
+  _tools.emplace_back(std::move(tool), std::move(execute));
 }
 
 void McpServer::registerResource(McpResource resource,
                                  McpResourceFunction read) {
-  _resources.push_back({std::move(resource), std::move(read)});
+  _resources.emplace_back(std::move(resource), std::move(read));
 }
 
 void McpServer::addInstructions(std::string_view paragraph) {

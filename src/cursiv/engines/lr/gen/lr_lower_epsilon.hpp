@@ -71,7 +71,7 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                             std::uint16_t priority = kNoRow) {
   LrBuildCfg& c = o.cfg;
   if (priority == kNoRow) priority = lr_priority_alt(c, lhs);
-  const unsigned n = static_cast<unsigned>(slots.size());
+  const auto n = static_cast<unsigned>(slots.size());
   unsigned nopt = 0;
   for (const LrLowerSlot& s : slots)
     if (lr_subset_bit(s)) ++nopt;
@@ -313,7 +313,7 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
       if (o.cfg.lowerFail()) return;
       for (std::uint16_t k = before; k < o.cfg.nprods; ++k)
         if (o.cfg.prods[k].lhs == lhs) o.cfg.prodBuild[k].permuted = true;
-    } while (std::next_permutation(order.begin(), order.end()));
+    } while (std::ranges::next_permutation(order).found);
     return;
   }
 
@@ -391,8 +391,9 @@ inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
       lr_emit_alts(o, p, lhs, k, lr_cat(p.e[k].made, made),
                    lr_cat(p.e[k].row, row));
     }
-  else if (p.passClose != kNoRow && e.kind == LrShape::sym && !is_term(e.sym) &&
-           made.size() == 1 && made.front() == p.passClose && row.empty())
+  else if (p.passClose != kNoRow && e.kind == LrShape::sym &&
+           !is_term(static_cast<std::uint16_t>(e.sym)) && made.size() == 1 &&
+           made.front() == p.passClose && row.empty())
     lr_emit_one(o, p, lhs, at, LrActs{}, row);
   else
     lr_emit_one(o, p, lhs, at, made, row);

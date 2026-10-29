@@ -111,7 +111,7 @@ std::vector<FileSystemNode> LocalFileSystemProvider::readDirectory(
     if (kind) continue;
     const bool file = std::filesystem::is_regular_file(status);
     const bool directory = std::filesystem::is_directory(status);
-    nodes.push_back({file, directory, path_to_file_uri(it->path().string())});
+    nodes.emplace_back(file, directory, path_to_file_uri(it->path().string()));
   }
   if (ec)
     throw FileSystemError(

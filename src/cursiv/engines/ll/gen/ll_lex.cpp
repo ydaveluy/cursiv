@@ -92,7 +92,8 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     } else if (n.kind == LlShape::call && g.cfgTriviaAt.size() > 2 &&
                (b.nullable[id] || !b.first[id].test(kEofSymbol) ||
                 b.first[id].more_than_one())) {
-      n.mode = intern(b.lookahead(id, b.after[id]) | skip(b.gapCfg, id));
+      n.mode = intern(b.lookahead(static_cast<std::uint16_t>(id), b.after[id]) |
+                      skip(b.gapCfg, id));
     }
   }
   b.headMode.assign(g.ndecisions, 0);
@@ -205,7 +206,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
 
 void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
                 const LexModes& modes, std::vector<DynSet>& modeTie) {
-  auto& g = built.cfg;
+  const auto& g = built.cfg;
   const std::vector<DynSet>& modeSet = modes.set;
   const auto push_relay = [&built](const LexRelayGen& row) {
     built.relays.push_back(row);

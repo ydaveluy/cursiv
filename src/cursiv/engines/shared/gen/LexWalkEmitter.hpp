@@ -150,7 +150,7 @@ class LexDfaEmitter {
       std::string cond;
       for (unsigned b = 0; b < 256;) {
         const auto in = [&](unsigned x) {
-          return std::find(g.cls.begin(), g.cls.end(), _cls[x]) != g.cls.end();
+          return std::ranges::find(g.cls, _cls[x]) != g.cls.end();
         };
         if (!in(b)) {
           ++b;
@@ -233,14 +233,10 @@ class LexDfaEmitter {
       return;
     }
     // `default` is the arm gcc reaches last: the token end, else the widest.
-    auto def = std::find_if(
-        groups.begin(), groups.end(),
-        [](const EdgeGroup& g) { return g.kind == EdgeKind::done; });
+    auto def = std::ranges::find(groups, EdgeKind::done, &EdgeGroup::kind);
     if (def == groups.end())
-      def = std::max_element(groups.begin(), groups.end(),
-                             [](const EdgeGroup& x, const EdgeGroup& y) {
-                               return x.cls.size() < y.cls.size();
-                             });
+      def = std::ranges::max_element(
+          groups, {}, [](const EdgeGroup& g) { return g.cls.size(); });
 
     // Keep the class lookup where it combines emitted byte cases.
     bool byteCases = true;
@@ -427,7 +423,7 @@ int lex_continuation_of(const View& v, std::uint16_t st,
   for (unsigned k = 0; k < v.classes(); ++k) {
     const auto to = v.next(st, k);
     if (to == st || to == kDeadState || (spelled && !spelled[to]) ||
-        std::find(tried.begin(), tried.end(), to) != tried.end())
+        std::ranges::find(tried, to) != tried.end())
       continue;
     tried.push_back(to);
     if (v.accept(to) != v.accept(st) || !lex_plain_run(v, to)) continue;

@@ -31,7 +31,7 @@ struct AstEntryTable {
     std::vector<std::uint32_t> out;
     for (; from[e] != kNoEntry; e = from[e]) out.push_back(chain[e]);
     out.push_back(chain[e]);
-    std::reverse(out.begin(), out.end());
+    std::ranges::reverse(out);
     return out;
   }
   // What fills the node a record built, and what writes it into the region

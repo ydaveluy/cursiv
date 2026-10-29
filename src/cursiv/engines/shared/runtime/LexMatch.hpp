@@ -54,7 +54,7 @@ struct LexMatch {
                                  const char* src, TextOffset i, TextOffset len,
                                  TextOffset& far) {
     if (ad.accept(st) == 0) return;
-    SymbolId t = static_cast<SymbolId>(ad.accept(st) - 1u);
+    auto t = static_cast<SymbolId>(ad.accept(st) - 1u);
     // The state's own election refused: the terminals it outranked answer
     // for themselves, and the one that stands takes the match.
     if constexpr (requires { ad.qualified(st, src, i, len, far); }) {

@@ -89,7 +89,9 @@ const char* AstEmitter::act_name(ActKind k) {
 }
 
 void AstEmitter::plan_held() {
-  std::uint16_t next = reg.convCount;
+  // The registry keeps `convCount` below `kNoIndex`; a held slot takes the
+  // next number, and none may reach it.
+  auto next = static_cast<std::uint16_t>(reg.convCount);
   for (std::uint32_t e = 0; e < a.count; ++e) {
     const auto* const value = plans.emplace_back(plan_conversions(e)).value;
     if (value == nullptr) continue;
@@ -100,8 +102,13 @@ void AstEmitter::plan_held() {
         const AstRowGen& g = reg.rows[r];
         if (g.writes() && g.convPasses && g.convSlot != detail::kNoIndex &&
             heldSlots.try_emplace({g.convSlot, value->valueRule}, next)
-                .second)
+                .second) {
+          if (next == detail::kNoIndex)
+            throw std::runtime_error(
+                "the grammar uses more than 65 535 conversion slots -- split "
+                "the grammar");
           ++next;
+        }
       }
   }
 }
@@ -164,10 +171,13 @@ void AstEmitter::check_base_chains() const {
     const std::uint32_t i = a.chains(static_cast<std::uint32_t>(e)).front();
     const Run& held = a.runs[i];
     unsigned opens = 0;
-    for (const std::uint16_t r : held)
-      if (reg.rows[r].opens() && ++opens > 1)
+    for (const std::uint16_t r : held) {
+      if (!reg.rows[r].opens()) continue;
+      ++opens;
+      if (opens > 1)
         throw std::logic_error("AST chain " + std::to_string(i) +
                                ": more than one creation in a base run");
+    }
     const int cr = made_row(held);
     if (cr < 0) continue;
     for (const std::uint16_t r : held) {

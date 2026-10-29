@@ -719,12 +719,15 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     return;
   }
   const bool nested = !flat && a.cfg.nodeBuild[id].ladder;
-  if (nested && ++nestedTurns > kMaxNestedTurns)
-    refuse_lowering(std::format(
-        "rule `{}` repeats a `nest` more than {} times in a row, more than "
-        "the LL parser supports -- narrow the range, or use `many` and check "
-        "the count in validation",
-        a.cfg.rule_name(inRule), kMaxNestedTurns));
+  if (nested) {
+    ++nestedTurns;
+    if (nestedTurns > kMaxNestedTurns)
+      refuse_lowering(std::format(
+          "rule `{}` repeats a `nest` more than {} times in a row, more than "
+          "the LL parser supports -- narrow the range, or use `many` and "
+          "check the count in validation",
+          a.cfg.rule_name(inRule), kMaxNestedTurns));
+  }
   const bool held = !flat && may_suspend(n.sym);
   // The turns are counted wherever a bound reads them: a floor guards the
   // choice, a ceiling ends the loop.

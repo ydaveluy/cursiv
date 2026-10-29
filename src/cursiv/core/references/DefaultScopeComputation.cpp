@@ -71,7 +71,7 @@ void DefaultScopeComputation::addLocalSymbol(AstNode& node,
                                              const Document& document,
                                              LocalSymbols& symbols) const {
   // The root's container is the document itself, which is nobody's scope.
-  AstNode* const container = node.parent;
+  const AstNode* const container = node.parent;
   if (container == nullptr || container == &document) return;
   if (auto description = services.astNodeDescriptionProvider->createDescription(
           node, {}, &document))

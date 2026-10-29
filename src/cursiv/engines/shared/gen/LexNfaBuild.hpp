@@ -337,7 +337,7 @@ struct LexNfaBuild {
     };
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
-    std::fill(visited.begin(), visited.end(), false);
+    visited.assign(visited.size(), false);
     const auto reads = [&](auto&& self, std::uint16_t at) -> bool {
       if (at == kNoLexNode || visited[at]) return false;
       visited[at] = true;

@@ -227,14 +227,14 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   if (params.workspaceFolders.has_value()) {
     if (!params.workspaceFolders->isNull())
       for (const lsp::WorkspaceFolder& folder : params.workspaceFolders->value())
-        _folders.push_back({folder.uri.toString(), folder.name});
+        _folders.emplace_back(folder.uri.toString(), folder.name);
   } else if (!params.rootUri.isNull()) {
     const std::string uri = params.rootUri->toString();
-    _folders.push_back({uri, uri_file_name(uri)});
+    _folders.emplace_back(uri, uri_file_name(uri));
   } else if (params.rootPath.has_value() && !params.rootPath->isNull() &&
              !params.rootPath->value().empty()) {
     const std::string uri = path_to_file_uri(params.rootPath->value());
-    _folders.push_back({uri, uri_file_name(uri)});
+    _folders.emplace_back(uri, uri_file_name(uri));
   }
   _scanOwed = !_folders.empty();
   // Whether the client will accept the file watcher this server registers at
@@ -581,7 +581,7 @@ void DefaultLanguageServer::didChange(
   const auto version = static_cast<std::int64_t>(params.textDocument.version);
   const std::string_view changed[] = {uri};
   writeAndPublish(changed, {}, [&]() {
-    Documents& documents = *_shared.documents;
+    const Documents& documents = *_shared.documents;
     const std::shared_ptr<Document> document = documents.getDocument(uri);
     // A change on a URI nothing opened is not this server's to guess at.
     if (document == nullptr) return false;
@@ -628,8 +628,8 @@ void DefaultLanguageServer::didClose(
     const lsp::DidCloseTextDocumentParams& params) {
   const std::string uri = params.textDocument.uri.toString();
   const FileSystemProvider& files = *_shared.fileSystemProvider;
-  DocumentBuilder& builder = *_shared.documentBuilder;
-  Documents& documents = *_shared.documents;
+  const DocumentBuilder& builder = *_shared.documentBuilder;
+  const Documents& documents = *_shared.documents;
   const std::string_view moved[] = {std::string_view(uri)};
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
@@ -671,8 +671,8 @@ void DefaultLanguageServer::didChangeWatchedFiles(
   if (order.empty()) return;
 
   const FileSystemProvider& files = *_shared.fileSystemProvider;
-  DocumentBuilder& builder = *_shared.documentBuilder;
-  Documents& documents = *_shared.documents;
+  const DocumentBuilder& builder = *_shared.documentBuilder;
+  const Documents& documents = *_shared.documents;
 
   // Everything below is one write action, disk reads included: the
   // store decides what an event means, and reading it outside the lock
@@ -742,7 +742,7 @@ void DefaultLanguageServer::onConfigurationSectionUpdate(
     std::string_view section, const lsp::LSPAny&) {
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
-        DocumentBuilder& builder = *_shared.documentBuilder;
+        const DocumentBuilder& builder = *_shared.documentBuilder;
         bool affected = false;
         for (const std::shared_ptr<Document>& document :
              _shared.documents->all()) {
@@ -785,7 +785,7 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willCreateFiles(
     const lsp::CreateFilesParams& params,
     const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
-  FileOperationHandler* files = _shared.fileOperationHandler.get();
+  const FileOperationHandler* files = _shared.fileOperationHandler.get();
   if (files == nullptr) return edit;
   (void)_shared.workspaceLock->read(
       [&]() { edit = files->willCreateFiles(params); }, token);
@@ -796,7 +796,7 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willRenameFiles(
     const lsp::RenameFilesParams& params,
     const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
-  FileOperationHandler* files = _shared.fileOperationHandler.get();
+  const FileOperationHandler* files = _shared.fileOperationHandler.get();
   if (files == nullptr) return edit;
   (void)_shared.workspaceLock->read(
       [&]() { edit = files->willRenameFiles(params); }, token);
@@ -807,7 +807,7 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willDeleteFiles(
     const lsp::DeleteFilesParams& params,
     const CancellationToken& token) const {
   std::optional<lsp::WorkspaceEdit> edit;
-  FileOperationHandler* files = _shared.fileOperationHandler.get();
+  const FileOperationHandler* files = _shared.fileOperationHandler.get();
   if (files == nullptr) return edit;
   (void)_shared.workspaceLock->read(
       [&]() { edit = files->willDeleteFiles(params); }, token);
@@ -1365,7 +1365,7 @@ void DefaultLanguageServer::writeAndPublish(
     std::span<const std::string_view> changed,
     std::span<const std::string_view> deleted,
     cursiv::function_ref<bool()> mutate) {
-  DocumentBuilder& builder = *_shared.documentBuilder;
+  const DocumentBuilder& builder = *_shared.documentBuilder;
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
         const bool moved = mutate();

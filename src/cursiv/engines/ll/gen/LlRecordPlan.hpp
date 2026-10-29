@@ -70,7 +70,9 @@ class LlRecordPlan {
           supplies(rule(n.sym), id);
         } else if (n.kind == LlShape::alt) {
           for (const auto child : _cfg.children(n)) supplies(child, id);
-        } else if (const auto only = single_position(id); only != kNoRow) {
+        } else if (const auto only =
+                       single_position(static_cast<std::uint16_t>(id));
+                   only != kNoRow) {
           supplies(only, id);
         } else {
           hands[id] = false;

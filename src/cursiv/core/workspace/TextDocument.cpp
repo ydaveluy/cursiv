@@ -154,14 +154,13 @@ std::string TextDocument::applyEdits(const TextDocument& document,
   for (const TextEdit& e : edits) {
     Range range = e.range;
     if (range.end < range.start) std::swap(range.start, range.end);
-    order.push_back({range.start, document.offsetAt(range.start),
-                     document.offsetAt(range.end), e.newText});
+    order.emplace_back(range.start, document.offsetAt(range.start),
+                       document.offsetAt(range.end), e.newText);
   }
   // Ascending stable sort, applied back to front: earlier offsets stay valid,
   // and two insertions at the same point land in array order.
-  std::stable_sort(
-      order.begin(), order.end(),
-      [](const Edit& a, const Edit& b) { return a.start < b.start; });
+  std::ranges::stable_sort(
+      order, [](const Edit& a, const Edit& b) { return a.start < b.start; });
   std::string out(document._text);
   std::size_t nextStart = out.size();
   for (const Edit& e : std::views::reverse(order)) {

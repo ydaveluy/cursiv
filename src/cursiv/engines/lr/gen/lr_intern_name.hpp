@@ -18,7 +18,7 @@ inline std::uint16_t lr_intern_name(LrBuildCfg& c, std::string_view text) {
     throw LowerRefused(LowerFail::namePool);
   }
   const std::uint16_t off = c.nameLen;
-  std::copy(text.begin(), text.end(), c.names.row(off, text.size()));
+  std::ranges::copy(text, c.names.row(off, text.size()));
   c.nameLen = static_cast<std::uint16_t>(off + text.size());
   return off;
 }

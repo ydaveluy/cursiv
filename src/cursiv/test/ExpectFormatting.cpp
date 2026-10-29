@@ -75,7 +75,7 @@ Disposable expectFormatting(const LspServices& services,
   std::vector<TextEdit> converted;
   converted.reserve(edits.size());
   for (const lsp::TextEdit& edit : edits)
-    converted.push_back({from_lsp(edit.range), edit.newText});
+    converted.emplace_back(from_lsp(edit.range), edit.newText);
   const std::string edited =
       TextDocument::applyEdits(document->textDocument(), converted);
 

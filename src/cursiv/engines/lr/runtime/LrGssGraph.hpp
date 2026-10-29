@@ -102,7 +102,7 @@ class LrGssGraph {
   std::size_t alternatives() const { return _forest.alternatives(); }
 
   Id add(Step step) {
-    const Id id = static_cast<Id>(_steps.size());
+    const auto id = static_cast<Id>(_steps.size());
     if (step.vertex != none && _vertices[step.vertex].steps == none)
       _vertices[step.vertex].steps = id;
     _steps.push_back(std::move(step));
@@ -145,7 +145,7 @@ class LrGssGraph {
             std::span<const std::uint32_t> wrap,
             std::span<const std::uint16_t> wrapAt);
   void watch(Pop pop) {
-    const Id id = static_cast<Id>(_pops.size());
+    const auto id = static_cast<Id>(_pops.size());
     _pops.push_back(pop);
     Vertex& v = _vertices[pop.vertex];
     // The seed's lowest vertex has frames under it the graph does not hold.

@@ -74,7 +74,7 @@ WorkerPool::WorkerPool(std::size_t workers) : _idle(workers) {
 void WorkerPool::stopAndJoin() noexcept {
   _stopping.store(true, std::memory_order_release);
   _idle.notifyAll();
-  for (auto& worker : _workers)
+  for (const auto& worker : _workers)
     if (worker->thread.joinable()) worker->thread.join();
 }
 
@@ -244,7 +244,7 @@ void WorkerPool::submit(Task& task, std::size_t self, std::size_t parts) {
 void WorkerPool::corun(Job& job, std::size_t self) noexcept {
   const std::size_t victims = victimCount();
   const bool isWorker = self < _workers.size();
-  Cell& cell = *job.cell;
+  const Cell& cell = *job.cell;
   std::size_t misses = 0;
   while (cell.pending.load(std::memory_order_acquire) != 0) {
     Task* task = isWorker ? _workers[self]->queue.pop() : nullptr;

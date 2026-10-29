@@ -65,7 +65,7 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
       full = true;
       return over;
     }
-    const ElementId id = static_cast<ElementId>(A.writes.nchains + A.nfused);
+    const auto id = static_cast<ElementId>(A.writes.nchains + A.nfused);
     fx.emplace(key, A.nfused);
     A.fused[A.nfused++] = LrFusedRow{r, over};
     return id;

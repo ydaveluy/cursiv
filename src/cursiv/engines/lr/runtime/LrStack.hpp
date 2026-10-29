@@ -110,7 +110,7 @@ class LrStack {
     reallocate(room_for(_cap));
   }
   CURSIV_NOINLINE void reallocate(std::uint32_t cap) {
-    LrFrame* q = new LrFrame[cap];
+    auto* q = new LrFrame[cap];
     for (std::uint32_t i = 0; i < _n; ++i) q[i] = _f[i];
     delete[] _f;
     _f = q;

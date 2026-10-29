@@ -27,7 +27,7 @@ struct ChainIndex {
   unsigned after(unsigned i) const { return next[i]; }
   void add(std::uint64_t h, unsigned i) {
     if (next.size() <= i) next.resize(i + 1, kNone);
-    const std::size_t b = static_cast<std::size_t>((h >> 24) & mask);
+    const auto b = static_cast<std::size_t>((h >> 24) & mask);
     next[i] = head[b];
     head[b] = i;
   }

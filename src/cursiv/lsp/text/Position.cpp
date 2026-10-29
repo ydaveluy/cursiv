@@ -18,12 +18,12 @@ std::vector<TextDocumentContentChangeEvent> from_lsp(
   for (const lsp::TextDocumentContentChangeEvent& change : changes) {
     if (const auto* whole =
             std::get_if<lsp::TextDocumentContentChangeWholeDocument>(&change)) {
-      converted.push_back({std::nullopt, whole->text});
+      converted.emplace_back(std::nullopt, whole->text);
       continue;
     }
     const auto& ranged =
         std::get<lsp::TextDocumentContentChangePartial>(change);
-    converted.push_back({from_lsp(ranged.range), ranged.text});
+    converted.emplace_back(from_lsp(ranged.range), ranged.text);
   }
   return converted;
 }

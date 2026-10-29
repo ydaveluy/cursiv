@@ -445,7 +445,7 @@ void DefaultDocumentValidator::validateAstNodes(
   };
   if (asks) {
     if (root != nullptr) ask(*root);
-    for (AstNode* const node : document.parseResult.nodes)
+    for (const AstNode* const node : document.parseResult.nodes)
       if (node != root) ask(*node);
   }
 
@@ -492,7 +492,7 @@ void DefaultDocumentValidator::validateAstNodes(
   // The walk stays that way on purpose. Document order is owed on the published
   // list, not on the traversal, and the list is a handful of diagnostics rather
   // than a tree of nodes -- `validateDocument` sorts it on the way out.
-  for (AstNode* const node : document.parseResult.nodes)
+  for (const AstNode* const node : document.parseResult.nodes)
     if (node != root) check(*node);
 }
 

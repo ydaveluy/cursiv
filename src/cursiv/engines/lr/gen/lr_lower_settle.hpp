@@ -47,7 +47,7 @@ void lr_compact_prods(Cfg& c, Pred&& drop) {
 template <class Cfg>
 void lr_intern_aux(Cfg& c) {
   // The auxiliaries are the last nonterminals minted.
-  const std::uint16_t first = static_cast<std::uint16_t>(c.nnts - c.auxCount);
+  const auto first = static_cast<std::uint16_t>(c.nnts - c.auxCount);
   if (c.auxCount < 2) return;
 
   const auto ix = lr_by_lhs(c);
@@ -278,7 +278,7 @@ inline void lr_no_hidden_left_recursion(
   };
   std::vector<Hidden> hidden;
   const auto is_gated = [&](std::uint16_t nt) {
-    return std::find(o.gated.begin(), o.gated.end(), nt) != o.gated.end();
+    return std::ranges::find(o.gated, nt) != o.gated.end();
   };
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const LrLowProd& q = c.prods[k];
@@ -303,7 +303,7 @@ inline void lr_no_hidden_left_recursion(
         if (b != a) o.faultCycle.insert(o.faultCycle.begin(), a);
       }
       o.fault.raise(GrammarFaultCode::hiddenLeftRecursion, a, gated,
-                    o.optionalGate);
+                    static_cast<std::uint16_t>(o.optionalGate));
       return;
     }
   for (std::uint16_t a = 0; a < c.nnts; ++a)

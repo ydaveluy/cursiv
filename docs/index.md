@@ -5,6 +5,8 @@ their tools: parsers, validators, command-line tools and language servers
 with Language Server Protocol (LSP) support. Its goal is to be as fast as
 possible.
 
+![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo.gif)
+
 You define the syntax and the abstract syntax tree (AST) in C++. Cursiv
 generates the parser, resolves references, runs your validation checks and
 provides editor features. For example, this rule reads the keyword `person`

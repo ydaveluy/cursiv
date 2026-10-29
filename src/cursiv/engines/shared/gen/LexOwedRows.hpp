@@ -40,7 +40,8 @@ LexOwedRows lex_owed_rows(const Dfa& d) {
   std::vector<std::uint16_t> accepting;
   for (std::size_t s = 0; s < n; ++s) {
     if (d.accept(static_cast<std::uint16_t>(s)) != 0) {
-      rows.owed[s] = static_cast<std::uint16_t>(d.accept(s) - 1u);
+      rows.owed[s] = static_cast<std::uint16_t>(
+          d.accept(static_cast<std::uint16_t>(s)) - 1u);
       accepting.push_back(static_cast<std::uint16_t>(s));
     }
     for (const auto to : d.successors(static_cast<std::uint16_t>(s))) {

@@ -467,7 +467,7 @@ void refuse_precedence_clash(Built& b) {
       for (const Spelt& s : spelt)
         if ((s.prec != op.prec || s.group != op.assoc) && s.words.meets(words))
           b.fault.raise(GrammarFaultCode::precedenceClash, r);
-      spelt.push_back({std::move(words), op.prec, op.assoc});
+      spelt.emplace_back(std::move(words), op.prec, op.assoc);
     }
   }
 }
@@ -865,8 +865,8 @@ struct Follow {
           const auto k = c.children(n);
           DynSet acc = std::move(visit.follow);
           const auto begin = pending.size();
-          for (unsigned i = k.size(); i-- > 0;) {
-            pending.push_back({k[i], acc});
+          for (auto i = static_cast<unsigned>(k.size()); i-- > 0;) {
+            pending.emplace_back(k[i], acc);
             if (!nullable[k[i]]) acc = DynSet{};
             acc |= first[k[i]];
           }
@@ -881,7 +881,7 @@ struct Follow {
           if (n.kind == LlShape::rep && n.max > 1) inner |= first[n.sym];
           const auto children = c.children(n);
           for (auto k = children.rbegin(); k != children.rend(); ++k)
-            pending.push_back({*k, inner});
+            pending.emplace_back(*k, inner);
           break;
         }
         default:
@@ -1214,7 +1214,7 @@ void build_atn(Built& b) {
       if (stop) stops.push_back(t);
     }
     for (const std::uint32_t t : visited) seen[t] = 0;
-    std::sort(stops.begin(), stops.end());
+    std::ranges::sort(stops);
     b.returnClass[s] = byStops.try_emplace(stops, s).first->second;
     if (stops.size() == 1 && b.states[stops[0]].kind == LlAtnKind::ruleStop)
       b.returnClass[s] |= kLlTailReturn;
@@ -1225,8 +1225,8 @@ void build_atn(Built& b) {
 // state of the automaton, whatever order they were reached in.
 std::vector<LlConfig> set_key(const std::vector<LlConfig>& cs) {
   std::vector<LlConfig> k = cs;
-  std::sort(k.begin(), k.end());
-  k.erase(std::unique(k.begin(), k.end()), k.end());
+  std::ranges::sort(k);
+  k.erase(std::ranges::unique(k).begin(), k.end());
   return k;
 }
 
@@ -1872,7 +1872,7 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
          [&](auto called) { heads[r].push_back(called); });
     auto& row = heads[r];
     std::ranges::sort(row);
-    row.erase(std::unique(row.begin(), row.end()), row.end());
+    row.erase(std::ranges::unique(row).begin(), row.end());
   }
   const auto scc = StrongComponents<>::of(heads);
   const auto count =

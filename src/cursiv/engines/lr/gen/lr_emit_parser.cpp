@@ -154,7 +154,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   template <class F>
   Piece piece(F&& f) {
     const std::size_t from = jumpLog.size();
-    std::string text = capture(f);
+    std::string text = capture(std::forward<F>(f));
     return {std::move(text), from, jumpLog.size()};
   }
   std::string jump(char kind, unsigned n) {
@@ -234,7 +234,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     for (unsigned st = 0; st < a.nstates; ++st)
       for (const LrAction& x : a.action_row(st)) {
         const auto into = [&](unsigned to) {
-          const int e = static_cast<int>(a.cfg.terms[x.term].element);
+          const auto e = static_cast<int>(a.cfg.terms[x.term].element);
           int& h = hopElem[to];
           if (h != -2 && h != e)
             throw std::logic_error(
@@ -580,9 +580,10 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
   }
 
   bool candidate_blind(unsigned st) const {
-    if (a.dfaRelay[st] != kNoRelay || a.dfa_res_set(st).any()) return false;
+    const auto state = static_cast<std::uint16_t>(st);
+    if (a.dfaRelay[st] != kNoRelay || a.dfa_res_set(state).any()) return false;
     for (unsigned t = 1; t < a.cfg.nterms; ++t)
-      if (a.dfa_acc_set(st).test(t) && a.dfa_acc_bound(st, t) != kNoSet)
+      if (a.dfa_acc_set(state).test(t) && a.dfa_acc_bound(state, t) != kNoSet)
         return false;
     return true;
   }
@@ -626,7 +627,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
         for (const unsigned st : states) fmt("    case {}:\n", st);
         line("    {");
         ByteSet stay{};
-        std::copy(words.begin(), words.end(), stay.w);
+        std::ranges::copy(words, stay.w);
         raw("      static constexpr ::std::array<::std::uint64_t, 4> kStay{");
         set64(stay);
         line("};");
@@ -707,9 +708,9 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
     std::vector<unsigned> work;
     candidateClean.assign(a.ndfa, 1);
     auto& clean = candidateClean;
-    for (unsigned st = 0; st < a.ndfa; ++st) {
+    for (std::uint16_t st = 0; st < a.ndfa; ++st) {
       for (unsigned k = 0; k < a.ncls; ++k) {
-        const auto to = a.next_dfa(st, k);
+        const auto to = a.next_dfa(st, static_cast<std::uint8_t>(k));
         if (to != kDeadState) before[to].push_back(st);
       }
       if (!candidate_blind(st)) {
@@ -734,7 +735,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
       const auto st = a.modeStart[m];
       if (a.dfa_acc_set(st).any()) continue;
       for (unsigned k = 0; k < a.ncls; ++k) {
-        const auto to = a.next_dfa(st, k);
+        const auto to = a.next_dfa(st, static_cast<std::uint8_t>(k));
         if (to == kDeadState || seen[to] || !clean[to] ||
             a.dfaAccept[to] == 0 || !a.modeWin[m].test(a.dfaAccept[to] - 1u) ||
             a.dfa_acc_set(to).rank(a.cfg.nterms) > 2)
@@ -784,7 +785,7 @@ full:
     line("inline constexpr const auto& kCandBase = kTable.cold.accBoundBase;");
     line("inline constexpr const auto& kCandBound = kTable.cold.accBound;");
     std::vector<unsigned> cands;
-    for (unsigned st = 0; st < a.ndfa; ++st) {
+    for (std::uint16_t st = 0; st < a.ndfa; ++st) {
       // `kCandBase` counts every bit a state accepts.
       assert(!a.dfa_acc_set(st).test(0));
       for (unsigned t = 1; t < a.cfg.nterms; ++t)
@@ -876,7 +877,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     DynSet& out = at->second;
     for (const auto st : dfa.states_from(e)) {
       // A guard can hand the match to an acceptance the ranked one hid.
-      out |= a.dfa_acc_set(st);
+      out |= a.dfa_acc_set(static_cast<std::uint16_t>(st));
       for (auto r = a.dfaRelay[st]; r != kNoRelay; r = a.relays[r].next)
         out.set(a.relays[r].term);
     }
@@ -895,8 +896,10 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
       return;
     unsigned to = kDeadState;
     for (unsigned b = 0; b < 256; ++b) {
-      const auto edge = a.next_dfa(st, a.cls[b]);
-      if ((edge != kDeadState) != a.cfg.sets[bound].has(b)) return;
+      const auto edge = a.next_dfa(static_cast<std::uint16_t>(st), a.cls[b]);
+      if ((edge != kDeadState) !=
+          a.cfg.sets[bound].has(static_cast<unsigned char>(b)))
+        return;
       if (edge == kDeadState) continue;
       if (to != kDeadState && to != edge) return;
       to = edge;
@@ -1049,7 +1052,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
       return false;
     for (const unsigned st : dfa.states_from(a.modeStart[m])) {
       for (unsigned t = 1; t < a.cfg.nterms; ++t) {
-        if (!a.dfa_acc_set(st).test(t)) continue;
+        if (!a.dfa_acc_set(static_cast<std::uint16_t>(st)).test(t)) continue;
         const auto& term = a.cfg.terms[t];
         if (!term.trivia && !term.spelled && !a.modeWin[m].test(t))
           return false;
@@ -1693,7 +1696,8 @@ again:
     const auto plain = [&](unsigned t) -> const LrAction* {
       const auto& term = a.cfg.terms[t];
       if (term.trivia || term.laid != 0) return nullptr;
-      const auto [lo, n] = lr_term_run(row, a.actionCount[s], t);
+      const auto [lo, n] =
+          lr_term_run(row, a.actionCount[s], static_cast<std::uint16_t>(t));
       if (n != 1) return nullptr;
       const LrAction& x = row[lo];
       if (x.kind == LrActionKind::shift) return &x;
@@ -2313,7 +2317,9 @@ again:
     const auto newlines = [](std::string_view t) {
       return static_cast<unsigned>(std::ranges::count(t, '\n'));
     };
-    const auto lines_of = [&](auto&& f) { return 1u + newlines(capture(f)); };
+    const auto lines_of = [&](auto&& f) {
+      return 1u + newlines(capture(std::forward<decltype(f)>(f)));
+    };
     for (unsigned s = 0; s < ns; ++s)
       weight[s] = lines_of([&] { emit_hop(s, {}); }) +
                   newlines(statePiece[s].text);

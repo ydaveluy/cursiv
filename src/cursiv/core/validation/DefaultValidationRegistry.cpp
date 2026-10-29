@@ -130,7 +130,7 @@ void DefaultValidationRegistry::fileDocumentCheck(
         "runtime's and null is nobody's");
   if (std::ranges::find(_categories, category) == _categories.end())
     _categories.push_back(category);
-  into.push_back(ValidationPreparationEntry{category, std::move(check)});
+  into.emplace_back(category, std::move(check));
 }
 
 // -Warray-bounds fires here on a `std::mutex` this function never names: at -O3

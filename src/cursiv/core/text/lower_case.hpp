@@ -18,9 +18,8 @@ namespace cursiv {
 namespace detail {
 
 inline char32_t lower_scalar(char32_t cp) noexcept {
-  const auto* run = std::upper_bound(
-      std::begin(unicode::kLower), std::end(unicode::kLower), cp,
-      [](char32_t c, const unicode::LowerRun& r) { return c < r.first; });
+  const auto* run = std::ranges::upper_bound(unicode::kLower, cp, {},
+                                             &unicode::LowerRun::first);
   if (run == std::begin(unicode::kLower)) return cp;
   --run;
   if (cp > run->last || (cp - run->first) % run->stride != 0) return cp;

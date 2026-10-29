@@ -21,12 +21,12 @@ namespace {
 
 template <class T>
 bool has(const std::vector<T>& sorted, T v) {
-  return std::binary_search(sorted.begin(), sorted.end(), v);
+  return std::ranges::binary_search(sorted, v);
 }
 
 std::vector<std::uint32_t> sorted_unique(std::vector<std::uint32_t> v) {
-  std::sort(v.begin(), v.end());
-  v.erase(std::unique(v.begin(), v.end()), v.end());
+  std::ranges::sort(v);
+  v.erase(std::ranges::unique(v).begin(), v.end());
   return v;
 }
 
@@ -76,9 +76,8 @@ std::uint16_t Lowerer::sym_of(unsigned cfg, std::uint32_t rule) {
   if (const auto t = _termIdx.find(rule); t != _termIdx.end()) {
     const std::uint8_t role = role_in(cfg, rule);
     if (role != role_in(0, rule)) {
-      const auto at = std::find(
-          _roles.begin(), _roles.end(),
-          std::pair<std::uint32_t, std::uint8_t>{rule, role});
+      const auto at = std::ranges::find(
+          _roles, std::pair<std::uint32_t, std::uint8_t>{rule, role});
       return role_sym(static_cast<std::size_t>(at - _roles.begin()));
     }
     return static_cast<std::uint16_t>(1 + t->second);
@@ -202,7 +201,7 @@ void Lowerer::index() {
       refuse_lowering(
           "a terminal belongs to at most one of `ignored` and `hidden`: "
           "trivia are dropped from the tree or kept in it, never both");
-  for (const std::uint8_t role : {0, 1, 2})
+  for (std::uint8_t role = 0; role < 3; ++role)
     for (const std::uint32_t rule : _skipped) {
       if (role_in(0, rule) == role) continue;
       for (unsigned k = 1; k < _cfgs.size(); ++k)
@@ -255,7 +254,8 @@ void Lowerer::open_configs() {
   walk = [&](ImageId id, unsigned home) {
     const ImageNode n = at(id);
     if (n.kind == ImageKind::skip) {
-      const auto ignore = listed(n.a, n.m), hide = listed(n.a + n.m, n.n);
+      const auto ignore = listed(n.a, n.m),
+                 hide = listed(static_cast<std::uint32_t>(n.a + n.m), n.n);
       Config c;
       c.ignore = sorted_unique(ignore);
       c.hide = sorted_unique(hide);

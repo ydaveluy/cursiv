@@ -87,7 +87,7 @@ struct HeadMatcher {
     std::vector<Work> work;
     const auto add = [&](std::uint32_t at, Items items) {
       const auto id = static_cast<std::uint32_t>(work.size());
-      work.push_back({at, std::move(items)});
+      work.emplace_back(at, std::move(items));
       return id;
     };
     const std::uint32_t from = reach ? 0 : offset;

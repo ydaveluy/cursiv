@@ -31,6 +31,7 @@
 #include "cursiv/engines/shared/gen/ChainIndex.hpp"
 #include "cursiv/engines/shared/gen/ChainPool.hpp"
 #include "cursiv/engines/shared/gen/LexOvertakes.hpp"
+#include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/PredicateModes.hpp"
 #include "cursiv/engines/shared/gen/bit_words.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
@@ -117,7 +118,7 @@ void lr_append(auto& pool, const auto& row) {
 // `v` sorted, each value once.
 void lr_sort_unique(auto& v) {
   std::ranges::sort(v);
-  v.erase(std::unique(v.begin(), v.end()), v.end());
+  v.erase(std::ranges::unique(v).begin(), v.end());
 }
 
 // What `. B` adds, once per nonterminal: the lookahead fixed by a follower or
@@ -301,7 +302,7 @@ LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
       for (const auto q : pn.of(nt_index(g.sym_at(pr, 0))))
         add(q, fixed, inherit);
     }
-    std::sort(active.begin(), active.end());
+    std::ranges::sort(active);
     cl.base[B] = static_cast<std::uint32_t>(cl.entries.size());
     for (const auto p : active) {
       cl.entries.push_back(row[p]);
@@ -526,7 +527,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         return i;
       }
     }
-    const unsigned id = static_cast<unsigned>(kernAt.size());
+    const auto id = static_cast<unsigned>(kernAt.size());
     if (id >= 0xffffu) {
       A.cap_hit(
           "it needs more than 65 535 parser states (optional items and "
@@ -1330,7 +1331,7 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions) {
           lr_kernel_hash(kp + gr.kernAt[s], gr.kernLen[s], nullptr);
       for (const std::uint64_t x : gr.tagKnown[s].w) h = hash_mix(h, x);
       for (const std::uint64_t x : gr.tagTruth[s].w) h = hash_mix(h, x);
-      unsigned found = static_cast<unsigned>(repr.size());
+      auto found = static_cast<unsigned>(repr.size());
       for (unsigned i = ix.first(h); i != ChainIndex::kNone; i = ix.after(i))
         if (gr.tagKnown[repr[i]] == gr.tagKnown[s] &&
             gr.tagTruth[repr[i]] == gr.tagTruth[s] &&
@@ -1417,8 +1418,8 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions) {
   };
   std::vector<Class::Speaks> merged;
   const auto join = [&](Class& c, unsigned s) {
-    if (std::none_of(c.impliedBy.begin(), c.impliedBy.end(),
-                     [&](unsigned m) { return implied[m] == implied[s]; }))
+    if (std::ranges::none_of(
+            c.impliedBy, [&](unsigned m) { return implied[m] == implied[s]; }))
       c.impliedBy.push_back(s);
     const auto u = row(s);
     merged.clear();
@@ -1850,7 +1851,7 @@ class LrWrittenOrder {
       words_at(e.prod, 0, [&](std::uint32_t w) { key.push_back(w); });
       const auto at = std::ranges::find(best, t, &Best::term);
       if (at == best.end())
-        best.push_back({t, key});
+        best.emplace_back(t, key);
       else if (std::ranges::lexicographical_compare(key, at->words))
         at->words = key;
     }
@@ -2125,7 +2126,7 @@ class LrWrittenOrder {
       sh.rootChain[i] = base;
       const std::vector<std::uint64_t>& flat = rise.flat;
       for (std::size_t from = 0, to = 0; from < flat.size(); from = to) {
-        const std::uint32_t ix = static_cast<std::uint32_t>(flat[from] >> 32);
+        const auto ix = static_cast<std::uint32_t>(flat[from] >> 32);
         while (to < flat.size() && (flat[to] >> 32) == ix) ++to;
         ups.clear();
         for (std::size_t k = from; k < to; ++k) ups.push_back(flat[k] << 32);
@@ -2302,12 +2303,14 @@ class LrWrittenOrder {
     if (!sh.built) build(sh);
   }
 
-  // The list of `r` that has these roots and reads `t`.
+  // The list of `r` that has these roots and reads `t`. Its shape numbers the
+  // roots in sixteen bits.
   std::uint32_t list_of(Row& r, std::span<const LrItem> roots,
                         std::uint32_t t) {
     for (std::uint32_t i = 0; i < r.lists.size(); ++i)
       if (r.lists[i].t == t && std::ranges::equal(r.lists[i].roots, roots))
         return i;
+    if (roots.size() > kNoRow) throw LowerRefused(LowerFail::tableTooLarge);
     r.lists.push_back({{roots.begin(), roots.end()}, t});
     r.shape.push_back(kNone);
     return static_cast<std::uint32_t>(r.lists.size() - 1);
@@ -2673,7 +2676,7 @@ class LrWrittenOrder {
       return std::span<const std::uint64_t>(lay.states)
           .subspan(c.from, c.to - c.from);
     };
-    for (std::size_t i = 0; i < a.roots.size(); ++i) {
+    for (unsigned i = 0; i < a.roots.size(); ++i) {
       if (A.rootChain[a.cls[i]] == kNone || a.roots[i].dot != height) continue;
       const Chain& ra = A.chains[A.rootChain[a.cls[i]]];
       const unsigned p = a.roots[i].prod;
@@ -2689,7 +2692,7 @@ class LrWrittenOrder {
                          }))
             return true;
       }
-      for (std::size_t j = 0; j < b.roots.size(); ++j) {
+      for (unsigned j = 0; j < b.roots.size(); ++j) {
         if (B.rootChain[b.cls[j]] == kNone || b.roots[j].dot != height ||
             b.roots[j].prod != p)
           continue;
@@ -2701,7 +2704,7 @@ class LrWrittenOrder {
           return true;
       }
     }
-    for (std::size_t j = 0; j < b.roots.size(); ++j) {
+    for (unsigned j = 0; j < b.roots.size(); ++j) {
       if (B.rootChain[b.cls[j]] == kNone || b.roots[j].dot != height) continue;
       const Chain& rb = B.chains[B.rootChain[b.cls[j]]];
       const unsigned p = b.roots[j].prod;
@@ -2883,9 +2886,10 @@ class LrWrittenOrder {
     const std::uint32_t top = dx == 0   ? first_of(ex)
                               : dy == 0 ? first_of(ey)
                                         : kNone;
-    return judge(skeleton_id(a, la, ca, i), skeleton_id(b, lb, cb, j),
-                 {top, first_of(ex), second_of(ex), first_of(ey), second_of(ey)},
-                 i, j, at);
+    return judge(
+        skeleton_id(a, la, ca, i), skeleton_id(b, lb, cb, j),
+        {top, first_of(ex), second_of(ex), first_of(ey), second_of(ey)},
+        static_cast<std::uint16_t>(i), static_cast<std::uint16_t>(j), at);
   }
 
   // The same for a pair `meets` noted, over every pair of roots its chains
@@ -3070,10 +3074,9 @@ class LrWrittenOrder {
   // The chains of `ids` whose tops are of production `p`.
   std::pair<Ids::const_iterator, Ids::const_iterator> with_prod(
       const Ids& ids, unsigned p) const {
-    return {std::lower_bound(ids.begin(), ids.end(),
-                             std::uint64_t{_dom.base[p]} << 32),
-            std::lower_bound(ids.begin(), ids.end(),
-                             std::uint64_t{_dom.base[p + 1]} << 32)};
+    return {
+        std::ranges::lower_bound(ids, std::uint64_t{_dom.base[p]} << 32),
+        std::ranges::lower_bound(ids, std::uint64_t{_dom.base[p + 1]} << 32)};
   }
 
   // The places among the chains of two of `lay` of those whose height is `h`.

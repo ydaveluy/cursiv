@@ -73,7 +73,7 @@ class AstArena {
   // its block is still the top of the bump. False when something was carved in
   // between, and the caller then copies once.
   bool try_extend(void* p, std::size_t oldBytes, std::size_t newBytes) {
-    char* const q = static_cast<char*>(p);
+    const auto* const q = static_cast<const char*>(p);
     if (q + oldBytes != _cur) return false;
     const std::size_t more = newBytes - oldBytes;
     if (std::cmp_greater(more, _end - _cur)) return false;
@@ -117,7 +117,7 @@ class AstArena {
     // A node wider than a chunk gets its own exact block; the current chunk
     // keeps its remaining room for the nodes that follow.
     const std::size_t want = size + align > kChunk ? size + align : kChunk;
-    char* const block = static_cast<char*>(_mem->allocate(want, kBumpAlign));
+    auto* const block = static_cast<char*>(_mem->allocate(want, kBumpAlign));
     char* const p = align_up(block, align);
     // An oversized node takes its own block and the current chunk is kept:
     // dropping it would strand the room left for the nodes that follow.

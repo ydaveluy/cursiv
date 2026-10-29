@@ -136,7 +136,7 @@ struct LexNfaPool {
   std::vector<int> eclose(std::span<const int> roots) const {
     if (_seen.size() < s.size()) _seen.resize(s.size(), 0);
     if (++_pass == 0) {
-      std::fill(_seen.begin(), _seen.end(), 0u);
+      std::ranges::fill(_seen, 0u);
       _pass = 1;
     }
     std::vector<int> set;
@@ -168,7 +168,7 @@ struct LexNfaPool {
   // too, every state short of the closer ends it there as well.
   template <class Cfg>
   int through(const Cfg& g, const LexNode& e, int out) {
-    const unsigned len = static_cast<unsigned>(e.min);
+    const auto len = static_cast<unsigned>(e.min);
     std::vector<int> q(len + 1);
     q[len] = out;
     for (unsigned i = 0; i < len; ++i) q[i] = hole();

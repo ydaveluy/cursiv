@@ -88,7 +88,7 @@ std::uint16_t lex_relay_push(Push&& push, const LexRelayGen& row) {
 // The pool's first rows, one per relay of the token graph, each resuming in
 // the DFA state its resume subset interns as.
 template <class Dfa, class Relays, class Push>
-void lex_relay_seed(Dfa& dfa, const Relays& relays, Push&& push) {
+void lex_relay_seed(Dfa& dfa, const Relays& relays, const Push& push) {
   for (const auto& relay : relays) {
     LexRelayGen row = relay.row;
     dfa.close(relay.resumeOut);
@@ -102,9 +102,9 @@ struct LexRelayChains {
 
   template <class Rows, class Push>
   std::uint16_t intern(std::vector<std::uint16_t>& group, const Rows& rows,
-                       Push&& push) {
-    std::sort(group.begin(), group.end());
-    group.erase(std::unique(group.begin(), group.end()), group.end());
+                       const Push& push) {
+    std::ranges::sort(group);
+    group.erase(std::ranges::unique(group).begin(), group.end());
     std::uint16_t head = kNoRelay;
     for (auto it = group.rbegin(); it != group.rend(); ++it) {
       if (head == kNoRelay) {
@@ -129,7 +129,7 @@ struct LexRelayChains {
   // `cut.gate` of what they wait on.
   template <class Cfg, class Cut, class Reading, class Rows, class Push>
   std::uint16_t launched(Cfg& g, Cut& cut, const Reading& r, const Rows& rows,
-                         Push&& push) {
+                         const Push& push) {
     std::vector<std::uint16_t> group = r.relays;
     const std::uint16_t predicate =
         r.gates.empty() ? kNoLexNode : cut.gate(g, r.gated);

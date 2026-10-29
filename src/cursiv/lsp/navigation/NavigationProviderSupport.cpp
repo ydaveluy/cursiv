@@ -60,14 +60,12 @@ std::vector<ReferenceDescription> collect_references_per_declaration(
           return a.sourceBegin < b.sourceBegin;
         return a.sourceEnd < b.sourceEnd;
       });
-  rows.erase(std::unique(rows.begin(), rows.end(),
-                         [](const ReferenceDescription& a,
-                            const ReferenceDescription& b) {
-                           return a.sourceDocumentId == b.sourceDocumentId &&
-                                  a.sourceBegin == b.sourceBegin &&
-                                  a.sourceEnd == b.sourceEnd;
-                         }),
-             rows.end());
+  const auto repeats = std::ranges::unique(
+      rows, [](const ReferenceDescription& a, const ReferenceDescription& b) {
+        return a.sourceDocumentId == b.sourceDocumentId &&
+               a.sourceBegin == b.sourceBegin && a.sourceEnd == b.sourceEnd;
+      });
+  rows.erase(repeats.begin(), repeats.end());
   return rows;
 }
 

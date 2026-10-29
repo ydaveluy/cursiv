@@ -140,7 +140,7 @@ template <auto M, class V>
                      const CancellationToken& token) {
         // The downcast is the filing's proof: the registry put this closure
         // under the tags of `Node`'s family and nowhere else.
-        const Node& typed = static_cast<const Node&>(node);
+        const auto& typed = static_cast<const Node&>(node);
         if constexpr (Traits::interruptible)
           (held->*M)(typed, accept, token);
         else

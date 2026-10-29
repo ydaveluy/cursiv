@@ -100,7 +100,7 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
     } else {
       auto nodes = keyword ? find_nodes_for_keyword(view, name)
                            : find_nodes_for_feature(view, name);
-      _anchors.push_back({std::string(name), keyword, std::move(nodes)});
+      _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
       found = _anchors.end() - 1;
     }
   }

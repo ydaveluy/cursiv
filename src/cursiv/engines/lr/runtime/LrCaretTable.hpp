@@ -149,7 +149,7 @@ struct LrCaretTable {
     }
     const std::uint32_t at = guardAt[target - mode.size()];
     const auto conditions = conditions_of(target);
-    const unsigned n = static_cast<unsigned>(conditions.size());
+    const auto n = static_cast<unsigned>(conditions.size());
     unsigned known = 0, truth = 0;
     for (unsigned b = 0; b < n; ++b) {
       const unsigned m = may(guardOps[at + 1u + b]);

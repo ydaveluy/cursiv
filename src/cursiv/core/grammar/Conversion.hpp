@@ -176,7 +176,7 @@ inline constexpr double kPow10[23] = {
   if (exp10 != 0 && !std::is_constant_evaluated() &&
       std::fegetround() != FE_TONEAREST)
     return false;
-  double d = static_cast<double>(sig);
+  auto d = static_cast<double>(sig);
   d = exp10 >= 0 ? d * kPow10[exp10] : d / kPow10[-exp10];
   out = neg ? -d : d;
   return true;
@@ -258,7 +258,7 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
 inline std::string_view copy_into(std::pmr::memory_resource* mem,
                                   std::string_view text) {
   // A null data pointer means an unwritten AST member, even at length zero.
-  char* const buf = static_cast<char*>(
+  auto* const buf = static_cast<char*>(
       mem->allocate(text.empty() ? 1 : text.size(), alignof(char)));
   if (!text.empty())
     std::char_traits<char>::copy(buf, text.data(), text.size());

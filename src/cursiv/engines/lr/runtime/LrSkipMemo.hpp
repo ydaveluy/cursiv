@@ -36,7 +36,7 @@ class LrSkipMemo {
     s.from = from;
     s.mode = mode;
     s.depth = depth;
-    s.n = n;
+    s.n = static_cast<std::uint8_t>(n);
     for (std::uint32_t i = 0; i < n; ++i) s.skip[i] = skip[i];
     s.token = token;
   }

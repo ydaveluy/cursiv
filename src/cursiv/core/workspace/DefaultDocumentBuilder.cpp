@@ -68,8 +68,8 @@ std::vector<Document*> DefaultDocumentBuilder::pending(
       work.push_back(d);
   // The open ones first, stably: the documents someone is looking at reach
   // every rung, and so the client, before the rest of the store.
-  std::stable_partition(work.begin(), work.end(),
-                        [](const Document* d) { return d->isOpen; });
+  std::ranges::stable_partition(work,
+                                [](const Document* d) { return d->isOpen; });
   return work;
 }
 
@@ -261,7 +261,7 @@ BuildOptions DefaultDocumentBuilder::getBuildOptions(
 void DefaultDocumentBuilder::prepareBuild(std::span<Document* const> documents,
                                           const BuildOptions& options) const {
   const std::scoped_lock lock(_stateMutex);
-  for (Document* const d : documents) {
+  for (const Document* const d : documents) {
     const auto at = _buildOptions.find(d->id);
     // An unfinished request survives: a document keeps what it was asked
     // until a build honours it, so an interrupted ask is never replaced.
@@ -287,7 +287,7 @@ void DefaultDocumentBuilder::buildDocuments(
     std::span<Document* const> documents,
     const CancellationToken& token) const {
   IndexManager& index = *_shared.indexManager;
-  DocumentFactory& factory = *_shared.documentFactory;
+  const DocumentFactory& factory = *_shared.documentFactory;
 
   const auto held = _shared.documents->all();
   std::vector<Document*> work(documents.begin(), documents.end());
@@ -314,7 +314,7 @@ void DefaultDocumentBuilder::buildDocuments(
       rebuild(d);
   }
   std::unordered_set<DocumentId> changed;
-  for (Document* d : work)
+  for (const Document* d : work)
     if (d->state.load() < DocumentState::IndexedContent) changed.insert(d->id);
   const bool prepareContent = !changed.empty() && std::ranges::any_of(
       held, [&](const auto& d) {
@@ -477,7 +477,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // Cause (a) before any look at the moved set, and it plays on an empty one:
   // this is the whole repair path for a reference broken by a symbol that has
   // since appeared somewhere else.
-  IndexManager& index = *_shared.indexManager;
+  const IndexManager& index = *_shared.indexManager;
   for (const std::shared_ptr<Document>& doc : store.all()) {
     Document* const d = doc.get();
     if (moved.contains(d->id)) continue;
@@ -532,7 +532,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
         } catch (const FileSystemError&) {
         }
       });
-  DocumentFactory& factory = *_shared.documentFactory;
+  const DocumentFactory& factory = *_shared.documentFactory;
   std::unordered_set<std::string_view> lost;
   for (std::size_t i = 0; i < fresh.size(); ++i) {
     if (store.hasDocument(fresh[i])) continue;  // another spelling installed it
@@ -786,7 +786,7 @@ void DefaultDocumentBuilder::publishFailure(std::uint64_t attempt) const {
 
 WaitOutcome DefaultDocumentBuilder::waitUntil(
     DocumentState state, const CancellationToken& token) const {
-  const std::size_t index = static_cast<std::size_t>(state);
+  const auto index = static_cast<std::size_t>(state);
   std::unique_lock lock(_stateMutex);
   if (token.stop_requested()) return WaitOutcome::Cancelled;
   if (_currentState >= state) return WaitOutcome::Reached;

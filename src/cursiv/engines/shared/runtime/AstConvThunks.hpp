@@ -94,7 +94,7 @@ inline std::string_view join_parts(AstBuildCtx& ctx, const PartRun& run) {
     return std::string_view{};
   }
   if (verbatim) return std::string_view(first, total);
-  char* const buf = static_cast<char*>(ctx.mem->allocate(total, alignof(char)));
+  auto* const buf = static_cast<char*>(ctx.mem->allocate(total, alignof(char)));
   char* out = buf;
   for (const std::string_view part : run)
     out = std::copy(part.begin(), part.end(), out);

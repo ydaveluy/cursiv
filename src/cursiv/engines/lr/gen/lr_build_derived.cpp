@@ -120,8 +120,7 @@ struct LrDeriving {
       if (const auto b = c.nt_after(p, 0); b != kNoRow && nullable[b])
         refused[q.node] = 1;
       auto& lhs = named[q.node];
-      if (std::find(lhs.begin(), lhs.end(), q.lhs) == lhs.end())
-        lhs.push_back(q.lhs);
+      if (std::ranges::find(lhs, q.lhs) == lhs.end()) lhs.push_back(q.lhs);
     }
     for (unsigned k = 0; k < a.nfused; ++k) {
       const auto node = a.fused[k].node;

@@ -85,7 +85,7 @@ std::vector<CstNodeView> collect(const CstNodeView& node,
   walk<kWriterFirst>(cst, node.id, matches, [&](NodeId id) {
     found.push_back(CstNodeView{&cst, id});
   });
-  std::reverse(found.begin(), found.end());
+  std::ranges::reverse(found);
   return found;
 }
 
@@ -245,15 +245,14 @@ std::vector<NodeId> interior_nodes(const Cst& cst, NodeId open, NodeId close) {
     else if (behindClose)
       interior.push_back(child);
   }
-  std::reverse(interior.begin(), interior.end());
+  std::ranges::reverse(interior);
   return interior;
 }
 
 AstNode* owner_of_leaf(const Cst& cst, NodeId leaf) {
   const OwnedNodes owned = cst.owned();
-  const auto at = std::lower_bound(
-      owned.begin(), owned.end(), leaf,
-      [](const AstNode* row, NodeId want) { return row->cstNodeId < want; });
+  const auto at =
+      std::ranges::lower_bound(owned, leaf, {}, &AstNode::cstNodeId);
   if (at == owned.end()) return nullptr;
   for (AstNode* node = *at;
        node != nullptr && node->cstNodeId != kNoNode; node = node->parent)

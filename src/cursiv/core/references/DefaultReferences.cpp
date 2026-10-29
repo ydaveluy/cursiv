@@ -248,7 +248,8 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
   // multi reference stands for its overload set. Filtered like any row -- a
   // sibling declared in another document is not a highlight of this one.
   if (options.includeDeclaration)
-    for (ReferenceDescription& row : getSelfReferences(target, cancelToken))
+    for (const ReferenceDescription& row :
+         getSelfReferences(target, cancelToken))
       if (wanted(row.sourceDocumentId)) references.push_back(row);
 
   (void)index.visitReferences(home->id, target.cstNodeId,

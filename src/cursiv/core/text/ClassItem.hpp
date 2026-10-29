@@ -150,7 +150,7 @@ constexpr void class_escape_ranges(char klass, Sink sink) {
   constexpr Span kDigit[] = {{'0', '9'}};
   constexpr Span kWord[] = {{'0', '9'}, {'A', 'Z'}, {'_', '_'}, {'a', 'z'}};
   constexpr Span kSpace[] = {{0x09, 0x0D}, {0x20, 0x20}};
-  const char lower = static_cast<char>(klass | 0x20);
+  const auto lower = static_cast<char>(klass | 0x20);
   const Span* r = lower == 'd' ? kDigit : lower == 'w' ? kWord : kSpace;
   const std::size_t n = lower == 'd' ? 1 : lower == 'w' ? 4 : 2;
   if (klass == lower) {

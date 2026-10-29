@@ -35,7 +35,7 @@ template <class CondCfg, class LexCfg, class RuleName>
 void report_warnings(std::string_view grammar, GrammarImage& image,
                      const CondCfg& conds, const LexCfg& lex,
                      RuleName rule_name) {
-  const int n = static_cast<int>(grammar.size());
+  const auto n = static_cast<int>(grammar.size());
   for (const UnboundedCondition& u : conds.unbounded)
     std::fprintf(stderr, "%.*s: warning: %s\n", n, grammar.data(),
                  unbounded_condition_text(conds, rule_name(u.rule), u).c_str());
@@ -128,7 +128,7 @@ std::string_view empty_match_terminal(const Built& a, Accepted accepted) {
 template <class Built>
 bool refuse_unbuilt(std::string_view grammar, const Built& a,
                     std::string_view rule) {
-  const int n = static_cast<int>(grammar.size());
+  const auto n = static_cast<int>(grammar.size());
   if (a.cfg.lowerWhy != LowerFail::none)
     std::fprintf(stderr, "%.*s: refused: %s\n", n, grammar.data(),
                  lower_fail_sentence(a.cfg, rule).c_str());

@@ -10,6 +10,14 @@ extension. Choose one for the feature you want to add:
 | Packages, qualified names and formatting | [Domainmodel](https://github.com/ydaveluy/cursiv/tree/main/examples/domainmodel) |
 | Several languages with cross-file references | [Requirements](https://github.com/ydaveluy/cursiv/tree/main/examples/requirements) |
 
+## More languages
+
+[cursiv-grammar](https://github.com/ydaveluy/cursiv-grammar) holds more than
+300 languages implemented with Cursiv, mostly adapted from
+[ANTLR grammars-v4](https://github.com/antlr/grammars-v4). Each one builds on
+its own, with a CLI, a language server and tests: a good starting point when
+your language is close to an existing one.
+
 ## Run an example
 
 From the Cursiv repository root, with GCC and Ninja installed:

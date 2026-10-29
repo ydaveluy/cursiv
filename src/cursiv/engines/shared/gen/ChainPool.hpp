@@ -86,7 +86,7 @@ struct ChainPool {
   // chain that closes over it.
   void note_makes(std::span<const WriteKind> kind) {
     for (std::uint16_t i = 0; i < nchains; ++i) {
-      Chain& ch = chains[i];
+      const Chain& ch = chains[i];
       // Every chain has a build half, the empty ones included: the pool is
       // indexed, so a hole in it is a read past the end.
       ChainBuild& cb = chainBuild[i];

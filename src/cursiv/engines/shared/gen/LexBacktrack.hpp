@@ -35,7 +35,8 @@ inline std::vector<std::uint8_t> lex_backtrack_modes(
   if (!accepting) return {};
   const auto next = [&](std::uint32_t s, unsigned c) {
     if constexpr (requires { a.next_dfa(s, c); })
-      return a.next_dfa(s, c);
+      return a.next_dfa(static_cast<std::uint16_t>(s),
+                        static_cast<std::uint8_t>(c));
     else
       return a.dfaNext[std::size_t{s} * a.ncls + c];
   };

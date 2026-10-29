@@ -587,8 +587,8 @@ struct LexDfaBuild {
   }
 
   std::uint32_t close_kernel() {
-    std::sort(_kernel.begin(), _kernel.end());
-    _kernel.erase(std::unique(_kernel.begin(), _kernel.end()), _kernel.end());
+    std::ranges::sort(_kernel);
+    _kernel.erase(std::ranges::unique(_kernel).begin(), _kernel.end());
     std::uint64_t h = hash_mix(0x9e3779b97f4a7c15ull, _kernel.size());
     for (const int t : _kernel) h = hash_mix(h, static_cast<std::uint64_t>(t));
     for (unsigned i = _kernelIx.first(h); i != ChainIndex::kNone;
@@ -632,9 +632,8 @@ struct LexDfaBuild {
                                                          : 0)});
       }
     }
-    std::sort(r.relays.begin(), r.relays.end());
-    r.relays.erase(std::unique(r.relays.begin(), r.relays.end()),
-                   r.relays.end());
+    std::ranges::sort(r.relays);
+    r.relays.erase(std::ranges::unique(r.relays).begin(), r.relays.end());
     auto& rows = r.accepts;
     std::ranges::sort(rows);
     auto bestRank = 0u;
@@ -703,8 +702,8 @@ struct LexDfaBuild {
         relayed.push_back(_cut.trivia[x]);
     }
     if (stands.empty()) return mn;
-    std::sort(stands.begin(), stands.end());
-    stands.erase(std::unique(stands.begin(), stands.end()), stands.end());
+    std::ranges::sort(stands);
+    stands.erase(std::ranges::unique(stands).begin(), stands.end());
     const auto leaves = [&](int x) {
       const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
       const std::uint16_t term = _cut.trivia[static_cast<std::size_t>(x)];
@@ -801,8 +800,8 @@ struct LexDfaBuild {
 // subset became.
 template <class Built, class Push, class Write>
 void lex_build_dfa(Built& b, const LexAlphabet& alpha, LexKeywordCut& cut,
-                   const std::vector<DynSet>& modeSet, Push&& push,
-                   Write&& write) {
+                   const std::vector<DynSet>& modeSet, const Push& push,
+                   const Write& write) {
   auto& g = b.cfg;
   const std::vector<std::uint8_t> words = lex_word_flags(g);
   LexDfaBuild dfa(alpha.nfa, g.sets.data(), g.sets.size(), alpha.repByte,
