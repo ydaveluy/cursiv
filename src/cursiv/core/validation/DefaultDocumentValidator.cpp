@@ -147,8 +147,11 @@ void DefaultDocumentValidator::attachRepairActions(
     const Document& document, TextRange range, const ParseDiagnostic& owed,
     Diagnostic& diagnostic) const {
   // The repair already says which tokens it was owed, and what they spell is
-  // the grammar's own answer -- never a second walk over the document.
-  if (owed.element == kNoElement) return;
+  // the grammar's own answer -- never a second walk over the document. A
+  // deletion names the token it resumed on, already in the text: writing it
+  // again is no fix.
+  if (owed.element == kNoElement || owed.kind == DiagnosticKind::deleted)
+    return;
 
   constexpr std::size_t kMaxActions = 4;
   const std::vector<std::string_view> spellings =
@@ -221,12 +224,7 @@ void DefaultDocumentValidator::processParsingErrors(
     if (!d.message.empty())
       diagnostic.message = d.message;
     else
-      diagnostic.message =
-          repair_message(_core.parser->getGrammar(), d,
-                         d.end <= text.size() && d.begin <= d.end
-                             ? text.substr(d.begin, d.end - d.begin)
-                             : std::string_view{},
-                         d.end >= text.size());
+      diagnostic.message = repair_message(_core.parser->getGrammar(), d, text);
     diagnostic.source = source;
     diagnostic.code = DiagnosticCode{std::string(code)};
     // The element the repair was owed is what a quick fix is built from.

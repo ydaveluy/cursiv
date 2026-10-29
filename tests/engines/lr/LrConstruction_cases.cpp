@@ -702,11 +702,12 @@ void a_forced_row_is_honoured_or_refused() {
 
 void the_refusal_names_both_counts() {
   CHECK(cursiv::stamp_refusal(40000, 20000) ==
-        "the record's stamp -- this table's 40000 rows need 16 bits and its "
-        "20000 states 15, and a record holds 30");
+        "its 40000 AST write chains need 16 bits and its 20000 parser states "
+        "15 bits, more than the 30 bits of a record");
   CHECK(cursiv::stamp_refusal(150, 60, 7) ==
-        "the record's stamp -- this table's 150 rows need 8 bits and its 60 "
-        "states 6, and a record holds 30 with the row forced to 7");
+        "its 150 AST write chains need 8 bits and its 60 parser states 6 "
+        "bits, more than the 30 bits of a record with the chains forced to 7 "
+        "bits");
 }
 
 // Row and state read back whatever the split, the sentinel included, and a

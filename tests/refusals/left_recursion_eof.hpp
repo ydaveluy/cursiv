@@ -1,6 +1,6 @@
 // A rule that calls itself behind `eof`: the assertion reads nothing, so at
 // the end of the text the descent would call itself for ever.
-// expect LR: refused .unitProductionCycle..*rule .Tail. stands on a cycle of reductions
+// expect LR: refused .unitProductionCycle..*rule .Tail. is part of a cycle of rules that call each other without matching any text
 // expect LL: refused .leftRecursion..*rule .Tail. reaches itself before matching anything
 #pragma once
 

@@ -706,9 +706,9 @@ std::uint16_t LexReifier::reify_mark(ImageId id, bool tail) {
   const ImageNode n = at(id);
   if (!mark_run(kid(n, 0)))
     refuse_lowering(
-        "cursiv: a mark<> names a RUN -- one character class or "
-        "one-character literal, repeated: `many(lit<\"=\">)`, "
-        "`some(w)`, `repeat<0, 16>(cr<\"^() \">)`");
+        "`mark<>` takes one character class or one-character literal, "
+        "alone or repeated: `many(lit<\"=\">)`, `some(w)`, "
+        "`repeat<0, 16>(cr<\"^() \">)`");
   const std::uint16_t kidNode = reify(kid(n, 0), tail);
   return push(LexNode{
       LexKind::mark, kidNode, 0,
@@ -887,8 +887,8 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
       return reify_nested(id);
     case ImageKind::commit:
       refuse_lowering(
-          "cursiv: a commit stands in a rule, not in a terminal or a gap "
-          "condition");
+          "a commit is allowed in a rule, not in a terminal or a gap condition "
+          "-- use the plain repetition forms there");
     case ImageKind::repeat: {
       if (n.m >= 0xffffffffu || (n.n != kUnbounded && n.n >= 0xffffffffu))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
@@ -901,15 +901,18 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
     }
     case ImageKind::embed:
       refuse_lowering(
-          "cursiv: `section<G>(open, close)` stands in a rule, not in a "
-          "terminal: a terminal is one token and a section parses a grammar");
+          "`section<G>(open, close)` is allowed in a rule, not in a terminal: a "
+          "terminal is one token, and a section parses a grammar");
     case ImageKind::doc:
       refuse_lowering(
-          "a doc inside a lexical guard has nothing to stand on: the "
-          "guard is part of the token in front of it and takes no span "
-          "of its own. Document the literal the guard belongs to");
+          "a `doc` inside a guard has nothing to attach to: the guard is "
+          "part of the token before it -- document the literal the guard "
+          "belongs to");
     default:
-      refuse_lowering("cursiv: this expression cannot be read inside a terminal");
+      refuse_lowering(
+          "this expression cannot be used inside a terminal: a terminal "
+          "matches one token, so it cannot hold an unordered group, `skip`, "
+          "`tight`, a gap condition, `implied` or a directive");
   }
 }
 

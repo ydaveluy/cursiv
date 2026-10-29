@@ -1,6 +1,6 @@
 // A match that ends where a word it refuses ends, past a head, and a letter
 // past ASCII rescues that word: the body does not read on over it.
-// expect LR: a character past ASCII rescues that word
+// expect LR: a character past ASCII after that word lets the guard pass
 #pragma once
 
 #include "refusals/head.hpp"

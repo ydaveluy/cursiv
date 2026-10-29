@@ -1,6 +1,6 @@
 // A class of scalars refused where a match may end one byte into one of
 // its scalars: the rest of that scalar is text past the token.
-// expect LR: refused: terminal .NUM. may end a match short of .\\p{Lo}., a word it refuses past its head
+// expect LR: refused: terminal .NUM. may end a match before the end of .\\p{Lo}., which a guard excludes after the start of the terminal
 #pragma once
 
 #include "refusals/head.hpp"

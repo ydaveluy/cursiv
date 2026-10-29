@@ -156,10 +156,19 @@ struct Row {
 enum class Shape : std::size_t { ManySmall, Medium, FewLarge, Mixed, Count };
 
 inline constexpr const char* shape_name(Shape shape) {
-  constexpr const char* kName[] = {"many-small", "medium", "few-large",
-                                   "mixed"};
-  static_assert(std::size(kName) == static_cast<std::size_t>(Shape::Count));
-  return shape < Shape::Count ? kName[static_cast<std::size_t>(shape)] : "";
+  switch (shape) {
+    case Shape::ManySmall:
+      return "many-small";
+    case Shape::Medium:
+      return "medium";
+    case Shape::FewLarge:
+      return "few-large";
+    case Shape::Mixed:
+      return "mixed";
+    case Shape::Count:
+      break;
+  }
+  return "";
 }
 
 // How the reference graph of a shape's corpus is wired. Both regimes drive

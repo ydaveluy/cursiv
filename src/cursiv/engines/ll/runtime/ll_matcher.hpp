@@ -116,17 +116,6 @@ struct LlLexTape : LexTape<T> {
     if (T.dfaBound[s] == kNoSet) return i;
     return lex_boundary(T).reach(T.dfaBound[s], src, i, len);
   }
-  Scan unrefused(const char* src, TextOffset len, std::uint16_t st,
-                 TextOffset from, Scan out, TextOffset& far) const
-    requires(!Skips && LexTape<T>::kRefuses)
-  {
-    return lex_unrefused(*this, src, len, st, from, out, far);
-  }
-  bool skips(SymbolId t) const
-    requires(Skips)
-  {
-    return skip->test(t);
-  }
 };
 
 template <const auto& T>

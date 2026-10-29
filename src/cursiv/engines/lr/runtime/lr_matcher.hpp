@@ -136,17 +136,6 @@ struct LrLexTape : LexTape<A> {
                                         TextOffset i, TextOffset len) const {
     return lr_accept_else<A>(s, src, i, len);
   }
-  Scan unrefused(const char* src, TextOffset len, std::uint16_t st,
-                 TextOffset from, Scan out, TextOffset& far) const
-    requires(!Skips && LexTape<A>::kRefuses)
-  {
-    return lex_unrefused(*this, src, len, st, from, out, far);
-  }
-  bool skips(SymbolId t) const
-    requires(Skips)
-  {
-    return skip->test(t);
-  }
   SymbolId qualified(std::uint16_t s, const char* src, TextOffset i,
                      TextOffset len, TextOffset& far) const
     requires(Skips)

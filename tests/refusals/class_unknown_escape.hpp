@@ -1,6 +1,6 @@
 // A class escapes as std::regex does: a backslash before a letter it gives
 // no meaning is no escape, and the spelling does not compile.
-// expect LR: holds an escape std::regex does not read in a class
+// expect LR: holds an escape that std::regex does not accept in a class
 #pragma once
 
 #include "refusals/head.hpp"

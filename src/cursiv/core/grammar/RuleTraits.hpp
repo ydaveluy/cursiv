@@ -21,8 +21,8 @@ struct infix_kind {};
 template <class E>
 struct super_escaped {
   static_assert(dependent_false<E>,
-                "`super` names the body being overridden: it is legal only "
-                "inside the body of an override<> specialization");
+                "`super` stands for the body of the overridden rule: use it "
+                "only inside the body of an override");
   using type = E;
   static constexpr bool value = false;
 };

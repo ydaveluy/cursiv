@@ -200,7 +200,7 @@ class LrGss {
     const std::uint32_t elected = lr_search_run<A>(_c, s, exhausted, raced);
     install(sources[elected == kLrNoConfig
                         ? 0
-                        : lr_search_root_of(s.links, s.configs[elected].link)]);
+                        : repair_root_of(s.links, s.configs[elected].link)]);
     return lr_search_take<A>(_c, s, elected, exhausted, raced, false);
   }
 

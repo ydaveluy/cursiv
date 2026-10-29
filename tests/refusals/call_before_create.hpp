@@ -1,6 +1,6 @@
 // The same two heads in the other order: a create absorbs what stands before
 // it, the call included.
-// expect LR: this alternative can create twice
+// expect LR: this alternative can create two nodes
 #pragma once
 
 #include "refusals/head.hpp"

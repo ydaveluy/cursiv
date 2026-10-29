@@ -39,7 +39,7 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
   LrShapeId lay_made(unsigned cfg, ImageId e);
   LrShapeId lay_write(unsigned cfg, ImageId e);
   LrShapeId lay_flag(unsigned cfg, ImageId e);
-  LrShapeId lay_gap(unsigned cfg, ImageId e);
+  LrShapeId lay_condition(unsigned cfg, ImageId e);
   LrShapeId lay_stop(unsigned cfg, ImageId e, const Cut& cut);
   LrShapeId lay_implied(unsigned cfg, ImageId e);
   LrShapeId capture_created(LrShapeId at);

@@ -1,5 +1,4 @@
-// What this language owns beyond what every language owns, and the module
-// that fills its container.
+// The services of the @CURSIV_NEW_ID@ language.
 #pragma once
 
 #include <memory>
@@ -8,9 +7,9 @@
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
 
-// Two containers per language: the shared one holds what is workspace-wide
-// (the document store, the index), the other holds one language's
-// services. Add a service of your own here, filled in `install_core_module`.
+// The shared services belong to the whole workspace, such as its documents.
+// The core services belong to this language. To add a service, declare it in
+// the core services and create it in `install_core_module`.
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -24,8 +23,8 @@ struct @CURSIV_NEW_CLASS@CoreServices
       @CURSIV_NEW_CLASS@SharedCoreServices& sharedServices)
       : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
 
-  // One row per service, for whoever asks what a container holds: the
-  // language's own rows come after the defaults.
+  // Lists the services after the default ones, so that a missing required
+  // service is reported by name. Add a line for each service you add.
   void visitServices(
       cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
     cursiv::CoreServices::visitServices(yield);
@@ -33,6 +32,7 @@ struct @CURSIV_NEW_CLASS@CoreServices
   }
 };
 
+// Installs the services of this language; see CoreModule.cpp.
 void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services);
 
 }  // namespace @CURSIV_NEW_ID@

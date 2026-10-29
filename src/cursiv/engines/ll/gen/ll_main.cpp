@@ -13,13 +13,13 @@
 #include "cursiv/core/grammar/dump.hpp"
 #include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/ll_ast_registry.hpp"
 #include "cursiv/engines/ll/gen/ll_build.hpp"
 #include "cursiv/engines/ll/gen/ll_emit_parser.hpp"
 #include "cursiv/engines/ll/gen/ll_emit_table.hpp"
 #include "cursiv/engines/ll/gen/ll_entry_rows.hpp"
 #include "cursiv/engines/shared/gen/AsWritten.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
+#include "cursiv/engines/shared/gen/AstRowOf.hpp"
 #include "cursiv/engines/shared/gen/CommonArtifacts.hpp"
 #include "cursiv/engines/shared/gen/EmitRecords.hpp"
 #include "cursiv/engines/shared/gen/GenCode.hpp"
@@ -90,11 +90,11 @@ int run(int argc, char** argv) try {
   // an offset that wrapped, so the store's own extent is what says so.
   if (!fits(low.cfg.names.size(), "name characters") ||
       !fits(low.cfg.sets.size(), "byte classes") ||
-      !fits(low.cfg.lex.size(), "token graph nodes") ||
-      !fits(low.cfg.lexKid.size(), "token graph edges") ||
+      !fits(low.cfg.lex.size(), "lexer nodes") ||
+      !fits(low.cfg.lexKid.size(), "lexer edges") ||
       !fits(low.cfg.terms.size(), "terminals") ||
       !fits(low.cfg.rules.size(), "rules") ||
-      !fits(low.cfg.decisions.size(), "decisions") ||
+      !fits(low.cfg.decisions.size(), "choice points") ||
       !fits(low.cfg.climbs.size(), "precedence tables") ||
       !fits(low.cfg.climbOps.size(), "precedence operators"))
     return exit_status(GenCode::refused);
@@ -110,7 +110,8 @@ int run(int argc, char** argv) try {
   // refused before anything is written.
   const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS);
 
-  const auto registry = cursiv::ll_ast_registry<G>(CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
+  const auto registry = cursiv::ast_registry<G, cursiv::LlLowering<G>>(
+      CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
   std::vector<cursiv::RecordGen> records;
   const auto entries = cursiv::ll_entry_table(*done, registry.rows, records);
   if (const auto wrote = cursiv::write_common_artifacts(

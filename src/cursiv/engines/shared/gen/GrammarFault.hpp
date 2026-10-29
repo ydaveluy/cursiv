@@ -84,12 +84,12 @@ constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
 // Two operators of a table that may share a text, one of them spelled past
 // what the comparison lists.
 inline std::string unlisted_operators(const GrammarFault& f) {
-  return "cannot compare the text of " + f.part +
-         " of its precedence table: one is spelled through a repetition, an "
-         "`option` or a region, or more than " +
+  return "has two operators whose texts cannot be compared, " + f.part +
+         " of its precedence table: one of them is written with a "
+         "repetition, an `option` or a region, or has more than " +
          std::to_string(f.count) +
-         " ways, so both may read one text -- spell each with literals, "
-         "terminals and data rules of fixed text";
+         " spellings, so both may match the same text -- write each operator "
+         "with literals, terminals and data rules of fixed text";
 }
 
 // What the author is told: what the engine cannot hold and what to write
@@ -97,105 +97,104 @@ inline std::string unlisted_operators(const GrammarFault& f) {
 inline std::string grammar_fault_text(const GrammarFault& f) {
   switch (f.code) {
     case GrammarFaultCode::nullableRepetition:
-      return "repeats an item that may match nothing, so one text has as "
-             "many readings as turns left empty -- make the item consume and "
-             "let the repetition's minimum say how many may be absent: "
-             "`many(option(x))` is `many(x)`, `repeat<2, 3>(option(x))` is "
-             "`repeat<0, 3>(x)`";
+      return "repeats an item that may match nothing, so the same text could "
+             "be read with any number of empty turns -- make the item consume "
+             "input and use the minimum of the repetition for what may be "
+             "absent: write `many(x)` for `many(option(x))`, and "
+             "`repeat<0, 3>(x)` for `repeat<2, 3>(option(x))`";
     case GrammarFaultCode::nullableUnorderedItem:
       // `gated`: the group spells every order in full, and so reads each
       // item.
       if (f.gated)
-        return "holds an optional unordered item, `" + f.part +
-               "`, in a group whose items hold a `nest`: such a group spells "
-               "every order in full, so each of its items must read input -- "
-               "make the item consume, or write the group with and without "
-               "it, `unordered(a, b) | a`";
-      return "holds an unordered item that may match nothing, `" + f.part +
-             "`: an unordered item must read input, since one that reads "
-             "nothing could stand anywhere in the order -- an item may be "
-             "left out only as `option(x)`, `many(x)` or `repeat<0, n>(x)` "
-             "where `x` reads input; otherwise make the item consume";
+        return "has an optional item, `" + f.part +
+               "`, in an unordered group whose items hold a `nest`: in such a "
+               "group every item must consume input -- make the item consume, "
+               "or write the group with and without it: `unordered(a, b) | a`";
+      return "has an unordered item that may match nothing, `" + f.part +
+             "`: an item that matches nothing could stand anywhere in the "
+             "order -- to make an item optional, write `option(x)`, "
+             "`many(x)` or `repeat<0, n>(x)` where `x` consumes input";
     case GrammarFaultCode::ruleWithoutProduction:
-      return "derives nothing: every reading of it turned out impossible, so "
-             "whoever calls it can never return";
+      return "can never match any text: each of its alternatives is "
+             "impossible, such as one that needs a token after `eof` or a "
+             "recursion that never ends -- give the rule an alternative that "
+             "can match";
     case GrammarFaultCode::twoEndMarks:
-      return "asserts end of input twice in one choice -- the second says "
-             "nothing the first has not";
+      return "asserts end of input twice in one choice: the second adds "
+             "nothing -- remove it";
     case GrammarFaultCode::optionalEndMark:
-      return "makes an end-of-input assertion optional: the reading that keeps "
-             "it refuses everything past it, and the reading that drops it is "
-             "that same production with no condition at all -- write `eof` "
-             "where you mean it, or a choice one branch of which is `eof`";
+      return "makes an end-of-input assertion optional: `option(eof)` matches "
+             "with or without the end of input, so it tests nothing -- write "
+             "`eof` where the input must end, or a choice with an `eof` "
+             "branch";
     case GrammarFaultCode::optionalCondition:
-      return "makes a condition optional: the reading that drops it reads "
-             "the same text with no condition at all -- write the condition "
-             "where it must hold, or make optional what it guards";
+      return "makes a condition optional: an optional condition always holds, "
+             "so it tests nothing -- write the condition where it must hold, "
+             "or make optional the part it guards";
     case GrammarFaultCode::unitProductionCycle:
-      return "stands on a cycle of reductions that read no text (`A -> B`, "
-             "`B -> A`, or `A -> A B` where `B` may match nothing): the chain "
-             "comes back to itself having read nothing, so one document has "
-             "as many derivations as anyone cares to write";
+      return "is part of a cycle of rules that call each other without "
+             "matching any text (`A -> B` and `B -> A`, or `A -> A B` where "
+             "`B` may match nothing): the same text could be read through "
+             "the cycle any number of times -- make the cycle match some text, "
+             "or remove the call that closes it";
     case GrammarFaultCode::hiddenLeftRecursion:
       if (f.gated)
-        return "reaches itself at its left edge behind more than " +
+        return "reaches itself before matching anything, behind more than " +
                std::to_string(f.count) +
-               " optional items: an alternative spells out the subsets of "
-               "that many and reads each earlier one as an item that may "
-               "match nothing, so before the first token the parser cannot "
+               " optional items: before the first token, the parser cannot "
                "know how many of them to skip -- keep " +
                std::to_string(f.count) +
-               " optional items or fewer before the recursive call, group "
-               "some behind one that consumes, or put the call first";
-      return "reaches itself at its left edge behind an item that may match "
-             "nothing (`A -> B A x` where `B` can be empty): before the first "
-             "token the parser cannot know how many empty `B`s to read -- make "
-             "that item consume, or move it after the recursive call";
+               " optional items or fewer before the recursive call, put some "
+               "behind an item that consumes input, or put the call first";
+      return "reaches itself before matching anything, behind an item that "
+             "may match nothing (`A -> B A x` where `B` may be empty): before "
+             "the first token, the parser cannot know how many empty `B`s to "
+             "read -- make that item consume input, or move it after the "
+             "recursive call";
     case GrammarFaultCode::leftRecursion:
       if (f.gated)
         return "reaches itself before matching anything inside a repetition "
-               "or behind optional items, past what the LL descent spells "
-               "out: at most " +
+               "or behind optional items, beyond what the LL parser supports: "
+               "at most " +
                std::to_string(f.count) +
-               " optional items in front of the call, in a rule of bounded "
-               "size -- write the alternatives yourself, grouping the "
-               "optional items in front of the call behind one that consumes: "
-               "`X? Y? A z` as `(X Y? | Y) A z | A z` (refusals.md, "
-               "leftRecursion)";
-      return "reaches itself before matching anything in a way the LL "
-             "descent cannot fold -- spell a chain of binary operators as "
-             "`infix<>`; otherwise give the cycle an arm that only calls its "
-             "next rule, write an inner loop's turn before an outer one that "
-             "starts with the same text, or make every reading consume a token "
-             "first (refusals.md, leftRecursion)";
+               " optional items before the call, in a rule of limited size -- "
+               "write the alternatives out, and put the optional items before "
+               "the call behind one that consumes input: `X? Y? A z` becomes "
+               "`(X Y? | Y) A z | A z` (see refusals.md, leftRecursion)";
+      return "reaches itself before matching anything, in a way the LL parser "
+             "cannot handle -- write a chain of binary operators with "
+             "`infix<>`; otherwise give one rule of the cycle an alternative "
+             "that only calls the next rule, put first the alternative where "
+             "a rule calls itself directly, or make every alternative match a "
+             "token first (see refusals.md, leftRecursion)";
     case GrammarFaultCode::precedenceClash:
       if (f.gated) return unlisted_operators(f);
       return "names the same operator text on two levels of a precedence "
-             "table, or with two groupings: nothing after its first token "
-             "tells the readings apart, so the table cannot say which binds "
-             "tighter -- give each text one level and one grouping in the "
-             "table";
+             "table, or with two groupings: the next tokens cannot tell the "
+             "two operators apart, so the table cannot say which binds "
+             "tighter -- give each operator text one level and one grouping "
+             "in the table";
     case GrammarFaultCode::postfixBinaryClash:
       if (f.gated) return unlisted_operators(f);
-      return "reads " + f.part +
-             " of its precedence table: after an operand, nothing tells the "
-             "two readings apart -- give the postfix and the binary operator "
-             "different text";
+      return "uses " + f.part +
+             " of its precedence table: after an operand, the parser cannot "
+             "tell which of the two it is -- give the postfix and the binary "
+             "operator different texts";
     case GrammarFaultCode::infixOperatorNotText:
       return "names as an operator a rule that builds a node: an operator "
-             "hands over text -- a literal, a terminal or a data rule, with a "
-             "converter where `op` is not text";
+             "gives a value, not a node -- use a literal, a terminal or a data "
+             "rule, with a converter if the operator member is not text";
     case GrammarFaultCode::directiveOnNoPosition:
-      return "writes a member from `eof` alone, or from nothing: there is no "
-             "record for the write to ride, so the member would never be "
-             "written. Put the directive on the part the reading consumes, or "
-             "on a choice one branch of which is `eof`";
+      return "writes a member from `eof` alone, or from nothing: such a "
+             "directive matches no text, so the member would never be "
+             "written -- put the directive on a part that consumes input, or "
+             "on a choice with an `eof` branch";
     case GrammarFaultCode::tooManyPrecedences:
-      return "declares more than 255 precedence levels";
+      return "declares more than 255 precedence levels -- use at most 255";
     case GrammarFaultCode::skippedTerminal:
-      return "names a terminal its reading skips as trivia: the lexer never "
-             "hands it over there, so no text can match it -- drop it, or "
-             "read it under a skipper that keeps it";
+      return "names a terminal that is skipped as trivia at that point, so it "
+             "can never match there -- remove it, or read it inside `tight(e)` "
+             "or a `skip()` that does not skip it";
     case GrammarFaultCode::docConflict:
       return "documents one word twice with different prose: a token has one "
              "hover text -- keep one of them";

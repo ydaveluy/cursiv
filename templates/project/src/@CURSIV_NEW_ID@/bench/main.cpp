@@ -1,3 +1,6 @@
+// The @CURSIV_NEW_ID@ benchmark: it times parsing, document builds and editor
+// features on the given files. Run it with `--help` to list the options.
+
 #include "cursiv/bench/LanguageBench.hpp"
 #include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
 

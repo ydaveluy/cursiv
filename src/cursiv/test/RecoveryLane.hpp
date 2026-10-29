@@ -139,15 +139,11 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
     // What an editor would name, navigated from the position the repair
     // reports -- a literal by its spelling, a rule by its name -- and then
     // the sentence itself, which is the only part an author ever reads.
-    const bool sane = d.begin <= d.end && d.end <= text.size();
-    const std::string_view over =
-        sane ? std::string_view(text).substr(d.begin, d.end - d.begin)
-             : std::string_view{};
     p.diags.emplace_back(
         std::string(kKind[static_cast<int>(d.kind)]) + ":" +
         std::string(owed_name(grammar, d.element)) + "@" +
         std::to_string(d.begin) + "<" +
-        cursiv::repair_message(grammar, d, over, d.end >= text.size()) + ">");
+        cursiv::repair_message(grammar, d, text) + ">");
   }
   return p;
 }

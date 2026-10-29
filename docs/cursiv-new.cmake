@@ -72,13 +72,14 @@ function(_cursiv_new_finish)
   message(STATUS "Created ${CURSIV_NEW_ID} in ${_target}")
   message(STATUS "Next: cd ${DIR}")
   message(STATUS "      cmake -B build")
-  message(STATUS "      cmake --build build -j")
+  message(STATUS "      cmake --build build --parallel")
+  message(STATUS "      ./build/src/${CURSIV_NEW_ID}_cli example/hello${CURSIV_NEW_EXT}")
 endfunction()
 
 message(STATUS "Scaffolding ${NAME} (id=${CURSIV_NEW_ID}, ext=${EXT})")
 
-_cursiv_new_emit([==[.clang-format]==] [==[# Google style, but a long expression breaks before its operators (not its
-# assignments), so the `|` and `+` of a grammar rule start lines.
+_cursiv_new_emit([==[.clang-format]==] [==[# Google style. Long expressions break before their operators, so each `+`
+# and `|` of a grammar rule starts a line.
 BasedOnStyle: Google
 BreakBeforeBinaryOperators: NonAssignment
 ]==])
@@ -119,8 +120,7 @@ jobs:
       - name: Test
         run: ctest --preset gcc-release --parallel 4 --output-on-failure
 ]==])
-_cursiv_new_emit([==[.gitignore]==] [==[# The generated tree is build output: the generator rewrites it from the
-# grammar, and a table is megabytes git has no use for.
+_cursiv_new_emit([==[.gitignore]==] [==[# Build output, including the parser generated from the grammar.
 generated/
 /build*
 /.cache/
@@ -178,7 +178,7 @@ _cursiv_new_emit([==[.vscode/tasks.json]==] [==[{
   "tasks": [
     {
       "label": "build the server and the extension",
-      "detail": "Build @CURSIV_NEW_ID@_lsp in the active preset's tree, then bundle the TypeScript.",
+      "detail": "Build @CURSIV_NEW_ID@_lsp with the active CMake preset, then compile the extension.",
       "dependsOrder": "sequence",
       "dependsOn": [
         "build the language server",
@@ -223,8 +223,8 @@ _cursiv_new_emit([==[CMakeLists.txt]==] [==[cmake_minimum_required(VERSION 3.30)
 project(@CURSIV_NEW_ID@ LANGUAGES CXX)
 
 include(FetchContent)
-# A local checkout wins over the tag: `-DCURSIV_SOURCE_DIR=<path>` is how you
-# build this language against an engine you are also editing.
+# Cursiv is downloaded at the tag below. To build against a local copy of
+# Cursiv instead, configure with `-DCURSIV_SOURCE_DIR=<path>`.
 if(CURSIV_SOURCE_DIR)
   FetchContent_Declare(cursiv SOURCE_DIR ${CURSIV_SOURCE_DIR})
 else()
@@ -234,7 +234,7 @@ else()
 endif()
 FetchContent_MakeAvailable(cursiv)
 
-# FetchContent may use a local override or a shared download directory.
+# WebAssembly (WASI) builds run their tests with Node.js.
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CURSIV_NODE)
   set(CMAKE_CROSSCOMPILING_EMULATOR ${CURSIV_NODE} --no-warnings
       "${cursiv_SOURCE_DIR}/tools/wasi-run.mjs")
@@ -332,16 +332,19 @@ The CLI, server, benchmark and VS Code extension are included by default.
 Remove the component folders you do not need; CMake omits their targets and
 tests. Removing `lsp/` also disables the benchmark, which uses LSP services.
 ]==])
-_cursiv_new_emit([==[example/hello@CURSIV_NEW_EXT@]==] [==[// The people this document knows about.
+_cursiv_new_emit([==[example/hello@CURSIV_NEW_EXT@]==] [==[// Two people.
 person Alice
 person Bob
 
-/* And the greetings for them. Each name is a cross reference: rename Alice
-   above and this one follows, because the linker resolved it. */
+/* A greeting for each. Each name refers to a person declared above: in the
+   editor, renaming Alice also renames this use. */
 Hello Alice!
 Hello Bob!
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/bench/main.cpp]==] [==[#include "cursiv/bench/LanguageBench.hpp"
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/bench/main.cpp]==] [==[// The @CURSIV_NEW_ID@ benchmark: it times parsing, document builds and editor
+// features on the given files. Run it with `--help` to list the options.
+
+#include "cursiv/bench/LanguageBench.hpp"
 #include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
 
 int main(int argc, char** argv) {
@@ -350,16 +353,16 @@ int main(int argc, char** argv) {
       @CURSIV_NEW_ID@::register_lsp_services>(argc, argv);
 }
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/cli/main.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: parse one file, link it, validate it, and
-// answer on the exit code -- 0 clean, 1 diagnostics, 2 misuse, 3 fatal.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/cli/main.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
+// prints its diagnostics. Run it with `--help` to list the options. It returns
+// 0 for no errors, 1 for document errors, 2 for invalid arguments or paths, and
+// 3 for an internal or output error.
 
 #include "cursiv/cli/cli.hpp"
 #include "cursiv/core/services/CoreLanguage.hpp"
 #include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
 
-// A language is an installer: the three type arguments are all that
-// separates one from another, so `run_cli` itself is compiled once for
-// every language there is and no grammar reaches it.
+// Adds the language to the workspace that the command line creates.
 constexpr auto kRegister =
     &cursiv::register_language<@CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@CoreServices,
                            @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedCoreServices,
@@ -370,62 +373,55 @@ int main(int argc, char** argv) {
       argc, argv, kRegister);
 }
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp]==] [==[// The @CURSIV_NEW_ID@ language: its grammar. A cursiv grammar is a C++ type --
-// there is no grammar file to parse, and no generator reads this header at
-// build time except the one compiled against it.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp]==] [==[// The grammar of the @CURSIV_NEW_ID@ language, written in C++. The build
+// generates the parser from this header.
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "@CURSIV_NEW_ID@/core/ast.hpp"
 
-// A hello-world language, and every piece of it is a piece you will reuse:
+// The sample language declares people and greets them:
 //
-//     // people, and greetings for them
 //     person Alice
-//     person Bob
-//
 //     Hello Alice!
 //
-// The four kinds of member:
-//   * `terminal<...>`    a token the lexer produces; `as<T>(...)` around
-//                         its body converts its text (a number, say)
-//   * `rule<...>`        a parser rule, its AST class deduced from the
-//                         members it writes -- nothing is annotated
-//   * `entry`            the rule a document starts at
-//   * `ignored`/`hidden` trivia: `ignored` is dropped, `hidden` stays in the
-//                        tree, which is what lets a comment attach to what
-//                        follows it
+// The members of a grammar:
+//   * `terminal<...>`  a token, such as a name or a number; `as<T>(...)`
+//                      converts its text, for example to a number
+//   * `rule<...>`      a rule; it builds the AST class whose members it fills
+//   * `entry`          the rule that reads a whole document
+//   * `ignored`        tokens allowed anywhere and dropped, such as spaces
+//   * `hidden`         tokens allowed anywhere and kept in the syntax tree,
+//                      such as comments, which hover can then show
 //
-// `ref<R>` calls the rule or terminal `R`. The directives build the tree:
-//   * `create<T>`         make a T here, even if nothing else writes to it
-//   * `assign<&T::m>(e)`  parse `e`, store it in `m` (once)
-//   * `append<&T::m>(e)`  parse `e`, push it onto the list `m`
-//   * `flag<&T::m>(e)`    parse `e`, then set the bool `m` to true
-//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, which
-//                         holds it in `m`
+// In a rule, `ref<R>` reads the rule or terminal `R`, and these build the AST:
+//   * `create<T>`         build a T, even if no member is set
+//   * `assign<&T::m>(e)`  read `e` and store it in `m`
+//   * `append<&T::m>(e)`  read `e` and add it to the list `m`
+//   * `flag<&T::m>(e)`    read `e` and set the bool `m` to true
+//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, stored in `m`
 //
-// One trap: rules that reduce in a cycle without reading text are refused by
-// name -- `A -> B` with `B -> A`, or a rule that reaches itself past symbols
-// deriving nothing. Make one step of the cycle match at least one token.
+// If the build refuses the grammar, look up the message on the "Grammar
+// errors" page of the Cursiv documentation.
 
 namespace @CURSIV_NEW_ID@ {
 
 struct @CURSIV_NEW_CLASS@ : cursiv::GrammarSpec {
-  // `s` is the whitespace class, `w` the word class, `cr<"...">` a character
-  // range written as in a regular expression.
+  // `s` matches a whitespace character, `w` a word character, and `cr<"...">`
+  // a character from a range, written as in a regular expression.
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
 
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
 
-  // `kw` is a keyword (a whole word, never a prefix of a longer one); `ikw` is
-  // its case-insensitive twin, and `lit` is raw text with no word boundary.
+  // `kw` matches a whole keyword, not the start of a longer word; `ikw` does
+  // the same in any letter case, and `lit` matches exact text such as `!`.
   struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 
-  // `person` is a `reference<Person>` in the AST, so this reads a name and
-  // the linker resolves it after the parse: the default scope makes every
-  // named node visible inside its container.
+  // `ast::Greeting::person` is a `reference<Person>`: this reads a name, and
+  // after parsing the name resolves to the `Person` declared with it. By
+  // default, a named node is visible inside the node that contains it.
   struct Greeting
       : rule<kw<"Hello"> + assign<&ast::Greeting::person>(ref<ID>) + lit<"!">> {
   };
@@ -442,9 +438,9 @@ struct @CURSIV_NEW_CLASS@ : cursiv::GrammarSpec {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreModule.cpp]==] [==[// What this language installs over the generated module: what its author
-// writes. Everything the grammar derives -- parser, reflection, metadata -- is
-// in the generated one, and this file is the only place the two meet.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreModule.cpp]==] [==[// Installs the services of the @CURSIV_NEW_ID@ language: first the parser and
+// the other services generated from the grammar, then your own, such as the
+// validation checks.
 
 #include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
 #include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
@@ -459,8 +455,7 @@ void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services) {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreServices.hpp]==] [==[// What this language owns beyond what every language owns, and the module
-// that fills its container.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreServices.hpp]==] [==[// The services of the @CURSIV_NEW_ID@ language.
 #pragma once
 
 #include <memory>
@@ -469,9 +464,9 @@ _cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreServices.hpp]==] [==[// What t
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
 
-// Two containers per language: the shared one holds what is workspace-wide
-// (the document store, the index), the other holds one language's
-// services. Add a service of your own here, filled in `install_core_module`.
+// The shared services belong to the whole workspace, such as its documents.
+// The core services belong to this language. To add a service, declare it in
+// the core services and create it in `install_core_module`.
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -485,8 +480,8 @@ struct @CURSIV_NEW_CLASS@CoreServices
       @CURSIV_NEW_CLASS@SharedCoreServices& sharedServices)
       : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
 
-  // One row per service, for whoever asks what a container holds: the
-  // language's own rows come after the defaults.
+  // Lists the services after the default ones, so that a missing required
+  // service is reported by name. Add a line for each service you add.
   void visitServices(
       cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
     cursiv::CoreServices::visitServices(yield);
@@ -494,19 +489,20 @@ struct @CURSIV_NEW_CLASS@CoreServices
   }
 };
 
+// Installs the services of this language; see CoreModule.cpp.
 void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/ast.hpp]==] [==[// The @CURSIV_NEW_ID@ language: its AST. Plain structs -- the grammar names
-// their members, and the generated builder fills them.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/ast.hpp]==] [==[// The AST classes of the @CURSIV_NEW_ID@ language. The grammar fills their
+// members when it parses a document.
 #pragma once
 
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
-// Every class derives `cursiv::AstNode` through `cursiv::Extends`, which
-// brings the field vocabulary into scope -- `vector`, `string_view` and
-// `reference` below are the base's aliases, not std names spelled by hand.
+// `cursiv::Extends<cursiv::AstNode>` provides the member types used below:
+// `string_view` holds text, `vector<T*>` holds child nodes, and `reference<T>`
+// holds a name that resolves to a `T` after parsing.
 
 namespace @CURSIV_NEW_ID@::ast {
 
@@ -538,8 +534,8 @@ _cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Valid
 
 namespace @CURSIV_NEW_ID@ {
 
-// `.property<&T::m>()` is what puts the squiggle under the name instead of
-// under the whole declaration: without it the range is the node's.
+// `.property<&ast::Person::name>()` marks the name instead of the whole
+// declaration.
 void @CURSIV_NEW_CLASS@Validator::checkPersonStartsWithCapital(
     const ast::Person& person, cursiv::ValidationAcceptor& accept) const {
   if (!person.name.empty() && person.name.front() >= 'a' &&
@@ -562,8 +558,8 @@ void @CURSIV_NEW_CLASS@Validator::checkUniquePersons(
   }
 }
 
-// A check is registered against the AST class it judges: the validator walks
-// the tree once and calls each check on the nodes of its own type.
+// Creates the validator and registers its checks. Each check runs on every
+// node of the type of its first parameter.
 void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services) {
   using V = @CURSIV_NEW_CLASS@Validator;
   services.validator = std::make_unique<const V>(services);
@@ -577,8 +573,9 @@ void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services) {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp]==] [==[// The checks of this language: what the grammar accepts but the language does
-// not. Two here -- a naming convention, and the one fact no single node can see.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp]==] [==[// The validation checks of the @CURSIV_NEW_ID@ language: rules that the
+// grammar alone cannot express. Declare a check here, write it in the .cpp
+// file and register it in `register_validation_checks`.
 #pragma once
 
 #include "cursiv/core/services/DefaultCoreService.hpp"
@@ -597,8 +594,8 @@ class @CURSIV_NEW_CLASS@Validator final : public cursiv::DefaultCoreService {
                           cursiv::ValidationAcceptor& accept) const;
 };
 
-// Declared here rather than in the module, so a check and its registration are
-// read together. `CoreServices.hpp` is the one that includes this header.
+// Creates the validator and registers its checks; `install_core_module` calls
+// it.
 struct @CURSIV_NEW_CLASS@CoreServices;
 void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services);
 
@@ -620,10 +617,8 @@ void install_lsp_module(@CURSIV_NEW_CLASS@Services& services) {
   cursiv::install_default_lsp_services(services);
 }
 
-// The three storeys in order: the framework's defaults, the language's
-// core module, then its LSP module. The container is one object -- both
-// bases derive `CoreServices` virtually -- so the providers read what the
-// core module wired.
+// Creates the services of this language for the language server: the
+// defaults, then the core module, then the LSP module.
 bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
   auto& shared =
       dynamic_cast<@CURSIV_NEW_CLASS@SharedServices&>(sharedServices);
@@ -644,20 +639,18 @@ _cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspModule.hpp]==] [==[#pragma once
 
 namespace @CURSIV_NEW_ID@ {
 
-// The LSP storey of this language: the framework's defaults, then whatever the
-// language overrides -- a formatter, a hover provider, a semantic token
-// provider. Add it here.
+// Installs the editor services: the defaults, then your own, such as a
+// formatter or a hover provider. Add yours in LspModule.cpp.
 void install_lsp_module(@CURSIV_NEW_CLASS@Services& services);
 
-// Files this language into a workspace the server owns. What `main` hands to
-// the runner, which has already installed the workspace-wide services.
+// Adds this language to the workspace of the language server; `main` passes
+// it to the server.
 bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspServices.hpp]==] [==[// The same language one storey up. Both containers derive `CoreServices`
-// virtually, so this holds one of it and the core module wires the same
-// object the LSP providers read.
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspServices.hpp]==] [==[// The services of the language server: the core services of the language plus
+// the editor services. To add an editor service, declare it here.
 #pragma once
 
 #include "cursiv/lsp/services/LspServices.hpp"
@@ -677,8 +670,7 @@ struct @CURSIV_NEW_CLASS@Services final : @CURSIV_NEW_CLASS@CoreServices,
         @CURSIV_NEW_CLASS@CoreServices(sharedServices),
         cursiv::LspServices(sharedServices) {}
 
-  // One emission per storey through the diamond: the language rows through the
-  // core side, the LSP rows alone.
+  // Lists the core services, then the editor services.
   void visitServices(
       cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
     @CURSIV_NEW_CLASS@CoreServices::visitServices(yield);
@@ -688,8 +680,8 @@ struct @CURSIV_NEW_CLASS@Services final : @CURSIV_NEW_CLASS@CoreServices,
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/main.cpp]==] [==[// The @CURSIV_NEW_ID@ language server: one language, the standard transport
-// (stdio -- the editor spawns this binary and speaks the protocol to it).
+_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/main.cpp]==] [==[// The @CURSIV_NEW_ID@ language server. The editor starts it and talks to it
+// over standard input and output.
 
 #include "cursiv/lsp/runtime/LanguageServerMain.hpp"
 #include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
@@ -700,19 +692,22 @@ int main(int argc, char** argv) {
       argc, argv, "@CURSIV_NEW_ID@-lsp", &@CURSIV_NEW_ID@::register_lsp_services);
 }
 ]==])
-_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Generate the parser and its language module.
+_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Generate the parser from the grammar. The build regenerates it when the
+# grammar changes.
 cursiv_generate_language(ID @CURSIV_NEW_ID@
     GRAMMAR    @CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp
     NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
     EXTENSIONS @CURSIV_NEW_EXT@
     OUT        @CURSIV_NEW_ID@/generated)
 
-# Add custom services and validation over the generated module.
+# The language library: every .cpp file under core/.
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/core/*.cpp)
 add_library(@CURSIV_NEW_ID@Core ${_core})
 target_link_libraries(@CURSIV_NEW_ID@Core PUBLIC @CURSIV_NEW_ID@Generated)
 
+# The command line, the language server and the benchmark are optional:
+# delete the cli/, lsp/ or bench/ folder to drop its target.
 file(GLOB_RECURSE _cli CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/cli/*.cpp)
 if(_cli)
@@ -737,6 +732,7 @@ if(TARGET @CURSIV_NEW_ID@Lsp AND
       SOURCES @CURSIV_NEW_ID@/bench/main.cpp)
 endif()
 
+# WASI builds copy the language server into vscode/server/.
 cursiv_package_language(@CURSIV_NEW_ID@)
 ]==])
 _cursiv_new_emit([==[tests/CMakeLists.txt]==] [==[# Parse the sample and check its syntax tree.
@@ -755,9 +751,8 @@ if(TARGET @CURSIV_NEW_ID@_cli)
            ${PROJECT_SOURCE_DIR}/example/hello@CURSIV_NEW_EXT@)
 endif()
 ]==])
-_cursiv_new_emit([==[tests/grammar_test.cpp]==] [==[// The smoke test of the language: build the container the way a workspace
-// does, read the sample, and check the tree. No framework -- the exit code is
-// the verdict, and ctest reads it.
+_cursiv_new_emit([==[tests/grammar_test.cpp]==] [==[// Parses the sample document and checks its AST. Update the checks at the end
+// when you change the language. CTest reads the exit code: 0 means success.
 
 #include <cstdio>
 #include <fstream>
@@ -785,7 +780,7 @@ int main() {
   const std::string text((std::istreambuf_iterator<char>(file)),
                          std::istreambuf_iterator<char>());
 
-  // The whole language in one call: the defaults, then `install_core_module`.
+  // Create the language services, including the parser.
   const auto language = cursiv::create_language<
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@CoreServices,
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedCoreServices,
@@ -817,14 +812,14 @@ if (!watch) {
   rmSync('out', { recursive: true, force: true });
 }
 
-// Only `vscode` is external -- the editor injects it at runtime; everything
-// else is bundled, so the packaged .vsix is self-contained.
+// Bundle the extension and its dependencies into one file. VS Code provides
+// the `vscode` module itself.
 const context = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18', // VS Code 1.86 supports native servers; WASI needs 1.101.
+  target: 'node18', // The Node.js version of VS Code 1.86.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,
@@ -948,8 +943,8 @@ _cursiv_new_emit([==[vscode/package.json]==] [==[{
   }
 }
 ]==])
-_cursiv_new_emit([==[vscode/src/extension.ts]==] [==[// The @CURSIV_NEW_ID@ extension: it spawns `@CURSIV_NEW_ID@_lsp` and speaks
-// the protocol to it over stdio.
+_cursiv_new_emit([==[vscode/src/extension.ts]==] [==[// The @CURSIV_NEW_ID@ extension for VS Code. It starts the language server
+// `@CURSIV_NEW_ID@_lsp` and talks to it over standard input and output.
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -971,17 +966,16 @@ function executableName(): string {
     return process.platform === 'win32' ? `${SERVER}.exe` : SERVER;
 }
 
-// A native binary is its own command; a wasm module is a file Node runs, and
-// the extension host IS Node, so the wasm route needs no dependency.
+// How to start the server: a native server runs directly, and a WebAssembly
+// server runs with the Node.js that runs this extension.
 interface ServerCommand {
     command: string;
     args: string[];
     env?: Record<string, string>;
 }
 
-// A wasm module opens with `\0asm` and a host binary does not. The cross build
-// names its output exactly like the native one, so the file itself is the only
-// thing that says which of the two runners it needs.
+// Native and WebAssembly builds name the server the same way, so the first
+// bytes of the file tell them apart.
 function isWasm(file: string): boolean {
     let handle: number | undefined;
     try {
@@ -996,9 +990,8 @@ function isWasm(file: string): boolean {
     }
 }
 
-// What the active CMake preset just built: `launch.json` hands its binary
-// directory over, so F5 runs the artefact the editor is configured to build
-// rather than whatever a previous cross left under `server/`.
+// The server built by the active CMake preset: when you press F5,
+// `launch.json` sets CURSIV_SERVER_DIR to its build folder.
 function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const directory = process.env.CURSIV_SERVER_DIR?.trim();
     if (!directory) return undefined;
@@ -1008,10 +1001,8 @@ function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefi
     return wasmRun(built, path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
-// The wasm server, preferred when it is there: one artefact for every platform,
-// and the sandbox comes with it -- the module reads only what the runner
-// preopens. `cursiv_package_language` refreshes both files under `server/` on a
-// threaded cross build, and a packaged .vsix carries them.
+// The WebAssembly server under `server/`, which a WASI build copies there. It
+// runs on every platform, so a packaged extension prefers it.
 function wasmCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     return wasmRun(path.join(context.extensionPath, 'server', `${SERVER}.wasm`),
                    path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
@@ -1024,14 +1015,13 @@ function wasmRun(module: string, runner: string): ServerCommand | undefined {
     return {
         command: process.execPath,
         args: ['--no-warnings', runner, module],
-        // WASI cannot count the host's cores: `hardware_concurrency()` answers
-        // one there, so the pool would never be built. The host knows.
+        // A WebAssembly server cannot see how many CPU cores there are.
         env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
     };
 }
 
-// The extension lives at `<project>/vscode`, so `../build/src/` is where
-// CMake put the native server.
+// The native server: the packaged copy under `bin/`, or the one CMake built
+// in `../build/src/`.
 function nativeCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const name = executableName();
     for (const candidate of [
@@ -1066,8 +1056,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine(`server: ${server.command} ${server.args.join(' ')}`);
 
-    // A native server has no --inspect to add, so the debug configuration is
-    // the run configuration.
     const executable: Executable = {
         command: server.command,
         args: server.args,
@@ -1082,8 +1070,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     client = new LanguageClient(ID, '@CURSIV_NEW_CLASS@', serverOptions, clientOptions);
     await client.start();
-    // The MCP door onto the same session: a model connected here reads what
-    // the editor holds unsaved.
+    // Let AI assistants use the language server through MCP. They see the
+    // same documents as the editor, including unsaved changes.
     context.subscriptions.push(startMcpBridge(ID, '@CURSIV_NEW_CLASS@', client, outputChannel));
 }
 
@@ -1093,10 +1081,9 @@ export async function deactivate(): Promise<void> {
     await running?.stop();
 }
 ]==])
-_cursiv_new_emit([==[vscode/src/mcp.ts]==] [==[// The MCP bridge: the endpoint lives in the language server and rides the LSP
-// wire as `cursiv/mcp`; this hosts the standard Streamable HTTP transport the
-// module itself cannot open under WASI. Localhost only, one bearer token per
-// session, no SSE -- the endpoint sends nothing on its own.
+_cursiv_new_emit([==[vscode/src/mcp.ts]==] [==[// The MCP server of the extension. It accepts HTTP requests from this machine
+// only, with a token created for each session, and forwards them to the
+// language server.
 
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
@@ -1105,9 +1092,8 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 
 const MCP_METHOD = 'cursiv/mcp';
 
-// Announcing the server to the editor is VS Code 1.101 API; serving it is not.
-// Declared here rather than taken from `@types/vscode` so the extension still
-// compiles, installs and serves against the older engine it asks for.
+// The MCP registration API of VS Code 1.101 and later, declared here so the
+// extension still builds and runs on VS Code 1.86.
 interface McpRegistry {
     lm?: {
         registerMcpServerDefinitionProvider?(
@@ -1154,8 +1140,7 @@ export function startMcpBridge(
         };
         const refusal = (status: number, code: number, message: string): void =>
             answer(status, { jsonrpc: '2.0', id: null, error: { code, message } });
-        // Anti DNS-rebinding: a browser page reaching for the port names its
-        // origin, and no browser origin has business here.
+        // Refuse requests from web pages (protection against DNS rebinding).
         if (!isLocal(request.headers.host) || !isLocal(request.headers.origin)) {
             return refusal(403, -32000, 'forbidden origin');
         }
@@ -1182,7 +1167,7 @@ export function startMcpBridge(
             }
             const id = (message as { id?: unknown })?.id ?? null;
             client.sendRequest(MCP_METHOD, message).then(
-                // A notification answers nothing, which the transport spells 202.
+                // A notification has no result: reply 202 Accepted.
                 (result) => (result === null ? answer(202) : answer(200, result)),
                 (error) => answer(500, {
                     jsonrpc: '2.0',
@@ -1200,14 +1185,14 @@ export function startMcpBridge(
                 return resolve(undefined);
             }
             const url = `http://127.0.0.1:${address.port}/mcp`;
-            // The line an external client copies:
+            // Other MCP clients connect with this URL and token, for example:
             //   claude mcp add --transport http <name> <url> --header "Authorization: Bearer <token>"
             outputChannel.appendLine(`mcp: ${url} (Authorization: Bearer ${token})`);
             const api = vscode as unknown as McpRegistry;
             const register = api.lm?.registerMcpServerDefinitionProvider;
             const HttpDefinition = api.McpHttpServerDefinition;
-            // Before 1.101 the editor has no MCP registry, so the line above is
-            // the whole wiring: the server serves, a client is pointed at it.
+            // Before 1.101, VS Code cannot register MCP servers: clients use
+            // the URL above.
             if (register === undefined || HttpDefinition === undefined) {
                 return resolve(undefined);
             }

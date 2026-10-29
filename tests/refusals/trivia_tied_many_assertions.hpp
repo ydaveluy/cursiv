@@ -1,7 +1,7 @@
 // A hidden trivia of twelve arms, each read where its own assertion holds: the
 // check would walk every set of them that may hold at once, twice as many with
 // each arm, so it stops and the grammar is generated with a warning.
-// expect LR: warning: terminals .(WS|NOTE). and .(WS|NOTE). are trivia, and the check that they never read the same text at the same length and rank could not be completed
+// expect LR: warning: terminals .(WS|NOTE). and .(WS|NOTE). are trivia, but the generator could not check that they never match the same text with the same length and category
 #pragma once
 
 #include "refusals/head.hpp"

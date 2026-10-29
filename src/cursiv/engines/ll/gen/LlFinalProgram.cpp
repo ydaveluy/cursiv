@@ -1,7 +1,7 @@
 #include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 
 #include <cstdint>
-#include <cstdio>
+#include <string>
 #include <vector>
 
 #include "cursiv/engines/shared/gen/GrammarFault.hpp"
@@ -43,8 +43,9 @@ std::string_view ll_empty_match_terminal(const LlBuiltProgram& a) {
 
 bool ll_fits(std::string_view grammar, std::size_t n, const char* what) {
   if (n <= 0xFFFFu) return true;
-  std::fprintf(stderr, "%.*s: refused, %zu %s overrun sixteen bits\n",
-               static_cast<int>(grammar.size()), grammar.data(), n, what);
+  refuse_too_large(grammar,
+                   "it has " + std::to_string(n) + ' ' + what +
+                       ", more than 65 535");
   return false;
 }
 

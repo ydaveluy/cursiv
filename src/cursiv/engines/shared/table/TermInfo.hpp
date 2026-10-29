@@ -46,6 +46,15 @@ struct TermInfo {
   constexpr bool operator==(const TermInfo&) const = default;
 };
 
+// Whether any terminal of `C` is recorded: where none is, a parse never fills
+// `pending`.
+template <const auto& C>
+inline constexpr bool kTermsRecorded = [] {
+  for (unsigned t = 0; t < C.nterms; ++t)
+    if (C.terms[t].recorded) return true;
+  return false;
+}();
+
 // What an election weighs of a category: a literal and a keyword tie, over a
 // pattern.
 constexpr unsigned lex_weight(unsigned tier) { return tier != 0 ? 1u : 0u; }

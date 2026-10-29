@@ -1,6 +1,6 @@
 // A directive over a sequence that builds a node, into a member that takes a
 // value: the node would be held by nothing.
-// expect LR: stands over a shape that builds a node, and the member takes a value
+// expect LR: applies to an expression that builds a node, but the member takes a value
 #pragma once
 
 #include "refusals/head.hpp"

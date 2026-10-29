@@ -1,12 +1,12 @@
-# Grammar errors and fixes {#refusals}
+# Grammar errors and fixes
 
-A **refusal** is an error in the grammar: the generator stops and builds no
-parser. Search this page for the code or the first words of the message; the
-quoted messages are excerpts. [Warnings](#warned-not-refused) do not stop
-generation. LL and LR share the codes, but
+A **refusal** is an error in your grammar: the build stops and no parser is
+generated. Search this page for the code or the first words of the message;
+the quoted messages are excerpts. [Warnings](#warnings) do not stop
+the build. LL and LR use the same codes, but
 [a few limits differ](#where-the-engines-differ).
 
-## Rule errors {#refused-against-a-rule}
+## Rule errors
 
 The message reads `<grammar>: refused (code)` and names the rule; for a cycle, it
 also lists the rules involved.
@@ -15,30 +15,33 @@ also lists the rules involved.
 
 > rule `Root` repeats an item that may match nothing
 
-A repeated item must read input, also through rule calls. Put the optionality
-in the bounds: `many(x)`, not `many(option(x))`; `repeat<0, 3>(x)`, not
-`repeat<2, 3>(option(x))`. For terminals, see
+A repeated item must read input, including through the rules it calls. Use
+the bounds to make it optional: `many(x)`, not `many(option(x))`;
+`repeat<0, 3>(x)`, not `repeat<2, 3>(option(x))`. For terminals, see
 [`terminalNullableRepetition`](#terminalnullablerepetition).
 
 ### `nullableUnorderedItem`
 
-> rule `Root` holds an unordered item that may match nothing, `"final"? "static"?` …
+> rule `Root` has an unordered item that may match nothing, `"final"? "static"?` …
 
-> rule `Root` holds an optional unordered item, … in a group whose items hold a `nest`
+> rule `Root` has an optional item, …, in an unordered group whose items hold a
+> `nest`
 
-An item of `unordered(…)` must read input. To leave one out, write
-`option(x)`, `many(x)` or `repeat<0, n>(x)` where `x` reads input. Above,
-split the item in two: `option(kw<"final">), option(kw<"static">)`. When the
-items contain a `nest`, no item may be optional: write the group with and
-without it, `unordered(a, b) | a`.
+An item of `unordered(…)` must read input. To make an item optional, write
+`option(x)`, `many(x)` or `repeat<0, n>(x)` where `x` reads input. In the
+first example, split the item in two: `option(kw<"final">), option(kw<"static">)`.
+When the items contain a `nest`, no item may be optional: write the group
+with and without that item, `unordered(a, b) | a`.
 
 ### `ruleWithoutProduction`
 
-> rule `Tail` derives nothing: every reading of it turned out impossible, so
-> whoever calls it can never return
+> rule `Tail` can never match any text: each of its alternatives is
+> impossible, such as one that needs a token after `eof` or a recursion that
+> never ends
 
-No alternative can succeed: a token is required after `eof`, for example, or
-a recursion never ends. Keep at least one possible match.
+No alternative of the rule can ever match: for example, it requires a token
+after `eof`, or its recursion never ends. Give the rule at least one
+alternative that can match.
 
 ### `twoEndMarks`
 
@@ -64,16 +67,16 @@ the part it guards.
 
 > rule `Root` writes a member from `eof` alone, or from nothing
 
-`flag<&Doc::last>(eof)` writes from nothing. Put the directive on a part that
-reads input, or on a choice with an `eof` branch.
+`flag<&Doc::last>(eof)` reads no text, so it never writes the member. Put the
+directive on a part that reads input, or on a choice with an `eof` branch.
 
 ### `skippedTerminal`
 
-> rule `Root` names a terminal its reading skips as trivia
+> rule `Root` names a terminal that is skipped as trivia at that point
 
-`ignored` or `hidden` skips this terminal at that point, so the rule never
-sees it. Operators are checked too. Remove the call, or read it under
-`tight(e)` or a `skip()` that does not skip it.
+At this point, `ignored` or `hidden` skips the terminal as trivia, so the
+rule never sees it. This also applies to operators. Remove the call, or read
+it inside `tight(e)` or a `skip()` that does not skip it.
 
 ### `docConflict`
 
@@ -86,30 +89,33 @@ one hover text. Keep one.
 
 > rule `Sum` names the same operator text on two levels
 
-One text, such as `*`, stands on two levels of one table. Give it one level in
-its table; another table may give it a level and a grouping of its own. A
-condition on an operator does not make it different.
+One operator text, such as `*`, appears on two levels of one precedence
+table, or with two groupings. Give each text one level and one grouping in a
+table; another table may use the same text with its own level and grouping.
+A condition on an operator does not make it a different operator.
 
-Allowed: operators that later tokens tell apart (`>` and `>` `>`, `not in` and
-`not like`), and a prefix operator with the text of a binary one, such as
-`-`. Two prefix levels, or two postfix levels, cannot share a text.
+These are allowed: operators that the next tokens tell apart (`>` and `>`
+`>`, `not in` and `not like`), and a prefix operator with the same text as a
+binary one, such as `-`. Two prefix levels, or two postfix levels, cannot
+share a text.
 
 ### `postfixBinaryClash`
 
-> rule `Expr` reads `!` as a postfix operator on level 1 and as a binary
+> rule `Expr` uses `!` as a postfix operator on level 1 and as a binary
 > operator on level 3 of its precedence table
 
-After an operand, `!` could end it or join it to the next one. Give the two
-operators different text.
+After an operand, `!` could either end the expression or join it to the next
+operand. Give the two operators different texts.
 
-> cannot compare the text of the postfix operator on level 1 with the binary
-> operator on level 2 …
+> has two operators whose texts cannot be compared, the postfix operator on
+> level 1 and the binary operator on level 2 …
 
 This check and [`precedenceClash`](#precedenceclash) compare prefix and
-postfix operators by their text. When an operator is spelled through a
-repetition, an `option` or a region, or in too many ways, the table is refused
-wherever it could clash. Spell it with literals, terminals and data rules of
-fixed text.
+postfix operators by their text. When an operator's text comes from a
+repetition, an `option` or a region, or has too many spellings, the check
+cannot compare it, so the table is refused wherever two operators could
+clash. Write each operator with literals, terminals and data rules of fixed
+text.
 
 ### `infixOperatorNotText`
 
@@ -126,49 +132,51 @@ Use at most 255 levels.
 
 ### `unitProductionCycle`
 
-> rule `A` stands on a cycle of reductions that read no text (`A -> B`,
-> `B -> A`, or `A -> A B` where `B` may match nothing)
+> rule `A` is part of a cycle of rules that call each other without matching
+> any text (`A -> B` and `B -> A`, or `A -> A B` where `B` may match nothing)
 
-LR only; LL reports [`leftRecursion`](#leftrecursion). Make the cycle read
-input, or remove the redundant call.
+LR only; LL reports [`leftRecursion`](#leftrecursion). The rules call each
+other in a loop without reading text. Make the loop read input, or remove the
+redundant call.
 
 ### `hiddenLeftRecursion`
 
-> rule `Type` reaches itself at its left edge behind an item that may match
-> nothing (`A -> B A x` where `B` can be empty)
+> rule `Type` reaches itself before matching anything, behind an item that may
+> match nothing (`A -> B A x` where `B` may be empty)
 
 LR only; LL reports [`leftRecursion`](#leftrecursion). Make `B` read input, or
-move it after the recursive call: `A -> A x` is fine. When the message names a
-limit on optional items before the call, use fewer, group some behind an item
-that reads input, or put the call first.
+move it after the recursive call; plain left recursion such as `A -> A x` is
+fine. When the message names a limit of optional items before the call, use
+fewer, put some behind an item that reads input, or put the call first.
 
 ### `leftRecursion`
 
-> rule `Expr` reaches itself before matching anything in a way the LL descent
-> cannot fold
+> rule `Expr` reaches itself before matching anything, in a way the LL parser
+> cannot handle
 
 > rule `A` reaches itself before matching anything inside a repetition or
-> behind optional items, past what the LL descent spells out
+> behind optional items, beyond what the LL parser supports
 
 LL only. LL also refuses what LR reports as
 [`unitProductionCycle`](#unitproductioncycle) or
 [`hiddenLeftRecursion`](#hiddenleftrecursion). Spell a chain of binary
 operators as `infix<>`.
 
-LL reads a call inside or behind an `option`, or behind a `many`, up to seven
-such items. Past that, or for a call inside `many` or `some`, write the
-alternatives yourself, and group the optional items in front of the call
-behind one that reads input: `X? Y? A z` becomes `(X Y? | Y) A z | A z`.
+LL accepts a left-recursive call inside or after an `option`, or after a
+`many`, with up to seven such items in front of it. With more, or for a call
+inside `many` or `some`, write the alternatives yourself, and put the
+optional items in front of the call behind one that reads input:
+`X? Y? A z` becomes `(X Y? | Y) A z | A z`.
 
 ??? note "Indirect left recursion in LL"
 
-    Some indirect cycles that LR reads need a rewrite for LL; the message
+    Some indirect cycles that LR accepts need a rewrite for LL; the message
     names the cycle. Give one rule of the cycle an alternative that only calls
     another rule of the cycle, or inline one rule into the other:
 
     ```text
     A := B "x" | "a" "x"       B := A "y" | "a"       refused
-    A := B | "a" "x"           B := A "x" | "a"       read
+    A := B | "a" "x"           B := A "x" | "a"       accepted
     ```
 
     When a rule of the cycle also calls itself directly, put that alternative
@@ -176,7 +184,7 @@ behind one that reads input: `X? Y? A z` becomes `(X Y? | Y) A z | A z`.
 
     ```text
     B := A "y" "z" | B "y" "w" | "b"       refused
-    B := B "y" "w" | A "y" "z" | "b"       read, with the same trees
+    B := B "y" "w" | A "y" "z" | "b"       accepted, with the same trees
     ```
 
     Otherwise, split the cycle into explicit precedence levels, or use LR. LL
@@ -184,8 +192,8 @@ behind one that reads input: `X? Y? A z` becomes `(X Y? | Y) A z | A z`.
 
 ### `selfBoundedArm`
 
-> rule `E`: the arm `E '+' E` begins and ends with `E`, which says nothing of
-> how its operands nest …
+> rule `E`: the alternative `E '+' E` begins and ends with `E`, so it does not
+> say how its operands group …
 
 `E := E + E | a` does not say whether `a+a+a` is `(a+a)+a` or `a+(a+a)`;
 `E := E E | a` and `E := E "?" E ":" E | a` are refused too. Declare the
@@ -193,29 +201,30 @@ operators with [`infix`](grammar.md#operator-precedence), or give each level
 its own rule: `E := E + T | T`, `T := T * F | F`. An alternative that begins
 or ends with a token, such as `E := "-" E | a`, is fine.
 
-## C++ type errors {#refused-by-the-compiler}
+## C++ type errors
 
-These errors come from a `static_assert` when the grammar compiles.
+These errors have no code. Most come from a `static_assert` when the C++
+compiler compiles the grammar; a few come from the generator.
 
 ### A grammar named with `ref<>`
 
 > `ref<G>` names a grammar: read it with `section<G>(open, close)`
 
 Write `section<Json>(lit<"<">, lit<">">)`, so that the embedded text has an
-end. A grammar that states indentation, or whose entry is a terminal, cannot
-be embedded.
+end. A grammar that uses indentation, or whose entry is a terminal, cannot be
+embedded.
 
 ### A trivia list that names a rule
 
 > `ignored`, `hidden` and `skip()` list terminals only: trivia are tokens the
-> lexer skips, never rules the parser reads
+> lexer skips, never rules
 
 Make the listed rule a `terminal<>`.
 
 ### A terminal in both trivia lists
 
 > a terminal belongs to at most one of `ignored` and `hidden`: trivia are
-> dropped or kept in the tree, never both
+> dropped from the tree or kept in it, never both
 
 List the terminal once: in `ignored` to drop it, in `hidden` to keep it. The
 same holds for a `skip()` and an embedded grammar.
@@ -228,8 +237,8 @@ Write the item alone.
 
 ### A level table that lists an operator
 
-> levels(...) lists the levels of a table, tightest-binding first, each one
-> `left(op)`, `right(op)`, `nonassoc(op)`, `prefix<...>(op)` or
+> levels(...) takes only precedence levels, tightest-binding first: each one
+> is `left(op)`, `right(op)`, `nonassoc(op)`, `prefix<...>(op)` or
 > `postfix<...>(op)`
 
 Write `levels(left(lit<"*">), left(lit<"+">))`, not
@@ -244,69 +253,71 @@ Name the three members, or none to use `left`, `op` and `right`.
 
 ### A commit outside a quantifier
 
-> commit(prefix, body) stands only as the direct item of option, many, some or
-> repeat
+> commit(prefix, body) must be the direct item of option, many, some or
+> repeat, as in many(commit(a, b))
 
 Write `many(commit(a, b))`, not `commit(a, b) + c`.
 
 ### A commit inside a terminal
 
-> a commit stands in a rule, not in a terminal: a terminal reads adjacent bytes
-> and has no condition to stop on
+> a commit is allowed in a rule, not in a terminal: inside a terminal, use
+> option, many, some or repeat without commit
 
 Use the plain repetition forms inside terminals.
 
-### An implied token that is no unguarded literal
+### An implied token that is not a plain literal
 
-> `implied(tok, cond)` lays a token of no width, so `tok` is an unguarded
-> literal or a terminal whose body is one
+> in `implied(tok, cond)`, `tok` must be a literal with no guard, or a
+> terminal whose body is one
 
 `implied(kw<"end">, eof)` and `implied(ref<NEWLINE>, eof)`, where `NEWLINE`
-reads more than a literal, are refused. Imply a plain literal, or write
-`ref<NEWLINE> | eof` where the token may be absent.
+reads more than a literal, are refused: a keyword is a guarded literal. Imply
+a plain `lit<>`, or write `ref<NEWLINE> | eof` where the token may be absent.
 
 ### A condition over a rule that builds a node
 
-> A rule that builds a node is parsed, not read: no condition asks one
+> a condition cannot test a rule that builds a node
 
-A condition reads text and builds nothing. Test the terminals the rule starts
-with, or a data rule that spells them.
+A condition only tests text and builds nothing. Test the terminals the rule
+starts with, or a data rule made of them.
 
 ### A section in a condition or a terminal
 
-> `section<G>(open, close)` stands in a rule, not in a condition …
+> `section<G>(open, close)` is allowed in a rule, not in a condition …
 
 A similar message names a terminal. Read the section in a rule, and test its
 opening token in a condition: `&lit<"<">`.
 
-### A condition over a rule that reaches itself
+### A condition over a recursive rule
 
-> a condition reads a data rule that reaches itself
+> a condition cannot test a data rule that calls itself, directly or through
+> other rules
 
 Test what the rule starts with instead.
 
 ### An expression a condition cannot read
 
-> `&e` and `!e` read `e` as the parse would: terminals, nonrecursive data
-> rules, classes, literals and `any` …
+> a condition (`&e` or `!e`) cannot test this expression: `e` may hold
+> terminals, data rules that do not call themselves, classes, literals and
+> `any` …
 
-Spell the orders of an unordered group as a choice,
-`&((kw<"x"> + kw<"y">) | (kw<"y"> + kw<"x">))`, test the token itself rather
-than `implied`, and read `indent` and `dedent` outside conditions.
+Write the orders of an unordered group as a choice,
+`&((kw<"x"> + kw<"y">) | (kw<"y"> + kw<"x">))`, test the token itself instead
+of `implied`, and read `indent` and `dedent` outside conditions.
 
 A [commit](grammar.md#committed-items) prefix has the same limits, so a
-directive there gets this message too. Put directives in the commit's body,
-and commit on a token you do not need to store, such as a separator.
+directive in a prefix gets this message too. Put directives in the commit's
+body, and commit on a token you do not need to store, such as a separator.
 
 ### A directive that would never run
 
-> a create<>/assign<>/append<>/flag<> sits under a LOOKAHEAD … so this
-> directive never runs
+> a create<>, assign<>, append<> or flag<> is inside a condition (`&` or `!`)
+> … so this directive never runs
 
-A condition builds nothing, and `through()` and `mark()`, which the message
-may name instead, read inside one token: `&assign<&T::name>(ref<ID>)` never
-writes. Put the directive around the whole part:
-`assign<&T::name>(through(lit<"<">, lit<">">))`.
+A directive inside a condition, a `through()` or a `mark()` never runs: a
+condition builds nothing, and `through()` and `mark()` read inside one token.
+For example, `&assign<&T::name>(ref<ID>)` never writes. Put the directive
+around the whole part instead: `assign<&T::name>(through(lit<"<">, lit<">">))`.
 
 ### An AST member that owns its text
 
@@ -319,19 +330,21 @@ struct Person : cursiv::Extends<cursiv::AstNode> {
 };
 ```
 
-Keep the source text and `ParseResult` alive while reading the tree.
+A text member is a view into the source. Keep the source text and the
+`ParseResult` alive while you read the tree.
 
 ### A directive over a shape with no value
 
-> stands over a shape that produces no value
+> applies to an expression that gives no value
 
-A quantifier over no node, or a condition, has no value. Put the directive
-inside, `option(assign<&T::n>(ref<NUMBER>))`, or name the quantifier as a
-data rule and write that rule.
+A quantifier that holds no node, such as `option(ref<NUMBER>)`, and a
+condition have no value. Put the directive inside,
+`option(assign<&T::n>(ref<NUMBER>))`, or make the quantifier a data rule and
+assign a call to that rule.
 
 ### A node written into a member that takes a value
 
-> stands over a shape that builds a node, and the member takes a value
+> applies to an expression that builds a node, but the member takes a value
 
 `assign<&T::name>(option(ref<Item>))` where `name` is a `string_view` and
 `Item` builds a node. Give the member a node type, or write the part that
@@ -339,30 +352,30 @@ carries the value: `assign<&T::name>(ref<ID>)`.
 
 ### A directive over a repetition of nodes
 
-> stands over a repetition that can hold SEVERAL nodes
+> applies to a repetition that can hold several nodes
 
-Put the directive under the repetition:
+Put the directive inside the repetition:
 `many(append<&T::m>(ref<Item>), lit<",">)`, not
 `append<&T::m>(many(ref<Item>, lit<",">))`.
 
 ### A directive over two nodes
 
-> stands over a sequence that can hold TWO nodes
+> applies to a sequence that can hold two nodes
 
-`assign<&T::name>(option(ref<Qualifier>) + ref<Name>)`: create a node that
-holds both, and write that.
+In `assign<&T::name>(option(ref<Qualifier>) + ref<Name>)`, both parts may
+build a node. Create one node that holds both, and assign that node.
 
 ### A list item that creates a node
 
-> a create<> or nest<> as a separated-list item would absorb the whole list:
-> name the item as a rule instead
+> a create<> or nest<> cannot be the item of a separated list, since it would
+> take in the whole list: declare the item as a rule and use ref<> to it
 
 Declare the item as a rule and append it:
 `many(append<&List::items>(ref<Item>), lit<",">)`.
 
 ### An alternative that creates twice
 
-> this alternative can create twice
+> this alternative can create two nodes
 
 A rule returns one node, and this alternative may build two:
 
@@ -381,22 +394,22 @@ A rule returns one node, and this alternative may build two:
 
 ### An alternative whose node may not exist
 
-> this alternative hands over a node the text may leave out
+> this alternative returns a node that the text may leave out
 
 In `rule<lit<"let"> + option(ref<Item>)>`, the rule returns the node of
 `Item`, which may be absent. Put the node on every path, or create the rule's
 own node around the optional part:
 `create<Let>(option(assign<&Let::item>(ref<Item>)))`.
 
-### A call after the node in hand was written
+### A call after the current node was written
 
-> this alternative calls a rule that builds a node after the node in hand was
+> this alternative calls a rule that builds a node after the current node was
 > written, created or nested
 
-An unassigned call makes the called node the current one, which works only
-before anything is written. Hold the called node with `assign` or `append`,
-or write the shared part as a [fragment](grammar.md#reuse-grammar-pieces) in
-each alternative:
+An unassigned call makes the called node the
+[current node](glossary.md), which works only before anything is written.
+Hold the called node with `assign` or `append`, or write the shared part as a
+[fragment](grammar.md#reuse-grammar-pieces) in each alternative:
 
 ```cpp
 static constexpr auto fn_body = kw<"fn"> + assign<&Decl::name>(ref<ID>);
@@ -410,11 +423,12 @@ struct Root : rule<option(flag<&Decl::exported>(kw<"export">))
 
 > this repetition writes the member on every turn
 
-> this directive writes a member the node of the rule called before it may have
-> written already
+> this directive writes a member that the rule called before it may already
+> have written
 
-Write a single-valued member once on each path through a node, writes of a
-called rule included. For a list, put `append` inside the repetition:
+Write a single-value member at most once on each [path](glossary.md)
+through a node, counting the writes of the rules you call. For a list, put
+`append` inside the repetition:
 `many(append<&Holder::items>(assign<&Part::n>(ref<ID>)))` builds one `Part`
 per turn, while `append<&Holder::items>(many(assign<&Part::n>(ref<ID>)))`
 writes one `Part`'s `n` on every turn.
@@ -429,8 +443,9 @@ Write `struct Guest : cursiv::Extends<Person> {}`, not
 
 ### A directive on the wrong storage
 
-> `=` names the ONE value a member takes, and this member is a `vector<T>` list
-> `+=` accumulates, so it names a member the grammar can accumulate INTO
+> `=` sets the single value of a member, and this member is a `vector<T>` list
+
+> `+=` appends, so it needs a `vector<T>` list member
 
 Use `assign` for a single value and `append` for a `vector<T>` list.
 
@@ -442,7 +457,7 @@ Make the member a `bool`.
 
 ### A directive over a shape with no node
 
-> stands over a shape that can match with NO node
+> applies to an expression that can match without a node
 
 The part may hold no node of the member's class: it may be absent, read only
 literals, build another class, or have its node taken by an inner directive.
@@ -450,69 +465,70 @@ Make the directive optional: `option(assign<&T::m>(ref<Part>))`.
 
 ### A nest with nothing in front of it
 
-> this alternative has a nest<> with nothing in front of it
+> this alternative has a nest<> with nothing before it
 
 A nest wraps the current node, so a `create`, a call to an AST rule or a write
 must come before it on every path.
 
-### A nest whose member cannot hold the node in hand
+### A nest whose member cannot hold the current node
 
-> this nest buries the node in hand in a member that cannot hold it
+> this nest stores the current node in a member that cannot hold it
 
 The nest's member must accept every class the current node may have there,
-earlier nests' wrappers included.
+including the wrappers of earlier nests.
 
-### A write the node in hand may not declare
+### A write the current node may not declare
 
-> this directive writes a member of a class the node in hand may not be
+> this directive writes a member that the current node may not have
 
-`ref<Prim> + assign<&Typed::ty>(ref<ID>)` where `Prim` builds a `Name` or a
-`Typed`: a `Name` has no `ty`. Adopt the subclass alone, or write a member
-every adopted class declares.
+In `ref<Prim> + assign<&Typed::ty>(ref<ID>)`, `Prim` builds a `Name` or a
+`Typed`, and a `Name` has no `ty`. Call a rule that builds only `Typed`, or
+write a member that every class `Prim` may build declares.
 
 ### An override outside the family of its rule
 
-> this override hands back a class outside the type of the rule it stands over
+> this override builds a class outside the type of the rule it overrides
 
 An override must build the rule's class or a class derived from it.
 
-### An override that changes between AST and data rules {#an-override-that-changes-a-rules-genre}
+### An override that changes between AST and data rules
 
-> an override restates the rule's genre and this one changes it
+> this override changes whether the rule builds a node
 
 Override an AST rule with a body that builds a node, and a data rule with one
 that builds none.
 
 ### An override that changes a passed value
 
-> this override passes a value of another type than the data rule it stands
-> over
+> this override gives a value of another type than the data rule it
+> overrides
 
-Without `as`, an override keeps the value type of the data rule:
-`rule<as<V::c>(kw<"c">) | super>` over a rule passing a `V` is accepted,
-`rule<kw<"c">>` is not.
+An override of a data rule must return the same value type; use `as` to give
+it that type. Over a rule that returns a `V`,
+`rule<as<V::c>(kw<"c">) | super>` is accepted, but `rule<kw<"c">>` is not.
 
 ### A literal the member can never read
 
 > this literal can never convert
 
-A literal such as `lit<"+">`, or a sequence such as `kw<"NOT"> + kw<"IN">`
-(spelled `NOTIN`), written into a `bool` or enum member must spell one of its
-values. Spell an enumerator, or give the value: `as<Op::add>(lit<"+">)`. Enumerators are found by name
-only between `CURSIV_ENUM_PROBE_MIN` and `CURSIV_ENUM_PROBE_MAX` (-64 and 512
-unless you define them).
+When you write a literal, such as `lit<"+">`, or a sequence of literals, such
+as `kw<"NOT"> + kw<"IN">` (read as `NOTIN`), into a `bool` or enum member, its
+text must be the name of one of the member's values. Use an enumerator's
+name, or give the value: `as<Op::add>(lit<"+">)`. Enumerators are found by
+name only when their value is between `CURSIV_ENUM_PROBE_MIN` and
+`CURSIV_ENUM_PROBE_MAX` (-64 and 512 unless you define them).
 
 ### A converter whose result the member cannot take
 
-> no conversion from this payload to the member type … `default_converter`
+> no conversion from this value to the member type … `default_converter`
 
 The terminal's converter gives a type the member does not accept.
 
 ### A converter function with an unclear input
 
-> as<f>(e): f accepts more than one input
+> as<f>(e): f accepts more than one kind of input
 
-> as<f>(e): f reads neither the text … nor the parts … nor nothing
+> as<f>(e): f must take the text …, the parts … or no argument
 
 A function given to `as` reads `std::string_view` text, the parts, or nothing,
 with an optional `std::pmr::memory_resource*` after them. Give a generic
@@ -520,17 +536,18 @@ lambda's parameter a type.
 
 ### An `as` inside an `as`
 
-> as<X>(as<Y>(e)) is refused: compose the two conversions in one function
+> as<X>(as<Y>(e)) is not allowed: combine the two conversions in one function
 
 Write one function that does both conversions.
 
 ### An `as` inside a terminal body
 
-> inside a terminal, as<X>(e) wraps the whole body or each of its alternatives
+> inside a terminal, as<X>(e) must wrap the whole body or each of its
+> alternatives
 
-> inside a terminal, as<V>(e) on an alternative names a constant
+> inside a terminal, as<V>(e) on one alternative must give a constant value
 
-> inside a terminal, an alternative with its own as<V>(e) reads words only
+> inside a terminal, an alternative with its own as<V>(e) may only match words
 
 > inside a terminal, the constants of the alternatives' as<V>(e) have different types
 
@@ -540,21 +557,22 @@ To give each word its own value, write a data rule:
 
 ### Data rule alternatives of different types
 
-> the alternatives of this data rule pass values of different types
+> the alternatives of this data rule give values of different types
 
-Give the whole rule one value, as in
-`rule<as<std::string_view>(ref<NUM> | ref<ID>)>`, or make the branches agree.
+Wrap the whole choice in one `as`, as in
+`rule<as<std::string_view>(ref<NUM> | ref<ID>)>`, or make every alternative
+return the same type.
 
 ### An `as` around a directive or a node
 
-> as<X>(e) converts text, and this e writes the AST
+> as<X>(e) converts text, but this e holds a directive
 
-> as<X>(e) gives a value to text, and this e builds an AST node
+> as<X>(e) converts text, but this e builds an AST node
 
 Move `assign`, `append`, `flag`, `create` and `nest` out of the `as`, and do
 not wrap a rule that builds a node.
 
-## AST list storage {#and-one-more-the-vocabulary-carries}
+## AST list storage
 
 ```cpp
 vector<Person> persons;        // refused: a node is held by pointer
@@ -564,28 +582,31 @@ std::vector<Person*> people;   // refused: use cursiv::vector
 
 Each message names the fix.
 
-## Lexical and layout errors {#refused-by-the-lowering}
+## Lexical and layout errors
 
 ### `regionBoundaryShared`
 
-> the grammar reaches one point through a `skip()` region and outside it at
-> once …
+> the grammar reaches the same token both inside a `skip()` region and
+> outside it …
 
-The trivia before a token could belong to the region or not. Part the
-alternatives before the region opens, give the region an opening token of its
-own, or end it on a token that no optional part or `eof` follows.
+Two alternatives reach the same token, one inside a `skip()` region and one
+outside it, so the trivia before that token could follow either setting.
+Make the alternatives differ before the region opens, give the region its
+own opening token, or end the region on a token that no optional part or
+`eof` follows.
 
 ### `sectionPointShared`
 
-> the grammar reaches one point inside a `section<>` and outside it at once
+> the grammar reaches the same token both inside a `section<>` and outside
+> it
 
-Two alternatives part only after the token that opens a section. Part them
-before the section opens.
+Two alternatives differ only after the token that opens a section. Make them
+differ before the section opens.
 
 ### `sectionEndShared`
 
-> the grammar closes a `section<>` on a token the embedded grammar reads, or on
-> the start of one
+> the grammar closes a `section<>` on a token that the embedded grammar also
+> reads, or that starts one of its tokens
 
 In `section<Expr>(lit<"<">, lit<">">)`, where `Expr` reads `>=`, the `>` of
 `>=` could close the section. Close it on a token that no token of the
@@ -593,49 +614,53 @@ embedded grammar begins with.
 
 ### `sectionIndented`
 
-> the grammar reads its lines by indentation and embeds a grammar with
-> `section<>`
+> the grammar uses indentation and embeds a grammar with `section<>`
 
-Embed sections only in a grammar that states no indentation.
+Use `section<>` only in a grammar that does not use indentation. The
+embedded grammar must not use indentation either: the compiler reports
+"a grammar embedded with `section<>` cannot use indentation".
 
 ### `indentTwice`
 
-> terminal `OPEN` declares two indent terminals, or two dedent terminals
+> terminal `OPEN` is a second `indent` or `dedent` terminal
 
 Declare `terminal<indent>` once and `terminal<dedent>` once.
 
 ### `indentShape`
 
-> terminal `T` spells `indent` or `dedent` inside a body
+> terminal `T` uses `indent` or `dedent` as a part of its body
 
-Each is a terminal's whole body: `terminal<indent>`.
+`indent` and `dedent` must each be a terminal's whole body:
+`terminal<indent>`.
 
 ### Indentation settings that name no token
 
-> `indent_newline` names the terminal that ends a line: a terminal a rule
-> reads, not a rule or a terminal no rule reaches
+> `indent_newline` must name the terminal that ends a line, one that a rule
+> uses, not a rule or an unused terminal
 
 Similar messages name `indent_open` and `indent_close`, which may also name
 one token per bracket: `lit<"("> | lit<"[">`, not `lit<"("> + lit<"[">`.
 
 ### `gapShape`
 
-> the grammar asks a condition of an expression the matcher does not read
+> the grammar uses an expression in `gap::has` or `gap::is` that they cannot
+> test
 
 `gap::has` and `gap::is` take classes, literals, `any`, sequences, choices and
 repetitions, never `through`.
 
 ### `echoUnmarked`
 
-> terminal `T` echoes a mark<> not set in its scope
+> terminal `T` uses `same<>` where a `mark<>` with its tag is not set on every
+> path before it
 
-Set the `mark<Tag>` before the echo on every path, in the same terminal call.
-A mark in one branch of a choice, or in a loop that may not turn, does not
-count.
+A `same<Tag>` needs a `mark<Tag>` before it on every path, in the same
+terminal call. A mark in one branch of a choice, or in a loop that may run
+zero times, does not count.
 
 ### A mark that names no run
 
-> a mark<> names a RUN -- one character class or one-character literal,
+> `mark<>` takes one character class or one-character literal, alone or
 > repeated: `many(lit<"=">)`, `some(w)`, `repeat<0, 16>(cr<"^() ">)`
 
 `mark<Eq>(lit<"ab">)` is refused: mark one character class or one-character
@@ -643,8 +668,8 @@ literal, alone or repeated.
 
 ### A capture outside a token
 
-> this combinator has no lowering: a body reaching here would become a
-> right-hand side nobody wrote
+> this expression cannot be used directly in a rule: `mark<>` and `same<>`
+> work only inside a terminal or a `through`
 
 `mark` and `same` work inside one token. Use them in a `through` or a
 terminal, not directly in a rule:
@@ -656,7 +681,8 @@ through(lit<"["> + mark<Eq>(many(lit<"=">)) + lit<"[">,
 
 ### `triviaTied`
 
-> terminal `NOTE` is trivia that reads the same text as another trivia terminal
+> terminal `NOTE` is trivia that matches the same text as another trivia
+> terminal
 
 Two trivia terminals match the same text at the same length and
 [category](grammar.md#tokens), and one is `hidden`. Put both in `ignored`, or
@@ -679,7 +705,7 @@ Read input before the recursive call: `lit<"a"> + option(ref<T>)`, not
 
 ### `terminalUnproductive`
 
-> terminal `T` has a recursive call that cannot return a finite match
+> terminal `T` has a recursive call that can never finish a match
 
 `T : terminal<lit<"a"> + ref<T>>` never ends. Add an alternative that ends, or
 make the recursive part optional.
@@ -693,33 +719,35 @@ recursive allow it.
 
 ### `terminalReadsRule`
 
-> the grammar reads the rule `Pair`: a rule is read with the skipper between
-> its parts, a phrase of tokens and never the bytes of one
+> the grammar uses the rule `Pair` inside a terminal or a `through`: these
+> read one token, so they cannot call a rule, even a data rule
 
-A terminal reads one token, even through a data rule. Name the terminals the
-rule is made of, or read the rule from a rule. A condition in a rule, such as
-`&ref<Pair>`, may still name a data rule.
+A terminal reads one token, so it cannot call a rule, even a data rule. Use
+the terminals the rule is made of, or call the rule from a rule. A condition
+in a rule, such as `&ref<Pair>`, may still name a data rule.
 
 ### An expression a terminal cannot read
 
-> this expression cannot be read inside a terminal
+> this expression cannot be used inside a terminal: a terminal matches one
+> token …
 
 A terminal reads one token, so it cannot hold an unordered group, `skip`,
-`tight`, a gap condition, `implied` or a directive. Spell a group as a choice,
-drop `skip`, `tight` and gaps or read those parts in a rule, and put `implied`
-and directives in the rule that reads the terminal. A condition that reads a
-data rule holding an unordered group gets the same message.
+`tight`, a gap condition, `implied` or a directive. Write a group as a choice,
+remove `skip`, `tight` and gap conditions or read those parts in a rule, and
+put `implied` and directives in the rule that reads the terminal. A condition
+that reads a data rule holding an unordered group gets the same message.
 
 ### `commitPrefixEmpty`
 
-> rule `Root` commits on a prefix that may read nothing …
+> rule `Root` has a `commit` whose prefix may match nothing …
 
-An empty prefix always matches, so the quantifier never stops. Give the
-prefix a part it must read: `commit(option(lit<"x">) + lit<"a">, lit<"b">)`.
+A prefix that may read nothing always matches, so the quantifier never
+stops. Give the prefix a part it must read:
+`commit(option(lit<"x">) + lit<"a">, lit<"b">)`.
 
 ### `unorderedTooWide`
 
-> rule `Root` holds an unordered group of too many items
+> rule `Root` has an unordered group with too many items
 
 A group holds at most eleven items, or six when an item contains `nest`. Use
 fewer, or collect them as nodes, `many(append<&T::items>(ref<Item>))`, and
@@ -727,31 +755,33 @@ check uniqueness in validation.
 
 ## Advanced token restrictions
 
-These rare errors concern negative guards in terminals. A terminal *refuses*
-the word a guard such as `!kw<"if">` excludes, and the word-boundary class
-*rescues* it inside a longer word: `!kw<"if">` allows `iffy`.
+These rare errors concern negative guards in terminals, such as `!kw<"if">`,
+which excludes the word `if`. A character of the word boundary after the word
+lets the guard pass: `!kw<"if">` still allows `iffy`.
 
 ### `wordPastMatch`
 
-> terminal `HASH` may end a match short of `'abc'`, a word it refuses past
-> its head
+> terminal `HASH` may end a match before the end of `'abc'`, which a guard
+> excludes after the start of the terminal
 
-`lit<"#"> | lit<"##", !lit<"abc">>`: the match `##` ends before `abc` is read.
-Give the guarded literal a terminal of its own, or read the word whole before
-the match may stop. A guard on a character class, such as `!uc::Lo`, gets this
-message when a match may end inside one of its multi-byte characters.
+In `lit<"#"> | lit<"##", !lit<"abc">>`, the match `##` ends before `abc` is
+read. Give the guarded literal a terminal of its own, or make the token read
+the whole word before it can end. A guard on a character class, such as
+`!uc::Lo`, gets this message when a match may end inside one of its
+multi-byte characters.
 
 ### `wordRefusedInLoop`
 
-> terminal `STARS` refuses a word inside a repetition that may come back to a
-> refusal without reading a byte
+> terminal `STARS` has a guard inside a repetition, and a turn of that
+> repetition may read nothing after the guard
 
-Give the turn a part to read after the guard: `!lit<"/"> + any`.
+Make each turn of the loop read something after the guard:
+`!lit<"/"> + any`.
 
 ### `rescuedRefusalPastMatch`
 
-> terminal `W` ends a match exactly where the word it refuses ends, past its
-> head, and `_` rescues that word
+> terminal `W` may end a match exactly where a word its guard excludes ends,
+> after the start of the terminal, and `_` after that word lets the guard pass
 
 Put the guard at the start of the terminal, or after literals and character
 classes only, or let the token read the characters that allow the longer
@@ -759,56 +789,57 @@ word.
 
 ### `refusalIntoRelay`
 
-> terminal `CMT` refuses a word that runs into a relay's content
+> terminal `CMT` has a guard whose excluded word reaches into the text between
+> a `mark<>` and its `same<>`
 
-In a nested run, restrict the guard to the content's first byte, without a
-rescue class.
+In a nested run, the guard may test only the first character of that text,
+and not as a keyword.
 
 ### `rescueReadsPast`
 
-> terminal `NAME` reads on past a word it refuses over a character its word
-> boundary does not hold
+> terminal `NAME` excludes a word with a keyword guard, then may read after it
+> a character outside `word_boundary`
 
 Let the word boundary hold every character the terminal reads after the word.
 
 ### `boundaryDisagrees`
 
-> terminal `T` reaches one match through two refusals of different classes
+> terminal `T` reaches the same match through two guards that exclude
+> different characters after it
 
-LR only. LL accepts this shape.
+LR only; LL accepts this terminal.
 
 ### `boundaryMisses`
 
-> terminal `NAME` refuses `"in"` at its head, and reads `\` where a word of
-> its own begins and again past `"in"`, yet the class that rescues `"in"`
-> leaves `\` out
+> terminal `NAME` excludes `"in"` at its start, and can read `\` at the start
+> of a word and again after `"in"`, but `\` is not in the word boundary
 
 Let the boundary hold the character: `cr<R"(a-zA-Z0-9_\\)">`.
 
-## Warnings {#warned-not-refused}
+## Warnings
 
-A warning does not stop generation. Only a
-[repeated alternative](#twinproductions) changes the grammar: the generator
-drops it.
+A warning does not stop the build. Only a
+[repeated alternative](#an-alternative-that-repeats-an-earlier-one) changes the grammar: the generator
+drops that alternative.
 
-### An alternative that repeats an earlier one {#twinproductions}
+### An alternative that repeats an earlier one
 
-> warning: rule `Root`: branch 2 of 2 `b=ID` reads the same tokens as branch
-> 1, so it is never chosen and is dropped …
+> warning: rule `Root`: branch 2 of 2 `b=ID` matches the same tokens as
+> branch 1, so it is never chosen and is dropped …
 
-> warning: rule `Root`: `(b=ID)?` reads the same tokens as the earlier
-> `(a=ID)?`, so reading it in place of that item is never chosen and is
+> warning: rule `Root`: `(b=ID)?` matches the same tokens as the earlier
+> `(a=ID)?`, so it is never chosen in place of that item, and that choice is
 > dropped …
 
 A choice takes the first alternative written, so an alternative that reads the
-same tokens as an earlier one, whatever it writes, never wins; nor does an
-optional item read in place of an earlier one. Merge the two, or reorder them
-so that the one you mean comes first.
+same tokens as an earlier one never wins, whatever it writes. The same holds
+for an optional item that reads the same tokens as an earlier optional item.
+Merge the two, or reorder them so that the one you mean comes first.
 
 ### A run nested in a run
 
-> warning: rule `Root`: `(X+)*` repeats a run, so a run of items reads as one
-> group or as several and the election picks one …
+> warning: rule `Root`: `(X+)*` repeats a repetition, so a run of items can be
+> split into groups in several ways and the parser picks one …
 
 `many(some(ref<X>))`, even through a rule or a choice, groups the input in
 several ways, and [parse selection](grammar.md#choosing-between-parses) picks
@@ -816,18 +847,18 @@ one. Write `many(ref<X>)`, with `append` inside to collect one child per item.
 
 ### Two runs side by side
 
-> warning: rule `Root` reads a run of `NL` twice in a row: the run splits
-> between the two in several ways -- write one repetition
+> warning: rule `Root` has two repetitions of `NL` in a row: a run of them can
+> be split between the two in several ways -- write one repetition
 
-LR only. An absent option between two runs splits them too:
+LR only. Write one repetition. The warning also applies when only an option
+that may be absent separates the two runs:
 `many(ref<X>) + option(ref<Y>) + some(ref<X>)`. Move the first run into the
 option: `option(many(ref<X>) + ref<Y>) + some(ref<X>)`.
 
 ### An unbounded run in a condition
 
-> warning: rule `Arrow` asks a condition of the token in hand that reads
-> `('-')+` to any length: a completion then replays every token before the
-> caret …
+> warning: rule `Arrow` has a condition that matches `('-')+` with no length
+> limit: code completion then has to re-read every token before the cursor …
 
 A condition with no maximum may read to the end of the document, which slows
 completion; a run inside another repetition can also make parsing quadratic,
@@ -838,8 +869,8 @@ reads adjacent text only: in `- ->`, only `->` is then an arrow.
 
 ### A branch past `eof`
 
-> warning: rule `Para`: branch 2 of 2 `ADORN !. EOL` is never read -- `EOL`
-> stands after `eof`, which nothing can follow
+> warning: rule `Para`: branch 2 of 2 `ADORN !. EOL` can never match -- `EOL`
+> comes after `eof`, and nothing can follow the end of input
 
 The message spells `eof` as `!.`. Remove what follows `eof`, or let either one
 end the branch: `ref<ADORN> + (ref<EOL> | eof)`. The warning also names an
@@ -847,9 +878,9 @@ option after `eof`, and an `eof` branch that a token follows.
 
 ### A flag that may read nothing
 
-> warning: rule `Root`: `on?=("on"?)` reads an operand that may match nothing,
-> so it always sets the member -- flag the token that tells, and make the flag
-> optional
+> warning: rule `Root`: `on?=("on"?)` flags an operand that may match nothing,
+> so it always sets the member -- flag a token that must be there, and make the
+> flag optional
 
 Write `option(flag<&Item::on>(kw<"on">))`, not
 `flag<&Item::on>(option(kw<"on">))`, and initialize the member to `false`.
@@ -857,20 +888,21 @@ Write `option(flag<&Item::on>(kw<"on">))`, not
 ### A word literal with no guard
 
 > warning: rule `Root`: `'begin'` is a literal with no guard that ends in a
-> word character, so it also matches the start of a longer word, as
-> `lit<"end">` matches `end` in `endx` -- write `kw<"begin">`, or give the
-> literal a guard (`lit<"begin", G>`) if that is intended
+> word character, so it also matches the start of a longer word, such as
+> `beginx` -- write `kw<"begin">`, or give the literal a guard
+> (`lit<"begin", G>`) if that is intended
 
 Literals in terminals and conditions get no warning.
 
 ### A lexical check that cannot conclude
 
-> warning: terminals `LONG` and `TAG` are trivia, and the check that they
-> never read the same text at the same length and rank could not be completed …
+> warning: terminals `LONG` and `TAG` are trivia, but the generator could not
+> check that they never match the same text with the same length and
+> category …
 
 The [`sectionEndShared`](#sectionendshared) and [`triviaTied`](#triviatied)
-checks warn instead of refusing when a capture, a call, a nested run or a
-condition stops them.
+checks cannot always look inside a terminal that uses a capture, a call, a
+nested run or a condition. They then warn instead of refusing.
 
 ## Where the engines differ
 
@@ -879,16 +911,16 @@ condition stops them.
   recursive cycles past LL's size limit.
 - **LL reads, LR refuses**: one terminal match behind two guards of different
   classes ([`boundaryDisagrees`](#boundarydisagrees)), and more than 32
-  implied tokens ([`gapTooMany`](#counts-a-program-cannot-hold)).
+  implied tokens ([`gapTooMany`](#grammar-size-limits)).
 - **Different codes**: [`unitProductionCycle`](#unitproductioncycle) and
   [`hiddenLeftRecursion`](#hiddenleftrecursion) in LR are `leftRecursion` in
-  LL, and the [size limits](#counts-a-program-cannot-hold) differ.
+  LL, and the [size limits](#grammar-size-limits) differ.
 - Only LR gives the [two runs side by side](#two-runs-side-by-side) warning.
 
-## Grammar size limits {#counts-a-program-cannot-hold}
+## Grammar size limits
 
-These codes mean that the grammar is too large once generated, counting what
-generation adds to your declarations.
+These codes mean that the generated parser would be too large. The counts
+include the rules and alternatives that the generator adds to yours.
 
 | Code | The grammar… |
 |---|---|
@@ -898,7 +930,7 @@ generation adds to your declarations.
 | `tooManyConfigurations` | uses more than 255 trivia settings: its own, one per distinct `skip()` and one per `section<>` |
 | `gapTooMany` | states more than 255 gap conditions, or (LR only) more than 32 implied tokens |
 | `gapLeafPool` | declares too many distinct condition expressions |
-| `tokenGraphTooLarge` | has tokens too complex to generate, or a repetition bound above 4 294 967 295 |
+| `tokenGraphTooLarge` | has tokens too complex to generate, or a repetition bound above 4 294 967 294 |
 | `tooManyPositions` | exceeds LL's size limit |
 | `tooManyProductions` | has too many alternatives for LR |
 | `productionTooWide` | has an alternative too long for LR |
@@ -909,7 +941,5 @@ Counted repetitions and unordered groups grow fast: in a rule,
 repetition and check the count in validation, reduce alternatives, factor
 shared expressions, or split the grammar into separate languages. The same
 fixes apply to messages without a code, such as
-`refused by the 16-bit index of an LR state …`,
-`refused, 70000 rules overrun sixteen bits`,
-`refused by the record's stamp …` or, in LL,
+`the grammar is too large for the generated parser: …` or, in LL,
 ``rule `Root` repeats a `nest` more than 64 times in a row``.

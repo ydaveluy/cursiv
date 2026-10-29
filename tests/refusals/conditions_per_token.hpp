@@ -1,6 +1,6 @@
 // 17 distinct conditions of the gap guard 17 alternatives that all shift one
 // token: a state stands for each subset of them.
-// expect LR: refused by the conditions one token is read under
+// expect LR: refused: the grammar is too large for the generated parser: more than 16 conditions apply to one token
 #pragma once
 
 #include <cstddef>

@@ -8,18 +8,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/engines/ll/runtime/LlGesture.hpp"
 #include "cursiv/engines/ll/runtime/LlLookIndent.hpp"
 #include "cursiv/engines/ll/runtime/LlReading.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
-#include "cursiv/engines/shared/runtime/GestureRank.hpp"
 #include "cursiv/engines/shared/runtime/LexReading.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/engines/shared/runtime/RepairEnds.hpp"
+#include "cursiv/engines/shared/runtime/RepairSearch.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
-#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
@@ -50,25 +47,18 @@ struct LlRoot {
   bool operator==(const LlRoot&) const = default;
 };
 
-struct LlSearch {
-  LlSearch(const LlAtnView& atn, TextOffset len, const RepairBudget& b = {})
-      : sim(atn), budget(repair_allot(b, len)), perSearch(b.perSearch) {}
-
+// First in a search, so that its simulation stands at the search's address.
+struct LlSearchSim {
   LlSimulation sim;
-  std::uint64_t budget;
-  std::uint64_t perSearch;
-  std::uint64_t work = 0;
+};
+
+struct LlSearch : LlSearchSim, RepairSearch<LlGesture> {
+  LlSearch(const LlAtnView& atn, TextOffset len, const RepairBudget& b = {})
+      : LlSearchSim{LlSimulation(atn)}, RepairSearch(len, b) {}
+
   // The visits of the simulation already paid into `work`.
   std::uint64_t visited = 0;
-  // Where the search in flight stops: its share of what the parse has left.
-  std::uint64_t limit = 0;
-  // The parse's budget answered: every later fault is repaired by the first
-  // gesture that holds.
-  bool degraded = false;
 
-  struct Entry {
-    std::uint32_t f, lost, faults, invented, seq, at;
-  };
   // What a reading's future depends on, its owed run aside: two readings with
   // the same one gain the same increments of key, the one holding the owed
   // run perhaps more. A fingerprint: it selects the readings that may share
@@ -96,17 +86,9 @@ struct LlSearch {
   // The levels every reading stands in: the descent's, copied, and those the
   // readings open. A reading keeps its top alone.
   LlLookIndent indent;
-  std::vector<LlGesture> links;
-  // Links a dominated reading handed to the one that kept its future.
-  std::uint64_t handed = 0;
-  GestureRank rank;
-  std::vector<Entry> heap;
-  std::uint32_t seq = 0;
   std::unordered_multimap<Future, std::uint32_t, FutureHash> seen;
-  // The readings one read is still carrying forward, and the goals of the
-  // least cost.
+  // The readings one read is still carrying forward.
   std::vector<std::uint32_t> out;
-  std::vector<std::uint32_t> goals;
   // Scratch for the terminals a step reads and the ones a position offers.
   std::vector<std::uint16_t> terms;
   std::unordered_map<std::uint32_t, std::uint32_t> depths;
@@ -129,14 +111,10 @@ struct LlSearch {
   LlFacts facts;
 
   // The elected path: the gestures to write, the next one to, and the arm of
-  // the root's choice the path enters. `also` are the terminals the first
-  // insertion could as cheaply have been, `tied` the paths dropped for one as
-  // cheap.
+  // the root's choice the path enters.
   std::vector<LlGesture> plan;
   std::size_t next = 0;
   std::uint16_t arm = 0xFFFFu;
-  std::vector<ElementId> also;
-  TiedInserts tied;
   // The root and the pause the plan was made for: its arm is that root's
   // alone.
   bool planned = false;

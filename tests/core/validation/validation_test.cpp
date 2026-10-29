@@ -790,6 +790,20 @@ void anchors_land_where_the_grammar_wrote() {
         onKeyword->range.end == keyword + 6);
 }
 
+// A deletion resumes on a token already in the text: writing it again is no
+// fix, so the repair carries no edit row.
+void a_deletion_offers_no_quick_fix() {
+  World world;
+  const cursiv::Document* const document =
+      world.build("file:///a.ws", "datatype String\n) datatype Other\n");
+  const cursiv::Diagnostic* const repaired =
+      find_code(document->diagnostics, cursiv::kParseRepaired);
+  CHECK(repaired != nullptr);
+  if (repaired == nullptr) return;
+  CHECK(repaired->message == "Unexpected ')', expecting 'datatype'.");
+  CHECK(!repaired->data.has_value());
+}
+
 // End to end: the build publishes a repair with its edit rows, the code-action
 // provider turns them into a quick fix, and applying the edit really fixes
 // the document.
@@ -877,6 +891,7 @@ void run() {
   a_never_entered_parse_names_the_whole_document();
   anchors_land_where_the_grammar_wrote();
   a_repairs_quick_fix_really_fixes();
+  a_deletion_offers_no_quick_fix();
   the_answer_comes_back_in_document_order();
 }
 
@@ -1070,9 +1085,9 @@ void run() {
 
 }  // namespace validation_acceptor
 
-// Pins two `deleted`-repair message defects: a stray byte that quotes to
-// nothing must still name the expectation, and a deleted token that is the
-// expectation is said once, not twice.
+// Pins the `deleted`-repair messages: a stray byte that quotes to nothing must
+// still name the expectation, a deleted token that is the expectation is said
+// once, not twice, and a refused indentation is said as one.
 namespace repair_message {
 
 namespace {
@@ -1084,13 +1099,20 @@ std::string message_for(const cursiv::Parser& engine, std::string_view text,
   const cursiv::ParseResult result = engine.parse(text);
   for (const cursiv::ParseDiagnostic& d : result.cst().diagnostics()) {
     if (kind && d.kind != *kind) continue;
-    const bool sane = d.begin <= d.end && d.end <= text.size();
-    const std::string_view over =
-        sane ? text.substr(d.begin, d.end - d.begin) : std::string_view{};
-    return cursiv::repair_message(engine.getGrammar(), d, over,
-                                  d.end >= text.size());
+    return cursiv::repair_message(engine.getGrammar(), d, text);
   }
   return {};
+}
+
+// The sentence of a deletion over [begin, end) of `text`.
+std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
+                         cursiv::TextOffset end) {
+  const auto engine = tmsg::generated::MessageG::create_parser();
+  cursiv::ParseDiagnostic d;
+  d.kind = cursiv::DiagnosticKind::deleted;
+  d.begin = begin;
+  d.end = end;
+  return cursiv::repair_message(engine->getGrammar(), d, text);
 }
 
 void a_tight_region_deletion_still_names_the_expectation() {
@@ -1119,31 +1141,33 @@ void an_unwound_token_matching_the_expectation_is_not_echoed_twice() {
 // Past 24 bytes the quote is cut back to a lead byte, never through a
 // multi-byte character's continuation bytes.
 void a_long_deletion_does_not_split_a_multibyte_character() {
-  const std::unique_ptr<cursiv::Parser> engine =
-      tmsg::generated::MessageG::create_parser();
   const std::string over = std::string(23, 'a') +
                            "\xC3\xA9"
                            "bbb";
-  cursiv::ParseDiagnostic d;
-  d.kind = cursiv::DiagnosticKind::deleted;
-  const std::string message =
-      cursiv::repair_message(engine->getGrammar(), d, over, /*atEnd=*/false);
-  CHECK(message == "Unexpected '" + std::string(23, 'a') + "...'.");
+  CHECK(deleted_over(over, 0, over.size()) ==
+        "Unexpected '" + std::string(23, 'a') + "...'.");
 }
 
 void quotes_trim_before_shortening_and_flatten_line_breaks() {
-  const auto engine = tmsg::generated::MessageG::create_parser();
-  cursiv::ParseDiagnostic d;
-  d.kind = cursiv::DiagnosticKind::deleted;
-  CHECK(cursiv::repair_message(engine->getGrammar(), d,
-                               " \t\r\na\nb\tc\rd  \n", false) ==
-        "Unexpected 'a b c d'.");
-  CHECK(cursiv::repair_message(engine->getGrammar(), d,
-                               "short" + std::string(100000, ' '), false) ==
-        "Unexpected 'short'.");
-  CHECK(cursiv::repair_message(engine->getGrammar(), d,
-                               std::string(100000, ' '), false) ==
-        "Syntax error");
+  const std::string_view breaks = " \t\r\na\nb\tc\rd\fe\vf  \n";
+  CHECK(deleted_over(breaks, 0, breaks.size()) ==
+        "Unexpected 'a b c d e f'.");
+  const std::string tail = "short" + std::string(100000, ' ');
+  CHECK(deleted_over(tail, 0, tail.size()) == "Unexpected 'short'.");
+  const std::string blanks = "x" + std::string(100000, ' ');
+  CHECK(deleted_over(blanks, 1, blanks.size()) == "Syntax error");
+}
+
+// The blanks a line starts with, or the point before them where a dropped
+// indent took no byte: whatever they are made of, the indentation is what was
+// refused, never the token behind it. Blanks inside a line are no indentation.
+void a_refused_indentation_says_so() {
+  CHECK(deleted_over("a:\n    b\n  c\n", 9, 9) == "Unexpected indentation.");
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10) == "Unexpected indentation.");
+  CHECK(deleted_over("a:\n  b\n\f  c\n", 7, 8) == "Unexpected indentation.");
+  CHECK(deleted_over("  a\n", 0, 2) == "Unexpected indentation.");
+  CHECK(deleted_over("a  b\n", 1, 3) == "Syntax error");
+  CHECK(deleted_over("a\n  b\n", 2, 5) != "Unexpected indentation.");
 }
 
 }  // namespace
@@ -1153,6 +1177,7 @@ void run() {
   an_unwound_token_matching_the_expectation_is_not_echoed_twice();
   a_long_deletion_does_not_split_a_multibyte_character();
   quotes_trim_before_shortening_and_flatten_line_breaks();
+  a_refused_indentation_says_so();
 }
 
 }  // namespace repair_message

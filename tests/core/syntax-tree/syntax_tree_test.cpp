@@ -73,8 +73,8 @@
 #include "cursiv/core/utils/TypeName.hpp"
 #include "cursiv/core/utils/typelist.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
 #include "cursiv/engines/lr/gen/lr_build.hpp"
+#include "cursiv/engines/shared/gen/AstRowOf.hpp"
 #include "cursiv/engines/shared/gen/RowOf.hpp"
 #include "cursiv/engines/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/engines/shared/runtime/AstReducer.hpp"
@@ -247,7 +247,8 @@ void the_tables_read_back() {
 
   // The converter of NUM into the variant's int64 alternative, and the default
   // path into a reference's name: two different entries.
-  CHECK(cursiv::lr_ast_registry<tab::hier::G>().convCount >= 2);
+  CHECK(cursiv::ast_registry<tab::hier::G, cursiv::LrLowering<tab::hier::G>>()
+            .convCount >= 2);
 
   // Built types and the pointee of a node member, each once.
   CHECK(std::count_if(m.types, m.types + m.typeCount, [](const auto* t) {
@@ -421,7 +422,8 @@ void an_enum_is_a_plain_value_member() {
   // It converts through its own entry: (VIS's converter, Vis) is not
   // (default path, string_view), and the converter-less spelling of the same
   // member is one entry more -- (default path, Vis).
-  CHECK(cursiv::lr_ast_registry<tab::enm::G>().convCount == 3);
+  CHECK(cursiv::ast_registry<tab::enm::G, cursiv::LrLowering<tab::enm::G>>()
+            .convCount == 3);
 }
 
 }  // namespace enm
@@ -435,7 +437,8 @@ void no_directive_no_columns() {
       reflection_of<&tab::bare::generated::G::create_ast_reflection>();
   CHECK(r.metaData().fieldCount == 0);
   CHECK(r.metaData().typeCount == 1);
-  CHECK(cursiv::lr_ast_registry<tab::bare::G>().convCount == 0);
+  CHECK(cursiv::ast_registry<tab::bare::G, cursiv::LrLowering<tab::bare::G>>()
+            .convCount == 0);
   CHECK(r.typeIndexOf(kTag<Node>) != cursiv::kNoType);
 }
 
@@ -857,7 +860,8 @@ void every_alternative_is_kept() {
   const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Val>, "v").nature ==
         cursiv::detail::FieldNature::variant);
-  CHECK(cursiv::lr_ast_registry<tab::exact::G>().convCount == 4);
+  CHECK(cursiv::ast_registry<tab::exact::G, cursiv::LrLowering<tab::exact::G>>()
+            .convCount == 4);
 }
 
 void each_payload_lands_in_its_own_slot() {
@@ -910,7 +914,8 @@ static_assert(std::is_same_v<slot_of<G::WORD>, std::string_view>);
 // The two rules keep two conversion entries: the annotated one may not share
 // the bare-text one, or the writer emplaces the wrong slot.
 void the_annotated_rule_keeps_its_own_entry() {
-  CHECK(cursiv::lr_ast_registry<tab::annot::G>().convCount == 2);
+  CHECK(cursiv::ast_registry<tab::annot::G, cursiv::LrLowering<tab::annot::G>>()
+            .convCount == 2);
 }
 
 void annotated_terminal_lands_in_its_annotated_slot() {

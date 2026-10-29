@@ -282,9 +282,9 @@ std::string dead_branch_text(const DeadBranch& d) {
            detail::decimal(d.arms) + ' ';
   out += '`' + d.branch + '`';
   if (!d.choice.empty()) out += " in `" + d.choice + '`';
-  out += " is never read -- ";
+  out += " can never match -- ";
   out += d.after.empty() ? std::string("it") : '`' + d.after + '`';
-  return out + " stands after `eof`, which nothing can follow";
+  return out + " comes after `eof`, and nothing can follow the end of input";
 }
 
 }  // namespace cursiv

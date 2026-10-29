@@ -89,11 +89,9 @@ struct strip_storage<cursiv::vector<X>> {
 template <class X, class A>
 struct strip_storage<std::vector<X, A>> {
   static_assert(sizeof(X) == 0,
-                "an AST list member is the vocabulary's `vector<T>` "
-                "(cursiv::vector), not std::vector: the list is seated in the "
-                "tree's own arena, which is what takes the per-node allocation "
-                "and the teardown out of the build. Spell it `vector<T>` -- "
-                "AstNode brings the alias into scope");
+                "an AST list member must be `vector<T>` (cursiv::vector), not "
+                "std::vector: the list is stored in the tree's own memory. "
+                "Write `vector<T>`; AstNode brings the name into scope");
   using type = X;
   static constexpr FieldStorage storage = FieldStorage::vector;
 };

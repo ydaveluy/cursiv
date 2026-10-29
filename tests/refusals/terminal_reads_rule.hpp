@@ -1,6 +1,6 @@
 // A terminal reading a rule that builds a node: a rule is read with the
 // skipper between its parts, and a terminal is the bytes of one token.
-// expect LR: refused: the grammar reads the rule .(Pair|Dotted).: a rule is read with the skipper between its parts
+// expect LR: refused: the grammar uses the rule .(Pair|Dotted). inside a terminal or a .through.: these read one token
 #pragma once
 
 #include "refusals/head.hpp"

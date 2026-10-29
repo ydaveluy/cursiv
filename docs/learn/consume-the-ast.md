@@ -1,10 +1,12 @@
 # Read the AST from a program
 
-Read the abstract syntax tree (AST) from your own compiler, code generator
-or validator. These examples use the Recipe language from the
-[tutorial](walkthrough.md).
+This guide shows how to read the abstract syntax tree (AST) from your own
+program, such as a compiler or a code generator. The examples use the Recipe
+language from the [tutorial](walkthrough.md).
 
 ## Create the language services
+
+First create the services of your language:
 
 ```cpp
 #include <cstdio>
@@ -20,8 +22,9 @@ const auto language = cursiv::create_language<
     recipe::install_core_module>();
 ```
 
-`language.language` holds Recipe's services, including the parser.
-`language.shared` manages the documents and names of the workspace.
+`language.language` holds the services of Recipe, including its parser.
+`language.shared` holds the workspace services, such as the document store and
+the document builder.
 
 ## Parse only
 
@@ -101,7 +104,9 @@ To skip validation, pass `BuildOptions` with `validation = false`. See
 
 ## Several documents
 
-Add the documents to the same workspace and build them together:
+Add the documents to the same workspace and build them together. Here,
+`documents` holds `std::shared_ptr<cursiv::Document>` values created with
+`fromString`:
 
 ```cpp
 std::vector<cursiv::Document*> all;
@@ -115,7 +120,7 @@ shared.documentBuilder->build(all);
 From the command line, `--root <dir>` loads a folder for cross-file
 references.
 
-## Reading a whole folder
+## Read a whole folder
 
 By default, `create_language()` reads no files from disk. Pass a
 `LocalFileSystemProvider`, then let the workspace manager scan a folder URI:
@@ -133,4 +138,6 @@ const cursiv::WorkspaceFolder folders[] = {{"file:///path/to/project", "project"
 language.shared->workspaceManager->initializeWorkspace(folders);
 ```
 
-For tests, `MemoryFileSystemProvider` supplies files from memory.
+`initializeWorkspace` loads the files of your language from the folder and
+its subfolders, then builds them all. For tests, `MemoryFileSystemProvider`
+supplies files from memory.

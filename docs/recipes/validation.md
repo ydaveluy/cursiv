@@ -41,8 +41,7 @@ void RecipeValidator::checkNoDuplicateUse(
 ## Choose the diagnostic range
 
 `accept.error(node, message)` underlines the whole node.
-`.property<&ast::Use::ingredient>()` underlines only that member, which is
-usually what the author needs:
+`.property<&ast::Use::ingredient>()` underlines only that member:
 
 ```
   use Flour 200
@@ -74,9 +73,10 @@ convention, a duplicate, a constraint between two declarations. If a
 construct is never legal, refuse it in the grammar instead: the parser then
 reports a syntax error and recovers.
 
-Reserved words are the exception. Keywords are contextual, so
-`ingredient recipe in gram` parses with `recipe` as the name. To reserve a
-word, keep the grammar permissive and report the name in a check:
+Reserved words are the exception. A word is a keyword only where the
+grammar expects that keyword, so `ingredient recipe in gram` parses with
+`recipe` as the name. To reserve a word, keep the grammar permissive and
+report the name in a check:
 
 ```cpp
 void RecipeValidator::checkNameNotReserved(
@@ -90,7 +90,7 @@ void RecipeValidator::checkNameNotReserved(
 
 Unresolved references need no check: the linker already reports them.
 
-## Check the check
+## Test it
 
 ```cpp
 auto result = ct::validationHelper(language.language,

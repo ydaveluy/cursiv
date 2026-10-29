@@ -51,14 +51,14 @@ struct AstNode;
 template <class T>
 class vector {
   static_assert(std::is_trivially_copyable_v<T>,
-                "an AST list member holds trivially copyable elements: the "
-                "arena relocates by memcpy and runs no destructor. A list of "
-                "values that own something is a list of POINTERS to nodes that "
-                "do");
+                "the elements of an AST list member must be trivially "
+                "copyable: the tree moves them with memcpy and never runs "
+                "their destructors. Store views (`string_view`) or pointers to "
+                "nodes instead of values that own memory");
   static_assert(!std::is_base_of_v<AstNode, T>,
-                "an AST list member holds nodes by pointer: `vector<Person*>`, "
-                "not `vector<Person>` -- a node is built in the tree, wired to "
-                "its parent, and never copied into a list");
+                "an AST list member holds nodes by pointer: write "
+                "`vector<Person*>`, not `vector<Person>`. A node is built in "
+                "the tree and is never copied into a list");
 
  public:
   using value_type = T;
@@ -423,10 +423,11 @@ template <class S>
 void refuse_owning_bind() {
   static_assert(
       dependent_false<S>,
-      "this name OWNS its bytes and dies at the end of the full expression, "
-      "while the reference keeps a view of them. Bind a view of something "
-      "that outlives the tree: a slice of the parsed document, or bytes "
-      "copied into the tree's own resource (`cursiv::copy_into(mem, text)`)");
+      "this name is a temporary that owns its text and is destroyed at the "
+      "end of the expression, but the reference keeps only a view of it. "
+      "Bind text that lives as long as the tree: a slice of the parsed "
+      "document, or text copied into the tree's memory "
+      "(`cursiv::copy_into(mem, text)`)");
 }
 
 }  // namespace detail

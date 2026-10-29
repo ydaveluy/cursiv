@@ -1,5 +1,5 @@
-// The @CURSIV_NEW_ID@ language server: one language, the standard transport
-// (stdio -- the editor spawns this binary and speaks the protocol to it).
+// The @CURSIV_NEW_ID@ language server. The editor starts it and talks to it
+// over standard input and output.
 
 #include "cursiv/lsp/runtime/LanguageServerMain.hpp"
 #include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"

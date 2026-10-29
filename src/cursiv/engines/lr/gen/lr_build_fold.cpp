@@ -126,7 +126,7 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
     }
   }
   if (full) {
-    A.cap_hit("the fold pool -- an element id is 16 bits");
+    A.cap_hit("its rules expand to more than 65 535 elements");
     return false;
   }
 

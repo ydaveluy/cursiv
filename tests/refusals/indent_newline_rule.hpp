@@ -1,5 +1,5 @@
 // The line's end named by a rule: nothing would ever mark it.
-// expect LR: `indent_newline` names the terminal that ends a line
+// expect LR: `indent_newline` must name the terminal that ends a line
 #pragma once
 
 #include "refusals/head.hpp"

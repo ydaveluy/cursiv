@@ -1,6 +1,6 @@
 // A commit whose prefix may read nothing: it is always there to be read, so
 // the quantifier could never stop.
-// expect LR: rule .Root. commits on a prefix that may read nothing
+// expect LR: rule .Root. has a .commit. whose prefix may match nothing
 #pragma once
 
 #include "refusals/head.hpp"

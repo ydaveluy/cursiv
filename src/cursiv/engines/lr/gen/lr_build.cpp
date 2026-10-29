@@ -529,9 +529,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     const unsigned id = static_cast<unsigned>(kernAt.size());
     if (id >= 0xffffu) {
       A.cap_hit(
-          "the 16-bit index of an LR state, counted before minimisation "
-          "(optional items and counted repetitions multiply them; n "
-          "conditions read under one token make 2^n)");
+          "it needs more than 65 535 parser states (optional items and "
+          "counted repetitions multiply them, and n conditions on one token "
+          "make 2^n)");
       fresh = false;
       return 0;
     }
@@ -784,11 +784,11 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       });
       // An outcome per subset of the conditions.
       if (prog.conds.size() > 16) {
-        A.cap_hit("the conditions one token is read under");
+        A.cap_hit("more than 16 conditions apply to one token");
         return;
       }
       if (progs.size() >= 0xffffu) {
-        A.cap_hit("the 16-bit index of a guard");
+        A.cap_hit("it needs more than 65 535 sets of conditions");
         return;
       }
       const std::size_t nOut = std::size_t{1} << prog.conds.size();
@@ -3688,7 +3688,7 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
                             merged.begin() + static_cast<std::ptrdiff_t>(i));
         });
     if (merged.size() >= 0xffffu) {
-      A.cap_hit("the 16-bit action count of a state");
+      A.cap_hit("one parser state has more than 65 534 actions");
       return false;
     }
     A.actionBase[f] = A.nactions;
@@ -4062,9 +4062,10 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
   A.identity = WithLa ? LrIdentity::core_plus_lookaheads : LrIdentity::core;
   A.cfg = low.cfg;
   A.writes = low.writes;
-  if (A.writes.capped) A.cap_hit("the chain pool");
+  if (A.writes.capped) A.cap_hit(kTooManyChains);
   if (!lr_guard_positions(A.cfg, A.writes))
-    A.cap_hit(A.writes.capped ? "the chain pool" : "the 8-bit id of a condition");
+    A.cap_hit(A.writes.capped ? kTooManyChains
+                              : "it has more than 255 distinct conditions");
 
   const LexAlphabet alpha = lr_lex_alphabet(A);
   if (A.overflow || A.cfg.lowerFail()) return A;

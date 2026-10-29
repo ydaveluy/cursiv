@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -15,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cursiv/engines/shared/gen/EmitOutput.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/bit_words.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
@@ -182,12 +182,7 @@ struct LexNamePool {
 template <class Name>
 std::string lex_relay_source(const LexRelayGen& r, Name&& name) {
   constexpr LexRelay d{};
-  std::string out;
-  const auto field = [&]<class V>(std::string_view key, V v, V def,
-                                  std::string_view pre = "") {
-    if (v != def)
-      std::format_to(std::back_inserter(out), ",.{}={}{}", key, pre, v);
-  };
+  EmitFields field;
   field("term", r.term, d.term);
   field("markSet", r.markSet, d.markSet);
   field("fence", r.fence, d.fence);
@@ -206,7 +201,7 @@ std::string lex_relay_source(const LexRelayGen& r, Name&& name) {
   field("tier", r.tier, d.tier);
   field("asserts", r.predicate, kNoLexNode, "&lexical_predicate_");
   field("recognizes", r.recognition, kNoLexNode, "&lexical_recognizer_");
-  return "{" + out.substr(out.empty() ? 0 : 1) + "}";
+  return std::format("{{{}}}", field.list());
 }
 
 }  // namespace cursiv

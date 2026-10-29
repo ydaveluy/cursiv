@@ -14,11 +14,11 @@ ast.hpp + MyLangGrammar.hpp → CMake build → parser and language module
 
 Never edit the generated files. Change your headers and build again.
 
-## 2. Two trees, and they answer different questions
+## 2. Two trees: the CST and the AST
 
 The **CST** (concrete syntax tree) records the parsed text and its positions,
-including comments declared as `hidden`. Editor services use it to find text
-ranges and the token under the cursor.
+including comments when the grammar declares them `hidden`. Editor services
+use it to find text ranges and the token under the cursor.
 
 The **AST** holds your structs and their values: names, child nodes, lists
 and references. Your validation, interpreter or code generator works on it.
@@ -39,7 +39,7 @@ struct Greeting : cursiv::Extends<cursiv::AstNode> {
 By default, a named node is visible inside its container. For packages and
 imports, see [Qualified names and scoping](../recipes/scoping.md).
 
-## 4. Services live in two containers
+## 4. Services are shared or per language
 
 A service implements one feature, such as parsing, validation or completion:
 

@@ -1,7 +1,7 @@
 # Command line
 
-The generated CLI checks a document, prints its syntax tree, or validates
-files from a script:
+The command-line tool of a scaffolded project checks one file and can print
+its syntax tree. Use it to validate files from a script:
 
 ```bash
 mylang_cli [--dump] [--json] [--root <dir>] [--help] <file>
@@ -14,8 +14,9 @@ mylang_cli [--dump] [--json] [--root <dir>] [--help] <file>
 | `--root <dir>` | Load supported files from a workspace folder before validating the file. |
 | `--help`, `-h` | Print usage and the registered file extensions. |
 
-Diagnostics and the final `: ok` or `: not clean` go to stderr, so a tree on
-stdout can be piped. Lines and columns are 1-based; columns count bytes.
+Diagnostics and the final `<file>: ok` or `<file>: not clean` line go to
+stderr, so you can pipe the tree from stdout. Lines and columns are 1-based;
+columns count bytes.
 
 ## Exit codes
 
@@ -26,7 +27,7 @@ stdout can be piped. Lines and columns are 1-based; columns count bytes.
 | `2` | Invalid arguments, unreadable path, unsupported file, or a file of 4 GiB or more |
 | `3` | An internal error or output failure |
 
-## Load a workspace {#what-root-changes}
+## Load a workspace
 
 Without `--root`, only the named file is loaded. Pass the workspace folder when
 references target declarations in other files:
@@ -35,15 +36,28 @@ references target declarations in other files:
 ./build/src/mylang_cli --root example example/hello.mylang
 ```
 
-The CLI reads saved files only, unlike an editor session.
+The CLI reads files from disk, so it does not see unsaved changes in an
+editor.
 
-## Inspect the syntax tree {#reading-the-tree}
+## Inspect the syntax tree
 
-`--dump` shows which rules and tokens matched, with source offsets. Trivia
-declared `hidden`, such as comments, appears; `ignored` trivia does not. The
-text dump abbreviates long leaves; `--json` keeps their full text.
+`--dump` prints one line per node of the syntax tree, with its source offsets.
+A node is named by the AST class it built, otherwise by its terminal; a
+keyword or a punctuation mark shows only its text:
 
-## Customize the CLI {#writing-your-own}
+```text
+Module [0..35)
+   [0..6) 'module'
+  ID [7..8) 'm'
+  Definition [9..29)
+```
+
+Comments and other `hidden` trivia appear between the tokens; `ignored`
+trivia does not. The text dump shortens long token text. `--json` keeps the
+full text and gives each node its `element` (terminal or data rule) and its
+`type` (AST class).
+
+## Customize the CLI
 
 The scaffold's `cli/main.cpp` calls `run_cli` with your language registration
 function:

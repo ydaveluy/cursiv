@@ -101,8 +101,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
                    : 0u;
       };
       run.finish(ad, src, len, far, [&](SymbolId t, TextOffset e, unsigned as) {
-        if constexpr (requires { ad.skips(t); })
-          if (ad.skips(t)) return;
+        if constexpr (LexSkipping<Ad>)
+          if (ad.skip->test(t)) return;
         if (e == out.end && out.term != kInvalidSymbol && reserved(t)) return;
         if (e == relayed.end && t == relayed.term) {
           tier = std::max(tier, as);
@@ -120,8 +120,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
         out = relayed;
     }
   }
-  if constexpr (requires { ad.unrefused(src, len, st, from, out, far); })
-    out = ad.unrefused(src, len, st, from, out, far);
+  if constexpr (LexRereads<Ad>)
+    out = lex_unrefused(ad, src, len, st, from, out, far);
   halt = i > far ? i : far;
   return out;
 }
@@ -130,7 +130,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
 // `bound_has`, `bound_reach`, and `refused` or, where a state's election
 // answers for every acceptance, `qualified` -- and, where its tokens echo a
 // mark, `relay`, `relay_of`, `sets`, `names`, `prefers`; where a terminal
-// refuses words behind its head, `unrefused`. Each answers with a lookup.
+// refuses words behind its head, `Skipping`. Each answers with a lookup.
 // What `kQualified` and `kRelays` announce is checked against these first
 // (`LexAdapter.hpp`).
 //

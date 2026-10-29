@@ -1,6 +1,6 @@
 // In a terminal, the alternatives' constants are the token's value: an `as`
 // around them would be a second one.
-// expect LR: inside a terminal, as<X>.e. wraps the whole body or each of its alternatives
+// expect LR: inside a terminal, as<X>.e. must wrap the whole body or each of its alternatives
 #pragma once
 
 #include "refusals/head.hpp"

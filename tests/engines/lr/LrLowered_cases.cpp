@@ -551,8 +551,8 @@ bool says(const char* part) {
 
 void run() {
   CHECK(found<Twice>().size() == 1 && found<Between>().size() == 1);
-  CHECK(says<Twice>("rule `Root` reads a run of `X` twice in a row"));
-  CHECK(says<Between>("a run of `X` twice"));
+  CHECK(says<Twice>("rule `Root` has two repetitions of `X` in a row"));
+  CHECK(says<Between>("two repetitions of `X` in a row"));
   CHECK(found<nested_repeat::Flat>().empty());
   CHECK(found<Words>().empty());
   CHECK(found<Apart>().empty());
@@ -560,25 +560,25 @@ void run() {
   CHECK(found<Chain>().empty());
   CHECK(cfg<Endless>().unbounded.size() == 1 &&
         unbounded_text<Endless>().find(
-            "rule `Item` asks a condition of the token in hand that "
-            "reads `[0-9]+` to any length: a completion then replays every "
-            "token before the caret") != std::string::npos);
+            "rule `Item` has a condition that matches `[0-9]+` with no "
+            "length limit: code completion then has to re-read every token "
+            "before the cursor") != std::string::npos);
   CHECK(cfg<EndlessDashes>().unbounded.size() == 1 &&
         unbounded_text<EndlessDashes>().find(
-            "rule `Arrow` asks a condition of the token in hand "
-            "that reads `('-')+` to any length") != std::string::npos);
+            "rule `Arrow` has a condition that matches `('-')+` with no "
+            "length limit") != std::string::npos);
   CHECK(cfg<EndlessMany>().unbounded.size() == 1 &&
-        unbounded_text<EndlessMany>().find("reads `[0-9]*` to any length") !=
-            std::string::npos);
+        unbounded_text<EndlessMany>().find(
+            "matches `[0-9]*` with no length limit") != std::string::npos);
   CHECK(cfg<EndlessSeveral>().unbounded.size() == 1 &&
         unbounded_text<EndlessSeveral>().find(
-            "reads `[0-9]{3,}` to any length") != std::string::npos);
+            "matches `[0-9]{3,}` with no length limit") != std::string::npos);
   CHECK(cfg<Bounded>().unbounded.empty());
   CHECK(cfg<Nested>().unbounded.size() == 2 &&
         cfg<Nested>().unbounded[0].kept && !cfg<Nested>().unbounded[1].kept &&
         unbounded_text<Nested>(1).find(
-            "reads `('-')+` to any length: where it is tested at each token "
-            "of a long run, each test reads on to the run's end, so the parse "
+            "matches `('-')+` with no length limit: tested at each token of "
+            "a long run, it reads to the end of the run each time, so parsing "
             "time grows with the square of the run's length") !=
             std::string::npos);
   CHECK(cfg<Tokens>().unbounded.empty());

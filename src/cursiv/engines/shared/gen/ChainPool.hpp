@@ -37,6 +37,10 @@ struct ChainBuild {
   bool turn = false;
 };
 
+// The cap a build names where the pool is `capped`.
+inline constexpr const char* kTooManyChains =
+    "its AST writes need more than 65 535 chains or actions";
+
 struct ChainPool {
   Vec<std::uint16_t> acts{};
   std::uint16_t nacts = 0;

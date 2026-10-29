@@ -74,8 +74,8 @@ struct choose_parent<R, TypeList<Ps...>> {
       R, tl_cat_t<cond_t<overrides_rule<Ps, R>, TypeList<Ps>, TypeList<>>...>>::
       type;
   static_assert(tl_size<winners>::value <= 1,
-                "two parents override the same rule -- restate the override "
-                "in this grammar to say which one wins");
+                "two parent grammars override the same rule: override it "
+                "again in this grammar to choose one");
 };
 template <class R, class G>
 using winners_t =
@@ -174,9 +174,9 @@ struct Overridden : O {
   using inherited = I;
   static constexpr auto body = B;
   static_assert(std::is_same_v<typename O::kind, typename R::kind>,
-                "an override restates the rule's KIND and this one changes "
-                "it: a terminal is one lexed token and a rule runs the "
-                "separator inside -- restate the base's kind");
+                "an override must keep the kind of the rule it replaces: "
+                "override a terminal with a terminal<>, a rule with a "
+                "rule<>, and an infix rule with an infix<>");
 };
 
 template <class G, class R, bool Ov = overrides_rule<G, R>>
@@ -250,7 +250,7 @@ template <class WB>
 struct declared_bound {
   static_assert(
       sizeof(WB) == 0,
-      "a grammar's `word_boundary` must be a CHARACTER CLASS -- "
+      "a grammar's `word_boundary` must be a character class, such as "
       "`static constexpr auto word_boundary = cr<\"a-zA-Z0-9_-\">;`, "
       "`uc::XID_Continue`, or `cr<\"a-zA-Z0-9_$\"> | uc::XID_Continue`");
 };
@@ -261,9 +261,10 @@ struct declared_bound<CpSet<M, N, S>> {
 template <class... Es>
 struct declared_bound<Choice<Es...>> {
   static_assert(sizeof...(Es) == 0,
-                "a grammar's `word_boundary` is ONE class, and this is a "
-                "choice of expressions. Join classes with `|`: "
-                "`cr<\"a-z\"> | cr<\"_\">`, `uc::XID_Continue | cr<\"_$\">`");
+                "a grammar's `word_boundary` must be one character class, "
+                "and this is a choice of other expressions: join classes "
+                "only, with `|`, as in `cr<\"a-z\"> | cr<\"_\">` or "
+                "`uc::XID_Continue | cr<\"_$\">`");
 };
 template <class G>
 consteval auto bound_of() {
@@ -274,9 +275,9 @@ consteval auto bound_of() {
     // Two parents hide the name only by ambiguity: every `GrammarSpec`
     // declares one.
     static_assert(tl_size<typename parents_of<G>::type>::value < 2,
-                  "two parents of this grammar declare different "
-                  "`word_boundary` classes -- restate `word_boundary` in this "
-                  "grammar to say which one holds");
+                  "two parent grammars declare different `word_boundary` "
+                  "classes: declare `word_boundary` in this grammar to choose "
+                  "one");
     return std::remove_cvref_t<decltype(w)>{};
   }
 }
@@ -608,41 +609,38 @@ struct checked {
   using c = chain<typename alt_parts<A>::type>;
   using hand = typename in_hand<typename hand_at_start<A>::type, A, true>::type;
   static_assert(!Over || all_derive<hand, RT>,
-                "this override hands back a class outside the type of the rule "
-                "it stands over: every caller of the base reads that type, so "
-                "an override builds that class or one derived from it -- the "
-                "node it creates, or the wrapper of its last nest. Every "
-                "document taking it would lose its tree. Build or wrap into a "
-                "class of the base rule's family");
+                "this override builds a class outside the type of the rule it "
+                "overrides: every caller of the rule expects that type, so the "
+                "node the override creates, or the wrapper of its last nest, "
+                "must be that class or a class derived from it");
   static_assert(!optional_head<A>,
-                "this alternative hands over a node the text may leave out: a "
-                "reference to a rule that creates, or a create<>, stands under "
-                "an option<>, a repetition that may be empty or one branch of "
-                "a choice, so a text that skips it gives the rule no node. Put "
-                "the node on every path, or create a node of the rule's own "
-                "around it and let the optional part write into it");
+                "this alternative returns a node that the text may leave out: "
+                "a create<>, or a call to a rule that builds a node, is inside "
+                "an option(), a repetition that may be empty, or one branch of "
+                "a choice, so a text without it gives the rule no node. Put "
+                "the node on every path, or create the rule's own node around "
+                "it and let the optional part write into it");
   static_assert(
       !c::twice,
-      "this alternative can create twice: a second head replaces the "
-      "current node, and nothing ever points at the first. ONE head "
-      "per alternative -- a create<>, or a call to a rule that builds "
-      "a node, never both -- then nests; a single branch of a choice "
-      "that creates, or calls such a rule, is one, as is each turn "
-      "of a repetition of such a branch");
+      "this alternative can create two nodes: the second replaces the "
+      "first, which is then lost. An alternative starts at most one node, "
+      "with a create<> or a call to a rule that builds a node, never both, "
+      "and may then wrap it with nests. A branch of a choice that starts a "
+      "node counts as one start, and each turn of a repetition of such a "
+      "branch counts as another");
   static_assert(!late_call<typename alt_parts<A>::type>,
                 "this alternative calls a rule that builds a node after the "
-                "node in hand was written, created or nested: a call adopts "
-                "its node only while the current node is empty, and nothing "
-                "merges into it. Hold the called node with `assign` or "
-                "`append`, or write the shared part as a fragment "
+                "current node was written, created or nested: a call adopts "
+                "its node only while the current node is still empty, and the "
+                "two nodes are never merged. Store the called node with "
+                "`assign` or `append`, or write the shared part as a fragment "
                 "(`static constexpr auto body = ...;`, an expression whose "
-                "directives write the current node) and spell it in each "
+                "directives write the current node) and use it in each "
                 "alternative that needs it");
   static_assert(!c::bare,
-                "this alternative has a nest<> with nothing in front of it: a "
-                "nest buries the CURRENT node under its wrapper, so a create, "
-                "a call to a rule that builds a node, or a write has to come "
-                "first on every path");
+                "this alternative has a nest<> with nothing before it: a nest "
+                "wraps the current node, so a create, a call to a rule that "
+                "builds a node, or a write must come before it on every path");
   using type = A;
 };
 
@@ -686,10 +684,10 @@ template <class Rule>
 consteval bool OverrideGenre() {
   static_assert(
       dependent_false<Rule>,
-      "an override restates the rule's genre and this one changes it: the "
-      "rule it stands over builds a node and the override builds none, or "
-      "the reverse -- keep a create<>, a directive or a reference to a rule "
-      "that builds one, or drop it, as the base does");
+      "this override changes whether the rule builds a node: the rule it "
+      "overrides builds a node and the override builds none, or the "
+      "reverse. Build a node in the override (with a create<>, a directive "
+      "or a call to a rule that builds one) exactly when the base rule does");
   return false;
 }
 

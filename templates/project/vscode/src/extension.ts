@@ -1,5 +1,5 @@
-// The @CURSIV_NEW_ID@ extension: it spawns `@CURSIV_NEW_ID@_lsp` and speaks
-// the protocol to it over stdio.
+// The @CURSIV_NEW_ID@ extension for VS Code. It starts the language server
+// `@CURSIV_NEW_ID@_lsp` and talks to it over standard input and output.
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -21,17 +21,16 @@ function executableName(): string {
     return process.platform === 'win32' ? `${SERVER}.exe` : SERVER;
 }
 
-// A native binary is its own command; a wasm module is a file Node runs, and
-// the extension host IS Node, so the wasm route needs no dependency.
+// How to start the server: a native server runs directly, and a WebAssembly
+// server runs with the Node.js that runs this extension.
 interface ServerCommand {
     command: string;
     args: string[];
     env?: Record<string, string>;
 }
 
-// A wasm module opens with `\0asm` and a host binary does not. The cross build
-// names its output exactly like the native one, so the file itself is the only
-// thing that says which of the two runners it needs.
+// Native and WebAssembly builds name the server the same way, so the first
+// bytes of the file tell them apart.
 function isWasm(file: string): boolean {
     let handle: number | undefined;
     try {
@@ -46,9 +45,8 @@ function isWasm(file: string): boolean {
     }
 }
 
-// What the active CMake preset just built: `launch.json` hands its binary
-// directory over, so F5 runs the artefact the editor is configured to build
-// rather than whatever a previous cross left under `server/`.
+// The server built by the active CMake preset: when you press F5,
+// `launch.json` sets CURSIV_SERVER_DIR to its build folder.
 function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const directory = process.env.CURSIV_SERVER_DIR?.trim();
     if (!directory) return undefined;
@@ -58,10 +56,8 @@ function presetCommand(context: vscode.ExtensionContext): ServerCommand | undefi
     return wasmRun(built, path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
 }
 
-// The wasm server, preferred when it is there: one artefact for every platform,
-// and the sandbox comes with it -- the module reads only what the runner
-// preopens. `cursiv_package_language` refreshes both files under `server/` on a
-// threaded cross build, and a packaged .vsix carries them.
+// The WebAssembly server under `server/`, which a WASI build copies there. It
+// runs on every platform, so a packaged extension prefers it.
 function wasmCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     return wasmRun(path.join(context.extensionPath, 'server', `${SERVER}.wasm`),
                    path.join(context.extensionPath, 'server', 'wasi-run.mjs'));
@@ -74,14 +70,13 @@ function wasmRun(module: string, runner: string): ServerCommand | undefined {
     return {
         command: process.execPath,
         args: ['--no-warnings', runner, module],
-        // WASI cannot count the host's cores: `hardware_concurrency()` answers
-        // one there, so the pool would never be built. The host knows.
+        // A WebAssembly server cannot see how many CPU cores there are.
         env: { CURSIV_WORKERS: String(Math.max(0, os.availableParallelism() - 1)) },
     };
 }
 
-// The extension lives at `<project>/vscode`, so `../build/src/` is where
-// CMake put the native server.
+// The native server: the packaged copy under `bin/`, or the one CMake built
+// in `../build/src/`.
 function nativeCommand(context: vscode.ExtensionContext): ServerCommand | undefined {
     const name = executableName();
     for (const candidate of [
@@ -116,8 +111,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine(`server: ${server.command} ${server.args.join(' ')}`);
 
-    // A native server has no --inspect to add, so the debug configuration is
-    // the run configuration.
     const executable: Executable = {
         command: server.command,
         args: server.args,
@@ -132,8 +125,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     client = new LanguageClient(ID, '@CURSIV_NEW_CLASS@', serverOptions, clientOptions);
     await client.start();
-    // The MCP door onto the same session: a model connected here reads what
-    // the editor holds unsaved.
+    // Let AI assistants use the language server through MCP. They see the
+    // same documents as the editor, including unsaved changes.
     context.subscriptions.push(startMcpBridge(ID, '@CURSIV_NEW_CLASS@', client, outputChannel));
 }
 

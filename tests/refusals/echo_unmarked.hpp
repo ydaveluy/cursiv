@@ -1,5 +1,5 @@
 // A lookahead cannot echo a tag absent from the enclosing token.
-// expect LR: refused: terminal .TAG. echoes a mark<> not set in its scope
+// expect LR: refused: terminal .TAG. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 
 #include "refusals/head.hpp"

@@ -85,9 +85,10 @@ struct Lit : GrammarNode {
   static_assert(std::is_void_v<Guard> ||
                     std::is_same_v<Guard, detail::WordBound> ||
                     std::derived_from<Guard, GrammarNode>,
-                "Lit<S, CI, Guard>: the guard is an EXPRESSION the lexer runs "
-                "right after the text -- `lit<\"toto\", !lit<\"titi\">>`. For "
-                "the grammar's boundary discipline spell `kw<S>` instead");
+                "lit<S, G>: the guard G must be a grammar expression, "
+                "checked right after the text, such as "
+                "`lit<\"toto\", !lit<\"titi\">>`. For a keyword that must not "
+                "run into the next word, write `kw<S>` instead");
 
   // The prose a hover shows over this word. Spelled on the element, the only
   // place that knows what the word means.
@@ -494,8 +495,8 @@ struct LevelsFn {
     using Ls = detail::tl_cat_t<typename detail::sole_level<Ts>::type...>;
     static_assert(
         sizeof...(Ts) > 0 && detail::tl_size<Ls>::value == sizeof...(Ts),
-        "levels(...) lists the levels of a table, tightest-binding "
-        "first, each one `left(op)`, `right(op)`, `nonassoc(op)`, "
+        "levels(...) takes only precedence levels, tightest-binding "
+        "first: each one is `left(op)`, `right(op)`, `nonassoc(op)`, "
         "`prefix<...>(op)` or `postfix<...>(op)`");
     // Past the refusal, the table of the levels that are levels: the line
     // that states the mistake stays the only one.
@@ -657,12 +658,12 @@ struct create_second;
 template <class Pre, class Done, class Cur, class T, class X, class... Rest>
 struct create_second<Pre, Done, Cur, T, X, Pack<Rest...>> {
   static_assert(!is_nest<Cur>,
-                "a create AFTER a nest is a SECOND head: the nest already made "
-                "its wrapper the current node, so this create starts another "
-                "one -- put it in its own alternative, or before the nest");
+                "a create<> after a nest<> starts a second node: the nest "
+                "already made its wrapper the current node. Put the create "
+                "before the nest, or in its own alternative");
   static_assert(is_nest<Cur>,
-                "a sequence builds ONE node, so it cannot name two types; put "
-                "each create in its own alternative");
+                "a sequence builds one node, so it cannot hold two create<>: "
+                "put each create in its own alternative");
   // The errors above have already been reported; carrying on keeps the
   // diagnostic to the one line that states the mistake.
   using type =
@@ -803,10 +804,8 @@ consteval bool holds_a_letter() {
 template <str S>
 consteval auto make_ikw() {
   static_assert(holds_a_letter<S>(),
-                "`ikw<S>` is the CASE-INSENSITIVE keyword and this spelling "
-                "holds no letter, so it has no second case to match: it is "
-                "`kw<S>` written the long way, and the two would be two "
-                "element rows for one token. Spell it `kw<S>`");
+                "`ikw<S>` is a case-insensitive keyword, and this text has no "
+                "letter, so case changes nothing: write `kw<S>` instead");
   return Lit<S, true, WordBound>{};
 }
 
@@ -838,30 +837,32 @@ namespace detail {
 template <ClassFault Fault>
 consteval void class_refused() {
   static_assert(Fault != ClassFault::lone_backslash,
-                "cursiv: this class spelling ends on a lone backslash. A "
-                "backslash opens an escape, as in std::regex: the backslash "
-                "itself is `\\\\`, R\"(\\\\)\" in C++");
+                "cursiv: this character class ends with a lone backslash. A "
+                "backslash starts an escape, as in std::regex: write a "
+                "backslash itself as `\\\\`, or R\"(\\\\)\" in C++");
   static_assert(Fault != ClassFault::unknown_escape,
-                "cursiv: this class spelling holds an escape std::regex does "
-                "not read in a class. After a backslash, a letter or a digit "
-                "is `xHH`, `uHHHH`, `u{H...}`, `n`, `r`, `t`, `f`, `v`, `b`, "
-                "`0` before no digit, `cX` with X a letter, or one of the "
-                "classes `d` `D` `s` `S` `w` `W`; any other character is "
-                "itself: `\\-`, `\\^`, `\\\\`");
+                "cursiv: this character class holds an escape that "
+                "std::regex does not accept in a class. A backslash followed "
+                "by a letter or a digit must form one of `xHH`, `uHHHH`, "
+                "`u{H...}`, `n`, `r`, `t`, `f`, `v`, `b`, `0` (not followed "
+                "by a digit), `cX` with X a letter, or one of the classes "
+                "`d` `D` `s` `S` `w` `W`; a backslash before any other "
+                "character stands for that character: `\\-`, `\\^`, `\\\\`");
   static_assert(Fault != ClassFault::class_endpoint,
-                "cursiv: this class spelling puts a class escape (`\\d`, "
-                "`\\s`, `\\w`, their complements) at an end of a range: a "
-                "range runs between two characters, and a `-` beside a class "
-                "is `\\-`");
+                "cursiv: this character class uses a class escape (`\\d`, "
+                "`\\s`, `\\w` or their complements) as an end of a range, but "
+                "a range goes from one character to another. To match a `-` "
+                "next to a class, write `\\-`");
   static_assert(Fault != ClassFault::reversed_range,
-                "cursiv: this class spelling holds a reversed range: its "
-                "first end is past its last");
+                "cursiv: this character class holds a reversed range: its "
+                "first character comes after its last");
   static_assert(Fault != ClassFault::not_scalar,
-                "cursiv: this class spelling names a value that is no "
-                "scalar: a surrogate (U+D800 to U+DFFF) or a value past "
-                "U+10FFFF");
+                "cursiv: this character class names a value that is not a "
+                "Unicode character: a surrogate (U+D800 to U+DFFF) or a value "
+                "above U+10FFFF");
   static_assert(Fault != ClassFault::malformed,
-                "cursiv: this class spelling holds a byte that is no UTF-8");
+                "cursiv: this character class holds bytes that are not "
+                "valid UTF-8");
 }
 template <str Spec>
 consteval ClassFault class_fault() {
@@ -1000,9 +1001,9 @@ consteval auto cp_join() {
     return CpSet<MA | MB, false, class_spelled<SA, SB, ClassOp::unite>()>{};
   } else if constexpr (NA && NB) {
     static_assert(MA == MB,
-                  "complement the union, not a side of it: ~(a | b). A "
-                  "complement joins another only among classes of the same "
-                  "properties");
+                  "cursiv: two complemented classes can be joined with `|` "
+                  "only when they use the same Unicode properties: complement "
+                  "the whole union instead, ~(a | b)");
     return CpSet<MA, true, class_spelled<SA, SB, ClassOp::meet>()>{};
   } else if constexpr (NA) {
     return CpSet<0, true, join_left_out_spelled<SA, MA, SB, MB>()>{};
@@ -1024,7 +1025,7 @@ constexpr auto operator|(CpSet<A, NA, SA>, CpSet<B, NB, SB>) {
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator~(CpSet<M, N, S>) {
   static_assert(!N || M != 0 || S.size() != 0,
-                "cursiv: this complement holds no character: it is the "
+                "cursiv: this complement matches no character: it is the "
                 "complement of `any`");
   return CpSet<M, !N, S>{};
 }
@@ -1040,15 +1041,15 @@ constexpr auto operator~(B) {
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator|(CpSet<M, N, S>, Byte) {
   static_assert(detail::dependent_false<CpSet<M, N, S>>,
-                "cursiv: `byte` is one raw byte, not a class, so no class "
-                "joins it: give each its own alternative");
+                "cursiv: `byte` is one raw byte, not a class, so it cannot be "
+                "joined to a class: give each its own alternative");
   return Byte{};
 }
 template <std::uint64_t M, bool N, str S>
 constexpr auto operator|(Byte, CpSet<M, N, S>) {
   static_assert(detail::dependent_false<CpSet<M, N, S>>,
-                "cursiv: `byte` is one raw byte, not a class, so no class "
-                "joins it: give each its own alternative");
+                "cursiv: `byte` is one raw byte, not a class, so it cannot be "
+                "joined to a class: give each its own alternative");
   return Byte{};
 }
 // The Unicode properties, which hold scalars only: a general category and its
@@ -1166,15 +1167,17 @@ struct SomeFn {
   constexpr auto operator()(E e, Sep sep) const {
     static_assert(detail::list_item_stands<std::remove_cvref_t<E>,
                                            std::remove_cvref_t<Sep>>,
-                  "a create<> or nest<> as a separated-list item would absorb "
-                  "the whole list: name the item as a rule instead");
+                  "a create<> or nest<> cannot be the item of a separated "
+                  "list, since it would take in the whole list: declare the "
+                  "item as a rule and use ref<> to it");
     return e + Repeat<0, kUnbounded, std::remove_cvref_t<decltype(sep + e)>>{};
   }
   template <class P, class B, Expr Sep>
   constexpr auto operator()(Commit<P, B>, Sep) const {
     static_assert(detail::list_item_stands<P, B, std::remove_cvref_t<Sep>>,
-                  "a create<> or nest<> as a separated-list item would absorb "
-                  "the whole list: name the item as a rule instead");
+                  "a create<> or nest<> cannot be the item of a separated "
+                  "list, since it would take in the whole list: declare the "
+                  "item as a rule and use ref<> to it");
     return P{} + B{} + detail::committed_tail<P, B, std::remove_cvref_t<Sep>>{};
   }
 };
@@ -1192,8 +1195,9 @@ struct ManyFn {
   template <class P, class B, Expr Sep>
   constexpr auto operator()(Commit<P, B>, Sep) const {
     static_assert(detail::list_item_stands<P, B, std::remove_cvref_t<Sep>>,
-                  "a create<> or nest<> as a separated-list item would absorb "
-                  "the whole list: name the item as a rule instead");
+                  "a create<> or nest<> cannot be the item of a separated "
+                  "list, since it would take in the whole list: declare the "
+                  "item as a rule and use ref<> to it");
     return Repeat<0, 1,
                   detail::committed_list<P, B, std::remove_cvref_t<Sep>>>{};
   }

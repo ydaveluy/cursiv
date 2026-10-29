@@ -1,6 +1,6 @@
 # Case-insensitive languages
 
-Keyword matching and name matching are separate settings. Both can ignore the
+You set keyword matching and name matching separately. Both can ignore the
 case of ASCII letters (`A`–`Z` and `a`–`z`).
 
 ## Keywords in any case
@@ -8,7 +8,7 @@ case of ASCII letters (`A`–`Z` and `a`–`z`).
 Use `ikw<>` in place of `kw<>` for keywords that accept any letter case:
 
 ```cpp
-static constexpr auto Reserved = ikw<"SELECT"> | ikw<"FROM">;
+static constexpr auto keywords = ikw<"SELECT"> | ikw<"FROM">;
 ```
 
 `select`, `SELECT` and `SeLeCt` all match, and the document keeps its own

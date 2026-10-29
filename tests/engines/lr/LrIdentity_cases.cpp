@@ -22,7 +22,6 @@
 #include "cursiv/engines/lr/gen/LrGotoRows.hpp"
 #include "cursiv/engines/lr/gen/LrIdentity.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 #include "cursiv/engines/lr/gen/lr_build_derived.hpp"
 #include "cursiv/engines/lr/gen/lr_build_guards.hpp"
@@ -33,6 +32,7 @@
 #include "cursiv/engines/lr/gen/lr_term_run.hpp"
 #include "cursiv/engines/lr/table/LrActionKind.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
+#include "cursiv/engines/shared/gen/AstRowOf.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "deferrednested/generated/NestedFirst/Module.hpp"
@@ -274,7 +274,7 @@ void completion_sites_agree() {
   // must use the proved agreement of AT's own sites or Name's callers.
   auto a = cursiv::lr_build_automaton(low, {.passes = false});
   CHECK(!a.overflow);
-  const auto registry = cursiv::lr_ast_registry<G>();
+  const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>();
   const auto facts =
       cursiv::lr_record_gens(cursiv::lr_entry_table(a), registry.rows);
   const auto canonical = cursiv::lr_completion_sites(facts);
@@ -730,7 +730,8 @@ void run() {
     for (std::uint32_t s = 0; s <= 0xffffu; ++s) rows.push_row(e);
     a->set_gotos(std::move(rows));
     CHECK(a->overflow && std::string_view(a->overflowCap) ==
-                             "the 16-bit goto count of one nonterminal");
+                             "one rule is reached from more than 65 535 "
+                             "parser states");
   }
   // What a state owes runs past a byte's reach, in the frozen table as in the
   // construction.

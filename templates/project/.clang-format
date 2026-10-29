@@ -1,4 +1,4 @@
-# Google style, but a long expression breaks before its operators (not its
-# assignments), so the `|` and `+` of a grammar rule start lines.
+# Google style. Long expressions break before their operators, so each `+`
+# and `|` of a grammar rule starts a line.
 BasedOnStyle: Google
 BreakBeforeBinaryOperators: NonAssignment

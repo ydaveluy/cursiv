@@ -1,6 +1,6 @@
 // Two alternatives that share their first tokens, one of them inside a
 // region: the state holding both cannot say whether the space is legal.
-// expect LR: refused: the grammar reaches one point through a .* region and outside it at once
+// expect LR: refused: the grammar reaches the same token both inside a .* region and outside it
 #pragma once
 
 #include "refusals/head.hpp"

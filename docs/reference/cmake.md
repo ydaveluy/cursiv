@@ -3,7 +3,7 @@
 The [scaffolder](../learn/scaffold.md) creates a configured project. Use this
 page to add Cursiv to an existing project or change its build settings.
 
-## Consuming cursiv
+## Add Cursiv to a project
 
 Add Cursiv with FetchContent, then declare your language target:
 
@@ -20,19 +20,19 @@ FetchContent_MakeAvailable(cursiv)
 ```
 
 Configure with `-DCURSIV_SOURCE_DIR=/path/to/cursiv` to use a local checkout;
-generated projects follow the same convention.
+scaffolded projects accept the same option.
 
 ## The targets you link
 
 | Target | Provides |
 |---|---|
-| `cursiv::core` | the parse, the tree, references, validation |
+| `cursiv::core` | parsing, syntax trees, linking and validation |
 | `cursiv::lsp` | the language server and its providers |
-| `cursiv::cli` | `run_cli` |
+| `cursiv::cli` | `run_cli`, for a [command-line tool](cli.md) |
 | `cursiv::mcp` | the MCP server and its default tools |
-| `cursiv::test` | the harness and the expectations |
-| `cursiv::bench` | the language benchmark driver |
-| `<ID>Generated` | one language's generated module |
+| `cursiv::test` | the [test helpers](test.md) |
+| `cursiv::bench` | the benchmark driver |
+| `<ID>Generated` | the generated module of language `<ID>` |
 
 ## `cursiv_generate_language`
 
@@ -65,8 +65,8 @@ cursiv_generate_language(ID         mylang
 `<OUT>/Type/`, so languages with different type names can share `OUT`. A
 relative `OUT` goes under `generated-src/` in the build tree: `OUT
 mylang/generated` in `src/CMakeLists.txt` writes to
-`build/src/generated-src/mylang/generated/`. The calling source directory
-stays an include root.
+`build/src/generated-src/mylang/generated/`. The calling source directory is
+also an include root.
 
 `BASE` only adds build dependencies; declare grammar inheritance in C++ with
 `cursiv::extends<BaseGrammar>`.
@@ -96,13 +96,14 @@ it to the aggregate `bench` target. Declare `mylangLsp` first.
 | Option | Default | Use it to… |
 |---|---|---|
 | `CURSIV_DEFAULT_ENGINE` | `LR` | Select `LL` or `LR` when a language does not specify `ENGINE`. |
-| `CURSIV_MIMALLOC` | `ON` | Enable the mimalloc allocator; use `OFF` to disable it. |
+| `CURSIV_MIMALLOC` | `ON` | Link the mimalloc allocator into every executable. |
 | `CURSIV_SOURCE_DIR` | — | Select a local checkout in the FetchContent setup above. |
-| `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WASI target required by the language server. Use it only with the WASI toolchain. |
+| `CURSIV_HOST_TOOLS` | — | When cross-compiling, run the parser generators from this existing native build instead of building them in `host-tools/` inside the build directory. |
+| `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WebAssembly target, which the packaged language server needs. Set it only with the WASI toolchain. |
 | `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes. |
 | `CURSIV_WASI_STACK` | `1048576` (1 MiB) with the WASI toolchain | Set the main thread's stack size in bytes. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
 
-Global sanitizer flags disable mimalloc. With sanitizers on one target only,
-configure with `-DCURSIV_MIMALLOC=OFF`, or set the `CURSIV_OWN_ALLOCATOR`
-target property to `ON` on that target.
+Sanitizer flags set for the whole build turn mimalloc off. If only one target
+uses a sanitizer, configure with `-DCURSIV_MIMALLOC=OFF`, or set the
+`CURSIV_OWN_ALLOCATOR` property of that target to `ON`.

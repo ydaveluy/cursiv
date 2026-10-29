@@ -8,21 +8,18 @@
 #include <unordered_map>
 #include <vector>
 
-#include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/lr/runtime/LrCactus.hpp"
 #include "cursiv/engines/lr/runtime/LrConfig.hpp"
 #include "cursiv/engines/lr/runtime/LrFrame.hpp"
 #include "cursiv/engines/lr/runtime/LrGesture.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
-#include "cursiv/engines/shared/runtime/RepairEnds.hpp"
 #include "cursiv/engines/lr/runtime/LrStack.hpp"
-#include "cursiv/engines/shared/runtime/GestureRank.hpp"
 #include "cursiv/engines/shared/runtime/IndentLevel.hpp"
 #include "cursiv/engines/shared/runtime/LexReading.hpp"
+#include "cursiv/engines/shared/runtime/RepairEnds.hpp"
 #include "cursiv/engines/shared/runtime/RepairFault.hpp"
-#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
+#include "cursiv/engines/shared/runtime/RepairSearch.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
 #include "cursiv/engines/shared/table/FlatMap.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
@@ -36,23 +33,13 @@ inline constexpr std::uint64_t kLrBoundAfter = 1024;
 inline constexpr std::uint32_t kLrNoConfig = 0xFFFFFFFFu;
 inline constexpr TextOffset kLrNoOpen = 0xFFFFFFFFu;
 
-struct LrSearch {
+struct LrSearch : RepairSearch<LrGesture> {
   LrSearch(TextOffset len, const RepairBudget& b,
            const std::vector<IndentLevel>& levels)
-      : budget(repair_allot(b, len)),
-        perSearch(b.perSearch),
-        seen(0, FutureHash{}, FutureSame{&levels}) {}
+      : RepairSearch(len, b), seen(0, FutureHash{}, FutureSame{&levels}) {}
 
-  std::uint64_t budget;
-  std::uint64_t perSearch;
-  std::uint64_t work = 0;
   // What the conditions had read of long gaps when the search last paid.
   std::uint64_t gapsPaid = 0;
-  // Where the search in flight stops: its share of what the parse has left.
-  std::uint64_t limit = 0;
-  // The parse's budget answered: every later fault is repaired by the first
-  // gesture that holds.
-  bool degraded = false;
   // A span a bound decided, open over the faults written since its search
   // set out; a degraded parse's stays open to the end.
   bool bounded = false;
@@ -71,9 +58,6 @@ struct LrSearch {
   std::uint64_t degradedLimit = 0;
   std::uint32_t degradedShifts = 0xFFFFFFFFu;
 
-  struct Entry {
-    std::uint32_t f, lost, faults, invented, seq, at;
-  };
   // What a reading's future depends on, its free insertions aside: two
   // readings with the same one gain the same increments of key, the one
   // holding fewer free insertions perhaps more. Its levels compare by
@@ -136,12 +120,6 @@ struct LrSearch {
       std::unordered_map<Future, std::uint32_t, FutureHash, FutureSame>;
   LrCactus cactus;
   std::vector<LrConfig> configs;
-  std::vector<LrGesture> links;
-  // Links a dominated reading handed to the one that kept its future.
-  std::uint64_t handed = 0;
-  GestureRank rank;
-  std::vector<Entry> heap;
-  std::uint32_t seq = 0;
   Futures seen;
   // The configurations one read is still carrying forward.
   std::vector<std::uint32_t> reading;
@@ -176,8 +154,6 @@ struct LrSearch {
   bool bounding = false;
   bool boundShort = false;
   FlatMap<std::uint8_t> unread;
-  // The goals of the least cost.
-  std::vector<std::uint32_t> goals;
   // What the table does with an invented token before its reading: the
   // reductions it makes (their productions and the states they land on, and the
   // states the stack stands on above its own) and the shift that takes it.
@@ -231,10 +207,6 @@ struct LrSearch {
   // The shifts the context had read when the last gesture was written: more
   // since means the fault it left open takes no gesture now.
   std::uint32_t wroteShifts = 0;
-  // What the elected fault's first insertion could as cheaply have been, and
-  // the paths dropped for one as cheap.
-  std::vector<ElementId> planAlso;
-  TiedInserts tied;
 
   // The fault being written: what its gestures did so far.
   RepairFault fault;

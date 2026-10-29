@@ -28,9 +28,10 @@ to try an example in VS Code.
 
 ## Adapt an example
 
-Read `core/*Grammar.hpp` and `core/ast.hpp` first: they define the syntax and
-the data it produces. Then read the validation, scoping or formatting service
-you need.
+In `src/<example>/core/`, read `*Grammar.hpp` and `ast.hpp` first: they
+define the syntax and the AST it builds. Then read the validation, scoping or
+formatting service you need.
 
 To start your own project, see [Create a project](../learn/scaffold.md). To
-extend another grammar, see [Derived grammars](../recipes/derived-grammars.md).
+extend another grammar, see
+[Reuse a grammar](../recipes/reuse-a-grammar.md#derive-a-dialect).

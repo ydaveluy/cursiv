@@ -1,8 +1,8 @@
-// The people this document knows about.
+// Two people.
 person Alice
 person Bob
 
-/* And the greetings for them. Each name is a cross reference: rename Alice
-   above and this one follows, because the linker resolved it. */
+/* A greeting for each. Each name refers to a person declared above: in the
+   editor, renaming Alice also renames this use. */
 Hello Alice!
 Hello Bob!

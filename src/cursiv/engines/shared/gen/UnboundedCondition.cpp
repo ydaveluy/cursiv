@@ -147,15 +147,16 @@ std::string unbounded_condition_text(const LowerPools& c,
                                      const UnboundedCondition& u) {
   const std::string who = rule.empty() ? "a rule of this grammar "
                                        : "rule `" + std::string(rule) + "` ";
-  return who + "asks a condition of the token in hand that reads `" +
-         spell(c, u.run) + "` to any length" +
-         (u.kept ? ": a completion then replays every token before the caret"
-                 : ": where it is tested at each token of a long run, each "
-                   "test reads on to the run's end, so the parse time grows "
-                   "with the square of the run's length and a completion "
-                   "replays every token before the caret") +
-         " -- give the run a maximum (`repeat<Min, Max>`) or read it as one "
-         "terminal";
+  return who + "has a condition that matches `" + spell(c, u.run) +
+         "` with no length limit" +
+         (u.kept ? ": code completion then has to re-read every token "
+                   "before the cursor"
+                 : ": tested at each token of a long run, it reads to the end "
+                   "of the run each time, so parsing time grows with the "
+                   "square of the run's length, and code completion has to "
+                   "re-read every token before the cursor") +
+         " -- give the repetition a maximum (`repeat<Min, Max>`), or match it "
+         "as one terminal";
 }
 
 }  // namespace cursiv

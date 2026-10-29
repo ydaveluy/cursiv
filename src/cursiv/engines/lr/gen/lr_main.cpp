@@ -18,7 +18,6 @@
 #include "cursiv/engines/lr/gen/LrFinalTable.hpp"
 #include "cursiv/engines/lr/gen/LrIdentity.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 #include "cursiv/engines/lr/gen/lr_completion_sites.hpp"
 #include "cursiv/engines/lr/gen/lr_emit_parser.hpp"
@@ -28,6 +27,7 @@
 #include "cursiv/engines/lr/gen/lr_term_run.hpp"
 #include "cursiv/engines/shared/gen/AsWritten.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
+#include "cursiv/engines/shared/gen/AstRowOf.hpp"
 #include "cursiv/engines/shared/gen/CommonArtifacts.hpp"
 #include "cursiv/engines/shared/gen/EmitRecords.hpp"
 #include "cursiv/engines/shared/gen/GenCode.hpp"
@@ -268,7 +268,8 @@ int run(int argc, char** argv) try {
   auto automaton = build(low);
   if (refuse_graph(*automaton, args.stampRowBits))
     return exit_status(GenCode::refused);
-  const auto registry = cursiv::lr_ast_registry<G>(CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
+  const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>(
+      CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
   const auto entries = cursiv::lr_entry_table(*automaton);
   const auto records = cursiv::lr_record_gens(entries, registry.rows);
   // From here the table is read-only.
@@ -309,11 +310,8 @@ int run(int argc, char** argv) try {
       });
   if (std::getenv("CURSIV_CONFLICTS") != nullptr) report_each_conflict(a);
   return exit_status(GenCode::ok);
-} catch (const cursiv::LowerRefused& e) {
-  std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, e.what());
-  return exit_status(GenCode::refused);
 } catch (const std::exception& e) {
-  std::fprintf(stderr, "%s: %s\n", CURSIV_GEN_NAME, e.what());
+  std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, e.what());
   return exit_status(GenCode::refused);
 }
 

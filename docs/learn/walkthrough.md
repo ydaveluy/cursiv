@@ -116,11 +116,20 @@ struct Recipe : cursiv::GrammarSpec {
 }  // namespace recipe
 ```
 
-`kw<"unit">` matches a whole keyword and `lit<"{">` punctuation. `assign`
-fills a member, `append` adds a list element and `ref` calls a terminal or a
-rule. `some` reads one or more items, `many` zero or more. A rule builds the
-AST class whose members it fills: `Unit` builds an `ast::Unit` and `Model` an
-`ast::Model`. [Write a grammar](write-a-grammar.md) explains each construct.
+A `terminal` reads one token, such as a name or a number. A `rule` reads a
+sequence of tokens and rules, and builds the AST class whose members it fills:
+`Unit` builds an `ast::Unit` and `Model` an `ast::Model`. In a rule:
+
+- `kw<"unit">` matches a whole keyword, and `lit<"{">` matches punctuation.
+- `ref` calls a terminal or a rule.
+- `assign` stores a value in a member, and `append` adds an element to a list.
+- `some` reads one or more items, and `many` zero or more.
+
+`entry` is the rule that reads a whole document. Whitespace and comments may
+appear between any two tokens: `ignored` drops them, and `hidden` keeps them in
+the syntax tree. The recipe rule is named `RecipeDecl` because C++ does not
+allow a member to have the name of its class, `Recipe`.
+[Write a grammar](write-a-grammar.md) explains each construct.
 
 ## 3. Replace the sample validator
 
@@ -185,14 +194,15 @@ void register_validation_checks(RecipeCoreServices& services) {
 }  // namespace recipe
 ```
 
-The check runs on every `ast::Recipe` node.
-`.property<&ast::Use::ingredient>()` underlines the ingredient name. `get()`
-returns null for an unresolved reference, which the linker already reports.
-See [Custom validation](../recipes/validation.md).
+The type of the first parameter decides where a check runs: here, on every
+`ast::Recipe` node. `.property<&ast::Use::ingredient>()` puts the error on the
+ingredient name instead of the whole `use` line. `get()` returns the target of
+a reference, or null when the name does not resolve; the linker already reports
+that case. See [Custom validation](../recipes/validation.md).
 
 ## 4. Update the test and build
 
-In `tests/grammar_test.cpp`, keep the setup and replace the final size check,
+In `tests/grammar_test.cpp`, keep the setup. Replace the final size check,
 which counts hello-world declarations, with:
 
 ```cpp
@@ -212,7 +222,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The tests pass and the CLI reports `example/hello.recipe: ok`. `--dump`
-prints the concrete syntax tree: the rules and tokens that matched.
+prints the concrete syntax tree: the AST classes built and the tokens read.
 
 ## 5. Try the reference resolution
 
@@ -254,10 +264,11 @@ client with **F5**. Completion offers keywords and reference targets,
 go-to-definition and rename follow your references, and the duplicate check
 shows as a diagnostic.
 
-For hover documentation, add `/** The gram unit. */` before `unit gram`: a
-`hidden` comment stays in the syntax tree, where hover finds it. To highlight
-the Recipe keywords, update the extension's TextMate grammar, as that guide
-explains.
+To add hover documentation, write `/** The gram unit. */` before `unit gram`.
+Hover then shows it on `gram` and on each reference to it. Hover reads these
+comments from the `hidden` terminal named `ML_COMMENT`, which stays in the
+syntax tree. To highlight the Recipe keywords, update the extension's TextMate
+grammar, as that guide explains.
 
 ## What to change next
 

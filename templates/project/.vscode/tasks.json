@@ -3,7 +3,7 @@
   "tasks": [
     {
       "label": "build the server and the extension",
-      "detail": "Build @CURSIV_NEW_ID@_lsp in the active preset's tree, then bundle the TypeScript.",
+      "detail": "Build @CURSIV_NEW_ID@_lsp with the active CMake preset, then compile the extension.",
       "dependsOrder": "sequence",
       "dependsOn": [
         "build the language server",

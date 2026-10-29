@@ -1,6 +1,6 @@
 // A surrogate is no scalar: no class holds it, and the spelling
 // does not compile.
-// expect LR: names a value that is no scalar
+// expect LR: names a value that is not a Unicode character
 #pragma once
 
 #include "refusals/head.hpp"

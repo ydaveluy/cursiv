@@ -94,9 +94,9 @@ struct scoped<G, Implied<T, C>, TypeList<>> {
 template <class G, class E>
 struct unindented {
   static_assert(dependent_false<G>,
-                "a grammar embedded with `section<>` reads no indentation: its "
-                "lines would be measured against the embedding document's. "
-                "Embed a grammar that states no `indent`/`dedent`, or parse "
+                "a grammar embedded with `section<>` cannot use indentation: "
+                "its lines would be measured against the outer document. "
+                "Embed a grammar that declares no `indent`/`dedent`, or parse "
                 "the indented language on its own");
   using type = E;
 };
@@ -189,9 +189,9 @@ struct InGrammar : detail::in_grammar_rule<G, X> {
           std::is_same_v<std::remove_cvref_t<decltype(G::indent_close)>,
                          Epsilon> &&
           std::is_void_v<typename G::indent_newline>,
-      "a grammar embedded with `section<>` reads no indentation: its lines "
-      "would be measured against the embedding document's. Embed a grammar "
-      "that states no `indent_open`, `indent_close` or `indent_newline`");
+      "a grammar embedded with `section<>` cannot use indentation: its lines "
+      "would be measured against the outer document. Embed a grammar that "
+      "declares no `indent_open`, `indent_close` or `indent_newline`");
 };
 
 template <class G, class X>
@@ -205,10 +205,9 @@ namespace detail {
 template <class G, class E = named_rule_t<G>>
 struct section_entry {
   static_assert(!is_terminal_rule<E>,
-                "a grammar embedded with `section<>` enters on a terminal: a "
-                "section is read by rules, and one token has no inside for its "
-                "trivia to stand in -- give the grammar an entry rule over "
-                "the terminal");
+                "a grammar embedded with `section<>` has a terminal as its "
+                "entry, but a section is parsed by rules: give the grammar an "
+                "entry rule that uses the terminal");
   using type = E;
 };
 }  // namespace detail

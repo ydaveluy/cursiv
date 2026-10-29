@@ -34,11 +34,12 @@ constexpr std::optional<StampLayout> stamp_split(std::uint32_t rows,
 inline std::string stamp_refusal(std::uint32_t rows, std::uint32_t states,
                                     unsigned forced = 0) {
   std::string out = std::format(
-      "the record's stamp -- this table's {} rows need {} bits and its {} "
-      "states {}, and a record holds {}",
+      "its {} AST write chains need {} bits and its {} parser states {} "
+      "bits, more than the {} bits of a record",
       rows, std::bit_width(rows), states, std::bit_width(states - 1u),
       StampLayout::record_bits());
-  if (forced != 0) out += std::format(" with the row forced to {}", forced);
+  if (forced != 0)
+    out += std::format(" with the chains forced to {} bits", forced);
   return out;
 }
 

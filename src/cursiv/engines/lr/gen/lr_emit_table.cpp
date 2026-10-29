@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
-#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
@@ -103,24 +102,10 @@ struct LrTableEmitter : EmitOutput {
     }
     raw("}}");
   }
-  // A cell spells only the fields off their default: the member initializers
-  // write the rest.
-  struct Fields {
-    std::string text;
-    template <class V>
-    void operator()(std::string_view name, V v, V def,
-                    std::string_view pre = "", std::string_view post = "") {
-      if (v != def)
-        std::format_to(std::back_inserter(text), ",.{}={}{}{}", name, pre, v,
-                       post);
-    }
-  };
-  void cell(const Fields& f) {
-    fmt("{{{}}}", std::string_view(f.text).substr(f.text.empty() ? 0 : 1));
-  }
+  void cell(const EmitFields& f) { fmt("{{{}}}", f.list()); }
   void cell(const TermInfo& t) {
     constexpr TermInfo d{};
-    Fields f;
+    EmitFields f;
     f("nameOff", names(t.nameOff), d.nameOff);
     f("nameLen", t.nameLen, d.nameLen);
     f("element", t.element, d.element);
@@ -138,7 +123,7 @@ struct LrTableEmitter : EmitOutput {
   }
   void cell(const LrProduction& p) {
     constexpr LrProduction d{};
-    Fields f;
+    EmitFields f;
     f("lhs", p.lhs, d.lhs);
     f("node", p.node, d.node);
     f("len", p.len, d.len);
@@ -148,7 +133,7 @@ struct LrTableEmitter : EmitOutput {
   }
   void cell(const LrReducePlan& p) {
     constexpr LrReducePlan d{};
-    Fields f;
+    EmitFields f;
     f("names", p.names, d.names, "", "u");
     f("count", p.count, d.count);
     f("form", static_cast<std::uint8_t>(p.form),
@@ -159,7 +144,7 @@ struct LrTableEmitter : EmitOutput {
   }
   void cell(const LrReduceName& n) {
     constexpr LrReduceName d{};
-    Fields f;
+    EmitFields f;
     f("slot", n.slot, d.slot);
     f("row", n.row, d.row);
     f("fold", n.fold, d.fold);

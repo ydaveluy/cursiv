@@ -1,6 +1,6 @@
 // A rule naming a terminal the grammar skips: the lexer never hands it over
 // where it reads, so no text can match it.
-// expect LR LL: refused .skippedTerminal..*rule .Root. names a terminal its reading skips as trivia
+// expect LR LL: refused .skippedTerminal..*rule .Root. names a terminal that is skipped as trivia at that point
 #pragma once
 
 #include "refusals/head.hpp"

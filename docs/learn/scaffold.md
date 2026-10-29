@@ -1,6 +1,7 @@
 # Create a project
 
-Install the [required tools](index.md#before-you-start) first.
+This guide creates a language project, builds it and runs it on its sample
+document. Install the [required tools](index.md#before-you-start) first.
 
 ## Create, build and run
 
@@ -19,7 +20,7 @@ cmake --build build --parallel
 The CLI reports `example/hello.mylang: ok`. The sample declares two people
 and greets each by name.
 
-Run the tests and print the syntax tree:
+Run the tests, then print the syntax tree of the sample:
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -40,15 +41,15 @@ mylang/
 │   ├── CMakeLists.txt      language and executable targets
 │   └── mylang/
 │       ├── core/
-│       │   ├── ast.hpp                 your structs
+│       │   ├── ast.hpp                 your AST classes
 │       │   ├── MyLangGrammar.hpp       your grammar
 │       │   ├── CoreServices.hpp        your services
 │       │   ├── CoreModule.cpp          service configuration
 │       │   └── validation/             your checks
-│       ├── cli/main.cpp
-│       ├── lsp/{LspModule,main}.cpp
-│       └── bench/main.cpp
-├── tests/grammar_test.cpp
+│       ├── cli/                        the command line
+│       ├── lsp/                        the language server
+│       └── bench/                      the benchmark
+├── tests/grammar_test.cpp  a test of the sample
 └── vscode/                 the editor client
 ```
 
@@ -57,8 +58,9 @@ You mostly edit three places: `core/ast.hpp` for the data types,
 tutorial replaces all three. Generated sources go under `build/`; never edit
 them.
 
-Delete `cli/`, `lsp/`, `bench/` or `vscode/` if you do not need them. CMake
-then skips the matching targets and tests. The benchmark needs `lsp/`.
+If you do not need the command line, the server, the benchmark or the editor
+client, delete `cli/`, `lsp/`, `bench/` or `vscode/`. CMake then skips their
+targets and tests. The benchmark needs `lsp/`.
 
 ## Open it in VS Code
 
@@ -72,7 +74,7 @@ extension loaded.
 |---|---|---|
 | `-DNAME=` | *required* | Grammar type. It and its lowercase form must be valid, non-reserved C++ identifiers. |
 | `-DEXT=` | `.<id>` | File extension, starting with a dot. |
-| `-DDIR=` | `<id>` | Directory to create; it must be empty. |
+| `-DDIR=` | `<id>` | Directory to create. If it exists, it must be empty. |
 | `-DCURSIV_TAG=` | `main` | Cursiv revision to fetch. |
 
 The lowercase name is the language id. For example, this creates a `recipe`

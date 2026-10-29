@@ -1,6 +1,6 @@
 // A condition that reads a data rule reaching itself: what it reads is
 // unrolled once, and the rule never ends.
-// expect LR: a condition reads a data rule that reaches itself
+// expect LR: a condition cannot test a data rule that calls itself
 #pragma once
 
 #include "refusals/head.hpp"

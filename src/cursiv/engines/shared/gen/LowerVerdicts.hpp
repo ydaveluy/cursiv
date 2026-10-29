@@ -85,153 +85,157 @@ constexpr unsigned unordered_most(bool nests) {
   while (cost(most + 1) <= kNoRow) ++most;
   return most;
 }
+// The sentence of `unorderedTooWide` states both.
 static_assert(unordered_most(false) == 11 && unordered_most(true) == 6);
 
 // `{bytes}` stands for the bytes a refusal turns on, `{word}` for the word.
 constexpr std::string_view lower_fail_text(LowerFail f) {
   switch (f) {
     case LowerFail::wordRefusedInLoop:
-      return "refuses a word inside a repetition that may come back to a "
-             "refusal without reading a byte: the token graph cannot spell "
-             "the turn that follows the refusal -- give the turn a part it "
-             "must read after the refusal";
+      return "has a guard inside a repetition, and a turn of that repetition "
+             "may read nothing after the guard -- make each turn read "
+             "something after it, as in `!lit<\"/\"> + any`";
     case LowerFail::rescuedRefusalPastMatch:
-      return "ends a match exactly where the word it refuses ends, past its "
-             "head, and {bytes} rescues that word: the frontier states which "
-             "class the byte behind a match may NOT be, never which it must "
-             "be -- and where the document ends there is no byte to rescue "
-             "it with. Refuse the word at the token's head or behind literals "
-             "and classes alone, or let the body read on over {bytes}";
+      return "may end a match exactly where a word its guard excludes ends, "
+             "after the start of the terminal, and {bytes} after that word "
+             "lets the guard pass: whether the guard holds would depend on "
+             "the character after the token, and at the end of the document "
+             "there is none -- put the guard at the start of the terminal or "
+             "after literals and character classes only, or let the terminal "
+             "read {bytes} after the word";
     case LowerFail::wordPastMatch:
-      return "may end a match short of {word}, a word it refuses past its "
-             "head: whether {word} stands would turn on text past the token, "
-             "and the token graph reads one class there, of bytes or of "
-             "scalars, no more. Refuse it at the token's head or behind "
-             "literals and classes alone, where it is read whole, or let the "
-             "body read on to the word's end before it may stop";
+      return "may end a match before the end of {word}, which a guard "
+             "excludes after the start of the terminal: whether the guard "
+             "holds would depend on text after the token -- give the guarded "
+             "literal a terminal of its own, put the guard at the start of "
+             "the terminal or after literals and character classes only, or "
+             "let the terminal read the whole word before it can end";
     case LowerFail::boundaryDisagrees:
-      return "reaches one match through two refusals of different classes: "
-             "one class is tested after a match, not two";
+      return "reaches the same match through two guards that exclude "
+             "different characters after it, and the LR parser tests one set "
+             "of characters after a match -- use the same guard on both paths";
     case LowerFail::regionBoundaryShared:
-      return "reaches one point through a `skip()` region and outside it at "
-             "once: the point that reads the next token cannot read the "
-             "trivia in front of it two ways -- part the alternatives before "
-             "the region opens, give the region an opening token of its own, "
-             "or end it on one no optional part follows";
+      return "reaches the same token both inside a `skip()` region and "
+             "outside it, so the trivia before that token could follow either "
+             "setting -- make the alternatives differ before the region "
+             "opens, give the region its own opening token, or end the region "
+             "on a token that no optional part follows";
     case LowerFail::sectionPointShared:
-      return "reaches one point inside a `section<>` and outside it at "
-             "once: the point that reads the next token cannot read the "
-             "trivia in front of it both as the embedded grammar's and as "
-             "the caller's -- part the alternatives before the section opens";
+      return "reaches the same token both inside a `section<>` and outside "
+             "it, so the trivia before that token could follow either grammar "
+             "-- make the alternatives differ before the section opens";
     case LowerFail::sectionEndShared:
-      return "closes a `section<>` on a token the embedded grammar "
-             "reads, or on the start of one: where the section ends would be "
-             "that grammar's reading, not the text's -- close it on a token "
-             "none of the embedded grammar's begins with";
+      return "closes a `section<>` on a token that the embedded grammar also "
+             "reads, or that starts one of its tokens, so the section could "
+             "end too early -- close it on a token that no token of the "
+             "embedded grammar begins with";
     case LowerFail::sectionIndented:
-      return "reads its lines by indentation and embeds a grammar with "
-             "`section<>`: the section's lines would be measured as the "
-             "document's -- embed it in a grammar that states no indentation";
+      return "uses indentation and embeds a grammar with `section<>`: the "
+             "lines of the section would be measured as lines of the document "
+             "-- use `section<>` only in a grammar without indentation";
     case LowerFail::namePool:
-      return "spells more names than the 16-bit name pool holds";
+      return "has names whose characters add up to more than 65 535 -- use "
+             "fewer or shorter names, or split the grammar";
     case LowerFail::tooManyTerminals:
-      return "declares more than 32 767 terminals";
+      return "declares more than 32 767 terminals -- split the grammar";
     case LowerFail::tooManyRules:
-      return "declares more than 32 767 rules, auxiliaries included";
+      return "declares more than 32 767 rules, counting the rules the "
+             "generator adds -- simplify the grammar, or split it";
     case LowerFail::tooManyConfigurations:
-      return "reads under more than 255 skip configurations: the grammar's "
-             "own, one for every distinct pair of lists a `skip()` names and "
-             "one for every `section<>`, each named by a byte -- let "
-             "regions share their lists";
+      return "uses more than 255 trivia settings: its own, one for each "
+             "distinct `skip()` and one for each `section<>` -- let `skip()` "
+             "regions share the same lists";
     case LowerFail::productionTooWide:
-      return "spells a right-hand side of more than 65 535 positions: a "
-             "production's length is sixteen bits";
+      return "has an alternative longer than 65 535 items once expanded, too "
+             "long for the LR parser -- narrow the range of a counted "
+             "repetition, or use `many` and check the count in validation";
     case LowerFail::tooManyProductions:
-      return "lowers to more than 65 535 productions";
+      return "has more than 65 535 alternatives once expanded, too many for "
+             "the LR parser -- simplify the grammar, or split it";
     case LowerFail::tooManyPositions:
-      return "lowers to more than 65 535 positions: a counted repetition has "
-             "one for every turn it may take, a choice one for every arm -- "
-             "narrow the range, or repeat with `many` and check the count "
-             "where the tree is read";
+      return "is too large for the LL parser once expanded, more than 65 535 "
+             "items: a counted repetition is copied once for each turn it may "
+             "take, a choice once for each alternative -- narrow the range, "
+             "or use `many` and check the count in validation";
     case LowerFail::tokenGraphTooLarge:
-      return "spells a token graph past the indices of its tables: more than "
-             "65 535 byte classes, tags, nodes, edges, relays, lexing modes, "
-             "scalar ranges or states, or a repetition bound past 32 bits -- give "
-             "a large alternative, such as a table of keywords or a set of "
-             "scalar ranges, fewer or narrower terminals";
+      return "has terminals too complex for the generated lexer: more than "
+             "65 535 character sets, states or parts, or a repetition bound "
+             "above 4 294 967 294 -- simplify the largest terminals, such as "
+             "a long list of keywords or of Unicode ranges, or split them";
     case LowerFail::tableTooLarge:
-      return "needs a table past the indices of its program: more than "
-             "65 534 states and guards together, more than 65 536 distinct "
-             "completion entries, or more than 2^32 actions or matrix blocks "
-             "-- split the grammar";
+      return "is too large for the LR parser tables: more than 65 534 states "
+             "and condition sets, 65 536 completion entries, or 2^32 actions "
+             "or table blocks -- simplify the grammar, or split it";
     case LowerFail::echoUnmarked:
-      return "echoes a mark<> not set in its scope: same<> needs a mark "
-             "with its tag before it on every path of the current terminal "
-             "call or of the environment inherited by a lookahead";
+      return "uses `same<>` where a `mark<>` with its tag is not set on every "
+             "path before it -- set the mark before the `same<>` on every "
+             "path of the same terminal: a mark in one branch of a choice, or "
+             "in a loop that may run zero times, does not count";
     case LowerFail::gapShape:
-      return "asks a condition of an expression the matcher does not read: "
-             "`gap::has` and `gap::is` take classes, literals, `any`, "
-             "sequences, choices and repetitions, never a `through`";
+      return "uses an expression in `gap::has` or `gap::is` that they cannot "
+             "test: they take classes, literals, `any`, sequences, choices "
+             "and repetitions, never a `through`";
     case LowerFail::gapTooMany:
-      return "states more than 255 gap conditions, or more implied tokens "
-             "than a reading holds a bit for at one position";
+      return "has more than 255 gap conditions, or more than 32 implied "
+             "tokens that can be inserted at one position -- simplify the "
+             "conditions, or split the grammar";
     case LowerFail::gapLeafPool:
-      return "asks more distinct questions in its conditions than the "
-             "16-bit leaf pool holds";
+      return "has too many distinct expressions in its conditions -- "
+             "simplify the conditions, or split the grammar";
     case LowerFail::indentShape:
-      return "spells `indent` or `dedent` inside a body: each is a "
-             "terminal's whole body, `terminal<indent>`";
+      return "uses `indent` or `dedent` as a part of its body: each must be a "
+             "whole terminal, `terminal<indent>`";
     case LowerFail::indentTwice:
-      return "declares two indent terminals, or two dedent terminals: the "
-             "indentation answers one of each";
+      return "is a second `indent` or `dedent` terminal: a grammar has at "
+             "most one of each -- declare `terminal<indent>` once and "
+             "`terminal<dedent>` once";
     case LowerFail::refusalIntoRelay:
-      return "refuses a word that runs into a relay's content: the relay "
-             "reads it by search and no edge of the token graph narrows it. "
-             "Only the content's first byte can be refused, in a nested run, "
-             "with no rescue class";
+      return "has a guard whose excluded word reaches into the text between a "
+             "`mark<>` and its `same<>`, which the generator cannot check -- in "
+             "a nested run, a guard may test only the first character of that "
+             "text, and not as a keyword";
     case LowerFail::rescueReadsPast:
-      return "reads on past a word it refuses over a character its word "
-             "boundary does not hold: whether the word stands turns on that "
-             "character, which the token graph reads byte by byte -- let the "
-             "word boundary hold every character the terminal reads after "
-             "the word";
+      return "excludes a word with a keyword guard, then may read after it a "
+             "character outside `word_boundary`: whether the guard holds "
+             "would depend on that character -- add to `word_boundary` every "
+             "character the terminal reads after the word";
     case LowerFail::boundaryMisses:
-      return "refuses {word} at its head, and reads {bytes} where a word of "
-             "its own begins and again past {word}, yet the class that "
-             "rescues {word} leaves {bytes} out: there {word} stands refused "
-             "and the word splits in two tokens -- let the word boundary, or "
-             "the refused literal's guard, hold {bytes}";
+      return "excludes {word} at its start, and can read {bytes} at the start "
+             "of a word and again after {word}, but {bytes} is not in the "
+             "word boundary: after {word}, {bytes} does not continue the "
+             "word, so {word} is excluded and the text splits into two tokens "
+             "-- add {bytes} to `word_boundary`, or to the guard of the "
+             "excluded literal";
     case LowerFail::unorderedTooWide:
-      return "holds an unordered group of too many items: `unordered(a, b, "
-             "...)` is spelled once for every subset of its items, and once "
-             "for every order of them where an item nests, and those outgrow "
-             "the 16-bit pools of the program -- group fewer items, or read "
-             "them as a repetition of a choice and check each was read once "
-             "where the tree is read";
+      return "has an unordered group with too many items: at most 11, or 6 "
+             "when an item holds a `nest` -- use fewer items, or read them as "
+             "a repetition of a choice and check in validation that each "
+             "appears once";
     case LowerFail::terminalCycle:
       return "calls itself without consuming input: every recursive cycle "
-             "must read at least one byte before the next call";
+             "must read at least one character before the next call";
     case LowerFail::terminalUnproductive:
-      return "has a recursive call that cannot return a finite match: give "
-             "the recursion a terminating alternative";
+      return "has a recursive call that can never finish a match -- add an "
+             "alternative without the call, or make the call optional";
     case LowerFail::terminalNullableRepetition:
       return "repeats an item that may match nothing inside a recursive "
-             "terminal: make the item consume input";
+             "terminal -- make the item consume input";
     case LowerFail::terminalEmpty:
       return "matches the empty string -- give its body a part it must read";
     case LowerFail::terminalReadsRule:
-      return "reads the rule {word}: a rule is read with the skipper between "
-             "its parts, a phrase of tokens and never the bytes of one -- "
-             "name the terminals it is made of, or read the rule from a rule";
+      return "uses the rule {word} inside a terminal or a `through`: these "
+             "read one token, so they cannot call a rule, even a data rule -- "
+             "use the terminals the rule is made of, or call the rule from a "
+             "rule";
     case LowerFail::commitPrefixEmpty:
-      return "commits on a prefix that may read nothing: its quantifier "
-             "stops where the prefix cannot be read, and a prefix that reads "
-             "nothing is always there -- give the prefix a part it must read";
+      return "has a `commit` whose prefix may match nothing: such a prefix "
+             "always matches, so the quantifier around it never stops -- give "
+             "the prefix a part it must read";
     case LowerFail::triviaTied:
-      return "is trivia that reads the same text as another trivia terminal, "
-             "at the same length and rank, and one of the two is hidden: "
-             "which of them the tree keeps would turn on the order they are "
-             "declared in -- put both in `ignored`, or make them read "
+      return "is trivia that matches the same text as another trivia "
+             "terminal, with the same length and category, and one of the two "
+             "is `hidden`: which one the tree keeps would depend on the order "
+             "of declaration -- put both in `ignored`, or make them match "
              "different texts";
     case LowerFail::none:
       break;

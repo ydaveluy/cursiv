@@ -1,6 +1,6 @@
 // A range runs between two characters: a class escape at one of its ends
 // names no range, and the spelling does not compile.
-// expect LR: puts a class escape .* at an end of a range
+// expect LR: uses a class escape .* as an end of a range
 #pragma once
 
 #include "refusals/head.hpp"

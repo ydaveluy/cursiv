@@ -15,13 +15,12 @@ namespace cursiv {
 namespace {
 
 constexpr std::string_view kUnreadable =
-    "cursiv: `&e` and `!e` read `e` as the parse would: "
-    "terminals, nonrecursive data rules, classes, literals and "
-    "`any`, their sequences, choices and repetitions, nested `&` "
-    "and `!`, gap conditions (`gap::has`, `gap::is`, `eof`) and "
-    "`skip()`; conditions compose with !, | and +. A rule that "
-    "builds a node is parsed, not read: no condition asks one -- "
-    "ask the terminals it starts with";
+    "a condition (`&e` or `!e`) cannot test this expression: `e` may hold "
+    "terminals, data rules that do not call themselves, classes, literals "
+    "and `any`, their sequences, choices and repetitions, nested `&` and "
+    "`!`, gap conditions (`gap::has`, `gap::is`, `eof`) and `skip()`, "
+    "combined with `!`, `|` and `+`. A condition cannot test a rule that "
+    "builds a node -- test the terminals it starts with";
 
 bool gap_readable(const LowerPools& c, std::uint16_t n,
                   bool recognition = false) {
@@ -355,10 +354,12 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
       if (terminal_rule(n.a)) return phrase_token(cfg, e);
       if (!data_rule(n.a))
         refuse_lowering(
-            "cursiv: A rule that builds a node is parsed, not read: no "
-            "condition asks one");
+            "a condition cannot test a rule that builds a node -- test the "
+            "terminals it starts with");
       if (std::ranges::find(path, n.a) != path.end())
-        refuse_lowering("cursiv: a condition reads a data rule that reaches itself");
+        refuse_lowering(
+            "a condition cannot test a data rule that calls itself, directly "
+            "or through other rules -- test the terminals it starts with");
       path.push_back(n.a);
       const std::uint16_t out =
           phrase(cfg, body_in(cfg, n.a), skip, path);
@@ -500,9 +501,10 @@ void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
     return check_implied_token(cfg, body_in(cfg, n.a));
   if (n.kind != ImageKind::lit || (n.flags & (kLitGuardWord | kLitGuardExpr)))
     refuse_lowering(
-        "cursiv: `implied(tok, cond)` lays a token of no width, so "
-        "`tok` is an unguarded literal or a terminal whose body is "
-        "one -- where it is no literal, write `tok | eof`");
+        "in `implied(tok, cond)`, `tok` must be a literal with no guard, or "
+        "a terminal whose body is one: the parser inserts it with zero width "
+        "when it is missing -- imply a plain `lit<>`, or write `tok | eof` "
+        "where the token may be absent");
 }
 
 std::uint16_t Lowerer::implied_term(ImageId e, std::uint16_t k) {

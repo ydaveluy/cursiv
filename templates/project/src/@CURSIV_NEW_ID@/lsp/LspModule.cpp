@@ -14,10 +14,8 @@ void install_lsp_module(@CURSIV_NEW_CLASS@Services& services) {
   cursiv::install_default_lsp_services(services);
 }
 
-// The three storeys in order: the framework's defaults, the language's
-// core module, then its LSP module. The container is one object -- both
-// bases derive `CoreServices` virtually -- so the providers read what the
-// core module wired.
+// Creates the services of this language for the language server: the
+// defaults, then the core module, then the LSP module.
 bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
   auto& shared =
       dynamic_cast<@CURSIV_NEW_CLASS@SharedServices&>(sharedServices);

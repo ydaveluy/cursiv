@@ -115,8 +115,8 @@ class Reach {
     const ImageNode n = _image.nodes[id];
     if (n.kind == ImageKind::embed)
       throw std::runtime_error(
-          "`section<G>(open, close)` stands in a rule, not in a condition: a "
-          "condition reads text and never parses a grammar -- ask the token "
+          "`section<G>(open, close)` is allowed in a rule, not in a condition: a "
+          "condition tests text and cannot parse a grammar -- test the token "
           "that opens the section");
     const std::size_t count = _image.shape_kids(id).size();
     if (count != 0) {

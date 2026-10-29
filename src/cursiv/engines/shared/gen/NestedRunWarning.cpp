@@ -15,9 +15,9 @@ std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found) {
 
 std::string nested_run_warning_text(const NestedRunWarning& w) {
   return "rule `" + w.rule + "`: `" + w.run +
-         "` repeats a run, so a run of items reads as one group or as "
-         "several and the election picks one -- write one repetition unless "
-         "the groups are wanted";
+         "` repeats a repetition, so a run of items can be split into "
+         "groups in several ways and the parser picks one -- write one "
+         "repetition unless the groups matter";
 }
 
 }  // namespace cursiv

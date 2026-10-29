@@ -195,13 +195,13 @@ void Lowerer::index() {
     if (!_termIdx.contains(rule))
       refuse_lowering(
           "`ignored`, `hidden` and `skip()` list terminals only: trivia are "
-          "tokens the lexer skips, never rules the parser reads");
+          "tokens the lexer skips, never rules");
   for (const Config& c : _cfgs)
     if (std::ranges::any_of(c.ignore,
                             [&](std::uint32_t r) { return has(c.hide, r); }))
       refuse_lowering(
           "a terminal belongs to at most one of `ignored` and `hidden`: "
-          "trivia are dropped or kept in the tree, never both");
+          "trivia are dropped from the tree or kept in it, never both");
   for (const std::uint8_t role : {0, 1, 2})
     for (const std::uint32_t rule : _skipped) {
       if (role_in(0, rule) == role) continue;
@@ -276,8 +276,9 @@ void Lowerer::open_configs() {
       const ImageId end = token_core(kid(inner, 2));
       if (end == kNoImage || token_core(kid(inner, 0)) == kNoImage)
         refuse_lowering(
-            "`section<G>(open, close)`: `open` and `close` are each one "
-            "token of the caller, a literal, a keyword or a terminal");
+            "in `section<G>(open, close)`, `open` and `close` must each be "
+            "one token of the calling grammar: a literal, a keyword or a "
+            "terminal");
       walk(kid(inner, 0), home);
       if (std::ranges::none_of(_cfgs, [&](const Config& c) {
             return c.section == n.a && c.end == end;
@@ -416,8 +417,8 @@ void Lowerer::delimit(ImageId spelled, std::int8_t d) {
     case ImageKind::ref: {
       if (!_termIdx.contains(n.a))
         refuse_lowering(
-            "`indent_open` and `indent_close` name a terminal a rule "
-            "reads, not a rule or a terminal no rule reaches");
+            "`indent_open` and `indent_close` must name terminals that a "
+            "rule uses, not rules or unused terminals");
       const ImageId body = body_in(0, n.a);
       if (at(body).kind == ImageKind::lit)
         delimit(body, d);
@@ -430,7 +431,7 @@ void Lowerer::delimit(ImageId spelled, std::int8_t d) {
       return;
     default:
       refuse_lowering(
-          "`indent_open` and `indent_close` name spellings or "
+          "`indent_open` and `indent_close` must name literals or "
           "terminals: `lit<\"(\">`, `ref<LPAR>` or a choice of them");
   }
 }
@@ -438,7 +439,10 @@ void Lowerer::delimit(ImageId spelled, std::int8_t d) {
 void Lowerer::declare() {
   if (_d.terms.size() + _roles.size() >= kNtBase ||
       _d.nts.size() * _cfgs.size() >= kNtBase)
-    refuse_lowering("cursiv: declared symbols exceed their 15-bit domain");
+    refuse_lowering(
+        "the grammar declares more than 32 767 terminals or rules, counting "
+        "a copy of each rule for each trivia setting -- simplify the "
+        "grammar, or split it");
   if (_cfgs.size() > 255) lower_refuse(_c, LowerFail::tooManyConfigurations);
   _nterms = 1;
   _c.terms[0].nameOff = intern_name("$end");
@@ -456,9 +460,8 @@ void Lowerer::declare() {
     const std::uint32_t newline = _im.rule(*_d.indentNewline);
     if (!_termIdx.contains(newline))
       refuse_lowering(
-          "`indent_newline` names the terminal that ends a line: a "
-          "terminal a rule reads, not a rule or a terminal no rule "
-          "reaches");
+          "`indent_newline` must name the terminal that ends a line, one "
+          "that a rule uses, not a rule or an unused terminal");
     _c.terms[sym_of(0, newline)].joins = true;
   }
   declare_rules();
@@ -643,10 +646,10 @@ std::uint16_t Lowerer::terminal_sym(unsigned cfg, ImageId e) {
     case ImageKind::doc: {
       if (at(kid(n, 0)).kind != ImageKind::lit)
         refuse_lowering(
-            "a doc stands on a WORD a reader can hover -- `kw<\"if\">` or "
-            "`lit<\"if\">`. Nothing else holds one: only a terminal has a "
-            "column for it, and prose over a rule reference would have "
-            "nowhere to land");
+            "a `doc` goes on a word a reader can hover, such as "
+            "`kw<\"if\">` or `lit<\"if\">`: only a token shows hover "
+            "text, so a `doc` cannot go on a rule reference or on another "
+            "expression");
       const std::uint16_t sym = terminal_sym(cfg, kid(n, 0));
       std::string_view& doc = _c.termBuild[sym].doc;
       if (doc.empty())
@@ -668,9 +671,7 @@ std::uint16_t Lowerer::terminal_sym(unsigned cfg, ImageId e) {
     case ImageKind::dedent:
       return lay_laid(e, kLaidDedent, "dedent");
     default:
-      refuse_lowering(
-          "this combinator has no lowering: a body reaching here would "
-          "become a right-hand side nobody wrote");
+      refuse_lowering(kNotInRule);
   }
 }
 

@@ -1,6 +1,6 @@
 // A commit in a terminal: a terminal reads adjacent bytes, with no condition
 // to stop a repetition on.
-// expect LR: a commit stands in a rule, not in a terminal
+// expect LR: a commit is allowed in a rule, not in a terminal
 #pragma once
 
 #include "refusals/head.hpp"

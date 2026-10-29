@@ -3,53 +3,54 @@
 The Model Context Protocol (MCP) server lets an assistant inspect and validate
 your language documents.
 
-## Connect to the server {#two-transports}
+## Connect to the server
 
-**Through LSP.** The language server answers `cursiv/mcp` requests on the
-editor's connection, so tools see the editor's workspace, unsaved buffers
-included. The scaffold's VS Code client provides this bridge.
+**Through LSP.** The language server handles `cursiv/mcp` requests on the
+editor's connection, so the tools see the editor's workspace, including
+unsaved changes. The scaffold's VS Code extension makes this server available
+to assistants in VS Code.
 
 **Through stdio.** `<id>_lsp --mcp --folder <dir>` starts a separate MCP
-session over newline-delimited JSON-RPC. It scans the saved files in `<dir>`,
-or in the current directory without `--folder`.
+server on standard input and output. It reads the saved files in `<dir>`, or
+in the current directory without `--folder`.
 
-## Available tools {#the-tools}
+## Available tools
 
 | Tool | Returns |
 |---|---|
-| `languages` | which languages this server registered, and their extensions |
+| `languages` | the registered languages and their file extensions |
 | `grammar` | the grammar as text |
 | `rule` | one rule and the rules it depends on |
-| `documents` | what the workspace holds |
+| `documents` | the documents of the workspace |
 | `text-document-content` | one document's text |
 | `get-diagnostics` | workspace diagnostics, optionally restricted by directory |
-| `validate` | parse a text, link it, run the checks — and discard it |
+| `validate` | the diagnostics of a text, linked against the workspace and then discarded |
 | `document-symbols` | one document's outline |
 | `symbols` | a name search across the workspace |
-| `references` | every site naming a declaration |
+| `references` | every place that refers to a declaration |
 | `hover` | the declaration, type and documentation at a position |
-| `rename` | the edits a rename would make, without checking naming rules |
+| `rename` | the edits a rename would make, without checking the language's naming rules |
 | `expected-at` | what may be written at a position |
-| `scope-candidates` | what a cross reference could bind to |
+| `scope-candidates` | the declarations a reference could resolve to |
 | `format` | the formatted document text; needs an installed formatter |
 
 None of these tools saves text or applies edits. Each grammar is also a text
 resource at `cursiv://grammar/<languageId>`.
 
-## Select a language or document {#picking-the-language}
+## Select a language or document
 
-`grammar` and `rule` take a `languageId`. `validate` takes `text` plus a
-`languageId` or a `file` name whose extension or name selects the language,
-even when only one language is registered; with both, `languageId` selects the
-language and `file` names the document. Other tools take an existing
-document's `file` path or URI.
+`grammar` and `rule` take a `languageId`. `validate` takes the `text` and a
+`languageId` or a `file` name, whose extension or name selects the language.
+It needs one of the two even when only one language is registered. With both,
+`languageId` selects the language and `file` names the document. The other
+tools take the `file` path or URI of a document in the workspace.
 
 Positions use **1-based lines and columns**, with columns in UTF-16 code
 units; ranges exclude their end.
 
-## Advanced: add a tool {#installing-your-own}
+## Advanced: add a tool
 
-The scaffold installs the standard service. To add tools, derive from
+The language server installs the standard tools. To add tools, derive from
 `LspMcpService` and extend `createServer`:
 
 ```cpp
@@ -82,6 +83,7 @@ void install_mcp_service(cursiv::SharedLspServices& sharedServices) {
 }
 ```
 
-Call `install_mcp_service` while registering your language services, before
-the runner starts a session. A core-only application derives from
-`DefaultMcpService`, which has the same tools except `format`.
+Call `install_mcp_service` from the function that registers your languages
+(`register_lsp_services` in the scaffold), so it runs before the server
+starts. A core-only application derives from `DefaultMcpService`, which has
+the same tools except `format`.

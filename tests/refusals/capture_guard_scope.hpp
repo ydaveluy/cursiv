@@ -1,4 +1,4 @@
-// expect LR: refused: terminal .OUTER. echoes a mark<> not set in its scope
+// expect LR: refused: terminal .OUTER. uses .same<>. where a .mark<>. with its tag is not set on every path before it
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

@@ -163,6 +163,27 @@ void json_ignores_stream_number_formatting() {
   CHECK(actual.flags() == flags);
 }
 
+// A node is named by the AST class it built: the grammar has no name for the
+// record of a rule that builds a node. Where a node spans its whole parent,
+// the two share a record, and the parent's class is shown.
+void the_dump_names_the_ast_classes() {
+  const auto parser = ws::generated::Workspace::create_parser();
+  for (const auto& [source, expected] :
+       {std::pair{"datatype A datatype B",
+                  "Workspace [0..21)\n  DataType [0..10)\n"},
+        std::pair{"datatype A", "Workspace [0..10)\n   [0..8)"}}) {
+    cursiv::Document document(
+        cursiv::TextDocument::create("file:///a.ws", "workspace", 0, source));
+    document.parseResult = parser->parse(document.textDocument().getText());
+    std::ostringstream text, json;
+    cursiv::dump_cst(document, parser->getGrammar(), text);
+    cursiv::dump_cst_json(document, parser->getGrammar(), json);
+    CHECK(text.str().starts_with(expected));
+    CHECK(json.str().starts_with(
+        "{\"element\":\"\",\"type\":\"Workspace\","));
+  }
+}
+
 void text_dump_escapes_control_bytes() {
   const auto parser = ws::generated::Workspace::create_parser();
   cursiv::Document document(cursiv::TextDocument::create(
@@ -307,6 +328,7 @@ int main() {
   diagnostics_use_byte_columns_and_all_line_terminators();
   json_keeps_a_cst_without_an_ast();
   json_ignores_stream_number_formatting();
+  the_dump_names_the_ast_classes();
   text_dump_escapes_control_bytes();
   json_replaces_invalid_utf8_without_changing_the_document();
   root_documents_are_reused_and_references_resolve();

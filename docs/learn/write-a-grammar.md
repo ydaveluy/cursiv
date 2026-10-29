@@ -1,8 +1,9 @@
 # Write a grammar
 
-This guide writes the grammar of a small calculator language step by step,
-then checks the tree it builds. The [grammar reference](../reference/grammar.md)
-gives the exact rules. Programs in the finished language look like this:
+In this guide, you write the grammar of a small calculator language step by
+step, then check the tree it builds. The
+[grammar reference](../reference/grammar.md) gives the exact rules. Programs in
+the finished language look like this:
 
 ```text title="example/hello.calc"
 // A definition names an expression; an evaluation computes one.
@@ -14,8 +15,7 @@ area(2);
 
 ## 1. Set up the project
 
-Create a project named `Calc`, as in [Create a project](scaffold.md), and
-replace `example/hello.calc` with the program above:
+Create a project named `Calc`, as in [Create a project](scaffold.md):
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
@@ -23,7 +23,8 @@ cmake -DNAME=Calc -P cursiv-new.cmake
 cd calc
 ```
 
-The grammar fills these AST classes. Replace `src/calc/core/ast.hpp` with:
+Replace `example/hello.calc` with the program above. Then replace
+`src/calc/core/ast.hpp` with the AST classes that the grammar fills:
 
 ```cpp title="src/calc/core/ast.hpp"
 #pragma once
@@ -169,14 +170,14 @@ using entry = Model;
 |---|---|
 | `ref<R>` | Call the terminal or rule `R`. |
 | `a + b` | Read `a`, then `b`. |
+| `a | b` | Read `a` or `b`. |
 | `assign<&T::m>(e)` | Store the value of `e` in the member `m`. |
 | `append<&T::m>(e)` | Add the value of `e` to the list `m`. |
 
-`a | b` reads `a` or `b`. A rule builds the class whose members it writes:
-`Model` builds an `ast::Model` and `Evaluation` an `ast::Evaluation`.
-`Statement` writes nothing, so it returns the node of the rule it calls. Put
-`append` inside the repetition, as in `Model`, so that each turn adds one
-statement.
+A rule builds the class whose members it writes: `Model` builds an
+`ast::Model` and `Evaluation` an `ast::Evaluation`. `Statement` writes nothing,
+so it returns the node of the rule it calls. Put `append` inside the
+repetition, as in `Model`, so that each turn adds one statement.
 
 A rule can only name rules declared above it. The four declarations at the top
 let rules name rules defined further down. `entry` is the rule that reads a
@@ -279,8 +280,8 @@ The command line prints `example/hello.calc: ok`, or the line and column of a
 syntax error. Add `--dump` to print the concrete syntax tree (CST), one node
 per line with its source range. Unlike the AST, the CST keeps the parentheses.
 
-Then pin the tree in a test. In `tests/grammar_test.cpp`, keep the setup and
-replace the final size check with:
+Then check the tree in a test. In `tests/grammar_test.cpp`, keep the setup.
+Replace the final size check with:
 
 ```cpp
 if (model.statements.size() != 4)

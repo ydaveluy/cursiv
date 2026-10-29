@@ -1,5 +1,5 @@
 // Tokens are not a node: a nest behind them has an empty node to bury.
-// expect LR: has a nest<> with nothing in front of it
+// expect LR: has a nest<> with nothing before it
 #pragma once
 
 #include "refusals/head.hpp"

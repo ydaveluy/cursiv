@@ -36,14 +36,14 @@ if (root == nullptr)
 const auto& model = *root;
 ```
 
-`create_language` sets up your language services. The parser alone does not
-resolve references or run validation. `ast_cast<T>` returns null when the node
-is not a `T`.
+`create_language` sets up the services of your language. `ast_cast<T>`
+returns null when the node is not a `T`. The parser alone does not resolve
+references or run validation: the next section does both.
 
-## Checking your validation
+## Check your validation
 
-Add a test executable for validation. It links `cursiv::lsp` for the
-diagnostic helpers:
+Add a test executable for your checks. It links `cursiv::test` for the test
+helpers and `cursiv::lsp`, which the diagnostic helpers also need:
 
 ```cmake title="tests/CMakeLists.txt"
 add_executable(recipe_validation_test validation_test.cpp)
@@ -101,24 +101,36 @@ int main() {
 }
 ```
 
-`validationHelper` builds a document and returns its diagnostics.
-`expectError` and `expectWarning` take a message and optional filters, such as
-an offset, a diagnostic code or an AST property. `dispose()` removes the
-document when you are done.
+`validationHelper` parses, links and validates the text, and returns the
+diagnostics. `expectError` and `expectWarning` take the expected message and
+optional filters, such as an offset, a diagnostic code or an AST property.
+`expectNoIssues` expects no diagnostic at all. `dispose()` removes the document
+from the workspace.
 
-`count_expectations()` collects the failures of the `expect*` helpers, and
-`report` prints the verdict and returns the exit code that CTest reads. For
-your own assertions, use `CHECK(condition)` from `cursiv/test/Check.hpp`.
+Without `count_expectations()`, the first failed `expect*` throws an exception.
+With it, each failure prints a message and the test goes on. `report` prints
+the result and returns the exit code that CTest reads. For your own
+assertions, use `CHECK(condition)` from `cursiv/test/Check.hpp`.
 
-## Checking the editor's answers
+## Check editor features
 
-The same module tests editor features. In the input text, `<|>` marks the
-cursor and `<| |>` wraps the range the result must cover:
+The test module also checks editor features. These checks need the language
+server services: link the test to `recipeLsp` and `cursiv::test`, and create
+the services with the scaffold's `register_lsp_services`, as the language
+server does. In the input text, `<|>` marks the cursor and `<|text|>` marks an
+expected range:
 
 ```cpp
+#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/test/ExpectedHover.hpp"
+#include "recipe/lsp/LspModule.hpp"
 
-// `services` is a RecipeServices container with core and LSP modules installed.
+recipe::RecipeSharedServices shared;
+cursiv::install_default_shared_lsp_services(shared);
+recipe::register_lsp_services(shared);
+const auto& services = dynamic_cast<const recipe::RecipeServices&>(
+    *shared.serviceRegistry->all().front());
+
 (void)ct::expectHover(services,
                       {.text = "/** The gram unit. */\nunit gram\n"
                                "ingredient Flour in g<|>ram\n",
@@ -132,7 +144,7 @@ references, highlights, rename, symbols, folding, semantic tokens and
 formatting have similar helpers, listed in
 [Test module](../reference/test.md#check-editor-features).
 
-## Further checks
+## Other tests
 
 The examples also include fuzz tests, which generate documents and check
 their trees, and recovery tests, which compare repairs of broken input. See

@@ -1,17 +1,35 @@
 # Services
 
 A service implements one part of a language, such as parsing, validation or
-an editor feature; the CLI, the language server and tests share them.
-**Shared services** (documents, symbol index, document builder, language
-registry) belong to the workspace, which several languages can share.
-**Language services** (parser, name resolution, validation, editor providers)
-belong to one language. The scaffold declares both in `core/CoreServices.hpp`
-and `lsp/LspServices.hpp`.
+an editor feature. The CLI, the language server and tests use the same
+services.
+
+## Containers
+
+Services live in four containers:
+
+| | Core | LSP |
+|---|---|---|
+| **Shared**: one per workspace | `SharedCoreServices` | `SharedLspServices` |
+| **Language**: one per language | `CoreServices` | `LspServices` |
+
+- **Shared services** serve the whole workspace and every language in it:
+  documents, index, document builder.
+- **Language services** belong to one language: parser, scoping, validation,
+  editor providers. They reach the shared services through `services.shared`.
+- **Core services** are what the CLI, tests and programs need. **LSP
+  services** add the editor features. An LSP container extends the core one,
+  so a language server has both.
+
+The scaffold derives the four in `core/CoreServices.hpp`
+(`MyLangSharedCoreServices`, `MyLangCoreServices`) and `lsp/LspServices.hpp`
+(`MyLangSharedServices`, `MyLangServices`).
 
 ## Replace a service
 
-The framework installs default services, then calls your
-`install_core_module`, where assigning a member replaces its default:
+The framework installs the default services, then calls your module
+functions. Assign a member there to replace its default. Replace language
+services in `install_core_module`:
 
 ```cpp title="core/CoreModule.cpp"
 void install_core_module(MyLangCoreServices& services) {
@@ -21,27 +39,108 @@ void install_core_module(MyLangCoreServices& services) {
 }
 ```
 
-Editor providers are replaced the same way in `install_lsp_module`, after
+Replace editor providers the same way in `install_lsp_module`, after
 `cursiv::install_default_lsp_services(services)`.
 
-| Service | Purpose |
-|---|---|
-| `nameProvider` | Name an AST node |
-| `scopeComputation` | Collect exported and local symbols |
-| `scopeProvider` | Find symbols visible from a reference |
-| `validationRegistry` | Register checks for AST types |
-| `documentationProvider` | Supply documentation for hover |
-| `formatter` | Define formatting rules (LSP services) |
+Replace shared services in the function that registers your languages
+(`register_lsp_services` in the scaffold). It runs after the shared defaults
+are installed:
+
+```cpp title="lsp/LspModule.cpp"
+bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
+  auto& shared = dynamic_cast<MyLangSharedServices&>(sharedServices);
+  shared.executeCommandHandler = std::make_unique<MyCommandHandler>();
+  // ...then create and register the language services, as the scaffold does.
+}
+```
 
 Recipes show complete examples: [scoping](../recipes/scoping.md),
 [case-insensitive names](../recipes/case-insensitive.md) (a `MyScopeProvider`),
 [validation](../recipes/validation.md) and [formatting](../recipes/formatting.md).
 
-The default editor providers cover completion, hover, definition, references,
-rename, symbols, folding, selection ranges, semantic tokens and quick fixes.
-Call and type hierarchies, signature help, inlay hints and formatting need a
-provider of your own; formatting is advertised only once a formatter is
-installed.
+## Service list
+
+The **Default** column says what provides a service when you do not: the
+framework, the module generated from your grammar, or nothing.
+
+### Shared core services
+
+| Service | Purpose | Default |
+|---|---|---|
+| `documents` | Hold the documents of the workspace | Framework |
+| `documentFactory` | Create a document from a URI or a text | Framework |
+| `documentBuilder` | Build documents through the [lifecycle](#document-lifecycle), and rebuild them after a change | Framework |
+| `indexManager` | Index the exported symbols and references of every document | Framework |
+| `serviceRegistry` | Hold the registered languages and find a document's language | Framework |
+| `workspaceManager` | Load the documents of the workspace folders | Framework |
+| `fileSystemProvider` | Read files and folders | An empty file system; the CLI and the language server read the disk |
+| `workspaceLock` | Run workspace updates one at a time, and let requests read the workspace between them | Framework |
+| `taskScheduler` | Run builds in parallel; `CURSIV_WORKERS` sets the number of worker threads | Framework |
+| `observabilitySink` | Report problems that are not document diagnostics, such as an unreadable file or a check that threw | Standard error |
+
+### Language core services
+
+| Service | Purpose | Default |
+|---|---|---|
+| `languageMetaData` | Give the language id and file extensions | Generated |
+| `parser` | Parse a document's text | Generated |
+| `astReflection` | Describe the AST types | Generated |
+| `grammarSource` | Give the grammar's text to tools such as MCP | Generated |
+| `nameProvider` | Give the name of an AST node | Framework |
+| `scopeComputation` | Collect exported and local symbols | Framework |
+| `scopeProvider` | Find symbols visible from a reference | Framework |
+| `linker` | Resolve references | Framework |
+| `references` | Find the references to a declaration | Framework |
+| `astNodeLocator` | Give a node's path in its document, and the node at a path | Framework |
+| `astNodeDescriptionProvider` | Describe an exported node for the index | Framework |
+| `referenceDescriptionProvider` | Describe a reference for the index | Framework |
+| `documentationProvider` | Give the documentation shown by hover and completion | Framework |
+| `commentProvider` | Find the comment written above a node, by default in a hidden terminal named `ML_COMMENT` | Framework |
+| `validationRegistry` | Register checks for AST types | Framework |
+| `documentValidator` | Report a document's parse errors and run its checks | Framework |
+
+### Shared LSP services
+
+| Service | Purpose | Default |
+|---|---|---|
+| `languageServer` | Handle the client's requests | Framework |
+| `languageClient` | Send messages to the client | Set during a session |
+| `configurationProvider` | Read the client's settings | Framework |
+| `workspaceSymbolProvider` | Search symbols across the workspace | Framework |
+| `nodeKindProvider` | Give the symbol and completion kind of a node | Framework |
+| `fuzzyMatcher` | Match typed text against names, for completion and symbol search | Framework |
+| `mcpService` | Serve the [MCP tools](mcp.md) | Installed by the language server |
+| `executeCommandHandler` | Run the commands a client requests | None |
+| `fileOperationHandler` | React when files are created, renamed or deleted | None |
+| `textDocumentContentProvider` | Give the text of virtual documents | None |
+
+### Language LSP services
+
+The server advertises an editor feature only when its provider is installed.
+
+| Service | Feature | Default |
+|---|---|---|
+| `completionProvider` | Completion | Framework |
+| `hoverProvider` | Hover | Framework |
+| `definitionProvider` | Go to definition | Framework |
+| `referencesProvider` | Find references | Framework |
+| `documentHighlightProvider` | Highlight related occurrences | Framework |
+| `renameProvider` | Rename | Framework |
+| `documentSymbolProvider` | Document outline | Framework |
+| `foldingRangeProvider` | Folding | Framework |
+| `selectionRangeProvider` | Expand selection | Framework |
+| `semanticTokenProvider` | Semantic highlighting | Framework |
+| `codeActionProvider` | Quick fixes | Framework |
+| `formatter` | Formatting rules, see [Formatting](../recipes/formatting.md) | None |
+| `declarationProvider` | Go to declaration | None |
+| `typeDefinitionProvider` | Go to type definition | None |
+| `implementationProvider` | Go to implementation | None |
+| `callHierarchyProvider` | Call hierarchy | None |
+| `typeHierarchyProvider` | Type hierarchy | None |
+| `signatureHelpProvider` | Signature help | None |
+| `inlayHintProvider` | Inlay hints | None |
+| `documentLinkProvider` | Document links | None |
+| `codeLensProvider` | Code lenses | None |
 
 ## Translate the text before parsing
 
@@ -64,15 +163,16 @@ void install_core_module(MyLangCoreServices& services) {
 }
 ```
 
-Call `replace(begin, end, spelling)` in source order; the text between calls
-is kept. `out.error(begin, end, message)` reports a malformed piece. A
-document the translator leaves untouched is parsed as it is. A language
-composes all its phases in one translator: `translating_parser` refuses a
-parser that already translates.
+Call `replace(begin, end, spelling)` in source order, without overlaps; the
+text between calls is kept. `out.error(begin, end, message)` reports a
+malformed piece. A document the translator leaves untouched is parsed as it
+is. Put all the rewrites in one translator: `translating_parser` throws
+`std::invalid_argument` for a parser that already translates.
 
-The parser reads the translated text, so AST values are decoded (`f\u006fo`
-reads `foo`). Syntax-tree spans, diagnostics, completion and the other editor
-features keep the document's positions.
+The parser reads the translated text, so AST values hold the decoded text
+(`f\u006fo` gives `foo`). Positions in the syntax tree, diagnostics,
+completion and the other editor features still refer to the original
+document.
 
 ## Use a language from a program
 
@@ -88,35 +188,36 @@ const auto language = cursiv::create_language<
 ```
 
 `language.language` gives the language services and `*language.shared` the
-workspace. Keep the returned object alive while using them. See
+shared services. Keep the returned object alive while you use them. See
 [Read the AST from a program](../learn/consume-the-ast.md) and
 [Several languages](../recipes/multiple-languages.md).
 
 ## Document lifecycle
 
-`DocumentBuilder` builds each document from `Changed` through these states,
-in order:
+A new or edited document is `Changed`. The `documentBuilder` moves it
+through these states, in order:
 
 | State | Available result |
 |---|---|
 | `Parsed` | The CST and AST |
 | `IndexedContent` | Exported symbols in the workspace index |
-| `ComputedScopes` | Local symbols; references can now resolve on access |
+| `ComputedScopes` | Local symbols; a reference resolves when you read it |
 | `Linked` | Resolved references or linking errors |
 | `IndexedReferences` | Reference information for navigation and dependency tracking |
 | `Validated` | Built-in diagnostics and registered validation checks |
 
 A build stops at `IndexedReferences` with `BuildOptions{.validation = false}`.
-After an edit, `DocumentBuilder.update` rebuilds the changed document and the
-references it affects; the `Document` stays the same object, but its trees may
-be replaced.
+After an edit, `documentBuilder->update` rebuilds the changed documents and
+the documents that depend on them. Each `Document` stays the same object, but
+its trees may be replaced.
 
-To customize scopes, collect workspace-wide symbols in
-`collectExportedSymbols` and document-local ones in `collectLocalSymbols`.
-Never resolve references in these methods: other documents' scopes may not be
-ready. The default `ScopeProvider` then lists the candidates visible from a
-reference, from the nearest enclosing container outward, then the global
-index; the linker and completion both use them.
+To customize scopes, override `collectExportedSymbols` (symbols other
+documents can see) and `collectLocalSymbols` (symbols visible inside the
+document) in a custom `scopeComputation`. Do not resolve references in these
+methods: the scopes of other documents may not be ready yet. The default
+`scopeProvider` then looks for a reference's candidates from the nearest
+enclosing container outward, then in the global index. The linker and
+completion both use these candidates.
 
 ## Advanced: add a service
 
@@ -131,6 +232,7 @@ std::unique_ptr<const MyAnalysis> analysis;
 services.analysis = std::make_unique<const MyAnalysis>(services);
 ```
 
-Pass the services container to the constructor and read other services through
-it, so customized implementations are used. A validator also registers its
-methods with `validationRegistry`; see [Custom validation](../recipes/validation.md).
+Pass the services container to the constructor and read other services
+through it, so that your service uses the ones you replaced. A validator also
+registers its methods with `validationRegistry`; see
+[Custom validation](../recipes/validation.md).

@@ -163,53 +163,29 @@ LrShapeId LrLowerer::lay_flag(unsigned cfg, ImageId e) {
 LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   switch (n.kind) {
-    case ImageKind::ref:
-      return lay_ref(cfg, n.a);
-    case ImageKind::epsilon:
-      return _p.push(LrLowerNode{LrShape::none});
     case ImageKind::eof:
       return mark(cfg, _p.push(LrLowerNode{LrShape::end}));
-    case ImageKind::embed:
-      return lay_embed(cfg, e);
-    case ImageKind::seq:
-      return gap(e) ? lay_gap(cfg, e) : lay_seq(cfg, e);
-    case ImageKind::choice:
-      return gap(e) ? lay_gap(cfg, e)
-                    : lay_kids(cfg, LrShape::alt, kids_of(n));
     case ImageKind::unordered:
       return lay_unordered(cfg, e);
-    case ImageKind::repeat:
-      return lay_repeat(cfg, e);
     case ImageKind::skip:
       return lay_skip(cfg, e);
     case ImageKind::create:
     case ImageKind::nest:
       return lay_made(cfg, e);
-    case ImageKind::assign:
-    case ImageKind::append:
-      return lay_write(cfg, e);
-    case ImageKind::flag:
-      return lay_flag(cfg, e);
-    case ImageKind::gapHas:
-    case ImageKind::gapIs:
-    case ImageKind::andOf:
-      return lay_gap(cfg, e);
     case ImageKind::notOf: {
       const ImageNode k = at(kid(n, 0));
       if (k.kind == ImageKind::trigger) {
         const Cut cut = cut_prefix(kid(k, 0));
         if (cut.ok && cut.guards.empty()) return lay_stop(cfg, e, cut);
       }
-      return lay_gap(cfg, e);
+      return lay_condition(cfg, e);
     }
-    case ImageKind::implied:
-      return lay_implied(cfg, e);
-    default:  // a token, or a combinator `terminal_sym` refuses
-      return push_sym(terminal_sym(cfg, e), cfg);
+    default:
+      return lay_shared(cfg, e, n);
   }
 }
 
-LrShapeId LrLowerer::lay_gap(unsigned cfg, ImageId e) {
+LrShapeId LrLowerer::lay_condition(unsigned cfg, ImageId e) {
   const std::uint16_t k = gap_cond(cfg, e);
   if (_p.gapNt.size() <= k) _p.gapNt.resize(k + 1u, 0);
   if (_p.gapNt[k] == 0) {

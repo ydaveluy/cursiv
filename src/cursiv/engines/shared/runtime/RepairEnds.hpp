@@ -37,10 +37,7 @@ struct RepairEnds {
     };
     const auto advance = [&](TextOffset& i, const auto& keep) {
       if (i >= r.end) return true;
-      const std::uint64_t left = maxWork > work ? maxWork - work : 0;
-      const std::uint64_t bytes = left > ~std::uint64_t{0} / kRepairLexBytes
-                                      ? ~std::uint64_t{0}
-                                      : left * kRepairLexBytes;
+      const std::uint64_t bytes = repair_bytes(work, maxWork);
       const TextOffset cap = std::min(
           upto, r.end - i > bytes ? static_cast<TextOffset>(i + bytes) : r.end);
       while (i < r.end && i < cap && keep(i)) {

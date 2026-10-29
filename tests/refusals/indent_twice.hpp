@@ -1,5 +1,5 @@
 // Two indent terminals: the indentation answers one of each.
-// expect LR: refused: terminal .OPEN. declares two indent terminals, or two dedent terminals
+// expect LR: refused: terminal .OPEN. is a second .indent. or .dedent. terminal
 #pragma once
 
 #include "refusals/head.hpp"

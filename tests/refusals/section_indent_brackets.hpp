@@ -1,6 +1,6 @@
 // A grammar that names the brackets indentation is blind inside of, embedded:
 // its lines would be measured against the embedding document's.
-// expect LR: a grammar embedded with .section<>. reads no indentation
+// expect LR: a grammar embedded with .section<>. cannot use indentation
 #pragma once
 
 #include "refusals/head.hpp"

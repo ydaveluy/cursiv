@@ -1,7 +1,7 @@
 // A section closed by `a!`, whose grammar reads runs of `a` around a `?` with
 // a terminal that calls itself: no text of it starts with `a!`, but the check
 // does not follow a call, so the grammar is generated with a warning.
-// expect LR: warning: terminal .a!. closes a .section<>., and the check that .Inner::RUN., a terminal its grammar reads, neither reads it nor begins with it could not be completed
+// expect LR: warning: terminal .a!. closes a .section<>., but the generator could not check that .Inner::RUN., a terminal of the embedded grammar, neither matches it nor starts with it
 #pragma once
 
 #include "refusals/head.hpp"

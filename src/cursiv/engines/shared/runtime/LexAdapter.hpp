@@ -89,6 +89,18 @@ concept LexDeclaresRelays = requires { Ad::kRelays; };
 template <class Ad>
 concept LexAnnouncesRelays = requires { requires Ad::kRelays; };
 
+// A tape that reads a position again without the terminals a refused word took
+// off it names that tape `Skipping`, which holds them in `skip`: a skipping
+// tape names itself, and any other reads a refused word again through it
+// (`lex_unrefused`).
+template <class Ad>
+concept LexSkipping = std::same_as<Ad, typename Ad::Skipping>;
+template <class Ad>
+concept LexRereads = requires {
+  typename Ad::Skipping;
+  requires Ad::kRefuses && !LexSkipping<Ad>;
+};
+
 // The acceptance the adapter announces is the one it offers: `qualified` where
 // `kQualified` is true, the fallback where it is false, either where it
 // announces nothing.

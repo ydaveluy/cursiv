@@ -26,6 +26,24 @@ struct EmitOutput {
   }
 };
 
+// A row as a designated initializer that spells only the fields off their
+// default: the member initializers write the rest.
+struct EmitFields {
+  std::string text;
+
+  template <class V>
+  void operator()(std::string_view name, V v, V def, std::string_view pre = "",
+                  std::string_view post = "") {
+    if (v != def)
+      std::format_to(std::back_inserter(text), ",.{}={}{}{}", name, pre, v,
+                     post);
+  }
+  // The fields, without the comma before the first.
+  std::string_view list() const {
+    return std::string_view(text).substr(text.empty() ? 0 : 1);
+  }
+};
+
 // The cells of `items`, `sep` between two.
 template <class Items, class Cell = std::identity>
 std::string join(const Items& items, std::string_view sep, Cell cell = {}) {

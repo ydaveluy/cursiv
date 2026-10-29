@@ -191,7 +191,7 @@ struct LexAlphabet {
     }
     auto n = static_cast<unsigned>(seen.size());
     if (n > 0xffu) {
-      A.cap_hit("the 8-bit count of byte classes");
+      A.cap_hit("its terminals need more than 255 classes of bytes");
       for (unsigned b = 0; b < 256; ++b)
         if (A.cls[b] > 0xfeu) A.cls[b] = 0xfe;
       n = 0xff;

@@ -1,5 +1,5 @@
 // `A -> B`, `B -> A`: the reduction derives itself and never stops.
-// expect LR: refused .unitProductionCycle..*rule .A. stands on a cycle of reductions that read no text.*cycle: .A. -> .B. -> .A.
+// expect LR: refused .unitProductionCycle..*rule .A. is part of a cycle of rules that call each other without matching any text.*cycle: .A. -> .B. -> .A.
 // expect LL: refused .leftRecursion..*rule .A. reaches itself before matching anything.*cycle: .A. -> .B. -> .A.
 #pragma once
 

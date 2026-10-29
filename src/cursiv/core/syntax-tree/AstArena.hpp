@@ -40,11 +40,12 @@ class AstArena {
   template <class T>
   T* make() {
     static_assert(std::is_base_of_v<AstNode, T>,
-                  "every AST node derives from cursiv::AstNode");
+                  "an AST node type must derive from cursiv::AstNode");
     static_assert(std::is_trivially_destructible_v<T>,
-                  "an AST node owns nothing: its lists are the arena's and a "
-                  "plural reference's targets are its home's, so the tree is "
-                  "freed as one block and no destructor ever runs");
+                  "an AST node must be trivially destructible: the tree is "
+                  "freed as one block and never runs a destructor, so a node "
+                  "member must not own memory. Use `vector<T>` for lists and "
+                  "`string_view` for text");
     // A default-constructed arena borrows nothing: `make` on it would
     // dereference null rather than say what is missing.
     assert(_mem != nullptr && "AstArena needs a memory resource before make()");

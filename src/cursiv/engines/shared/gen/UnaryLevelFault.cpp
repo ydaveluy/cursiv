@@ -181,7 +181,7 @@ GrammarFault unary_level_fault(GrammarImage& image,
         const std::string to = std::to_string(b + 1);
         if (!listed && binary)
           fault.part = "the postfix operator on level " + at +
-                       " with the binary operator on level " + to;
+                       " and the binary operator on level " + to;
         else if (!listed)
           fault.part = std::string(levels[a].group == ImageGroup::prefix
                                        ? "the prefix"

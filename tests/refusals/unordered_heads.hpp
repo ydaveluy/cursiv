@@ -1,4 +1,4 @@
-// expect LR: this alternative can create twice
+// expect LR: this alternative can create two nodes
 #pragma once
 
 #include "refusals/head.hpp"

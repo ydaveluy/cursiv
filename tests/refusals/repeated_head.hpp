@@ -1,6 +1,6 @@
 // A helper rule that repeats a node: each turn is a head of its own, and the
 // rule hands over only the first.
-// expect LR: this alternative can create twice.*each turn of a repetition
+// expect LR: this alternative can create two nodes.*each turn of a repetition
 #pragma once
 
 #include "refusals/head.hpp"

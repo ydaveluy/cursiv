@@ -1948,7 +1948,7 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   refuse_section_lookahead(b);
   settle_repair(b);
   settle_fusion(b);
-  if (b.writes.capped) b.cap_hit("the chain pool");
+  if (b.writes.capped) b.cap_hit(kTooManyChains);
   detail::ll_build_lexer(b);
   if (b.cfg.lowerFail()) return b;
   settle_after_states(b);

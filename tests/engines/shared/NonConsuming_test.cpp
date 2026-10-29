@@ -265,25 +265,27 @@ void run() {
         para[0] == cursiv::DeadBranch{"Para", "ADORN !. EOL", "", 2, 2, "EOL"});
   CHECK(texts(para) ==
         std::vector<std::string>{
-            "rule `Para`: branch 2 of 2 `ADORN !. EOL` is never read -- `EOL` "
-            "stands after `eof`, which nothing can follow"});
+            "rule `Para`: branch 2 of 2 `ADORN !. EOL` can never match -- "
+            "`EOL` comes after `eof`, and nothing can follow the end of "
+            "input"});
   CHECK(lowers<Paragraph>());
   CHECK(!lr_reads<Paragraph>("ADORN") && lr_reads<Paragraph>("EOL"));
 
   CHECK(texts(dead<Conditions>()) ==
         std::vector<std::string>{
-            "rule `Ended`: branch 1 of 2 `!.` in `!. | B` is never read -- "
-            "`C` stands after `eof`, which nothing can follow",
-            "rule `Guarded`: branch 1 of 2 `ADORN !B !. C` is never read -- "
-            "`C` stands after `eof`, which nothing can follow"});
+            "rule `Ended`: branch 1 of 2 `!.` in `!. | B` can never match -- "
+            "`C` comes after `eof`, and nothing can follow the end of input",
+            "rule `Guarded`: branch 1 of 2 `ADORN !B !. C` can never match -- "
+            "`C` comes after `eof`, and nothing can follow the end of "
+            "input"});
   CHECK(lowers<Conditions>());
   CHECK(lr_count<Conditions>("Ended") == 1);
   CHECK(lr_count<Conditions>("Guarded") == 1 && !lr_reads<Conditions>("ADORN"));
 
   CHECK(texts(dead<Optional>()) ==
-        std::vector<std::string>{"rule `Root`: `EOL?` is never read -- it "
-                                 "stands after `eof`, which nothing can "
-                                 "follow"});
+        std::vector<std::string>{"rule `Root`: `EOL?` can never match -- it "
+                                 "comes after `eof`, and nothing can follow "
+                                 "the end of input"});
   CHECK(lowers<Optional>());
   CHECK(lr_count<Optional>("Root") == 1 && !lr_reads<Optional>("EOL"));
 
@@ -576,9 +578,10 @@ std::size_t arms(const char* rule) {
 void run() {
   CHECK(said<Operator>() ==
         std::vector<std::string>{
-            "rule `E`: the arm `E '+' E` begins and ends with `E`, which says "
-            "nothing of how its operands nest -- declare the operators with "
-            "infix<>, or give each level its own rule (`E := E + T | T`)"});
+            "rule `E`: the alternative `E '+' E` begins and ends with `E`, so "
+            "it does not say how its operands group -- declare the operators "
+            "with `infix<>`, or give each level its own rule "
+            "(`E := E + T | T`)"});
   CHECK(arms<Juxtaposed>("E") == 1);
   CHECK(arms<Mixfix>("E") == 1);
   CHECK(arms<Wrapped>("E") == 1);
@@ -746,9 +749,9 @@ void run() {
   CHECK(names<Direct>("Root", "(X+)*"));
   CHECK(said<Direct>() ==
         std::vector<std::string>{
-            "rule `Root`: `(X+)*` repeats a run, so a run of items reads as "
-            "one group or as several and the election picks one -- write one "
-            "repetition unless the groups are wanted"});
+            "rule `Root`: `(X+)*` repeats a repetition, so a run of items can "
+            "be split into groups in several ways and the parser picks one -- "
+            "write one repetition unless the groups matter"});
   CHECK(names<Twice>("Root", "(X+)+"));
   CHECK(names<Behind>("Root", "Xs*"));
   CHECK(names<Chained>("Root", "Mid*"));
@@ -849,10 +852,9 @@ void run() {
   if (plain.size() == 1)
     CHECK(cursiv::word_lit_warning_text(plain[0]) ==
           "rule `Root`: `'begin'` is a literal with no guard that ends in a "
-          "word character, so it also matches the start of a longer word, as "
-          "`lit<\"end\">` matches `end` in `endx` -- write `kw<\"begin\">`, "
-          "or give the literal a guard (`lit<\"begin\", G>`) if that is "
-          "intended");
+          "word character, so it also matches the start of a longer word, "
+          "such as `beginx` -- write `kw<\"begin\">`, or give the literal a "
+          "guard (`lit<\"begin\", G>`) if that is intended");
   CHECK(found<Twice>() == std::vector<W>{{"Root", "'item'", "item"},
                                          {"Item", "'item'", "item"}});
   CHECK(found<Spared>().empty());
@@ -1018,7 +1020,7 @@ LlBody ll_body(std::string_view rule) {
 
 std::string branch(std::string_view spelled, std::string_view over) {
   return "rule `Root`: branch 2 of 2 `" + std::string(spelled) +
-         "` reads the same tokens as " + std::string(over) +
+         "` matches the same tokens as " + std::string(over) +
          ", so it is never chosen and is dropped -- merge the branches, or "
          "reorder them";
 }
@@ -1032,15 +1034,14 @@ void run() {
   CHECK(texts<Data>() == V{branch("b=Label", "branch 1")});
   CHECK(texts<Left>() == V{branch("b=ID", "branch 1")});
   CHECK(texts<Union>() ==
-        V{"rule `Root`: branch 3 of 3 `b=ID ';'?` reads the same tokens as "
+        V{"rule `Root`: branch 3 of 3 `b=ID ';'?` matches the same tokens as "
           "branches 1 and 2, so it is never chosen and is dropped -- merge the "
           "branches, or reorder them"});
   CHECK(texts<Items>() ==
-        V{"rule `Root`: `(b=ID)?` reads the same tokens as the earlier "
-          "`(a=ID)?`, "
-          "so reading it in place of that item is never chosen and is dropped "
-          "-- merge the two items, or nest the second in the first, as "
-          "`option(a + option(b))`"});
+        V{"rule `Root`: `(b=ID)?` matches the same tokens as the earlier "
+          "`(a=ID)?`, so it is never chosen in place of that item, and that "
+          "choice is dropped -- merge the two items, or nest the second in the "
+          "first, as `option(a + option(b))`"});
   CHECK(texts<Apart>().empty());
   CHECK(texts<Spelled>().empty());
 

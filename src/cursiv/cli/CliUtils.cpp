@@ -24,8 +24,10 @@
 #include "cursiv/core/services/Diagnostic.hpp"
 #include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
+#include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/core/utils/UriUtils.hpp"
 #include "cursiv/core/utils/Utf8.hpp"
 #include "cursiv/core/workspace/Document.hpp"
@@ -290,6 +292,23 @@ void print_diagnostics(const Document& document, std::string_view displayPath,
   }
 }
 
+// The AST class built at each record, by record id: the grammar names only
+// the records of terminals and data rules. A wrapper can share its content's
+// record; the class kept there is the wrapper's, whose parent sits elsewhere.
+static std::vector<std::string_view> ast_classes(const ParseResult& parsed) {
+  std::vector<std::string_view> classes(parsed.cst().size());
+  for (const AstNode* const node : parsed.nodes) {
+    if (node == nullptr || node->type == nullptr ||
+        node->cstNodeId >= classes.size())
+      continue;
+    const AstNode* const parent = node->parent;
+    if (classes[node->cstNodeId].empty() || parent == nullptr ||
+        parent->cstNodeId != node->cstNodeId)
+      classes[node->cstNodeId] = node->type->name;
+  }
+  return classes;
+}
+
 void dump_cst(const Document& document, const Grammar& grammar,
               std::ostream& out) {
   // Not gated on the AST: the tree is whatever the parser built, and a
@@ -306,6 +325,8 @@ void dump_cst(const Document& document, const Grammar& grammar,
     cursiv::NodeId id;
     int depth;
   };
+  const std::vector<std::string_view> classes =
+      ast_classes(document.parseResult);
   std::vector<Frame> stack{{cst.entry_root(), 0}};
   while (!stack.empty()) {
     const Frame frame = stack.back();
@@ -313,8 +334,12 @@ void dump_cst(const Document& document, const Grammar& grammar,
 
     for (int i = 0; i < frame.depth; ++i) out << "  ";
     const cursiv::CstNode& node = cst[frame.id];
-    out << grammar.recordRule(node) << " [" << node.begin << ".." << node.end
-        << ')';
+    // The AST class first: a token that builds a node, such as a number
+    // literal, is read as that node.
+    const std::string_view name = classes[frame.id].empty()
+                                      ? grammar.recordRule(node)
+                                      : classes[frame.id];
+    out << name << " [" << node.begin << ".." << node.end << ')';
     if (node.hidden != 0) out << " hidden";
     if (node.recovered != 0) out << " recovered";
     if (cst.childless(frame.id)) {
@@ -427,6 +452,8 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     bool close;
     bool comma;
   };
+  const std::vector<std::string_view> classes =
+      ast_classes(document.parseResult);
   std::vector<Frame> stack{{cst.entry_root(), false, false}};
   while (!stack.empty()) {
     const Frame frame = stack.back();
@@ -439,6 +466,10 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
     const cursiv::CstNode& node = cst[frame.id];
     out << "{\"element\":";
     write_json_string(out, grammar.recordRule(node));
+    if (!classes[frame.id].empty()) {
+      out << ",\"type\":";
+      write_json_string(out, classes[frame.id]);
+    }
     out << ",\"begin\":";
     write_json_offset(out, node.begin);
     out << ",\"end\":";

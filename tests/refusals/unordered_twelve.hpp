@@ -1,5 +1,5 @@
 // Twelve items in any order, one past the most either engine spells.
-// expect LR LL: refused: rule .Root. holds an unordered group of too many items
+// expect LR LL: refused: rule .Root. has an unordered group with too many items
 #pragma once
 
 #include "refusals/head.hpp"

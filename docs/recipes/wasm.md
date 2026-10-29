@@ -1,8 +1,8 @@
 # Cross-compiling to WebAssembly
 
-A WebAssembly language server is one module for every platform. The
-scaffold's VS Code client runs it through Node.js, which needs VS Code 1.101
-or later. The steps below use the `wasi-release` preset of a generated
+A WebAssembly language server is one module that runs on every platform.
+The scaffold's VS Code client runs it with Node.js; this requires VS Code
+1.101 or later. The steps below use the `wasi-release` preset of a generated
 project.
 
 ## Install the tools
@@ -16,9 +16,10 @@ export WASI_SDK=$HOME/wasi-sdk-34.0
 
 You can also pass `-DWASI_SDK=/path/to/wasi-sdk` to CMake.
 
-For Release builds, also put `wasm-opt` from
-[Binaryen 120 or later](https://github.com/WebAssembly/binaryen/releases) on
-your `PATH`. Without it, the build skips that optimization.
+For Release builds, also put `wasm-opt` on your `PATH` to optimize the module.
+Take it from a [Binaryen release](https://github.com/WebAssembly/binaryen/releases)
+that supports the WebAssembly features of your wasi-sdk, including exception
+handling. Without it, the build skips this step.
 
 ## Build the server
 
@@ -27,8 +28,8 @@ cmake --preset wasi-release
 cmake --build --preset wasi-release --target mylang_lsp
 ```
 
-CMake still builds and runs the parser generator on your machine. The WASI
-presets use their own build directories, apart from the native ones.
+The parser generator is still built and run natively on your machine. The
+WASI presets use their own build directories, apart from the native ones.
 
 To try the server, select `wasi-release` or `wasi-debug` in VS Code and press
 F5. See [Ship an editor extension](../learn/editor-integration.md).

@@ -23,22 +23,22 @@ struct Person : cursiv::Extends<cursiv::AstNode> {
 | `optional<T>` | An optional value |
 | `variant<Ts...>` | One value from several types |
 | `vector<T>` | A list |
-| `T*` | A contained AST node |
+| `T*` | A child AST node |
 | `reference<T>` | A reference to a named node |
-| `reference<A, B>` | A reference accepting either candidate type |
+| `reference<A, B>` | A reference to a node of type `A` or `B` |
 | `multi_reference<T>` | One name resolving to several nodes |
 
-Text members are `string_view`, never owning strings: they point into the
-source text, or into the `ParseResult` for converted values. Keep both alive
-while reading the AST.
+Text members are `string_view`, never owning strings. They point into the
+source text, or into the `ParseResult` for converted values, so keep both
+alive while you read the AST.
 
 ## `vector<T>` is not `std::vector<T>`
 
-A list of nodes holds pointers: `vector<Person*> persons;`. A `vector<Person>`
-or `std::vector<Person*>` member is rejected, and elements must be trivially
-copyable. The parser fills the list; read it with `size()`, `empty()`,
-`operator[]`, `begin()`, `end()`, `back()`, `data()`, or as a
-`std::span<const T>`.
+A list of nodes holds pointers: `vector<Person*> persons;`. A
+`vector<Person>` or `std::vector<Person*>` member is rejected at compile
+time, and elements must be trivially copyable. The parser fills the list;
+read it with `size()`, `empty()`, `operator[]`, `begin()`, `end()`, `back()`,
+`data()`, or as a `std::span<const T>`.
 
 ## References
 
@@ -55,21 +55,21 @@ Parsing alone does not resolve it: build the document first, as described in
 
 | Access | Result |
 |---|---|
-| `.get()` | The target, or null; for a single candidate type |
+| `.get()` | The target, or null; only with a single candidate type |
 | `.get<T>()` | The target from candidate `T`, or null |
 | `operator->`, `operator*` | The target of a resolved single-candidate reference |
 | `explicit operator bool` | Whether the reference resolved |
 | `.refText` | The name as written |
 | `.state()` | The resolution state |
 
-Check `.get()` for null before using the target. A `multi_reference<T>` reads
-its targets with `.size()` and `.get(index)`, or `.get<T>(index)` with several
-candidate types.
+Check `.get()` for null before you use the target. Read the targets of a
+`multi_reference<T>` with `.size()` and `.get(index)`, or `.get<T>(index)`
+with several candidate types.
 
 ## Identify a node's type
 
-`ast_cast<T>` returns the node as a `T` when its class is `T` or derives from
-it, and null otherwise or for a null node:
+`ast_cast<T>` returns the node as a `T` when its class is `T` or derives
+from `T`. It returns null otherwise, and for a null node:
 
 ```cpp
 const auto* model = cursiv::ast_cast<recipe::ast::Model>(root);

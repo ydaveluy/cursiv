@@ -42,17 +42,18 @@ std::string lex_check_incomplete_text(const Cfg& g,
     return '`' + std::string(g.term_name(t)) + '`';
   };
   const std::string why =
-      " could not be completed: one of them reads text the check does not "
-      "follow, such as a capture, a call, a nested run or a condition -- ";
+      ": one of them uses something the check cannot follow, such as a "
+      "capture, a call, a nested run or a condition -- ";
   if (c.check == LowerFail::sectionEndShared)
-    return "terminal " + name(c.first) + " closes a `section<>`, and the " +
-           "check that " + name(c.second) + ", a terminal its grammar " +
-           "reads, neither reads it nor begins with it" + why +
-           "the parser is built as if they never met";
+    return "terminal " + name(c.first) +
+           " closes a `section<>`, but the generator could not check that " +
+           name(c.second) + ", a terminal of the embedded grammar, neither " +
+           "matches it nor starts with it" + why +
+           "the parser is generated as if they never overlap";
   return "terminals " + name(c.first) + " and " + name(c.second) +
-         " are trivia, and the check that they never read the same text at " +
-         "the same length and rank" + why +
-         "the parser is built as if they never tied";
+         " are trivia, but the generator could not check that they never " +
+         "match the same text with the same length and category" + why +
+         "the parser is generated as if they never do";
 }
 
 }  // namespace cursiv

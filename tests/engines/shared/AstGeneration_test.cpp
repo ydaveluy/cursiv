@@ -12,11 +12,12 @@
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/utils/TypeName.hpp"
 #include "cursiv/engines/ll/gen/LlBuiltProgram.hpp"
-#include "cursiv/engines/ll/gen/ll_ast_registry.hpp"
+#include "cursiv/engines/ll/gen/LlLowering.hpp"
 #include "cursiv/engines/lr/gen/LrBuildTable.hpp"
-#include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
+#include "cursiv/engines/lr/gen/LrLowering.hpp"
 #include "cursiv/engines/shared/gen/AstEmitter.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
+#include "cursiv/engines/shared/gen/AstRowOf.hpp"
 #include "cursiv/engines/shared/gen/GrammarBindings.hpp"
 #include "cursiv/engines/shared/gen/HeadMatcher.hpp"
 #include "cursiv/engines/shared/gen/LexBacktrack.hpp"
@@ -470,9 +471,9 @@ void a_longer_mode_cannot_consume_the_last_slot_twice() {
 void ast_generation_cases_run() {
   astgen::nested_template_arguments_remain_qualified();
   astgen::reflection_only_types_need_no_factory(
-      cursiv::lr_ast_registry<astgen::G>());
+      cursiv::ast_registry<astgen::G, cursiv::LrLowering<astgen::G>>());
   astgen::reflection_only_types_need_no_factory(
-      cursiv::ll_ast_registry<astgen::G>());
+      cursiv::ast_registry<astgen::G, cursiv::LlLowering<astgen::G>>());
   astgen::a_truncated_operator_product_keeps_every_opening();
   astgen::long_refused_words_emit_bounded_functions();
   astgen::named_heads_compare_the_scalars_after_the_same_lead_byte();

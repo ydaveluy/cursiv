@@ -106,15 +106,6 @@ CURSIV_ALWAYS_INLINE inline bool ll_blanks(const LlContext& c,
   return true;
 }
 
-// Whether any terminal is recorded at all: where none is, `pending` is never
-// filled.
-template <const auto& T>
-inline constexpr bool kLlAnyRecorded = [] {
-  for (unsigned t = 0; t < T.nterms; ++t)
-    if (T.terms[t].recorded) return true;
-  return false;
-}();
-
 // The lookahead under one alphabet, where the token in hand does not answer
 // it. A token already read under another is read again: the two alphabets
 // may not agree on where it ends, and the point that asks is the one that

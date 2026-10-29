@@ -1,6 +1,6 @@
 // The same, in a section: the rescuing letter is its grammar's class, which the
 // host's says nothing of.
-// expect LR: a character past ASCII rescues that word
+// expect LR: a character past ASCII after that word lets the guard pass
 #pragma once
 
 #include "refusals/head.hpp"

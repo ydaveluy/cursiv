@@ -1,6 +1,6 @@
 // One branch of a choice adopts a node and the other does not: the rule hands
 // one over on one path only.
-// expect LR: this alternative hands over a node the text may leave out
+// expect LR: this alternative returns a node that the text may leave out
 #pragma once
 
 #include "refusals/head.hpp"

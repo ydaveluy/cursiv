@@ -1,12 +1,12 @@
-// The @CURSIV_NEW_ID@ language: its AST. Plain structs -- the grammar names
-// their members, and the generated builder fills them.
+// The AST classes of the @CURSIV_NEW_ID@ language. The grammar fills their
+// members when it parses a document.
 #pragma once
 
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
-// Every class derives `cursiv::AstNode` through `cursiv::Extends`, which
-// brings the field vocabulary into scope -- `vector`, `string_view` and
-// `reference` below are the base's aliases, not std names spelled by hand.
+// `cursiv::Extends<cursiv::AstNode>` provides the member types used below:
+// `string_view` holds text, `vector<T*>` holds child nodes, and `reference<T>`
+// holds a name that resolves to a `T` after parsing.
 
 namespace @CURSIV_NEW_ID@::ast {
 

@@ -76,7 +76,7 @@ class LlLanguageParser final : public Parser {
     builder.bind_stream();
     LlContext c(text, builder, _budget);
     c.stop = CancellationPoll(cancelToken);
-    if constexpr (kLlAnyRecorded<T>) c.pending.reserve(8);
+    if constexpr (kTermsRecorded<T>) c.pending.reserve(8);
     _drive(c);
     ll_finish<T>(c);
     // What the predictions read goes to the thread's count, as the searches'.

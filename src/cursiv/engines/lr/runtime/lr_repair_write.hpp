@@ -32,7 +32,7 @@ namespace cursiv {
 // The trivia before the token in hand, laid as the drive lays it.
 template <const auto& A>
 inline void lr_write_trivia(LrContext& c) {
-  lr_record_trivia<kLrAnyRecorded<A>, A.stamp>(c, kLrTermElem<A>.data());
+  lr_record_trivia<kTermsRecorded<A.cfg>, A.stamp>(c, kLrTermElem<A>.data());
 }
 
 // The goto decides first -- a guarded one by the tag of the span's first
@@ -313,7 +313,7 @@ void lr_write_skip(LrContext& c, SymbolId term, TextOffset end) {
   const TextOffset at = c.la.begin > c.committed ? c.la.begin : c.committed;
   lr_close_whole<A>(c, end);
   lr_flush_trivia<A>(c);
-  if constexpr (kLrAnyRecorded<A>)
+  if constexpr (kTermsRecorded<A.cfg>)
     if (kLrTermMask<A, true>.test(term))
       c.tape.hidden<A.stamp>(at, end, kLrTermElem<A>[term]);
   if (end > c.committed) c.committed = end;

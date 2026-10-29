@@ -6,11 +6,17 @@ Grammar rules are C++ types that fill your abstract syntax tree (AST) with
 `assign` and `append`. Cursiv generates an LL or an LR parser; LR is the
 default and recommended one. See the [grammar reference](../reference/grammar.md).
 
+## Performance
+
+Cursiv aims to be as fast as possible: the generated parsers and the
+language services are compiled C++, and a workspace builds its documents in
+parallel. See [Benchmarks](../benchmarks/README.md).
+
 ## Ambiguity diagnostics
 
-The generator rejects unsupported grammar constructions before you run the
-language. The LR backend also reports parser conflicts and overlapping
-tokens, with examples that show the ambiguity.
+The generator rejects unsupported grammar constructions when you build. The
+LR generator also reports parser conflicts and overlapping tokens, with
+examples that show the ambiguity.
 
 ## Error recovery
 

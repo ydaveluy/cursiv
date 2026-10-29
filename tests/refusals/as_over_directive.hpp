@@ -1,5 +1,5 @@
 // `as` gives a value to text: a directive inside it would write the AST.
-// expect LR: as<X>.e. converts text, and this e writes the AST
+// expect LR: as<X>.e. converts text, but this e holds a directive
 #pragma once
 
 #include "refusals/head.hpp"

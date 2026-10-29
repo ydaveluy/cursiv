@@ -1,18 +1,25 @@
 # cursiv++
 
-cursiv++ is a C++20 framework for building languages, compilers and language
-tools, with built-in Language Server Protocol (LSP) support.
+cursiv++ is a C++20 framework for building domain-specific languages and
+their tools: parsers, validators, command-line tools and language servers
+with Language Server Protocol (LSP) support. Its goal is to be as fast as
+possible.
 
 You define the syntax and the abstract syntax tree (AST) in C++. Cursiv
-generates the parser and provides references, validation and editor
-features. For example, this rule reads a `person` declaration and stores its
-name, read by the `ID` terminal, in your `ast::Person` type:
+generates the parser, resolves references, runs your validation checks and
+provides editor features. For example, this rule reads the keyword `person`
+followed by an identifier (`ID`), and stores the identifier in
+`ast::Person::name`:
 
 ```cpp
 struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 ```
 
 The [tutorial](learn/walkthrough.md) builds a complete language this way.
+
+Performance comes first: the generated parsers and the editor features stay
+fast on large documents and workspaces. See the
+[benchmarks](benchmarks/README.md).
 
 ## Start here
 
@@ -38,7 +45,7 @@ The [tutorial](learn/walkthrough.md) builds a complete language this way.
 
     ---
 
-    Scoping, validation, formatting, several languages in one project.
+    Add scoping, validation, formatting or several languages to a project.
 
     [:octicons-arrow-right-24: Recipes](recipes/index.md)
 

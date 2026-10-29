@@ -40,9 +40,9 @@ template <auto Body>
 struct body_not_a_rule {
   static_assert(
       !requires { typename std::remove_cv_t<decltype(Body)>::kind; },
-      "a rule is named with `ref<>`, never spelled bare: an inline "
-      "rule is `ref<terminal<...>>` / `ref<rule<...>>`, a declared "
-      "one `ref<Name>`");
+      "a rule is used through `ref<>`, never directly: write "
+      "`ref<Name>` for a declared rule, and `ref<terminal<...>>` or "
+      "`ref<rule<...>>` for an inline one");
   static constexpr bool ok = true;
 };
 
@@ -113,12 +113,12 @@ template <auto Body, class... Opts>
 struct TerminalRule {
   static_assert(detail::body_not_a_rule<Body>::ok);
   static_assert(!detail::holds_as<std::remove_cv_t<decltype(Body)>>,
-                "inside a terminal, as<X>(e) wraps the whole body or each "
-                "of its alternatives: write terminal<as<X>(...)> or "
+                "inside a terminal, as<X>(e) must wrap the whole body or "
+                "each of its alternatives: write terminal<as<X>(...)> or "
                 "terminal<as<A>(...) | as<B>(...)>");
   static_assert(!detail::holds_commit<std::remove_cv_t<decltype(Body)>>,
-                "a commit stands in a rule, not in a terminal: a terminal "
-                "reads adjacent bytes and has no condition to stop on");
+                "a commit is allowed in a rule, not in a terminal: inside a "
+                "terminal, use option, many, some or repeat without commit");
   using kind = detail::terminal_kind;
   using slot = TypeList<Opts...>;
   static constexpr auto body = Body;
@@ -132,8 +132,8 @@ struct Rule {
   static_assert(detail::body_not_a_rule<Body>::ok);
   static_assert(!detail::stray_commit<
                     detail::as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
-                "commit(prefix, body) stands only as the direct item of "
-                "option, many, some or repeat");
+                "commit(prefix, body) must be the direct item of option, "
+                "many, some or repeat, as in many(commit(a, b))");
   using kind = detail::node_kind;
   using slot = TypeList<Opts...>;
   static constexpr auto body = detail::commit_free_t<
@@ -776,13 +776,13 @@ struct as_conv<X, true> {
   static constexpr bool parts = requires(Parts p) { X(p); } ||
                                 parts_resource_arg<X, std::pmr::memory_resource*>;
   static_assert(none || text || parts,
-                "as<f>(e): f reads neither the text (std::string_view), nor "
-                "the parts (std::span<const std::string_view>), nor nothing; "
+                "as<f>(e): f must take the text (std::string_view), the "
+                "parts (std::span<const std::string_view>) or no argument; "
                 "a second parameter may only be a std::pmr::memory_resource*");
   static_assert(int(none) + int(text) + int(parts) <= 1,
-                "as<f>(e): f accepts more than one input -- the text, the "
-                "parts or nothing -- as a generic (auto) lambda does; give "
-                "its parameter a type");
+                "as<f>(e): f accepts more than one kind of input (the text, "
+                "the parts or no argument), as a generic (auto) lambda does: "
+                "give its parameter a type");
   using type = cond_t<parts, parts_conv<X>, text_conv<X>>;
 };
 
@@ -791,11 +791,12 @@ struct as_conv<X, true> {
 template <class C, class E>
 constexpr auto as_with() {
   static_assert(!is_as<E>,
-                "as<X>(as<Y>(e)) is refused: compose the two conversions in "
-                "one function");
+                "as<X>(as<Y>(e)) is not allowed: combine the two conversions "
+                "in one function");
   static_assert(!holds_directive<E>,
-                "as<X>(e) converts text, and this e writes the AST: move the "
-                "directives out of the `as`");
+                "as<X>(e) converts text, but this e holds a directive "
+                "(create, assign, append, flag or nest): move the directives "
+                "out of the `as`");
   return As<C, E>{};
 }
 
@@ -836,13 +837,15 @@ struct terminal_of<Body, As<C, E>> {
 template <auto Body, class... Cs, class... Es>
 struct terminal_of<Body, Choice<As<Cs, Es>...>> {
   static_assert((is_value_conv<Cs> && ...),
-                "inside a terminal, as<V>(e) on an alternative names a "
-                "constant: convert with a type or a function around the "
-                "whole body, terminal<as<X>(...)>");
+                "inside a terminal, as<V>(e) on one alternative must give a "
+                "constant value, such as as<true>(...): to convert with a "
+                "type or a function, wrap the whole body, "
+                "terminal<as<X>(...)>");
   static_assert((word_of<Es> && ...),
                 "inside a terminal, an alternative with its own as<V>(e) "
-                "reads words only, lit<\"...\">, kw<\"...\">, ikw<\"...\"> "
-                "or a choice of those: for other text, write a data rule");
+                "may only match words: lit<\"...\">, kw<\"...\">, "
+                "ikw<\"...\"> or a choice of those. For other text, write a "
+                "data rule");
   static_assert(one_value_type<Cs...>,
                 "inside a terminal, the constants of the alternatives' "
                 "as<V>(e) have different types: give them one type");
@@ -886,7 +889,8 @@ struct slot_of<TypeList<O>> {
 template <class O0, class O1, class... Os>
 struct slot_of<TypeList<O0, O1, Os...>> {
   static_assert(dependent_false<O0>,
-                "one converter per rule: this slot names two");
+                "a rule takes at most one converter, and this one is given "
+                "two");
   using type = O0;
 };
 template <class R>
@@ -1075,7 +1079,7 @@ struct self_created_common {
       TypeList<typename branch_type<Es>::type...>>::type;
   static_assert(!std::is_void_v<type>,
                 "the alternatives of this nested choice build classes with "
-                "no common base -- annotate the enclosing rule type");
+                "no common base: derive these classes from one base class");
 };
 // The laziness rule (typelist.hpp): a branch is lazy only when it is a class
 // template-id whose `::type` is asked afterwards. Spelled as two
@@ -1099,9 +1103,9 @@ template <class E>
 struct lookahead_writes_nothing {
   static_assert(
       std::is_same_v<typename cands<E>::type, TypeList<>>,
-      "a create<>/assign<>/append<>/flag<> sits under a LOOKAHEAD: a "
-      "lookahead matches without consuming and commits nothing, so this "
-      "directive never runs -- move it out of the `!`/`&`");
+      "a create<>, assign<>, append<> or flag<> is inside a condition "
+      "(`&` or `!`): a condition only tests the text and builds nothing, so "
+      "this directive never runs. Move it out of the condition");
   using type = TypeList<>;
 };
 template <class E>
@@ -1119,17 +1123,17 @@ struct cands<Through<O, Cl>> {
   static_assert(
       std::is_same_v<typename cands<O>::type, TypeList<>> &&
           std::is_same_v<typename cands<Cl>::type, TypeList<>>,
-      "a create<>/assign<>/append<>/flag<> sits inside a through(): "
-      "through is a TOKEN shape, lexed whole, so this directive never runs -- "
-      "move it out of the `through`");
+      "a create<>, assign<>, append<> or flag<> is inside a through(): "
+      "through() matches one token, so this directive never runs. Move it "
+      "out of the `through`");
   using type = TypeList<>;
 };
 template <class Tag, class E>
 struct cands<Mark<Tag, E>> {
   static_assert(std::is_same_v<typename cands<E>::type, TypeList<>>,
-                "a create<>/assign<>/append<>/flag<> sits inside a mark(): "
-                "a mark is a run of a token, lexed whole, so this directive "
-                "never runs -- move it out of the `mark<>`");
+                "a create<>, assign<>, append<> or flag<> is inside a "
+                "mark<>: a mark matches part of one token, so this directive "
+                "never runs. Move it out of the `mark<>`");
   using type = TypeList<>;
 };
 template <class T, class E>
@@ -1241,8 +1245,8 @@ struct infix_answer<R, Levels<Ls...>> {
                       TypeList<typename R::node_type>, TypeList<>>,
                typename level_class<Ls>::type...>>::type;
   static_assert(!std::is_void_v<type>,
-                "the levels of this infix table build classes with no common "
-                "base: derive them from one");
+                "the levels of this infix rule build classes with no common "
+                "base: derive these classes from one base class");
 };
 template <class R>
 using infix_answer_t = typename infix_answer<R>::type;
@@ -1336,23 +1340,22 @@ struct in_hand<In, Create<T, E>, Check> : in_hand<TypeList<T>, E, Check> {};
 template <class In, class T, auto P, class E, bool Check>
 struct in_hand<In, Nest<T, P, E>, Check> : in_hand<TypeList<T>, E, Check> {
   static_assert(!Check || buries_ok<In, std::remove_cv_t<decltype(P)>>,
-                "this nest buries the node in hand in a member that cannot "
-                "hold it: the head in front of it, or the wrapper of a nest "
-                "before it, can be a class that does not derive from the "
-                "member's -- every document reaching the nest would lose its "
-                "tree. Give the member a class every node before the nest "
-                "derives from");
+                "this nest stores the current node in a member that cannot "
+                "hold it: the node created or called before the nest, or the "
+                "wrapper of an earlier nest, can be of a class that does not "
+                "derive from the member's type. Give the member a type that "
+                "every node before the nest derives from");
 };
 template <class In, auto Sp, bool Check>
 struct writes_ok {
   static_assert(!Check || std::is_same_v<In, TypeList<>> ||
                     all_derive<In, spec_class_t<Sp>>,
-                "this directive writes a member of a class the node in hand "
-                "may not be: the alternative adopts a node of a base class, "
-                "or a nest wrapped it into another, and a class that does not "
-                "declare the member has nowhere to write it -- every such "
-                "document would lose its tree. Adopt the class that declares "
-                "it, or write a member the node's own class has");
+                "this directive writes a member that the current node may not "
+                "have: the alternative adopts a node of a base class, or a "
+                "nest wrapped it in another class, and that class does not "
+                "declare the member. Adopt the class that declares the "
+                "member, or write a member that every class of the current "
+                "node declares");
   using type = In;
 };
 // An operand that creates its node is a region on a head of its own.
@@ -1463,8 +1466,8 @@ struct branch_type_from {
   using type =
       cond_t<must_adopt<A> && std::is_same_v<Ad, TypeList<>>, void, inferred>;
   static_assert(must_adopt<A> || !std::is_void_v<type>,
-                "the directives of this alternative write unrelated classes -- "
-                "state create<T>");
+                "the directives of this alternative write members of "
+                "unrelated classes: add create<T> to say which class to build");
 };
 template <class A, class Seen>
 struct branch_type : branch_type_from<A, Seen, typename cands<A>::type> {};
@@ -1544,8 +1547,9 @@ struct deduce_node_type<Choice<A0, As...>, Seen> {
   static_assert(!std::is_void_v<type> ||
                     (std::is_same_v<Named, TypeList<>> &&
                      !std::is_same_v<Seen, TypeList<>>),
-                "the alternatives build classes with no common base -- "
-                "state create<T>");
+                "the alternatives of this rule build classes with no common "
+                "base: derive these classes from one base class, or add "
+                "create<T> to say which class each alternative builds");
 };
 // Where a node type came from, and only one source can lie: a pointer to an
 // inherited member carries the class that declares it, so the derived class
@@ -1656,14 +1660,14 @@ struct branch_type_from<A, Seen, TypeList<>> {
   using L = typename adopt_cands<A, Seen>::type;
   static constexpr bool cycles = adopt_cycles<A, Seen>::value;
   static_assert(!std::is_same_v<L, TypeList<>> || cycles,
-                "cannot deduce this alternative's type: no create<>, assign<>, "
-                "append<> or flag<> in it -- state create<T>");
+                "cannot find the class this alternative builds: it has no "
+                "create<>, assign<>, append<> or flag<>. Add create<T>");
   using type = typename cond_t<std::is_same_v<L, TypeList<>>,
                                std::type_identity<void>,
                                common_base_of<L>>::type;
   static_assert(std::is_same_v<L, TypeList<>> || !std::is_void_v<type>,
-                "the nodes this alternative adopts have no common base -- "
-                "state create<T>");
+                "the nodes this alternative adopts have no common base: add "
+                "create<T> to say which class to build");
 };
 
 // An override restating neither slot nor converter keeps the type of the
@@ -1700,8 +1704,8 @@ template <class R, class Seen>
 struct overridden_value<R, Seen, true> : declared_rule_type<R> {
   static_assert(std::is_same_v<typename body_value<R, Seen>::type,
                                typename declared_rule_type<R>::type>,
-                "this override passes a value of another type than the data "
-                "rule it stands over: keep the type, or state it with "
+                "this override gives a value of another type than the data "
+                "rule it overrides: keep the same type, or set it with "
                 "as<T>(...)");
 };
 
@@ -1746,9 +1750,9 @@ struct one_value {
 template <class T, class... Ts>
 struct one_value<TypeList<T, Ts...>> {
   static_assert((std::is_same_v<T, Ts> && ...),
-                "the alternatives of this data rule pass values of different "
-                "types: give the whole rule one value with as<T>(...), or make "
-                "the alternatives pass the same type");
+                "the alternatives of this data rule give values of different "
+                "types: wrap the whole body in as<T>(...), or make every "
+                "alternative give the same type");
   using type = T;
 };
 template <class... Bs, class Seen>
@@ -1776,8 +1780,8 @@ struct rule_type {
                   !slot_empty<R>)
       static_assert(
           !builds_node<std::remove_cv_t<decltype(R::body)>, TypeList<R>>,
-          "as<X>(e) gives a value to text, and this e builds an AST node: "
-          "convert the text the node rule reads, not the rule");
+          "as<X>(e) converts text, but this e builds an AST node: convert "
+          "the text inside the node rule, not the rule itself");
     if constexpr (ConvertsParts<Cv> || ConvertsPartsMem<Cv>) {
       // A parts converter is not callable with text; its result is probed
       // against the forward-declared `Parts` instead.

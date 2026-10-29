@@ -83,6 +83,16 @@ inline void refuse_fault(std::string_view grammar, const GrammarFault& fault,
                static_cast<int>(code.size()), code.data(), message.c_str());
 }
 
+// A limit of the generated parser the grammar overran, `cap` saying which,
+// refused under the grammar's name.
+inline void refuse_too_large(std::string_view grammar, std::string_view cap) {
+  std::fprintf(stderr,
+               "%.*s: refused: the grammar is too large for the generated "
+               "parser: %.*s -- simplify the grammar, or split it\n",
+               static_cast<int>(grammar.size()), grammar.data(),
+               static_cast<int>(cap.size()), cap.data());
+}
+
 // The split of a record's stamp over a table of `rows` and `states`, `forced`
 // being the row width a lane asks for: true where none holds.
 inline bool refuse_unstamped(std::string_view grammar, StampLayout& stamp,
@@ -92,8 +102,7 @@ inline bool refuse_unstamped(std::string_view grammar, StampLayout& stamp,
     stamp = *split;
     return false;
   }
-  std::fprintf(stderr, "%.*s: refused by %s\n", static_cast<int>(grammar.size()),
-               grammar.data(), stamp_refusal(rows, states, forced).c_str());
+  refuse_too_large(grammar, stamp_refusal(rows, states, forced));
   return true;
 }
 
@@ -124,9 +133,10 @@ bool refuse_unbuilt(std::string_view grammar, const Built& a,
     std::fprintf(stderr, "%.*s: refused: %s\n", n, grammar.data(),
                  lower_fail_sentence(a.cfg, rule).c_str());
   else if (a.overflow)
-    std::fprintf(stderr, "%.*s: refused by %s\n", n, grammar.data(),
-                 a.overflowCap ? a.overflowCap
-                               : "the lowering, which named no limit");
+    refuse_too_large(grammar, a.overflowCap
+                                  ? a.overflowCap
+                                  : "it overran a limit the generator does "
+                                    "not name");
   else
     return false;
   return true;

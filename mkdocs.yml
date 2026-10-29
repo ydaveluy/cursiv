@@ -1,5 +1,5 @@
 site_name: cursiv++
-site_description: A C++20 toolkit for building languages — grammar, AST, validation, references, formatting and a language server, from one declaration.
+site_description: A high-performance C++20 toolkit for building languages — grammar, AST, validation, references, formatting and a language server, from one declaration.
 site_url: https://ydaveluy.github.io/cursiv/
 repo_url: https://github.com/ydaveluy/cursiv
 repo_name: ydaveluy/cursiv
@@ -79,8 +79,9 @@ nav:
       - Custom validation: recipes/validation.md
       - Formatting: recipes/formatting.md
       - Case-insensitive languages: recipes/case-insensitive.md
+      - Indentation-sensitive languages: recipes/indentation.md
       - Several languages in one project: recipes/multiple-languages.md
-      - Derived grammars: recipes/derived-grammars.md
+      - Reuse a grammar: recipes/reuse-a-grammar.md
       - Cross-compiling to wasm: recipes/wasm.md
   - Reference:
       - reference/index.md

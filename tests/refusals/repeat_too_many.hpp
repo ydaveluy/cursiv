@@ -1,7 +1,7 @@
 // A counted repetition has a position for every turn it may take: 70 000 turns
 // are more than a program holds, and the lowering says so before it writes one.
-// expect LR: refused: the grammar spells a right-hand side of more than 65 535 positions
-// expect LL: refused: rule .Root. lowers to more than 65 535 positions
+// expect LR: refused: the grammar has an alternative longer than 65 535 items once expanded
+// expect LL: refused: rule .Root. is too large for the LL parser once expanded
 #pragma once
 
 #include "refusals/head.hpp"

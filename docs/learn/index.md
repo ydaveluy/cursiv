@@ -1,6 +1,6 @@
 # Learn
 
-Follow the first two guides in order. Use the others when you need them.
+Start with the first two guides, in order. Read the others when you need them.
 
 <div class="grid cards" markdown>
 
@@ -14,15 +14,15 @@ Follow the first two guides in order. Use the others when you need them.
 
     ---
 
-    Go from the hello-world grammar to references, checks and an editor, one
-    change at a time.
+    Turn the hello-world project into a recipe language with references, a
+    check and an editor, one step at a time.
 
 -   **[Write a grammar](write-a-grammar.md)**
 
     ---
 
-    Tokens, rules, lists, recursion and operator precedence, for a small
-    calculator language.
+    Write the grammar of a small calculator: tokens, rules, lists, recursion
+    and operator precedence.
 
 -   **[Test your language](testing.md)**
 
@@ -49,5 +49,5 @@ Follow the first two guides in order. Use the others when you need them.
 You need Git, CMake 3.30 or newer and a C++20 compiler with `std::format` and
 guaranteed tail calls (`musttail`). GCC 16 and Clang 22 are tested.
 
-VS Code needs [a few more tools](editor-integration.md). For WebAssembly,
-follow the [WASI setup](../recipes/wasm.md).
+The VS Code extension needs [a few more tools](editor-integration.md). For
+WebAssembly, follow the [WASI setup](../recipes/wasm.md).

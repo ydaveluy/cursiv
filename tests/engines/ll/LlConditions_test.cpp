@@ -343,8 +343,8 @@ void a_condition_that_reads_a_run_without_end_is_warned_of() {
   CHECK(found.size() == 1);
   CHECK(cursiv::unbounded_condition_text(
             arrow.cfg, arrow.cfg.rule_name(found[0].rule), found[0])
-            .find("rule `Root` asks a condition of the token in hand that "
-                  "reads `('-')+` to any length") != std::string::npos);
+            .find("rule `Root` has a condition that matches `('-')+` with "
+                  "no length limit") != std::string::npos);
 }
 
 }  // namespace

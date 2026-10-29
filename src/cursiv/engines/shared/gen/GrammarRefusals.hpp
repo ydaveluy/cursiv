@@ -12,9 +12,9 @@ template <class Rule, auto Member>
 inline constexpr bool WrittenAgain = [] {
   static_assert(cursiv::detail::dependent_false<Rule>,
                 "this directive writes the member a second time on one "
-                "path: `=` overwrites, so the first value would be lost "
-                "and a node would keep the "
-                "parent it was given. Write it once, or `+=` into a "
+                "path: `=` overwrites, so the first value would be lost, and "
+                "a node written there would keep the parent it was given -- "
+                "write the member once, or append with `+=` into a "
                 "`vector<T>` list member");
   return false;
 }();
@@ -23,20 +23,20 @@ template <class Rule, auto Member>
 inline constexpr bool WrittenEachTurn = [] {
   static_assert(cursiv::detail::dependent_false<Rule>,
                 "this repetition writes the member on every turn and `=` "
-                "overwrites: only the last turn's value would stay. "
-                "Append into a `vector<T>` list "
-                "member, or write it once outside the repetition");
+                "overwrites, so only the value of the last turn would stay "
+                "-- append into a `vector<T>` list member, or write the "
+                "member once outside the repetition");
   return false;
 }();
 
 template <class Rule, auto Member>
 inline constexpr bool WrittenOverAdopted = [] {
   static_assert(cursiv::detail::dependent_false<Rule>,
-                "this directive writes a member the node of the rule called "
-                "before it may have written already: a call adopts its node, "
-                "and `=` would overwrite what the rule put there. Write the "
+                "this directive writes a member that the rule called before "
+                "it may already have written: the call hands over its node, "
+                "so `=` would overwrite what that rule put there -- write the "
                 "member in one place: in the called rule, or in a fragment "
-                "spelled where the call stood");
+                "used in place of the call");
   return false;
 }();
 
@@ -44,8 +44,9 @@ template <class Node>
 consteval bool NodeClass() {
   static_assert(
       std::is_base_of_v<cursiv::AstNode, Node>,
-      "this rule builds a class which does not derive from cursiv::AstNode "
-      "-- the builder wires `parent` and the type tag through that base");
+      "this rule builds a class that does not derive from cursiv::AstNode "
+      "-- derive it from cursiv::AstNode, which holds the `parent` link and "
+      "the type tag");
   return true;
 }
 
@@ -56,14 +57,14 @@ consteval bool BuildableNode() {
                 "a rule builds a class that is no AST node: the message "
                 "above says which");
   static_assert(!(derived && std::is_abstract_v<Node>),
-                "this rule builds an ABSTRACT class -- name the concrete "
-                "class the rule produces, or give the branches a common "
+                "this rule builds an abstract class -- name the concrete "
+                "class the rule builds, or give the branches a common "
                 "concrete base");
   static_assert(!(derived && !std::is_abstract_v<Node> &&
                   !std::is_default_constructible_v<Node>),
-                "this rule builds a class which has no default constructor "
+                "this rule builds a class that has no default constructor "
                 "-- the builder creates the node empty and the directives "
-                "fill it, so every member needs a default");
+                "fill it, so give every member a default value");
   return true;
 }
 
@@ -80,9 +81,9 @@ consteval bool AstBase() {
 template <auto Member, class Node>
 consteval bool MemberNodeOutsideAst() {
   static_assert(cursiv::detail::dependent_false<Node>,
-                "this member holds a node which does not derive from "
-                "cursiv::AstNode -- the builder wires `parent` and the type "
-                "tag through that base");
+                "this member holds a node that does not derive from "
+                "cursiv::AstNode -- derive its class from cursiv::AstNode, "
+                "which holds the `parent` link and the type tag");
   return false;
 }
 
@@ -90,14 +91,12 @@ template <auto Member, class Value>
 consteval bool BorrowedTextTemporary() {
   static_assert(
       cursiv::detail::dependent_false<Value>,
-      "a string_view member BORROWS its text, so the payload's return type "
-      "must BE string_view -- this converter answers a value which the "
-      "builder MATERIALISES as a temporary and destroys the instant the "
-      "member is written: the view would point at freed bytes. THE TEXT "
-      "LAW, and the converter's return type decides it: answer a string_view "
-      "into the input, or -- when the value has to be built -- take the "
-      "resource the builder offers and answer a view of what you allocated "
-      "there (`static std::string_view convert(std::string_view, "
+      "a string_view member points into text, so its converter must return "
+      "a string_view: this converter returns another value, which the "
+      "builder keeps only as a temporary, so the view would point at freed "
+      "memory -- return a string_view into the input, or, when the value "
+      "must be built, allocate it in the resource the builder passes and "
+      "return a view of it (`static std::string_view convert(std::string_view, "
       "std::pmr::memory_resource*)`), which lives as long as the ParseResult");
   return false;
 }
@@ -106,11 +105,10 @@ template <auto Member, cursiv::str Literal>
 consteval bool BoolLiteral() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this literal can never convert: it is the whole payload written into "
-      "a bool member, and no bool reads that text -- every match would be a "
-      "conversion diagnostic. A bool set by the FACT of a match is `?=`: "
-      "write `flag<&C::f>(...)`, not `assign`; a bool read by value "
-      "takes `true` or `false`");
+      "this literal can never convert: it is the whole value written into a "
+      "bool member, and only `true` and `false` convert to a bool, so every "
+      "match would report a conversion error -- to set a bool when the text "
+      "matches, write `flag<&C::f>(...)` instead of `assign`");
   return false;
 }
 
@@ -118,14 +116,13 @@ template <auto Member, cursiv::str Literal, class Enum, Enum... Accepted>
 consteval bool EnumLiteral() {
   static_assert(
       cursiv::detail::dependent_false<Enum>,
-      "this literal can never convert: it is the whole payload written into "
-      "the enum member, and no enumerator reads that text -- every match "
-      "would be a conversion diagnostic. An enum member takes an "
-      "ENUMERATOR NAME, spelled exactly: match one of the Accepted "
-      "enumerators, or give the payload a converter answering the enum. "
-      "An enumerator is read by name only within "
-      "`CURSIV_ENUM_PROBE_MIN`..`CURSIV_ENUM_PROBE_MAX` (-64..512 unless "
-      "defined)");
+      "this literal can never convert: it is the whole value written into "
+      "the enum member, and it is not the name of an enumerator, so every "
+      "match would report a conversion error -- write the exact name of one "
+      "of the Accepted enumerators, or give the value a converter that "
+      "returns the enum. Enumerators are found by name only between "
+      "`CURSIV_ENUM_PROBE_MIN` and `CURSIV_ENUM_PROBE_MAX` (-64 and 512 "
+      "unless defined)");
   return false;
 }
 
@@ -133,11 +130,11 @@ template <auto Member>
 consteval bool DirectiveWithoutValue() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a shape that produces no value -- a "
-      "quantifier alone (option, many, some, repeat) over no node, or a "
-      "condition alone -- and the member takes one. Put the directive "
+      "this directive applies to an expression that gives no value -- a "
+      "quantifier (option, many, some, repeat) with no node in it, or a "
+      "condition alone -- and the member needs one: put the directive "
       "inside the quantifier (`option(assign<&T::f>(ref<Part>))`), or give "
-      "the span a rule of its own and write that rule");
+      "the expression a rule of its own and write that rule");
   return false;
 }
 
@@ -145,10 +142,10 @@ template <auto Member>
 consteval bool DirectiveNodeIntoValue() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a shape that builds a node, and the member "
-      "takes a value, not a node. Give the member a node type, or write the "
-      "part that carries the value (`assign<&T::f>(ref<Part>)` inside the "
-      "shape)");
+      "this directive applies to an expression that builds a node, but the "
+      "member takes a value, not a node -- give the member a node type, or "
+      "put the directive on the part that carries the value "
+      "(`assign<&T::f>(ref<Part>)` inside the expression)");
   return false;
 }
 
@@ -156,11 +153,11 @@ template <auto Member>
 consteval bool DirectiveLosesValues() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a sequence, and only a node travels "
-      "through one -- the member also takes values, which a rule or "
-      "terminal inside would pay and the member never receive. Name the "
-      "ONE part the member reads (`assign<&T::f>(ref<Part>)` inside the "
-      "sequence)");
+      "this directive applies to a sequence, and only a node passes through "
+      "a sequence: the member also takes values, which a rule or a terminal "
+      "inside would give and the member never receive -- put the directive "
+      "on the one part the member takes (`assign<&T::f>(ref<Part>)` inside "
+      "the sequence)");
   return false;
 }
 
@@ -168,11 +165,11 @@ template <auto Member>
 consteval bool DirectiveRepeatsNodes() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a repetition that can hold SEVERAL "
-      "nodes, and the member takes ONE per write: the first would be kept "
-      "and the rest dropped. Put the directive under the repetition "
+      "this directive applies to a repetition that can hold several nodes, "
+      "but the member takes one per write, so only the first would be kept "
+      "-- put the directive inside the repetition "
       "(`many(append<&T::f>(ref<Item>), sep)`), or on the one part the "
-      "member reads");
+      "member takes");
   return false;
 }
 
@@ -180,11 +177,11 @@ template <auto Member>
 consteval bool DirectiveHoldsTwoNodes() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a sequence that can hold TWO nodes "
-      "for the member, and the member takes ONE: the first would be kept "
-      "and the other dropped. Create the node that holds both "
+      "this directive applies to a sequence that can hold two nodes for the "
+      "member, but the member takes one, so only the first would be kept -- "
+      "create a node that holds both "
       "(`create<T>(assign<&T::a>(ref<A>) + assign<&T::b>(ref<B>))`) and "
-      "write that, or put the directive on the one part the member reads");
+      "write that, or put the directive on the one part the member takes");
   return false;
 }
 
@@ -192,12 +189,12 @@ template <auto Member>
 consteval bool DirectiveMayLackNode() {
   static_assert(
       cursiv::detail::dependent_false<decltype(Member)>,
-      "this directive stands over a shape that can match with NO node "
-      "for the member -- a sequence of literals, a part that may be "
-      "absent, a node of another family, or one a directive inside already "
-      "takes -- and the member takes one: such a match would leave nothing "
-      "to write. Give every alternative the node the member reads, or make "
-      "the directive's own part optional (`option(assign<&T::f>(ref<Part>))`)");
+      "this directive applies to an expression that can match without a "
+      "node for the member, such as a sequence of literals, a part that may "
+      "be absent, a node of an unrelated class, or one that a directive "
+      "inside already takes: such a match would leave nothing to write -- "
+      "give every alternative a node for the member, or make the directive "
+      "optional (`option(assign<&T::f>(ref<Part>))`)");
   return false;
 }
 
@@ -205,10 +202,9 @@ template <auto Member, class Narrow>
 consteval bool NarrowNonReference() {
   static_assert(
       cursiv::detail::dependent_false<Narrow>,
-      "this member is not a cross-reference, so this site has no candidates "
-      "to narrow: a narrow type restricts WHICH of a reference's classes "
-      "one site may bind, and every other member already names the one "
-      "class it holds");
+      "this member is not a cross-reference, so there is nothing to narrow: "
+      "a narrowing limits which classes a reference may point to at one "
+      "place, and any other member already names the one class it holds");
   return false;
 }
 
@@ -216,10 +212,10 @@ template <auto Member, class Narrow>
 consteval bool NarrowOutsideCandidates() {
   static_assert(
       cursiv::detail::dependent_false<Narrow>,
-      "this site narrows the member to a class which derives from none "
-      "of the classes the member can hold -- a narrowing RESTRICTS what "
-      "the member already accepts, so name one of its candidates or a "
-      "class deriving from one");
+      "this narrowing names a class that derives from none of the classes "
+      "the member can hold, and a narrowing only limits what the member "
+      "already accepts -- name one of those classes, or a class derived "
+      "from one");
   return false;
 }
 
@@ -227,10 +223,9 @@ template <auto Member, class Narrow>
 consteval bool NarrowAmbiguousCandidate() {
   static_assert(
       cursiv::detail::dependent_false<Narrow>,
-      "this site narrows the member to a class which derives from SEVERAL "
-      "of the member's candidates -- the filter answers WHICH candidate "
-      "a target satisfies, and there would be two right answers, so "
-      "`get<T>()` would depend on the order the candidates happen to be "
-      "written in. Narrow to a class deriving from exactly one of them");
+      "this narrowing names a class that derives from several of the "
+      "classes the member can hold, so `get<T>()` would depend on the order "
+      "in which they are written -- narrow to a class derived from exactly "
+      "one of them");
   return false;
 }

@@ -98,25 +98,3 @@ int main(int argc, char** argv) {
 
 The language server works the same way with `register_lsp_services`: one
 process serves both languages.
-
-## Advanced: embed a grammar in a document
-
-To parse another grammar *inside* a document, use
-`section<Json>(open, close)`:
-
-```cpp
-struct Doc : cursiv::GrammarSpec {
-  struct Block
-      : rule<create<ast::Block>(
-            kw<"json"> + assign<&ast::Block::json>(
-                             section<Json>(lit<"'''">, lit<"'''">)))> {};
-  // ...
-};
-```
-
-`Json` is a grammar type. The enclosing rule reads the delimiters, and Json
-reads the content with its own trivia and keywords. The AST mixes nodes from
-both grammars. This combines parsers only: the enclosing language must
-provide any validation or scoping for the Json nodes. See
-[Embedded grammars](../reference/grammar.md#embedded-grammars) for the
-delimiter restrictions.

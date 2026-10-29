@@ -1,6 +1,6 @@
 // `Type -> Annos Type "[]"` where `Annos` may be empty: the recursion hides
 // behind an item that matches nothing.
-// expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind an item that may match nothing
+// expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself before matching anything, behind an item that may match nothing
 // expect LL: refused .leftRecursion..*rule .Type. reaches itself before matching anything
 #pragma once
 

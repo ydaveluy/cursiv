@@ -1,15 +1,15 @@
 # Test helpers
 
 `cursiv::test` builds test documents and checks diagnostics and editor
-features. Link it to your test target, with `cursiv::lsp` for the diagnostic
-and editor expectations. [Test your language](../learn/testing.md) shows
+features. Link it to your test target, and also link `cursiv::lsp` to use the
+diagnostic and editor checks. [Test your language](../learn/testing.md) shows
 complete test programs.
 
 ## Build a test document
 
 | Helper | Result |
 |---|---|
-| `parseHelper(services, text, options)` | A registered and built `std::shared_ptr<Document>` |
+| `parseHelper(services, text, options)` | A `std::shared_ptr<Document>`, added to the workspace and built |
 | `parseDocument(services, text, options)` | The same; throws `ExpectationError` if no AST was built |
 | `validationHelper(services, text, options)` | A `ValidationResult` with the document and its diagnostics |
 
@@ -41,7 +41,7 @@ result.dispose();
 
 A message is exact text or a predicate on `std::string_view`. Options can
 restrict the match to an offset, length, range, diagnostic code, node or
-property; every option supplied must match.
+property; every option you set must match.
 
 ## Check editor features
 
@@ -62,7 +62,8 @@ an expected range.
 | `expectSemanticToken` | Semantic highlighting |
 | `expectFormatting` | Formatted text |
 
-For example, with `cursiv/test/ExpectedHover.hpp` and Recipe LSP `services`:
+For example, with `cursiv/test/ExpectedHover.hpp` and the Recipe LSP
+`services` created as in [Check editor features](../learn/testing.md#check-editor-features):
 
 ```cpp
 (void)ct::expectHover(services,
@@ -75,10 +76,13 @@ For example, with `cursiv/test/ExpectedHover.hpp` and Recipe LSP `services`:
 ## Clean up documents
 
 Test documents stay in the workspace until you remove them; destroying a
-result does not. When tests share a workspace, remove them so one case's
-declarations do not leak into the next: call `dispose()` on a `ValidationResult` or on the
-`Disposable` an editor helper returns (or set `disposeAfterCheck = true`), and
-`clearDocuments(services)` for `parseHelper` and `parseDocument` documents.
+result does not remove them. When tests share a workspace, remove them so
+that the declarations of one case do not leak into the next:
+
+- call `dispose()` on a `ValidationResult`, or on the `Disposable` that an
+  editor helper returns (or set `disposeAfterCheck = true`);
+- call `clearDocuments(services)` for `parseHelper` and `parseDocument`
+  documents.
 
 ## Assertions and the test exit code
 
@@ -87,7 +91,7 @@ Include `cursiv/test/Check.hpp`:
 | Function or macro | Purpose |
 |---|---|
 | `CHECK(condition)` | Report a failed assertion with its file and line |
-| `count_expectations()` | Count failed expectations rather than throwing |
+| `count_expectations()` | Count failed expectations instead of throwing |
 | `report("name")` | Print the result and return a test exit code |
 
 Call `count_expectations()` first to report every failure, and return
@@ -95,10 +99,12 @@ Call `count_expectations()` first to report every failure, and return
 
 ## Recovery and fuzz
 
-`cursiv/test/RecoveryLane.hpp` compares the repairs of broken documents with
-a reference file, regenerated with `--write`. Where an engine repairs a
-document differently, its own `REFERENCE-ll.txt` or `REFERENCE-lr.txt` sits
-beside the shared `REFERENCE.txt`: create it as a copy of the shared file, and
-`--write` then refreshes it. `cursiv/fuzz/FuzzRun.hpp`
-generates documents, checks their trees against the grammar and reports
-coverage. Each example language has both tests in its `tests/` directory.
+`cursiv/test/RecoveryLane.hpp` compares how the parser repairs broken
+documents with a reference file, `REFERENCE.txt`. Run the test with `--write`
+to regenerate it. If the LL and LR parsers repair a document differently,
+copy `REFERENCE.txt` to `REFERENCE-ll.txt` or `REFERENCE-lr.txt` beside it;
+`--write` then updates that copy for that parser.
+
+`cursiv/fuzz/FuzzRun.hpp` generates documents, checks their trees against the
+grammar and reports grammar coverage. Each example language has both tests in
+its `tests/` directory.

@@ -25,6 +25,13 @@ static_assert(kRepairReread <= kRepairGesture,
 // The bytes of a lexical walk one unit of work pays for.
 inline constexpr TextOffset kRepairLexBytes = 32;
 
+// The bytes of lexical walks the work left from `work` to `limit` pays for.
+inline std::uint64_t repair_bytes(std::uint64_t work, std::uint64_t limit) {
+  const std::uint64_t left = limit > work ? limit - work : 0;
+  return left > ~std::uint64_t{0} / kRepairLexBytes ? ~std::uint64_t{0}
+                                                    : left * kRepairLexBytes;
+}
+
 // Bounds on work against the document, set on the recovery metric.
 inline constexpr std::uint64_t kRepairFloor = std::uint64_t{1} << 16;
 inline constexpr std::uint64_t kRepairPerByte = 64;

@@ -1,6 +1,5 @@
-// The smoke test of the language: build the container the way a workspace
-// does, read the sample, and check the tree. No framework -- the exit code is
-// the verdict, and ctest reads it.
+// Parses the sample document and checks its AST. Update the checks at the end
+// when you change the language. CTest reads the exit code: 0 means success.
 
 #include <cstdio>
 #include <fstream>
@@ -28,7 +27,7 @@ int main() {
   const std::string text((std::istreambuf_iterator<char>(file)),
                          std::istreambuf_iterator<char>());
 
-  // The whole language in one call: the defaults, then `install_core_module`.
+  // Create the language services, including the parser.
   const auto language = cursiv::create_language<
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@CoreServices,
       @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedCoreServices,

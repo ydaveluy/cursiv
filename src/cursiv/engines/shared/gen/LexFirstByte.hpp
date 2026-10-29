@@ -1,6 +1,6 @@
 // What a lexer reads off a token's first byte without its walk, for every
 // engine: the blank runs it crosses blind, and the one-byte literals it takes
-// whole.
+// whole. Also the part of the automaton's view both engines share.
 #pragma once
 
 #include <cstddef>
@@ -20,6 +20,28 @@ namespace cursiv {
 // token), `ends(s)` where `bounded` leaves it out (whether an acceptance
 // stands only where no byte follows), `relay(s)` (`kNoRelay` where it holds
 // none), and per terminal `term(t)`, `text(t)` and `folded(t)`.
+
+// The part of `Dfa` both engines' tables hold under the same names, with
+// `relay_of(k)`: an engine's view adds `bounded`, `relay` and `tier`.
+template <class Table>
+struct LexTableView {
+  const Table& a;
+
+  std::uint32_t modes() const { return a.nmodes; }
+  std::uint16_t start(std::uint32_t m) const { return a.modeStart[m]; }
+  unsigned classes() const { return a.ncls; }
+  std::uint8_t cls(unsigned b) const { return a.cls[b]; }
+  std::uint16_t next(std::uint16_t s, unsigned c) const {
+    return a.dfaNext[std::size_t{s} * a.ncls + c];
+  }
+  std::uint16_t accept(std::uint16_t s) const { return a.dfaAccept[s]; }
+  const auto& relay_of(std::uint16_t k) const { return a.relays[k]; }
+  const TermInfo& term(unsigned t) const { return a.cfg.terms[t]; }
+  std::string_view text(unsigned t) const {
+    return a.cfg.term_text(static_cast<std::uint16_t>(t));
+  }
+  bool folded(unsigned t) const { return a.cfg.termBuild[t].folded; }
+};
 
 // The bytes an ignored run is made of, four words per mode: the mode's start
 // takes the byte to an unrecorded trivia token whose every live edge comes

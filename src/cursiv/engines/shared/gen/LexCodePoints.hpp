@@ -57,7 +57,7 @@ struct LexCodePoints {
     out.normalize();
     if (complement) out.complement();
     if (out.ranges.empty())
-      throw std::invalid_argument("cursiv: a class names no character");
+      throw std::invalid_argument("a character class matches no character");
     return out;
   }
 
@@ -240,9 +240,10 @@ struct LexCodePoints {
         spec, [this](char32_t lo, char32_t hi) { ranges.push_back({lo, hi}); });
     if (fault != ClassFault::none)
       throw std::invalid_argument(
-          "cursiv: a class is misspelled: a lone or unknown "
-          "escape, a class escape at an end of a range, a reversed range, a "
-          "surrogate or a value past U+10FFFF, or a byte that is no UTF-8");
+          "a character class is malformed: it has a lone or unknown "
+          "escape, a class escape at one end of a range, a reversed range, a "
+          "surrogate, a value above U+10FFFF, or a byte that is not valid "
+          "UTF-8");
   }
 
   void normalize() {

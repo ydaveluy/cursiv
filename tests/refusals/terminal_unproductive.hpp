@@ -1,4 +1,4 @@
-// expect LR: refused:.*has a recursive call that cannot return a finite match
+// expect LR: refused:.*has a recursive call that can never finish a match
 #pragma once
 
 #include "refusals/head.hpp"

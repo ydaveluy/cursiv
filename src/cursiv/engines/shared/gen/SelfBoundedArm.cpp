@@ -95,10 +95,10 @@ std::vector<SelfBoundedArm> self_bounded_arms(GrammarImage& image) {
 }
 
 std::string self_bounded_arm_text(const SelfBoundedArm& a) {
-  return "rule `" + a.rule + "`: the arm `" + a.arm +
+  return "rule `" + a.rule + "`: the alternative `" + a.arm +
          "` begins and ends with `" + a.rule +
-         "`, which says nothing of how its operands nest -- declare the "
-         "operators with infix<>, or give each level its own rule (`" +
+         "`, so it does not say how its operands group -- declare the "
+         "operators with `infix<>`, or give each level its own rule (`" +
          a.rule + " := " + a.rule + " + T | T`)";
 }
 

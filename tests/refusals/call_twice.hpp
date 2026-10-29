@@ -1,5 +1,5 @@
 // A second call on one path returns a node the first one's replaces.
-// expect LR: this alternative can create twice
+// expect LR: this alternative can create two nodes
 #pragma once
 
 #include "refusals/head.hpp"

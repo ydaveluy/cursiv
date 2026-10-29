@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.30)
 project(@CURSIV_NEW_ID@ LANGUAGES CXX)
 
 include(FetchContent)
-# A local checkout wins over the tag: `-DCURSIV_SOURCE_DIR=<path>` is how you
-# build this language against an engine you are also editing.
+# Cursiv is downloaded at the tag below. To build against a local copy of
+# Cursiv instead, configure with `-DCURSIV_SOURCE_DIR=<path>`.
 if(CURSIV_SOURCE_DIR)
   FetchContent_Declare(cursiv SOURCE_DIR ${CURSIV_SOURCE_DIR})
 else()
@@ -13,7 +13,7 @@ else()
 endif()
 FetchContent_MakeAvailable(cursiv)
 
-# FetchContent may use a local override or a shared download directory.
+# WebAssembly (WASI) builds run their tests with Node.js.
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CURSIV_NODE)
   set(CMAKE_CROSSCOMPILING_EMULATOR ${CURSIV_NODE} --no-warnings
       "${cursiv_SOURCE_DIR}/tools/wasi-run.mjs")

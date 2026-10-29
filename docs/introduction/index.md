@@ -18,7 +18,7 @@ To add a language to an existing project, see
 | Core | Parsing, AST construction, references, scoping and validation |
 | CLI (command-line interface) | Validate files from the terminal or a script |
 | LSP (Language Server Protocol) | Add editor completion, navigation and rename |
-| MCP (Model Context Protocol) | Expose language tools to a model |
+| MCP (Model Context Protocol) | Let an AI assistant inspect and validate documents |
 
 The scaffold includes all four. A program that only reads and validates files
 needs only the core.

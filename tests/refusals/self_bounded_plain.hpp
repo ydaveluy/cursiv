@@ -1,7 +1,7 @@
 // Arms that begin and end with their own rule, in rules that build no node:
 // an operator between, nothing between, a mixfix. The order of the arms does
 // not matter.
-// expect LR LL: refused .selfBoundedArm..*rule .Sum.: the arm .* begins and ends with .Sum., which says nothing of how its operands nest.*rule .Pair.: the arm .* begins and ends with .Pair.*rule .Cond.: the arm .* begins and ends with .Cond.
+// expect LR LL: refused .selfBoundedArm..*rule .Sum.: the alternative .* begins and ends with .Sum., so it does not say how its operands group.*rule .Pair.: the alternative .* begins and ends with .Pair.*rule .Cond.: the alternative .* begins and ends with .Cond.
 #pragma once
 
 #include "refusals/head.hpp"

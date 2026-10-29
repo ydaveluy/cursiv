@@ -1,6 +1,6 @@
 // An unordered item that may read nothing and is no optional item could stand
 // anywhere in the order: both engines refuse the group, naming the item.
-// expect LR LL: refused .nullableUnorderedItem..*rule .Root. holds an unordered item that may match nothing, ."final"[?] "static"[?].: an unordered item must read input
+// expect LR LL: refused .nullableUnorderedItem..*rule .Root. has an unordered item that may match nothing, ."final"[?] "static"[?].: an item that matches nothing
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,7 +1,7 @@
 // A region ends on a call whose rule may read nothing: the point after the
 // region's first token reads the rule's token inside the region and the
 // caller's outside it.
-// expect LR LL: refused: the grammar reaches one point through a .* region and outside it at once
+// expect LR LL: refused: the grammar reaches the same token both inside a .* region and outside it
 #pragma once
 
 #include "refusals/head.hpp"

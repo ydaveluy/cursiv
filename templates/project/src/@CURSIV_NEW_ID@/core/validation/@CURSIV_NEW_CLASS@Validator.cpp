@@ -11,8 +11,8 @@
 
 namespace @CURSIV_NEW_ID@ {
 
-// `.property<&T::m>()` is what puts the squiggle under the name instead of
-// under the whole declaration: without it the range is the node's.
+// `.property<&ast::Person::name>()` marks the name instead of the whole
+// declaration.
 void @CURSIV_NEW_CLASS@Validator::checkPersonStartsWithCapital(
     const ast::Person& person, cursiv::ValidationAcceptor& accept) const {
   if (!person.name.empty() && person.name.front() >= 'a' &&
@@ -35,8 +35,8 @@ void @CURSIV_NEW_CLASS@Validator::checkUniquePersons(
   }
 }
 
-// A check is registered against the AST class it judges: the validator walks
-// the tree once and calls each check on the nodes of its own type.
+// Creates the validator and registers its checks. Each check runs on every
+// node of the type of its first parameter.
 void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services) {
   using V = @CURSIV_NEW_CLASS@Validator;
   services.validator = std::make_unique<const V>(services);

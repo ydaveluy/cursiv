@@ -89,10 +89,7 @@ inline void lr_search_cut(LrSearch& s) {
 // while the bound weighs, no further than its reach -- so the bound never
 // spends the share.
 inline std::uint64_t lr_search_bytes(const LrSearch& s) {
-  const std::uint64_t left = s.limit > s.work ? s.limit - s.work : 0;
-  const std::uint64_t bytes = left > ~std::uint64_t{0} / kRepairLexBytes
-                                  ? ~std::uint64_t{0}
-                                  : left * kRepairLexBytes;
+  const std::uint64_t bytes = repair_bytes(s.work, s.limit);
   return s.bounding ? std::min<std::uint64_t>(bytes, kLrBoundReach) : bytes;
 }
 

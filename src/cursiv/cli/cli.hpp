@@ -84,8 +84,9 @@ void print_diagnostics(const cursiv::Document& document,
                        std::string_view displayPath, std::ostream& out);
 
 /**
- * Prints the concrete syntax tree, indented, in source order. `grammar` is
- * separate because the tree itself does not know what its element ids
+ * Prints the concrete syntax tree, indented, in source order. A node is named
+ * by the AST class it built, or else by its terminal or data rule. `grammar`
+ * is separate because the tree itself does not know what its element ids
  * mean.
  */
 void dump_cst(const cursiv::Document& document, const cursiv::Grammar& grammar,
@@ -93,7 +94,8 @@ void dump_cst(const cursiv::Document& document, const cursiv::Grammar& grammar,
 
 /**
  * The same tree as JSON, one line, per node `element`/`begin`/`end` plus
- * `hidden`/`recovered` when set and `text` on a leaf. Unlike `dump_cst`,
+ * `type` (the AST class built there), `hidden`/`recovered` when set and
+ * `text` on a leaf. Unlike `dump_cst`,
  * leaf text is not truncated, since this form is meant to be re-parsed.
  * Ill-formed UTF-8 is replaced by U+FFFD in the output only.
  */

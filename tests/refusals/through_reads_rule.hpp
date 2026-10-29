@@ -1,4 +1,4 @@
-// expect LR: a rule is read with the skipper between
+// expect LR: a terminal or a .through.: these read one token, so they cannot call a rule
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

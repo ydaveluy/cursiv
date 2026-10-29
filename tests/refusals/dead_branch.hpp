@@ -1,6 +1,6 @@
 // A branch that reads a token past `eof`, beside one that stands: the
 // generation goes on, and names the branch no text reaches.
-// expect LR: warning: rule .Para.: branch 2 of 2 .BAR !. SEMI. is never read
+// expect LR: warning: rule .Para.: branch 2 of 2 .BAR !. SEMI. can never match
 #pragma once
 
 #include "refusals/head.hpp"

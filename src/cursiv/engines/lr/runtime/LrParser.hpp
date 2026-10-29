@@ -78,7 +78,7 @@ struct LrParser {
     CstRun::Watch watch(builder.stream(), cancelToken);
     LrContext c(text, builder);
     c.stop = CancellationPoll(cancelToken);
-    if constexpr (kLrAnyRecorded<A>) c.pending.reserve(8);
+    if constexpr (kTermsRecorded<A.cfg>) c.pending.reserve(8);
     // The room a position's candidates fill, for the life of the parse.
     ScanRoom<(A.maxCands != 0 ? A.maxCands : 1)> room;
     c.cand = room.data();

@@ -170,47 +170,46 @@ struct check_write {
 
   static consteval bool check() {
     static_assert(!owns_text,
-                  "an AST member never owns its text: this one holds a string "
-                  "-- itself, or as a variant alternative -- and the tree "
-                  "BORROWS the document. Make it AstNode::string_view. A value "
-                  "the grammar has to MATERIALISE (a decoded literal, a "
-                  "case-folded name) is allocated by the converter, in the "
-                  "resource it is handed (`static std::string_view "
+                  "an AST member never owns its text: this one holds a "
+                  "string, directly or in a variant, and the tree points "
+                  "into the document -- make it AstNode::string_view. A "
+                  "value that must be built, such as a decoded literal or a "
+                  "case-folded name, is allocated by the converter in the "
+                  "resource it is given (`static std::string_view "
                   "convert(std::string_view, std::pmr::memory_resource*)`), "
-                  "and reaches the member as a view of that -- which lives as "
-                  "long as the ParseResult");
+                  "and reaches the member as a view that lives as long as "
+                  "the ParseResult");
     static_assert(!(is_ref_nature(nature) && !is_text_pay<Src>),
-                  "a reference member takes a TEXT payload: a cross-reference "
-                  "stores the WRITTEN NAME (a value rule or a matcher), never "
-                  "the node a rule built");
+                  "a reference member takes text: a cross-reference stores "
+                  "the name as written, from a terminal or a data rule, never "
+                  "a node built by a rule");
     static_assert(!(is_ref_nature(nature) && is_text_pay<Src> && !ok),
-                  "a reference member BORROWS its name: it holds a "
-                  "string_view into the parsed document, so the payload's "
-                  "value type must BE string_view -- this one produces an "
-                  "owned value (a string, a number, a class), which the "
-                  "builder materialises as a TEMPORARY and the name would "
-                  "outlive. Give the rule a converter answering a string_view: "
-                  "into the input, or into the resource the converter is "
-                  "handed (`convert(std::string_view, "
+                  "a reference member holds its name as a string_view into "
+                  "the document, so its value must be a string_view: this "
+                  "one is another value (a string, a number, a class), which "
+                  "the builder keeps only as a temporary -- give the rule a "
+                  "converter that returns a string_view into the input, or "
+                  "into the resource the converter is given "
+                  "(`convert(std::string_view, "
                   "std::pmr::memory_resource*)`)");
     if constexpr (!pointee_ok)
       ::MemberNodeOutsideAst<P, std::remove_pointer_t<X>>();
     static_assert(!(nature == FieldNature::node && pointee_ok && !ok),
-                  "this member holds a node of its own type: the payload must "
-                  "build a node whose type derives from the member's pointee "
-                  "(a node rule, a region, or a nest)");
+                  "this member holds a node of its own type: the value "
+                  "written must be a node whose type derives from the type "
+                  "the member points to (from a rule that builds a node, a "
+                  "region, or a nest)");
     static_assert(!(nature == FieldNature::variant && !ok),
-                  "a variant member takes what matches EXACTLY ONE of its "
-                  "alternatives -- this payload matches none, or several");
+                  "a variant member takes a value that matches exactly one "
+                  "of its alternatives -- this one matches none, or "
+                  "several");
     static_assert(variant_alts_index_targets,
-                  "a variant member mixes alternatives that name an AST type "
-                  "WITHOUT holding a node: a cross-reference alternative, a "
-                  "nested variant, or a pointer to a class outside the "
-                  "cursiv::AstNode family. The "
-                  "builder names the alternative to write by its rank among "
-                  "the member's target types, so such a member would resolve "
-                  "to the wrong alternative or to none. Give the reference a "
-                  "member of its own");
+                  "a variant member mixes node alternatives with "
+                  "alternatives that name an AST type without holding a "
+                  "node: a cross-reference, a nested variant, or a pointer to "
+                  "a class that does not derive from cursiv::AstNode, so the "
+                  "builder would pick the wrong alternative, or none -- give "
+                  "the reference a member of its own");
     if constexpr (view_dangles)
       ::BorrowedTextTemporary<P, typename pay_value<Src>::type>();
     // An enum's default conversion matches text against its enumerator names,
@@ -219,14 +218,14 @@ struct check_write {
     // enumerator is `check_lit_write`'s question.
     static_assert(
         !(nature == FieldNature::value && !ok && !view_dangles && !owns_text),
-        "no conversion from this payload to the member type: the tree's own "
-        "conversion reaches string_view, bool, the arithmetic set and an enum, "
-        "and nothing else. Give the rule a converter answering the member's "
-        "type -- `as<f>(...)` around the rule's body, or a "
+        "no conversion from this value to the member type: the built-in "
+        "conversions cover string_view, bool, arithmetic types and enums, and "
+        "nothing else -- give the rule a converter that returns the member's "
+        "type: `as<f>(...)` around the rule's body, or a "
         "`cursiv::default_converter<T>` specialisation declaring `static "
         "ConversionResult<T> convert(std::string_view)`, which every rule "
-        "naming T then reaches. Declaring only `using result = T` announces a "
-        "target the tree cannot produce");
+        "naming T then uses. Declaring only `using result = T` is not "
+        "enough");
     return true;
   }
 };
@@ -366,13 +365,13 @@ template <auto P, bool IsAppend>
 consteval bool dir_storage_ok() {
   constexpr FieldStorage storage = field_tag<P>::storage;
   static_assert(!(IsAppend && storage != FieldStorage::vector),
-                "`+=` accumulates, so it names a member the grammar can "
-                "accumulate INTO -- a `vector<T>` list. On a single-valued "
-                "member each match overwrites the last: write `=`");
+                "`+=` appends, so it needs a `vector<T>` list member: on a "
+                "single-value member each match would overwrite the last -- "
+                "write `=`");
   static_assert(!(!IsAppend && storage == FieldStorage::vector),
-                "`=` names the ONE value a member takes, and this member is "
-                "a `vector<T>` list -- repeated matches would pile up, which "
-                "is what `+=` says. Write `+=`");
+                "`=` sets the single value of a member, and this member is "
+                "a `vector<T>` list -- to add each match to the list, write "
+                "`+=`");
   return true;
 }
 

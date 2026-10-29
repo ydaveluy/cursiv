@@ -1,5 +1,4 @@
-# The generated tree is build output: the generator rewrites it from the
-# grammar, and a table is megabytes git has no use for.
+# Build output, including the parser generated from the grammar.
 generated/
 /build*
 /.cache/

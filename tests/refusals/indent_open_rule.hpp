@@ -1,5 +1,5 @@
 // A bracket named by a rule: a rule is no token, and nothing would mark it.
-// expect LR: `indent_open` and `indent_close` name a terminal a rule reads
+// expect LR: `indent_open` and `indent_close` must name terminals that a rule uses
 #pragma once
 
 #include "refusals/head.hpp"

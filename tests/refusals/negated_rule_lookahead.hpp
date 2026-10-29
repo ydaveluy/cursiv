@@ -1,6 +1,6 @@
 // A negated lookahead over a rule that builds a node: it is parsed, and a
 // condition only reads.
-// expect LR: A rule that builds a node is parsed, not read: no condition asks one
+// expect LR: [Aa] condition cannot test a rule that builds a node
 #pragma once
 
 #include "refusals/head.hpp"

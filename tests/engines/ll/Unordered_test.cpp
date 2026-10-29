@@ -219,7 +219,7 @@ void refused_alike(const Lowered& t, std::uint16_t rules, Name&& name) {
   const std::string said =
       cursiv::lower_fail_sentence(t.cfg, name(t.cfg, t.cfg.lowerRule));
   CHECK(said.starts_with("rule `") &&
-        said.find("Root` holds an unordered group") != std::string::npos);
+        said.find("Root` has an unordered group") != std::string::npos);
 }
 
 // Both engines refuse a group in the same words.
@@ -250,8 +250,8 @@ void refused_empty(std::string_view part) {
   CHECK(lr.cfg.nt_name(lr.fault.rule) == "Root" &&
         ll.cfg.rule_name(ll.fault.rule) == "Root");
   CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
-      "holds an unordered item that may match nothing, `" + std::string(part) +
-      "`: an unordered item must read input"));
+      "has an unordered item that may match nothing, `" + std::string(part) +
+      "`: an item that matches nothing"));
 }
 
 // ...and refuse an optional item in a group that holds a nest, naming it.
@@ -262,8 +262,8 @@ void refused_nest(std::string_view part) {
   CHECK(lr.fault.code == cursiv::GrammarFaultCode::nullableUnorderedItem);
   CHECK(lr.fault == ll.fault && lr.fault.part == part && lr.fault.gated);
   CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
-      "holds an optional unordered item, `" + std::string(part) +
-      "`, in a group whose items hold a `nest`"));
+      "has an optional item, `" + std::string(part) +
+      "`, in an unordered group whose items hold a `nest`"));
 }
 
 // Both engines read one text alike: the verdict, the tree and the records

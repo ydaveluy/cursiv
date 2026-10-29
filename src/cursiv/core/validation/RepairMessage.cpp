@@ -45,13 +45,17 @@ std::string_view named_below(const Grammar& grammar, ElementId element) {
   return grammar.terminalName(element);
 }
 
+// The bytes a line's indentation is made of, and those a quote trims.
+constexpr std::string_view kIndentBlanks = " \t\f\v";
+constexpr std::string_view kBlanks = " \t\f\v\n\r";
+
 // One line of source, whatever the author wrote: a repair over a run of
 // newlines would otherwise print a paragraph into a hover.
 std::string quote_found(std::string_view text) {
   constexpr std::size_t kMax = 24;
-  const std::size_t begin = text.find_first_not_of(" \n\r\t");
+  const std::size_t begin = text.find_first_not_of(kBlanks);
   if (begin == std::string::npos) return {};
-  text = text.substr(begin, text.find_last_not_of(" \n\r\t") - begin + 1);
+  text = text.substr(begin, text.find_last_not_of(kBlanks) - begin + 1);
   const bool shortened = text.size() > kMax;
   std::size_t cut = std::min(text.size(), kMax);
   // Keep the truncation on a UTF-8 lead byte.
@@ -60,9 +64,20 @@ std::string quote_found(std::string_view text) {
       --cut;
   std::string out(text.substr(0, cut));
   for (char& c : out)
-    if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    if (kBlanks.find(c) != std::string_view::npos) c = ' ';
   if (shortened) out += "...";
   return out;
+}
+
+// A deletion of a line's leading blanks, or one standing before them where a
+// dropped indent took no byte: the indentation was refused, not the token
+// after it.
+bool refuses_indentation(std::string_view text, const ParseDiagnostic& d) {
+  const bool lineStart =
+      d.begin == 0 || text[d.begin - 1] == '\n' || text[d.begin - 1] == '\r';
+  const std::size_t run =
+      std::min(text.find_first_not_of(kIndentBlanks, d.begin), text.size());
+  return lineStart && run > d.begin && d.end <= run;
 }
 
 // `'a'`, `'a' or 'b'`, `one of 'a', 'b', 'c'`.
@@ -82,8 +97,12 @@ std::string spell_expected(std::span<const std::string_view> spellings) {
 // cannot enumerate -- an identifier, a number -- falls back to the element's
 // own name, and a position that answers neither keeps the bare sentence.
 std::string repair_message(const Grammar& grammar, const ParseDiagnostic& d,
-                           std::string_view over, bool atEnd) {
+                           std::string_view text) {
   constexpr std::size_t kMaxNamed = 4;
+  const bool sane = d.begin <= d.end && d.end <= text.size();
+  const std::string_view over =
+      sane ? text.substr(d.begin, d.end - d.begin) : std::string_view{};
+  const bool atEnd = d.end >= text.size();
   // A skip over pure whitespace -- the only byte a tight region ever refuses
   // -- quotes to nothing: `found` is then empty despite the span itself
   // being non-empty, and what is left to say is the expectation alone.
@@ -126,7 +145,10 @@ std::string repair_message(const Grammar& grammar, const ParseDiagnostic& d,
     case DiagnosticKind::deleted:
       // Text the parser had to skip to carry on: what was expected is what it
       // skipped towards, so it is named second here -- unless skipping it is
-      // what was expected, which is said once, not twice.
+      // what was expected, which is said once, not twice. Skipped blanks
+      // quote to nothing, and at a line start they are its indentation.
+      if (sane && refuses_indentation(text, d))
+        return "Unexpected indentation.";
       return opposed(/*foundFirst=*/true);
     case DiagnosticKind::incomplete:
       // A frame runs out of text it can place, and that is not always the end

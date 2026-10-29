@@ -54,8 +54,8 @@ std::string word_lit_warning_text(const WordLitWarning& w) {
   }
   return "rule `" + w.rule + "`: `" + w.lit +
          "` is a literal with no guard that ends in a word character, so it "
-         "also matches the start of a longer word, as `lit<\"end\">` matches "
-         "`end` in `endx` -- write `kw<\"" + text +
+         "also matches the start of a longer word, such as `" + w.text +
+         "x` -- write `kw<\"" + text +
          "\">`, or give the literal a guard (`lit<\"" + text +
          "\", G>`) if that is intended";
 }

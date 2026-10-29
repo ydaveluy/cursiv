@@ -1,5 +1,6 @@
-// The checks of this language: what the grammar accepts but the language does
-// not. Two here -- a naming convention, and the one fact no single node can see.
+// The validation checks of the @CURSIV_NEW_ID@ language: rules that the
+// grammar alone cannot express. Declare a check here, write it in the .cpp
+// file and register it in `register_validation_checks`.
 #pragma once
 
 #include "cursiv/core/services/DefaultCoreService.hpp"
@@ -18,8 +19,8 @@ class @CURSIV_NEW_CLASS@Validator final : public cursiv::DefaultCoreService {
                           cursiv::ValidationAcceptor& accept) const;
 };
 
-// Declared here rather than in the module, so a check and its registration are
-// read together. `CoreServices.hpp` is the one that includes this header.
+// Creates the validator and registers its checks; `install_core_module` calls
+// it.
 struct @CURSIV_NEW_CLASS@CoreServices;
 void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services);
 

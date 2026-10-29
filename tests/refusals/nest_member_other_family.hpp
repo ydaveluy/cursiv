@@ -1,6 +1,6 @@
 // A nest buries the node in hand in its member, and the head in front of it
 // builds a class that member does not hold.
-// expect LR: this nest buries the node in hand in a member that cannot hold it
+// expect LR: this nest stores the current node in a member that cannot hold it
 #pragma once
 
 #include "refusals/head.hpp"

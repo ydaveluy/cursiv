@@ -1,7 +1,7 @@
 // A name reading on past a word it refuses over symbols its word boundary
 // does not hold: `if` before one is refused, yet the token graph reads the
 // symbol's bytes on as the name.
-// expect LR: refused: terminal .NAME. reads on past a word it refuses over a character its word boundary does not hold
+// expect LR: refused: terminal .NAME. excludes a word with a keyword guard, then may read after it a character outside .word_boundary.
 #pragma once
 
 #include "refusals/head.hpp"

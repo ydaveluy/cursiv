@@ -470,13 +470,13 @@ std::vector<TwinBranch> twin_branches(WarningFound& found) {
 std::string twin_branch_text(const TwinBranch& t) {
   std::string out = "rule `" + t.rule + "`: ";
   if (t.arms == 0)
-    return out + '`' + t.branch + "` reads the same tokens as the earlier `" +
-           t.earlier +
-           "`, so reading it in place of that item is never chosen and is "
-           "dropped -- merge the two items, or nest the second in the first, "
-           "as `option(a + option(b))`";
+    return out + '`' + t.branch +
+           "` matches the same tokens as the earlier `" + t.earlier +
+           "`, so it is never chosen in place of that item, and that choice "
+           "is dropped -- merge the two items, or nest the second in the "
+           "first, as `option(a + option(b))`";
   out += "branch " + detail::decimal(t.arm) + " of " + detail::decimal(t.arms) +
-         " `" + t.branch + "` reads the same tokens as ";
+         " `" + t.branch + "` matches the same tokens as ";
   out += t.over.size() == 1 ? "branch " : "branches ";
   for (std::size_t i = 0; i < t.over.size(); ++i) {
     if (i != 0) out += i + 1 == t.over.size() ? " and " : ", ";

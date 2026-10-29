@@ -191,11 +191,6 @@ SymbolId lr_peek2(const LrContext& c, std::uint16_t mode) {
   return lr_scan_at<A>(c, mode, c.la.end, c.indent.depth).sym;
 }
 
-// Whether any terminal is one at all: where none is, `pending` is never
-// filled, and the flush is the cursor move alone.
-template <const auto& A>
-inline constexpr bool kLrAnyRecorded = kLrTermMask<A, true>.any();
-
 // The row each terminal's record states.
 template <const auto& A>
 inline constexpr std::array<ElementId, A.cfg.nterms> kLrTermElem = [] {
@@ -206,7 +201,7 @@ inline constexpr std::array<ElementId, A.cfg.nterms> kLrTermElem = [] {
 
 template <const auto& A>
 inline void lr_flush_trivia(LrContext& c) {
-  lr_flush<kLrAnyRecorded<A>, A.stamp>(c, kLrTermElem<A>.data());
+  lr_flush<kTermsRecorded<A.cfg>, A.stamp>(c, kLrTermElem<A>.data());
 }
 
 template <const auto& A>

@@ -1,6 +1,6 @@
 // A root create followed by a second create, of a class outside the family the
 // member holding the rule takes.
-// expect LR: this member holds a node of its own type: the payload must build a node whose type derives
+// expect LR: this member holds a node of its own type: the value written must be a node whose type derives
 #pragma once
 
 #include "refusals/head.hpp"

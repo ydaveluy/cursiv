@@ -1,6 +1,6 @@
 // A flag around a call changes nothing: the call adopts its node only while
 // the current node is empty.
-// expect LR: calls a rule that builds a node after the node in hand was written, created or nested
+// expect LR: calls a rule that builds a node after the current node was written, created or nested
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,5 @@
 // In a terminal, `as` converts the whole token, never a part of it.
-// expect LR: inside a terminal, as<X>.e. wraps the whole body or each of its alternatives
+// expect LR: inside a terminal, as<X>.e. must wrap the whole body or each of its alternatives
 #pragma once
 
 #include "refusals/head.hpp"

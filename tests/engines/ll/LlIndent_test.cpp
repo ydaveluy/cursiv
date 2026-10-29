@@ -13,6 +13,7 @@
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/core/validation/RepairMessage.hpp"
 #include "cursiv/engines/ll/gen/LlLowering.hpp"
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
@@ -191,6 +192,23 @@ void muted_levels_lay_no_dedent_at_the_end() {
     for (cursiv::NodeId i = 0; i < cst.size(); ++i)
       CHECK(cst[i].subtreeSize != 1 || cst[i].begin != text.size());
   }
+}
+
+// Each way a line's indentation goes wrong -- too deep, back to no level,
+// another blank, a form feed -- is one repair that says so, in both engines.
+void an_indentation_error_says_so() {
+  const auto ll = tllindent::generated::Ll::create_parser();
+  const auto lr = tindent::generated::G::create_parser();
+  for (const cursiv::Parser* const p : {ll.get(), lr.get()})
+    for (const std::string_view text :
+         {"a\n  b\nc\n", "a:\n    b\n  c\n", "a:\n\tb\n    c\n",
+          "a:\n  b\n\f  c\n"}) {
+      const auto result = p->parse(text);
+      CHECK(result.diagnostics.size() == 1);
+      for (const auto& d : result.diagnostics)
+        CHECK(cursiv::repair_message(p->getGrammar(), d, text) ==
+              "Unexpected indentation.");
+    }
 }
 
 // An indent a repair invents opens a level the line back at the enclosing one
@@ -502,6 +520,7 @@ int main() {
   a_dropped_indent_leaves_the_name_it_splits(
       *tindent::laid::generated::Cases::create_parser());
   an_invented_indent_opens_a_level();
+  an_indentation_error_says_so();
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
   an_invented_block_closed_at_once_ends();

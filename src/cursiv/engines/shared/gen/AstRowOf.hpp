@@ -210,9 +210,9 @@ AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) 
   // A terminal or data-rule entry would push nothing.
   static_assert(is_node_rule<typename Normalize<G>::entry> ||
                     is_infix_rule<typename Normalize<G>::entry>,
-                "this grammar's entry rule builds no AST node -- it is a "
-                "terminal or a data rule; the rule a grammar enters through "
-                "must produce the tree's root");
+                "the entry rule of this grammar builds no AST node: it is a "
+                "terminal or a data rule -- make `entry` a rule that builds "
+                "the root node");
   // An infix rule synthesizes its body, so a mismatched operand carries no
   // directive to refuse it: the check lives on the rule and is put in force
   // here, where the rules the build reached are named.
@@ -234,7 +234,7 @@ AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) 
             ...);
       }(typename Low::rules{}),
       "a directive of this grammar names a member that cannot take its "
-      "payload: the message above says which");
+      "value: the message above says which");
   const auto rows = [&]<class... Rs>(TypeList<Rs...>) {
     return std::span<const AstRowDesc* const>(detail::kRows<Stage, Rs...> + 1,
                                               sizeof...(Rs));

@@ -187,7 +187,7 @@ void insertion_allowance_is_part_of_the_future() {
   s.configs[0].phase = cursiv::LrRepairPhase::inserting;
   auto free = s.configs[0];
   free.freeInserts = 2;
-  free.link = cursiv::lr_search_link(s, cursiv::LrGesture{.choice = 1});
+  free.link = s.link(cursiv::LrGesture{.choice = 1});
   s.configs.push_back(free);
   for (const std::uint64_t held : {1u, 3u}) {
     auto dear = free;
@@ -270,7 +270,7 @@ void merged_path_keeps_its_source_rank() {
     last = goal;
   }
   CHECK(!s.configs[first].gone && s.configs[last].gone);
-  CHECK(cursiv::lr_search_root_of(s.links, s.configs[first].link) == 0);
+  CHECK(cursiv::repair_root_of(s.links, s.configs[first].link) == 0);
   bool exhausted = false, raced = false;
   CHECK(cursiv::lr_search_run<gdm::kTable>(c, s, exhausted, raced) == first);
   CHECK(!exhausted && !raced);
@@ -297,7 +297,7 @@ using Rank = std::function<std::uint64_t(const cursiv::LrSearch&,
 template <const auto& A>
 cursiv::TextOffset reach_of(cursiv::LrContext& c, cursiv::LrSearch& s,
                             std::uint32_t g) {
-  if (s.configs[g].done) return cursiv::kLrReachAll;
+  if (s.configs[g].done) return cursiv::kRepairReachAll;
   s.configs.push_back(s.configs[g]);
   std::vector<std::uint32_t> todo{
       static_cast<std::uint32_t>(s.configs.size()) - 1};
@@ -307,7 +307,7 @@ cursiv::TextOffset reach_of(cursiv::LrContext& c, cursiv::LrSearch& s,
     const std::uint32_t i = todo.back();
     todo.pop_back();
     for (;;) {
-      if (s.configs[i].done) return cursiv::kLrReachAll;
+      if (s.configs[i].done) return cursiv::kRepairReachAll;
       if (s.configs[i].gone) {
         far = std::max(far, s.configs[i].la.begin);
         break;
@@ -358,12 +358,12 @@ Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
               Lay lay, const Rank& rank) {
   cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   if (!lay(s)) return kNoKey;
-  std::vector<cursiv::LrSearch::Entry> todo(s.heap);
+  std::vector<cursiv::RepairEntry> todo(s.heap);
   s.heap.clear();
   std::vector<std::uint32_t> goals;
   std::vector<std::pair<std::uint32_t, std::uint32_t>> refused;
   while (!todo.empty()) {
-    const cursiv::LrSearch::Entry e = todo.back();
+    const cursiv::RepairEntry e = todo.back();
     todo.pop_back();
     const cursiv::LrConfig& x = s.configs[e.at];
     if (x.gone || x.cost > most) continue;

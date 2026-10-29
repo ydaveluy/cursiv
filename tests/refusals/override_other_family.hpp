@@ -1,7 +1,7 @@
 // An override that adds an alternative building a class outside the family of
 // the rule it stands over: every caller of the base reads an `Item` and would
 // find another class there.
-// expect LR: this override hands back a class outside the type of the rule it stands over
+// expect LR: this override builds a class outside the type of the rule it overrides
 #pragma once
 
 #include "refusals/head.hpp"

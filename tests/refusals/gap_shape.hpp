@@ -1,5 +1,5 @@
 // A gap condition over a run the gap matcher does not read.
-// expect LR LL: refused: the grammar asks a condition of an expression the matcher does not read
+// expect LR LL: refused: the grammar uses an expression in .gap::has. or .gap::is. that they cannot test
 #pragma once
 
 #include "refusals/head.hpp"

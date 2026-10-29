@@ -13,6 +13,7 @@
 
 #include "cursiv/core/grammar/Association.hpp"
 #include "cursiv/core/grammar/GrammarImage.hpp"
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/shared/gen/ChainPool.hpp"
 #include "cursiv/engines/shared/gen/GrammarFault.hpp"
 #include "cursiv/engines/shared/gen/LexReifier.hpp"
@@ -26,6 +27,12 @@
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
 namespace cursiv {
+
+// An expression a rule body has no place for, such as a capture outside a
+// token.
+inline constexpr std::string_view kNotInRule =
+    "this expression cannot be used directly in a rule: `mark<>` and `same<>` "
+    "work only inside a terminal or a `through`";
 
 class Lowerer {
  public:
@@ -272,8 +279,9 @@ struct LowerState {
 };
 
 // The walk both lowerings lay a body with, into the tree of laid nodes `Pool`
-// holds. `Self` lays each node its own way, an embed's close and the call of a
-// grammar's entry with them.
+// holds. `Self::lay` lays the nodes its engine lays apart and hands every other
+// to `lay_shared`; it also lays an embed's close and the call of a grammar's
+// entry.
 template <class Self, class Lowered, class Pool>
 class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
  public:
@@ -338,9 +346,7 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
     const ImageNode n = at(e);
     const ImageNode inner = at(kid(n, 0));
     if (inner.kind != ImageKind::seq || inner.count != 3)
-      refuse_lowering(
-          "this combinator has no lowering: a body reaching here would "
-          "become a right-hand side nobody wrote");
+      refuse_lowering(kNotInRule);
     const unsigned in = section_of(n.a, token_core(kid(inner, 2)));
     const Id open = self().lay(cfg, kid(inner, 0));
     const Id entry = self().lay(in, kid(inner, 1));
@@ -368,6 +374,39 @@ class LowerWalk : private LowerState<Lowered, Pool>, public Lowerer {
     }
     _p.e[group].unorderedOptional = optional;
     return group;
+  }
+  // A node both engines lay alike, through `Self`'s own layings of a
+  // repetition, a write, a flag, a condition and an implied token.
+  CURSIV_ALWAYS_INLINE Id lay_shared(unsigned cfg, ImageId e,
+                                     const ImageNode& n) {
+    switch (n.kind) {
+      case ImageKind::ref:
+        return lay_ref(cfg, n.a);
+      case ImageKind::epsilon:
+        return _p.push(Node{Shape::none});
+      case ImageKind::embed:
+        return lay_embed(cfg, e);
+      case ImageKind::seq:
+        return gap(e) ? self().lay_condition(cfg, e) : lay_seq(cfg, e);
+      case ImageKind::choice:
+        return gap(e) ? self().lay_condition(cfg, e)
+                      : lay_kids(cfg, Shape::alt, kids_of(n));
+      case ImageKind::repeat:
+        return self().lay_repeat(cfg, e);
+      case ImageKind::assign:
+      case ImageKind::append:
+        return self().lay_write(cfg, e);
+      case ImageKind::flag:
+        return self().lay_flag(cfg, e);
+      case ImageKind::gapHas:
+      case ImageKind::gapIs:
+      case ImageKind::andOf:
+        return self().lay_condition(cfg, e);
+      case ImageKind::implied:
+        return self().lay_implied(cfg, e);
+      default:  // a token, or a combinator `terminal_sym` refuses
+        return push_sym(terminal_sym(cfg, e), cfg);
+    }
   }
   // What a rule's body owes its rule: a data rule's conversion, unless a fold
   // reads it, and a node rule's close, where the body opens no record -- true

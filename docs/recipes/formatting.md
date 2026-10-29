@@ -46,10 +46,10 @@ class RecipeFormatter final : public cursiv::AbstractFormatter {
 }  // namespace recipe
 ```
 
-`on<T>` registers a callback for exactly the class `T`. A node formatter
-selects **regions**: a keyword, a property, a node, or the content between
-delimiters. `prepend`, `append` and `surround` place an action around a
-region:
+`on<T>` registers a callback for the class `T` only, not its subclasses.
+A node formatter selects **regions**: a keyword, a property, a node, or the
+content between delimiters. `prepend`, `append` and `surround` place an
+action around a region:
 
 | Action | Effect |
 |---|---|
@@ -76,9 +76,10 @@ void install_lsp_module(RecipeServices& services) {
 ```
 
 There is no default formatter: the server offers formatting once you install
-one. A document with syntax errors is not formatted as a whole.
+one. A document with syntax errors is not formatted as a whole, but a
+selection that ends before the line of the first error is.
 
-## Check it
+## Test it
 
 Test the expected text directly:
 
@@ -94,6 +95,6 @@ options. See [Test your language](../learn/testing.md) for the test setup.
 
 ## Advanced: comments
 
-To format comments, register `onHidden("SL_COMMENT", callback)`; the callback
-receives a `HiddenNodeFormatter`. The Domainmodel example's
+To format comments, register `onHidden("SL_COMMENT", callback)` with the
+name of your comment terminal; the callback receives a `HiddenNodeFormatter`. The Domainmodel example's
 `DomainModelFormatter` formats both line and block comments.

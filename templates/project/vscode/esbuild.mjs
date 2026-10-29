@@ -8,14 +8,14 @@ if (!watch) {
   rmSync('out', { recursive: true, force: true });
 }
 
-// Only `vscode` is external -- the editor injects it at runtime; everything
-// else is bundled, so the packaged .vsix is self-contained.
+// Bundle the extension and its dependencies into one file. VS Code provides
+// the `vscode` module itself.
 const context = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18', // VS Code 1.86 supports native servers; WASI needs 1.101.
+  target: 'node18', // The Node.js version of VS Code 1.86.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,

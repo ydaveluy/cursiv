@@ -116,8 +116,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
         const auto slot = static_cast<std::size_t>(at - list.begin());
         if (slot >= 0xFFu)
           throw std::runtime_error(
-              "this grammar declares more narrowings of one member than a "
-              "reference's index byte can name");
+              "the grammar narrows one reference member to more than 255 "
+              "classes -- narrow it to fewer classes");
         g.narrowSlot = static_cast<std::uint8_t>(slot);
       }
     }
@@ -129,21 +129,20 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
 
   if (typeKeys.empty())
     throw std::runtime_error(
-        "this grammar materialises an AST but names no AST type -- no rule "
-        "builds one, no member points at one, no directive writes one; a "
-        "purely lexical grammar parses, it does not build");
+        "the grammar uses no AST type: no rule builds a node, no member "
+        "points at one and no directive writes one -- make the entry rule "
+        "build a node with `create<T>`");
   if (fields.keys().size() > 0xFFFEu)
     throw std::runtime_error(
-        "this grammar writes more distinct members than a record's field "
-        "index can name");
+        "the grammar writes more than 65 534 distinct members -- split the "
+        "grammar");
   if (typeKeys.size() > 0xFFFEu)
     throw std::runtime_error(
-        "this grammar names more distinct AST types than a record's type "
-        "index can name");
+        "the grammar uses more than 65 534 AST types -- split the grammar");
   if (convs.size() > 0xFFFEu)
     throw std::runtime_error(
-        "this grammar needs more distinct conversions than a record's "
-        "conversion index can name");
+        "the grammar uses more than 65 534 distinct conversions -- split the "
+        "grammar");
 
   const auto bindingAt = position_in(bindings);
   const auto source = [&](const AstTypeDesc* type) {

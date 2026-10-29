@@ -6,12 +6,10 @@
 
 #include <algorithm>
 #include <array>
-#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -41,20 +39,10 @@
 
 namespace cursiv {
 
-inline std::uint32_t ll_search_link(LlSearch& s, const LlGesture& g) {
-  s.links.push_back(g);
-  return static_cast<std::uint32_t>(s.links.size()) - 1;
-}
-
 // What a gesture is to the expected set: the terminal it inserts, if any.
 inline std::uint32_t ll_search_kind(const LlGesture& g) {
   return g.kind == LlGesture::ins ? std::uint32_t{g.term}
                                   : std::uint32_t{kNoElement};
-}
-
-inline std::strong_ordering ll_key_cmp(const LlReading& a, const LlReading& b) {
-  return std::tie(a.cost, a.lost, a.faults, a.invented) <=>
-         std::tie(b.cost, b.lost, b.faults, b.invented);
 }
 
 inline bool ll_search_goal(const LlReading& r) {
@@ -64,20 +52,9 @@ inline bool ll_search_goal(const LlReading& r) {
                     r.settled);
 }
 
-inline bool ll_entry_after(const LlSearch::Entry& a, const LlSearch::Entry& b) {
-  return std::tie(a.f, a.lost, a.faults, a.invented, a.seq) >
-         std::tie(b.f, b.lost, b.faults, b.invented, b.seq);
-}
-
-// A reading that took a token since its last gesture opens a fault with the
-// next one.
 inline void ll_search_queue(LlSearch& s, std::uint32_t f, const LlReading& r,
                             std::uint32_t at, std::uint32_t lost = 0) {
-  const std::uint32_t opens = !r.gen && !ll_search_goal(r) && r.fresh ? 1u : 0u;
-  s.heap.push_back(LlSearch::Entry{f, r.lost + lost, r.faults + opens,
-                                   r.invented, s.seq++, at});
-  std::push_heap(s.heap.begin(), s.heap.end(), ll_entry_after);
-  s.nodes[at].queued = true;
+  s.queue(s.nodes, f, r, at, lost, !r.gen && !ll_search_goal(r) && r.fresh);
 }
 
 // Once a gesture's readings are admitted, the tail no queue entry names is
@@ -165,11 +142,7 @@ bool ll_search_same_future(const LlSearch& s, const LlReading& a,
   return true;
 }
 
-// A reading dies to another of its future at a worse key and no longer an
-// owed run, or at an equal key and run, where the kept one takes the better
-// rank's path: what descends from it follows, and what the dropped path first
-// inserted stays named. Two at an equal key and different runs both stand, as
-// two that neither outdoes do.
+// Reading `i` queued, unless the one its future keeps outdoes it.
 template <const auto& T>
 void ll_search_admit(LlSearch& s, std::uint32_t i) {
   LlReading& r = s.nodes[i];
@@ -177,30 +150,11 @@ void ll_search_admit(LlSearch& s, std::uint32_t i) {
   auto [it, last] = s.seen.equal_range(future);
   while (it != last && !ll_search_same_future<T>(s, r, s.nodes[it->second]))
     ++it;
-  if (it == last) {
+  if (it == last)
     s.seen.emplace(future, i);
-  } else {
-    LlReading& x = s.nodes[it->second];
-    const auto k = x.gone ? std::strong_ordering::less : ll_key_cmp(r, x);
-    if (k > 0 ? r.owing <= x.owing : k == 0 && r.owing == x.owing) {
-      if (k == 0) {
-        const GestureRank::Parting p = s.rank.part(s.links, r.link, x.link);
-        const bool handed = r.link != x.link && GestureRank::before(s.links, p);
-        s.work +=
-            s.tied.tie(s.links, x.link, r.link, p, handed, ll_search_kind);
-        if (handed) {
-          s.links[x.link] = s.links[r.link];
-          ++s.handed;
-        }
-      }
-      r.gone = true;
-      return;
-    }
-    if (x.gone || (k < 0 && x.owing <= r.owing)) {
-      x.gone = true;
-      it->second = i;
-    }
-  }
+  else if (repair_meet<&LlReading::owing>(s, s.nodes, i, it->second,
+                                          ll_search_kind))
+    return;
   ll_search_queue(
       s, r.cost + (!ll_search_goal(r) && !r.owing ? kRepairReread : 0), r, i);
 }
@@ -240,16 +194,9 @@ inline void ll_search_cut(LlSearch& s) {
   if (s.work <= s.limit) s.work = s.limit + 1;
 }
 
-inline std::uint64_t ll_search_bytes(const LlSearch& s) {
-  const std::uint64_t left = s.limit > s.work ? s.limit - s.work : 0;
-  return left > ~std::uint64_t{0} / kRepairLexBytes
-             ? ~std::uint64_t{0}
-             : left * kRepairLexBytes;
-}
-
 inline TextOffset ll_search_walk_end(const LlContext& c, const LlSearch& s,
                                      TextOffset p) {
-  const std::uint64_t bytes = ll_search_bytes(s);
+  const std::uint64_t bytes = repair_bytes(s.work, s.limit);
   return c.len - p > bytes ? static_cast<TextOffset>(p + bytes) : c.len;
 }
 
@@ -702,13 +649,13 @@ inline std::uint32_t ll_search_child(LlSearch& s, std::uint32_t from,
                                      TextOffset begin) {
   s.nodes.push_back(s.nodes[from]);
   LlReading& e = s.nodes.back();
-  e.link = ll_search_link(s, LlGesture{.parent = e.link,
-                                       .choice = choice,
-                                       .kind = kind,
-                                       .term = term,
-                                       .end = end,
-                                       .at = e.gapFrom,
-                                       .begin = begin});
+  e.link = s.link(LlGesture{.parent = e.link,
+                            .choice = choice,
+                            .kind = kind,
+                            .term = term,
+                            .end = end,
+                            .at = e.gapFrom,
+                            .begin = begin});
   e.faults += e.fresh ? 1u : 0u;
   e.fresh = false;
   // An insertion or an abandon leaves the token in hand where it stood.
@@ -918,7 +865,7 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
   TypoCandidates found;
   const TextOffset len = ll_search_text_end<T>(
       c, s, tok.begin, ll_search_walk_end(c, s, tok.begin));
-  const std::uint64_t most = ll_search_bytes(s);
+  const std::uint64_t most = repair_bytes(s.work, s.limit);
   const auto reach = static_cast<TextOffset>(
       std::min<std::uint64_t>(most, kLlUnscanned));
   const TextOffset horizon = typo_horizon(tok.begin, tok.end, len, reach);
@@ -1182,14 +1129,12 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
   ll_search_abandons<T>(c, s, bi, choice);
 }
 
-inline constexpr TextOffset kLlReachAll = 0xFFFFFFFFu;
-
 // The goals read on with no gesture: `reach[k]` is where candidate `k`'s
-// furthest reading was refused, or `kLlReachAll`; `of[g]` is the candidate goal
-// `g` stands for. The reading furthest back steps, so two bound for one future
-// meet and go on as one; settled once every reading still going stands for the
-// same candidates past every other's refusal. True where the search's share ran
-// out first.
+// furthest reading was refused, or `kRepairReachAll`; `of[g]` is the candidate
+// goal `g` stands for. The reading furthest back steps, so two bound for one
+// future meet and go on as one; settled once every reading still going stands
+// for the same candidates past every other's refusal. True where the search's
+// share ran out first.
 template <const auto& T>
 bool ll_search_race(LlContext& c, LlSearch& s,
                     const std::vector<std::uint32_t>& of,
@@ -1206,7 +1151,7 @@ bool ll_search_race(LlContext& c, LlSearch& s,
   std::ranges::fill(reach, 0);
   for (std::uint32_t g = 0; g < s.goals.size(); ++g) {
     if (s.nodes[s.goals[g]].done) {
-      reach[of[g]] = kLlReachAll;
+      reach[of[g]] = kRepairReachAll;
       continue;
     }
     const LlReading r = s.nodes[s.goals[g]];
@@ -1217,11 +1162,11 @@ bool ll_search_race(LlContext& c, LlSearch& s,
     std::ranges::push_heap(queue, behind);
   }
   const auto settle = [&](const std::vector<std::uint32_t>& ks) {
-    for (const std::uint32_t k : ks) reach[k] = kLlReachAll;
+    for (const std::uint32_t k : ks) reach[k] = kRepairReachAll;
   };
   const auto level = [&] {
     const std::vector<std::uint32_t>& first = runners[queue[0]].of;
-    TextOffset least = kLlReachAll;
+    TextOffset least = kRepairReachAll;
     for (const std::uint32_t q : queue) {
       if (runners[q].of != first) return false;
       least = std::min(least, s.nodes[runners[q].node].ahead.p);
@@ -1314,63 +1259,16 @@ inline bool ll_same_gestures(const std::vector<LlGesture>& links,
   return true;
 }
 
-// The furthest reach, then the key, then the rank. Goals that make the same
-// gestures race as one candidate.
-template <const auto& T>
-std::uint32_t ll_search_elect(LlContext& c, LlSearch& s, bool& raced) {
-  std::erase_if(s.goals, [&](std::uint32_t g) { return s.nodes[g].gone; });
-  const auto goal = [&](std::size_t k) -> const LlReading& {
-    return s.nodes[s.goals[k]];
-  };
-  const auto hash = [&](std::uint32_t l) {
-    return static_cast<std::size_t>(ll_gestures_fold(s.links, l));
-  };
-  const auto same = [&](std::uint32_t a, std::uint32_t b) {
-    return ll_same_gestures(s.links, a, b);
-  };
-  std::unordered_map<std::uint32_t, std::uint32_t, decltype(hash),
-                     decltype(same)>
-      groups(0, hash, same);
-  std::vector<std::uint32_t> of(s.goals.size());
-  for (std::size_t k = 0; k < s.goals.size(); ++k)
-    of[k] = groups
-                .try_emplace(goal(k).link,
-                             static_cast<std::uint32_t>(groups.size()))
-                .first->second;
-  std::vector<TextOffset> reach(groups.size(), kLlReachAll);
-  if (groups.size() > 1) raced = ll_search_race<T>(c, s, of, reach);
-  const auto before = [&](std::size_t a, std::size_t b) {
-    if (reach[of[a]] != reach[of[b]]) return reach[of[a]] > reach[of[b]];
-    const auto k = ll_key_cmp(goal(a), goal(b));
-    return k != 0 ? k < 0 : s.rank.before(s.links, goal(a).link, goal(b).link);
-  };
-  std::size_t w = 0;
-  for (std::size_t k = 1; k < s.goals.size(); ++k)
-    if (before(k, w)) w = k;
-  s.also.clear();
-  s.tied.open();
-  for (std::size_t k = 0; k < s.goals.size(); ++k) {
-    if (reach[of[k]] != reach[of[w]] || ll_key_cmp(goal(k), goal(w)) != 0)
-      continue;
-    s.tied.name(s.links, goal(k).link, ll_search_kind, s.also);
-  }
-  TiedInserts::order(s.also);
-  return s.goals[w];
-}
-
 // A plan names the pool of the search that laid it: a search that lays another
 // drops it.
 inline void ll_search_reset(LlSearch& s) {
-  ll_clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed, s.scans,
-           s.readings, s.ends, s.typos, s.drops, s.plan, s.also, s.tied,
-           s.depths, s.sourceTokens);
+  s.restart();
+  ll_clear(s.pool, s.nodes, s.seen, s.lexed, s.scans, s.readings, s.ends,
+           s.typos, s.drops, s.plan, s.depths, s.sourceTokens);
   s.facts.cfg = kLlNoNode;
-  s.sourceScanned = s.sourceCount = s.seq = 0;
+  s.sourceScanned = s.sourceCount = 0;
   s.next = 0;
   s.planned = false;
-  s.limit = s.work < s.budget
-                ? s.work + std::min(s.perSearch, s.budget - s.work)
-                : s.budget;
 }
 
 // With no goal before the work ran out, the reading that got furthest.
@@ -1381,9 +1279,7 @@ std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
   exhausted = raced = false;
   while (!s.heap.empty()) {
     c.stop.poll();
-    std::pop_heap(s.heap.begin(), s.heap.end(), ll_entry_after);
-    const LlSearch::Entry e = s.heap.back();
-    s.heap.pop_back();
+    const RepairEntry e = s.pop();
     if (s.nodes[e.at].gone) continue;
     if (!s.goals.empty() && e.f > s.nodes[s.goals[0]].cost) break;
     if (ll_search_spent(s)) {
@@ -1419,7 +1315,11 @@ std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
   // A walk the share cut leaves the goals of its cost unread: the share
   // decided, even where the bucket emptied.
   exhausted = exhausted || ll_search_spent(s);
-  return s.goals.empty() ? furthest : ll_search_elect<T>(c, s, raced);
+  if (s.goals.empty()) return furthest;
+  return repair_elect<ll_gestures_fold, ll_same_gestures, ll_search_kind>(
+      s, s.nodes, false, [&](const auto& of, auto& reach) {
+        raced = ll_search_race<T>(c, s, of, reach);
+      });
 }
 
 inline void ll_search_plan(LlSearch& s, std::uint32_t ci) {
@@ -1489,7 +1389,7 @@ std::uint32_t ll_search_root(LlContext& c, LlSearch& s, const LlRoot& root,
   r.ahead = ll_search_ahead<T>(c, s);
   r.inHand = true;
   r.gapFrom = c.at;
-  r.link = ll_search_link(s, LlGesture{});
+  r.link = s.link(LlGesture{});
   s.nodes.push_back(std::move(r));
   return static_cast<std::uint32_t>(s.nodes.size()) - 1;
 }

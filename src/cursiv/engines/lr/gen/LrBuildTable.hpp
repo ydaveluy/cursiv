@@ -159,7 +159,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
 
   void set_gotos(LrGotoRows rows) {
     if (!rows.canonicalize(cfg.nnts))
-      cap_hit("the 16-bit goto count of one nonterminal");
+      cap_hit("one rule is reached from more than 65 535 parser states");
     gotoRows = std::move(rows);
   }
 

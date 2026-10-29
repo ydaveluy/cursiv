@@ -1,6 +1,6 @@
 // An indented grammar embedding another: the section's lines would be
 // measured as the document's.
-// expect LR LL: refused: the grammar reads its lines by indentation and embeds a grammar with .section<>.
+// expect LR LL: refused: the grammar uses indentation and embeds a grammar with .section<>.
 #pragma once
 
 #include "refusals/head.hpp"

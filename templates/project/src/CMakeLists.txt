@@ -1,16 +1,19 @@
-# Generate the parser and its language module.
+# Generate the parser from the grammar. The build regenerates it when the
+# grammar changes.
 cursiv_generate_language(ID @CURSIV_NEW_ID@
     GRAMMAR    @CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp
     NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
     EXTENSIONS @CURSIV_NEW_EXT@
     OUT        @CURSIV_NEW_ID@/generated)
 
-# Add custom services and validation over the generated module.
+# The language library: every .cpp file under core/.
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/core/*.cpp)
 add_library(@CURSIV_NEW_ID@Core ${_core})
 target_link_libraries(@CURSIV_NEW_ID@Core PUBLIC @CURSIV_NEW_ID@Generated)
 
+# The command line, the language server and the benchmark are optional:
+# delete the cli/, lsp/ or bench/ folder to drop its target.
 file(GLOB_RECURSE _cli CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/cli/*.cpp)
 if(_cli)
@@ -35,4 +38,5 @@ if(TARGET @CURSIV_NEW_ID@Lsp AND
       SOURCES @CURSIV_NEW_ID@/bench/main.cpp)
 endif()
 
+# WASI builds copy the language server into vscode/server/.
 cursiv_package_language(@CURSIV_NEW_ID@)

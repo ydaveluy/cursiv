@@ -1,4 +1,4 @@
-// expect LR: `section<G>.open, close.` stands in a rule, not in a terminal
+// expect LR: `section<G>.open, close.` is allowed in a rule, not in a terminal
 #pragma once
 
 #include "refusals/head.hpp"

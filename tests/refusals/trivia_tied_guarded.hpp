@@ -1,6 +1,6 @@
 // Two trivia that read one space, one ignored and unguarded and one hidden and
 // guarded: a guard adds no rank.
-// expect LR: refused: terminal .NOTE. is trivia that reads the same text as another trivia terminal
+// expect LR: refused: terminal .NOTE. is trivia that matches the same text as another trivia terminal
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,13 +1,13 @@
-// The @CURSIV_NEW_ID@ command line: parse one file, link it, validate it, and
-// answer on the exit code -- 0 clean, 1 diagnostics, 2 misuse, 3 fatal.
+// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
+// prints its diagnostics. Run it with `--help` to list the options. It returns
+// 0 for no errors, 1 for document errors, 2 for invalid arguments or paths, and
+// 3 for an internal or output error.
 
 #include "cursiv/cli/cli.hpp"
 #include "cursiv/core/services/CoreLanguage.hpp"
 #include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
 
-// A language is an installer: the three type arguments are all that
-// separates one from another, so `run_cli` itself is compiled once for
-// every language there is and no grammar reaches it.
+// Adds the language to the workspace that the command line creates.
 constexpr auto kRegister =
     &cursiv::register_language<@CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@CoreServices,
                            @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedCoreServices,

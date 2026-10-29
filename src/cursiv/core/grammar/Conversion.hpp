@@ -238,7 +238,8 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
                                     std::string(detail::type_name<M>()));
   } else
     static_assert(has_default_convert<M>,
-                  "no default converter for this member type");
+                  "no default converter for this member type: specialise "
+                  "cursiv::default_converter<T>, or convert with as<f>(e)");
 }
 
 // The text law says a member holds a view. A converter whose value the

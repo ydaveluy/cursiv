@@ -1,6 +1,5 @@
-// The same language one storey up. Both containers derive `CoreServices`
-// virtually, so this holds one of it and the core module wires the same
-// object the LSP providers read.
+// The services of the language server: the core services of the language plus
+// the editor services. To add an editor service, declare it here.
 #pragma once
 
 #include "cursiv/lsp/services/LspServices.hpp"
@@ -20,8 +19,7 @@ struct @CURSIV_NEW_CLASS@Services final : @CURSIV_NEW_CLASS@CoreServices,
         @CURSIV_NEW_CLASS@CoreServices(sharedServices),
         cursiv::LspServices(sharedServices) {}
 
-  // One emission per storey through the diamond: the language rows through the
-  // core side, the LSP rows alone.
+  // Lists the core services, then the editor services.
   void visitServices(
       cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
     @CURSIV_NEW_CLASS@CoreServices::visitServices(yield);

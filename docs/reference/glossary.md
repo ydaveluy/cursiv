@@ -1,8 +1,8 @@
 # Glossary
 
-**Adoption** — an unassigned call to an AST rule returns that rule's node:
-`lit<"("> + ref<Expression> + lit<")">` returns the `Expression` node. See
-[Adoption and classes](grammar.md#adoption-and-classes).
+**Adoption** — a call to an AST rule outside `assign` or `append` returns that
+rule's node: `lit<"("> + ref<Expression> + lit<")">` returns the `Expression`
+node. See [Adoption and classes](grammar.md#adoption-and-classes).
 
 **AST (abstract syntax tree)** — your language's parsed objects: C++ structs
 holding names, values, child nodes and references.
@@ -10,16 +10,16 @@ holding names, values, child nodes and references.
 **Category** — of a token: keyword, literal or pattern. At equal length,
 keywords and literals beat patterns. See [Tokens](grammar.md#tokens).
 
-**Condition** — `&e` or `!e`: a test of the next tokens (in a rule) or the
-adjacent bytes (in a terminal) that consumes and builds nothing. See
+**Condition** — `&e` or `!e`: a test that consumes nothing and builds nothing.
+In a rule, it tests the next tokens; in a terminal, the next bytes. See
 [Conditions](grammar.md#conditions).
 
 **Construction context** — where one value is built: each rule call and each
 operand of `assign` or `append` has its own. See
-[Nested assignments](grammar.md#construction-contexts).
+[Nested assignments](grammar.md#nested-assignments).
 
 **CST (concrete syntax tree)** — the parsed tokens with their source
-positions, including `hidden` comments. Editor features use it to locate AST
+positions, including `hidden` comments. Editor features use it to find AST
 nodes and members in the text.
 
 **Current node** — the node that directives write. `create` gives it a class,
@@ -27,51 +27,55 @@ nodes and members in the text.
 rule's node current.
 
 **Data rule** — a rule that returns a value rather than an AST node: the value
-of the rule or branch it reads alone, or else its tokens' text without trivia.
+of the rule or branch it reads alone, or else the text of its tokens without
+trivia.
 
 **Directive** — `create`, `assign`, `append`, `flag` or `nest`: an operation
-that builds or fills an AST node. `skip` controls trivia instead.
+that builds or fills an AST node.
 
 **Document** — a source text with a URI, its parsed trees, diagnostics and
 symbols.
 
-**Entry** — the rule a document starts at, named by `using entry = R;`.
+**Entry** — the rule that reads a whole document, named by `using entry = R;`.
 
-**Formatting region** — syntax nodes selected for a spacing or indentation rule.
+**Formatting region** — syntax nodes selected for a spacing or indentation
+rule.
 
-**Fragment** — a named expression, `static constexpr auto f = e;`, written in
-place wherever `f` is used; its directives write the using rule's current
-node. See [Reuse grammar pieces](grammar.md#reuse-grammar-pieces).
+**Fragment** — a named expression, `static constexpr auto f = e;`, copied
+wherever `f` is used; its directives write the current node of the rule that
+uses it. See [Reuse grammar pieces](grammar.md#reuse-grammar-pieces).
 
-**Generated module** — the parser, AST metadata and service setup generated
-from your grammar, as build output.
+**Generated module** — the parser, AST metadata and service setup that the
+build generates from your grammar.
 
 **hidden / ignored** — trivia settings: `hidden` keeps tokens in the CST, for
-example to attach comments to declarations; `ignored` discards them.
+example to attach comments to declarations; `ignored` drops them.
 
 **Index** — the workspace's exported symbols, used to resolve references
 across documents.
 
-**Keyword** — a literal with a word-boundary check: `kw<"if">` matches `if`
-but not the start of `iffy`.
+**Keyword** — a literal that must not be followed by a word character:
+`kw<"if">` matches `if` but not the start of `iffy`.
 
-**Linker** — resolves a reference's written name against a scope, after the
-parse.
+**Linker** — resolves the name written in a reference against a scope, after
+the parse.
 
 **Path** — one way through a rule's body: one alternative at each choice, one
 number of turns at each option or repetition. A single-valued member is
 written at most once per node and path.
 
-**Reference** — a member that reads a name at parse time and is resolved
-afterwards: `reference<T>`, or `multi_reference<T>` for several targets.
+**Reference** — an AST member that holds a name read from the text and is
+linked to its target after the parse: `reference<T>`, or `multi_reference<T>`
+for several targets.
 
 **Reflection** — metadata that lets services inspect AST types and members
 without knowing each C++ class.
 
 **Refusal** — a grammar error: no parser is generated. See
-[Grammar errors](refusals.md). Input a parser does not accept is *rejected*.
+[Grammar errors](refusals.md). Input that a parser does not accept is
+*rejected*.
 
-**Rule** — an expression that combines tokens, allows trivia between them, and
+**Rule** — a declaration that combines tokens, allows trivia between them, and
 returns an AST node or a value. Declared with `rule<...>`.
 
 **Scope** — the symbols a reference can target at a position, collected by
@@ -80,14 +84,14 @@ returns an AST node or a value. Declared with `rule<...>`.
 **Services** — framework objects such as the parser, linker and validator,
 shared by the workspace or owned by one language.
 
-**Terminal** — an expression recognizing one token, with no trivia inside.
+**Terminal** — a declaration that reads one token, with no trivia inside.
 Declared with `terminal<...>`.
 
 **Trivia** — whitespace and comments, declared with `ignored` or `hidden`.
 
-**Viable parse** — a parse that has read the text so far without error. The
-lexer only tries the terminals a viable parse expects, plus trivia. See
+**Viable parse** — a parse that has read the text so far without error. Only
+the terminals that a viable parse can accept are tried, plus trivia. See
 [Tokens](grammar.md#tokens).
 
-**Word boundary** — the character class that continues a word, set with
+**Word boundary** — the characters that continue a word, set with
 `word_boundary` (`w` by default).

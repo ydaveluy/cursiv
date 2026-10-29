@@ -1,7 +1,7 @@
 // A postfix operator spelled through a repetition, in a table with a binary
 // operator: the strings it reads cannot be listed, so a clash with the binary
 // operator cannot be ruled out.
-// expect LR LL: refused .postfixBinaryClash..*rule .Sum. cannot compare the text of the postfix operator on level 1 with the binary operator on level 2
+// expect LR LL: refused .postfixBinaryClash..*rule .Sum. has two operators whose texts cannot be compared, the postfix operator on level 1 and the binary operator on level 2
 #pragma once
 
 #include "refusals/head.hpp"

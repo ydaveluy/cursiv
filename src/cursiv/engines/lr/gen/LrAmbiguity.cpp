@@ -104,9 +104,9 @@ std::string lr_ambiguity_text(const LrBuildCfg& c, const LrAmbiguity& a) {
                               ? "rule `" + std::string(c.nt_name(a.rule)) + "` "
                               : "a rule of this grammar ";
   const std::string item = spell(c, a.item);
-  return who + "reads a run of " + item +
-         " twice in a row: the run splits between the two in several ways -- "
-         "write one repetition";
+  return who + "has two repetitions of " + item +
+         " in a row: a run of them can be split between the two in several "
+         "ways -- write one repetition";
 }
 
 }  // namespace cursiv

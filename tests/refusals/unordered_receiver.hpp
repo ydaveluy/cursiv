@@ -1,4 +1,4 @@
-// expect LR: this directive writes a member of a class the node in hand may not be
+// expect LR: this directive writes a member that the current node may not have
 #pragma once
 
 #include "refusals/head.hpp"

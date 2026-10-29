@@ -1,6 +1,6 @@
 // A directive over a choice distributes: an alternative that produces no
 // value is refused beside one that does, not crashed on at the first document.
-// expect LR: stands over a shape that produces no value
+// expect LR: applies to an expression that gives no value
 #pragma once
 
 #include "refusals/head.hpp"

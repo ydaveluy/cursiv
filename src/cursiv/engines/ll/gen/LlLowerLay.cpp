@@ -108,30 +108,17 @@ std::uint16_t LlLowerer::lay_implied(unsigned cfg, ImageId e) {
 std::uint16_t LlLowerer::lay(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   switch (n.kind) {
-    case ImageKind::ref:
-      return lay_ref(cfg, n.a);
-    case ImageKind::epsilon:
-      return _p.push(Node{Shape::none});
     case ImageKind::eof: {
       if (_cfgs[cfg].end == kNoImage)
         return mark(cfg, _p.push(Node{Shape::end}));
       const std::uint16_t close = lay(cfg, _cfgs[cfg].end);
       return mark(cfg, _p.push(Node{Shape::end, _p.e[close].sym}));
     }
-    case ImageKind::embed:
-      return lay_embed(cfg, e);
-    case ImageKind::seq:
-      return gap(e) ? lay_condition(cfg, e) : lay_seq(cfg, e);
-    case ImageKind::choice:
-      return gap(e) ? lay_condition(cfg, e)
-                    : lay_kids(cfg, Shape::alt, kids_of(n));
     case ImageKind::unordered: {
       const std::uint16_t node = lay_unordered(cfg, e);
       _p.e[node].unorderedTurns = buries(e);
       return node;
     }
-    case ImageKind::repeat:
-      return lay_repeat(cfg, e);
     case ImageKind::skip:
       return lay(region_of(cfg, n), kid(n, 0));
     case ImageKind::create:
@@ -145,20 +132,10 @@ std::uint16_t LlLowerer::lay(unsigned cfg, ImageId e) {
       _p.e[node].leftFold = true;
       return node;
     }
-    case ImageKind::assign:
-    case ImageKind::append:
-      return lay_write(cfg, e);
-    case ImageKind::flag:
-      return lay_flag(cfg, e);
-    case ImageKind::gapHas:
-    case ImageKind::gapIs:
-    case ImageKind::andOf:
     case ImageKind::notOf:
       return lay_condition(cfg, e);
-    case ImageKind::implied:
-      return lay_implied(cfg, e);
-    default:  // a token, or a combinator `terminal_sym` refuses
-      return push_sym(terminal_sym(cfg, e), cfg);
+    default:
+      return lay_shared(cfg, e, n);
   }
 }
 

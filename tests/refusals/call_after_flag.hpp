@@ -1,6 +1,6 @@
 // A flag written ahead of a call is a write: the called node is not adopted
 // over it. A fragment spelled in each alternative is how the flag is shared.
-// expect LR: calls a rule that builds a node after the node in hand was written, created or nested
+// expect LR: calls a rule that builds a node after the current node was written, created or nested
 #pragma once
 
 #include "refusals/head.hpp"

@@ -5,22 +5,23 @@
       <img alt="cursiv++" src="docs/assets/logo.png" width="320">
     </picture>
   </a>
-  <h3>C++20 language engineering framework</h3>
+  <h3>High-performance C++20 language engineering framework</h3>
 </div>
 
 <div align="center">
 
 [![Build](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml)
 [![Documentation](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml)
-[![SonarCloud](https://github.com/ydaveluy/cursiv/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/sonarcloud.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ydaveluy_pegium&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ydaveluy_pegium)
 
 </div>
 
 ---
 
-cursiv++ is a C++20 framework for building domain-specific languages,
-compilers and language tools, with built-in Language Server Protocol (LSP)
-support.
+cursiv++ is a C++20 framework for building domain-specific languages and
+their tools: parsers, validators, command-line tools and language servers
+with Language Server Protocol (LSP) support. Its goal is to be as fast as
+possible.
 
 Define your grammar and abstract syntax tree (AST) as C++ types. Cursiv
 generates the parser and provides services for a command-line tool or an
@@ -33,6 +34,8 @@ editor extension.
 - **C++ grammars and ASTs:** grammar rules fill your structs, and the C++
   compiler checks the bindings.
 - **LL and LR parsing:** generated parsers with syntax error recovery.
+- **Fast:** performance comes first, from the generated parsers to the editor
+  services.
 - **Language services:** symbol indexing, scoping, cross-reference resolution,
   validation and formatting, each one customizable.
 - **Editor and tool integration:** LSP, command-line and Model Context
@@ -58,7 +61,7 @@ The project includes a working grammar, AST, validation, CLI, language
 server, tests, benchmark and VS Code extension. The
 [language tutorial](docs/learn/walkthrough.md) turns it into your own
 language. To add Cursiv to an existing project, see the
-[CMake integration guide](docs/reference/cmake.md#consuming-cursiv).
+[CMake integration guide](docs/reference/cmake.md#add-cursiv-to-a-project).
 
 ## Documentation
 
@@ -77,11 +80,17 @@ Each example includes a grammar, AST, services, tests, a CLI and an editor clien
 - [Domainmodel](examples/domainmodel): packages, qualified names, custom scoping and formatting.
 - [Requirements](examples/requirements): two languages sharing a server and cross-document references.
 
-## Benchmarks
+## Performance
 
-Each project includes a benchmark for parsing, workspace builds and editor
-services. The [benchmark page](docs/benchmarks/README.md) explains how to run
-it and shows the framework's results.
+Performance is a first-class feature of Cursiv: every part is designed to be
+as fast as possible, from the generated parsers to the editor services. The
+parsers are compiled C++, workspaces build their documents in parallel, and
+editor features stay responsive on large documents and workspaces. Cursiv
+suits projects where size and speed matter most.
+
+Each new project includes a benchmark for its language. The
+[benchmark page](docs/benchmarks/README.md) shows how to run it and the
+framework's results.
 
 ## Contributing to Cursiv
 

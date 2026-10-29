@@ -205,9 +205,7 @@ void a_missing_operator_names_every_level() {
     CHECK(parsed.diagnostics.size() == 1);
     if (parsed.diagnostics.size() != 1) continue;
     const cursiv::ParseDiagnostic& d = parsed.diagnostics.front();
-    CHECK(cursiv::repair_message(parser->getGrammar(), d,
-                                 text.substr(d.begin, d.end - d.begin),
-                                 false) ==
+    CHECK(cursiv::repair_message(parser->getGrammar(), d, text) ==
           "Expecting one of '*', ',', '/', '+' but found '='.");
   }
   // The second operator is planned with the first: it names nothing more.

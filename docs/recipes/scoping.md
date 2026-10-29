@@ -70,9 +70,9 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
 }  // namespace dm
 ```
 
-A description borrows its name, so `copy_into` stores the computed name in
-the document's memory. Do not resolve references here: linking starts only
-after every document's scopes are ready.
+A description does not copy its name, so `copy_into` stores the computed
+name in the document's memory. Do not resolve references here: other
+documents may not have exported their symbols yet.
 
 ## Install the implementation
 
@@ -88,7 +88,7 @@ The default scope provider then finds `foo.bar.Thing` among the exported
 names. Both documents must be built in the same workspace; the CLI does this
 with `--root <dir>`.
 
-## Check the result
+## Test it
 
 With the test helpers from [Test your language](../learn/testing.md), mark the
 declaration and the reference:
