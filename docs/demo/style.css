@@ -1,116 +1,97 @@
-:root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --line: #e5e7eb;
-  --accent: #2563eb;
-  --accent-soft: #eff4ff;
-  --error: #dc2626;
-  --warning: #d97706;
-  --ok: #16a34a;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color-scheme: light;
+/* The "Try it online" demo, inside the content of its documentation page.
+   Every rule is scoped to .cursiv-demo, and the colours come from the
+   Material palette, so the demo follows the light and dark schemes. */
+.cursiv-demo {
+  --demo-line: var(--md-default-fg-color--lightest);
+  --demo-error: #e5484d;
+  --demo-warning: #e5930b;
+  --demo-ok: #30a46c;
+  font-size: .7rem;
+  line-height: 1.4;
 }
+.cursiv-demo button { font: inherit; }
 
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
-body {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}
-.brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
-.logo { display: block; width: 30px; height: 30px; }
-.name { font-weight: 700; font-size: 16px; letter-spacing: -0.2px; }
-.plus { color: var(--accent); }
-.sep { width: 1px; height: 18px; background: var(--line); }
-.title { color: var(--muted); font-weight: 500; }
-
-.segmented {
-  display: flex; gap: 2px; padding: 3px;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+.cursiv-demo .segmented {
+  display: inline-flex; gap: .1rem; max-width: 100%; margin-bottom: .6rem; padding: .15rem;
+  background: var(--md-code-bg-color); border-radius: .3rem;
   overflow-x: auto;
 }
-.segmented button {
-  border: 0; background: transparent; color: var(--muted);
-  padding: 5px 12px; border-radius: 6px; font: inherit; font-weight: 500;
+.cursiv-demo .segmented button {
+  border: 0; background: transparent; color: var(--md-default-fg-color--light);
+  padding: .3rem .7rem; border-radius: .2rem; font-weight: 700;
   cursor: pointer; white-space: nowrap;
 }
-.segmented button:hover { color: var(--text); }
-.segmented button[aria-selected="true"] {
-  background: var(--surface); color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+.cursiv-demo .segmented button:hover { color: var(--md-accent-fg-color); }
+.cursiv-demo .segmented button[aria-selected="true"] {
+  background: var(--md-default-bg-color); color: var(--md-default-fg-color);
+  box-shadow: var(--md-shadow-z1);
 }
-.docs { margin-left: auto; color: var(--muted); text-decoration: none; white-space: nowrap; }
-.docs:hover { color: var(--accent); }
 
-.workspace {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  min-height: 0;
-  margin: 12px 16px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+/* The rest of the window below the page title and the picker, so that the
+   status line stays in view on a laptop screen. */
+.cursiv-demo .workspace {
+  display: flex; flex-direction: column;
+  height: clamp(20rem, calc(100vh - 19rem), 48rem);
+  border: .05rem solid var(--demo-line); border-radius: .2rem;
+  background: var(--md-default-bg-color);
   overflow: hidden;
 }
-.doc-tabs {
-  display: flex; gap: 0; overflow-x: auto;
-  border-bottom: 1px solid var(--line); background: #fbfbfc;
+.cursiv-demo .doc-tabs {
+  display: flex; flex: none; overflow-x: auto;
+  background: var(--md-code-bg-color); border-bottom: .05rem solid var(--demo-line);
 }
-.doc-tab {
-  display: flex; align-items: center; gap: 8px;
-  border: 0; border-right: 1px solid var(--line); background: transparent;
-  padding: 9px 14px; font: 13px/1 var(--mono); color: var(--muted); cursor: pointer;
-  border-bottom: 2px solid transparent; white-space: nowrap;
+.cursiv-demo .doc-tab {
+  display: flex; align-items: center; gap: .4rem;
+  border: 0; border-right: .05rem solid var(--demo-line); border-bottom: .1rem solid transparent;
+  background: transparent; padding: .45rem .7rem;
+  font-family: var(--md-code-font-family); font-size: .65rem; line-height: 1;
+  color: var(--md-default-fg-color--light); cursor: pointer; white-space: nowrap;
 }
-.doc-tab:hover { color: var(--text); background: var(--surface); }
-.doc-tab[aria-selected="true"] { color: var(--text); background: var(--surface); border-bottom-color: var(--accent); }
-.badge:empty { display: none; }
-.badge {
-  min-width: 18px; padding: 2px 5px; border-radius: 9px;
-  font: 600 11px/1 system-ui, sans-serif; color: #fff; background: var(--muted); text-align: center;
+.cursiv-demo .doc-tab:hover { color: var(--md-default-fg-color); }
+.cursiv-demo .doc-tab[aria-selected="true"] {
+  color: var(--md-default-fg-color); background: var(--md-default-bg-color);
+  border-bottom-color: var(--md-accent-fg-color);
 }
-.badge.error { background: var(--error); }
-.badge.warning { background: var(--warning); }
-.editor { min-height: 0; }
+.cursiv-demo .badge:empty { display: none; }
+.cursiv-demo .badge {
+  min-width: .9rem; padding: .1rem .25rem; border-radius: .45rem;
+  font: 700 .55rem/1 var(--md-text-font-family); text-align: center;
+  color: #fff; background: var(--md-default-fg-color--light);
+}
+.cursiv-demo .badge.error { background: var(--demo-error); }
+.cursiv-demo .badge.warning { background: var(--demo-warning); }
+.cursiv-demo .editor { flex: 1; min-height: 0; }
 
-.statusbar {
-  display: flex; align-items: center; gap: 20px;
-  padding: 6px 16px; min-height: 30px;
-  background: var(--surface); border-top: 1px solid var(--line);
-  font-size: 12.5px; color: var(--muted);
+.cursiv-demo .statusbar {
+  display: flex; flex: none; align-items: center; gap: 1rem;
+  min-height: 1.5rem; padding: .25rem .7rem;
+  background: var(--md-code-bg-color); border-top: .05rem solid var(--demo-line);
+  font-size: .6rem; color: var(--md-default-fg-color--light);
 }
-.server { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
-.server[data-phase="ready"] .dot { background: var(--ok); }
-.server[data-phase="stopped"] .dot { background: var(--error); }
-.server[data-phase="starting"] .dot, .server[data-phase="loading"] .dot { animation: pulse 1s ease-in-out infinite alternate; }
-@keyframes pulse { to { opacity: 0.3; } }
-#restart { font: inherit; padding: 1px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; }
-.diags { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.diags .err { color: var(--error); }
-.diags .warn { color: var(--warning); }
-.diags b { color: var(--text); font-weight: 600; }
-.first { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-family: var(--mono); font-size: 12px; }
-.right { margin-left: auto; display: flex; gap: 16px; white-space: nowrap; }
+.cursiv-demo .server { display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
+.cursiv-demo .dot { width: .4rem; height: .4rem; border-radius: 50%; background: var(--demo-warning); }
+.cursiv-demo .server[data-phase="ready"] .dot { background: var(--demo-ok); }
+.cursiv-demo .server[data-phase="stopped"] .dot,
+.cursiv-demo .server[data-phase="unavailable"] .dot { background: var(--demo-error); }
+.cursiv-demo .server[data-phase="starting"] .dot,
+.cursiv-demo .server[data-phase="loading"] .dot { animation: cursiv-demo-pulse 1s ease-in-out infinite alternate; }
+@keyframes cursiv-demo-pulse { to { opacity: .3; } }
+.cursiv-demo #restart {
+  padding: .05rem .4rem; border: .05rem solid var(--demo-line); border-radius: .2rem;
+  background: var(--md-default-bg-color); color: var(--md-default-fg-color); cursor: pointer;
+}
+.cursiv-demo #restart[hidden] { display: none; }
+.cursiv-demo .diags { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.cursiv-demo .diags .err, .cursiv-demo .diags .warn { flex: none; white-space: nowrap; }
+.cursiv-demo .diags .err { color: var(--demo-error); }
+.cursiv-demo .diags .warn { color: var(--demo-warning); }
+.cursiv-demo .diags b { color: var(--md-default-fg-color); }
+.cursiv-demo .first {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--md-default-fg-color); font-family: var(--md-code-font-family);
+}
+.cursiv-demo .right { display: flex; gap: .8rem; margin-left: auto; white-space: nowrap; }
 
-@media (max-width: 720px) {
-  .topbar { flex-wrap: wrap; gap: 10px; }
-  .docs { display: none; }
-  .workspace { margin: 8px; }
-  .statusbar { flex-wrap: wrap; gap: 8px 16px; }
-  .right span:last-child { display: none; }
+@media (max-width: 44.9375em) {
+  .cursiv-demo .statusbar { flex-wrap: wrap; gap: .3rem .8rem; }
 }

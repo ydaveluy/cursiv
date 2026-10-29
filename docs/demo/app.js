@@ -29,28 +29,46 @@ function loadMonaco() {
   });
 }
 
-function defineTheme() {
-  // Semantic token types announced by Cursiv servers, on a light base.
-  monaco.editor.defineTheme('cursiv-light', {
-    base: 'vs', inherit: true,
+// A Material palette colour as opaque hex, painted over the page background:
+// Monaco themes take no CSS variables and no transparency.
+const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+function paletteColor(name) {
+  const style = getComputedStyle(document.body);
+  for (const color of ['--md-default-bg-color', name]) {
+    probe.fillStyle = style.getPropertyValue(color).trim();
+    probe.fillRect(0, 0, 1, 1);
+  }
+  return [...probe.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+// The editor colours of the docs' code blocks, for the active Material
+// scheme ("slate" is the dark one). Rules cover the semantic token types of
+// Cursiv servers.
+function applyTheme() {
+  const c = paletteColor;
+  const highlight = `#${c('--md-code-bg-color')}`;
+  monaco.editor.defineTheme('cursiv', {
+    base: document.body.dataset.mdColorScheme === 'slate' ? 'vs-dark' : 'vs', inherit: true,
     rules: [
-      { token: 'keyword', foreground: '7c3aed', fontStyle: 'bold' },
-      { token: 'type', foreground: '0f766e' },
-      { token: 'variable', foreground: '1f2937' },
-      { token: 'property', foreground: '1d4ed8' },
-      { token: 'number', foreground: 'b45309' },
-      { token: 'string', foreground: 'b91c1c' },
-      { token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
-      { token: 'operator', foreground: '475569' },
+      { token: 'keyword', foreground: c('--md-code-hl-keyword-color') },
+      { token: 'type', foreground: c('--md-code-hl-constant-color') },
+      { token: 'variable', foreground: c('--md-code-hl-name-color') },
+      { token: 'property', foreground: c('--md-code-hl-function-color') },
+      { token: 'number', foreground: c('--md-code-hl-number-color') },
+      { token: 'string', foreground: c('--md-code-hl-string-color') },
+      { token: 'comment', foreground: c('--md-code-hl-comment-color'), fontStyle: 'italic' },
+      { token: 'operator', foreground: c('--md-code-hl-operator-color') },
     ],
     colors: {
-      'editor.background': '#ffffff',
-      'editorLineNumber.foreground': '#9ca3af',
-      'editorLineNumber.activeForeground': '#374151',
-      'editor.lineHighlightBackground': '#f8fafc',
-      'editorGutter.background': '#ffffff',
+      'editor.background': `#${c('--md-default-bg-color')}`,
+      'editor.foreground': `#${c('--md-code-fg-color')}`,
+      'editorLineNumber.foreground': `#${c('--md-default-fg-color--lighter')}`,
+      'editorLineNumber.activeForeground': `#${c('--md-default-fg-color--light')}`,
+      'editor.lineHighlightBackground': highlight,
+      'editor.lineHighlightBorder': highlight,
     },
   });
+  monaco.editor.setTheme('cursiv');
 }
 
 // Comments and strings before the first semantic tokens arrive.
@@ -262,6 +280,11 @@ async function openLanguage(id, wantedDoc) {
 }
 
 async function main() {
+  if (!window.require) {
+    // A documentation build without tools/build-demo.sh (a preview).
+    setStatus('unavailable', 'This build has no editor: tools/build-demo.sh adds it with the language servers.');
+    return;
+  }
   if (!crossOriginIsolated) {
     // coi-serviceworker reloads the page once it controls it.
     setStatus('starting', window.isSecureContext && 'serviceWorker' in navigator
@@ -271,20 +294,25 @@ async function main() {
   }
   setStatus('loading', 'Loading the editor…');
   [monaco, languages] = await Promise.all([loadMonaco(), fetch('languages.json').then((r) => r.json())]);
-  defineTheme();
+  applyTheme();
+  // The palette toggle of the site header switches the editor theme too.
+  new MutationObserver(applyTheme).observe(document.body, { attributeFilter: ['data-md-color-scheme'] });
   const extensions = {};
   for (const lang of languages)
     for (const d of lang.documents) (extensions[d.languageId] ??= new Set()).add(d.name.slice(d.name.lastIndexOf('.')));
   for (const [id, exts] of Object.entries(extensions)) registerMonacoLanguage(id, [...exts]);
 
   editor = monaco.editor.create($('editor'), {
-    theme: 'cursiv-light', automaticLayout: true, minimap: { enabled: false },
-    fontSize: 14, lineHeight: 21, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    theme: 'cursiv', automaticLayout: true, minimap: { enabled: false },
+    fontSize: 14, lineHeight: 21,
+    fontFamily: getComputedStyle(document.body).getPropertyValue('--md-code-font-family').trim() || 'monospace',
     'semanticHighlighting.enabled': true, wordBasedSuggestions: 'off', renderLineHighlight: 'line',
     scrollBeyondLastLine: false, fixedOverflowWidgets: true, padding: { top: 12 }, tabSize: 4,
     quickSuggestions: { other: true, comments: false, strings: false },
   });
   state.editor = editor;
+  // The code font of the site loads on first use: measure it again then.
+  document.fonts.addEventListener('loadingdone', () => monaco.editor.remeasureFonts());
   editor.onDidChangeCursorPosition((e) => { $('cursor').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`; });
   // Go to definition in another example document switches tabs.
   monaco.editor.registerEditorOpener({

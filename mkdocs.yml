@@ -45,6 +45,11 @@ theme:
 
 plugins:
   - search
+  # Self-host the theme's web fonts: the cross-origin isolated demo page
+  # loads no third-party assets. No page draws Mermaid diagrams.
+  - privacy:
+      assets_exclude:
+        - unpkg.com/mermaid@11/*
 
 markdown_extensions:
   - admonition
@@ -98,7 +103,7 @@ nav:
       - Grammar errors: reference/refusals.md
       - Glossary: reference/glossary.md
   - Examples: examples/index.md
-  # Not a MkDocs page: the deployment adds it with tools/build-demo.sh.
-  - Try it online: demo/index.html
+  # The deployment adds the editor and the servers with tools/build-demo.sh.
+  - Try it online: demo/index.md
   - Benchmarks: benchmarks/README.md
   - FAQ: faq.md

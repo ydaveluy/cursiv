@@ -21,7 +21,8 @@
 cursiv++ is a C++20 framework for building domain-specific languages and
 their tools: parsers, validators, command-line tools and language servers
 with Language Server Protocol (LSP) support. Its goal is to be as fast as
-possible.
+possible while staying simple to use: the standard language features work out
+of the box, and you can customize every service.
 
 Define your grammar and abstract syntax tree (AST) as C++ types. Cursiv
 generates the parser and provides services for a command-line tool or an

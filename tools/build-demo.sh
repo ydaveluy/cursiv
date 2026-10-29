@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Assemble the "Try it online" page in <out-dir>: the sources in docs/demo/, the
-# Monaco editor and coi-serviceworker from npm, the example documents, and the
-# language servers that tools/wasm-dist.sh collects from a wasi-release build.
-# The page needs http(s): serve <out-dir> over https or on localhost.
+# Complete the "Try it online" page of a documentation build. MkDocs builds
+# the page from docs/demo/ and copies its scripts; this adds the Monaco editor
+# and coi-serviceworker from npm, the example documents, and the language
+# servers that tools/wasm-dist.sh collects from a wasi-release build. The page
+# needs http(s): serve the site over https or on localhost.
 #
-#   tools/build-demo.sh <servers-dir> <out-dir>   # e.g. dist site/demo
+#   tools/build-demo.sh <servers-dir> <site-demo-dir>   # e.g. dist site/demo
 set -euo pipefail
 
-[ $# = 2 ] || { echo "usage: $0 <servers-dir> <out-dir>" >&2; exit 2; }
+[ $# = 2 ] || { echo "usage: $0 <servers-dir> <site-demo-dir>" >&2; exit 2; }
 servers=$(cd "$1" && pwd)
-mkdir -p "$2"
+[ -f "$2/index.html" ] || { echo "no page in $2: run mkdocs build first" >&2; exit 1; }
 out=$(cd "$2" && pwd)
 root=$(cd "$(dirname "$0")/.." && pwd)
 demo=$root/docs/demo
@@ -22,10 +23,8 @@ cp "$demo"/package.json "$demo"/package-lock.json "$work/"
 (cd "$work" && npm ci --ignore-scripts --no-audit --no-fund --silent)
 npm=$work/node_modules
 
-cp "$demo"/{index.html,style.css,app.js,lsp.js,server.js,wasi-worker.js,languages.json} "$out/"
 cp "$npm/coi-serviceworker/coi-serviceworker.js" "$out/"
-mkdir -p "$out/assets" "$out/licenses"
-cp "$root/docs/assets/icon.png" "$out/assets/"
+mkdir -p "$out/licenses"
 
 # Monaco: the AMD build, trimmed to the editor itself.
 for part in loader.js editor/editor.main.js editor/editor.main.css \

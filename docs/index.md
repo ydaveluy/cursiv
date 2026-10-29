@@ -3,12 +3,13 @@
 cursiv++ is a C++20 framework for building domain-specific languages and
 their tools: parsers, validators, command-line tools and language servers
 with Language Server Protocol (LSP) support. Its goal is to be as fast as
-possible.
+possible while staying simple to use: the standard language features work out
+of the box, and you can customize every service.
 
 ![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo.gif)
 
-[Try it online](demo/index.html): write documents in the example languages in your
-browser, with their language servers compiled to WebAssembly.
+[Try it online](demo/index.md): write documents in the example languages in
+your browser, with their language servers compiled to WebAssembly.
 
 You define the syntax and the abstract syntax tree (AST) in C++. Cursiv
 generates the parser, resolves references, runs your validation checks and
