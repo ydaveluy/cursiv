@@ -21,6 +21,7 @@ Source directories:
 - `src/cursiv/bench/`: Benchmark harness and performance counters.
 - `src/cursiv/fuzz/`: Grammar-based input generation and tree checks.
 - `examples/`: Complete example languages.
+- `docs/demo/`: The "Try it online" page of the documentation.
 - `tests/`: Framework tests.
 - `bench/`: Benchmark executables and corpora.
 - `bench/recovery_metric/`: Error-recovery quality reports and internal support.

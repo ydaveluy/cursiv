@@ -2,6 +2,7 @@
 // `Solaris` is an environment nothing declares.
 contact: "Goofy"
 
+/** The machine most testers use. */
 environment Windows10: "our standard PC"
 
 req ReqId100 "A requirement that applies somewhere undeclared" applicable for Solaris

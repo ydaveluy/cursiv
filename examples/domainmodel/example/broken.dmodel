@@ -1,8 +1,10 @@
 // BROKEN ON PURPOSE -- open this file to see the server's diagnostics.
 // `Missing` is a supertype nothing declares: the document parses, and the
 // reference is what fails.
+/** Plain text. */
 datatype String
 
+/** An article of the blog. */
 entity Article extends Missing {
     title: String
 }

@@ -2,6 +2,7 @@
 // The definition below never reaches its `;`.
 module broken
 
+/** Twice its argument. */
 def double(x): x * 2
 
 double(3);

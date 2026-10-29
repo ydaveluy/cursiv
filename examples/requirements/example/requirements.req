@@ -1,10 +1,16 @@
 // The requirements side of the example: what the product must do, and where.
 contact: "Mickey Mouse"
 
+/** The machine most testers use. */
 environment Windows10: "our standard PC"
+/** The machine of the CI runners. */
 environment Linux_x86: "for CI"
 
+/** Needed for the coverage report. */
 req ReqId000 "The generator shall extract all test cases referencing a requirement"
+/** Keeps test names easy to sort. */
 req ReqId001_tstID "A test identifier shall contain a number." applicable for Windows10, Linux_x86
+/** Keeps requirement names easy to sort. */
 req ReqId002_reqID "A requirement identifier shall contain a number." applicable for Windows10
+/** The rule this example checks. */
 req ReqId003_reqCov "A requirement shall be covered by at least one test"

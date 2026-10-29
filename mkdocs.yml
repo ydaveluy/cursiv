@@ -7,6 +7,9 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 strict: true
+# The demo's npm manifest is build input, not part of the published page.
+exclude_docs: |
+  demo/package*.json
 
 theme:
   name: material
@@ -95,5 +98,7 @@ nav:
       - Grammar errors: reference/refusals.md
       - Glossary: reference/glossary.md
   - Examples: examples/index.md
+  # Not a MkDocs page: the deployment adds it with tools/build-demo.sh.
+  - Try it online: demo/index.html
   - Benchmarks: benchmarks/README.md
   - FAQ: faq.md

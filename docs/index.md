@@ -7,6 +7,9 @@ possible.
 
 ![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo.gif)
 
+[Try it online](demo/index.html): write documents in the example languages in your
+browser, with their language servers compiled to WebAssembly.
+
 You define the syntax and the abstract syntax tree (AST) in C++. Cursiv
 generates the parser, resolves references, runs your validation checks and
 provides editor features. For example, this rule reads the keyword `person`

@@ -1,0 +1,116 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #2563eb;
+  --accent-soft: #eff4ff;
+  --error: #dc2626;
+  --warning: #d97706;
+  --ok: #16a34a;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.logo { display: block; width: 30px; height: 30px; }
+.name { font-weight: 700; font-size: 16px; letter-spacing: -0.2px; }
+.plus { color: var(--accent); }
+.sep { width: 1px; height: 18px; background: var(--line); }
+.title { color: var(--muted); font-weight: 500; }
+
+.segmented {
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  overflow-x: auto;
+}
+.segmented button {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 5px 12px; border-radius: 6px; font: inherit; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button[aria-selected="true"] {
+  background: var(--surface); color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.docs { margin-left: auto; color: var(--muted); text-decoration: none; white-space: nowrap; }
+.docs:hover { color: var(--accent); }
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  margin: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.doc-tabs {
+  display: flex; gap: 0; overflow-x: auto;
+  border-bottom: 1px solid var(--line); background: #fbfbfc;
+}
+.doc-tab {
+  display: flex; align-items: center; gap: 8px;
+  border: 0; border-right: 1px solid var(--line); background: transparent;
+  padding: 9px 14px; font: 13px/1 var(--mono); color: var(--muted); cursor: pointer;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.doc-tab:hover { color: var(--text); background: var(--surface); }
+.doc-tab[aria-selected="true"] { color: var(--text); background: var(--surface); border-bottom-color: var(--accent); }
+.badge:empty { display: none; }
+.badge {
+  min-width: 18px; padding: 2px 5px; border-radius: 9px;
+  font: 600 11px/1 system-ui, sans-serif; color: #fff; background: var(--muted); text-align: center;
+}
+.badge.error { background: var(--error); }
+.badge.warning { background: var(--warning); }
+.editor { min-height: 0; }
+
+.statusbar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 6px 16px; min-height: 30px;
+  background: var(--surface); border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--muted);
+}
+.server { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
+.server[data-phase="ready"] .dot { background: var(--ok); }
+.server[data-phase="stopped"] .dot { background: var(--error); }
+.server[data-phase="starting"] .dot, .server[data-phase="loading"] .dot { animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: 0.3; } }
+#restart { font: inherit; padding: 1px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; }
+.diags { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.diags .err { color: var(--error); }
+.diags .warn { color: var(--warning); }
+.diags b { color: var(--text); font-weight: 600; }
+.first { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-family: var(--mono); font-size: 12px; }
+.right { margin-left: auto; display: flex; gap: 16px; white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; gap: 10px; }
+  .docs { display: none; }
+  .workspace { margin: 8px; }
+  .statusbar { flex-wrap: wrap; gap: 8px 16px; }
+  .right span:last-child { display: none; }
+}

@@ -20,6 +20,9 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
   CCACHE_MAXSIZE: 1G
   CCACHE_COMPILERCHECK: content
+  # Every instrumented process writes its own profile: the generators the
+  # build runs, the tests, and the processes the tests start.
+  LLVM_PROFILE_FILE: ${{ github.workspace }}/build/profiles/%p-%m.profraw
 
 defaults:
   run:
@@ -28,7 +31,6 @@ defaults:
 jobs:
   analyze:
     runs-on: ubuntu-26.04
-    container: gcc:16
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,22 +39,20 @@ jobs:
           persist-credentials: false
       - name: Install build and coverage tools
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates ccache cmake curl git gnupg ninja-build python3-venv unzip
-          python3 -m venv .venv-coverage
-          .venv-coverage/bin/python -m pip install gcovr==8.7
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ccache llvm-22
       - name: Cache compilation
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-v1-ubuntu26-gcc16-coverage-${{ github.sha }}
-          restore-keys: ccache-v1-ubuntu26-gcc16-coverage-
+          key: ccache-v1-ubuntu26-clang22-coverage-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-clang22-coverage-
       - name: Configure coverage
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-          -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          -DCMAKE_CXX_COMPILER=clang++-22 -DCMAKE_C_COMPILER=clang-22
+          "-DCMAKE_CXX_FLAGS=-fprofile-instr-generate -fcoverage-mapping"
+          -DCMAKE_EXE_LINKER_FLAGS=-fprofile-instr-generate
           -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
           -DCURSIV_MIMALLOC=OFF
       - name: Build
@@ -64,13 +64,20 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Collect coverage
-        run: >-
-          .venv-coverage/bin/gcovr --root . --filter src/
-          --gcov-executable gcov
-          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file
-          --exclude-throw-branches --exclude-unreachable-branches
-          --exclude-branches-by-pattern='.*'
-          --sonarqube build/coverage.xml build
+        # LCOV counts each source branch once, across template instantiations.
+        run: |
+          llvm-profdata-22 merge -sparse -o build/coverage.profdata build/profiles
+          objects=()
+          while IFS= read -r -d '' file; do
+            if llvm-readelf-22 -S "$file" 2>/dev/null | grep -q __llvm_covfun; then
+              objects+=(-object "$file")
+            fi
+          done < <(find build -type f -perm -u+x ! -path '*/_deps/*' ! -path '*/CMakeFiles/*' -print0)
+          llvm-cov-22 export -format=lcov -skip-functions \
+            -instr-profile build/coverage.profdata \
+            -ignore-filename-regex="^/usr/|/_deps/|^$PWD/(build|tests|examples|bench|templates)/" \
+            "${objects[@]}" > build/coverage.lcov
+          python3 tools/lcov_to_sonar.py . build/coverage.lcov build/coverage.xml
       - name: Compilation cache statistics
         if: always()
         run: ccache --show-stats

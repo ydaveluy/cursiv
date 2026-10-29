@@ -2,29 +2,36 @@
 statemachine TrafficLight
 
 events
+    /** The power switch is turned. */
     switchCapacity
+    /** The timer asks for the next light. */
     next
 
 commands
+    /** Makes the amber light blink. */
     flashAmber
 
 initialState PowerOff
 
+/** The light is off. */
 state PowerOff
     switchCapacity => RedLight
 end
 
+/** Cars must stop. */
 state RedLight
     switchCapacity => PowerOff
     next => GreenLight
 end
 
+/** Cars must stop if they safely can. */
 state YellowLight
     actions { flashAmber }
     switchCapacity => PowerOff
     next => RedLight
 end
 
+/** Cars may go. */
 state GreenLight
     switchCapacity => PowerOff
     next => YellowLight

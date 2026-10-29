@@ -1,0 +1,93 @@
+[
+  {
+    "id": "statemachine",
+    "label": "State machine",
+    "server": "servers/statemachine_lsp.wasm",
+    "languages": [
+      "statemachine"
+    ],
+    "documents": [
+      {
+        "name": "trafficlight.statemachine",
+        "path": "examples/statemachine/trafficlight.statemachine",
+        "languageId": "statemachine"
+      },
+      {
+        "name": "doors.statemachine",
+        "path": "examples/statemachine/doors.statemachine",
+        "languageId": "statemachine"
+      },
+      {
+        "name": "broken.statemachine",
+        "path": "examples/statemachine/broken.statemachine",
+        "languageId": "statemachine"
+      }
+    ]
+  },
+  {
+    "id": "arithmetics",
+    "label": "Arithmetics",
+    "server": "servers/arithmetics_lsp.wasm",
+    "languages": [
+      "arithmetics"
+    ],
+    "documents": [
+      {
+        "name": "demo.calc",
+        "path": "examples/arithmetics/demo.calc",
+        "languageId": "arithmetics"
+      },
+      {
+        "name": "broken.calc",
+        "path": "examples/arithmetics/broken.calc",
+        "languageId": "arithmetics"
+      }
+    ]
+  },
+  {
+    "id": "domainmodel",
+    "label": "Domain model",
+    "server": "servers/domainmodel_lsp.wasm",
+    "languages": [
+      "domain-model"
+    ],
+    "documents": [
+      {
+        "name": "blog.dmodel",
+        "path": "examples/domainmodel/blog.dmodel",
+        "languageId": "domain-model"
+      },
+      {
+        "name": "broken.dmodel",
+        "path": "examples/domainmodel/broken.dmodel",
+        "languageId": "domain-model"
+      }
+    ]
+  },
+  {
+    "id": "requirements",
+    "label": "Requirements",
+    "server": "servers/requirements_lsp.wasm",
+    "languages": [
+      "requirements-lang",
+      "tests-lang"
+    ],
+    "documents": [
+      {
+        "name": "requirements.req",
+        "path": "examples/requirements/requirements.req",
+        "languageId": "requirements-lang"
+      },
+      {
+        "name": "tests.tst",
+        "path": "examples/requirements/tests.tst",
+        "languageId": "tests-lang"
+      },
+      {
+        "name": "broken.req",
+        "path": "examples/requirements/broken.req",
+        "languageId": "requirements-lang"
+      }
+    ]
+  }
+]

@@ -5,6 +5,17 @@
 
 namespace dm {
 
+inline constexpr auto packageKw = cursiv::ikw<"package">.doc<
+    "Groups types under a qualified name: `package blog.archive { ... }`.">();
+inline constexpr auto datatypeKw = cursiv::ikw<"datatype">.doc<
+    "Declares a basic type, such as `String`.">();
+inline constexpr auto entityKw = cursiv::ikw<"entity">.doc<
+    "Declares an entity and its features, between `{` and `}`.">();
+inline constexpr auto extendsKw = cursiv::ikw<"extends">.doc<
+    "Names the entity this one inherits its features from.">();
+inline constexpr auto manyKw = cursiv::ikw<"many">.doc<
+    "Marks a feature that holds several values.">();
+
 struct DomainModel : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
@@ -24,20 +35,20 @@ struct DomainModel : cursiv::GrammarSpec {
   struct PackageDeclaration;
 
   // Feature returns Feature: many?='many'i? name=ID ':' type=QualifiedName;
-  struct Feature : rule<option(flag<&ast::Feature::many>(ikw<"many">))
+  struct Feature : rule<option(flag<&ast::Feature::many>(manyKw))
                         + assign<&ast::Feature::name>(ref<ID>) + lit<":">
                         + assign<&ast::Feature::type>(ref<QualifiedName>)> {};
 
   // DataType returns DataType: 'datatype'i name=ID;
-  struct DataType : rule<create<ast::DataType> + ikw<"datatype">
+  struct DataType : rule<create<ast::DataType> + datatypeKw
                          + assign<&ast::DataType::name>(ref<ID>)> {};
 
   // Entity returns Entity:
   // 'entity'i name=ID ('extends'i superType=QualifiedName)?
   // '{' features+=Feature* '}';
   struct Entity
-      : rule<ikw<"entity"> + assign<&ast::Entity::name>(ref<ID>)
-             + option(ikw<"extends">
+      : rule<entityKw + assign<&ast::Entity::name>(ref<ID>)
+             + option(extendsKw
                       + assign<&ast::Entity::superType>(ref<QualifiedName>))
              + lit<"{"> + many(append<&ast::Entity::features>(ref<Feature>))
              + lit<"}">> {};
@@ -48,7 +59,7 @@ struct DomainModel : cursiv::GrammarSpec {
   // PackageDeclaration returns PackageDeclaration:
   // 'package'i name=QualifiedName '{' elements+=AbstractElement* '}';
   struct PackageDeclaration
-      : rule<ikw<"package">
+      : rule<packageKw
              + assign<&ast::PackageDeclaration::name>(ref<QualifiedName>)
              + lit<"{">
              + many(append<&ast::PackageDeclaration::elements>(

@@ -60,6 +60,17 @@ and `uuid` ^11.1.1 to avoid
 Remove these overrides when the upstream dependency tree passes `npm audit`
 and VSIX packaging without them.
 
+The "Try it online" page of the documentation lives in `docs/demo/`. To try it
+after a `wasi-release` build, add it to a documentation build and open
+<http://localhost:8000/demo/>:
+
+```sh
+tools/wasm-dist.sh build-wasi dist
+mkdocs build
+tools/build-demo.sh dist site/demo
+python3 -m http.server -b localhost -d site
+```
+
 ## Find the relevant code
 
 | Area | Implementation | Tests |

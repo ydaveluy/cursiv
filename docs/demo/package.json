@@ -1,0 +1,11 @@
+{
+  "name": "cursiv-demo",
+  "description": "The \"Try it online\" page: the example languages in the browser",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "coi-serviceworker": "0.1.7",
+    "monaco-editor": "0.52.2"
+  }
+}

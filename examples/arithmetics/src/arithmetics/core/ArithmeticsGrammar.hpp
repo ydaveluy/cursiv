@@ -5,6 +5,12 @@
 
 namespace arith {
 
+inline constexpr auto moduleKw = cursiv::ikw<"module">.doc<
+    "Starts the document and names the module.">();
+inline constexpr auto defKw = cursiv::ikw<"def">.doc<
+    "Defines a constant, `def pi: 3.14;`, or a function, "
+    "`def area(r): pi * r ^ 2;`.">();
+
 struct Arith : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
@@ -34,7 +40,7 @@ struct Arith : cursiv::GrammarSpec {
 
   // Module returns Module: 'module'i name=ID statements+=Statement*;
   struct Module
-      : rule<ikw<"module"> + assign<&ast::Module::name>(ref<ID>)
+      : rule<moduleKw + assign<&ast::Module::name>(ref<ID>)
              + many(append<&ast::Module::statements>(ref<Statement>))> {};
 
   // Statement returns AstNode: Definition | Evaluation;
@@ -45,7 +51,7 @@ struct Arith : cursiv::GrammarSpec {
   // args+=DeclaredParameter)* ')')?
   // ':' expr=Expression ';';
   struct Definition
-      : rule<ikw<"def"> + assign<&ast::Definition::name>(ref<ID>)
+      : rule<defKw + assign<&ast::Definition::name>(ref<ID>)
              + option(
                  lit<"(">
                  + some(append<&ast::Definition::args>(ref<DeclaredParameter>),

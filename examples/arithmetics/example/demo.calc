@@ -1,7 +1,9 @@
 // A module: definitions first, then the expressions to evaluate.
 module demo
 
+/** The ratio of a circle's circumference to its diameter. */
 def pi: 3.14159;
+/** The area of a circle of radius `r`. */
 def area(r): pi * r ^ 2;
 
 area(2 + 3) * 2;

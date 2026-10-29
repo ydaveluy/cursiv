@@ -30,6 +30,7 @@ editor extension.
 ![The Statemachine example in an editor: completion, an error and its fix, hover and rename](docs/assets/demo.gif)
 
 [Documentation](docs/index.md) ·
+[Try it online](https://ydaveluy.github.io/cursiv/demo/) ·
 [Getting started](docs/learn/scaffold.md) ·
 [Benchmark results](docs/benchmarks/README.md)
 

@@ -1,13 +1,19 @@
-/* Two states and one command, written on single lines: the whitespace between
-   the parts of a statemachine carries no meaning. */
+/* A door, with each state written on one line: the whitespace between the
+   parts of a statemachine carries no meaning. */
 statemachine Doors
 
 events open close
 
-commands lock unlock
+commands
+    /** Locks the door. */
+    lock
+    /** Unlocks the door. */
+    unlock
 
 initialState Closed
 
+/** The door is shut and locked. */
 state Closed actions { lock } open => Open end
 
+/** The door is open. */
 state Open actions { unlock } close => Closed end

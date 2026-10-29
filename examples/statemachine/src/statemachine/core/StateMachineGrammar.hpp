@@ -7,6 +7,8 @@ namespace sm {
 
 namespace x = cursiv;
 
+inline constexpr auto statemachineKw = x::ikw<"statemachine">.doc<
+    "Starts the document and names the state machine.">();
 inline constexpr auto eventsKw =
     x::ikw<"events">.doc<"Opens the events the machine reacts to.">();
 inline constexpr auto initialStateKw =
@@ -15,6 +17,10 @@ inline constexpr auto stateKw =
     x::ikw<"state">.doc<"Declares a state, closed by `end`.">();
 inline constexpr auto endKw =
     x::ikw<"end">.doc<"Closes the state opened by `state`.">();
+inline constexpr auto commandsKw =
+    x::ikw<"commands">.doc<"Opens the commands that states can run.">();
+inline constexpr auto actionsKw = x::ikw<"actions">.doc<
+    "Lists the commands the state runs, between `{` and `}`.">();
 
 struct SM : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -29,16 +35,16 @@ struct SM : cursiv::GrammarSpec {
                            + assign<&ast::Transition::state>(ref<ID>)> {};
   struct State
       : rule<stateKw + assign<&ast::State::name>(ref<ID>)
-             + option(ikw<"actions"> + kw<"{">
+             + option(actionsKw + kw<"{">
                       + some(append<&ast::State::actions>(ref<ID>)) + kw<"}">)
              + many(append<&ast::State::transitions>(ref<Transition>))
              + endKw> {};
   struct Statemachine
-      : rule<ikw<"statemachine"> + assign<&ast::Statemachine::name>(ref<ID>)
+      : rule<statemachineKw + assign<&ast::Statemachine::name>(ref<ID>)
              + option(eventsKw
                       + some(append<&ast::Statemachine::events>(ref<Event>)))
              + option(
-                 ikw<"commands">
+                 commandsKw
                  + some(append<&ast::Statemachine::commands>(ref<Command>)))
              + initialStateKw + assign<&ast::Statemachine::init>(ref<ID>)
              + many(append<&ast::Statemachine::states>(ref<State>))> {};

@@ -1,25 +1,31 @@
 // A blog: datatypes, entities, inheritance and a nested package.
+/** Plain text. */
 datatype String
+/** A calendar date. */
 datatype Date
 
+/** Anything someone wrote. */
 entity HasAuthor {
     author: String
 }
 
+/** An article of the blog. */
 entity Post extends HasAuthor {
     title: String
     published: Date
     many comments: Comment
 }
 
+/** A reader's answer to a post. */
 entity Comment extends HasAuthor {
     content: String
 }
 
 package archive {
-    /* A qualified name reaches out of the package it is written in. */
+    /** A copy of the blog at one point in time. */
     entity Snapshot {
         taken: Date
+        // A name declared outside the package resolves here too.
         many posts: Post
     }
 }
