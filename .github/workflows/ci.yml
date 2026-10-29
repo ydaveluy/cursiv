@@ -229,3 +229,23 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  # A main commit whose builds pass is then checked against the language
+  # library: cursiv-grammar runs its CI on this exact commit.
+  notify-grammars:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [gcc, clang, wasi]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: dispatch to cursiv-grammar
+        env:
+          GH_TOKEN: ${{ secrets.GRAMMARS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::GRAMMARS_DISPATCH_TOKEN is not set: cursiv-grammar is not notified."
+            exit 0
+          fi
+          gh api repos/ydaveluy/cursiv-grammar/dispatches \
+            -f event_type=cursiv-engine-updated \
+            -f "client_payload[engine_ref]=$GITHUB_SHA"
