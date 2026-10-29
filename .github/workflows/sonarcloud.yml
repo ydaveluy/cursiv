@@ -52,7 +52,8 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-          -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          -DCMAKE_CXX_FLAGS="--coverage -fprofile-update=atomic"
+          -DCMAKE_EXE_LINKER_FLAGS=--coverage
           -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
           -DCURSIV_MIMALLOC=OFF
       - name: Build
@@ -66,7 +67,9 @@ jobs:
       - name: Collect coverage
         run: >-
           .venv-coverage/bin/gcovr --root . --filter src/
-          --gcov-executable gcov --sonarqube build/coverage.xml build
+          --gcov-executable gcov
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file
+          --sonarqube build/coverage.xml build
       - name: Compilation cache statistics
         if: always()
         run: ccache --show-stats
