@@ -74,7 +74,6 @@ struct TriviaBase : cursiv::GrammarSpec {
   using hidden = COMMENT;
 };
 struct TriviaLl : TriviaBase {};
-struct TriviaLr : TriviaBase {};
 
 // The condition of an implied `;` reads more of the word after it than the
 // token a prediction lexes there: `abd` refuses the insertion only at its
@@ -130,5 +129,4 @@ struct GluedBase : cursiv::GrammarSpec {
   using ignored = WS;
 };
 struct GluedLl : GluedBase {};
-
 }  // namespace tllconditions

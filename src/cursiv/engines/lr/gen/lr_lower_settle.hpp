@@ -87,15 +87,10 @@ void lr_intern_aux(Cfg& c) {
       moved = true;
     }
     if (!moved) break;
-    for (std::uint16_t k = 0; k < c.nprods; ++k) {
-      LrLowProd& q = c.prods[k];
-      for (unsigned i = 0; i < q.len; ++i) {
-        const std::uint16_t sym = c.sym_at(q, i);
-        if (is_term(sym)) continue;
-        const std::uint16_t nt = nt_index(sym);
-        if (repl[nt] != nt) c.slotSym[q.at + i] = nt_sym(repl[nt]);
-      }
-    }
+    for (std::uint16_t k = 0; k < c.nprods; ++k)
+      c.each_nt(c.prods[k], [&](unsigned i, std::uint16_t nt) {
+        if (repl[nt] != nt) c.slotSym[c.prods[k].at + i] = nt_sym(repl[nt]);
+      });
   }
 
   // A merged nonterminal keeps its index; its productions go.
@@ -127,12 +122,10 @@ inline void lr_no_rule_without_production(LrLowered& o) {
   std::vector<std::uint16_t> work;
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
     const LrLowProd& q = c.prods[k];
-    for (unsigned i = 0; i < q.len; ++i) {
-      const std::uint16_t sym = c.sym_at(q, i);
-      if (is_term(sym)) continue;
+    c.each_nt(q, [&](unsigned, std::uint16_t nt) {
       ++owed[k];
-      users[nt_index(sym)].push_back(k);
-    }
+      users[nt].push_back(k);
+    });
     if (owed[k] == 0 && !productive[q.lhs]) {
       productive[q.lhs] = true;
       work.push_back(q.lhs);
@@ -229,9 +222,7 @@ inline void lr_drop_unread_stops(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> read(c.nnts, false);
   for (std::uint16_t k = 0; k < c.nprods; ++k)
-    for (unsigned i = 0; i < c.prods[k].len; ++i)
-      if (const std::uint16_t sym = c.sym_at(c.prods[k], i); !is_term(sym))
-        read[nt_index(sym)] = true;
+    c.each_nt(c.prods[k], [&](unsigned, std::uint16_t nt) { read[nt] = true; });
   const auto ix = lr_by_lhs(c);
   lr_compact_prods(c, [&](std::uint16_t k) {
     const std::uint16_t lhs = c.prods[k].lhs;
@@ -259,11 +250,9 @@ inline void lr_no_unit_cycle(LrLowered& o,
       required += is_term(s) || empty[nt_index(s)] == 0;
     }
     if (required > 1) continue;
-    for (unsigned i = 0; i < q.len; ++i) {
-      const std::uint16_t s = c.sym_at(q, i);
-      if (!is_term(s) && (required == 0 || empty[nt_index(s)] == 0))
-        adj[q.lhs].push_back(nt_index(s));
-    }
+    c.each_nt(q, [&](unsigned, std::uint16_t nt) {
+      if (required == 0 || empty[nt] == 0) adj[q.lhs].push_back(nt);
+    });
   }
   const auto scc = StrongComponents<>::of(adj);
   for (std::uint16_t i = 0; i < c.nnts; ++i)
@@ -327,14 +316,10 @@ inline void lr_no_hidden_left_recursion(
 inline void lr_lay_bare_records(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> called(c.nnts, false);
-  for (std::uint16_t k = 0; k < c.nprods; ++k) {
-    const LrLowProd& q = c.prods[k];
-    for (unsigned i = 0; i < q.len; ++i) {
-      const std::uint16_t sym = c.sym_at(q, i);
-      if (c.row_at(q, i) != kNoRow && !is_term(sym))
-        called[nt_index(sym)] = true;
-    }
-  }
+  for (std::uint16_t k = 0; k < c.nprods; ++k)
+    c.each_nt(c.prods[k], [&](unsigned i, std::uint16_t nt) {
+      if (c.row_at(c.prods[k], i) != kNoRow) called[nt] = true;
+    });
   // A pass-through hands the demand down to its symbol.
   for (bool moved = true; moved;) {
     moved = false;

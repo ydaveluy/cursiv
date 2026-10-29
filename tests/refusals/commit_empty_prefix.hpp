@@ -1,5 +1,6 @@
 // A commit whose prefix may read nothing: it is always there to be read, so
 // the quantifier could never stop.
+// expect LR: rule .Root. commits on a prefix that may read nothing
 #pragma once
 
 #include "refusals/head.hpp"

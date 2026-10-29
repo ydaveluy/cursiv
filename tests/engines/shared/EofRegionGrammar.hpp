@@ -178,7 +178,6 @@ struct Base : cursiv::GrammarSpec {
   using entry = Entry;
 };
 
-
 }  // namespace tbytecond
 
 namespace teofregion {

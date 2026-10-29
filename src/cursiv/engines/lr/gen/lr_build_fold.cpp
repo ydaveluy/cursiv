@@ -134,19 +134,11 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
   // whose one symbol brings nothing back reads no row.
   for (unsigned p = 0; p < nP; ++p) {
     LrLowProd& pr = wprods[p];
-    bool can = pr.node != kNoRow;
-    if (!can && pr.len == 1) {
-      if (g.row_at(pr, 0) != kNoRow) {
-        can = true;
-      } else {
-        const std::uint16_t sym = g.sym_at(pr, 0);
-        if (is_term(sym))
-          can = g.terms[sym].element != kNoRow;
-        else
-          can = rec[nt_index(sym)].any();
-      }
-    }
-    pr.folds = can;
+    const std::uint16_t sym = pr.len == 1 ? g.sym_at(pr, 0) : 0;
+    pr.folds = pr.node != kNoRow ||
+               (pr.len == 1 && (g.row_at(pr, 0) != kNoRow ||
+                                (is_term(sym) ? g.terms[sym].element != kNoRow
+                                              : rec[nt_index(sym)].any())));
   }
   if (sound)
     for (unsigned B = 0; B < nN; ++B)
@@ -167,11 +159,8 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
     return site;
   };
   std::vector<bool> opens(a.cfg.nnts, false);
-  for (unsigned i = 0; i < a.cfg.nprods; ++i) {
-    const auto& p = a.cfg.prods[i];
-    if (p.len != 0 && !is_term(a.cfg.sym_at(p, 0)))
-      opens[nt_index(a.cfg.sym_at(p, 0))] = true;
-  }
+  for (unsigned i = 0; i < a.cfg.nprods; ++i)
+    if (const auto b = a.cfg.nt_after(i, 0); b != kNoRow) opens[b] = true;
   // A section's entry opens its grammar's text, as the document's does.
   for (std::size_t k = 1; k < a.cfg.cfgHome.size(); ++k)
     if (a.cfg.cfgHome[k] == k) opens[a.cfg.cfgEntry[k]] = true;

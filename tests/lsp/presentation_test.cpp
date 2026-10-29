@@ -16,21 +16,20 @@
 #include <vector>
 
 #include "cursiv/core/references/DefaultNameProvider.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/core/services/Diagnostic.hpp"
+#include "cursiv/core/services/JsonValue.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstNodeView.hpp"
 #include "cursiv/core/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/core/syntax-tree/MultiRefItems.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
+#include "cursiv/core/validation/DefaultCodeActionProtocol.hpp"
 #include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
+#include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/lsp/actions/DefaultCodeActionProvider.hpp"
+#include "cursiv/lsp/actions/JsonBridge.hpp"
 #include "cursiv/lsp/completion/FuzzyMatcher.hpp"
 #include "cursiv/lsp/content/DefaultTextDocumentContentProvider.hpp"
 #include "cursiv/lsp/content/TextDocumentContentProvider.hpp"
@@ -42,14 +41,28 @@
 #include "cursiv/lsp/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/lsp/semantic/SignatureHelpProvider.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/lsp/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/lsp/symbols/WorkspaceSymbolProvider.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/DecodedSemanticTokens.hpp"
 #include "lsp/uri.h"
+#include "support/Editor.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+
+namespace {
+
+// A URI of its own for each document, so one lane's documents never meet.
+struct MintingWorld : support::LspWorkspace {
+  mutable unsigned minted = 0;
+
+  cursiv::Document* built(std::string text) const {
+    return WorkspaceWorld::built(
+        "file:///w/a" + std::to_string(minted++) + ".ws", std::move(text));
+  }
+};
+
+}  // namespace
 
 // What `textDocument/foldingRange` answers: one fold per AST node under the
 // root spanning three lines, the closer left visible, one per comment record
@@ -58,44 +71,7 @@ namespace folding_range_provider {
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  mutable unsigned minted = 0;
-
-  cursiv::Document* built(std::string text) const {
-    auto document = shared.documentFactory->fromString(
-        std::move(text), "file:///w/a" + std::to_string(minted++) + ".ws");
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
-
+struct World : MintingWorld {
   [[nodiscard]] std::vector<lsp::FoldingRange> folds(
       std::string text,
       const cursiv::FoldingRangeProvider* provider = nullptr) const {
@@ -105,25 +81,7 @@ struct World {
   }
 };
 
-// 0: package p {
-// 1:   /* a block comment
-// 2:      over three lines
-// 3:   */
-// 4:   datatype String
-// 5:   entity Person {
-// 6:     name : String
-// 7:   }
-// 8: }
-constexpr std::string_view kModel =
-    "package p {\n"
-    "  /* a block comment\n"
-    "     over three lines\n"
-    "  */\n"
-    "  datatype String\n"
-    "  entity Person {\n"
-    "    name : String\n"
-    "  }\n"
-    "}\n";
+constexpr std::string_view kModel = support::kPackage;
 
 [[nodiscard]] const lsp::FoldingRange* starting(
     const std::vector<lsp::FoldingRange>& ranges, lsp::Uint line) {
@@ -344,44 +302,7 @@ namespace selection_range_provider {
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  mutable unsigned minted = 0;
-
-  cursiv::Document* built(std::string text) const {
-    auto document = shared.documentFactory->fromString(
-        std::move(text), "file:///w/a" + std::to_string(minted++) + ".ws");
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
-
+struct World : MintingWorld {
   [[nodiscard]] std::vector<lsp::SelectionRange> at(std::string text,
                                                     lsp::Position caret) const {
     const cursiv::Document* const document = built(std::move(text));
@@ -505,41 +426,7 @@ namespace {
 
 namespace ct = cursiv::test;
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  cursiv::Document* built(const std::string& uri, std::string text) const {
-    auto document = shared.documentFactory->fromString(std::move(text), uri);
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
-};
+using World = support::LspWorkspace;
 
 // One token, absolute: what the client reconstructs from the deltas.
 struct Decoded {
@@ -801,29 +688,11 @@ struct SilentClient final : cursiv::LanguageClient {
   void publishDiagnostics(lsp::PublishDiagnosticsParams) override {}
 };
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    language->signatureHelpProvider = std::make_unique<ContextEcho>();
-    shared.serviceRegistry->registerServices(std::move(language));
+struct World : support::LspWorkspace {
+  World()
+      : WorkspaceWorld([](cursiv::LspServices& language) {
+          language.signatureHelpProvider = std::make_unique<ContextEcho>();
+        }) {
     shared.languageClient = std::make_unique<SilentClient>();
   }
 
@@ -832,12 +701,7 @@ struct World {
   }
 
   void open(std::string_view text) const {
-    lsp::DidOpenTextDocumentParams params;
-    params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
-    params.textDocument.languageId = std::string("workspace");
-    params.textDocument.version = 1;
-    params.textDocument.text = std::string(text);
-    server().didOpen(params);
+    support::open(server(), kUri, "workspace", text);
   }
 };
 
@@ -897,41 +761,7 @@ namespace code_action_provider {
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  cursiv::Document* built(const std::string& uri, std::string text) const {
-    auto document = shared.documentFactory->fromString(std::move(text), uri);
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
-};
+using World = support::LspWorkspace;
 
 // A missing `:` the parser repairs, which stamps one quick-fix row.
 constexpr const char* kBroken = "datatype String\nentity A { x  String }\n";
@@ -1118,6 +948,145 @@ void a_range_touching_no_finding_answers_nothing() {
   CHECK(provider.getCodeActions(*document, params, cursiv::kNoCancel).empty());
 }
 
+struct ObservedActions final : cursiv::DefaultCodeActionProvider {
+  mutable bool called = false;
+
+  void appendCodeActions(const cursiv::Document&, const lsp::CodeActionParams&,
+                         std::vector<lsp::CodeAction>&,
+                         const cursiv::CancellationToken&) const override {
+    called = true;
+  }
+};
+
+void cancellation_precedes_a_filter_that_excludes_quick_fixes() {
+  const cursiv::Document document(
+      cursiv::TextDocument::create("file:///cancel.ws", "workspace", 1, ""));
+  const ObservedActions provider;
+  lsp::CodeActionParams params;
+  params.context.only = lsp::Array<lsp::CodeActionKindEnum>{
+      lsp::CodeActionKindEnum(lsp::CodeActionKind::Source)};
+  cursiv::CancellationTokenSource source;
+  source.request_stop();
+  bool cancelled = false;
+  try {
+    (void)provider.getCodeActions(document, params, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  CHECK(cancelled);
+  CHECK(!provider.called);
+  CHECK(provider.getCodeActions(document, params).empty());
+  CHECK(provider.called);
+}
+
+void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
+  cursiv::Document document(cursiv::TextDocument::create(
+      "file:///diagnostic.ws", "workspace", 1, "a"));
+  cursiv::Diagnostic diagnostic;
+  diagnostic.range = {0, 1};
+  diagnostic.message = "replace a";
+  diagnostic.source = "audit";
+  diagnostic.severity = cursiv::DiagnosticSeverity::Warning;
+  diagnostic.code = cursiv::DiagnosticCode("audit.replace");
+  cursiv::JsonValue::Object data;
+  data[std::string(cursiv::kDefaultCodeActionsKey)] = cursiv::JsonValue::Array{
+      cursiv::make_action_row(cursiv::kReplaceEdit, "replace", {0, 1}, "b", 0)};
+  data["numbers"] = cursiv::JsonValue::Array{
+      cursiv::JsonValue(1.0), cursiv::JsonValue(cursiv::JsonValue::Object{
+                                  {"nested", cursiv::JsonValue(2.0)}})};
+  diagnostic.data = cursiv::JsonValue(std::move(data));
+  document.diagnostics.push_back(std::move(diagnostic));
+
+  lsp::CodeActionParams params;
+  params.range = {{0, 0}, {0, 1}};
+  lsp::Diagnostic echo;
+  echo.range = params.range;
+  echo.message = std::string("replace a");
+  echo.severity = lsp::DiagnosticSeverity::Warning;
+  echo.source = "audit";
+  echo.code = std::string("audit.replace");
+  echo.data = cursiv::to_lsp_any(*document.diagnostics.front().data);
+  echo.tags =
+      lsp::Array<lsp::DiagnosticTagEnum>{lsp::DiagnosticTag::Deprecated};
+  lsp::CodeDescription description;
+  description.href = lsp::Uri::parse("https://example.test/diagnostic");
+  echo.codeDescription = std::move(description);
+  lsp::DiagnosticRelatedInformation related;
+  related.location.uri = lsp::Uri::parse("file:///related.ws");
+  related.location.range = {{2, 3}, {2, 4}};
+  related.message = "related";
+  echo.relatedInformation =
+      lsp::Array<lsp::DiagnosticRelatedInformation>{std::move(related)};
+  params.context.diagnostics.push_back(echo);
+
+  const cursiv::DefaultCodeActionProvider provider;
+  const auto actions = provider.getCodeActions(document, params);
+  CHECK(actions.size() == 1);
+  if (actions.size() != 1) return;
+  CHECK(actions.front().diagnostics.has_value());
+  if (!actions.front().diagnostics.has_value()) return;
+  CHECK(actions.front().diagnostics->size() == 1);
+  if (actions.front().diagnostics->size() != 1) return;
+  const lsp::Diagnostic& about = actions.front().diagnostics->front();
+  CHECK(about.severity == lsp::DiagnosticSeverity::Warning);
+  CHECK(about.source == echo.source);
+  CHECK(about.code == echo.code);
+  CHECK(about.data == echo.data);
+  CHECK(about.codeDescription.has_value());
+  CHECK(about.tags.has_value() && about.tags->size() == 1);
+  CHECK(about.relatedInformation.has_value() &&
+        about.relatedInformation->size() == 1);
+  if (about.relatedInformation.has_value() &&
+      !about.relatedInformation->empty())
+    CHECK(about.relatedInformation->front().message == "related");
+
+  auto& numbers = params.context.diagnostics.front().data->object()["numbers"];
+  numbers.array().front() = lsp::LSPAny(1);
+  numbers.array().back().object()["nested"] = lsp::LSPAny(2);
+  const auto normalized = provider.getCodeActions(document, params);
+  CHECK(normalized.size() == 1);
+  if (normalized.size() == 1 && normalized.front().diagnostics.has_value() &&
+      !normalized.front().diagnostics->empty()) {
+    CHECK(normalized.front().diagnostics->front().data ==
+          params.context.diagnostics.front().data);
+    CHECK(normalized.front().diagnostics->front().tags.has_value());
+  } else {
+    CHECK(false);
+  }
+
+  numbers.array().front() = lsp::LSPAny(3);
+  const auto changed = provider.getCodeActions(document, params);
+  CHECK(changed.size() == 1);
+  if (changed.size() == 1 && changed.front().diagnostics.has_value() &&
+      !changed.front().diagnostics->empty())
+    CHECK(!changed.front().diagnostics->front().data.has_value());
+  else
+    CHECK(false);
+
+  params.context.diagnostics.front() = echo;
+  auto& duplicate = params.context.diagnostics.front().data->object();
+  duplicate.remove("numbers");
+  duplicate.append(std::string(cursiv::kDefaultCodeActionsKey),
+                   duplicate.get(cursiv::kDefaultCodeActionsKey));
+  const auto duplicated = provider.getCodeActions(document, params);
+  CHECK(duplicated.size() == 1);
+  if (duplicated.size() == 1 && duplicated.front().diagnostics.has_value() &&
+      duplicated.front().diagnostics->size() == 1)
+    CHECK(!duplicated.front().diagnostics->front().data.has_value());
+  else
+    CHECK(false);
+
+  params.context.diagnostics.front().data = lsp::LSPAny("stale");
+  const auto fresh = provider.getCodeActions(document, params);
+  CHECK(fresh.size() == 1);
+  if (fresh.size() != 1) return;
+  CHECK(fresh.front().diagnostics.has_value());
+  if (!fresh.front().diagnostics.has_value()) return;
+  CHECK(fresh.front().diagnostics->size() == 1);
+  if (fresh.front().diagnostics->size() != 1) return;
+  CHECK(!fresh.front().diagnostics->front().data.has_value());
+}
+
 }  // namespace
 
 void run() {
@@ -1127,6 +1096,8 @@ void run() {
   a_range_touching_no_finding_answers_nothing();
   a_misspelt_reference_is_offered_its_neighbour();
   a_request_walks_the_references_once();
+  cancellation_precedes_a_filter_that_excludes_quick_fixes();
+  an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads();
 }
 
 }  // namespace code_action_provider
@@ -1137,26 +1108,7 @@ namespace text_document_content_provider {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  void hold(const std::string& uri, std::string text) const {
-    shared.documents->addDocument(
-        shared.documentFactory->fromString(std::move(text), uri));
-  }
-};
+using World = support::CoreWorkspace;
 
 [[nodiscard]] std::optional<lsp::TextDocumentContentResult> ask(
     const cursiv::TextDocumentContentProvider& provider,
@@ -1168,7 +1120,7 @@ struct World {
 
 void a_held_document_is_served_by_uri() {
   const World world;
-  world.hold("builtin:///lib.ws", "datatype String\n");
+  world.add("builtin:///lib.ws", "datatype String\n");
   const cursiv::DefaultTextDocumentContentProvider provider(world.shared,
                                                             {"builtin"});
   const std::optional<lsp::TextDocumentContentResult> answer =
@@ -1179,7 +1131,7 @@ void a_held_document_is_served_by_uri() {
 
 void a_scheme_matches_whatever_its_case() {
   const World world;
-  world.hold("builtin:///lib.ws", "datatype String\n");
+  world.add("builtin:///lib.ws", "datatype String\n");
   const cursiv::DefaultTextDocumentContentProvider provider(world.shared,
                                                             {"BuiltIn"});
   CHECK(ask(provider, "builtin:///lib.ws").has_value());
@@ -1191,7 +1143,7 @@ void a_scheme_matches_whatever_its_case() {
 
 void an_undeclared_scheme_answers_nothing() {
   const World world;
-  world.hold("file:///w/a.ws", "datatype String\n");
+  world.add("file:///w/a.ws", "datatype String\n");
   const cursiv::DefaultTextDocumentContentProvider provider(world.shared,
                                                             {"builtin"});
   CHECK(!ask(provider, "file:///w/a.ws").has_value());

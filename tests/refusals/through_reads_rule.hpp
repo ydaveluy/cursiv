@@ -1,3 +1,4 @@
+// expect LR: a rule is read with the skipper between
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

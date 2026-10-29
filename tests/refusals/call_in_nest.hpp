@@ -1,5 +1,6 @@
 // A nest makes its wrapper the current node: a call inside it adopts a node
 // the wrapper already replaced.
+// expect LR: this alternative can create twice
 #pragma once
 
 #include "refusals/head.hpp"

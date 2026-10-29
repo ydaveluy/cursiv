@@ -1,5 +1,6 @@
 // A call adopts its node while the current node is empty: after a write, the
 // node the call returns has nowhere to take what was written.
+// expect LR: calls a rule that builds a node after the node in hand was written, created or nested
 #pragma once
 
 #include "refusals/head.hpp"

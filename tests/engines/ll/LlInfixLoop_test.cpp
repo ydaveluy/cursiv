@@ -3,6 +3,7 @@
 // the spec elects, whichever rule the call enters at.
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -127,29 +128,22 @@ void expect(const char* engine, const Case& c, const std::string& got) {
   CHECK(got == c.tree);
 }
 
-template <std::size_t N, class MakeLl, class MakeLlReflection>
-void expect_cases(const Case (&cases)[N], MakeLl makeLl,
-                  MakeLlReflection makeLlr, std::string_view prefix = {}) {
-  const auto ll = makeLl();
-  const auto llr = makeLlr();
-  for (const Case& c : cases) {
-    const std::string text = std::string(prefix) + std::string(c.text);
-    expect("descent", c, read(*ll, *llr, text));
-  }
+void expect_cases(std::span<const Case> cases, std::string_view prefix) {
+  namespace g = tllexpressions::generated;
+  const auto ll = g::Ll::create_parser();
+  const auto llr = g::Ll::create_ast_reflection();
+  for (const Case& c : cases)
+    expect("descent", c,
+           read(*ll, *llr, std::string(prefix) + std::string(c.text)));
 }
 
 }  // namespace
 
 void run() {
-  namespace g = tllexpressions::generated;
-  expect_cases(kSum, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "loop:sum:");
-  expect_cases(kLadder, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "loop:ladder:");
-  expect_cases(kVia, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "loop:via:");
-  expect_cases(kMixed, g::Ll::create_parser, g::Ll::create_ast_reflection,
-               "loop:mixed:");
+  expect_cases(kSum, "loop:sum:");
+  expect_cases(kLadder, "loop:ladder:");
+  expect_cases(kVia, "loop:via:");
+  expect_cases(kMixed, "loop:mixed:");
 }
 
 }  // namespace infix_loop_cases

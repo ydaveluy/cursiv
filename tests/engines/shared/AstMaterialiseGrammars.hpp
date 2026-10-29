@@ -193,7 +193,6 @@ struct GivenUp : Base {
   using ignored = WS;
 };
 
-
 struct Suite : Base {
   struct Root : rule<(lit<"atomchain:"> + ref<AtomChain::Root>) |
                      (lit<"sharedprefix:"> + ref<SharedPrefix::Unary>) |
@@ -274,7 +273,6 @@ struct Base : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-
 
 }  // namespace tnestadopt
 

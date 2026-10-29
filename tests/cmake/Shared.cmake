@@ -98,17 +98,15 @@ cursiv_test(AstTree_test
     "engines/shared/AstTree_test.cpp;engines/shared/AstMaterialise_cases.cpp;engines/shared/DirectiveSequence_cases.cpp"
     cursivLlGen cursivLrGen asttreellGenerated asttreelrGenerated
     asttreeauxGenerated backwardlrGenerated)
-set_target_properties(AstTree_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 cursiv_test(Conformance_test
     "engines/shared/Conformance_test.cpp;engines/shared/ConditionContract_cases.cpp;engines/shared/SectionPredicate_cases.cpp;engines/shared/BranchValues_cases.cpp"
     conformancellGenerated conformancelrGenerated
     sectionpredicatellGenerated sectionpredicatelrGenerated
     branchvaluesllGenerated branchvalueslrGenerated)
-set_target_properties(Conformance_test PROPERTIES
+set_target_properties(AstTree_test Conformance_test PROPERTIES
     UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
-set_tests_properties(LexicalBackends_test PROPERTIES TIMEOUT 30)
-set_tests_properties(RecursiveTerminals_test PROPERTIES TIMEOUT 30)
-set_tests_properties(TypoCandidates_test PROPERTIES TIMEOUT 30)
+set_tests_properties(LexicalBackends_test RecursiveTerminals_test
+    TypoCandidates_test PROPERTIES TIMEOUT 30)
 
 # Conditions tested at each token of a run cost the run's length, on both
 # engines.

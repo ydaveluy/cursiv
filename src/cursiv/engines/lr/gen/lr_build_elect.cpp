@@ -77,9 +77,8 @@ void lr_elect_words(LrBuildTable& A) {
   const LrBuildCfg& g = A.cfg;
   const unsigned nP = g.nprods, nN = g.nnts;
   const auto lead = [&](unsigned p) -> unsigned {
-    const LrLowProd& q = g.prods[p];
-    if (q.len == 0 || is_term(g.sym_at(q, 0))) return nN;
-    return nt_index(g.sym_at(q, 0));
+    const unsigned b = g.nt_after(p, 0);
+    return b == kNoRow ? nN : b;
   };
   std::vector<std::uint8_t> turn(nP, 0);
   for (unsigned p = 0; p < nP; ++p) turn[p] = g.turns(p);
@@ -256,10 +255,9 @@ void lr_elect_runs(LrBuildTable& A) {
     for (unsigned p = 0; p < nP; ++p) {
       A.electWatchAt[p] = static_cast<std::uint32_t>(A.electWatch.size());
       const LrLowProd& q = g.prods[p];
-      for (unsigned i = 0; i < q.len; ++i)
-        if (const std::uint16_t s = g.sym_at(q, i);
-            !is_term(s) && carries[nt_index(s)])
-          A.electWatch.push_back(i << 16 | nt_index(s));
+      g.each_nt(q, [&](unsigned i, std::uint16_t nt) {
+        if (carries[nt]) A.electWatch.push_back(i << 16 | nt);
+      });
     }
     A.electWatchAt[nP] = static_cast<std::uint32_t>(A.electWatch.size());
   }

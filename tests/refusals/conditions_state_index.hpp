@@ -1,5 +1,6 @@
 // 16 distinct conditions of the gap guard 16 alternatives that all shift one
 // token: a state stands for each subset of them.
+// expect LR: refused by the 16-bit index of an LR state, counted before minimisation
 #pragma once
 
 #include <cstddef>

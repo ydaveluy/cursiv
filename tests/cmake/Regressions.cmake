@@ -26,8 +26,6 @@ cursiv_test(RunOnEquations_test engines/lr/RunOnEquations_test.cpp
 set_tests_properties(RunOnEquations_test PROPERTIES TIMEOUT 120)
 cursiv_grammar(room221 engines/lr/FrozenRoomGrammars.hpp troom::seed221::G ENGINE LR)
 cursiv_grammar(repaircost engines/lr/RepairCostGrammar.hpp trepair::G ENGINE LR)
-# Repairs over long documents: their cost, their ledger, and the arms a repaired
-# reading forks.
 # Random grammars against an Earley reading of each: every seed is a grammar
 # the build generates, so the lane runs where the generator does.
 if(NOT CMAKE_CROSSCOMPILING)

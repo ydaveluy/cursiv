@@ -1,5 +1,6 @@
 // `=` names the one value a member takes: on a `vector<T>` the matches would
 // pile up, which is what `+=` says.
+// expect LR: names the ONE value a member takes, and this member is a .vector<T>. list
 #pragma once
 
 #include "refusals/head.hpp"

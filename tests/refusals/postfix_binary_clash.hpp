@@ -1,5 +1,6 @@
 // One operator both postfix and binary in a precedence table: after an
 // operand, nothing tells its two readings apart.
+// expect LR LL: refused .postfixBinaryClash..*rule .Sum. reads .!. as a postfix operator on level 1 and as a binary operator on level 3
 #pragma once
 
 #include "refusals/head.hpp"

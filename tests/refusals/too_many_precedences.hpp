@@ -1,4 +1,5 @@
 // A precedence table of more levels than a byte numbers.
+// expect LR LL: refused .tooManyPrecedences..*rule .Sum. declares more than 255 precedence levels
 #pragma once
 
 #include <cstddef>

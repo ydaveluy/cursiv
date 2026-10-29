@@ -1,5 +1,6 @@
 // A data rule passes the value of the alternative it took, so its
 // alternatives pass one type: here a number and a text.
+// expect LR: the alternatives of this data rule pass values of different types
 #pragma once
 
 #include <cstdint>

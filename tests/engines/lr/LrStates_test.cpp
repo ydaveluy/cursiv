@@ -9,7 +9,6 @@
 
 #include "continuedlr/generated/Lr/Module.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
@@ -18,6 +17,7 @@
 #include "cursiv/test/Check.hpp"
 #include "edges/generated/G/Module.hpp"
 #include "engines/lr/ContinuedLineGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/PeekCaretGrammar.hpp"
 #include "engines/lr/VirtualStateGrammar.hpp"
 #include "indent/generated/G/Module.hpp"
@@ -37,7 +37,7 @@ namespace g = tpeekcaret::generated::G;
 // The two cells after `@`, on KEY and on RAW, both peek.
 static_assert(g::kTable.npeeks == 2);
 
-int run() {
+void run() {
   const auto parser = g::create_parser();
   const auto splice = tedges::generated::G::create_parser();
   constexpr cursiv::TextOffset kSpliceHead = 7;
@@ -45,11 +45,11 @@ int run() {
     const std::string source = "splice:" + text;
     const auto r = splice->parse(source);
     CHECK(r.accepted && r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
     // Replace the suffix so the lexer cannot select the right answer from
     // the existing punctuation. The two-symbol Pair return must retain its
     // caller: LALR and conflict-only re-fusion offer both '!' and '?' here.
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + 3, kSpliceHead + 4, out);
+    const auto out =
+        checks::features(*splice, r, kSpliceHead + 3, kSpliceHead + 4);
     CHECK(out.size() == 1);
     for (const auto& f : out) {
       const auto spellings = splice->getGrammar().terminalSpellings(f.feature);
@@ -71,12 +71,11 @@ int run() {
       });
       CHECK(insertedBeforeTrivia);
     }
-    std::vector<cursiv::NextFeature> out;
     const auto at = static_cast<cursiv::TextOffset>(text.size() - 1);
     // The same invisible Pair return after a repaired token: the typo keeps
     // its corrected terminal, and the earlier zero-width insert is a shift.
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + at, kSpliceHead + at + 1,
-                           out);
+    const auto out =
+        checks::features(*splice, r, kSpliceHead + at, kSpliceHead + at + 1);
     CHECK(out.size() == 1);
     for (const auto& f : out) {
       const auto spellings = splice->getGrammar().terminalSpellings(f.feature);
@@ -88,46 +87,32 @@ int run() {
     const std::string source = "splice:" + text;
     const auto r = splice->parse(source);
     CHECK(r.accepted && !r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + text.size(),
-                           kSpliceHead + text.size(), out);
-    bool closes = false;
-    for (const auto& f : out)
-      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
-        closes = closes || s == ")";
-    CHECK(out.size() == 1 && closes);
+    const auto at = static_cast<cursiv::TextOffset>(kSpliceHead + text.size());
+    const auto out = checks::features(*splice, r, at, at);
+    CHECK(out.size() == 1 && checks::spelled(*splice, out, ")"));
   }
   for (const std::string text : {"u(a!", "u ( a ! "}) {
     const std::string source = "splice:" + text;
     const auto r = splice->parse(source);
     CHECK(r.accepted && !r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    const auto at = static_cast<cursiv::TextOffset>(text.size());
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + at, kSpliceHead + at, out);
-    bool next = false;
-    for (const auto& f : out)
-      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
-        next = next || s == "next";
-    CHECK(out.size() == 1 && next);
+    const auto at = static_cast<cursiv::TextOffset>(kSpliceHead + text.size());
+    const auto out = checks::features(*splice, r, at, at);
+    CHECK(out.size() == 1 && checks::spelled(*splice, out, "next"));
   }
   {
     const auto r = splice->parse("splice:{ac}");
     CHECK(r.accepted && r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
-    bool inserts = false;
-    for (const auto& f : out)
-      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
-        inserts = inserts || s == "b";
-    CHECK(out.size() == 2 && inserts);
+    const auto out =
+        checks::features(*splice, r, kSpliceHead + 2, kSpliceHead + 2);
+    CHECK(out.size() == 2 && checks::spelled(*splice, out, "b"));
   }
   for (const auto count : {1u, 16u, 65u}) {
     const auto text = "[a" + std::string(count, 'c') + "d]";
     const std::string source = "splice:" + text;
     const auto r = splice->parse(source);
     CHECK(r.accepted && r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
+    const auto out =
+        checks::features(*splice, r, kSpliceHead + 2, kSpliceHead + 2);
     bool tail = false;
     for (const auto& f : out) {
       for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
@@ -141,8 +126,8 @@ int run() {
     CHECK(r.accepted && r.diagnostics.empty());
     const auto changed = splice->parse("splice:<abc>");
     CHECK(!changed.accepted || !changed.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
+    const auto out =
+        checks::features(*splice, r, kSpliceHead + 2, kSpliceHead + 2);
     bool keeps = false;
     for (const auto& f : out)
       for (const auto word :
@@ -155,36 +140,20 @@ int run() {
   // A leaf two readings share: a candidate only one of them leads to glues
   // onto that reading, whose guard refuses it here.
   {
-    const auto r = splice->parse("splice:<a");
-    std::vector<cursiv::NextFeature> out;
-    splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
-    bool b = false, c = false, d = false;
-    for (const auto& f : out)
-      for (const auto word :
-           splice->getGrammar().terminalSpellings(f.feature)) {
-        b = b || word == "b";
-        c = c || word == "c";
-        d = d || word == "d";
-      }
-    CHECK(!b && c && d);
+    const auto out = checks::features(*splice, splice->parse("splice:<a"),
+                                      kSpliceHead + 2, kSpliceHead + 2);
+    CHECK(!checks::spelled(*splice, out, "b") &&
+          checks::spelled(*splice, out, "c") &&
+          checks::spelled(*splice, out, "d"));
   }
   // One terminal two readings read in different modes: a candidate glued to
   // it is judged in the mode of the reading that goes on with it. The `>`
   // follows the `-` only where the mode also reads `->`, which takes it in.
   {
     const std::string text = "splice:&=-";
-    const auto r = splice->parse(text);
-    std::vector<cursiv::NextFeature> out;
     const auto at = static_cast<cursiv::TextOffset>(text.size());
-    splice->nextFeaturesAt(r.cst(), at, at, out);
-    bool bang = false, arrow = false;
-    for (const auto& f : out)
-      for (const auto word :
-           splice->getGrammar().terminalSpellings(f.feature)) {
-        bang = bang || word == "!";
-        arrow = arrow || word == ">";
-      }
-    CHECK(bang && !arrow);
+    CHECK(checks::offers(*splice, text, at, at, "!") &&
+          !checks::offers(*splice, text, at, at, ">"));
     const auto glued = splice->parse(text + ">");
     CHECK(!glued.accepted || !glued.diagnostics.empty());
     for (const std::string_view typed : {"!", " >"}) {
@@ -197,15 +166,8 @@ int run() {
   // glued to the `-` makes it `->`, so it follows only after a blank.
   for (const std::string_view gap : {"", " "}) {
     const std::string text = "splice:%-" + std::string(gap);
-    const auto r = splice->parse(text);
-    std::vector<cursiv::NextFeature> out;
     const auto at = static_cast<cursiv::TextOffset>(text.size());
-    splice->nextFeaturesAt(r.cst(), at, at, out);
-    bool arrow = false;
-    for (const auto& f : out)
-      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
-        arrow = arrow || s == ">";
-    CHECK(arrow == !gap.empty());
+    CHECK(checks::offers(*splice, text, at, at, ">") == !gap.empty());
     const auto typed = splice->parse(text + ">");
     CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
   }
@@ -216,11 +178,9 @@ int run() {
   {
     const auto offered = [&](const std::string& text, cursiv::TextOffset at,
                              cursiv::TextOffset resume) {
-      const auto r = splice->parse(text);
-      std::vector<cursiv::NextFeature> out;
-      splice->nextFeaturesAt(r.cst(), at, resume, out);
       std::set<std::string_view> words;
-      for (const auto& f : out) {
+      for (const auto& f :
+           checks::features(*splice, splice->parse(text), at, resume)) {
         const auto spellings =
             splice->getGrammar().terminalSpellings(f.feature);
         if (spellings.empty()) words.insert(std::string_view{});
@@ -251,10 +211,8 @@ int run() {
   for (const std::string text : {"p@tx!", "p@ty!", "q@tz?", "q@tw?"}) {
     const auto r = parser->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    std::vector<cursiv::NextFeature> out;
-    parser->nextFeaturesAt(r.cst(), 3, 4, out);
     bool left = false, right = false;
-    for (const auto& f : out) {
+    for (const auto& f : checks::features(*parser, r, 3, 4)) {
       const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
       const std::string_view word =
           spellings.size() == 1 ? spellings.front() : std::string_view{};
@@ -276,11 +234,8 @@ int run() {
   // The typed `t` is KEY on the tape and RAW under the words that follow it:
   // the caret offers what either reading leads to.
   for (const std::string_view text : {"p@t", "q@t"}) {
-    const auto r = parser->parse(text);
-    std::vector<cursiv::NextFeature> out;
-    parser->nextFeaturesAt(r.cst(), 3, 3, out);
     std::vector<std::string_view> words;
-    for (const auto& f : out) {
+    for (const auto& f : checks::features(*parser, parser->parse(text), 3, 3)) {
       const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
       if (spellings.empty()) words.emplace_back();
       words.insert(words.end(), spellings.begin(), spellings.end());
@@ -289,14 +244,13 @@ int run() {
     CHECK(
         (words == std::vector<std::string_view>{"#", "$", "w", "x", "y", "z"}));
   }
-  return 0;
 }
 
 }  // namespace peek_caret
 
 namespace virtual_state {
 
-int run() {
+void run() {
   const auto implied = tpeekcaret::generated::G::create_parser();
   for (const std::string_view body : {"px", "px:", "px;", "px:,;", "px;,;"}) {
     const std::string text = "virtual:" + std::string(body);
@@ -317,14 +271,13 @@ int run() {
     const auto* root = r.value_as<tvirtual::Node>();
     CHECK(root && root->first && !root->second);
   }
-  return 0;
 }
 
 }  // namespace virtual_state
 
 namespace reduce_cells {
 
-int run() {
+void run() {
   const auto parser = tpeekcaret::generated::G::create_parser();
   for (const char term : {'x', 'y', 'z'}) {
     for (const unsigned distance : {0u, 64u}) {
@@ -344,7 +297,6 @@ int run() {
       }
     }
   }
-  return 0;
 }
 
 }  // namespace reduce_cells
@@ -386,7 +338,7 @@ void a_text_no_condition_admits_is_repaired_not_lost(
 
 }  // namespace
 
-int run() {
+void run() {
   const auto parser = tedges::generated::G::create_parser();
   // The blank the tight mode reads no token of reduces the empty rule.
   for (const std::string_view text : {"p a c", "p ac"}) {
@@ -402,7 +354,6 @@ int run() {
   CHECK(parser->parse("groups:landing p x").accepted);
   const auto reflection = tedges::generated::G::create_ast_reflection();
   a_text_no_condition_admits_is_repaired_not_lost(*parser, *reflection);
-  return 0;
 }
 
 }  // namespace group_guard
@@ -418,13 +369,10 @@ namespace g = twide::generated::G;
 void every_keyword_is_offered_once() {
   static const auto parser = g::create_parser();
   for (const std::string text : {"", "k001 ", "k001 k002 k255 "}) {
-    const cursiv::ParseResult r = parser->parse(text);
     const auto at = static_cast<cursiv::TextOffset>(text.size());
-    std::vector<cursiv::NextFeature> out;
-    parser->nextFeaturesAt(r.cst(), at, at, out);
     std::set<std::string> seen;
     std::size_t texts = 0;
-    for (const auto& f : out)
+    for (const auto& f : checks::features(*parser, parser->parse(text), at, at))
       for (const std::string_view t :
            parser->getGrammar().terminalSpellings(f.feature)) {
         ++texts;
@@ -440,10 +388,8 @@ void every_keyword_is_offered_once() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   every_keyword_is_offered_once();
-  return 0;
 }
 }  // namespace case_lrcaretkeywords
 
@@ -458,17 +404,8 @@ namespace g = tedges::generated::G;
 
 std::set<std::string> offered(const std::string& text, std::size_t caret) {
   static const auto parser = g::create_parser();
-  const std::string source = "trivia:" + text;
-  const cursiv::ParseResult r = parser->parse(source);
-  const auto at = static_cast<cursiv::TextOffset>(7 + caret);
-  std::vector<cursiv::NextFeature> out;
-  parser->nextFeaturesAt(r.cst(), at, at, out);
-  std::set<std::string> words;
-  for (const auto& f : out)
-    for (const std::string_view t :
-         parser->getGrammar().terminalSpellings(f.feature))
-      words.insert(std::string(t));
-  return words;
+  return checks::spellings(*parser, "trivia:" + text,
+                           static_cast<cursiv::TextOffset>(7 + caret));
 }
 
 const std::set<std::string> kNext{"north", "south"};
@@ -499,12 +436,10 @@ void a_caret_in_a_line_comment_answers_nothing() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_caret_inside_blanks_answers_as_their_end_does();
   a_caret_inside_a_continuation_answers_nothing();
   a_caret_in_a_line_comment_answers_nothing();
-  return 0;
 }
 }  // namespace case_lrcarettrivia
 
@@ -522,13 +457,10 @@ static_assert(cursiv::kLaid<g::kTable.cfg, cursiv::kLaidDedent> == 0);
 
 std::set<std::string> offered(const std::string& text, std::size_t caret) {
   static const auto parser = g::create_parser();
-  const std::string source = "bracket:" + text;
-  const cursiv::ParseResult r = parser->parse(source);
   const auto at = static_cast<cursiv::TextOffset>(8 + caret);
-  std::vector<cursiv::NextFeature> out;
-  parser->nextFeaturesAt(r.cst(), at, at, out);
   std::set<std::string> words;
-  for (const auto& f : out) {
+  for (const auto& f :
+       checks::features(*parser, parser->parse("bracket:" + text), at, at)) {
     const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
     words.insert(std::string(
         spellings.size() == 1 ? spellings.front()
@@ -561,14 +493,13 @@ void a_newline_between_delimiters_is_a_blank_to_the_caret() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_newline_between_delimiters_is_a_blank_to_the_caret();
-  return 0;
 }
 }  // namespace case_lrbracketcaret
 
 namespace case_lrcontinuedline {
-int run() {
+void run() {
   const auto parser = tcontinued::generated::Lr::create_parser();
   for (const std::string_view text : {
            "s:\n  x ;<1\n",
@@ -591,7 +522,6 @@ int run() {
     CHECK(root->body[0]->name == (multiple ? "xy" : "x"));
     if (multiple && root->body.size() == 2) CHECK(root->body[1]->name == "z");
   }
-  return 0;
 }
 }  // namespace case_lrcontinuedline
 
@@ -619,26 +549,23 @@ void a_condition_reads_the_terminals_it_names() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_condition_reads_the_terminals_it_names();
-  return 0;
 }
 }  // namespace case_lrconditionrefs
 
-int run_lr_rule_refusal_cases();
+void run_lr_rule_refusal_cases();
 
 int main() {
-  int movedStatus = run_lr_rule_refusal_cases();
-  movedStatus |= case_lrcaretkeywords::run();
-  movedStatus |= case_lrcarettrivia::run();
-  movedStatus |= case_lrbracketcaret::run();
-  movedStatus |= case_lrcontinuedline::run();
-  movedStatus |= case_lrconditionrefs::run();
-  int status = 0;
-  status |= peek_caret::run();
-  status |= virtual_state::run();
-  status |= reduce_cells::run();
-  status |= group_guard::run();
-  return (cursiv::test::report("LrStates_test") | status) | movedStatus;
+  run_lr_rule_refusal_cases();
+  case_lrcaretkeywords::run();
+  case_lrcarettrivia::run();
+  case_lrbracketcaret::run();
+  case_lrcontinuedline::run();
+  case_lrconditionrefs::run();
+  peek_caret::run();
+  virtual_state::run();
+  reduce_cells::run();
+  group_guard::run();
+  return cursiv::test::report("LrStates_test");
 }

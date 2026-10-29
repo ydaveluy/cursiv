@@ -1,17 +1,30 @@
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <initializer_list>
 #include <memory>
 #include <random>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/engines/ll/gen/LlLowering.hpp"
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
+#include "cursiv/engines/lr/gen/LrLowering.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
+#include "dedentrunflatll/generated/FlatLl/Module.hpp"
+#include "dedentrunll/generated/Ll/Module.hpp"
+#include "delimll/generated/Ll/Module.hpp"
+#include "engines/ll/DedentRunGrammar.hpp"
+#include "engines/ll/DelimSpellingGrammar.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/lr/IndentAst.hpp"
 #include "indent/generated/G/Module.hpp"
 #include "indentrepaired/generated/G/Module.hpp"
@@ -66,11 +79,7 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     cursiv::LlContext context(tree.text(), builder);
     cursiv::LlMask<table.termWords> viable;
     viable.set(newline);
-    constexpr auto identifier = [] {
-      for (std::uint16_t t = 1; t < table.nterms; ++t)
-        if (table.term_name(t) == "ID") return t;
-      return cursiv::kInvalidSymbol;
-    }();
+    constexpr auto identifier = ll_terms::named<table>("ID");
     static_assert(identifier != cursiv::kInvalidSymbol);
     viable.set(identifier);
     std::vector<std::uint16_t> readings;
@@ -378,6 +387,84 @@ void a_caret_past_a_dedent_is_offered_the_words_of_the_outer_level() {
   CHECK(!offers(*ll, "suites top a:\n  pass", 20, 20, "top"));
 }
 
+struct Reading {
+  bool accepted = false;
+  std::size_t diagnostics = 0;
+  std::string ast;
+};
+
+template <class Pair>
+Reading read(Pair& p, std::string_view text) {
+  const auto result = p.first->parse(text);
+  Reading out{result.accepted, result.diagnostics.size(), {}};
+  if (result.value) cursiv::test::ast_of(*p.second, *result.value, out.ast);
+  return out;
+}
+
+template <class Pair>
+void expect_closures(Pair& ll, std::string_view text, std::size_t closures,
+           bool clean) {
+  const auto a = read(ll, text);
+  CHECK((a.diagnostics == 0) == clean);
+  if (!clean) return;
+  std::string want = "Node{";
+  for (std::size_t i = 0; i < closures; ++i)
+    want += "closures" + std::to_string(i) + "=Closure{} ";
+  want += '}';
+  CHECK(a.accepted && a.ast == want);
+}
+
+template <class Parser>
+void closes(const Parser& parser, std::string_view text, std::size_t levels) {
+  const auto result = parser->parse(text);
+  CHECK(result.accepted && result.diagnostics.empty());
+  CHECK(result.template value_as<tlldedentrun::Marks>()->dedents.size() ==
+        levels);
+}
+
+// A dropped dedent closes a level and owns no byte: the text past it is still
+// dropped, whether the entry stops at `eof` or before the text does.
+template <class Parser>
+void drops_past_dedents_to_the_end(const Parser& parser,
+                                   std::string_view text) {
+  const auto result = parser->parse(text);
+  const auto& cst = result.cst();
+  cursiv::TextOffset end = 0;
+  for (cursiv::NodeId i = 0; i < cst.size(); ++i)
+    end = std::max(end, cst[i].end);
+  CHECK(!result.diagnostics.empty() && end == text.size());
+}
+
+template <class... Pairs>
+void agree(std::string_view text, std::string_view expected, Pairs&... pairs) {
+  const Reading readings[] = {read(pairs, text)...};
+  std::size_t at = 0;
+  for (const auto& r : readings) {
+    const bool same =
+        r.accepted && r.diagnostics == 0 && !r.ast.empty() &&
+        r.ast == expected;
+    if (!same)
+      std::printf("delim spelling reading %zu (%zu diagnostics): %s\n", at,
+                  r.diagnostics, std::string(text).c_str());
+    CHECK(same);
+    ++at;
+  }
+}
+
+// The brackets are the terminals the rules read: a spelling read only through
+// a named terminal is that terminal, and no terminal of its own.
+template <class Lowered>
+void brackets_are_terminals_read(const Lowered& low) {
+  unsigned opens = 0, closes = 0;
+  for (std::uint16_t t = 1; t < low.cfg.nterms; ++t) {
+    const std::string_view name = low.cfg.term_name(t);
+    for (const std::string_view named : {"[", "]", "{", "}", ">"})
+      CHECK(name != named);
+    opens += low.cfg.terms[t].delim > 0 ? 1 : 0;
+    closes += low.cfg.terms[t].delim < 0 ? 1 : 0;
+  }
+  CHECK(opens == 4 && closes == 4);
+}
 }  // namespace
 
 // The dedents a descent read have left the levels behind: the caret on the line
@@ -448,5 +535,40 @@ int main() {
          *tindent::laid::generated::Cases::create_parser(),
          *tllindent::generated::Laid::create_ast_reflection(),
          {"a", "a:\n  b", "a:\n  b\nc"});
+  namespace dedent = tlldedentrun::generated;
+  auto runs = std::pair{dedent::Ll::create_parser(),
+                        dedent::Ll::create_ast_reflection()};
+  expect_closures(runs, "some:a\n b\n  c\nd", 2, true);
+  expect_closures(runs, "some:a\n b\n  c\n d", 1, true);
+  expect_closures(runs, "many:a\n b\n  c\nd", 2, true);
+  expect_closures(runs, "many:a\n b\n  c\n d", 1, true);
+  expect_closures(runs, "many:a\n b\n  c\n  d", 0, true);
+  expect_closures(runs, "some:a\n b\n  c\n  d", 0, false);
+  drops_past_dedents_to_the_end(runs.first, "many:a\n b\n  c\n  d\n e\nf");
+  drops_past_dedents_to_the_end(runs.first, "tail:a\n b\n  c\nd");
+  const auto flatLl = dedent::FlatLl::create_parser();
+  for (const auto text : {"a:\n  b:\n    c", "a:\n  b:\n    c\n"})
+    closes(flatLl, text, 2);
+  brackets_are_terminals_read(cursiv::LlLowering<tdelim::Ll>::lower());
+  brackets_are_terminals_read(cursiv::LrLowering<tdelim::Lr>::lower());
+  auto delim = std::pair{tdelim::generated::Ll::create_parser(),
+                         tdelim::generated::Ll::create_ast_reflection()};
+  struct Case { std::string_view before, body, after; };
+  for (const auto& c : {
+           Case{"a ", "b\n c", "\nd\n"},
+           Case{"a ", "\n  b\n  .c\n", "\nd\n"},
+           Case{"s:\n  a ", "\nb\n   .c\n  ", "\n  d\n"},
+           Case{"s:\n  a ", " b\n .c d\n.e", "\ne\n"},
+       }) {
+    const auto wrap = [&](std::string_view open, std::string_view close) {
+      return std::string(c.before) + std::string(open) + std::string(c.body) +
+             std::string(close) + std::string(c.after);
+    };
+    const auto expected = read(delim, wrap("(", ")"));
+    for (const auto [open, close] :
+         {std::pair{"(", ")"}, std::pair{"[", "]"}, std::pair{"{", "}"},
+          std::pair{"<", ">"}, std::pair{"<~", ">"}})
+      agree(wrap(open, close), expected.ast, delim);
+  }
   return cursiv::test::report("LlIndent_test");
 }

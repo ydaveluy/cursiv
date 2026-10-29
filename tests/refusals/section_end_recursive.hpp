@@ -1,6 +1,7 @@
 // A section closed by `END`, whose grammar reads `END` with a terminal that
 // calls itself: the closing token is a token of the grammar, but the check
 // does not follow a call, so the grammar is generated with a warning.
+// expect LR LL: warning: terminal .END. closes a .section<>., and the check that .Inner::REGION., a terminal its grammar reads, neither reads it nor begins with it could not be completed
 #pragma once
 
 #include "refusals/head.hpp"

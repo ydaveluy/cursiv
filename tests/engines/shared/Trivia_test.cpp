@@ -5,8 +5,8 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/shared/Checks.hpp"
 #include "engines/shared/TriviaGrammar.hpp"
-#include <cstdio>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -88,21 +88,15 @@ void a_trivia_terminal_is_no_bracket() {
 }  // namespace
 
 void run() {
-  two_ignored_terminals_may_read_one_text(
-      *ttrivia::generated::Ll::create_parser(), "tied:");
-  two_ignored_terminals_may_read_one_text(
-      *ttrivia::generated::Lr::create_parser(), "tied:");
-  two_ignored_terminals_may_read_one_text(
-      *ttrivia::generated::Ll::create_parser(), "ranked:");
-  two_ignored_terminals_may_read_one_text(
-      *ttrivia::generated::Lr::create_parser(), "ranked:");
-  a_blank_keeps_its_head_refusal(*ttrivia::generated::Ll::create_parser());
-  a_blank_keeps_its_head_refusal(*ttrivia::generated::Lr::create_parser());
-  a_region_head_is_its_callers(*ttrivia::generated::Ll::create_parser());
-  a_region_head_is_its_callers(*ttrivia::generated::Lr::create_parser());
+  for (const auto make : {&ttrivia::generated::Ll::create_parser,
+                          &ttrivia::generated::Lr::create_parser}) {
+    two_ignored_terminals_may_read_one_text(*make(), "tied:");
+    two_ignored_terminals_may_read_one_text(*make(), "ranked:");
+    a_blank_keeps_its_head_refusal(*make());
+    a_region_head_is_its_callers(*make());
+  }
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Ll::kTable>();
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Lr::kTable>();
-
 }
 
 }  // namespace trivia_cases
@@ -146,11 +140,7 @@ const char* engine = "";
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, text);
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 void a_closing_tag_ends_the_statement_before_it(const cursiv::Parser& parser) {
@@ -163,28 +153,22 @@ void a_closing_tag_ends_the_statement_before_it(const cursiv::Parser& parser) {
 }  // namespace
 
 void run() {
-  prefix = "implied:";
-  engine = "SpelledLl";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Ll::create_parser());
-  engine = "SpelledLr";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Lr::create_parser());
-  prefix = "implied:named:";
-  engine = "NamedLl";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Ll::create_parser());
-  engine = "NamedLr";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Lr::create_parser());
-  prefix = "implied:apart:";
-  engine = "ApartLl";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Ll::create_parser());
-  engine = "ApartLr";
-  a_closing_tag_ends_the_statement_before_it(
-      *ttrivia::generated::Lr::create_parser());
-
+  const struct {
+    const char* prefix;
+    const char* ll;
+    const char* lr;
+  } forms[] = {{"implied:", "SpelledLl", "SpelledLr"},
+               {"implied:named:", "NamedLl", "NamedLr"},
+               {"implied:apart:", "ApartLl", "ApartLr"}};
+  for (const auto& form : forms) {
+    prefix = form.prefix;
+    engine = form.ll;
+    a_closing_tag_ends_the_statement_before_it(
+        *ttrivia::generated::Ll::create_parser());
+    engine = form.lr;
+    a_closing_tag_ends_the_statement_before_it(
+        *ttrivia::generated::Lr::create_parser());
+  }
 }
 
 }  // namespace implied_tag_cases

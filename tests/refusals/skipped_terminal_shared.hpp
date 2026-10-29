@@ -1,5 +1,6 @@
 // A rule read outside every region and inside one: the reading outside names
 // the skipped terminal where the lexer never hands it over.
+// expect LR: refused .skippedTerminal..*rule .Pair. names a terminal its reading skips as trivia
 #pragma once
 
 #include "refusals/head.hpp"

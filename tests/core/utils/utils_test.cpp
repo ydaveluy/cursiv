@@ -8,15 +8,16 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/utils/CaseFold.hpp"
 #include "cursiv/core/utils/DocumentCache.hpp"
 #include "cursiv/core/utils/EditDistance.hpp"
+#include "cursiv/core/utils/FunctionRef.hpp"
 #include "cursiv/core/utils/SimpleCache.hpp"
 #include "cursiv/core/utils/UriTrie.hpp"
 #include "cursiv/core/utils/UriUtils.hpp"
@@ -25,9 +26,8 @@
 #include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/test/Check.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/WorkspaceWorld.hpp"
 
 #if !defined(__wasi__) || defined(_REENTRANT)
 #include <atomic>
@@ -84,6 +84,57 @@ void run() {
 }
 
 }  // namespace edit_distance
+
+// A `function_ref` calls what it was bound to: a function, a pointer read at
+// binding, a borrowed callable whose later state it sees.
+namespace function_ref {
+
+namespace {
+int next(int n) { return n + 1; }
+int previous(int n) noexcept { return n - 1; }
+auto from_temporary_pointer() { return cursiv::function_ref<int(int)>(&next); }
+struct Value {
+  int offset = 4;
+  int operator()(int n) const { return n + offset; }
+};
+}  // namespace
+
+void run() {
+  cursiv::function_ref<int(int)> direct(next);
+  CHECK(direct(7) == 8);
+  auto held = from_temporary_pointer();
+  CHECK(held(2) == 3);
+  auto pointer = &next;
+  cursiv::function_ref<int(int)> copied(pointer);
+  pointer = &previous;
+  CHECK(copied(2) == 3);
+  CHECK(cursiv::function_ref<int(int)>(&previous)(2) == 1);
+  Value value;
+  cursiv::function_ref<int(int)> borrowed(value);
+  CHECK(borrowed(1) == 5);
+  value.offset = 8;
+  CHECK(borrowed(1) == 9);
+  const Value constant{3};
+  cursiv::function_ref<int(int)> constBorrowed(constant);
+  CHECK(constBorrowed(2) == 5);
+  auto mutableCallback = [count = 0]() mutable { return ++count; };
+  cursiv::function_ref<int()> mutableBorrowed(mutableCallback);
+  CHECK(mutableBorrowed() == 1);
+  CHECK(mutableBorrowed() == 2);
+  CHECK(mutableCallback() == 3);
+  static_assert(!std::is_constructible_v<cursiv::function_ref<int()>,
+                                         const decltype(mutableCallback)&>);
+  int calls = 0;
+  const auto callback = [&] { return ++calls; };
+  cursiv::function_ref<void()> discard(callback);
+  discard();
+  CHECK(calls == 1);
+  cursiv::function_ref<void(int)> discarded_function(next);
+  discarded_function(3);
+  static_assert(std::is_trivially_copyable_v<decltype(borrowed)>);
+}
+
+}  // namespace function_ref
 
 // Pins the folder tree: the exact query, the prefix at two depths, and the
 // erasure that takes a subtree with it -- the claims the registry makes.
@@ -380,30 +431,7 @@ namespace caching {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection =
-        ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  cursiv::Document* add(const std::string& uri, std::string text) const {
-    auto document =
-        shared.documentFactory->fromString(std::move(text), std::string(uri));
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    return raw;
-  }
-};
+using World = support::CoreWorkspace;
 
 // The one question: a miss computes, a hit never does, `clear` starts over.
 void a_hit_never_recomputes() {
@@ -645,6 +673,7 @@ void run() {
 int main() {
   case_fold::run();
   edit_distance::run();
+  function_ref::run();
   uri_trie::run();
   uri_utils::run();
   caching::run();

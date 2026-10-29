@@ -7,6 +7,7 @@
 #include "cursiv/engines/ll/runtime/ll_search.hpp"
 #include "cursiv/engines/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "llindent/generated/Ll/Table.hpp"
 #include "parityll/generated/Ll/Table.hpp"
 #include "predicatesll/generated/Ll/Table.hpp"
@@ -32,11 +33,7 @@ constexpr auto kObserved = [] {
   t.condition = observed_condition;
   return t;
 }();
-constexpr auto kIdentifier = [] {
-  for (cursiv::SymbolId t = 0; t < kPredicates.nterms; ++t)
-    if (kPredicates.term_name(t) == "ID") return t;
-  return cursiv::kInvalidSymbol;
-}();
+constexpr auto kIdentifier = ll_terms::named<kPredicates>("ID");
 static_assert(kIdentifier != cursiv::kInvalidSymbol);
 
 void a_clipped_token_is_not_memoized() {

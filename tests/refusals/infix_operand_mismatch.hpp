@@ -1,5 +1,6 @@
 // An infix rule synthesizes its body, so its operands carry no directive to
 // refuse them: `left` and `right` hold a class the primary does not build.
+// expect LR: this member holds a node of its own type
 #pragma once
 
 #include "refusals/head.hpp"

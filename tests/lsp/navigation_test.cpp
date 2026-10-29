@@ -16,17 +16,12 @@
 #include <vector>
 
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
+#include "cursiv/core/references/NameProvider.hpp"
 #include "cursiv/core/references/References.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/workspace/AstNodeDescription.hpp"
 #include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/lsp/hierarchy/HierarchyProviderSupport.hpp"
 #include "cursiv/lsp/hover/HoverProvider.hpp"
 #include "cursiv/lsp/navigation/DefinitionProvider.hpp"
@@ -35,7 +30,6 @@
 #include "cursiv/lsp/navigation/RenameProvider.hpp"
 #include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/lsp/symbols/DefaultWorkspaceSymbolProvider.hpp"
 #include "cursiv/lsp/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/lsp/symbols/WorkspaceSymbolProvider.hpp"
@@ -44,9 +38,24 @@
 #include "cursiv/test/ExpectedRename.hpp"
 #include "cursiv/test/ExpectedSymbols.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
+
+namespace {
+
+// The workspace fixture as its own module installs it, qualified names and all.
+struct ModuleWorld {
+  ws::WorkspaceLanguage services = ws::create_lsp_services();
+  ws::WorkspaceSharedServices& shared = *services.shared;
+
+  std::vector<cursiv::Document*> built(
+      std::vector<std::pair<std::string, std::string>> sources) const {
+    return support::built(shared, std::move(sources));
+  }
+};
+
+}  // namespace
 
 // Go to definition: the link a caret produces, with its three ranges -- the
 // origin underlined here, the declaration previewed there, the name selected
@@ -57,44 +66,13 @@ namespace {
 
 template <std::unique_ptr<cursiv::Parser> (*MakeParser)(),
           std::unique_ptr<cursiv::AstReflection> (*MakeReflection)()>
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* language;
 
-  Shared shared;
-  Language* language = nullptr;
-
-  World(std::string id, std::string extension) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto owned = std::make_unique<Language>(shared);
-    owned->languageMetaData = {std::move(id), {std::move(extension)}, {}};
-    owned->parser = MakeParser();
-    owned->astReflection = MakeReflection();
-    owned->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*owned);
-    cursiv::install_default_core_services(*owned);
-    cursiv::install_default_lsp_services(*owned);
-    language = owned.get();
-    shared.serviceRegistry->registerServices(std::move(owned));
-  }
-
-  // Every document of the world in one build: a reference resolves against
-  // what its neighbours export, so the set has to reach the index together.
-  std::vector<cursiv::Document*> built(
-      std::vector<std::pair<std::string, std::string>> sources) const {
-    std::vector<cursiv::Document*> documents;
-    for (auto& [uri, text] : sources) {
-      auto document = shared.documentFactory->fromString(std::move(text), uri);
-      documents.push_back(document.get());
-      shared.documents->addDocument(std::move(document));
-    }
-    shared.documentBuilder->build(documents);
-    return documents;
-  }
+  World(std::string id, std::string extension)
+      : language(&support::add_language<cursiv::LspServices>(
+            shared, {std::move(id), {std::move(extension)}, {}}, MakeParser(),
+            MakeReflection())) {}
 
   [[nodiscard]] std::optional<std::vector<lsp::LocationLink>> at(
       const cursiv::Document& document, lsp::Uint line,
@@ -232,24 +210,7 @@ namespace document_highlight_provider {
 
 namespace {
 
-struct World {
-  ws::WorkspaceLanguage services = ws::create_lsp_services();
-  ws::WorkspaceSharedServices& shared = *services.shared;
-
-  // Every document of the world in one build: a reference resolves against
-  // what its neighbours export, so the set has to reach the index together.
-  std::vector<cursiv::Document*> built(
-      std::vector<std::pair<std::string, std::string>> sources) const {
-    std::vector<cursiv::Document*> documents;
-    for (auto& [uri, text] : sources) {
-      auto document = shared.documentFactory->fromString(std::move(text), uri);
-      documents.push_back(document.get());
-      shared.documents->addDocument(std::move(document));
-    }
-    shared.documentBuilder->build(documents);
-    return documents;
-  }
-
+struct World : ModuleWorld {
   [[nodiscard]] std::vector<lsp::DocumentHighlight> at(
       const cursiv::Document& document, lsp::Uint line,
       lsp::Uint character) const {
@@ -323,24 +284,7 @@ namespace references_provider {
 
 namespace {
 
-struct World {
-  ws::WorkspaceLanguage services = ws::create_lsp_services();
-  ws::WorkspaceSharedServices& shared = *services.shared;
-
-  // Every document of the world in one build: a reference resolves against
-  // what its neighbours export, so the set has to reach the index together.
-  std::vector<cursiv::Document*> built(
-      std::vector<std::pair<std::string, std::string>> sources) const {
-    std::vector<cursiv::Document*> documents;
-    for (auto& [uri, text] : sources) {
-      auto document = shared.documentFactory->fromString(std::move(text), uri);
-      documents.push_back(document.get());
-      shared.documents->addDocument(std::move(document));
-    }
-    shared.documentBuilder->build(documents);
-    return documents;
-  }
-
+struct World : ModuleWorld {
   [[nodiscard]] std::vector<lsp::Location> at(const cursiv::Document& document,
                                               lsp::Uint line,
                                               lsp::Uint character,
@@ -467,44 +411,13 @@ namespace ct = cursiv::test;
 // that crosses documents, and its identifiers exclude the reserved words.
 template <std::unique_ptr<cursiv::Parser> (*MakeParser)(),
           std::unique_ptr<cursiv::AstReflection> (*MakeReflection)()>
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* language;
 
-  Shared shared;
-  Language* language = nullptr;
-
-  World(std::string id, std::string extension) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto owned = std::make_unique<Language>(shared);
-    owned->languageMetaData = {std::move(id), {std::move(extension)}, {}};
-    owned->parser = MakeParser();
-    owned->astReflection = MakeReflection();
-    owned->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*owned);
-    cursiv::install_default_core_services(*owned);
-    cursiv::install_default_lsp_services(*owned);
-    language = owned.get();
-    shared.serviceRegistry->registerServices(std::move(owned));
-  }
-
-  // Every document of the world in one build: a reference resolves against
-  // what its neighbours export, so the pair has to reach the index together.
-  std::vector<cursiv::Document*> built(
-      std::vector<std::pair<std::string, std::string>> sources) const {
-    std::vector<cursiv::Document*> documents;
-    for (auto& [uri, text] : sources) {
-      auto document = shared.documentFactory->fromString(std::move(text), uri);
-      documents.push_back(document.get());
-      shared.documents->addDocument(std::move(document));
-    }
-    shared.documentBuilder->build(documents);
-    return documents;
-  }
+  World(std::string id, std::string extension)
+      : language(&support::add_language<cursiv::LspServices>(
+            shared, {std::move(id), {std::move(extension)}, {}}, MakeParser(),
+            MakeReflection())) {}
 
   [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
       const cursiv::Document& document, lsp::Uint line, lsp::Uint character,
@@ -519,22 +432,7 @@ using Workspace = World<&ws::generated::Workspace::create_parser,
 
 // The fixture's own arm on top of the default: a package's members answer to
 // qualified names, so renaming the package rewrites their sites too.
-struct Module {
-  ws::WorkspaceLanguage services = ws::create_lsp_services();
-  ws::WorkspaceSharedServices& shared = *services.shared;
-
-  std::vector<cursiv::Document*> built(
-      std::vector<std::pair<std::string, std::string>> sources) const {
-    std::vector<cursiv::Document*> documents;
-    for (auto& [uri, text] : sources) {
-      auto document = shared.documentFactory->fromString(std::move(text), uri);
-      documents.push_back(document.get());
-      shared.documents->addDocument(std::move(document));
-    }
-    shared.documentBuilder->build(documents);
-    return documents;
-  }
-
+struct Module : ModuleWorld {
   [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
       const cursiv::Document& document, lsp::Uint line, lsp::Uint character,
       std::string_view newName) const {
@@ -835,41 +733,13 @@ namespace ct = cursiv::test;
 // hold a cross reference.
 template <std::unique_ptr<cursiv::Parser> (*MakeParser)(),
           std::unique_ptr<cursiv::AstReflection> (*MakeReflection)()>
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* language;
 
-  Shared shared;
-  Language* language = nullptr;
-
-  World(std::string id, std::string extension) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto owned = std::make_unique<Language>(shared);
-    owned->languageMetaData = {std::move(id), {std::move(extension)}, {}};
-    owned->parser = MakeParser();
-    owned->astReflection = MakeReflection();
-    owned->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*owned);
-    cursiv::install_default_core_services(*owned);
-    cursiv::install_default_lsp_services(*owned);
-    language = owned.get();
-    shared.serviceRegistry->registerServices(std::move(owned));
-  }
-
-  // Parsed, scoped, indexed and linked: a hover over a reference reads what
-  // the link left behind.
-  cursiv::Document* built(const std::string& uri, std::string text) const {
-    auto document = shared.documentFactory->fromString(std::move(text), uri);
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
+  World(std::string id, std::string extension)
+      : language(&support::add_language<cursiv::LspServices>(
+            shared, {std::move(id), {std::move(extension)}, {}}, MakeParser(),
+            MakeReflection())) {}
 
   [[nodiscard]] std::optional<lsp::Hover> at(const cursiv::Document& document,
                                              lsp::Uint line,
@@ -976,61 +846,9 @@ namespace {
 
 namespace ct = cursiv::test;
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+using World = support::LspWorkspace;
 
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  cursiv::Document* built(const std::string& uri, std::string text) const {
-    auto document = shared.documentFactory->fromString(std::move(text), uri);
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
-  }
-};
-
-// 0: package p {
-// 1:   /* a block comment
-// 2:      over three lines
-// 3:   */
-// 4:   datatype String
-// 5:   entity Person {
-// 6:     name : String
-// 7:   }
-// 8: }
-constexpr std::string_view kModel =
-    "package p {\n"
-    "  /* a block comment\n"
-    "     over three lines\n"
-    "  */\n"
-    "  datatype String\n"
-    "  entity Person {\n"
-    "    name : String\n"
-    "  }\n"
-    "}\n";
+constexpr std::string_view kModel = support::kPackage;
 
 [[nodiscard]] const lsp::DocumentSymbol* find(
     std::span<const lsp::DocumentSymbol> symbols, std::string_view name) {

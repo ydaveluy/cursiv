@@ -55,7 +55,6 @@ if(NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(LrLowering_test PRIVATE astfusedlrGenerated deferrednestedGenerated)
 endif()
 
-# Shared lexical refusal fixture, retained here after its LL suite was consolidated.
 cursiv_grammar(shorterlr engines/lr/RefusedShorterGrammar.hpp trefusedshorter::Lr ENGINE LR)
 
 # The LR failed-walk oracle uses the shared lexical-predicate fixture.

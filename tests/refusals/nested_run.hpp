@@ -1,5 +1,6 @@
 // A run written inside a run: the generation goes on, and names the
 // repetition.
+// expect LR: warning: rule .Root.: .*repeats a run, so a run of items reads as one group
 #pragma once
 
 #include "refusals/head.hpp"

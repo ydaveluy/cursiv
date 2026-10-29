@@ -1,3 +1,4 @@
+// expect LR: belongs to at most one of .ignored. and .hidden.
 #pragma once
 
 #include "refusals/head.hpp"

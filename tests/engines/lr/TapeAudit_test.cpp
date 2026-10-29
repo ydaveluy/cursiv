@@ -2,10 +2,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <random>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,6 +19,7 @@
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/AstText.hpp"
+#include "cursiv/test/Check.hpp"
 #include "cursiv/test/CstAudit.hpp"
 #include "edges/generated/G/Module.hpp"
 #include "torture/generated/Torture/Module.hpp"
@@ -29,11 +28,10 @@
 
 namespace {
 
-int failures = 0;
 int checked = 0;
 
-void bad(const std::string& lang, const std::string& what,
-         const std::string& text, const std::string& msg) {
+void bad(const std::string& lang, const std::string& text,
+         const std::string& msg) {
   ++failures;
   if (failures > 40) return;
   std::string esc;
@@ -45,38 +43,32 @@ void bad(const std::string& lang, const std::string& what,
     else
       esc += c;
   }
-  std::printf("FAIL [%s] %s\n  text: <<%s>>\n  %s\n", lang.c_str(),
-              what.c_str(), esc.c_str(), msg.c_str());
+  std::printf("FAIL [%s] <<%s>>\n  %s\n", lang.c_str(), esc.c_str(),
+              msg.c_str());
 }
 
-void audit(const std::string& lang, const std::string& what,
-           const std::string& text, const cursiv::ParseResult& r) {
+void audit(const std::string& lang, const std::string& text,
+           const cursiv::ParseResult& r) {
   ++checked;
-  cursiv::test::audit_cst_structure(
-      r, text, [&](const char* m) { bad(lang, what, text, m); });
+  cursiv::test::audit_cst_structure(r, text,
+                                    [&](const char* m) { bad(lang, text, m); });
 }
+
+const std::string kAlpha = " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";
 
 std::string mutate(const std::string& seed, std::mt19937& rng, int faults) {
-  static const std::string alpha = " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";
   std::string d = seed;
   for (int k = 0; k < faults && !d.empty(); ++k) {
     const int op = static_cast<int>(rng() % 3);
     const std::size_t p = rng() % (d.size() + (op == 0 ? 1 : 0));
     if (op == 0)
-      d.insert(d.begin() + static_cast<long>(p), alpha[rng() % alpha.size()]);
+      d.insert(d.begin() + static_cast<long>(p), kAlpha[rng() % kAlpha.size()]);
     else if (op == 1 && p < d.size())
       d.erase(d.begin() + static_cast<long>(p));
     else if (p < d.size())
-      d[p] = alpha[rng() % alpha.size()];
+      d[p] = kAlpha[rng() % kAlpha.size()];
   }
   return d;
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
 }
 
 const char* kSeeds[] = {
@@ -93,19 +85,9 @@ namespace case_tapesplit {
 
 namespace {
 
-int failures = 0;
-int checked = 0;
 int forests = 0;
 int forestsValued = 0;
 std::string firstForest;
-
-void bad(const std::string& lang, const std::string& text,
-         const std::string& msg) {
-  ++failures;
-  if (failures > 40) return;
-  std::printf("FAIL [%s] <<%s>>\n  %s\n", lang.c_str(), text.c_str(),
-              msg.c_str());
-}
 
 // The document a crash died on: printed and flushed before the parse, so an
 // abort names its input.
@@ -114,13 +96,6 @@ void say(const std::string& lang, const std::string& text) {
   if (trace == nullptr) return;
   std::fprintf(stderr, "TRY [%s] <<%s>>\n", lang.c_str(), text.c_str());
   std::fflush(stderr);
-}
-
-void audit(const std::string& lang, const std::string& text,
-           const cursiv::ParseResult& r) {
-  ++checked;
-  cursiv::test::audit_cst_structure(r, text,
-                                    [&](const char* m) { bad(lang, text, m); });
 }
 
 // The structural audit's question as a verdict: is the run a forest?
@@ -187,19 +162,13 @@ bool tiles(const cursiv::Cst& cst, const std::string& text) {
 
 }  // namespace
 
-int run() {
+void run() {
+  const auto wide = tcells::generated::G::create_parser();
+  const auto nest = tcells::generated::G::create_parser();
+  const auto uns = tedges::generated::G::create_parser();
 
-  const std::unique_ptr<cursiv::Parser> wide =
-      tcells::generated::G::create_parser();
-  const std::unique_ptr<cursiv::Parser> nest =
-      tcells::generated::G::create_parser();
-  const std::unique_ptr<cursiv::Parser> uns =
-      tedges::generated::G::create_parser();
-
-  const std::unique_ptr<cursiv::Parser> nsRc =
-      tcells::generated::G::create_parser();
-  const std::unique_ptr<cursiv::AstReflection> nsR =
-      tcells::generated::G::create_ast_reflection();
+  const auto nsRc = tcells::generated::G::create_parser();
+  const auto nsR = tcells::generated::G::create_ast_reflection();
 
   // The oracle: the text names its arm, the tree must hold that arm's node.
   // Read from the AST, so what is judged is what a consumer of the module
@@ -439,15 +408,12 @@ int run() {
       "tape_split: first forest with an ast <<%s>>\n",
       forests, forestsValued, firstForest.c_str());
   std::printf("tape_split: %d trees checked, %d failures\n", checked, failures);
-  return failures == 0 ? 0 : 1;
 }
 }  // namespace case_tapesplit
 
 int main() {
-  int movedStatus = 0;
-  movedStatus |= case_tapesplit::run();
-  const std::unique_ptr<cursiv::Parser> a =
-      tort::generated::Torture::create_parser();
+  case_tapesplit::run();
+  const auto a = tort::generated::Torture::create_parser();
 
   // The torture corpus and mutations through one representative module.
   const std::string dir = CURSIV_TAPE_CORPUS;
@@ -456,33 +422,32 @@ int main() {
     if (e.path().extension() == ".trt") files.push_back(e.path().string());
   std::sort(files.begin(), files.end());
   for (const std::string& f : files) {
-    const std::string text = slurp(f);
-    audit("torture-A", "corpus " + f, text, a->parse(text));
+    const std::string text = cursiv::test::read_file(f);
+    audit("torture-A corpus " + f, text, a->parse(text));
   }
 
   // Exhaustive one-byte mutations of the seeds.
-  static const std::string alpha = " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";
   for (const char* s : kSeeds) {
     const std::string seed = s;
     for (std::size_t p = 0; p <= seed.size(); ++p) {
-      for (const char c : alpha) {
+      for (const char c : kAlpha) {
         std::string d = seed;
         d.insert(d.begin() + static_cast<long>(p), c);
         const cursiv::ParseResult x = a->parse(d);
-        audit("torture-A", "ins", d, x);
+        audit("torture-A ins", d, x);
       }
       if (p >= seed.size()) continue;
       {
         std::string d = seed;
         d.erase(d.begin() + static_cast<long>(p));
         const cursiv::ParseResult x = a->parse(d);
-        audit("torture-A", "del", d, x);
+        audit("torture-A del", d, x);
       }
-      for (const char c : alpha) {
+      for (const char c : kAlpha) {
         std::string d = seed;
         d[p] = c;
         const cursiv::ParseResult x = a->parse(d);
-        audit("torture-A", "rep", d, x);
+        audit("torture-A rep", d, x);
       }
     }
   }
@@ -494,9 +459,9 @@ int main() {
       for (int t = 0; t < 100; ++t) {
         const std::string d = mutate(s, rng, faults);
         const cursiv::ParseResult x = a->parse(d);
-        audit("torture-A", "mut" + std::to_string(faults), d, x);
+        audit("torture-A mut" + std::to_string(faults), d, x);
       }
 
   std::printf("tape_audit: %d trees checked, %d failures\n", checked, failures);
-  return (failures == 0 ? 0 : 1) | movedStatus;
+  return cursiv::test::report("TapeAudit_test");
 }

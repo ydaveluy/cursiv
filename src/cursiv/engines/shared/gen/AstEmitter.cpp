@@ -39,11 +39,6 @@ AstEmitter::AstEmitter(const AstRegistry& registry, const AstEntryTable& table,
   }
 }
 
-bool AstEmitter::derives(std::uint16_t base, std::uint16_t sub) const {
-  return ((reg.derives[std::size_t{base} * reg.typeWords + sub / 64] >>
-           (sub % 64)) &
-          1u) != 0;
-}
 bool AstEmitter::fills(std::uint16_t cr, std::uint16_t r) const {
   if (!reg.rows[r].writes()) return false;
   return derives(reg.rows[r].declType, reg.rows[cr].declType) ||

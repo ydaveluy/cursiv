@@ -11,6 +11,8 @@
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/ExplicitUnitAst.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "unitsll/generated/Ll/Module.hpp"
 #include "unitsll/generated/Ll/Table.hpp"
 #include "lextiereservedll/generated/ReservedLl/Module.hpp"
@@ -42,10 +44,8 @@ void expect_cases(Ll ll, LlAst llr,
 // token there: no choice read under them waits on a lexical tie.
 void a_reserved_spelling_ties_no_mode_that_reserves_it() {
   constexpr auto& T = tlllextie::generated::ReservedLl::kTable;
-  std::uint16_t keyword = 0;
-  for (std::uint16_t t = 1; t < T.nterms; ++t)
-    if (T.term_name(t) == "x") keyword = t;
-  CHECK(keyword != 0);
+  constexpr auto keyword = ll_terms::named<T>("x");
+  CHECK(keyword != cursiv::kInvalidSymbol);
   for (std::uint16_t m = 0; m < T.nmodes; ++m)
     if (T.mode_admits(m, keyword)) CHECK(T.modeMulti[m] == 0);
 }
@@ -67,9 +67,36 @@ void a_visible_token_beats_the_blank_in_a_lookahead() {
   CHECK(from == 1 && readings.size() == 1);
 }
 
+void explicit_units_read_one_blank() {
+  const auto parser = tllunit::generated::Ll::create_parser();
+  // A single visible blank ties the skipper and wins. A longer ignored run
+  // is one token, so it cannot supply several visible character units.
+  for (const std::string_view text : {"x y", "x\ty"}) {
+    const std::string source = "required:" + std::string(text);
+    const auto parsed = parser->parse(source);
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    const auto* doc = parsed.value_as<tllunit::Document>();
+    CHECK(doc && doc->padding == text.substr(1, 1));
+  }
+  for (const std::string_view text : {"x   y", "x \t\r\n y", "xy"})
+    CHECK(!parser->parse("required:" + std::string(text)).diagnostics.empty());
+  for (unsigned n = 1; n <= 6; ++n) {
+    const std::string text = "[" + std::string(n, ' ') + "]";
+    CHECK(!parser->parse("required:" + text).diagnostics.empty());
+  }
+  for (const std::string_view text : {"[ ]xy", "[   ]  x   y", "[\t] x y"}) {
+    const std::string source = "clone:" + std::string(text);
+    const auto result = parser->parse(source);
+    CHECK(result.accepted && result.diagnostics.empty());
+    const auto* doc = result.value_as<tllunit::Document>();
+    CHECK(doc && doc->padding == text.substr(1, text.find(']') - 1));
+  }
+}
+
 }  // namespace
 
 int main() {
+  explicit_units_read_one_blank();
   a_visible_token_beats_the_blank_in_a_lookahead();
   a_reserved_spelling_ties_no_mode_that_reserves_it();
   using namespace tlllextie::generated;

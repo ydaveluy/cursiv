@@ -39,7 +39,5 @@ struct Shadow : cursiv::GrammarSpec {
 };
 
 struct NarrowLl : Narrow {};
-struct NarrowLr : Narrow {};
 struct ShadowLl : Shadow {};
-struct ShadowLr : Shadow {};
 }  // namespace tllrescan

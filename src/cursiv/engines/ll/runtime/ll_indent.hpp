@@ -55,13 +55,9 @@ inline bool ll_mode_ends(std::uint16_t mode) {
 // Whether one of the readings stands before an edge that reads `term`.
 template <const auto& T, class Readings>
 inline bool ll_readings_read(const Readings& readings, SymbolId term) {
-  for (const auto& config : readings) {
-    const auto& state = T.atn.state(config.state);
-    for (std::uint32_t k = 0; k < state.nedges; ++k) {
-      const auto& edge = T.atn.edge(state.edge + k);
+  for (const auto& config : readings)
+    for (const LlAtnEdge& edge : T.atn.outgoing(config.state))
       if (edge.kind == LlEdgeKind::atom && edge.label == term) return true;
-    }
-  }
   return false;
 }
 

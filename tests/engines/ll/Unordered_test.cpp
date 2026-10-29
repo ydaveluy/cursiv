@@ -74,6 +74,14 @@ void valid(const cursiv::Parser& parser, std::string_view text,
   }
 }
 
+void refused(const cursiv::Parser& parser, std::string_view text) {
+  const auto result = parser.parse(text);
+  if (result.accepted && result.diagnostics.empty())
+    std::fprintf(stderr, "accepted: %.*s\n", static_cast<int>(text.size()),
+                 text.data());
+  CHECK(!result.accepted || !result.diagnostics.empty());
+}
+
 bool offers(const cursiv::Parser& parser, std::string_view prefix,
             std::string_view word) {
   const auto partial = parser.parse(prefix);
@@ -129,22 +137,17 @@ void exercise(const cursiv::Parser& parser) {
         {"gather b /*comment*/ a a;", "baa"}})
     valid(parser, text, values);
 
-  for (const auto text :
-       {"gather;", "gather a a;", "gather b b;", "gather a b a;",
-        "gather b a b;", "gather a a b a;"}) {
-    const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
-  }
+  for (const auto text : {"gather;", "gather a a;", "gather b b;",
+                          "gather a b a;", "gather b a b;", "gather a a b a;"})
+    refused(parser, text);
   for (const auto text :
        {"pair a;",      "pair b;",        "pair a a;",        "pair a b a;",
         "four a b c;",  "four a a c d;",  "blocks b;",        "blocks a b a;",
         "bounded a b;", "bounded a b a;", "bounded a a a b;", "nested a c b;",
         "prefix x a;",  "group a c b;",   "group b c a;",     "group a b;",
         "group c;",     "duplicate a;",   "optional a;",      "tight [a b];",
-        "edges a b ;"}) {
-    const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
-  }
+        "edges a b ;"})
+    refused(parser, text);
 
   CHECK(offers(parser, "fields flag ", "name") &&
         offers(parser, "fields flag ", "value") &&
@@ -168,11 +171,8 @@ void lowering_paths(const cursiv::Parser& parser) {
     valid(parser, "trio " + order + ";");
     valid(parser, "trio  " + order + " ;");
   } while (std::next_permutation(order.begin(), order.end()));
-  for (const auto text :
-       {"trio a bc;", "trio ab;", "trio abca;", "trio aab;"}) {
-    const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
-  }
+  for (const auto text : {"trio a bc;", "trio ab;", "trio abca;", "trio aab;"})
+    refused(parser, text);
 
   std::string ops = "!?~";
   do {
@@ -192,10 +192,8 @@ void lowering_paths(const cursiv::Parser& parser) {
     CHECK(atom != nullptr && atom->name == "12");
   } while (std::next_permutation(ops.begin(), ops.end()));
 
-  for (const auto text : {"nests 12!?;", "nests 12!!?~;", "nests 12~?;"}) {
-    const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
-  }
+  for (const auto text : {"nests 12!?;", "nests 12!!?~;", "nests 12~?;"})
+    refused(parser, text);
 
   for (const auto text :
        {"flaggroup 12 34!;", "flaggroup 12!34;", "flagrun 12 34!;"}) {
@@ -268,12 +266,11 @@ void refused_nest(std::string_view part) {
       "`, in a group whose items hold a `nest`"));
 }
 
-// Both engines read one text alike: the verdict, the tree and, where
-// `records`, the records under it.
+// Both engines read one text alike: the verdict, the tree and the records
+// under it.
 void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
            const cursiv::AstReflection& llAst,
-           const cursiv::AstReflection& lrAst, std::string_view text,
-           bool records) {
+           const cursiv::AstReflection& lrAst, std::string_view text) {
   const auto a = ll.parse(text), b = lr.parse(text);
   CHECK(a.accepted == b.accepted);
   CHECK(a.diagnostics.size() == b.diagnostics.size());
@@ -285,8 +282,7 @@ void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
                  static_cast<int>(text.size()), text.data(), x.c_str(),
                  y.c_str());
   CHECK(x == y);
-  if (records)
-    CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
+  CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
 }
 
 void records_alike() {
@@ -302,7 +298,7 @@ void records_alike() {
         "wrapwords 12(?)(!);", "edges ba ;", "fields value 34 flag name 12;",
         "four d b c a ;", "blocks b a a;", "bounded b a a;",
         "pair a a;", "nested a c b;", "gather b b a a;", "gather a b a;"})
-    alike(*ll, *lr, *llAst, *lrAst, text, true);
+    alike(*ll, *lr, *llAst, *lrAst, text);
 }
 
 // A loop inside an operand is decided in the operand's own rule: `+1` after
@@ -316,7 +312,7 @@ void loop_in_operand() {
   for (const auto text :
        {"!name +1 x;", "?name +1 x;", "?;name +1 x", "!name +1 +2 x y;",
         "?name +1 +2 x y;", "?;name +1 +2 x y", "?name x;", "?name + 1 x;"})
-    alike(*ll, *lr, *llAst, *lrAst, text, true);
+    alike(*ll, *lr, *llAst, *lrAst, text);
   for (const auto text : {"?name +1 x;", "?;name +1 x"}) {
     const auto result = ll->parse(text);
     const auto* doc = result.value_as<tunorderedturns::Doc>();
@@ -352,14 +348,6 @@ std::string values_of(const toptional::Record& node) {
   std::string seen;
   for (const auto value : node.values) seen += value;
   return seen;
-}
-
-void refused(const cursiv::Parser& parser, std::string_view text) {
-  const auto result = parser.parse(text);
-  if (result.accepted && result.diagnostics.empty())
-    std::fprintf(stderr, "accepted: %.*s\n", static_cast<int>(text.size()),
-                 text.data());
-  CHECK(!result.accepted || !result.diagnostics.empty());
 }
 
 // Optional items: every order of the items present, with any of the optional
@@ -478,7 +466,7 @@ void optional_alike() {
        {"mix d c a 1 b 2;", "mix a 1;", "mix c a 1;", "ordered a 1 d;",
         "opt;", "opt b a;", "count b a a;", "region b;", "region b <>;",
         "child;", "child x 12;", "mix b 2;", "opt a a;"})
-    alike(*ll, *lr, *llAst, *lrAst, text, true);
+    alike(*ll, *lr, *llAst, *lrAst, text);
 }
 
 }  // namespace

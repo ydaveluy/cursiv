@@ -100,7 +100,6 @@ struct KeywordTie : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-
 struct KeywordTieBoundary : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct LIT_IF : terminal<lit<"if">> {};
@@ -563,7 +562,6 @@ struct Calls : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-
 
 // A branch, or an optional item, that reads what an earlier one reads is never
 // chosen, so the generator drops it. Case `n` holds the twin, and case `n.`

@@ -82,8 +82,8 @@ class LlEpisodeSim {
 
   // Between two episodes.
   void reset() {
-    clear(_arms, _lexes, _reduces, _stacks, _below, _relatedProcessed,
-          _relatedFlags, _heads, _stack, _words, _side, _shared, _joins);
+    ll_clear(_arms, _lexes, _reduces, _stacks, _below, _relatedProcessed,
+             _relatedFlags, _heads, _stack, _words, _side, _shared, _joins);
     _reduceUp.assign(1, 0);
     _reduceState.assign(1, 0);
     _log = nullptr;
@@ -142,8 +142,8 @@ class LlEpisodeSim {
   // edges, so the order of the readings needs no comparing. Only a reading
   // that returns past a cell leaves it, and those wait their turn.
   void close(const std::vector<LlThread>& origins, std::vector<LlThread>& out) {
-    clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags, _stack,
-          _words, _side);
+    ll_clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags, _stack,
+             _words, _side);
     _base = _stacks.size();
     std::size_t next = 0;
     for (;;) {
@@ -195,9 +195,7 @@ class LlEpisodeSim {
   void advance(const LlThread& t, const std::uint16_t* terms, std::size_t n,
                LlHistory::Node lex, std::uint32_t kernel,
                std::vector<LlThread>& origins) const {
-    const LlAtnState& s = _atn.state(t.state);
-    for (std::uint32_t i = 0; i < s.nedges; ++i) {
-      const LlAtnEdge& e = _atn.edge(s.edge + i);
+    for (const LlAtnEdge& e : _atn.outgoing(t.state)) {
       if (e.kind != LlEdgeKind::atom) continue;
       for (std::size_t m = 0; m < n; ++m)
         if (e.label == terms[m]) {
@@ -593,13 +591,9 @@ class LlEpisodeSim {
                       S&& stays = {}) {
     std::vector<LlThread> everyone = threads;
     expand(everyone, [](std::uint16_t, std::uint32_t) { return true; }, stays);
-    for (const LlThread& t : everyone) {
-      const LlAtnState& s = _atn.state(t.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const LlAtnEdge& e = _atn.edge(s.edge + i);
+    for (const LlThread& t : everyone)
+      for (const LlAtnEdge& e : _atn.outgoing(t.state))
         if (e.kind == LlEdgeKind::atom) read(e.label);
-      }
-    }
   }
 
   static constexpr std::uint32_t kStart = ~std::uint32_t{0};
@@ -617,8 +611,6 @@ class LlEpisodeSim {
   }
 
   static constexpr std::uint32_t kNoWord = ~std::uint32_t{0};
-
-  static void clear(auto&... x) { (x.clear(), ...); }
 
   void push(const LlThread& t, std::uint32_t word = kNoWord) {
     _stack.push_back(t);

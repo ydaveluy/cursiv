@@ -1,23 +1,25 @@
 #include <cstdio>
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "engines/ll/CountedScopeGrammar.hpp"
+#include <initializer_list>
 #include <limits>
 #include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "countedll/generated/Ll/Module.hpp"
 #include "countedlr/generated/Lr/Module.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
+#include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/engines/ll/gen/LlLowerPool.hpp"
 #include "cursiv/engines/ll/gen/LlLowering.hpp"
 #include "cursiv/engines/ll/gen/ll_build.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/CountedRepeatGrammar.hpp"
+#include "engines/ll/CountedScopeGrammar.hpp"
 using namespace tllcounted;
 #include "semanticll/generated/Ll/Module.hpp"
 
@@ -228,52 +230,27 @@ void two_runs(const Engines& e) {
 }
 
 void runs_in_other_shapes(const Engines& e) {
-  e.read("n01 b", true);
-  e.read("n01 a d b", true);
-  e.read("n01 a d d a d b b", true);
-  e.read("n01 a b", false);
-  e.read("n01", false);
-  e.read("n01 a d a d a d b", false);
-  e.read("o01 b b", true);
-  e.read("o01 a b c", true);
-  e.read("o01 a d d d b c b b", true);
-  e.read("o01 a d d d d b b", false);
-  e.read("o01 b", false);
-  e.read("m01 b", true);
-  e.read("m01 a a ; b", true);
-  e.read("m01 a a ; a a a ; b b", true);
-  e.read("m01 a ; b", false);
-  e.read("a01 x", true);
-  e.read("a01 a a x", true);
-  e.read("a01 a a a x", true);
-  e.read("a01 b b y", true);
-  e.read("a01 b b b b y", true);
-  e.read("a01 b y", false);
-  e.read("a01 a a a a x", false);
-  e.read("c01 b b", true);
-  e.read("c01 a a b c", true);
-  e.read("c01 a a a b b c c", true);
-  e.read("c01 a a a a b b", false);
-  e.read("d01 b b", true);
-  e.read("d01 a a a b c c", true);
-  e.read("d01 a a a a b b", false);
-  e.read("t01 b", true);
-  e.read("t01 a a a b b d d", true);
-  e.read("t01 a b d", true);
-  e.read("t01 d", false);
-  e.read("s01 <i;> b b", true);
-  e.read("s01 a a <i;> b c b b", true);
-  e.read("s01 b b", false);
-  e.read("r01 b b", true);
-  e.read("r01 a a b c", true);
-  e.read("r01 a a a b b b b", true);
-  e.read("r01 a a a a b b", false);
-  e.read("g01 bb;", true);
-  e.read("g01 aabbb;", true);
-  e.read("g01 aaabbbb;", true);
-  e.read("g01 a bb;", false);
-  e.read("g01 aab b;", false);
-  e.read("g01 a;", false);
+  for (const auto& [text, valid] :
+       std::initializer_list<std::pair<const char*, bool>>{
+           {"n01 b", true}, {"n01 a d b", true}, {"n01 a d d a d b b", true},
+           {"n01 a b", false}, {"n01", false}, {"n01 a d a d a d b", false},
+           {"o01 b b", true}, {"o01 a b c", true},
+           {"o01 a d d d b c b b", true}, {"o01 a d d d d b b", false},
+           {"o01 b", false}, {"m01 b", true}, {"m01 a a ; b", true},
+           {"m01 a a ; a a a ; b b", true}, {"m01 a ; b", false},
+           {"a01 x", true}, {"a01 a a x", true}, {"a01 a a a x", true},
+           {"a01 b b y", true}, {"a01 b b b b y", true}, {"a01 b y", false},
+           {"a01 a a a a x", false}, {"c01 b b", true}, {"c01 a a b c", true},
+           {"c01 a a a b b c c", true}, {"c01 a a a a b b", false},
+           {"d01 b b", true}, {"d01 a a a b c c", true},
+           {"d01 a a a a b b", false}, {"t01 b", true},
+           {"t01 a a a b b d d", true}, {"t01 a b d", true}, {"t01 d", false},
+           {"s01 <i;> b b", true}, {"s01 a a <i;> b c b b", true},
+           {"s01 b b", false}, {"r01 b b", true}, {"r01 a a b c", true},
+           {"r01 a a a b b b b", true}, {"r01 a a a a b b", false},
+           {"g01 bb;", true}, {"g01 aabbb;", true}, {"g01 aaabbbb;", true},
+           {"g01 a bb;", false}, {"g01 aab b;", false}, {"g01 a;", false}})
+    e.read(text, valid);
 }
 
 }  // namespace
@@ -283,7 +260,6 @@ void check_repeat_scopes() {
   const Engines e{*ll};
   two_runs(e);
   runs_in_other_shapes(e);
-
 }
 }
 
@@ -395,24 +371,21 @@ int main() {
     auto a = ll->parse(text), b = lr->parse(text);
     CHECK(!a.diagnostics.empty() && !b.diagnostics.empty());
   }
-  {
-    const auto* engine = ll.get();
-    const auto items = [&](const std::string& text) -> std::size_t {
-      const std::string source = "long:" + text;
-      const auto a = engine->parse(source);
-      const auto* document = a.value_as<Document>();
-      if (!a.accepted || !a.diagnostics.empty() || document == nullptr ||
-          document->entries.size() != 1)
-        return ~std::size_t{0};
-      const auto* range = cursiv::ast_cast<Range>(document->entries[0]);
-      return range == nullptr ? ~std::size_t{0} : range->items.size();
-    };
-    for (const std::size_t n : {0, 1, 2, 511, 512, 513})
-      CHECK(items(run("x", n)) == n);
-    for (const std::size_t n : {3, 4, 511, 512, 513})
-      CHECK(items(run("y", n)) == n);
-    for (const std::string& text : {run("x", 514), run("y", 2), run("y", 514)})
-      CHECK(!engine->parse("long:" + text).diagnostics.empty());
-  }
+  const auto items = [&](const std::string& text) -> std::size_t {
+    const std::string source = "long:" + text;
+    const auto a = ll->parse(source);
+    const auto* document = a.value_as<Document>();
+    if (!a.accepted || !a.diagnostics.empty() || document == nullptr ||
+        document->entries.size() != 1)
+      return ~std::size_t{0};
+    const auto* range = cursiv::ast_cast<Range>(document->entries[0]);
+    return range == nullptr ? ~std::size_t{0} : range->items.size();
+  };
+  for (const std::size_t n : {0, 1, 2, 511, 512, 513})
+    CHECK(items(run("x", n)) == n);
+  for (const std::size_t n : {3, 4, 511, 512, 513})
+    CHECK(items(run("y", n)) == n);
+  for (const std::string& text : {run("x", 514), run("y", 2), run("y", 514)})
+    CHECK(!ll->parse("long:" + text).diagnostics.empty());
   return cursiv::test::report("LlCountedRepeat_test");
 }

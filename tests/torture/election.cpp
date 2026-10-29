@@ -25,7 +25,6 @@ namespace {
 
 namespace ast = telect::ast;
 namespace e = telect::generated::Election;
-namespace d = telect::generated::Election;
 using Stmt = tdang::ast::Stmt;
 
 // The table, not the grammar: the counters are the table's, which the erased
@@ -149,10 +148,10 @@ void small_ast_checks() {
   cursiv::Cst cst;
 
   // A lone if: no conflict, no ambiguity to elect.
-  CHECK(accepts<d::kTable>("if a then x", &d::kDrive, cst));
+  CHECK(accepts<e::kTable>("if a then x", &e::kDrive, cst));
   {
-    cursiv::ParseResult r = cursiv::AstReducer::build<d::kTable.stamp>(
-        d::kAstActions, std::move(cst));
+    cursiv::ParseResult r = cursiv::AstReducer::build<e::kTable.stamp>(
+        e::kAstActions, std::move(cst));
     const Stmt* root = r.value_as<Stmt>();
     CHECK(root != nullptr);
     CHECK(root->cond == "a");
@@ -163,10 +162,10 @@ void small_ast_checks() {
   // "if a then if b then x else e" reads two ways, parting first at the
   // outer if, which keeps its first arm written: the nearest takes the else.
   cursiv::Cst cst2;
-  CHECK(accepts<d::kTable>("if a then if b then x else e", &d::kDrive, cst2));
+  CHECK(accepts<e::kTable>("if a then if b then x else e", &e::kDrive, cst2));
   {
-    cursiv::ParseResult r = cursiv::AstReducer::build<d::kTable.stamp>(
-        d::kAstActions, std::move(cst2));
+    cursiv::ParseResult r = cursiv::AstReducer::build<e::kTable.stamp>(
+        e::kAstActions, std::move(cst2));
     const Stmt* root = r.value_as<Stmt>();
     CHECK(root != nullptr && root->cond == "a");
     CHECK(root->else_ == nullptr);
@@ -180,7 +179,7 @@ void small_ast_checks() {
   // just a boolean.
   cursiv::Cst cst3;
   const std::string_view text = "if a then if b then x else e";
-  CHECK(accepts<d::kTable>(text, &d::kDrive, cst3));
+  CHECK(accepts<e::kTable>(text, &e::kDrive, cst3));
   CHECK(cst3[cst3.entry_root()].begin == 0);
   CHECK(cst3[cst3.entry_root()].end == text.size());
 
@@ -354,14 +353,14 @@ void torture_election() {
   guard_elects("mixedyx", false);
 
   small_ast_checks();
-  election_stable_in_depth<d::kTable>(kDeepIf, &d::kDrive, d::kAstActions,
+  election_stable_in_depth<e::kTable>(kDeepIf, &e::kDrive, e::kAstActions,
                                       24);
   election_stable_in_depth<e::kTable>(kDeepIfRev, &e::kDrive, e::kAstActions,
                                       24);
   // 30-deep nesting, in both declaration orders: here (elses == depth, no
   // surplus to elect over) the tree is unambiguous, so a clean parse is
   // provable.
-  depth_probe<d::kTable>(kDeepIf, &d::kDrive, d::kAstActions, 30);
+  depth_probe<e::kTable>(kDeepIf, &e::kDrive, e::kAstActions, 30);
   depth_probe<e::kTable>(kDeepIfRev, &e::kDrive, e::kAstActions, 30);
 
   overlap();

@@ -1,6 +1,7 @@
 // A counted repetition ends a region and `eof` follows it: past the floor the
 // point that reads on cannot tell a turn of the region from the end of the
 // text, which the caller reads under another skipper.
+// expect LR LL: refused: the grammar reaches one point through a .* region and outside it at once
 #pragma once
 
 #include "refusals/head.hpp"

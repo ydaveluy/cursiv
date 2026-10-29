@@ -23,17 +23,10 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-struct Ll : Base {};
-struct Lr : Base {};
-
 struct Spelled : Base {
   struct Root
       : rule<create<Doc>((lit<"do", !lit<"!">> + (lit<"!"> | lit<"?">)) |
                          (ref<ID> + lit<":">))> {};
   using entry = Root;
 };
-
-struct SpelledLl : Spelled {};
-struct SpelledLr : Spelled {};
-
 }  // namespace tcaretreading

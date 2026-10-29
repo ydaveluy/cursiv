@@ -214,12 +214,10 @@ void run() {
   const auto held = givenUp[0].parser->parse("mat:givenup:x n a ? ;");
   CHECK(tree(givenUp[0], held) == "Holder{}");
 
-
   const Reader ll{g::Ll::create_parser(), g::Ll::create_ast_reflection(), {}};
   const Reader lr{g::Lr::create_parser(), g::Lr::create_ast_reflection(), {}};
   fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLl", ll);
   fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLr", lr);
-
 }
 
 }  // namespace ast_materialise_cases
@@ -290,7 +288,6 @@ void run() {
                 ttree::generated::Ll::create_ast_reflection()});
   every_engine({ttree::generated::Lr::create_parser(),
                 ttree::generated::Lr::create_ast_reflection()});
-
 }
 
 }  // namespace nest_adopt_cases

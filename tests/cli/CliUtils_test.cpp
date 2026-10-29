@@ -11,7 +11,6 @@
 
 #include "cursiv/cli/cli.hpp"
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
 #include "cursiv/core/workspace/DefaultDocumentFactory.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
@@ -19,6 +18,7 @@
 #include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/World.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
 namespace {
@@ -42,16 +42,11 @@ struct CountingParser final : cursiv::Parser {
 
 CountingParser& register_workspace(cursiv::SharedCoreServices& shared,
                                    std::string id = "workspace") {
-  auto language = std::make_unique<cursiv::CoreServices>(shared);
-  language->languageMetaData = {std::move(id), {".ws"}, {}};
   auto parser = std::make_unique<CountingParser>();
   auto& counter = *parser;
-  language->parser = std::move(parser);
-  language->astReflection = ws::generated::Workspace::create_ast_reflection();
-  language->nameProvider =
-      std::make_unique<cursiv::DefaultNameProvider>(*language);
-  cursiv::install_default_core_services(*language);
-  shared.serviceRegistry->registerServices(std::move(language));
+  (void)support::add_language<cursiv::CoreServices>(
+      shared, {std::move(id), {".ws"}, {}}, std::move(parser),
+      ws::generated::Workspace::create_ast_reflection());
   return counter;
 }
 

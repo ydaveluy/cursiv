@@ -1,5 +1,6 @@
 // Seven items in any order, each one a nest: they are spelled in every order,
 // and the orders of seven outgrow the pools of the descent.
+// expect LR LL: refused: rule .Root. holds an unordered group of too many items
 #pragma once
 
 #include "refusals/head.hpp"

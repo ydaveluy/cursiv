@@ -5,6 +5,7 @@
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/ll/SwiftWidthAst.hpp"
 #include "swiftwidthll/generated/Ll/Module.hpp"
 #include "swiftwidthll/generated/Ll/Table.hpp"
@@ -44,9 +45,8 @@ void a_completed_entry_survives_an_unfinished_shorter_reading() {
 }
 void a_closing_walk_reads_the_closer() {
   constexpr const auto& table = generated::Ll::kTable;
-  std::uint16_t decision = cursiv::kNoRow, close = cursiv::kInvalidSymbol;
-  for (std::uint16_t i = 0; i < table.nterms; ++i)
-    if (table.term_name(i) == "Close") close = i;
+  std::uint16_t decision = cursiv::kNoRow;
+  const std::uint16_t close = ll_terms::named<table>("Close");
   // Value's loop leaves directly for Close; GuardedValue has a condition there.
   for (std::uint16_t i = 0; i < table.ndecisions; ++i)
     for (const auto& exit : table.atn.outgoing(table.decisions[i].state))

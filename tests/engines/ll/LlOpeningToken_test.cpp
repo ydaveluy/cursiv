@@ -218,7 +218,6 @@ void run() {
                            {"1:2 a b 3", "((1 : 2) ab 3)"},
                            {"1~2 a b 3", "((1 ~ 2) ab 3)"},
                            {"1 a b 2~3", "(1 ab (2 ~ 3))"}});
-
 }
 
 }  // namespace opening_token_cases

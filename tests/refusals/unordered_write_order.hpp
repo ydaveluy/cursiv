@@ -1,3 +1,4 @@
+// expect LR: [ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Node::name
 #pragma once
 
 #include "refusals/head.hpp"

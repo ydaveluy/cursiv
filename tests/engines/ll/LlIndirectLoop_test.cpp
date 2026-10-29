@@ -301,16 +301,14 @@ int main() {
       tindirectloop::generated::CycleLr::create_ast_reflection();
   for (const Case& c : kCycle)
     expect("table", c, read(*table, *tabler, c.text));
-  for (const Case& c : kShared) {
+  for (const Case& c : kShared)
     expect("descent", c, read(*ll, *llr, c.text, "loop:"));
-  }
   alike("table", kAlikeCycle,
         [&](const std::string& text) { return read(*table, *tabler, text); });
   alike("descent", kAlikeShared,
         [&](const std::string& text) { return read(*ll, *llr, text, "loop:"); });
-  for (const Case& c : kTwin) {
+  for (const Case& c : kTwin)
     expect("descent", c, read(*ll, *llr, c.text, "loop:"));
-  }
   const auto refused = cursiv::ll_build_program(
       cursiv::LlLowering<tindirectloop::Cycle>::lower());
   CHECK(refused.fault.code == cursiv::GrammarFaultCode::leftRecursion);

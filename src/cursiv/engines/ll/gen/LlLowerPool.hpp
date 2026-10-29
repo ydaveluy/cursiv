@@ -85,11 +85,11 @@ struct Pool : LowerPool {
 
 Acts cat(const Acts& a, const Acts& b);
 
-// A choice the parse makes, minted where the shape holds one. What separates
-// its arms is the construction's to settle; the lowering only says where a
-// decision stands.
-std::uint16_t new_decision(LlLowered& o, std::uint16_t node,
-                           std::uint16_t nalts, std::uint16_t owner);
+// Position `node`, as the choice the parse makes there, minted where the
+// shape holds one. What separates its arms is the construction's to settle;
+// the lowering only says where a decision stands.
+std::uint16_t with_decision(LlLowered& o, std::uint16_t node,
+                            std::uint16_t nalts, std::uint16_t owner);
 
 std::uint16_t put_node(LlLowered& o, const LlNode& n,
                        const LlNodeBuild& b = {});

@@ -1,5 +1,6 @@
 // A single-valued member written on every turn of a repetition: only the last
 // turn's value would stay.
+// expect LR: [ '‘]WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Holder::first
 #pragma once
 
 #include "refusals/head.hpp"

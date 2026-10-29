@@ -16,7 +16,6 @@ struct DynSet {
   // words, which is what lets a hash and an equality read them alone.
   std::vector<std::uint64_t> w;
 
-  std::uint32_t words() const { return static_cast<std::uint32_t>(w.size()); }
   std::uint64_t word(std::size_t k) const { return k < w.size() ? w[k] : 0; }
 
   void trim() {

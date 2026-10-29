@@ -20,7 +20,6 @@
 #include "candidateruns/generated/G/Parser.hpp"
 #include "candidateruns/generated/G/Table.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
@@ -46,6 +45,7 @@
 #include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/LexGuardGrammars.hpp"
 #include "engines/lr/MemConvGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"
 #include "engines/lr/RefusedShorterGrammar.hpp"
 #include "engines/lr/ReservedChoiceGrammar.hpp"
@@ -107,7 +107,7 @@ void candidates(std::string text, unsigned from, unsigned end,
 
 }  // namespace
 
-int run() {
+void run() {
   const auto parser = gen::create_parser();
   for (const unsigned from : {0u, 1u}) {
     const std::string blanks(from, ' ');
@@ -152,7 +152,6 @@ int run() {
     candidates(prefix + "while!", from, from + 5, {"while"});
     candidates(prefix + "whilex", from, from + 6, {"Word", "Twin"});
   }
-  return 0;
 }
 
 }  // namespace candidate_runs
@@ -216,17 +215,16 @@ void every_distinct_reading_is_a_ranked_candidate() {
 }
 }  // namespace
 
-int run() {
+void run() {
   the_continuation_decides_the_repaired_span();
   every_distinct_reading_is_a_ranked_candidate();
-  return 0;
 }
 
 }  // namespace typo_alternatives
 
 namespace audit_regression {
 
-int run() {
+void run() {
   auto parser = taudit::generated::G::create_parser();
   for (const auto text :
        {"relaxed_ok", "reservedx", "reserved_ok", "united_ok", "relaxed;ok"}) {
@@ -242,10 +240,8 @@ int run() {
     CHECK(r.accepted && r.diagnostics.empty());
     const auto at = static_cast<cursiv::TextOffset>(text.find(' ') + 1);
     const auto word = std::string_view(text).substr(at);
-    std::vector<cursiv::NextFeature> out;
-    parser->nextFeaturesAt(r.cst(), at, at, out);
     bool found = false;
-    for (const auto& f : out) {
+    for (const auto& f : checks::features(*parser, r, at, at)) {
       const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
       if (std::ranges::find(spellings, word) == spellings.end()) continue;
       found = true;
@@ -361,7 +357,6 @@ int run() {
       CHECK(grammar->spellingDoc(binary) == "binary literal");
     }
   }
-  return 0;
 }
 
 }  // namespace audit_regression
@@ -370,15 +365,13 @@ int run() {
 // and reads its words.
 namespace wide_terminals {
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   const auto p = twide::generated::G::create_parser();
   const cursiv::ParseResult r = p->parse("k000 k519 k300");
   CHECK(r.accepted && r.diagnostics.empty());
   const auto* const doc = r.value_as<twide::ast::Doc>();
   CHECK(doc != nullptr && doc->words.size() == 3 && doc->words[1] == "k519");
   CHECK(!p->parse("k520").diagnostics.empty());
-  return 0;
 }
 
 }  // namespace wide_terminals
@@ -435,7 +428,7 @@ void borrowed_conversion_results_are_not_consumed() {
 
 }  // namespace
 
-int run() {
+void run() {
   borrowed_conversion_results_are_not_consumed();
   const auto engine = tfused::generated::Lr::create_parser();
   const std::string text = "'ab' 'cd' 'ef'";
@@ -443,14 +436,13 @@ int run() {
   CHECK(r.accepted && r.diagnostics.empty());
   const auto* const doc = r.value_as<tmemconv::ast::Doc>();
   CHECK(doc != nullptr);
-  if (doc == nullptr) return 0;
+  if (doc == nullptr) return;
   CHECK(doc->direct == "ab");
   // The join is what the parts MEAN, so the quotes are off there too.
   CHECK(doc->joined == "cdef");
   std::printf("  direct=`%.*s` joined=`%.*s`\n",
               static_cast<int>(doc->direct.size()), doc->direct.data(),
               static_cast<int>(doc->joined.size()), doc->joined.data());
-  return 0;
 }
 
 }  // namespace mem_conv
@@ -1057,7 +1049,7 @@ void the_reading_ends_where_the_lexer_does(const char* lang,
 
 }  // namespace
 
-int run() {
+void run() {
   const auto tested =
       long_runs_agree<tcandrun::generated::G::kTable>(
           "candidate and ASCII runs", tcandrun::generated::G::kDrive);
@@ -1070,7 +1062,6 @@ int run() {
   a_refused_keyword_hands_the_spelling_back_the_same_way();
   the_hard_shapes_answer_the_same_from_every_form();
   an_echo_answers_the_same_from_every_form();
-  return 0;
 }
 }  // namespace case_lexercontract
 
@@ -1084,7 +1075,6 @@ namespace case_lexguard {
 // The lexical tables are held to the same guards, byte by byte.
 
 namespace g = tguard::generated::G;
-namespace gm = tguard::generated::G;
 
 namespace {
 
@@ -1207,20 +1197,17 @@ void a_re_reading_keeps_the_guard_of_what_it_names() {
   repairs("abx ;", true);
   repairs("abx;", false);
   // A refused word of two bytes takes the match back just as a byte does.
-  repairs_in<gm::kTable>("typomulti dxef ; ;", true, &gm::kDrive);
-  repairs_in<gm::kTable>("typomulti dxef;;", false, &gm::kDrive);
+  repairs_in<g::kTable>("typomulti dxef ; ;", true, &g::kDrive);
+  repairs_in<g::kTable>("typomulti dxef;;", false, &g::kDrive);
 }
 
 // The caret's own reading of the same law: one spelling, two terminals, and
 // the answer is the terminal whose guard admits what stands behind the caret.
 void a_caret_offers_the_terminal_whose_own_guard_admits() {
   const auto offered = [&](const char* text) {
-    const std::string doc = in("own", text);
-    const cursiv::ParseResult r = parser().parse(doc);
-    std::vector<cursiv::NextFeature> out;
     const auto at = static_cast<cursiv::TextOffset>(std::strlen("own "));
-    parser().nextFeaturesAt(r.cst(), at, at, out);
-    return out.size();
+    return checks::features(parser(), parser().parse(in("own", text)), at, at)
+        .size();
   };
   // `A` refuses a `;` right behind it, `B` does not; both spell `a` and both
   // stand where the case opens.
@@ -1283,15 +1270,8 @@ void a_caret_offers_only_what_the_position_reads() {
   const auto at = static_cast<cursiv::TextOffset>(std::strlen("shorter "));
   const auto asks = [&](const char* text, cursiv::TextOffset from,
                         cursiv::TextOffset to, std::string_view want) {
-    const std::string doc = in("shorter", text);
-    const cursiv::ParseResult r = parser().parse(doc);
-    std::vector<cursiv::NextFeature> out;
-    parser().nextFeaturesAt(r.cst(), at + from, at + to, out);
-    for (const cursiv::NextFeature& f : out)
-      for (const std::string_view s :
-           parser().getGrammar().terminalSpellings(f.feature))
-        if (s == want) return true;
-    return false;
+    return checks::offers(parser(), in("shorter", text), at + from, at + to,
+                          want);
   };
   const auto offers = [&](const char* text, cursiv::TextOffset from,
                           cursiv::TextOffset to, std::string_view want) {
@@ -1507,7 +1487,7 @@ void audit() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_refused_word_takes_the_match_back_where_it_is_spelled_whole();
   a_candidate_keeps_its_own_guard();
   a_candidate_inherits_no_sibling_boundary();
@@ -1528,7 +1508,6 @@ int run() {
   CHECK(coverage.reserved);
   CHECK(coverage.wideHead);
   CHECK(coverage.duplicateHead);
-  return 0;
 }
 }  // namespace case_lexguard
 
@@ -1574,7 +1553,7 @@ bool is_word(const std::vector<std::string>& all, const std::string& s) {
 
 }  // namespace
 
-int run() {
+void run() {
   const auto parser = tguard::generated::G::create_parser();
   const std::vector<std::string> all = split(kWords);
   CHECK(all.size() > 80);
@@ -1620,7 +1599,6 @@ int run() {
     CHECK(parser->parse("heads =" + w + "x;").diagnostics.empty());
     CHECK(parser->parse("heads = " + w + "_ ;").diagnostics.empty());
   }
-  return 0;
 }
 }  // namespace case_refusedheadwords
 
@@ -1654,17 +1632,6 @@ std::string tokens(const cursiv::ParseResult& r) {
   return out;
 }
 
-std::uint16_t mode_of(std::string_view lead) {
-  for (unsigned s = 0; s < A.nstates; ++s) {
-    const auto t = A.derived.expect.shiftTerm[s];
-    if (t < A.cfg.nterms && A.cfg.terms[t].spelled &&
-        A.cfg.term_text(t) == lead)
-      return A.mode[s];
-  }
-  CHECK(false);
-  return 0;
-}
-
 std::string_view name_of(const Scan& s) {
   return s.term == cursiv::kInvalidSymbol ? std::string_view("-")
                                           : A.cfg.term_name(s.term);
@@ -1678,7 +1645,7 @@ bool held(const Scan* room, std::uint32_t n, const Scan& s) {
 
 void reads(std::string_view lead, const std::vector<Case>& cases) {
   const auto lr = g::Lr::create_parser();
-  const std::uint16_t mode = mode_of(lead);
+  const std::uint16_t mode = case_lexguard::mode_of<A>(lead);
   for (const Case& c : cases) {
     const std::string doc = std::string(lead) + ' ' + std::string(c.text);
     const auto b = lr->parse(doc);
@@ -1720,7 +1687,7 @@ void each_word(Each&& each) {
 // The walks agree, and the sweep, where it answers, answers the walk's extent
 // with the walk's own token among them.
 void walks_agree(std::string_view lead) {
-  const std::uint16_t mode = mode_of(lead);
+  const std::uint16_t mode = case_lexguard::mode_of<A>(lead);
   std::vector<Scan> room(A.maxCands != 0 ? A.maxCands : 1);
   each_word([&](const std::string& text) {
     const auto l = static_cast<TextOffset>(text.size());
@@ -1745,7 +1712,7 @@ void walks_agree(std::string_view lead) {
 
 }  // namespace
 
-int run() {
+void run() {
   reads("head", {{"abab!", "N:ab N:ab ! ", 2, "HeadA"},
                  {"ab!", "N:ab ! ", 2, "HeadA"},
                  {"abab", "W:abab ", 4, "HeadP"},
@@ -1759,7 +1726,6 @@ int run() {
                 {"abab", "W:abab ", 4, "RunP"},
                 {"ababab!", "W:ababab ! ", 6, "RunP"}});
   for (const char* lead : {"head", "wide", "run"}) walks_agree(lead);
-  return 0;
 }
 }  // namespace case_refusedshorter
 
@@ -1783,7 +1749,7 @@ std::string items(const cursiv::ParseResult& r) {
 
 }  // namespace
 
-int run() {
+void run() {
   static_assert(!talike::generated::Reduced::kTable.multiCand);
   static_assert(tguard::generated::G::kTable.multiCand);
   const auto mode =
@@ -1809,7 +1775,6 @@ int run() {
         "a b= yes yesx= c nox yes0123456789abcdef= abcdefghijklmnop0123456789 ");
   for (const std::string_view bad : {"yes=", "no=", "a: yes="})
     CHECK(!shifted->parse("shifted " + std::string(bad)).diagnostics.empty());
-  return 0;
 }
 }  // namespace case_alikecandidates
 
@@ -1851,10 +1816,9 @@ void reads_the_keyword(Lr& lr, const char* head) {
 
 }  // namespace
 
-int run() {
+void run() {
   const auto blr = tguard::generated::G::create_parser();
   reads_the_keyword(blr, "handoff p ");
-  return 0;
 }
 }  // namespace case_keywordhandoff
 
@@ -1888,11 +1852,9 @@ void the_refused_words_are_not_names() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   the_choice_is_one_leaf();
   the_refused_words_are_not_names();
-  return 0;
 }
 }  // namespace case_lrreservedchoice
 
@@ -1913,10 +1875,8 @@ void a_bidi_control_is_escaped() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_bidi_control_is_escaped();
-  return 0;
 }
 }  // namespace case_cliteral
 
@@ -1985,31 +1945,27 @@ void a_broken_token_ends_at_its_line_whatever_ends_it() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_broken_token_ends_at_its_line_whatever_ends_it();
-  return 0;
 }
 }  // namespace case_lrlineend
 
 int main() {
-  int movedStatus = 0;
 #ifdef CURSIV_LR_LEXER_CONTRACT
-  movedStatus |= case_lexercontract::run();
+  case_lexercontract::run();
 #endif
-  movedStatus |= case_lexguard::run();
-  movedStatus |= case_refusedheadwords::run();
-  movedStatus |= case_refusedshorter::run();
-  movedStatus |= case_alikecandidates::run();
-  movedStatus |= case_keywordhandoff::run();
-  movedStatus |= case_lrreservedchoice::run();
-  movedStatus |= case_cliteral::run();
-  movedStatus |= case_lrlineend::run();
-  int status = 0;
-  status |= candidate_runs::run();
-  status |= typo_alternatives::run();
-  status |= audit_regression::run();
-  status |= wide_terminals::run();
-  status |= mem_conv::run();
-  return (cursiv::test::report("LrLexicon_test") | status) | movedStatus;
+  case_lexguard::run();
+  case_refusedheadwords::run();
+  case_refusedshorter::run();
+  case_alikecandidates::run();
+  case_keywordhandoff::run();
+  case_lrreservedchoice::run();
+  case_cliteral::run();
+  case_lrlineend::run();
+  candidate_runs::run();
+  typo_alternatives::run();
+  audit_regression::run();
+  wide_terminals::run();
+  mem_conv::run();
+  return cursiv::test::report("LrLexicon_test");
 }

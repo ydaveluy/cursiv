@@ -15,10 +15,7 @@
 #include <lsp/json/json.h>
 #include <lsp/types.h>
 
-#include "cursiv/core/references/DefaultNameProvider.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/validation/ValidationAcceptor.hpp"
 #include "cursiv/core/validation/ValidationRegistry.hpp"
@@ -26,7 +23,6 @@
 #include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentState.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/lsp/mcp/LspMcpService.hpp"
@@ -36,6 +32,7 @@
 #include "cursiv/mcp/McpServer.hpp"
 #include "cursiv/mcp/McpToolKit.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "wordslr/generated/Lr/Module.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -321,40 +318,24 @@ struct GeneratedModule {
       &ws::generated::Workspace::create_grammar_source;
 };
 
-struct World {
-  struct Shared : cursiv::SharedCoreServices {};
-  struct Language : cursiv::CoreServices {
-    explicit Language(Shared& s) : cursiv::CoreServices(s) {}
-  };
-
-  Shared shared;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    addLanguage("workspace", {".ws"});
-  }
+struct World : support::World<> {
+  World() { addLanguage("workspace", {".ws"}); }
 
   void addLanguage(std::string id, std::vector<std::string> extensions,
                    std::string diagnostic = {}, GeneratedModule from = {}) {
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {std::move(id), std::move(extensions), {}};
-    language->parser = from.parser();
-    language->astReflection = from.reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->grammarSource = from.source();
-    cursiv::install_default_core_services(*language);
-    if (!diagnostic.empty())
-      language->validationRegistry->registerAfterDocument(
-          [message = std::move(diagnostic)](
-              const cursiv::Document&, cursiv::ValidationAcceptor& accept,
-              const cursiv::CancellationToken&) {
-            accept.accept(cursiv::TextRange{0, 0},
-                          cursiv::DiagnosticSeverity::Warning, message);
-          });
-    shared.serviceRegistry->registerServices(std::move(language));
+    (void)support::add_language<cursiv::CoreServices>(
+        shared, {std::move(id), std::move(extensions), {}}, from.parser(),
+        from.reflection(), [&](cursiv::CoreServices& language) {
+          language.grammarSource = from.source();
+          if (!diagnostic.empty())
+            language.validationRegistry->registerAfterDocument(
+                [message = std::move(diagnostic)](
+                    const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+                    const cursiv::CancellationToken&) {
+                  accept.accept(cursiv::TextRange{0, 0},
+                                cursiv::DiagnosticSeverity::Warning, message);
+                });
+        });
   }
 
   void build(
@@ -904,12 +885,7 @@ namespace {
 namespace json = lsp::json;
 
 constexpr std::string_view kUri = "file:///w/messy.ws";
-constexpr std::string_view kMessy =
-    "entity   Person{\n"
-    "name   :String\n"
-    "     age:String\n"
-    "}\n"
-    "datatype     String\n";
+using support::kMessy;
 
 struct World {
   ws::WorkspaceLanguage services = ws::create_lsp_services();

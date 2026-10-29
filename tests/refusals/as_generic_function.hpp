@@ -1,5 +1,6 @@
 // A generic lambda given to `as` could read the text and the parts: its
 // parameter type has to say which.
+// expect LR: as<f>.e.: f accepts more than one input
 #pragma once
 
 #include "refusals/head.hpp"

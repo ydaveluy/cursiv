@@ -18,6 +18,7 @@
 #include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/ll/ReservedRefusedGlrGrammar.hpp"
 #include "engines/ll/ReservedRefusedGrammar.hpp"
 #include "engines/ll/ReservedRefusedPeekGrammar.hpp"
@@ -201,11 +202,7 @@ void a_word_refused_at_a_cut_runs_into_it() {
 void a_reservation_reads_the_word_its_keyword_refuses() {
   namespace cl = tllrefused::generated::CondLl;
   constexpr const auto& table = cl::kTable;
-  constexpr cursiv::SymbolId name = [] {
-    for (cursiv::SymbolId t = 0; t < table.nterms; ++t)
-      if (table.term_name(t) == "NAME") return t;
-    return cursiv::kInvalidSymbol;
-  }();
+  constexpr cursiv::SymbolId name = ll_terms::named<table>("NAME");
   static_assert(name != cursiv::kInvalidSymbol);
   constexpr std::pair<std::string_view, bool> cases[] = {
       {"in-place", false}, {"in-pla", true}, {"in-placex", true}};

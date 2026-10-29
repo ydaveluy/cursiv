@@ -25,11 +25,6 @@ struct Ascii : cursiv::GrammarSpec {
   static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
 };
 
-// The same where the boundary is the name's own alphabet.
-struct Equal : Ascii {
-  static constexpr auto word_boundary = cr<"a-zA-Z0-9_">;
-};
-
 // Letters past ASCII the name decodes, every scalar past ASCII the boundary
 // holds.
 struct Wide : cursiv::GrammarSpec {
@@ -47,13 +42,6 @@ struct Wide : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
   static constexpr auto word_boundary = cr<R"(a-zA-Z0-9_\u{80}-\u{10FFFF})">;
-};
-
-// The boolean referenced first, so ranked above the name.
-struct LitFirst : Wide {
-  struct Root : rule<create<Doc>(many(append<&Doc::flags>(ref<Lit>) |
-                                      append<&Doc::items>(ref<Name>)))> {};
-  using entry = Root;
 };
 
 // Rivals whose frontiers refuse the very bytes behind a refused word: inside
@@ -93,16 +81,9 @@ struct Aside : Frontier {
   static constexpr auto word_boundary = w;
 };
 
-struct AsciiLl : Ascii {};
 struct AsciiLr : Ascii {};
-struct EqualLl : Equal {};
-struct EqualLr : Equal {};
 struct WideLl : Wide {};
 struct WideLr : Wide {};
-struct LitFirstLl : LitFirst {};
-struct LitFirstLr : LitFirst {};
-struct FrontierLl : Frontier {};
 struct FrontierLr : Frontier {};
-struct AsideLl : Aside {};
 struct AsideLr : Aside {};
 }  // namespace tllbound

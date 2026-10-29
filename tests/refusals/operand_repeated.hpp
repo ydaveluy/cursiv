@@ -1,5 +1,6 @@
 // The operand of a directive builds one node, and a repetition inside it
 // writes the same member of that node on every turn.
+// expect LR: [ '‘]WrittenEachTurn<.*refuse::ast::Part::n
 #pragma once
 
 #include "refusals/head.hpp"

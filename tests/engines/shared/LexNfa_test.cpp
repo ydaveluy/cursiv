@@ -305,7 +305,6 @@ void run() {
   an_assertion_is_entered_or_not();
   a_nested_run_is_followed_at_depth_zero();
   an_echo_leaves_the_walk_incomplete();
-
 }
 
 }  // namespace lex_nfa_cases
@@ -456,7 +455,6 @@ void run() {
   large_subsets(false);
   a_loop_over_every_character_is_one_state();
   a_character_before_a_byte_keeps_its_length();
-
 }
 
 }  // namespace lex_dfa_cases
@@ -504,7 +502,6 @@ void run() {
   CHECK(behind.bodies[2] == 1 && behind.owed[2] == 0);
   const auto plain = cursiv::lex_owed_rows(Quoted{false});
   CHECK(!plain.openers[0].has('"'));
-
 }
 
 }  // namespace lex_owed_rows_cases
@@ -527,7 +524,6 @@ void run() {
   CHECK(reach.size() == 4);
   CHECK(!reach[0].any() && !reach[3].any());
   CHECK(reach[1].test(5) && reach[2].test(5));
-
 }
 
 }  // namespace lex_reserve_cases

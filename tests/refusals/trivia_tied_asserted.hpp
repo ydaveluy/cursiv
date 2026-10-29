@@ -1,6 +1,7 @@
 // Two trivia that read `#!x`, one hidden behind an assertion and one ignored:
 // they tie where the assertion holds, but the check does not read whether it
 // does, so the grammar is generated with a warning.
+// expect LR: warning: terminals .(NOTE|SKIP). and .(NOTE|SKIP). are trivia, and the check that they never read the same text at the same length and rank could not be completed
 #pragma once
 
 #include "refusals/head.hpp"

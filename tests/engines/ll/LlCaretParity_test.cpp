@@ -172,57 +172,31 @@ void statements_ended_by_a_gap_or_a_semicolon() {
        "{ 1;\n{ 2 + 3 } }", "a.b;\n1 + 2 + 3\nreturn"});
 }
 
-// The table engine steps over a finished record when no condition asked in it
-// reads the text a candidate replaces. The word's condition reads the two
-// tokens behind it: `y` standing for `bb` would complete `x y` and refuse it.
-
-// The condition of `a;` is asked of `x` and reads two tokens on: a caret on the
-// third of `x y z`, or one that ends the document, replaces text it still
-// reads, wherever the replay starts.
-
-// A comment in `ignored` leaves no leaf: the caret has to read the blanks and
-// the comments before it again to know that what is typed there goes into the
-// comment, and a word the comment absorbs is not the keyword it spells.
-
 // The word under the caret is a guarded terminal for one arm and a name for the
 // other, and both go on from it: `do:` is as sound as `do?`, so the caret that
 // replaces the `?` is offered the `:`.
 void a_word_read_as_two_terminals_goes_on_as_either() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
-  for (const cursiv::Parser* parser : {ll.get()}) {
-    const auto offered =
-        spellings(features_between(*parser, "do?", 2, 3, "reading:"));
-    CHECK((offered == std::vector<std::string>{":", "?"}));
-  }
+  CHECK((spellings(features_between(*ll, "do?", 2, 3, "reading:")) ==
+         std::vector<std::string>{":", "?"}));
 }
 
 // A literal takes its spelling from the name at the same point: behind `do` the
 // caret is offered what the literal goes on with, and not the `:` of the name.
 void a_literal_takes_its_spelling_from_the_name() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
-  for (const cursiv::Parser* parser : {ll.get()}) {
-    const auto offered =
-        spellings(features_between(*parser, "do?", 2, 3, "spelled:"));
-    CHECK((offered == std::vector<std::string>{"?"}));
-  }
+  CHECK((spellings(features_between(*ll, "do?", 2, 3, "spelled:")) ==
+         std::vector<std::string>{"?"}));
 }
-
-// A token goes on from the reading of its own arm alone: the guard refuses
-// `do!`, so the `!` only the guarded terminal goes on with is not offered
-// behind the name, with a condition in the grammar or without.
 
 // Behind an operator guarded against a second `<` the lexer elects the bare
 // twin, yet the operand goes on from the operator: the `<` that opens an
 // operand, typed there, would make the operator the twin and is not offered.
 void the_twin_of_the_operator_is_not_offered_behind_it() {
   const auto ll = tllexpressions::generated::Ll::create_parser();
-  for (const cursiv::Parser* parser : {ll.get()}) {
-    for (const auto& [at, resume] : {std::pair{2u, 2u}, std::pair{2u, 3u}}) {
-      const auto offered =
-          features_between(*parser, "a<b;", at, resume, "climb:");
-      CHECK((spellings(offered) == std::vector<std::string>{"!", "ID"}));
-    }
-  }
+  for (const auto& [at, resume] : {std::pair{2u, 2u}, std::pair{2u, 3u}})
+    CHECK((spellings(features_between(*ll, "a<b;", at, resume, "climb:")) ==
+           std::vector<std::string>{"!", "ID"}));
 }
 
 // The choice between two rules that read `%` is made on the token behind it,
@@ -271,15 +245,10 @@ void a_condition_reads_the_tokens_behind_the_caret_its_own_way() {
   CHECK(clean(cut + "!") && !clean(cut + "?"));
 }
 
-// The document fails the condition of a word and a candidate would satisfy it:
-// `a;` is refused while `x y` stands behind it, and what is typed in front of
-// them lets it stand. Every caret and every span a candidate may replace.
-
 // Behind a repair the replay is still the descent's: a run of invented tokens,
 // a misspelt word and dropped text each leave the stack the table engine
 // names.
 void carets_behind_a_repair_are_the_table_engines() {
-
   sweep_language("tpar repaired", *tpar::generated::Lr::create_parser(),
                  *tpar::generated::Ll::create_parser(),
                  {"sow a;", "shw all x, y;"}, false);

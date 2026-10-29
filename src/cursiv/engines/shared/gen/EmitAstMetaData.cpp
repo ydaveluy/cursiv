@@ -1,19 +1,110 @@
 #include "cursiv/engines/shared/gen/EmitAstMetaData.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <numeric>
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/shared/gen/EmitAstMembers.hpp"
+#include "cursiv/core/syntax-tree/AstField.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
 #include "cursiv/engines/shared/gen/TypeSpelling.hpp"
 
 namespace cursiv {
+
+namespace {
+
+// The fields in the order the classes declare them: a base's members before
+// its derived class's, each class's by position in the class.
+std::vector<std::size_t> member_order(const AstRegistry& registry) {
+  const auto& fields = registry.fields;
+  std::vector<std::size_t> depth(registry.types.size(), 0);
+  for (std::size_t base = 0; base < depth.size(); ++base)
+    for (std::size_t type = 0; type < depth.size(); ++type)
+      if (type != base && registry.subtype(base, type)) ++depth[type];
+  std::vector<std::size_t> order(fields.size());
+  std::iota(order.begin(), order.end(), std::size_t{0});
+  std::ranges::stable_sort(order, {}, [&](std::size_t f) {
+    return std::tuple(depth[fields[f].owner], fields[f].owner,
+                      fields[f].offset);
+  });
+  return order;
+}
+
+// The member-access aliases of each node type: what the generated module
+// names to reach a type's fields and references.
+std::string emit_ast_members(const AstRegistry& registry,
+                             const std::vector<std::string>& types,
+                             const std::vector<std::string>& tags,
+                             std::span<const std::size_t> order) {
+  const auto& fields = registry.fields;
+  std::string out;
+  const auto access = [&](std::string_view name, std::string_view type,
+                          std::span<const std::size_t> members) {
+    out += std::format(
+        "using {} = ::cursiv::AstMemberAccess<{}, ::cursiv::TypeList<{}>>;\n",
+        name, type,
+        join(members, ", ", [&](std::size_t f) { return tags[f]; }));
+  };
+  std::vector<std::vector<std::size_t>> references(types.size());
+  std::vector<std::size_t> refFields;
+  bool multi = false;
+  for (std::size_t f = 0; f < fields.size(); ++f) {
+    if (detail::is_ref_nature(fields[f].nature)) refFields.push_back(f);
+    multi |= detail::is_multi_ref_nature(fields[f].nature);
+  }
+  access("UnknownMembers", "void", order);
+  for (std::size_t t = 0; t < types.size(); ++t) {
+    std::vector<std::size_t> members;
+    for (const std::size_t f : order) {
+      if (!registry.subtype(fields[f].owner, t)) continue;
+      members.push_back(f);
+      if (detail::is_ref_nature(fields[f].nature)) references[t].push_back(f);
+    }
+    access(std::format("Members{}", t), types[t], members);
+  }
+  const auto typeIds = std::views::iota(std::size_t{0}, types.size());
+  const auto number = [](std::size_t f) { return std::format("{}u", f); };
+  out += emit_table(
+      "constexpr ::cursiv::detail::WrittenFn kComplete[]", typeIds,
+      [](std::size_t t) { return std::format("&Members{}::complete", t); },
+      "nullptr");
+  out += emit_table(
+      "constexpr ::cursiv::detail::YieldFn kMemberVisitors[]", typeIds,
+      [](std::size_t t) { return std::format("&Members{}::visit", t); },
+      "nullptr");
+  // A grammar with no reference member keeps no reference rows.
+  if (!refFields.empty()) {
+    out += emit_table("constexpr ::std::uint16_t kReferenceFields[]",
+                      refFields, number);
+    std::vector<std::size_t> typed;
+    for (const auto& row : references)
+      typed.insert(typed.end(), row.begin(), row.end());
+    out += emit_table("constexpr ::std::uint16_t kTypeReferenceFields[]",
+                      typed, number);
+    std::size_t at = 0;
+    out += emit_table(
+        "constexpr ::std::span<const ::std::uint16_t> kReferenceRows[]",
+        references,
+        [&at](const std::vector<std::size_t>& row) {
+          return std::format("{{kTypeReferenceFields + {}u, {}u}}",
+                             std::exchange(at, at + row.size()), row.size());
+        });
+    out += std::format("constexpr ::std::size_t kReferenceFieldCount = {}u;\n",
+                       refFields.size());
+  }
+  out += std::format("constexpr bool kAnyMultiReference = {};\n", multi);
+  return out;
+}
+
+}  // namespace
 
 std::string emit_ast_metadata(const AstRegistry& registry,
                               const std::vector<std::string>& tags) {
@@ -22,10 +113,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
   for (const auto& field : registry.fields)
     narrows.push_back(narrow_list(field.narrows));
   const std::span<const AstRegistry::Field> fields = registry.fields;
-  const std::span<const std::uint64_t> derives = registry.derives;
-  const std::span<const std::uint64_t> accepts = registry.accepts;
-  const std::size_t words = registry.typeWords;
-  const auto order = member_order(fields, derives, words);
+  const auto order = member_order(registry);
   const auto word = [](std::uint64_t w) { return std::format("{}ull", w); };
   std::string out =
       emit_table("constexpr const ::cursiv::AstTypeTag* kTypes[]", types,
@@ -37,7 +125,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
   for (std::size_t t = 0; t < types.size(); ++t) {
     out += std::format("    kTypes[{}u],", t);
     for (std::size_t u = 0; u < types.size(); ++u)
-      if (u != t && ((derives[t * words + u / 64] >> (u % 64)) & 1u)) {
+      if (u != t && registry.subtype(t, u)) {
         out += std::format("kTypes[{}u],", u);
         ++counts[t];
       }
@@ -50,7 +138,8 @@ std::string emit_ast_metadata(const AstRegistry& registry,
                       return std::format("{{kSubtypeTags + {}u, {}u}}",
                                          std::exchange(at, at + count), count);
                     });
-  out += emit_table("constexpr ::std::uint64_t kDerives[]", derives, word);
+  out += emit_table("constexpr ::std::uint64_t kDerives[]", registry.derives,
+                    word);
 
   if (!fields.empty()) {
     out += "constexpr ::std::uint16_t kTargets[] = {\n";
@@ -88,7 +177,8 @@ std::string emit_ast_metadata(const AstRegistry& registry,
                                          tags[f], narrows[f])
                                    : std::string("{}");
                       });
-    out += emit_table("constexpr ::std::uint64_t kAccepts[]", accepts, word);
+    out += emit_table("constexpr ::std::uint64_t kAccepts[]",
+                      registry.accepts, word);
     out += emit_table(
         "constexpr const ::cursiv::AstTypeTag* kReferenceTags[]", rows,
         [&](std::size_t f) {
@@ -125,7 +215,7 @@ std::string emit_ast_metadata(const AstRegistry& registry,
                               : std::format("{{kProperties + {}u, {}u}}",
                                             starts[t], counts[t]);
       });
-  return out + emit_ast_members(types, tags, fields, order, derives, words);
+  return out + emit_ast_members(registry, types, tags, order);
 }
 
 std::string emit_ast_metadata_record(const AstRegistry& registry) {

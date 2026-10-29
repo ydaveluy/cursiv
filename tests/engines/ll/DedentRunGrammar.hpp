@@ -32,8 +32,6 @@ struct Some : Common {
   using entry = Root;
   using ignored = WS;
 };
-struct SomeLl : Some {};
-struct SomeLr : Some {};
 
 struct Many : Common {
   struct Root
@@ -44,8 +42,6 @@ struct Many : Common {
   using entry = Root;
   using ignored = WS;
 };
-struct ManyLl : Many {};
-struct ManyLr : Many {};
 
 struct Flat : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
@@ -62,7 +58,6 @@ struct Flat : cursiv::GrammarSpec {
   using indent_newline = NEWLINE;
 };
 struct FlatLl : Flat {};
-struct FlatLr : Flat {};
 // `tail:` ends its entry two levels deep, before the text does.
 struct Combined : Common {
   struct Root : rule<(lit<"some:"> + ref<Some::Root>) |

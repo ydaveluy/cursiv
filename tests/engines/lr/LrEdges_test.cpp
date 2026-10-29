@@ -8,12 +8,9 @@
 #include <type_traits>
 #include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
@@ -29,6 +26,7 @@
 #include "edges/generated/G/Parser.hpp"
 #include "edges/generated/G/Table.hpp"
 #include "engines/lr/EdgesGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/RegionSkipGrammar.hpp"
 #include "engines/lr/SectionTailGrammar.hpp"
 #include "engines/lr/WideOptionalGrammar.hpp"
@@ -45,7 +43,7 @@
 
 namespace commits {
 
-int run() {
+void run() {
   const auto p = tedges::generated::G::create_parser();
   const auto clean = [&](std::string_view body) {
     const std::string text = "commit " + std::string(body);
@@ -88,7 +86,6 @@ int run() {
   CHECK(doc != nullptr && doc->words.size() == 64);
   if (doc != nullptr)
     for (const auto word : doc->words) CHECK(word == "a");
-  return 0;
 }
 
 }  // namespace commits
@@ -103,17 +100,14 @@ namespace {
 constexpr std::string_view kHead = "region:";
 
 bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(kHead) + std::string(text));
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
+  return checks::clean(p, std::string(kHead) + std::string(text));
 }
 bool repaired(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(kHead) + std::string(text));
-  return r.accepted && !r.diagnostics.empty();
+  return checks::repaired(p, std::string(kHead) + std::string(text));
 }
 
 void a_region_opening_with_a_rule_keeps_the_callers_boundary() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "x]"));
   CHECK(clean(*p, " x]"));
   CHECK(clean(*p, "x] x]"));
@@ -121,37 +115,26 @@ void a_region_opening_with_a_rule_keeps_the_callers_boundary() {
 }
 
 void a_region_past_the_head_keeps_the_callers_boundary() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "d ef x"));
   CHECK(repaired(*p, "d e f x"));
   // The blank the repair dropped was the keyword's reading's; the name read
   // in the tight region was refused on it first, and closes nothing past it.
   const std::string text = std::string(kHead) + "d ";
-  const cursiv::ParseResult r = p->parse(text);
   const auto at = static_cast<cursiv::TextOffset>(text.size());
-  std::vector<cursiv::NextFeature> out;
-  p->nextFeaturesAt(r.cst(), at, at, out);
-  bool closes = false, opens = false;
-  for (const auto& f : out)
-    for (const auto s : p->getGrammar().terminalSpellings(f.feature)) {
-      closes = closes || s == "]";
-      opens = opens || s == "e";
-    }
-  CHECK(!closes && opens);
+  const auto out = checks::features(*p, p->parse(text), at, at);
+  CHECK(!checks::spelled(*p, out, "]") && checks::spelled(*p, out, "e"));
 }
 
 void an_optional_head_keeps_the_callers_boundary() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "o b x"));
   CHECK(clean(*p, "o ab x"));
   CHECK(repaired(*p, "o a b x"));
 }
 
 void a_refusal_holds_inside_a_region() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "(foo)"));
   CHECK(repaired(*p, "(state)"));
   CHECK(clean(*p, "<foo>"));
@@ -180,14 +163,13 @@ void a_region_closing_on_a_rule_hands_back_the_callers_boundary() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_region_opening_with_a_rule_keeps_the_callers_boundary();
   a_region_past_the_head_keeps_the_callers_boundary();
   an_optional_head_keeps_the_callers_boundary();
   a_refusal_holds_inside_a_region();
   a_refusal_at_either_region_edge_keeps_its_boundaries();
   a_region_closing_on_a_rule_hands_back_the_callers_boundary();
-  return 0;
 }
 
 }  // namespace region_edges
@@ -199,8 +181,7 @@ namespace guarded_alt {
 namespace {
 
 bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse("guard " + std::string(text));
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
+  return checks::clean(p, "guard " + std::string(text));
 }
 bool faulted(const cursiv::Parser& p, std::string_view text) {
   const cursiv::ParseResult r = p.parse("guard " + std::string(text));
@@ -242,9 +223,8 @@ void every_engine(const cursiv::Parser& p) {
 
 }  // namespace
 
-int run() {
+void run() {
   every_engine(*tedges::generated::G::create_parser());
-  return 0;
 }
 
 }  // namespace guarded_alt
@@ -256,14 +236,8 @@ namespace case_regionskip {
 
 namespace {
 
-bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  const bool ok = r.accepted && r.diagnostics.empty() && r.value != nullptr;
-  if (!ok)
-    std::printf("  not clean: \"%.*s\"\n", static_cast<int>(text.size()),
-                text.data());
-  return ok;
-}
+using checks::clean, checks::leaves, checks::offered;
+
 // Read with a repair, the first one at `at`: where the text breaks the law
 // the case is about.
 bool repaired(const cursiv::Parser& p, std::string_view text,
@@ -286,32 +260,6 @@ bool local(const cursiv::Parser& p, std::string_view text,
     std::printf("  not local: \"%.*s\"\n", static_cast<int>(text.size()),
                 text.data());
   return ok;
-}
-
-// The leaves in document order, a kept trivia in brackets.
-std::string leaves(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  std::string out;
-  r.cst().visit_leaves([&](const cursiv::CstLeaf& l) {
-    if (l.begin == l.end) return;
-    if (!out.empty()) out += ' ';
-    const std::string_view s = text.substr(l.begin, l.end - l.begin);
-    out += l.hidden ? "[" + std::string(s) + "]" : std::string(s);
-  });
-  return out;
-}
-
-// The literals a caret at the end of `text` is offered.
-std::string offered(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
-  std::vector<cursiv::NextFeature> out;
-  p.nextFeaturesAt(r.cst(), at, at, out);
-  std::string seen;
-  for (const auto& f : out)
-    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
-      if (seen.find(t) == std::string::npos) seen += t;
-  return seen;
 }
 
 // A region that skips nothing: its edges are the caller's, and a rule it calls
@@ -429,11 +377,10 @@ void a_condition_at_a_region_tail(const cursiv::Parser& p) {
 
 }  // namespace
 
-int run() {
+void run() {
   const auto lr = tskip::generated::Lr::create_parser();
   each("LR", *lr);
   a_condition_at_a_region_tail(*lr);
-  return 0;
 }
 }  // namespace case_regionskip
 
@@ -452,9 +399,7 @@ struct Random {
   }
 };
 
-bool clean(const cursiv::ParseResult& r) {
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
-}
+using checks::clean;
 
 std::string join(const std::vector<std::string>& words) {
   std::string out;
@@ -655,20 +600,6 @@ void an_assertion_before_a_node_built_from_nothing(const Engine& e) {
   e.refuse("m c0");
 }
 
-// The literals a caret at the end of `text` is offered.
-std::set<std::string> offered(const cursiv::Parser& p,
-                              const std::string& text) {
-  const cursiv::ParseResult r = p.parse(text);
-  const auto at = static_cast<cursiv::TextOffset>(text.size());
-  std::vector<cursiv::NextFeature> out;
-  p.nextFeaturesAt(r.cst(), at, at, out);
-  std::set<std::string> seen;
-  for (const auto& f : out)
-    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
-      seen.emplace(t);
-  return seen;
-}
-
 std::string listed(const std::set<std::string>& offers) {
   std::string out;
   for (const std::string& t : offers) out += " " + t;
@@ -677,7 +608,8 @@ std::string listed(const std::set<std::string>& offers) {
 
 void offers(const Engine& e, const std::string& text,
             const std::set<std::string>& expected) {
-  const auto actual = offered(e.lr, text);
+  const auto actual = checks::spellings(
+      e.lr, text, static_cast<cursiv::TextOffset>(text.size()));
   if (actual != expected)
     std::printf("  LR offers at \"%s\":%s\n", text.c_str(), listed(actual).c_str());
   CHECK(actual == expected);
@@ -742,7 +674,7 @@ void a_required_token_after_an_assertion(const Engine& e) {
 
 }  // namespace
 
-int run() {
+void run() {
   const auto lr = twideoptional::generated::Lr::create_parser();
   const Engine e{*lr};
   tight_regions(e);
@@ -754,7 +686,6 @@ int run() {
   an_assertion_before_a_node_built_from_nothing(e);
   the_caret_is_offered_the_positions_still_open(e);
   a_region_at_the_head_of_the_document(e);
-  return 0;
 }
 }  // namespace case_wideoptional
 
@@ -928,25 +859,22 @@ void both_engines_read_the_run_as_one_fault() {
 
 }  // namespace
 
-int run() {
+void run() {
   the_section_end_is_looked_for_in_linear_work();
   the_section_end_is_looked_for_once_per_drop();
   a_whole_parse_of_the_run_is_linear({});
   a_whole_parse_of_the_run_is_linear({64, 0, 64, 64});
   the_engines_tell_a_cancelled_scan();
   both_engines_read_the_run_as_one_fault();
-  return 0;
 }
 }  // namespace case_sectiontail
 
 int main() {
-  int movedStatus = 0;
-  movedStatus |= case_regionskip::run();
-  movedStatus |= case_wideoptional::run();
-  movedStatus |= case_sectiontail::run();
-  int status = 0;
-  status |= commits::run();
-  status |= region_edges::run();
-  status |= guarded_alt::run();
-  return (cursiv::test::report("LrEdges_test") | status) | movedStatus;
+  case_regionskip::run();
+  case_wideoptional::run();
+  case_sectiontail::run();
+  commits::run();
+  region_edges::run();
+  guarded_alt::run();
+  return cursiv::test::report("LrEdges_test");
 }

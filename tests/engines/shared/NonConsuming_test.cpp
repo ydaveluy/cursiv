@@ -294,7 +294,6 @@ void run() {
   CHECK(lowers<Alive>());
   CHECK(lr_reads<Alive>("r", "Ruled") && lr_reads<Alive>("TEXT", "Clash"));
   CHECK(lr_count<Alive>("Spared") == 3);
-
 }
 
 }  // namespace dead_branch_cases
@@ -378,7 +377,6 @@ void run() {
   CHECK(f.run(call<G::Lead>(image)));
   CHECK(f.nothing(call<G::Ring2>(image)));
   CHECK(!f.nothing(call<G::Cycle1>(image)));
-
 }
 
 }  // namespace written_reads_cases
@@ -604,7 +602,6 @@ void run() {
   CHECK(said<Unit>().empty());
   CHECK(said<Mutual>().empty());
   CHECK(said<Ranked>().empty());
-
 }
 
 }  // namespace self_bounded_arm_cases
@@ -770,7 +767,6 @@ void run() {
   CHECK(found<Fixed>().empty());
   CHECK(found<Lexical>().empty());
   CHECK(found<Recursive>().empty());
-
 }
 
 }  // namespace nested_run_warning_cases
@@ -980,14 +976,7 @@ bool lowers() {
 }
 
 // The productions of `lhs` in the table engine, and whether one calls `rule`.
-template <class G>
-unsigned lr_count(std::string_view lhs) {
-  const auto& c = cursiv::LrLowering<G>::table().cfg;
-  unsigned n = 0;
-  for (std::uint16_t k = 0; k < c.nprods; ++k)
-    n += c.nt_name(c.prods[k].lhs) == lhs ? 1u : 0u;
-  return n;
-}
+using dead_branch_cases::lr_count;
 template <class G>
 bool lr_calls(std::string_view lhs, std::string_view rule) {
   const auto& c = cursiv::LrLowering<G>::table().cfg;

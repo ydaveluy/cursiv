@@ -1,5 +1,6 @@
 // One operator on two prefix levels of a precedence table: an operand reads
 // it on either level.
+// expect LR: refused .precedenceClash..*rule .Sum. names the same operator text on two levels
 #pragma once
 
 #include "refusals/head.hpp"

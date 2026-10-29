@@ -354,7 +354,6 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-
 }  // namespace tnonassoc
 
 namespace telectionloop {

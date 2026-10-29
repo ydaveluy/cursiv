@@ -14,17 +14,12 @@ namespace {
 
 using AsWrittenFn = std::string (*)(std::string_view);
 
-// The name of rule `r`, empty where the program holds no such rule.
-std::string_view rule_name_of(const LlBuiltProgram& a, std::uint16_t r) {
-  return r < a.cfg.nrules ? a.cfg.rule_name(r) : std::string_view{};
-}
-
 // A shape the descent cannot hold: the sentence names the rule, as its author
 // wrote it, and the cycle it runs through. True where there was one.
 bool refuse_build_fault(std::string_view grammar, const LlBuiltProgram& a,
                         AsWrittenFn asWritten) {
   if (!a.fault) return false;
-  const std::string_view rule = rule_name_of(a, a.fault.rule);
+  const std::string_view rule = a.cfg.rule_name(a.fault.rule);
   std::vector<std::string_view> cycle;
   for (const auto q : a.faultCycle)
     cycle.push_back(a.cfg.rule_name(static_cast<std::uint16_t>(q)));
@@ -58,7 +53,7 @@ std::optional<LlFinalProgram> LlFinalProgram::make(LlBuiltProgram built,
                                                    AsWrittenFn asWritten) {
   if (refuse_build_fault(grammar, built, asWritten) ||
       refuse_unbuilt(grammar, built,
-                     rule_name_of(built, built.cfg.lowerRule)) ||
+                     built.cfg.rule_name(built.cfg.lowerRule)) ||
       // A stamp's position is a node or an operator of a precedence table.
       refuse_unstamped(grammar, built.stamp, built.writes.nchains,
                        built.cfg.nnodes + 1u) ||

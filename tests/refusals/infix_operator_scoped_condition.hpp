@@ -1,5 +1,6 @@
 // A condition inside a region, in front of a rule that builds a node named as
 // an operator: the region leaves the operator the rule it names.
+// expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node
 #pragma once
 
 #include "refusals/head.hpp"

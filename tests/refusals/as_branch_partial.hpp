@@ -1,4 +1,5 @@
 // In a terminal, either every alternative has its own `as` or none has.
+// expect LR: inside a terminal, as<X>.e. wraps the whole body or each of its alternatives
 #pragma once
 
 #include "refusals/head.hpp"

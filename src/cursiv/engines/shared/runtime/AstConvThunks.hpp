@@ -117,28 +117,42 @@ struct TextValues {
   std::unordered_map<NodeId, Value> calls;
 };
 
-// Text thunks only depend on the calls below their record. Discover that
-// frontier without running converters, then evaluate it in source order.
-inline void text_dependencies(AstBuildCtx& ctx, NodeId id,
-                              std::vector<NodeId>& dependencies) {
+// The parts below `id`, in source order, a repaired wrapper record read
+// through. `visit(child, leaf, row)` answers 1 to read a part's own parts, 0
+// to go on past it and -1 to stop the walk, which then answers false.
+template <class Visit>
+bool each_part_below(AstBuildCtx& ctx, NodeId id, Visit&& visit) {
   const Cst& cst = *ctx.cst;
   std::vector<NodeId> pending;
-  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
+  const auto open = [&](NodeId at) {
+    for (const NodeId c : cst.reverse_children(at)) pending.push_back(c);
+  };
+  open(id);
   while (!pending.empty()) {
     const auto child = pending.back();
     pending.pop_back();
     const CstNode& n = cst[child];
-    if (n.hidden) continue;
     const bool leaf = n.subtreeSize == 1;
-    if (leaf && !part_leaf(ctx, n)) continue;
+    if (n.hidden || (leaf && !part_leaf(ctx, n))) continue;
     const auto row = ctx.stamp.row(n);
-    if (!(n.recovered && !leaf && !ctx.actions->is_call(row)) &&
-        ctx.actions->call_at(row) != nullptr) {
-      dependencies.push_back(child);
-    } else if (!leaf) {
-      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
-    }
+    const int step = !leaf && n.recovered && !ctx.actions->is_call(row)
+                         ? 1
+                         : visit(child, leaf, row);
+    if (step < 0) return false;
+    if (step > 0) open(child);
   }
+  return true;
+}
+
+// Text thunks only depend on the calls below their record. Discover that
+// frontier without running converters, then evaluate it in source order.
+inline void text_dependencies(AstBuildCtx& ctx, NodeId id,
+                              std::vector<NodeId>& dependencies) {
+  each_part_below(ctx, id, [&](NodeId child, bool leaf, ElementId row) {
+    if (ctx.actions->call_at(row) == nullptr) return leaf ? 0 : 1;
+    dependencies.push_back(child);
+    return 0;
+  });
 }
 
 // One query's conversions, in postorder on the heap. A converter that reads
@@ -193,37 +207,31 @@ inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
   return std::nullopt;
 }
 
+// A call below a record as one part, converted where the record's text
+// converts: 1 where it is not, -1 where its conversion failed.
+template <bool Text>
+int call_part(AstBuildCtx& ctx, NodeId child, ElementId row, PartRun& out) {
+  const TextFn fn = texting<Text>(ctx) ? ctx.actions->call_at(row) : nullptr;
+  if (fn == nullptr) return 1;
+  const auto value =
+      evaluate_text(ctx, child, fn, ctx.actions->text_children(row, true));
+  if (!value) return -1;
+  out.push_back(*value);
+  return 0;
+}
+
 // Raw data-rule groups need no intermediate strings when their text is being
 // joined. Converted calls remain atomic and keep their own conversion order.
 // The parts are those below `id`, not `id` itself.
 template <bool Text>
 bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
-  const Cst& cst = *ctx.cst;
-  std::vector<NodeId> pending;
-  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
-  while (!pending.empty()) {
-    const auto child = pending.back();
-    pending.pop_back();
-    const CstNode& n = cst[child];
-    if (n.hidden) continue;
-    const bool leaf = n.subtreeSize == 1;
-    if (leaf && !part_leaf(ctx, n)) continue;
-    const auto row = ctx.stamp.row(n);
-    if (!(n.recovered && !leaf && !ctx.actions->is_call(row)) &&
-        texting<Text>(ctx))
-      if (const TextFn fn = ctx.actions->call_at(row)) {
-        const auto value = evaluate_text(ctx, child, fn,
-                                         ctx.actions->text_children(row, true));
-        if (!value) return false;
-        out.push_back(*value);
-        continue;
-      }
-    if (leaf)
-      out.push_back(cst.text(child));
-    else
-      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
-  }
-  return true;
+  return each_part_below(ctx, id, [&](NodeId child, bool leaf, ElementId row) {
+    if (const int step = call_part<Text>(ctx, child, row, out); step <= 0)
+      return step;
+    if (!leaf) return 1;
+    out.push_back(ctx.cst->text(child));
+    return 0;
+  });
 }
 
 // Parts converters observe each data-rule call as one part. Repaired wrapper
@@ -231,37 +239,18 @@ bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
 // once, rather than materialising a string at every nesting level.
 template <bool Text>
 bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
-  const Cst& cst = *ctx.cst;
-  std::vector<NodeId> pending;
-  for (const NodeId c : cst.reverse_children(id)) pending.push_back(c);
-  while (!pending.empty()) {
-    const auto child = pending.back();
-    pending.pop_back();
-    const CstNode& n = cst[child];
-    if (n.hidden) continue;
-    if (n.subtreeSize == 1 && !part_leaf(ctx, n)) continue;
-    if (n.subtreeSize != 1 && n.recovered &&
-        !ctx.actions->is_call(ctx.stamp.row(n))) {
-      for (const NodeId c : cst.reverse_children(child)) pending.push_back(c);
-      continue;
-    }
-    if (texting<Text>(ctx))
-      if (const auto fn = ctx.actions->call_at(ctx.stamp.row(n))) {
-        const auto value = evaluate_text(
-            ctx, child, fn, ctx.actions->text_children(ctx.stamp.row(n), true));
-        if (!value) return false;
-        out.push_back(*value);
-        continue;
-      }
-    if (n.subtreeSize == 1) {
-      if (part_leaf(ctx, n)) out.push_back(cst.text(child));
-      continue;
+  return each_part_below(ctx, id, [&](NodeId child, bool leaf, ElementId row) {
+    if (const int step = call_part<Text>(ctx, child, row, out); step <= 0)
+      return step;
+    if (leaf) {
+      out.push_back(ctx.cst->text(child));
+      return 0;
     }
     PartRun inner;
-    if (!flat_text_parts<Text>(ctx, child, inner)) return false;
+    if (!flat_text_parts<Text>(ctx, child, inner)) return -1;
     out.push_back(join_parts(ctx, inner));
-  }
-  return true;
+    return 0;
+  });
 }
 
 // The payload's own text stops before the converter run at this site. `Flat`

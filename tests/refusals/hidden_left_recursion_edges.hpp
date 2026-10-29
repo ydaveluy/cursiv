@@ -1,5 +1,7 @@
 // The same eight optional clauses, each the whole of a `skip()` region: a
 // region's edge is no reason to read the first as anything else.
+// expect LR: refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind more than 7 optional items
+// expect LL: refused .leftRecursion..*rule .Type. reaches itself before matching anything
 #pragma once
 
 #include "refusals/head.hpp"

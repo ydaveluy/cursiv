@@ -64,7 +64,7 @@ struct G : cursiv::GrammarSpec {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrLowered low = cursiv::LrLowering<G>::table();
   CHECK(!low.cfg.lowerFail());
   CHECK(!low.fault);
@@ -79,7 +79,6 @@ int run() {
     if (sp == "*" || sp == "+") CHECK(prec != 0);
   }
   CHECK(stepped >= 2);
-  return 0;
 }
 
 }  // namespace infix_first
@@ -146,14 +145,13 @@ unsigned sources(const char* name) {
 
 }  // namespace
 
-int run() {
+void run() {
   const unsigned bare = sources<Bare>("bare");
   const unsigned regioned = sources<Regioned>("regioned");
   CHECK(bare == 2);
   // A region between the directive and the choice is not a reason for the two
   // alternatives to share one conversion.
   CHECK(regioned == bare);
-  return 0;
 }
 
 }  // namespace distribute
@@ -250,7 +248,7 @@ bool refused_at_the_region_edge() {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrLowered low = cursiv::LrLowering<G>::table();
   CHECK(!low.cfg.lowerFail());
   // The auxiliary the repetition became: the only nonterminal with a
@@ -281,7 +279,6 @@ int run() {
   CHECK(refused_at_the_region_edge<Trivia>());
   CHECK(refused_at_the_region_edge<Nested>());
   CHECK(!refused_at_the_region_edge<Same>());
-  return 0;
 }
 
 }  // namespace region_tail
@@ -307,11 +304,10 @@ struct Inside : cursiv::GrammarSpec {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrLowered& inside = cursiv::LrLowering<Inside>::table();
   CHECK(!inside.fault);
   CHECK(!cursiv::lr_build_automaton(inside).cfg.lowerFail());
-  return 0;
 }
 
 }  // namespace region_rule
@@ -361,7 +357,7 @@ cursiv::LrBuildTable built() {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrBuildTable flat = built<Flat>();
   CHECK(flat.nconflicts == 0);
   const cursiv::LrBuildTable single = built<OptionSome>();
@@ -369,7 +365,6 @@ int run() {
   CHECK(single.nstates == flat.nstates && single.cfg.nprods == flat.cfg.nprods);
   CHECK(built<ManySome>().nconflicts != 0);
   CHECK(built<Run>().nconflicts != 0);
-  return 0;
 }
 
 }  // namespace nested_repeat
@@ -411,7 +406,7 @@ struct Outer : cursiv::GrammarSpec {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrBuildTable prefix =
       cursiv::lr_build_automaton(cursiv::LrLowering<Outer<">">>::table());
   CHECK(prefix.cfg.lowerWhy == cursiv::LowerFail::sectionEndShared);
@@ -421,7 +416,6 @@ int run() {
   const cursiv::LrBuildTable self =
       cursiv::lr_build_automaton(cursiv::LrLowering<Self>::table());
   CHECK(self.cfg.lowerWhy == cursiv::LowerFail::sectionEndShared);
-  return 0;
 }
 
 }  // namespace section_end
@@ -555,7 +549,7 @@ bool says(const char* part) {
 
 }  // namespace
 
-int run() {
+void run() {
   CHECK(found<Twice>().size() == 1 && found<Between>().size() == 1);
   CHECK(says<Twice>("rule `Root` reads a run of `X` twice in a row"));
   CHECK(says<Between>("a run of `X` twice"));
@@ -589,11 +583,9 @@ int run() {
             std::string::npos);
   CHECK(cfg<Tokens>().unbounded.empty());
   CHECK(cfg<EndlessTokens>().unbounded.size() == 1);
-  return 0;
 }
 }  // namespace case_lrambiguity
 
-namespace case_lrloweredmodules {
 // Grammars both lowered in process and generated: what the lowering keeps is
 // what the generated parser reads.
 
@@ -603,7 +595,7 @@ namespace case_lrloweredmodules {
 // refuses texts the grammar states.
 namespace named_conflict {
 
-int run() {
+void run() {
   const cursiv::LrBuildTable A =
       cursiv::lr_build_automaton(cursiv::LrLowering<tnamedconf::G>::table());
   // The cell is open and nothing was ordered away: what the parser reads is
@@ -629,7 +621,6 @@ int run() {
                 c.states ? "states it" : "does not");
     ++failures;
   }
-  return 0;
 }
 
 }  // namespace named_conflict
@@ -661,8 +652,7 @@ void only_what_the_region_reaches_is_read_twice() {
 }
 
 const cursiv::Parser& engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tdoor::generated::G::create_parser();
+  static const auto p = tdoor::generated::G::create_parser();
   return *p;
 }
 
@@ -713,12 +703,11 @@ void the_island_hands_its_node_up() {
 
 }  // namespace
 
-int run() {
+void run() {
   only_what_the_region_reaches_is_read_twice();
   the_ladder_still_climbs();
   the_island_stays_tight();
   wri::the_island_hands_its_node_up();
-  return 0;
 }
 
 }  // namespace infix_region
@@ -741,8 +730,7 @@ void the_lowering_kept_the_twenty() {
 }
 
 void the_parser_reads_it() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tpasses::generated::G::create_parser();
+  const auto p = tpasses::generated::G::create_parser();
   const cursiv::ParseResult r =
       p->parse("wide one + - * / % ^ & | ~ < > = : ; , . ? @ two");
   CHECK(r.accepted);
@@ -756,19 +744,17 @@ void the_parser_reads_it() {
 
 }  // namespace
 
-int run() {
+void run() {
   the_lowering_kept_the_twenty();
   the_parser_reads_it();
-  return 0;
 }
 
 }  // namespace wide_alternative
 
 namespace gap {
 
-int run() {
+void run() {
   using namespace cursiv;
-  cursiv::test::count_expectations();
   const auto lowered = LrLowering<tasi::cases::G>::table();
   const auto& g = lowered.cfg;
   std::mt19937 rng(123);
@@ -866,33 +852,22 @@ int run() {
       }
     }
   }
-  return 0;
 }
 
 }  // namespace gap
 
-int run() {
-  int status = 0;
-  status |= named_conflict::run();
-  status |= infix_region::run();
-  status |= wide_alternative::run();
-  status |= gap::run();
-  return 0 | status;
-}
-}  // namespace case_lrloweredmodules
-
-int run() {
-  int movedStatus = 0;
-  movedStatus |= case_lrambiguity::run();
-  movedStatus |= case_lrloweredmodules::run();
-  int status = 0;
-  status |= infix_first::run();
-  status |= distribute::run();
-  status |= region_tail::run();
-  status |= region_rule::run();
-  status |= nested_repeat::run();
-  status |= section_end::run();
-  return (cursiv::test::report("LrLowered_test") | status) | movedStatus;
+void run() {
+  case_lrambiguity::run();
+  named_conflict::run();
+  infix_region::run();
+  wide_alternative::run();
+  gap::run();
+  infix_first::run();
+  distribute::run();
+  region_tail::run();
+  region_rule::run();
+  nested_repeat::run();
+  section_end::run();
 }
 
 }  // namespace lr_lowered_cases

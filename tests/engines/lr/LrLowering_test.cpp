@@ -1,18 +1,19 @@
 // Construction, lowering and generated pass cases share their engine headers.
-namespace lr_construction_cases { int run(); }
-namespace lr_lowered_cases { int run(); }
-namespace lr_passes_cases { int run(); }
+#include "cursiv/test/Check.hpp"
+
+namespace lr_construction_cases { void run(); }
+namespace lr_lowered_cases { void run(); }
+namespace lr_passes_cases { void run(); }
 #ifdef CURSIV_TEST_NATIVE_IDENTITY
-namespace lr_identity_cases { int run(); }
+namespace lr_identity_cases { void run(); }
 #endif
 
 int main() {
-  int status = 0;
-  status |= lr_construction_cases::run();
-  status |= lr_lowered_cases::run();
-  status |= lr_passes_cases::run();
+  lr_construction_cases::run();
+  lr_lowered_cases::run();
+  lr_passes_cases::run();
 #ifdef CURSIV_TEST_NATIVE_IDENTITY
-  status |= lr_identity_cases::run();
+  lr_identity_cases::run();
 #endif
-  return status;
+  return cursiv::test::report("LrLowering_test");
 }

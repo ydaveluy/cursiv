@@ -21,6 +21,7 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/lr/AdoptEntryGrammar.hpp"
 #include "engines/lr/AstFusedGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/ShadowedNamespaceGrammars.hpp"
 #include "engines/lr/sibling/Grammar.hpp"
 #include "shadowll/generated/Ll/Module.hpp"
@@ -39,9 +40,7 @@ using tfused::ast::Node;
 using tfused::ast::Wrap;
 
 // The AST points into the document: each case keeps its string alive.
-bool clean(const cursiv::ParseResult& r) {
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
-}
+using checks::clean;
 
 void a_nest_on_the_creations_record_wraps_the_node_made_there(
     const cursiv::Parser& p) {
@@ -238,10 +237,9 @@ void every_grammar(const cursiv::Parser& fused, const cursiv::Parser& entry) {
 
 }  // namespace
 
-int run() {
+void run() {
   every_grammar(*tfused::generated::Lr::create_parser(),
                 *tadopt::generated::G::create_parser());
-  return 0;
 }
 
 }  // namespace ast_fused
@@ -268,8 +266,7 @@ std::string root_name(const Engine& engine, std::string_view text,
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   std::size_t nodes = 0;
   {
     const auto e = tadopt::generated::G::create_parser();
@@ -295,7 +292,6 @@ int run() {
     std::printf("inner: %zu node(s)\n", r.nodes.size());
     CHECK(r.nodes.size() == 2);
   }
-  return 0;
 }
 
 }  // namespace adopt_entry
@@ -316,10 +312,9 @@ void reads(const std::unique_ptr<::cursiv::Parser>& parser) {
 
 }  // namespace
 
-int run() {
+void run() {
   reads(tshadow::cursiv::std::generated::Lr::create_parser());
   reads(tshadow::cursiv::std::generated::Ll::create_parser());
-  return 0;
 }
 
 }  // namespace shadowed_namespace
@@ -338,11 +333,9 @@ bool reads(const cursiv::Parser& parser) {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   CHECK(reads(*tsibling::generated::Lr::create_parser()));
   CHECK(reads(*tsibling::generated::Module::create_parser()));
-  return 0;
 }
 
 }  // namespace sibling_header
@@ -913,7 +906,7 @@ void a_run_of_actions_has_no_cap() {
 
 }  // namespace
 
-int run() {
+void run() {
   the_symbol_space();
   the_token_graph();
   the_productions();
@@ -924,17 +917,15 @@ int run() {
   two_auxiliaries_that_say_the_same_thing();
   a_regions_boundaries();
   a_run_of_actions_has_no_cap();
-  return 0;
 }
 
 }  // namespace lowering
 
 int main() {
-  int status = 0;
-  status |= ast_fused::run();
-  status |= adopt_entry::run();
-  status |= shadowed_namespace::run();
-  status |= sibling_header::run();
-  status |= lowering::run();
-  return cursiv::test::report("LrAst_test") | status;
+  ast_fused::run();
+  adopt_entry::run();
+  shadowed_namespace::run();
+  sibling_header::run();
+  lowering::run();
+  return cursiv::test::report("LrAst_test");
 }

@@ -83,7 +83,4 @@ struct Suite : Base {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
-
 }  // namespace toperatorcondition

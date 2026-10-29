@@ -113,7 +113,6 @@ struct Reserved : cursiv::GrammarSpec {
   using ignored = WS;
 };
 struct ReservedLl : Reserved {};
-struct ReservedLr : Reserved {};
 
 struct Fuzzy : cursiv::Extends<cursiv::AstNode> {
   Number* similarity{};
@@ -175,6 +174,4 @@ struct Suite : Members {
   using ignored = WS;
 };
 struct Ll : Suite {};
-struct Lr : Suite {};
-
 }  // namespace tlllextie

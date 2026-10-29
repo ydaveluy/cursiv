@@ -1,5 +1,6 @@
 // A counted tail of nest turns: the LL descent spells each turn inside the one
 // before it, so its source nests one block deeper per turn.
+// expect LL: refused: rule .Root. repeats a .nest. more than 64 times in a row
 #pragma once
 
 #include "refusals/head.hpp"

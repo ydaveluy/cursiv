@@ -1,5 +1,6 @@
 // In a terminal, an alternative's own `as` names a constant: a type or a
 // function converts the whole body.
+// expect LR: inside a terminal, as<V>.e. on an alternative names a constant
 #pragma once
 
 #include "refusals/head.hpp"

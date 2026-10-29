@@ -1,5 +1,6 @@
 // A directive over the end assertion: `eof` consumes nothing, so there is no
 // record for the write to ride and the member would never be written.
+// expect LR LL: refused .directiveOnNoPosition..*writes a member from `eof` alone, or from nothing
 #pragma once
 
 #include "refusals/head.hpp"

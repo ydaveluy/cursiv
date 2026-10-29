@@ -1,4 +1,5 @@
 // An AST member that owns its text: the tree borrows the document.
+// expect LR: an AST member never owns its text
 #pragma once
 
 #include <string>

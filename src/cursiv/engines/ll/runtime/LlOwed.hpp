@@ -30,15 +30,13 @@ class LlOwed {
       todo.assign(1, T.atn.ruleStart[r]);
       entry[todo.back()] = 1;
       while (!todo.empty()) {
-        const LlAtnState& state = T.atn.state(todo.back());
+        const std::uint32_t s = todo.back();
         todo.pop_back();
-        for (std::uint32_t i = 0; i < state.nedges; ++i) {
-          const LlAtnEdge& e = T.atn.edge(state.edge + i);
+        for (const LlAtnEdge& e : T.atn.outgoing(s))
           if (e.kind == LlEdgeKind::epsilon && entry[e.target] == 0) {
             entry[e.target] = 1;
             todo.push_back(e.target);
           }
-        }
       }
     }
     _stands.assign(T.atn.nstates, 0);
@@ -151,10 +149,9 @@ class LlOwed {
   }
 
   bool stands(std::uint32_t s) const {
-    const LlAtnState& state = T.atn.state(s);
-    if (state.kind == LlAtnKind::ruleStop) return true;
-    for (std::uint32_t i = 0; i < state.nedges; ++i)
-      if (T.atn.edge(state.edge + i).kind != LlEdgeKind::epsilon) return true;
+    if (T.atn.state(s).kind == LlAtnKind::ruleStop) return true;
+    for (const LlAtnEdge& e : T.atn.outgoing(s))
+      if (e.kind != LlEdgeKind::epsilon) return true;
     return false;
   }
 

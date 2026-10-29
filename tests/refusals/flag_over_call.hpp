@@ -1,5 +1,6 @@
 // A flag around a call changes nothing: the call is a second head beside the
 // creation.
+// expect LR: this alternative can create twice
 #pragma once
 
 #include "refusals/head.hpp"

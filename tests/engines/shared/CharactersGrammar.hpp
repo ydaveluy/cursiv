@@ -184,7 +184,6 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-
 }  // namespace trepeatedunicode
 
 namespace tchars {

@@ -1,5 +1,6 @@
 // Two members of classes that share none: the implicit node has no class to
 // be, and the rule is told to state one.
+// expect LR: write unrelated classes -- state create<T>
 #pragma once
 
 #include "refusals/head.hpp"

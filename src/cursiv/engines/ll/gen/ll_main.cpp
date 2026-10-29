@@ -133,10 +133,8 @@ int run(int argc, char** argv) try {
     return exit_status(wrote);
 
   report(a);
-  cursiv::report_warnings(
-      CURSIV_GEN_NAME, image, a.cfg, a.cfg, [&](std::uint16_t r) {
-        return r < a.cfg.nrules ? a.cfg.rule_name(r) : std::string_view{};
-      });
+  cursiv::report_warnings(CURSIV_GEN_NAME, image, a.cfg, a.cfg,
+                          [&](std::uint16_t r) { return a.cfg.rule_name(r); });
   return exit_status(GenCode::ok);
 } catch (const std::exception& error) {
   std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, error.what());

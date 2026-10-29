@@ -13,6 +13,7 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/InfixOperatorsGrammar.hpp"
+#include "engines/shared/Checks.hpp"
 #include "engines/shared/UnaryLevelsGrammar.hpp"
 #include "infixoperatorsll/generated/Ll/Module.hpp"
 #include "infixoperatorslr/generated/Lr/Module.hpp"
@@ -78,11 +79,7 @@ void check(const cursiv::Parser& parser, std::string_view tag,
            std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, std::string(tag) + std::string(text));
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 void a_sequence_hands_over_its_parts_joined(const cursiv::Parser& p) {
@@ -336,7 +333,6 @@ void run() {
   every_engine(*toperators::generated::Ll::create_parser());
   engine = "Lr";
   every_engine(*toperators::generated::Lr::create_parser());
-
 }
 
 }  // namespace infix_operators_cases
@@ -378,11 +374,7 @@ const char* engine = "";
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected) {
   const std::string got = read(parser, text);
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 void one_operator_of_the_level_reads(const cursiv::Parser& parser) {
@@ -459,7 +451,6 @@ void run() {
   every_engine(*toperators::generated::Ll::create_parser());
   engine = "Lr";
   every_engine(*toperators::generated::Lr::create_parser());
-
 }
 
 }  // namespace nonassoc_cases
@@ -529,10 +520,14 @@ void check_tree(const cursiv::AstReflection& reflection, const cursiv::Cst& cst,
       });
 }
 
-template <class Ll, class LlAst, class Lr, class LrAst>
-void agree(std::string_view prefix, Ll ll, LlAst llAst, Lr lr, LrAst lrAst,
+void agree(std::string_view prefix,
            std::initializer_list<std::pair<std::string_view, std::string_view>>
                cases) {
+  namespace gen = toperators::generated;
+  const auto ll = gen::Ll::create_parser();
+  const auto llAst = gen::Ll::create_ast_reflection();
+  const auto lr = gen::Lr::create_parser();
+  const auto lrAst = gen::Lr::create_ast_reflection();
   const auto check = [&](const auto& parser, const auto& ast,
                          std::string_view engine, std::string_view text,
                          std::string_view want) {
@@ -557,52 +552,38 @@ void agree(std::string_view prefix, Ll ll, LlAst llAst, Lr lr, LrAst lrAst,
 }  // namespace
 
 void run() {
-  namespace gen = toperators::generated;
-  agree("", gen::Ll::create_parser(), gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(), gen::Lr::create_ast_reflection(),
-        {{"x", "x"}, {"x y", "ns(x)"}, {"x y y", "ns(xy)"}});
-  agree("direct:", gen::Ll::create_parser(), gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(), gen::Lr::create_ast_reflection(),
-        {{"a+a+a", "((a+a)+a)"},
-         {"a+a+a+a", "(((a+a)+a)+a)"},
-         {"(a+a)+a", "((a+a)+a)"},
-         {"a+(a+a)", "(a+(a+a))"},
-         {"fn=>a+a", "fn((a+a))"},
-         {"fn=>a+a+a", "fn(((a+a)+a))"},
-         {"a+fn=>a+a", "(a+fn((a+a)))"},
-         {"include a+a", "include((a+a))"},
-         {"a+include a+a", "(a+include((a+a)))"},
-         {"cast a+a", "cast((a+a))"},
-         {"a+cast a+a", "(a+cast((a+a)))"}});
-  agree("multi:", gen::Ll::create_parser(), gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(), gen::Lr::create_ast_reflection(),
-        {{"a+a*a", "(a+(a*a))"},
-         {"a*a+a", "((a*a)+a)"},
-         {"a*a*a*a", "(((a*a)*a)*a)"},
-         {"a+a+a+a", "(((a+a)+a)+a)"},
-         {"(a+a)*a", "((a+a)*a)"},
-         {"a*(a+a)", "(a*(a+a))"},
-         {"fn=>a*a+a", "fn(((a*a)+a))"},
-         {"a*fn=>a+a", "(a*fn((a+a)))"},
-         {"include a*a+a", "include(((a*a)+a))"},
-         {"a*include a+a", "(a*include((a+a)))"},
-         {"cast a*a+a", "cast(((a*a)+a))"},
-         {"a*cast a+a", "(a*cast((a+a)))"}});
-  agree("statement:", gen::Ll::create_parser(),
-        gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(),
-        gen::Lr::create_ast_reflection(),
+  agree("", {{"x", "x"}, {"x y", "ns(x)"}, {"x y y", "ns(xy)"}});
+  agree("direct:", {{"a+a+a", "((a+a)+a)"},
+                    {"a+a+a+a", "(((a+a)+a)+a)"},
+                    {"(a+a)+a", "((a+a)+a)"},
+                    {"a+(a+a)", "(a+(a+a))"},
+                    {"fn=>a+a", "fn((a+a))"},
+                    {"fn=>a+a+a", "fn(((a+a)+a))"},
+                    {"a+fn=>a+a", "(a+fn((a+a)))"},
+                    {"include a+a", "include((a+a))"},
+                    {"a+include a+a", "(a+include((a+a)))"},
+                    {"cast a+a", "cast((a+a))"},
+                    {"a+cast a+a", "(a+cast((a+a)))"}});
+  agree("multi:", {{"a+a*a", "(a+(a*a))"},
+                   {"a*a+a", "((a*a)+a)"},
+                   {"a*a*a*a", "(((a*a)*a)*a)"},
+                   {"a+a+a+a", "(((a+a)+a)+a)"},
+                   {"(a+a)*a", "((a+a)*a)"},
+                   {"a*(a+a)", "(a*(a+a))"},
+                   {"fn=>a*a+a", "fn(((a*a)+a))"},
+                   {"a*fn=>a+a", "(a*fn((a+a)))"},
+                   {"include a*a+a", "include(((a*a)+a))"},
+                   {"a*include a+a", "(a*include((a+a)))"},
+                   {"cast a*a+a", "cast(((a*a)+a))"},
+                   {"a*cast a+a", "(a*cast((a+a)))"}});
+  agree("statement:",
         {{"if c then if c then x else x", "[if(if(x,x),_)]"},
          {"if c then if c then x else x else x", "[if(if(x,x),x)]"}});
-  agree("loop:", gen::Ll::create_parser(),
-        gen::Ll::create_ast_reflection(),
-        gen::Lr::create_parser(),
-        gen::Lr::create_ast_reflection(),
+  agree("loop:",
         {{"if c then if c then x else x", "[if(if(x,x),_)]"},
          {"if c then if c then x else x x", "[if(if(x,x),_),x]"},
          {"x if c then if c then x else x", "[x,if(if(x,x),_)]"},
          {"if c then if c then x else x else x x", "[if(if(x,x),x),x]"}});
-
 }
 
 }  // namespace election_loop_cases
@@ -674,11 +655,7 @@ void check(const cursiv::Parser& parser, std::string_view tag,
     got.clear();
     spell(*v, got);
   }
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 void a_prefix_binds_what_is_tighter(const cursiv::Parser& p) {

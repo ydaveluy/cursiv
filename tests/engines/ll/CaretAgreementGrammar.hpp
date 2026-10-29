@@ -74,6 +74,4 @@ struct Base : cursiv::GrammarSpec {
 };
 
 struct Ll : Base {};
-struct Lr : Base {};
-
 }  // namespace tllcaretagree

@@ -1,5 +1,6 @@
 // A terminal whose body may match nothing: the lexer reads no token of no
 // width, so the parser owes one it can never be given.
+// expect LR LL: terminal .MaybeNum. matches the empty string
 #pragma once
 
 #include "refusals/head.hpp"

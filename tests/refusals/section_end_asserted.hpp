@@ -2,6 +2,7 @@
 // `]]`: where the assertion holds, the closing token begins a token of the
 // grammar, but the check does not read whether it does, so the grammar is
 // generated with a warning.
+// expect LR LL: warning: terminal ... closes a .section<>., and the check that ...., a terminal its grammar reads, neither reads it nor begins with it could not be completed
 #pragma once
 
 #include "refusals/head.hpp"

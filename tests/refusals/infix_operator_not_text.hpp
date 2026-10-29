@@ -1,4 +1,5 @@
 // A rule that builds a node named as an operator: an operator hands over text.
+// expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // A rule whose only production calls itself: it derives no finite text, so
 // the branch that reaches it can never reduce.
+// expect LR: refused .ruleWithoutProduction..*rule .Loop. derives nothing
 #pragma once
 
 #include "refusals/head.hpp"

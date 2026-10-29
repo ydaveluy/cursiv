@@ -76,8 +76,7 @@ using G = tident::G;
 using Built = cursiv::LrBuildTable;
 
 const cursiv::Parser& engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tfused::generated::Lr::create_parser();
+  static const auto p = tfused::generated::Lr::create_parser();
   return *p;
 }
 
@@ -128,7 +127,7 @@ void minimization_reads_condition_tags_as_held() {
 
 }  // namespace
 
-int run() {
+void run() {
   minimization_reads_condition_tags_as_held();
   // The control: the core graph really is the broken one -- its merge made
   // a cell the grammar does not order, and the detector named it.
@@ -191,7 +190,6 @@ int run() {
   reads<ast::BKid>("b c d");
   reads<ast::BKid>("a c e");
   reads<ast::AKid>("b c e");
-  return 0;
 }
 
 }  // namespace identity
@@ -320,14 +318,13 @@ void completion_sites_agree() {
 }
 }  // namespace
 
-int run() {
+void run() {
   completion_sites_agree<Last::same>();
   completion_sites_agree<Last::same, true>();
   completion_sites_agree<Last::other>();
   completion_sites_agree<Last::owner>();
   completion_sites_agree<Last::narrow>();
   completion_sites_agree<Last::bare>();
-  return 0;
 }
 
 }  // namespace completion_sites
@@ -336,7 +333,7 @@ namespace case_lrmanyalternatives {
 // The items of a state are all read, however many alternatives stand before
 // the one that reads another terminal.
 
-int run() {
+void run() {
   const cursiv::LrBuildTable A =
       cursiv::lr_build_automaton(cursiv::LrLowering<tmany::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
@@ -353,7 +350,6 @@ int run() {
     lists += first == "t" && second == "u";
   }
   CHECK(lists == 1);
-  return 0;
 }
 }  // namespace case_lrmanyalternatives
 
@@ -362,10 +358,6 @@ namespace case_lrchaininsert {
 // share however long their chain goes.
 
 namespace {
-
-bool ends_with(std::string_view s, std::string_view tail) {
-  return s.size() >= tail.size() && s.substr(s.size() - tail.size()) == tail;
-}
 
 // The terminal a state's list inserts first, empty where its ids order them.
 std::string_view first_inserted(const cursiv::LrBuildTable& A, unsigned s) {
@@ -376,15 +368,14 @@ std::string_view first_inserted(const cursiv::LrBuildTable& A, unsigned s) {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrBuildTable A =
       cursiv::lr_build_automaton(cursiv::LrLowering<tchaininsert::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
   unsigned lists = 0;
   for (unsigned s = 0; s < A.nstates; ++s)
-    lists += ends_with(first_inserted(A, s), "b");
+    lists += first_inserted(A, s).ends_with("b");
   CHECK(lists >= 27);
-  return 0;
 }
 }  // namespace case_lrchaininsert
 
@@ -417,7 +408,7 @@ bool shifts(const cursiv::LrBuildTable& A, unsigned s) {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrBuildTable A =
       cursiv::lr_build_automaton(cursiv::LrLowering<tinsertorder::G>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
@@ -431,7 +422,6 @@ int run() {
   CHECK(picks == 1);
   CHECK(goes >= 1);
   CHECK(returns >= 1);
-  return 0;
 }
 }  // namespace case_lrinsertorder
 
@@ -517,7 +507,7 @@ void names_each_program_once() {
 
 }  // namespace
 
-int run() {
+void run() {
   adds_no_ambiguity<ElectionCase<telect::Election::GuardXY>>("GuardXY");
   adds_no_ambiguity<ElectionCase<telect::Election::GuardYX>>("GuardYX");
   adds_no_ambiguity<ElectionCase<telect::Election::MixedXY>>("GuardMixedXY");
@@ -537,7 +527,6 @@ int run() {
   names_each_program_once<Folded>();
   names_each_program_once<tasi::G>();
   names_each_program_once<taudit::G>();
-  return 0;
 }
 }  // namespace case_lrguards
 
@@ -546,10 +535,6 @@ namespace case_lrcornerkey {
 // they climb through, not of its first sixteen.
 
 namespace {
-
-bool ends_with(std::string_view s, std::string_view tail) {
-  return s.size() >= tail.size() && s.substr(s.size() - tail.size()) == tail;
-}
 
 // The rule whose reduction the table lays first where `Whole_` and `Tail`
 // both reduce on a token.
@@ -564,8 +549,8 @@ std::string_view first_reduction(const cursiv::LrBuildTable& A) {
         continue;
       const std::string_view x = A.cfg.nt_name(A.cfg.prods[a.arg].lhs);
       const std::string_view y = A.cfg.nt_name(A.cfg.prods[b.arg].lhs);
-      if ((ends_with(x, "Whole_") && ends_with(y, "Tail")) ||
-          (ends_with(x, "Tail") && ends_with(y, "Whole_")))
+      if ((x.ends_with("Whole_") && y.ends_with("Tail")) ||
+          (x.ends_with("Tail") && y.ends_with("Whole_")))
         return x;
     }
   return {};
@@ -573,13 +558,11 @@ std::string_view first_reduction(const cursiv::LrBuildTable& A) {
 
 }  // namespace
 
-int run() {
+void run() {
   const cursiv::LrBuildTable A =
       cursiv::lr_build_automaton(cursiv::LrLowering<tcornerkey::Lr>::table());
   CHECK(!A.overflow && !A.cfg.lowerFail());
-  CHECK(ends_with(first_reduction(A), "Whole_"));
-
-  return 0;
+  CHECK(first_reduction(A).ends_with("Whole_"));
 }
 }  // namespace case_lrcornerkey
 
@@ -624,10 +607,9 @@ void a_run_that_grows_by_turns_is_not() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_chain_is_ordered_for_every_text();
   a_run_that_grows_by_turns_is_not();
-  return 0;
 }
 }  // namespace case_lrtableorder
 
@@ -677,7 +659,7 @@ void keeps_actions(bool wide, std::uint64_t digest, unsigned states,
 }
 }  // namespace
 
-int run() {
+void run() {
   for (bool wide : {false, true}) {
     keeps_actions<ttableorder::Lr>(wide, 12584957980273038131ull, 13, 13, 5, 3);
     keeps_actions<tgchain::Lr>(wide, 7874924981012405869ull, 11, 12, 2, 2);
@@ -687,7 +669,6 @@ int run() {
   // inexact written order of nested dangling-else choices.
   keeps_actions<tlldangling::Lr>(false, 6348924868896240653ull, 38, 41, 3, 3);
   keeps_actions<tlldangling::Lr>(true, 15855575149852123932ull, 53, 71, 3, 3);
-  return 0;
 }
 }  // namespace case_lrwrittenorder
 
@@ -719,7 +700,7 @@ void probe_cuts(unsigned expected) {
 
 }  // namespace
 
-int run() {
+void run() {
   {
     const auto a = built<tbounds::transitions::G>();
     CHECK(!a->overflow);
@@ -764,7 +745,6 @@ int run() {
     const auto cut = parser->parse(text.substr(0, 20));
     CHECK(cut.accepted && !cut.diagnostics.empty());
   }
-  return 0;
 }
 }  // namespace case_lrbuildbounds
 
@@ -801,8 +781,7 @@ void nested(const cursiv::Parser& parser, std::string_view operand, bool type) {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   using namespace tdeferred::generated;
   const auto first = NestedFirst::create_parser();
   for (const auto operand : {"Integer", "Pkg.Integer", "reverse Pkg.Integer",
@@ -810,11 +789,10 @@ int run() {
     const bool type = std::string_view(operand) != "'x'";
     nested(*first, operand, type);
   }
-  return 0;
 }
 }  // namespace case_lrdeferredchoice
 
-int run() {
+void run() {
   // Naming an empty guarded creation preserves the lowered condition program.
   const auto& inlineGuards = cursiv::LrLowering<tguardedchoice::Inline>::cfg();
   const auto& namedGuards = cursiv::LrLowering<tguardedchoice::Named>::cfg();
@@ -822,20 +800,17 @@ int run() {
   CHECK(inlineGuards.ngapConds == namedGuards.ngapConds);
   CHECK(inlineGuards.ngapLeaves == namedGuards.ngapLeaves);
 
-  int movedStatus = 0;
-  movedStatus |= case_lrmanyalternatives::run();
-  movedStatus |= case_lrchaininsert::run();
-  movedStatus |= case_lrinsertorder::run();
-  movedStatus |= case_lrguards::run();
-  movedStatus |= case_lrcornerkey::run();
-  movedStatus |= case_lrtableorder::run();
-  movedStatus |= case_lrwrittenorder::run();
-  movedStatus |= case_lrbuildbounds::run();
-  movedStatus |= case_lrdeferredchoice::run();
-  int status = 0;
-  status |= identity::run();
-  status |= completion_sites::run();
-  return (cursiv::test::report("LrIdentity_test") | status) | movedStatus;
+  case_lrmanyalternatives::run();
+  case_lrchaininsert::run();
+  case_lrinsertorder::run();
+  case_lrguards::run();
+  case_lrcornerkey::run();
+  case_lrtableorder::run();
+  case_lrwrittenorder::run();
+  case_lrbuildbounds::run();
+  case_lrdeferredchoice::run();
+  identity::run();
+  completion_sites::run();
 }
 
 }  // namespace lr_identity_cases

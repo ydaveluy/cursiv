@@ -1,5 +1,6 @@
 // An implied token is an unguarded literal: a keyword checks the byte after
 // it, which a token laid with no width has none to check.
+// expect LR LL: implied.tok, cond.. lays a token of no width, so .tok. is an unguarded literal
 #pragma once
 
 #include "refusals/head.hpp"

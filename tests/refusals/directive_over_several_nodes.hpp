@@ -1,5 +1,6 @@
 // A directive over a repetition: the member takes one node per write, and the
 // repetition holds as many as the text spells.
+// expect LR: stands over a repetition that can hold SEVERAL nodes
 #pragma once
 
 #include "refusals/head.hpp"

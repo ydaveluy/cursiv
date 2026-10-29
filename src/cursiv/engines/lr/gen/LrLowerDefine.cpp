@@ -9,11 +9,8 @@ namespace cursiv {
 
 LrLowerSlot LrLowerer::infix_side(unsigned cfg, const void* row,
                                   std::uint16_t sym) {
-  LrLowerSlot s;
-  s.sym = sym;
-  s.cfg = static_cast<std::uint8_t>(cfg);
-  s.row.push_back(row_id(row));
-  return s;
+  return LrLowerSlot{
+      .sym = sym, .cfg = static_cast<std::uint8_t>(cfg), .row = {row_id(row)}};
 }
 
 void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,

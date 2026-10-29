@@ -33,7 +33,4 @@ struct Wide : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Wide {};
-struct Lr : Wide {};
-
 }  // namespace tskipcfg

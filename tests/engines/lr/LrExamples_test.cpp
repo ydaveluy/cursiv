@@ -12,7 +12,6 @@
 #include "asicases/generated/G/Module.hpp"
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
@@ -23,6 +22,7 @@
 #include "domainmodel/generated/DomainModel/Module.hpp"
 #include "domainmodel/generated/DomainModel/Table.hpp"
 #include "edges/generated/G/Module.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "requirements/generated/Requirements/Module.hpp"
 #include "requirements/generated/Requirements/Table.hpp"
 #include "statemachine/generated/SM/Module.hpp"
@@ -46,21 +46,10 @@ struct Tally {
 // that is made -- so the rounds are the walk out, and this is what bounds it.
 constexpr unsigned kRounds = 8;
 
-std::string read(const std::string& path) {
-  std::string out;
-  if (FILE* f = std::fopen(path.c_str(), "rb")) {
-    char buf[4096];
-    for (std::size_t n; (n = std::fread(buf, 1, sizeof buf, f)) != 0;)
-      out.append(buf, n);
-    std::fclose(f);
-  }
-  return out;
-}
-
 // The files a corpus names, the valid twin apart: the manifest is the list.
 std::vector<std::string> manifest(const std::string& dir) {
   std::vector<std::string> names;
-  const std::string all = read(dir + "/MANIFEST.tsv");
+  const std::string all = cursiv::test::read_file(dir + "/MANIFEST.tsv");
   for (std::size_t at = 0, line = 0; at < all.size(); ++line) {
     const std::size_t nl = std::min(all.find('\n', at), all.size());
     const std::size_t tab = all.find('\t', at);
@@ -129,7 +118,7 @@ void language(const cursiv::Parser& engine, const char* name,
   }
   unsigned closed = 0, applicable = 0;
   for (const std::string& file : names) {
-    const std::string text = read(dir + "/" + file);
+    const std::string text = cursiv::test::read_file(dir + "/" + file);
     if (text.empty()) continue;
     ++tally.docs;
     const cursiv::ParseResult r = engine.parse(text);
@@ -171,7 +160,7 @@ void language(const cursiv::Parser& engine, const char* name,
 
 }  // namespace
 
-int run() {
+void run() {
   Tally t;
   const std::string dir = CURSIV_EXAMPLE_DIR;
 #define LANG(FACTORY, NAME, SUB) \
@@ -188,7 +177,6 @@ int run() {
       "out of reach (%u a repair the grammar cannot spell)\n",
       t.docs, t.applicable, t.closed, t.rounds, t.deepest, t.opaque,
       t.unspelled);
-  return 0;
 }
 
 }  // namespace repair_closure
@@ -201,30 +189,17 @@ namespace caret_end {
 
 namespace {
 
-// Whether the caret at the end of `text` is offered a token spelled `want`.
+// Whether the caret at the end of `text` is offered a token spelled `want`,
+// or a terminal named `name`.
 bool offers(const cursiv::Parser& engine, const std::string& text,
             std::string_view want) {
-  const cursiv::ParseResult r = engine.parse(text);
-  std::vector<cursiv::NextFeature> out;
   const auto at = static_cast<cursiv::TextOffset>(text.size());
-  engine.nextFeaturesAt(r.cst(), at, at, out);
-  const cursiv::Grammar& g = engine.getGrammar();
-  for (const cursiv::NextFeature& f : out)
-    for (const std::string_view s : g.terminalSpellings(f.feature))
-      if (s == want) return true;
-  return false;
+  return checks::offers(engine, text, at, at, want);
 }
-
-// Whether the caret at the end of `text` is offered a terminal named `name`.
 bool offers_named(const cursiv::Parser& engine, const std::string& text,
                   std::string_view name) {
-  const cursiv::ParseResult r = engine.parse(text);
-  std::vector<cursiv::NextFeature> out;
   const auto at = static_cast<cursiv::TextOffset>(text.size());
-  engine.nextFeaturesAt(r.cst(), at, at, out);
-  for (const cursiv::NextFeature& f : out)
-    if (engine.getGrammar().terminalName(f.feature) == name) return true;
-  return false;
+  return checks::offers_named(engine, text, at, at, name);
 }
 
 void a_statement_may_still_be_carried_on() {
@@ -253,13 +228,11 @@ void a_closed_block_offers_only_its_enclosing_scope() {
         "entity S { x: T }\n", "package First {} package Second {}\n"}) {
     const auto r = engine->parse(text);
     CHECK(r.accepted && !r.cst().recovered());
-    std::vector<cursiv::NextFeature> out;
     const auto at = static_cast<cursiv::TextOffset>(text.size());
-    engine->nextFeaturesAt(r.cst(), at, at, out);
     CHECK(offers(*engine, text, "package"));
     CHECK(offers(*engine, text, "entity"));
     CHECK(offers(*engine, text, "datatype"));
-    for (const auto& f : out) {
+    for (const auto& f : checks::features(*engine, r, at, at)) {
       const auto spellings = engine->getGrammar().terminalSpellings(f.feature);
       const bool opens =
           std::ranges::any_of(spellings, [](std::string_view spelling) {
@@ -304,12 +277,11 @@ void a_comment_takes_the_name_typed_against_its_end() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_statement_may_still_be_carried_on();
   a_closed_block_offers_only_its_enclosing_scope();
   a_word_after_a_repair_swallows_what_is_glued_to_it();
   a_comment_takes_the_name_typed_against_its_end();
-  return 0;
 }
 
 }  // namespace caret_end
@@ -324,11 +296,9 @@ namespace {
 std::vector<cursiv::ElementId> offered(const cursiv::Parser& parser,
                                        const std::string& text,
                                        cursiv::TextOffset at) {
-  const cursiv::ParseResult r = parser.parse(text);
-  std::vector<cursiv::NextFeature> out;
-  parser.nextFeaturesAt(r.cst(), at, at, out);
   std::vector<cursiv::ElementId> ids;
-  for (const cursiv::NextFeature& f : out) ids.push_back(f.feature);
+  for (const auto& f : checks::features(parser, parser.parse(text), at, at))
+    ids.push_back(f.feature);
   std::ranges::sort(ids);
   ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
   return ids;
@@ -389,19 +359,17 @@ void a_record_the_text_has_not_decided_is_walked() {
 
 }  // namespace
 
-int run() {
+void run() {
   an_insertion_replays_through_the_reductions_it_needs();
   an_abandon_to_the_start_state_replays();
   a_record_the_text_has_not_decided_is_walked();
-  return 0;
 }
 
 }  // namespace caret_replay
 
 int main() {
-  int status = 0;
-  status |= repair_closure::run();
-  status |= caret_end::run();
-  status |= caret_replay::run();
-  return cursiv::test::report("LrExamples_test") | status;
+  repair_closure::run();
+  caret_end::run();
+  caret_replay::run();
+  return cursiv::test::report("LrExamples_test");
 }

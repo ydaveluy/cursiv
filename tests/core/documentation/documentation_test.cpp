@@ -15,17 +15,15 @@
 #include "cursiv/core/documentation/DocComment.hpp"
 #include "cursiv/core/references/DefaultScopeComputation.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/workspace/DefaultDocumentFactory.hpp"
 #include "cursiv/core/workspace/Document.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/IndexManager.hpp"
 #include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
 
 // Pins the CommentProvider contract: the image is returned as written, only
 // the rule the provider is bound to answers, the root reads its whole leading
@@ -753,23 +751,7 @@ namespace documentation_provider {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
+struct World : support::CoreWorkspace {
   // A document taken to `ComputedScopes` and indexed, which is what a link
   // resolution reads.
   std::shared_ptr<cursiv::Document> built(const std::string& uri,

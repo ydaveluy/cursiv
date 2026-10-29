@@ -1,3 +1,4 @@
+// expect LR: .ignored., .hidden. and .skip... list terminals only
 #pragma once
 
 #include "refusals/head.hpp"

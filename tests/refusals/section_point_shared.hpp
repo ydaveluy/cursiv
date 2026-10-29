@@ -1,6 +1,7 @@
 // Two alternatives that part only past their first token, one a section:
 // the point behind that token reads the embedded grammar's first token and
 // the caller's at once.
+// expect LR LL: refused: the grammar reaches one point inside a .section<>. and outside it at once
 #pragma once
 
 #include "refusals/head.hpp"

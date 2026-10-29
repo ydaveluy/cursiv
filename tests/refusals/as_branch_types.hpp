@@ -1,5 +1,6 @@
 // In a terminal, the alternatives' constants give one token its value, so
 // they have one type.
+// expect LR: inside a terminal, the constants of the alternatives. as<V>.e. have different types
 #pragma once
 
 #include "refusals/head.hpp"

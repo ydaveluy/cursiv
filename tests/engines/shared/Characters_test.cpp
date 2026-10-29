@@ -7,6 +7,7 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/CharactersGrammar.hpp"
+#include "engines/shared/Checks.hpp"
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -49,11 +50,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected, std::string_view prefix = {}) {
   const std::string got = read(parser, text, prefix);
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 std::string with(std::string_view tag, std::string_view body) {
@@ -470,7 +467,6 @@ void run() {
   engine = "LR";
   exercise(*tchars::generated::Lr::create_parser());
   gaps(*tchars::generated::Lr::create_parser());
-
 }
 
 }  // namespace characters_cases
@@ -534,7 +530,6 @@ void exercise(const cursiv::Parser& parser) {
 
 void run() {
   exercise(*tchars::generated::Lr::create_parser());
-
 }
 
 }  // namespace repeated_unicode_cases

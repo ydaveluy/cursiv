@@ -89,10 +89,6 @@ void run() {
   const auto parser = tllsemantic::generated::Ll::create_parser();
   const auto reflection = tllsemantic::generated::Ll::create_ast_reflection();
 
-  // A paragraph's lines go on before the document's loop opens the next
-  // paragraph, whatever block stands before; with no `;` last, the document's
-  // loop turns first.
-
   // One `*` both an operator and a glob's suffix: an operand is a call of its
   // own, whose turns win over stopping.
   namespace fold = tllexpressions::generated;
@@ -135,9 +131,6 @@ void run() {
           "right=Name{} } }"},
          {"! a implies b",
           "Doc{items0=Box{value=Both{left=Name{} right=Name{} } } }"}});
-  // The loop that goes on at a definition decides before the guards of the
-  // definition do; with no definition to open, the guard goes on.
-
   // A ladder closed by a left recursion: the arms of a rung, written either
   // way round, are chosen where the rung starts, and the suffix goes on in the
   // operand it ends before it climbs out.
@@ -219,8 +212,6 @@ void run() {
         "Doc{items0=Compare{left=Name{} "
         "right=Match{left=Box{value=Box{value=Match{left=Name{} right=Name{} } "
         "} } right=Name{} } } }"}});
-  // A keyword two rules spell alike: the rule written first reads it.
-
   // A declaration whose type name refuses a reserved word against an
   // expression that shifts the same name: the one written first reads it.
   constexpr std::string_view declared =

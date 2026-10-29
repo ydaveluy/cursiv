@@ -29,7 +29,6 @@
 #include "cursiv/core/references/LinkingResult.hpp"
 #include "cursiv/core/references/NameProvider.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/syntax-tree/AstMetaData.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
@@ -45,7 +44,6 @@
 #include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/IndexManager.hpp"
 #include "cursiv/core/workspace/ReferenceDescription.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
@@ -58,9 +56,10 @@
 #include "multiref/generated/MultiG/Module.hpp"
 #include "narrowedsite/generated/NarrowedSite/Module.hpp"
 #include "sharedrecord/generated/SharedRecord/Module.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
+#include "workspace/core/references/WorkspaceScopeProvider.hpp"
 #include "workspace/generated/Workspace/AstReflection.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
 
 // Pins what a name points at. Reading a reference resolves it -- the lazy
 // `ref` -- and the linker is what the read reaches.
@@ -82,26 +81,7 @@ cursiv::ReferenceInfo site_of(const cursiv::AstMetaData& meta,
           .narrow = meta.refOps[h.field].narrow_of(*h.owner, h.index)};
 }
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection =
-        ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
+struct World : support::CoreWorkspace {
   std::shared_ptr<cursiv::Document> scoped(std::string text) const {
     auto document = shared.documentFactory->fromString(std::move(text),
                                                        "file:///w/a.ws");
@@ -311,16 +291,6 @@ void a_name_nothing_declares_reads_the_same() {
         "Could not resolve reference to Entity named 'Absent'.");
 }
 
-struct CaseInsensitiveProvider final : cursiv::DefaultScopeProvider {
-  using DefaultScopeProvider::DefaultScopeProvider;
-
- protected:
-  [[nodiscard]] bool isCaseSensitive(
-      const cursiv::ReferenceInfo&) const noexcept override {
-    return false;
-  }
-};
-
 // `StrinG` resolves `String` under an insensitive provider, and the linker
 // itself compares nothing: `getCandidate` and `getCandidates` answer the same
 // walk, under both policies.
@@ -336,7 +306,7 @@ void the_policy_decides_what_a_reference_reaches() {
   // The same document under an insensitive provider: the reference reaches
   // the `String` the author declared, spelling untouched.
   world.ws->scopeProvider =
-      std::make_unique<CaseInsensitiveProvider>(*world.ws);
+      std::make_unique<ws::WorkspaceScopeProvider>(*world.ws);
   world.ws->linker->unlink(*document);
   world.ws->linker->link(*document);
   const ws::ast::Type* const target = World::feature(*document).type.get();
@@ -544,19 +514,11 @@ void a_candidate_is_answered_once() {
   CHECK(all->size() == 1);
 }
 
-struct CapturingSink final : cursiv::ObservabilitySink {
-  std::vector<cursiv::Observation> rows;
-  void publish(const cursiv::Observation& o) noexcept override {
-    rows.push_back(o);
-  }
-};
-
 // A lookup before the local symbols exist fails, and the sink says so.
 void an_early_read_is_said() {
   World world;
-  auto sink = std::make_unique<CapturingSink>();
-  CapturingSink& sunk = *sink;
-  world.shared.observabilitySink = std::move(sink);
+  const support::CaptureSink& sunk =
+      support::capture_observations(world.shared);
 
   const auto document = world.shared.documentFactory->fromString(
       "datatype String\nentity Person { age : String }\n",
@@ -567,9 +529,9 @@ void an_early_read_is_said() {
       site_of(ws::generated::Workspace::kAstMetaData,
               document->parseResult.references->handles.front(), "String");
   (void)world.ws->linker->getCandidate(site);
-  CHECK(!sunk.rows.empty());
-  if (!sunk.rows.empty())
-    CHECK(sunk.rows.front().code ==
+  CHECK(!sunk.seen.empty());
+  if (!sunk.seen.empty())
+    CHECK(sunk.seen.front().code ==
           cursiv::ObservationCode::ScopeReadBeforeComputed);
 }
 
@@ -638,25 +600,11 @@ using tns::Kind1;
 using tns::Kind2;
 using tns::Use;
 
-struct NsWorld {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* lang = nullptr;
-
-  NsWorld() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"narrowedsite", {".ns"}, {}};
-    language->parser = tns::generated::NarrowedSite::create_parser();
-    language->astReflection =
-        tns::generated::NarrowedSite::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    lang = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct NsWorld : support::World<> {
+  cursiv::CoreServices* lang = &support::add_language<cursiv::CoreServices>(
+      shared, {"narrowedsite", {".ns"}, {}},
+      tns::generated::NarrowedSite::create_parser(),
+      tns::generated::NarrowedSite::create_ast_reflection());
 
   std::shared_ptr<cursiv::Document> scoped(std::string text) const {
     auto document =
@@ -961,41 +909,14 @@ namespace ct = cursiv::test;
 
 // The LSP storey too: what the editor is answered about a group is the same
 // fact, one floor up.
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* mref = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"multiref", {".mref"}, {}};
-    language->parser = fmulti::generated::MultiG::create_parser();
-    language->astReflection =
-        fmulti::generated::MultiG::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    mref = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* mref = &support::add_language<cursiv::LspServices>(
+      shared, {"multiref", {".mref"}, {}},
+      fmulti::generated::MultiG::create_parser(),
+      fmulti::generated::MultiG::create_ast_reflection());
 
   cursiv::Document* built(std::string text) const {
-    auto document =
-        shared.documentFactory->fromString(std::move(text), "file:///q.mref");
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
+    return support::built(shared, "file:///q.mref", std::move(text));
   }
 };
 
@@ -1171,17 +1092,10 @@ void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
       return exported;
     }
   };
-  struct IgnoreCase final : cursiv::DefaultScopeProvider {
-    using DefaultScopeProvider::DefaultScopeProvider;
-
-   protected:
-    bool isCaseSensitive(const cursiv::ReferenceInfo&) const noexcept override {
-      return false;
-    }
-  };
   world.mref->scopeComputation = std::make_unique<ExportItems>(*world.mref);
   if (ignoreCase)
-    world.mref->scopeProvider = std::make_unique<IgnoreCase>(*world.mref);
+    world.mref->scopeProvider =
+        std::make_unique<ws::WorkspaceScopeProvider>(*world.mref);
 
   constexpr std::string_view kA = "file:///a.mref";
   constexpr std::string_view kB = "file:///b.mref";
@@ -1331,27 +1245,19 @@ struct ExportPair final : cursiv::DefaultScopeComputation {
 // both; find-references lists their one declaration site and their one
 // reference once each.
 void two_nodes_on_one_record_are_two_targets() {
-  cursiv::SharedCoreServices shared;
-  shared.fileSystemProvider =
-      std::make_unique<cursiv::EmptyFileSystemProvider>();
-  cursiv::install_default_shared_core_services(shared);
-  auto language = std::make_unique<cursiv::CoreServices>(shared);
-  language->languageMetaData = {"sharedrecord", {".srm"}, {}};
-  language->parser = tsr::generated::SharedRecord::create_parser();
-  language->astReflection =
-      tsr::generated::SharedRecord::create_ast_reflection();
-  cursiv::install_default_core_services(*language);
-  language->scopeComputation = std::make_unique<ExportPair>(*language);
-  const cursiv::CoreServices* const srm = language.get();
-  shared.serviceRegistry->registerServices(std::move(language));
+  support::World<> world;
+  const cursiv::CoreServices* const srm =
+      &support::add_language<cursiv::CoreServices>(
+          world.shared, {"sharedrecord", {".srm"}, {}},
+          tsr::generated::SharedRecord::create_parser(),
+          tsr::generated::SharedRecord::create_ast_reflection(),
+          [](cursiv::CoreServices& language) {
+            language.scopeComputation = std::make_unique<ExportPair>(language);
+          });
 
-  auto document =
-      shared.documentFactory->fromString("same;same", "file:///same.srm");
-  //                                      012345678
-  cursiv::Document* const raw = document.get();
-  shared.documents->addDocument(std::move(document));
-  cursiv::Document* const set[] = {raw};
-  shared.documentBuilder->build(set);
+  const cursiv::Document* const raw =
+      world.built("file:///same.srm", "same;same");
+  //                                   012345678
 
   const auto* const model = raw->parseResult.value_as<tsr::Model>();
   CHECK(model != nullptr && model->pair != nullptr &&
@@ -1405,26 +1311,7 @@ namespace scope_computation {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->astReflection =
-        ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
+struct World : support::CoreWorkspace {
   // Stored, because a description names its document by id and the store is
   // what mints one: an unmanaged document describes nothing resolvable.
   std::shared_ptr<cursiv::Document> parse(std::string text) const {
@@ -1545,25 +1432,7 @@ namespace scope_provider {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
+struct World : support::CoreWorkspace {
   // A document taken to `ComputedScopes`, which is what a scope provider needs.
   std::shared_ptr<cursiv::Document> scoped(std::string text) const {
     auto document =
@@ -1765,17 +1634,6 @@ void a_detached_site_sees_nothing() {
   CHECK(world.visible(detached).empty());
 }
 
-// The one override a case-insensitive language writes.
-struct CaseInsensitiveProvider final : cursiv::DefaultScopeProvider {
-  using DefaultScopeProvider::DefaultScopeProvider;
-
- protected:
-  [[nodiscard]] bool isCaseSensitive(
-      const cursiv::ReferenceInfo&) const noexcept override {
-    return false;
-  }
-};
-
 void the_policy_defaults_to_case_sensitive() {
   const World world;
   const auto document =
@@ -1790,7 +1648,7 @@ void an_insensitive_provider_matches_across_case() {
   const auto document =
       world.scoped("datatype String\nentity Person { age : StrinG }\n");
   const cursiv::ReferenceInfo context = site(*document);
-  const CaseInsensitiveProvider provider(*world.ws);
+  const ws::WorkspaceScopeProvider provider(*world.ws);
 
   const cursiv::AstNodeDescription* const found =
       provider.getScopeEntry(context, "StrinG");
@@ -1806,7 +1664,7 @@ void shadowing_respects_the_policy() {
       "datatype STRING\n"
       "package p {\n  datatype String\n  entity E { f : string }\n}\n");
   const cursiv::ReferenceInfo context = site(*document);
-  const CaseInsensitiveProvider insensitive(*world.ws);
+  const ws::WorkspaceScopeProvider insensitive(*world.ws);
 
   const cursiv::AstNodeDescription* const inner =
       insensitive.getScopeEntry(context, "string");
@@ -1822,7 +1680,7 @@ void an_exact_name_passes_a_folded_homonym() {
   const auto document = world.scoped(
       "datatype string\ndatatype String\nentity E { f : String }\n");
   const cursiv::ReferenceInfo context = site(*document);
-  const CaseInsensitiveProvider insensitive(*world.ws);
+  const ws::WorkspaceScopeProvider insensitive(*world.ws);
 
   const cursiv::AstNodeDescription* const exact =
       world.ws->scopeProvider->getScopeEntry(context, "String");
@@ -1840,7 +1698,7 @@ void the_named_visit_leads_with_the_entry() {
       "datatype STRING\n"
       "package p {\n  datatype String\n  entity E { f : string }\n}\n");
   const cursiv::ReferenceInfo context = site(*document);
-  const CaseInsensitiveProvider insensitive(*world.ws);
+  const ws::WorkspaceScopeProvider insensitive(*world.ws);
 
   std::vector<std::string> matched;
   CHECK(insensitive.visitScopeEntries(

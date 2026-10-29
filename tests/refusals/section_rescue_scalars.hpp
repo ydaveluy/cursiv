@@ -1,5 +1,6 @@
 // The same, in a section: the rescuing letter is its grammar's class, which the
 // host's says nothing of.
+// expect LR: a character past ASCII rescues that word
 #pragma once
 
 #include "refusals/head.hpp"

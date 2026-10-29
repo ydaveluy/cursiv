@@ -150,7 +150,6 @@ struct Nested : Base {
                     assign<&ast::D::c>(assign<&ast::C::n>(ref<ID>)))> {};
 };
 
-
 struct Adopted : Base {
   struct LeafRule : rule<create<ast::Leaf>(lit<"$">)> {};
   struct Root : rule<assign<&ast::Pair::leaf>(
@@ -165,7 +164,6 @@ struct Chained : Base {
             many(nest<&ast::Index::array>(
                 lit<"."> + assign<&ast::Index::index>(ref<NameRule>)))))> {};
 };
-
 
 struct Suite : Base {
   struct Root : rule<(lit<"declared:"> + ref<Declared::Root>) |

@@ -1,5 +1,6 @@
 // A rule whose only reading asserts end of input and then reads on: the
 // reading is dropped, and the rule is left with none.
+// expect LR LL: refused .ruleWithoutProduction..*rule .Tail. derives nothing
 #pragma once
 
 #include "refusals/head.hpp"

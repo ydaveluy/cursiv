@@ -14,7 +14,6 @@
 
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstBuilder.hpp"
@@ -35,6 +34,7 @@
 #include "cursiv/engines/shared/runtime/GapPositions.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "workspace/generated/Workspace/AstReflection.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/generated/Workspace/Table.hpp"
@@ -307,7 +307,7 @@ void adjacency_skips_a_recovered_region_without_rows() {
 
 }  // namespace
 
-int run() {
+void run() {
   gap_repetitions_stop_when_no_later_round_can_change_the_answer();
   gap_search_keeps_positions_at_word_boundaries();
   scratch_arrays_preserve_values_without_running_initializers();
@@ -316,14 +316,13 @@ int run() {
   a_class_stands_for_the_frames_below_the_top();
   abandoning_a_suffix_discards_only_its_pending_close();
   adjacency_skips_a_recovered_region_without_rows();
-  return 0;
 }
 
 }  // namespace runtime_state
 
 namespace stack {
 
-int run() {
+void run() {
   for (const unsigned capacity : {1u, 64u, 128u}) {
     cursiv::LrStack alias;
     alias.reserve(capacity);
@@ -363,7 +362,6 @@ int run() {
   CHECK(copy.size() == 2);
   CHECK(copy.top().state == 22 && copy.top().word == 26);
   CHECK(stack[0].open == 2 && stack[0].begin == 3);
-  return 0;
 }
 
 }  // namespace stack
@@ -475,13 +473,12 @@ void a_root_naming_the_document_stays_its_one_node() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_leaf_naming_a_row_is_roofed();
   a_bare_leaf_is_left_alone();
   a_composite_beside_the_root_is_roofed();
   a_whole_document_is_left_alone();
   a_root_naming_the_document_stays_its_one_node();
-  return 0;
 }
 
 }  // namespace roof
@@ -540,31 +537,20 @@ void a_broken_document_is_repaired_into_a_tree() {
   misread_by_the_full_row(r.cst());
 }
 
-bool offers(const std::vector<cursiv::NextFeature>& out,
-            std::string_view spelled) {
-  for (const cursiv::NextFeature& f : out)
-    for (const std::string_view s :
-         service().getGrammar().terminalSpellings(f.feature))
-      if (s == spelled) return true;
-  return false;
-}
-
 void the_caret_reads_the_states_the_leaves_carry() {
   const std::string text = "entity A { x : String ";
-  const cursiv::ParseResult r = service().parse(text);
-  std::vector<cursiv::NextFeature> out;
   const auto at = static_cast<cursiv::TextOffset>(text.size());
-  service().nextFeaturesAt(r.cst(), at, at, out);
-  CHECK(offers(out, "}") && offers(out, "."));
+  const auto out = checks::features(service(), service().parse(text), at, at);
+  CHECK(checks::spelled(service(), out, "}") &&
+        checks::spelled(service(), out, "."));
 }
 
 }  // namespace
 
-int run() {
+void run() {
   a_clean_document_builds_its_tree();
   a_broken_document_is_repaired_into_a_tree();
   the_caret_reads_the_states_the_leaves_carry();
-  return 0;
 }
 
 }  // namespace stamp_narrow
@@ -574,7 +560,7 @@ int run() {
 // what stood before answers as it did.
 namespace cactus_rewind {
 
-int run() {
+void run() {
   cursiv::LrCactus cactus;
   const std::uint32_t root = cactus.intern(1, cursiv::kLrNoNode);
   const std::uint32_t a = cactus.intern(2, root);
@@ -599,17 +585,15 @@ int run() {
   const std::uint32_t top = wide.intern(0, cursiv::kLrNoNode);
   for (std::uint16_t s = 1; s <= 64; ++s) wide.intern(s, top);
   CHECK(wide.pay(32) == 63 && wide.pay(1) == 0);
-  return 0;
 }
 
 }  // namespace cactus_rewind
 
 int main() {
-  int status = 0;
-  status |= cactus_rewind::run();
-  status |= runtime_state::run();
-  status |= stack::run();
-  status |= roof::run();
-  status |= stamp_narrow::run();
-  return cursiv::test::report("LrRuntime_test") | status;
+  cactus_rewind::run();
+  runtime_state::run();
+  stack::run();
+  roof::run();
+  stamp_narrow::run();
+  return cursiv::test::report("LrRuntime_test");
 }

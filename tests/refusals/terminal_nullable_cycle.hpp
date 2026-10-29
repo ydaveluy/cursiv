@@ -1,3 +1,4 @@
+// expect LR: refused:.*calls itself without consuming input
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // A refused word in a loop is read by recognition, past the automaton's start:
 // the body still matches the empty string.
+// expect LR: terminal .NOISE. matches the empty string
 #pragma once
 
 #include "refusals/head.hpp"

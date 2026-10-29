@@ -497,6 +497,38 @@ inline bool ll_settled(const LlContext& c, std::uint16_t decision) {
   return ll_ends<T>(c, c.la.sym) || T.holds(T.dec_first(decision), c.la.sym);
 }
 
+// The repairs of a choice no arm of which takes the token in hand, written
+// until a pause answers: `answer` reads a pause that elected an insertion or
+// a reading, `give` is the answer where the repair gives up or nothing more
+// can be taken from the text, and `settled` says whether the token a repair
+// left in hand ends them, and with what answer where it is not `give`.
+template <const auto& T, class R, class Answer, class Settled>
+CURSIV_ALWAYS_INLINE inline R ll_fix(LlContext& c, std::uint16_t mode,
+                                     std::uint16_t decision, R give,
+                                     Answer&& answer, Settled&& settled) {
+  const Token held = c.laMode == kLaHeld ? c.la : Token{};
+  const auto done = [&](R r) {
+    ll_rehold<T>(c, held, mode);
+    return r;
+  };
+  const LlRoot root{decision, kNoRow};
+  for (;;) {
+    ll_repair_peek<T>(c);
+    const LlPause pause = ll_pause<T>(c, root);
+    if (const LlGesture* g = pause.gesture;
+        g != nullptr && g->kind != LlGesture::ins) {
+      ll_write<T>(c, mode, *g);
+      if (c.give) return done(give);
+    } else if (g != nullptr || !pause.degraded) {
+      return done(answer(pause));
+    } else if (ll_ends<T>(c, c.la.sym) || !ll_drop<T>(c)) {
+      return done(give);
+    }
+    ll_peek<T>(c, mode);
+    if (R r = give; settled(r)) return done(r);
+  }
+}
+
 // A choice no arm of which takes the token in hand: the arm a repair enters
 // with the token it owes invented in front, `kNoRow` where the text was
 // repaired until an arm reads it or none of its arms reads on.
@@ -504,31 +536,13 @@ template <const auto& T>
 CURSIV_NOINLINE inline std::uint16_t ll_choice_fix(LlContext& c,
                                                    std::uint16_t mode,
                                                    std::uint16_t decision) {
-  const Token held = c.laMode == kLaHeld ? c.la : Token{};
-  const auto done = [&](std::uint16_t arm) {
-    ll_rehold<T>(c, held, mode);
-    return arm;
-  };
-  const LlRoot root{decision, kNoRow};
-  for (;;) {
-    ll_repair_peek<T>(c);
-    const LlPause pause = ll_pause<T>(c, root);
-    if (const LlGesture* g = pause.gesture; g != nullptr) {
-      if (g->kind == LlGesture::ins) {
+  return ll_fix<T>(
+      c, mode, decision, kNoRow,
+      [&](const LlPause& pause) {
         ll_peek<T>(c, mode);
-        return done(pause.arm);
-      }
-      ll_write<T>(c, mode, *g);
-      if (c.give) return done(kNoRow);
-    } else if (!pause.degraded) {
-      ll_peek<T>(c, mode);
-      return done(pause.arm);
-    } else if (ll_ends<T>(c, c.la.sym) || !ll_drop<T>(c)) {
-      return done(kNoRow);
-    }
-    ll_peek<T>(c, mode);
-    if (ll_settled<T>(c, decision)) return done(kNoRow);
-  }
+        return pause.arm;
+      },
+      [&](std::uint16_t&) { return ll_settled<T>(c, decision); });
 }
 
 // A choice an arm of which reads the token in hand, though the prediction
@@ -563,31 +577,20 @@ template <const auto& T>
 CURSIV_NOINLINE inline std::uint8_t ll_loop_fix(LlContext& c,
                                                 std::uint16_t mode,
                                                 std::uint16_t decision) {
-  const Token held = c.laMode == kLaHeld ? c.la : Token{};
-  const auto done = [&](std::uint8_t fix) {
-    ll_rehold<T>(c, held, mode);
-    return fix;
-  };
-  const LlRoot root{decision, kNoRow};
-  for (;;) {
-    ll_repair_peek<T>(c);
-    const LlPause pause = ll_pause<T>(c, root);
-    if (const LlGesture* g = pause.gesture; g != nullptr) {
-      if (g->kind == LlGesture::ins)
-        return done(pause.arm == 1 ? kLlLoopLeave : kLlLoopTurn);
-      ll_write<T>(c, mode, *g);
-      if (c.give) return done(kLlLoopLeave);
-    } else if (!pause.degraded) {
-      ll_peek<T>(c, mode);
-      return done(pause.arm == 1   ? kLlLoopLeave
-                  : pause.arm == 0 ? kLlLoopTurn
-                                   : kLlLoopNone);
-    } else if (ll_ends<T>(c, c.la.sym) || !ll_drop<T>(c)) {
-      return done(kLlLoopLeave);
-    }
-    ll_peek<T>(c, mode);
-    if (ll_settled<T>(c, decision)) return done(kLlLoopNone);
-  }
+  return ll_fix<T>(
+      c, mode, decision, kLlLoopLeave,
+      [&](const LlPause& pause) {
+        if (pause.gesture != nullptr)
+          return pause.arm == 1 ? kLlLoopLeave : kLlLoopTurn;
+        ll_peek<T>(c, mode);
+        return pause.arm == 1   ? kLlLoopLeave
+               : pause.arm == 0 ? kLlLoopTurn
+                                : kLlLoopNone;
+      },
+      [&](std::uint8_t& fix) {
+        fix = kLlLoopNone;
+        return ll_settled<T>(c, decision);
+      });
 }
 
 // A climb whose operand stands complete before a token it cannot go on from,
@@ -602,30 +605,20 @@ template <const auto& T>
 CURSIV_NOINLINE inline std::uint16_t ll_climb_fix(LlContext& c,
                                                   std::uint16_t mode,
                                                   std::uint16_t decision) {
-  const Token held = c.laMode == kLaHeld ? c.la : Token{};
-  const auto done = [&](std::uint16_t arm) {
-    ll_rehold<T>(c, held, mode);
-    return arm;
-  };
-  const LlRoot root{decision, kNoRow};
   const std::uint16_t exitArm =
       static_cast<std::uint16_t>(T.atn.state(T.decisions[decision].state).nedges - 1u);
-  for (;;) {
-    ll_repair_peek<T>(c);
-    const LlPause pause = ll_pause<T>(c, root);
-    if (const LlGesture* g = pause.gesture; g != nullptr) {
-      if (g->kind == LlGesture::ins)
-        return done(pause.arm == exitArm ? kNoRow : pause.arm);
-      ll_write<T>(c, mode, *g);
-      if (c.give) return done(kNoRow);
-    } else if (!pause.degraded || ll_ends<T>(c, c.la.sym) || !ll_drop<T>(c)) {
-      return done(kNoRow);
-    }
-    ll_peek<T>(c, mode);
-    ll_repair_peek<T>(c);
-    if (const int reads = ll_climb_reads<T>(c, decision, c.la.sym); reads != 0)
-      return done(reads == 1 ? kLlClimbAgain : kNoRow);
-  }
+  return ll_fix<T>(
+      c, mode, decision, kNoRow,
+      [&](const LlPause& pause) {
+        return pause.gesture != nullptr && pause.arm != exitArm ? pause.arm
+                                                                : kNoRow;
+      },
+      [&](std::uint16_t& fix) {
+        ll_repair_peek<T>(c);
+        const int reads = ll_climb_reads<T>(c, decision, c.la.sym);
+        if (reads == 1) fix = kLlClimbAgain;
+        return reads != 0;
+      });
 }
 
 // What is left of the document once the entry rule has read what it can: text

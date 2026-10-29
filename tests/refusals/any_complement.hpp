@@ -1,4 +1,5 @@
 // The complement of `any` holds no character.
+// expect LR: this complement holds no character
 #pragma once
 
 #include "refusals/head.hpp"

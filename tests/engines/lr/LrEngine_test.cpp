@@ -10,7 +10,6 @@
 #include "cells/generated/G/Module.hpp"
 #include "cells/generated/G/Parser.hpp"
 #include "cells/generated/G/Table.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
@@ -29,6 +28,7 @@
 #include "edges/generated/G/Module.hpp"
 #include "edges/generated/G/Parser.hpp"
 #include "edges/generated/G/Table.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "guard/generated/G/Table.hpp"
 #include "lexicalpredicateslr/generated/Lr/Table.hpp"
 #include "nested/generated/G/Table.hpp"
@@ -36,6 +36,17 @@
 #include "shadowlr/generated/Lr/Module.hpp"
 
 // Cells and positions no look-ahead settles, split rather than guessed.
+
+namespace {
+
+// An item of the cells grammar: `x`, `run` repetitions, then arm `arm`'s end.
+std::string item(unsigned run, unsigned arm) {
+  std::string s = "x";
+  for (unsigned i = 0; i < run; ++i) s += " a";
+  return s + " end" + std::to_string(arm);
+}
+
+}  // namespace
 
 // A precedence table in a region, whose two ASTs, the descent's and this
 // engine's, must be the one AST. Then the cells and positions no look-ahead
@@ -65,14 +76,7 @@ void one_tree(const char* what, const Twin& t, std::string_view text) {
   CHECK(x == y);
 }
 
-bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
-}
-bool repaired(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  return r.accepted && !r.diagnostics.empty();
-}
+using checks::clean, checks::repaired;
 
 // A precedence table a region reaches.
 void a_table_may_stand_inside_a_region() {
@@ -98,8 +102,7 @@ void a_table_may_stand_inside_a_region() {
 // them: asking it is what tells a refusal from a lexical failure. The reader a
 // look-ahead uses owes the same answer, so the `x q` entry asks it there too.
 void a_refused_guard_leaves_the_reading_it_outranked() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "fallback:a_"));
   CHECK(clean(*p, "fallback:b_"));
   CHECK(clean(*p, "fallback:aa_"));
@@ -122,19 +125,11 @@ void a_refused_guard_leaves_the_reading_it_outranked() {
 // owed. After `a;` the leaf is the guarded terminal, which outranks the
 // identifier where it stands: `;` is offered and `_` is not.
 void a_refused_guard_leaves_the_caret_its_reading() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   const auto offers = [&](std::string_view text, cursiv::TextOffset from,
                           cursiv::TextOffset to, std::string_view literal) {
-    const std::string doc = "fallback:" + std::string(text);
-    const cursiv::ParseResult r = p->parse(doc);
-    std::vector<cursiv::NextFeature> out;
-    p->nextFeaturesAt(r.cst(), 9 + from, 9 + to, out);
-    for (const cursiv::NextFeature& f : out)
-      for (const std::string_view s :
-           p->getGrammar().terminalSpellings(f.feature))
-        if (s == literal) return true;
-    return false;
+    return checks::offers(*p, "fallback:" + std::string(text), 9 + from,
+                          9 + to, literal);
   };
   CHECK(offers("a_", 1, 2, "_"));
   CHECK(offers("b_", 1, 2, "_"));
@@ -147,8 +142,7 @@ void a_refused_guard_leaves_the_caret_its_reading() {
 // no budget separates them before the last token. Out of look-ahead, the cell
 // is split rather than guessed: the text refutes the loser.
 void a_cell_no_look_ahead_settles_is_split() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   std::string b = "cell:x", c = "cell:x";
   for (unsigned i = 0; i < 40; ++i) {
     b += " a";
@@ -162,29 +156,20 @@ void a_cell_no_look_ahead_settles_is_split() {
 // them; the others are as much the parse as it is, and the table carries the
 // states they stand in.
 void a_caret_over_a_split_cell_owes_every_arm() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   for (const std::string_view text : {"x", "x a", "x a a", "x a b", "x a c"}) {
     const std::string doc = "cell:" + std::string(text);
     const cursiv::ParseResult r = p->parse(doc);
-    std::vector<cursiv::NextFeature> out;
     // Also inspect the same split inside each clean, complete reading:
     // EOF recovery must not hide a missing sibling.
     const bool complete = doc.ends_with(" b") || doc.ends_with(" c");
     if (complete) CHECK(r.accepted && r.diagnostics.empty());
     const auto at = static_cast<cursiv::TextOffset>(doc.size() - (complete ? 2 : 0));
-    p->nextFeaturesAt(r.cst(), at, at, out);
-    bool a = false, b = false, c = false;
-    for (const cursiv::NextFeature& f : out)
-      for (const std::string_view spelled :
-           p->getGrammar().terminalSpellings(f.feature)) {
-        a = a || spelled == "a";
-        b = b || spelled == "b";
-        c = c || spelled == "c";
-      }
+    const auto out = checks::features(*p, r, at, at);
     // `b` closes one arm and `c` the other: an answer holding only one of
     // them is the cell decided by the caret instead of by the text.
-    CHECK(a && b && c);
+    for (const std::string_view arm : {"a", "b", "c"})
+      CHECK(checks::spelled(*p, out, arm));
   }
 }
 
@@ -192,8 +177,7 @@ void a_caret_over_a_split_cell_owes_every_arm() {
 // repetition nothing bounds. Out of look-ahead, the position is split like a
 // cell: one branch per candidate, on the token it stands for.
 void a_position_no_look_ahead_settles_is_split() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tedges::generated::G::create_parser();
+  const auto p = tedges::generated::G::create_parser();
   std::string t = "split x";
   for (unsigned i = 0; i < 40; ++i) {
     t += " a";
@@ -249,14 +233,11 @@ void short_items_after_a_long_one_leave_the_graph() {
 // the literal and every arm is settled: a cell is not decided by how many
 // arms it has, so forty of them read as far as two.
 std::string wide_arm(unsigned k, unsigned run) {
-  std::string text = "wide x";
-  for (unsigned i = 0; i < run; ++i) text += " a";
-  return text + " end" + std::to_string(k);
+  return "wide " + item(run, k);
 }
 
 void a_wide_cell_reads_as_far_as_a_narrow_one() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tcells::generated::G::create_parser();
+  const auto p = tcells::generated::G::create_parser();
   for (unsigned run = 0; run <= 10; ++run)
     for (unsigned k = 0; k < 40; ++k) CHECK(clean(*p, wide_arm(k, run)));
 }
@@ -266,8 +247,7 @@ void a_wide_cell_reads_as_far_as_a_narrow_one() {
 // every arm the cell has, whatever the floor of sixteen says. Forty arms and
 // a hundred and twenty repetitions: every one of them reads clean.
 void a_cell_splits_as_wide_as_it_is() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tcells::generated::G::create_parser();
+  const auto p = tcells::generated::G::create_parser();
   for (unsigned k = 0; k < 40; ++k) CHECK(clean(*p, wide_arm(k, 120)));
 }
 
@@ -276,8 +256,7 @@ void a_cell_splits_as_wide_as_it_is() {
 // pool had no room for is unread, not refuted, and a cell decided from what
 // was read would delete text the author wrote.
 void a_reading_the_pool_had_no_room_for_refutes_nothing() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tcells::generated::G::create_parser();
+  const auto p = tcells::generated::G::create_parser();
   for (unsigned k = 0; k < 40; ++k)
     for (const char* tail : {"b", "c"})
       CHECK(clean(*p, "nested x y end" + std::to_string(k) + " " + tail));
@@ -287,13 +266,7 @@ void a_reading_the_pool_had_no_room_for_refutes_nothing() {
 // it takes is the text's, not the state's. Read twice in one document, the
 // long occurrence must leave the short one alone.
 void a_cell_given_up_on_once_is_read_again() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tcells::generated::G::create_parser();
-  const auto item = [](unsigned run, unsigned arm) {
-    std::string s = "x";
-    for (unsigned i = 0; i < run; ++i) s += " a";
-    return s + " end" + std::to_string(arm);
-  };
+  const auto p = tcells::generated::G::create_parser();
   CHECK(clean(*p, item(1, 16)));
   CHECK(clean(*p, item(120, 0)));
   CHECK(clean(*p, item(1, 0) + ";" + item(1, 16)));
@@ -302,7 +275,7 @@ void a_cell_given_up_on_once_is_read_again() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_table_may_stand_inside_a_region();
   a_refused_guard_leaves_the_reading_it_outranked();
   a_refused_guard_leaves_the_caret_its_reading();
@@ -315,7 +288,6 @@ int run() {
   a_cell_splits_as_wide_as_it_is();
   a_reading_the_pool_had_no_room_for_refutes_nothing();
   a_cell_given_up_on_once_is_read_again();
-  return 0;
 }
 
 }  // namespace engine
@@ -326,12 +298,6 @@ int run() {
 namespace audit {
 
 namespace {
-
-std::string item(unsigned run, unsigned arm) {
-  std::string s = "x";
-  for (unsigned i = 0; i < run; ++i) s += " a";
-  return s + " end" + std::to_string(arm);
-}
 
 // One verdict per document, in a form two orders can be compared on.
 int verdict(const cursiv::Parser& p, const std::string& text) {
@@ -355,7 +321,7 @@ void both_orders_answer_the_same(const char* name,
 
 }  // namespace
 
-int run() {
+void run() {
   // Seventeen arms under a branch cap of seventeen, reached by runs long
   // enough to spend the budget.
   std::vector<std::string> cells;
@@ -377,7 +343,6 @@ int run() {
                         " " + tail);
   both_orders_answer_the_same("flood", tcells::generated::G::create_parser(),
                               tcells::generated::G::create_parser(), flood);
-  return 0;
 }
 
 }  // namespace audit
@@ -439,11 +404,9 @@ void sweep(const char* what, const cursiv::Parser& p, const std::string& head,
 
 }  // namespace
 
-int run() {
-  const std::unique_ptr<cursiv::Parser> lr =
-      tcells::generated::G::create_parser();
-  const std::unique_ptr<cursiv::AstReflection> lrR =
-      tcells::generated::G::create_ast_reflection();
+void run() {
+  const auto lr = tcells::generated::G::create_parser();
+  const auto lrR = tcells::generated::G::create_ast_reflection();
   // The lengths that move the verdict: none, one, and long enough to put the
   // deciding token out of the oracle's reach. Between them the answer never
   // changed over the audit's wider sweep.
@@ -484,7 +447,7 @@ int run() {
     std::printf("fuzz records=%zu\n", records);
   }
   std::printf("bad=%d\n", bad);
-  return bad == 0 ? 0 : 1;
+  CHECK(bad == 0);
 }
 
 }  // namespace nested_split
@@ -643,8 +606,7 @@ void unmatched_text_is_read_once() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_failed_walk_is_the_walk();
   a_failed_walk_halts_as_the_lexer<tguard::generated::G::kTable>(
       "refused heads",
@@ -660,16 +622,13 @@ int run() {
       13);
   the_unmatched_text_ends_where_it_did();
   unmatched_text_is_read_once();
-  return 0;
 }
 }  // namespace case_lrunmatched
 
 int main() {
-  int movedStatus = 0;
-  movedStatus |= case_lrunmatched::run();
-  int status = 0;
-  status |= engine::run();
-  status |= audit::run();
-  status |= nested_split::run();
-  return (cursiv::test::report("LrEngine_test") | status) | movedStatus;
+  case_lrunmatched::run();
+  engine::run();
+  audit::run();
+  nested_split::run();
+  return cursiv::test::report("LrEngine_test");
 }

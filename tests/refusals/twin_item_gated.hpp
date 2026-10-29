@@ -2,6 +2,7 @@
 // a sequence so wide that the gate spells its first positions as auxiliaries:
 // the second read in place of the first is named and dropped as in a narrow
 // one.
+// expect LR LL: warning: rule .Root.: ..b=ID... reads the same tokens as the earlier ..a=ID..., so reading it in place of that item is never chosen and is dropped
 #pragma once
 
 #include "refusals/head.hpp"

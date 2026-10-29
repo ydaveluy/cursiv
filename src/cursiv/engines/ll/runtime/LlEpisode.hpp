@@ -317,9 +317,8 @@ class LlEpisode {
     _sim = &ll_episode_sim<T>(tracked);
     if constexpr (kIndented<T>) ll_indent_copy(ctx(), _own);
     _entryRule = ctx().document;
-    const auto clear = [](auto&... x) { (x.clear(), ...); };
-    clear(_positions, _entries, _below, _ways, _frontier, _final, _ends,
-          _kernels.up);
+    ll_clear(_positions, _entries, _below, _ways, _frontier, _final, _ends,
+             _kernels.up);
     _decided = _early = _halted = false;
     _chosenAt = 0;
     _answer = kNoRow;
@@ -714,10 +713,8 @@ class LlEpisode {
     _lost.clear();
     for (std::size_t k = 0; k < threads.size(); ++k) {
       if (!of(k)) continue;
-      const LlAtnState& s = T.atn.state(threads[k].state);
       bool reads = false, asks = false, holds = false;
-      for (std::uint32_t e = 0; e < s.nedges; ++e) {
-        const LlAtnEdge& edge = T.atn.edge(s.edge + e);
+      for (const LlAtnEdge& edge : T.atn.outgoing(threads[k].state)) {
         asks = asks || edge.kind == LlEdgeKind::atom;
         reads = reads ||
                 (edge.kind == LlEdgeKind::atom && elected.test(edge.label));
@@ -835,9 +832,7 @@ class LlEpisode {
     if (top == 0) return false;
     bool read_top = false, read_rest = false;
     for (const LlThread& t : threads) {
-      const LlAtnState& s = T.atn.state(t.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const LlAtnEdge& e = T.atn.edge(s.edge + i);
+      for (const LlAtnEdge& e : T.atn.outgoing(t.state)) {
         if (e.kind != LlEdgeKind::atom) continue;
         const auto at = std::find(read.begin(), read.end(), e.label);
         if (at == read.end()) continue;
@@ -941,9 +936,7 @@ class LlEpisode {
   static bool takes(const std::vector<LlThread>& threads, const Token& token,
                     TextOffset end, const std::vector<std::uint16_t>& read) {
     for (const LlThread& t : threads) {
-      const LlAtnState& s = T.atn.state(t.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const LlAtnEdge& e = T.atn.edge(s.edge + i);
+      for (const LlAtnEdge& e : T.atn.outgoing(t.state)) {
         if (e.kind != LlEdgeKind::atom) continue;
         if (token.end > end
                 ? e.label == token.sym
@@ -968,11 +961,9 @@ class LlEpisode {
 
   // The terminals reading `t` reads next, added to `into`: false where none.
   static bool atoms_into(const LlThread& t, LlMask<T.termWords>& into) {
-    const LlAtnState& s = T.atn.state(t.state);
     bool any = false;
-    for (std::uint32_t i = 0; i < s.nedges; ++i)
-      if (const LlAtnEdge& e = T.atn.edge(s.edge + i);
-          e.kind == LlEdgeKind::atom) {
+    for (const LlAtnEdge& e : T.atn.outgoing(t.state))
+      if (e.kind == LlEdgeKind::atom) {
         into.set(e.label);
         any = true;
       }

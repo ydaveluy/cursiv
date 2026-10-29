@@ -14,6 +14,7 @@
 #include "cursiv/test/Check.hpp"
 #include "door/generated/G/Module.hpp"
 #include "engines/lr/DoorGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/PassesGrammar.hpp"
 #include "passes/generated/G/Module.hpp"
 
@@ -33,14 +34,7 @@ const cursiv::Parser& passes() {
   return *p;
 }
 
-bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  return r.accepted && r.diagnostics.empty() && r.value != nullptr;
-}
-bool repaired(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(text);
-  return r.accepted && !r.diagnostics.empty();
-}
+using checks::clean, checks::repaired;
 
 // A case of the passes grammar: its opening keyword, then the text.
 bool clean(std::string_view head, std::string_view text) {
@@ -78,8 +72,7 @@ void terminal_alternatives_keep_their_continuations() {
 
 // The entry's empty production adds no action of the production after it.
 void an_empty_production_reads_no_neighbour() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tpasses::generated::G::create_parser();
+  const auto p = tpasses::generated::G::create_parser();
   CHECK(clean(*p, ""));
   CHECK(clean(*p, "k m x"));
   CHECK(repaired(*p, "m x"));
@@ -101,13 +94,11 @@ void a_peek_never_crosses_a_lex_mode() {
   for (const std::string body : {"b x in foo", "b x foo bar"}) {
     const std::string head = "peek ";
     const std::string text = head + body;
-    const auto result = p->parse(text);
-    std::vector<cursiv::NextFeature> next;
     const auto from = static_cast<cursiv::TextOffset>(head.size() + 4);
     const auto end = static_cast<cursiv::TextOffset>(text.find(' ', from));
-    p->nextFeaturesAt(result.cst(), from, end, next);
     bool id = false, in = false;
-    for (const auto& feature : next) {
+    for (const auto& feature :
+         checks::features(*p, p->parse(text), from, end)) {
       const auto name = p->getGrammar().terminalName(feature.feature);
       const auto spellings = p->getGrammar().terminalSpellings(feature.feature);
       const bool spellsIn = spellings.size() == 1 && spellings.front() == "in";
@@ -128,14 +119,13 @@ void an_unbounded_repetition_keeps_its_floor() {
 
 }  // namespace
 
-int run() {
+void run() {
   minimisation_keeps_every_goto();
   end_assertion_survives_the_unit_passes();
   terminal_alternatives_keep_their_continuations();
   an_empty_production_reads_no_neighbour();
   a_peek_never_crosses_a_lex_mode();
   an_unbounded_repetition_keeps_its_floor();
-  return 0;
 }
 
 }  // namespace passes
@@ -168,8 +158,7 @@ std::string names(const Engine& engine, std::string_view head,
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   const auto e = tpasses::generated::G::create_parser();
   std::printf("spelled: '%s' | '%s' | '%s'\n",
               names(e, "soft ", "type = 5").c_str(),
@@ -189,7 +178,6 @@ int run() {
   CHECK(names(e, "soft ", "{get: 1}") == " <repaired>");
   CHECK(names(e, "soft ", "{get x {}}") == "x");
   CHECK(names(e, "soft ", "{a: 1, get: 2}") == "a <repaired>");
-  return 0;
 }
 
 }  // namespace soft_keyword
@@ -215,8 +203,7 @@ char kid(const cursiv::Parser& p, std::string_view head,
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   const auto p = tpasses::generated::G::create_parser();
   for (const std::string_view head : {"plain ", "grown "}) {
     CHECK(kid(*p, head, "x c") == 'A');
@@ -224,7 +211,6 @@ int run() {
   }
   CHECK(kid(*p, "context ", "x c w") == 'A');
   CHECK(kid(*p, "context ", "y c w") == 'B');
-  return 0;
 }
 
 }  // namespace rank_context
@@ -251,18 +237,16 @@ const ast::Kid* kid_of(const cursiv::Parser& p, std::string_view body) {
 
 }  // namespace
 
-int run() {
+void run() {
   const auto parser = tpasses::generated::G::create_parser();
   CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x y q")) != nullptr);
   CHECK(cursiv::ast_cast<ast::Wrap>(kid_of(*parser, "c x y r")) != nullptr);
   CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x #")) != nullptr);
   CHECK(cursiv::ast_cast<ast::AKid>(kid_of(*parser, "c x y #")) != nullptr);
-  return 0;
 }
 
 }  // namespace settle_phase
 
-namespace case_lrdoor {
 // The small languages of the door grammar, read through the parser.
 
 // The walk reads to where the automaton dies and hands back the last place it
@@ -275,7 +259,7 @@ namespace case_lrdoor {
 // of how far the automaton can run from a place is kept.
 namespace maximal_munch {
 
-int run() {
+void run() {
   const auto engine = tdoor::generated::G::create_parser();
   for (const std::size_t n : {std::size_t{64}, std::size_t{4000}}) {
     const std::string text = "munch " + std::string(n, 'a');
@@ -294,7 +278,6 @@ int run() {
   if (const auto* const doc = r.value_as<tmunch::ast::Doc>())
     CHECK(doc->parts.size() == 1);
   std::printf("  a run read one name at a time, and closed read as one\n");
-  return 0;
 }
 
 }  // namespace maximal_munch
@@ -306,7 +289,7 @@ int run() {
 // looks again.
 namespace high_byte {
 
-int run() {
+void run() {
   const auto engine = tdoor::generated::G::create_parser();
   // Long enough for the eight-byte step to run at all.
   const std::string texts[] = {"abcdefghij",
@@ -335,7 +318,6 @@ int run() {
     const cursiv::ParseResult r = engine->parse(doc);
     CHECK(r.accepted && r.diagnostics.empty());
   }
-  return 0;
 }
 
 }  // namespace high_byte
@@ -376,8 +358,7 @@ void one_operator_of_several_words(const cursiv::Parser& p,
 }
 
 void the_words_and_the_trivia_between_them() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tdoor::generated::G::create_parser();
+  const auto p = tdoor::generated::G::create_parser();
   one_operator_of_several_words(*p, "a is b", Cmp::is);
   one_operator_of_several_words(*p, "a is not b", Cmp::is_not);
   one_operator_of_several_words(*p, "a != b", Cmp::is_not);
@@ -389,8 +370,7 @@ void the_words_and_the_trivia_between_them() {
 }
 
 void the_step_rides_the_opening_token() {
-  const std::unique_ptr<cursiv::Parser> p =
-      tdoor::generated::G::create_parser();
+  const auto p = tdoor::generated::G::create_parser();
   const cursiv::ParseResult r = p->parse("infix a is not b and c is less d");
   CHECK(r.accepted && r.diagnostics.empty());
   const Bin* root = as_bin(r.value);
@@ -411,10 +391,9 @@ void the_step_rides_the_opening_token() {
 
 }  // namespace
 
-int run() {
+void run() {
   the_words_and_the_trivia_between_them();
   the_step_rides_the_opening_token();
-  return 0;
 }
 
 }  // namespace infix_op
@@ -470,10 +449,7 @@ std::string read(std::string_view text) {
 }
 
 bool same(std::string_view text, std::string_view want) {
-  const std::string got = read(text);
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return checks::matches(text, read(text), want);
 }
 
 namespace paren {
@@ -507,18 +483,14 @@ std::string read(std::string_view text) {
 }
 
 bool same(std::string_view text, std::string_view want) {
-  const std::string got = read(text);
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return checks::matches(text, read(text), want);
 }
 
 }  // namespace paren
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   // A lone operand, assigned or not.
   CHECK(same("i;", "i"));
   CHECK(same("1;", "1"));
@@ -539,7 +511,6 @@ int run() {
   CHECK(paren::same("let : a | b", "(a|b)"));
   CHECK(paren::same("let : (a | b)", "(a|b)"));
   CHECK(paren::same("let : ((a)) | (b | c)", "(a|(b|c))"));
-  return 0;
 }
 
 }  // namespace nest_after_infix
@@ -678,8 +649,7 @@ void long_postfix_chain() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   long_postfix_chain();
   long_postfix_chain_beside_a_fault();
   CHECK(sound("a+b(c).d;"));
@@ -688,7 +658,6 @@ int run() {
   CHECK(sound("a.b(c}(d).1* (f + g);"));
   CHECK(sound("f(){ x = a * b(c)(d).1 + g; }"));
   CHECK(sound("a * b(c)(d).1 + g;"));
-  return 0;
 }
 
 }  // namespace nest_recovered
@@ -723,8 +692,7 @@ bool converted_nothing(const cursiv::ParseResult& r) {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   {
     const auto r = parse("let x = -5 v 1.2 @ 12:345;");
     const Decl* const d = first(r);
@@ -749,7 +717,6 @@ int run() {
     CHECK(r.accepted && d != nullptr && d->pair == -1);
   }
   CHECK(tdatains::fewestParts == 3);
-  return 0;
 }
 
 }  // namespace data_inserted
@@ -776,7 +743,7 @@ void row(const cursiv::Parser& p, const char* who, const std::string& body) {
 }
 }  // namespace
 
-int run() {
+void run() {
   const std::unique_ptr<cursiv::Parser> p = tdoor::generated::G::create_parser();
   row(*p, "plain", "k a end");
   row(*p, "plain", "k a done");
@@ -786,33 +753,22 @@ int run() {
   for (const char* d : {"k { } end", "k { } done", "k { a } end",
                         "k { a } done", "k { a ; b } end", "k { a ; b } done"})
     row(*p, "sh", d);
-  return 0;
 }
 
 }  // namespace twin_arm
 
-int run() {
-  int status = 0;
-  status |= maximal_munch::run();
-  status |= high_byte::run();
-  status |= infix_op::run();
-  status |= nest_after_infix::run();
-  status |= nest_recovered::run();
-  status |= data_inserted::run();
-  status |= twin_arm::run();
-  return 0 | status;
-}
-}  // namespace case_lrdoor
-
-int run() {
-  int movedStatus = 0;
-  movedStatus |= case_lrdoor::run();
-  int status = 0;
-  status |= passes::run();
-  status |= soft_keyword::run();
-  status |= rank_context::run();
-  status |= settle_phase::run();
-  return (cursiv::test::report("LrPasses_test") | status) | movedStatus;
+void run() {
+  maximal_munch::run();
+  high_byte::run();
+  infix_op::run();
+  nest_after_infix::run();
+  nest_recovered::run();
+  data_inserted::run();
+  twin_arm::run();
+  passes::run();
+  soft_keyword::run();
+  rank_context::run();
+  settle_phase::run();
 }
 
 }  // namespace lr_passes_cases

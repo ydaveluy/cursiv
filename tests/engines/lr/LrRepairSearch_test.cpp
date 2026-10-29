@@ -752,7 +752,6 @@ std::vector<cursiv::ParseDiagnostic> repaired_indent(std::string_view text) {
 
 }  // namespace
 
-namespace case_lrrepairchoice {
 // Which repair a reading makes, and what it costs over a long document.
 
 // Which repair a reading makes, and how much the search opens to find it.
@@ -877,14 +876,13 @@ void a_deletion_names_the_token_it_resumes_on() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_missing_terminator_is_inserted_where_the_construct_closes();
   a_stray_indent_is_said_once();
   a_refused_word_at_the_end_is_not_an_open_token();
   a_deletion_names_the_token_it_resumes_on();
   a_token_refused_in_its_middle_ends_at_its_closer();
   an_open_comment_ends_where_the_code_resumes();
-  return 0;
 }
 
 }  // namespace repair_choice
@@ -980,25 +978,15 @@ void a_run_of_closers_replays_in_one_pass() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_fault_per_member_is_said_once_each();
   readings_frozen_alike_do_not_fill_the_room();
   a_document_of_close_faults_reads_in_one_pass();
   a_run_of_closers_replays_in_one_pass();
-  return 0;
 }
 
 }  // namespace repair_scale
 
-int run() {
-  int status = 0;
-  status |= repair_choice::run();
-  status |= repair_scale::run();
-  return 0 | status;
-}
-}  // namespace case_lrrepairchoice
-
-namespace case_lrrepaircost {
 // Repairs over long documents: their cost, their ledger, and the arms a
 // repaired reading forks.
 
@@ -1035,9 +1023,8 @@ void a_document_of_stray_bytes_is_read_in_one_pass() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_document_of_stray_bytes_is_read_in_one_pass();
-  return 0;
 }
 
 }  // namespace repair_cost
@@ -1089,9 +1076,8 @@ void a_document_of_faults_is_covered_at_any_length() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_document_of_faults_is_covered_at_any_length();
-  return 0;
 }
 
 }  // namespace ledger
@@ -1132,8 +1118,7 @@ std::string tail(unsigned n) {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   bool accepted = false;
   std::size_t repairs = 0;
   // The tail alone: one fork per statement, merged at the next.
@@ -1147,19 +1132,9 @@ int run() {
   for (unsigned i = 0; i < 64; ++i) lines += "k p a\nb;\n";
   (void)parse_nl(lines, accepted);
   CHECK(accepted);
-  return 0;
 }
 
 }  // namespace ambiguous_tail
-
-int run() {
-  int status = 0;
-  status |= repair_cost::run();
-  status |= ledger::run();
-  status |= ambiguous_tail::run();
-  return 0 | status;
-}
-}  // namespace case_lrrepaircost
 
 namespace case_lrrepairtables {
 // Repair metadata must describe the emitted automata exactly, independently
@@ -1262,11 +1237,10 @@ void matches_the_emitted_automata() {
 
 }  // namespace
 
-int run() {
+void run() {
   matches_the_emitted_automata<tpar::generated::Lr::kTable>();
   matches_the_emitted_automata<tasi::cases::generated::G::kTable>();
   matches_the_emitted_automata<tnestedlex::generated::G::kTable>();
-  return 0;
 }
 }  // namespace case_lrrepairtables
 
@@ -1300,19 +1274,19 @@ void a_repair_never_cuts_a_code_point() {
 
 }  // namespace
 
-int run() {
-  cursiv::test::count_expectations();
+void run() {
   a_repair_never_cuts_a_code_point();
-  return 0;
 }
 }  // namespace case_lrtypoutf8
 
 int main() {
-  int movedStatus = 0;
-  movedStatus |= case_lrrepairchoice::run();
-  movedStatus |= case_lrrepaircost::run();
-  movedStatus |= case_lrrepairtables::run();
-  movedStatus |= case_lrtypoutf8::run();
+  repair_choice::run();
+  repair_scale::run();
+  repair_cost::run();
+  ledger::run();
+  ambiguous_tail::run();
+  case_lrrepairtables::run();
+  case_lrtypoutf8::run();
   a_stop_at_recovery_discards_the_partial_tree();
   phases_and_generators_name_what_they_stand_for();
   insertion_allowance_is_part_of_the_future();
@@ -1460,5 +1434,5 @@ int main() {
     const auto d = repaired_indent("a:\n  b:\n  *  c\nx\n");
     CHECK(d.size() == 1);
   }
-  return (cursiv::test::report("LrRepairSearch_test")) | movedStatus;
+  return cursiv::test::report("LrRepairSearch_test");
 }

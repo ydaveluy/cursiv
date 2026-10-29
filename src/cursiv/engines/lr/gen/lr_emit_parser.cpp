@@ -208,8 +208,6 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   bool multiMode(unsigned m) const { return a.modeMulti[m] == 1; }
   bool eofMode(unsigned m) const { return a.modeMulti[m] == 2; }
   bool sweepMode(unsigned m) const { return a.modeMulti[m] != 0; }
-  // Whether a mode flags a terminal that a stack may refuse.
-  bool flags(unsigned m) const { return a.flags_mode(m); }
   // Whether a mode's ladder stops short, so its walk ends in the flat DFA rows.
   bool anyPartialLadder() const {
     for (unsigned m = 0; m < a.nmodes; ++m)
@@ -382,9 +380,8 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
             [&](std::size_t t) { num(a.cfg.terms[t].element); });
   }
 
-  bool scalars() const { return a.cfg.wordRanges.size() != 0; }
   bool marked(unsigned set) const {
-    return (scalars() || a.cfg.scalarRanges.size() != 0) &&
+    return (a.cfg.wordRanges.size() != 0 || a.cfg.scalarRanges.size() != 0) &&
            a.cfg.setDecode[set] != kNoSet;
   }
 
@@ -870,11 +867,6 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 )");
   }
 
-  // Only an unguarded one-byte literal with no continuation bypasses the lexer.
-  bool byte_literal(unsigned m, unsigned t) const {
-    return lex_byte_literal(view, m, t);
-  }
-
   mutable std::unordered_map<unsigned, DynSet> reachedTerms{};
 
   // The terminals a walk entering DFA state `e` may answer.
@@ -1115,7 +1107,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
           indentTerm, dedentTerm, multiMode(m) ? "    c.ncand = 0;\n" : "", m);
     fmt("  lex_tail_{}(c, c.committed, {});\n", tailLead[m], m);
     if (a.modeLonger[m] != kNoMode) line("  lengthen(c);");
-    if (flags(m))
+    if (a.flags_mode(m))
       fmt("  if (kTable.flagged({0}, c.la.sym)) [[unlikely]] "
           "::cursiv::lr_drive_exact<kTable>(c, {0});\n",
           m);
@@ -1686,7 +1678,7 @@ again:
       const auto& x = row[i];
       if (conflicted(s, i) || x.kind == LrActionKind::guard ||
           (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap != 0) ||
-          !byte_literal(m, x.term))
+          !lex_byte_literal(view, m, x.term))
         continue;
       if (literals.size() == kLrProbeLits) {
         cut = true;
@@ -1706,7 +1698,7 @@ again:
       const LrAction& x = row[lo];
       if (x.kind == LrActionKind::shift) return &x;
       if (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap == 0 &&
-          !(flags(m) && a.modeFlag[m].test(t)))
+          !(a.flags_mode(m) && a.modeFlag[m].test(t)))
         return &x;
       return nullptr;
     };
@@ -1834,7 +1826,7 @@ again:
       line("    }");
     }
     fmt("    lex_tail_{}(c, p, {});\n", tailLead[m], m);
-    if (flags(m))
+    if (a.flags_mode(m))
       fmt("    if (kTable.flagged({0}, c.la.sym)) [[unlikely]] "
           "::cursiv::lr_drive_exact<kTable>(c, {0});\n",
           m);

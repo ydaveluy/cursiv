@@ -41,8 +41,6 @@
 
 namespace cursiv {
 
-inline void ll_search_clear(auto&... x) { (x.clear(), ...); }
-
 inline std::uint32_t ll_search_link(LlSearch& s, const LlGesture& g) {
   s.links.push_back(g);
   return static_cast<std::uint32_t>(s.links.size()) - 1;
@@ -536,7 +534,7 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
   f.reading = i;
   f.cfg = r.cfg;
   f.n = r.ncfg;
-  ll_search_clear(f.viable, f.due, f.rest, f.modes, f.bits, f.written);
+  ll_clear(f.viable, f.due, f.rest, f.modes, f.bits, f.written);
   ll_search_load(s, r);
   if constexpr (T.ngapConds != 0) {
     const Token tok = ll_search_peek<T>(c, s, s.nodes[i]);
@@ -1363,9 +1361,9 @@ std::uint32_t ll_search_elect(LlContext& c, LlSearch& s, bool& raced) {
 // A plan names the pool of the search that laid it: a search that lays another
 // drops it.
 inline void ll_search_reset(LlSearch& s) {
-  ll_search_clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed,
-                  s.scans, s.readings, s.ends, s.typos, s.drops, s.plan, s.also,
-                  s.tied, s.depths, s.sourceTokens);
+  ll_clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed, s.scans,
+           s.readings, s.ends, s.typos, s.drops, s.plan, s.also, s.tied,
+           s.depths, s.sourceTokens);
   s.facts.cfg = kLlNoNode;
   s.sourceScanned = s.sourceCount = s.seq = 0;
   s.next = 0;

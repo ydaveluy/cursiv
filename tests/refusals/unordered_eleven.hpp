@@ -1,6 +1,8 @@
 // Eleven items in any order, the most either engine spells: a rule and three
 // positions for every subset in the descent, a production for every subset in
 // the table.
+// expect LR: refusal_unordered_eleven: states=
+// expect LL: refusal_unordered_eleven_ll: terms=
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,3 +1,4 @@
+// expect LR: refused: terminal .OUTER. echoes a mark<> not set in its scope
 #pragma once
 #include "refusals/head.hpp"
 namespace refuse {

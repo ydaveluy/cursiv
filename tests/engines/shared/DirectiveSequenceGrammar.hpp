@@ -119,7 +119,6 @@ struct Chosen : Base {
   };
 };
 
-
 struct Suite : Base {
   struct Root : rule<(lit<"dotted:"> + ref<Dotted::Root>) |
                      (lit<"enumerated:"> + ref<Enumerated::Root>) |
@@ -301,7 +300,6 @@ struct Created : Base {
                      eof> {};
 };
 
-
 struct Suite : Base {
   struct Root : rule<(lit<"init:"> + ref<Init::Root>) |
                      (lit<"counted:"> + ref<Counted::Root>) |
@@ -407,7 +405,6 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = COMMENT;
 };
-
 
 }  // namespace tdataparts
 

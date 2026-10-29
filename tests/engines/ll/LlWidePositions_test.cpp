@@ -18,6 +18,7 @@
 #include "cursiv/engines/shared/runtime/LexSuffixSession.hpp"
 #include "cursiv/engines/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/ll/WidePositionsGrammar.hpp"
 #include "wideposll/generated/Ll/Grammar.hpp"
 #include "wideposll/generated/Ll/Module.hpp"
@@ -30,12 +31,9 @@ constexpr std::size_t kPositions = twidepos::kLeading + 2;
 constexpr auto kStamp = *cursiv::stamp_split(0, kPositions + 1);
 static_assert(kStamp.rowBits == 15);
 
-constexpr std::uint16_t terminal(std::string_view spelling) {
-  for (std::uint16_t t = 1; t < kLexer.nterms; ++t)
-    if (kLexer.term_text(t) == spelling) return t;
-  return cursiv::kInvalidSymbol;
-}
-constexpr auto kA = terminal("a"), kB = terminal("b"), kC = terminal("c");
+constexpr auto kA = ll_terms::spelled<kLexer>("a"),
+               kB = ll_terms::spelled<kLexer>("b"),
+               kC = ll_terms::spelled<kLexer>("c");
 static_assert(kA != cursiv::kInvalidSymbol && kB != cursiv::kInvalidSymbol &&
               kC != cursiv::kInvalidSymbol);
 

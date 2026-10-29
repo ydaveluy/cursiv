@@ -1,5 +1,7 @@
 // An operator spelling a terminal the grammar skips: the descent lays the
 // operator's rule in place, so the refusal names the table it stands in.
+// expect LR: refused .skippedTerminal..*rule .Plus. names a terminal its reading skips as trivia
+// expect LL: refused .skippedTerminal..*rule .Sum. names a terminal its reading skips as trivia
 #pragma once
 
 #include "refusals/head.hpp"

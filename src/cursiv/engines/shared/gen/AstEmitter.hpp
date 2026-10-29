@@ -95,7 +95,9 @@ struct AstEmitter : EmitOutput {
 
   static std::string u(unsigned long long v) { return std::to_string(v) + "u"; }
 
-  bool derives(std::uint16_t base, std::uint16_t sub) const;
+  bool derives(std::uint16_t base, std::uint16_t sub) const {
+    return reg.subtype(base, sub);
+  }
   // A write whose declaring class the created node satisfies fills that node;
   // the other direction holds for a close alone, which may adopt a subclass.
   bool fills(std::uint16_t cr, std::uint16_t r) const;

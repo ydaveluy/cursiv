@@ -1,5 +1,6 @@
 // An implied token is a literal: a terminal that reads more than one has no
 // spelling to lay.
+// expect LR LL: implied.tok, cond.. lays a token of no width, so .tok. is an unguarded literal
 #pragma once
 
 #include "refusals/head.hpp"

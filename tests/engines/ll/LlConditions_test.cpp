@@ -24,6 +24,7 @@
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/ConditionsGrammar.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "gluedll/generated/GluedLl/Module.hpp"
 #include "impliedrivalll/generated/RivalLl/Module.hpp"
 #include "impliedrivallr/generated/RivalLr/Module.hpp"
@@ -35,12 +36,8 @@ namespace {
 
 namespace cache_test {
 constexpr const auto& base = tllconditions::generated::Ll::kTable;
-constexpr auto identifier = [] {
-  for (std::uint16_t i = 1; i < base.nterms; ++i)
-    if (base.term_name(i) == "ID") return i;
-  return cursiv::kNoRow;
-}();
-static_assert(identifier != cursiv::kNoRow);
+constexpr auto identifier = ll_terms::named<base>("ID");
+static_assert(identifier != cursiv::kInvalidSymbol);
 constexpr cursiv::LlAtnState states[] = {
     {cursiv::LlAtnKind::basic, 0, 0, 0, 2},
     {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 2, 1},

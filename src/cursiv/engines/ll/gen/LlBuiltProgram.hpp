@@ -52,6 +52,13 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint8_t> nullable{};
   std::vector<DynSet> ruleFirst{};
   std::vector<DynSet> ruleFollow{};
+  // What a position may begin with, and -- where nothing at all is a reading
+  // of it -- whatever follows it.
+  DynSet lookahead(std::uint16_t id, const DynSet& follow) const {
+    DynSet s = first[id];
+    if (nullable[id]) s |= follow;
+    return s;
+  }
   // The rules the entry reaches, a climb's operators and operand included.
   std::vector<bool> liveRules{};
 

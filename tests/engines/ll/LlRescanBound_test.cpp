@@ -14,6 +14,7 @@
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/engines/ll/runtime/ll_rescan.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/ll/RescanBoundAst.hpp"
 #include "rescannarrowll/generated/NarrowLl/Module.hpp"
 #include "rescannarrowll/generated/NarrowLl/Table.hpp"
@@ -23,13 +24,7 @@
 namespace {
 
 namespace gen = tllrescan::generated;
-
-template <const auto& T>
-constexpr std::uint16_t term_of(std::string_view name) {
-  for (std::uint16_t t = 1; t < T.nterms; ++t)
-    if (T.term_name(t) == name) return t;
-  return cursiv::kInvalidSymbol;
-}
+using ll_terms::named;
 
 // The first of the terminals a point owes, a set of them, that are read again
 // at the end of `word`, with `text` behind the re-reading.
@@ -38,7 +33,7 @@ cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
                             std::initializer_list<std::string_view> owes) {
   std::array<std::uint64_t, T.termWords> want{};
   for (const std::string_view name : owes) {
-    const std::uint16_t t = term_of<T>(name);
+    const std::uint16_t t = named<T>(name);
     want[t >> 6] |= std::uint64_t{1} << (t & 63u);
   }
   std::uint16_t state = T.modeStart[T.errMode];
@@ -62,7 +57,7 @@ cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
 // the requested readings must fall back to the error alphabet.
 template <const auto& T>
 void hinted_readings_agree(std::string_view first, std::string_view second) {
-  const auto a = term_of<T>(first), b = term_of<T>(second);
+  const auto a = named<T>(first), b = named<T>(second);
   for (const std::string_view text : {"abc;", "abc.", "abcd;", "abcd.", "abc"})
     for (unsigned mask = 1; mask < 4; ++mask) {
       cursiv::LlMask<T.termWords> wanted;
@@ -106,11 +101,11 @@ int main() {
   // word, and is the one that stands there.
   constexpr const auto& narrow = gen::NarrowLl::kTable;
   CHECK(owed_after<narrow>("abc", "abc;", {"BOUNDED", "LONGER"}) ==
-        term_of<narrow>("LONGER"));
+        named<narrow>("LONGER"));
   CHECK(owed_after<narrow>("abc", "abc.", {"BOUNDED", "LONGER"}) ==
-        term_of<narrow>("BOUNDED"));
+        named<narrow>("BOUNDED"));
   CHECK(owed_after<narrow>("abc", "abcd", {"BOUNDED", "LONGER"}) ==
-        term_of<narrow>("BOUNDED"));
+        named<narrow>("BOUNDED"));
 
   // The one declared first has the frontier that refuses; the one elected
   // where both accept has none, and ends at a word.
@@ -118,9 +113,9 @@ int main() {
   hinted_readings_agree<narrow>("BOUNDED", "LONGER");
   hinted_readings_agree<shadow>("BOUNDED", "SPELLED");
   CHECK(owed_after<shadow>("abc", "abc;", {"BOUNDED", "SPELLED"}) ==
-        term_of<shadow>("SPELLED"));
+        named<shadow>("SPELLED"));
   CHECK(owed_after<shadow>("abc", "abc.", {"BOUNDED", "SPELLED"}) ==
-        term_of<shadow>("BOUNDED"));
+        named<shadow>("BOUNDED"));
 
   struct Case {
     std::string_view text;

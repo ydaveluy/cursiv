@@ -1,4 +1,5 @@
 // Thirty-three implied tokens: a reading holds a bit for thirty-two.
+// expect LR: states more than 255 gap conditions, or more implied tokens than a reading holds a bit for
 #pragma once
 
 #include "refusals/head.hpp"

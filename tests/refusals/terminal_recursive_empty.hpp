@@ -1,3 +1,4 @@
+// expect LR: terminal .EMPTY. matches the empty string
 #pragma once
 
 #include "refusals/head.hpp"

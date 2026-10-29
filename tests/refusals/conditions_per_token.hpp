@@ -1,5 +1,6 @@
 // 17 distinct conditions of the gap guard 17 alternatives that all shift one
 // token: a state stands for each subset of them.
+// expect LR: refused by the conditions one token is read under
 #pragma once
 
 #include <cstddef>

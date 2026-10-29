@@ -1,5 +1,6 @@
 // A commit that may leave a tight region's last item out: the point after it
 // is read inside the region and outside it, as for an option.
+// expect LR LL: refused: the grammar reaches one point through a .* region and outside it at once
 #pragma once
 
 #include "refusals/head.hpp"

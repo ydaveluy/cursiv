@@ -54,7 +54,6 @@ struct Common : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   struct NameRule : rule<create<Name>(assign<&Name::text>(ref<ID>))> {};
-  struct CloseRule : rule<create<Close>(lit<">">)> {};
 };
 
 // A paragraph's loop of lines against the document's loop of blocks, whatever
@@ -112,10 +111,6 @@ struct Cycle : Common {
   using entry = Root;
   using ignored = WS;
 };
-// The same consuming suffix through a parser rule must preserve the rung's
-// association; the other families keep the literal spelling above.
-
-
 // The arm that reads a child and a tail against the arm that reads the child
 // alone, both wrapping it: the arm decides before the loop the child opens.
 struct Whole : Common {
@@ -183,5 +178,4 @@ struct Combined : Common {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Combined {};
 }  // namespace tlltextorder

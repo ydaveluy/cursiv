@@ -1,5 +1,6 @@
 // `+=` accumulates, so it names a member the grammar can accumulate into: on a
 // single-valued member each match would overwrite the last.
+// expect LR: accumulates, so it names a member the grammar can accumulate INTO
 #pragma once
 
 #include "refusals/head.hpp"

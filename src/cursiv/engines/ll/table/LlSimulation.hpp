@@ -24,6 +24,9 @@ inline constexpr std::uint32_t kLlCtxNone = 0xFFFFFFFFu;
 // "The two contexts do not join": one of them is the unknown caller, and
 // folding a known stack into it would lose the caller a walk actually has.
 inline constexpr std::uint32_t kLlCtxApart = 0xFFFFFFFEu;
+
+inline void ll_clear(auto&... x) { (x.clear(), ...); }
+
 // Open-addressed flat arrays retain their storage across tokens.
 // Stamps clear the table without visiting each slot or allocating nodes.
 template <class K, class H>
@@ -588,13 +591,9 @@ class LlSimulation : public LlReturnPool {
   // A configuration waits on a condition `asks` names.
   template <class Asks>
   bool needs_filter(Asks&& asks) const {
-    for (const LlConfig& c : _cur) {
-      const auto& s = _atn.state(c.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const auto& e = _atn.edge(s.edge + i);
+    for (const LlConfig& c : _cur)
+      for (const LlAtnEdge& e : _atn.outgoing(c.state))
         if (e.kind == LlEdgeKind::condition && asks(e.label)) return true;
-      }
-    }
     return false;
   }
   bool needs_filter() const {
@@ -609,13 +608,9 @@ class LlSimulation : public LlReturnPool {
   void possible_terms(F&& read) {
     const bool pending = needs_filter();
     if (pending) expand_conditions([](std::uint16_t) { return true; });
-    for (const auto& c : pending ? _next : _cur) {
-      const auto& s = _atn.state(c.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const auto& e = _atn.edge(s.edge + i);
+    for (const auto& c : pending ? _next : _cur)
+      for (const LlAtnEdge& e : _atn.outgoing(c.state))
         if (e.kind == LlEdgeKind::atom) read(e.label);
-      }
-    }
   }
 
   // Conditions wait for the token at this position. A step has only just
@@ -664,13 +659,10 @@ class LlSimulation : public LlReturnPool {
     // traversed. Walk each incoming delta, not each published position once.
     for (std::size_t at = 0; at < _conditions.size(); ++at) {
       const LlConfig c = _conditions[at];
-      const auto& s = _atn.state(c.state);
-      for (std::uint32_t i = 0; i < s.nedges; ++i) {
-        const auto& e = _atn.edge(s.edge + i);
+      for (const LlAtnEdge& e : _atn.outgoing(c.state))
         if (e.kind == LlEdgeKind::condition && accepts(e.label))
           closure(LlConfig{.state = e.target, .ctx = c.ctx, .alt = c.alt},
                   _next, &_conditions);
-      }
     }
   }
 

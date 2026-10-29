@@ -90,6 +90,4 @@ struct Combined : WithAliases<Base> {
   using entry = Root;
 };
 struct Ll : Combined {};
-struct Lr : Combined {};
-
 }  // namespace tllindirect

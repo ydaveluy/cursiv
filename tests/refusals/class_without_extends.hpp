@@ -1,6 +1,7 @@
 // A class that derives from a node class says so with `Extends`: a reference
 // to the base resolves through the declared bases, and inheritance alone leaves
 // the class out of them.
+// expect LR: without .Extends
 #pragma once
 
 #include "refusals/head.hpp"

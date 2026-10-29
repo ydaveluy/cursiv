@@ -1,5 +1,6 @@
 // A word refused two bytes into a relay's content: the walk reads only the
 // first byte of it, and no edge of the token graph narrows the rest.
+// expect LR: refused: terminal .CMT. refuses a word that runs into a relay's content
 #pragma once
 
 #include "refusals/head.hpp"

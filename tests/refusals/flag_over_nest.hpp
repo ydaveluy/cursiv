@@ -1,5 +1,6 @@
 // A flag whose operand nests sets its member on the wrapper, which is not an
 // Item.
+// expect LR: this directive writes a member of a class the node in hand may not be
 #pragma once
 
 #include "refusals/head.hpp"

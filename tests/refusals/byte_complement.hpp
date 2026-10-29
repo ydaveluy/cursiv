@@ -1,4 +1,5 @@
 // `byte` is one raw byte, not a class: it has no complement.
+// expect LR: byte. is one raw byte, not a class, so it has no complement
 #pragma once
 
 #include "refusals/head.hpp"

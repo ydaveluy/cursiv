@@ -37,7 +37,6 @@ struct Base : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Lr : Base {};
 // Inline anonymous leaves still belong to the surrounding parent.
 struct Tree : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -53,11 +52,8 @@ struct Tree : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct TreeLl : Tree {};
-struct TreeLr : Tree {};
 struct Combined : Base {
   struct Root : rule<ref<Base::Root> | (lit<"tree:"> + ref<Tree::Root>)> {};
   using entry = Root;
 };
-struct Ll : Combined {};
 }  // namespace tllcreation

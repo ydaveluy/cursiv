@@ -124,8 +124,14 @@ const cursiv::AstActions actions{.meta = &meta,
                                  .applies = applies,
                                  .takeBits = takeBits};
 
-cursiv::ParseResult reduce(cursiv::Cst&& c) {
-  return cursiv::AstReducer::build<kStamp>(actions, std::move(c));
+// The tree closed on `top` and accepted, reduced with the write count reset.
+cursiv::ParseResult reduce(cursiv::Cst&& c, cursiv::CstBuilder& b,
+                           cursiv::NodeId top,
+                           const cursiv::AstActions& with = actions) {
+  b.bind_entry(0, c.size(), top);
+  b.bind_accepted(true);
+  writes = 0;
+  return cursiv::AstReducer::build<kStamp>(with, std::move(c));
 }
 
 // An adoption takes the node its body built or none: a repair excuses an
@@ -156,10 +162,7 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
   b.stream().at(top).recovered = parentRepair;
   if (ownRepair || parentRepair || childRepair || unrelatedRepair)
     b.note_repair(cursiv::DiagnosticKind::deleted, cursiv::kNoElement, 0, 0);
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  writes = 0;
-  const auto result = reduce(std::move(c));
+  const auto result = reduce(std::move(c), b, top);
   const bool good = node && !badExtent;
   CHECK((result.error == cursiv::AstBuildError::none) == good);
   CHECK((result.value != nullptr) == good);
@@ -181,10 +184,7 @@ void a_direct_write_without_its_node_is_broken(bool repaired) {
   b.stream().at(top).recovered = repaired;
   if (repaired)
     b.note_repair(cursiv::DiagnosticKind::inserted, cursiv::kNoElement, 0, 0);
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  writes = 0;
-  const auto result = reduce(std::move(c));
+  const auto result = reduce(std::move(c), b, top);
   CHECK(result.error == cursiv::AstBuildError::malformed_cst);
   CHECK(result.value == nullptr && writes == 1);
 }
@@ -199,10 +199,7 @@ void repeated_node_writes_keep_source_order_and_skip_other_families() {
   const auto second = b.leaf(2, 3, kStamp.make(2, 0));
   b.leaf(3, 4, kStamp.make(2, 0));
   const auto top = b.exit(opened, 0, kStamp.make(4, 0));
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  writes = 0;
-  const auto result = reduce(std::move(c));
+  const auto result = reduce(std::move(c), b, top);
   CHECK(result.error == cursiv::AstBuildError::none);
   const auto* r = result.value_as<Root>();
   CHECK(r != nullptr && r->child != nullptr);
@@ -222,10 +219,7 @@ void a_node_no_member_takes_leaves_the_node_list() {
   const auto taken = b.leaf(0, 1, kStamp.make(2, 0));
   b.leaf(1, 2, kStamp.make(2, 0));
   const auto top = b.exit(opened, 0, kStamp.make(3, 0));
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  writes = 0;
-  const auto result = reduce(std::move(c));
+  const auto result = reduce(std::move(c), b, top);
   CHECK(result.error == cursiv::AstBuildError::none);
   const auto* r = result.value_as<Root>();
   CHECK(r != nullptr && r->child != nullptr && r->child->cstNodeId == taken);
@@ -334,9 +328,7 @@ std::string reduce_turn(const cursiv::AstActions& actions, bool stateSays,
     b.stream().at(token).subtreeSize = badExtent == 1 ? 0 : cursiv::kNoNode;
   if (abandoned)
     b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  const auto r = cursiv::AstReducer::build<kStamp>(actions, std::move(c));
+  const auto r = reduce(std::move(c), b, top, actions);
   if (r.error != cursiv::AstBuildError::none || r.value == nullptr)
     return "error";
   const auto* call = cursiv::ast_cast<Call>(r.value);
@@ -366,6 +358,21 @@ void a_turn_reads_the_same_by_state_or_by_row() {
   }
 }
 
+// `count` calls down to a flagged number, each the parent of its callee.
+void a_chain_of(const cursiv::ParseResult& r, unsigned count) {
+  CHECK(r.error == cursiv::AstBuildError::none);
+  CHECK(r.nodes.size() == count + 1);
+  unsigned depth = 0;
+  const cursiv::AstNode* current = r.value;
+  while (const auto* call = cursiv::ast_cast<nest::Call>(current)) {
+    CHECK(call->callee != nullptr && call->callee->parent == call);
+    current = call->callee;
+    ++depth;
+  }
+  const auto* num = cursiv::ast_cast<nest::Num>(current);
+  CHECK(depth == count && num != nullptr && num->flag);
+}
+
 void unrelated_repairs_leave_a_long_nest_chain_intact() {
   constexpr unsigned count = 2048;
   cursiv::Cst c("1(");
@@ -380,20 +387,7 @@ void unrelated_repairs_leave_a_long_nest_chain_intact() {
   }
   const auto top = b.exit(all, 0, kStamp.make(2, 0));
   b.note_repair(cursiv::DiagnosticKind::inserted, cursiv::kNoElement, 2, 2);
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
-  const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
-  CHECK(r.error == cursiv::AstBuildError::none);
-  CHECK(r.nodes.size() == count + 1);
-  unsigned depth = 0;
-  const cursiv::AstNode* current = r.value;
-  while (const auto* call = cursiv::ast_cast<nest::Call>(current)) {
-    CHECK(call->callee != nullptr && call->callee->parent == call);
-    current = call->callee;
-    ++depth;
-  }
-  const auto* num = cursiv::ast_cast<nest::Num>(current);
-  CHECK(depth == count && num != nullptr && num->flag);
+  a_chain_of(reduce(std::move(c), b, top, nest::byState), count);
 }
 
 void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
@@ -417,22 +411,10 @@ void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
   const auto top = b.exit(all, 0, kStamp.make(2, 0));
   b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1,
                  count + 1);
-  b.bind_entry(0, c.size(), top);
-  b.bind_accepted(true);
   const auto start = std::chrono::steady_clock::now();
-  const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+  const auto r = reduce(std::move(c), b, top, nest::byState);
   CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
-  CHECK(r.error == cursiv::AstBuildError::none);
-  CHECK(r.nodes.size() == count + 1);
-  unsigned depth = 0;
-  const cursiv::AstNode* current = r.value;
-  while (const auto* call = cursiv::ast_cast<nest::Call>(current)) {
-    CHECK(call->callee != nullptr && call->callee->parent == call);
-    current = call->callee;
-    ++depth;
-  }
-  const auto* num = cursiv::ast_cast<nest::Num>(current);
-  CHECK(depth == count && num != nullptr && num->flag);
+  a_chain_of(r, count);
 }
 
 void the_first_repair_below_the_consumer_decides_the_turn() {
@@ -453,9 +435,7 @@ void the_first_repair_below_the_consumer_decides_the_turn() {
     // A repair on the consumer itself does not give up its own effects.
     b.stream().at(top).recovered = true;
     b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
-    b.bind_entry(0, c.size(), top);
-    b.bind_accepted(true);
-    const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+    const auto r = reduce(std::move(c), b, top, nest::byState);
     CHECK(r.error == cursiv::AstBuildError::none);
     CHECK(r.nodes.size() == (outerRepair ? 1u : 2u));
     CHECK((cursiv::ast_cast<nest::Num>(r.value) != nullptr) == outerRepair);
@@ -480,9 +460,7 @@ void only_a_nest_outside_the_repair_changes_its_receiver() {
     b.stream().at(outside ? a : z).recovered = true;
     const auto top = b.exit(all, 0, kStamp.make(2, 0));
     b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1, 2);
-    b.bind_entry(0, c.size(), top);
-    b.bind_accepted(true);
-    const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+    const auto r = reduce(std::move(c), b, top, nest::byState);
     CHECK(r.error == cursiv::AstBuildError::none);
     CHECK(r.nodes.size() == (outside ? 2u : 3u));
     const auto* call = cursiv::ast_cast<nest::Call>(r.value);

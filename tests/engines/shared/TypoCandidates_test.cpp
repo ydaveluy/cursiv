@@ -86,7 +86,6 @@ void run() {
   cursiv::test::count_expectations();
   ranks_as_an_insertion_does();
   a_long_line_costs_its_candidates();
-
 }
 
 }  // namespace typo_candidates_cases
@@ -166,7 +165,6 @@ void long_paths_rank_at_their_divergence() {
 void run() {
   small_forests_rank_as_the_depths_say();
   long_paths_rank_at_their_divergence();
-
 }
 
 }  // namespace gesture_rank_cases

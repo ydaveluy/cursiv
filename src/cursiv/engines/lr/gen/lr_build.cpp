@@ -452,11 +452,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     nNtList = 0;
     for (std::size_t j = 0; j < kn; ++j) {
       const LrItem& it = kernel[j];
-      const LrLowProd& p = prods[it.prod];
-      if (it.dot >= p.len) continue;
-      const std::uint16_t x = g.sym_at(p, it.dot);
-      if (is_term(x)) continue;
-      const unsigned B = nt_index(x);
+      const unsigned B = g.nt_after(it.prod, it.dot);
+      if (B == kNoRow) continue;
       if (!ntMark[B]) {
         ntMark[B] = 1;
         if (WithLa) ntLa[B] = DynSet{};
@@ -642,11 +639,9 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         changed = false;
         for (std::uint32_t ci = 0; ci < csn; ++ci) {
           const LrLowProd& p = prods[cs[ci].prod];
-          if (cs[ci].dot >= p.len) continue;
-          const std::uint16_t x = g.sym_at(p, cs[ci].dot);
-          if (is_term(x)) continue;
+          const unsigned B = g.nt_after(cs[ci].prod, cs[ci].dot);
+          if (B == kNoRow) continue;
           if (opened(ci) && gammaGen[p.lhs] != visitGen) continue;
-          const unsigned B = nt_index(x);
           if (gammaGen[B] != visitGen) {
             gammaGen[B] = visitGen;
             gamma[B].clear();
@@ -668,8 +663,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         } else {
           req[ci].push_back(own[ci]);
         }
-        if (lr_req_asks(req[ci]) && cs[ci].dot < p.len &&
-            !is_term(g.sym_at(p, cs[ci].dot)))
+        if (lr_req_asks(req[ci]) &&
+            g.nt_after(cs[ci].prod, cs[ci].dot) != kNoRow)
           openers.push_back(ci);
       }
     }
@@ -698,10 +693,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       for (std::uint32_t ci = 0; ci < csn; ++ci) {
         const LrItem& it = cs[ci];
         const LrLowProd& p = prods[it.prod];
-        if (it.dot >= p.len || !kept(ci)) continue;
-        const std::uint16_t x = g.sym_at(p, it.dot);
-        if (is_term(x)) continue;
-        const unsigned Bx = nt_index(x);
+        const unsigned Bx = g.nt_after(it.prod, it.dot);
+        if (Bx == kNoRow || !kept(ci)) continue;
         const ElementId row = g.row_at(p, it.dot);
         // The nearest site: the slot's chain, or a unit production's own
         // where the call and its caller each lay a record.
@@ -723,19 +716,13 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     entered([](std::uint32_t) { return true; });
     std::uint32_t symTop = 0;
     // The terminals the state meets, ascending, then its nonterminals.
-    each_bit(actMask.w.data(), actMask.w.size(), [&](std::size_t a) {
-      symAt[a] = symTop;
-      symFill[a] = symTop;
-      symTop += symCnt[a];
-      symCnt[a] = 0;
-    });
-    for (std::uint32_t q = 0; q < nNtSyms; ++q) {
-      const std::size_t bk = nT + nt_index(ntSyms[q]);
-      symAt[bk] = symTop;
-      symFill[bk] = symTop;
-      symTop += symCnt[bk];
-      symCnt[bk] = 0;
-    }
+    const auto lay = [&](std::size_t k) {
+      symAt[k] = symFill[k] = symTop;
+      symTop += symCnt[k];
+      symCnt[k] = 0;
+    };
+    each_bit(actMask.w.data(), actMask.w.size(), lay);
+    for (std::uint32_t q = 0; q < nNtSyms; ++q) lay(nT + nt_index(ntSyms[q]));
     for (std::uint32_t j = 0; j < csn; ++j) {
       const LrItem& it = cs[j];
       const LrLowProd& p = prods[it.prod];
@@ -1020,12 +1007,10 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   };
 
   // The entry is followed by end of input, which acceptance never shifts.
-  {
-    const LrLowProd& sp = prods[g.startProd];
-    if (sp.len == 1 && !is_term(g.sym_at(sp, 0))) {
-      const auto [e0, e1] = trIds(0, nt_index(g.sym_at(sp, 0)));
-      for (std::uint32_t e = e0; e < e1; ++e) read[e].set(kEofSymbol);
-    }
+  if (const std::uint16_t b = g.nt_after(g.startProd, 0);
+      b != kNoRow && prods[g.startProd].len == 1) {
+    const auto [e0, e1] = trIds(0, b);
+    for (std::uint32_t e = e0; e < e1; ++e) read[e].set(kEofSymbol);
   }
 
   // The goto that closes a span: the landing its guard picks off the tag of
@@ -1239,14 +1224,9 @@ struct LrActions {
     const auto row = gr.shifts[s];
     for (std::size_t k = 0; k < row.size(); ++k) {
       const LrEdge& e = row[k];
-      LrAction a =
-          e.prog == 0
-              ? LrAction{e.sym, LrActionKind::shift, e.to, e.site, e.outer}
-              : LrAction{e.sym,
-                         LrActionKind::guard,
-                         static_cast<std::uint16_t>(e.prog - 1u),
-                         e.site,
-                         e.outer};
+      LrAction a{e.sym, e.prog == 0 ? LrActionKind::shift : LrActionKind::guard,
+                 static_cast<std::uint16_t>(e.prog == 0 ? e.to : e.prog - 1u),
+                 e.site, e.outer};
       // One guarded terminal is one action. Its landings name one caret
       // hint, or none.
       while (e.prog != 0 && k + 1 < row.size() && row[k + 1].sym == e.sym) {
@@ -1836,9 +1816,8 @@ class LrWrittenOrder {
       const unsigned x = todo.back();
       todo.pop_back();
       for (const std::uint16_t q : _pn.of(x)) {
-        const LrLowProd& pr = _g.prods[q];
-        if (pr.len == 0 || is_term(_g.sym_at(pr, 0))) continue;
-        const unsigned y = nt_index(_g.sym_at(pr, 0));
+        const unsigned y = _g.nt_after(q, 0);
+        if (y == kNoRow) continue;
         key = _keys[best[x]];
         words_at(q, 0, [&](std::uint32_t w) { key.push_back(w); });
         if (best[y] != kNone &&
@@ -1964,12 +1943,9 @@ class LrWrittenOrder {
     std::vector<Next>& v = _nexts[o];
     if (_nextsMade[o]) return v;
     _nextsMade[o] = 1;
-    for (const LrItem& k : _gr.kernel(o)) {
-      const LrLowProd& pr = _g.prods[k.prod];
-      if (k.dot < pr.len && !is_term(_g.sym_at(pr, k.dot)))
-        v.push_back({k, static_cast<std::uint16_t>(
-                            nt_index(_g.sym_at(pr, k.dot)))});
-    }
+    for (const LrItem& k : _gr.kernel(o))
+      if (const std::uint16_t nt = _g.nt_after(k.prod, k.dot); nt != kNoRow)
+        v.push_back({k, nt});
     return v;
   }
 

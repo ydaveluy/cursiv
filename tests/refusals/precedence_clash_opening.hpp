@@ -1,5 +1,6 @@
 // Two rules that spell `not in`, on two levels: nothing after `not` tells them
 // apart.
+// expect LR LL: refused .precedenceClash..*rule .Sum. names the same operator text on two levels
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // A grammar read by its indentation, embedded: its lines would be measured
 // against the embedding document's.
+// expect LR: a grammar embedded with .section<>. reads no indentation
 #pragma once
 
 #include "refusals/head.hpp"

@@ -42,14 +42,13 @@ std::uint16_t put_group(LlLowered& o, LlShape kind,
                   b);
 }
 
-std::uint16_t new_decision(LlLowered& o, std::uint16_t node,
-                           std::uint16_t nalts, std::uint16_t owner) {
+std::uint16_t with_decision(LlLowered& o, std::uint16_t node,
+                            std::uint16_t nalts, std::uint16_t owner) {
   if (o.cfg.ndecisions >= kNoRow) too_many_positions();
-  const auto id = static_cast<std::uint16_t>(o.cfg.ndecisions);
+  o.cfg.nodes[node].decision = static_cast<std::uint16_t>(o.cfg.ndecisions);
   o.cfg.decisionBuild[o.cfg.ndecisions].nalts = nalts;
-  o.cfg.decisions[o.cfg.ndecisions++] =
-      LlDecision{.node = node, .rule = owner};
-  return id;
+  o.cfg.decisions[o.cfg.ndecisions++] = LlDecision{.node = node, .rule = owner};
+  return node;
 }
 
 // A directive over `eof`, or over nothing, standing as one position among
@@ -124,8 +123,7 @@ inline std::uint16_t emit_alt(LlLowered& o, const Pool& p, std::uint16_t at,
   const std::uint16_t id = put_group(
       o, LlShape::alt, ids, kNoRow,
       LlNodeBuild{.cfg = e.cfg, .section = e.section});
-  o.cfg.nodes[id].decision = new_decision(o, id, e.count, owner);
-  return id;
+  return with_decision(o, id, e.count, owner);
 }
 
 inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
@@ -136,9 +134,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
                          bool foldStep = false) {
     const auto id = put_group(o, kind, ids, chain,
                               LlNodeBuild{.cfg = e.cfg, .foldStep = foldStep});
-    if (kind == LlShape::alt)
-      o.cfg.nodes[id].decision = new_decision(o, id, ids.size(), rule);
-    return id;
+    return kind == LlShape::alt ? with_decision(o, id, ids.size(), rule) : id;
   };
   const auto tooWide = [&] {
     return refuse_node(o, LowerFail::unorderedTooWide, owner);
@@ -278,8 +274,7 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
               LlNode{
                   .kind = LlShape::rep, .sym = kid, .min = 0, .max = maximum},
               LlNodeBuild{.cfg = e.cfg, .section = e.section});
-          o.cfg.nodes[id].decision = new_decision(o, id, 2, owner);
-          return id;
+          return with_decision(o, id, 2, owner);
         };
         std::vector<std::uint16_t> ids;
         ids.reserve(e.min + (e.min != e.max));
@@ -314,8 +309,7 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
           LlNodeBuild{
               .cfg = e.cfg, .section = e.section, .leftFold = e.leftFold});
       // The turn is the choice: one arm enters the body, the other leaves.
-      o.cfg.nodes[id].decision = new_decision(o, id, 2, owner);
-      return id;
+      return with_decision(o, id, 2, owner);
     }
   }
   return put_node(o, LlNode{.kind = LlShape::empty});

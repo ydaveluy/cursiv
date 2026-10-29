@@ -1,4 +1,5 @@
 // An echo needs its mark on every path: one arm of the choice sets none.
+// expect LR: refused: terminal .TAG. echoes a mark<> not set in its scope
 #pragma once
 
 #include "refusals/head.hpp"

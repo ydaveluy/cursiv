@@ -1,5 +1,6 @@
 // An override that stops a node rule building its node: callers of the base
 // would still read the rule as the node's type.
+// expect LR: an override restates the rule's genre and this one changes it
 #pragma once
 
 #include "refusals/head.hpp"

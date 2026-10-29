@@ -8,7 +8,6 @@
 #include <lsp/types.h>
 
 #include <algorithm>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -16,80 +15,37 @@
 #include <vector>
 
 #include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
-#include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
 #include "lsp/completion/CaretGrammar.hpp"
+#include "support/Editor.hpp"
+#include "support/World.hpp"
 
 namespace {
 
-namespace ct = cursiv::test;
 namespace ast = tcaret::ast;
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+using support::offered;
+using support::offers;
 
-  Shared shared;
-  Language* lang = nullptr;
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* lang;
 
-  explicit World(const CaretDoor& door) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"caret", {".caret"}, {}};
-    language->parser = door.parser();
-    language->astReflection = door.reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->completionProvider =
-        std::make_unique<cursiv::DefaultCompletionProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    lang = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-    // An editor that chooses between inserting and replacing a word.
-    lsp::InitializeParams params;
-    params.capabilities.textDocument.emplace()
-        .completion.emplace()
-        .completionItem.emplace()
-        .insertReplaceSupport = true;
-    (void)shared.languageServer->initialize(params);
+  explicit World(const CaretDoor& door)
+      : lang(&support::add_language<cursiv::LspServices>(
+            shared, {"caret", {".caret"}, {}}, door.parser(),
+            door.reflection())) {
+    support::take_both_ranges(shared);
   }
 };
-
-[[nodiscard]] bool offers(const lsp::CompletionList& list,
-                          std::string_view label) {
-  return std::ranges::any_of(list.items, [label](const lsp::CompletionItem& i) {
-    return i.label == label;
-  });
-}
-
-void offered(const World& world, std::string text,
-             std::function<void(const lsp::CompletionList&)> assertion) {
-  (void)ct::expectCompletion(*world.lang, ct::ExpectedCompletionCallback{
-                                              .text = std::move(text),
-                                              .assertion = std::move(assertion),
-                                              .disposeAfterCheck = true});
-}
 
 // `KW_END` is `kw<"end">` behind a `terminal<>` of its own, which is what the
 // grammar carries: naming it does not stop it spelling its bytes.
 void a_named_keyword_is_offered_by_its_bytes(const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { e<|> }", [](const lsp::CompletionList& list) {
+  offered(*world.lang, "fn f() { e<|> }", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "end"));
     CHECK(!offers(list, "KW_END"));
     CHECK(!offers(list, "ID"));
@@ -131,10 +87,11 @@ void a_named_literal_beats_a_named_terminal_at_equal_length(
 // that follows; a caret sits before that token, so both arms are still open.
 void a_k2_cell_offers_both_arms(const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { @~<|>!; }", [](const lsp::CompletionList& list) {
-    CHECK(offers(list, "!"));
-    CHECK(offers(list, "?"));
-  });
+  offered(*world.lang, "fn f() { @~<|>!; }",
+          [](const lsp::CompletionList& list) {
+            CHECK(offers(list, "!"));
+            CHECK(offers(list, "?"));
+          });
 }
 
 // `see` binds an `Alpha` and nothing else, though `Link::to` accepts every
@@ -142,7 +99,7 @@ void a_k2_cell_offers_both_arms(const CaretDoor& door) {
 // only come from the grammar's site.
 void a_narrowed_site_offers_its_subtype_alone(const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { alpha a; beta b; see <|> }",
+  offered(*world.lang, "fn f() { alpha a; beta b; see <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "a"));
             CHECK(!offers(list, "b"));
@@ -154,7 +111,7 @@ void a_narrowed_site_offers_its_subtype_alone(const CaretDoor& door) {
 // at a caret standing in front of it.
 void a_member_two_classes_spell_answers_for_its_own_site(const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { alpha a; beta b; tie <|> }",
+  offered(*world.lang, "fn f() { alpha a; beta b; tie <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "b"));
             CHECK(!offers(list, "a"));
@@ -164,7 +121,7 @@ void a_member_two_classes_spell_answers_for_its_own_site(const CaretDoor& door) 
 void a_new_reference_uses_its_own_type_before_an_ancestors(
     const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { alpha a; beta b; nest a { tie <|> } }",
+  offered(*world.lang, "fn f() { alpha a; beta b; nest a { tie <|> } }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "b"));
             CHECK(!offers(list, "a"));
@@ -176,7 +133,7 @@ void a_new_reference_uses_its_own_type_before_an_ancestors(
 void a_site_that_narrows_nothing_offers_the_whole_member(
     const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn f() { alpha a; beta b; any <|> }",
+  offered(*world.lang, "fn f() { alpha a; beta b; any <|> }",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "a"));
             CHECK(offers(list, "b"));
@@ -235,11 +192,11 @@ void a_token_inside_a_rule_names_no_member(const CaretDoor& door) {
 void a_caret_under_nested_open_constructs_keeps_its_state(
     const CaretDoor& door) {
   const World world(door);
-  offered(world, "fn add(<|>", [](const lsp::CompletionList& list) {
+  offered(*world.lang, "fn add(<|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, ")"));
     CHECK(!offers(list, "fn"));
   });
-  offered(world, "fn f() { f(<|>", [](const lsp::CompletionList& list) {
+  offered(*world.lang, "fn f() { f(<|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, ")"));
     CHECK(!offers(list, "fn"));
   });
@@ -249,7 +206,7 @@ void a_caret_under_nested_open_constructs_keeps_its_state(
 // it whole: the anchor is the leaf, not a byte class stopping at `Ü`.
 void a_name_outside_ascii_is_replaced_whole(const CaretDoor& door) {
   const World world(door);
-  offered(world,
+  offered(*world.lang,
           "fn f() { alpha \xC3\x9C"
           "ber; see \xC3\x9C"
           "b<|> }",

@@ -1,5 +1,6 @@
 // A precedence chain spelled without `infix`: each level calls the next one
 // twice, and the parentheses close the cycle back to the top.
+// expect LR: this alternative can create twice
 #pragma once
 
 #include "refusals/head.hpp"

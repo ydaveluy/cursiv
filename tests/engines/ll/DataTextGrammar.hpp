@@ -62,6 +62,4 @@ struct Base : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Base {};
-struct Lr : Base {};
 }  // namespace tlldatatext

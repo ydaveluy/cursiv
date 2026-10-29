@@ -1,6 +1,7 @@
 // A nested comment hidden and a delimited one ignored in a skip region: both
 // read `/* x */`, so the tree would keep the comment by the order they are
 // declared in.
+// expect LR: refused: terminal .NOTE. is trivia that reads the same text as another trivia terminal
 #pragma once
 
 #include "refusals/head.hpp"

@@ -46,7 +46,6 @@ struct Basic : cursiv::GrammarSpec {
   using hidden = list<REMARK, LINE, BLOCK>;
 };
 struct BasicLl : Basic {};
-struct BasicLr : Basic {};
 
 // The same keyword cut also applies to comments that recognize a recursive
 // group or echo a capture behind the keyword.
@@ -59,8 +58,6 @@ struct Recognized : Basic {
                  many(cr<R"(^\r\n)">)> {};
   using hidden = list<RecursiveRemark, LINE, BLOCK>;
 };
-struct RecognizedLl : Recognized {};
-struct RecognizedLr : Recognized {};
 
 struct Run {};
 struct Captured : Basic {
@@ -69,8 +66,6 @@ struct Captured : Basic {
                  same<Run> + many(cr<R"(^\r\n)">)> {};
   using hidden = list<CapturedRemark, LINE, BLOCK>;
 };
-struct CapturedLl : Captured {};
-struct CapturedLr : Captured {};
 
 // Recursive and captured comments use the same word boundary. Local skip
 // scopes keep their trivia independent inside one generated parser.
@@ -108,7 +103,6 @@ struct Wide : cursiv::GrammarSpec {
   using hidden = REMARK;
 };
 struct WideLl : Wide {};
-struct WideLr : Wide {};
 
 // A comment that reads no more than a name yields to it: a bare `REM` is a
 // name, `REM hello` a comment, and `REMx` a name.
@@ -128,6 +122,4 @@ struct Bare : cursiv::GrammarSpec {
   using hidden = REMARK;
 };
 struct BareLl : Bare {};
-struct BareLr : Bare {};
-
 }  // namespace tllkwtrivia

@@ -1,5 +1,6 @@
 // A root create whose node a nest may wrap into a class outside the one the
 // member holding the rule takes.
+// expect LR: this member holds a node of its own type: the payload must build a node whose type derives
 #pragma once
 
 #include "refusals/head.hpp"

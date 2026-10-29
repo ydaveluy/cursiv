@@ -1,5 +1,6 @@
 // An indented grammar embedding another, its indentation spelled in the body
 // of a rule rather than as terminals it names.
+// expect LR: refused: the grammar reads its lines by indentation and embeds a grammar with .section<>.
 #pragma once
 
 #include "refusals/head.hpp"

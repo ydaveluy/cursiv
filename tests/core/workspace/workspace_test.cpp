@@ -14,6 +14,7 @@
 #include <future>
 #include <iterator>
 #include <latch>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ranges>
@@ -68,8 +69,9 @@
 #include "cursiv/core/workspace/WorkspaceFolder.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "workspace/core/references/WorkspaceScopeProvider.hpp"
 
 #if !defined(NDEBUG) && !defined(__wasi__)
 #include <sys/resource.h>
@@ -88,23 +90,8 @@ namespace ast_node_locator {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  const cursiv::AstNodeLocator* locator = nullptr;
-
-  World() {
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->astReflection =
-        ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    locator = language->astNodeLocator.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct World : support::CoreWorkspace {
+  const cursiv::AstNodeLocator* locator = ws->astNodeLocator.get();
 
   [[nodiscard]] std::shared_ptr<cursiv::Document> build(
       std::string text) const {
@@ -209,31 +196,7 @@ struct Heard : cursiv::BuildPhaseListener {
   }
 };
 
-struct World {
-  cursiv::SharedCoreServices shared;
-
-  // `tweak` replaces a slot after the defaults are in, before registration.
-  explicit World(const std::function<void(cursiv::CoreServices&)>& tweak = {}) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    if (tweak) tweak(*language);
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
-  cursiv::Document* add(const std::string& uri, std::string text) const {
-    auto document =
-        shared.documentFactory->fromString(std::move(text), std::move(uri));
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    return raw;
-  }
-};
+using World = support::CoreWorkspace;
 
 void a_default_workspace_build_uses_its_workers() {
   World world;
@@ -402,22 +365,7 @@ void an_update_honors_an_overridden_affected_check() {
   CHECK(world.shared.indexManager->isAffected(*dependent, moved));
 }
 
-class CountingParser final : public cursiv::Parser {
- public:
-  explicit CountingParser(std::unique_ptr<const cursiv::Parser> parser)
-      : _parser(std::move(parser)) {}
-  const cursiv::Grammar& getGrammar() const noexcept override {
-    return _parser->getGrammar();
-  }
-  cursiv::ParseResult parse(std::string_view text,
-                            const cursiv::CancellationToken& token) const override {
-    ++calls;
-    return _parser->parse(text, token);
-  }
-  mutable std::atomic<unsigned> calls{0};
- private:
-  std::unique_ptr<const cursiv::Parser> _parser;
-};
+using support::CountingParser;
 
 void factory_then_build_parses_once() {
   CountingParser* counter = nullptr;
@@ -859,20 +807,12 @@ const cursiv::AstNode* referenced_type(const cursiv::Document& document) {
   return entity->features[0]->type.get();
 }
 
-struct CaseInsensitiveScope final : cursiv::DefaultScopeProvider {
-  using DefaultScopeProvider::DefaultScopeProvider;
-
- protected:
-  bool isCaseSensitive(const cursiv::ReferenceInfo&) const noexcept override {
-    return false;
-  }
-};
-
 void a_new_homonym_retargets_without_reparsing(bool fromDisk,
                                              bool caseInsensitive) {
   World world([&](cursiv::CoreServices& language) {
     if (caseInsensitive)
-      language.scopeProvider = std::make_unique<CaseInsensitiveScope>(language);
+      language.scopeProvider =
+          std::make_unique<ws::WorkspaceScopeProvider>(language);
   });
   auto files = std::make_unique<cursiv::MemoryFileSystemProvider>();
   auto* disk = files.get();
@@ -2202,20 +2142,10 @@ class HalfReadableFiles final : public cursiv::FileSystemProvider {
 // out of the store and said, and the others are built; a subscriber is not
 // told of a change the store does not hold.
 void a_new_file_that_cannot_be_read_is_said_and_left_out() {
-  struct Capture final : cursiv::ObservabilitySink {
-    std::vector<cursiv::Observation> seen;
-    void publish(const cursiv::Observation& observation) noexcept override {
-      try {
-        seen.push_back(observation);
-      } catch (...) {
-      }
-    }
-  };
   World world;
   world.shared.fileSystemProvider = std::make_unique<HalfReadableFiles>();
-  auto sink = std::make_unique<Capture>();
-  const Capture* const capture = sink.get();
-  world.shared.observabilitySink = std::move(sink);
+  const support::CaptureSink* const capture =
+      &support::capture_observations(world.shared);
   struct Told final : cursiv::DocumentUpdateListener {
     std::vector<std::string> changed;
     void onUpdate(std::span<const std::string_view> c,
@@ -2899,12 +2829,7 @@ void get_or_create_reads_the_disk_when_nothing_is_held() {
   memory->addFile("file:///w/a.ws", "datatype A\n");
   world.fileSystemProvider = std::move(memory);
   cursiv::install_default_shared_core_services(world);
-  auto language = std::make_unique<cursiv::CoreServices>(world);
-  language->languageMetaData = {"workspace", {".ws"}, {}};
-  language->parser = ws::generated::Workspace::create_parser();
-  language->astReflection = ws::generated::Workspace::create_ast_reflection();
-  cursiv::install_default_core_services(*language);
-  world.serviceRegistry->registerServices(std::move(language));
+  (void)support::add_workspace<cursiv::CoreServices>(world);
 
   const auto created = world.documents->getOrCreateDocument("file:///w/a.ws");
   CHECK(created != nullptr);
@@ -2954,12 +2879,9 @@ void run() {
 
 }  // namespace documents
 
-// Pins how a workspace reads what it did not open: a `file:` URI names a path
-// or the read fails, and nothing is ever guessed from a URI it cannot resolve.
-namespace file_system_provider {
-
 namespace {
 
+// Whether `f` throws the error a file system refuses with.
 template <class F>
 bool throws(F&& f) {
   try {
@@ -2969,6 +2891,14 @@ bool throws(F&& f) {
   }
   return false;
 }
+
+}  // namespace
+
+// Pins how a workspace reads what it did not open: a `file:` URI names a path
+// or the read fails, and nothing is ever guessed from a URI it cannot resolve.
+namespace file_system_provider {
+
+namespace {
 
 // Every read fails and nothing exists -- what an embedder installs when
 // documents only ever arrive as text.
@@ -3106,23 +3036,7 @@ namespace index_manager {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::CoreServices* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-
+struct World : support::CoreWorkspace {
   // A document taken all the way to `IndexedReferences`.
   std::shared_ptr<cursiv::Document> built(const std::string& uri,
                                           std::string text) const {
@@ -3512,32 +3426,18 @@ void one_table_answers_both_policies() {
 // Two languages, two policies, one index: what a case-sensitive language
 // cannot see under a misspelt case, an insensitive one resolves -- against
 // the very same snapshot.
-struct CaseInsensitiveProvider final : cursiv::DefaultScopeProvider {
-  using DefaultScopeProvider::DefaultScopeProvider;
-
- protected:
-  [[nodiscard]] bool isCaseSensitive(
-      const cursiv::ReferenceInfo&) const noexcept override {
-    return false;
-  }
-};
-
 void two_languages_share_the_index() {
   World world;
   // A second language over the same grammar, insensitive where the first
   // keeps the default.
-  cursiv::CoreServices* ci = nullptr;
-  {
-    auto language = std::make_unique<cursiv::CoreServices>(world.shared);
-    language->languageMetaData = {"workspace-ci", {".wsci"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    language->scopeProvider =
-        std::make_unique<CaseInsensitiveProvider>(*language);
-    ci = language.get();
-    world.shared.serviceRegistry->registerServices(std::move(language));
-  }
+  cursiv::CoreServices* const ci = &support::add_language<cursiv::CoreServices>(
+      world.shared, {"workspace-ci", {".wsci"}, {}},
+      ws::generated::Workspace::create_parser(),
+      ws::generated::Workspace::create_ast_reflection(),
+      [](cursiv::CoreServices& language) {
+        language.scopeProvider =
+            std::make_unique<ws::WorkspaceScopeProvider>(language);
+      });
 
   const auto exporter = world.built("file:///lib.ws", "datatype String\n");
   const auto site =
@@ -3761,16 +3661,6 @@ void run() {
 namespace memory_file_system_provider {
 
 namespace {
-
-template <class F>
-bool throws(F&& f) {
-  try {
-    f();
-  } catch (const cursiv::FileSystemError&) {
-    return true;
-  }
-  return false;
-}
 
 void stat_and_exists_tell_files_from_folders() {
   cursiv::MemoryFileSystemProvider fs;
@@ -4294,6 +4184,132 @@ void run() {
 
 }  // namespace text_document
 
+// A cursor walking a document answers each offset as the document does.
+namespace text_document_cursor {
+
+using cursiv::TextDocument;
+using cursiv::TextOffset;
+using Cursor = cursiv::TextDocument::Cursor;
+
+namespace {
+
+void matches_position_at(const std::string& text) {
+  const auto document = TextDocument::create("file:///cursor", "test", 1, text);
+  const auto size = static_cast<TextOffset>(text.size());
+  for (const TextOffset first : {TextOffset{0}, size / 2, size}) {
+    Cursor cursor(document, first);
+    for (TextOffset offset = first; offset <= size; ++offset) {
+      const auto expected = document.positionAt(offset);
+      CHECK(cursor.positionAt(offset) == expected);
+      CHECK(cursor.positionAt(offset) == expected);
+    }
+    CHECK(cursor.positionAt(std::numeric_limits<TextOffset>::max()) ==
+          document.positionAt(std::numeric_limits<TextOffset>::max()));
+  }
+}
+
+void unicode_and_line_boundaries() {
+  for (const std::string_view text : {
+           "",
+           "ascii",
+           "\n\r\r\n",
+           "a\rb\r\nc\nd\r\n",
+           "a\xc3\xa9\xf0\x9f\x98\x80z\r\n\xe4\xb8\xad\n",
+           "\xe2\x82"
+           "A\r\n\xc0\x80\xed\xa0\x80\xf4\x90\x80\x80",
+           "abcdefgh\xf0\x9f\x98\x80\xe2\x82\xacijklmnop",
+       })
+    matches_position_at(std::string(text));
+
+  std::string manyLines;
+  for (int i = 0; i < 140; ++i)
+    manyLines += i % 3 == 0 ? "\xc3\xa9\xf0\x9f\x98\x80\r\n" : "abcdefgh\r\n";
+  matches_position_at(manyLines);
+}
+
+// Include every byte offset, even inside a scalar or a malformed subpart.
+// Adjacent pieces can also join into a valid sequence, so these exercise both
+// the vectorised well-formed path and the replacement decoder.
+void generated_texts_match_the_public_conversion() {
+  constexpr std::string_view pieces[] = {"abcdefgh",
+                                         "a",
+                                         "\xc3\xa9",
+                                         "\xe2\x82\xac",
+                                         "\xf0\x9f\x98\x80",
+                                         "\n",
+                                         "\r\n",
+                                         "\r",
+                                         "\x80",
+                                         "\xbf",
+                                         "\xc3",
+                                         "\xe2\x82",
+                                         "\xf0\x9f\x98",
+                                         "\xc0\x80",
+                                         "\xed\xa0\x80",
+                                         "\xf5",
+                                         "\xff"};
+  std::uint32_t state = 7;
+  for (int round = 0; round < 1000; ++round) {
+    std::string text;
+    for (int i = 0; i < 24; ++i) {
+      state = state * 1103515245U + 12345U;
+      text += pieces[(state >> 16U) % std::size(pieces)];
+    }
+    matches_position_at(text);
+  }
+}
+
+void sparse_offsets_and_independent_cursors() {
+  std::string text;
+  for (int i = 0; i < 10000; ++i) text += "long prefix\r\n";
+  text += "\xc3\xa9\xf0\x9f\x98\x80 end\n";
+  const auto document = TextDocument::create("file:///sparse", "test", 1, text);
+  const auto size = static_cast<TextOffset>(text.size());
+  Cursor full(document);
+  Cursor range(document, size - 10);
+  CHECK(full.positionAt(1) == document.positionAt(1));
+  CHECK(range.positionAt(size - 10) == document.positionAt(size - 10));
+  CHECK(full.positionAt(size - 7) == document.positionAt(size - 7));
+  CHECK(range.positionAt(size - 7) == document.positionAt(size - 7));
+  CHECK(full.positionAt(size) == document.positionAt(size));
+  CHECK(range.positionAt(size) == document.positionAt(size));
+}
+
+void line_ends_and_transitions_match_the_public_conversion() {
+  const std::string text = "é😀\r\n\r\nx\r最後";
+  const auto document = TextDocument::create("file:///lines", "test", 1, text);
+  constexpr auto pastEnd = std::numeric_limits<TextOffset>::max();
+  for (const TextOffset first : {0U, 1U, 3U, 7U, 8U, 99U}) {
+    Cursor cursor(document, first);
+    auto position = cursor.positionAt(first);
+    for (;;) {
+      const auto end = document.offsetAt({position.line, pastEnd});
+      CHECK(cursor.lineEnd() == document.positionAt(end));
+      CHECK(cursor.lineEnd() == document.positionAt(end));
+      if (position.line + 1 == document.lineCount()) {
+        CHECK(!cursor.crossesLine(pastEnd));
+        break;
+      }
+      const auto next = document.offsetAt({position.line + 1, 0});
+      CHECK(!cursor.crossesLine(next - 1));
+      CHECK(cursor.crossesLine(next));
+      position = cursor.nextLine();
+      CHECK(position == document.positionAt(next));
+    }
+  }
+}
+
+}  // namespace
+
+void run() {
+  unicode_and_line_boundaries();
+  generated_texts_match_the_public_conversion();
+  sparse_offsets_and_independent_cursors();
+  line_ends_and_transitions_match_the_public_conversion();
+}
+
+}  // namespace text_document_cursor
+
 // Pins the workspace scan: the folders' claimed files reach the store built,
 // the filter keeps what a language claims, the additional-documents hook runs
 // before any folder, and `ready` resolves once the documents are in.
@@ -4326,12 +4342,7 @@ struct World {
       shared.workspaceManager =
           std::make_unique<LibraryWorkspaceManager>(shared);
     cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    shared.serviceRegistry->registerServices(std::move(language));
+    (void)support::add_workspace<cursiv::CoreServices>(shared);
   }
 };
 
@@ -4566,6 +4577,7 @@ int main() {
   local_symbols::run();
   memory_file_system_provider::run();
   text_document::run();
+  text_document_cursor::run();
   workspace_manager::run();
   return cursiv::test::report("workspace");
 }

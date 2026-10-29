@@ -527,11 +527,6 @@ void a_nested_run_counts_every_opener_it_lists() {
   std::printf("  a nested run counts every opener it lists\n");
 }
 
-bool pragma(std::string_view text, std::string_view want) {
-  static const auto p = tnestedlex::generated::G::create_parser();
-  return reads<tnestedlex::ast::Doc>(*p, std::string(text), want);
-}
-
 // A nested comment as the language spells it, and a token's end where the
 // text starts one: `{-#` is no comment, a byte after the opener is content.
 cursiv::TextOffset pragma_model(std::string_view t, bool dollar = false) {
@@ -570,18 +565,18 @@ void delimiters_are_as_long_as_written() {
 // the walk reads it off the refused class and the search starts behind it, so
 // a closer or an opener standing on that byte still counts.
 void a_refusal_before_a_relay_leaves_its_first_byte_to_the_search() {
-  CHECK(pragma("a {- x -} b", "a b"));
-  CHECK(pragma("a {--} b", "a b"));
-  CHECK(pragma("a {-{- x -}-} b", "a b"));
-  CHECK(pragma("a {- {-# x #-} -} b", "a b"));
-  CHECK(pragma("a {-\xC3\xA9-} b", "a b"));
-  CHECK(pragma("a {-}-} b", "a b"));
-  CHECK(pragma("a {-# x #-} b", "a {-# x #-} b"));
-  CHECK(pragma("{-#-}", "<refused>"));
-  CHECK(pragma("a {-}", "<refused>"));
-  CHECK(pragma("a {- x", "<refused>"));
-  CHECK(pragma("a {-", "<refused>"));
-  CHECK(pragma("a {-# x", "a {-# x"));
+  CHECK(nested("a {- x -} b", "a b"));
+  CHECK(nested("a {--} b", "a b"));
+  CHECK(nested("a {-{- x -}-} b", "a b"));
+  CHECK(nested("a {- {-# x #-} -} b", "a b"));
+  CHECK(nested("a {-\xC3\xA9-} b", "a b"));
+  CHECK(nested("a {-}-} b", "a b"));
+  CHECK(nested("a {-# x #-} b", "a {-# x #-} b"));
+  CHECK(nested("{-#-}", "<refused>"));
+  CHECK(nested("a {-}", "<refused>"));
+  CHECK(nested("a {- x", "<refused>"));
+  CHECK(nested("a {-", "<refused>"));
+  CHECK(nested("a {-# x", "a {-# x"));
   namespace g = tnestedlex::generated::G;
   std::mt19937 rng(20260929);
   constexpr std::string_view alphabet = "{-}#a ";
@@ -907,7 +902,6 @@ void a_padded_closer_inside_a_repeated_capture_is_read_once() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
   lua_long_brackets();
   lua_lexes_the_same_from_every_form();
   cpp_raw_strings();

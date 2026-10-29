@@ -54,19 +54,12 @@ target_compile_definitions(LrRuntime_test PRIVATE
     CURSIV_NARROW_ROW_BITS=${CURSIV_NARROW_ROW_BITS})
 cursiv_test(edits_narrow_test lsp/edits_test.cpp cursiv::lsp wsnarrowLsp)
 
-# The erased door: a service holds a `Parser&`, not a grammar.
-cursiv_test(Parser_test core/parser/Parser_test.cpp wsCore)
-# A text translated before its tokens are read, on both engines.
+# The erased door: a service holds a `Parser&`, not a grammar. And a text
+# translated before its tokens are read, on both engines.
 cursiv_grammar_pair(translate core/parser/TranslationGrammar.hpp ttrans::Lr
     ttrans::Ll)
-cursiv_test(SourceTranslation_test core/parser/SourceTranslation_test.cpp
-    translatelrGenerated translatellGenerated)
-
-# Its own operator new, which ThreadSanitizer's runtime also defines.
-if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
-  cursiv_test(RegistrationFailure_test core/services/RegistrationFailure_test.cpp wsCore)
-  set_target_properties(RegistrationFailure_test PROPERTIES CURSIV_OWN_ALLOCATOR ON)
-endif()
+cursiv_test(parser_test core/parser/parser_test.cpp wsCore translatelrGenerated
+    translatellGenerated)
 
 cursiv_test(services_test core/services/services_test.cpp wsLsp)
 

@@ -1,5 +1,6 @@
 // One single-valued member written twice on one path: the second overwrites
 // the first, which is left with a parent that does not hold it.
+// expect LR: [ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Holder::first
 #pragma once
 
 #include "refusals/head.hpp"

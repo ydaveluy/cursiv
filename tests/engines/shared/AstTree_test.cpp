@@ -11,6 +11,7 @@
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/AstTreeGrammars.hpp"
+#include "engines/shared/Checks.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -28,13 +29,6 @@ namespace ast_tree_cases {
 namespace {
 
 using Pair = std::array<std::unique_ptr<cursiv::Parser>, 2>;
-
-template <class T>
-const T* exactly(const cursiv::ParseResult& r) {
-  return r.value != nullptr && r.value->type == &cursiv::ast_type_tag<T>
-             ? static_cast<const T*>(r.value)
-             : nullptr;
-}
 
 bool read(const cursiv::ParseResult& r) {
   return r.accepted && r.diagnostics.empty() &&
@@ -184,8 +178,6 @@ void run() {
           index->array != nullptr && index->index != nullptr);
     CHECK(block->atoms[1]->type == &cursiv::ast_type_tag<ast::Name>);
   }
-
-
 }
 
 }  // namespace ast_tree_cases
@@ -270,7 +262,6 @@ void run() {
   // enough to challenge their shared metadata emitter's encounter order.
   every_engine({tmember::generated::BackwardLr::create_parser(),
                 tmember::generated::BackwardLr::create_ast_reflection(), ""});
-
 }
 
 }  // namespace member_order_cases
@@ -359,7 +350,6 @@ void run() {
   verify(*ll);
   verify(*lr);
   verify(*aux);
-
 }
 
 }  // namespace cyclic_adopt_cases
@@ -429,8 +419,6 @@ void run() {
 
   groups({g::Ll::create_parser(), g::Lr::create_parser()}, "run:inplace:");
   groups({g::Ll::create_parser(), g::Lr::create_parser()}, "run:behind:");
-
-
 }
 
 }  // namespace nested_run_cases

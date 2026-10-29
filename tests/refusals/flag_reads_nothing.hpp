@@ -1,5 +1,6 @@
 // A flag over an operand that may read nothing always sets the member: the
 // grammar is read, and the generator says so.
+// expect LR: warning: rule .Root.: .*reads an operand that may match nothing
 #pragma once
 
 #include "refusals/head.hpp"

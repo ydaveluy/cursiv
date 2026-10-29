@@ -1,5 +1,6 @@
 // A rule whose only content is a reference the text may skip: it hands over
 // a node on some paths only.
+// expect LR: this alternative hands over a node the text may leave out
 #pragma once
 
 #include "refusals/head.hpp"

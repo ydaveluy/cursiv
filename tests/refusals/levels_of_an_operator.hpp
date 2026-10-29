@@ -1,5 +1,6 @@
 // A precedence table listing an operator where a level stands: `levels(...)`
 // takes `left(op)`, `right(op)` or `nonassoc(op)`, which say how it groups.
+// expect LR: levels.[.][.][.]. lists the levels of a table, tightest-binding first
 #pragma once
 
 #include "refusals/head.hpp"

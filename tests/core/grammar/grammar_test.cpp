@@ -47,6 +47,7 @@
 #include "sentword/generated/Word/Module.hpp"
 #include "spelldashed/generated/Dashed/Module.hpp"
 #include "spellplain/generated/Plain/Module.hpp"
+#include "support/World.hpp"
 
 // Pins the expression layer: NTTP usability, operator+ flattening, create
 // absorption, combinator shapes, directive shapes.
@@ -1693,14 +1694,10 @@ static_assert(
     std::is_same_v<std::remove_cv_t<decltype(lit<"toto">)>, Lit<"toto">>);
 
 const cursiv::Parser& spellplain() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tspell::generated::Plain::create_parser();
-  return *p;
+  return support::parser_of<&tspell::generated::Plain::create_parser>();
 }
 const cursiv::Parser& spelldashed() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tspell::generated::Dashed::create_parser();
-  return *p;
+  return support::parser_of<&tspell::generated::Dashed::create_parser>();
 }
 
 bool parses(const cursiv::Parser& engine, std::string_view text) {
@@ -2300,19 +2297,13 @@ namespace compiler {
 namespace {
 
 const cursiv::Parser& sentblob() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tsent::generated::Blob::create_parser();
-  return *p;
+  return support::parser_of<&tsent::generated::Blob::create_parser>();
 }
 const cursiv::Parser& sentword() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tsent::generated::Word::create_parser();
-  return *p;
+  return support::parser_of<&tsent::generated::Word::create_parser>();
 }
 const cursiv::Parser& sentfree() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tsent::generated::Free::create_parser();
-  return *p;
+  return support::parser_of<&tsent::generated::Free::create_parser>();
 }
 
 // A document with a NUL embedded, counted among its bytes.

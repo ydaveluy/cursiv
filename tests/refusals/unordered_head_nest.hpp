@@ -1,3 +1,4 @@
+// expect LR: this alternative can create twice
 #pragma once
 
 #include "refusals/head.hpp"

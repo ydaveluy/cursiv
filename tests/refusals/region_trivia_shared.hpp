@@ -1,5 +1,6 @@
 // A region that skips the newlines its caller reads as tokens, and may stop
 // after its first name: the point after that name reads a newline two ways.
+// expect LR LL: refused: the grammar reaches one point through a .* region and outside it at once
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // In a terminal, an alternative with its own `as` reads words: a comparison
 // with the token's text tells which one it is.
+// expect LR: inside a terminal, an alternative with its own as<V>.e. reads words only
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // A list of nodes by value: a node is built in the tree and never copied into
 // a list, whether or not a directive writes the member.
+// expect LR: an AST list member holds nodes by pointer
 #pragma once
 
 #include "refusals/head.hpp"

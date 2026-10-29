@@ -92,9 +92,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     } else if (n.kind == LlShape::call && g.cfgTriviaAt.size() > 2 &&
                (b.nullable[id] || !b.first[id].test(kEofSymbol) ||
                 b.first[id].more_than_one())) {
-      DynSet want = b.first[id];
-      if (b.nullable[id]) want |= b.after[id];
-      n.mode = intern(want | skip(b.gapCfg, id));
+      n.mode = intern(b.lookahead(id, b.after[id]) | skip(b.gapCfg, id));
     }
   }
   b.headMode.assign(g.ndecisions, 0);

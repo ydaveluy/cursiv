@@ -1,6 +1,7 @@
 // A name an escape may begin, reading one on past a word it refuses, under a
 // word boundary without the escape's backslash: `inA` would be read as
 // `in` and a second name.
+// expect LR: refused: terminal .NAME. refuses ."in". at its head, and reads .\\. where a word of its own begins
 #pragma once
 
 #include "refusals/head.hpp"

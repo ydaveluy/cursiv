@@ -1,8 +1,9 @@
-// The class syntax of `cr<>`: a std::regex bracket expression without its
-// brackets, read among scalars.
+// The class syntax of `cr<>`, a std::regex bracket expression without its
+// brackets read among scalars, and a text lowered as a client lowers it.
 #include <algorithm>
 #include <initializer_list>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -10,6 +11,7 @@
 #include "cursiv/core/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/core/grammar/word_final_in.hpp"
 #include "cursiv/core/text/ClassItem.hpp"
+#include "cursiv/core/text/lower_case.hpp"
 #include "cursiv/core/utils/ctstring.hpp"
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
 #include "cursiv/test/Check.hpp"
@@ -223,6 +225,21 @@ bool same_ranges(const LexCodePoints& c,
   return true;
 }
 
+// As a client's `toLowerCase` lowers: each scalar by its full mapping, and a
+// capital sigma by whether it closes a word.
+void a_text_lowers_as_a_client_lowers_it() {
+  CHECK(cursiv::lower_case("MixedCASE_9") == "mixedcase_9");
+  CHECK(cursiv::lower_case("ÉCOLE Ŀ") == "école ŀ");
+  CHECK(cursiv::lower_case("İ") == "i̇");
+  CHECK(cursiv::lower_case("ΟΔΟΣ ΣΑ") == "οδος σα");
+  CHECK(cursiv::lower_case("ΑΣ'") == "ας'");
+  CHECK(cursiv::lower_case("Σ") == "σ");
+  CHECK(cursiv::lower_case("\U00010400") == "\U00010428");
+  CHECK(cursiv::lower_case(std::string("A\xFF"
+                                       "B")) == std::string("a\xFF"
+                                                            "b"));
+}
+
 }  // namespace
 
 int main() {
@@ -269,5 +286,6 @@ int main() {
     }
     CHECK(refused);
   }
-  return test::report("ClassItem_test");
+  a_text_lowers_as_a_client_lowers_it();
+  return test::report("text_test");
 }

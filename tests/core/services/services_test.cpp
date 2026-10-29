@@ -41,7 +41,7 @@
 #include "cursiv/core/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/core/workspace/WorkspaceManager.hpp"
 #include "cursiv/test/Check.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
 #ifndef __wasi__
@@ -76,8 +76,6 @@ void install_nothing(cursiv::CoreServices&) {}
 // gets is an uncaught exception instead.
 void register_language_throws_instead_of_answering_false() {
   cursiv::SharedCoreServices shared;
-  shared.fileSystemProvider =
-      std::make_unique<cursiv::EmptyFileSystemProvider>();
   cursiv::install_default_shared_core_services(shared);
 
   bool threw = false;
@@ -729,16 +727,17 @@ namespace observability_sink {
 
 namespace {
 
-// The sink a host writes: it keeps what it is told.
-class CaptureSink final : public cursiv::ObservabilitySink {
- public:
-  void publish(const cursiv::Observation& observation) noexcept override {
-    try {
-      seen.push_back(observation);
-    } catch (...) {
-    }
+using support::CaptureSink;
+
+// A workspace whose observations are kept, over `disk` -- none, an empty one.
+struct Observed {
+  cursiv::SharedCoreServices shared;
+  CaptureSink* capture = &support::capture_observations(shared);
+
+  explicit Observed(std::unique_ptr<cursiv::FileSystemProvider> disk = {}) {
+    shared.fileSystemProvider = std::move(disk);
+    cursiv::install_default_shared_core_services(shared);
   }
-  std::vector<cursiv::Observation> seen;
 };
 
 void an_observation_is_one_line() {
@@ -827,13 +826,8 @@ void concurrent_publishes_never_splice_two_lines() {
 
 // The later registration owns the extension, and the collision is said.
 void a_colliding_extension_is_said() {
-  cursiv::SharedCoreServices shared;
-  shared.fileSystemProvider =
-      std::make_unique<cursiv::EmptyFileSystemProvider>();
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
+  Observed world;
+  auto& [shared, capture] = world;
 
   shared.serviceRegistry->registerServices(language(shared, "one", ".x"));
   CHECK(capture->seen.empty());
@@ -851,13 +845,8 @@ void a_colliding_extension_is_said() {
 
 // A colliding file name is said too.
 void a_colliding_file_name_is_said() {
-  cursiv::SharedCoreServices shared;
-  shared.fileSystemProvider =
-      std::make_unique<cursiv::EmptyFileSystemProvider>();
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
+  Observed world;
+  auto& [shared, capture] = world;
 
   auto one = language(shared, "one", ".a");
   one->languageMetaData.fileNames = {"BUILD"};
@@ -909,17 +898,12 @@ class SubfolderRefusingFileSystemProvider final
 // the other folders are read and `ready` resolves -- or every request awaiting
 // the scan would wait for the session.
 void a_refused_root_is_said_and_the_others_are_read() {
-  cursiv::SharedCoreServices shared;
   auto provider =
       std::make_unique<SubfolderRefusingFileSystemProvider>("file:///gone");
   provider->addFile("file:///w/a.ws", "datatype A\n");
-  shared.fileSystemProvider = std::move(provider);
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
-  shared.serviceRegistry->registerServices(
-      language(shared, "workspace", ".ws"));
+  Observed world(std::move(provider));
+  auto& [shared, capture] = world;
+  (void)support::add_workspace<cursiv::CoreServices>(shared);
 
   const std::vector<cursiv::WorkspaceFolder> folders = {
       {"file:///gone", "gone"}, {"file:///w", "w"}};
@@ -944,19 +928,14 @@ void a_refused_root_is_said_and_the_others_are_read() {
 // A subfolder's refusal is said and stepped over: the scan keeps its
 // siblings, and nothing propagates.
 void a_refused_subfolder_is_said_and_stepped_over() {
-  cursiv::SharedCoreServices shared;
   auto provider =
       std::make_unique<SubfolderRefusingFileSystemProvider>("file:///w/sub");
   provider->addFile("file:///w/a.ws", "datatype A\n");
   provider->addFile("file:///w/sub/b.ws", "datatype B\n");
   provider->addFile("file:///w/other/c.ws", "datatype C\n");
-  shared.fileSystemProvider = std::move(provider);
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
-  shared.serviceRegistry->registerServices(
-      language(shared, "workspace", ".ws"));
+  Observed world(std::move(provider));
+  auto& [shared, capture] = world;
+  (void)support::add_workspace<cursiv::CoreServices>(shared);
 
   const std::vector<cursiv::WorkspaceFolder> folders = {{"file:///w", "w"}};
   shared.workspaceManager->initializeWorkspace(folders);
@@ -973,18 +952,13 @@ void a_refused_subfolder_is_said_and_stepped_over() {
 // A file the scan found and could not read is said, as one an update cannot
 // read is, and left out; the files beside it are read.
 void an_unreadable_file_is_said_and_the_others_are_read() {
-  cursiv::SharedCoreServices shared;
   auto provider =
       std::make_unique<SubfolderRefusingFileSystemProvider>("file:///w/b.ws");
   provider->addFile("file:///w/a.ws", "datatype A\n");
   provider->addFile("file:///w/b.ws", "datatype B\n");
-  shared.fileSystemProvider = std::move(provider);
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
-  shared.serviceRegistry->registerServices(
-      language(shared, "workspace", ".ws"));
+  Observed world(std::move(provider));
+  auto& [shared, capture] = world;
+  (void)support::add_workspace<cursiv::CoreServices>(shared);
 
   const std::vector<cursiv::WorkspaceFolder> folders = {{"file:///w", "w"}};
   shared.workspaceManager->initializeWorkspace(folders);
@@ -1002,18 +976,13 @@ void an_unreadable_file_is_said_and_the_others_are_read() {
 // A changed folder an update cannot list is said as the folder it is, not as
 // the workspace root the scan read.
 void a_changed_folder_no_update_can_list_is_a_folder() {
-  cursiv::SharedCoreServices shared;
   auto provider =
       std::make_unique<SubfolderRefusingFileSystemProvider>("file:///w/sub");
   provider->addFile("file:///w/a.ws", "datatype A\n");
   provider->addFile("file:///w/sub/b.ws", "datatype B\n");
-  shared.fileSystemProvider = std::move(provider);
-  auto sink = std::make_unique<CaptureSink>();
-  CaptureSink* const capture = sink.get();
-  shared.observabilitySink = std::move(sink);
-  cursiv::install_default_shared_core_services(shared);
-  shared.serviceRegistry->registerServices(
-      language(shared, "workspace", ".ws"));
+  Observed world(std::move(provider));
+  auto& [shared, capture] = world;
+  (void)support::add_workspace<cursiv::CoreServices>(shared);
   const std::vector<cursiv::WorkspaceFolder> folders = {{"file:///w", "w"}};
   shared.workspaceManager->initializeWorkspace(folders);
   capture->seen.clear();

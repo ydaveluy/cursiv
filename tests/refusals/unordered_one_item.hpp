@@ -1,4 +1,5 @@
 // An unordered group of one item: nothing to read in another order.
+// expect LR: an unordered group needs at least two items: .unordered.a, b.
 #pragma once
 
 #include "refusals/head.hpp"

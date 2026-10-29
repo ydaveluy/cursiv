@@ -44,6 +44,7 @@
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/ll/LlTerms.hpp"
 #include "engines/ll/ParityGrammar.hpp"
 #include "engines/ll/TagGrammar.hpp"
 #include "menull/generated/Ll/Module.hpp"
@@ -827,17 +828,10 @@ void an_abandon_replays_equivalent_returns_without_collapsing_frames() {
   }
 }
 
-constexpr std::uint16_t parity_terminal(std::string_view name) {
-  constexpr const auto& table = tpar::generated::Ll::kTable;
-  for (std::uint16_t t = 1; t < table.nterms; ++t)
-    if (table.term_name(t) == name) return t;
-  return cursiv::kInvalidSymbol;
-}
-
 void a_search_reads_keywords_in_the_shared_alphabet() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
-  constexpr auto keyword = parity_terminal("export"),
-                 identifier = parity_terminal("ID");
+  constexpr auto keyword = ll_terms::named<table>("export"),
+                 identifier = ll_terms::named<table>("ID");
   static_assert(keyword != cursiv::kInvalidSymbol &&
                 identifier != cursiv::kInvalidSymbol);
   std::array<cursiv::LlConfig, 2> cfg;
@@ -863,8 +857,8 @@ void a_search_reads_keywords_in_the_shared_alphabet() {
 // Its required child owes a token only when that call really read the prefix.
 void an_optional_prefix_keeps_owing_across_a_required_call() {
   static constexpr const auto& base = tpar::generated::Ll::kTable;
-  constexpr auto keyword = parity_terminal("export"),
-                 identifier = parity_terminal("ID");
+  constexpr auto keyword = ll_terms::named<base>("export"),
+                 identifier = ll_terms::named<base>("ID");
   static_assert(keyword != cursiv::kInvalidSymbol &&
                 identifier != cursiv::kInvalidSymbol);
   static constexpr cursiv::LlAtnState states[] = {
@@ -997,17 +991,10 @@ void a_plan_is_the_parses_own_and_goes_with_a_repair() {
 // can re-read the same spelling under an identifier-only mode.
 void prediction_reserves_only_viable_keywords() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
-  constexpr std::uint16_t identifier = [] {
-    for (std::uint16_t t = 1; t < table.nterms; ++t)
-      if (table.term_name(t) == "ID") return t;
-    return cursiv::kNoRow;
-  }();
-  constexpr std::uint16_t keyword = [] {
-    for (std::uint16_t t = 1; t < table.nterms; ++t)
-      if (table.term_text(t) == "let") return t;
-    return cursiv::kNoRow;
-  }();
-  static_assert(identifier != cursiv::kNoRow && keyword != cursiv::kNoRow);
+  constexpr std::uint16_t identifier = ll_terms::named<table>("ID"),
+                          keyword = ll_terms::spelled<table>("let");
+  static_assert(identifier != cursiv::kInvalidSymbol &&
+                keyword != cursiv::kInvalidSymbol);
   cursiv::LlMask<table.termWords> viable;
   std::vector<std::uint16_t> read;
   viable.set(identifier);
@@ -1092,14 +1079,10 @@ const std::string_view kCorpus[] = {
 // numbering and says nothing across the two -- and the AST by class and
 // member, which is what a consumer of either module holds.
 void the_two_engines_write_one_tree() {
-  const std::unique_ptr<cursiv::Parser> lr =
-      tpar::generated::Lr::create_parser();
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
-  const std::unique_ptr<cursiv::AstReflection> lrR =
-      tpar::generated::Lr::create_ast_reflection();
-  const std::unique_ptr<cursiv::AstReflection> llR =
-      tpar::generated::Ll::create_ast_reflection();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  const auto lrR = tpar::generated::Lr::create_ast_reflection();
+  const auto llR = tpar::generated::Ll::create_ast_reflection();
   for (const std::string_view text : kCorpus) {
     const cursiv::ParseResult a = lr->parse(text);
     const cursiv::ParseResult b = ll->parse(text);
@@ -1165,10 +1148,8 @@ void a_result_keeps_its_grammar_after_the_parser_dies() {
 // A block comment closes on its closer, or with the text: both engines read
 // it as one hidden record, and a closer never written refuses nothing.
 void a_block_comment_closes_with_the_text() {
-  const std::unique_ptr<cursiv::Parser> lr =
-      tpar::generated::Lr::create_parser();
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   for (const std::string_view text :
        {"let a = 1; /* open", "let a = 1; /*", "let a = 1; /* x */ /* y *",
         "let a = 1 /* x */ ;"}) {
@@ -1183,14 +1164,10 @@ void a_block_comment_closes_with_the_text() {
 // the author spelled it -- `<` and `,` inside the string, a number past the
 // signed range -- so both units compile and write the same tree.
 void a_string_instance_is_spelled_as_written() {
-  const std::unique_ptr<cursiv::Parser> lr =
-      ttag::generated::Lr::create_parser();
-  const std::unique_ptr<cursiv::Parser> ll =
-      ttag::generated::Ll::create_parser();
-  const std::unique_ptr<cursiv::AstReflection> lrR =
-      ttag::generated::Lr::create_ast_reflection();
-  const std::unique_ptr<cursiv::AstReflection> llR =
-      ttag::generated::Ll::create_ast_reflection();
+  const auto lr = ttag::generated::Lr::create_parser();
+  const auto ll = ttag::generated::Ll::create_parser();
+  const auto lrR = ttag::generated::Lr::create_ast_reflection();
+  const auto llR = ttag::generated::Ll::create_ast_reflection();
   const cursiv::ParseResult a = lr->parse("ab , cd");
   const cursiv::ParseResult b = ll->parse("ab , cd");
   CHECK(a.accepted && b.accepted && a.diagnostics.empty() &&
@@ -1231,8 +1208,7 @@ const std::string_view kBroken[] = {
 };
 
 void a_refused_document_is_still_a_tree() {
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   for (const std::string_view text : kBroken) {
     const cursiv::ParseResult r = ll->parse(text);
     CHECK(r.cst().size() != 0);
@@ -1255,14 +1231,10 @@ void a_refused_document_is_still_a_tree() {
 // ...but a repair both can make is one repair: a note per fault, of one kind
 // over one span, and one tree.
 void a_repair_both_engines_make_is_one_repair() {
-  const std::unique_ptr<cursiv::Parser> lr =
-      tpar::generated::Lr::create_parser();
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
-  const std::unique_ptr<cursiv::AstReflection> lrR =
-      tpar::generated::Lr::create_ast_reflection();
-  const std::unique_ptr<cursiv::AstReflection> llR =
-      tpar::generated::Ll::create_ast_reflection();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  const auto lrR = tpar::generated::Lr::create_ast_reflection();
+  const auto llR = tpar::generated::Ll::create_ast_reflection();
   for (const std::string_view text :
        {"let a = 1 1;", "let a  1;", "let a = ;", "let ; = 1;", "a a = 1;",
         "show ;", "show x x;", "x x;"}) {
@@ -1435,8 +1407,7 @@ std::string lets(std::size_t n) {
 // The uncancelled document is read whole, and an already cancelled call
 // answers before allocating or descending into that document.
 void a_long_document_parses_and_a_cancelled_call_stops() {
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   const std::string src = lets(1u << 14);
   const cursiv::ParseResult whole = ll->parse(src);
   CHECK(whole.accepted && whole.diagnostics.empty());
@@ -1456,8 +1427,7 @@ void a_long_document_parses_and_a_cancelled_call_stops() {
 // heap, so the document is read like a shallow one. The comments leave trivia
 // pending at every call.
 void a_document_deeper_than_the_stack_is_read() {
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   constexpr int kDeep = 100000;
   std::string text = "let a = ";
   for (int i = 0; i < kDeep; ++i) text += "( // c\n";
@@ -1479,8 +1449,7 @@ void a_document_deeper_than_the_stack_is_read() {
 // span stays his -- what the repair names is the terminal his bytes stand
 // for -- and everything after the fault is still read.
 void a_misspelt_keyword_is_read_as_the_one_it_spells() {
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   const cursiv::ParseResult r = ll->parse("exort let a = 1; let b = 2;");
   CHECK(r.value != nullptr);
   bool replaced = false;
@@ -1496,8 +1465,7 @@ void a_misspelt_keyword_is_read_as_the_one_it_spells() {
 // ...and a word no keyword is one edit from is text to skip, not a keyword to
 // guess. The loop it stands in reads on rather than ending the document.
 void a_word_that_spells_no_keyword_is_skipped() {
-  const std::unique_ptr<cursiv::Parser> ll =
-      tpar::generated::Ll::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
   const cursiv::ParseResult r = ll->parse("zzzz let a = 1; let b = 2;");
   CHECK(r.value != nullptr);
   bool deleted = false;

@@ -156,7 +156,4 @@ struct Suite : Choice {
                      (lit<"called:"> + ref<Called::Root>)> {};
   using entry = Root;
 };
-struct Ll : Suite {};
-struct Lr : Suite {};
-
 }  // namespace tkwrelay

@@ -1,4 +1,6 @@
 // Six nests in any order, the most either engine spells.
+// expect LR: refusal_unordered_nests_six: states=
+// expect LL: refusal_unordered_nests_six_ll: terms=
 #pragma once
 
 #include "refusals/head.hpp"

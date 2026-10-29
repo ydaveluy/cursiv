@@ -31,7 +31,4 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
   using hidden = list<BLOCK>;
 };
-struct Ll : Base {};
-struct Lr : Base {};
-
 }  // namespace tlltail

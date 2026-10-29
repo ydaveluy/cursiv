@@ -83,6 +83,7 @@
 #include "cursiv/test/Check.hpp"
 #include "dualll/generated/Ll/Module.hpp"
 #include "duallr/generated/Lr/Module.hpp"
+#include "support/World.hpp"
 
 // The AST tables and the reducer that reads them: the tables through the
 // erased reflection -- member classification, address-as-tag identity, the
@@ -97,16 +98,20 @@ namespace {
 // a service holds: an index found by owner and member name, never a member
 // pointer the erased door no longer knows.
 
-template <auto Create>
-const cursiv::Parser& parser_of() {
-  static const std::unique_ptr<cursiv::Parser> p = Create();
-  return *p;
-}
+using support::parser_of;
 
 template <auto Create>
 const cursiv::DefaultAstReflection& reflection_of() {
   static const std::unique_ptr<cursiv::AstReflection> r = Create();
   return static_cast<const cursiv::DefaultAstReflection&>(*r);
+}
+
+// The grammar most lanes below read, and its tables.
+const cursiv::Parser& engine() {
+  return parser_of<&tab::generated::All::create_parser>();
+}
+const cursiv::DefaultAstReflection& refl() {
+  return reflection_of<&tab::generated::All::create_ast_reflection>();
 }
 
 template <class T>
@@ -200,8 +205,7 @@ constexpr bool node_queries() {
 static_assert(node_queries());
 
 void the_tables_read_back() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   const cursiv::AstMetaData& m = r.metaData();
 
   // The two rules that write `name` share one entry: the action they name is
@@ -288,10 +292,8 @@ void the_tables_read_back() {
 // A member a grammar site wraps in `option()` can go unwritten on an
 // accepted, diagnostic-free parse -- what `isComplete` exists to catch.
 void a_skipped_optional_site_leaves_the_node_incomplete() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
-  const cursiv::Parser& engine =
-      parser_of<&tab::generated::All::create_parser>();
+  const cursiv::DefaultAstReflection& r = refl();
+  const cursiv::Parser& engine = ast_builder::engine();
 
   const cursiv::ParseResult bare = engine.parse("root");
   CHECK(bare.accepted && bare.diagnostics.empty());
@@ -312,8 +314,7 @@ namespace infix {
 using namespace tab::climb;
 
 void the_climb_contributes_its_members() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   const cursiv::AstMetaData& m = r.metaData();
   const std::uint16_t left = field_of(r, kTag<Bin>, "left");
   const std::uint16_t op = field_of(r, kTag<Bin>, "op");
@@ -339,9 +340,7 @@ namespace climbs {
 using namespace tab::climbs;
 
 void two_climbs_over_one_class_keep_their_own_members() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse(
-          "$twoclimbs 1+2 3@4");
+  cursiv::ParseResult r = engine().parse("$twoclimbs 1+2 3@4");
   CHECK(r.accepted);
   auto* const h = r.value_as<Holder2>();
   CHECK(r.error == cursiv::AstBuildError::none);
@@ -365,14 +364,9 @@ using namespace tab::region;
 static_assert(kTag<Wrap>->derivesFrom(kTag<Node>));
 static_assert(!kTag<Node>->derivesFrom(kTag<Wrap>));
 
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
-
 // A nest names both the type it creates and the member it moves into.
 void the_nest_names_a_node_member() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Wrap>, "inner").nature ==
         cursiv::detail::FieldNature::node);
   CHECK(desc_of(r, kTag<Wrap>, "inner").target == r.typeIndexOf(kTag<Node>));
@@ -420,8 +414,7 @@ using namespace tab::enm;
 static_assert(cursiv::has_default_convert<Vis>);
 
 void an_enum_is_a_plain_value_member() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   // No storage, no node, no reference.
   CHECK(desc_of(r, kTag<Decl>, "vis").nature ==
         cursiv::detail::FieldNature::value);
@@ -453,10 +446,6 @@ void no_directive_no_columns() {
 namespace wiring {
 
 using namespace tab::wiring;
-
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
 
 void builds_doc() {
   cursiv::ParseResult r = engine().parse("doc item a item b");
@@ -590,12 +579,6 @@ namespace vocab {
 
 using namespace tab::vocab;
 
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
-const cursiv::DefaultAstReflection& refl() {
-  return reflection_of<&tab::generated::All::create_ast_reflection>();
-}
 
 // The document that exercises every member form at once; the move tests
 // reuse it, because a result carrying references is what a move must keep
@@ -871,16 +854,14 @@ static_assert(std::is_same_v<typename cursiv::detail::conv_alt<
 // Validation accepts all three, where the constructibility scan alone would
 // have refused bool and double.
 void every_alternative_is_kept() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   CHECK(desc_of(r, kTag<Val>, "v").nature ==
         cursiv::detail::FieldNature::variant);
   CHECK(cursiv::lr_ast_registry<tab::exact::G>().convCount == 4);
 }
 
 void each_payload_lands_in_its_own_slot() {
-  const cursiv::Parser& engine =
-      parser_of<&tab::generated::All::create_parser>();
+  const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rb = engine.parse("$exact true");
   auto* b = rb.value_as<Val>();
   CHECK(rb.accepted);
@@ -933,8 +914,7 @@ void the_annotated_rule_keeps_its_own_entry() {
 }
 
 void annotated_terminal_lands_in_its_annotated_slot() {
-  const cursiv::Parser& engine =
-      parser_of<&tab::generated::All::create_parser>();
+  const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult rn = engine.parse("$annot 42");
   auto* const n = rn.value_as<Val>();
   CHECK(rn.error == cursiv::AstBuildError::none && rn.diagnostics.empty());
@@ -963,8 +943,7 @@ static_assert(
                    std::int32_t>);
 
 void the_validated_alternative_is_the_written_one() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("$annot2 42");
+  cursiv::ParseResult r = engine().parse("$annot2 42");
   auto* const v = r.value_as<Num>();
   CHECK(r.error == cursiv::AstBuildError::none);
   CHECK(v != nullptr && std::holds_alternative<std::int32_t>(v->n));
@@ -1084,8 +1063,7 @@ using namespace tab::nodealt;
 // Both families are reachable from the member, in declaration order, and the
 // position is the alternative to emplace.
 void both_families_are_reachable() {
-  const cursiv::DefaultAstReflection& r =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& r = refl();
   const cursiv::detail::FieldDesc& v = desc_of(r, kTag<H>, "v");
   CHECK(v.target_count == 2);
   CHECK(v.targets[0] == r.typeIndexOf(kTag<A>));
@@ -1094,8 +1072,7 @@ void both_families_are_reachable() {
 }
 
 void both_node_alternatives_build() {
-  const cursiv::Parser& engine =
-      parser_of<&tab::generated::All::create_parser>();
+  const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult ra = engine.parse("@ax");
   auto* const ha = ra.value_as<H>();
   CHECK(ra.error == cursiv::AstBuildError::none);
@@ -1113,14 +1090,13 @@ void both_node_alternatives_build() {
 
 // A node held in a variant is a child the reflection visits.
 void the_variant_child_is_visited() {
-  const cursiv::Parser& engine =
-      parser_of<&tab::generated::All::create_parser>();
+  const cursiv::Parser& engine = ast_builder::engine();
   cursiv::ParseResult ra = engine.parse("@ax");
   auto* const ha = ra.value_as<H>();
   CHECK(ha != nullptr);
   if (ha == nullptr) return;
   std::string seen;
-  reflection_of<&tab::generated::All::create_ast_reflection>().visitMembers(
+  refl().visitMembers(
       *ha, [&](std::string_view name, std::uint32_t, cursiv::AstNode& c) {
         seen += name;
         seen += c.parent == ha ? "+" : "-";
@@ -1135,9 +1111,7 @@ namespace nest {
 using namespace tab::nested;
 
 void nest_chain() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse(
-          "$nest pub a . b !!");
+  cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
   CHECK(r.accepted && static_cast<bool>(r));
   N* const outer = r.value_as<N>();
   CHECK(outer != nullptr);
@@ -1185,8 +1159,7 @@ namespace wrapper {
 using namespace tab::wrapper;
 
 void wrapper_owns_what_follows_the_nest() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("$wrapper a ! ?");
+  cursiv::ParseResult r = engine().parse("$wrapper a ! ?");
   CHECK(r.accepted && static_cast<bool>(r));
   Wrap* const w = r.value_as<Wrap>();
   CHECK(w != nullptr && cursiv::ast_cast<Wrap>(w) != nullptr);
@@ -1211,8 +1184,7 @@ void wrapper_owns_what_follows_the_nest() {
 // `Inner`, the value is a `Wrap` -- here `Wrap` is an `Inner`, so the adoption
 // is legal and the pointer is sound.
 void adopts_the_wrapper_as_itself() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("$adopt a ! b !");
+  cursiv::ParseResult r = engine().parse("$adopt a ! b !");
   CHECK(r.accepted && static_cast<bool>(r));
   auto* doc = r.value_as<tab::adoptwrap::Doc>();
   CHECK(doc != nullptr && doc->items.size() == 2);
@@ -1229,8 +1201,7 @@ namespace move {
 using namespace tab::move;
 
 cursiv::ParseResult parse(std::string_view text) {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse(text);
+  cursiv::ParseResult r = engine().parse(text);
   CHECK(r.accepted);
   return r;
 }
@@ -1285,10 +1256,6 @@ void self_assignment_is_a_no_op() {
 namespace climb {
 
 using namespace tab::climb;
-
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
 
 std::int32_t leaf_value(Expr* e) {
   const Num* const n = cursiv::ast_cast<Num>(e);
@@ -1348,8 +1315,7 @@ namespace hoist {
 using namespace tab::hoist;
 
 void a_hoisted_write_reaches_the_branch() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("$hoist x[ y]");
+  cursiv::ParseResult r = engine().parse("$hoist x[ y]");
   CHECK(r.accepted && static_cast<bool>(r) &&
         r.error == cursiv::AstBuildError::none);
   CHECK(r.diagnostics.empty());
@@ -1390,8 +1356,8 @@ void one(const cursiv::Parser& engine, std::string_view src,
 }
 
 void the_collapse_repro_builds_a_correct_ast() {
-  one(parser_of<&tab::generated::All::create_parser>(), "doc let a end", "a");
-  one(parser_of<&tab::generated::All::create_parser>(), "let a", "a");
+  one(engine(), "doc let a end", "a");
+  one(engine(), "let a", "a");
 }
 
 }  // namespace held
@@ -1402,7 +1368,7 @@ namespace spell {
 using namespace tab::spell;
 
 Flag* built(std::string_view text, cursiv::ParseResult& out) {
-  out = parser_of<&tab::generated::All::create_parser>().parse(text);
+  out = engine().parse(text);
   if (!out.accepted) return nullptr;
   return out ? out.value_as<Flag>() : nullptr;
 }
@@ -1465,9 +1431,7 @@ static_assert(!takes<std::string, tab::All::TextID>);
 static_assert(!takes<std::pmr::string, tab::All::TextQUOTED>);
 
 void the_law_leaves_the_safe_combinations_alone() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse(
-          "$text abc 'xy' 42 HELLO");
+  cursiv::ParseResult r = engine().parse("$text abc 'xy' 42 HELLO");
   CHECK(r.accepted && static_cast<bool>(r) && r.diagnostics.empty());
   const N* const n = r.value_as<N>();
   CHECK(n != nullptr);
@@ -1498,10 +1462,6 @@ namespace own {
 
 using namespace tab::own;
 
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
-
 void a_specialised_converter_reaches_its_own_target() {
   cursiv::ParseResult r = engine().parse("$own 42");
   auto* n = r.value_as<Node>();
@@ -1523,13 +1483,9 @@ namespace optnode {
 
 using namespace tab::optnode;
 
-const cursiv::Parser& engine() {
-  return parser_of<&tab::generated::All::create_parser>();
-}
-
 std::string walk(const cursiv::AstNode& n) {
   std::string out;
-  reflection_of<&tab::generated::All::create_ast_reflection>().visitMembers(
+  refl().visitMembers(
       n, [&](std::string_view name, std::uint32_t, cursiv::AstNode&) {
         out += name;
         out += ';';
@@ -1564,8 +1520,7 @@ namespace inl {
 using namespace tab::inl;
 
 void the_inline_slot_converts() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("$inl ff 10");
+  cursiv::ParseResult r = engine().parse("$inl ff 10");
   CHECK(r.accepted && !!r);
   auto* d = r.value_as<Doc>();
   CHECK(d != nullptr && d->nums.size() == 2);
@@ -1581,8 +1536,7 @@ namespace narrow {
 using namespace tab::narrow;
 
 void a_narrowed_site_stamps_and_filters() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse("use abc");
+  cursiv::ParseResult r = engine().parse("use abc");
   CHECK(r.accepted);
   auto* const site = static_cast<Site*>(r.value);
   CHECK(site != nullptr);
@@ -1591,8 +1545,7 @@ void a_narrowed_site_stamps_and_filters() {
 
   CHECK(r.references->handles.size() == 1);
   const std::uint16_t at = r.references->handles[0].field;
-  const cursiv::DefaultAstReflection& refl =
-      reflection_of<&tab::generated::All::create_ast_reflection>();
+  const cursiv::DefaultAstReflection& refl = ast_builder::refl();
   const cursiv::RefOps& ops = refl.metaData().refOps[at];
   CHECK(ops.narrow_count == 1);
   CHECK(ops.narrow_of(*site, 0) == site->broad.narrow);
@@ -1617,9 +1570,7 @@ namespace deferred {
 using namespace tab::deferred;
 
 void writes_land_on_the_branch_node() {
-  cursiv::ParseResult r =
-      parser_of<&tab::generated::All::create_parser>().parse(
-          "pets rex #fast dog ! @big tom cat");
+  cursiv::ParseResult r = engine().parse("pets rex #fast dog ! @big tom cat");
   CHECK(r.accepted && static_cast<bool>(r));
   auto* doc = r.value_as<Doc>();
   CHECK(doc && doc->pets.size() == 2);
@@ -1740,9 +1691,7 @@ static_assert(cursiv::ParseDiagnostic{}.begin == 0 &&
 static_assert(cursiv::ParseDiagnostic{}.element == cursiv::kNoElement);
 
 const cursiv::Parser& engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tcstn::generated::LexG::create_parser();
-  return *p;
+  return support::parser_of<&tcstn::generated::LexG::create_parser>();
 }
 
 void cst_node_view_and_bind_round_trip() {
@@ -2050,9 +1999,7 @@ namespace {
 using namespace tconv;
 
 const cursiv::Parser& engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tconv::generated::G::create_parser();
-  return *p;
+  return support::parser_of<&tconv::generated::G::create_parser>();
 }
 
 void keyword_template_converters_compile_and_parse() {
@@ -2071,9 +2018,7 @@ void keyword_template_converters_compile_and_parse() {
 // A data rule with a separator -- `some(ref<IDT>, lit<".">)` matches one IDT,
 // then repeats `lit<"."> + ref<IDT>` -- exactly the shape Parts is built for.
 const cursiv::Parser& separated() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tab::generated::All::create_parser();
-  return *p;
+  return support::parser_of<&tab::generated::All::create_parser>();
 }
 
 void defaults() {
@@ -3166,15 +3111,11 @@ using tdual::Doc;
 using tdual::Item;
 
 const cursiv::Parser& engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tdual::generated::Lr::create_parser();
-  return *p;
+  return support::parser_of<&tdual::generated::Lr::create_parser>();
 }
 
 const cursiv::Parser& ll_engine() {
-  static const std::unique_ptr<cursiv::Parser> p =
-      tdual::generated::Ll::create_parser();
-  return *p;
+  return support::parser_of<&tdual::generated::Ll::create_parser>();
 }
 
 struct Parsed {

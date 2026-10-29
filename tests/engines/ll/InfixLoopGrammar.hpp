@@ -98,7 +98,4 @@ struct Combined : Common {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Combined {};
-struct Lr : Combined {};
-
 }  // namespace tinfixloop

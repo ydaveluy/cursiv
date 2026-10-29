@@ -7,34 +7,22 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
 #include "embedlr/generated/DocLr/GrammarSource.hpp"
 #include "embedlr/generated/DocLr/Module.hpp"
 #include "engines/lr/EmbedGrammar.hpp"
+#include "engines/lr/ParseChecks.hpp"
 
 namespace {
 
 using cursiv::Parser;
 using cursiv::ParseResult;
 using cursiv::TextOffset;
+using checks::clean, checks::leaves, checks::offered;
 
-bool clean(const Parser& p, std::string_view text) {
-  const ParseResult r = p.parse(text);
-  const bool ok = r.accepted && r.diagnostics.empty() && r.value != nullptr;
-  if (!ok)
-    std::printf("  not clean: \"%.*s\"\n", static_cast<int>(text.size()),
-                text.data());
-  return ok;
-}
 // Read with a repair, the first one in [at, upto]: where the text breaks the
 // law the case is about.
 bool repaired(const Parser& p, std::string_view text, TextOffset at,
@@ -59,22 +47,6 @@ bool owes(const Parser& p, const ParseResult& r, std::string_view text) {
            p.getGrammar().terminalSpellings(d.element))
         if (s == text) return true;
   return false;
-}
-
-TextOffset size_of(std::string_view s) {
-  return static_cast<TextOffset>(s.size());
-}
-
-std::string leaves(const Parser& p, std::string_view text) {
-  const ParseResult r = p.parse(text);
-  std::string out;
-  r.cst().visit_leaves([&](const cursiv::CstLeaf& l) {
-    if (l.begin == l.end) return;
-    if (!out.empty()) out += ' ';
-    const std::string s(text.substr(l.begin, l.end - l.begin));
-    out += l.hidden ? "[" + s + "]" : s;
-  });
-  return out;
 }
 
 template <class T>
@@ -119,19 +91,6 @@ const cursiv::AstNode* first_block(const ParseResult& r, bool script) {
   const tembed::ast::Block* b = *doc->blocks.begin();
   if (b == nullptr) return nullptr;
   return script ? static_cast<const cursiv::AstNode*>(b->script) : b->json;
-}
-
-// The literals a caret at the end of `text` is offered.
-std::string offered(const Parser& p, std::string_view text) {
-  const ParseResult r = p.parse(text);
-  const auto at = size_of(text);
-  std::vector<cursiv::NextFeature> out;
-  p.nextFeaturesAt(r.cst(), at, at, out);
-  std::string seen;
-  for (const auto& f : out)
-    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
-      if (seen.find(t) == std::string::npos) seen += t;
-  return seen;
 }
 
 void a_section_reads_its_own_trivia(const Parser& p) {

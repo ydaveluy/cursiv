@@ -8,7 +8,6 @@
 
 #include "cursiv/core/syntax-tree/AstField.hpp"
 #include "cursiv/core/syntax-tree/AstMetaData.hpp"
-#include "cursiv/engines/shared/gen/kind_as_act.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
 namespace cursiv {
@@ -47,7 +46,27 @@ struct AstRowGen {
   bool valued = false;
   std::string_view valueRule;
 
-  constexpr ActKind act() const { return kind_as_act(kind); }
+  // The kind the record answers the enclosing region with: the switch names
+  // every `WriteKind`, so a new one is a -Wswitch diagnostic here.
+  constexpr ActKind act() const {
+    switch (kind) {
+      case WriteKind::create:
+      case WriteKind::close:
+      case WriteKind::climb:
+        return ActKind::create;
+      case WriteKind::assign:
+        return ActKind::assign;
+      case WriteKind::append:
+        return ActKind::append;
+      case WriteKind::nest:
+        return ActKind::nest;
+      case WriteKind::flag:
+        return ActKind::flag;
+      case WriteKind::convert:
+        break;
+    }
+    return ActKind::none;
+  }
   // Hands a node back: an opening, or a close, which adopts what a call
   // inside built.
   constexpr bool makes() const {

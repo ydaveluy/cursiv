@@ -417,6 +417,18 @@ concept owning_text_rvalue =
     !std::is_same_v<std::remove_cv_t<S>, std::string_view> &&
     !std::is_pointer_v<std::decay_t<S>> && !std::is_array_v<S>;
 
+// Both references' refusal of an owning temporary: a static_assert, since g++
+// drops the reason of a `= delete("...")` across a module boundary.
+template <class S>
+void refuse_owning_bind() {
+  static_assert(
+      dependent_false<S>,
+      "this name OWNS its bytes and dies at the end of the full expression, "
+      "while the reference keeps a view of them. Bind a view of something "
+      "that outlives the tree: a slice of the parsed document, or bytes "
+      "copied into the tree's own resource (`cursiv::copy_into(mem, text)`)");
+}
+
 }  // namespace detail
 
 // A cross-reference as an AST field: the name now, one target of Ts... once
@@ -505,16 +517,10 @@ struct reference {
     _state = RefState::Unresolved;
   }
   // An owning temporary is refused where it is written rather than dangling
-  // silently; it wins the overload as an exact match. A static_assert body and
-  // not `= delete("...")`, whose reason g++ drops across a module boundary.
+  // silently; it wins the overload as an exact match.
   template <detail::owning_text_rvalue S>
   void bind(NodeId, S&&, std::uint8_t = kNoNarrow) {
-    static_assert(
-        detail::dependent_false<S>,
-        "this name OWNS its bytes and dies at the end of the full expression, "
-        "while the reference keeps a view of them. Bind a view of something "
-        "that outlives the tree: a slice of the parsed document, or bytes "
-        "copied into the tree's own resource (`cursiv::copy_into(mem, text)`)");
+    detail::refuse_owning_bind<S>();
   }
 };
 
@@ -585,16 +591,9 @@ struct multi_reference {
     narrow = nar;
     _state = RefState::Unresolved;
   }
-  // The same refusal as `reference::bind`, by the same mechanism -- see it
-  // for why a `static_assert` body and not `= delete("...")`.
   template <detail::owning_text_rvalue S>
   void bind(NodeId, S&&, std::uint8_t = kNoNarrow) {
-    static_assert(
-        detail::dependent_false<S>,
-        "this name OWNS its bytes and dies at the end of the full expression, "
-        "while the reference keeps a view of them. Bind a view of something "
-        "that outlives the tree: a slice of the parsed document, or bytes "
-        "copied into the tree's own resource (`cursiv::copy_into(mem, text)`)");
+    detail::refuse_owning_bind<S>();
   }
 };
 

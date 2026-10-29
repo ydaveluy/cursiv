@@ -154,13 +154,11 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
       arms.push_back(_cfg.climbOps[cl.opBase + i].body);
     arms.push_back(put_node(_o, LlNode{.kind = LlShape::empty},
                             LlNodeBuild{static_cast<std::uint8_t>(cfg)}));
-    cl.selectNode =
+    cl.selectNode = detail::llow::with_decision(
+        _o,
         detail::llow::put_group(_o, LlShape::alt, arms, kNoRow,
-                                LlNodeBuild{static_cast<std::uint8_t>(cfg)});
-    _cfg.nodes[cl.selectNode].decision =
-        detail::llow::new_decision(_o, cl.selectNode,
-                                   static_cast<std::uint16_t>(arms.size()),
-                                   lhs);
+                                LlNodeBuild{static_cast<std::uint8_t>(cfg)}),
+        static_cast<std::uint16_t>(arms.size()), lhs);
   }
   _cfg.rules[lhs].climb = _cfg.nclimbs;
   _cfg.climbs[_cfg.nclimbs++] = cl;

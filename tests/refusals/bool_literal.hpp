@@ -1,3 +1,4 @@
+// expect LR: [ '‘]BoolLiteral.*refuse::ast::Flag::enabled.*!
 #pragma once
 
 #include "refusals/head.hpp"

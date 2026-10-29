@@ -59,16 +59,13 @@ void read(const Reader& r, const Case& c) {
   CHECK(wants || !result.diagnostics.empty());
 }
 
-template <std::size_t N>
-void expect_cases(const Reader (&readers)[N],
-                       std::span<const Case> cases) {
-  for (const Reader& r : readers)
-    for (const Case& c : cases) read(r, c);
+void expect_cases(std::string_view prefix, std::span<const Case> cases) {
+  const Reader r{"LL", g::Ll::create_parser(), g::Ll::create_ast_reflection(),
+                 prefix};
+  for (const Case& c : cases) read(r, c);
 }
 
 void a_condition_after_the_operator_reads_the_gap_behind_it() {
-  const Reader readers[] = {
-      {"LL", g::Ll::create_parser(), g::Ll::create_ast_reflection(), "after:"}};
   const Case cases[] = {
       {"1", "Document{value=Number{} }"},
       {"1 + 2", kOne},
@@ -80,55 +77,47 @@ void a_condition_after_the_operator_reads_the_gap_behind_it() {
       {"1 + 2 +\n3", ""},
       {"1\n+\n2", ""},
   };
-  expect_cases(readers, cases);
+  expect_cases("after:", cases);
 }
 
 void conditions_on_both_sides_of_the_operator_each_read_their_own_gap() {
-  const Reader readers[] = {
-      {"LL", g::Ll::create_parser(), g::Ll::create_ast_reflection(), "both:"}};
   const Case cases[] = {
       {"1 +\n2", kOne}, {"1 +\n2 +\n3", kTwo}, {"1 + 2", ""},
       {"1\n+\n2", ""},  {"1\n+ 2", ""},        {"1 +\n2 + 3", ""},
   };
-  expect_cases(readers, cases);
+  expect_cases("both:", cases);
 }
 
 void a_guarded_operator_among_plain_ones_reads_its_own_gap() {
-  const Reader readers[] = {
-      {"LL", g::Ll::create_parser(), g::Ll::create_ast_reflection(), "mixed:"}};
   const Case cases[] = {
       {"1 * 2 + 3", kTwo},   {"1\n* 2 + 3", kTwo},    {"1 * 2\n+ 3", kTwo},
       {"1 + 2 * 3", kRight}, {"1\n+ 2\n* 3", kRight}, {"1 +\n2 * 3", ""},
       {"1 * 2 +\n3", ""},
   };
-  expect_cases(readers, cases);
+  expect_cases("mixed:", cases);
 }
 
 // The operator's token also opens an item of its own: a break behind it parts
 // the operands, and the same text reads as two items.
 void a_break_behind_the_operator_parts_what_it_would_join() {
-  const Reader readers[] = {
-      {"LL", g::Ll::create_parser(), g::Ll::create_ast_reflection(), "list:"}};
   const Case cases[] = {
       {"1 + 2", kJoined},
       {"1\n+ 2", kJoined},
       {"1 +\n2", kApart},
       {"1 + \n 2", kApart},
   };
-  expect_cases(readers, cases);
+  expect_cases("list:", cases);
 }
 
 void the_operator_text_leaves_the_condition_out() {
   const auto ll = g::Ll::create_parser();
-  for (const cursiv::Parser* parser : {ll.get()}) {
-    const auto result = parser->parse("after:1\n+ 2");
-    const auto* document = result.value_as<toperatorcondition::Document>();
-    const auto* sum =
-        document == nullptr
-            ? nullptr
-            : cursiv::ast_cast<toperatorcondition::Binary>(document->value);
-    CHECK(sum != nullptr && sum->op == "+");
-  }
+  const auto result = ll->parse("after:1\n+ 2");
+  const auto* document = result.value_as<toperatorcondition::Document>();
+  const auto* sum =
+      document == nullptr
+          ? nullptr
+          : cursiv::ast_cast<toperatorcondition::Binary>(document->value);
+  CHECK(sum != nullptr && sum->op == "+");
 }
 
 }  // namespace

@@ -70,17 +70,27 @@ Id open_next(LrGssGraph& g) {
   return v;
 }
 
-// Two stacks of one future, their states and symbols alike: the one that
-// ranks first is the one the text comes back with.
-void two_stacks_of_one_future_keep_the_one_ranked_first() {
+// Two stacks of one future, their states and symbols alike, one shifted on
+// each arm and the arms met again on the next: whether the text comes back,
+// and the action of the step the graph elects first.
+struct Arms {
+  std::vector<std::uint32_t> words;
+  std::uint32_t action = ~0u;
+};
+struct Elected {
+  bool handed = false;
+  std::uint32_t first = ~0u;
+  unsigned tabled = 0;
+};
+Elected elect(const Arms& a, const Arms& b, bool exact = false) {
   LrGssGraph g;
   g.seed(stack_of({0, 3}), at(3, 0));
   const Id s = open_next(g);
   Reading one = at(5, 1), other = at(5, 1);
   one.laMode = 1;
   other.laMode = 2;
-  const Id x = shift_onto(g, s, 7, one, {1});
-  const Id y = shift_onto(g, s, 7, other, {0});
+  const Id x = shift_onto(g, s, 7, one, a.words, false, a.action, exact);
+  const Id y = shift_onto(g, s, 7, other, b.words, false, b.action, exact);
   CHECK(x != y);
   CHECK(open_next(g) == x);
   const Id top = shift(g, x, 9, 2, 6, {});
@@ -90,84 +100,43 @@ void two_stacks_of_one_future_keep_the_one_ranked_first() {
   TextOffset p = 0;
   CHECK(g.next_vertex(v, p) && v == top && p == 2);
   g.settle(p);
-  CHECK(g.hand_back(v, 1));
-  const auto steps = g.elected();
-  CHECK(steps.size() == 2 && tag(g, steps[0]) == 0);
-  CHECK(g.tabled() == 0);
+  Elected out;
+  out.handed = g.hand_back(v, 1);
+  if (out.handed) {
+    const auto steps = g.elected();
+    CHECK(steps.size() == 2);
+    if (!steps.empty()) out.first = tag(g, steps[0]);
+  }
+  out.tabled = g.tabled();
+  return out;
+}
+
+// The one that ranks first is the one the text comes back with.
+void two_stacks_of_one_future_keep_the_one_ranked_first() {
+  const Elected e = elect({{1}}, {{0}});
+  CHECK(e.handed && e.first == 0 && e.tabled == 0);
 }
 
 // The words of two derivations tell them apart before the order the table lays
 // its arms in is asked: the arm laid first, with the later words, loses.
 void words_outweigh_the_order_of_the_table() {
-  LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
-  const Id s = open_next(g);
-  Reading one = at(5, 1), other = at(5, 1);
-  one.laMode = 1;
-  other.laMode = 2;
-  const Id x = shift_onto(g, s, 7, one, {1}, false, 0);
-  const Id y = shift_onto(g, s, 7, other, {0}, false, 9);
-  CHECK(open_next(g) == x);
-  const Id top = shift(g, x, 9, 2, 6, {});
-  CHECK(open_next(g) == y);
-  CHECK(shift(g, y, 9, 2, 6, {}) == top);
-  Id v = LrGssGraph::none;
-  TextOffset p = 0;
-  CHECK(g.next_vertex(v, p) && v == top && p == 2);
-  g.settle(p);
-  CHECK(g.hand_back(v, 1));
-  const auto steps = g.elected();
-  CHECK(steps.size() == 2 && tag(g, steps[0]) == 9);
-  CHECK(g.tabled() == 0);
+  const Elected e = elect({{1}, 0}, {{0}, 9});
+  CHECK(e.handed && e.first == 9 && e.tabled == 0);
 }
 
 // Where their words say nothing and the table proves its order the election's
 // for every text, the arm the table lays first stays, and the graph counts the
 // election the table decided.
 void the_order_of_the_table_decides_what_words_leave_open() {
-  LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
-  const Id s = open_next(g);
-  Reading one = at(5, 1), other = at(5, 1);
-  one.laMode = 1;
-  other.laMode = 2;
-  const Id x = shift_onto(g, s, 7, one, {1}, false, 4, true);
-  const Id y = shift_onto(g, s, 7, other, {1}, false, 2, true);
-  CHECK(open_next(g) == x);
-  const Id top = shift(g, x, 9, 2, 6, {});
-  CHECK(open_next(g) == y);
-  CHECK(shift(g, y, 9, 2, 6, {}) == top);
-  Id v = LrGssGraph::none;
-  TextOffset p = 0;
-  CHECK(g.next_vertex(v, p) && v == top && p == 2);
-  g.settle(p);
-  CHECK(g.hand_back(v, 1));
-  const auto steps = g.elected();
-  CHECK(steps.size() == 2 && tag(g, steps[0]) == 2);
-  CHECK(g.tabled() == 1);
+  const Elected e = elect({{1}, 4}, {{1}, 2}, true);
+  CHECK(e.handed && e.first == 2 && e.tabled == 1);
 }
 
 // Where the table proves nothing of its order, it elects nothing: both stacks
 // stay, whatever arm it lays first.
 void an_order_the_table_does_not_prove_drops_no_stack() {
-  LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
-  const Id s = open_next(g);
-  Reading one = at(5, 1), other = at(5, 1);
-  one.laMode = 1;
-  other.laMode = 2;
-  const Id x = shift_onto(g, s, 7, one, {1}, false, 4);
-  const Id y = shift_onto(g, s, 7, other, {1}, false, 2);
-  CHECK(open_next(g) == x);
-  const Id top = shift(g, x, 9, 2, 6, {});
-  CHECK(open_next(g) == y);
-  CHECK(shift(g, y, 9, 2, 6, {}) == top);
-  Id v = LrGssGraph::none;
-  TextOffset p = 0;
-  CHECK(g.next_vertex(v, p) && v == top && p == 2);
-  g.settle(p);
-  CHECK(!g.hand_back(v, 1));
-  CHECK(g.tabled() == 0);
+  const Elected e = elect({{1}, 4}, {{1}, 2});
+  CHECK(!e.handed && e.tabled == 0);
 }
 
 // Two arms onto one state by two symbols: a pass-through the table skipped
@@ -518,15 +487,7 @@ void frozen_stacks_come_in_the_order_the_lexer_ranks_their_first_tokens() {
 // A real token whose step names the vertex that took it.
 Id taken_shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
                std::uint32_t state) {
-  Step s;
-  s.vertex = v;
-  s.reading = g.reading(v);
-  s.reading.la = {g.reading(v).at, to, symbol};
-  s.shifts = true;
-  const Id step = g.add(std::move(s));
-  const Id next = g.vertex(at(state, to));
-  g.edge(next, v, symbol, {}, step, {});
-  return next;
+  return shift_onto(g, v, symbol, at(state, to), {}, false, 0);
 }
 
 // Two stacks of unequal depth onto one frozen vertex, parted by the rank of

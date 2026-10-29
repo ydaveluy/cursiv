@@ -5,15 +5,11 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/lr/IndentAst.hpp"
+#include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/VirtualStateGrammar.hpp"
 #include "indent/generated/G/Module.hpp"
 #include "indentfolded/generated/Cases/Module.hpp"
@@ -55,9 +51,7 @@ std::string parse(std::string_view text) {
 }
 
 bool recovers(std::string_view text) {
-  const auto engine = tindent::generated::G::create_parser();
-  const cursiv::ParseResult r = engine->parse(text);
-  return r.accepted && !r.diagnostics.empty();
+  return checks::repaired(*tindent::generated::G::create_parser(), text);
 }
 
 // Where the first statement's tree ends, or -1 where the parse complained.
@@ -74,29 +68,14 @@ long first_end(const Engine& engine, std::string_view text) {
 // Whether the caret over `|..|` offers the spelling `literal`.
 bool offers_over(const cursiv::Parser& engine, std::string text,
                  std::string_view literal) {
-  const auto from = static_cast<cursiv::TextOffset>(text.find('|'));
-  text.erase(from, 1);
-  const auto to = static_cast<cursiv::TextOffset>(text.find('|'));
-  text.erase(to, 1);
-  const cursiv::ParseResult r = engine.parse(text);
-  std::vector<cursiv::NextFeature> out;
-  engine.nextFeaturesAt(r.cst(), from, to, out);
-  for (const cursiv::NextFeature& f : out)
-    for (const std::string_view s :
-         engine.getGrammar().terminalSpellings(f.feature))
-      if (s == literal) return true;
-  return false;
+  const checks::Marked from(std::move(text)), to(from.text);
+  return checks::offers(engine, to.text, from.at, to.at, literal);
 }
 
 // Whether the caret at `at` is offered the terminal named `name`.
 bool offers(const cursiv::Parser& engine, std::string_view text,
             cursiv::TextOffset at, std::string_view name) {
-  const cursiv::ParseResult r = engine.parse(text);
-  std::vector<cursiv::NextFeature> out;
-  engine.nextFeaturesAt(r.cst(), at, at, out);
-  for (const cursiv::NextFeature& f : out)
-    if (engine.getGrammar().terminalName(f.feature) == name) return true;
-  return false;
+  return checks::offers_named(engine, text, at, at, name);
 }
 
 void an_indent_keeps_an_earlier_repair_reading_alive() {
@@ -157,7 +136,6 @@ void an_indent_settles_a_cell_without_the_graph() {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
   an_indent_keeps_an_earlier_repair_reading_alive();
   an_indent_settles_a_cell_without_the_graph();
   CHECK(parse("a\nb\n") == "a b");

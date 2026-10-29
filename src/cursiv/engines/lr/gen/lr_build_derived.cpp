@@ -117,8 +117,7 @@ struct LrDeriving {
     for (unsigned p = 0; p < c.nprods; ++p) {
       const auto& q = c.prods[p];
       if (q.node == kNoRow || q.node >= nrows) continue;
-      const auto first = q.len == 0 ? 0u : c.sym_at(q, 0);
-      if (q.len != 0 && !is_term(first) && nullable[nt_index(first)])
+      if (const auto b = c.nt_after(p, 0); b != kNoRow && nullable[b])
         refused[q.node] = 1;
       auto& lhs = named[q.node];
       if (std::find(lhs.begin(), lhs.end(), q.lhs) == lhs.end())
@@ -187,15 +186,12 @@ struct LrDeriving {
       moved = false;
       for (std::uint16_t k = 0; k < c.nprods; ++k) {
         const LrLowProd& q = c.prods[k];
-        for (unsigned i = 0; i < q.len; ++i) {
-          const std::uint16_t x = c.sym_at(q, i);
-          if (is_term(x)) continue;
-          const unsigned into = nt_index(x);
+        c.each_nt(q, [&](unsigned i, std::uint16_t into) {
           const ElementId row = c.row_at(q, i);
           const Agreement source = row != kNoElement ? at(row)
               : q.len == 1 && q.node != kNoRow ? at(q.node) : found[q.lhs];
           moved = found[into].add(source) || moved;
-        }
+        });
       }
     }
     return found;

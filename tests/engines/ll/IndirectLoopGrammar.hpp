@@ -514,7 +514,4 @@ struct Combined : Common {
   struct Root : rule<ref<Shared::Root> | ref<Twin::Root>> {};
   using entry = Root;
 };
-struct SharedLl : Combined {};
-struct SharedLr : Combined {};
-
 }  // namespace tindirectloop

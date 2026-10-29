@@ -1,4 +1,5 @@
 // A directive over a qualifier and a name: two nodes, one member.
+// expect LR: stands over a sequence that can hold TWO nodes
 #pragma once
 
 #include "refusals/head.hpp"

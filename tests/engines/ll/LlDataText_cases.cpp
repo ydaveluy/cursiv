@@ -31,30 +31,27 @@ void run() {
       std::pair{"keyed key.name;", "key.name"},
   };
   for (const auto& [text, expected] : cases) {
-    for (const auto* parser : {ll.get()}) {
-      tlldatatext::untickCalls = 0;
-      const std::string input = "data:" + std::string(text);
-      auto parsed = parser->parse(input);
-      const std::string_view source{text};
-      CHECK(tlldatatext::untickCalls ==
-            static_cast<unsigned>(std::count(source.begin(), source.end(), '`') /
-                                  2));
-      CHECK(parsed.accepted && parsed.diagnostics.empty());
-      CHECK(parsed.value != nullptr);
-      if (!parsed.value) continue;
-      const auto& document = *static_cast<tlldatatext::Document*>(parsed.value);
-      CHECK(document.values.size() == 1);
-      if (document.values.size() == 1) {
-        CHECK(document.values[0] != nullptr);
-        if (document.values[0]) {
-          const auto actual = document.values[0]->text;
-          if (actual != expected)
-            std::fprintf(stderr, "%s: %s produced '%.*s', expected '%s'\n",
-                         "LL", text,
-                         static_cast<int>(actual.size()), actual.data(),
-                         expected);
-          CHECK(actual == expected);
-        }
+    tlldatatext::untickCalls = 0;
+    const std::string input = "data:" + std::string(text);
+    auto parsed = ll->parse(input);
+    const std::string_view source{text};
+    CHECK(tlldatatext::untickCalls ==
+          static_cast<unsigned>(std::count(source.begin(), source.end(), '`') /
+                                2));
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    CHECK(parsed.value != nullptr);
+    if (!parsed.value) continue;
+    const auto& document = *static_cast<tlldatatext::Document*>(parsed.value);
+    CHECK(document.values.size() == 1);
+    if (document.values.size() == 1) {
+      CHECK(document.values[0] != nullptr);
+      if (document.values[0]) {
+        const auto actual = document.values[0]->text;
+        if (actual != expected)
+          std::fprintf(stderr, "%s: %s produced '%.*s', expected '%s'\n", "LL",
+                       text, static_cast<int>(actual.size()), actual.data(),
+                       expected);
+        CHECK(actual == expected);
       }
     }
   }

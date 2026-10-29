@@ -1,4 +1,5 @@
 // A write the text may skip is no node to bury on every path.
+// expect LR: has a nest<> with nothing in front of it
 #pragma once
 
 #include "refusals/head.hpp"

@@ -203,7 +203,6 @@ void a_lexical_probe_requests_the_frames_below_a_partial_seed() {
 // A ceiling the parse meets is counted, never silently taken.
 namespace ceilings {
 
-namespace g = tcells::generated::G;
 namespace wide = tcells::generated::G;
 namespace deep = telect::generated::Election;
 
@@ -216,7 +215,7 @@ cursiv::LrParseStats stats_of(const std::string& body) {
   const std::string text = "nests sixteen " + body;
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive);
+  cursiv::lr_parser<wide::kTable>.parse(text, cst, &stats, &wide::kDrive);
   return stats;
 }
 
@@ -310,7 +309,7 @@ void a_nest_deeper_than_any_scan_is_closed_whole() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_document_that_forks_says_how_often();
   a_noisy_document_leaves_the_search_little_room();
   the_look_budget_says_when_it_answered();
@@ -318,7 +317,6 @@ int run() {
   a_starved_budget_leaves_the_far_corner_clean();
   a_nest_says_the_same_thing_at_every_depth();
   a_nest_deeper_than_any_scan_is_closed_whole();
-  return 0;
 }
 
 }  // namespace ceilings
@@ -348,9 +346,8 @@ void the_seed_221_reads_clean() {
 
 }  // namespace
 
-int run() {
+void run() {
   the_seed_221_reads_clean();
-  return 0;
 }
 
 }  // namespace frozen_room
@@ -390,9 +387,8 @@ void a_full_room_reads_the_nest_clean() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_full_room_reads_the_nest_clean();
-  return 0;
 }
 
 }  // namespace room_scale
@@ -426,10 +422,9 @@ void a_cell_whose_arms_reduce_by_different_chains_is_one_reading() {
   reads_without_forking<tail::kTable>(text, &tail::kDrive);
 }
 
-int run() {
+void run() {
   an_operand_two_rules_derive_is_one_reading();
   a_cell_whose_arms_reduce_by_different_chains_is_one_reading();
-  return 0;
 }
 
 }  // namespace folding
@@ -452,9 +447,8 @@ void a_deep_nest_reads_its_elses_clean() {
   CHECK(cst.diagnostics().empty());
 }
 
-int run() {
+void run() {
   a_deep_nest_reads_its_elses_clean();
-  return 0;
 }
 
 }  // namespace waiting_budget
@@ -487,9 +481,8 @@ void a_caret_behind_a_longer_chain_answers_in_a_moment() {
   CHECK(took < std::chrono::seconds(5));
 }
 
-int run() {
+void run() {
   a_caret_behind_a_longer_chain_answers_in_a_moment();
-  return 0;
 }
 
 }  // namespace caret_chain
@@ -577,9 +570,8 @@ void a_wide_nullable_closure_keeps_candidate_order() {
           feature.type == nullptr);
 }
 
-int run() {
+void run() {
   a_wide_nullable_closure_keeps_candidate_order();
-  return 0;
 }
 
 }  // namespace caret_nullable
@@ -645,11 +637,10 @@ void a_long_episode_repairs_its_end() {
   CHECK(stats.splits == 2 && stats.episodeSearches == 1);
 }
 
-int run() {
+void run() {
   a_long_statement_slows_only_itself();
   local_conflicts_share_a_deep_frozen_stack();
   a_long_episode_repairs_its_end();
-  return 0;
 }
 
 }  // namespace long_episode
@@ -768,13 +759,12 @@ void a_deep_nest_binds_each_else_to_the_nearest_if() {
   }
 }
 
-int run() {
+void run() {
   a_short_document_reads_as_the_taken_block();
   a_long_document_reads_as_the_taken_block();
   a_deep_nest_binds_each_else_to_the_nearest_if();
   a_long_document_repairs_its_end_as_the_taken_block();
   a_cut_span_is_said_behind_the_fault_before_it();
-  return 0;
 }
 
 }  // namespace held_graph
@@ -783,7 +773,7 @@ int run() {
 // respects an equal or a late winner.
 namespace rank_growth {
 
-int run() {
+void run() {
   namespace g = tceilings::generated::G;
   std::string text = "rank x";
   for (unsigned i = 0; i != 8000; ++i) text += " a";
@@ -800,7 +790,6 @@ int run() {
     const auto* node = result.value_as<trankgrowth::Node>();
     CHECK(node && node->first == !second && node->second == second);
   }
-  return 0;
 }
 
 }  // namespace rank_growth
@@ -810,16 +799,15 @@ int main() {
   lexical_probes_share_paths_at_each_remaining_depth();
   lexical_probes_keep_a_vertex_at_different_remaining_depths();
   a_lexical_probe_requests_the_frames_below_a_partial_seed();
-  int status = 0;
-  status |= ceilings::run();
-  status |= frozen_room::run();
-  status |= room_scale::run();
-  status |= folding::run();
-  status |= waiting_budget::run();
-  status |= caret_chain::run();
-  status |= caret_nullable::run();
-  status |= long_episode::run();
-  status |= held_graph::run();
-  status |= rank_growth::run();
-  return cursiv::test::report("LrCeilings_test") | status;
+  ceilings::run();
+  frozen_room::run();
+  room_scale::run();
+  folding::run();
+  waiting_budget::run();
+  caret_chain::run();
+  caret_nullable::run();
+  long_episode::run();
+  held_graph::run();
+  rank_growth::run();
+  return cursiv::test::report("LrCeilings_test");
 }

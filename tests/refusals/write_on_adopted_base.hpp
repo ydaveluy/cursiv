@@ -1,5 +1,6 @@
 // A rule adopts a node of a base class and writes a member only a subclass
 // declares: a document whose node is not that subclass has nowhere to write.
+// expect LR: this directive writes a member of a class the node in hand may not be
 #pragma once
 
 #include "refusals/head.hpp"

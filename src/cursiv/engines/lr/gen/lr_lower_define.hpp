@@ -195,17 +195,12 @@ inline void lr_emit_left_recursion(LrLowered& o, LrLowerPool& p,
                                    std::uint32_t min) {
   // Only the base case stands at the head of the run, and only the item at
   // its tail.
-  LrLowerSlot self;
-  self.sym = nt_sym(aux);
-  self.cfg = in.cfg;
-  self.lead = in.lead;
-  self.trail = 0;
   LrLowerSlot inner = in;
   inner.lead = 0;
-  const LrLowerSlot pair[2] = {self, inner};
+  const LrLowerSlot pair[2] = {
+      {.sym = nt_sym(aux), .cfg = in.cfg, .lead = in.lead}, inner};
   lr_push_prod(o, p, aux, pair);
-  const std::uint32_t n = min > 1 ? min : 1;
-  lr_push_prod(o, p, aux, lr_turns(in, n));
+  lr_push_prod(o, p, aux, lr_turns(in, std::max(min, 1u)));
 }
 
 // Each optional turn owns its empty alternative, the turn written first: left

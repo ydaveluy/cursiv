@@ -584,6 +584,22 @@ inline bool ll_ends_before_word(std::string_view text, std::uint16_t mode,
       });
 }
 
+// Whether `take` takes a sample word that `mode` reads whole as `term`, or no
+// sample word reads as it: a terminal that spells nothing is tried as the
+// words it reads as.
+template <const auto& T, class Take>
+inline bool ll_sample_takes(SymbolId term, std::uint16_t mode, Take&& take) {
+  bool known = false;
+  for (const std::string_view word : StampedGrammar::samples) {
+    const Scan s = ll_match_text<T>(
+        word.data(), static_cast<TextOffset>(word.size()), mode, 0);
+    if (s.term != term || s.end != word.size()) continue;
+    known = true;
+    if (take(word)) return true;
+  }
+  return !known;
+}
+
 // Whether `mode` reads the text from `from` to `to` as trivia and arrives at
 // `to`. `tail` takes the last whole token read, `begin` where it starts.
 template <const auto& T>
@@ -719,15 +735,9 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     const Comment& comment = comment_in(gap);
     if (!comment.present) return true;
     if (!spelling.empty()) return comment_ends(comment, spelling);
-    bool known = false;
-    for (const std::string_view word : StampedGrammar::samples) {
-      const Scan s = ll_match_text<T>(
-          word.data(), static_cast<TextOffset>(word.size()), mode, 0);
-      if (s.term != label || s.end != word.size()) continue;
-      known = true;
-      if (comment_ends(comment, word)) return true;
-    }
-    return !known;
+    return ll_sample_takes<T>(label, mode, [&](std::string_view word) {
+      return comment_ends(comment, word);
+    });
   };
   // A mode that holds several readings of one text elects one of them: the
   // terminal asked is read there only if the text reads as it too, its guard
@@ -1018,9 +1028,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
           beyond = beyond || (widens && sim.at_unbound_return());
           bool any = false;
           for (const LlConfig& config : sim.configs()) {
-            const auto& state = T.atn.state(config.state);
-            for (std::uint32_t i = 0; i < state.nedges; ++i) {
-              const auto& edge = T.atn.edge(state.edge + i);
+            for (const LlAtnEdge& edge : T.atn.outgoing(config.state)) {
               if (edge.kind == LlEdgeKind::atom && edge.label == term) {
                 if (std::ranges::find(survivors[term], config) ==
                     survivors[term].end())
@@ -1187,20 +1195,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       return reads_as(s, term, read_in) && s.end == at - leaf.begin &&
              choice_reads(spelling);
     };
-    // A terminal that spells nothing is tried as the words it reads as: glued
-    // to the token before the caret, a name can read as one word with it.
-    const auto glue_words = [&](std::uint16_t branch, SymbolId label,
-                                std::uint16_t mode) {
-      bool known = false;
-      for (const std::string_view sample : StampedGrammar::samples) {
-        const Scan s = ll_match_text<T>(
-            sample.data(), static_cast<TextOffset>(sample.size()), mode, 0);
-        if (s.term != label || s.end != sample.size()) continue;
-        known = true;
-        if (glue_reads(sample, branch)) return true;
-      }
-      return !known;
-    };
+    // Glued to the token before the caret, a name can read as one word with
+    // it.
     std::unordered_map<std::uint64_t, bool> glued_with;
     const auto glues = [&](std::uint16_t branch, SymbolId label,
                            std::uint16_t mode,
@@ -1209,13 +1205,13 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       const auto [slot, fresh] = glued_with.try_emplace(
           std::uint64_t{branch} << 32 | std::uint32_t{label} << 16 | mode,
           false);
+      const auto reads = [&](std::string_view s) {
+        return glue_reads(s, branch);
+      };
       if (fresh)
-        slot->second =
-            spellings.empty()
-                ? glue_words(branch, label, mode)
-                : std::ranges::any_of(spellings, [&](std::string_view s) {
-                    return glue_reads(s, branch);
-                  });
+        slot->second = spellings.empty()
+                           ? ll_sample_takes<T>(label, mode, reads)
+                           : std::ranges::any_of(spellings, reads);
       return slot->second;
     };
     const auto alphabet_at = [&](std::uint32_t edge) {
@@ -1239,14 +1235,10 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     const auto& frontier = T.ngapConds != 0 ? candidates : sim.configs();
     everyone.reset();
     spliced_in.clear();
-    for (const LlConfig& c : frontier) {
-      const LlAtnState& q = T.atn.state(c.state);
-      for (std::uint32_t i = 0; i < q.nedges; ++i) {
-        const LlAtnEdge& e = T.atn.edge(q.edge + i);
+    for (const LlConfig& c : frontier)
+      for (const LlAtnEdge& e : T.atn.outgoing(c.state))
         if (e.kind == LlEdgeKind::atom && e.label != kEofSymbol)
           everyone.set(e.label);
-      }
-    }
     for (const LlConfig& c : frontier) {
       const LlAtnState& q = T.atn.state(c.state);
       for (std::uint32_t i = 0; i < q.nedges; ++i) {

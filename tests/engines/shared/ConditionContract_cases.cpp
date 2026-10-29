@@ -1,7 +1,6 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include "ConformanceTest.hpp"
 #include "conformancell/generated/Ll/Module.hpp"
@@ -56,12 +55,9 @@ void reads_as(const char* engine, const cursiv::Parser& p,
 }  // namespace
 
 void run() {
-  const auto& ll = conformance_test::engines()[0];
-  const auto& lr = conformance_test::engines()[1];
-  const std::pair<const char*, const cursiv::Parser*> engines[] = {
-      {"LL", ll.get()}, {"LR", lr.get()}};
-  for (const auto& [name, parser] : engines) {
-    const auto& p = *parser;
+  for (unsigned e = 0; e < 2; ++e) {
+    const char* name = conformance_test::kEngine[e];
+    const auto& p = *conformance_test::engines()[e];
     reads(name, p, "spec1 ab", false);
     reads(name, p, "spec1 a b", true);
     reads(name, p, "spec2 AS", false);
@@ -142,9 +138,7 @@ void run() {
     reads(name, p, "seplist x:1,end", false);
     reads(name, p, "expand <<", true);
     reads(name, p, "expand < x <<", true);
-  }
-  for (const auto& [name, parser] : engines) {
-    const auto r = parser->parse("abc");
+    const auto r = p.parse("abc");
     const auto* holder = r.value_as<tcondcontract::Holder>();
     const bool got = r.accepted && r.diagnostics.empty() && holder != nullptr &&
                      holder->name == "abc";
@@ -157,26 +151,18 @@ void run() {
                   holder ? int(holder->name.size()) : 0,
                   holder ? holder->name.data() : "");
     CHECK(got);
-  }
-  for (const auto& [name, parser] : engines) {
-    reads(name, *parser, "classed:{a}", true);
-    reads(name, *parser, "classed:{a b}", false);
-    reads(name, *parser, "classed:a", true);
-  }
-  for (const auto& [name, parser] : engines) {
-    reads(name, *parser, "spelled:{a}", true);
-    reads(name, *parser, "spelled:{a b}", false);
-    reads(name, *parser, "spelled:a", true);
-  }
-  for (const auto& [name, parser] : engines) {
-    reads(name, *parser, "@ REM hi\nx", false);
-    reads(name, *parser, "@ REM\nx", false);
-    reads(name, *parser, "% REM hi\nx", true);
-    reads(name, *parser, "% REM\nx", true);
-  }
-  for (const auto& [name, parser] : engines) {
-    reads(name, *parser, "tie:if", true);
-    reads(name, *parser, "tie:if ;", true);
+    reads(name, p, "classed:{a}", true);
+    reads(name, p, "classed:{a b}", false);
+    reads(name, p, "classed:a", true);
+    reads(name, p, "spelled:{a}", true);
+    reads(name, p, "spelled:{a b}", false);
+    reads(name, p, "spelled:a", true);
+    reads(name, p, "@ REM hi\nx", false);
+    reads(name, p, "@ REM\nx", false);
+    reads(name, p, "% REM hi\nx", true);
+    reads(name, p, "% REM\nx", true);
+    reads(name, p, "tie:if", true);
+    reads(name, p, "tie:if ;", true);
   }
 }
 
@@ -187,27 +173,11 @@ namespace template_tail_cases {
 // A template tail is lexed only where a template continuation can stand, in
 // both engines.
 
-namespace {
-
-void reads(const char* engine, const cursiv::Parser& p, std::string_view text,
-           bool want) {
-  const auto r = p.parse(text);
-  const bool got = r.accepted && r.diagnostics.empty() && r.value != nullptr;
-  if (got != want)
-    std::printf("%s [%.*s]: wanted %s\n", engine, static_cast<int>(text.size()),
-                text.data(), want ? "read" : "refused");
-  CHECK(got == want);
-}
-
-}  // namespace
-
 void run() {
-  const auto& ll = conformance_test::engines()[0];
-  const auto& lr = conformance_test::engines()[1];
-  const std::pair<const char*, const cursiv::Parser*> engines[] = {
-      {"LL", ll.get()}, {"LR", lr.get()}};
-  for (const auto& [name, parser] : engines) {
-    const auto& p = *parser;
+  using condition_contract_cases::reads;
+  for (unsigned e = 0; e < 2; ++e) {
+    const char* name = conformance_test::kEngine[e];
+    const auto& p = *conformance_test::engines()[e];
     reads(name, p, "function f { x = 1 }", true);
     reads(name, p, "function f { x = `a${1}b` }", true);
     reads(name, p, "function f { x = 1 }\nfunction g { x = `a${1}b` }", true);

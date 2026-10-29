@@ -24,11 +24,21 @@
 
 namespace {
 
-void agree(const cursiv::Parser& ll, const cursiv::Parser& lr,
-           const cursiv::AstReflection& llr, const cursiv::AstReflection& lrr,
-           std::string_view text, bool repaired = true) {
-  const auto a = ll.parse(text);
-  const auto b = lr.parse(text);
+// The descent and the table engine of one language, with their reflections.
+struct Engines {
+  std::unique_ptr<cursiv::Parser> ll, lr;
+  std::unique_ptr<cursiv::AstReflection> llr, lrr;
+};
+
+Engines parity() {
+  namespace g = tpar::generated;
+  return {g::Ll::create_parser(), g::Lr::create_parser(),
+          g::Ll::create_ast_reflection(), g::Lr::create_ast_reflection()};
+}
+
+void agree(const Engines& e, std::string_view text, bool repaired = true) {
+  const auto a = e.ll->parse(text);
+  const auto b = e.lr->parse(text);
   CHECK(a.accepted && b.accepted);
   CHECK(a.cst().recovered() == repaired && b.cst().recovered() == repaired);
   CHECK(a.diagnostics.empty() == !repaired &&
@@ -56,8 +66,8 @@ void agree(const cursiv::Parser& ll, const cursiv::Parser& lr,
   CHECK(alike);
   if (a.value == nullptr || b.value == nullptr) return;
   std::string x, y;
-  cursiv::test::ast_of(llr, *a.value, x);
-  cursiv::test::ast_of(lrr, *b.value, y);
+  cursiv::test::ast_of(*e.llr, *a.value, x);
+  cursiv::test::ast_of(*e.lrr, *b.value, y);
   if (x != y)
     std::fprintf(stderr, "tree parity [%.*s]\n  LL: %s\n  LR: %s\n",
                  static_cast<int>(text.size()), text.data(), x.c_str(),
@@ -69,10 +79,7 @@ void agree(const cursiv::Parser& ll, const cursiv::Parser& lr,
 // statements all leave the following statement in the same tree. These also
 // pin what the repair calls its missing terminal, and any tied alternatives.
 void a_repair_keeps_the_following_statement() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   for (const std::string_view text :
        {"show x as 2;", "show x as ; show y;", "let a = 1 + ; show b;",
         "let a = (1 + 2; show b;", "let a = f(1 2); show b;",
@@ -82,40 +89,34 @@ void a_repair_keeps_the_following_statement() {
         "let a = f(1, 2", "show x as", "export", "let a = (1, 2);",
         "show (1, 2);", "let a = f(1,)!; show a;",
         "let a = f(1, @2, 3)!; show a;", "let a = (; s~ow a;", "(;s~ow"})
-    agree(*ll, *lr, *llr, *lrr, text);
+    agree(e, text);
   for (const std::string_view text :
        {"", "let a = 1; show b;", "show let, export;",
         "export let a = f(1, 2); /* gap */ show a as b;"})
-    agree(*ll, *lr, *llr, *lrr, text, false);
+    agree(e, text, false);
 }
 
 // A prediction can discover a fault far beyond a choice's common prefix.
 // Reading a few clean tokens there must not settle the choice before recovery
 // reaches the missing semicolon, inventing a postfix operator along the way.
 void a_late_fault_does_not_commit_an_optional_postfix() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   std::string text = "let a = f(";
   for (unsigned i = 0; i < 80; ++i) {
     if (i != 0) text += ',';
     text += '1';
   }
   text += ')';
-  agree(*ll, *lr, *llr, *lrr, text);
+  agree(e, text);
 }
 
 // A plan owing more closers than a repair may invent unplanned writes them
 // all: the statement after the run stays in the tree.
 void a_planned_run_of_closers_is_written_whole() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   const std::string text = "let a = " + std::string(20, '(') + "1;\nlet b = 2;";
-  agree(*ll, *lr, *llr, *lrr, text);
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+  agree(e, text);
+  for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()}) {
     const auto parsed = parser->parse(text);
     const auto* unit = parsed.value_as<tpar::ast::Unit>();
     CHECK(unit && unit->lets.size() == 2);
@@ -140,14 +141,14 @@ bool marks(const cursiv::ParseResult& r, cursiv::TextOffset begin,
 // token is repaired as it would be with nothing in front of it. A trivia the
 // lexer refused is laid as the author's text, unmarked.
 void unmatched_bytes_stop_at_an_open_token() {
-  const auto ll = tllconditions::generated::Ll::create_parser();
-  const auto lr = tllconditions::generated::Lr::create_parser();
-  const auto llr = tllconditions::generated::Ll::create_ast_reflection();
-  const auto lrr = tllconditions::generated::Lr::create_ast_reflection();
+  namespace c = tllconditions::generated;
+  const Engines e{c::Ll::create_parser(), c::Lr::create_parser(),
+                  c::Ll::create_ast_reflection(),
+                  c::Lr::create_ast_reflection()};
   for (const std::string_view text :
        {"one; @/* x", "one; /* x", "{ one; /* x", "one; @@/* x"})
-    agree(*ll, *lr, *llr, *lrr, text);
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    agree(e, text);
+  for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()}) {
     const auto parsed = parser->parse("one; @/* x");
     CHECK(marks(parsed, 5, 6) && !marks(parsed, 6, 10));
     CHECK(!marks(parser->parse("{ one; /* x"), 7, 11));
@@ -158,29 +159,23 @@ void unmatched_bytes_stop_at_an_open_token() {
 // closes one: the repair is one insertion or one replacement, and the text
 // behind it is read.
 void a_stray_token_costs_one_repair() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   for (const std::string_view text :
        {",2;", "as;", "+2;", "y,", ")2;", "w,", "a,", "a 2", "@2;", "/2;",
         "xport;", "w 2", "le;", "et;", ";2;", "/y;", "\"2;"})
-    agree(*ll, *lr, *llr, *lrr, text);
+    agree(e, text);
 }
 
 // Declarations that open alike and part on their second word: a misspelling of
 // it is read again, not made up for by a construct invented in front of it.
 void a_misspelt_second_word_is_read_again() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   for (const auto& [text, count] :
        {std::pair{"decl:pub strcut a {}", 1u},
         std::pair{"decl:pub strut a {}", 1u},
         std::pair{"decl:pub struct a {} pub strcut b {}", 2u}}) {
-    agree(*ll, *lr, *llr, *lrr, text);
-    const auto parsed = ll->parse(text);
+    agree(e, text);
+    const auto parsed = e.ll->parse(text);
     const auto* unit = parsed.value_as<tpar::ast::Unit>();
     CHECK(unit && unit->lets.size() == count && unit->shows.empty());
     if (unit != nullptr)
@@ -188,9 +183,9 @@ void a_misspelt_second_word_is_read_again() {
         CHECK(unit->lets[i] && unit->lets[i]->exported &&
               unit->lets[i]->name == (i == 0 ? "a" : "b"));
   }
-  agree(*ll, *lr, *llr, *lrr, "decl:pub struct a {}", false);
-  agree(*ll, *lr, *llr, *lrr, "decl:pub class a extends b {}", false);
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()})
+  agree(e, "decl:pub struct a {}", false);
+  agree(e, "decl:pub class a extends b {}", false);
+  for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()})
     CHECK(!parser->parse("decl:/* gap */pub struct a {}").diagnostics.empty());
 }
 
@@ -199,16 +194,13 @@ void a_misspelt_second_word_is_read_again() {
 // the readings each search merges are its own. An operator a tighter level
 // refuses is the next looser level's, and that level writes the planned one.
 void a_missing_operator_names_every_level() {
-  const auto ll = tpar::generated::Ll::create_parser();
-  const auto lr = tpar::generated::Lr::create_parser();
-  const auto llr = tpar::generated::Ll::create_ast_reflection();
-  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const auto e = parity();
   for (const std::string_view text :
        {"show 1 = 2 * 3;", "show f(1) = 2 + 3;", "let a = 1 = 2 * 3;",
         "show 1 2 * 3;", "show (1 2 3);", "let a = (1 2 3); show a;"})
-    agree(*ll, *lr, *llr, *lrr, text);
+    agree(e, text);
   const std::string_view text = "show 1 = 2 * 3;";
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+  for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()}) {
     const auto parsed = parser->parse(text);
     CHECK(parsed.diagnostics.size() == 1);
     if (parsed.diagnostics.size() != 1) continue;
@@ -219,7 +211,7 @@ void a_missing_operator_names_every_level() {
           "Expecting one of '*', ',', '/', '+' but found '='.");
   }
   // The second operator is planned with the first: it names nothing more.
-  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+  for (const cursiv::Parser* parser : {e.ll.get(), e.lr.get()}) {
     const auto parsed = parser->parse("show (1 2 3);");
     CHECK(parsed.diagnostics.size() == 2);
     if (parsed.diagnostics.size() == 2)

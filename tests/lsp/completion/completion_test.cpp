@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -20,23 +19,18 @@
 #include "caret/generated/Caret/Table.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
 #include "cursiv/core/references/DefaultScopeProvider.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
-#include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/lsp/completion/DefaultFuzzyMatcher.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "lsp/completion/CaretLane.hpp"
+#include "support/Editor.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "wordsll/generated/Ll/Module.hpp"
 #include "wordslr/generated/Lr/Module.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
 
 // What a word boundary forbids at a caret: a literal made of word characters
 // cannot be inserted against a name, since the two would read as one word. The
@@ -46,57 +40,15 @@ namespace default_completion_provider {
 
 namespace {
 
-namespace ct = cursiv::test;
-
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->completionProvider =
-        std::make_unique<cursiv::DefaultCompletionProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
-};
-
-[[nodiscard]] bool offers(const lsp::CompletionList& list,
-                          std::string_view label) {
-  return std::ranges::any_of(list.items, [label](const lsp::CompletionItem& i) {
-    return i.label == label;
-  });
-}
-
-void offered(const World& world, std::string text,
-             std::function<void(const lsp::CompletionList&)> assertion) {
-  (void)ct::expectCompletion(*world.ws, ct::ExpectedCompletionCallback{
-                                            .text = std::move(text),
-                                            .assertion = std::move(assertion),
-                                            .disposeAfterCheck = true});
-}
+using support::offered;
+using support::offers;
+using World = support::LspWorkspace;
 
 // `extends` glued to `E` spells `Eextends`, which is not the keyword: only a
 // literal with no word boundary of its own may be inserted there.
 void a_caret_glued_to_a_name_is_offered_no_word() {
   const World world;
-  offered(world, "entity E<|>", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "{"));
     CHECK(!offers(list, "extends"));
   });
@@ -105,7 +57,7 @@ void a_caret_glued_to_a_name_is_offered_no_word() {
 // One space later the boundary is back, and both offers stand.
 void a_caret_past_the_space_is_offered_the_word() {
   const World world;
-  offered(world, "entity E <|>", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "extends"));
     CHECK(offers(list, "{"));
   });
@@ -131,7 +83,7 @@ void a_reference_context_names_the_member_being_completed() {
   auto scope = std::make_unique<PropertyScope>(*world.ws);
   const PropertyScope& observed = *scope;
   world.ws->scopeProvider = std::move(scope);
-  offered(world, "entity Base {} entity E extends <|>",
+  offered(*world.ws, "entity Base {} entity E extends <|>",
           [](const lsp::CompletionList& list) { CHECK(offers(list, "Base")); });
   CHECK(observed.asked);
 }
@@ -208,30 +160,10 @@ namespace g = tcaret::generated::Caret;
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-  Shared shared;
-  Language* lang = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"caret", {".caret"}, {}};
-    language->parser = g::create_parser();
-    language->astReflection = g::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    lang = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
+      shared, {"caret", {".caret"}, {}}, g::create_parser(),
+      g::create_ast_reflection());
 };
 
 }  // namespace
@@ -346,37 +278,12 @@ namespace g = tblock::generated::Block;
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-  Shared shared;
-  Language* lang = nullptr;
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
+      shared, {"block", {".block"}, {}}, g::create_parser(),
+      g::create_ast_reflection());
 
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"block", {".block"}, {}};
-    language->parser = g::create_parser();
-    language->astReflection = g::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    lang = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-    // A client that takes both ranges, so the replace range is sent at all.
-    lsp::InitializeParams params;
-    params.capabilities.textDocument.emplace()
-        .completion.emplace()
-        .completionItem.emplace()
-        .insertReplaceSupport = true;
-    (void)shared.languageServer->initialize(params);
-  }
+  World() { support::take_both_ranges(shared); }
 };
 
 // The ranges offered for `entity` at the marked caret, as
@@ -441,45 +348,20 @@ namespace word_terminals {
 
 namespace {
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-  Shared shared;
-  const Language* ll = nullptr;
-  const Language* lr = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    ll = add("words-ll", ".wll", &twords::generated::Ll::create_parser,
-             &twords::generated::Ll::create_ast_reflection);
-    lr = add("words-lr", ".wlr", &twords::generated::Lr::create_parser,
-             &twords::generated::Lr::create_ast_reflection);
-  }
-
-  const Language* add(std::string id, std::string extension, auto parser,
-                      auto reflection) {
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {std::move(id), {std::move(extension)}, {}};
-    language->parser = parser();
-    language->astReflection = reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    const Language* const out = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-    return out;
-  }
+struct World : support::World<cursiv::SharedLspServices> {
+  const cursiv::LspServices* ll = &support::add_language<cursiv::LspServices>(
+      shared, {"words-ll", {".wll"}, {}},
+      twords::generated::Ll::create_parser(),
+      twords::generated::Ll::create_ast_reflection());
+  const cursiv::LspServices* lr = &support::add_language<cursiv::LspServices>(
+      shared, {"words-lr", {".wlr"}, {}},
+      twords::generated::Lr::create_parser(),
+      twords::generated::Lr::create_ast_reflection());
 };
 
 // Each item as an editor reads it -- what it shows, how it sorts, what it
 // writes and where -- in label order.
-std::vector<std::string> items_at(const World::Language& language,
+std::vector<std::string> items_at(const cursiv::LspServices& language,
                                   std::string text) {
   std::vector<std::string> out;
   (void)cursiv::test::expectCompletion(
@@ -513,7 +395,7 @@ std::vector<std::string> items_at(const World::Language& language,
   return out;
 }
 
-std::vector<std::string> labels_at(const World::Language& language,
+std::vector<std::string> labels_at(const cursiv::LspServices& language,
                                    std::string text) {
   std::vector<std::string> out = items_at(language, std::move(text));
   for (std::string& item : out) item.resize(item.find('|'));
@@ -528,7 +410,7 @@ constexpr const char* kTerminalForms[] = {"branch:\n", "whole:\n"};
 // the forms agree on the tree and only the words are compared.
 void the_words_are_offered_as_the_data_rule_offers_its_keywords() {
   const World world;
-  for (const World::Language* language : {world.ll, world.lr})
+  for (const cursiv::LspServices* language : {world.ll, world.lr})
     for (const std::string_view body :
          {"a TRUE; b false; c TRUE;", "a // note\nTRUE; b FALSE;"})
       for (std::size_t at = 0; at <= body.size(); ++at) {
@@ -560,7 +442,7 @@ void the_words_are_offered_as_the_data_rule_offers_its_keywords() {
 void a_terminal_offers_its_words_and_a_pattern_none() {
   const World world;
   using Labels = std::vector<std::string>;
-  for (const World::Language* language : {world.ll, world.lr}) {
+  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
     for (const std::string form : {"branch:\n", "whole:\n", "rule:\n"}) {
       CHECK(labels_at(*language, form + "a <|>") == Labels{"FALSE", "TRUE"});
       CHECK(labels_at(*language, form + "a t<|>") == Labels{"TRUE"});

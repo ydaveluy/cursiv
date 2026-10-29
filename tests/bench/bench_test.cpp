@@ -1,7 +1,14 @@
+// The harness's own sums: the counters a hybrid CPU splits, a service's
+// samples, and the rows of a language whose parser keeps no reference.
 #include <array>
+#include <memory>
+#include <string_view>
+#include <utility>
 
 #include "cursiv/bench/LanguageBench.hpp"
+#include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/Check.hpp"
+#include "workspace/lsp/LspModule.hpp"
 
 using namespace cursiv::bench;
 
@@ -118,11 +125,97 @@ void keep_valid_repetition() {
     CHECK(row.perf[stage].instructions == next[stage].instructions);
 }
 
+void every_sample_counts() {
+  ServiceMeasurement single;
+  CHECK(single.samples == 0);
+  CHECK(single.min == kAbsent);
+  CHECK(single.ms == kAbsent);
+  CHECK(single.worst == kAbsent);
+
+  single.record(9.0);
+  CHECK(single.samples == 1);
+  CHECK(single.min == 9.0);
+  CHECK(single.ms == 9.0);
+  CHECK(single.worst == 9.0);
+
+  // Include every repetition of every probe, even slower calls and zeroes.
+  ServiceMeasurement sweep;
+  for (const double elapsed : {3.0, 9.0, 6.0, 30.0, 12.0, 24.0})
+    sweep.record(elapsed);
+  CHECK(sweep.samples == 6);
+  CHECK(sweep.min == 3.0);
+  CHECK(sweep.ms == 14.0);
+  CHECK(sweep.worst == 30.0);
+  sweep.record(0.0);
+  CHECK(sweep.samples == 7);
+  CHECK(sweep.min == 0.0);
+  CHECK(sweep.ms == 12.0);
+  CHECK(sweep.worst == 30.0);
+}
+
+class WithoutReferences final : public cursiv::Parser {
+ public:
+  explicit WithoutReferences(std::unique_ptr<const cursiv::Parser> parser)
+      : parser_(std::move(parser)) {}
+
+  const cursiv::Grammar& getGrammar() const noexcept override {
+    return parser_->getGrammar();
+  }
+
+  cursiv::ParseResult parse(std::string_view text,
+                            const cursiv::CancellationToken& cancel =
+                                cursiv::kNoCancel) const override {
+    auto result = parser_->parse(text, cancel);
+    CHECK(result.references && result.references->handles.empty());
+    result.references.reset();
+    return result;
+  }
+
+ private:
+  std::unique_ptr<const cursiv::Parser> parser_;
+};
+
+bool register_language(cursiv::SharedCoreServices& shared) {
+  auto services = ws::create_lsp_services(
+      dynamic_cast<ws::WorkspaceSharedServices&>(shared));
+  services->parser =
+      std::make_unique<WithoutReferences>(std::move(services->parser));
+  shared.serviceRegistry->registerServices(std::move(services));
+  return true;
+}
+
+void a_parser_without_references_counts_none() {
+  {
+    cursiv::bench::Row row;
+    row.references = row.resolved = 99;
+    cursiv::bench::ws_stages<ws::WorkspaceSharedServices>(
+        1, false, "workspace", ".ws", "datatype lowercase", row,
+        register_language);
+    CHECK(row.references == 0);
+    CHECK(row.resolved == 0);
+    CHECK(row.diagnostics == 1);
+    CHECK(row.ms[cursiv::bench::kIndex] >= 0);
+  }
+  {
+    cursiv::bench::MultiRow row;
+    row.references = row.resolved = 99;
+    cursiv::bench::multi_stages<ws::WorkspaceSharedServices>(
+        1, "workspace", ".ws", {"datatype Text", "datatype lowercase"}, {0},
+        row, register_language);
+    CHECK(row.references == 0);
+    CHECK(row.resolved == 0);
+    CHECK(row.diagnostics == 1);
+    CHECK(row.points.size() == 1);
+  }
+}
+
 }  // namespace
 
 int main() {
   hybrid_coverage();
   cumulative_intervals();
   keep_valid_repetition();
-  return cursiv::test::report("PerfCounters");
+  every_sample_counts();
+  a_parser_without_references_counts_none();
+  return cursiv::test::report("bench_test");
 }

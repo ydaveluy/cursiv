@@ -1,3 +1,5 @@
+// Pins what an allocation refused part-way leaves behind: a publication, a
+// queue, a pool's submission, a registration.
 #include <atomic>
 #include <barrier>
 #include <cstdlib>
@@ -9,10 +11,14 @@
 
 #include "cursiv/core/execution/TaskQueue.hpp"
 #include "cursiv/core/execution/WorkerPool.hpp"
+#include "cursiv/core/services/CoreServices.hpp"
+#include "cursiv/core/services/DefaultServiceRegistry.hpp"
+#include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/syntax-tree/AstArena.hpp"
 #include "cursiv/core/syntax-tree/CstRun.hpp"
 #include "cursiv/core/utils/Published.hpp"
 #include "cursiv/test/Check.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 
 namespace {
 std::atomic<int> failAfter{-1};
@@ -177,6 +183,54 @@ void a_partial_submission_joins_before_unwinding() {
   pool.run(100, [&](std::size_t) noexcept { ++calls; });
   CHECK(calls == 100);
 }
+
+struct Tracked final : cursiv::CoreServices {
+  bool& destroyed;
+  Tracked(cursiv::SharedCoreServices& shared, bool& flag)
+      : CoreServices(shared), destroyed(flag) {}
+  ~Tracked() noexcept override { destroyed = true; }
+};
+
+// Every allocation of one registration refused in turn, into a registry
+// that already routes the extension -- so the collision's message is one of
+// them. Whatever the step, a route that names the container names a live one.
+void a_refused_allocation_leaves_no_route_to_a_freed_container() {
+  cursiv::SharedCoreServices shared;
+  cursiv::install_default_shared_core_services(shared);
+  bool finished = false;
+  for (int step = 0; step < 1000 && !finished; ++step) {
+    cursiv::DefaultServiceRegistry registry(shared);
+    auto first = std::make_unique<cursiv::CoreServices>(shared);
+    first->languageMetaData = {"first", {".q"}, {}};
+    first->parser = ws::generated::Workspace::create_parser();
+    first->astReflection = ws::generated::Workspace::create_ast_reflection();
+    cursiv::install_default_core_services(*first);
+    registry.registerServices(std::move(first));
+
+    bool destroyed = false;
+    auto tracked = std::make_unique<Tracked>(shared, destroyed);
+    tracked->languageMetaData = {"tracked", {".q"}, {}};
+    tracked->parser = ws::generated::Workspace::create_parser();
+    tracked->astReflection = ws::generated::Workspace::create_ast_reflection();
+    cursiv::install_default_core_services(*tracked);
+    const cursiv::CoreServices* const address = tracked.get();
+
+    bool refused = false;
+    fail_allocation(step);
+    try {
+      registry.registerServices(std::move(tracked));
+    } catch (const std::bad_alloc&) {
+      refused = true;
+    }
+    failAfter.store(-1, std::memory_order_release);
+    finished = !refused;
+    if (destroyed) {
+      CHECK(registry.findServices("file:///a.x", "tracked") != address);
+      CHECK(registry.findServices("file:///a.q") != address);
+    }
+  }
+  CHECK(finished);
+}
 }  // namespace
 
 int main() {
@@ -184,5 +238,6 @@ int main() {
   a_failed_retirement_keeps_the_published_value_alive();
   a_queue_allocation_failure_leaves_no_leak_or_lost_item();
   a_partial_submission_joins_before_unwinding();
-  return cursiv::test::report("PublicationFailure_test");
+  a_refused_allocation_leaves_no_route_to_a_freed_container();
+  return cursiv::test::report("AllocationFailure_test");
 }

@@ -53,6 +53,19 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   std::uint16_t row_at(const LrLowProd& p, unsigned i) const {
     return slots[p.at + i].row;
   }
+  // The nonterminal after the dot of production `p`'s item at `dot`, `kNoRow`
+  // where none stands there.
+  std::uint16_t nt_after(unsigned p, unsigned dot) const {
+    const LrLowProd& q = prods[p];
+    return dot < q.len && !is_term(sym_at(q, dot)) ? nt_index(sym_at(q, dot))
+                                                  : std::uint16_t{kNoRow};
+  }
+  // Each nonterminal `p` reads, `f(position, nonterminal)`.
+  template <class F>
+  void each_nt(const LrLowProd& p, F&& f) const {
+    for (unsigned i = 0; i < p.len; ++i)
+      if (const std::uint16_t y = sym_at(p, i); !is_term(y)) f(i, nt_index(y));
+  }
   // `i == len` is the boundary after the last symbol, which the production
   // states itself.
   std::uint8_t cfg_at(std::uint16_t p, unsigned i) const {
@@ -72,9 +85,8 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   }
   // Whether production `p` goes on from a left operand of its own recursion.
   bool turns(unsigned p) const {
-    const LrLowProd& q = prods[p];
-    return q.len != 0 && !is_term(sym_at(q, 0)) && loop_of(q.lhs) != kNoRow &&
-           loop_of(nt_index(sym_at(q, 0))) == loop_of(q.lhs);
+    const std::uint16_t lhs = prods[p].lhs, b = nt_after(p, 0);
+    return b != kNoRow && loop_of(lhs) != kNoRow && loop_of(b) == loop_of(lhs);
   }
 
   std::string_view nt_name(std::uint16_t n) const {

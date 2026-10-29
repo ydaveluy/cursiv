@@ -1,4 +1,5 @@
 #include "engines/shared/EofRegionAst.hpp"
+#include "engines/shared/Checks.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
@@ -7,7 +8,6 @@
 #include "eofregionaux/generated/Aux/Module.hpp"
 #include "eofregionll/generated/Ll/Module.hpp"
 #include "eofregionlr/generated/Lr/Module.hpp"
-#include <cstdio>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -80,7 +80,6 @@ void run() {
     CHECK(!invalid.accepted || invalid.cst().recovered() ||
           !invalid.diagnostics.empty());
   }
-
 }
 
 }  // namespace eof_region_cases
@@ -138,7 +137,6 @@ void run() {
       CHECK(!r.accepted || r.cst().recovered() || !r.diagnostics.empty());
     }
   }
-
 }
 
 }  // namespace nullable_region_cases
@@ -204,7 +202,6 @@ void run() {
       }
     }
   }
-
 }
 
 }  // namespace regional_read_mode_cases
@@ -240,11 +237,7 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string_view expected, bool inside) {
   const std::string got = read(parser, text, inside);
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 void exercise(const cursiv::Parser& parser) {
@@ -291,7 +284,6 @@ void run() {
   exercise(*teofregion::generated::Ll::create_parser());
   engine = "LR";
   exercise(*teofregion::generated::Lr::create_parser());
-
 }
 
 }  // namespace byte_condition_cases

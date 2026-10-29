@@ -1,5 +1,6 @@
 // The grammar's own configuration and a region for each of 255 terminals: a
 // position names the configuration it is read under by one byte.
+// expect LR LL: refused: the grammar reads under more than 255 skip configurations
 #pragma once
 
 #include <cstddef>

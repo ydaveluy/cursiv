@@ -21,10 +21,6 @@ struct RightTag : cursiv::Extends<Expression> {
   vector<Expression*> parts;
   bool enabled{};
 };
-struct Maybe : cursiv::Extends<Expression> {
-  Expression* value{};
-  bool enabled{};
-};
 struct Let : cursiv::Extends<Expression> {
   Expression* value{};
 };
@@ -101,7 +97,4 @@ struct Base : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct Ll : Base {};
-struct Lr : Base {};
-
 }  // namespace tllprefix

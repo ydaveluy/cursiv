@@ -19,7 +19,6 @@
 #include "cursiv/core/services/CoreServices.hpp"
 #include "cursiv/core/services/Diagnostic.hpp"
 #include "cursiv/core/services/JsonValue.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
@@ -45,13 +44,12 @@
 #include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/lsp/actions/DefaultCodeActionProvider.hpp"
 #include "cursiv/test/Check.hpp"
 #include "repairmsg/generated/MessageG/Module.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
 
 // Pins the validation pass: who runs (family against exact filing, category
 // selection, `built_in` reserved), what runs around the walk (the document
@@ -60,17 +58,6 @@
 namespace document_validator {
 
 namespace {
-
-// Everything the runtime says outside the document, kept for the assertions.
-struct CaptureSink final : cursiv::ObservabilitySink {
-  std::vector<cursiv::Observation> seen;
-  void publish(const cursiv::Observation& observation) noexcept override {
-    try {
-      seen.push_back(observation);
-    } catch (...) {
-    }
-  }
-};
 
 // The container-owned instance every registration binds by address.
 struct TestValidator {
@@ -149,33 +136,19 @@ struct SelectiveValidator final : cursiv::DefaultDocumentValidator {
 struct World {
   TestValidator validator;
   cursiv::SharedCoreServices shared;
-  CaptureSink* sink = nullptr;
+  support::CaptureSink* sink = nullptr;
   cursiv::CoreServices* language = nullptr;
   cursiv::ValidationRegistry* registry = nullptr;
 
   World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
     cursiv::install_default_shared_core_services(shared);
-    auto capture = std::make_unique<CaptureSink>();
-    sink = capture.get();
-    shared.observabilitySink = std::move(capture);
-    auto services = std::make_unique<cursiv::CoreServices>(shared);
-    services->languageMetaData = {"workspace", {".ws"}, {}};
-    services->parser = ws::generated::Workspace::create_parser();
-    services->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*services);
-    language = services.get();
-    registry = services->validationRegistry.get();
-    shared.serviceRegistry->registerServices(std::move(services));
+    sink = &support::capture_observations(shared);
+    language = &support::add_workspace<cursiv::CoreServices>(shared);
+    registry = language->validationRegistry.get();
   }
 
   cursiv::Document* add(const std::string& uri, std::string text) const {
-    auto document =
-        shared.documentFactory->fromString(std::move(text), std::string(uri));
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    return raw;
+    return support::add(shared, uri, std::move(text));
   }
 
   cursiv::Document* build(const std::string& uri, std::string text,

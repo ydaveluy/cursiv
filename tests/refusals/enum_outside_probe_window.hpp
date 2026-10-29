@@ -1,5 +1,6 @@
 // An enumerator whose value lies outside the probe window has no name the
 // conversion can read: the refusal says where the window is.
+// expect LR: this literal can never convert.*CURSIV_ENUM_PROBE_MAX
 #pragma once
 
 #include <cstdint>

@@ -169,7 +169,6 @@ void run() {
     check(*parser, "(())", true);
     check(*parser, "(", false);
   }
-
 }
 
 }  // namespace recursive_terminals_cases
@@ -309,7 +308,6 @@ void run() {
   check_backends(tlexbackends::generated::Lr::kTable);
   exercise(*ll, normalized(cursiv::LlLowering<trightlinear::Ll>::table().cfg));
   exercise(*lr, normalized(cursiv::LrLowering<trightlinear::Lr>::table().cfg));
-
 }
 
 }  // namespace lex_right_linear_cases
@@ -610,7 +608,6 @@ void run() {
   endpoint_differential();
   excluded_shapes();
   shared_roots_and_limits();
-
 }
 
 }  // namespace lex_right_linear_shape_cases

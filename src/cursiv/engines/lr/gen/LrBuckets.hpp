@@ -68,18 +68,13 @@ inline std::vector<bool> lr_reachable(const LrBuildCfg& c,
   while (!work.empty()) {
     const std::uint16_t lhs = work.back();
     work.pop_back();
-    for (const std::uint16_t k : ix.of(lhs)) {
-      const LrLowProd& q = c.prods[k];
-      for (unsigned i = 0; i < q.len; ++i) {
-        const std::uint16_t sym = c.sym_at(q, i);
-        if (is_term(sym)) continue;
-        const std::uint16_t nt = nt_index(sym);
+    for (const std::uint16_t k : ix.of(lhs))
+      c.each_nt(c.prods[k], [&](unsigned, std::uint16_t nt) {
         if (!live[nt]) {
           live[nt] = true;
           work.push_back(nt);
         }
-      }
-    }
+      });
   }
   return live;
 }

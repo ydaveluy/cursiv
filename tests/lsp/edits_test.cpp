@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -17,29 +16,22 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/references/DefaultNameProvider.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/lsp/completion/CompletionContext.hpp"
 #include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/lsp/formatting/Formatter.hpp"
 #include "cursiv/lsp/formatting/FormattingEngine.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/lsp/text/Position.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectFormatting.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "cursiv/test/ParseHelper.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/Editor.hpp"
+#include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
 #include "workspace/lsp/WorkspaceFormatter.hpp"
@@ -66,49 +58,19 @@ struct OffersOnlyWords final : cursiv::DefaultCompletionProvider {
 
 // The workspace fixture and not a bare grammar: its members hold a cross
 // reference, and the scope's answer is half of what this door owes an editor.
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
-
-  explicit World(bool onlyWords = false) {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    if (onlyWords)
-      language->completionProvider =
-          std::make_unique<OffersOnlyWords>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-    // An editor that chooses between inserting and replacing a word.
-    lsp::InitializeParams params;
-    params.capabilities.textDocument.emplace()
-        .completion.emplace()
-        .completionItem.emplace()
-        .insertReplaceSupport = true;
-    (void)shared.languageServer->initialize(params);
+struct World : support::LspWorkspace {
+  explicit World(bool onlyWords = false)
+      : WorkspaceWorld([onlyWords](cursiv::LspServices& language) {
+          if (onlyWords)
+            language.completionProvider =
+                std::make_unique<OffersOnlyWords>(language);
+        }) {
+    support::take_both_ranges(shared);
   }
 };
 
-[[nodiscard]] bool offers(const lsp::CompletionList& list,
-                          std::string_view label) {
-  return std::ranges::any_of(list.items, [label](const lsp::CompletionItem& i) {
-    return i.label == label;
-  });
-}
+using support::offered;
+using support::offers;
 
 [[nodiscard]] const lsp::CompletionItem* find(const lsp::CompletionList& list,
                                               std::string_view label) {
@@ -145,16 +107,6 @@ struct World {
   const std::size_t from = offset_of(text, range.start);
   const std::size_t to = offset_of(text, range.end);
   return text.replace(from, to - from, newText);
-}
-
-// The offer at the caret the text marks, handed to what the lane wants to say
-// about it.
-void offered(const World& world, std::string text,
-             std::function<void(const lsp::CompletionList&)> assertion) {
-  (void)ct::expectCompletion(*world.ws, ct::ExpectedCompletionCallback{
-                                            .text = std::move(text),
-                                            .assertion = std::move(assertion),
-                                            .disposeAfterCheck = true});
 }
 
 // The same, at the end of a broken text: the recovery always leaves a tree
@@ -218,7 +170,7 @@ void the_item_replaces_the_word_being_typed() {
 // editor picks via `editor.suggest.insertMode`.
 void an_item_covers_the_word_the_caret_sits_in() {
   const World world;
-  offered(world, "datatype String\nentity E { f : Str<|>ng }",
+  offered(*world.ws, "datatype String\nentity E { f : Str<|>ng }",
           [](const lsp::CompletionList& list) {
             const lsp::CompletionItem* const item = find(list, "String");
             CHECK(item != nullptr);
@@ -247,7 +199,7 @@ void an_applied_edit_leaves_the_word_the_author_meant() {
     const World world;
     // Taken before the marked text is handed over: what the editor holds.
     const std::string document = text_of(source);
-    offered(world, std::move(source), [&](const lsp::CompletionList& list) {
+    offered(*world.ws, std::move(source), [&](const lsp::CompletionList& list) {
       const lsp::CompletionItem* const item = find(list, label);
       CHECK(item != nullptr);
       if (item == nullptr || !item->textEdit.has_value()) return;
@@ -271,11 +223,11 @@ void an_applied_edit_leaves_the_word_the_author_meant() {
 // word, not the tail the edit is about to take.
 void a_keyword_is_offered_from_inside_a_word() {
   const World world;
-  offered(world, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "entity"));
   });
   // ...and the edit takes the word whole, so accepting leaves `entity`.
-  offered(world, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "ent<|>ity E {}", [](const lsp::CompletionList& list) {
     const lsp::CompletionItem* const item = find(list, "entity");
     CHECK(item != nullptr);
     if (item == nullptr || !item->textEdit.has_value()) return;
@@ -289,7 +241,7 @@ void a_keyword_is_offered_from_inside_a_word() {
 // turn the mid-word caret into noise.
 void a_word_no_keyword_begins_offers_no_keyword() {
   const World world;
-  offered(world, "zq<|>xw E {}", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "zq<|>xw E {}", [](const lsp::CompletionList& list) {
     CHECK(!offers(list, "entity"));
     CHECK(!offers(list, "datatype"));
     CHECK(!offers(list, "package"));
@@ -300,12 +252,12 @@ void a_word_no_keyword_begins_offers_no_keyword() {
 // it there, and only a language says otherwise, per keyword.
 void a_keyword_with_no_letter_is_offered() {
   const World world;
-  offered(world, "entity E <|>", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "extends"));
     CHECK(offers(list, "{"));
   });
   const World words(true);
-  offered(words, "entity E <|>", [](const lsp::CompletionList& list) {
+  offered(*words.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "extends"));
     CHECK(!offers(list, "{"));
   });
@@ -325,14 +277,14 @@ void a_keyword_is_matched_like_a_name() {
 // every name.
 void a_keyword_says_what_it_is_and_sorts_after_the_names() {
   const World world;
-  offered(world, "entity E <|>", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     const lsp::CompletionItem* const keyword = find(list, "extends");
     CHECK(keyword != nullptr);
     if (keyword == nullptr) return;
     CHECK(keyword->detail == "Keyword");
     CHECK(keyword->sortText == "1");
   });
-  offered(world, "datatype String\nentity E { f : <|>",
+  offered(*world.ws, "datatype String\nentity E { f : <|>",
           [](const lsp::CompletionList& list) {
             const lsp::CompletionItem* const name = find(list, "String");
             CHECK(name != nullptr);
@@ -349,7 +301,7 @@ void a_word_that_answers_nothing_asks_at_the_caret() {
   // What may follow the name spells no letter; a word glued to it is
   // `completion_boundary_test`'s.
   const World world;
-  offered(world, "entity E<|>", [](const lsp::CompletionList& list) {
+  offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "{"));
     // ...and it replaces nothing: the name it sits behind is not being
     // rewritten.
@@ -369,7 +321,7 @@ void a_word_that_answers_nothing_asks_at_the_caret() {
 // the visible declarations rather than the word "ID".
 void a_reference_offers_the_names_in_scope() {
   const World world;
-  offered(world, "datatype String\ndatatype Int\nentity E { f : <|>",
+  offered(*world.ws, "datatype String\ndatatype Int\nentity E { f : <|>",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "String"));
             CHECK(offers(list, "Int"));
@@ -383,7 +335,8 @@ void a_reference_offers_the_names_in_scope() {
 // one before the hole and not the one the repair walked into.
 void a_reference_offers_the_names_in_scope_mid_document() {
   const World world;
-  offered(world, "datatype String\ndatatype Int\nentity E {\n  f : <|>\n}\n",
+  offered(*world.ws,
+          "datatype String\ndatatype Int\nentity E {\n  f : <|>\n}\n",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "String"));
             CHECK(offers(list, "Int"));
@@ -396,21 +349,21 @@ void a_reference_offers_the_names_in_scope_mid_document() {
 void a_caret_inside_a_comment_is_offered_nothing() {
   const World world;
   // ...with a word under the caret, and without one.
-  offered(world, "entity E {}\n/* aa<|>a */\nentity F {}",
+  offered(*world.ws, "entity E {}\n/* aa<|>a */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
-  offered(world, "entity E {}\n/* --<|>- */\nentity F {}",
+  offered(*world.ws, "entity E {}\n/* --<|>- */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
   // ...in the opener itself, which is inside the leaf as much as its body is.
-  offered(world, "entity E {}\n/<|>* aaa */\nentity F {}",
+  offered(*world.ws, "entity E {}\n/<|>* aaa */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
-  offered(world, "entity E {}\n/*<|> aaa */\nentity F {}",
+  offered(*world.ws, "entity E {}\n/*<|> aaa */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
   // ...and a line comment says the same.
-  offered(world, "entity E {}\n// aa<|>a\nentity F {}",
+  offered(*world.ws, "entity E {}\n// aa<|>a\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
   // A comment the author has not closed matches no terminal at all, so the
   // repair keeps its bytes as spans it threw away -- unread text either way.
-  offered(world, "entity E {}\n/* aa<|>a",
+  offered(*world.ws, "entity E {}\n/* aa<|>a",
           [](const lsp::CompletionList& list) { CHECK(list.items.empty()); });
 }
 
@@ -418,9 +371,9 @@ void a_caret_inside_a_comment_is_offered_nothing() {
 // comment closes, and right before one opens, is the grammar's to answer.
 void the_edges_of_a_comment_still_answer() {
   const World world;
-  offered(world, "entity E {}\n/* aaa */<|>\nentity F {}",
+  offered(*world.ws, "entity E {}\n/* aaa */<|>\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
-  offered(world, "entity E {}\n<|>/* aaa */\nentity F {}",
+  offered(*world.ws, "entity E {}\n<|>/* aaa */\nentity F {}",
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
 }
 
@@ -429,7 +382,7 @@ void the_edges_of_a_comment_still_answer() {
 void a_candidate_carries_its_documentation() {
   const World world;
   offered(
-      world,
+      *world.ws,
       "/** The string. */\ndatatype String\ndatatype Int\nentity E { f : <|>",
       [](const lsp::CompletionList& list) {
         const lsp::CompletionItem* const documented = find(list, "String");
@@ -450,16 +403,16 @@ void a_candidate_carries_its_documentation() {
 // guess. A keyword is offered because the grammar spells it out.
 void a_terminal_is_never_offered_by_name() {
   const World world;
-  offered(world, "entity <|>",
+  offered(*world.ws, "entity <|>",
           [](const lsp::CompletionList& list) { CHECK(!offers(list, "ID")); });
-  offered(world, "entity E<|>",
+  offered(*world.ws, "entity E<|>",
           [](const lsp::CompletionList& list) { CHECK(!offers(list, "ID")); });
 }
 
 // ...filtered by what has been typed, through the same anchor as a keyword.
 void a_reference_is_filtered_by_what_is_typed() {
   const World world;
-  offered(world, "datatype String\ndatatype Int\nentity E { f : St<|>",
+  offered(*world.ws, "datatype String\ndatatype Int\nentity E { f : St<|>",
           [](const lsp::CompletionList& list) {
             CHECK(offers(list, "String"));
             CHECK(!offers(list, "Int"));
@@ -488,7 +441,7 @@ void the_same_answer_is_offered_once() {
 // would collapse the pair into one entry naming neither.
 void two_homonyms_of_different_types_stay_two_offers() {
   const World world;
-  offered(world, "datatype String\nentity String { }\nentity E { f : <|>",
+  offered(*world.ws, "datatype String\nentity String { }\nentity E { f : <|>",
           [](const lsp::CompletionList& list) {
             std::vector<std::string> details;
             for (const lsp::CompletionItem& item : list.items)
@@ -505,7 +458,7 @@ void two_homonyms_of_different_types_stay_two_offers() {
 // incomplete rather than unwinding.
 void a_broken_document_still_answers() {
   const World world;
-  offered(world, "entity E { f : String\nentity <|>",
+  offered(*world.ws, "entity E { f : String\nentity <|>",
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
 }
 
@@ -577,13 +530,9 @@ struct World {
   // A fresh URI per text: the lanes below format the same source twice and the
   // second document must be a document of its own.
   cursiv::Document* built(std::string text) {
-    const std::string uri = "file:///w/d" + std::to_string(nextUri++) + ".ws";
-    auto document = shared.documentFactory->fromString(std::move(text), uri);
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
+    return support::built(shared,
+                          "file:///w/d" + std::to_string(nextUri++) + ".ws",
+                          std::move(text));
   }
 };
 
@@ -753,12 +702,7 @@ template <class W>
   return cursiv::TextDocument::applyEdits(document.textDocument(), converted);
 }
 
-constexpr std::string_view kMessy =
-    "entity   Person{\n"
-    "name   :String\n"
-    "     age:String\n"
-    "}\n"
-    "datatype     String\n";
+using support::kMessy;
 
 // ...and the shape it reaches: the language's own rule, no space before the
 // colon and one after it.

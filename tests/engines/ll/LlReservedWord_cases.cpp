@@ -50,55 +50,44 @@ void run() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   const std::string_view text =
       "reserved:i; if x; iff; if_; whil; while_; w; ifwhile; if i; cas; cases; Loops;";
-  for (const auto& p : {ll.get()}) {
-    const auto r = p->parse(text);
-    CHECK(r.accepted && r.diagnostics.empty());
-    CHECK(names(r) == "i ?x iff if_ whil while_ w ifwhile ?i cas cases Loops ");
-  }
+  const auto r = ll->parse(text);
+  CHECK(r.accepted && r.diagnostics.empty());
+  CHECK(names(r) == "i ?x iff if_ whil while_ w ifwhile ?i cas cases Loops ");
   for (const std::string_view bad :
        {"if;", "while;", "if while;", "CASE;", "Loop;", "if case;"}) {
     CHECK(!ll->parse("reserved:" + std::string(bad)).diagnostics.empty());
   }
-  for (const auto& p : {ll.get()}) {
-    const auto r = p->parse("reserved:a; ----");
-    const auto* d = r.value_as<tllreserved::Doc>();
-    CHECK(r.accepted && r.diagnostics.empty() && d != nullptr && d->ruled);
-    CHECK(!p->parse("reserved:a; ----\n").diagnostics.empty());
-  }
+  const auto ruled = ll->parse("reserved:a; ----");
+  const auto* doc = ruled.value_as<tllreserved::Doc>();
+  CHECK(ruled.accepted && ruled.diagnostics.empty() && doc && doc->ruled);
+  CHECK(!ll->parse("reserved:a; ----\n").diagnostics.empty());
   // A repair reads no refused word on into the text behind it: the name
   // after it stays a token of its own.
-  for (const auto& p : {ll.get()}) {
-    const auto r = p->parse("reserved:if if, x;");
-    CHECK(!r.diagnostics.empty() && reach(r) <= 15);
-    CHECK(names(r).ends_with("?x "));
-  }
+  const auto repaired = ll->parse("reserved:if if, x;");
+  CHECK(!repaired.diagnostics.empty() && reach(repaired) <= 15);
+  CHECK(names(repaired).ends_with("?x "));
 
   // An escape inside a name the word boundary holds: the refused word does
   // not stand before it.
   const auto ell = tllescape::generated::Ll::create_parser();
-  for (const auto& p : {ell.get()}) {
-    const auto r =
-        p->parse("in\\u0041; in x; x\\u0041y; \\u0061b; ab:; in ab;");
-    CHECK(r.accepted && r.diagnostics.empty());
-    const auto* d = r.value_as<tllescape::Doc>();
-    std::string got;
-    if (d != nullptr)
-      for (const tllescape::Item* i : d->items)
-        got += std::string(i->guarded ? "?" : "") + std::string(i->name) +
-               std::string(i->label) + ' ';
-    CHECK(got == "in\\u0041 ?x x\\u0041y \\u0061b ab: ?ab ");
-    for (const std::string_view bad : {"in;", "in:;", "in\\u00;"})
-      CHECK(!p->parse(bad).diagnostics.empty());
-  }
+  const auto escaped =
+      ell->parse("in\\u0041; in x; x\\u0041y; \\u0061b; ab:; in ab;");
+  CHECK(escaped.accepted && escaped.diagnostics.empty());
+  const auto* d = escaped.value_as<tllescape::Doc>();
+  std::string got;
+  if (d != nullptr)
+    for (const tllescape::Item* i : d->items)
+      got += std::string(i->guarded ? "?" : "") + std::string(i->name) +
+             std::string(i->label) + ' ';
+  CHECK(got == "in\\u0041 ?x x\\u0041y \\u0061b ab: ?ab ");
+  for (const std::string_view bad : {"in;", "in:;", "in\\u00;"})
+    CHECK(!ell->parse(bad).diagnostics.empty());
   // A name that asserts what follows it is read behind a relay, and the words
   // a keyword spells are no more its than a plain name's.
-  namespace ra = tllsemantic::generated;
-  const auto choiceLl = ra::Ll::create_parser();
-  for (const auto* parser : {choiceLl.get()}) {
-    const auto result = parser->parse("assert:if; x; iff; if_; ifx; while; whilex; i;");
-    CHECK(result.accepted && result.diagnostics.empty());
-    CHECK(reserved(result) == "? x iff if_ ifx ? whilex i ");
-  }
+  const auto result =
+      ll->parse("assert:if; x; iff; if_; ifx; while; whilex; i;");
+  CHECK(result.accepted && result.diagnostics.empty());
+  CHECK(reserved(result) == "? x iff if_ ifx ? whilex i ");
 }
 
 }  // namespace ll_reserved_word_cases

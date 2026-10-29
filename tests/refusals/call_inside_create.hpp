@@ -1,5 +1,6 @@
 // A creation and a call on one path are two heads: the node the call returns
 // would be held by nothing.
+// expect LR: this alternative can create twice
 #pragma once
 
 #include "refusals/head.hpp"

@@ -1,5 +1,6 @@
 // `as` gives a value to text: around a rule that builds a node, the node
 // would be built and lost.
+// expect LR: as<X>.e. gives a value to text, and this e builds an AST node
 #pragma once
 
 #include "refusals/head.hpp"

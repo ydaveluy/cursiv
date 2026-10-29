@@ -43,23 +43,17 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
   std::uint32_t gen = 0;
   for (unsigned f = 0; f < A.nstates; ++f) {
     ++gen;
-    for (const LrItem& it : clos[pick[f]]) {
-      const LrLowProd& p = A.cfg.prods[it.prod];
-      if (it.dot >= p.len) continue;
-      const std::uint16_t x = A.cfg.sym_at(p, it.dot);
-      if (!is_term(x)) calledAt[nt_index(x)] = gen;
-    }
+    for (const LrItem& it : clos[pick[f]])
+      if (const auto b = A.cfg.nt_after(it.prod, it.dot); b != kNoRow)
+        calledAt[b] = gen;
     bool seen = false;
     for (const LrItem& it : clos[pick[f]]) {
       const auto& p = A.cfg.prods[it.prod];
       const auto& build = A.cfg.prodBuild[it.prod];
-      if (it.dot < p.len) {
-        const auto x = A.cfg.sym_at(p, it.dot);
-        if (!is_term(x) && !A.nullable[nt_index(x)] &&
-            first[nt_index(x)].test(kEofSymbol) &&
-            !first[nt_index(x)].more_than_one())
-          continue;
-      }
+      if (const auto b = A.cfg.nt_after(it.prod, it.dot);
+          b != kNoRow && !A.nullable[b] && first[b].test(kEofSymbol) &&
+          !first[b].more_than_one())
+        continue;
       if (it.dot == 0 && calledAt[p.lhs] == gen && !build.closesRegion &&
           !(p.len == 0 && build.endOnly))
         continue;
@@ -115,19 +109,6 @@ LexAlphabet lr_lex_alphabet(LrBuildTable& A) {
   lex.terminals(A, lr_intern_name);
   return lex;
 }
-
-namespace {
-
-// Per mode, the flagged terminals of the states that read in it.
-std::vector<DynSet> lr_lex_flagged(const LrBuildTable& A, const LexModes& r,
-                                   const std::vector<DynSet>& flagged) {
-  std::vector<DynSet> out(r.set.size());
-  for (unsigned f = 0; f < A.nstates; ++f) out[A.mode[f]] |= flagged[f];
-  for (std::size_t m = 0; m < out.size(); ++m) out[m] &= r.set[m];
-  return out;
-}
-
-}  // namespace
 
 LexModes lr_lex_mode_sets(LrBuildTable& A,
                           const std::vector<std::uint8_t>& cfgState,
@@ -200,10 +181,10 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
   }
   A.nmodes = static_cast<std::uint16_t>(r.set.size());
   if (std::ranges::any_of(flagged, [](const DynSet& s) { return s.any(); })) {
-    const std::vector<DynSet> byMode = lr_lex_flagged(A, r, flagged);
+    // Per mode, the flagged terminals of the states that read in it.
     DynSet* const out = A.modeFlag.row(0, A.nmodes);
-    for (unsigned m = 0; m < byMode.size() && m < A.nmodes; ++m)
-      out[m] = byMode[m];
+    for (unsigned f = 0; f < A.nstates; ++f) out[A.mode[f]] |= flagged[f];
+    for (unsigned m = 0; m < A.nmodes; ++m) out[m] &= r.set[m];
   }
   std::uint16_t* const longer = A.modeLonger.row(0, A.nmodes);
   for (unsigned m = 0; m < A.nmodes; ++m) longer[m] = r.longerMode[m];

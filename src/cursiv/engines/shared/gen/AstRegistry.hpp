@@ -57,6 +57,10 @@ struct AstRegistry {
   std::deque<std::string> sources;
   bool anyNest = false;
 
+  // Whether type `sub` derives from type `base`, itself included.
+  bool subtype(std::size_t base, std::size_t sub) const {
+    return ((derives[base * typeWords + sub / 64] >> (sub % 64)) & 1u) != 0;
+  }
   std::span<const std::uint16_t> targets_of(const Field& f) const {
     return std::span(targets).subspan(f.firstTarget, f.targetCount);
   }

@@ -1,4 +1,5 @@
 // A condition made optional conditions nothing.
+// expect LR LL: refused .optionalCondition..*rule .Root. makes a condition optional
 #pragma once
 
 #include "refusals/head.hpp"

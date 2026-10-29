@@ -7,7 +7,6 @@
 #include <random>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "asi/generated/G/Module.hpp"
 #include "asicases/generated/G/Module.hpp"
@@ -17,6 +16,7 @@
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/CstAudit.hpp"
 #include "engines/lr/AsiAst.hpp"
+#include "engines/lr/ParseChecks.hpp"
 
 namespace {
 
@@ -35,6 +35,26 @@ const cursiv::Parser& cases() {
 }
 
 const Case* current = nullptr;
+
+using checks::matches;
+
+// The items of a case behind `head`, each spelled by `spell`, or
+// `<refused>` where the parse complained.
+template <class Doc, class Spell>
+bool items(std::string_view head, std::string_view text,
+           std::string_view want, Spell spell) {
+  const std::string doc = std::string(head) + std::string(text);
+  const cursiv::ParseResult r = cases().parse(doc);
+  std::string got = "<refused>";
+  if (r.accepted && r.diagnostics.empty()) {
+    got.clear();
+    for (const auto* const item : r.value_as<Doc>()->items) {
+      if (!got.empty()) got += ' ';
+      spell(item, got);
+    }
+  }
+  return matches(text, got, want);
+}
 
 // A statement as a word: `a(b)` a call, `{a b}` a block, `return a`, `;`.
 void spell(const tasi::ast::Stmt* s, std::string& out) {
@@ -100,10 +120,7 @@ std::string read(std::string_view body) {
 }
 
 bool same(std::string_view text, std::string_view want) {
-  const std::string got = read(text);
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return matches(text, read(text), want);
 }
 
 void spell_op(const tasi::ops::ast::Node* n, std::string& out) {
@@ -131,22 +148,13 @@ void spell_op(const tasi::ops::ast::Node* n, std::string& out) {
 
 // An expression of the tail grammar as its operands joined by operators.
 bool tail(std::string_view text, std::string_view want) {
-  const std::string source = "tailops " + std::string(text);
-  const cursiv::ParseResult r = cases().parse(source);
-  std::string got = "<refused>";
-  if (r.accepted && r.diagnostics.empty()) {
-    got.clear();
-    for (const auto* const item : r.value_as<tasi::tail::ast::Doc>()->items) {
-      if (!got.empty()) got += ' ';
-      for (const auto* const k : item->kids) {
-        if (!k->op.empty()) got += k->op;
-        got += k->kids.empty() ? k->name : k->kids[0]->name;
-      }
-    }
-  }
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return items<tasi::tail::ast::Doc>(
+      "tailops ", text, want, [](const auto* item, std::string& got) {
+        for (const auto* const k : item->kids) {
+          if (!k->op.empty()) got += k->op;
+          got += k->kids.empty() ? k->name : k->kids[0]->name;
+        }
+      });
 }
 
 void spell_block(const tasi::block::ast::Node* n, std::string& out) {
@@ -163,19 +171,7 @@ void spell_block(const tasi::block::ast::Node* n, std::string& out) {
 }
 
 bool block(std::string_view text, std::string_view want) {
-  const std::string doc = "block " + std::string(text);
-  const cursiv::ParseResult r = cases().parse(doc);
-  std::string got = "<refused>";
-  if (r.accepted && r.diagnostics.empty()) {
-    got.clear();
-    for (const auto* const item : r.value_as<tasi::block::ast::Doc>()->items) {
-      if (!got.empty()) got += ' ';
-      spell_block(item, got);
-    }
-  }
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return items<tasi::block::ast::Doc>("block ", text, want, spell_block);
 }
 
 // The names read, or how the parse refused: a repair names what it did, and
@@ -198,64 +194,28 @@ std::string optgap(std::string_view text) {
 }
 
 bool ops(std::string_view text, std::string_view want) {
-  const std::string doc = "ops " + std::string(text);
-  const cursiv::ParseResult r = cases().parse(doc);
-  std::string got = "<refused>";
-  if (r.accepted && r.diagnostics.empty()) {
-    got.clear();
-    for (const auto* const item : r.value_as<tasi::ops::ast::Doc>()->items) {
-      if (!got.empty()) got += ' ';
-      spell_op(item, got);
-    }
-  }
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return items<tasi::ops::ast::Doc>("ops ", text, want, spell_op);
 }
 
-// Whether the caret at `|` offers `literal`.
+// Whether the caret at `|` offers `literal`, or the terminal named `name`.
 bool offers_at(const Case& c, std::string_view body,
                std::string_view literal) {
-  const cursiv::Parser& parser = c.p;
-  std::string text = c.text(body);
-  const auto at = text.find('|');
-  text.erase(at, 1);
-  const auto r = parser.parse(text);
-  std::vector<cursiv::NextFeature> features;
-  parser.nextFeaturesAt(r.cst(), at, at, features);
-  for (const auto& feature : features)
-    for (const std::string_view s :
-         parser.getGrammar().terminalSpellings(feature.feature))
-      if (s == literal) return true;
-  return false;
+  const checks::Marked m(c.text(body));
+  return checks::offers(c.p, m.text, m.at, m.at, literal);
 }
-
-// Whether the caret at `|` offers the terminal named `name`.
 bool names_at(const Case& c, std::string_view body, std::string_view name) {
-  const cursiv::Parser& parser = c.p;
-  std::string text = c.text(body);
-  const auto at = text.find('|');
-  text.erase(at, 1);
-  const auto r = parser.parse(text);
-  std::vector<cursiv::NextFeature> features;
-  parser.nextFeaturesAt(r.cst(), at, at, features);
-  for (const auto& feature : features)
-    if (parser.getGrammar().terminalName(feature.feature) == name) return true;
-  return false;
+  const checks::Marked m(c.text(body));
+  return checks::offers_named(c.p, m.text, m.at, m.at, name);
 }
 
 void guarded_completion(const Case& c) {
   const cursiv::Parser& parser = c.p;
   const auto offers = [&](std::string_view body, unsigned replaced,
                           std::string_view literal, std::string_view name = {}) {
-    std::string text = c.text(body);
-    const auto at = text.find('|');
-    text.erase(at, 1);
-    const auto r = parser.parse(text);
-    std::vector<cursiv::NextFeature> features;
-    parser.nextFeaturesAt(r.cst(), at, at + replaced, features);
+    const checks::Marked m(c.text(body));
     // An empty literal asks for a terminal with no spelling.
-    for (const auto& feature : features) {
+    for (const auto& feature :
+         checks::features(c.p, c.p.parse(m.text), m.at, m.at + replaced)) {
       const auto spellings =
           parser.getGrammar().terminalSpellings(feature.feature);
       const bool spelled =
@@ -373,19 +333,7 @@ void spell_prec(const tasi::prec::ast::Expr* e, std::string& out) {
 }
 
 bool prec(std::string_view text, std::string_view want) {
-  const std::string doc = "prec " + std::string(text);
-  const cursiv::ParseResult r = cases().parse(doc);
-  std::string got = "<refused>";
-  if (r.accepted && r.diagnostics.empty()) {
-    got.clear();
-    for (const auto* const item : r.value_as<tasi::prec::ast::Doc>()->items) {
-      if (!got.empty()) got += ' ';
-      spell_prec(item, got);
-    }
-  }
-  if (got == want) return true;
-  std::printf("  %s -> %s\n", std::string(text).c_str(), got.c_str());
-  return false;
+  return items<tasi::prec::ast::Doc>("prec ", text, want, spell_prec);
 }
 
 // Where the first statement's tree ends past the opening keyword, or -1
@@ -427,7 +375,6 @@ bool names_laid(const Case& c, std::string_view body) {
 }  // namespace
 
 int main() {
-  cursiv::test::count_expectations();
   static const auto parser = tasi::generated::G::create_parser();
   const Case spelled{*parser, ""};
   const Case more{cases(), "more "};

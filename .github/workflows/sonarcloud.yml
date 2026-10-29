@@ -52,8 +52,7 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-          -DCMAKE_CXX_FLAGS="--coverage -fprofile-update=atomic"
-          -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
           -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
           -DCURSIV_MIMALLOC=OFF
       - name: Build
@@ -112,3 +111,8 @@ jobs:
             -Dsonar.tests=tests
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.cpp.file.suffixes=.cpp,.hpp
+            -Dsonar.issue.ignore.multicriteria=benchlog,benchpath
+            -Dsonar.issue.ignore.multicriteria.benchlog.ruleKey=cppsecurity:S5145
+            -Dsonar.issue.ignore.multicriteria.benchlog.resourceKey=src/cursiv/bench/**/*
+            -Dsonar.issue.ignore.multicriteria.benchpath.ruleKey=cppsecurity:S2083
+            -Dsonar.issue.ignore.multicriteria.benchpath.resourceKey=src/cursiv/bench/**/*

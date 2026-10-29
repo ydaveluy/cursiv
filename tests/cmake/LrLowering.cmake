@@ -1,5 +1,3 @@
-# The construction, piece by piece: action and close rows, programs, ordered
-# reduces, the stamp split and the lowering's limits.
 cursiv_grammar(edges engines/lr/EdgesGrammar.hpp tedges::G ENGINE LR
     GENERATOR_ARGS --group-lines=64)
 # Where a reading commits and where a token ends: committed repetitions, region
@@ -33,9 +31,6 @@ cursiv_test(LrStates_test engines/lr/LrStates_test.cpp
     trivialrGenerated
     rulerefusalGenerated)
 target_sources(LrStates_test PRIVATE engines/lr/LrRuleRefusal_cases.cpp)
-set_target_properties(LrStates_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
-# The cases of the passes grammar: construction passes, ranked cells and soft
-# keywords.
 # Only the master project builds what the shipped languages' own documents ask,
 # and only when they are built with LR: these suites read the LR tables.
 if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
@@ -86,12 +81,9 @@ if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
   cursiv_timeout(LrRepairBudget_test 60)
   set_tests_properties(LrRepairBudget_test PROPERTIES PROCESSORS 4)
 endif()
-# Grammars both lowered in process and generated: what the lowering keeps is
-# what the generated parser reads.
-# The small languages of the door grammar, read through the parser.
-# Grammars lowered in process: where an infix step rides, how a directive
-# distributes, and the boundary a region hands back.
 
+# The construction piece by piece, grammars lowered in process and generated,
+# the door grammar's small languages and the passes grammar's cases.
 set(_lowering_cases
     engines/lr/LrLowering_test.cpp
     engines/lr/LrConstruction_cases.cpp
@@ -100,4 +92,5 @@ set(_lowering_cases
 )
 cursiv_test(LrLowering_test "${_lowering_cases}"
     asicasesGenerated cursivLrGen doorGenerated passesGenerated)
-set_target_properties(LrLowering_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
+set_target_properties(LrStates_test LrLowering_test PROPERTIES
+    UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)

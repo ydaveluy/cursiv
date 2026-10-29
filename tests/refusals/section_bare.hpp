@@ -1,5 +1,6 @@
 // A grammar named with `ref<>`: it has no tokens around it, so nothing says
 // where its text ends.
+// expect LR: `ref<G>` names a grammar: read it with `section<G>
 #pragma once
 
 #include "refusals/head.hpp"

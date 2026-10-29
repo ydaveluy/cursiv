@@ -1,5 +1,6 @@
 // A rule whose only production calls itself after a token: no left recursion,
 // and still no finite text.
+// expect LR LL: refused .ruleWithoutProduction..*rule .Loop. derives nothing
 #pragma once
 
 #include "refusals/head.hpp"

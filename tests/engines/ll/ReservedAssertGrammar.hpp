@@ -28,9 +28,4 @@ struct Choice : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-struct ChoiceLl : Choice {};
-struct ChoiceLr : Choice {};
-
-// The same names without the assertion: the reservation these two read.
-
 }  // namespace tllreservedassert

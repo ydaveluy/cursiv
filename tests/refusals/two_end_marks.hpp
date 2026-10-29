@@ -1,4 +1,5 @@
 // End of input asserted twice in one choice: the second says nothing.
+// expect LR LL: refused .twoEndMarks..*rule .Root. asserts end of input twice
 #pragma once
 
 #include "refusals/head.hpp"

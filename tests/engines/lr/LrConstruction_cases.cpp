@@ -50,6 +50,29 @@
 
 namespace lr_construction_cases {
 
+namespace {
+
+// A production of `lhs` over `syms`, laid at the end of the build's rows.
+void lay(cursiv::LrBuildCfg& g, std::uint16_t lhs,
+         const std::vector<std::uint16_t>& syms) {
+  const auto p = g.nprods++;
+  g.prods[p] = cursiv::LrLowProd{};
+  g.prods[p].lhs = lhs;
+  g.prods[p].at = g.nslots;
+  g.prods[p].len = static_cast<std::uint16_t>(syms.size());
+  g.prods[p].node = cursiv::kNoRow;
+  g.prodBuild[p] = cursiv::LrProdBuild{};
+  g.prodBuild[p].owner = cursiv::kNoRow;
+  for (const std::uint16_t x : syms) {
+    g.slots[g.nslots] = cursiv::LrLowSlot{};
+    g.slots[g.nslots].row = cursiv::kNoRow;
+    g.slotCfg[g.nslots] = 0;
+    g.slotSym[g.nslots++] = x;
+  }
+}
+
+}  // namespace
+
 namespace action_rows {
 
 namespace {
@@ -125,7 +148,7 @@ void deep_entry_chains() {
 
 }  // namespace
 
-int run() {
+void run() {
   stable_set_classes();
   deep_entry_chains();
   using namespace cursiv;
@@ -161,7 +184,6 @@ int run() {
   LrBuildTable empty;
   lr_share_action_rows(empty);
   CHECK(empty.nactions == 0);
-  return 0;
 }
 
 }  // namespace action_rows
@@ -266,24 +288,6 @@ namespace close_rows {
 namespace {
 
 constexpr std::uint16_t kOpen = 1, kClose = 2, kComma = 3, kN = 4;
-
-void lay(cursiv::LrBuildCfg& g, std::uint16_t lhs,
-         const std::vector<std::uint16_t>& syms) {
-  const auto p = g.nprods++;
-  g.prods[p] = cursiv::LrLowProd{};
-  g.prods[p].lhs = lhs;
-  g.prods[p].at = g.nslots;
-  g.prods[p].len = static_cast<std::uint16_t>(syms.size());
-  g.prods[p].node = cursiv::kNoRow;
-  g.prodBuild[p] = cursiv::LrProdBuild{};
-  g.prodBuild[p].owner = cursiv::kNoRow;
-  for (const std::uint16_t x : syms) {
-    g.slots[g.nslots] = cursiv::LrLowSlot{};
-    g.slots[g.nslots].row = cursiv::kNoRow;
-    g.slotCfg[g.nslots] = 0;
-    g.slotSym[g.nslots++] = x;
-  }
-}
 
 // Terminal `k + 1` spells `spell[k]`; nonterminal 1 is the entry.
 void spell(cursiv::LrBuildCfg& g, std::string_view spell, unsigned nnts) {
@@ -391,7 +395,7 @@ bool owes(const cursiv::LrBuildTable& A, std::uint32_t s,
 
 }  // namespace
 
-int run() {
+void run() {
   cursiv::LrLowered low;
   brackets(low);
   const cursiv::LrBuildTable A = cursiv::lr_build_automaton(low);
@@ -418,7 +422,6 @@ int run() {
   const cursiv::LrBuildTable C = cursiv::lr_build_automaton(called);
   CHECK(!C.overflow && !C.cfg.lowerFail());
   CHECK(owes(C, before(C, {1}, 3), {3}));
-  return 0;
 }
 
 }  // namespace close_rows
@@ -547,10 +550,9 @@ void programs_preserve_order_and_shift_effects() {
 
 }  // namespace
 
-int run() {
+void run() {
   blocks_share_values_without_changing_columns();
   programs_preserve_order_and_shift_effects();
-  return 0;
 }
 
 }  // namespace programs
@@ -563,24 +565,6 @@ int run() {
 namespace ordered_reduce {
 
 namespace {
-
-void lay(cursiv::LrBuildCfg& g, std::uint16_t lhs,
-         const std::vector<std::uint16_t>& syms) {
-  const auto p = g.nprods++;
-  g.prods[p] = cursiv::LrLowProd{};
-  g.prods[p].lhs = lhs;
-  g.prods[p].at = g.nslots;
-  g.prods[p].len = static_cast<std::uint16_t>(syms.size());
-  g.prods[p].node = cursiv::kNoRow;
-  g.prodBuild[p] = cursiv::LrProdBuild{};
-  g.prodBuild[p].owner = cursiv::kNoRow;
-  for (const std::uint16_t x : syms) {
-    g.slots[g.nslots] = cursiv::LrLowSlot{};
-    g.slots[g.nslots].row = cursiv::kNoRow;
-    g.slotCfg[g.nslots] = 0;
-    g.slotSym[g.nslots++] = x;
-  }
-}
 
 // S -> a | B a a ;  B -> a | S a | C S a ;  C -> a | a a a
 void cyclic(cursiv::LrLowered& low) {
@@ -667,10 +651,9 @@ void long_bodies_keep_the_order_written() {
 
 }  // namespace
 
-int run() {
+void run() {
   unordered_cells_are_counted();
   long_bodies_keep_the_order_written();
-  return 0;
 }
 
 }  // namespace ordered_reduce
@@ -755,14 +738,13 @@ void every_split_reads_back_what_it_wrote() {
 
 }  // namespace
 
-int run() {
+void run() {
   a_table_whose_states_leave_room_keeps_the_full_row();
   past_fourteen_bits_of_states_the_row_yields();
   rows_and_states_that_do_not_fit_together_are_refused();
   a_forced_row_is_honoured_or_refused();
   the_refusal_names_both_counts();
   every_split_reads_back_what_it_wrote();
-  return 0;
 }
 
 }  // namespace stamp_layout
@@ -771,6 +753,17 @@ namespace lower_limits {
 
 namespace {
 using namespace cursiv;
+
+// Whether `build` is refused, and for `why`.
+template <class Build>
+bool refused(Build build, LowerFail why) {
+  try {
+    build();
+  } catch (const LowerRefused& e) {
+    return e.why == why;
+  }
+  return false;
+}
 
 void name_pool_refuses_before_returning_an_invalid_span() {
   LrBuildCfg c;
@@ -787,23 +780,14 @@ void name_pool_refuses_before_returning_an_invalid_span() {
   c.terms[2].nameOff = 65534;
   c.terms[2].nameLen = 2;
   CHECK(c.term_name(2).empty());
-  bool refused = false;
-  try {
-    (void)lr_intern_name(c, "y");
-  } catch (const LowerRefused& e) {
-    refused = e.why == LowerFail::namePool;
-  }
-  CHECK(refused && c.lowerWhy == LowerFail::namePool);
+  CHECK(refused([&] { (void)lr_intern_name(c, "y"); }, LowerFail::namePool) &&
+        c.lowerWhy == LowerFail::namePool);
   CHECK(c.nameLen == 65535 && c.names.size() == 65535);
   CHECK(c.term_name(0) == text);
   LrBuildCfg empty;
-  refused = false;
-  try {
-    (void)lr_intern_name(empty, std::string(65536, 'z'));
-  } catch (const LowerRefused& e) {
-    refused = e.why == LowerFail::namePool;
-  }
-  CHECK(refused && empty.nameLen == 0 && empty.names.size() == 0);
+  CHECK(refused([&] { (void)lr_intern_name(empty, std::string(65536, 'z')); },
+                LowerFail::namePool) &&
+        empty.nameLen == 0 && empty.names.size() == 0);
 }
 
 struct GapGrammar : GrammarSpec {
@@ -849,13 +833,9 @@ struct OversizedLexicalDfa : GrammarSpec {
 };
 
 void lexical_state_indices_are_checked_before_narrowing() {
-  bool refused = false;
-  try {
-    (void)lr_build_automaton(LrLowering<OversizedLexicalDfa>::table());
-  } catch (const LowerRefused& e) {
-    refused = e.why == LowerFail::tokenGraphTooLarge;
-  }
-  CHECK(refused);
+  using Oversized = LrLowering<OversizedLexicalDfa>;
+  CHECK(refused([] { (void)lr_build_automaton(Oversized::table()); },
+                LowerFail::tokenGraphTooLarge));
 }
 
 template <std::size_t Min, std::size_t Max>
@@ -1273,22 +1253,20 @@ void lexical_pools_cannot_wrap() {
   for (unsigned which = 0; which < 3; ++which) {
     LrBuildCfg cfg;
     detail::SetIndex ix;
-    bool refused = false;
-    try {
-      if (which == 0) {
-        cfg.nlex = 65535;
-        cfg.push_lex({});
-      } else if (which == 1) {
-        cfg.nlexKid = 65535;
-        cfg.push_lex_kid(0);
-      } else {
-        cfg.nsets = 65535;
-        detail::intern_set(cfg, ix, {});
-      }
-    } catch (const LowerRefused& e) {
-      refused = e.why == LowerFail::tokenGraphTooLarge;
-    }
-    CHECK(refused);
+    CHECK(refused(
+        [&] {
+          if (which == 0) {
+            cfg.nlex = 65535;
+            cfg.push_lex({});
+          } else if (which == 1) {
+            cfg.nlexKid = 65535;
+            cfg.push_lex_kid(0);
+          } else {
+            cfg.nsets = 65535;
+            detail::intern_set(cfg, ix, {});
+          }
+        },
+        LowerFail::tokenGraphTooLarge));
   }
   // Guard products also intern sets after the initial lexical lowering.
   using Guard =
@@ -1297,18 +1275,13 @@ void lexical_pools_cannot_wrap() {
   low.cfg.sets[65534] = {};
   low.cfg.setDecode[65534] = 0;
   low.cfg.nsets = 65535;
-  bool refused = false;
-  try {
-    (void)lr_build_automaton(low);
-  } catch (const LowerRefused& e) {
-    refused = e.why == LowerFail::tokenGraphTooLarge;
-  }
-  CHECK(refused);
+  CHECK(refused([&] { (void)lr_build_automaton(low); },
+                LowerFail::tokenGraphTooLarge));
 
 }
 }  // namespace
 
-int run() {
+void run() {
   name_pool_refuses_before_returning_an_invalid_span();
   a_final_table_is_the_built_one_read_only();
   lexical_state_indices_are_checked_before_narrowing();
@@ -1331,7 +1304,6 @@ int run() {
   alias_decisions_keep_their_order_around_the_callee();
   lexical_pools_cannot_wrap();
   malformed_unicode_classes_are_refused();
-  return 0;
 }
 
 }  // namespace lower_limits
@@ -1470,19 +1442,17 @@ void substituted_reductions_keep_the_returned_row() {
 }
 }  // namespace fold_contract
 
-int run() {
+void run() {
   fold_contract::precomposition_keeps_bare_records_through_renames();
   fold_contract::substituted_reductions_keep_the_returned_row();
   lexical_derived::owed_terminals_stop_at_the_first_acceptance();
   lexical_derived::relay_chains_share_suffixes_in_both_pool_forms();
-  int status = 0;
-  status |= action_rows::run();
-  status |= close_rows::run();
-  status |= programs::run();
-  status |= ordered_reduce::run();
-  status |= stamp_layout::run();
-  status |= lower_limits::run();
-  return cursiv::test::report("LrConstruction_test") | status;
+  action_rows::run();
+  close_rows::run();
+  programs::run();
+  ordered_reduce::run();
+  stamp_layout::run();
+  lower_limits::run();
 }
 
 }  // namespace lr_construction_cases

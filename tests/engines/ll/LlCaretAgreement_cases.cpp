@@ -103,12 +103,10 @@ void an_unnamed_reading_prevents_member_attribution() {
 
 void an_unstamped_tree_does_not_supply_engine_positions() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
-  for (const cursiv::Parser* parser : {ll.get()}) {
-    cursiv::Cst empty("");
-    std::vector<cursiv::NextFeature> output;
-    parser->nextFeaturesAt(empty, 0, 0, output);
-    CHECK(output.empty());
-  }
+  cursiv::Cst empty("");
+  std::vector<cursiv::NextFeature> none;
+  ll->nextFeaturesAt(empty, 0, 0, none);
+  CHECK(none.empty());
   for (const bool withLeaf : {false, true}) {
     constexpr std::string_view text = "use target+";
     cursiv::Cst tree(text);
@@ -119,17 +117,15 @@ void an_unstamped_tree_does_not_supply_engine_positions() {
       builder.exit(opened, 0, 0);
     }
     CHECK(!tree.engine_stamped());
-    for (const cursiv::Parser* parser : {ll.get()}) {
-      for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
-        std::vector<cursiv::NextFeature> output{{123u, "kept", 7u, nullptr}};
-        const auto* data = output.data();
-        const auto capacity = output.capacity();
-        parser->nextFeaturesAt(tree, at, at, output);
-        CHECK(output.size() == 1 && output[0].feature == 123u &&
-              output[0].property == "kept" && output[0].narrow == 7u &&
-              output[0].type == nullptr);
-        CHECK(output.data() == data && output.capacity() == capacity);
-      }
+    for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
+      std::vector<cursiv::NextFeature> output{{123u, "kept", 7u, nullptr}};
+      const auto* data = output.data();
+      const auto capacity = output.capacity();
+      ll->nextFeaturesAt(tree, at, at, output);
+      CHECK(output.size() == 1 && output[0].feature == 123u &&
+            output[0].property == "kept" && output[0].narrow == 7u &&
+            output[0].type == nullptr);
+      CHECK(output.data() == data && output.capacity() == capacity);
     }
   }
 }
@@ -167,21 +163,18 @@ void the_guarded_reference_keeps_its_member() {
         GuardCase{"narrow target-", "other", true}, GuardCase{"ka target+", "to", false},
         GuardCase{"kb target-", "other", false}}) {
     const auto at = static_cast<cursiv::TextOffset>(k.text.find("target"));
-    for (const cursiv::Parser* parser : {ll.get()}) {
-      const std::string source = "guard:" + k.text;
-      const cursiv::ParseResult parsed = parser->parse(source);
-      CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
-      const auto next = features_at(*parser, parsed.cst(), at + 6);
-      std::vector<Feature> names;
-      for (const auto& f : next)
-        if (f.terminal == "ID")
-          names.push_back(f);
-      CHECK(names.size() == 1);
-      if (names.size() != 1) continue;
-      CHECK(names[0].property == k.member);
-      CHECK(names[0].type == parsed.value->type);
-      CHECK((names[0].narrow != cursiv::kNoNarrow) == k.narrowed);
-    }
+    const std::string source = "guard:" + k.text;
+    const cursiv::ParseResult parsed = ll->parse(source);
+    CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
+    const auto next = features_at(*ll, parsed.cst(), at + 6);
+    std::vector<Feature> names;
+    for (const auto& f : next)
+      if (f.terminal == "ID") names.push_back(f);
+    CHECK(names.size() == 1);
+    if (names.size() != 1) continue;
+    CHECK(names[0].property == k.member);
+    CHECK(names[0].type == parsed.value->type);
+    CHECK((names[0].narrow != cursiv::kNoNarrow) == k.narrowed);
   }
 }
 

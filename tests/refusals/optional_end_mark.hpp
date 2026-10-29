@@ -1,6 +1,7 @@
 // An end assertion that may be absent: the reading that keeps it refuses
 // everything past it, the reading that drops it is the same production with no
 // condition at all.
+// expect LR LL: refused .optionalEndMark..*rule .Root. makes an end-of-input assertion optional
 #pragma once
 
 #include "refusals/head.hpp"

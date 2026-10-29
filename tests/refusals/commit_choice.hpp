@@ -1,4 +1,5 @@
 // A commit as the arm of a choice: it stands only as the item of a quantifier.
+// expect LR: commit.prefix, body. stands only as the direct item of option, many, some or repeat
 #pragma once
 
 #include "refusals/head.hpp"

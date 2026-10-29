@@ -1,6 +1,7 @@
 // A `default_converter` announcing a `result` the tree's own conversion cannot
 // produce: `result` names a target `default_convert` already reaches, and a
 // target of one's own is reached by a `convert` on the same specialisation.
+// expect LR: no conversion from this payload to the member type.*default_converter
 #pragma once
 
 #include "refusals/head.hpp"

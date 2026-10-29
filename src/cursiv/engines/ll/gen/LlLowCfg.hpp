@@ -91,8 +91,10 @@ struct LlLowCfg : LowerPools {
     return off;
   }
 
+  // Empty where the program holds no such rule.
   std::string_view rule_name(std::uint16_t r) const {
-    return name_view(rules[r].nameOff, rules[r].nameLen);
+    return r < nrules ? name_view(rules[r].nameOff, rules[r].nameLen)
+                      : std::string_view{};
   }
 };
 

@@ -1,6 +1,7 @@
 // A directive over a choice distributes, and a member that takes a node is
 // refused an alternative that holds none, as a text member is refused one
 // that pays no value.
+// expect LR: stands over a shape that can match with NO node
 #pragma once
 
 #include <cstdint>

@@ -6,6 +6,7 @@
 #include "asttreell/generated/Ll/Module.hpp"
 #include "asttreelr/generated/Lr/Module.hpp"
 #include "engines/shared/DirectiveSequenceGrammar.hpp"
+#include "engines/shared/Checks.hpp"
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -37,11 +38,7 @@ void check(const cursiv::Parser& parser, std::string_view tag,
            std::string_view text,
            std::string (*show)(const ast::Doc&), std::string_view expected) {
   const std::string got = read(parser, std::string(tag) + std::string(text), show);
-  if (got != expected)
-    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
-                static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
+  same_text(engine, text, got, expected);
 }
 
 std::string name_of(const ast::Doc& doc) { return std::string(doc.name); }
@@ -153,7 +150,6 @@ void run() {
   every_engine(*ttree::generated::Ll::create_parser());
   engine = "Lr";
   every_engine(*ttree::generated::Lr::create_parser());
-
 }
 
 }  // namespace directive_sequence_cases
@@ -263,7 +259,6 @@ void every_engine(const cursiv::Parser& parser) {
 void run() {
   every_engine(*ttree::generated::Ll::create_parser());
   every_engine(*ttree::generated::Lr::create_parser());
-
 }
 
 }  // namespace data_parts_cases
@@ -355,19 +350,10 @@ std::string read(const cursiv::Parser& parser, std::string_view text,
   return show(*root);
 }
 
-void expect(const char* what, std::string_view text, const std::string& got,
-            std::string_view expected) {
-  if (got != expected)
-    std::printf("  [%s] %s %.*s\n    got      %s\n    expected %.*s\n", engine,
-                what, static_cast<int>(text.size()), text.data(), got.c_str(),
-                static_cast<int>(expected.size()), expected.data());
-  CHECK(got == expected);
-}
-
 template <class T>
 void check(const cursiv::Parser& parser, std::string_view text,
            std::string (*show)(const T&), std::string_view expected) {
-  expect("", text, read<T>(parser, text, show), expected);
+  same_text(engine, text, read<T>(parser, text, show), expected);
 }
 
 std::string wrapped_tree(const Parsers& p, std::string_view text) {
@@ -428,8 +414,9 @@ void a_flag_over_a_value_write_takes_the_value(const Parsers& p) {
 }
 
 void a_flag_over_a_nest_sets_its_member_on_the_wrapper(const Parsers& p) {
-  expect("wrapped", "x!", wrapped_tree(p, "x!"), "wrap bang=yes of decl x");
-  expect("wrapped", "x", wrapped_tree(p, "x"), "decl x");
+  same_text(engine, "wrapped x!", wrapped_tree(p, "x!"),
+            "wrap bang=yes of decl x");
+  same_text(engine, "wrapped x", wrapped_tree(p, "x"), "decl x");
 }
 
 void flags_in_sequence_each_read_their_own_tokens(const Parsers& p) {

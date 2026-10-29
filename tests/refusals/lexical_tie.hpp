@@ -1,4 +1,5 @@
 // `**` reads as both terminals where one state shifts either.
+// expect LR: candidates mode=[0-9]+ .(STARS|BOLD). -> .(STARS|BOLD). on .[*][*].
 #pragma once
 
 #include "refusals/head.hpp"

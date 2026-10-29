@@ -36,10 +36,8 @@
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
 #include "cursiv/core/services/Diagnostic.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
@@ -60,7 +58,6 @@
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/DocumentState.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/core/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/core/workspace/WorkspaceFolder.hpp"
@@ -69,7 +66,6 @@
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/lsp/completion/CompletionProvider.hpp"
 #include "cursiv/lsp/completion/CompletionProviderOptions.hpp"
-#include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/lsp/content/DefaultTextDocumentContentProvider.hpp"
 #include "cursiv/lsp/formatting/Formatter.hpp"
 #include "cursiv/lsp/runtime/DefaultLanguageServer.hpp"
@@ -93,7 +89,8 @@
 #include "doc/generated/DocG/Table.hpp"
 #include "lsp/types.h"
 #include "lsp/uri.h"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/Editor.hpp"
+#include "support/WorkspaceWorld.hpp"
 
 // The LSP storey with no wire under it: the containers installed, the
 // handshake's promises, the notifications that publish, and the routes that
@@ -212,14 +209,8 @@ struct RecordingFiles final : cursiv::FileOperationHandler {
 // members hold a cross reference -- a linking verdict and a find-references
 // answer both need one.
 struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* ws = nullptr;
+  cursiv::SharedLspServices shared;
+  cursiv::LspServices* ws = nullptr;
   RecordingClient* client = nullptr;
   cursiv::MemoryFileSystemProvider* disk = nullptr;
   RecordingLock* lock = nullptr;
@@ -230,24 +221,12 @@ struct World {
       auto memory = std::make_unique<cursiv::MemoryFileSystemProvider>();
       disk = memory.get();
       shared.fileSystemProvider = std::move(memory);
-    } else {
-      shared.fileSystemProvider =
-          std::make_unique<cursiv::EmptyFileSystemProvider>();
     }
     auto recordingLock = std::make_unique<RecordingLock>();
     lock = recordingLock.get();
     shared.workspaceLock = std::move(recordingLock);
     cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    ws = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
+    ws = &support::add_workspace<cursiv::LspServices>(shared);
     auto recording = std::make_unique<RecordingClient>();
     client = recording.get();
     shared.languageClient = std::move(recording);
@@ -267,22 +246,11 @@ struct World {
   }
 
   void open(std::string_view text) const {
-    lsp::DidOpenTextDocumentParams params;
-    params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
-    params.textDocument.languageId = std::string("workspace");
-    params.textDocument.version = 1;
-    params.textDocument.text = std::string(text);
-    server().didOpen(params);
+    support::open(server(), kUri, "workspace", text);
   }
 
   void change(int version, std::string_view text) const {
-    lsp::DidChangeTextDocumentParams params;
-    params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
-    params.textDocument.version = version;
-    lsp::TextDocumentContentChangeWholeDocument whole;
-    whole.text = std::string(text);
-    params.contentChanges.emplace_back(std::move(whole));
-    server().didChange(params);
+    support::change(server(), kUri, version, text);
   }
 
   void close(std::string_view uri = kUri) const {
@@ -538,12 +506,7 @@ void a_closed_virtual_document_stays() {
           world.shared, std::vector<std::string>{"builtin"});
   (void)world.handshake();
   world.open("entity A { x : Library }\n");
-  lsp::DidOpenTextDocumentParams opened;
-  opened.textDocument.uri = lsp::Uri::parse(std::string(kLibrary));
-  opened.textDocument.languageId = std::string("workspace");
-  opened.textDocument.version = 1;
-  opened.textDocument.text = std::string("datatype Library\n");
-  world.server().didOpen(opened);
+  support::open(world.server(), kLibrary, "workspace", "datatype Library\n");
 
   world.close(kLibrary);
   const auto library = world.shared.documents->getDocument(kLibrary);
@@ -617,21 +580,7 @@ void an_edit_republishes_what_it_repaired() {
   CHECK(repaired->version.has_value() && *repaired->version == 2);
 }
 
-class CountingParser final : public cursiv::Parser {
- public:
-  explicit CountingParser(std::unique_ptr<const cursiv::Parser> parser)
-      : inner(std::move(parser)) {}
-  const cursiv::Grammar& getGrammar() const noexcept override {
-    return inner->getGrammar();
-  }
-  cursiv::ParseResult parse(
-      std::string_view text, const cursiv::CancellationToken& token) const override {
-    ++calls;
-    return inner->parse(text, token);
-  }
-  std::unique_ptr<const cursiv::Parser> inner;
-  mutable unsigned calls = 0;
-};
+using support::CountingParser;
 
 void opening_parses_once_and_unchanged_edits_keep_the_tree() {
   World world;
@@ -648,7 +597,7 @@ void opening_parses_once_and_unchanged_edits_keep_the_tree() {
   params.textDocument.uri = lsp::Uri::parse(kUri);
   params.range = {{0, 0}, {10, 0}};
   CHECK(!world.server().codeAction(params).empty());
-  const auto calls = count->calls;
+  const unsigned calls = count->calls;
   world.change(2, broken);
   CHECK(document->textDocument().version() == 2);
   CHECK(document->parseResult.value == tree);
@@ -693,30 +642,19 @@ void requests_use_the_language_attached_to_an_untitled_document() {
 
 void opening_can_override_the_language_of_an_existing_document() {
   World world;
-  auto language = std::make_unique<World::Language>(world.shared);
-  language->languageMetaData = {"alternate", {".alt"}, {}};
   auto parser = std::make_unique<CountingParser>(
       ws::generated::Workspace::create_parser());
   const auto* counter = parser.get();
-  language->parser = std::move(parser);
-  language->astReflection = ws::generated::Workspace::create_ast_reflection();
-  language->nameProvider =
-      std::make_unique<cursiv::DefaultNameProvider>(*language);
-  cursiv::install_default_lsp_services(*language);
-  const auto* alternate = language.get();
-  world.shared.serviceRegistry->registerServices(std::move(language));
+  const auto* alternate = &support::add_language<cursiv::LspServices>(
+      world.shared, {"alternate", {".alt"}, {}}, std::move(parser),
+      ws::generated::Workspace::create_ast_reflection());
   (void)world.handshake();
   // A file may already have been loaded under its extension's language.
   auto document = world.shared.documentFactory->fromString(
       std::string(kRepaired), kUri);
   world.shared.documents->addDocument(document);
   CHECK(document->language == world.ws);
-  lsp::DidOpenTextDocumentParams open;
-  open.textDocument.uri = lsp::Uri::parse(std::string(kUri));
-  open.textDocument.languageId = "alternate";
-  open.textDocument.version = 1;
-  open.textDocument.text = std::string(kRepaired);
-  world.server().didOpen(open);
+  support::open(world.server(), kUri, "alternate", kRepaired);
   CHECK(document->language == alternate);
   CHECK(document->textDocument().languageId() == "alternate");
   CHECK(counter->calls == 1);
@@ -946,17 +884,6 @@ void a_watched_file_joins_the_workspace() {
   CHECK(c != nullptr && !c->diagnostics.empty());
 }
 
-// An open on any URI, where `World::open` names the world's one document.
-void open_at(const World& world, std::string_view uri,
-             std::string_view languageId, std::string_view text) {
-  lsp::DidOpenTextDocumentParams params;
-  params.textDocument.uri = lsp::Uri::parse(std::string(uri));
-  params.textDocument.languageId = std::string(languageId);
-  params.textDocument.version = 1;
-  params.textDocument.text = std::string(text);
-  world.server().didOpen(params);
-}
-
 // The names a workspace query answers.
 std::vector<std::string> symbol_names(const World& world,
                                       std::string_view query) {
@@ -1031,7 +958,7 @@ void a_closed_file_outside_the_folders_keeps_its_saved_content() {
   (void)world.handshake(world.folderParams());
   CHECK(world.shared.documents->getDocument(kOutside) == nullptr);
 
-  open_at(world, kOutside, "workspace", "datatype Buffered\n");
+  support::open(world.server(), kOutside, "workspace", "datatype Buffered\n");
   CHECK(symbol_names(world, "Buffered").size() == 1);
   world.close(kOutside);
 
@@ -1053,7 +980,7 @@ void a_closed_untitled_buffer_leaves_the_workspace() {
       std::make_unique<cursiv::LocalFileSystemProvider>();
   (void)world.handshake();
   constexpr std::string_view kUntitled = "untitled:Unsaved-1";
-  open_at(world, kUntitled, "workspace", "datatype Ghost\n");
+  support::open(world.server(), kUntitled, "workspace", "datatype Ghost\n");
   world.open("entity A { x : Ghost }\n");
   lsp::DefinitionParams definition;
   definition.textDocument.uri = lsp::Uri::parse(std::string(kUri));
@@ -1114,15 +1041,13 @@ struct KeystrokeFormatter final : cursiv::Formatter {
 void the_on_type_triggers_are_a_union_over_the_languages() {
   World world;
   world.ws->formatter = std::make_unique<KeystrokeFormatter>("}");
-  auto second = std::make_unique<World::Language>(world.shared);
-  second->languageMetaData = {"second", {".second"}, {}};
-  second->parser = ws::generated::Workspace::create_parser();
-  second->astReflection = ws::generated::Workspace::create_ast_reflection();
-  second->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*second);
-  cursiv::install_default_core_services(*second);
-  cursiv::install_default_lsp_services(*second);
-  second->formatter = std::make_unique<KeystrokeFormatter>(";");
-  world.shared.serviceRegistry->registerServices(std::move(second));
+  (void)support::add_language<cursiv::LspServices>(
+      world.shared, {"second", {".second"}, {}},
+      ws::generated::Workspace::create_parser(),
+      ws::generated::Workspace::create_ast_reflection(),
+      [](cursiv::LspServices& second) {
+        second.formatter = std::make_unique<KeystrokeFormatter>(";");
+      });
 
   const lsp::InitializeResult result = world.handshake();
   const auto& announced = result.capabilities.documentOnTypeFormattingProvider;
@@ -1132,7 +1057,7 @@ void the_on_type_triggers_are_a_union_over_the_languages() {
 
   constexpr std::string_view kSecond = "file:///w/b.second";
   world.open("entity A { }\n");
-  open_at(world, kSecond, "second", "entity B { }\n");
+  support::open(world.server(), kSecond, "second", "entity B { }\n");
   const auto typed = [&](std::string_view uri, std::string ch) {
     lsp::DocumentOnTypeFormattingParams params;
     params.textDocument.uri = lsp::Uri::parse(std::string(uri));
@@ -1695,21 +1620,8 @@ namespace language_server_main {
 
 namespace {
 
-struct Language : cursiv::LspServices {
-  explicit Language(cursiv::SharedLspServices& s)
-      : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-};
-
 bool register_workspace(cursiv::SharedLspServices& shared) {
-  auto language = std::make_unique<Language>(shared);
-  language->languageMetaData = {"workspace", {".ws"}, {}};
-  language->parser = ws::generated::Workspace::create_parser();
-  language->astReflection = ws::generated::Workspace::create_ast_reflection();
-  language->nameProvider =
-      std::make_unique<cursiv::DefaultNameProvider>(*language);
-  cursiv::install_default_core_services(*language);
-  cursiv::install_default_lsp_services(*language);
-  shared.serviceRegistry->registerServices(std::move(language));
+  (void)support::add_workspace<cursiv::LspServices>(shared);
   return true;
 }
 
@@ -1829,42 +1741,17 @@ namespace {
 
 // One world per engine, everything else identical: the providers, the document
 // factory and the builder are the shipped ones, but for the keyword filter.
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
-  Language* doc = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"doc", {".doc"}, {}};
-    language->parser = fdoc::generated::DocG::create_parser();
-    language->astReflection = fdoc::generated::DocG::create_ast_reflection();
-    language->completionProvider =
-        std::make_unique<cursiv::DefaultCompletionProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    doc = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* doc = &support::add_language<cursiv::LspServices>(
+      shared, {"doc", {".doc"}, {}}, fdoc::generated::DocG::create_parser(),
+      fdoc::generated::DocG::create_ast_reflection());
 
   mutable unsigned minted = 0;
 
   cursiv::Document* built(std::string text) const {
-    auto document = shared.documentFactory->fromString(
-        std::move(text), "file:///w/a" + std::to_string(minted++) + ".doc");
-    cursiv::Document* const raw = document.get();
-    shared.documents->addDocument(std::move(document));
-    cursiv::Document* const set[] = {raw};
-    shared.documentBuilder->build(set);
-    return raw;
+    return support::built(shared,
+                          "file:///w/a" + std::to_string(minted++) + ".doc",
+                          std::move(text));
   }
 };
 
@@ -2033,11 +1920,9 @@ void a_stamp_past_the_table_is_declined() {
 
 // This storey owes nothing: a language that installs no provider is complete.
 void a_language_with_no_provider_owes_no_slot() {
-  World::Shared shared;
-  shared.fileSystemProvider =
-      std::make_unique<cursiv::EmptyFileSystemProvider>();
+  cursiv::SharedLspServices shared;
   cursiv::install_default_shared_lsp_services(shared);
-  World::Language language(shared);
+  cursiv::LspServices language(shared);
   language.languageMetaData = {"doc", {".doc"}, {}};
   language.parser = fdoc::generated::DocG::create_parser();
   language.astReflection = fdoc::generated::DocG::create_ast_reflection();
@@ -2141,22 +2026,8 @@ namespace configuration_provider {
 
 namespace {
 
-struct World {
-  cursiv::SharedCoreServices shared;
-  cursiv::ValidationRegistry* registry = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    registry = language->validationRegistry.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-  }
+struct World : support::CoreWorkspace {
+  cursiv::ValidationRegistry* registry = ws->validationRegistry.get();
 };
 
 // Keeps what it is asked, answers when told to.
@@ -2499,21 +2370,11 @@ namespace {
 constexpr std::string_view kA = "file:///w/a.wsa";
 constexpr std::string_view kB = "file:///w/b.wsb";
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
-
-  Shared shared;
+struct World : support::World<cursiv::SharedLspServices> {
   // How many times language b's slow pass ran.
   std::atomic<int> slowRuns{0};
 
   World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
     add("wsa", ".wsa");
     add("wsb", ".wsb", [this](cursiv::ValidationRegistry& registry) {
       registry.registerAfterDocument(
@@ -2537,37 +2398,15 @@ struct World {
   void add(
       std::string id, std::string extension,
       const std::function<void(cursiv::ValidationRegistry&)>& checks = {}) {
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {id, {extension}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    if (checks) checks(*language->validationRegistry);
-    shared.serviceRegistry->registerServices(std::move(language));
+    (void)support::add_language<cursiv::LspServices>(
+        shared, {id, {extension}, {}},
+        ws::generated::Workspace::create_parser(),
+        ws::generated::Workspace::create_ast_reflection(),
+        [&](cursiv::LspServices& language) {
+          if (checks) checks(*language.validationRegistry);
+        });
   }
 
-  void open(std::string_view uri, std::string_view languageId,
-            std::string_view text) const {
-    lsp::DidOpenTextDocumentParams params;
-    params.textDocument.uri = lsp::Uri::parse(std::string(uri));
-    params.textDocument.languageId = std::string(languageId);
-    params.textDocument.version = 1;
-    params.textDocument.text = std::string(text);
-    shared.languageServer->didOpen(params);
-  }
-
-  void change(std::string_view uri, int version, std::string_view text) const {
-    lsp::DidChangeTextDocumentParams params;
-    params.textDocument.uri = lsp::Uri::parse(std::string(uri));
-    params.textDocument.version = version;
-    lsp::TextDocumentContentChangeWholeDocument whole;
-    whole.text = std::string(text);
-    params.contentChanges.emplace_back(std::move(whole));
-    shared.languageServer->didChange(params);
-  }
 
   [[nodiscard]] bool warned(std::string_view uri) const {
     for (const cursiv::Diagnostic& d :
@@ -2579,11 +2418,13 @@ struct World {
 
 void a_relinked_document_keeps_its_own_languages_validation() {
   World world;
-  world.open(kA, "wsa", "datatype T\n");
-  world.open(kB, "wsb", "entity B { x : T }\n");
+  support::open(*world.shared.languageServer, kA, "wsa", "datatype T\n");
+  support::open(*world.shared.languageServer, kB, "wsb",
+                "entity B { x : T }\n");
   CHECK(world.warned(kB));
   const int before = world.slowRuns;
-  world.change(kA, 2, "datatype T\ndatatype U\n");
+  support::change(*world.shared.languageServer, kA, 2,
+                  "datatype T\ndatatype U\n");
   CHECK(world.slowRuns > before);
   CHECK(world.warned(kB));
   CHECK(!world.warned(kA));

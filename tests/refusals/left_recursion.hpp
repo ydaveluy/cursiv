@@ -1,5 +1,6 @@
 // A rule that calls itself behind a rule that may match nothing: the descent
 // cannot fold the cycle into a loop, and would never return.
+// expect LL: refused .leftRecursion..*rule .Path. reaches itself before matching anything
 #pragma once
 
 #include "refusals/head.hpp"

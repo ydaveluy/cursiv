@@ -1221,14 +1221,6 @@ void build_atn(Built& b) {
   }
 }
 
-// The lookahead of one arm: what it may begin with, and -- where nothing at
-// all is a reading of it -- whatever would follow the choice.
-DynSet arm_lookahead(const Built& b, std::uint16_t arm, const DynSet& after) {
-  DynSet s = b.first[arm];
-  if (b.nullable[arm]) s |= after;
-  return s;
-}
-
 // A set of configurations, canonical: the same readings met twice are one
 // state of the automaton, whatever order they were reached in.
 std::vector<LlConfig> set_key(const std::vector<LlConfig>& cs) {
@@ -1598,15 +1590,13 @@ void settle_decisions(Built& b, const LlBuildOptions& opt) {
     const auto base = static_cast<std::uint32_t>(b.laSet.size());
     if (n.kind == LlShape::rep) {
       // Entering the body wins a turn; leaving it is what follows the loop.
-      DynSet in = b.first[n.sym];
-      if (b.nullable[n.sym]) in |= after;
-      b.laSet.push_back(in);
+      b.laSet.push_back(b.lookahead(n.sym, after));
       b.laSet.push_back(after);
       if (exits[d] != kNoRow) b.laSet.back().andnot(b.cut[exits[d]]);
     } else {
       const auto k = b.cfg.children(n);
       for (unsigned i = 0; i < k.size(); ++i) {
-        b.laSet.push_back(arm_lookahead(b, k[i], after));
+        b.laSet.push_back(b.lookahead(k[i], after));
         const LlNode& arm = b.cfg.nodes[k[i]];
         if (arm.kind == LlShape::condition)
           b.laSet.back().andnot(b.cut[arm.sym]);
@@ -1786,8 +1776,8 @@ std::vector<std::uint8_t> repeat_scopes(const Built& b, const LlAtnView& atn,
       const auto& state = atn.state(at);
       caller = caller ||
                (state.kind == LlAtnKind::ruleStop && state.rule == dec.rule);
-      for (std::uint32_t i = 0; i < state.nedges; ++i)
-        if (atn.edge(state.edge + i).kind == LlEdgeKind::atom) {
+      for (const LlAtnEdge& e : atn.outgoing(at))
+        if (e.kind == LlEdgeKind::atom) {
           local = local || state.rule == dec.rule;
           caller = caller || state.rule != dec.rule;
         }
@@ -1833,8 +1823,7 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
         const auto& calls = waiting[state.rule];
         todo.insert(todo.end(), calls.begin(), calls.end());
       }
-      for (std::uint32_t i = 0; i < state.nedges; ++i) {
-        const auto& e = atn.edge(state.edge + i);
+      for (const LlAtnEdge& e : atn.outgoing(at)) {
         if (e.kind == LlEdgeKind::epsilon)
           todo.push_back(e.target);
         else if (e.kind == LlEdgeKind::rule) {
@@ -1867,9 +1856,7 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
       todo.pop_back();
       if (seen[at] == round) continue;
       seen[at] = round;
-      const LlAtnState& state = atn.state(at);
-      for (std::uint32_t i = 0; i < state.nedges; ++i) {
-        const LlAtnEdge& e = atn.edge(state.edge + i);
+      for (const LlAtnEdge& e : atn.outgoing(at)) {
         if (e.kind == LlEdgeKind::epsilon) {
           todo.push_back(e.target);
         } else if (e.kind == LlEdgeKind::rule) {
@@ -1914,11 +1901,9 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
       bits[w] |= region[std::size_t{scc.component[rule]} * words + w];
   };
   for (std::uint32_t at = 0; at < atn.nstates; ++at) {
-    const LlAtnState& state = atn.state(at);
-    if (state.nedges < 2) continue;
+    if (atn.state(at).nedges < 2) continue;
     std::ranges::fill(once, 0);
-    for (std::uint32_t i = 0; i < state.nedges; ++i) {
-      const LlAtnEdge& e = atn.edge(state.edge + i);
+    for (const LlAtnEdge& e : atn.outgoing(at)) {
       std::ranges::fill(bits, 0);
       if (e.kind == LlEdgeKind::epsilon) {
         scan(e.target, include);

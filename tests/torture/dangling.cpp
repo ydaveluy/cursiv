@@ -4,65 +4,35 @@
 
 #include <lsp/types.h>
 
-#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <memory>
 #include <string_view>
 
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "election/generated/Election/Module.hpp"
+#include "support/Editor.hpp"
+#include "support/World.hpp"
 
 namespace {
 
 namespace ct = cursiv::test;
 
-struct World {
-  struct Shared : cursiv::SharedLspServices {};
-  struct Language : cursiv::LspServices {
-    explicit Language(Shared& s)
-        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
-  };
+struct World : support::World<cursiv::SharedLspServices> {
+  cursiv::LspServices* lang = &support::add_language<cursiv::LspServices>(
+      shared, {"dangling", {".dangling"}, {}},
+      telect::generated::Election::create_parser(),
+      telect::generated::Election::create_ast_reflection());
 
-  Shared shared;
-  Language* lang = nullptr;
-
-  World() {
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::EmptyFileSystemProvider>();
-    cursiv::install_default_shared_lsp_services(shared);
-    auto language = std::make_unique<Language>(shared);
-    language->languageMetaData = {"dangling", {".dangling"}, {}};
-    language->parser = telect::generated::Election::create_parser();
-    language->astReflection = telect::generated::Election::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    cursiv::install_default_lsp_services(*language);
-    lang = language.get();
-    shared.serviceRegistry->registerServices(std::move(language));
-    // An editor that chooses between inserting and replacing a word.
-    lsp::InitializeParams params;
-    params.capabilities.textDocument.emplace()
-        .completion.emplace()
-        .completionItem.emplace()
-        .insertReplaceSupport = true;
-    (void)shared.languageServer->initialize(params);
-  }
+  World() { support::take_both_ranges(shared); }
 };
 
-bool offers(const lsp::CompletionList& list, std::string_view label) {
-  return std::ranges::any_of(list.items, [label](const lsp::CompletionItem& i) {
-    return i.label == label;
-  });
-}
+using support::offers;
 
 // No offer may spell a raw terminal name -- every label a plain keyword
 // spelling (this grammar's `kw<"if">`/`kw<"then">`/`kw<"else">`) or the

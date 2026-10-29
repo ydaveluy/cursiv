@@ -52,9 +52,6 @@ endif()
 cursiv_test(navigation_test lsp/navigation_test.cpp cursiv::lsp wsLsp multirefGenerated)
 
 cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore)
-cursiv_test(code_action_test lsp/code_action_test.cpp cursiv::lsp)
-
-cursiv_test(TextDocumentCursor_test core/workspace/TextDocumentCursor_test.cpp cursiv::core)
 
 cursiv_test(server_test lsp/server_test.cpp cursiv::lsp wsCore docgGenerated)
 target_compile_definitions(server_test PRIVATE

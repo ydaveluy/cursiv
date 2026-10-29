@@ -21,5 +21,4 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
 };
 struct Ll : Base {};
-struct Lr : Base {};
 }  // namespace tllswiftwidth

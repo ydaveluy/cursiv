@@ -1,5 +1,6 @@
 // A section closed by a token its grammar reads itself: where the section
 // ends would be the parse's to say, not the text's.
+// expect LR LL: refused: the grammar closes a .section<>. on a token the embedded grammar reads
 #pragma once
 
 #include "refusals/head.hpp"

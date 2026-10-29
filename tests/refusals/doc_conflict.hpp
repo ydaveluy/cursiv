@@ -1,4 +1,5 @@
 // One word, two hover texts: a token has one.
+// expect LR: refused .docConflict..*rule .Root. documents one word twice with different prose
 #pragma once
 
 #include "refusals/head.hpp"

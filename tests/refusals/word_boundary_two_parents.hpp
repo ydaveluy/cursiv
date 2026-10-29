@@ -1,5 +1,6 @@
 // Two parents, one of which declares its own word boundary: the child sees
 // two answers to one question, and its keywords would take neither.
+// expect LR: two parents of this grammar declare different
 #pragma once
 
 #include "refusals/head.hpp"

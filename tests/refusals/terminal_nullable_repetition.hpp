@@ -1,5 +1,6 @@
 // A repetition that may match nothing, written in a helper that keeps its
 // call, since it captures: the refusal names the helper, not its caller.
+// expect LR: refused: terminal .REST. repeats an item that may match nothing inside a recursive terminal
 #pragma once
 
 #include "refusals/head.hpp"

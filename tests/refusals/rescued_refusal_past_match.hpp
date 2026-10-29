@@ -2,6 +2,7 @@
 // ends: whether the refusal fires is the byte behind the match, and a
 // keyword's rescue asks that that byte BE a word byte -- here `_`, which the
 // body does not read on over.
+// expect LR: refused: terminal .W. ends a match exactly where the word it refuses ends, past its head, and ._. rescues that word
 #pragma once
 
 #include "refusals/head.hpp"

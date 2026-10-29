@@ -1,4 +1,3 @@
-#include "ConformanceTest.hpp"
 // The conformance cases of the grammar reference, on both engines.
 
 #include <array>
@@ -20,7 +19,9 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
+#include "engines/shared/Checks.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
+#include "engines/shared/ConformanceTest.hpp"
 namespace condition_contract_cases {
 void run();
 }
@@ -44,13 +45,6 @@ using conformance_test::expect;
 using conformance_test::kEngine;
 using conformance_test::Pair;
 
-template <class T>
-const T* exactly(const cursiv::ParseResult& r) {
-  return r.value != nullptr && r.value->type == &cursiv::ast_type_tag<T>
-             ? static_cast<const T*>(r.value)
-             : nullptr;
-}
-
 template <class T, class Check>
 void tree(const Pair& pair, std::string_view text, Check&& check,
           std::source_location at = std::source_location::current()) {
@@ -66,6 +60,25 @@ void tree(const Pair& pair, std::string_view text, Check&& check,
   }
 }
 
+// The two texts a `Won` or a `Pick` holds, on both engines.
+void won(const Pair& pair, std::string_view text, std::string_view token,
+         std::string_view name,
+         std::source_location at = std::source_location::current()) {
+  tree<tconformance::ast::Won>(
+      pair, text,
+      [&](const auto& n) { return n.token == token && n.name == name; }, at);
+}
+void pick(const Pair& pair, std::string_view text, std::string_view literal,
+          std::string_view keyword,
+          std::source_location at = std::source_location::current()) {
+  tree<tconformance::ast::Pick>(
+      pair, text,
+      [&](const auto& n) {
+        return n.literal == literal && n.keyword == keyword;
+      },
+      at);
+}
+
 }  // namespace
 
 int main() {
@@ -78,31 +91,19 @@ int main() {
 
   // A keyword and a literal of one spelling tie: the arm written first wins.
   const Pair keywordTie{"keywordtie:"};
-  tree<ast::Pick>(keywordTie, "if(", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
+  pick(keywordTie, "if(", "if", "");
   const Pair keywordTieBoundary{"keywordtieboundary:"};
-  tree<ast::Pick>(keywordTieBoundary, "if x", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
-  tree<ast::Pick>(keywordTieBoundary, "ifx", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
+  pick(keywordTieBoundary, "if x", "if", "");
+  pick(keywordTieBoundary, "ifx", "if", "");
   const Pair firstArm{"firstarm:"};
   tree<ast::First>(firstArm, "if then", [](const ast::First&) { return true; });
   const Pair elected{"elected:"};
-  const auto won = [&](std::string_view text, std::string_view token,
-                       std::string_view name) {
-    tree<ast::Won>(elected, text, [&](const ast::Won& n) {
-      return n.token == token && n.name == name;
-    });
-  };
   tree<ast::First>(elected, "1 if;", [](const ast::First&) { return true; });
   tree<ast::Second>(elected, "1 if:", [](const ast::Second&) { return true; });
-  won("2 if", "if", "");
-  won("2 iff", "", "iff");
-  won("3 if(", "if", "");
-  won("3 if (", "", "if");
+  won(elected, "2 if", "if", "");
+  won(elected, "2 iff", "", "iff");
+  won(elected, "3 if(", "if", "");
+  won(elected, "3 if (", "", "if");
   tree<ast::Tally>(elected, "4 if if", [](const ast::Tally& n) {
     return n.turns.size() == 2 && !n.tail;
   });
@@ -120,120 +121,64 @@ int main() {
   }
 
   const Pair literalsRank{"literalsrank:"};
-  tree<ast::Won>(literalsRank, "if", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(literalsRank, "while", [](const ast::Won& n) {
-    return n.token == "while" && n.name.empty();
-  });
-  tree<ast::Won>(literalsRank, "iff", [](const ast::Won& n) {
-    return n.name == "iff" && n.token.empty();
-  });
+  won(literalsRank, "if", "if", "");
+  won(literalsRank, "while", "while", "");
+  won(literalsRank, "iff", "", "iff");
   const Pair literalsRankRefuses{"literalsrankrefuses:"};
   expect(literalsRankRefuses, "if", false);
   expect(literalsRankRefuses, "if;", true);
   expect(literalsRankRefuses, "x", true);
 
   const Pair literalConditionRank{"literalconditionrank:"};
-  tree<ast::Won>(literalConditionRank, "if;", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(literalConditionRank, "if ;", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
-  tree<ast::Won>(literalConditionRank, "x;", [](const ast::Won& n) {
-    return n.name == "x" && n.token.empty();
-  });
+  won(literalConditionRank, "if;", "if", "");
+  won(literalConditionRank, "if ;", "", "if");
+  won(literalConditionRank, "x;", "", "x");
 
   const Pair mixedRank{"mixedrank:"};
-  tree<ast::Pick>(mixedRank, "if(", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
-  tree<ast::Pick>(mixedRank, "x(", [](const ast::Pick& n) {
-    return n.keyword == "x" && n.literal.empty();
-  });
+  pick(mixedRank, "if(", "if", "");
+  pick(mixedRank, "x(", "", "x");
 
   const Pair conditionedRank{"conditionedrank:"};
-  tree<ast::Pick>(conditionedRank, "if;", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
-  tree<ast::Pick>(conditionedRank, "if:", [](const ast::Pick& n) {
-    return n.literal == "if" && n.keyword.empty();
-  });
+  pick(conditionedRank, "if;", "if", "");
+  pick(conditionedRank, "if:", "if", "");
   const Pair conditionedSwapped{"conditionedrankswapped:"};
-  tree<ast::Pick>(conditionedSwapped, "if;", [](const ast::Pick& n) {
-    return n.keyword == "if" && n.literal.empty();
-  });
-  tree<ast::Pick>(conditionedSwapped, "if:", [](const ast::Pick& n) {
-    return n.keyword == "if" && n.literal.empty();
-  });
+  pick(conditionedSwapped, "if;", "", "if");
+  pick(conditionedSwapped, "if:", "", "if");
 
   const Pair patternsTie{"patternstie:"};
-  tree<ast::Won>(patternsTie, "if", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
+  won(patternsTie, "if", "if", "");
   const Pair patternsTieSwapped{"patternstieswapped:"};
-  tree<ast::Won>(patternsTieSwapped, "if", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
+  won(patternsTieSwapped, "if", "", "if");
 
   const Pair mixedRefused{"mixedrefused:"};
-  tree<ast::Won>(mixedRefused, "if;", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(mixedRefused, "x;", [](const ast::Won& n) {
-    return n.name == "x" && n.token.empty();
-  });
+  won(mixedRefused, "if;", "if", "");
+  won(mixedRefused, "x;", "", "x");
 
   const Pair mixedLeading{"mixedleading:"};
-  tree<ast::Won>(mixedLeading, "if;", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(mixedLeading, "x;", [](const ast::Won& n) {
-    return n.name == "x" && n.token.empty();
-  });
+  won(mixedLeading, "if;", "if", "");
+  won(mixedLeading, "x;", "", "x");
 
   const Pair keywordTrivia{"keywordtrivia:"};
-  tree<ast::Won>(keywordTrivia, "if", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
-  tree<ast::Won>(keywordTrivia, "iff", [](const ast::Won& n) {
-    return n.name == "iff" && n.token.empty();
-  });
+  won(keywordTrivia, "if", "", "if");
+  won(keywordTrivia, "iff", "", "iff");
   const Pair literalTrivia{"literaltrivia:"};
-  tree<ast::Won>(literalTrivia, "if", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
-  tree<ast::Won>(literalTrivia, "iff", [](const ast::Won& n) {
-    return n.name == "iff" && n.token.empty();
-  });
+  won(literalTrivia, "if", "", "if");
+  won(literalTrivia, "iff", "", "iff");
   const Pair conditionedTrivia{"conditionedtrivia:"};
-  tree<ast::Won>(conditionedTrivia, "if;", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
+  won(conditionedTrivia, "if;", "", "if");
   const Pair guardedLiteral{"guardedliteral:"};
-  tree<ast::Won>(guardedLiteral, "if;", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(guardedLiteral, "if(", [](const ast::Won& n) {
-    return n.name == "if" && n.token.empty();
-  });
+  won(guardedLiteral, "if;", "if", "");
+  won(guardedLiteral, "if(", "", "if");
   const Pair literalBesideGuard{"literalbesideguard:"};
-  tree<ast::Won>(literalBesideGuard, "if", [](const ast::Won& n) {
-    return n.token == "if" && n.name.empty();
-  });
-  tree<ast::Won>(literalBesideGuard, "iff", [](const ast::Won& n) {
-    return n.name == "iff" && n.token.empty();
-  });
+  won(literalBesideGuard, "if", "if", "");
+  won(literalBesideGuard, "iff", "", "iff");
   // The lexer tries what the readings take, not what the state merged from
   // its callers would: `TEXT` is no rival of `.` where a path is a key.
   const Pair mergedLookahead{"mergedlookahead:"};
   expect(mergedLookahead, "a.b", true);
   expect(mergedLookahead, "a.b: [@c.d e.f]", true);
   const Pair expectedKeyword{"expectedkeyword:"};
-  tree<ast::Won>(expectedKeyword, "REM ; REM junk\nabc", [](const ast::Won& n) {
-    return n.token == "REM" && n.name == "abc";
-  });
+  won(expectedKeyword, "REM ; REM junk\nabc", "REM", "abc");
 
   const Pair arms{"arms:"};
   tree<ast::Arms>(arms, "abc:", [](const ast::Arms& n) {
@@ -264,25 +209,19 @@ int main() {
       CHECK(ok);
     }
   };
-  const auto twin = [&](std::string_view text, std::string_view token,
-                        std::string_view name) {
-    tree<ast::Won>(twins, text, [&](const ast::Won& n) {
-      return n.token == token && n.name == name;
-    });
-  };
   for (const char* id : {"1", "2", "3", "4"}) unchanged(id, "x");
   unchanged("4", "x;");
   for (const char* text : {"", "x", "x y"}) unchanged("5", text);
-  twin("2 x", "x", "");
-  twin("3 x", "x", "");
-  twin("4 x", "x", "");
-  twin("5 x", "x", "");
-  twin("5 x y", "x", "y");
-  twin("6 x;", "x", "");
-  twin("6 x", "", "x");
+  won(twins, "2 x", "x", "");
+  won(twins, "3 x", "x", "");
+  won(twins, "4 x", "x", "");
+  won(twins, "5 x", "x", "");
+  won(twins, "5 x y", "x", "y");
+  won(twins, "6 x;", "x", "");
+  won(twins, "6 x", "", "x");
   // A text both branches read goes to the first; the rest to the second.
-  twin("7 x", "x", "");
-  twin("7 x;", "", "x");
+  won(twins, "7 x", "x", "");
+  won(twins, "7 x;", "", "x");
 
   const Pair separated{"separated:"};
   tree<ast::List>(separated, "",

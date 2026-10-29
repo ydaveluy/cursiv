@@ -27,4 +27,11 @@ static_assert(sizeof(void*) != 8 || sizeof(Pending) == 24,
               "the record's columns live in padding Pending already had: a "
               "wider pending was measured worse than the tape reads it saves");
 
+// A node and its exact type index. A nest moves both, the wrapper being
+// another class.
+struct Made {
+  AstNode* value = nullptr;
+  std::uint16_t type = detail::kNoIndex;
+};
+
 }  // namespace cursiv

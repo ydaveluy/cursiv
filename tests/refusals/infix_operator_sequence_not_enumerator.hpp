@@ -1,6 +1,7 @@
 // An infix operator written as a sequence of keywords into an enum member: the
 // joined spelling `NOTIN` names no enumerator, so every operator read would be
 // a conversion diagnostic.
+// expect LR: [ '‘]EnumLiteral.*refuse::ast::Bin::op.*NOTIN.*refuse::Op::add.*refuse::Op::mul
 #pragma once
 
 #include <cstdint>

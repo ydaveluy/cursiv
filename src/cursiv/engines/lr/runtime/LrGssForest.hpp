@@ -380,20 +380,17 @@ class LrGssForest {
       Spell::Length total = 0;
       for (const Piece& p : _joined)
         total = detail::gss_length_add(total, length(p));
+      Node& n = _nodes[node];
+      n.mark = kRanked;
       if (_small && total <= kFlat) {
-        Node& n = _nodes[node];
         std::size_t at = _flats.reserve(total);
         n.flatAt = static_cast<std::uint32_t>(at);
         for (const Piece& p : _joined)
           for (std::uint32_t i = 0; i != p.size; ++i) _flats[at++] = p.words[i];
         n.flatLen = static_cast<std::uint8_t>(total);
-        n.mark = kRanked;
-        continue;
+      } else {
+        n.rank = spell(_joined);
       }
-      const Spell::Id rank = spell(_joined);
-      Node& n = _nodes[node];
-      n.rank = rank;
-      n.mark = kRanked;
     }
   }
 

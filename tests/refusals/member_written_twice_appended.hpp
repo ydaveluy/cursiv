@@ -1,5 +1,6 @@
 // A node created in place, as the operand of `append`, writes one of its
 // single-valued members twice: the second overwrites the first.
+// expect LR: [ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Node::name
 #pragma once
 
 #include "refusals/head.hpp"

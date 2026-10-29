@@ -1,6 +1,8 @@
 // A cycle through a rule that is also called from outside: `Primary` reaches
 // `Glob`, whose first position is the whole `Expr` of which `Primary` is the
 // operand. Both engines read it.
+// expect LR: refusal_left_recursion_indirect: states=
+// expect LL: refusal_left_recursion_indirect_ll: terms=
 #pragma once
 
 #include "refusals/head.hpp"
