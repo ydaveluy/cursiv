@@ -24,14 +24,13 @@ class LlAtoms {
     std::uint16_t mode;
   };
 
-  LlAtoms() : _base(T.atn.nstates + 1, 0), _reads_text(T.atn.nstates, 0) {
+  LlAtoms() : _base(T.atn.nstates + 1, 0) {
     for (std::uint32_t s = 0; s < T.atn.nstates; ++s) {
       const LlAtnState& state = T.atn.state(s);
       for (std::uint32_t i = 0; i < state.nedges; ++i) {
         const LlAtnEdge& e = T.atn.edge(state.edge + i);
         if (e.kind != LlEdgeKind::atom && e.kind != LlEdgeKind::condition)
           continue;
-        _reads_text[s] = 1;
         const std::uint16_t hop = T.edgeNode[state.edge + i];
         if (hop != kNoRow) _reads.emplace_back(hop, s);
         if (e.kind != LlEdgeKind::atom) continue;
@@ -48,10 +47,6 @@ class LlAtoms {
     return {_atoms.data() + _base[state], _atoms.data() + _base[state + 1]};
   }
 
-  // Whether a reading at `state` can take a token: the other positions of a
-  // set are the routes that led to the ones that can.
-  bool reads_text(std::uint32_t state) const { return _reads_text[state] != 0; }
-
   // The states that read position `node`, which is where a token it expects
   // is missing.
   std::span<const std::pair<std::uint16_t, std::uint32_t>> reading(
@@ -66,7 +61,6 @@ class LlAtoms {
 
  private:
   std::vector<std::uint32_t> _base;
-  std::vector<std::uint8_t> _reads_text;
   std::vector<Atom> _atoms;
   std::vector<std::pair<std::uint16_t, std::uint32_t>> _reads;
 };

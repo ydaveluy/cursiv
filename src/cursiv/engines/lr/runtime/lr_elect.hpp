@@ -98,7 +98,8 @@ bool lr_elect_restore(std::uint16_t prod, std::span<const std::uint32_t> words,
   const std::uint16_t len = A.cfg.prods[prod].len;
   // At one position: the run under the child before it closes, the
   // production's own words, then the run under the child after it opens.
-  for (std::uint16_t q = 0; q <= len; ++q) {
+  // The last position may be 65 535: the walk stops there, not past it.
+  for (std::uint16_t q = 0;; ++q) {
     if (open != kLrNoRun) lr_elect_chain<A>(open, 1, q, out, at);
     open = kLrNoRun;
     for (; k != words.size() && pos[k] == q; ++k) {
@@ -109,6 +110,7 @@ bool lr_elect_restore(std::uint16_t prod, std::span<const std::uint32_t> words,
       open = skipped(A.cold.electWatch[w++]);
       if (open != kLrNoRun) lr_elect_chain<A>(open, 0, q, out, at);
     }
+    if (q == len) break;
   }
   return true;
 }

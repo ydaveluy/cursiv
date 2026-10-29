@@ -28,7 +28,7 @@ struct G : cursiv::GrammarSpec {
       : rule<create<ast::Doc>(
             many(append<&ast::Doc::names>(ref<NameRule>) + lit<";">))> {};
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace treserved

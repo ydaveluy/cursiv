@@ -1,10 +1,7 @@
 #pragma once
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/ExplicitUnitAst.hpp"
 namespace tllunit {
-struct Document : cursiv::Extends<cursiv::AstNode> {
-  string_view padding;
-};
 struct Required : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\r\n)">)> {};
   struct Padding : rule<some(cr<R"( \t\r\n)">)> {};
@@ -14,7 +11,7 @@ struct Required : cursiv::GrammarSpec {
               (lit<"["> + assign<&Document::padding>(ref<CountedPadding>) +
                gap::none + lit<"]">)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 // Identical whole-run readings are not protected units. Their skip region
 // still decides where they are trivia and where they are visible data.
@@ -26,16 +23,10 @@ struct Clone : cursiv::GrammarSpec {
                        lit<"]">)> {};
   struct Root : rule<ref<Tight> + lit<"x"> + lit<"y"> + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A blank is both trivia and a visible token of the same length.
-struct Name : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
-struct Stmts : cursiv::Extends<cursiv::AstNode> {
-  vector<Name*> stmts;
-};
 struct Blank : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct GAP : terminal<some(s)> {};
@@ -44,7 +35,7 @@ struct Blank : cursiv::GrammarSpec {
   struct WordRule : rule<assign<&Name::text>(ref<WORD>)> {};
   struct Root : rule<some(append<&Stmts::stmts>(ref<GapRule> | ref<WordRule>)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Visible blanks, counted character units and an identical trivia terminal
@@ -52,11 +43,11 @@ struct Blank : cursiv::GrammarSpec {
 struct Ll : cursiv::GrammarSpec {
   struct Root
       : rule<(lit<"required:"> +
-              skip(ignored<Required::WS>, hide<>, ref<Required::Root>)) |
+              skip(ignore<Required::WS>, hide<>, ref<Required::Root>)) |
              (lit<"clone:"> +
-              skip(ignored<Clone::WS>, hide<>, ref<Clone::Root>)) |
+              skip(ignore<Clone::WS>, hide<>, ref<Clone::Root>)) |
              (lit<"blank:"> +
-              skip(ignored<Blank::WS>, hide<>,
+              skip(ignore<Blank::WS>, hide<>,
                    ref<Blank::Root>))> {};
   using entry = Root;
 };

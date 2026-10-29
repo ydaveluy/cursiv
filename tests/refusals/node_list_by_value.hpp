@@ -18,7 +18,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct G : Base {
   struct Root : rule<create<byvalue::Doc>(ref<ID>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

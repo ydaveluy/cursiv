@@ -179,8 +179,6 @@ Prec GrammarPrinter::prec(ImageId id) const {
       return Prec::Sequence;
     case ImageKind::choice:
       return implied_pair(n) ? Prec::Item : Prec::Choice;
-    case ImageKind::unordered:
-      return Prec::Unordered;
     case ImageKind::notOf:
     case ImageKind::andOf:
     case ImageKind::create:
@@ -429,10 +427,12 @@ void GrammarPrinter::emit(std::string& out, ImageId id) {
       emit_choice(out, n);
       return;
     case ImageKind::unordered:
+      out += "unordered(";
       for (std::uint32_t i = 0; i < n.count; ++i) {
-        if (i != 0) out += " & ";
-        item(out, kid(i), Prec::Sequence);
+        if (i != 0) out += ", ";
+        item(out, kid(i), Prec::Choice);
       }
+      out += ')';
       return;
     case ImageKind::repeat:
       emit_repeat(out, n);
@@ -486,9 +486,9 @@ void GrammarPrinter::emit(std::string& out, ImageId id) {
       if (n.m == 0 && n.n == 0) {
         out += "tight(";
       } else {
-        // `ignored` and `hide` are variable templates: the chevron form is
+        // `ignore` and `hide` are variable templates: the chevron form is
         // the one that re-reads as the grammar that produced it.
-        out += "skip(ignored<";
+        out += "skip(ignore<";
         name_list(out, n.a, static_cast<std::uint32_t>(n.m));
         out += ">, hide<";
         name_list(out, n.a + static_cast<std::uint32_t>(n.m),
@@ -540,15 +540,36 @@ void GrammarPrinter::line(std::string& out, std::uint32_t rule) {
     out += ") on ";
     out += reference_name(f.primary);
     out += ": ";
+    // A table of one is its level alone, as it is spelled.
+    if (f.levelCount > 1) out += "levels(";
     for (std::uint32_t i = 0; i < f.levelCount; ++i) {
-      if (i != 0) out += " >> ";
+      if (i != 0) out += ", ";
       const ImageLevel level = _image.levels[f.levelsAt + i];
-      out += level.group == ImageGroup::right ? "right("
-             : level.group == ImageGroup::non ? "nonassoc("
-                                              : "left(";
+      switch (level.group) {
+        case ImageGroup::right:
+          out += "right(";
+          break;
+        case ImageGroup::non:
+          out += "nonassoc(";
+          break;
+        case ImageGroup::prefix:
+        case ImageGroup::postfix:
+          // A unary level builds a class of its own: `prefix<U(op, operand)>`.
+          out += level.group == ImageGroup::prefix ? "prefix<" : "postfix<";
+          out += level.node;
+          out += '(';
+          out += level.members[0];
+          out += ", ";
+          out += level.members[1];
+          out += ")>(";
+          break;
+        default:
+          out += "left(";
+      }
       emit(out, level.op);
       out += ')';
     }
+    if (f.levelCount > 1) out += ')';
     out += ';';
   } else {
     if (f.kind == ImageRuleKind::terminal)

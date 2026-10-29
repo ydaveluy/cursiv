@@ -25,25 +25,25 @@ struct Base : cursiv::GrammarSpec {
   struct Path : rule<kw<"use"> + tight(ref<ID> + many(ref<Seg>) + lit<";">)> {};
   // Arguments that skip blanks again, and nothing else, inside a tight call.
   struct Args
-      : rule<skip(ignored<WS>, hide<>, lit<"("> + many(ref<ID>) + lit<")">)> {};
+      : rule<skip(ignore<WS>, hide<>, lit<"("> + many(ref<ID>) + lit<")">)> {};
   struct Call : rule<kw<"do"> + tight(ref<ID> + ref<Args>) +
                      kw<"end">> {};
   // ...and arguments that skip what the grammar skips.
   struct Grammar
-      : rule<skip(ignored<WS>, hide<CM>, lit<"("> + many(ref<ID>) + lit<")">)> {
+      : rule<skip(ignore<WS>, hide<CM>, lit<"("> + many(ref<ID>) + lit<")">)> {
   };
   struct Again
       : rule<kw<"dd"> + tight(ref<ID> + ref<Grammar>) +
              kw<"end">> {};
   // A mark kept in the tree between the words.
-  struct Bang : rule<kw<"hb"> + skip(ignored<WS>, hide<BANG>,
+  struct Bang : rule<kw<"hb"> + skip(ignore<WS>, hide<BANG>,
                                      ref<ID> + ref<ID> + kw<"end">)> {};
   // Comments dropped in the outer region, not read in the inner one, and
   // kept again past both.
   struct Item
       : rule<kw<"m"> +
-             skip(ignored<WS, CM>, hide<>,
-                  skip(ignored<WS>, hide<>, ref<ID> + lit<":">) + lit<"?">) +
+             skip(ignore<WS, CM>, hide<>,
+                  skip(ignore<WS>, hide<>, ref<ID> + lit<":">) + lit<"?">) +
              kw<"end">> {};
   // A run at the head of a region: its first sign is the caller's to reach.
   struct Neg : rule<kw<"neg"> + tight(many(lit<"-">) + ref<NUM>)> {};
@@ -54,7 +54,7 @@ struct Base : cursiv::GrammarSpec {
   // A newline ends a line, except between parentheses; a name followed by
   // `=` takes a second token to tell from a name alone.
   struct Expr;
-  struct Tuple : rule<skip(ignored<WS, NL>, hide<CM>,
+  struct Tuple : rule<skip(ignore<WS, NL>, hide<CM>,
                            lit<"("> + ref<Expr> + many(lit<","> + ref<Expr>) +
                                lit<")">)> {};
   struct Expr
@@ -72,7 +72,7 @@ struct Base : cursiv::GrammarSpec {
                                    ref<Pick> | ref<Via> | ref<Line> |
                                    ref<Band>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<CM>;
 };
 // A condition at the tail of a region that skips newlines reads the gap in
@@ -80,7 +80,7 @@ struct Base : cursiv::GrammarSpec {
 struct Lr : Base {
   struct Tail
       : rule<kw<"tail"> +
-             skip(ignored<WS, NL>, hide<CM>,
+             skip(ignore<WS, NL>, hide<CM>,
                   lit<"("> + ref<ID> + lit<")"> + !gap::line) +
              ref<NL>> {};
   struct Root

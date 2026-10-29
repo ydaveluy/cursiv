@@ -41,7 +41,7 @@ struct Last : cursiv::GrammarSpec {
                                 (many(append<&ast::Items::items>(ref<Mid>)) +
                                  append<&ast::Items::items>(ref<Fin>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A word is marked where a `>` follows it, which only the text past a section
@@ -57,7 +57,7 @@ struct Reach : cursiv::GrammarSpec {
                     many(append<&ast::Items::items>(ref<Mark> | ref<Plain>)))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 template <class In>
@@ -68,7 +68,7 @@ struct Host : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Block>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Suite : Last {

@@ -63,25 +63,6 @@ inline std::uint16_t lr_optional_aux(LrLowered& o, LrLowerPool& p,
   return aux;
 }
 
-// Two optional positions on one symbol with nothing needed between them, that
-// write different things: each taken alone is a production spelled like the
-// other's, however the gate spells them.
-inline bool lr_optional_twins(const std::vector<LrLowerSlot>& slots) {
-  for (std::size_t i = 0; i < slots.size(); ++i) {
-    const LrLowerSlot& a = slots[i];
-    if (!lr_subset_bit(a) || a.lead != 0 || a.trail != 0) continue;
-    for (std::size_t j = i + 1; j < slots.size(); ++j) {
-      const LrLowerSlot& b = slots[j];
-      if (b.none) continue;
-      if (!lr_subset_bit(b)) break;
-      if (b.sym == a.sym && b.cfg == a.cfg && b.lead == 0 && b.trail == 0 &&
-          (b.made != a.made || b.row != a.row))
-        return true;
-    }
-  }
-  return false;
-}
-
 // One production per subset of an alternative's optional positions. The empty
 // subset is written too: a rule keeps an empty right-hand side where every
 // position may be left out.
@@ -94,11 +75,11 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
   unsigned nopt = 0;
   for (const LrLowerSlot& s : slots)
     if (lr_subset_bit(s)) ++nopt;
-  if (lr_optional_twins(slots))
-    o.fault.raise(GrammarFaultCode::twinProductions, p.owner);
   const std::size_t tokenEnd =
       nopt > o.optionalGate ? lr_required_end(slots) : 0;
-  for (std::size_t i = 0; i < slots.size() && nopt > o.optionalGate; ++i) {
+  // The surplus is taken from the right, so the positions in front of a
+  // recursive call stay subsets for as long as the gate allows.
+  for (std::size_t i = slots.size(); i-- > 0 && nopt > o.optionalGate;) {
     LrLowerSlot& s = slots[i];
     if (!lr_subset_bit(s)) continue;
     if (s.endAlt && tokenEnd > i + 1) {
@@ -181,7 +162,15 @@ inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
         endOnly, 0, priority, static_cast<std::uint16_t>(greedy));
     if (stop != 0 && k != kNoRow) c.prodBuild[k].stop = stop;
     lr_decide(c, k, arms);
-    lr_close_region(c, k, len == 0 ? trailOwed : std::uint8_t{0});
+    // A condition takes no position, and the last one reads past the region:
+    // a production of nothing else closes it.
+    const bool bare = std::ranges::all_of(
+        std::span(keptSlots).first(len),
+        [&](const LrLowerSlot& s) { return p.is_gap(s.sym); });
+    lr_close_region(c, k,
+                    !bare      ? std::uint8_t{0}
+                    : len == 0 ? trailOwed
+                               : keptSlots[len - 1].trail);
     if (endOnly && !asserted && k != kNoRow) c.prodBuild[k].tailCfg = endCfg;
   }
 }
@@ -277,20 +266,10 @@ inline void lr_emit_one(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                   priority);
 }
 
-// An item that may read nothing becomes a rule that may derive nothing.
-inline void lr_symbolize_item(LrLowered& o, LrLowerPool& p, LrLowerSlot& s) {
-  if (lr_subset_bit(s)) {
-    lr_optional_aux(o, p, s);
-  } else if (s.none || s.end) {
-    const std::uint16_t aux = lr_new_aux(o.cfg);
-    const auto empty = lr_push_prod(o, p, aux, {}, {}, s.end);
-    if (s.end && empty != kNoRow) o.cfg.prodBuild[empty].tailCfg = s.cfg;
-    lr_close_region(o.cfg, empty, s.trail);
-    s = LrLowerSlot{.sym = nt_sym(aux), .cfg = s.cfg, .lead = s.lead,
-                    .trail = s.trail};
-  }
-}
-
+// Each item of an unordered group once, in any order. Every item reads input,
+// as the front end requires, so each stands as the symbol it lowers to; an
+// optional item stands in its present form, and the group may end where only
+// such items are left.
 inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                               LrShapeId at, const LrActs& made,
                               const LrActs& row) {
@@ -339,16 +318,19 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
   }
 
   const std::size_t end = std::size_t{1} << n, full = end - 1;
-  const std::size_t productions = n * (end >> 1) - n;
+  const std::size_t optional = e.unorderedOptional;
+  // A lone optional item left is a state of its own, and every set of them
+  // ends the group once.
+  const auto lone = static_cast<std::size_t>(std::popcount(optional));
+  const std::size_t productions =
+      n * (end >> 1) - n + 2 * lone + ((std::size_t{1} << lone) - 1 - lone);
   const bool turning = p.turning;
   std::vector<LrLowerSlot> body(n), head(n), tail(n);
   p.turning = false;
+  const auto symbol = [&](LrShapeId k) {
+    return lr_slot_for(o, p, k, p.e[k].made, p.e[k].row);
+  };
   for (std::size_t i = 0; i < n; ++i) {
-    const auto symbol = [&](LrShapeId k) {
-      auto s = lr_slot_for(o, p, k, p.e[k].made, p.e[k].row);
-      lr_symbolize_item(o, p, s);
-      return s;
-    };
     body[i] = symbol(kids[i]);
     head[i] = heads[i] == kids[i] ? body[i] : symbol(heads[i]);
     tail[i] = tails[i] == kids[i] ? body[i] : symbol(tails[i]);
@@ -357,30 +339,44 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
   if (o.cfg.lowerFail()) return;
   // Operand auxiliaries share the same pools as the subset states.
   if (productions > 0xffffu - o.cfg.nprods ||
-      end - n - 2 > std::size_t{kNtBase} - o.cfg.nnts) {
+      end - n - 2 + lone > std::size_t{kNtBase} - o.cfg.nnts) {
     too_wide();
     return;
   }
+  // Where only optional items are left, the group may end.
+  const auto ends = [&](std::size_t mask) { return (mask & ~optional) == 0; };
   // Spelt to the right: the election compares readings from the first item.
   std::vector<std::uint16_t> states(end, kNoRow);
   for (std::size_t mask = 1; mask <= full; ++mask)
-    if (!std::has_single_bit(mask))
+    if (!std::has_single_bit(mask) || ends(mask))
       states[mask] = mask == full ? lhs : lr_new_aux(o.cfg);
   for (std::size_t mask = 1; mask <= full; ++mask) {
-    if (std::has_single_bit(mask)) continue;
+    if (states[mask] == kNoRow) continue;
+    const auto push = [&](std::span<const LrLowerSlot> slots) {
+      const auto k = lr_push_prod(o, p, states[mask], slots,
+                                  mask == full ? lr_cat(made, row) : LrActs{});
+      if (k != kNoRow) o.cfg.prodBuild[k].permuted = true;
+      return k;
+    };
     for (std::size_t i = 0; i < n; ++i) {
       if ((mask & (std::size_t{1} << i)) == 0) continue;
       const std::size_t rest = mask ^ (std::size_t{1} << i);
-      const LrLowerSlot next = std::has_single_bit(rest)
+      // A lone optional item left is the last one read.
+      if (rest == 0) {
+        push(std::span(&tail[i], 1));
+        continue;
+      }
+      const LrLowerSlot next = states[rest] == kNoRow
                                    ? tail[std::countr_zero(rest)]
                                    : LrLowerSlot{.sym = nt_sym(states[rest]),
                                                  .cfg = e.cfg,
                                                  .trail = e.trail};
       const LrLowerSlot slots[] = {mask == full ? head[i] : body[i], next};
-      const auto k = lr_push_prod(o, p, states[mask], slots,
-                                  mask == full ? lr_cat(made, row) : LrActs{});
-      if (k != kNoRow) o.cfg.prodBuild[k].permuted = true;
+      push(slots);
     }
+    // The end comes last, as an option's absence does: an item still read is
+    // the preferred reading.
+    if (ends(mask)) lr_close_region(o.cfg, push({}), e.trail);
   }
 }
 

@@ -143,7 +143,7 @@ struct check_write {
         "no conversion from this payload to the member type: the tree's own "
         "conversion reaches string_view, bool, the arithmetic set and an enum, "
         "and nothing else. Give the rule a converter answering the member's "
-        "type -- `text_conv<>`/`parts_conv<>` in the rule's own slot, or a "
+        "type -- `as<f>(...)` around the rule's body, or a "
         "`cursiv::default_converter<T>` specialisation declaring `static "
         "ConversionResult<T> convert(std::string_view)`, which every rule "
         "naming T then reaches. Declaring only `using result = T` announces a "
@@ -415,15 +415,19 @@ consteval bool infix_rule_ok() {
          infix_operands_ok<nodePrimary, R, St>() &&
          infix_ops_ok<R, St, Src>(std::make_index_sequence<R::levels::size>{});
 }
+// Asked one rule at a time, so what the check instantiates is named by the
+// stage and that rule, never by the whole list of rules reached.
+template <class St, template <class, class, auto> class Src, class R>
+consteval bool infix_rule_reached_ok() {
+  using T = typename St::template rule<R>;
+  if constexpr (is_infix_rule<T>)
+    return infix_rule_ok<T, St, Src>();
+  else
+    return true;
+}
 template <class St, template <class, class, auto> class Src, class... Rs>
 consteval bool infix_rules_ok(TypeList<Rs...>) {
-  return ([] {
-    using T = typename St::template rule<Rs>;
-    if constexpr (is_infix_rule<T>)
-      return infix_rule_ok<T, St, Src>();
-    else
-      return true;
-  }() && ...);
+  return (infix_rule_reached_ok<St, Src, Rs>() && ...);
 }
 
 }  // namespace cursiv::detail

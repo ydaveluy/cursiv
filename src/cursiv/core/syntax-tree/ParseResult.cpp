@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
+#include <span>
+#include <string_view>
 #include <utility>
 
 #include "cursiv/core/syntax-tree/AstBuildError.hpp"
@@ -69,6 +71,15 @@ void ParseResult::bind_grammar(const Grammar& grammar) noexcept {
 void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept {
   _grammarOwner = std::move(grammar);
   bind_grammar(*_grammarOwner);
+}
+
+void ParseResult::bind_translation(
+    std::string_view document,
+    std::unique_ptr<const SourceTranslation> translation) {
+  translation->to_document(std::span(diagnostics));
+  const auto errors = translation->errors();
+  diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());
+  CstBuilder(*_cst).bind_translation(document, std::move(translation));
 }
 
 ParseResult::operator bool() const noexcept {

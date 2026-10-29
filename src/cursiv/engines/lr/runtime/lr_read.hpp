@@ -287,7 +287,8 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
 // The token a reading holds, a flagged winner of `mode`, read again while its
 // stack refuses it.
 template <const auto& A, class R>
-CURSIV_NOINLINE bool lr_read_refused(LrContext& c, R& s, std::uint16_t mode) {
+CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
+                                     std::uint16_t mode) {
   return lr_lex_refused<A>(
       [&](const Token& t) {
         return lr_climb_takes<A>(
@@ -295,12 +296,8 @@ CURSIV_NOINLINE bool lr_read_refused(LrContext& c, R& s, std::uint16_t mode) {
             lr_shadow_holds(c, s), c.walkMemo);
       },
       mode, s.la, [&](const LrSkipped<A>& skip, TextOffset from) {
-        const IndentAt was = c.indent;
-        c.indent = s.indent;
-        const Token t = lr_scan_skipping<A>(c, mode, from, skip,
-                                            [](TextOffset, const Token*) {});
-        c.indent = was;
-        return t;
+        return lr_scan_skipping<A>(c, mode, from, s.indent.depth, skip,
+                                   [](TextOffset, const Token*) {});
       });
 }
 
@@ -363,7 +360,7 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
         } else {
           // Where the lexer ranks rivals apart, a token's rank is a word of
           // the derivation that reads it.
-          [[maybe_unused]] const bool ranked = lr_rivals_ranked<A>(room, nc);
+          [[maybe_unused]] const bool ranked = lr_rivals_ranked(room, nc);
           [[maybe_unused]] const auto rank = [&](const Scan& scan) {
             return ranked ? ~lex_weight(scan.tier) : 0u;
           };
@@ -371,12 +368,12 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
             if (room[q].term == room[0].term) continue;
             const std::size_t j = x.fork(i);
             if (j == kLrNoFork) break;
-            x[j].la = Token{x[i].la.begin, room[q].end, room[q].term};
+            x[j].la = Token{x[i].la.begin, room[q].end, room[q].term, mode};
             if constexpr (requires { x[j].lexRank; })
               x[j].lexRank = rank(room[q]);
           }
           if (nc != 0) {
-            x[i].la = Token{x[i].la.begin, room[0].end, room[0].term};
+            x[i].la = Token{x[i].la.begin, room[0].end, room[0].term, mode};
             if constexpr (requires { x[i].lexRank; })
               x[i].lexRank = rank(room[0]);
           }

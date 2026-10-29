@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/core/grammar/GrammarImage.hpp"
-
 namespace cursiv {
+
+class WarningFound;
 
 struct DeadBranch {
   std::string rule;
@@ -24,7 +24,7 @@ struct DeadBranch {
 };
 
 // Each branch once per rule, in the order the rules were reached.
-std::vector<DeadBranch> dead_branches(GrammarImage& image);
+std::vector<DeadBranch> dead_branches(WarningFound& found);
 
 std::string dead_branch_text(const DeadBranch& d);
 

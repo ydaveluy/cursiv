@@ -11,7 +11,7 @@ struct G : Base {
   struct A
       : rule<ref<B> | create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
   using entry = A;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -6,16 +6,20 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstBuilder.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
+#include "cursiv/engines/lr/gen/LrFinalTable.hpp"
 #include "cursiv/engines/lr/gen/LrFirstSets.hpp"
 #include "cursiv/engines/lr/gen/LrLowered.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
@@ -23,9 +27,11 @@
 #include "cursiv/engines/lr/gen/LrProgramMatrix.hpp"
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 #include "cursiv/engines/lr/gen/lr_build_derived.hpp"
+#include "cursiv/engines/lr/gen/lr_build_elect.hpp"
 #include "cursiv/engines/lr/gen/lr_build_fold.hpp"
 #include "cursiv/engines/lr/gen/lr_build_passes.hpp"
 #include "cursiv/engines/lr/gen/lr_emit_parser.hpp"
+#include "cursiv/engines/lr/gen/lr_emit_table.hpp"
 #include "cursiv/engines/lr/gen/lr_entry_rows.hpp"
 #include "cursiv/engines/lr/gen/lr_intern_name.hpp"
 #include "cursiv/engines/lr/gen/lr_lower_epsilon.hpp"
@@ -429,10 +435,10 @@ void blocks_share_values_without_changing_columns() {
       {0, 30, 30, 40, 0, 0, 0, 0, 1, 2, 3},
       {0, 10, 10, 20, 0, 0, 0, 0, 1, 2, 3}};
   for (const auto& row : rows) m.append(row, 0);
-  CHECK(m.blocks[0] == m.blocks[4]);
-  CHECK(m.blocks[1] == m.blocks[3] && m.blocks[3] == m.blocks[5]);
-  const LrProgramRows<std::uint32_t, std::uint64_t> view{m.blocks, m.values, 11,
-                                                         0};
+  CHECK(m.rows[0] == m.rows[2] && m.rows[0] != m.rows[1]);
+  CHECK(m.blocks.size() == 4 && m.blocks[1] == m.blocks[3]);
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> view{
+      m.rows, m.blocks, m.values, 11, 0};
   for (unsigned state = 0; state < rows.size(); ++state) {
     for (unsigned col = 0; col < rows[state].size(); ++col)
       CHECK(view.get(state, col) == rows[state][col]);
@@ -440,6 +446,14 @@ void blocks_share_values_without_changing_columns() {
     CHECK(view.get(state, 0xffffu) == 0);
   }
   CHECK(m.index_bits() == 8 && m.value_bits() == 8);
+  // Two distinct rows of eleven values: shared rows of values are smallest.
+  m.seal();
+  CHECK(m.blocks.empty() && m.rows == std::vector<std::uint32_t>{0, 11, 0});
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> laid{
+      m.rows, m.blocks, m.values, 11, 0};
+  for (unsigned state = 0; state < rows.size(); ++state)
+    for (unsigned col = 0; col < rows[state].size(); ++col)
+      CHECK(laid.get(state, col) == rows[state][col]);
 
   LrProgramMatrix wide;
   for (unsigned i = 0; i < 65537; ++i) {
@@ -448,15 +462,18 @@ void blocks_share_values_without_changing_columns() {
     CHECK(wide.index_bits() == (i < 256 ? 8u : i < 65536 ? 16u : 32u));
   }
   CHECK(wide.value_bits() == 64);
-  const LrProgramRows<std::uint32_t, std::uint64_t> wideView{wide.blocks,
-                                                             wide.values, 1, 0};
+  // Every row distinct, one value wide: the values alone are smallest.
+  wide.seal();
+  CHECK(wide.rows.empty() && wide.blocks.empty());
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> wideView{
+      wide.rows, wide.blocks, wide.values, 1, 0};
   CHECK(wideView.get(65536, 0) == (std::uint64_t{1} << 40) + 65536);
 
   LrProgramMatrix empty;
   empty.append({}, 0xffffu);
   empty.append({}, 0xffffu);
-  const LrProgramRows<std::uint32_t, std::uint64_t> emptyView{
-      empty.blocks, empty.values, 0, 0xffffu};
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> emptyView{
+      empty.rows, empty.blocks, empty.values, 0, 0xffffu};
   CHECK(emptyView.get(1, 0) == 0xffffu);
   CHECK(empty.index_bits() == 8 && empty.value_bits() == 8);
   CHECK(LrProgramMatrix::bits(0xffu) == 8 &&
@@ -495,8 +512,8 @@ void programs_preserve_order_and_shift_effects() {
   lr_share_action_rows(a);
   const LrProgramLayout p(a);
   CHECK(p.countBits == 9);
-  const LrProgramRows<std::uint32_t, std::uint64_t> actions{
-      p.actions.blocks, p.actions.values, a.cfg.nterms, 0};
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> actions{
+      p.actions.rows, p.actions.blocks, p.actions.values, a.cfg.nterms, 0};
   for (unsigned s = 0; s < rows.size(); ++s)
     for (unsigned term = 0; term < 5; ++term) {
       std::vector<LrAction> expected;
@@ -517,8 +534,8 @@ void programs_preserve_order_and_shift_effects() {
   CHECK(actions.get(0, 1) != actions.get(2, 2));
   CHECK(actions.get(0, 1) != actions.get(5, 1));
   CHECK(actions.get(3, 1) == actions.get(6, 2));
-  const LrProgramRows<std::uint32_t, std::uint64_t> gotos{
-      p.gotos.blocks, p.gotos.values, a.cfg.nnts, 0xffffu};
+  const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> gotos{
+      p.gotos.rows, p.gotos.blocks, p.gotos.values, a.cfg.nnts, 0xffffu};
   for (unsigned s = 0; s < a.nstates; ++s)
     for (unsigned nt = 0; nt < 4; ++nt) {
       unsigned expected = 0xffffu;
@@ -541,7 +558,8 @@ int run() {
 // A grammar built to make reduce/reduce cells the grammar does not order:
 // one terminal, rules that reach back, and two bodies of different lengths
 // over the same text. The table forks such a cell by production index, and
-// `nOrdered` counts it -- the count is what this pins.
+// `nOrdered` counts it -- the count is what this pins. A body past 255
+// symbols is ordered at its far dots as at its near ones.
 namespace ordered_reduce {
 
 namespace {
@@ -603,10 +621,55 @@ void unordered_cells_are_counted() {
   CHECK(A.nOrdered != 0);
 }
 
+// A body longer than 255 symbols that meets a reduction at its dots 5 and
+// 261, under two callers whose cells stand over different origins. `P` is
+// written first, so its shift precedes.
+struct LongBodies : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct NUM : terminal<some(d)> {};
+  static constexpr auto k5 =
+      lit<"k"> + lit<"k"> + lit<"k"> + lit<"k"> + lit<"k">;
+  static constexpr auto k50 = k5 + k5 + k5 + k5 + k5 + k5 + k5 + k5 + k5 + k5;
+  static constexpr auto k255 = k50 + k50 + k50 + k50 + k50 + k5;
+  struct P : rule<k5 + lit<"x"> + k255 + lit<"x"> + ref<NUM>> {};
+  struct C : rule<k5> {};
+  struct D : rule<k5 + lit<"x"> + k255> {};
+  struct X : rule<ref<P> | (ref<C> + lit<"x"> + ref<NUM>) |
+                  (ref<D> + lit<"x"> + ref<NUM>)> {};
+  struct W : rule<ref<P> | (ref<C> + lit<"x"> + ref<NUM>)> {};
+  struct Root : rule<(lit<"a"> + ref<X> + lit<"y">) |
+                     (lit<"b"> + ref<W> + lit<"z">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Past dot 255 a body is ordered as before it: where `D` ends, the shift
+// of `P` precedes its reduction for every text.
+void long_bodies_keep_the_order_written() {
+  const cursiv::LrBuildTable A =
+      cursiv::lr_build_automaton(cursiv::LrLowering<LongBodies>::table());
+  CHECK(!A.overflow && !A.cfg.lowerFail());
+  unsigned cells = 0;
+  for (std::uint32_t s = 0; s < A.nstates; ++s)
+    for (unsigned k = 1; k < A.actionCount[s]; ++k) {
+      const cursiv::LrAction& first = A.actions[A.actionBase[s] + k - 1];
+      const cursiv::LrAction& reduce = A.actions[A.actionBase[s] + k];
+      if (first.term != reduce.term ||
+          reduce.kind != cursiv::LrActionKind::reduce ||
+          A.cfg.prods[reduce.arg].len < 256)
+        continue;
+      ++cells;
+      CHECK(cursiv::lr_takes_token(first.kind));
+      CHECK(first.exact && reduce.exact);
+    }
+  CHECK(cells == 1);
+}
+
 }  // namespace
 
 int run() {
   unordered_cells_are_counted();
+  long_bodies_keep_the_order_written();
   return 0;
 }
 
@@ -748,22 +811,35 @@ struct GapGrammar : GrammarSpec {
   using entry = Root;
 };
 
-void emission_waits_for_the_derived_tables() {
-  auto a = lr_build_automaton(LrLowering<GapGrammar>::table());
-  CHECK(!a.cfg.lowerFail() && !a.overflow);
-  CHECK(a.cfg.ngapConds == 1 && a.cfg.ngapLeaves == 1);
-  const LrProgramLayout programs(a);
-  bool premature = false;
-  try {
-    (void)lr_emit_parser_files(a, "incomplete", programs);
-  } catch (const std::logic_error& e) {
-    premature = true;
-    CHECK(std::string_view(e.what()) ==
-          "cursiv: derive LR tables before emitting the parser");
-  }
-  CHECK(premature);
-  lr_derive_tables(a, std::vector<ElementId>(a.writes.nchains + a.nfused, kNoElement));
-  CHECK(!lr_emit_parser_files(a, "valid", programs).empty());
+// The final table is the one that was built, derived and laid out, never a
+// copy; the emitters read it alone, and nothing writes to it or runs a pass
+// over it.
+template <class T>
+concept WritesStates = requires(T& t) { t.nstates = 0; };
+template <class T>
+concept MinimizesStates = requires(T& t) { lr_minimize_states(t); };
+using FinalTable = std::remove_reference_t<
+    decltype(std::declval<const LrFinalTable&>().table())>;
+static_assert(WritesStates<LrBuildTable> && MinimizesStates<LrBuildTable>);
+static_assert(!WritesStates<FinalTable> && !MinimizesStates<FinalTable>);
+static_assert(!std::is_copy_constructible_v<LrFinalTable>);
+
+void a_final_table_is_the_built_one_read_only() {
+  auto graph = std::make_unique<LrBuildTable>(
+      lr_build_automaton(LrLowering<GapGrammar>::table()));
+  const LrBuildTable* const owner = graph.get();
+  const LrAction* const actions = graph->actions.data();
+  const auto* const prods = graph->cfg.prods.data();
+  const std::vector<ElementId> sites(graph->writes.nchains + graph->nfused,
+                                     kNoElement);
+  const LrFinalTable done = LrFinalTable::make(std::move(graph), sites);
+  CHECK(&done.table() == owner);
+  CHECK(done.table().actions.data() == actions);
+  CHECK(done.table().cfg.prods.data() == prods);
+  CHECK(done.table().cfg.ngapConds == 1 && done.table().cfg.ngapLeaves == 1);
+  CHECK(!lr_emit_table(done, "final").empty());
+  CHECK(!lr_emit_parser_decl(done, "final").empty());
+  CHECK(!lr_emit_parser_states(done, "final").empty());
 }
 
 struct OversizedLexicalDfa : GrammarSpec {
@@ -885,9 +961,9 @@ void factored_options_write_only_on_the_present_arm() {
     s.cfg = 1;
   }
   // Distinct action occurrences remain distinct, including a repeated row.
-  slots[0].made = {17};
-  slots[0].row = {23, 23};
-  // Surplus positions use a nullable auxiliary.
+  slots.back().made = {17};
+  slots.back().row = {23, 23};
+  // Surplus positions, taken from the right, use a nullable auxiliary.
   lr_emit_subsets(low, pool, 1, slots, {});
   lr_lay_bare_records(low);
   CHECK(!low.cfg.lowerFail());
@@ -1062,6 +1138,137 @@ void unit_cycle_checks_use_bounded_stack_space() {
   CHECK(low.fault.rule != 0);  // The augmented start is outside the cycle.
 }
 
+void left_recursion_splitting_uses_bounded_stack_space() {
+  LrLowered low;
+  auto& cfg = low.cfg;
+  constexpr unsigned length = 16000;
+  cfg.nnts = length + 1;
+  cfg.nprods = length + 2;
+  cfg.prods[0] = {.lhs = 0, .at = 0, .len = 1};
+  cfg.slotSym[0] = nt_sym(1);
+  cfg.leftLoop[0] = kNoRow;
+  // Every turn consumes x; A1 also has a finite base. The cycle is legal
+  // left recursion, not a non-consuming unit cycle.
+  for (unsigned i = 1; i <= length; ++i) {
+    cfg.leftLoop[i] = 0;
+    cfg.prods[i] = {.lhs = static_cast<std::uint16_t>(i),
+                     .at = 2u * i - 1u, .len = 2};
+    cfg.slotSym[2u * i - 1u] = nt_sym(i == length ? 1u : i + 1u);
+    cfg.slotSym[2u * i] = 1;
+  }
+  cfg.prods[length + 1u] = {.lhs = 1, .at = 2u * length + 1u, .len = 1};
+  cfg.slotSym[2u * length + 1u] = 1;
+  lr_split_loops(low);
+  CHECK(cfg.nnts == length + 1u && cfg.nprods == length + 2u);
+  for (unsigned i = 1; i <= length; ++i)
+    CHECK(cfg.sym_at(cfg.prods[i], 0) == nt_sym(i == length ? 1u : i + 1u));
+}
+
+void left_recursion_splitting_restores_each_siblings_path() {
+  LrLowered low;
+  auto& cfg = low.cfg;
+  cfg.nnts = 4;
+  cfg.nprods = 7;
+  cfg.nts.row(0, cfg.nnts);
+  cfg.prodBuild.row(0, cfg.nprods);
+  const std::vector<std::vector<std::uint16_t>> bodies{
+      {nt_sym(1), nt_sym(2)}, {nt_sym(2), 1}, {nt_sym(3), 2},
+      {3}, {nt_sym(3), 4}, {nt_sym(1), 5}, {nt_sym(1), 6}};
+  const unsigned lhs[] = {0, 1, 1, 1, 2, 2, 3};
+  for (unsigned p = 0; p < bodies.size(); ++p) {
+    cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(lhs[p]),
+                     .at = cfg.nslots,
+                     .len = static_cast<std::uint16_t>(bodies[p].size())};
+    for (const auto sym : bodies[p]) {
+      cfg.slotSym[cfg.nslots] = sym;
+      cfg.slots[cfg.nslots] = {};
+      cfg.slotCfg[cfg.nslots++] = 0;
+    }
+  }
+  cfg.leftLoop.v = {kNoRow, 0, 0, 0};
+  lr_split_loops(low);
+  CHECK(cfg.nnts == 10 && cfg.nprods == 18 && cfg.auxCount == 6);
+  CHECK(cfg.sym_at(cfg.prods[1], 0) == nt_sym(4));
+  CHECK(cfg.sym_at(cfg.prods[2], 0) == nt_sym(5));
+  CHECK(cfg.sym_at(cfg.prods[4], 0) == nt_sym(6));
+  CHECK(cfg.sym_at(cfg.prods[5], 0) == nt_sym(8));
+  CHECK(cfg.sym_at(cfg.prods[6], 0) == nt_sym(1));
+}
+
+LrBuildTable election_aliases(unsigned length) {
+  LrBuildTable a;
+  auto& cfg = a.cfg;
+  cfg.nterms = 3;
+  cfg.nnts = cfg.nprods = static_cast<std::uint16_t>(length + 2u);
+  const auto lay = [&](unsigned p, const std::vector<std::uint16_t>& body) {
+    cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(p),
+                     .at = cfg.nslots,
+                     .len = static_cast<std::uint16_t>(body.size())};
+    cfg.prodBuild[p] = {};
+    for (const auto sym : body) {
+      cfg.slotSym[cfg.nslots] = sym;
+      cfg.slots[cfg.nslots] = {};
+      cfg.slotCfg[cfg.nslots++] = 0;
+    }
+  };
+  lay(0, {nt_sym(1), nt_sym(static_cast<std::uint16_t>(length + 1u))});
+  for (unsigned p = 1; p <= length; ++p)
+    lay(p, {p == length ? std::uint16_t{1}
+                       : nt_sym(static_cast<std::uint16_t>(p + 1u))});
+  lay(length + 1u, {1, 2});
+  return a;
+}
+
+void wordless_aliases_need_no_election_paths() {
+  auto a = election_aliases(2048);
+  // A separate, non-unit production spells a decision, so the table's
+  // election pass runs even though the long alias component has none.
+  a.electAt.assign(a.cfg.nprods + 1u, 0);
+  a.electAt.back() = 1;
+  a.electWord = {900};
+  a.electPos = {0};
+  lr_elect_runs(a);
+  CHECK(a.electWord == std::vector<std::uint32_t>{900});
+  CHECK(a.electChainKey.empty() && a.electChainWord.empty());
+  CHECK(a.electWatch.empty() && a.electTwin.empty());
+}
+
+void alias_decisions_keep_their_order_around_the_callee() {
+  auto a = election_aliases(8);
+  a.electAt.push_back(0);
+  for (unsigned p = 0; p < a.cfg.nprods; ++p) {
+    if (p == 1 || p == 3) {
+      a.electWord.insert(a.electWord.end(), {10u * p + 1u, 10u * p + 2u});
+      a.electPos.insert(a.electPos.end(), {0, 1});
+    }
+    a.electAt.push_back(static_cast<std::uint32_t>(a.electWord.size()));
+  }
+  lr_elect_runs(a);
+  const auto chain = [&](unsigned from, unsigned to) {
+    const auto key = from << 16 | to;
+    const auto at = std::lower_bound(a.electChainKey.begin(),
+                                      a.electChainKey.end(), key);
+    CHECK(at != a.electChainKey.end() && *at == key);
+    if (at == a.electChainKey.end() || *at != key)
+      return std::vector<std::uint32_t>{};
+    const auto i = static_cast<unsigned>(at - a.electChainKey.begin());
+    const auto begin = a.electChainAt[i], end = a.electChainAt[i + 1u];
+    bool after = false;
+    for (auto k = begin; k < end; ++k) {
+      CHECK(a.electChainPos[k] <= 1);
+      CHECK(!after || a.electChainPos[k] == 1);
+      after = a.electChainPos[k] == 1;
+    }
+    return std::vector<std::uint32_t>(a.electChainWord.begin() + begin,
+                                      a.electChainWord.begin() + end);
+  };
+  CHECK(chain(1, a.cfg.nterms + 4u) ==
+        std::vector<std::uint32_t>({11, 31, 32, 12}));
+  CHECK(chain(2, a.cfg.nterms + 4u) == std::vector<std::uint32_t>({31, 32}));
+  CHECK(chain(4, 1).empty());
+  CHECK(!a.electWatch.empty());
+}
+
 void lexical_pools_cannot_wrap() {
   for (unsigned which = 0; which < 3; ++which) {
     LrBuildCfg cfg;
@@ -1103,7 +1310,7 @@ void lexical_pools_cannot_wrap() {
 
 int run() {
   name_pool_refuses_before_returning_an_invalid_span();
-  emission_waits_for_the_derived_tables();
+  a_final_table_is_the_built_one_read_only();
   lexical_state_indices_are_checked_before_narrowing();
   bounds_are_checked_before_narrowing();
   a_bounded_repetition_costs_two_productions_a_turn();
@@ -1118,6 +1325,10 @@ int run() {
   auxiliary_self_markers_are_outside_the_symbol_domain();
   first_sets_include_the_last_nonterminal();
   unit_cycle_checks_use_bounded_stack_space();
+  left_recursion_splitting_uses_bounded_stack_space();
+  left_recursion_splitting_restores_each_siblings_path();
+  wordless_aliases_need_no_election_paths();
+  alias_decisions_keep_their_order_around_the_callee();
   lexical_pools_cannot_wrap();
   malformed_unicode_classes_are_refused();
   return 0;

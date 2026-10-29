@@ -57,11 +57,12 @@ template <const auto& A>
 inline constexpr bool kLrConditioned =
     kLrImplied<A>.size() != 0 || kLrAnyGap<A> || kLrGuarded<A>;
 
-// Inside a bracket a token that beat a trivia at its extent is that trivia.
+// Inside a bracket a token that beat a trivia at its extent is that trivia:
+// `depth` is the bracket depth of the reading that reads it.
 template <const auto& A>
-CURSIV_ALWAYS_INLINE inline bool lr_joins(const LrContext& c, unsigned t) {
+CURSIV_ALWAYS_INLINE inline bool lr_joins(std::uint32_t depth, unsigned t) {
   if constexpr (kIndented<A.cfg>)
-    return c.indent.depth != 0 && A.cfg.terms[t].joins;
+    return depth != 0 && A.cfg.terms[t].joins;
   else
     return false;
 }
@@ -72,15 +73,17 @@ CURSIV_ALWAYS_INLINE inline bool lr_is_trivia(unsigned t) {
 }
 
 // The token at `from` under one alphabet, trivia crossed and not recorded,
-// read by the drive's own walk. `Short` reads the text as ending at `end`
-// with its inspection frontier: `refused`, whether the walk that read it read
-// on past its match and died, `reached` rising to how far the walks read.
-// Out of line, as the lexer's walk is: inlined into a reader's loop, it
-// costs every step of it.
+// read by the drive's own walk under bracket depth `depth`: of the levels of
+// the reading that asks, a scan reads that depth alone. `Short` reads the text
+// as ending at `end` with its inspection frontier: `refused`, whether the walk
+// that read it read on past its match and died, `reached` rising to how far
+// the walks read. Out of line, as the lexer's walk is: inlined into a
+// reader's loop, it costs every step of it.
 template <const auto& A, bool Short = false>
 CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
-                        TextOffset from, bool* refused = nullptr,
-                        TextOffset end = 0, TextOffset* reached = nullptr) {
+                        TextOffset from, std::uint32_t depth,
+                        bool* refused = nullptr, TextOffset end = 0,
+                        TextOffset* reached = nullptr) {
   const TextOffset len = Short ? end : c.len;
   TextOffset p = from;
   for (;;) {
@@ -110,10 +113,36 @@ CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
       if (s.term == kInvalidSymbol || s.end == p)
         return Token{p, p, kInvalidSymbol};
     }
-    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(c, s.term))
-      return Token{p, s.end, s.term};
+    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(depth, s.term))
+      return Token{p, s.end, s.term, mode};
     p = s.end;
   }
+}
+
+// Whether the lexer, choosing once for every parse at one place, elects `u`
+// over `t`: the longer, then a literal or a keyword over a pattern of the same
+// bytes. `heavier` weighs `u` against `t`; only two terminals of one extent
+// ask it.
+template <class Heavier>
+inline bool lr_token_beats(const Token& u, const Token& t, Heavier&& heavier) {
+  if (u.begin != t.begin || u.end < t.end) return false;
+  if (u.end > t.end) return true;
+  if (u.sym == t.sym || u.mode == kNoMode || t.mode == kNoMode) return false;
+  return heavier();
+}
+
+// A token's weight, read again in the alphabet it was read in.
+template <const auto& A>
+inline unsigned lr_token_weight(const LrContext& c, const Token& x) {
+  return lex_weight(lex_reading_tier(LrLexTape<A>{}, c.src, c.len, x.mode,
+                                    x.begin, x.end, x.sym));
+}
+
+template <const auto& A>
+inline bool lr_token_beats(const LrContext& c, const Token& u, const Token& t) {
+  return lr_token_beats(u, t, [&] {
+    return lr_token_weight<A>(c, u) > lr_token_weight<A>(c, t);
+  });
 }
 
 template <const auto& A>
@@ -142,7 +171,6 @@ CURSIV_ALWAYS_INLINE inline std::uint32_t lr_rivals(const LrContext& c,
 
 // Whether the rivals do not weigh alike: only then a derivation owes the word
 // its token's rank.
-template <const auto& A>
 CURSIV_ALWAYS_INLINE inline bool lr_rivals_ranked(const Scan* room,
                                                   std::uint32_t n) {
   for (std::uint32_t q = 1; q < n; ++q)
@@ -160,7 +188,7 @@ SymbolId lr_peek2(const LrContext& c, std::uint16_t mode) {
         (c.indent.depth == 0 && c.la.end < c.len &&
          indent_line_start(c.src, c.la.end, [&c] { return c.la.end; })))
       return kInvalidSymbol;
-  return lr_scan_at<A>(c, mode, c.la.end).sym;
+  return lr_scan_at<A>(c, mode, c.la.end, c.indent.depth).sym;
 }
 
 // Whether any terminal is one at all: where none is, `pending` is never

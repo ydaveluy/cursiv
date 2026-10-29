@@ -48,61 +48,103 @@ struct first_fault_of {
   using type = pack_at_t<at, Fs..., NoWriteFault>;
 };
 
-// The single-valued members a rule's own node can end up with written, over
-// every path: the members of its directives, the member each nest buries into,
-// and what the node it adopts has. A payload is another node's, and not
-// descended into. `Path` holds the rules being walked.
-template <class St, class Path, class E,
-          class Kids = typename ExprShape<E>::kids>
-struct node_writes {
+// A climb's node has its three members written, or a unary level's two.
+template <class L, bool Unary = is_unary_level<L>>
+struct unary_writes {
   using type = TypeList<>;
 };
-template <class St, class Path, class E>
-using node_writes_t = typename node_writes<St, Path, E>::type;
-template <class St, class Path, class E, class... Ks>
-  requires(grouping<E> || transparent<E>)
-struct node_writes<St, Path, E, TypeList<Ks...>>
-    : tl_cat<node_writes_t<St, Path, Ks>...> {};
-template <class St, class Path, class T, class E>
-struct node_writes<St, Path, Create<T, E>, TypeList<E>>
-    : node_writes<St, Path, E> {};
-template <class St, class Path, class T, auto P, class E>
-struct node_writes<St, Path, Nest<T, P, E>, TypeList<E>>
-    : tl_cat<TypeList<wrote<P>>, node_writes_t<St, Path, E>> {};
-template <class St, class Path, auto S, class E>
-struct node_writes<St, Path, Assign<S, E>, TypeList<E>> {
-  static constexpr auto P = spec_ptr<S>;
-  using type = cond_t<field_tag<P>::storage != FieldStorage::vector,
-                      TypeList<wrote<P>>, TypeList<>>;
+template <class L>
+struct unary_writes<L, true> {
+  using type = TypeList<wrote<L::op_pointer>, wrote<L::operand_pointer>>;
 };
-template <class St, class Path, auto S, class E>
-struct node_writes<St, Path, Append<S, E>, TypeList<E>> {
-  using type = TypeList<>;
+template <class R, class Lvls = typename R::levels>
+struct infix_writes;
+template <class R, class... Ls>
+struct infix_writes<R, Levels<Ls...>> {
+  using type =
+      dedupe_t<tl_cat_t<TypeList<wrote<R::left_pointer>, wrote<R::op_pointer>,
+                                 wrote<R::right_pointer>>,
+                        typename unary_writes<Ls>::type...>>;
 };
 
-template <class St, class Path, class R, bool Node, bool OnPath>
-struct rule_node_writes {
-  using type = TypeList<>;
+// What one body does to its node: the single-valued members it writes -- the
+// members of its directives, the member each nest buries into, and a climb's
+// -- and the calls whose node becomes the node in hand, a call building a node
+// wherever the node in hand stands. A payload is another node's, and not
+// descended into; what such a call hands over is what its rule writes, which
+// `rule_writes` gathers.
+template <class E, class Kids = typename ExprShape<E>::kids>
+struct node_effects {
+  using writes = TypeList<>;
+  using calls = TypeList<>;
 };
-template <class St, class Path, class R>
-struct rule_node_writes<St, Path, R, true, false>
-    : node_writes<St, tl_cat_t<Path, TypeList<R>>,
-                  std::remove_cvref_t<typename St::template body<R>>> {};
-template <class St, class Path, class R0>
-struct node_writes<St, Path, Ref<R0>, TypeList<>> {
+template <class E, class... Ks>
+  requires(grouping<E> || transparent<E>)
+struct node_effects<E, TypeList<Ks...>> {
+  using writes = tl_cat_t<typename node_effects<Ks>::writes...>;
+  using calls = tl_cat_t<typename node_effects<Ks>::calls...>;
+};
+template <class T, class E>
+struct node_effects<Create<T, E>, TypeList<E>> : node_effects<E> {};
+template <class T, auto P, class E>
+struct node_effects<Nest<T, P, E>, TypeList<E>> : node_effects<E> {
+  using writes = tl_cat_t<TypeList<wrote<P>>, typename node_effects<E>::writes>;
+};
+template <auto S, class E>
+struct node_effects<Assign<S, E>, TypeList<E>> {
+  static constexpr auto P = spec_ptr<S>;
+  using writes = cond_t<field_tag<P>::storage != FieldStorage::vector,
+                        TypeList<wrote<P>>, TypeList<>>;
+  using calls = TypeList<>;
+};
+template <auto S, class E>
+struct node_effects<Append<S, E>, TypeList<E>> {
+  using writes = TypeList<>;
+  using calls = TypeList<>;
+};
+template <class R0>
+struct node_effects<Ref<R0>, TypeList<>> {
   using R = named_rule_t<R0>;
-  using type =
-      typename rule_node_writes<St, Path, declared_of_t<R>,
-                                is_node_rule<R> && !is_grammar<R0>,
-                                tl_has<declared_of_t<R>, Path>::value>::type;
+  using writes = TypeList<>;
+  using calls = cond_t<is_node_rule<R> && !is_grammar<R0>,
+                       TypeList<declared_of_t<R>>, TypeList<>>;
 };
-template <class St, class Path, class R0>
+template <class R0>
   requires is_infix_rule<named_rule_t<R0>>
-struct node_writes<St, Path, Ref<R0>, TypeList<>> {
-  using R = named_rule_t<R0>;
-  using type = TypeList<wrote<R::left_pointer>, wrote<R::op_pointer>,
-                        wrote<R::right_pointer>>;
+struct node_effects<Ref<R0>, TypeList<>> {
+  using writes = typename infix_writes<named_rule_t<R0>>::type;
+  using calls = TypeList<>;
 };
+template <class St, class R>
+using body_effects =
+    node_effects<std::remove_cvref_t<typename St::template body<R>>>;
+template <class St>
+struct writes_calls {
+  template <class R>
+  struct of : dedupe<typename body_effects<St, R>::calls> {};
+};
+
+// The single-valued members a rule's node can end up with written, over every
+// path: what its body writes and what every rule whose node it can adopt
+// writes, a cycle included. The rules come from the closure of those calls,
+// so each rule has one answer whatever path asks for it.
+template <class St, class Rs>
+struct writes_of;
+template <class St, class... Rs>
+struct writes_of<St, TypeList<Rs...>>
+    : dedupe<tl_cat_t<typename body_effects<St, Rs>::writes...>> {};
+template <class St, class R>
+struct rule_writes
+    : writes_of<St, tl_cat_t<TypeList<R>,
+                             typename reached_by<writes_calls<St>::template of,
+                                                 R>::type>> {};
+template <class St, class R0, class R = named_rule_t<R0>,
+          bool Node = is_node_rule<R> && !is_grammar<R0>>
+struct call_writes {
+  using type = typename node_effects<Ref<R0>>::writes;
+};
+template <class St, class R0, class R>
+struct call_writes<St, R0, R, true> : rule_writes<St, declared_of_t<R>> {};
 
 template <class L>
 struct as_adopted;
@@ -224,24 +266,36 @@ template <class St, class T, auto P, class E, class Seen>
 struct writes_once<St, Nest<T, P, E>, Seen>
     : writes_once<St, E, TypeList<wrote<P>>> {};
 
-// A directive writes the node in hand. Its operand builds a node apart, and is
-// checked as the rule of its own it is.
+// A directive's operand builds a node apart. One that builds it in place, in
+// a creation, is walked here on that node; a rule of its own is checked as the
+// rule it is.
+template <class St, class E, bool InPlace = holds_directive<E>>
+struct operand_fault {
+  using type = NoWriteFault;
+};
+template <class St, class E>
+struct operand_fault<St, E, true> {
+  using type = typename writes_once<St, E, TypeList<>>::fault;
+};
+
+// A directive writes the node in hand.
 template <class St, auto S, class E, class Seen>
 struct writes_once<St, Assign<S, E>, Seen> {
   static constexpr auto P = spec_ptr<S>;
   static constexpr bool single = field_tag<P>::storage != FieldStorage::vector;
   using added = cond_t<single, TypeList<wrote<P>>, TypeList<>>;
   using seen = tl_cat_t<Seen, added>;
-  using fault =
+  using fault = typename first_fault_of<
       cond_t<single && tl_has<wrote<P>, Seen>::value, WriteAgain<field_tag<P>>,
              cond_t<single && tl_has<adopted_wrote<P>, Seen>::value,
-                    WriteOverAdopted<field_tag<P>>, NoWriteFault>>;
+                    WriteOverAdopted<field_tag<P>>, NoWriteFault>>,
+      typename operand_fault<St, E>::type>::type;
 };
 
 template <class St, auto S, class E, class Seen>
 struct writes_once<St, Append<S, E>, Seen> {
   using seen = Seen;
-  using fault = NoWriteFault;
+  using fault = typename operand_fault<St, E>::type;
 };
 
 // A call adopts the node it returns: the members that node's rule may have
@@ -249,7 +303,7 @@ struct writes_once<St, Append<S, E>, Seen> {
 template <class St, class R0, class Seen>
 struct writes_once<St, Ref<R0>, Seen> {
   using seen = tl_cat_t<
-      Seen, typename as_adopted<node_writes_t<St, TypeList<>, Ref<R0>>>::type>;
+      Seen, typename as_adopted<typename call_writes<St, R0>::type>::type>;
   using fault = NoWriteFault;
 };
 template <class St, class E, class Seen>

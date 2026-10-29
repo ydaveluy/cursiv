@@ -12,7 +12,7 @@ struct G : Base {
             lit<"operator"> +
             assign<&ast::Node::name>(ref<ID> | many(lit<"[">) | lit<"+">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

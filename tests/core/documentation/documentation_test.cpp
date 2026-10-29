@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "comments/generated/Comments/Module.hpp"
 #include "core/documentation/CommentsGrammar.hpp"
@@ -21,6 +22,7 @@
 #include "cursiv/core/workspace/Documents.hpp"
 #include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/core/workspace/IndexManager.hpp"
+#include "cursiv/core/workspace/TextDocument.hpp"
 #include "cursiv/test/Check.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -383,8 +385,48 @@ void unfinished_inline_tags_leave_the_following_line_readable() {
   CHECK(rendered.ends_with("[shown](https://example.org)"));
   CHECK(cursiv::parse_doc_comment("/** {@link x\r {@link https://a label} */")
             .toMarkdown().ends_with("[label](https://a)"));
-  CHECK(cursiv::parse_doc_comment("/** {@bad x {@link \rhttps://a label} */")
-            .toMarkdown() == "{@bad x [label](https://a)");
+  // A lone CR ends the line as LF does, so the tag it splits stays text.
+  for (const std::string_view eol : {"\n", "\r"})
+    CHECK(cursiv::parse_doc_comment("/** {@bad x {@link " + std::string(eol) +
+                                    "https://a label} */")
+              .toMarkdown() == "{@bad x {@link\nhttps://a label}");
+}
+
+// LF, CRLF and a lone CR each end a line, as `TextDocument` counts them: the
+// text and every range read the same under the three.
+void every_line_ending_splits_lines() {
+  const auto parse = [](std::string_view eol) {
+    std::string text;
+    for (const std::string_view line :
+         {"/**", " * first", " *", " * @see second", " */"}) {
+      if (!text.empty()) text += eol;
+      text += line;
+    }
+    return std::pair{
+        cursiv::parse_doc_comment(text),
+        cursiv::TextDocument::create("file:///doc.ws", "ws", 1, text)
+            .positionAt(static_cast<cursiv::TextOffset>(text.find("first")))};
+  };
+  const auto same = [](const cursiv::DocCommentRange& a,
+                       const cursiv::DocCommentRange& b) {
+    return a.start.line == b.start.line &&
+           a.start.character == b.start.character && a.end.line == b.end.line &&
+           a.end.character == b.end.character;
+  };
+  const auto [lf, at] = parse("\n");
+  CHECK(lf.toMarkdown() == "first\n\n*@see* — second");
+  CHECK(lf.elements.size() == 2);
+  CHECK(lf.range.start.line == at.line && at.line == 1);
+  for (const std::string_view eol : {"\r\n", "\r"}) {
+    const auto [other, otherAt] = parse(eol);
+    CHECK(other.toMarkdown() == lf.toMarkdown());
+    CHECK(otherAt.line == at.line && otherAt.character == at.character);
+    CHECK(same(other.range, lf.range));
+    CHECK(other.elements.size() == lf.elements.size());
+    for (std::size_t i = 0; i < other.elements.size() && i < lf.elements.size();
+         ++i)
+      CHECK(same(other.elements[i].range, lf.elements[i].range));
+  }
 }
 
 // Elements join with a blank line, the second paragraph keeps its leading
@@ -681,6 +723,7 @@ void run() {
   children_hold_lines_and_inline_tags();
   an_empty_inline_link_still_parses();
   unfinished_inline_tags_leave_the_following_line_readable();
+  every_line_ending_splits_lines();
   paragraphs_join_with_a_blank_line();
   empty_lines_are_preserved();
   the_render_survives_the_markers();

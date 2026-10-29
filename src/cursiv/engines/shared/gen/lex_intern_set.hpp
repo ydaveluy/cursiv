@@ -56,8 +56,8 @@ ByteSet lex_decode_bytes(const Cfg& g, std::uint16_t s) {
 // Whether a set is a word class: the generated grammar's -- its bytes, and the
 // lead bytes of its scalars -- or a section's, or a keyword's own.
 template <class Cfg>
-bool lex_word_set(const Cfg& g, std::uint16_t s, const ByteSet& leads) {
-  return (g.sets[s] == g.wordBytes && lex_decode_bytes(g, s) == leads &&
+bool lex_word_set(const Cfg& g, std::uint16_t s) {
+  return (g.sets[s] == g.wordBytes && lex_decode_bytes(g, s) == g.wordLeads &&
           lex_set_scalars(g, s) == 0) ||
          std::ranges::any_of(g.sectionWords.v,
                              [s](const auto& w) { return w.set == s; }) ||
@@ -68,19 +68,17 @@ bool lex_word_set(const Cfg& g, std::uint16_t s, const ByteSet& leads) {
 // each.
 template <class Cfg>
 std::vector<std::uint16_t> lex_word_bounds(const Cfg& g) {
-  const ByteSet leads = lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
   std::vector<std::uint16_t> words;
   for (std::uint16_t s = 0; s < g.nsets; ++s)
-    if (lex_word_set(g, s, leads)) words.push_back(s);
+    if (lex_word_set(g, s)) words.push_back(s);
   return words;
 }
 
 template <class Cfg>
 std::vector<std::uint8_t> lex_word_flags(const Cfg& g) {
-  const ByteSet leads = lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
   std::vector<std::uint8_t> flags(g.nsets, 0);
   for (std::uint16_t s = 0; s < g.nsets; ++s)
-    flags[s] = lex_word_set(g, s, leads) ? 1 : 0;
+    flags[s] = lex_word_set(g, s) ? 1 : 0;
   return flags;
 }
 

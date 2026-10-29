@@ -14,8 +14,8 @@ std::string QualifiedNameProvider::qualifierOf(
     const cursiv::Document& document,
     const ast::PackageDeclaration& package) const {
   const cursiv::AstNode* const container = package.parent;
-  if (container != nullptr &&
-      container->type == &cursiv::ast_type_tag<ast::PackageDeclaration>)
+  if (container != nullptr
+      && container->type == &cursiv::ast_type_tag<ast::PackageDeclaration>)
     return getQualifiedName(
         qualifierOf(document,
                     static_cast<const ast::PackageDeclaration&>(*container)),

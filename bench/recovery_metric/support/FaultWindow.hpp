@@ -16,7 +16,7 @@
 #include "recovery_metric/support/RepairCase.hpp"
 #include "recovery_metric/support/RepairFault.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct FaultWindow {
   // Twin tokens, half-open: the ones the fault touches.
@@ -81,4 +81,4 @@ struct FaultWindow {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

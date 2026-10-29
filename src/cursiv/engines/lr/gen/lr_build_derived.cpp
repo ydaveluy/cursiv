@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/engines/lr/gen/LrLexView.hpp"
 #include "cursiv/engines/lr/gen/LrLowProd.hpp"
 #include "cursiv/engines/lr/gen/lr_build_fold.hpp"
 #include "cursiv/engines/lr/gen/lr_build_lex.hpp"
@@ -18,11 +19,11 @@
 #include "cursiv/engines/lr/gen/lr_nullable.hpp"
 #include "cursiv/engines/lr/table/LrAction.hpp"
 #include "cursiv/engines/lr/table/LrProduction.hpp"
+#include "cursiv/engines/shared/gen/LexFirstByte.hpp"
 #include "cursiv/engines/shared/gen/LexOwedRows.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/SetPool.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
-#include "cursiv/engines/shared/table/LexRelay.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
@@ -34,42 +35,10 @@ struct LrDeriving {
   const LrBuildTable& a;
   const std::span<const ElementId> sites;
 
-  struct Automaton {
-    const LrBuildTable& a;
-    const LrDerivedRows& rows;
-
-    std::size_t states() const { return a.ndfa; }
-    std::span<const std::uint16_t> successors(std::uint16_t s) const {
-      return {rows.typoSucc.data() + rows.typoSuccBase[s],
-              rows.typoSucc.data() + rows.typoSuccBase[s + 1]};
-    }
-    std::uint16_t accept(std::uint16_t s) const { return a.dfaAccept[s]; }
-    std::uint16_t relay(std::uint16_t s) const {
-      return a.nrelays != 0 ? a.dfaRelay[s] : kNoRelay;
-    }
-    std::vector<std::uint16_t> hops(std::uint16_t s) const {
-      std::vector<std::uint16_t> to;
-      if (a.nrelays != 0)
-        for (auto k = a.dfaRelay[s]; k != kNoRelay; k = a.relays[k].next)
-          if (a.relays[k].predicate != kNoLexNode)
-            to.push_back(a.relays[k].resume);
-      return to;
-    }
-    std::size_t modes() const { return a.nmodes; }
-    std::uint16_t start(std::uint16_t m) const { return a.modeStart[m]; }
-    std::uint16_t next(std::uint16_t s, unsigned char b) const {
-      return a.next_dfa(s, a.cls[b]);
-    }
-    bool before(std::uint16_t x, std::uint16_t y) const {
-      const auto tx = a.dfaAccept[x] - 1u, ty = a.dfaAccept[y] - 1u;
-      return lex_term_before(a.cfg.terms[tx], a.dfa_tier(x, tx), tx,
-                             a.cfg.terms[ty], a.dfa_tier(y, ty), ty);
-    }
-  };
-
   void repair_tables(LrDerivedRows& rows) const {
     const std::size_t n = a.ndfa;
-    LexOwedRows owed = lex_owed_rows(Automaton{a, rows});
+    LexOwedRows owed = lex_owed_rows(
+        LexOwedView{LrLexView{a}, a.ndfa, rows.typoSuccBase, rows.typoSucc});
     rows.lexBodies = std::move(owed.bodies);
     rows.lexOwed = std::move(owed.owed);
     rows.lexOpeners = std::move(owed.openers);
@@ -211,32 +180,6 @@ struct LrDeriving {
     }
   }
 
-  // The bytes an ignored run is made of: the mode's start takes the byte to
-  // an unrecorded trivia token whose every live edge comes back to it.
-  std::vector<std::uint64_t> skip_set() const {
-    std::vector<std::uint64_t> t(std::size_t{a.nmodes} * 4, 0);
-    for (std::uint32_t m = 0; m < a.nmodes; ++m) {
-      const std::uint16_t s0 = a.modeStart[m];
-      for (unsigned b = 0; b < 256; ++b) {
-        const std::uint16_t s1 = a.next_dfa(s0, a.cls[b]);
-        if (s1 == kDeadState || a.dfaAccept[s1] == 0 || a.dfa_bounded(s1) ||
-            a.dfaRelay[s1] != kNoRelay)
-          continue;
-        const unsigned term = a.dfaAccept[s1] - 1u;
-        if (!a.cfg.terms[term].trivia || a.cfg.terms[term].recorded) continue;
-        bool loops = true;
-        for (unsigned c = 0; c < a.ncls && loops; ++c) {
-          const std::uint16_t n = a.next_dfa(s1, c);
-          if (n == kDeadState) continue;
-          if (n != s1 || a.next_dfa(s0, c) != s1) loops = false;
-        }
-        if (loops)
-          t[std::size_t{m} * 4 + (b >> 6)] |= std::uint64_t{1} << (b & 63u);
-      }
-    }
-    return t;
-  }
-
   // A call without a row inherits its caller's agreement; an explicit row
   // answers for itself.
   std::vector<Agreement> rule_sites() const {
@@ -367,11 +310,11 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   const LrDeriving d{a, sites};
   LrDerivedRows r;
   d.repair_states(r);
-  d.goto_classes(r);
+  if (a.nconflicts != 0 || a.multiCand) d.goto_classes(r);
   d.row_lhs(r, sites.size());
   r.shiftTerm = lr_shift_terms(a);
   d.expect(d.terminal_sites(), r);
-  r.skipSet = d.skip_set();
+  r.skipSet = lex_skip_set(LrLexView{a});
   lr_derive_lexical(a, r);
   d.repair_tables(r);
   lr_derive_reductions(a, r);
@@ -382,6 +325,7 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   a.dfaAccPool = SetPool(a.dfaAcc.data(), a.ndfa);
   a.dfaResPool = SetPool(a.dfaRes.data(), a.ndfa);
   a.dfaRelayResPool = SetPool(a.dfaRelayRes.row(0, a.ndfa), a.ndfa);
+  a.followPool = SetPool(a.follow.row(0, a.nstates), a.nstates);
   // A state past the last row owes nothing.
   a.closePool = SetPool(a.closeRow.row(0, a.nstates), a.nstates);
 }

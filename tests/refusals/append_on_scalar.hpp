@@ -10,7 +10,7 @@ struct G : Base {
   struct Root
       : rule<create<ast::Node>(many(append<&ast::Node::name>(ref<ID>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

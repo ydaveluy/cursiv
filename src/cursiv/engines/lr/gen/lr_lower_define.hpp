@@ -103,8 +103,8 @@ inline void lr_decide(LrBuildCfg& c, std::uint16_t k,
   c.decisions.v.insert(c.decisions.v.end(), arms.begin(), arms.end());
 }
 
-// An empty production pushed where a region closes: it stands past the
-// region, on the boundary `trail` names.
+// A production of no position but conditions, pushed where a region closes:
+// it stands past the region, on the boundary `trail` names.
 inline void lr_close_region(LrBuildCfg& c, std::uint16_t k,
                             std::uint8_t trail) {
   if (trail == 0 || k == kNoRow) return;

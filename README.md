@@ -1,10 +1,22 @@
-# cursiv++
+<div align="center">
+  <a href="https://github.com/ydaveluy/cursiv">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+      <img alt="cursiv++" src="docs/assets/logo.png" width="320">
+    </picture>
+  </a>
+  <h3>C++20 language engineering framework</h3>
+</div>
 
-<img src="docs/assets/logo.png" alt="cursiv++" width="180">
+<div align="center">
 
 [![Build](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml)
 [![Documentation](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml)
 [![SonarCloud](https://github.com/ydaveluy/cursiv/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/sonarcloud.yml)
+
+</div>
+
+---
 
 cursiv++ is a C++20 framework for building domain-specific languages,
 compilers and language tools, with built-in Language Server Protocol (LSP)
@@ -18,19 +30,18 @@ editor extension.
 [Getting started](docs/learn/scaffold.md) ·
 [Benchmark results](docs/benchmarks/README.md)
 
-- **C++ grammars and ASTs:** grammar rules fill your structs, with bindings
-  checked by the C++ compiler.
+- **C++ grammars and ASTs:** grammar rules fill your structs, and the C++
+  compiler checks the bindings.
 - **LL and LR parsing:** generated parsers with syntax error recovery.
-- **Customizable language services:** symbol indexing, scoping, cross-reference
-  resolution, validation and formatting.
-- **Editor and tool integration:** LSP features, command-line support and
-  Model Context Protocol (MCP) tools, with native and WebAssembly builds.
+- **Language services:** symbol indexing, scoping, cross-reference resolution,
+  validation and formatting, each one customizable.
+- **Editor and tool integration:** LSP, command-line and Model Context
+  Protocol (MCP) tools, with native and WebAssembly builds.
 
 ## Get started
 
-You need **CMake 3.30 or later**, **Git**, and a C++20 compiler with
-`std::format` and `musttail` support. Tested compilers are **GCC 16** and
-**Clang 22**.
+You need CMake 3.30 or later, Git, and a C++20 compiler with `std::format`
+and `musttail` support. GCC 16 and Clang 22 are tested.
 
 Create a language project, build it and parse its sample document:
 
@@ -43,23 +54,17 @@ cmake --build build --parallel
 ./build/src/mylang_cli example/hello.mylang
 ```
 
-The project includes a working grammar, AST types, validation hooks, a CLI,
-a language server, tests, a benchmark and a VS Code extension.
-
-Follow the [language tutorial](docs/learn/walkthrough.md) to define your AST,
-write grammar rules and add validation. CMake regenerates the parser when
-you build after a grammar change.
-
-To use Cursiv in an existing project, see the
+The project includes a working grammar, AST, validation, CLI, language
+server, tests, benchmark and VS Code extension. The
+[language tutorial](docs/learn/walkthrough.md) turns it into your own
+language. To add Cursiv to an existing project, see the
 [CMake integration guide](docs/reference/cmake.md#consuming-cursiv).
 
 ## Documentation
 
-Choose a guide for your next task:
-
 - [Learn](docs/learn/index.md): create a language, test it and use its AST.
 - [Recipes](docs/recipes/index.md): add scoping, validation and formatting.
-- [Reference](docs/reference/index.md): look up grammar, AST, services and CMake APIs.
+- [Reference](docs/reference/index.md): grammar, AST, services and CMake APIs.
 - [Editor integration](docs/learn/editor-integration.md): build and ship a VS Code extension.
 - [WebAssembly](docs/recipes/wasm.md): deploy a WASI language server.
 
@@ -74,9 +79,9 @@ Each example includes a grammar, AST, services, tests, a CLI and an editor clien
 
 ## Benchmarks
 
-Use your project's benchmark executable to measure parsing, workspace builds
-and editor services. See the [benchmark results](docs/benchmarks/README.md)
-for the framework measurements and how to reproduce them.
+Each project includes a benchmark for parsing, workspace builds and editor
+services. The [benchmark page](docs/benchmarks/README.md) explains how to run
+it and shows the framework's results.
 
 ## Contributing to Cursiv
 

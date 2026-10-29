@@ -128,16 +128,18 @@ UriParts split_uri(std::string_view uri) {
   return parts;
 }
 
+// Both normalized: the scheme and the authority are already in lower case.
 bool same_place(const UriParts& a, const UriParts& b) {
-  return std::ranges::equal(
-             a.scheme, b.scheme, {}, [](char c) { return to_lower(c); },
-             [](char c) { return to_lower(c); }) &&
-         a.authority == b.authority;
+  return a.scheme == b.scheme && a.authority == b.authority;
 }
 
-// The authority in lower case, its userinfo apart.
-std::string with_lower_authority(std::string_view uri) {
+// The scheme and the authority in lower case, the userinfo apart: RFC 3986
+// makes both case-insensitive, and gives the scheme lower case as its
+// canonical form.
+std::string with_lower_scheme_and_authority(std::string_view uri) {
   std::string out(uri);
+  const std::size_t scheme = split_uri(uri).scheme.size();
+  for (std::size_t i = 0; i < scheme; ++i) out[i] = to_lower(out[i]);
   const std::size_t colon = out.find(':');
   if (colon == std::string::npos || !uri.substr(colon + 1).starts_with("//"))
     return out;
@@ -179,7 +181,7 @@ std::string normalize_uri(std::string_view uri) {
       out.append(uri.substr(suffix));
     return out;
   }
-  return with_lower_authority(uri);
+  return with_lower_scheme_and_authority(uri);
 }
 
 bool is_file_uri(std::string_view uri) { return has_file_scheme(uri); }

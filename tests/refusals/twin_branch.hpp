@@ -1,5 +1,5 @@
-// Two alternatives spelling the same symbols and writing different members:
-// no lookahead tells them apart.
+// Two alternatives reading the same tokens and writing different members: the
+// second is never chosen, so the generator names it and drops it.
 #pragma once
 
 #include "refusals/head.hpp"
@@ -15,7 +15,7 @@ struct G : Base {
   struct Root : rule<create<two::Node>(assign<&two::Node::a>(ref<ID>) |
                                        assign<&two::Node::b>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

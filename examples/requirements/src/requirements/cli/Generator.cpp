@@ -104,8 +104,8 @@ std::string generate_summary(const ast::RequirementModel& model,
 
   std::ofstream out(outputPath, std::ios::binary);
   if (!out.is_open()) {
-    throw std::runtime_error("Unable to open output file: " +
-                             outputPath.string());
+    throw std::runtime_error("Unable to open output file: "
+                             + outputPath.string());
   }
   out << generate_summary_file_html_content(model, testModels);
   return outputPath.string();

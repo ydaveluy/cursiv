@@ -10,6 +10,7 @@
 
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/lr/runtime/LrCactus.hpp"
 #include "cursiv/engines/lr/runtime/LrConfig.hpp"
 #include "cursiv/engines/lr/runtime/LrFrame.hpp"
@@ -18,8 +19,10 @@
 #include "cursiv/engines/shared/runtime/RepairEnds.hpp"
 #include "cursiv/engines/lr/runtime/LrStack.hpp"
 #include "cursiv/engines/shared/runtime/GestureRank.hpp"
+#include "cursiv/engines/shared/runtime/IndentLevel.hpp"
 #include "cursiv/engines/shared/runtime/LexReading.hpp"
 #include "cursiv/engines/shared/runtime/RepairFault.hpp"
+#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
 #include "cursiv/engines/shared/table/FlatMap.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
@@ -34,8 +37,11 @@ inline constexpr std::uint32_t kLrNoConfig = 0xFFFFFFFFu;
 inline constexpr TextOffset kLrNoOpen = 0xFFFFFFFFu;
 
 struct LrSearch {
-  LrSearch(TextOffset len, const RepairBudget& b)
-      : budget(repair_allot(b, len)), perSearch(b.perSearch) {}
+  LrSearch(TextOffset len, const RepairBudget& b,
+           const std::vector<IndentLevel>& levels)
+      : budget(repair_allot(b, len)),
+        perSearch(b.perSearch),
+        seen(0, FutureHash{}, FutureSame{&levels}) {}
 
   std::uint64_t budget;
   std::uint64_t perSearch;
@@ -70,7 +76,8 @@ struct LrSearch {
   };
   // What a reading's future depends on, its free insertions aside: two
   // readings with the same one gain the same increments of key, the one
-  // holding fewer free insertions perhaps more.
+  // holding fewer free insertions perhaps more. Its levels compare by
+  // content, in the parse's arena, and stay out of the hash.
   struct Future {
     std::uint32_t node;
     TextOffset at;
@@ -78,7 +85,8 @@ struct LrSearch {
     std::uint16_t laMode;
     LrVirtualAt virt;
     IndentAt indent;
-    std::uint8_t shifts, phase;
+    std::uint8_t shifts;
+    LrRepairPhase phase;
     bool fresh, done;
     bool operator==(const Future&) const = default;
     static Future of(const LrConfig& r) {
@@ -104,12 +112,28 @@ struct LrSearch {
       mix(f.la.end | (std::uint64_t{f.laMode} << 32));
       mix(f.virt.insertedAt | (std::uint64_t{f.virt.from} << 32));
       mix(f.virt.inserted | (std::uint64_t{f.virt.pending} << 32));
-      mix(f.indent.head | (std::uint64_t{f.indent.depth} << 32));
-      mix(f.shifts | (std::uint64_t{f.phase} << 8) |
+      mix(f.indent.depth);
+      mix(f.shifts | (static_cast<std::uint64_t>(f.phase) << 8) |
           (std::uint64_t{f.fresh} << 16) | (std::uint64_t{f.done} << 17));
       return static_cast<std::size_t>(h);
     }
   };
+  // Levels written apart are seldom met: their walk stays out of the lookups.
+  struct FutureSame {
+    const std::vector<IndentLevel>* levels;
+    bool operator()(const Future& a, const Future& b) const {
+      return a == b || apart(a, b);
+    }
+    CURSIV_COLD CURSIV_NOINLINE bool apart(const Future& a,
+                                           const Future& b) const {
+      if (a.indent.head == b.indent.head) return false;
+      Future c = a;
+      c.indent = b.indent;
+      return c == b && indent_same(*levels, a.indent, b.indent);
+    }
+  };
+  using Futures =
+      std::unordered_map<Future, std::uint32_t, FutureHash, FutureSame>;
   LrCactus cactus;
   std::vector<LrConfig> configs;
   std::vector<LrGesture> links;
@@ -118,7 +142,7 @@ struct LrSearch {
   GestureRank rank;
   std::vector<Entry> heap;
   std::uint32_t seq = 0;
-  std::unordered_map<Future, std::uint32_t, FutureHash> seen;
+  Futures seen;
   // The configurations one read is still carrying forward.
   std::vector<std::uint32_t> reading;
   std::vector<std::uint32_t> out;
@@ -204,8 +228,13 @@ struct LrSearch {
   // Where a path written to its end stopped inside its last fault: a search
   // set out from there, no token read since, goes on with that fault.
   TextOffset openAt = kLrNoOpen;
-  // What the elected fault's first insertion could as cheaply have been.
+  // The shifts the context had read when the last gesture was written: more
+  // since means the fault it left open takes no gesture now.
+  std::uint32_t wroteShifts = 0;
+  // What the elected fault's first insertion could as cheaply have been, and
+  // the paths dropped for one as cheap.
   std::vector<ElementId> planAlso;
+  TiedInserts tied;
 
   // The fault being written: what its gestures did so far.
   RepairFault fault;

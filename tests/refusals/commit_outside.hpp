@@ -8,6 +8,6 @@ struct G : Base {
   struct Root : rule<create<ast::Node>(commit(lit<"a">, lit<"b">) + lit<"c">)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace refuse

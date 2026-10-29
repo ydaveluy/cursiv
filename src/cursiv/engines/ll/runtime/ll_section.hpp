@@ -3,6 +3,7 @@
 // where that grammar alone would see the end of its text.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string_view>
 
@@ -42,23 +43,26 @@ inline bool ll_condition(const LlContext& c, std::uint16_t condition,
 }
 
 // Where the text the descent reads ends: the document's end, or in a section
-// the first token that closes it. Looked for no further than `upto`.
+// the first token that closes it, looked for from `at` up to a token starting
+// at `upto`. `reached` rises to how far the search read.
 template <const auto& T>
-TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto) {
+TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
+                       TextOffset& reached) {
   if constexpr (T.nsections == 0) {
-    (void)at, (void)upto;
+    (void)at, (void)upto, (void)reached;
     return c.len;
   } else {
     if (c.section == 0) return c.len;
     LexFailedWalks<LlLexTape<T>> failed;
     const auto mode = ll_err_mode<T>(c);
-    for (TextOffset p = at; p < c.len && p < upto;) {
+    for (TextOffset p = at; p < c.len && p <= upto;) {
       c.stop.poll();
       TextOffset halt = p;
       Scan s;
       if (!failed.fails(LlLexTape<T>{}, c.src, c.len, mode, p, halt,
                         [&] { c.stop.poll(); }))
         s = ll_match_text<T>(c.src, c.len, mode, p);
+      reached = std::max({reached, halt, s.end});
       if (s.term == kInvalidSymbol || s.end <= p) {
         ++p;
         continue;

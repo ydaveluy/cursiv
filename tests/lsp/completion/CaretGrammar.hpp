@@ -151,7 +151,7 @@ struct Caret : cursiv::GrammarSpec {
   struct FileR
       : rule<create<ast::File>(many(append<&ast::File::fns>(ref<FnR>)))> {};
   using entry = FileR;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tcaret

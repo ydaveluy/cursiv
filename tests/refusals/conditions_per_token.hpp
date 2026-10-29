@@ -24,7 +24,7 @@ struct G : Base {
   struct Root : rule<create<ast::Node>(
                     many(guarded_shifts(std::make_index_sequence<17>{})))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -12,6 +12,6 @@ struct G : Base {
   struct T : terminal<lit<"a"> + section<Guest>(lit<"[">, lit<"]">)> {};
   struct Root : rule<create<ast::Node>(ref<T>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace refuse

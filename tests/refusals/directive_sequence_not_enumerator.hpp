@@ -20,7 +20,7 @@ struct G : Base {
   struct Root
       : rule<create<ast::Bin>(assign<&ast::Bin::op>(kw<"NOT"> + kw<"IN">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

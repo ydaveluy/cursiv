@@ -315,15 +315,36 @@ inline constexpr ImageDesc kNode<V, Skip<TypeList<Is...>, TypeList<Hs...>, E>> =
         .rules(RulesOf<V, TypeList<Is..., Hs...>>::kAll)
         .counts(sizeof...(Is), sizeof...(Hs));
 
+constexpr ImageGroup image_group(Association a) {
+  switch (a) {
+    case Association::right:
+      return ImageGroup::right;
+    case Association::non:
+      return ImageGroup::non;
+    case Association::prefix:
+      return ImageGroup::prefix;
+    case Association::postfix:
+      return ImageGroup::postfix;
+    default:
+      return ImageGroup::left;
+  }
+}
+
+template <class V, class L>
+consteval ImageLevelDesc level_desc() {
+  ImageLevelDesc d{image_group(L::kGroup), &kNode<V, typename L::op_expr>};
+  if constexpr (is_unary_level<L>) {
+    d.node = dump_type_name<typename L::node_type>();
+    d.members[0] = member_name<L::op_pointer>();
+    d.members[1] = member_name<L::operand_pointer>();
+  }
+  return d;
+}
 template <class V, class Lv>
 struct LevelsOf;
 template <class V, class... Ls>
 struct LevelsOf<V, Levels<Ls...>> {
-  static constexpr ImageLevelDesc kAll[] = {
-      {Ls::kGroup == Association::right ? ImageGroup::right
-       : Ls::kGroup == Association::non ? ImageGroup::non
-                                        : ImageGroup::left,
-       &kNode<V, typename Ls::op_expr>}...};
+  static constexpr ImageLevelDesc kAll[] = {level_desc<V, Ls>()...};
 };
 
 template <class C>
@@ -335,7 +356,7 @@ struct class_of_bound<CpSet<M, N, S>> {
 
 template <class V, class K>
 consteval ImageFaceDesc grammar_face() {
-  using Ig = section_ignore_t<K>;
+  using Ig = section_ignored_t<K>;
   using Hd = section_hidden_t<K>;
   ImageFaceDesc f;
   f.kind = ImageRuleKind::grammar;
@@ -353,7 +374,7 @@ template <class V, class K>
 consteval ImageFaceDesc infix_face() {
   ImageFaceDesc f;
   f.kind = ImageRuleKind::infix;
-  f.returns = dump_type_name<rule_type_t<K>>();
+  f.returns = dump_type_name<typename K::node_type>();
   f.members[0] = member_name<K::left_pointer>();
   f.members[1] = member_name<K::op_pointer>();
   f.members[2] = member_name<K::right_pointer>();
@@ -452,7 +473,7 @@ struct RuleMaker {
 template <class V>
 consteval ImageGrammarDesc grammar_of() {
   using G = view_grammar_t<V>;
-  using Ig = typename ov::as_rules<G, typename G::ignore>::type;
+  using Ig = typename ov::as_rules<G, typename G::ignored>::type;
   using Hd = typename ov::as_rules<G, typename G::hidden>::type;
   ImageGrammarDesc g;
   g.name = type_name<G>();
@@ -474,13 +495,12 @@ inline constexpr ImageGrammarDesc kGrammar = grammar_of<V>();
 
 namespace cursiv {
 
+// A new image of the grammar, owned by the caller: an image fills itself as it
+// is read, so no two callers share one.
 template <class V>
-GrammarImage& grammar_image() {
-  static GrammarImage image = [] {
-    GrammarImage im;
-    im.open(detail::kGrammar<V>);
-    return im;
-  }();
+GrammarImage grammar_image() {
+  GrammarImage image;
+  image.open(detail::kGrammar<V>);
   return image;
 }
 

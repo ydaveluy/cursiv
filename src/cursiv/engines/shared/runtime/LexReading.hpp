@@ -9,7 +9,10 @@
 
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/engines/shared/runtime/LexBoundary.hpp"
+#include "cursiv/engines/shared/runtime/LexFailedWalks.hpp"
+#include "cursiv/engines/shared/runtime/LexReadBudget.hpp"
 #include "cursiv/engines/shared/runtime/LexRelay.hpp"
+#include "cursiv/engines/shared/runtime/LexTape.hpp"
 #include "cursiv/engines/shared/runtime/LexWalk.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
@@ -98,9 +101,9 @@ std::uint16_t lex_hop(const Tape& tape, std::uint16_t k, const char* src,
 // body: the byte itself where the body admits it -- an escape given up -- and
 // the byte after it otherwise, save a line end, which the token stops short
 // of. A token open to the end of the text stops there. `reached` rises to how
-// far the walks read; `match` is the engine's walk with its halt.
-template <class Tape, class Match>
-LexReading lex_reading(const Tape& tape, const LexOwed& derived, Match&& match,
+// far the walks read.
+template <class Tape>
+LexReading lex_reading(const Tape& tape, const LexOwed& derived,
                        const char* src, TextOffset len, std::uint16_t mode,
                        TextOffset p, TextOffset& reached) {
   LexReading out;
@@ -111,7 +114,7 @@ LexReading lex_reading(const Tape& tape, const LexOwed& derived, Match&& match,
     if (x > reached) reached = x;
   };
   TextOffset halt = p;
-  const Scan m = match(src, len, mode, p, halt);
+  const Scan m = lex_match_halt(tape, src, len, mode, p, halt);
   read(halt);
   if (halt <= m.end) return out;
   std::uint16_t s = tape.start(mode);
@@ -218,6 +221,41 @@ bool lex_cuts(const char* src, TextOffset len, TextOffset e) {
 inline TextOffset lex_cut(TextOffset p, const LexReading& r) {
   if (r.closed) return r.end;
   return r.open > p ? r.open : p + 1;
+}
+
+// The unmatched text at `p`, which `mode` lexes a fault with: the bytes where
+// no token starts, not even one the lexer would leave open, up to a `blank`
+// or a line end -- one token, however long. An open token there is repaired
+// as it would be with nothing in front of it. `reached` rises to how far the
+// walks read; the readings of open tokens are paid from `budget`.
+template <class Tape, class Blank, class Poll>
+TextOffset lex_unmatched_end(const Tape& tape, const LexOwed& derived,
+                             const char* src, TextOffset len,
+                             std::uint16_t mode, TextOffset p, Blank&& blank,
+                             TextOffset& reached, LexReadBudget& budget,
+                             Poll&& poll) {
+  LexFailedWalks<Tape> failed;
+  TextOffset q = p + 1;
+  while (q < len && !lex_line_end_at(src, q) &&
+         !blank(static_cast<unsigned char>(src[q]))) {
+    poll();
+    TextOffset halt = q;
+    Scan s;
+    if (!failed.fails(tape, src, len, mode, q, halt, poll))
+      s = lex_match_halt(tape, src, len, mode, q, halt);
+    if (halt > reached) reached = halt;
+    if (s.term != kInvalidSymbol && s.end > q) break;
+    if (!budget.spent()) {
+      TextOffset read = q;
+      const LexReading r = lex_reading(tape, derived, src, len, mode, q, read);
+      budget.pay(q, read);
+      if (read > reached) reached = read;
+      if (r.term != kInvalidSymbol) break;
+    }
+    ++q;
+  }
+  if (q > reached) reached = q;
+  return q;
 }
 
 }  // namespace cursiv

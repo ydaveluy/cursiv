@@ -32,7 +32,7 @@ struct G : cursiv::GrammarSpec {
   struct Line : rule<lit<"k"> + (ref<X> | ref<Y>) + lit<";">> {};
   struct Root : rule<create<ast::Doc>(many(ref<Stat> | ref<Line>))> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
 };
 
 }  // namespace tambtail

@@ -14,7 +14,7 @@ struct ReachedRules {
   std::vector<std::uint32_t> visible;
 };
 
-// `entry`, `ignore` and `hidden`, closed over the rules each body names, as
+// `entry`, `ignored` and `hidden`, closed over the rules each body names, as
 // the pipeline resolved the bodies. A rule a condition names is read there
 // as text, never as a call: it is reached, and not visible.
 ReachedRules reached_rules(GrammarImage& image);

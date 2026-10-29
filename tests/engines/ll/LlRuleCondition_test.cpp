@@ -86,7 +86,7 @@ bool reads_ab_dot(const Cfg& g) {
         if (!self(self, g.lexKid[e.a + i])) return false;
       return true;
     };
-    if (walk(walk, operand.b) && steps.size() == 4 &&
+    if (walk(walk, cursiv::lex_token_body(g, operand)) && steps.size() == 4 &&
         steps[0].kind == cursiv::LexKind::chars &&
         g.sets[steps[0].a].has('a') && g.sets[steps[0].a].has('A'))
       return true;

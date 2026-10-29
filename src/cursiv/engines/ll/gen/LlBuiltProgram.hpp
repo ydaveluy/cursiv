@@ -41,19 +41,17 @@ struct LlBuiltProgram : ShapeOverflow {
   Vec<LlAtnEdge> edges{};
   std::uint32_t nedges = 0;
   std::vector<std::uint32_t> ruleStart{};
-  std::vector<std::uint32_t> ruleStop{};
   std::vector<std::uint32_t> callerBase{};
   std::vector<std::uint32_t> callerAt{};
   std::vector<std::uint32_t> returnClass{};
 
-  // Per position, then per rule: what may begin here, what may follow, and
-  // whether nothing at all is a reading of it.
+  // Per position, then per rule: what may begin here and what may follow; and
+  // per position, whether nothing at all is a reading of it.
   std::vector<DynSet> first{};
   std::vector<DynSet> after{};
   std::vector<std::uint8_t> nullable{};
   std::vector<DynSet> ruleFirst{};
   std::vector<DynSet> ruleFollow{};
-  std::vector<std::uint8_t> ruleNullable{};
   // The rules the entry reaches, a climb's operators and operand included.
   std::vector<bool> liveRules{};
 
@@ -88,9 +86,10 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint64_t> modeSub{};
   std::uint32_t subWords = 0;
   // 1 where any token may be read as several terminals, 2 where only a token
-  // that ends the text may; for the latter, the terminals that meet there.
+  // that ends the text may.
   Vec<std::uint8_t> modeMulti{};
-  std::vector<DynSet> modeTie{};
+  // Empty unless a mode can read arbitrarily far beyond its last match.
+  std::vector<std::uint8_t> modeBacktrack{};
   // The choices of a mode of the second kind that the end of the text can
   // settle otherwise than their token does.
   std::vector<std::uint8_t> decEnded{};
@@ -146,12 +145,10 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint16_t> edgeNode{};
   // The call position returning into each state, absent for synthetic calls.
   std::vector<std::uint16_t> returnNode{};
-  // The state the graph stands in once each position is read, and the
-  // alphabet that position was read under. A climb's operator is a position
-  // too, though the program holds no node for it: its own run follows the
-  // nodes'.
+  // The state the graph stands in once each position is read. A climb's
+  // operator is a position too, though the program holds no node for it: its
+  // own run follows the nodes'.
   std::vector<std::uint32_t> nodeAfter{};
-  std::vector<std::uint16_t> nodeAfterMode{};
   // Whether a position can be the first its rule's invocation reads.
   std::vector<std::uint8_t> nodeHead{};
   // The skip configuration the trivia in front of a position's token is read
@@ -172,6 +169,10 @@ struct LlBuiltProgram : ShapeOverflow {
   // every arm as the lexer chose it.
   std::vector<std::uint8_t> decStands{};
   std::vector<std::uint16_t> lookMode{};
+  // What an episode reads besides the graph, per rule and per choice: see
+  // `LlTable`. Empty where none is flagged.
+  std::vector<std::uint8_t> sharedRules{};
+  std::vector<std::uint8_t> repeatScopes{};
   // Per section configuration where the grammar embeds others: see
   // `LlTable`. Empty where it embeds none.
   std::vector<std::uint16_t> sectionErr{};

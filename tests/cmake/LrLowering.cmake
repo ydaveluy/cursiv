@@ -13,7 +13,7 @@ cursiv_test(LrEdges_test engines/lr/LrEdges_test.cpp
 # Regions naming trivia of their own.
 cursiv_grammar(skiplr engines/lr/RegionSkipGrammar.hpp tskip::Lr ENGINE LR)
 # Twenty optional positions on a region's edge or an end assertion.
-cursiv_grammar(wideoptionallr engines/lr/WideOptionalGrammar.hpp twide::Lr ENGINE LR)
+cursiv_grammar(wideoptionallr engines/lr/WideOptionalGrammar.hpp twideoptional::Lr ENGINE LR)
 # Embedded grammars in both engines, checked against fixed expectations.
 cursiv_grammar_pair(embed engines/lr/EmbedGrammar.hpp tembed::DocLr tembed::DocLl)
 cursiv_test(Embed_test engines/lr/Embed_test.cpp
@@ -36,8 +36,9 @@ target_sources(LrStates_test PRIVATE engines/lr/LrRuleRefusal_cases.cpp)
 set_target_properties(LrStates_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 # The cases of the passes grammar: construction passes, ranked cells and soft
 # keywords.
-# Only the master project builds what the shipped languages' own documents ask.
-if(cursiv_IS_TOP_LEVEL)
+# Only the master project builds what the shipped languages' own documents ask,
+# and only when they are built with LR: these suites read the LR tables.
+if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
   # The shipped examples under repair and at the caret.
   cursiv_test(LrExamples_test engines/lr/LrExamples_test.cpp
     arithmeticsCore
@@ -54,12 +55,14 @@ if(cursiv_IS_TOP_LEVEL)
   # Which repair a reading makes, what the search opens to find it, and what
   # it costs over a long document.
   cursiv_grammar(opentoken engines/lr/OpenTokenGrammar.hpp topen::G ENGINE LR)
+  cursiv_grammar(indentbody engines/lr/IndentGrammar.hpp tindent::body::G ENGINE LR)
   # The repair search against an enumeration of its gestures, and its
   # writer against the drive over whole documents.
   cursiv_test(LrRepairSearch_test engines/lr/LrRepairSearch_test.cpp
     arithmeticsGenerated
     domain-modelGenerated
     indentGenerated
+    indentbodyGenerated
     ambtailGenerated
     electionGenerated
     astfusedlrGenerated
@@ -80,7 +83,8 @@ if(cursiv_IS_TOP_LEVEL)
     degradedGenerated
     owedGenerated)
   # Its CPU work has a 30s watchdog: reserve all four CI test slots.
-  set_tests_properties(LrRepairBudget_test PROPERTIES TIMEOUT 60 PROCESSORS 4)
+  cursiv_timeout(LrRepairBudget_test 60)
+  set_tests_properties(LrRepairBudget_test PROPERTIES PROCESSORS 4)
 endif()
 # Grammars both lowered in process and generated: what the lowering keeps is
 # what the generated parser reads.

@@ -10,11 +10,11 @@
 
 #include "cursiv/core/services/CoreLanguage.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectDiagnosticOptions.hpp"
 #include "cursiv/test/ValidationHelper.hpp"
 #include "cursiv/test/ValidationResult.hpp"
 #include "statemachine/core/CoreServices.hpp"
-#include "cursiv/test/Check.hpp"
 
 namespace {
 

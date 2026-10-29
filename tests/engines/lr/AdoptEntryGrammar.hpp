@@ -32,7 +32,7 @@ struct G : Words {
   struct Tree : rule<(ref<Clade> + lit<";">) |
                      (option(ref<SHEBANG>) + ref<Clade>)> {};
   using entry = Tree;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace token
 
@@ -42,7 +42,7 @@ struct G : Words {
   struct Tree : rule<ref<Clade> + lit<";">> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::clade>(ref<Tree>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace inner
 
@@ -50,7 +50,7 @@ struct G : Words {
   struct Root : rule<ref<token::G::Tree> |
                      (kw<"inner"> + ref<inner::G::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tadopt

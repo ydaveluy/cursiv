@@ -13,15 +13,16 @@ void fuzz_requirements() {
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
       g::create_ast_reflection();
-  cursiv::fuzzer::lane<req::Requirements>(
-      "requirements", *parser, *reflection, 400, 0x5eed0c);
+  cursiv::fuzzer::lane<req::Requirements>("requirements", *parser, *reflection,
+                                          400, 0x5eed0c);
 }
 void fuzz_reqtests() {
   namespace g = req::generated::Tests;
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
       g::create_ast_reflection();
-  cursiv::fuzzer::lane<req::Tests>("reqtests", *parser, *reflection, 400, 0x5eed0d);
+  cursiv::fuzzer::lane<req::Tests>("reqtests", *parser, *reflection, 400,
+                                   0x5eed0d);
 }
 }  // namespace
 

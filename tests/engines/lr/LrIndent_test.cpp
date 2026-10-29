@@ -13,7 +13,8 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/lr/IndentGrammar.hpp"
+#include "engines/lr/IndentAst.hpp"
+#include "engines/lr/VirtualStateGrammar.hpp"
 #include "indent/generated/G/Module.hpp"
 #include "indentfolded/generated/Cases/Module.hpp"
 #include "indentfolded/generated/Cases/Parser.hpp"
@@ -81,7 +82,9 @@ bool offers_over(const cursiv::Parser& engine, std::string text,
   std::vector<cursiv::NextFeature> out;
   engine.nextFeaturesAt(r.cst(), from, to, out);
   for (const cursiv::NextFeature& f : out)
-    if (engine.getGrammar().terminalText(f.feature) == literal) return true;
+    for (const std::string_view s :
+         engine.getGrammar().terminalSpellings(f.feature))
+      if (s == literal) return true;
   return false;
 }
 
@@ -112,7 +115,9 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
         for (const auto& d : r.diagnostics) {
           CHECK(d.kind == cursiv::DiagnosticKind::inserted);
           CHECK(d.begin == prefix.size() && d.end == prefix.size());
-          CHECK(engine->getGrammar().terminalText(d.element) == ";");
+          const auto spellings =
+              engine->getGrammar().terminalSpellings(d.element);
+          CHECK(spellings.size() == 1 && spellings.front() == ";");
         }
         unsigned invented = 0;
         r.cst().visit_leaves([&](const cursiv::CstLeaf& leaf) {
@@ -123,7 +128,7 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
         cursiv::Cst cst;
         cursiv::LrParseStats stats;
         CHECK(cursiv::lr_parser<g::kTable>.parse(prefix + tail, cst, &stats,
-                                                 g::kDrivePtr));
+                                                 &g::kDrive));
         CHECK(stats.splits > 0 && stats.episodeSearches > 0);
         for (const auto& text : {prefix + ";" + tail, prefix + tail + "!@$"}) {
           const auto valid = engine->parse(text);
@@ -145,7 +150,7 @@ void an_indent_settles_a_cell_without_the_graph() {
   CHECK(parse_with(g::create_parser(), text) == "ab(c(d) e) f");
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr));
+  CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive));
   CHECK(stats.splits == 0);
 }
 
@@ -170,6 +175,15 @@ int main() {
   CHECK(recovers("a:\n  b\n\f\nc\n"));
   CHECK(recovers("a:\n  b:\n    c\n\fd\n"));
   CHECK(recovers("a:\n  b\n \f c\n"));
+  // ...and so is one on the last line, where no line ending follows. Past
+  // content it is plain trivia.
+  CHECK(recovers("a\n\f"));
+  CHECK(recovers("a:\n  b\n\f"));
+  CHECK(recovers("a:\n  b\n  \f"));
+  CHECK(recovers("a:\n  b:\n    c\n\f"));
+  CHECK(recovers("a:\n  b\nc\n\f"));
+  CHECK(parse("a:\n  b\f") == "a(b)");
+  CHECK(parse("a:\n  b \f\n") == "a(b)");
   // A line back to no level that was opened is no dedent the grammar takes.
   CHECK(recovers("a:\n    b\n  c\n"));
   // A deeper line where no suite opens is an error, and the parse goes on.

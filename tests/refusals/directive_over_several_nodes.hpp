@@ -20,7 +20,7 @@ struct G : Base {
             append<&ast::List::items>(many(ref<Item>, lit<",">)) +
             lit<")">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

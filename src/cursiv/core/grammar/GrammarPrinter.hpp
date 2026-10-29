@@ -19,7 +19,7 @@
 namespace cursiv {
 
 // Enough precedence to decide brackets: `(name=X)*` and `name=X*` print apart.
-enum class Prec { Choice, Unordered, Sequence, Prefix, Item };
+enum class Prec { Choice, Sequence, Prefix, Item };
 
 enum class ImageView : std::uint8_t { written = 0, resolved = 1 };
 

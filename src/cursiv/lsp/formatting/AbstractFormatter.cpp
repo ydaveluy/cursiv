@@ -64,8 +64,9 @@ std::vector<lsp::TextEdit> AbstractFormatter::formatDocumentOnType(
     const Document& document, const lsp::DocumentOnTypeFormattingParams& params,
     const CancellationToken& token) const {
   throw_if_cancelled(token);
-  // The line the caret is on, up to the caret: a keystroke may not move text
-  // the author has not reached yet.
+  // From the start of the caret's line to the caret. Edits are kept by line,
+  // as for a selection, so the whole line is formatted, text past the caret
+  // included.
   lsp::Range range{};
   range.start.line = params.position.line;
   range.start.character = 0;
@@ -115,7 +116,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
 
   // Root first, each node before its descendants: on a boundary two
   // constructions both claim, the inner one's rule is registered last and
-  // wins the tie. A subtree outside the range is not entered.
+  // wins the tie. A subtree whose lines miss the range's lines is not entered.
   std::vector<const AstNode*> pending{parsed.value};
   std::vector<const AstNode*> children;
   while (!pending.empty()) {

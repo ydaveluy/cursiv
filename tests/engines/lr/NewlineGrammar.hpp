@@ -14,6 +14,6 @@ struct NlG : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Doc>(assign<&ast::Doc::name>(ref<ID>) + ref<EOL>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnl

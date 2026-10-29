@@ -20,7 +20,9 @@ namespace ll_caret_agreement_cases {
 namespace {
 
 struct Feature {
-  std::string_view terminal, spelling, property;
+  std::string_view terminal;
+  std::vector<std::string_view> spellings;
+  std::string_view property;
   std::uint8_t narrow;
   const cursiv::AstTypeTag* type;
   bool operator==(const Feature&) const = default;
@@ -32,12 +34,17 @@ std::vector<Feature> features_at(const cursiv::Parser& parser,
   std::vector<cursiv::NextFeature> next;
   parser.nextFeaturesAt(tree, at, at, next);
   std::vector<Feature> out;
-  for (const auto& feature : next)
+  for (const auto& feature : next) {
+    const auto spellings =
+        parser.getGrammar().terminalSpellings(feature.feature);
     out.push_back({parser.getGrammar().terminalName(feature.feature),
-                   parser.getGrammar().terminalText(feature.feature),
-                   feature.property, feature.narrow, feature.type});
+                   {spellings.begin(), spellings.end()},
+                   feature.property,
+                   feature.narrow,
+                   feature.type});
+  }
   const auto key = [](const Feature& feature) {
-    return std::tuple{feature.terminal, feature.spelling, feature.property,
+    return std::tuple{feature.terminal, feature.spellings, feature.property,
                       feature.narrow,
                       feature.type ? feature.type->name : std::string_view{}};
   };

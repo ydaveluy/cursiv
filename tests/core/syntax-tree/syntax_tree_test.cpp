@@ -331,10 +331,9 @@ void the_climb_contributes_its_members() {
 
 }  // namespace infix
 
-// Two climbs, one class: `InfixRule`'s deduced type is the class its left
-// member belongs to, so both rules below key to `Two`. A descriptor keyed by
-// type alone would hand the second rule the first's three member pointers,
-// silently -- no error, no diagnostic.
+// Two climbs, one class: both rules below build `Two`, over different members.
+// A descriptor keyed by type alone would hand the second rule the first's
+// three member pointers, silently -- no error, no diagnostic.
 namespace climbs {
 
 using namespace tab::climbs;
@@ -1040,7 +1039,7 @@ using ChainHex =
     typename cursiv::ResolveOverride<tdual::D2>::template rule<Base::TEN>;
 static_assert(std::is_same_v<cursiv::rule_type_t<ChainHex>, std::uint32_t>);
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
-                             cursiv::text_conv<tdual::D1::tens_conv>>);
+                             cursiv::detail::text_conv<tdual::D1::tens_conv>>);
 
 template <auto Create>
 void an_override_keeps_the_converter_it_stood_over(const char* engine) {
@@ -1494,7 +1493,7 @@ void the_law_leaves_the_safe_combinations_alone() {
 }  // namespace textlaw
 
 // `default_converter<T>` carrying a `convert` is the conversion, so every
-// rule naming T reaches it without repeating a `text_conv`.
+// rule naming T reaches it without repeating a converter function.
 namespace own {
 
 using namespace tab::own;
@@ -1558,7 +1557,7 @@ void an_absent_one_yields_nothing() {
 
 }  // namespace optnode
 
-// `assign<&Num::value>(ref<terminal<body, Conv>>)` carries its conversion in
+// `assign<&Num::value>(ref<terminal<as<f>(body)>>)` carries its conversion in
 // the rule's own type, so splicing the reference cannot lose it.
 namespace inl {
 
@@ -2134,6 +2133,27 @@ void empty_materialized_members_are_complete() {
   }
 }
 
+// Parts that are all present but convert to empty text still write the
+// member: only a member no conversion reached holds the null view.
+void empty_joined_parts_are_complete() {
+  const auto ll = tdual::generated::Ll::create_parser();
+  const auto llReflection = tdual::generated::Ll::create_ast_reflection();
+  const auto reflection = tconv::generated::G::create_ast_reflection();
+  const std::pair<const cursiv::Parser*, const cursiv::AstReflection*>
+      engines[]{{&engine(), reflection.get()}, {ll.get(), llReflection.get()}};
+  for (const auto& [parser, r] : engines) {
+    const auto parsed = parser->parse(parser == ll.get()
+                                          ? "$conv:blank \"\" \"\""
+                                          : "blank \"\" \"\"");
+    CHECK(parsed && parsed.diagnostics.empty());
+    const auto* value = parsed.value_as<comp::N>();
+    CHECK(value != nullptr);
+    if (value == nullptr) continue;
+    CHECK(value->name.empty() && value->name.data() != nullptr);
+    CHECK(r->isComplete(*value));
+  }
+}
+
 void floating_conversion_ignores_host_rounding() {
   struct Restore {
     int mode = std::fegetround();
@@ -2264,6 +2284,33 @@ void a_leaf_converter_composes() {
   CHECK(n != nullptr);
   // "a.b", not "a.'b'": the quotes are not part of what the parts denote.
   if (n != nullptr) CHECK(n->name == "a.b");
+}
+
+// A call that read nothing still gives its parent the text it converts to,
+// in a grammar where no converter takes parts.
+void an_empty_call_gives_its_text() {
+  const cursiv::ParseResult none = engine().parse("emptycall abc");
+  CHECK(none.accepted && none.diagnostics.empty());
+  const auto* n0 = none.value_as<comp::N>();
+  CHECK(n0 != nullptr);
+  if (n0 != nullptr) CHECK(n0->name == "noneabc");
+  const cursiv::ParseResult some = engine().parse("emptycall ! abc");
+  CHECK(some.accepted && some.diagnostics.empty());
+  const auto* n1 = some.value_as<comp::N>();
+  CHECK(n1 != nullptr);
+  if (n1 != nullptr) CHECK(n1->name == "!abc");
+}
+
+// A converter that reads nothing is run alone: the calls below its record, here
+// one that refuses its text, are not its input.
+void a_converter_without_input_runs_no_call() {
+  for (const char* const text : {"fixed !ab.c/d", "fixed !az.c/d"}) {
+    const cursiv::ParseResult r = engine().parse(text);
+    CHECK(r.accepted && r.diagnostics.empty());
+    const auto* n = r.value_as<comp::N>();
+    CHECK(n != nullptr);
+    if (n != nullptr) CHECK(n->name == "fixed/d");
+  }
 }
 
 void parts_on_data_rule() {
@@ -2523,6 +2570,7 @@ void run() {
   keyword_template_converters_compile_and_parse();
   text_helpers_keep_empty_values_present();
   empty_materialized_members_are_complete();
+  empty_joined_parts_are_complete();
   floating_conversion_ignores_host_rounding();
   leading_plus();
   char_like_excluded();
@@ -2530,6 +2578,8 @@ void run() {
   enumerators_outside_the_first_run();
   parts_on_data_rule();
   a_leaf_converter_composes();
+  an_empty_call_gives_its_text();
+  a_converter_without_input_runs_no_call();
   a_repair_invents_no_value();
   parts_are_atoms();
   data_value_is_the_language();
@@ -2665,6 +2715,40 @@ void a_branch_run_holds_at_most_twice_its_records() {
     run.leaf(i, i + 1, 0);
     CHECK(run.capacity() <= std::max<std::size_t>(64, 2 * run.records()));
   }
+}
+
+// A watched run reads the stop once per run of records, on the test that
+// guards its room; the watch ends with its scope and never travels with a
+// move.
+void a_watched_run_answers_a_stop_within_a_run_of_records() {
+  constexpr cursiv::NodeCount kRun = 64 * 1024;
+  cursiv::CancellationTokenSource source;
+  const cursiv::CancellationToken token = source.get_token();
+  cursiv::CstRun run;
+  run.reserve_for(std::size_t{4} * kRun);
+  cursiv::NodeCount written = 0;
+  bool threw = false;
+  {
+    cursiv::CstRun::Watch watch(run, token);
+    for (; written < kRun / 2; ++written) run.leaf(written, written + 1, 0);
+    source.request_stop();
+    try {
+      for (; written < 4 * kRun; ++written) run.leaf(written, written + 1, 0);
+    } catch (const cursiv::OperationCancelled&) {
+      threw = true;
+    }
+  }
+  CHECK(threw && written <= kRun);
+
+  // Unwatched again: the stop is no longer read, and the room still grows.
+  for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) run.leaf(i, i + 1, 0);
+  CHECK(run.records() == written + 4 * kRun);
+
+  cursiv::CstRun watched;
+  cursiv::CstRun::Watch watch(watched, token);
+  cursiv::CstRun moved(std::move(watched));
+  for (cursiv::NodeCount i = 0; i < 4 * kRun; ++i) moved.leaf(i, i + 1, 0);
+  CHECK(moved.records() == 4 * kRun);
 }
 
 void entry_defaults() {
@@ -2848,6 +2932,7 @@ void run() {
   a_large_document_is_reserved_for();
   reservation_follows_record_density();
   a_branch_run_holds_at_most_twice_its_records();
+  a_watched_run_answers_a_stop_within_a_run_of_records();
   entry_defaults();
   moved_from_is_empty();
   diagnostics_follow_the_tree();

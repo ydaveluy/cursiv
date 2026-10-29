@@ -49,8 +49,8 @@ struct Base : cursiv::GrammarSpec {
                         create<Name>(assign<&Name::id>(ref<ID>)) |
                         (lit<"("> + ref<Expression> + lit<")">)> {};
   struct Expression
-      : infix<Primary, &Binary::left, &Binary::op, &Binary::right,
-              (left(lit<"*"> | lit<"/">) >> left(lit<"+"> | lit<"-">))> {};
+      : infix<Primary, Binary,
+              levels(left(lit<"*"> | lit<"/">), left(lit<"+"> | lit<"-">))> {};
 
   struct Statement;
   struct LetStmt
@@ -71,7 +71,7 @@ struct Base : cursiv::GrammarSpec {
       : rule<create<Unit>(many(append<&Unit::stmts>(ref<Statement>)))> {};
 
   using entry = UnitRule;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 

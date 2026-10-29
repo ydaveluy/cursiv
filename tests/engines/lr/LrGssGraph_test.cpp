@@ -224,6 +224,40 @@ void a_dead_arm_holds_the_text_three_tokens() {
   CHECK(g.elected().size() == 3);
 }
 
+// One token past a dead arm, the vertex alone is held. The readings past it
+// fork, one of them dies, and the first vertex opened two real tokens on gives
+// the text back at the held vertex: the derivation ends there.
+void a_reading_past_a_held_vertex_gives_the_text_back_at_it() {
+  LrGssGraph g;
+  g.seed(stack_of({0, 3}), at(3, 0));
+  const Id s = open_next(g);
+  g.die(0);
+  const Id held = shift(g, s, 7, 1, 5, {});
+  // As an episode reads: the nearest vertex, settled, offered, then opened.
+  TextOffset openedAt = 0;
+  const auto offer = [&](Id want) {
+    Id v = LrGssGraph::none;
+    TextOffset p = 0;
+    CHECK(g.next_vertex(v, p) && v == want);
+    g.settle(p);
+    const bool back = g.hand_back(v, openedAt);
+    if (!back) {
+      g.take_vertex();
+      openedAt = std::max(openedAt, p);
+    }
+    return back;
+  };
+  CHECK(!offer(held));
+  const Id x = shift(g, held, 8, 2, 6, {});
+  const Id y = shift(g, held, 9, 2, 7, {});
+  CHECK(!offer(x));
+  const Id top = shift(g, x, 7, 3, 8, {});
+  CHECK(!offer(y));
+  g.die(2);
+  CHECK(offer(top));
+  CHECK(g.elected().size() == 1);
+}
+
 // A laid indent spans real bytes but validates no reading. Both hand-back and
 // the frozen sources wait for three real tokens.
 void laid_shifts_do_not_validate_or_expire_frozen_readings() {
@@ -595,6 +629,7 @@ int main() {
   two_symbols_onto_one_state_both_stay();
   two_arms_over_different_states_both_stay();
   a_dead_arm_holds_the_text_three_tokens();
+  a_reading_past_a_held_vertex_gives_the_text_back_at_it();
   laid_shifts_do_not_validate_or_expire_frozen_readings();
   frozen_stacks_are_ranked_before_the_cap();
   frozen_stacks_share_prefixes_and_keep_equal_rank_order();

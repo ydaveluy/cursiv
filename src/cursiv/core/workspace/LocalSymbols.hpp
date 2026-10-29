@@ -174,9 +174,8 @@ class LocalSymbols {
 
   // Grouped by container after `seal`, each group in declaration order.
   std::vector<AstNodeDescription> _entries;
-  // The container of `_entries[i]`, while building only: `seal` permutes it
-  // with the entries, copies what the name table needs into the slots, and
-  // drops it.
+  // The container of `_entries[i]`, while building only: `seal` groups the
+  // entries by it and drops it, since each group then names its container.
   std::vector<const AstNode*> _containerOf;
   // The next entry of the same container carrying the same name, or `kNone`.
   std::vector<std::uint32_t> _nextSameName;

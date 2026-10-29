@@ -1,13 +1,9 @@
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/LexicalPredicatesAst.hpp"
 
 namespace tlexicalpredicates {
-
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
 
 struct Tag {};
 
@@ -139,7 +135,7 @@ struct Base : cursiv::GrammarSpec {
                            (lit<"through:"> + Read<Through>)) +
                           eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = Comment;
 };
 struct Ll : Base {};

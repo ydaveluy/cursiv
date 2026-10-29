@@ -36,8 +36,8 @@ class LlLowerer : private LlLowerState, public Lowerer {
   void declare_rules() override;
 
   ImageId ended_in(ImageId id, bool inPredicate);
-  bool buries(ImageId id) const;
-  ImageId operator_body(unsigned cfg, ImageId op);
+  ImageId operator_body(unsigned cfg, ImageId op,
+                        std::vector<std::uint32_t>& reading);
 
   std::uint16_t lay(unsigned cfg, ImageId e);
   std::uint16_t lay_ref(unsigned cfg, std::uint32_t rule);

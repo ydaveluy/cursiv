@@ -70,7 +70,7 @@ struct Base : cursiv::GrammarSpec {
                      ref<SameNarrow> | ref<Mixed> | ref<Field> | ref<Bare> |
                      ref<OnlyAlpha> | ref<OnlyBeta>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Base {};

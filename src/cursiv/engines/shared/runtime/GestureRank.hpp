@@ -13,15 +13,23 @@ inline constexpr std::uint32_t kNoGestureLink = 0xFFFFFFFFu;
 
 class GestureRank {
  public:
-  // Whether path `a` ranks before path `b`, the paths being the links ending
-  // them. Both are walked up from their ends, each marking what it crosses,
-  // until one steps on what the other crossed: the cost is the distance to the
-  // link they share, never the depth. A `Gesture` has a `parent` and a
-  // `choice`.
+  // Where two paths part: the link they share, and on each side the link just
+  // below it -- `kNoGestureLink` for a path that ends there. Paths from two
+  // roots share none, and their roots stand for where they part.
+  struct Parting {
+    std::uint32_t shared = kNoGestureLink;
+    std::uint32_t a = kNoGestureLink;
+    std::uint32_t b = kNoGestureLink;
+  };
+
+  // Paths `a` and `b`, the links ending them, walked up from their ends, each
+  // marking what it crosses, until one steps on what the other crossed: the
+  // cost is the distance to the link they share, never the depth. A `Gesture`
+  // has a `parent` and a `choice`.
   template <class Gesture>
-  bool before(const std::vector<Gesture>& links, std::uint32_t a,
-              std::uint32_t b) {
-    if (a == b) return false;
+  Parting part(const std::vector<Gesture>& links, std::uint32_t a,
+               std::uint32_t b) {
+    if (a == b) return {a, kNoGestureLink, kNoGestureLink};
     if (_marks.size() < links.size()) _marks.resize(links.size());
     if (++_stamp == 0x80000000u) {
       for (Mark& m : _marks) m.seen = 0;
@@ -41,28 +49,32 @@ class GestureRank {
         if (up == kNoGestureLink) continue;
         if (_marks[up].seen == (base | (side ^ 1u))) {
           const std::uint32_t theirs = _marks[up].via;
-          return side == 0 ? parted_before(links, below, theirs)
-                           : parted_before(links, theirs, below);
+          return side == 0 ? Parting{up, below, theirs}
+                           : Parting{up, theirs, below};
         }
         _marks[up] = {base | side, below};
         top[side] = up;
       }
-    return parted_before(links, top[0], top[1]);
+    return {kNoGestureLink, top[0], top[1]};
+  }
+
+  // Whether path `a` ranks before path `b`: the lower choice where they part,
+  // and a path that ends there first.
+  template <class Gesture>
+  bool before(const std::vector<Gesture>& links, std::uint32_t a,
+              std::uint32_t b) {
+    return a != b && before(links, part(links, a, b));
+  }
+  template <class Gesture>
+  static bool before(const std::vector<Gesture>& links, const Parting& p) {
+    if (p.a == kNoGestureLink || p.b == kNoGestureLink)
+      return p.a == kNoGestureLink;
+    return links[p.a].choice != links[p.b].choice
+               ? links[p.a].choice < links[p.b].choice
+               : p.a < p.b;
   }
 
  private:
-  // The lower choice at the link two paths part on: `a` and `b` are the links
-  // just below it, `kNoGestureLink` for a path that ends there, which comes
-  // first.
-  template <class Gesture>
-  static bool parted_before(const std::vector<Gesture>& links, std::uint32_t a,
-                            std::uint32_t b) {
-    if (a == kNoGestureLink || b == kNoGestureLink) return a == kNoGestureLink;
-    return links[a].choice != links[b].choice
-               ? links[a].choice < links[b].choice
-               : a < b;
-  }
-
   // The stamp of the ranking that marked a link, and the link its walk came up
   // from.
   struct Mark {

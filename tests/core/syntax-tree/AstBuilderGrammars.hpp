@@ -44,7 +44,7 @@ struct G : cursiv::GrammarSpec {
     for (char c : t) v = v * 10 + (c - '0');
     return v;
   };
-  struct NUM : terminal<some(d), cursiv::text_conv<num_conv>> {};
+  struct NUM : terminal<as<num_conv>(some(d))> {};
   // `create<Mid>` where the deduction would answer `Mid` anyway: `Mid` is a
   // strict base of what `LeafR` builds, and a type that is the base of another
   // rule's is one the inherited-member trap could have produced.
@@ -58,7 +58,7 @@ struct G : cursiv::GrammarSpec {
                      option(assign<&Holder::tag>(ref<NUM>)) +
                      option(assign<&Holder::target>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab::hier
@@ -111,12 +111,12 @@ struct G : cursiv::GrammarSpec {
   static constexpr auto vis_conv = [](std::string_view t) {
     return t == "priv" ? Vis::priv : Vis::pub;
   };
-  struct VIS : terminal<some(cr<"a-z">), cursiv::text_conv<vis_conv>> {};
+  struct VIS : terminal<as<vis_conv>(some(cr<"a-z">))> {};
   struct Root
       : rule<(assign<&Decl::vis>(ref<VIS>) + assign<&Decl::name>(ref<ID>)) |
              (kw<"refl"> + assign<&Decl::vis>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab::enm
@@ -131,7 +131,7 @@ struct G : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Root : rule<create<Node> + kw<"x"> + ref<ID>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab::bare
@@ -181,13 +181,13 @@ struct Val : cursiv::Extends<cursiv::AstNode> {
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct BOOL : terminal<kw<"true"> | kw<"false">, bool> {};
+  struct BOOL : terminal<as<bool>(kw<"true"> | kw<"false">)> {};
   static constexpr auto num_conv = [](std::string_view t) {
     double v = 0;
     for (char c : t) v = v * 10 + (c - '0');
     return v;
   };
-  struct NUM : terminal<some(d), cursiv::text_conv<num_conv>> {};
+  struct NUM : terminal<as<num_conv>(some(d))> {};
   // The positioned result of the same value type: the deduction peels the
   // wrapper, so this rule's value type is `double` and the exactness round
   // sees `double` -- not `ConversionResult<double>`, which would match no
@@ -198,13 +198,13 @@ struct G : cursiv::GrammarSpec {
       if (c != '%') v = v * 10 + (c - '0');
     return cursiv::ConversionResult<double>::ok(v / 100);
   };
-  struct PCT : terminal<some(d) + lit<"%">, cursiv::text_conv<pct_conv>> {};
+  struct PCT : terminal<as<pct_conv>(some(d) + lit<"%">)> {};
   struct STR : terminal<some(cr<"a-z">)> {};
   // PCT before NUM: `42%` must not be read as `42` with a stray tail.
   struct Root : rule<assign<&Val::v>(ref<BOOL>) | assign<&Val::v>(ref<PCT>) |
                      assign<&Val::v>(ref<NUM>) | assign<&Val::v>(ref<STR>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab::exact
@@ -218,11 +218,12 @@ struct Val : cursiv::Extends<cursiv::AstNode> {
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct NUM : terminal<some(d), std::int64_t> {};  // annotated, no converter
+  // A target type, no converter function.
+  struct NUM : terminal<as<std::int64_t>(some(d))> {};
   struct WORD : terminal<some(cr<"a-z">)> {};
   struct Root : rule<assign<&Val::v>(ref<NUM>) | assign<&Val::v>(ref<WORD>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab::annot
@@ -463,11 +464,10 @@ struct All : cursiv::GrammarSpec {
   struct ClimbsINT : terminal<some(d)> {};
   struct ClimbsPrim : rule<assign<&climbs::Two::value>(ref<ClimbsINT>)> {};
   struct ClimbsE1
-      : infix<ClimbsPrim, &climbs::Two::left, &climbs::Two::op,
-              &climbs::Two::right, (left(kw<"*">) >> left(kw<"+">))> {};
-  struct ClimbsE2 : infix<ClimbsPrim, &climbs::Two::l2, &climbs::Two::op2,
-                          &climbs::Two::r2, (left(kw<"/">) >> left(kw<"@">))> {
-  };
+      : infix<ClimbsPrim, climbs::Two, levels(left(kw<"*">), left(kw<"+">))> {};
+  struct ClimbsE2
+      : infix<ClimbsPrim, climbs::Two, levels(left(kw<"/">), left(kw<"@">)),
+              &climbs::Two::l2, &climbs::Two::op2, &climbs::Two::r2> {};
   struct ClimbsRoot : rule<assign<&climbs::Holder2::a>(ref<ClimbsE1>) +
                            assign<&climbs::Holder2::b>(ref<ClimbsE2>)> {};
 
@@ -502,7 +502,7 @@ struct All : cursiv::GrammarSpec {
           "small is at most 999");
     return cursiv::ConversionResult<std::int32_t>::ok(v);
   };
-  struct VocabSMALL : terminal<some(d), cursiv::text_conv<vocab_small_conv>> {};
+  struct VocabSMALL : terminal<as<vocab_small_conv>(some(d))> {};
   // The two branches of the tag write two different alternatives, so each
   // payload must name its value type exactly.
   static constexpr auto vocab_num_conv = [](std::string_view t) {
@@ -510,7 +510,7 @@ struct All : cursiv::GrammarSpec {
     for (char c : t) v = v * 10 + (c - '0');
     return v;
   };
-  struct VocabNUM : terminal<some(d), cursiv::text_conv<vocab_num_conv>> {};
+  struct VocabNUM : terminal<as<vocab_num_conv>(some(d))> {};
   struct VocabNAME : terminal<some(cr<"a-z">)> {};
   // A converter that materialises: uppercasing produces a name the document
   // does not spell, so it allocates in the resource the builder hands it and
@@ -522,8 +522,7 @@ struct All : cursiv::GrammarSpec {
       room[i] = static_cast<char>(t[i] - 'a' + 'A');
     return std::string_view(room.data(), room.size());
   };
-  struct VocabQNAME
-      : terminal<some(cr<"a-z">), cursiv::text_conv<vocab_qname_conv>> {};
+  struct VocabQNAME : terminal<as<vocab_qname_conv>(some(cr<"a-z">))> {};
   struct VocabTgt
       : rule<kw<"target"> + assign<&vocab::Target::name>(ref<VocabID>)> {};
   struct VocabRoot
@@ -542,7 +541,7 @@ struct All : cursiv::GrammarSpec {
              append<&vocab::Rec::also>(ref<VocabID>) +
              append<&vocab::Rec::also>(ref<VocabID>)> {};
 
-  struct Annot2INT : terminal<some(d), std::int32_t> {};
+  struct Annot2INT : terminal<as<std::int32_t>(some(d))> {};
   struct Annot2Root : rule<assign<&annot2::Num::n>(ref<Annot2INT>)> {};
 
   struct NodealtID : terminal<some(cr<"a-z">)> {};
@@ -578,9 +577,8 @@ struct All : cursiv::GrammarSpec {
 
   struct ClimbINT : terminal<some(d)> {};
   struct ClimbPrim : rule<assign<&climb::Num::value>(ref<ClimbINT>)> {};
-  struct ClimbE : infix<ClimbPrim, &climb::Bin::left, &climb::Bin::op,
-                        &climb::Bin::right, (left(kw<"*">) >> left(kw<"+">))> {
-  };
+  struct ClimbE
+      : infix<ClimbPrim, climb::Bin, levels(left(kw<"*">), left(kw<"+">))> {};
 
   struct HoistID : terminal<some(cr<"a-z">)> {};
   struct HoistM : rule<create<hoist::V> + kw<"m">> {};
@@ -619,8 +617,8 @@ struct All : cursiv::GrammarSpec {
     return t.substr(1, t.size() - 2);
   };
   struct TextID : terminal<some(cr<"a-z">)> {};
-  struct TextQUOTED : terminal<lit<"'"> + many(cr<"^'">) + lit<"'">,
-                               cursiv::text_conv<text_quoted_conv>> {};
+  struct TextQUOTED
+      : terminal<as<text_quoted_conv>(lit<"'"> + many(cr<"^'">) + lit<"'">)> {};
   // Materialises its answer, in the resource the builder hands it: lowercasing
   // spells bytes the document does not, and the view answered is a view of
   // the tree's own memory.
@@ -631,22 +629,21 @@ struct All : cursiv::GrammarSpec {
       room[i] = static_cast<char>(t[i] - 'A' + 'a');
     return std::string_view(room.data(), room.size());
   };
-  struct TextLOWER
-      : terminal<some(cr<"A-Z">), cursiv::text_conv<text_lower_conv>> {};
+  struct TextLOWER : terminal<as<text_lower_conv>(some(cr<"A-Z">))> {};
   // Not in the body: the shape the law refuses, declared here so the refusal
   // is asserted beside the shapes it admits.
   static constexpr auto text_owns_conv = [](std::string_view t) {
     return std::string(t);
   };
-  struct TextOWNS
-      : terminal<some(cr<"A-Z">), cursiv::text_conv<text_owns_conv>> {};
-  struct TextNUM : terminal<some(d), std::int64_t> {};  // annotated, no conv
+  struct TextOWNS : terminal<as<text_owns_conv>(some(cr<"A-Z">))> {};
+  // A target type, no converter function.
+  struct TextNUM : terminal<as<std::int64_t>(some(d))> {};
   struct TextRoot : rule<assign<&textlaw::N::slice>(ref<TextID>) +
                          assign<&textlaw::N::viewed>(ref<TextQUOTED>) +
                          assign<&textlaw::N::annotated>(ref<TextNUM>) +
                          assign<&textlaw::N::built>(ref<TextLOWER>)> {};
 
-  struct OwnPCT : terminal<some(d), own::Percent> {};
+  struct OwnPCT : terminal<as<own::Percent>(some(d))> {};
   struct OwnRoot
       : rule<create<own::Node>(assign<&own::Node::share>(ref<OwnPCT>))> {};
 
@@ -658,7 +655,7 @@ struct All : cursiv::GrammarSpec {
                        assign<&optnode::Bag::head>(ref<OptIt>) +
                        option(assign<&optnode::Bag::tail>(ref<OptIt>)))> {};
 
-  struct InlHEX : terminal<some(cr<"0-9a-f">), cursiv::text_conv<inl::hexv>> {};
+  struct InlHEX : terminal<as<inl::hexv>(some(cr<"0-9a-f">))> {};
   struct InlN : rule<create<inl::Num> + assign<&inl::Num::value>(ref<InlHEX>)> {
   };
   struct InlRoot
@@ -699,7 +696,7 @@ struct All : cursiv::GrammarSpec {
              (kw<"$own"> + ref<OwnRoot>) | (kw<"$rebind"> + ref<RebindRoot>) |
              (kw<"$opt"> + ref<OptRoot>) | (kw<"$inl"> + ref<InlRoot>)> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tab

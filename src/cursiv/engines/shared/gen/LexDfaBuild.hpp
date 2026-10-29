@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/gen/ChainIndex.hpp"
 #include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
@@ -39,12 +40,11 @@ struct LexDfaReading {
     auto operator<=>(const Accept&) const = default;
   };
   // A trivia the subset gave up because a keyword's spelling stands beside it:
-  // launched into the subset `resume` where none of the keywords `stands`
-  // names (as `LexKeywordCut::reads` tags them) stands.
+  // launched into the subset `resume` where none of the keywords of `gated`
+  // stands.
   struct Gate {
     std::uint16_t term;
     std::uint16_t resume;
-    std::vector<std::uint32_t> stands;
   };
   // By terminal, then boundary, each once. A terminal read with no boundary
   // keeps that reading alone.
@@ -54,6 +54,9 @@ struct LexDfaReading {
   std::vector<Accept> stands;
   std::vector<std::uint16_t> relays;  // ascending, each once
   std::vector<Gate> gates;
+  // The keywords every gate waits on, as `LexKeywordCut::reads` tags them;
+  // empty where there is no gate.
+  std::vector<std::uint32_t> gated;
   DynSet acc;                         // the terminals of `accepts`
   int best = -1;                      // the terminal the lexer elects
   // An acceptance stands behind the refusal of a scalar's rest.
@@ -75,11 +78,10 @@ struct LexDfaReading {
       out.push_back((std::uint64_t{a.term} << 16) | a.bound);
     out.push_back(~std::uint64_t{0} - 1u);
     for (const std::uint16_t r : relays) out.push_back(r);
-    for (const Gate& gate : gates) {
+    for (const Gate& gate : gates)
       out.push_back((std::uint64_t{gate.term} << 16) | gate.resume);
-      out.push_back(gate.stands.size());
-      for (const std::uint32_t tag : gate.stands) out.push_back(tag);
-    }
+    out.push_back(gated.size());
+    for (const std::uint32_t tag : gated) out.push_back(tag);
   }
 };
 
@@ -169,15 +171,18 @@ struct LexDfaBuild {
     bool strayed = false;
     for (std::size_t i = 0; i < _order.size(); ++i) {
       std::vector<LexDfaReading::Gate> gates;
-      const std::size_t mn = detach(members(_order[i]), gates);
+      std::vector<std::uint32_t> gated;
+      const std::size_t mn = detach(members(_order[i]), gates, gated);
       readings.push_back(read(mn));
       readings.back().gates = std::move(gates);
+      readings.back().gated = std::move(gated);
       cls.push_back(intern_key(readings.back()));
       plain.push_back(cls.back());
       if (readings.back().strayed) {
         strayed = true;
         auto bare = read(mn, true);
         bare.gates = readings.back().gates;
+        bare.gated = readings.back().gated;
         plain.back() = intern_key(bare);
       }
       rows.resize((i + 1) * _ncls);
@@ -339,9 +344,11 @@ struct LexDfaBuild {
   // A state whose every wide byte leads into a region of states that read
   // alike -- the same row on every other byte, the same acceptance bar the
   // refusal of a scalar's rest, none dead on a wide byte -- reads them in one
-  // stride into the region's state that has no such refusal. No end falls
-  // inside a scalar there: the walk never dies on a continuation byte, and
-  // the refusal only held an end back from the byte that continues it.
+  // stride into the least state of the region that has no such refusal. No
+  // end falls inside a scalar there: the walk never dies on a continuation
+  // byte, and the refusal only held an end back from the byte that continues
+  // it. A region is what the wide bytes reach, so what it says is said once
+  // per strong component of the wide bytes, from the components it reaches.
   void collapse(const std::vector<std::uint32_t>& blk, std::uint32_t nblocks,
                 std::vector<std::uint32_t>& rows,
                 const std::vector<std::uint32_t>& strict,
@@ -351,6 +358,7 @@ struct LexDfaBuild {
     std::vector<unsigned> wide, narrow;
     for (unsigned c = 0; c < _ncls; ++c)
       (_wide[c] ? wide : narrow).push_back(c);
+    if (wide.empty()) return;
     std::vector<std::uint32_t> head(nblocks, kNoLocal);
     for (std::size_t s = n; s-- > 0;)
       head[blk[s]] = static_cast<std::uint32_t>(s);
@@ -362,40 +370,62 @@ struct LexDfaBuild {
       const auto& r = readings[head[b]];
       return r.relays.empty() && r.gates.empty();
     };
-    std::vector<std::uint32_t> target(nblocks, kNoLocal),
-        seen(nblocks, kNoLocal);
-    std::vector<std::uint32_t> region;
+    std::vector<std::uint32_t> starts{0}, edges;
+    for (std::uint32_t b = 0; b < nblocks; ++b) {
+      for (const unsigned c : wide) edges.push_back(to(b, c));
+      starts.push_back(static_cast<std::uint32_t>(edges.size()));
+    }
+    const auto scc = StrongComponents<>::build(starts, edges);
+    // What a component and all it reaches say: whether each state is clean
+    // and lives on every wide byte, a state they all read alike with
+    // (`kNoLocal` where they do not), and their least state with no refusal.
+    struct Region {
+      bool total = true;
+      std::uint32_t like = kNoLocal, least = kNoLocal;
+    };
+    const auto alike = [&](std::uint32_t y, std::uint32_t b) {
+      return y == b ||
+             (plain[head[y]] == plain[head[b]] &&
+              std::ranges::all_of(
+                  narrow, [&](unsigned c) { return to(y, c) == to(b, c); }));
+    };
+    const auto join = [&](Region& into, const Region& r) {
+      into.total = into.total && r.total;
+      into.least = std::min(into.least, r.least);
+      if (into.like != kNoLocal &&
+          (r.like == kNoLocal || !alike(into.like, r.like)))
+        into.like = kNoLocal;
+    };
+    // A component closes after all it reaches: in that order, each region is
+    // joined from those already laid.
+    std::vector<std::uint32_t> order(nblocks);
+    for (std::uint32_t b = 0; b < nblocks; ++b) order[b] = b;
+    std::ranges::sort(order, {},
+                      [&](std::uint32_t b) { return scc.component[b]; });
+    std::vector<Region> region(nblocks);
+    const Region dead{false};
+    const auto reach = [&](std::uint32_t t) -> const Region& {
+      return t == kNoLocal ? dead : region[scc.component[t]];
+    };
+    for (std::size_t i = 0; i < order.size(); ++i) {
+      const std::uint32_t y = order[i], own = scc.component[y];
+      const Region self{clean(y), y,
+                        strict[head[y]] == plain[head[y]] ? y : kNoLocal};
+      if (i == 0 || scc.component[order[i - 1]] != own)
+        region[own] = self;
+      else
+        join(region[own], self);
+      for (auto e = starts[y]; e < starts[y + 1]; ++e)
+        if (edges[e] == kNoLocal || scc.component[edges[e]] != own)
+          join(region[own], reach(edges[e]));
+    }
+    std::vector<std::uint32_t> target(nblocks, kNoLocal);
     for (std::uint32_t x = 0; x < nblocks; ++x) {
       if (!clean(x)) continue;
-      region.clear();
-      bool total = true;
-      const auto enter = [&](std::uint32_t t) {
-        if (t == kNoLocal) {
-          total = false;
-        } else if (seen[t] != x) {
-          seen[t] = x;
-          region.push_back(t);
-        }
-      };
-      for (const unsigned c : wide) enter(to(x, c));
-      for (std::size_t i = 0; total && i < region.size(); ++i) {
-        const auto y = region[i];
-        total = clean(y);
-        for (const unsigned c : wide) enter(to(y, c));
-      }
-      if (!total || region.empty()) continue;
-      std::sort(region.begin(), region.end());
-      for (const auto b : region) {
-        if (strict[head[b]] != plain[head[b]]) continue;
-        const bool alike = std::ranges::all_of(region, [&](std::uint32_t y) {
-          return plain[head[y]] == strict[head[b]] &&
-                 std::ranges::all_of(
-                     narrow, [&](unsigned c) { return to(y, c) == to(b, c); });
-        });
-        if (!alike) continue;
-        target[x] = b;
-        break;
-      }
+      Region r = reach(edges[starts[x]]);
+      for (auto e = starts[x] + 1; e < starts[x + 1]; ++e)
+        join(r, reach(edges[e]));
+      if (r.total && r.like != kNoLocal) target[x] = r.least;
     }
     for (std::size_t s = 0; s < n; ++s)
       if (const auto b = target[blk[s]]; b != kNoLocal)
@@ -473,6 +503,10 @@ struct LexDfaBuild {
     return bound != kNoSet && bound < _words.size() && _words[bound] != 0;
   }
 
+  // What the first `mn` members accept and launch. A `plain` read answers the
+  // key of the subset as its strays leave it: the acceptance is settled as in
+  // any read, but `acc`, `best` and `strayed` stay unset, which the key never
+  // reads.
   LexDfaReading read(std::size_t mn, bool plain = false) const {
     LexDfaReading r;
     const LexNfaState* const nst = _nfa.s.data();
@@ -480,7 +514,7 @@ struct LexDfaBuild {
       const LexNfaState& st = nst[static_cast<std::size_t>(_mem[q])];
       if (st.relay >= 0) r.relays.push_back(static_cast<std::uint16_t>(st.relay));
       if (st.accept >= 0) {
-        r.strayed = r.strayed || st.strayBound;
+        if (!plain) r.strayed = r.strayed || st.strayBound;
         const auto own = plain ? st.plain() : st.bound;
         const auto bound = own < 0 ? kNoSet : static_cast<std::uint16_t>(own);
         r.accepts.push_back(
@@ -499,16 +533,18 @@ struct LexDfaBuild {
     std::size_t kept = 0;
     for (std::size_t i = 0, j; i < rows.size(); i = j) {
       for (j = i; j < rows.size() && rows[j].term == rows[i].term;) ++j;
-      const auto term = rows[i].term;
-      r.acc.set(term);
-      auto tier = 0u;
-      for (std::size_t k = i; k < j; ++k)
-        tier = std::max<unsigned>(tier, rows[k].tier);
-      const auto rank = lex_rank(tier, _terms[term].trivia);
-      if (r.best < 0 || lex_term_before(rank, term, bestRank,
-                                        static_cast<unsigned>(r.best))) {
-        r.best = term;
-        bestRank = rank;
+      if (!plain) {
+        const auto term = rows[i].term;
+        r.acc.set(term);
+        auto tier = 0u;
+        for (std::size_t k = i; k < j; ++k)
+          tier = std::max<unsigned>(tier, rows[k].tier);
+        const auto rank = lex_rank(tier, _terms[term].trivia);
+        if (r.best < 0 || lex_term_before(rank, term, bestRank,
+                                          static_cast<unsigned>(r.best))) {
+          r.best = term;
+          bestRank = rank;
+        }
       }
       if (rows[j - 1].bound == kNoSet) {
         for (std::size_t k = i; k + 1 < j; ++k)
@@ -539,9 +575,11 @@ struct LexDfaBuild {
 
   // A trivia holding a relay goes on only behind `gates` wherever a keyword
   // stands beside it; any other trivia, once a keyword is spelled whole. One
-  // subset per terminal, and what the trivia accepts stays. Answers the
-  // members left.
-  std::size_t detach(std::size_t mn, std::vector<LexDfaReading::Gate>& gates) {
+  // subset per terminal, and what the trivia accepts stays. `gated` takes the
+  // keywords the gates wait on, once for all of them. Answers the members
+  // left.
+  std::size_t detach(std::size_t mn, std::vector<LexDfaReading::Gate>& gates,
+                     std::vector<std::uint32_t>& gated) {
     if (!_cut.active) return mn;
     int* const mw = _mem.data();
     std::vector<std::uint32_t> stands;
@@ -579,8 +617,9 @@ struct LexDfaBuild {
       const std::uint32_t resume = number(_sub.intern());
       if (resume >= kDeadState)
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
-      gates.push_back({term, static_cast<std::uint16_t>(resume), stands});
+      gates.push_back({term, static_cast<std::uint16_t>(resume)});
     }
+    if (!gates.empty()) gated = std::move(stands);
     return kept;
   }
 

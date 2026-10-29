@@ -35,13 +35,12 @@ struct G : Base {
                                  flag<&cycle::Glob::trailing>(lit<"*">))> {
   };
   struct Primary : rule<ref<NameRule> | ref<GlobRule>> {};
-  struct Expr : infix<Primary, &cycle::Binary::left, &cycle::Binary::op,
-                      &cycle::Binary::right, left(ref<MULT>)> {};
+  struct Expr : infix<Primary, cycle::Binary, left(ref<MULT>)> {};
   struct Root
       : rule<create<cycle::Document>(
             append<&cycle::Document::values>(ref<Primary>) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

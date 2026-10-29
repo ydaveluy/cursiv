@@ -29,8 +29,6 @@ struct LlGesture {
   // in hand begins.
   TextOffset at = 0;
   TextOffset begin = 0;
-  // What the reading it was made from had paid.
-  std::uint32_t cost = 0;
 };
 
 }  // namespace cursiv

@@ -876,8 +876,8 @@ class SubfolderRefusingFileSystemProvider final
  public:
   explicit SubfolderRefusingFileSystemProvider(std::string refused)
       : _refused(std::move(refused)) {}
-  void addFile(std::string uri, std::string text) {
-    _inner.addFile(std::move(uri), std::move(text));
+  void addFile(std::string_view uri, std::string text) {
+    _inner.addFile(uri, std::move(text));
   }
   [[nodiscard]] cursiv::FileSystemNode stat(
       std::string_view uri) const override {

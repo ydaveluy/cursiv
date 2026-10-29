@@ -35,7 +35,7 @@ struct Ll : cursiv::GrammarSpec {
                    ref<R2>> {};
   struct R2 : rule<create<N2>(many(lit<"b">) + lit<"c"> + option(lit<"c">))> {};
   using entry = R0;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tllrepairgrowth

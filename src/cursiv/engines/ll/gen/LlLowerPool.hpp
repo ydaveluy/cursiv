@@ -64,8 +64,10 @@ struct Node {
   bool foldStep = false;
   bool leftFold = false;
   bool layered = false;
-  bool ranked = false;
   bool unorderedTurns = false;
+  // unordered: the items the text may leave out, one bit each. Each stands in
+  // its present form, and the group may end where only these are left.
+  std::uint32_t unorderedOptional = 0;
 };
 
 // What the walk holds while it runs, and nothing longer: the elements a body

@@ -24,11 +24,11 @@ struct Holder : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace own
 struct G : Base {
-  struct PCT : terminal<some(d), own::Percent> {};
+  struct PCT : terminal<as<own::Percent>(some(d))> {};
   struct Root
       : rule<create<own::Holder>(assign<&own::Holder::share>(ref<PCT>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -1,22 +1,15 @@
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include <variant>
+#include "EofRegionAst.hpp"
 namespace teofregion {
 
-struct Island : cursiv::Extends<cursiv::AstNode> {
-  vector<string_view> words;
-};
-struct Document : cursiv::Extends<cursiv::AstNode> {
-  vector<std::variant<Island*, std::string_view>> parts;
-};
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
   struct TEXT : terminal<some(cr<"^<">)> {};
   struct WORD : terminal<lit<"x">> {};
   struct IslandRule
-      : rule<skip(ignored<WS>, hide<>,
+      : rule<skip(ignore<WS>, hide<>,
                   lit<"<?"> + many(append<&Island::words>(ref<WORD>)) +
                       (lit<"?>"> | eof))> {};
   struct Root : rule<create<Document>(many(
@@ -24,33 +17,29 @@ struct Base : cursiv::GrammarSpec {
   using entry = Root;
 };
 
-struct Empty : cursiv::Extends<cursiv::AstNode> {};
-struct ChainDocument : cursiv::Extends<cursiv::AstNode> {
-  Empty* empty;
-};
 struct ChainBase : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
-  struct InnerEnd : rule<skip(ignored<WS>, hide<>, eof)> {};
+  struct InnerEnd : rule<skip(ignore<WS>, hide<>, eof)> {};
   struct StrictEnd : rule<tight(eof)> {};
   struct EmptyRule : rule<create<Empty>> {};
   struct Root
       : rule<create<ChainDocument>(
-            (lit<"inner"> + skip(ignored<WS>, hide<>, eof) + eof) |
-            (lit<"outer"> + eof + skip(ignored<WS>, hide<>, eof)) |
+            (lit<"inner"> + skip(ignore<WS>, hide<>, eof) + eof) |
+            (lit<"outer"> + eof + skip(ignore<WS>, hide<>, eof)) |
             (lit<"ref-inner"> + ref<InnerEnd> + eof) |
             (lit<"ref-outer"> + eof + ref<InnerEnd>) |
-            (lit<"direct"> + skip(ignored<WS>, hide<>,
+            (lit<"direct"> + skip(ignore<WS>, hide<>,
                                   lit<"x"> + tight(eof))) |
             (lit<"call"> +
-             skip(ignored<WS>, hide<>, lit<"x"> + ref<StrictEnd>)) |
-            (lit<"node"> + skip(ignored<WS>, hide<>, eof) +
+             skip(ignore<WS>, hide<>, lit<"x"> + ref<StrictEnd>)) |
+            (lit<"node"> + skip(ignore<WS>, hide<>, eof) +
              assign<&ChainDocument::empty>(ref<EmptyRule>)))> {};
   using entry = Root;
 };
 
 struct PureBase : ChainBase {
   struct Root
-      : rule<create<ChainDocument>(skip(ignored<WS>, hide<>, eof) + eof)> {};
+      : rule<create<ChainDocument>(skip(ignore<WS>, hide<>, eof) + eof)> {};
   using entry = Root;
 };
 struct PureLl : PureBase {};
@@ -59,16 +48,6 @@ struct PureLr : PureBase {};
 }  // namespace teofregion
 
 namespace tnullableregion {
-struct Expr : cursiv::Extends<cursiv::AstNode> {};
-struct Number : cursiv::Extends<Expr> {
-  string_view text;
-};
-struct Block : cursiv::Extends<Expr> {
-  Expr* value;
-};
-struct String : cursiv::Extends<Expr> {
-  Block* hole;
-};
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<lit<"#"> + many(cr<R"(^\r\n)">)> {};
@@ -79,31 +58,18 @@ struct Base : cursiv::GrammarSpec {
   struct StringRule
       : rule<create<String>(
             tight(lit<"\""> + ref<OPEN> +
-                      skip(ignored<WS>, hide<COMMENT>,
+                      skip(ignore<WS>, hide<COMMENT>,
                            assign<&String::hole>(ref<BlockRule>) + lit<"}">) +
                       lit<"\"">))> {};
   struct BlockRule : rule<create<Block>(option(assign<&Block::value>(
                          ref<NumberRule> | ref<StringRule>)))> {};
   using entry = BlockRule;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 }  // namespace tnullableregion
 
 namespace tregionalreadmode {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  Node* left;
-  string_view op;
-  Node* right;
-  vector<Node*> args;
-};
-struct Text : cursiv::Extends<Node> {};
-struct Block : cursiv::Extends<Node> {};
-struct Echo : cursiv::Extends<Node> {};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Node*> items;
-};
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct HTML : terminal<some(cr<"^<"> | lit<"<", !lit<"?">>)> {};
@@ -133,9 +99,9 @@ struct G : cursiv::GrammarSpec {
                            option(lit<"?"> + append<&Node::args>(ref<Expr>) +
                                   lit<":"> +
                                   append<&Node::args>(ref<Expr>))))> {};
-  struct Expr : infix<Atom, &Node::left, &Node::op, &Node::right,
-                      (left(lit<"*">) >> left(lit<"+">) >>
-                       left(lit<"&", !lit<"&">>) >> left(lit<"||">))> {};
+  struct Expr : infix<Atom, Node,
+                      levels(left(lit<"*">), left(lit<"+">),
+                             left(lit<"&", !lit<"&">>), left(lit<"||">))> {};
   struct EchoRule : rule<create<Echo>(
                         ikw<"echo"> +
                         some(append<&Node::args>(ref<Expr>), lit<",">) + Eos)> {
@@ -155,7 +121,7 @@ struct G : cursiv::GrammarSpec {
                      ref<ExprStmt>> {};
   struct Code
       : rule<create<Block>(&(Open | lit<"<?=">)+skip(
-            ignored<WS>, hide<>,
+            ignore<WS>, hide<>,
             (Open |
              (lit<"<?="> +
               append<&Node::args>(create<Echo>(
@@ -166,7 +132,7 @@ struct G : cursiv::GrammarSpec {
       : rule<create<Doc>(option(ref<SHEBANG>) +
                          many(append<&Doc::items>(ref<Html> | ref<Code>)))> {};
   using entry = Root;
-  using ignore = list<>;
+  using ignored = list<>;
   using hidden = list<>;
 };
 }  // namespace tregionalreadmode
@@ -176,18 +142,6 @@ struct G : cursiv::GrammarSpec {
 // one character.
 
 namespace tbytecond {
-
-namespace ast {
-struct Item : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Item*> items;
-};
-struct Section : cursiv::Extends<cursiv::AstNode> {
-  Doc* doc = nullptr;
-};
-}  // namespace ast
 
 struct Inner : cursiv::GrammarSpec {
   struct WORD : terminal<some(cr<"a-z">)> {};

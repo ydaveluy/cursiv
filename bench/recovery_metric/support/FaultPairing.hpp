@@ -15,7 +15,7 @@
 #include "cursiv/core/text/TextOffset.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct FaultPairing {
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
@@ -81,4 +81,4 @@ struct FaultPairing {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

@@ -32,7 +32,7 @@ struct Choice : cursiv::GrammarSpec {
                                    Tail + lit<";">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The assertion in the rule reads tokens, so it skips blanks: the keyword
@@ -47,7 +47,7 @@ struct Rule : cursiv::GrammarSpec {
                           lit<";">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A literal that carries its condition ranks as a written word.
@@ -63,7 +63,7 @@ struct Written : cursiv::GrammarSpec {
                                    Tail + lit<";">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Pick : cursiv::Extends<cursiv::AstNode> {
@@ -85,7 +85,7 @@ struct MixedHeld : cursiv::GrammarSpec {
                           (assign<&Pick::second>(ref<MIXED>) + lit<";">))> {};
   struct Root : rule<create<Picks>(many(append<&Picks::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A condition adds no priority, and a literal that is not a word is not a
@@ -99,7 +99,7 @@ struct Starred : cursiv::GrammarSpec {
                           (assign<&Pick::second>(ref<STAR_K>) + lit<"(">))> {};
   struct Root : rule<create<Picks>(many(append<&Picks::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Called : cursiv::GrammarSpec {
@@ -111,7 +111,7 @@ struct Called : cursiv::GrammarSpec {
                           (assign<&Pick::second>(ref<FN_NAME>) + lit<"(">))> {};
   struct Root : rule<create<Picks>(many(append<&Picks::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Where a word byte follows the keyword and the patterns stop there, the
@@ -127,7 +127,7 @@ struct Narrow : cursiv::GrammarSpec {
                                     option(ref<NUM>) + lit<";">))> {};
   struct Root : rule<create<Picks>(many(append<&Picks::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Several conditions, and keywords of their own, after the choice.
@@ -142,7 +142,7 @@ struct SharedTwo : cursiv::GrammarSpec {
                           (assign<&Pick::second>(ref<SHARED>) + lit<";">))> {};
   struct Root : rule<create<Picks>(many(append<&Picks::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Suite : Choice {

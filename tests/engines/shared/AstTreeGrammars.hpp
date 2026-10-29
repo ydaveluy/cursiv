@@ -78,9 +78,9 @@ struct QuickStart : cursiv::GrammarSpec {
   struct COMMENT : terminal<through(lit<"//">, &eol | eof)> {};
   struct ID
       : terminal<(uc::XID_Start | cr<"_">)+many(uc::XID_Continue | cr<"_">)> {};
-  struct INTEGER : terminal<some(d), std::int64_t> {};
+  struct INTEGER : terminal<as<std::int64_t>(some(d))> {};
 
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
   static constexpr auto word_boundary = uc::XID_Continue | cr<"_">;
 
@@ -96,8 +96,8 @@ struct QuickStart : cursiv::GrammarSpec {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
-  struct NUM : terminal<some(d), std::int64_t> {};
-  using ignore = WS;
+  struct NUM : terminal<as<std::int64_t>(some(d))> {};
+  using ignored = WS;
 };
 
 struct Declared : Base {
@@ -210,26 +210,26 @@ struct Parts : cursiv::GrammarSpec {
 };
 
 struct Forward : Parts {
-  struct Root : rule<create<ast::Derived>(
-                    (kw<"f"> + assign<&ast::Base::first>(ref<LeafR>)) &
-                    (kw<"l"> + assign<&ast::Base::link>(ref<ID>)) &
-                    (kw<"s"> + assign<&ast::Base::second>(ref<LeafR>)) &
-                    (kw<"t"> + assign<&ast::Derived::third>(ref<LeafR>)) &
-                    some(kw<"i"> + append<&ast::Derived::items>(ref<LeafR>)))> {
-  };
+  struct Root
+      : rule<create<ast::Derived>(unordered(
+            kw<"f"> + assign<&ast::Base::first>(ref<LeafR>),
+            kw<"l"> + assign<&ast::Base::link>(ref<ID>),
+            kw<"s"> + assign<&ast::Base::second>(ref<LeafR>),
+            kw<"t"> + assign<&ast::Derived::third>(ref<LeafR>),
+            some(kw<"i"> + append<&ast::Derived::items>(ref<LeafR>))))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Backward : Parts {
-  struct Root : rule<create<ast::Derived>(
-                    some(kw<"i"> + append<&ast::Derived::items>(ref<LeafR>)) &
-                    (kw<"t"> + assign<&ast::Derived::third>(ref<LeafR>)) &
-                    (kw<"s"> + assign<&ast::Base::second>(ref<LeafR>)) &
-                    (kw<"l"> + assign<&ast::Base::link>(ref<ID>)) &
-                    (kw<"f"> + assign<&ast::Base::first>(ref<LeafR>)))> {};
+  struct Root : rule<create<ast::Derived>(unordered(
+                    some(kw<"i"> + append<&ast::Derived::items>(ref<LeafR>)),
+                    kw<"t"> + assign<&ast::Derived::third>(ref<LeafR>),
+                    kw<"s"> + assign<&ast::Base::second>(ref<LeafR>),
+                    kw<"l"> + assign<&ast::Base::link>(ref<ID>),
+                    kw<"f"> + assign<&ast::Base::first>(ref<LeafR>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct BackwardLr : Backward {};
@@ -299,7 +299,7 @@ struct Groups : cursiv::Extends<cursiv::AstNode> {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ItemRule : rule<create<ast::Item>(lit<"x">)> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Plain : Base {
@@ -339,7 +339,7 @@ struct Combined : Base {
   struct Entry
       : rule<ref<Suite::Root> |
              (lit<"cyclic:"> +
-              skip(ignored<>, hide<>,
+              skip(ignore<>, hide<>,
                    ref<tcyclicadopt::Grammar::Expression> + eof)) |
              (lit<"run:"> + ref<tnestedrun::Suite::Root>) |
              (lit<"members:"> + ref<tmember::Forward::Root>) |
@@ -355,7 +355,7 @@ struct Lr : Combined {};
 struct Aux : Base {
   struct Entry
       : rule<lit<"cyclic:"> +
-             skip(ignored<>, hide<>,
+             skip(ignore<>, hide<>,
                   ref<tcyclicadopt::Grammar::Expression> + eof)> {};
   using entry = Entry;
 };

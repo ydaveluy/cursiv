@@ -44,7 +44,6 @@
 #include "cursiv/test/ExpectedRename.hpp"
 #include "cursiv/test/ExpectedSymbols.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
-#include "workspace/core/WorkspaceGrammar.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
@@ -633,6 +632,60 @@ void a_new_name_the_language_would_not_read_back_is_refused() {
                             .disposeAfterCheck = true});
 }
 
+// ...and so in a repaired document, where the count of diagnostics proves
+// nothing: the stray `:` already costs one, and the repair reads a number, a
+// brace or a comment there at no extra cost. None is read as the name it
+// replaces, so all are refused; a name still goes through.
+void a_repaired_document_refuses_what_is_not_read_as_the_name() {
+  const Workspace world("workspace", ".ws");
+  for (const std::string_view refused : {"1", "{", ":", "/* c */"})
+    (void)ct::expectRename(*world.language,
+                           {.text = "datatype <|>String :\n"
+                                    "entity E { f : String }\n",
+                            .newName = std::string(refused),
+                            .nameRefused = true,
+                            .disposeAfterCheck = true});
+  (void)ct::expectRename(*world.language,
+                         {.text = "datatype <|<|>String|> :\n"
+                                  "entity E { f : <|String|> }\n",
+                          .newName = "Text",
+                          .disposeAfterCheck = true});
+  // The same at a reference, judged where it stands. `a.` reads as a
+  // qualified name only once the repair inserts its last segment.
+  for (const std::string_view refused : {"1", "{", "a."})
+    (void)ct::expectRename(*world.language,
+                           {.text = "entity E { f : <|>Missing :\n",
+                            .newName = std::string(refused),
+                            .nameRefused = true,
+                            .disposeAfterCheck = true});
+  (void)ct::expectRename(*world.language,
+                         {.text = "entity E { f : <|<|>Missing|> :\n",
+                          .newName = "a.b",
+                          .disposeAfterCheck = true});
+  // The old name may be the one the repair completed: renaming it to a whole
+  // name is how the author fixes it.
+  (void)ct::expectRename(*world.language, {.text = "package <|<|>a.|> { }\n",
+                                           .newName = "a.b",
+                                           .disposeAfterCheck = true});
+}
+
+// Every document the edits touch is read back with its own substitutions, a
+// repaired one too: its reference still reads as the name it renames.
+void a_rename_reads_back_every_document_it_edits() {
+  const Workspace world("workspace", ".ws");
+  const std::vector<cursiv::Document*> documents =
+      world.built({{"file:///w/a.ws", std::string(kLib)},
+                   {"file:///w/b.ws", "entity E { f : String :\n"}});
+  CHECK(documents.size() == 2);
+  if (documents.size() != 2) return;
+  const std::optional<lsp::WorkspaceEdit> edit =
+      world.rename(*documents[0], 0, 9, "Text");
+  CHECK(edit.has_value() && edit->changes.has_value() &&
+        edit->changes->size() == 2);
+  if (edit.has_value()) CHECK(editsFor(*edit, "file:///w/b.ws").size() == 1);
+  CHECK(!world.rename(*documents[0], 0, 9, "1").has_value());
+}
+
 void name_validation_observes_the_requests_cancellation() {
   Workspace world("workspace", ".ws");
   const auto documents = world.built({{"file:///w/a.ws", std::string(kLib)}});
@@ -758,6 +811,8 @@ void run() {
   a_rename_crosses_the_documents_that_name_it();
   an_unresolved_reference_renames_its_own_site();
   a_new_name_the_language_would_not_read_back_is_refused();
+  a_repaired_document_refuses_what_is_not_read_as_the_name();
+  a_rename_reads_back_every_document_it_edits();
   name_validation_observes_the_requests_cancellation();
   an_accepted_rename_rewrites_every_site();
   a_package_rename_requalifies_its_members_sites();

@@ -15,12 +15,15 @@ cursiv_grammar(dedentrunflatll engines/ll/DedentRunGrammar.hpp tlldedentrun::Fla
 cursiv_grammar(dedentrunll engines/ll/DedentRunGrammar.hpp tlldedentrun::Ll ENGINE LL)
 cursiv_grammar(delimll engines/ll/DelimSpellingGrammar.hpp tdelim::Ll ENGINE LL)
 cursiv_grammar(escapell engines/ll/ReservedEscapeGrammar.hpp tllescape::Ll ENGINE LL)
+cursiv_grammar(gluedll engines/ll/ConditionsGrammar.hpp tllconditions::GluedLl ENGINE LL)
+cursiv_grammar_pair(impliedrival engines/ll/ConditionsGrammar.hpp tllconditions::RivalLr tllconditions::RivalLl)
 cursiv_grammar(indirectfoldll engines/ll/ExpressionContractsGrammar.hpp tllexpressions::Ll ENGINE LL)
 cursiv_grammar(indirectloopcycle engines/ll/IndirectLoopGrammar.hpp tindirectloop::CycleLr ENGINE LR)
 cursiv_grammar(keywordtriviabarell engines/ll/KeywordTriviaGrammar.hpp tllkwtrivia::BareLl ENGINE LL)
 cursiv_grammar(keywordtriviabasicll engines/ll/KeywordTriviaGrammar.hpp tllkwtrivia::BasicLl ENGINE LL)
 cursiv_grammar(keywordtriviacapturedll engines/ll/KeywordTriviaGrammar.hpp tllkwtrivia::VariantsLl ENGINE LL)
 cursiv_grammar(keywordtriviawidell engines/ll/KeywordTriviaGrammar.hpp tllkwtrivia::WideLl ENGINE LL)
+cursiv_grammar_pair(leftoption engines/ll/LeftOptionGrammar.hpp tlloption::Lr tlloption::Ll)
 cursiv_grammar(latewidthll engines/ll/LateWidthGrammar.hpp tlllatewidth::Ll ENGINE LL GENERATOR_ARGS --no-staged)
 cursiv_grammar(lexicalpredicatesll engines/ll/LexicalPredicatesGrammar.hpp tlexicalpredicates::Ll ENGINE LL)
 cursiv_grammar(lextiell engines/ll/LexTieGrammar.hpp tlllextie::Ll ENGINE LL)
@@ -34,8 +37,12 @@ cursiv_grammar(openingshiftlr engines/ll/OpeningTokenGrammar.hpp topening::Shift
 cursiv_grammar(predicatesll engines/ll/PredicatesGrammar.hpp tpredicates::Ll ENGINE LL)
 cursiv_grammar(rcondll engines/ll/GuardCasesGrammar.hpp tllguardcases::Ll ENGINE LL)
 cursiv_grammar(rcondnest engines/ll/RuleConditionGrammar.hpp tllrcond::Nested ENGINE LR)
+cursiv_grammar(reachpredictll engines/ll/ConditionsGrammar.hpp tllconditions::ReachLl ENGINE LL)
 cursiv_grammar(refusedll engines/ll/ReservedRefusedGrammar.hpp tllrefused::Ll ENGINE LL)
 cursiv_grammar(refusedlr engines/ll/ReservedRefusedGrammar.hpp tllrefused::Lr ENGINE LR)
+cursiv_grammar_pair(refusedmemo engines/ll/ReservedRefusedGrammar.hpp
+    tllrefused::MemoLr tllrefused::MemoLl)
+cursiv_grammar(refusedcondll engines/ll/ReservedRefusedGrammar.hpp tllrefused::CondLl ENGINE LL)
 cursiv_grammar(repairgrowthll engines/ll/LlRepairGrowthGrammar.hpp tllrepairgrowth::Ll ENGINE LL)
 cursiv_grammar(rescannarrowll engines/ll/RescanBoundGrammar.hpp tllrescan::NarrowLl ENGINE LL)
 cursiv_grammar(rescanshadowll engines/ll/RescanBoundGrammar.hpp tllrescan::ShadowLl ENGINE LL)
@@ -44,12 +51,13 @@ cursiv_grammar(swiftwidthll engines/ll/SwiftWidthGrammar.hpp tllswiftwidth::Ll E
 cursiv_grammar(termcondlr engines/ll/RuleConditionGrammar.hpp tllterm::Lr ENGINE LR)
 cursiv_grammar(triviapredictll engines/ll/ConditionsGrammar.hpp tllconditions::TriviaLl ENGINE LL)
 cursiv_grammar(unitsll engines/ll/ExplicitUnitGrammar.hpp tllunit::Ll ENGINE LL)
-cursiv_grammar(unorderedendsll engines/ll/UnorderedGrammar.hpp tunordered::EndsLl ENGINE LL)
 cursiv_grammar(unorderedll engines/ll/UnorderedGrammar.hpp tunordered::Ll ENGINE LL)
 cursiv_grammar(unorderedlr engines/ll/UnorderedGrammar.hpp tunordered::Lr ENGINE LR)
+cursiv_grammar(unorderedoptll engines/ll/UnorderedOptionalGrammar.hpp toptional::Ll ENGINE LL)
+cursiv_grammar(unorderedoptlr engines/ll/UnorderedOptionalGrammar.hpp toptional::Lr ENGINE LR)
 cursiv_grammar(unorderedturnsll engines/ll/UnorderedTurnsGrammar.hpp tunorderedturns::Ll ENGINE LL)
 cursiv_grammar(unorderedturnslr engines/ll/UnorderedTurnsGrammar.hpp tunorderedturns::Lr ENGINE LR)
-cursiv_grammar(widechoicell engines/ll/WideChoiceGrammar.hpp twide::Ll ENGINE LL)
+cursiv_grammar(widechoicell engines/ll/WideChoiceGrammar.hpp twidechoice::Ll ENGINE LL)
 cursiv_grammar(wideposll engines/ll/WidePositionsGrammar.hpp twidepos::Ll ENGINE LL)
 
 cursiv_test(LexicalPredicates_test engines/ll/LexicalPredicates_test.cpp
@@ -59,13 +67,15 @@ cursiv_test(LlCaretParity_test engines/ll/LlCaretParity_test.cpp
 cursiv_test(LlCompoundOp_test engines/ll/LlCompoundOp_test.cpp
     compoundllGenerated compoundlrGenerated)
 cursiv_test(LlConditions_test engines/ll/LlConditions_test.cpp
-    conditionsllGenerated conditionslrGenerated triviapredictllGenerated cursivLlGen)
+    conditionsllGenerated conditionslrGenerated impliedrivalllGenerated
+    gluedllGenerated impliedrivallrGenerated reachpredictllGenerated
+    triviapredictllGenerated cursivLlGen)
 cursiv_test(LlCountedRepeat_test engines/ll/LlCountedRepeat_test.cpp
     countedllGenerated countedlrGenerated semanticllGenerated cursivLlGen)
 cursiv_test(LlDedentRun_test engines/ll/LlDedentRun_test.cpp
     dedentrunflatllGenerated dedentrunllGenerated)
 cursiv_test(LlDelimSpelling_test engines/ll/LlDelimSpelling_test.cpp
-    delimllGenerated)
+    delimllGenerated cursivLlGen cursivLrGen)
 cursiv_test(LlEngine_test engines/ll/LlEngine_test.cpp
     indirectfoldllGenerated menullGenerated menulrGenerated parityllGenerated paritylrGenerated tagllGenerated taglrGenerated cursivLlGen)
 cursiv_test(LlExplicitUnit_test engines/ll/LlExplicitUnit_test.cpp
@@ -86,7 +96,8 @@ cursiv_test(LlLexTie_test engines/ll/LlLexTie_test.cpp
 cursiv_test(LlPredicates_test engines/ll/LlPredicates_test.cpp
     predicatesllGenerated)
 cursiv_test(LlRecoveryParity_test engines/ll/LlRecoveryParity_test.cpp
-    parityllGenerated paritylrGenerated)
+    conditionsllGenerated conditionslrGenerated parityllGenerated
+    paritylrGenerated)
 cursiv_test(LlRepairBudget_test engines/ll/LlRepairBudget_test.cpp
     parityllGenerated paritylrGenerated)
 cursiv_test(LlRepairGrowth_test engines/ll/LlRepairGrowth_test.cpp
@@ -106,7 +117,8 @@ cursiv_test(LlWideChoice_test engines/ll/LlWideChoice_test.cpp
 cursiv_test(LlWidePositions_test engines/ll/LlWidePositions_test.cpp
     wideposllGenerated)
 cursiv_test(Unordered_test engines/ll/Unordered_test.cpp
-    unorderedendsllGenerated unorderedllGenerated unorderedlrGenerated unorderedturnsllGenerated unorderedturnslrGenerated cursivLlGen cursivLrGen)
+    unorderedllGenerated unorderedlrGenerated unorderedoptllGenerated unorderedoptlrGenerated
+    unorderedturnsllGenerated unorderedturnslrGenerated cursivLlGen cursivLrGen)
 
 # A shallow template budget catches per-element recursion in the wide choice.
 if(TARGET widechoicell_gen)
@@ -137,12 +149,14 @@ set_target_properties(LlSemantic_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATC
 set(_expression_cases
     engines/ll/LlExpression_test.cpp
     engines/ll/LlIndirectFold_test.cpp
+    engines/ll/LlLeftOption_cases.cpp
     engines/ll/LlPrefixFactor_test.cpp
     engines/ll/LlInfixLoop_test.cpp
     engines/ll/LlOperatorCondition_test.cpp
     engines/ll/LlOpeningToken_test.cpp)
 cursiv_test(LlExpression_test "${_expression_cases}"
-    indirectfoldllGenerated openingllGenerated openingshiftlrGenerated)
+    indirectfoldllGenerated leftoptionllGenerated leftoptionlrGenerated
+    openingllGenerated openingshiftlrGenerated)
 set_target_properties(LlExpression_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 
 set(_guard_cases
@@ -151,5 +165,6 @@ set(_guard_cases
     engines/ll/LlReservedRefused_test.cpp)
 cursiv_test(LlGuards_test "${_guard_cases}"
     rcondllGenerated rcondnestGenerated termcondlrGenerated
-    refusedllGenerated refusedlrGenerated cursivLlGen cursivLrGen)
+    refusedllGenerated refusedlrGenerated refusedmemollGenerated
+    refusedmemolrGenerated refusedcondllGenerated cursivLlGen cursivLrGen)
 set_target_properties(LlGuards_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)

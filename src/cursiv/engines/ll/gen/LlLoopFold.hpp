@@ -2,7 +2,8 @@
 // walk from that rule meets its bases and its turns in the order they rank;
 // the loop is laid as folds, a base followed by the turns that apply to it,
 // nested as the recursion nests, so a descent chooses among them as the
-// election does.
+// election does. An alternative whose call stands inside or behind optional
+// items is first read as the alternatives they spell.
 #pragma once
 
 #include <algorithm>
@@ -17,6 +18,7 @@
 #include "cursiv/core/grammar/expr.hpp"
 #include "cursiv/core/utils/typelist.hpp"
 #include "cursiv/engines/shared/gen/LeadGraph.hpp"
+#include "cursiv/engines/shared/gen/optional_shape.hpp"
 #include "cursiv/engines/shared/gen/reached.hpp"
 
 namespace cursiv::detail::llow {
@@ -37,6 +39,34 @@ struct fold_alts {
 };
 template <class... Es>
 struct fold_alts<Choice<Es...>> : tl_cat<typename fold_alts<Es>::type...> {};
+
+template <class L>
+struct make_seq;
+template <>
+struct make_seq<TypeList<>> {
+  using type = Epsilon;
+};
+template <class E>
+struct make_seq<TypeList<E>> {
+  using type = E;
+};
+template <class E, class F, class... Es>
+struct make_seq<TypeList<E, F, Es...>> {
+  using type = Seq<E, F, Es...>;
+};
+template <class E>
+struct pieces_of {
+  using type = TypeList<E>;
+};
+template <>
+struct pieces_of<Epsilon> {
+  using type = TypeList<>;
+};
+template <class... Es>
+struct pieces_of<Seq<Es...>> : tl_cat<typename pieces_of<Es>::type...> {};
+template <class... Es>
+using join_t =
+    typename make_seq<tl_cat_t<typename pieces_of<Es>::type...>>::type;
 
 // `E` closed over its rule: the conversion of a value rule, and for the rule a
 // fold belongs to, its close. A step reaches back over what the fold has read.
@@ -140,24 +170,73 @@ template <class G, class O, class T, auto P, class W, class... Es>
            operand_leads<G, O, typename fold_alts<W>::type>::value)
 struct arm_of<G, O, Create<T, Seq<Assign<P, W>, Es...>>>
     : operand_arms<G, O, T, P, TypeList<Es...>, typename fold_alts<W>::type> {};
-template <class G, class O, class T, auto P, class W, class... Es>
-  requires(sizeof...(Es) != 0 && std::is_void_v<spec_narrow_t<P>> &&
-           operand_leads<G, O, typename fold_alts<W>::type>::value)
-struct arm_of<G, O, Create<T, Seq<Repeat<0, 1, Assign<P, W>>, Es...>>> {
-  using type =
-      tl_cat_t<TypeList<BaseArm<Create<T, Seq<Es...>>>>,
-               typename operand_arms<G, O, T, P, TypeList<Es...>,
-                                     typename fold_alts<W>::type>::type>;
+// An alternative that opens on an optional item: the item taken -- once at
+// least, for a repetition -- and the item left out.
+template <class E>
+struct optional_head : std::false_type {};
+template <std::size_t M, class X>
+struct optional_head<Repeat<0, M, X>> : std::true_type {
+  using taken = cond_t<M == 1, X, Repeat<1, M, X>>;
+  using left = Epsilon;
 };
+template <std::size_t M, class X, class... Es>
+struct optional_head<Seq<Repeat<0, M, X>, Es...>> : std::true_type {
+  using taken = join_t<cond_t<M == 1, X, Repeat<1, M, X>>, Es...>;
+  using left = join_t<Es...>;
+};
+// A trivia scope around the optional item: the dropped reading leaves it out
+// whole, so the next element reads under the caller's scope.
+template <class I, class H, std::size_t M, class X, class... Es>
+struct optional_head<Seq<Skip<I, H, Repeat<0, M, X>>, Es...>> : std::true_type {
+  using taken = join_t<Skip<I, H, cond_t<M == 1, X, Repeat<1, M, X>>>, Es...>;
+  using left = join_t<Es...>;
+};
+template <class T, class E>
+  requires(optional_head<E>::value)
+struct optional_head<Create<T, E>> : std::true_type {
+  using taken = Create<T, typename optional_head<E>::taken>;
+  using left = Create<T, typename optional_head<E>::left>;
+};
+
+template <class G, class O, class L>
+struct any_member;
+template <class G, class O, class... Xs>
+struct any_member<G, O, TypeList<Xs...>>
+    : std::bool_constant<(G::template same<O, Xs> || ...)> {};
+
+// A call of the loop inside or behind optional items is read as the
+// alternatives they spell, the item taken before the item left out, as the
+// election prefers: `X? A y` is `X A y | A y`. Past the optional gate the
+// alternative stays as written, and the descent refuses it.
+template <class G, class O, class E, unsigned Left = kOptionalGate,
+          bool Spell = Left != 0 && optional_head<E>::value &&
+                       any_member<G, O, typename lead_refs<E>::type>::value>
+struct spelled {
+  using type = TypeList<E>;
+};
+template <class G, class O, class E, unsigned Left>
+struct spelled<G, O, E, Left, true>
+    : tl_cat<typename spelled<G, O, typename optional_head<E>::taken,
+                              Left - 1>::type,
+             typename spelled<G, O, typename optional_head<E>::left,
+                              Left - 1>::type> {};
 
 template <class G, class O, class L>
 struct arms_of;
 template <class G, class O, class... As>
 struct arms_of<G, O, TypeList<As...>>
     : tl_cat<typename arm_of<G, O, As>::type...> {};
+template <class G, class O, class L>
+struct spelled_alts;
+template <class G, class O, class... As>
+struct spelled_alts<G, O, TypeList<As...>>
+    : tl_cat<typename spelled<G, O, As>::type...> {};
 template <class S, class G, class O>
 using member_arms_t = typename arms_of<
-    G, O, typename fold_alts<typename S::template body<O>>::type>::type;
+    G, O,
+    typename spelled_alts<
+        G, O, typename fold_alts<typename S::template body<O>>::type>::type>::
+    type;
 
 // The first literal an arm reads after the call that starts it, as far as the
 // type says: two turns that start on literals neither of which begins the other
@@ -427,34 +506,6 @@ struct LoopTables<S, G, TypeList<Ms...>> {
       build(std::make_index_sequence<count>{});
 };
 
-template <class L>
-struct make_seq;
-template <>
-struct make_seq<TypeList<>> {
-  using type = Epsilon;
-};
-template <class E>
-struct make_seq<TypeList<E>> {
-  using type = E;
-};
-template <class E, class F, class... Es>
-struct make_seq<TypeList<E, F, Es...>> {
-  using type = Seq<E, F, Es...>;
-};
-template <class E>
-struct pieces_of {
-  using type = TypeList<E>;
-};
-template <>
-struct pieces_of<Epsilon> {
-  using type = TypeList<>;
-};
-template <class... Es>
-struct pieces_of<Seq<Es...>> : tl_cat<typename pieces_of<Es>::type...> {};
-template <class... Es>
-using join_t =
-    typename make_seq<tl_cat_t<typename pieces_of<Es>::type...>>::type;
-
 template <class S, class G, class Head>
 struct LoopFold {
   using members = typename G::template component<Head>;
@@ -593,21 +644,12 @@ struct late_refs;
 template <class E, class... Ks>
 struct late_refs<E, TypeList<Ks...>> : tl_cat<typename late_refs<Ks>::type...> {
 };
-template <class... Es>
-struct late_seq;
-template <>
-struct late_seq<> {
-  using type = TypeList<>;
-};
+// What follows the first item is read once it has consumed a token: an
+// optional item consumes one wherever it is taken.
 template <class E, class... Es>
-struct late_seq<E, Es...> {
-  using type =
-      tl_cat_t<typename late_refs<E>::type,
-               cond_t<lead_empty<E>::value, typename late_seq<Es...>::type,
-                      tl_cat_t<refs_t<Es>...>>>;
+struct late_refs<Seq<E, Es...>, TypeList<E, Es...>> {
+  using type = tl_cat_t<typename late_refs<E>::type, refs_t<Es>...>;
 };
-template <class... Es>
-struct late_refs<Seq<Es...>, TypeList<Es...>> : late_seq<Es...> {};
 template <class G, class O, class M, class C>
 struct late_refs<Embed<G, Seq<O, M, C>>, TypeList<Seq<O, M, C>>>
     : refs<Embed<G, Seq<O, M, C>>> {};
@@ -704,9 +746,10 @@ struct loop_fold_rule<S, G, R, true> {
   };
 };
 
-template <class S, class Rules = reached_t<S>>
+template <class S, class Reached = reached_of<S>>
 struct LoopFoldStage : S {
-  using graph = LeadGraph<S, Rules>;
+  // A class of its own, so the rules keyed on the graph are named by the stage.
+  struct graph : LeadGraph<S, typename Reached::type> {};
   template <class R>
   using rule = typename loop_fold_rule<S, graph, R>::type;
   template <class R>

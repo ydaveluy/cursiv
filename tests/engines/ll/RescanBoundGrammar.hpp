@@ -5,16 +5,9 @@
 // A misspelling is read again as either, judged on its own frontier.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/RescanBoundAst.hpp"
 
 namespace tllrescan {
-struct Item : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Item*> items;
-};
-
 // The bounded terminal ranks first, and is the state's own election.
 struct Narrow : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -27,7 +20,7 @@ struct Narrow : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(some(append<&Doc::items>(ref<Bounded>) |
                                       append<&Doc::items>(ref<Longer>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The spelled one is elected where both accept, and is declared last.
@@ -42,7 +35,7 @@ struct Shadow : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(some(append<&Doc::items>(ref<Bounded>) |
                                       append<&Doc::items>(ref<Spelled>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct NarrowLl : Narrow {};

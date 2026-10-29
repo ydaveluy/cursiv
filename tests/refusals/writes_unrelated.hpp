@@ -19,7 +19,7 @@ struct G : Base {
       : rule<assign<&ast::Left::a>(ref<ID>) + assign<&ast::Right::b>(ref<ID>)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

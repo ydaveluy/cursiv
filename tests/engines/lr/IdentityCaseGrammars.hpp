@@ -42,7 +42,7 @@ struct G : Base {
             (lit<"q"> + assign<&ast::Doc::kid>(ref<A>) + lit<"x"> +
              lit<"w">))> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace lr2
 
@@ -67,7 +67,7 @@ struct G : Base {
                  (lit<"x"> + assign<&ast::Doc::kid>(ref<X>) + lit<"y">) |
                  (lit<"z"> + assign<&ast::Doc::kid>(ref<X>) + lit<"w">))> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace sum
 

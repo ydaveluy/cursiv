@@ -118,7 +118,6 @@ class LrGssRope {
   [[nodiscard]] Length length(Id r) const {
     return r == none ? 0 : _nodes[r].len;
   }
-  [[nodiscard]] const Agg& agg(Id r) const { return _nodes[r].agg; }
   [[nodiscard]] std::uint32_t depth(Id r) const {
     return r == none ? 0 : _nodes[r].height;
   }

@@ -21,15 +21,15 @@ class LlStampPlan {
         _covers(a.cfg.nnodes, 0),
         _heads(a.cfg.nnodes, 0),
         _reaches(a.cfg.nnodes, 0) {
-    for (std::uint16_t id = 0; id < a.cfg.nnodes; ++id)
-      _heads[id] = heads_over(id);
-    for (std::uint16_t id = 0; id < a.cfg.nnodes; ++id)
-      _reaches[id] = reaches_over(id);
+    for (std::uint32_t id = 0; id < a.cfg.nnodes; ++id)
+      _heads[id] = heads_over(static_cast<std::uint16_t>(id));
+    for (std::uint32_t id = 0; id < a.cfg.nnodes; ++id)
+      _reaches[id] = reaches_over(static_cast<std::uint16_t>(id));
     // A record's stamp holds the rule shifted past the turn bit, in the
     // fourteen bits a record keeps for its state.
     if (a.cfg.nrules > kRules || a.cfg.sections()) return;
-    for (std::uint16_t id = 0; id < a.cfg.nnodes; ++id)
-      _stamps[id] = lays_named(id);
+    for (std::uint32_t id = 0; id < a.cfg.nnodes; ++id)
+      _stamps[id] = lays_named(static_cast<std::uint16_t>(id));
     // A group follows its members and has one parent: walked down, a position
     // reads the count its parent left.
     for (std::size_t id = a.cfg.nnodes; id-- > 0;) {

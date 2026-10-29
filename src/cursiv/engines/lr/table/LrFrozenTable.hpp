@@ -38,6 +38,8 @@ struct LrFrozenTable : LrTableFacts {
   constexpr std::uint16_t longer_mode(std::uint16_t mode) const {
     return modeLonger[mode];
   }
+  std::array<std::uint8_t, S.modeBacktracks> modeBacktrack{};
+  static constexpr bool has_backtrack() { return S.modeBacktracks != 0; }
   // Per mode, the terminals the lexer takes off a position once no live stack
   // takes them.
   LrSetStore<S, S.modeFlagSets != 0 ? S.modes : 0, S.modeFlagSets> modeFlag{};
@@ -51,13 +53,18 @@ struct LrFrozenTable : LrTableFacts {
   // A mode that crosses no trivia: a region's own.
   std::array<std::uint8_t, S.modes> modeTight{};
   // `from` covers `to`: a token lexed in `from` stands in `to` unless the
-  // state has no action for it or `to` flags it in `modeWin`.
+  // state has no action for it or `to` flags it in `modeWin`. An indented
+  // table has no matrix, and no mode covers another.
   std::array<std::uint64_t,
-             (std::size_t{S.modes} * S.modes + 63) / 64>
+             S.indented ? 0 : (std::size_t{S.modes} * S.modes + 63) / 64>
       modeSub{};
   constexpr bool mode_sub(unsigned from, unsigned to) const {
-    const auto i = std::size_t{from} * S.modes + to;
-    return ((modeSub[i >> 6] >> (i & 63u)) & 1u) != 0;
+    if constexpr (S.indented) {
+      return false;
+    } else {
+      const auto i = std::size_t{from} * S.modes + to;
+      return ((modeSub[i >> 6] >> (i & 63u)) & 1u) != 0;
+    }
   }
 
   std::array<std::uint16_t, S.dfa * S.cls> dfaNext{};

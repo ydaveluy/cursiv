@@ -16,7 +16,7 @@ struct G : Base {
   struct Items : rule<some(ref<Item>)> {};
   struct Root : rule<create<ast::Bag>(append<&ast::Bag::items>(ref<Items>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

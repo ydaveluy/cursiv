@@ -51,15 +51,17 @@ class ConfigurationProvider {
   virtual void removeConfigurationListener(ConfigurationSectionListener&) = 0;
 
   /**
-   * Records what the client said it can do. Only
-   * `capabilities.workspace.configuration` is read: a client that does not
-   * announce it is never asked, and every section stays unknown.
+   * Records what the client said it can do. `workspace.configuration`
+   * governs the pull: a client that does not announce it is never asked,
+   * and every section stays unknown. `workspace.didChangeConfiguration`
+   * says whether the client accepts the change registration.
    */
   virtual void initialize(const lsp::InitializeParams&) = 0;
 
   /**
-   * Registers for the change notification and pulls the current values.
-   * A null client detaches the session and its outstanding pulls.
+   * Registers for the change notification, when the client accepts that,
+   * and pulls the current values. A null client detaches the session and
+   * its outstanding pulls.
    */
   virtual void initialized(LanguageClient* client) = 0;
 

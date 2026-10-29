@@ -18,6 +18,7 @@
 #include "cursiv/engines/lr/gen/LrIdentity.hpp"
 #include "cursiv/engines/lr/gen/LrPeek.hpp"
 #include "cursiv/engines/lr/table/LrAction.hpp"
+#include "cursiv/engines/lr/table/LrColdTables.hpp"
 #include "cursiv/engines/lr/table/LrDerivedSizes.hpp"
 #include "cursiv/engines/lr/table/LrFusedRow.hpp"
 #include "cursiv/engines/lr/table/LrSizes.hpp"
@@ -32,6 +33,22 @@
 #include "cursiv/engines/shared/table/TermInfo.hpp"
 
 namespace cursiv {
+
+// What a pass that mints or fuses states does with one per-state column; see
+// `LrBuildTable::each_state_column`.
+//
+// A minted state takes its root's cell. States that fuse hold equal cells:
+// minimisation tells states apart by them, and the one cell stands.
+struct LrStateCopy {};
+// A minted state takes the cell its pass composed for it, handed to the mint.
+// States that fuse hold equal cells, as for a copy.
+struct LrStateComposed {};
+// A minted state takes its root's cell. States that fuse keep the cell they
+// all hold, `none` where two part: minimisation does not tell states apart by
+// it.
+struct LrStateMerge {
+  std::uint16_t none;
+};
 
 struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   std::uint16_t ncanonical = 0;  // states before re-fusion
@@ -96,6 +113,10 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   // Per mode, the mode that lexes what it takes for the length of its token
   // alone, `kNoMode` for none.
   Vec<std::uint16_t> modeLonger{};
+  // Empty unless a mode can read arbitrarily far beyond its last match.
+  std::vector<std::uint8_t> modeBacktrack{};
+  // Generator-only states where an unaccepted reading can cycle.
+  std::vector<std::uint8_t> dfaBacktrack{};
   // Per mode, the terminals the lexer takes off a position once no live stack
   // takes them; empty where no state has any.
   Vec<DynSet> modeFlag{};
@@ -160,6 +181,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   SetPool dfaAccPool{};
   SetPool dfaResPool{};
   SetPool dfaRelayResPool{};
+  SetPool followPool{};
   SetPool closePool{};
 
   // Per production, the decisions it wrote as a merge compares them; empty
@@ -196,6 +218,32 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   std::vector<std::uint16_t> electRhs{};
 
   Vec<LrAction> actions{};
+
+  // Every per-state column beside the action and goto rows, with its policy.
+  // The passes that mint and fuse states carry each column by it: a new
+  // column joins this list, and only a composed one also joins the mint.
+  template <class F>
+  void each_state_column(F&& f) {
+    // The terminals of the action row: a copy's row holds its root's.
+    f(follow, LrStateCopy{});
+    f(mode, LrStateCopy{});
+    f(tagKnown, LrStateCopy{});
+    f(tagTruth, LrStateCopy{});
+    f(insertOf, LrStateCopy{});
+    f(closeRow, LrStateComposed{});
+    f(stateSym, LrStateMerge{kLrNoStateSym});
+    f(stateBelow, LrStateMerge{kLrNoStateSym});
+  }
+
+  // Every state named outside the action and goto rows, with the value that
+  // names none: minimisation renumbers it, and sets it to that value once its
+  // state is swept.
+  template <class F>
+  void each_state_ref(F&& f) {
+    for (LrGuard& guard : guards)
+      for (std::uint16_t& to : guard.to) f(to, LrGuard::kNoState);
+    f(mergeState, std::uint16_t{0xffff});
+  }
 
   std::uint16_t next_dfa(std::uint16_t s, std::uint8_t c) const {
     return dfaNext[std::size_t{s} * ncls + c];
@@ -243,6 +291,15 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   bool flags_mode(unsigned m) const {
     return modeFlag.size() != 0 && modeFlag[m].any();
   }
+  // The grammar lays an indentation token or brackets a line, as `kIndented`
+  // tells at run time: no mode covers another, and `modeSub` is never built.
+  bool indented() const {
+    for (unsigned t = 1; t < cfg.nterms; ++t)
+      if (cfg.terms[t].laid == kLaidIndent ||
+          cfg.terms[t].laid == kLaidDedent || cfg.terms[t].delim != 0)
+        return true;
+    return false;
+  }
   bool mode_covers(unsigned from, unsigned to) const {
     const std::size_t i = std::size_t{from} * nmodes + to;
     return ((modeSub[i >> 6] >> (i & 63u)) & 1u) != 0;
@@ -266,9 +323,11 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
         .dfaResSets = static_cast<unsigned>(dfaResPool.sets.size()),
         .modeWinSets = static_cast<unsigned>(modeWinPool.sets.size()),
         .modeLongers = longer_modes() ? nmodes : 0u,
+        .modeBacktracks = static_cast<unsigned>(modeBacktrack.size()),
         .modeFlagSets = static_cast<unsigned>(modeFlagPool.sets.size()),
         .accBounds = static_cast<unsigned>(accBound.size()),
         .relays = nrelays,
+        .followSets = static_cast<unsigned>(followPool.sets.size()),
         .closeSets = static_cast<unsigned>(closePool.sets.size()),
         .dfaRelayResSets =
             relayReserves() ? static_cast<unsigned>(dfaRelayResPool.sets.size())
@@ -276,6 +335,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
         .accStands = standing() ? static_cast<unsigned>(accBound.size()) : 0u,
         .accTiers = tiered() ? static_cast<unsigned>(accBound.size()) : 0u,
         .errModes = static_cast<unsigned>(errModeOf.size()),
+        .indented = indented(),
         .insertLists = static_cast<unsigned>(insertAt.size() - 1u),
         .insertWords = static_cast<unsigned>(insertWord.size()),
         .electWords = static_cast<unsigned>(electWord.size()),
@@ -283,7 +343,8 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
         .electChains = static_cast<unsigned>(electChainKey.size()),
         .electChainWords = static_cast<unsigned>(electChainWord.size()),
         .electTwins = static_cast<unsigned>(electTwin.size()),
-        .electRhsSyms = static_cast<unsigned>(electRhs.size())};
+        .electRhsSyms = static_cast<unsigned>(electRhs.size()),
+        .gotoClasses = nconflicts != 0 || multiCand};
   }
 
   LrDerivedSizes derivedSizes() const {

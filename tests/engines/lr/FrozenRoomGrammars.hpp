@@ -36,7 +36,7 @@ struct G : cursiv::GrammarSpec {
              append<&ast::Node::kids>(ref<R0>) +
              append<&ast::Node::kids>(ref<R0>)))> {};
   using entry = R0;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace seed221
 

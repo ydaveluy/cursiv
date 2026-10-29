@@ -58,6 +58,8 @@ struct LexModes {
     if (set.size() >= UINT16_MAX)
       throw LowerRefused(LowerFail::tokenGraphTooLarge);
     const std::uint16_t reach = beyond.any() ? intern(beyond) : kNoMode;
+    if (set.size() >= UINT16_MAX)
+      throw LowerRefused(LowerFail::tokenGraphTooLarge);
     set.push_back(want);
     longer.push_back(beyond);
     longerMode.push_back(reach);
@@ -84,7 +86,8 @@ struct LexModes {
   // terminals `own`, its trivia and the token that closes it, so a fault is
   // never read as a token of the caller's. Outside any section, `err`.
   template <class Cfg>
-  std::vector<std::uint16_t> section_modes(const Cfg& g, std::vector<DynSet> own,
+  std::vector<std::uint16_t> section_modes(const Cfg& g,
+                                           std::vector<DynSet> own,
                                            std::uint16_t err) {
     std::vector<std::uint16_t> out(own.size(), err);
     for (std::size_t k = 0; k < own.size(); ++k)

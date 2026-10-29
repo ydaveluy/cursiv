@@ -1,7 +1,7 @@
 # Command line
 
-Use the generated CLI to check a language document, inspect its syntax tree
-or validate files from a script:
+The generated CLI checks a document, prints its syntax tree, or validates
+files from a script:
 
 ```bash
 mylang_cli [--dump] [--json] [--root <dir>] [--help] <file>
@@ -14,45 +14,39 @@ mylang_cli [--dump] [--json] [--root <dir>] [--help] <file>
 | `--root <dir>` | Load supported files from a workspace folder before validating the file. |
 | `--help`, `-h` | Print usage and the registered file extensions. |
 
-Diagnostics and the final `: ok` or `: not clean` status go to stderr, so they
-do not mix with a tree piped to another program. Diagnostic lines and columns
-are 1-based; columns count bytes.
+Diagnostics and the final `: ok` or `: not clean` go to stderr, so a tree on
+stdout can be piped. Lines and columns are 1-based; columns count bytes.
 
 ## Exit codes
 
 | Code | Means |
 |---|---|
-| `0` | no error diagnostics, or help was requested |
-| `1` | it carries at least one error diagnostic |
-| `2` | invalid arguments, unreadable path or unsupported file |
-| `3` | an internal error or output failure |
-
-Warnings alone do not make the command fail.
+| `0` | No error diagnostic (warnings allowed), or help was requested |
+| `1` | At least one error diagnostic |
+| `2` | Invalid arguments, unreadable path, unsupported file, or a file of 4 GiB or more |
+| `3` | An internal error or output failure |
 
 ## Load a workspace {#what-root-changes}
 
-Without `--root`, only the named file is loaded. Pass a workspace folder when
+Without `--root`, only the named file is loaded. Pass the workspace folder when
 references target declarations in other files:
 
 ```bash
 ./build/src/mylang_cli --root example example/hello.mylang
 ```
 
-The CLI scans the folder before validating the file. It uses saved files;
-an editor session may also contain unsaved changes.
+The CLI reads saved files only, unlike an editor session.
 
 ## Inspect the syntax tree {#reading-the-tree}
 
-`--dump` prints the CST with source offsets and retained comments. Trivia
-declared as `ignore` is omitted; trivia declared as `hidden` remains visible.
-Use it to check which rules and tokens matched.
-
-`--json` preserves full leaf text, while the text dump abbreviates long leaves.
+`--dump` shows which rules and tokens matched, with source offsets. Trivia
+declared `hidden`, such as comments, appears; `ignored` trivia does not. The
+text dump abbreviates long leaves; `--json` keeps their full text.
 
 ## Customize the CLI {#writing-your-own}
 
-The scaffold already includes `cli/main.cpp`. It calls `run_cli` with your
-language registration function:
+The scaffold's `cli/main.cpp` calls `run_cli` with your language registration
+function:
 
 ```cpp title="cli/main.cpp"
 #include "cursiv/cli/cli.hpp"
@@ -70,10 +64,5 @@ int main(int argc, char** argv) {
 }
 ```
 
-One registration function may install several languages in the workspace. See
+A registration function may install several languages; see
 [Several languages](../recipes/multiple-languages.md).
-
-## Document size
-
-Documents must be smaller than 4 GiB. Larger inputs are rejected with exit
-code `2`.

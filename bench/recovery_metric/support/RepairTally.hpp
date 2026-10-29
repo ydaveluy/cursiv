@@ -12,7 +12,7 @@
 
 #include "recovery_metric/support/RepairVerdict.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairTally {
   std::uint32_t docs = 0, faults = 0, diagnostics = 0;
@@ -88,4 +88,4 @@ struct RepairTally {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

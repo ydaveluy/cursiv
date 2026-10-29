@@ -2,24 +2,25 @@
 // over the whole `Type` family -- one sentence for a datatype and an entity --
 // and the cycle in `extends`, which is the one check no single node can answer.
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
-#include <vector>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/services/CoreLanguage.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "domainmodel/generated/DomainModel/Module.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectDiagnosticOptions.hpp"
 #include "cursiv/test/ValidationHelper.hpp"
 #include "cursiv/test/ValidationResult.hpp"
 #include "domainmodel/core/CoreServices.hpp"
-#include "cursiv/test/Check.hpp"
+#include "domainmodel/generated/DomainModel/Module.hpp"
 
 namespace {
 
@@ -116,9 +117,11 @@ void a_token_that_opens_an_element_names_the_member_it_fills() {
   CHECK(!out.empty());
   std::size_t named = 0, opens = 0;
   for (const cursiv::NextFeature& f : out) {
-    const std::string_view text = engine->getGrammar().terminalText(f.feature);
-    const bool opener =
-        text == "entity" || text == "datatype" || text == "package";
+    const bool opener = std::ranges::any_of(
+        engine->getGrammar().terminalSpellings(f.feature),
+        [](std::string_view text) {
+          return text == "entity" || text == "datatype" || text == "package";
+        });
     opens += opener ? 1u : 0u;
     if (opener) CHECK(f.property == "elements");
     named += f.property.empty() ? 0u : 1u;

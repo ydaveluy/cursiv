@@ -61,6 +61,13 @@ class WorkspaceManager {
   [[nodiscard]] virtual bool shouldIncludeEntry(
       const FileSystemNode& entry) const = 0;
 
+  // Whether the scan would reach `entry`: `shouldIncludeEntry` holds for it
+  // and for every folder between it and the root it sits under. A file event
+  // is filtered by it, so an event never brings in what the scan leaves out.
+  // A root itself is reached. An entry inside a workspace folder but under
+  // none of its roots is not; one no workspace folder holds is judged alone.
+  [[nodiscard]] virtual bool isIncluded(const FileSystemNode& entry) const = 0;
+
   // Resolved once the documents are in the store, which is not "the initial
   // build finished". The two signals are separate on purpose: whoever needs an
   // analysis phase waits for it with `DocumentBuilder::waitUntil`, and merging

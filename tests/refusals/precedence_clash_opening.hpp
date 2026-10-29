@@ -18,10 +18,10 @@ struct G : Base {
   struct NotIn : rule<kw<"not"> + kw<"in">> {};
   struct NotInToo : rule<kw<"not"> + kw<"in">> {};
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(ref<NotIn>) >> left(ref<NotInToo>))> {};
+  struct Sum : infix<Primary, ast::Bin,
+                     levels(left(ref<NotIn>), left(ref<NotInToo>))> {};
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

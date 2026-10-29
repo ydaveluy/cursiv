@@ -29,12 +29,11 @@ struct Base : cursiv::GrammarSpec {
   struct LT : terminal<lit<"<", !lit<"<">>> {};
   struct Primary : rule<create<Name>(assign<&Name::id>(ref<ID>)) |
                         (ref<BARE> + ref<Primary> + lit<">">)> {};
-  struct Sum : infix<Primary, &Bin::left, &Bin::op, &Bin::right,
-                     left(ref<LT>)> {};
+  struct Sum : infix<Primary, Bin, left(ref<LT>)> {};
   struct Root : rule<create<Doc>(assign<&Doc::value>(ref<Sum>) +
                                  (lit<";"> | (ref<BARE> + lit<"!">)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Base {};

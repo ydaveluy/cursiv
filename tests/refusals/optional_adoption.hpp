@@ -19,7 +19,7 @@ struct G : Base {
   struct Maybe : rule<option(ref<Item>)> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::item>(ref<Maybe>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

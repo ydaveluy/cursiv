@@ -121,7 +121,7 @@ struct Gaps : cursiv::GrammarSpec {
               (lit<"isaa"> + lit<"a"> + gap::is(any + any) + lit<"b">)) +
              eof> {};
   using entry = Root;
-  using ignore = Blank;
+  using ignored = Blank;
 };
 
 // Unicode decoding and class membership use the shared lexical machinery.
@@ -147,7 +147,7 @@ struct Integration : Base {
                (lit<"rt1:"> + &byte + item<One>) |
                (lit<"rt3:"> + &any + item<One>)) +
               eof) |
-             (lit<"gaps:"> + skip(ignored<Gaps::Blank>, hide<>,
+             (lit<"gaps:"> + skip(ignore<Gaps::Blank>, hide<>,
                                    ref<Gaps::Root> + eof))> {};
   using entry = Entry;
 };
@@ -181,7 +181,7 @@ struct Base : cursiv::GrammarSpec {
             (lit<"guard:"> + assign<&Node::text>(ref<Guarded>)) |
             (lit<"capture:"> + assign<&Node::text>(ref<Capture>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 
@@ -190,9 +190,9 @@ struct Base : cursiv::GrammarSpec {
 namespace tchars {
 struct Suite : Base {
   struct Entry : rule<ref<Base::Root> |
-                      (lit<"gaps:"> + skip(ignored<Gaps::Blank>, hide<>,
+                      (lit<"gaps:"> + skip(ignore<Gaps::Blank>, hide<>,
                           ref<Gaps::Root> + eof)) |
-                      (lit<"unicode:"> + skip(ignored<trepeatedunicode::Base::WS>,
+                      (lit<"unicode:"> + skip(ignore<trepeatedunicode::Base::WS>,
                           hide<>, ref<trepeatedunicode::Base::Root> + eof))> {};
   using entry = Entry;
 };
@@ -202,7 +202,7 @@ struct Lr : Suite {
   struct Decimal : terminal<some(uc::Nd)> {};
   struct Where : terminal<kw<"où">> {};
   struct Entry : rule<ref<Suite::Entry> |
-      (lit<"lex:"> + skip(ignored<tunicode::Cases::WS>, hide<>,
+      (lit<"lex:"> + skip(ignore<tunicode::Cases::WS>, hide<>,
                           ref<tunicode::Cases::Entry> + eof)) |
       (create<ast::Doc> + ((lit<"digits:"> + item<Decimal>) |
                            (lit<"where:"> + item<Where> + many(item<One>))) +

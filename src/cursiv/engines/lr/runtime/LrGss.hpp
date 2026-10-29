@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -23,11 +22,11 @@
 #include "cursiv/engines/lr/runtime/LrGssGraph.hpp"
 #include "cursiv/engines/lr/runtime/LrSearch.hpp"
 #include "cursiv/engines/lr/runtime/LrStack.hpp"
-#include "cursiv/engines/lr/runtime/LrWalkTail.hpp"
 #include "cursiv/engines/lr/runtime/lr_elect.hpp"
 #include "cursiv/engines/lr/runtime/lr_lex_exact.hpp"
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
 #include "cursiv/engines/lr/runtime/lr_read.hpp"
+#include "cursiv/engines/lr/runtime/lr_refusal.hpp"
 #include "cursiv/engines/lr/runtime/lr_repair_write.hpp"
 #include "cursiv/engines/lr/runtime/lr_search.hpp"
 #include "cursiv/engines/lr/runtime/lr_states.hpp"
@@ -40,6 +39,30 @@ namespace cursiv {
 
 // Stacks under one frozen reading a search sets out from, at most.
 inline constexpr std::size_t kLrGssStacks = 512;
+// The stack frames an episode's graph first holds.
+inline constexpr std::uint32_t kLrSeedWindow = 32;
+
+// Whether one stack below `vertex` takes `term` after its plain reductions,
+// as `lr_graph_takes` walks the graph.
+template <const auto& A, class Holds>
+bool lr_gss_takes(LrGssGraph& graph, LrGssGraph::Id vertex, SymbolId term,
+                  Holds&& holds) {
+  using Id = LrGssGraph::Id;
+  return lr_graph_takes(
+      vertex, [&](Id v) { return graph.reading(v).run.state; },
+      [&](Id v, auto&& f) { graph.each_below(v, f); },
+      [&](std::uint32_t top, std::uint32_t& prod, std::uint32_t& len) {
+        const int act = lr_climb_act<A>(top, term, holds, prod);
+        if (act >= 0) return act;
+        if (!lr_reduce_allowed<A>(prod, holds)) return 0;
+        if (kLrGuarded<A> && A.cfg.prods[prod].guarded != 0) return 1;
+        len = A.cfg.prods[prod].len;
+        return -1;
+      },
+      [&](std::uint32_t from, std::uint32_t prod) {
+        return lr_reduce_target<A>(from, prod, kLrNoFirst, holds);
+      });
+}
 
 template <const auto& A>
 class LrGss {
@@ -102,31 +125,40 @@ class LrGss {
       start.laMode = _c.laMode;
       start.pendEnd = _c.pendEnd;
     }
-    if constexpr (A.cold.electSym.size() != 0)
-      _g.seed(_c.stack, start, A.cold.electSym);
-    else
-      _g.seed(_c.stack, start);
+    // The graph holds the stack's top frames only, as many as its reductions
+    // reach: a reduction below them reads the episode again, seeded wider.
     bool collapsed = false;
-    TextOffset openedAt = start.at;
-    for (;;) {
-      _c.stop.poll();
-      Pop pop;
-      Id last;
-      if (_g.next_path(pop, last)) {
-        finish(pop, last);
-        continue;
+    for (std::uint32_t window = kLrSeedWindow;;) {
+      if constexpr (A.cold.electSym.size() != 0)
+        _g.seed(_c.stack, start, A.cold.electSym, window);
+      else
+        _g.seed(_c.stack, start, {}, window);
+      _c.stats.seeded += _c.stack.size() - _g.seed_base();
+      collapsed = false;
+      TextOffset openedAt = start.at;
+      while (!_g.underflow()) {
+        _c.stop.poll();
+        Pop pop;
+        Id last;
+        if (_g.next_path(pop, last)) {
+          finish(pop, last);
+          continue;
+        }
+        Id v;
+        TextOffset at;
+        if (!next_vertex(v, at)) break;
+        _g.settle(at);
+        if (_g.hand_back(v, openedAt)) {
+          collapsed = true;
+          break;
+        }
+        _g.take_vertex();
+        openedAt = std::max(openedAt, at);
+        open(v);
       }
-      Id v;
-      TextOffset at;
-      if (!next_vertex(v, at)) break;
-      _g.settle(at);
-      if (_g.hand_back(v, openedAt)) {
-        collapsed = true;
-        break;
-      }
-      _g.take_vertex();
-      openedAt = std::max(openedAt, at);
-      open(v);
+      if (!_g.underflow()) break;
+      const std::uint32_t depth = _c.stack.size();
+      window = window > depth / 4 ? depth : window * 4;
     }
     if (!collapsed && !_g.close()) return Ending::frozen;
     const auto chosen = _g.elected();
@@ -143,7 +175,7 @@ class LrGss {
   // said once the episode has written its path.
   void say_bounded() {
     if (_g.cut() == 0) return;
-    _c.stats.cutReadings += _g.cut();
+    lr_search_settle(_c, *_c.search);
     RepairNote note{};
     note.kind = DiagnosticKind::bounded;
     note.begin = _g.cut_begin();
@@ -200,16 +232,19 @@ class LrGss {
   // then one per graph frame, its records past the tape. The records' count.
   NodeCount frames_of(const LrGssGraph::Source& s, LrStack& out) {
     const NodeCount tape = _c.tape.len();
+    // The frames under the graph, then the seed's that the stack keeps.
+    const std::size_t base = _g.seed_base();
+    for (std::size_t f = 0; f < base; ++f) out.push(_c.stack[f]);
     std::size_t i = 0;
     while (i < s.vertices.size() && s.vertices[i] == i &&
-           i < _c.stack.size())
-      out.push(_c.stack[i++]);
+           base + i < _c.stack.size())
+      out.push(_c.stack[base + i++]);
     NodeCount past = 0;
-    for (const std::size_t kept = i; i < s.vertices.size(); ++i) {
+    for (const std::size_t kept = base + i; i < s.vertices.size(); ++i) {
       const Reading& r = _g.reading(s.vertices[i]);
-      const NodeCount open =
-          i == kept && kept < _c.stack.size() ? _c.stack[kept].open
-                                              : tape + past;
+      const NodeCount open = base + i == kept && kept < _c.stack.size()
+                                 ? _c.stack[kept].open
+                                 : tape + past;
       out.push(LrFrame{static_cast<std::uint16_t>(r.run.state), kNoElement,
                        open, r.at, kLrNoWord});
       past += _g.tokens(s.forests[i - 1]);
@@ -259,15 +294,12 @@ class LrGss {
             return;
           }
         }
-        const IndentAt outer = _c.indent;
-        _c.indent = r.indent;
-        r.la = lr_scan_at<A>(_c, mode, r.at);
+        r.la = lr_scan_at<A>(_c, mode, r.at, r.indent.depth);
         [[maybe_unused]] bool refused = false;
         if constexpr (A.has_flags())
           if (r.la.sym < A.cfg.nterms && A.flagged(mode, r.la.sym))
             [[unlikely]]
             refused = refuse(v, r, mode);
-        _c.indent = outer;
         r.pendEnd = r.la.begin;
         if constexpr (A.maxCands > 1) {
           if (!refused && lr_has_rivals<A>(r.laMode, r.la.sym)) {
@@ -277,8 +309,8 @@ class LrGss {
             if (keep != 0) {
               candidates = keep;
               const SymbolId term = room[candidate].term;
-              r.la = Token{r.la.begin, room[candidate].end, term};
-              step.ranked = lr_rivals_ranked<A>(room.data(), keep);
+              r.la = Token{r.la.begin, room[candidate].end, term, r.laMode};
+              step.ranked = lr_rivals_ranked(room.data(), keep);
               step.lexRank = ~lex_weight(room[candidate].tier);
             }
           }
@@ -334,7 +366,7 @@ class LrGss {
         if constexpr (kLrConditioned<A>) next.virt.shift(r.la);
         const Id landed = _g.vertex(next);
         lay(landed, v, to, r.la.sym, {}, s, {}, {});
-        if (real) _shifts.push_back({landed, r.la.begin, r.la.end});
+        if (real) _shifts.push_back({landed, r.la});
       }
       if (!lives) _g.freeze(v, r);
     }
@@ -346,7 +378,7 @@ class LrGss {
     return lr_lex_refused<A>(
         [&](const Token& t) { return takes(v, t.sym, r); }, mode, r.la,
         [&](const LrSkipped<A>& skip, TextOffset from) {
-          return lr_scan_skipping<A>(_c, mode, from, skip,
+          return lr_scan_skipping<A>(_c, mode, from, r.indent.depth, skip,
                                      [](TextOffset, const Token*) {});
         });
   }
@@ -355,94 +387,51 @@ class LrGss {
   // for it, the graph's paths popped as a reduction pops them. What the gap
   // decides counts as taken.
   bool takes(Id v, SymbolId term, const Reading& r) {
-    std::unordered_set<std::uint64_t> failed;
-    LrWalkTail above;
-    return takes_over(v, above, term, lr_shadow_holds(_c, r), failed);
-  }
-
-  // `failed` holds the stacks a descent already walked to a refusal, each by
-  // its vertex and the state pushed over it: two paths meeting are walked once.
-  template <class Holds>
-  bool takes_over(Id v, LrWalkTail& above, SymbolId term, Holds&& holds,
-                  std::unordered_set<std::uint64_t>& failed) {
-    for (;;) {
-      const std::uint32_t top =
-          above.size() != 0 ? above.back() : _g.reading(v).run.state;
-      std::uint32_t reduced = 0;
-      const int act = lr_climb_act<A>(top, term, holds, reduced);
-      if (act >= 0) return act != 0;
-      if (!lr_reduce_allowed<A>(reduced, holds)) return false;
-      const auto& prod = A.cfg.prods[reduced];
-      if (kLrGuarded<A> && prod.guarded != 0) return true;
-      if (prod.len <= above.size()) {
-        above.pop(prod.len);
-        const std::uint32_t to = lr_reduce_target<A>(
-            above.size() != 0 ? above.back() : _g.reading(v).run.state,
-            reduced, kLrNoFirst, holds);
-        if (to == kInvalidSymbol) return false;
-        above.push(to);
-        continue;
-      }
-      bool taken = false;
-      descend(v, prod.len - above.size(), [&](Id u) {
-        const std::uint32_t to = lr_reduce_target<A>(
-            _g.reading(u).run.state, reduced, kLrNoFirst, holds);
-        if (taken || to == kInvalidSymbol) return;
-        if (!failed.insert(std::uint64_t{u} << 32 | to).second) return;
-        LrWalkTail next;
-        next.push(to);
-        taken = takes_over(u, next, term, holds, failed);
-      });
-      return taken;
-    }
-  }
-
-  template <class F>
-  void descend(Id v, std::uint32_t depth, F&& f) {
-    if (depth == 0) {
-      f(v);
-      return;
-    }
-    _g.each_below(v, [&](Id u) { descend(u, depth - 1, f); });
+    return lr_gss_takes<A>(_g, v, term, lr_shadow_holds(_c, r));
   }
 
   // The nearest unopened vertex, once the shifts from every place before it
-  // are settled: of the tokens shifted from one place, only the longest stands.
+  // are settled: of the tokens shifted from one place, only the one the lexer
+  // elects stands.
   bool next_vertex(Id& v, TextOffset& at) {
     while (_g.next_vertex(v, at)) {
-      if (_shifts.empty() || !longest_stand(at)) return true;
+      if (_shifts.empty() || !elected_stand(at)) return true;
     }
     return false;
   }
 
   // Settles the shifts that start before `before`; whether a vertex was
   // retired.
-  bool longest_stand(TextOffset before) {
-    const Shift lead = _shifts.front();
-    if (std::ranges::all_of(_shifts, [&](const Shift& s) {
-          return s.begin == lead.begin && s.end == lead.end;
-        })) {
+  bool elected_stand(TextOffset before) {
+    const Token lead = _shifts.front().token;
+    if (std::ranges::all_of(_shifts,
+                            [&](const Shift& s) { return s.token == lead; })) {
       if (lead.begin < before) _shifts.clear();
       return false;
     }
-    for (Shift& s : _shifts) s.beaten = outlasted(s);
+    // A tie reads its tokens again: each once, not once per rival.
+    const auto weight = [&](Shift& s) {
+      if (s.weight == Shift::kUnweighed)
+        s.weight = static_cast<std::uint8_t>(lr_token_weight<A>(_c, s.token));
+      return s.weight;
+    };
+    for (Shift& s : _shifts)
+      s.beaten = std::ranges::any_of(_shifts, [&](Shift& o) {
+        return lr_token_beats(o.token, s.token,
+                              [&] { return weight(o) > weight(s); });
+      });
     std::vector<Id> rejected;
     for (const Shift& s : _shifts) {
-      if (s.begin >= before || !s.beaten) continue;
+      if (s.token.begin >= before || !s.beaten) continue;
       if (std::ranges::none_of(_shifts, [&](const Shift& o) {
             return o.vertex == s.vertex && !o.beaten;
           }))
         rejected.push_back(s.vertex);
     }
     _g.retire(rejected);
-    std::erase_if(_shifts, [&](const Shift& s) { return s.begin < before; });
+    std::erase_if(_shifts,
+                  [&](const Shift& s) { return s.token.begin < before; });
     return !rejected.empty();
-  }
-
-  bool outlasted(const Shift& s) const {
-    for (const Shift& o : _shifts)
-      if (o.begin == s.begin && o.end > s.end) return true;
-    return false;
   }
 
   // False where an empty reduction lands nowhere: the reading has no action.
@@ -547,8 +536,9 @@ class LrGss {
         t = lex_match(tape, _c.src, _c.len, mode, at);
       else
         t = _c.drive->walk(_c.src, _c.len, mode, at);
-      const bool trivia = t.end > at && (lr_is_trivia<A>(t.term) ||
-                                         lr_joins<A>(_c, t.term));
+      const bool trivia =
+          t.end > at && (lr_is_trivia<A>(t.term) ||
+                         lr_joins<A>(r.indent.depth, t.term));
       if (!trivia) {
         if constexpr (Apart) {
           if (t.end > at && A.flagged(mode, t.term)) {

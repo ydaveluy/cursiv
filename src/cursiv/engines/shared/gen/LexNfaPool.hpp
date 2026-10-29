@@ -7,7 +7,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <span>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
@@ -41,6 +44,8 @@ struct LexNfaState {
   // what follows it in a state of its own until the rest is ruled out.
   int stray = -1;
   std::uint16_t strayTerm = 0;
+  // The guard this hole stands for, or -1.
+  int guard = -1;
 
   int plain() const { return strayBound ? plainBound : bound; }
 };
@@ -50,6 +55,9 @@ struct LexNfaState {
 struct LexRelayBuild {
   LexRelayGen row;
   int resumeOut = -1;
+  // A nested relay's opener and closer, where each side is one literal; empty
+  // otherwise.
+  std::string open, close;
 };
 
 // A refusal recorded while the graph is still being built: `hole` is the state
@@ -103,7 +111,7 @@ struct LexNfaPool {
   int guard(std::uint16_t node, int out) {
     for (const LexNfaGuard& gd : guards)
       if (gd.node == node && gd.out == out) return gd.hole;
-    const int h = hole();
+    const int h = push({.guard = static_cast<int>(guards.size())});
     guards.push_back({h, out, node, term});
     return h;
   }
@@ -181,16 +189,14 @@ struct LexNfaPool {
 
  private:
   int sink(const LexNfaState& want) {
-    for (std::size_t i = 0; i < s.size(); ++i) {
-      const LexNfaState& x = s[i];
-      if (x.accept == want.accept && x.bound == want.bound &&
-          x.lit == want.lit && x.strayBound == want.strayBound &&
-          x.plainBound == want.plainBound && x.set < 0 && x.t1 < 0 && x.t2 < 0)
-        return static_cast<int>(i);
-    }
-    return push(want);
+    const auto [at, fresh] = _sinks.try_emplace(
+        {want.accept, want.bound, want.plainBound, want.strayBound, want.lit},
+        static_cast<int>(s.size()));
+    return fresh ? push(want) : at->second;
   }
 
+  // The sinks minted so far, by what they accept.
+  std::map<std::tuple<int, int, int, bool, bool>, int> _sinks;
   // One mark per state, stamped by the pass that reached it.
   mutable std::vector<std::uint32_t> _seen;
   mutable std::vector<int> _todo;

@@ -11,7 +11,6 @@
 #include "cursiv/core/text/scalar_at.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
-#include "cursiv/engines/ll/runtime/ll_section.hpp"
 #include "cursiv/engines/ll/table/LlTable.hpp"
 #include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
@@ -24,36 +23,13 @@ inline constexpr std::array<std::uint64_t, T.termWords> kNoReserve{};
 // One walk's table, as `typo_each` reads it: every answer is a lookup on the
 // frozen table.
 template <const auto& T>
-struct LlTypoTape {
-  const char* src;
-  // Where the search stops, and where the DOCUMENT stops. They are two facts:
-  // a token may end at the second, and at the first the walk has only run out
-  // of budget.
-  TextOffset extent;
-  TextOffset docLen;
+struct LlTypoTape : TypoBounds {
   // The terminals the point admits.
   std::uint64_t* want;
-  // The bytes the walk stepped over, every path counted.
-  std::uint64_t* read;
   // Where the token begins: a keyword's own refusal is asked of its head.
   TextOffset head = 0;
-  bool* shortOf = nullptr;
-  std::uint64_t most = ~std::uint64_t{0};
   const CancellationPoll* stop = nullptr;
 
-  TextOffset len() const { return extent; }
-  bool cut() const {
-    if (extent < docLen && shortOf != nullptr) *shortOf = true;
-    return extent < docLen;
-  }
-  bool spent() const {
-    if (*read <= most) return false;
-    if (shortOf != nullptr) *shortOf = true;
-    return true;
-  }
-  unsigned char byte(TextOffset p) const {
-    return static_cast<unsigned char>(src[p]);
-  }
   std::span<const std::uint16_t> successors(std::uint16_t s) const {
     return typo_successors(T.typoSuccBase, T.typoSucc, s);
   }
@@ -121,17 +97,13 @@ struct LlTypoTape {
   }
   // The typo walk's refusal hook has no statistics sink here.
   void refused() const {}
-  void transposes() const {}
-  void reads_unread() const {}
 };
 
-// How far past a fault a re-reading may look: one token, generously. A walk
-// is a search over paths, so what it reads it reads many times over.
-inline constexpr TextOffset kTypoExtent = 256;
-
-// The caller already read the ordinary token and bounded the section. All
-// paths and alphabets share `most`; hitting a horizon reports an incomplete
-// set of candidates through `cut`.
+// The re-readings of a misspelling from `at`, over the terminals `want` names
+// under `mode`, added to `found`; `read` counts the bytes the walks read. The
+// caller already read the ordinary token, which ends at `plain`, and bounded
+// the section. All paths and alphabets share `most`; hitting a horizon
+// reports an incomplete set of candidates through `cut`.
 template <const auto& T>
 inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
                              const std::uint64_t* want, TextOffset at,
@@ -146,31 +118,10 @@ inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
       if (((allowed[t >> 6] >> (t & 63u)) & 1u) != 0 &&
           T.head_refuses(t, c.src + at, c.len - at))
         allowed[t >> 6] &= ~(std::uint64_t{1} << (t & 63u));
-  typo_each(LlTypoTape<T>{c.src, horizon, len, allowed.data(), &read, at,
-                          &cut, most, &c.stop},
+  typo_each(LlTypoTape<T>{{c.src, horizon, len, &read, &cut, most},
+                          allowed.data(), at, &c.stop},
             T.modeStart[mode], at, plain,
             [&](const Typo& candidate) { found.add(candidate); });
-}
-
-// The re-readings of a misspelling from `at`, over the terminals `want` names
-// under `mode`, each (terminal, end) once at its fewest faults, in rank order:
-// fewer faults first, then the longer span, then the walk's declaration order.
-// `read` counts the bytes the walks read.
-template <const auto& T>
-inline void ll_rescan_candidates(const LlContext& c, std::uint16_t mode,
-                                 const std::uint64_t* want, TextOffset at,
-                                 std::uint64_t& read, TypoCandidates& found) {
-  // Head faults must end at `plain`, the widest ordinary token. An internal
-  // fault may join fragments beyond it, but only within this fixed horizon:
-  // without that bound, a file of faults costs its own square.
-  const TextOffset len = ll_text_end<T>(
-      c, at, c.len - at > 2 * kTypoExtent ? at + 2 * kTypoExtent : c.len);
-  const TextOffset plain =
-      ll_match_text<T>(c.src, len, ll_err_mode<T>(c), at).end;
-  const TextOffset horizon = typo_horizon(at, plain, len, kTypoExtent);
-  bool cut = false;
-  ll_rescan_within<T>(c, mode, want, at, plain, len, horizon, read, found,
-                      ~std::uint64_t{0}, cut);
 }
 
 }  // namespace cursiv

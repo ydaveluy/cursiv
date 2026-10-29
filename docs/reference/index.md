@@ -1,7 +1,7 @@
 # Reference
 
-Use these pages to look up syntax and API contracts while building a
-language. For a first project, follow the [tutorial](../learn/walkthrough.md).
+Look up syntax and API contracts here. For a first project, follow the
+[tutorial](../learn/walkthrough.md).
 
 | You want to… | Page |
 |---|---|

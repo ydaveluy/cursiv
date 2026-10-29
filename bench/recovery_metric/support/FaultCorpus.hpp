@@ -23,7 +23,7 @@
 #include "recovery_metric/support/RepairFault.hpp"
 #include "recovery_metric/support/RepairTwin.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct FaultCorpus {
   // What a one-byte fault writes: blanks, brackets, operators, quotes,
@@ -370,4 +370,4 @@ struct FaultCorpus {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

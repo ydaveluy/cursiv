@@ -19,16 +19,16 @@
 
 namespace cursiv {
 
+class LlMachine;
+
 // Whether the descent invented or skipped anything, and how many times it
 // has: what was planned before the last repair no longer says where it goes.
 class LlRepairFlag {
  public:
-  LlRepairFlag& operator=(bool repaired) {
-    if (repaired) {
-      _on = true;
-      ++_count;
-    }
-    return *this;
+  // One repair event: there is no assignment, so a plain bool cannot stand in.
+  void mark() {
+    _on = true;
+    ++_count;
   }
   operator bool() const { return _on; }
   std::uint32_t count() const { return _count; }
@@ -47,9 +47,7 @@ struct LlContext {
         src(text.data()),
         len(static_cast<TextOffset>(text.size())),
         reads(len),
-        budget(repairBudget) {
-    pending.reserve(8);
-  }
+        budget(repairBudget) {}
 
   CstBuilder& tape;
   const char* src;
@@ -86,6 +84,10 @@ struct LlContext {
   // Every call's exact return and first CST record. Recovery can then leave
   // an unfinished call and charge the author's tokens it actually gives up.
   LlReturnStack stack;
+  // The calls the descent hands over, and whether the rule in hand runs in
+  // its caller's place: such a rule hands its own calls over.
+  LlMachine* machine = nullptr;
+  bool nested = false;
 
   // The generated entry is running: its outermost caller is the document,
   // rather than the unknown caller of a raw prediction helper.
@@ -103,6 +105,9 @@ struct LlContext {
   // An elected abandon unwinds to this return depth. Other give-ups keep
   // their local loop behavior.
   std::size_t abandonDepth = ~std::size_t{0};
+  // The first record an elected abandon gave up: a record stating over a
+  // node that holds it may have no node left to state over.
+  NodeId lost = kNoNode;
 
   // The parse invented or skipped something: the tree stands, the verdict
   // does not.
@@ -111,15 +116,19 @@ struct LlContext {
   LexReadBudget reads;
   // The repair search of this parse, built at its first fault.
   std::unique_ptr<LlSearch> search;
-  // How many tokens have been invented since the last one was read. A repair
-  // that opens a construct calls the rules inside it, and those may repair in
-  // turn: without this the descent invents its way down a recursion that
-  // reads nothing and never returns.
+  // How many tokens no plan owed have been invented since the last one was
+  // read. A repair that opens a construct calls the rules inside it, and those
+  // may repair in turn: without this the descent invents its way down a
+  // recursion that reads nothing and never returns.
   std::uint16_t invented = 0;
   LlRepairRun run{};
   // The embedded grammar's configuration plus one, zero for the document.
   std::uint8_t section = 0;
   RepairBudget budget;
+  // The end a region read, past the gap it crossed to it, and the first
+  // record laid after: the nodes that close on that end span the gap.
+  TextOffset regionEnd = 0;
+  NodeId regionMark = kNoNode;
 };
 
 inline void ll_return(LlContext& c) {
@@ -127,6 +136,8 @@ inline void ll_return(LlContext& c) {
   if (c.stack.size() == c.abandonDepth) {
     c.give = false;
     c.abandonDepth = ~std::size_t{0};
+    // An abandon that laid no record gave nothing up on the tape.
+    if (c.lost >= c.tape.stream().records()) c.lost = kNoNode;
   }
 }
 

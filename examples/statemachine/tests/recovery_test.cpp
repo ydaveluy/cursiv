@@ -1,8 +1,8 @@
 #include <memory>
 #include <string_view>
 
-#include "cursiv/test/RecoveryLane.hpp"
 #include "cursiv/test/MutationOracle.hpp"
+#include "cursiv/test/RecoveryLane.hpp"
 #include "statemachine/core/ast.hpp"
 #include "statemachine/generated/SM/Module.hpp"
 
@@ -13,7 +13,6 @@ void run(Lane& lane) {
   lane.lang = "statemachine";
   const std::unique_ptr<cursiv::Parser> engine =
       sm::generated::SM::create_parser();
-#if !defined(CURSIV_ENGINE_LL)
   {
     const auto seed = document("valid.statemachine");
     const auto before = engine->parse(seed);
@@ -46,13 +45,12 @@ void run(Lane& lane) {
       if (model->states.size() == expected->states.size())
         for (std::size_t i = 0; i < model->states.size(); ++i) {
           CHECK(model->states[i]->name == expected->states[i]->name);
-          CHECK(model->states[i]->transitions.size() ==
-                expected->states[i]->transitions.size());
+          CHECK(model->states[i]->transitions.size()
+                == expected->states[i]->transitions.size());
         }
       if (replace) CHECK(model->name == expected->name);
     }
   }
-#endif
   language(lane, *engine, "valid.statemachine",
            {"01_typo1.statemachine", "02_typo2.statemachine",
             "03_closer_block.statemachine", "04_closer_eof.statemachine",
@@ -60,8 +58,7 @@ void run(Lane& lane) {
             "07_two_faults.statemachine", "08_head_fault.statemachine",
             "09_list_delim.statemachine", "10_noise.statemachine",
             "11_head_typo.statemachine"});
-  mutation_oracle(*engine, "statemachine",
-                  document("valid.statemachine"));
+  mutation_oracle(*engine, "statemachine", document("valid.statemachine"));
 }
 }  // namespace
 

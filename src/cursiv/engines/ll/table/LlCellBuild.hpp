@@ -1,5 +1,5 @@
-// What construction reads of a terminal, a rule and a position of a body, and
-// the frozen program never does. Beside the cells and not in them: only the
+// What construction reads of a choice and a position of a body, and the
+// frozen program never does. Beside the cells and not in them: only the
 // lowering holds these, and a table is emitted without them.
 #pragma once
 
@@ -8,13 +8,6 @@
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
 namespace cursiv {
-
-struct LlRuleBuild {
-  // It stands on a cycle that consumes nothing before reaching itself.
-  bool leftCyclic = false;
-
-  constexpr bool operator==(const LlRuleBuild&) const = default;
-};
 
 // The cost of an arm no token can stand for: it asserts the end of the text.
 inline constexpr std::uint16_t kLlRepairCostless = 0xFFFFu;
@@ -55,8 +48,6 @@ struct LlNodeBuild {
   // The rule whose repetition of more than one turn repeats this item: the
   // item may not match nothing.
   std::uint16_t repeatOwner = kNoRow;
-  // A choice the election ranks: arms that spell alike are told apart by it.
-  bool ranked = false;
 
   constexpr bool operator==(const LlNodeBuild&) const = default;
 };

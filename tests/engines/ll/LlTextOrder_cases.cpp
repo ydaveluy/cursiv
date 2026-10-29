@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "cursiv/core/parser/Parser.hpp"
+#include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
@@ -49,6 +50,14 @@ void abandoned(const cursiv::Parser& parser,
             diagnostic.also.empty();
     ++expected;
   }
+  // The text given up stays the author's: no token read in it is recovered.
+  for (const auto& diagnostic : result.diagnostics)
+    for (cursiv::NodeId i = 0; i < result.cst().size(); ++i) {
+      const cursiv::CstNode& n = result.cst()[i];
+      if (n.subtreeSize == 1 && !n.hidden && n.begin < n.end &&
+          n.begin >= diagnostic.begin && n.end <= diagnostic.end)
+        right = right && !n.recovered;
+    }
   if (out != want || !right) {
     std::cerr << "abandon text: " << text << "\nwant: " << want
               << "\ntree: " << out << '\n';

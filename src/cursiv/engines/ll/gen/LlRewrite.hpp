@@ -15,7 +15,7 @@ struct Rewrite {
   struct stages {
     using leveled = InfixLevelStage<Materialized, Declared>;
     using rules = reached_t<leveled>;
-    using stage = LoopFoldStage<leveled, rules>;
+    using stage = LoopFoldStage<leveled>;
   };
   template <class St, class Op, auto P>
   using infix_src = pay_text<infix_op_src<Op, P>>;

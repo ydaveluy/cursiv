@@ -1,11 +1,11 @@
 # Create a project
 
-Install the [required tools](index.md#before-you-start) first. The first build
-downloads Cursiv and its dependencies.
+Install the [required tools](index.md#before-you-start) first.
 
 ## Create, build and run
 
-Download the scaffolder and create a language named `MyLang`:
+Download the scaffolder and create a language named `MyLang`. The first build
+also downloads Cursiv and its dependencies.
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
@@ -17,17 +17,17 @@ cmake --build build --parallel
 ```
 
 The CLI reports `example/hello.mylang: ok`. The sample declares two people
-and greets each by name; its references resolve without custom services.
+and greets each by name.
 
-Run the generated tests and inspect the syntax tree:
+Run the tests and print the syntax tree:
 
 ```bash
 ctest --test-dir build --output-on-failure
 ./build/src/mylang_cli --dump example/hello.mylang
 ```
 
-Build again with `cmake --build build --parallel` after editing the grammar.
-CMake handles parser generation automatically.
+After a grammar change, build again with `cmake --build build --parallel`:
+the build regenerates the parser.
 
 ## What you got
 
@@ -52,36 +52,31 @@ mylang/
 └── vscode/                 the editor client
 ```
 
-Start with `core/ast.hpp` for your data types and `MyLangGrammar.hpp` for
-syntax. The validation directory contains the sample's naming and uniqueness
-checks. The tutorial replaces all three together.
+You mostly edit three places: `core/ast.hpp` for the data types,
+`MyLangGrammar.hpp` for the syntax and `validation/` for the checks. The
+tutorial replaces all three. Generated sources go under `build/`; never edit
+them.
 
-The generated sources appear under the build directory on the first build
-(`build/src/generated-src/mylang/generated/` with the default layout). They
-are rewritten whenever the grammar changes. Never edit them.
-
-The `cli/`, `lsp/`, `bench/` and `vscode/` directories are included by default.
-Delete the ones you do not want. CMake omits the matching targets and tests
-when `cli/`, `lsp/` or `bench/` is absent. The benchmark requires LSP services,
-so removing `lsp/` also disables the benchmark.
+Delete `cli/`, `lsp/`, `bench/` or `vscode/` if you do not need them. CMake
+then skips the matching targets and tests. The benchmark needs `lsp/`.
 
 ## Open it in VS Code
 
-Follow [Ship an editor extension](editor-integration.md) to install the editor
-prerequisites and launch with **F5**. A second window opens on `example/` with
-the extension loaded.
+Follow [Ship an editor extension](editor-integration.md) to install the
+editor tools, then press **F5**. A second window opens on `example/` with the
+extension loaded.
 
 ## Scaffold options
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-DNAME=` | *required* | Grammar type; it and its lowercase namespace must be non-reserved C++ identifiers. |
-| `-DEXT=` | `.<id>` | Language file extension, starting with a dot. |
+| `-DNAME=` | *required* | Grammar type. It and its lowercase form must be valid, non-reserved C++ identifiers. |
+| `-DEXT=` | `.<id>` | File extension, starting with a dot. |
 | `-DDIR=` | `<id>` | Directory to create; it must be empty. |
 | `-DCURSIV_TAG=` | `main` | Cursiv revision to fetch. |
 
-The lowercase name becomes the language id. For example, this creates a
-`recipe` project whose files use `.rcp`:
+The lowercase name is the language id. For example, this creates a `recipe`
+language whose files end in `.rcp`:
 
 ```bash
 cmake -DNAME=Recipe -DEXT=.rcp -DDIR=recipe-lang -P cursiv-new.cmake
@@ -89,5 +84,5 @@ cmake -DNAME=Recipe -DEXT=.rcp -DDIR=recipe-lang -P cursiv-new.cmake
 
 ## Next
 
-The [Recipe tutorial](walkthrough.md) starts a separate project with its own
-sample and AST.
+The [tutorial](walkthrough.md) creates a new project and builds a recipe
+language step by step.

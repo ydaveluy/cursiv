@@ -1,16 +1,15 @@
 # Test your language
 
-The scaffold includes a test that parses the sample and checks its abstract
-syntax tree (AST).
-As your language grows, add tests in this order:
+The scaffold's test parses the sample and checks its abstract syntax tree
+(AST). As your language grows, test that:
 
 1. A valid sample parses and produces the expected AST.
 2. Each validation reports an invalid case and accepts a valid one.
 3. Cross references resolve, and missing targets produce diagnostics.
 4. Custom editor providers return the expected results.
 
-The examples below use the Recipe language from the
-[tutorial](walkthrough.md).
+The examples use the Recipe language from the [tutorial](walkthrough.md). Run
+the tests with:
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -18,9 +17,9 @@ ctest --test-dir build --output-on-failure
 
 ## Check the parse result
 
-In the generated `tests/grammar_test.cpp`, keep the setup and update the AST
-assertions when you change the language. Check both the parse result and the
-diagnostics before reading the tree:
+In `tests/grammar_test.cpp`, keep the setup and update the AST checks when the
+language changes. Check the parse result and its diagnostics before reading
+the tree:
 
 ```cpp title="tests/grammar_test.cpp"
 const auto language = cursiv::create_language<
@@ -31,22 +30,20 @@ const cursiv::ParseResult result = language.language.parser->parse(text);
 if (!result || !result.diagnostics.empty())
   return fail("the sample does not parse cleanly");
 
-const auto* model = cursiv::ast_cast<recipe::ast::Model>(result.value);
-if (model == nullptr)
+const auto* const root = cursiv::ast_cast<recipe::ast::Model>(result.value);
+if (root == nullptr)
   return fail("the parse built no model");
+const auto& model = *root;
 ```
 
-`create_language` sets up your language services. Calling the parser directly
-does not resolve references or run validation checks.
-
-`result.cst().recovered()` reports syntax repair. `result.diagnostics` also
-contains conversion errors; an AST can exist even when diagnostics are present.
-
-`ast_cast<T>` checks the node's type and returns null if it does not match.
+`create_language` sets up your language services. The parser alone does not
+resolve references or run validation. `ast_cast<T>` returns null when the node
+is not a `T`.
 
 ## Checking your validation
 
-Add a separate test executable for validations:
+Add a test executable for validation. It links `cursiv::lsp` for the
+diagnostic helpers:
 
 ```cmake title="tests/CMakeLists.txt"
 add_executable(recipe_validation_test validation_test.cpp)
@@ -54,8 +51,6 @@ target_link_libraries(recipe_validation_test
     PRIVATE recipeCore cursiv::test cursiv::lsp)
 add_test(NAME recipe_validation_test COMMAND recipe_validation_test)
 ```
-
-Link `cursiv::lsp` when using the diagnostic expectation helpers.
 
 ```cpp title="tests/validation_test.cpp"
 #include "cursiv/core/services/CoreLanguage.hpp"
@@ -106,20 +101,19 @@ int main() {
 }
 ```
 
-`validationHelper` builds a document and returns its diagnostics. Validation is
-enabled by default in all document-building helpers, including `parseHelper`.
-`expectError` and `expectWarning` accept a message and optional filters such as
-an offset, diagnostic code or AST property.
+`validationHelper` builds a document and returns its diagnostics.
+`expectError` and `expectWarning` take a message and optional filters, such as
+an offset, a diagnostic code or an AST property. `dispose()` removes the
+document when you are done.
 
-Call `dispose()` to remove the document when finished, especially when reusing
-services between tests. Cleanup is explicit. Here each test also creates a
-separate workspace.
+`count_expectations()` collects the failures of the `expect*` helpers, and
+`report` prints the verdict and returns the exit code that CTest reads. For
+your own assertions, use `CHECK(condition)` from `cursiv/test/Check.hpp`.
 
 ## Checking the editor's answers
 
-The same module tests Language Server Protocol (LSP) editor features. Add
-markers to the input text: `<|>` marks the cursor, and `<| |>` wraps the range
-that the result must cover.
+The same module tests editor features. In the input text, `<|>` marks the
+cursor and `<| |>` wraps the range the result must cover:
 
 ```cpp
 #include "cursiv/test/ExpectedHover.hpp"
@@ -132,39 +126,14 @@ that the result must cover.
                        .disposeAfterCheck = true});
 ```
 
-Available expectations:
-
-| Helper | Checks |
-|---|---|
-| `expectCompletion` | what may be written at the caret |
-| `expectHover` | the documentation shown |
-| `expectGoToDefinition` | where a name leads |
-| `expectFindReferences` | every site that names a declaration |
-| `expectRename` | the edit's reach, and the names refused |
-| `expectHighlight` | the occurrences highlighted together |
-| `expectSymbols` / `expectWorkspaceSymbols` | the outline, and the workspace search |
-| `expectFoldings` | the ranges an editor may fold |
-| `expectSemanticToken` | the colouring |
-| `expectFormatting` | the layout on save |
-
-Set `disposeAfterCheck = true` to remove the test document immediately after
-the check. Otherwise, call `dispose()` on the returned result.
-
-## Report test failures
-
-Use `cursiv/test/Check.hpp` for assertions and a test exit code.
-
-```cpp
-CHECK(model->recipes.size() == 1);
-return cursiv::test::report("recipe_grammar_test");
-```
-
-`report` prints the verdict and returns the exit code CTest reads. Call
-`count_expectations()` first in `main` to collect all `expect*` failures before
-reporting them.
+`disposeAfterCheck = true` removes the test document after the check;
+otherwise, call `dispose()` on the result. Completion, go-to-definition,
+references, highlights, rename, symbols, folding, semantic tokens and
+formatting have similar helpers, listed in
+[Test module](../reference/test.md#check-editor-features).
 
 ## Further checks
 
-The examples also include fuzz tests that generate documents and check their
-trees, and recovery tests that compare repairs on broken input. See
-[Test module](../reference/test.md#recovery-and-fuzz) when you need them.
+The examples also include fuzz tests, which generate documents and check
+their trees, and recovery tests, which compare repairs of broken input. See
+[Test module](../reference/test.md#recovery-and-fuzz).

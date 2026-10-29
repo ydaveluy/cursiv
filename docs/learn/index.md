@@ -1,7 +1,6 @@
 # Learn
 
-Start by creating a project, then follow the Recipe tutorial. The remaining
-guides cover testing, using the AST and connecting an editor.
+Follow the first two guides in order. Use the others when you need them.
 
 <div class="grid cards" markdown>
 
@@ -15,8 +14,15 @@ guides cover testing, using the AST and connecting an editor.
 
     ---
 
-    From the hello-world grammar to cross references, checks and an editor —
-    changing one thing at a time.
+    Go from the hello-world grammar to references, checks and an editor, one
+    change at a time.
+
+-   **[Write a grammar](write-a-grammar.md)**
+
+    ---
+
+    Tokens, rules, lists, recursion and operator precedence, for a small
+    calculator language.
 
 -   **[Test your language](testing.md)**
 
@@ -41,7 +47,7 @@ guides cover testing, using the AST and connecting an editor.
 ## Before you start
 
 You need Git, CMake 3.30 or newer and a C++20 compiler with `std::format` and
-guaranteed tail calls (`musttail`). GCC 16 and Clang 22 are tested versions.
+guaranteed tail calls (`musttail`). GCC 16 and Clang 22 are tested.
 
-The [editor guide](editor-integration.md) lists the additional tools needed for
-VS Code. For WebAssembly, follow the [WASI setup](../recipes/wasm.md).
+VS Code needs [a few more tools](editor-integration.md). For WebAssembly,
+follow the [WASI setup](../recipes/wasm.md).

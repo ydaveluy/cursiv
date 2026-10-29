@@ -32,7 +32,7 @@ struct Base : cursiv::GrammarSpec {
              create<ast::Doc>(append<&ast::Doc::body>(ref<RunRule>) + lit<"b"> +
                               lit<"c">)> {};
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

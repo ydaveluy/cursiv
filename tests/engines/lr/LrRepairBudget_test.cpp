@@ -20,10 +20,13 @@
 #include "asi/generated/G/Parser.hpp"
 #include "asi/generated/G/Table.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
+#include "cursiv/core/syntax-tree/CstBuilder.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/engines/lr/runtime/LrDrive.hpp"
 #include "cursiv/engines/lr/runtime/LrParseStats.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
+#include "cursiv/engines/lr/runtime/lr_lex_exact.hpp"
+#include "cursiv/engines/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/test/Check.hpp"
 #include "degraded/generated/G/Parser.hpp"
 #include "degraded/generated/G/Table.hpp"
@@ -41,6 +44,87 @@ namespace gr = ::req::generated::Requirements;
 using namespace std::chrono_literals;
 
 namespace {
+
+// A re-read after a flagged token retains its alphabet, including in the memo:
+// otherwise a keyword cannot defeat that same-length identifier in a split.
+void a_rescanned_token_keeps_its_mode_for_the_election() {
+  constexpr const auto& table = garith::kTable;
+  for (const std::string_view text :
+       {"module", " module", "/* comment */module"}) {
+    cursiv::Cst tree(text);
+    cursiv::CstBuilder builder(tree);
+    builder.bind_stream();
+    cursiv::LrContext context(text, builder);
+    context.drive = &garith::kDrive;
+    const auto keyword =
+        cursiv::lr_scan_at<table>(context, table.errMode, 0, 0);
+    CHECK(keyword.sym < table.cfg.nterms &&
+          table.cfg.term_text(keyword.sym) == "module");
+    if (keyword.sym >= table.cfg.nterms) return;
+    cursiv::LrSkipped<table> skip;
+    skip.set(keyword.sym);
+    const auto crossed = [&](cursiv::TextOffset, const cursiv::Token* trivia) {
+      if (trivia != nullptr) CHECK(trivia->mode == table.errMode);
+    };
+    const auto identifier = cursiv::lr_scan_skipping<table>(
+        context, table.errMode, 0, 0, skip, crossed);
+    CHECK(identifier.begin == keyword.begin && identifier.end == keyword.end);
+    CHECK(identifier.sym < table.cfg.nterms &&
+          table.cfg.term_name(identifier.sym) == "ID");
+    CHECK(identifier.mode == table.errMode);
+    const auto repeated = cursiv::lr_scan_skipping<table>(
+        context, table.errMode, 0, 0, skip, crossed);
+    CHECK(repeated == identifier && repeated.mode == table.errMode);
+    if (text == "module")
+      CHECK(context.skipMemo.find(0, table.errMode, 0, &keyword.sym, 1) !=
+            nullptr);
+    CHECK(cursiv::lr_token_beats<table>(context, keyword, identifier));
+    CHECK(!cursiv::lr_token_beats<table>(context, identifier, keyword));
+
+    std::vector<cursiv::LrShadow> readings(2);
+    readings[0].la = identifier;
+    readings[1].la = keyword;
+    for (auto& reading : readings) reading.shifted = true;
+    cursiv::lr_elected_shift<table>(context, readings, readings.size());
+    CHECK(readings[0].dead && !readings[1].dead);
+
+    // The identifier read in its own alphabet has the same priority, while
+    // an identifier read against a shorter horizon loses to either full read.
+    auto own = cursiv::Token{};
+    for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
+      const auto token =
+          cursiv::lr_scan_at<table>(context, mode, keyword.begin, 0);
+      if (token.sym == identifier.sym) {
+        own = token;
+        break;
+      }
+    }
+    CHECK(own.mode != cursiv::kNoMode && own.mode != table.errMode);
+    if (own.mode == cursiv::kNoMode) return;
+    CHECK(cursiv::lr_token_beats<table>(context, keyword, own));
+    cursiv::TextOffset reached = keyword.begin;
+    const auto shortRead = cursiv::lr_scan_at<table, true>(
+        context, own.mode, keyword.begin, 0, nullptr, keyword.end - 1,
+        &reached);
+    const cursiv::Token tokens[] = {keyword, identifier, own, shortRead};
+    for (const auto& a : tokens)
+      for (const auto& b : tokens)
+        for (const auto& c : tokens)
+          if (cursiv::lr_token_beats<table>(context, a, b) &&
+              cursiv::lr_token_beats<table>(context, b, c))
+            CHECK(cursiv::lr_token_beats<table>(context, a, c));
+  }
+}
+
+// Unoptimised code runs the same work several times slower, and unoptimised
+// wasm slower again.
+#if defined(__wasi__) && !defined(NDEBUG)
+constexpr auto kWatchdog = 300s;
+#elif !defined(NDEBUG)
+constexpr auto kWatchdog = 120s;
+#else
+constexpr auto kWatchdog = 30s;
+#endif
 
 struct Parsed {
   bool accepted = false;
@@ -130,6 +214,8 @@ void a_forked_closer_costs_one_reading() {
     CHECK(p.accepted && p.stats.degradedPauses != 0);
     CHECK(p.stats.degradedHeld < 64);
     CHECK(p.stats.work <= std::uint64_t{32} * depth);
+    // Each closer's graph holds the frames it reduces, not the whole nest.
+    CHECK(p.stats.seeded <= std::uint64_t{64} * depth);
     if (before != 0) CHECK(p.stats.work <= 2 * before + 64);
     before = p.stats.work;
   }
@@ -208,11 +294,12 @@ void an_unbounded_budget_stays_unbounded() {
 }  // namespace
 
 int main() {
+  a_rescanned_token_keeps_its_mode_for_the_election();
   std::jthread watchdog([](std::stop_token stop) {
     std::mutex mutex;
     std::condition_variable_any wake;
     std::unique_lock lock(mutex);
-    wake.wait_for(lock, stop, 30s, [] { return false; });
+    wake.wait_for(lock, stop, kWatchdog, [] { return false; });
     if (!stop.stop_requested()) std::abort();
   });
   an_owed_run_that_grows_its_stack_ends();

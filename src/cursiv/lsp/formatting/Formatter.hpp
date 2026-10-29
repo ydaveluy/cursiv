@@ -26,8 +26,10 @@ class Formatter {
       const Document& document, const lsp::DocumentFormattingParams& params,
       const CancellationToken& = {}) const = 0;
 
-  // The same rules restricted to a range: every edit outside it is dropped, so
-  // a selection format cannot move text the user did not select.
+  // The same rules restricted to the lines of a range: an edit is kept when
+  // the lines it spans overlap the range's lines. The range's columns do not
+  // narrow it, and a gap that crosses a boundary line is rewritten whole, so
+  // an edit may reach past the range on either side.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> formatDocumentRange(
       const Document& document,
       const lsp::DocumentRangeFormattingParams& params,

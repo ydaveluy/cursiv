@@ -57,29 +57,46 @@ struct RuleRows {
       tl_cat_t<typename ConvertOf<typename S::template rule<R>>::type,
                close_rows_t<typename S::template rule<R>>, body_rows_t<S, R>>;
 };
-template <class S, class R, template <class, class, auto> class InfixSrc>
-struct RuleRows<S, R, InfixSrc, true> {
-  using T = typename S::template rule<R>;
-  // One `op` row per operator: what it hands over rides its own converter.
-  template <class L>
+// One `op` row per operator of a binary level: what it hands over rides its
+// own converter. A unary level writes what its rule writes: its class, its
+// operator and its operand.
+template <class S, class T, template <class, class, auto> class InfixSrc,
+          class L, bool Unary = is_unary_level<L>>
+struct level_rows {
+  template <class Ops>
   struct op_rows;
   template <class... Ops>
   struct op_rows<TypeList<Ops...>> {
     using type =
         TypeList<owned_row<T::op_pointer, InfixSrc<S, Ops, T::op_pointer>>...>;
   };
-  template <class Lvls, class Seq>
-  struct level_rows;
-  template <class Lvls, std::size_t... Is>
-  struct level_rows<Lvls, std::index_sequence<Is...>>
-      : tl_cat<typename op_rows<typename alts_list<
-            typename Lvls::template at<Is>::op_expr>::type>::type...> {};
-  using type = tl_cat_t<
-      TypeList<Row<WriteKind::climb, typename T::node_type>,
-               owned_row<T::left_pointer>>,
-      typename level_rows<typename T::levels,
-                          std::make_index_sequence<T::levels::size>>::type,
-      TypeList<owned_row<T::right_pointer>>>;
+  using type =
+      typename op_rows<typename alts_list<typename L::op_expr>::type>::type;
+};
+template <class S, class T, template <class, class, auto> class InfixSrc,
+          class L>
+struct level_rows<S, T, InfixSrc, L, true> {
+  using type = rows_of_t<
+      S, normalize_writes_t<
+             Create<typename L::node_type,
+                    Seq<Assign<L::op_pointer, typename L::op_expr>,
+                        Assign<L::operand_pointer, Ref<declared_of_t<T>>>>>>>;
+};
+template <class S, class T, template <class, class, auto> class InfixSrc,
+          class Lvls = typename T::levels>
+struct infix_level_rows;
+template <class S, class T, template <class, class, auto> class InfixSrc,
+          class... Ls>
+struct infix_level_rows<S, T, InfixSrc, Levels<Ls...>>
+    : tl_cat<typename level_rows<S, T, InfixSrc, Ls>::type...> {};
+
+template <class S, class R, template <class, class, auto> class InfixSrc>
+struct RuleRows<S, R, InfixSrc, true> {
+  using T = typename S::template rule<R>;
+  using type = tl_cat_t<TypeList<Row<WriteKind::climb, typename T::node_type>,
+                                 owned_row<T::left_pointer>>,
+                        typename infix_level_rows<S, T, InfixSrc>::type,
+                        TypeList<owned_row<T::right_pointer>>>;
 };
 
 template <class S, class Rules, template <class, class, auto> class InfixSrc>

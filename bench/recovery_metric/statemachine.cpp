@@ -14,12 +14,14 @@
 #include "statemachine/generated/SM/Parser.hpp"
 #include "statemachine/generated/SM/Table.hpp"
 
+namespace metric = cursiv::recovery_metric;
+
 namespace {
 
 namespace g = sm::generated::SM;
 const cursiv::fuzzer::CursivActions<sm::SM> kActions{};
 
-const recovery_metric::Registered kLanguage{{
+const metric::Registered kLanguage{{
     .rank = 4,
     .name = "statemachine",
     .parser = &g::create_parser,
@@ -28,14 +30,14 @@ const recovery_metric::Registered kLanguage{{
     .documents =
         [] {
           return std::vector<std::string>{
-              recovery_metric::source_file("examples/statemachine/tests/recovery/valid.statemachine"),
-              recovery_metric::source_file("examples/statemachine/example/doors.statemachine"),
-              recovery_metric::source_file("examples/statemachine/example/trafficlight.statemachine"),
+              metric::source_file("examples/statemachine/tests/recovery/valid.statemachine"),
+              metric::source_file("examples/statemachine/example/doors.statemachine"),
+              metric::source_file("examples/statemachine/example/trafficlight.statemachine"),
               bench::generateStatemachineSource(3072)};
         },
-    .ceilings = &recovery_metric::ceilings<g::kTable, g::kDrive,
+    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
                                           g::kGrammarMetaData, g::kAstActions>,
-    .searching = &recovery_metric::searching<g::kTable, g::kDrive,
+    .searching = &metric::searching<g::kTable, g::kDrive,
                                                 g::kGrammarMetaData,
                                                 g::kAstActions>,
 }};

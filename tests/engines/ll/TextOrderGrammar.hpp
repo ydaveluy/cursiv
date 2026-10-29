@@ -104,14 +104,13 @@ struct Cycle : Common {
             create<Compare>(assign<&Compare::left>(ref<Ago>) + ref<FROM> +
                             assign<&Compare::right>(ref<Ago>)),
             ref<Ago>)> {};
-  struct Sum
-      : infix<Before, &Add::left, &Add::op, &Add::right, left(ref<PLUS>)> {};
+  struct Sum : infix<Before, Add, left(ref<PLUS>)> {};
   struct Str : rule<in_order<TrimFirst>(
                    create<Box>(kw<"trim"> + assign<&Box::value>(ref<Str>)),
                    ref<Sum>)> {};
   struct Root : rule<create<Doc>(some(append<&Doc::items>(ref<Str>))) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 // The same consuming suffix through a parser rule must preserve the rung's
 // association; the other families keep the literal spelling above.
@@ -128,7 +127,7 @@ struct Whole : Common {
                      create<Box>(assign<&Box::value>(ref<Head>))> {};
   struct Root : rule<create<Doc>(append<&Doc::items>(ref<Item>)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A declaration whose type name refuses a reserved word against an expression
@@ -147,7 +146,7 @@ struct Refusal : Common {
   struct Root : rule<create<Doc>(some(append<&Doc::items>(ref<Item>))) + eof> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A keyword the word terminal also spells, where the condition above the name
@@ -172,7 +171,7 @@ struct Keyword : Common {
   struct Root
       : rule<create<Doc>(some(append<&Doc::items>(ref<Implies>))) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Combined : Common {
   struct Root : rule<(lit<"cycle:"> + ref<Cycle<true, true, true, true, true>::Root>) |
@@ -182,7 +181,7 @@ struct Combined : Common {
                      (lit<"refusal:"> + ref<Refusal<false>::Root>) |
                      (lit<"keyword:"> + ref<Keyword::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Combined {};
 }  // namespace tlltextorder

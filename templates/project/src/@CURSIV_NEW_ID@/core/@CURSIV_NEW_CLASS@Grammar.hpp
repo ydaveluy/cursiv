@@ -15,20 +15,22 @@
 //     Hello Alice!
 //
 // The four kinds of member:
-//   * `terminal<...>`    a token the lexer produces; a second template
-//                         argument converts its text (a number, say)
+//   * `terminal<...>`    a token the lexer produces; `as<T>(...)` around
+//                         its body converts its text (a number, say)
 //   * `rule<...>`        a parser rule, its AST class deduced from the
 //                         members it writes -- nothing is annotated
 //   * `entry`            the rule a document starts at
-//   * `ignore`/`hidden`  trivia: `ignore` is dropped, `hidden` stays in the
+//   * `ignored`/`hidden` trivia: `ignored` is dropped, `hidden` stays in the
 //                        tree, which is what lets a comment attach to what
 //                        follows it
 //
-// The four directives that build the tree:
+// `ref<R>` calls the rule or terminal `R`. The directives build the tree:
 //   * `create<T>`         make a T here, even if nothing else writes to it
 //   * `assign<&T::m>(e)`  parse `e`, store it in `m` (once)
 //   * `append<&T::m>(e)`  parse `e`, push it onto the list `m`
-//   * `ref<R>`            call the rule or terminal `R`
+//   * `flag<&T::m>(e)`    parse `e`, then set the bool `m` to true
+//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, which
+//                         holds it in `m`
 //
 // One trap: rules that reduce in a cycle without reading text are refused by
 // name -- `A -> B` with `B -> A`, or a rule that reaches itself past symbols
@@ -47,23 +49,22 @@ struct @CURSIV_NEW_CLASS@ : cursiv::GrammarSpec {
 
   // `kw` is a keyword (a whole word, never a prefix of a longer one); `ikw` is
   // its case-insensitive twin, and `lit` is raw text with no word boundary.
-  struct PersonRule
-      : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
+  struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 
   // `person` is a `reference<Person>` in the AST, so this reads a name and
   // the linker resolves it after the parse: the default scope makes every
   // named node visible inside its container.
-  struct GreetingRule
-      : rule<kw<"Hello"> + assign<&ast::Greeting::person>(ref<ID>) +
-             lit<"!">> {};
+  struct Greeting
+      : rule<kw<"Hello"> + assign<&ast::Greeting::person>(ref<ID>) + lit<"!">> {
+  };
 
-  struct ModelRule
-      : rule<create<ast::Model> +
-             some(append<&ast::Model::persons>(ref<PersonRule>) |
-                  append<&ast::Model::greetings>(ref<GreetingRule>))> {};
+  struct Model : rule<create<ast::Model>
+                      + some(append<&ast::Model::persons>(ref<Person>)
+                             | append<&ast::Model::greetings>(ref<Greeting>))> {
+  };
 
-  using entry = ModelRule;
-  using ignore = WS;
+  using entry = Model;
+  using ignored = WS;
   using hidden = list<SL_COMMENT, ML_COMMENT>;
 };
 

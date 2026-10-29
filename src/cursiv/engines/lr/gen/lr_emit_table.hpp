@@ -5,13 +5,10 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/engines/lr/gen/LrBuildTable.hpp"
-
 namespace cursiv {
 
-struct LrProgramLayout;
+class LrFinalTable;
 
-std::string lr_emit_table(const LrBuildTable& a, std::string_view ns,
-                          const LrProgramLayout& programs);
+std::string lr_emit_table(const LrFinalTable& done, std::string_view ns);
 
 }  // namespace cursiv

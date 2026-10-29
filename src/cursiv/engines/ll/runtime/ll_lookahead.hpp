@@ -107,18 +107,28 @@ inline const LlMask<T.termWords>& ll_unrefused_mask(
   }
 }
 
+// Whether a walk in `st` can still accept a terminal of `wanted`.
+template <const auto& T>
+inline bool ll_wants_ahead(std::uint16_t st,
+                           const LlMask<T.termWords>& wanted) {
+  if (T.lexLive == nullptr) return true;
+  const std::uint64_t* const live = T.dfa_live_set(st).w;
+  for (std::uint32_t k = 0; k < T.termWords; ++k)
+    if ((live[k] & wanted.word(k)) != 0) return true;
+  return false;
+}
+
 // Longest match, restricted, and ALL of it: at the longest accepting state
 // every terminal the readings still admit is a reading of this spelling.
 // Naming one of them would kill the arms that wanted another -- a guarded `=`
-// and a bare one are two terminals over one byte. A shared alphabet retains
-// only readings at its longest extent.
+// and a bare one are two terminals over one byte. `lengths`, where asked,
+// takes the readings at that longest extent.
 template <const auto& T, bool Collect>
 inline TextOffset ll_match_in_impl(
     const char* src, TextOffset len, TextOffset from,
     const LlMask<T.termWords>& wanted, std::vector<std::uint16_t>& out,
     TextOffset* inspected, bool* ended, bool* different,
-    std::vector<LlLexReading>* lengths, bool shared = false,
-    bool* rivalled = nullptr, std::uint16_t mode = T.errMode,
+    std::vector<LlLexReading>* lengths, std::uint16_t mode = T.errMode,
     std::size_t* top = nullptr) {
   LlMask<T.termWords> room;
   const LlMask<T.termWords>& viable =
@@ -127,7 +137,7 @@ inline TextOffset ll_match_in_impl(
   TextOffset end = from;
   TextOffset far = from;
   std::uint16_t best = kDeadState;
-  bool rivals = false, shorter = false;
+  bool shorter = false;
   std::array<std::uint64_t, T.termWords> previous;
   std::conditional_t<Collect, std::array<TextOffset, T.nterms>,
                      std::array<TextOffset, 0>>
@@ -170,7 +180,6 @@ inline TextOffset ll_match_in_impl(
       const bool reserve = ll_reserves_in<T>(st, viable, src, i, len, far);
       const std::uint64_t* const res = reserve ? T.dfa_res_set(st).w : nullptr;
       std::uint64_t any = 0;
-      unsigned meet = 0;
       for (std::uint32_t k = 0; k < T.termWords; ++k) {
         if constexpr (Collect) {
           if (reserve) {
@@ -199,7 +208,6 @@ inline TextOffset ll_match_in_impl(
           }
           bits = accepted;
         }
-        meet += static_cast<unsigned>(std::popcount(bits));
         any |= bits;
         if constexpr (Collect)
           for (auto accepted = bits; accepted != 0; accepted &= accepted - 1u) {
@@ -214,7 +222,6 @@ inline TextOffset ll_match_in_impl(
           previous[k] = bits;
         }
       }
-      rivals = rivals || meet > 1;
       if (any != 0) {
         end = i;
         best = st;
@@ -225,6 +232,9 @@ inline TextOffset ll_match_in_impl(
         if (viable.test(tape.relay_of(k).term))
           relays.launch(tape, k, src, len, from, i);
     if (i >= len) break;
+    // Past the last state that leads to a terminal the readings want, the
+    // walk can only die: a run of text no wanted token reads ends it here.
+    if (!ll_wants_ahead<T>(st, viable)) break;
     far = std::max(far, i + 1u);
     const std::uint16_t to =
         T.next_byte(st, static_cast<unsigned char>(src[i]));
@@ -347,20 +357,21 @@ inline TextOffset ll_match_in_impl(
     }
   }
   if (different != nullptr && shorter) *different = true;
-  if (rivalled != nullptr) *rivalled = rivals;
   // What a refused word the matcher asked read counts, whichever terminal
-  // was elected.
+  // was elected: its reach is a halt, the byte there read.
   if constexpr (T.termReach != nullptr)
     if (from < len)
       for (const std::uint16_t t : kLlRefusing<T>)
-        if (wanted.test(t))
-          far = std::max(far, from + T.termReach(t, src + from, len - from));
+        if (wanted.test(t)) {
+          const TextOffset halt = from + T.termReach(t, src + from, len - from);
+          far = std::max(far, halt < len ? halt + 1u : halt);
+        }
   if (inspected != nullptr) *inspected = std::max(far, i);
   if (ended != nullptr) *ended = i == len || far >= len;
   if constexpr (Collect) {
     lengths->clear();
     for (std::uint16_t term = 1; term < T.nterms; ++term)
-      if (terminalEnd[term] != from && (!shared || terminalEnd[term] == end))
+      if (terminalEnd[term] != from && terminalEnd[term] == end)
         lengths->push_back({term, terminalEnd[term], terminalTier[term]});
   }
   return end;
@@ -375,8 +386,7 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
                               std::uint16_t mode = T.errMode,
                               std::size_t* top = nullptr) {
   return ll_match_in_impl<T, false>(src, len, from, viable, out, inspected,
-                                    ended, different, nullptr, false, nullptr,
-                                    mode, top);
+                                    ended, different, nullptr, mode, top);
 }
 
 template <const auto& T>
@@ -385,11 +395,10 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
                               std::vector<std::uint16_t>& out,
                               TextOffset* inspected, bool* ended,
                               bool* different,
-                              std::vector<LlLexReading>* lengths, bool shared,
-                              bool* rivalled, std::uint16_t mode = T.errMode) {
+                              std::vector<LlLexReading>* lengths,
+                              std::uint16_t mode = T.errMode) {
   return ll_match_in_impl<T, true>(src, len, from, viable, out, inspected,
-                                   ended, different, lengths, shared, rivalled,
-                                   mode);
+                                   ended, different, lengths, mode);
 }
 
 struct LlLookRead {
@@ -480,17 +489,14 @@ constexpr std::uint32_t ll_skips_of(std::uint16_t mode) {
 }
 
 template <const auto& T>
-inline LlLookIndent& ll_look_indent(const LlContext& c,
-                                    bool shiftFirst = true) {
+inline LlLookIndent& ll_look_indent(const LlContext& c) {
   // Predictions have no user callbacks and finish before the descent can
   // ask another one: the room is retained between calls.
   thread_local LlLookIndent state;
   if constexpr (kIndented<T>) {
     ll_indent_copy(c, state);
-    if (shiftFirst) {
-      indent_shift<T>(state.arena, state.at, c.la);
-      if (c.la.end != c.la.begin) state.held = c.la.end;
-    }
+    indent_shift<T>(state.arena, state.at, c.la);
+    if (c.la.end != c.la.begin) state.held = c.la.end;
   }
   return state;
 }

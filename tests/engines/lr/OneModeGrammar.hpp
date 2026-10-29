@@ -18,7 +18,7 @@ struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\n)">)> {};
   struct Doc : rule<create<ast::Doc>(eof)> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tonemode

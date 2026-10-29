@@ -1,8 +1,9 @@
 # Build a language end to end
 
 This tutorial builds a recipe language with declarations, nested blocks,
-references and a validation check. Use the prerequisites from
-[Create a project](scaffold.md), then create a separate project named `Recipe`:
+references and a validation check. With the
+[required tools](index.md#before-you-start) installed, create a project named
+`Recipe`:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
@@ -10,9 +11,8 @@ cmake -DNAME=Recipe -P cursiv-new.cmake
 cd recipe
 ```
 
-The scaffold starts with the hello-world language. Replace
-`example/hello.recipe` with this sample, then update the source files below
-before building:
+Replace the hello-world sample in `example/hello.recipe` with this one. Do
+not build yet: the steps below replace the hello-world sources first.
 
 ```text
 unit gram
@@ -67,10 +67,9 @@ struct Model : cursiv::Extends<cursiv::AstNode> {
 }  // namespace recipe::ast
 ```
 
-`Extends<AstNode>` provides the field aliases `string_view`, `vector` and
-`reference`. A list of nodes uses `vector<T*>`. A `reference<T>` records a name
-while parsing and resolves to a target later. See
-[AST vocabulary](../reference/ast.md) for the complete field types.
+`Extends<AstNode>` provides the field types `string_view`, `vector` and
+`reference`. `vector<T*>` holds child nodes. `reference<T>` holds a name that
+resolves to a `T` after parsing. See [AST vocabulary](../reference/ast.md).
 
 ## 2. Define the grammar
 
@@ -92,49 +91,42 @@ struct Recipe : cursiv::GrammarSpec {
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
   struct NUMBER : terminal<some(d)> {};
 
-  struct UnitRule : rule<kw<"unit"> + assign<&ast::Unit::name>(ref<ID>)> {};
+  struct Unit : rule<kw<"unit"> + assign<&ast::Unit::name>(ref<ID>)> {};
 
-  struct IngredientRule
-      : rule<kw<"ingredient"> + assign<&ast::Ingredient::name>(ref<ID>) +
-             kw<"in"> + assign<&ast::Ingredient::unit>(ref<ID>)> {};
+  struct Ingredient
+      : rule<kw<"ingredient"> + assign<&ast::Ingredient::name>(ref<ID>)
+             + kw<"in"> + assign<&ast::Ingredient::unit>(ref<ID>)> {};
 
-  struct UseRule
-      : rule<kw<"use"> + assign<&ast::Use::ingredient>(ref<ID>) +
-             assign<&ast::Use::amount>(ref<NUMBER>)> {};
+  struct Use : rule<kw<"use"> + assign<&ast::Use::ingredient>(ref<ID>)
+                    + assign<&ast::Use::amount>(ref<NUMBER>)> {};
 
-  struct RecipeRule
-      : rule<kw<"recipe"> + assign<&ast::Recipe::name>(ref<ID>) + lit<"{"> +
-             many(append<&ast::Recipe::uses>(ref<UseRule>)) + lit<"}">> {};
+  struct RecipeDecl
+      : rule<kw<"recipe"> + assign<&ast::Recipe::name>(ref<ID>) + lit<"{">
+             + many(append<&ast::Recipe::uses>(ref<Use>)) + lit<"}">> {};
 
-  struct ModelRule
-      : rule<some(append<&ast::Model::units>(ref<UnitRule>) |
-                  append<&ast::Model::ingredients>(ref<IngredientRule>) |
-                  append<&ast::Model::recipes>(ref<RecipeRule>))> {};
+  struct Model : rule<some(append<&ast::Model::units>(ref<Unit>)
+                           | append<&ast::Model::ingredients>(ref<Ingredient>)
+                           | append<&ast::Model::recipes>(ref<RecipeDecl>))> {};
 
-  using entry = ModelRule;
-  using ignore = WS;
+  using entry = Model;
+  using ignored = WS;
   using hidden = list<SL_COMMENT, ML_COMMENT>;
 };
 
 }  // namespace recipe
 ```
 
-`kw<"unit">` matches a whole keyword; `lit<"{">` matches punctuation.
-`assign` fills one member, `append` adds a list element, and `ref` calls a
-terminal or rule. `some` requires at least one declaration; `many` allows none.
-
-The members named by the directives determine the AST class. `UnitRule`
-builds a `Unit`, and the `Model::units`, `ingredients` and `recipes` appends
-make `ModelRule` build a `Model`. You may write `create<ast::Model>` explicitly,
-but it is unnecessary here. Replacing `some` with `many` would also accept
-an empty document and build an empty `Model`.
+`kw<"unit">` matches a whole keyword and `lit<"{">` punctuation. `assign`
+fills a member, `append` adds a list element and `ref` calls a terminal or a
+rule. `some` reads one or more items, `many` zero or more. A rule builds the
+AST class whose members it fills: `Unit` builds an `ast::Unit` and `Model` an
+`ast::Model`. [Write a grammar](write-a-grammar.md) explains each construct.
 
 ## 3. Replace the sample validator
 
-The scaffold's Hello World validator refers to `Person`, `Model::persons`
-and `Model::greetings`. Replace both validator files so their checks use the
-Recipe AST defined above. Do this before building. The following check rejects
-using the same ingredient twice in one recipe:
+The scaffold's validator checks hello-world types that no longer exist.
+Replace both validator files with a check that rejects an ingredient used
+twice in one recipe:
 
 ```cpp title="src/recipe/core/validation/RecipeValidator.hpp"
 #pragma once
@@ -193,16 +185,15 @@ void register_validation_checks(RecipeCoreServices& services) {
 }  // namespace recipe
 ```
 
-The registry runs this method on each `ast::Recipe` node.
-`.property<&ast::Use::ingredient>()` puts the diagnostic under the ingredient
-name. An unresolved reference returns null from `get()`; the linker reports
-it, so this check skips it. See [Custom validation](../recipes/validation.md).
+The check runs on every `ast::Recipe` node.
+`.property<&ast::Use::ingredient>()` underlines the ingredient name. `get()`
+returns null for an unresolved reference, which the linker already reports.
+See [Custom validation](../recipes/validation.md).
 
 ## 4. Update the test and build
 
-The scaffold's test checks the `persons` and `greetings` lists of its Hello
-World sample. In `tests/grammar_test.cpp`, keep the setup and replace that
-final size check with:
+In `tests/grammar_test.cpp`, keep the setup and replace the final size check,
+which counts hello-world declarations, with:
 
 ```cpp
 if (model.units.size() != 2 || model.ingredients.size() != 2 ||
@@ -210,7 +201,7 @@ if (model.units.size() != 2 || model.ingredients.size() != 2 ||
   return fail("the model does not hold what the sample declares");
 ```
 
-Now configure, build and test:
+Now build and test:
 
 ```bash
 cmake -B build
@@ -221,17 +212,16 @@ ctest --test-dir build --output-on-failure
 ```
 
 The tests pass and the CLI reports `example/hello.recipe: ok`. `--dump`
-prints the concrete syntax tree, showing the rules and tokens that matched.
+prints the concrete syntax tree: the rules and tokens that matched.
 
 ## 5. Try the reference resolution
 
-`ingredient Flour in gram` refers to the `Unit` named `gram`. Each `use`
-refers to an `Ingredient`. The default scoping services expose named children
-inside their container; here the units and ingredients belong to the `Model`,
-so they are visible from nested recipes too.
+`in gram` refers to a `Unit`, and each `use` to an `Ingredient`. By default,
+a named node is visible inside its container. Units and ingredients belong to
+the `Model`, so the recipes see them.
 
-In the sample's `recipe Pancakes` block, replace `use Flour 200` with
-`use Sugar 200`, then run the CLI again:
+In the sample, replace `use Flour 200` with `use Sugar 200` and run the CLI
+again:
 
 ```bash
 ./build/src/recipe_cli example/hello.recipe
@@ -243,32 +233,31 @@ It reports an error containing:
 Could not resolve reference to Ingredient named 'Sugar'.
 ```
 
-Restore `Flour`. Forward references work as well: declarations do not have to
-appear before their uses.
+Restore `Flour`. Declarations may also come after their uses.
 
 ## 6. Try the validation
 
-Add a second `use Flour 200` inside the recipe and run the CLI again. The
-syntax is valid, but your check reports:
+Add a second `use Flour 200` to the recipe and run the CLI again. The syntax
+is valid, but your check reports:
 
 ```text
 This ingredient is already used in this recipe.
 ```
 
-Remove the duplicate before running the tests again. To make these two cases
-permanent tests, continue with [Test your language](testing.md).
+Remove the duplicate. To turn these two cases into tests, see
+[Test your language](testing.md).
 
 ## 7. Open the editor
 
 Follow [Ship an editor extension](editor-integration.md) to launch the VS Code
-client with **F5**. Completion offers allowed keywords and reference targets;
-go-to-definition and rename use the references you declared. The duplicate
-ingredient check appears as an editor diagnostic too.
+client with **F5**. Completion offers keywords and reference targets,
+go-to-definition and rename follow your references, and the duplicate check
+shows as a diagnostic.
 
-To try hover documentation, add `/** The gram unit. */` before `unit gram`.
-The `ML_COMMENT` terminal keeps the comment in the CST so the documentation
-provider can find it. Update the extension's TextMate grammar when you want
-its initial syntax highlighting to recognize the Recipe keywords.
+For hover documentation, add `/** The gram unit. */` before `unit gram`: a
+`hidden` comment stays in the syntax tree, where hover finds it. To highlight
+the Recipe keywords, update the extension's TextMate grammar, as that guide
+explains.
 
 ## What to change next
 

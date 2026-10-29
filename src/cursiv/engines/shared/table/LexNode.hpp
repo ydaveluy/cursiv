@@ -30,15 +30,15 @@ namespace cursiv {
 // depth zero: `a` the opener, the two kids from `b` the opener and the
 // closer as literals the search counts, or choices of them; `max` is one
 // where the end of the text closes it too.
-// `call` reads a terminal body at `a`; `b` names that terminal for diagnostics,
-// or is `kNoLexNode` for an internal call whose body is already linked.
-// A condition's phrase reads tokens: `token` reads terminal `a` whole, `b`
-// its body; `skip` reads trivia, its kids from `a`, `b` of them, `token`s,
-// until the token in hand is none of them; `positive` and `negative` assert
-// `a` and consume nothing; `gap_has` and `gap_is` ask the gap before the
-// token whether it holds or is the expression `a`; `end_mark` holds at the
-// end of the text. The lexer mode a token, choice, repetition or skip reads
-// in is the configuration's `lexMode`.
+// `call` reads the body of terminal `b`; an internal call, whose `b` is
+// `kNoLexNode`, reads the node `a`.
+// A condition's phrase reads tokens: `token` reads terminal `a` whole, its
+// body the node `termBuild[a].lex`; `skip` reads trivia, its kids from `a`,
+// `b` of them, `token`s, until the token in hand is none of them; `positive`
+// and `negative` assert `a` and consume nothing; `gap_has` and `gap_is` ask
+// the gap before the token whether it holds or is the expression `a`;
+// `end_mark` holds at the end of the text. The lexer mode a token, choice,
+// repetition or skip reads in is the configuration's `lexMode`.
 enum class LexKind : std::uint8_t {
   chars,
   seq,
@@ -77,5 +77,17 @@ struct LexNode {
 
   constexpr bool operator==(const LexNode&) const = default;
 };
+
+// The node a `call` reads.
+template <class Cfg>
+constexpr std::uint16_t lex_callee(const Cfg& g, const LexNode& e) {
+  return e.b == kNoLexNode ? e.a : g.termBuild[e.b].lex;
+}
+
+// The node holding the body of the terminal a `token` reads.
+template <class Cfg>
+constexpr std::uint16_t lex_token_body(const Cfg& g, const LexNode& e) {
+  return g.termBuild[e.a].lex;
+}
 
 }  // namespace cursiv

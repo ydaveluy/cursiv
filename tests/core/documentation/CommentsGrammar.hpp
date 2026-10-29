@@ -49,7 +49,7 @@ struct Comments : cursiv::GrammarSpec {
                        many(append<&ast::Doc::elements>(ref<ElementRule>)))> {};
 
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

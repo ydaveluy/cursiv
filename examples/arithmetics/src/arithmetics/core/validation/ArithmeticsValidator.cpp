@@ -23,16 +23,16 @@ namespace {
 
 const ast::Definition* definition_of(const ast::FunctionCall& call) {
   const cursiv::AstNode* const target = call.func.get();
-  return target != nullptr &&
-                 target->type == &cursiv::ast_type_tag<ast::Definition>
+  return target != nullptr
+                 && target->type == &cursiv::ast_type_tag<ast::Definition>
              ? static_cast<const ast::Definition*>(target)
              : nullptr;
 }
 
 // Parentheses are transparent to every walk below.
 const ast::Expression* unwrap(const ast::Expression* expression) {
-  while (expression != nullptr &&
-         expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>)
+  while (expression != nullptr
+         && expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>)
     expression =
         static_cast<const ast::GroupedExpression*>(expression)->expression;
   return expression;
@@ -169,9 +169,8 @@ constexpr std::size_t kDivisorStepLimit = 64;
 
 void say_if_zero(const ast::BinaryExpression& binary,
                  cursiv::ValidationAcceptor& accept) {
-  if ((binary.op != ast::Operator::divide &&
-       binary.op != ast::Operator::modulo) ||
-      binary.right == nullptr)
+  if ((binary.op != ast::Operator::divide && binary.op != ast::Operator::modulo)
+      || binary.right == nullptr)
     return;
   // An unbound name, a cycle, a spent budget: nullopt, not this check's
   // answer.
@@ -249,8 +248,8 @@ void ArithmeticsValidator::checkUniqueDefinitions(
       byName;
   byName.reserve(module.statements.size());
   for (const ast::Statement* const statement : module.statements) {
-    if (statement == nullptr ||
-        statement->type != &cursiv::ast_type_tag<ast::Definition>)
+    if (statement == nullptr
+        || statement->type != &cursiv::ast_type_tag<ast::Definition>)
       continue;
     const auto* const definition =
         static_cast<const ast::Definition*>(statement);
@@ -313,8 +312,8 @@ void ArithmeticsValidator::checkFunctionRecursion(
   };
 
   for (const ast::Statement* const statement : module.statements) {
-    if (statement == nullptr ||
-        statement->type != &cursiv::ast_type_tag<ast::Definition>)
+    if (statement == nullptr
+        || statement->type != &cursiv::ast_type_tag<ast::Definition>)
       continue;
     for (const NestedCall& root :
          callsOf(static_cast<const ast::Definition*>(statement))) {
@@ -344,8 +343,8 @@ void ArithmeticsValidator::checkFunctionRecursion(
 void ArithmeticsValidator::checkNormalizable(
     const ast::Definition& definition,
     cursiv::ValidationAcceptor& accept) const {
-  if (definition.expr == nullptr ||
-      definition.expr->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
+  if (definition.expr == nullptr
+      || definition.expr->type == &cursiv::ast_type_tag<ast::NumberLiteral>)
     return;
 
   std::unordered_map<const ast::Expression*, double> folded;

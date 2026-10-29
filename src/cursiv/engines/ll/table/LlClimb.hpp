@@ -37,9 +37,6 @@ struct LlClimb {
   // hands back a record, and the side it stands on states its member over it.
   std::uint32_t leftBase = 0, leftCount = 0;
   std::uint32_t rightBase = 0, rightCount = 0;
-  // ...and the one a join of its own becomes: the node just laid is the left
-  // operand of the next turn.
-  std::uint16_t selfLeft = kNoRow;
   // The state a call of the operand returns into: a prediction inside it
   // stands on the climb's own frame like any other.
   std::uint32_t atnEntry = 0;

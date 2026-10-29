@@ -29,10 +29,6 @@ struct row_field<Row<K, T, Wrote<P>, N, Src>> {
 };
 
 template <class R>
-inline constexpr bool row_makes =
-    row_of<R>::kind == WriteKind::create ||
-    row_of<R>::kind == WriteKind::climb || row_of<R>::kind == WriteKind::close;
-template <class R>
 inline constexpr bool row_writes = row_of<R>::kind == WriteKind::assign ||
                                    row_of<R>::kind == WriteKind::append;
 

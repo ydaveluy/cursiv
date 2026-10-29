@@ -6,7 +6,7 @@
 
 #include "cursiv/core/text/TextOffset.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairFault {
   TextOffset at = 0;
@@ -14,4 +14,4 @@ struct RepairFault {
   std::string inserted;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

@@ -18,17 +18,14 @@ struct Arith : cursiv::GrammarSpec {
 
   // One token per operation, each denoting its own constant: the precedence
   // table below names them, and `op` holds what they mean.
-  struct MODULO : terminal<lit<"%">, value<ast::Operator::modulo>> {};
-  struct EXPONENT
-      : terminal<lit<"^">, value<ast::Operator::exponent>> {};
-  struct MULTIPLY
-      : terminal<lit<"*">, value<ast::Operator::multiply>> {};
-  struct DIVIDE : terminal<lit<"/">, value<ast::Operator::divide>> {};
-  struct ADD : terminal<lit<"+">, value<ast::Operator::add>> {};
-  struct SUBTRACT
-      : terminal<lit<"-">, value<ast::Operator::subtract>> {};
+  struct MODULO : terminal<as<ast::Operator::modulo>(lit<"%">)> {};
+  struct EXPONENT : terminal<as<ast::Operator::exponent>(lit<"^">)> {};
+  struct MULTIPLY : terminal<as<ast::Operator::multiply>(lit<"*">)> {};
+  struct DIVIDE : terminal<as<ast::Operator::divide>(lit<"/">)> {};
+  struct ADD : terminal<as<ast::Operator::add>(lit<"+">)> {};
+  struct SUBTRACT : terminal<as<ast::Operator::subtract>(lit<"-">)> {};
 
-  struct StatementRule;
+  struct Statement;
   struct Definition;
   struct DeclaredParameter;
   struct Evaluation;
@@ -36,30 +33,31 @@ struct Arith : cursiv::GrammarSpec {
   struct PrimaryExpression;
 
   // Module returns Module: 'module'i name=ID statements+=Statement*;
-  struct ModuleRule
-      : rule<ikw<"module"> + assign<&ast::Module::name>(ref<ID>) +
-             many(append<&ast::Module::statements>(ref<StatementRule>))> {};
+  struct Module
+      : rule<ikw<"module"> + assign<&ast::Module::name>(ref<ID>)
+             + many(append<&ast::Module::statements>(ref<Statement>))> {};
 
   // Statement returns AstNode: Definition | Evaluation;
-  struct StatementRule : rule<ref<Definition> | ref<Evaluation>> {};
+  struct Statement : rule<ref<Definition> | ref<Evaluation>> {};
 
   // Definition returns Definition:
   // 'def'i name=ID ('(' args+=DeclaredParameter (','
   // args+=DeclaredParameter)* ')')?
   // ':' expr=Expression ';';
   struct Definition
-      : rule<ikw<"def"> + assign<&ast::Definition::name>(ref<ID>) +
-             option(lit<"("> +
-                    some(append<&ast::Definition::args>(ref<DeclaredParameter>),
-                         lit<",">) +
-                    lit<")">) +
-             lit<":"> + assign<&ast::Definition::expr>(ref<Expression>) +
-             lit<";">> {};
+      : rule<ikw<"def"> + assign<&ast::Definition::name>(ref<ID>)
+             + option(
+                 lit<"(">
+                 + some(append<&ast::Definition::args>(ref<DeclaredParameter>),
+                        lit<",">)
+                 + lit<")">)
+             + lit<":">
+             + assign<&ast::Definition::expr>(ref<Expression>) + lit<";">> {};
 
   // DeclaredParameter returns DeclaredParameter: name=ID;
   struct DeclaredParameter
-      : rule<create<ast::DeclaredParameter> +
-             assign<&ast::DeclaredParameter::name>(ref<ID>)> {};
+      : rule<create<ast::DeclaredParameter>
+             + assign<&ast::DeclaredParameter::name>(ref<ID>)> {};
 
   // Evaluation returns Evaluation: expression=Expression ';';
   struct Evaluation
@@ -70,13 +68,11 @@ struct Arith : cursiv::GrammarSpec {
   // infix BinaryExpression returns BinaryExpression on PrimaryExpression:
   // left assoc '%' > left assoc '^' > left assoc ('*' | '/')
   // > left assoc ('+' | '-');
-  struct Expression
-      : infix<PrimaryExpression, &ast::BinaryExpression::left,
-              &ast::BinaryExpression::op, &ast::BinaryExpression::right,
-              (left(ref<MODULO>) >>                  //
-               left(ref<EXPONENT>) >>                //
-               left(ref<MULTIPLY> | ref<DIVIDE>) >>  //
-               left(ref<ADD> | ref<SUBTRACT>))> {};
+  struct Expression : infix<PrimaryExpression, ast::BinaryExpression,
+                            levels(left(ref<MODULO>),                  //
+                                   left(ref<EXPONENT>),                //
+                                   left(ref<MULTIPLY> | ref<DIVIDE>),  //
+                                   left(ref<ADD> | ref<SUBTRACT>))> {};
 
   // PrimaryExpression returns Expression:
   // ({GroupedExpression} '(' expression=Expression ')')
@@ -85,21 +81,21 @@ struct Arith : cursiv::GrammarSpec {
   // args+=Expression)* ')')?);
   struct PrimaryExpression
       : rule<create<ast::GroupedExpression>(
-                 lit<"("> +
-                 assign<&ast::GroupedExpression::expression>(ref<Expression>) +
-                 lit<")">)  //
+                 lit<"(">
+                 + assign<&ast::GroupedExpression::expression>(ref<Expression>)
+                 + lit<")">)
              | create<ast::NumberLiteral>(
-                   assign<&ast::NumberLiteral::value>(ref<NUMBER>))  //
-             |
-             create<ast::FunctionCall>(
-                 assign<&ast::FunctionCall::func>(ref<ID>) +
-                 option(lit<"("> +
-                        some(append<&ast::FunctionCall::args>(ref<Expression>),
-                             lit<",">) +
-                        lit<")">))> {};
+                 assign<&ast::NumberLiteral::value>(ref<NUMBER>))
+             | create<ast::FunctionCall>(
+                 assign<&ast::FunctionCall::func>(ref<ID>)
+                 + option(
+                     lit<"(">
+                     + some(append<&ast::FunctionCall::args>(ref<Expression>),
+                            lit<",">)
+                     + lit<")">))> {};
 
-  using entry = ModuleRule;
-  using ignore = WS;
+  using entry = Module;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

@@ -11,8 +11,8 @@ strict: true
 theme:
   name: material
   language: en
-  logo: assets/logo.png
-  favicon: assets/logo.png
+  logo: assets/icon-white.png
+  favicon: assets/icon.png
   features:
     - navigation.tabs
     - navigation.sections
@@ -69,6 +69,7 @@ nav:
       - learn/index.md
       - Create a project: learn/scaffold.md
       - Build a language end to end: learn/walkthrough.md
+      - Write a grammar: learn/write-a-grammar.md
       - Test your language: learn/testing.md
       - Read the AST from a program: learn/consume-the-ast.md
       - Ship an editor extension: learn/editor-integration.md

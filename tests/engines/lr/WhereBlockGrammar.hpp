@@ -25,7 +25,7 @@ struct Equations : cursiv::GrammarSpec {
   struct Term : rule<some(ref<ID>)> {};
   struct IfPart : rule<ref<Term> + lit<","> + ref<Term>> {};
   struct Rhs : rule<ref<Term> | (ref<IfPart> + many(Assign + ref<IfPart>))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Open : Equations {

@@ -60,8 +60,8 @@ int generate(const GenerateOptions& options) {
     return cursiv::kDiagnostics;
   }
   const cursiv::AstNode* const root = document.parseResult.value;
-  if (root == nullptr ||
-      root->type != &cursiv::ast_type_tag<sm::ast::Statemachine>) {
+  if (root == nullptr
+      || root->type != &cursiv::ast_type_tag<sm::ast::Statemachine>) {
     std::cerr << "Unable to generate C++ for invalid statemachine.\n";
     return cursiv::kDiagnostics;
   }
@@ -71,8 +71,8 @@ int generate(const GenerateOptions& options) {
           ? std::optional<std::string_view>(*options.destination)
           : std::nullopt;
   std::cout << sm::generate_cpp(
-                   static_cast<const sm::ast::Statemachine&>(*root),
-                   options.path, destination)
+      static_cast<const sm::ast::Statemachine&>(*root), options.path,
+      destination)
             << '\n';
   return cursiv::kClean;
 }

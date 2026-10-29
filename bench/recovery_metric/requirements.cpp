@@ -14,12 +14,14 @@
 #include "requirements/generated/Requirements/Parser.hpp"
 #include "requirements/generated/Requirements/Table.hpp"
 
+namespace metric = cursiv::recovery_metric;
+
 namespace {
 
 namespace g = req::generated::Requirements;
 const cursiv::fuzzer::CursivActions<req::Requirements> kActions{};
 
-const recovery_metric::Registered kLanguage{{
+const metric::Registered kLanguage{{
     .rank = 3,
     .name = "requirements",
     .parser = &g::create_parser,
@@ -28,14 +30,14 @@ const recovery_metric::Registered kLanguage{{
     .documents =
         [] {
           return std::vector<std::string>{
-              recovery_metric::source_file("examples/requirements/tests/recovery/valid.req"),
-              recovery_metric::source_file("examples/requirements/example/requirements.req"),
-              recovery_metric::source_file("examples/requirements/example.req"),
+              metric::source_file("examples/requirements/tests/recovery/valid.req"),
+              metric::source_file("examples/requirements/example/requirements.req"),
+              metric::source_file("examples/requirements/example.req"),
               bench::generateRequirementsSource(3072)};
         },
-    .ceilings = &recovery_metric::ceilings<g::kTable, g::kDrive,
+    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
                                           g::kGrammarMetaData, g::kAstActions>,
-    .searching = &recovery_metric::searching<g::kTable, g::kDrive,
+    .searching = &metric::searching<g::kTable, g::kDrive,
                                                 g::kGrammarMetaData,
                                                 g::kAstActions>,
 }};

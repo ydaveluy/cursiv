@@ -1,11 +1,13 @@
 #pragma once
 
+#include <memory>
 #include <string_view>
 #include <vector>
 
 #include "cursiv/core/grammar/Grammar.hpp"
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/core/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 
@@ -39,5 +41,13 @@ class Parser {
   virtual void nextFeaturesAt(const Cst&, TextOffset, TextOffset,
                               std::vector<NextFeature>&) const {}
 };
+
+// `parser` reading the text `translate` makes of each document, while every
+// offset it answers -- tree, diagnostics, completion -- is the document's.
+// A document the translator leaves untouched is parsed as it is. One
+// translator does all the phases: over a parser that already translates, this
+// throws `std::invalid_argument`, here or at the parse.
+[[nodiscard]] std::unique_ptr<const Parser> translating_parser(
+    std::unique_ptr<const Parser> parser, SourceTranslator translate);
 
 }  // namespace cursiv

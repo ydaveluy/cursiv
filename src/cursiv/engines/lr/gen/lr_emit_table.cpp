@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "cursiv/engines/lr/gen/LrFinalTable.hpp"
 #include "cursiv/engines/lr/gen/LrProgramLayout.hpp"
 #include "cursiv/engines/lr/gen/LrProgramMatrix.hpp"
 #include "cursiv/engines/lr/table/LrDerivedSizes.hpp"
@@ -46,11 +47,12 @@ std::vector<std::uint8_t> lr_guarded_columns(const LrBuildTable& table) {
 }
 
 struct LrTableEmitter : EmitOutput {
-  LrTableEmitter(const LrBuildTable& table, const LrProgramLayout& layout)
-      : a(table),
-        guarded(lr_guarded_columns(table)),
-        S(lr_sizes(table, layout)),
-        programs(layout) {}
+  explicit LrTableEmitter(const LrFinalTable& done)
+      : a(done.table()),
+        guarded(lr_guarded_columns(a)),
+        S(lr_sizes(a, done.programs())),
+        programs(done.programs()),
+        names(a.cfg, std::span(a.relays.data(), a.nrelays)) {}
 
   const LrBuildTable& a;
   const std::vector<std::uint8_t> guarded;
@@ -58,34 +60,13 @@ struct LrTableEmitter : EmitOutput {
   bool aggregate = false;
   const LrProgramLayout& programs;
 
-  // The name pool as a reading takes it: the bytes a terminal or a relay
-  // names, each offset moved down past the bytes nothing reads.
-  std::vector<char> names{};
-  std::vector<std::uint16_t> nameAt{};
-  void plan_names() {
-    const auto& c = a.cfg;
-    std::vector<bool> kept(c.nameLen, false);
-    const auto keep = [&](std::uint16_t off, std::uint16_t len) {
-      for (unsigned i = 0; i < len; ++i) kept[off + i] = true;
-    };
-    for (unsigned t = 0; t < c.nterms; ++t) {
-      keep(c.terms[t].nameOff, c.terms[t].nameLen);
-      keep(c.terms[t].textOff, c.terms[t].textLen);
-    }
-    for (unsigned r = 0; r < a.nrelays; ++r) {
-      keep(a.relays[r].beforeOff, a.relays[r].beforeLen);
-      keep(a.relays[r].afterOff, a.relays[r].afterLen);
-    }
-    nameAt.resize(c.nameLen + 1u);
-    for (unsigned i = 0; i <= c.nameLen; ++i) {
-      nameAt[i] = static_cast<std::uint16_t>(names.size());
-      if (i < c.nameLen && kept[i]) names.push_back(c.names[i]);
-    }
-  }
+  const LexNamePool names;
+
   LrLowSizes low_sizes() const {
     const auto& c = a.cfg;
-    return LrLowSizes{static_cast<unsigned>(names.size()), c.nsets, c.nterms,
-                      c.nprods, static_cast<unsigned>(c.wordRanges.size()),
+    return LrLowSizes{static_cast<unsigned>(names.bytes.size()), c.nsets,
+                      c.nterms, c.nprods,
+                      static_cast<unsigned>(c.wordRanges.size()),
                       static_cast<unsigned>(c.scalarRanges.size())};
   }
 
@@ -140,13 +121,13 @@ struct LrTableEmitter : EmitOutput {
   void cell(const TermInfo& t) {
     constexpr TermInfo d{};
     Fields f;
-    f("nameOff", nameAt[t.nameOff], d.nameOff);
+    f("nameOff", names(t.nameOff), d.nameOff);
     f("nameLen", t.nameLen, d.nameLen);
     f("element", t.element, d.element);
     f("trivia", t.trivia, d.trivia);
     f("recorded", t.recorded, d.recorded);
     f("spelled", t.spelled, d.spelled);
-    f("textOff", nameAt[t.textOff], d.textOff);
+    f("textOff", names(t.textOff), d.textOff);
     f("textLen", t.textLen, d.textLen);
     f("delim", t.delim, d.delim);
     f("joins", t.joins, d.joins);
@@ -184,9 +165,7 @@ struct LrTableEmitter : EmitOutput {
     f("fold", n.fold, d.fold);
     cell(f);
   }
-  void cell(const LexRelayGen& r) {
-    raw(lex_relay_source(r, [&](std::uint16_t off) { return nameAt[off]; }));
-  }
+  void cell(const LexRelayGen& r) { raw(lex_relay_source(r, names)); }
   void cell(const unicode::Range& r) {
     fmt("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
         static_cast<std::uint32_t>(r.hi));
@@ -243,13 +222,15 @@ struct LrTableEmitter : EmitOutput {
       if (n != 0) fmt(",.{}={}", name, n);
     };
     field("modeLongers", S.modeLongers);
+    field("modeBacktracks", S.modeBacktracks);
     field("modeFlagSets", S.modeFlagSets);
-    fmt(",.accBounds={},.relays={},.closeSets={}", S.accBounds, S.relays,
-        S.closeSets);
+    fmt(",.accBounds={},.relays={},.followSets={},.closeSets={}", S.accBounds,
+        S.relays, S.followSets, S.closeSets);
     field("dfaRelayResSets", S.dfaRelayResSets);
     field("accStands", S.accStands);
     field("accTiers", S.accTiers);
     field("errModes", S.errModes);
+    if (S.indented) raw(",.indented=true");
     field("insertLists", S.insertLists);
     field("insertWords", S.insertWords);
     field("electWords", S.electWords);
@@ -259,6 +240,7 @@ struct LrTableEmitter : EmitOutput {
     field("electTwins", S.electTwins);
     field("electRhsSyms", S.electRhsSyms);
     field("orderWords", S.orderWords);
+    if (!S.gotoClasses) raw(",.gotoClasses=false");
     line("};");
     const LrLowSizes L = low_sizes();
     fmt("inline constexpr ::cursiv::LrLowSizes kLow{{{},{},{},{},{}{}}};\n",
@@ -270,14 +252,16 @@ struct LrTableEmitter : EmitOutput {
   void emit_cold() {
     aggregate = true;
     line("inline constexpr ::cursiv::LrColdTables<kSizes> kCold{");
-    array("follow", a.follow, S.states);
+    line("  .follow = {");
+    emit_pool("pool", "of", a.followPool);
+    line("  },");
     array("accBoundBase", a.accBoundBase, S.dfa + 1u);
     array("accBound", a.accBound, S.accBounds);
     if (S.accStands != 0) array("accStand", a.accStand, S.accStands);
     if (S.accTiers != 0) array("accTier", a.accTier, S.accTiers);
     array("soleReduce", a.soleReduce, S.states);
     array("readsToken", a.readsToken, S.states);
-    array("gotoClass", a.gotoClass, S.states);
+    if (S.gotoClasses) array("gotoClass", a.gotoClass, S.states);
     array("closePool", a.closePool.sets);
     array("closeOf", a.closePool.of);
     fmt("  .closeMax = {}u,\n", a.closeMax);
@@ -337,7 +321,7 @@ struct LrTableEmitter : EmitOutput {
     cell(c.wordBytes);
     line("};");
     const LrLowSizes L = low_sizes();
-    array("cfg.names", names, L.nameChars);
+    array("cfg.names", names.bytes, L.nameChars);
     array("cfg.sets", c.sets, L.sets);
     array("cfg.setDecode", c.setDecode, L.sets);
     array("cfg.terms", c.terms, L.terms);
@@ -364,6 +348,8 @@ struct LrTableEmitter : EmitOutput {
     array("mode", a.mode, S.states);
     array("modeStart", a.modeStart, S.modes);
     array("modeMulti", a.modeMulti, S.modes);
+    if (S.modeBacktracks != 0)
+      array("modeBacktrack", a.modeBacktrack, S.modeBacktracks);
     if (S.modeLongers != 0) array("modeLonger", a.modeLonger, S.modes);
     emit_pool("modeWin.pool", "modeWin.of", a.modeWinPool);
     if (S.modeFlagSets != 0)
@@ -373,7 +359,8 @@ struct LrTableEmitter : EmitOutput {
       array("errModeOf", a.errModeOf, S.errModes);
       array("modeEnd", a.modeEnd, S.errModes);
     }
-    array("modeSub", a.modeSub, (std::size_t{S.modes} * S.modes + 63) / 64);
+    if (!S.indented)
+      array("modeSub", a.modeSub, (std::size_t{S.modes} * S.modes + 63) / 64);
     array("dfaNext", a.dfaNext, std::size_t{S.dfa} * S.cls);
     array("dfaAccept", a.dfaAccept, S.dfa);
     emit_pool("dfaAcc.pool", "dfaAcc.of", a.dfaAccPool);
@@ -452,12 +439,22 @@ struct LrTableEmitter : EmitOutput {
   void program_matrix(const LrProgramMatrix& matrix, std::string_view name,
                       std::string_view value, unsigned columns,
                       unsigned absent) {
+    const auto row = std::format("::std::uint{}_t", matrix.row_bits());
     const auto index = std::format("::std::uint{}_t", matrix.index_bits());
-    program_array(index, std::format("{}Blocks", name), matrix.blocks);
+    // A layer the matrix does not lay is an empty span.
+    const auto layer = [&](std::string_view type, std::string_view part,
+                           const std::vector<std::uint32_t>& cells) {
+      if (cells.empty()) return std::string("{}");
+      std::string array = std::format("{}{}", name, part);
+      program_array(type, array, cells);
+      return array;
+    };
+    const std::string rows = layer(row, "Rows", matrix.rows);
+    const std::string blocks = layer(index, "Blocks", matrix.blocks);
     program_array(value, std::format("{}Values", name), matrix.values);
-    fmt("inline constexpr ::cursiv::LrProgramRows<{}, {}> {}{{\n"
-        "    {}Blocks, {}Values, {}u, {}u}};\n",
-        index, value, name, name, name, columns, absent);
+    fmt("inline constexpr ::cursiv::LrProgramRows<{}, {}, {}> {}{{\n"
+        "    {}, {}, {}Values, {}u, {}u}};\n",
+        row, index, value, name, rows, blocks, name, columns, absent);
   }
 
   void emit_programs() {
@@ -470,8 +467,10 @@ struct LrTableEmitter : EmitOutput {
         p.ops.empty() ? 0 : *std::ranges::max_element(p.ops);
     const auto op = std::format("::std::uint{}_t", LrProgramMatrix::bits(most));
     program_array(op, "kProgramOps", p.ops);
-    fmt("inline constexpr ::cursiv::LrActionPrograms<{}, {}, {}> kPrograms{{\n"
+    fmt("inline constexpr ::cursiv::LrActionPrograms<{}, {}, {}, {}> "
+        "kPrograms{{\n"
         "    kActionMatrix, kProgramOps, {}u}};\n",
+        std::format("::std::uint{}_t", p.actions.row_bits()),
         std::format("::std::uint{}_t", p.actions.index_bits()), value, op,
         p.countBits);
   }
@@ -534,7 +533,6 @@ struct LrTableEmitter : EmitOutput {
     raw(LexicalPredicateEmitter(a.cfg, ::std::span(a.relays.data(), a.nrelays),
                                 "")
             .declarations());
-    plan_names();
     emit_sizes();
     emit_cold();
     emit_derived();
@@ -580,8 +578,7 @@ struct LrTableEmitter : EmitOutput {
           "inline ::cursiv::TextOffset Table::head_reach(unsigned m, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
-           "kTable.cfg.scalarRanges.data()"},
-          HeadMatcher::Reach::walked));
+           "kTable.cfg.scalarRanges.data()"}));
     if (trailing())
       raw(lex_tail_source(
           a.termTails,
@@ -595,9 +592,8 @@ struct LrTableEmitter : EmitOutput {
 
 }  // namespace
 
-std::string lr_emit_table(const LrBuildTable& a, std::string_view ns,
-                          const LrProgramLayout& programs) {
-  LrTableEmitter e{a, programs};
+std::string lr_emit_table(const LrFinalTable& done, std::string_view ns) {
+  LrTableEmitter e{done};
   e.out.reserve(1u << 20);
   e.emit(ns);
   return e.out;

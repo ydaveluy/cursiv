@@ -24,7 +24,7 @@ struct G : cursiv::GrammarSpec {
                     many(append<&ast::Doc::items>(ref<T> | ref<V> | ref<U>)))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tcycle

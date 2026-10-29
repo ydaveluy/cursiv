@@ -1,9 +1,10 @@
-// The last steps of a replay whose conditions read as far as the caret, each
-// with the readings before it: what a candidate asks again on the text it
-// would splice in.
+// The last steps of a replay whose conditions read as far as the caret, and
+// the readings before the first of them: what a candidate asks again on the
+// text it would splice in.
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -21,7 +22,6 @@ struct LlTail {
   // A token taken, or where `node` names none a token the repair inserted;
   // with the conditions asked of it on the document and what they answered.
   struct Step {
-    std::vector<LlConfig> before;
     Token token;
     TextOffset gapFrom = 0;
     std::uint16_t node = kNoRow;
@@ -30,6 +30,8 @@ struct LlTail {
   };
 
   std::vector<Step> steps;
+  // The readings the first step starts from.
+  std::vector<LlConfig> before;
   // The last token, read again where the replay ends: once as each terminal
   // it can be.
   std::vector<Step> stood;
@@ -37,6 +39,12 @@ struct LlTail {
   // between the replay's last and the caret.
   TextOffset edge = 0;
   unsigned onward = 0;
+
+  // Whether a condition that read the text up to `seen` read the text the
+  // candidate replaces: a phrase that read to the end goes on with it.
+  bool reaches(TextOffset seen, std::size_t size) const {
+    return seen > edge || (seen == edge && seen == size);
+  }
 
   // Whether a condition asked of `leaf`, `between` tokens before the caret
   // counting it, can read the text the candidate replaces.

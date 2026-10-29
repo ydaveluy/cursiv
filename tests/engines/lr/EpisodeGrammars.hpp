@@ -1,8 +1,7 @@
 #pragma once
 
 // A cell after `x` on `a` that reduce or shift settle only at the token that
-// ends the statement, and a document of thousands of them: an episode that
-// forks at every statement and never has fewer than two readings alive.
+// ends the statement, however long the run of `a` before it.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
@@ -21,7 +20,7 @@ struct Long : cursiv::GrammarSpec {
                      (lit<"{"> + many(ref<Stat>) + lit<"}">)> {};
   struct Root : rule<create<ast::Doc>(many(ref<Stat>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tepisode

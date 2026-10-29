@@ -25,10 +25,9 @@ struct Bin : cursiv::Extends<Expr> {
 
 struct G : Base {
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"+">))> {};
+  struct Sum : infix<Primary, ast::Bin, (left(lit<"+">))> {};
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

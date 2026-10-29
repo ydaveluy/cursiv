@@ -43,7 +43,7 @@ struct G : Base {
             implied(lit<"af">, gap::line) +
             implied(lit<"ag">, gap::line))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

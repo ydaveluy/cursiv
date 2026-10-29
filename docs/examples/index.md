@@ -1,7 +1,7 @@
 # Examples
 
-Choose an example for the feature you want to add. Each project includes a
-grammar, AST, services, tests, CLI and VS Code extension.
+Each example includes a grammar, AST, services, tests, CLI and VS Code
+extension. Choose one for the feature you want to add:
 
 | To learn… | Start with |
 |---|---|
@@ -21,18 +21,16 @@ cmake --build --preset gcc-release --target statemachine_cli --parallel
   examples/statemachine/example/doors.statemachine
 ```
 
-The CLI reports `: ok` when the document has no error diagnostics. Use
-`--dump` to inspect the syntax tree or `--root <folder>` to load declarations
-from other files.
-
-For VS Code setup and packaging, see the
-[examples guide](https://github.com/ydaveluy/cursiv/tree/main/examples#try-an-editor-session).
+The CLI reports `: ok` when the document has no errors. See
+[Command line](../reference/cli.md) for its options, and the
+[examples guide](https://github.com/ydaveluy/cursiv/tree/main/examples#try-an-editor-session)
+to try an example in VS Code.
 
 ## Adapt an example
 
-Read `core/*Grammar.hpp` and `core/ast.hpp` first. They define the syntax and
+Read `core/*Grammar.hpp` and `core/ast.hpp` first: they define the syntax and
 the data it produces. Then read the validation, scoping or formatting service
-that implements the feature you need.
+you need.
 
-To create your own project, use [Create a project](../learn/scaffold.md).
-To extend another grammar, see [Derived grammars](../recipes/derived-grammars.md).
+To start your own project, see [Create a project](../learn/scaffold.md). To
+extend another grammar, see [Derived grammars](../recipes/derived-grammars.md).

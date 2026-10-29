@@ -540,7 +540,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Doc>(
                     many(append<&ast::Doc::words>(ref<Word>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace twide

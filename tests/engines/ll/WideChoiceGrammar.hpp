@@ -18,7 +18,7 @@
 // clang-format on
 #define TWIDE_OR(w) | ikw<#w>
 
-namespace twide {
+namespace twidechoice {
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> words;
@@ -35,12 +35,12 @@ struct Base : cursiv::GrammarSpec {
                               (lit<"2"> + append<&Doc::words>(Words)) |
                               (lit<"7"> + append<&Doc::words>(ref<ID>))))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};
 
-}  // namespace twide
+}  // namespace twidechoice
 
 #undef TWIDE_OR
 #undef TWIDE_100

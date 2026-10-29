@@ -5,7 +5,7 @@
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/SwiftWidthGrammar.hpp"
+#include "engines/ll/SwiftWidthAst.hpp"
 #include "swiftwidthll/generated/Ll/Module.hpp"
 #include "swiftwidthll/generated/Ll/Table.hpp"
 namespace {
@@ -45,12 +45,17 @@ void a_completed_entry_survives_an_unfinished_shorter_reading() {
 void a_closing_walk_reads_the_closer() {
   constexpr const auto& table = generated::Ll::kTable;
   std::uint16_t decision = cursiv::kNoRow, close = cursiv::kInvalidSymbol;
-  for (std::uint16_t i = 0; i < table.ndecisions; ++i)
-    if (table.rule_name(table.decisions[i].rule) == "Value" &&
-        table.decisions[i].repeat)
-      decision = i;
   for (std::uint16_t i = 0; i < table.nterms; ++i)
     if (table.term_name(i) == "Close") close = i;
+  // Value's loop leaves directly for Close; GuardedValue has a condition there.
+  for (std::uint16_t i = 0; i < table.ndecisions; ++i)
+    for (const auto& exit : table.atn.outgoing(table.decisions[i].state))
+      if (exit.kind == cursiv::LlEdgeKind::epsilon)
+        for (const auto& edge : table.atn.outgoing(exit.target))
+          if (edge.kind == cursiv::LlEdgeKind::atom && edge.label == close) {
+            CHECK(decision == cursiv::kNoRow);
+            decision = i;
+          }
   CHECK(decision != cursiv::kNoRow && close != cursiv::kInvalidSymbol);
   if (decision == cursiv::kNoRow || close == cursiv::kInvalidSymbol) return;
   const auto& dec = table.decisions[decision];
@@ -64,10 +69,11 @@ void a_closing_walk_reads_the_closer() {
   context.laValid = true;
   context.laMode = dec.mode;
   context.document = true;
-  context.stack.push_back(table.atn.callerAt[table.atn.callerBase[dec.rule]]);
+  context.stack.push_back(
+      table.atn.callerAt[table.atn.callerBase[table.atn.state(dec.state).rule]]);
   {
     cursiv::LlPredictionSession<table> session;
-    CHECK(cursiv::ll_episode<table>(context, decision, dec) == 1);
+    CHECK(cursiv::ll_episode<table>(context, decision) == 1);
   }
   {
     cursiv::LlPredictionSession<table> session;

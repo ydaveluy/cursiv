@@ -104,7 +104,14 @@ void DefaultDocumentValidator::validateDocument(
   // stride. Offset and position pack into a pair that stays in cache, the
   // position makes the order total -- so plain `sort` is already stable here --
   // and the answer is applied in one pass of n moves.
-  if (diagnostics.size() > 1) {
+  //
+  // A list that already arrives in order is kept as it is: checks that report
+  // on sibling nodes often emit in document order, and then the permutation,
+  // the second vector and its n moves buy nothing. Equal positions keep their
+  // emission order either way, so the result is the same.
+  const auto begin = [](const Diagnostic& d) { return d.range.begin; };
+  if (diagnostics.size() > 1 &&
+      !std::ranges::is_sorted(diagnostics, {}, begin)) {
     std::vector<std::pair<TextOffset, std::uint32_t>> order;
     order.reserve(diagnostics.size());
     for (std::uint32_t i = 0; i < diagnostics.size(); ++i)

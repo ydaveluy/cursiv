@@ -36,33 +36,30 @@ struct Base : cursiv::GrammarSpec {
 
 struct AfterBase : Base {
   struct Add : rule<ref<PLUS> + !gap::line> {};
-  struct Sum : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
-                     left(ref<Add>)> {};
+  struct Sum : infix<Atom, Binary, left(ref<Add>)> {};
   struct Root
       : rule<create<Document>(assign<&Document::value>(ref<Sum>) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct BothBase : Base {
   struct Add : rule<!gap::line + ref<PLUS> + gap::line> {};
-  struct Sum : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
-                     left(ref<Add>)> {};
+  struct Sum : infix<Atom, Binary, left(ref<Add>)> {};
   struct Root
       : rule<create<Document>(assign<&Document::value>(ref<Sum>) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct MixedBase : Base {
   struct TIMES : terminal<lit<"*">> {};
   struct Add : rule<ref<PLUS> + !gap::line> {};
-  struct Sum : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
-                     (left(ref<TIMES>) >> left(ref<Add>))> {};
+  struct Sum : infix<Atom, Binary, levels(left(ref<TIMES>), left(ref<Add>))> {};
   struct Root
       : rule<create<Document>(assign<&Document::value>(ref<Sum>) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct ListBase : Base {
@@ -70,13 +67,12 @@ struct ListBase : Base {
       : rule<create<Unary>(ref<PLUS> + assign<&Unary::operand>(ref<Atom>))> {};
   struct Operand : rule<ref<Sign> | ref<Atom>> {};
   struct Add : rule<ref<PLUS> + !gap::line> {};
-  struct Sum : infix<Operand, &Binary::left, &Binary::op, &Binary::right,
-                     left(ref<Add>)> {};
+  struct Sum : infix<Operand, Binary, left(ref<Add>)> {};
   struct Root
       : rule<create<Sequence>(many(append<&Sequence::items>(ref<Sum>)) + eof)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Suite : Base {
@@ -85,7 +81,7 @@ struct Suite : Base {
                      (lit<"mixed:"> + ref<MixedBase::Root>) |
                      (lit<"list:"> + ref<ListBase::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Suite {};
 struct Lr : Suite {};

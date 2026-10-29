@@ -88,9 +88,9 @@ std::optional<double> evaluate(const ast::Expression& expression,
     if (!right.has_value()) return std::nullopt;
     // The operator table throws on a zero divisor; on this path that is an
     // answerless question, not an unwind.
-    if ((binary.op == ast::Operator::divide ||
-         binary.op == ast::Operator::modulo) &&
-        *right == 0.0)
+    if ((binary.op == ast::Operator::divide
+         || binary.op == ast::Operator::modulo)
+        && *right == 0.0)
       return std::nullopt;
     return apply_operator(binary.op)(*left, *right);
   }
@@ -116,8 +116,8 @@ EvaluationResult interpret_evaluations(const ast::Module& module) {
   EvaluationResult results;
   const Context empty;
   for (const ast::Statement* const statement : module.statements) {
-    if (statement == nullptr ||
-        statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
+    if (statement == nullptr
+        || statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
       continue;
     const auto& evaluation = static_cast<const ast::Evaluation&>(*statement);
     if (evaluation.expression == nullptr) continue;

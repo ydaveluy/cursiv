@@ -18,6 +18,7 @@
 #include "cursiv/core/syntax-tree/CstRun.hpp"
 #include "cursiv/core/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/core/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/core/utils/macros.hpp"
 
@@ -64,7 +65,8 @@ class Cst {
         _grammar(other._grammar),
         _owned(other._owned),
         _leaves(std::move(other._leaves)),
-        _leafIndex(other._leafIndex) {
+        _leafIndex(other._leafIndex),
+        _translation(std::move(other._translation)) {
     other.clear();
   }
   Cst& operator=(Cst&& other) noexcept {
@@ -82,6 +84,7 @@ class Cst {
     _owned = other._owned;
     _leaves = std::move(other._leaves);
     _leafIndex = other._leafIndex;
+    _translation = std::move(other._translation);
     other.clear();
     return *this;
   }
@@ -122,6 +125,7 @@ class Cst {
     _owned = {};
     _leaves.clear();
     _leafIndex = 0;
+    _translation.reset();
   }
 
   void set_text(std::string_view text) {
@@ -196,6 +200,11 @@ class Cst {
   // Null for a tape no language parser finished.
   [[nodiscard]] const Grammar* grammar() const { return _grammar; }
   [[nodiscard]] OwnedNodes owned() const { return _owned; }
+  // Null unless the language's translator rewrote the document: the AST's
+  // views point into its text, while every offset here is the document's.
+  [[nodiscard]] const SourceTranslation* translation() const {
+    return _translation.get();
+  }
 
   // The leaves in document order, without the index: a linear consumer pays
   // nothing for a record it does not read. `f` takes a `const CstLeaf&`.
@@ -262,6 +271,15 @@ class Cst {
   void bind_model(const Grammar& grammar, OwnedNodes owned) {
     _grammar = std::addressof(grammar);
     _owned = owned;
+  }
+  // A parse of the translated text moves to the document's offsets and
+  // keeps the text its AST borrows.
+  void bind_translation(std::string_view document,
+                        std::unique_ptr<const SourceTranslation> translation) {
+    set_text(document);
+    if (size() != 0) translation->to_document({&_stream.at(0), size()});
+    translation->to_document(std::span(_diagnostics));
+    _translation = std::move(translation);
   }
 
   // One storage, and this is the read of it: the records the parser wrote are
@@ -342,6 +360,8 @@ class Cst {
   // Held only while the leaf index is built, so a second reader waits instead
   // of building it beside the first. Neither moved nor reset.
   mutable std::uint8_t _leafLock = 0;
+  // The translated text the AST borrows, and its map to the document.
+  std::unique_ptr<const SourceTranslation> _translation;
 };
 
 // Reverse view over a forest or one parent's children. `_cursor` is the

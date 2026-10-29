@@ -46,7 +46,7 @@ struct G : Parts {
                           std::make_index_sequence<20>{})> {};
   struct Root : rule<create<Doc>(assign<&Doc::item>(ref<Pick>)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tmany

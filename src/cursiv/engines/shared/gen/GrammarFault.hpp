@@ -1,5 +1,6 @@
-// The one refusal a lowering records against a rule, never aborts on: a code
-// and the rule that earned it. The walk carries on writing a well-formed value.
+// The one refusal a lowering records against a rule, never aborts on: a code,
+// the rule that earned it and, where one part of the rule earned it, that
+// part. The walk carries on writing a well-formed value.
 #pragma once
 
 #include <cstddef>
@@ -16,11 +17,11 @@ namespace cursiv {
 enum class GrammarFaultCode : std::uint8_t {
   none = 0,
   nullableRepetition,
+  nullableUnorderedItem,
   ruleWithoutProduction,
   twoEndMarks,
   optionalEndMark,
   optionalCondition,
-  twinProductions,
   unitProductionCycle,
   hiddenLeftRecursion,
   leftRecursion,
@@ -30,15 +31,19 @@ enum class GrammarFaultCode : std::uint8_t {
   tooManyPrecedences,
   skippedTerminal,
   docConflict,
+  postfixBinaryClash,
 };
 
 // Set once: a later refusal is a consequence, not a fault.
 struct GrammarFault {
   GrammarFaultCode code = GrammarFaultCode::none;
   std::uint16_t rule = kNoRow;
-  // The bound the refusal names, where `gated` says an engine's gate hid it.
+  // The bound the refusal names, where `gated` says an engine's gate or the
+  // bound of a check hid the answer.
   std::uint16_t count = 0;
   bool gated = false;
+  // The part of the rule the refusal names, as the dump spells it.
+  std::string part{};
 
   constexpr explicit operator bool() const {
     return code != GrammarFaultCode::none;
@@ -55,11 +60,11 @@ struct GrammarFault {
 constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
   constexpr std::string_view names[] = {"none",
                                         "nullableRepetition",
+                                        "nullableUnorderedItem",
                                         "ruleWithoutProduction",
                                         "twoEndMarks",
                                         "optionalEndMark",
                                         "optionalCondition",
-                                        "twinProductions",
                                         "unitProductionCycle",
                                         "hiddenLeftRecursion",
                                         "leftRecursion",
@@ -68,10 +73,23 @@ constexpr std::string_view grammar_fault_name(GrammarFaultCode c) {
                                         "directiveOnNoPosition",
                                         "tooManyPrecedences",
                                         "skippedTerminal",
-                                        "docConflict"};
+                                        "docConflict",
+                                        "postfixBinaryClash"};
   static_assert(std::size(names) ==
-                static_cast<std::size_t>(GrammarFaultCode::docConflict) + 1);
+                static_cast<std::size_t>(GrammarFaultCode::postfixBinaryClash) +
+                    1);
   return names[static_cast<std::size_t>(c)];
+}
+
+// Two operators of a table that may share a text, one of them spelled past
+// what the comparison lists.
+inline std::string unlisted_operators(const GrammarFault& f) {
+  return "cannot compare the text of " + f.part +
+         " of its precedence table: one is spelled through a repetition, an "
+         "`option` or a region, or more than " +
+         std::to_string(f.count) +
+         " ways, so both may read one text -- spell each with literals, "
+         "terminals and data rules of fixed text";
 }
 
 // What the author is told: what the engine cannot hold and what to write
@@ -84,6 +102,20 @@ inline std::string grammar_fault_text(const GrammarFault& f) {
              "let the repetition's minimum say how many may be absent: "
              "`many(option(x))` is `many(x)`, `repeat<2, 3>(option(x))` is "
              "`repeat<0, 3>(x)`";
+    case GrammarFaultCode::nullableUnorderedItem:
+      // `gated`: the group spells every order in full, and so reads each
+      // item.
+      if (f.gated)
+        return "holds an optional unordered item, `" + f.part +
+               "`, in a group whose items hold a `nest`: such a group spells "
+               "every order in full, so each of its items must read input -- "
+               "make the item consume, or write the group with and without "
+               "it, `unordered(a, b) | a`";
+      return "holds an unordered item that may match nothing, `" + f.part +
+             "`: an unordered item must read input, since one that reads "
+             "nothing could stand anywhere in the order -- an item may be "
+             "left out only as `option(x)`, `many(x)` or `repeat<0, n>(x)` "
+             "where `x` reads input; otherwise make the item consume";
     case GrammarFaultCode::ruleWithoutProduction:
       return "derives nothing: every reading of it turned out impossible, so "
              "whoever calls it can never return";
@@ -99,10 +131,6 @@ inline std::string grammar_fault_text(const GrammarFault& f) {
       return "makes a condition optional: the reading that drops it reads "
              "the same text with no condition at all -- write the condition "
              "where it must hold, or make optional what it guards";
-    case GrammarFaultCode::twinProductions:
-      return "holds two alternatives that spell the same symbols and write "
-             "different things -- no lookahead tells them apart, so the "
-             "grammar has to say which it meant";
     case GrammarFaultCode::unitProductionCycle:
       return "stands on a cycle of reductions that read no text (`A -> B`, "
              "`B -> A`, or `A -> A B` where `B` may match nothing): the chain "
@@ -124,6 +152,16 @@ inline std::string grammar_fault_text(const GrammarFault& f) {
              "token the parser cannot know how many empty `B`s to read -- make "
              "that item consume, or move it after the recursive call";
     case GrammarFaultCode::leftRecursion:
+      if (f.gated)
+        return "reaches itself before matching anything inside a repetition "
+               "or behind optional items, past what the LL descent spells "
+               "out: at most " +
+               std::to_string(f.count) +
+               " optional items in front of the call, in a rule of bounded "
+               "size -- write the alternatives yourself, grouping the "
+               "optional items in front of the call behind one that consumes: "
+               "`X? Y? A z` as `(X Y? | Y) A z | A z` (refusals.md, "
+               "leftRecursion)";
       return "reaches itself before matching anything in a way the LL "
              "descent cannot fold -- spell a chain of binary operators as "
              "`infix<>`; otherwise give the cycle an arm that only calls its "
@@ -131,11 +169,18 @@ inline std::string grammar_fault_text(const GrammarFault& f) {
              "starts with the same text, or make every reading consume a token "
              "first (refusals.md, leftRecursion)";
     case GrammarFaultCode::precedenceClash:
+      if (f.gated) return unlisted_operators(f);
       return "names the same operator text on two levels of a precedence "
              "table, or with two groupings: nothing after its first token "
              "tells the readings apart, so the table cannot say which binds "
-             "tighter -- give each text one level and one grouping, across "
-             "every table that reads it";
+             "tighter -- give each text one level and one grouping in the "
+             "table";
+    case GrammarFaultCode::postfixBinaryClash:
+      if (f.gated) return unlisted_operators(f);
+      return "reads " + f.part +
+             " of its precedence table: after an operand, nothing tells the "
+             "two readings apart -- give the postfix and the binary operator "
+             "different text";
     case GrammarFaultCode::infixOperatorNotText:
       return "names as an operator a rule that builds a node: an operator "
              "hands over text -- a literal, a terminal or a data rule, with a "

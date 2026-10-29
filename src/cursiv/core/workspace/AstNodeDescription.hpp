@@ -37,7 +37,9 @@ struct AstNodeDescription {
 
   DocumentId documentId = kNoDocument;
   // The CST node the AST node was cut from, which is what a document can find
-  // again after the node itself has been rebuilt.
+  // again after the node itself has been rebuilt. It names a declaration
+  // site, not a node: two nodes built on one record share it, so telling them
+  // apart takes `node` below.
   NodeId symbolId = kNoNode;
 
   // Present only while the description's own build stands -- for a local

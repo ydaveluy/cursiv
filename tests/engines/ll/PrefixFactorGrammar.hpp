@@ -99,7 +99,7 @@ struct Base : cursiv::GrammarSpec {
                                    lit<"?">) |
                    ref<Atom>)) + lit<"]">)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

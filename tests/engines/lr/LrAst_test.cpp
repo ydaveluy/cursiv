@@ -368,7 +368,7 @@ struct Doc : GrammarSpec {
   struct Word : rule<ref<ID>> {};
   struct Root : rule<ref<Word> + many(lit<","> + ref<Word>) + ref<KW>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Dc = LrLowering<Doc>;
@@ -399,7 +399,7 @@ struct Other : GrammarSpec {
   struct Word : rule<ref<ID>> {};
   struct Root : rule<ref<Word>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 // Restating a rule over a terminal the base never reached moves the graph: the
 // closure reads the body in force, never the declared one.
@@ -425,7 +425,7 @@ struct Sym : GrammarSpec {
   struct Word : rule<ref<ID>> {};
   struct Root : rule<ref<Word> + many(lit<","> + ref<Word>) + ref<KW>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 using L = LrLowering<Sym>;
 
@@ -463,7 +463,7 @@ void the_symbol_space() {
 void the_token_graph() {
   const auto& c = L::cfg();
   CHECK(c.nlex != 0 && c.nsets != 0);
-  // `ignore` is dropped, `hidden` is kept in the tree and out of the parse.
+  // `ignored` is dropped, `hidden` is kept in the tree and out of the parse.
   CHECK(c.term_name(1) == "WS");
   CHECK(c.terms[1].trivia && !c.terms[1].recorded);
   // A keyword guards only where it could run into a word: `end` ends on a
@@ -488,7 +488,7 @@ struct Pl : GrammarSpec {
   struct List : rule<lit<"["> + many(ref<Item>) + option(lit<"!">) + lit<"]">> {
   };
   using entry = List;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using P = LrLowering<Pl>;
@@ -557,12 +557,12 @@ struct Bin : Node {
 
 struct Ex : GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct NUM : terminal<some(d), double> {};
+  struct NUM : terminal<as<double>(some(d))> {};
   struct Atom : rule<create<ast::Num> + assign<&ast::Num::value>(ref<NUM>)> {};
-  struct Expr : infix<Atom, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                      (left(lit<"*">) >> left(lit<"+"> | lit<"-">))> {};
+  struct Expr : infix<Atom, ast::Bin,
+                      levels(left(lit<"*">), left(lit<"+"> | lit<"-">))> {};
   using entry = Expr;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using X = LrLowering<Ex>;
@@ -572,15 +572,15 @@ using X = LrLowering<Ex>;
 // row of the graph.
 struct ExNamed : GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct NUM : terminal<some(d), double> {};
+  struct NUM : terminal<as<double>(some(d))> {};
   struct STAR : terminal<lit<"*">> {};
   struct PLUS : terminal<lit<"+">> {};
   struct MINUS : terminal<lit<"-">> {};
   struct Atom : rule<create<ast::Num> + assign<&ast::Num::value>(ref<NUM>)> {};
-  struct Expr : infix<Atom, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                      (left(ref<STAR>) >> left(ref<PLUS> | ref<MINUS>))> {};
+  struct Expr : infix<Atom, ast::Bin,
+                      levels(left(ref<STAR>), left(ref<PLUS> | ref<MINUS>))> {};
   using entry = Expr;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using XN = LrLowering<ExNamed>;
@@ -657,7 +657,7 @@ struct Chain : GrammarSpec {
   struct Wrap : rule<assign<&ast::Wrap::name>(ref<Name>)> {};
   struct Top : rule<assign<&ast::Top::test>(ref<Wrap>)> {};
   using entry = Top;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Ch = LrLowering<Chain>;
@@ -716,7 +716,7 @@ struct Dotted : GrammarSpec {
   struct QName : rule<ref<ID> + many(lit<"."> + ref<ID>)> {};
   struct Root : rule<assign<&ast::Name::name>(ref<QName>) + lit<"A">> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Dot = LrLowering<Dotted>;
@@ -747,7 +747,7 @@ struct Relay : GrammarSpec {
   struct Root : rule<create<ast::Wrap>(assign<&ast::Wrap::name>(ref<Line>) +
                                        lit<"A">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Rl = LrLowering<Relay>;
@@ -777,7 +777,7 @@ struct Twin : GrammarSpec {
   struct Root : rule<lit<"("> + many(ref<ID>) + lit<")"> + lit<"["> +
                      many(ref<ID>) + lit<"]">> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Tw = LrLowering<Twin>;
@@ -809,7 +809,7 @@ struct Region : GrammarSpec {
   struct Root : rule<tight(lit<"["> + ref<Key> + lit<"]">)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Rg = LrLowering<Region>;
@@ -885,7 +885,7 @@ struct Stack : GrammarSpec {
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
   struct Root : rule<create<ast::Flags>(ref<ID> + stacked<kDeep>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 using Stk = LrLowering<Stack>;

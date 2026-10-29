@@ -72,8 +72,12 @@ std::vector<std::string> spellings_after(const cursiv::Parser& parser,
   const auto at = static_cast<cursiv::TextOffset>(source.size());
   parser.nextFeaturesAt(r.cst(), at, at, next);
   std::vector<std::string> out;
-  for (const auto& feature : next)
-    out.emplace_back(parser.getGrammar().terminalText(feature.feature));
+  for (const auto& feature : next) {
+    const auto spellings =
+        parser.getGrammar().terminalSpellings(feature.feature);
+    if (spellings.empty()) out.emplace_back();
+    for (const std::string_view s : spellings) out.emplace_back(s);
+  }
   std::ranges::sort(out);
   out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;

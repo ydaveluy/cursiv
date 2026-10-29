@@ -4,17 +4,10 @@
 // closes on a line back at an enclosing level, one dedent per level.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/IndentAst.hpp"
 #include "engines/lr/VirtualStateGrammar.hpp"
 
 namespace tindent {
-
-namespace ast {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  vector<Node*> body;
-};
-}  // namespace ast
 
 struct Plain : cursiv::GrammarSpec {
   // A backslash continues the line: the next physical line starts no
@@ -45,7 +38,7 @@ struct Plain : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
   using hidden = list<COMMENT>;
   static constexpr auto indent_open = lit<"[">;
   static constexpr auto indent_close = lit<"]">;
@@ -74,7 +67,7 @@ struct G : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
   using indent_newline = NEWLINE;
 };
@@ -100,7 +93,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
   static constexpr auto indent_open = lit<"[[[">;
   static constexpr auto indent_close = lit<"]]]">;
   using indent_newline = NEWLINE;
@@ -135,7 +128,7 @@ struct G : cursiv::GrammarSpec {
                     many(append<&ast::Node::body>(ref<Top>)))> {};
   struct Case : rule<ref<Root> | (kw<"suites"> + ref<Tops>)> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
 };
 }  // namespace laid
@@ -166,7 +159,7 @@ struct G : joined::Words {
              (ref<Second> + many(lit<"a">) + ref<NEWLINE> + ref<INDENT> +
               ref<ID> + lit<"!"> + lit<"@"> + lit<"$"> + ref<DEDENT>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using indent_newline = NEWLINE;
 };
 }  // namespace validation
@@ -232,7 +225,7 @@ struct G : Words {
   struct Top
       : rule<ref<Root> | (kw<"virt"> + ref<tvirtual::indented::G::Root>)> {};
   using entry = Top;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
   static constexpr auto indent_open = lit<"[">;
   static constexpr auto indent_close = lit<"]">;
   using indent_newline = NEWLINE;
@@ -257,7 +250,7 @@ struct G : joined::Words {
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
   static constexpr auto indent_open = lit<"[">;
   static constexpr auto indent_close = lit<"]">;
   using indent_newline = NEWLINE;
@@ -288,9 +281,43 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Item>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace fork
+
+// A dotted name: a line break inside it is a token no state there reads, and
+// so is the indent of a deeper line after it.
+namespace dotted {
+struct G : joined::Words {
+  struct Path : rule<ref<ID> + many(lit<"."> + ref<ID>)> {};
+  struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<Path>) +
+                                       (ref<NEWLINE> | eof))> {};
+};
+}  // namespace dotted
+
+// One list rule reads the document and every suite, so the state that ends
+// a list reads a dedent wherever the list stands; the document then owes a
+// full stop, which a repair at the end of the input inserts.
+namespace body {
+struct G : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<R"( \t)">)> {};
+  using NEWLINE = Plain::NEWLINE;
+  using INDENT = Plain::INDENT;
+  using DEDENT = Plain::DEDENT;
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Stmt;
+  struct Body : rule<some(append<&ast::Node::body>(ref<Stmt>))> {};
+  struct Stmt : rule<create<ast::Node>(
+                    assign<&ast::Node::name>(ref<ID>) +
+                    ((lit<":"> + ref<NEWLINE> + ref<INDENT> +
+                      append<&ast::Node::body>(ref<Body>) + ref<DEDENT>) |
+                     ref<NEWLINE> | eof))> {};
+  struct Root : rule<create<ast::Node>(append<&ast::Node::body>(ref<Body>) +
+                                       lit<".">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+}  // namespace body
 
 // Three bracket and newline cases use the same lexical policy.
 struct G : Plain {
@@ -310,7 +337,8 @@ struct Cases : G {
 
 namespace laid {
 struct Cases : G {
-  struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>)> {};
+  struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>) |
+                     (kw<"dotted"> + ref<dotted::G::Root>)> {};
   using entry = Case;
 };
 }  // namespace laid

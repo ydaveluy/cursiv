@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,10 +18,10 @@
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/core/utils/TypeName.hpp"
+#include "cursiv/engines/lr/gen/LrFinalTable.hpp"
 #include "cursiv/engines/lr/gen/LrGotoRows.hpp"
 #include "cursiv/engines/lr/gen/LrIdentity.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/LrProgramLayout.hpp"
 #include "cursiv/engines/lr/gen/lr_ast_registry.hpp"
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 #include "cursiv/engines/lr/gen/lr_build_derived.hpp"
@@ -89,39 +90,46 @@ void reads(std::string_view src) {
   CHECK(doc != nullptr && cursiv::ast_cast<Kid>(doc->kid) != nullptr);
 }
 
-// Two tags whose words differ only in where known ends and truth begins stay
-// apart.
-void minimization_keeps_distinct_condition_tags() {
-  Built a;
-  a.nstates = a.nactions = 2;
-  a.cfg.nnts = a.cfg.nterms = a.cfg.nprods = 1;
-  a.cfg.prods[0] = {};
-  a.cfg.prodBuild[0] = {};
-  for (unsigned s = 0; s < 2; ++s) {
-    a.actionBase[s] = s;
-    a.actionCount[s] = 1;
-    a.actions[s] = {0, cursiv::LrActionKind::accept, 0, 0};
-    a.gotoRows.edges.push_back({0, 1, 0});
-    a.gotoRows.close_row();
-    a.mode[s] = 0;
-    a.closeRow[s] = {};
-    a.follow[s].set(0);
-    a.tagTruth[s] = {};
-  }
-  a.tagKnown[0].w = {0xffffffffffffffffull, 1, 0x000100000001ffffull};
-  a.tagKnown[1].w = {0xffffffffffffffffull, 1};
-  a.tagTruth[1].w = {0xffff000100000001ull};
-  CHECK(a.tagKnown[1].covers(a.tagTruth[1]));
-
-  cursiv::lr_minimize_states(a);
-  CHECK(a.nstates == 2);
-  CHECK(a.gotoRows[0][0].to == 1);
+// A tag reads as held unless known false. Two tags whose words differ only in
+// where known ends and truth begins stay apart; a condition known to hold and
+// one nothing is known of fuse.
+void minimization_reads_condition_tags_as_held() {
+  using cursiv::DynSet;
+  // Two states alike but for their tags, minimised: how many stand, and where
+  // the first one's goto lands.
+  const auto minimized = [](std::array<DynSet, 2> known,
+                            std::array<DynSet, 2> truth) {
+    Built a;
+    a.nstates = a.nactions = 2;
+    a.cfg.nnts = a.cfg.nterms = a.cfg.nprods = 1;
+    a.cfg.prods[0] = {};
+    a.cfg.prodBuild[0] = {};
+    for (unsigned s = 0; s < 2; ++s) {
+      a.actionBase[s] = s;
+      a.actionCount[s] = 1;
+      a.actions[s] = {0, cursiv::LrActionKind::accept, 0, 0};
+      a.gotoRows.edges.push_back({0, 1, 0});
+      a.gotoRows.close_row();
+      a.mode[s] = 0;
+      a.closeRow[s] = {};
+      a.follow[s].set(0);
+      a.tagKnown[s] = known[s];
+      a.tagTruth[s] = truth[s];
+      CHECK(known[s].covers(truth[s]));
+    }
+    cursiv::lr_minimize_states(a);
+    return std::pair{unsigned{a.nstates}, unsigned{a.gotoRows[0][0].to}};
+  };
+  CHECK(minimized(
+            {DynSet{{~0ull, 1, 0x000100000001ffffull}}, DynSet{{~0ull, 1}}},
+            {DynSet{}, DynSet{{0xffff000100000001ull}}}) == std::pair{2u, 1u});
+  CHECK(minimized({DynSet{}, DynSet{{1}}}, {DynSet{}, DynSet{{1}}}).first == 1);
 }
 
 }  // namespace
 
 int run() {
-  minimization_keeps_distinct_condition_tags();
+  minimization_reads_condition_tags_as_held();
   // The control: the core graph really is the broken one -- its merge made
   // a cell the grammar does not order, and the detector named it.
   const cursiv::LrLowered& low = cursiv::LrLowering<G>::table();
@@ -478,6 +486,35 @@ unsigned gated_reductions() {
   return n;
 }
 
+// Options before a condition: the graph lays a program per way in, and the
+// states they land on fuse.
+struct Folded : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<option(lit<"c">) + option(lit<"a">) + lit<"b"> +
+                     !gap::none + lit<"b">> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// The table keeps the programs its states name, each once.
+template <class G>
+void names_each_program_once() {
+  const auto built = std::make_unique<Built>(
+      cursiv::lr_build_automaton(cursiv::LrLowering<G>::table()));
+  const std::vector<cursiv::LrGuard>& guards = built->guards;
+  std::vector<std::uint8_t> named(guards.size(), 0);
+  for (unsigned s = 0; s < built->nstates; ++s) {
+    for (const cursiv::LrAction& x : built->action_row(s))
+      if (x.kind == cursiv::LrActionKind::guard) named[x.arg] = 1;
+    for (const auto& e : built->gotoRows[s])
+      if (e.guard != 0) named[e.guard - 1u] = 1;
+  }
+  CHECK(!guards.empty());
+  CHECK(std::ranges::count(named, 0) == 0);
+  for (auto it = guards.begin(); it != guards.end(); ++it)
+    CHECK(std::find(guards.begin(), it, *it) == it);
+}
+
 }  // namespace
 
 int run() {
@@ -497,6 +534,9 @@ int run() {
   adds_no_ambiguity<tunicode::intersect::G>("UnicodeIntersect");
   CHECK(gated_reductions<tcondref::G>() == 0);
   CHECK(gated_reductions<tasi::tail::G>() != 0);
+  names_each_program_once<Folded>();
+  names_each_program_once<tasi::G>();
+  names_each_program_once<taudit::G>();
   return 0;
 }
 }  // namespace case_lrguards
@@ -669,12 +709,11 @@ template <class G>
 void probe_cuts(unsigned expected) {
   auto a = built<G>();
   CHECK(!a->overflow);
-  cursiv::lr_derive_tables(
-      *a, std::vector<cursiv::ElementId>(a->writes.nchains + a->nfused,
-                                         cursiv::kNoElement));
-  const cursiv::LrProgramLayout programs(*a);
+  const std::vector<cursiv::ElementId> sites(a->writes.nchains + a->nfused,
+                                             cursiv::kNoElement);
+  const auto done = cursiv::LrFinalTable::make(std::move(a), sites);
   unsigned cuts = 0;
-  CHECK(!cursiv::lr_emit_parser_files(*a, "probes", programs, &cuts).empty());
+  CHECK(!cursiv::lr_emit_parser_states(done, "probes", &cuts).empty());
   CHECK(cuts == expected);
 }
 

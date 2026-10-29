@@ -41,9 +41,9 @@ struct ParseDiagnostic {
   // insertion it is instead the terminal the reading was owed, since a
   // repair inserts bytes a token would match, not a grammar site.
   ElementId element = kNoElement;
-  // The other tokens the reading could as cheaply have been given, cheapest
-  // first: a state expects a set, and naming one of it alone reads as the
-  // only way out of it.
+  // The other tokens the reading could as cheaply have been given, in the
+  // order the grammar declares them: a state expects a set, and naming one of
+  // it alone reads as the only way out of it.
   std::vector<ElementId> also{};
   TextOffset begin = 0;
   TextOffset end = 0;

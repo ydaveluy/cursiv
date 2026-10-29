@@ -10,7 +10,7 @@ struct G : Base {
   struct T : terminal<lit<"ab", !cr<"x">> | lit<"ab", !cr<"y">>> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<T>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

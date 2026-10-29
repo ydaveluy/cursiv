@@ -119,6 +119,10 @@ template <class G, class Op>
 struct scoped_level<G, NonAssoc<Op>> {
   using type = NonAssoc<scoped_t<G, Op>>;
 };
+template <class G, Association A, class N, auto O, auto X, class Op>
+struct scoped_level<G, UnaryLevel<A, N, O, X, Op>> {
+  using type = UnaryLevel<A, N, O, X, scoped_t<G, Op>>;
+};
 template <class G, class L>
 struct scoped_levels;
 template <class G, class... Ls>
@@ -213,8 +217,8 @@ struct section_entry {
 template <class G>
 using section_entry_t = typename detail::section_entry<G>::type;
 template <class G>
-using section_ignore_t =
-    typename detail::scoped_list<G, typename ResolveOverride<G>::ignore>::type;
+using section_ignored_t =
+    typename detail::scoped_list<G, typename ResolveOverride<G>::ignored>::type;
 template <class G>
 using section_hidden_t =
     typename detail::scoped_list<G, typename ResolveOverride<G>::hidden>::type;
@@ -232,6 +236,11 @@ struct rule_type<InGrammar<G, X>, node_kind, Seen>
 template <class G, class X, class Seen>
 struct rule_type<InGrammar<G, X>, infix_kind, Seen>
     : rule_type<in_force_t<G, X>, infix_kind, Seen> {};
+// ...so a deduction entering it walks the body of the rule in force too.
+template <class G, class X>
+struct deduction_calls<InGrammar<G, X>>
+    : dedupe<tl_cat_t<typename rule_calls<InGrammar<G, X>>::type,
+                      typename rule_calls<in_force_t<G, X>>::type>> {};
 
 // Named after G: `Json::Value`.
 template <class G, class X>
@@ -247,14 +256,6 @@ template <class G, class X>
 struct home_of<InGrammar<G, X>> {
   using type = G;
 };
-
-// What a generated unit spelling a rule of an embedded grammar includes.
-template <class L>
-inline constexpr std::string_view embed_include{};
-template <class... Rs>
-  requires(!std::is_void_v<typename home_of<Rs>::type> || ...)
-inline constexpr std::string_view embed_include<TypeList<Rs...>> =
-    "#include \"cursiv/core/grammar/InGrammar.hpp\"\n";
 
 }  // namespace detail
 }  // namespace cursiv

@@ -32,7 +32,7 @@ struct G : cursiv::GrammarSpec {
                                             (kw<"c"> + ref<NoDigitStart>)) +
                     lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tcondref

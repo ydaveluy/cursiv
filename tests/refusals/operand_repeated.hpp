@@ -18,7 +18,7 @@ struct G : Base {
   struct Root : rule<append<&ast::Holder::items>(
                     many(assign<&ast::Part::n>(ref<ID>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

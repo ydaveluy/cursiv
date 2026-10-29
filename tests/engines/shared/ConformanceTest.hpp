@@ -10,6 +10,7 @@
 #include "conformancelr/generated/Lr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstBuildError.hpp"
+#include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 
 namespace conformance_test {
@@ -39,6 +40,17 @@ struct Pair {
 inline bool clean(const cursiv::ParseResult& parsed) {
   return parsed.accepted && parsed.diagnostics.empty() &&
          parsed.error == cursiv::AstBuildError::none;
+}
+
+// Both engines lay one tree: the same records, spans and standing.
+inline void one_tree(const Pair& pair, std::string_view text) {
+  const std::string source = pair.source(text);
+  const std::string ll = cursiv::test::records(pair[0]->parse(source).cst());
+  const std::string lr = cursiv::test::records(pair[1]->parse(source).cst());
+  if (ll != lr)
+    std::printf("[%s]\n  LL %s\n  LR %s\n", source.c_str(), ll.c_str(),
+                lr.c_str());
+  CHECK(ll == lr);
 }
 
 inline void expect(const Pair& pair, std::string_view text, bool want) {

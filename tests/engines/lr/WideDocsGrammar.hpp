@@ -33,7 +33,7 @@ struct G : cursiv::GrammarSpec {
                                      kw<"k7">.doc<TDOCS_8KIB>() |
                                      kw<"k8">.doc<TDOCS_8KIB>())))> {};
   using entry = Word;
-  using ignore = WS;
+  using ignored = WS;
 };
 // The same grammar under the descent.
 struct Ll : G {};

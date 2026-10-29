@@ -5,9 +5,13 @@
 #include <span>
 #include <string>
 
+#include "cursiv/core/grammar/GrammarPrinter.hpp"
 #include "cursiv/core/grammar/expr.hpp"
+#include "cursiv/core/text/white_space.hpp"
 #include "cursiv/engines/shared/gen/AstRegistryBuilder.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/UnaryLevelFault.hpp"
+#include "cursiv/engines/shared/gen/WrittenReads.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/engines/shared/table/TermInfo.hpp"
 
@@ -32,6 +36,12 @@ Lowerer::Lowerer(GrammarImage& image, const LowerDesc& desc,
                  LowerPools& pools, std::uint16_t& nterms, ByteSet& wordBytes,
                  ChainPool& writes, GrammarFault& fault, LowerPool& pool)
     : _im(image),
+      _twins(image,
+             [this](std::uint32_t rule) {
+               return data_rule(rule) && !_im.rules[rule].foreign
+                          ? _im.node(*stage(rule).body)
+                          : kNoImage;
+             }),
       _d(desc),
       _c(pools),
       _nterms(nterms),
@@ -119,6 +129,7 @@ ImageId Lowerer::body_in(unsigned cfg, std::uint32_t rule) {
   const std::uint64_t k = std::uint64_t{rule} << 1 | (section ? 1u : 0u);
   if (const auto it = _bodies.find(k); it != _bodies.end()) return it->second;
   ImageId out = _im.node(*stage(rule).body);
+  if (data_rule(rule) || node_rule(rule)) out = _twins.drop(out);
   if (section) out = ended(out);
   _bodies.emplace(k, out);
   return out;
@@ -167,8 +178,7 @@ unsigned Lowerer::region_of(unsigned cfg, const ImageNode& skip) const {
   refuse_lowering("the lowering reads a region no configuration holds");
 }
 
-unsigned Lowerer::section_of(unsigned, std::uint32_t grammar,
-                             ImageId end) const {
+unsigned Lowerer::section_of(std::uint32_t grammar, ImageId end) const {
   for (unsigned k = 0; k < _cfgs.size(); ++k)
     if (_cfgs[k].section == grammar && _cfgs[k].end == end) return k;
   refuse_lowering("the lowering reads a section no configuration holds");
@@ -219,13 +229,13 @@ void Lowerer::index() {
   for (const std::uint32_t rule : _skipped)
     if (!_termIdx.contains(rule))
       refuse_lowering(
-          "`ignore`, `hidden` and `skip()` list terminals only: trivia are "
+          "`ignored`, `hidden` and `skip()` list terminals only: trivia are "
           "tokens the lexer skips, never rules the parser reads");
   for (const Config& c : _cfgs)
     if (std::ranges::any_of(c.ignore,
                             [&](std::uint32_t r) { return has(c.hide, r); }))
       refuse_lowering(
-          "a terminal belongs to at most one of `ignore` and `hidden`: "
+          "a terminal belongs to at most one of `ignored` and `hidden`: "
           "trivia are dropped or kept in the tree, never both");
   for (const std::uint8_t role : {0, 1, 2})
     for (const std::uint32_t rule : _skipped) {
@@ -338,6 +348,25 @@ void Lowerer::spell_literal(std::uint16_t t, const ImageNode& lit) {
   _c.terms[t].spelled = true;
 }
 
+// The words a choice of them reads, each once, in the order written: literals
+// with no guard of their own, and keywords. False where it reads anything
+// else, white space included: a line break is no word to offer.
+bool Lowerer::list_words(ImageId id,
+                         std::vector<std::string_view>& words) const {
+  const ImageNode& n = at(id);
+  if (n.kind == ImageKind::lit) {
+    if ((n.flags & kLitGuardExpr) != 0 || white_space_only(n.text))
+      return false;
+    if (std::ranges::find(words, n.text) == words.end())
+      words.push_back(n.text);
+    return true;
+  }
+  if (n.kind != ImageKind::choice) return false;
+  for (const ImageId k : kids_of(n))
+    if (!list_words(k, words)) return false;
+  return true;
+}
+
 void Lowerer::declare_term(std::uint32_t rule) {
   const ImageStageDesc& st = stage(rule);
   const ImageId bodyId = body_in(0, rule);
@@ -348,6 +377,10 @@ void Lowerer::declare_term(std::uint32_t rule) {
   _c.terms[t].nameOff = off;
   _c.terms[t].nameLen = len;
   if (body.kind == ImageKind::lit) spell_literal(t, body);
+  // A choice of words spells none of them alone, but each is a spelling.
+  std::vector<std::string_view> words;
+  if (body.kind == ImageKind::choice && list_words(bodyId, words))
+    _c.termBuild[t].words = std::move(words);
   const bool predicateOnly = has(_predicate, rule);
   if (!predicateOnly) {
     const std::uint16_t conv = row_id(st.convertRow);
@@ -412,7 +445,10 @@ void Lowerer::delimit(ImageId spelled, std::int8_t d) {
     case ImageKind::epsilon:
       return;
     case ImageKind::lit:
-      _c.terms[terminal_sym(0, spelled)].delim = d;
+      if (const auto t = _pool.termIndex.find(
+              key(Key::token, 0, _lex.token_of(0, spelled, _d.bound)));
+          t != _pool.termIndex.end())
+        _c.terms[t->second].delim = d;
       delimit_spelled(spelled, d);
       return;
     case ImageKind::ref: {
@@ -451,17 +487,10 @@ void Lowerer::declare() {
     if (_cfgs[k].section != kNoImage && _cfgs[k].home == k)
       _lex.declare_section_word(_cfgs[k].bound);
   for (const std::uint32_t rule : _termRule) declare_term(rule);
-  for (std::uint16_t at = 0; at < _c.nlex; ++at) {
-    LexNode& e = _c.lex[at];
-    if (e.kind == LexKind::call && e.b != kNoLexNode)
-      e.a = _c.termBuild[e.b].lex;
-  }
   for (std::size_t i = 0; i < _roles.size(); ++i) declare_role_term(i);
   for (unsigned k = 0; k < _cfgs.size(); ++k) declare_config(k);
   _c.cfgTriviaAt[_cfgs.size()] =
       static_cast<std::uint32_t>(_c.cfgTrivia.size());
-  delimit(_im.node(*_d.indentOpen), 1);
-  delimit(_im.node(*_d.indentClose), -1);
   if (_d.indentNewline != nullptr) {
     const std::uint32_t newline = _im.rule(*_d.indentNewline);
     if (!_termIdx.contains(newline))
@@ -471,7 +500,6 @@ void Lowerer::declare() {
           "reaches");
     _c.terms[sym_of(0, newline)].joins = true;
   }
-  for (std::size_t i = 0; i < _roles.size(); ++i) inherit_role_term(i);
   declare_rules();
 }
 
@@ -483,15 +511,77 @@ bool Lowerer::clone_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs) {
   return true;
 }
 
+bool Lowerer::buries(ImageId id) const {
+  if (at(id).kind == ImageKind::nest) return true;
+  for (const ImageId k : _im.shape_kids(id))
+    if (buries(k)) return true;
+  return false;
+}
+
+// An unordered item the text may leave out: `option(x)`, `many(x)` or
+// `repeat<0, n>(x)`, seen through regions only. A region writes nothing when
+// its body is skipped; a directive may still write over an empty match -- a
+// `flag` sets its member, an `assign` stores the node its operand builds --
+// so an item under one is read as written. The repetition, or `kNoImage`.
+ImageId Lowerer::optional_item(ImageId item) const {
+  while (at(item).kind == ImageKind::skip) item = kid(at(item), 0);
+  const ImageNode& n = at(item);
+  return n.kind == ImageKind::repeat && n.m == 0 && n.n != 0 ? item : kNoImage;
+}
+
+// An unordered item reads input, or is left out whole: one that may read
+// nothing could stand anywhere in the order, a reading of one text for each
+// place. An optional item is read in its present form, `x` for `option(x)`,
+// which must read input, and only in a group that holds no `nest`: such a
+// group spells every order in full. The rules are read as the pipeline
+// resolved them, before either engine lays a body; the first item refused is
+// named under the rule that holds it.
+void Lowerer::refuse_empty_items() {
+  if (_fault) return;
+  WrittenReads reads(_im);
+  std::vector<ImageId> todo;
+  for (std::size_t i = 0; i < _ntRule.size(); ++i) {
+    const ImageFace face = _im.ready(_ntRule[i]).face[1];
+    if (face.kind != ImageRuleKind::data && face.kind != ImageRuleKind::node)
+      continue;
+    todo.assign(1, face.body);
+    while (!todo.empty()) {
+      const ImageId id = todo.back();
+      todo.pop_back();
+      const std::span<const ImageId> kids = _im.shape_kids(id);
+      todo.insert(todo.end(), kids.rbegin(), kids.rend());
+      // An answer may lay the faces of the rules it reaches: read by index.
+      const ImageNode n = at(id);
+      if (n.kind != ImageKind::unordered) continue;
+      const bool nests = buries(id);
+      for (std::uint32_t k = 0; k < n.count; ++k) {
+        const ImageId item = kid(n, k);
+        const ImageId optional = optional_item(item);
+        const bool present =
+            optional != kNoImage && !reads.nothing(kid(at(optional), 0));
+        if (present ? !nests : !reads.nothing(item)) continue;
+        GrammarPrinter printer(_im, ImageView::resolved);
+        printer.prime();
+        _fault = GrammarFault{.code = GrammarFaultCode::nullableUnorderedItem,
+                              .rule = static_cast<std::uint16_t>(i + 1),
+                              .gated = present,
+                              .part = printer.spell(item)};
+        return;
+      }
+    }
+  }
+}
+
 void Lowerer::define() {
+  refuse_empty_items();
+  if (!_fault) _fault = unary_level_fault(_im, _ntRule);
   std::uint16_t lhs = 0;
   for (const std::uint32_t rule : _ntRule) {
     ++lhs;
     if (reads_under(0, rule)) define_one(0, rule, lhs, 0);
   }
-  if (_cfgs.size() < 2) return;
   const auto n = static_cast<std::uint16_t>(_ntRule.size());
-  for (bool grew = true; grew;) {
+  for (bool grew = _cfgs.size() > 1; grew;) {
     grew = false;
     for (unsigned k = 1; k < _cfgs.size(); ++k) {
       auto i = static_cast<std::uint16_t>(k * n);
@@ -502,6 +592,11 @@ void Lowerer::define() {
     }
     grew = define_open() || grew;
   }
+  // The brackets once the rules numbered what they read: a spelling no rule
+  // reads is no terminal of its own.
+  delimit(_im.node(*_d.indentOpen), 1);
+  delimit(_im.node(*_d.indentClose), -1);
+  for (std::size_t i = 0; i < _roles.size(); ++i) inherit_role_term(i);
 }
 
 void Lowerer::unspell(std::uint16_t t, std::uint8_t laid) {
@@ -657,11 +752,7 @@ std::uint32_t Lowerer::op_rule_of(ImageId op) const {
   ImageId reader = kNoImage;
   std::size_t readers = 0;
   for (std::uint32_t i = 0; i < n.count; ++i) {
-    const ImageKind k = at(kid(n, i)).kind;
-    if (k == ImageKind::andOf || k == ImageKind::notOf ||
-        k == ImageKind::gapHas || k == ImageKind::gapIs ||
-        k == ImageKind::eof)
-      continue;
+    if (is_condition_node(_im, kid(n, i))) continue;
     ++readers;
     reader = kid(n, i);
   }

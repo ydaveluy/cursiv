@@ -12,6 +12,8 @@ cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia:
 # An operator written in place as a sequence reads as an unnamed data rule, in
 # both engines.
 cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp toperators::Lr toperators::Ll)
+# Prefix and postfix levels in a precedence table, in both engines.
+cursiv_grammar_pair(unarylevels engines/shared/UnaryLevelsGrammar.hpp tunary::Lr tunary::Ll)
 
 # A class's members are visited in its declaration order, whichever order the
 # arms of the grammar name them in, in both engines.
@@ -56,6 +58,10 @@ cursiv_grammar_pair(guardedclimb engines/shared/GuardedClimbGrammar.hpp tguarded
 
 cursiv_grammar_pair(sectionpredicate engines/shared/SectionPredicateGrammar.hpp tsecpred::Lr tsecpred::Ll)
 
+# A terminal whose alternatives each give a constant, beside the data rule
+# giving the same constants, in both engines.
+cursiv_grammar_pair(branchvalues engines/shared/BranchValuesGrammar.hpp tbranch::Lr tbranch::Ll)
+
 cursiv_grammar_pair(asttree engines/shared/AstTreeGrammars.hpp ttree::Lr ttree::Ll)
 cursiv_aux_grammar(asttreeaux engines/shared/AstTreeGrammars.hpp ttree::Aux)
 
@@ -80,7 +86,8 @@ cursiv_test(Characters_test engines/shared/Characters_test.cpp
 cursiv_test(Trivia_test engines/shared/Trivia_test.cpp
     triviallGenerated trivialrGenerated)
 cursiv_test(InfixOperators_test engines/shared/InfixOperators_test.cpp
-    infixoperatorsllGenerated infixoperatorslrGenerated)
+    infixoperatorsllGenerated infixoperatorslrGenerated unarylevelsllGenerated
+    unarylevelslrGenerated)
 cursiv_test(EofRegion_test engines/shared/EofRegion_test.cpp
     eofregionllGenerated eofregionlrGenerated eofregionauxGenerated
     eofpurellGenerated eofpurelrGenerated)
@@ -93,11 +100,32 @@ cursiv_test(AstTree_test
     asttreeauxGenerated backwardlrGenerated)
 set_target_properties(AstTree_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 cursiv_test(Conformance_test
-    "engines/shared/Conformance_test.cpp;engines/shared/ConditionContract_cases.cpp;engines/shared/SectionPredicate_cases.cpp"
+    "engines/shared/Conformance_test.cpp;engines/shared/ConditionContract_cases.cpp;engines/shared/SectionPredicate_cases.cpp;engines/shared/BranchValues_cases.cpp"
     conformancellGenerated conformancelrGenerated
-    sectionpredicatellGenerated sectionpredicatelrGenerated)
+    sectionpredicatellGenerated sectionpredicatelrGenerated
+    branchvaluesllGenerated branchvalueslrGenerated)
 set_target_properties(Conformance_test PROPERTIES
     UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 set_tests_properties(LexicalBackends_test PROPERTIES TIMEOUT 30)
 set_tests_properties(RecursiveTerminals_test PROPERTIES TIMEOUT 30)
 set_tests_properties(TypoCandidates_test PROPERTIES TIMEOUT 30)
+
+# Conditions tested at each token of a run cost the run's length, on both
+# engines.
+cursiv_grammar_pair(condgrowth engines/shared/ConditionGrowthGrammar.hpp tcondgrowth::Lr tcondgrowth::Ll)
+cursiv_test(ConditionGrowth_test engines/shared/ConditionGrowth_test.cpp
+    condgrowthllGenerated condgrowthlrGenerated)
+
+# Guards that decide where a token ends, in both engines: a keyword under a
+# complemented word boundary, and a refusal rescued past a terminal's head.
+cursiv_grammar_pair(lexguards engines/shared/LexGuardsGrammar.hpp tlexguards::Lr tlexguards::Ll)
+# An assertion that decides whether a longer token reads over a shorter one.
+cursiv_grammar_pair(lexovertake engines/shared/LexGuardsGrammar.hpp
+    tlexguards::OvertakeLr tlexguards::OvertakeLl)
+# A token that starts with a blank behind an assertion.
+cursiv_grammar_pair(lexblankhead engines/shared/LexGuardsGrammar.hpp
+    tlexguards::BlankHeadLr tlexguards::BlankHeadLl)
+cursiv_test(LexGuards_test engines/shared/LexGuards_test.cpp
+    lexguardsllGenerated lexguardslrGenerated
+    lexovertakellGenerated lexovertakelrGenerated
+    lexblankheadllGenerated lexblankheadlrGenerated)

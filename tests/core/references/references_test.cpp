@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "core/references/NarrowedSiteGrammar.hpp"
+#include "core/references/SharedRecordGrammar.hpp"
+#include "cursiv/core/execution/TaskScheduler.hpp"
 #include "cursiv/core/observability/ObservabilitySink.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/references/DefaultLinker.hpp"
@@ -55,7 +57,7 @@
 #include "multiref/generated/MultiG/AstReflection.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
 #include "narrowedsite/generated/NarrowedSite/Module.hpp"
-#include "workspace/core/WorkspaceGrammar.hpp"
+#include "sharedrecord/generated/SharedRecord/Module.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/AstReflection.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -1247,6 +1249,137 @@ void a_multi_reference_tracks_new_global_candidates(bool ignoreCase) {
   expectTargets({kA, kB, kZ});
 }
 
+// Throws on `Boom`; asked for `good`, first reads another document's multi
+// reference, as a provider consulting another site may.
+struct PeekingMultiProvider final : cursiv::DefaultScopeProvider {
+  using DefaultScopeProvider::DefaultScopeProvider;
+  using DefaultScopeProvider::visitScopeEntries;
+  const fmulti::ast::Pick* other = nullptr;
+
+  [[nodiscard]] bool visitScopeEntries(
+      const cursiv::ReferenceInfo& context, std::string_view name,
+      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      const override {
+    if (name == "Boom") throw std::runtime_error("provider exploded");
+    if (name == "good" && other != nullptr) (void)other->name.size();
+    return cursiv::DefaultScopeProvider::visitScopeEntries(context, name,
+                                                           visitor);
+  }
+};
+
+// The exception stays on the multi reference whose provider threw, whichever
+// document links first: the site that read it still resolves, and only the
+// failed one is reported.
+void a_throwing_provider_stays_on_its_multi_reference(bool failedFirst) {
+  World world;
+  // Inline, so the documents link in the order they are given.
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(0);
+  auto provider = std::make_unique<PeekingMultiProvider>(*world.mref);
+  PeekingMultiProvider* const peeking = provider.get();
+  world.mref->scopeProvider = std::move(provider);
+  const auto add = [&](std::string text, std::string uri) {
+    auto document = world.shared.documentFactory->fromString(std::move(text),
+                                                             std::move(uri));
+    cursiv::Document* const raw = document.get();
+    world.shared.documents->addDocument(std::move(document));
+    return raw;
+  };
+  cursiv::Document* const good =
+      add("SELECT good FROM good", "file:///good.mref");
+  cursiv::Document* const bad =
+      add("SELECT Boom FROM good", "file:///bad.mref");
+  const auto pick = [](const cursiv::Document& document) -> fmulti::ast::Pick& {
+    return *document.parseResult.value_as<fmulti::ast::Model>()->query->pick;
+  };
+  peeking->other = &pick(*bad);
+
+  std::vector<cursiv::Document*> order{good, bad};
+  if (failedFirst) std::ranges::reverse(order);
+  world.shared.workspaceLock->write(
+      [&](const cursiv::CancellationToken& token) {
+        world.shared.documentBuilder->build(order, {}, token);
+      });
+
+  CHECK(good->state.load() == cursiv::DocumentState::Validated);
+  CHECK(pick(*good).name.state() == cursiv::RefState::Resolved);
+  CHECK(pick(*good).name.size() == 1);
+  CHECK(good->diagnostics.empty());
+  CHECK(pick(*bad).name.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(bad->diagnostics.size() == 1);
+}
+
+// Exports both nodes of the pair: a child is no top-level symbol until a
+// language widens its exports, as this one does.
+struct ExportPair final : cursiv::DefaultScopeComputation {
+  using DefaultScopeComputation::DefaultScopeComputation;
+
+  std::vector<cursiv::AstNodeDescription> collectExportedSymbols(
+      const cursiv::Document& document,
+      const cursiv::CancellationToken&) const override {
+    std::vector<cursiv::AstNodeDescription> exported;
+    auto* const model = document.parseResult.value_as<tsr::Model>();
+    if (model == nullptr || model->pair == nullptr) return exported;
+    addExportedSymbol(*model->pair, exported, document);
+    if (model->pair->child != nullptr)
+      addExportedSymbol(*model->pair->child, exported, document);
+    return exported;
+  }
+};
+
+// `same;same`: an `Outer` and its `Inner` are cut from one CST record, so
+// they share a symbol, and are still two nodes. The multi reference holds
+// both; find-references lists their one declaration site and their one
+// reference once each.
+void two_nodes_on_one_record_are_two_targets() {
+  cursiv::SharedCoreServices shared;
+  shared.fileSystemProvider =
+      std::make_unique<cursiv::EmptyFileSystemProvider>();
+  cursiv::install_default_shared_core_services(shared);
+  auto language = std::make_unique<cursiv::CoreServices>(shared);
+  language->languageMetaData = {"sharedrecord", {".srm"}, {}};
+  language->parser = tsr::generated::SharedRecord::create_parser();
+  language->astReflection =
+      tsr::generated::SharedRecord::create_ast_reflection();
+  cursiv::install_default_core_services(*language);
+  language->scopeComputation = std::make_unique<ExportPair>(*language);
+  const cursiv::CoreServices* const srm = language.get();
+  shared.serviceRegistry->registerServices(std::move(language));
+
+  auto document =
+      shared.documentFactory->fromString("same;same", "file:///same.srm");
+  //                                      012345678
+  cursiv::Document* const raw = document.get();
+  shared.documents->addDocument(std::move(document));
+  cursiv::Document* const set[] = {raw};
+  shared.documentBuilder->build(set);
+
+  const auto* const model = raw->parseResult.value_as<tsr::Model>();
+  CHECK(model != nullptr && model->pair != nullptr &&
+        model->pair->child != nullptr && model->use != nullptr);
+  if (model == nullptr || model->pair == nullptr ||
+      model->pair->child == nullptr || model->use == nullptr)
+    return;
+  const tsr::Outer* const outer = model->pair;
+  const tsr::Inner* const inner = outer->child;
+  CHECK(outer->cstNodeId == inner->cstNodeId);
+  CHECK(raw->diagnostics.empty());
+
+  const auto& target = model->use->target;
+  CHECK(target.size() == 2);
+  CHECK(target.get<tsr::Outer>(0) == outer);
+  CHECK(target.get<tsr::Inner>(1) == inner);
+
+  const cursiv::AstNode* const declared[] = {outer, inner};
+  for (const cursiv::AstNode* const node : declared) {
+    const std::vector<cursiv::ReferenceDescription> rows =
+        srm->references->findReferences(*node, {.includeDeclaration = true});
+    CHECK(rows.size() == 2);
+    if (rows.size() != 2) continue;
+    CHECK(rows[0].sourceBegin == 0 && rows[0].sourceEnd == 4);
+    CHECK(rows[1].sourceBegin == 5 && rows[1].sourceEnd == 9);
+  }
+}
+
 }  // namespace
 
 void run() {
@@ -1259,6 +1392,9 @@ void run() {
   two_documents_built_together_keep_their_own_group();
   a_multi_reference_tracks_new_global_candidates(false);
   a_multi_reference_tracks_new_global_candidates(true);
+  a_throwing_provider_stays_on_its_multi_reference(false);
+  a_throwing_provider_stays_on_its_multi_reference(true);
+  two_nodes_on_one_record_are_two_targets();
 }
 
 }  // namespace references

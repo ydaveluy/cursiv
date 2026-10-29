@@ -1,7 +1,7 @@
 # =============================================================================
 # GENERATED FILE -- DO NOT EDIT.
 # Produced by cmake/GenerateScaffold.cmake from cmake/cursiv-new.cmake.in and
-# templates/project/, .clang-format, CMakePresets.json and cmake/wasi.cmake. Edit those
+# templates/project/, CMakePresets.json and cmake/wasi.cmake. Edit those
 # and regenerate:  cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
 # =============================================================================
 # cursiv-new.cmake -- scaffold a new cursiv language. CMake only, no other
@@ -77,6 +77,11 @@ endfunction()
 
 message(STATUS "Scaffolding ${NAME} (id=${CURSIV_NEW_ID}, ext=${EXT})")
 
+_cursiv_new_emit([==[.clang-format]==] [==[# Google style, but a long expression breaks before its operators (not its
+# assignments), so the `|` and `+` of a grammar rule start lines.
+BasedOnStyle: Google
+BreakBeforeBinaryOperators: NonAssignment
+]==])
 _cursiv_new_emit([==[.github/workflows/ci.yml]==] [==[name: ci
 
 on:
@@ -382,20 +387,22 @@ _cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp]==] 
 //     Hello Alice!
 //
 // The four kinds of member:
-//   * `terminal<...>`    a token the lexer produces; a second template
-//                         argument converts its text (a number, say)
+//   * `terminal<...>`    a token the lexer produces; `as<T>(...)` around
+//                         its body converts its text (a number, say)
 //   * `rule<...>`        a parser rule, its AST class deduced from the
 //                         members it writes -- nothing is annotated
 //   * `entry`            the rule a document starts at
-//   * `ignore`/`hidden`  trivia: `ignore` is dropped, `hidden` stays in the
+//   * `ignored`/`hidden` trivia: `ignored` is dropped, `hidden` stays in the
 //                        tree, which is what lets a comment attach to what
 //                        follows it
 //
-// The four directives that build the tree:
+// `ref<R>` calls the rule or terminal `R`. The directives build the tree:
 //   * `create<T>`         make a T here, even if nothing else writes to it
 //   * `assign<&T::m>(e)`  parse `e`, store it in `m` (once)
 //   * `append<&T::m>(e)`  parse `e`, push it onto the list `m`
-//   * `ref<R>`            call the rule or terminal `R`
+//   * `flag<&T::m>(e)`    parse `e`, then set the bool `m` to true
+//   * `nest<&T::m>(e)`    wrap the node built so far in a new T, which
+//                         holds it in `m`
 //
 // One trap: rules that reduce in a cycle without reading text are refused by
 // name -- `A -> B` with `B -> A`, or a rule that reaches itself past symbols
@@ -414,23 +421,22 @@ struct @CURSIV_NEW_CLASS@ : cursiv::GrammarSpec {
 
   // `kw` is a keyword (a whole word, never a prefix of a longer one); `ikw` is
   // its case-insensitive twin, and `lit` is raw text with no word boundary.
-  struct PersonRule
-      : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
+  struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 
   // `person` is a `reference<Person>` in the AST, so this reads a name and
   // the linker resolves it after the parse: the default scope makes every
   // named node visible inside its container.
-  struct GreetingRule
-      : rule<kw<"Hello"> + assign<&ast::Greeting::person>(ref<ID>) +
-             lit<"!">> {};
+  struct Greeting
+      : rule<kw<"Hello"> + assign<&ast::Greeting::person>(ref<ID>) + lit<"!">> {
+  };
 
-  struct ModelRule
-      : rule<create<ast::Model> +
-             some(append<&ast::Model::persons>(ref<PersonRule>) |
-                  append<&ast::Model::greetings>(ref<GreetingRule>))> {};
+  struct Model : rule<create<ast::Model>
+                      + some(append<&ast::Model::persons>(ref<Person>)
+                             | append<&ast::Model::greetings>(ref<Greeting>))> {
+  };
 
-  using entry = ModelRule;
-  using ignore = WS;
+  using entry = Model;
+  using ignored = WS;
   using hidden = list<SL_COMMENT, ML_COMMENT>;
 };
 
@@ -786,20 +792,14 @@ int main() {
       @CURSIV_NEW_ID@::install_core_module>();
 
   const cursiv::ParseResult result = language.language.parser->parse(text);
-  // `recovered()` is set when the parser had to repair the input to keep
-  // going: a clean document leaves it false.
-  if (result.cst().recovered()) return fail("the sample does not parse");
+  if (!result || !result.diagnostics.empty())
+    return fail("the sample does not parse cleanly");
 
-  // An AST node is identified by its tag, not by a dynamic_cast: the
-  // address of `ast_type_tag<T>` is unique in the process, and the cast
-  // follows the test.
-  const cursiv::AstNode* const root = result.value;
-  if (root == nullptr ||
-      root->type != &cursiv::ast_type_tag<@CURSIV_NEW_ID@::ast::Model>)
-    return fail("the parse built no model");
+  const auto* const root =
+      cursiv::ast_cast<@CURSIV_NEW_ID@::ast::Model>(result.value);
+  if (root == nullptr) return fail("the parse built no model");
 
-  const auto& model =
-      *static_cast<const @CURSIV_NEW_ID@::ast::Model*>(root);
+  const auto& model = *root;
   if (model.persons.size() != 2 || model.greetings.size() != 2)
     return fail("the model does not hold what the sample declares");
 
@@ -1291,8 +1291,6 @@ _cursiv_new_emit([==[vscode/tsconfig.json]==] [==[{
   ]
 }
 ]==])
-_cursiv_new_emit([==[.clang-format]==] [==[BasedOnStyle: Google
-]==])
 _cursiv_new_emit([==[CMakePresets.json]==] [==[{
   "version": 6,
   "configurePresets": [
@@ -1427,7 +1425,7 @@ if(CURSIV_WASI_THREADS)
   # A shared memory must declare its maximum at link time (wasm format). It is
   # an addressing cap, not a reservation: pages are committed as the heap
   # grows. Must be a multiple of 65536; 4 GiB is the wasm32 ceiling.
-  # The 100,000-level LL stress test exceeds 1 GiB with mimalloc.
+  # The 100,000-level LL stress test needs about 1 GiB with mimalloc.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
       "Shared-memory maximum handed to the linker (bytes)")
   # Clang already selects shared memory for the threaded target.

@@ -40,7 +40,7 @@ struct Base : cursiv::GrammarSpec {
                     (kw<"expr"> + assign<&Document::value>(ref<Expr>)) |
                     (kw<"block"> + assign<&Document::body>(ref<Block>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Base {};

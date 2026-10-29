@@ -16,7 +16,7 @@
 #include "cursiv/core/syntax-tree/CstLeaf.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairTwin {
   std::string text;
@@ -60,4 +60,4 @@ struct RepairTwin {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

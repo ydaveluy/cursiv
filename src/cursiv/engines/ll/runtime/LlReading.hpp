@@ -32,7 +32,6 @@ struct LlFacts {
   std::vector<std::uint16_t> rest;
   std::vector<std::uint16_t> modes;
   std::vector<std::uint64_t> bits;
-  std::uint32_t words = 0;
   std::uint64_t key = 0;
 };
 
@@ -53,6 +52,9 @@ struct LlReading {
   bool queued = false;
   // No gesture yet at this point: the next one opens a fault.
   bool fresh = true;
+  // Its next token is the descent's token in hand, whose gap the descent
+  // crossed under the point's own trivia: it is read where it begins.
+  bool inHand = false;
 
   // The key; the rank is read through `link`.
   std::uint32_t cost = 0;

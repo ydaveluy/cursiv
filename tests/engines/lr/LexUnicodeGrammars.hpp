@@ -40,7 +40,7 @@ struct G : cursiv::GrammarSpec {
                                               ref<DOTS> | ref<HASH>)> {};
   struct Doc : rule<create<ast::Doc> + many(append<&ast::Doc::items>(ref<Item>))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace dot
 
@@ -59,7 +59,7 @@ struct G : cursiv::GrammarSpec {
                       assign<&ast::Item::name>(ref<BIG> | ref<ACUTE>))> {};
   struct Doc : rule<create<ast::Doc> + many(append<&ast::Doc::items>(ref<Item>))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace cased
 
@@ -96,7 +96,7 @@ struct G : cursiv::GrammarSpec {
                      lit<"é">> {};
   struct Doc : rule<create<ast::Doc> + many(append<&ast::Doc::items>(ref<Item>))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto word_boundary = uc::XID_Continue | cr<"$">;
 };
 }  // namespace intersect

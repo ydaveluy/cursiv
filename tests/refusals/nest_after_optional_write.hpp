@@ -15,7 +15,7 @@ struct G : Base {
   struct Root : rule<option(assign<&ast::Wrapper::name>(ref<ID>)) +
                      nest<ast::Wrapper, &ast::Wrapper::inner>(lit<"!">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

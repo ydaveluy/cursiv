@@ -630,6 +630,13 @@ inline constexpr std::uint8_t kNoBranch = 0xFF;
 // out, `kNoBranch` for none.
 using RefBranchFn = std::uint8_t (*)(const AstTypeTag*) noexcept;
 
+// A single reference read whole: the CST node of its name and its target,
+// null unless the reference resolved.
+struct SingleRefRead {
+  NodeId name = kNoNode;
+  AstNode* target = nullptr;
+};
+
 struct RefOps {
   bool multi = false;
   // The index in `Ts...` a candidate satisfies, or `kNoBranch`. A subtype
@@ -668,6 +675,10 @@ struct RefOps {
                       std::uint32_t index) noexcept = nullptr;
   AstNode* (*at)(const AstNode& owner, std::uint32_t index,
                  std::size_t which) noexcept = nullptr;
+  // What `name_id`, `size` and `at` answer together, in one read of the
+  // member. Null for a multi reference.
+  SingleRefRead (*single)(const AstNode& owner,
+                          std::uint32_t index) noexcept = nullptr;
 
   void (*reset)(AstNode& owner, std::uint32_t index) noexcept = nullptr;
 };

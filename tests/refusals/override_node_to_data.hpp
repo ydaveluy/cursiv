@@ -21,7 +21,7 @@ struct Parent : Base {
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<ItemRule>)))> {
   };
   using entry = Top;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct G : cursiv::extends<Parent> {

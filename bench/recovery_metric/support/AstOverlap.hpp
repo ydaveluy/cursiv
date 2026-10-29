@@ -21,7 +21,7 @@
 #include "cursiv/core/utils/FunctionRef.hpp"
 #include "cursiv/fuzz/GrammarActions.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct AstOverlap {
   const AstReflection& reflection;
@@ -242,4 +242,4 @@ struct AstOverlap {
   };
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

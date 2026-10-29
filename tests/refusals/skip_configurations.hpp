@@ -26,7 +26,7 @@ constexpr auto region(std::index_sequence<Bits...>) {
       (Mask & (1u << Bits)) != 0, cursiv::TypeList<Parts::Token<Bits>>,
       cursiv::TypeList<>>...>;
   return []<class... Ts>(cursiv::TypeList<Ts...>) {
-    return cursiv::skip(cursiv::ignored<Ts...>, cursiv::hide<>,
+    return cursiv::skip(cursiv::ignore<Ts...>, cursiv::hide<>,
                         cursiv::lit<"x"> + cursiv::lit<"y">);
   }(Tokens{});
 }
@@ -44,7 +44,7 @@ struct G : Parts {
   using entry = Root;
   // Whitespace keeps the grammar's own configuration distinct from every
   // subset.
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

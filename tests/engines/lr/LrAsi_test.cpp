@@ -2,6 +2,7 @@
 // token in hand is refused, and a line break, a closing brace or the end of
 // input stands before it. A token the statement can take never splits it.
 
+#include <algorithm>
 #include <cstdio>
 #include <random>
 #include <string>
@@ -15,7 +16,7 @@
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/CstAudit.hpp"
-#include "engines/lr/AsiGrammar.hpp"
+#include "engines/lr/AsiAst.hpp"
 
 namespace {
 
@@ -223,8 +224,9 @@ bool offers_at(const Case& c, std::string_view body,
   std::vector<cursiv::NextFeature> features;
   parser.nextFeaturesAt(r.cst(), at, at, features);
   for (const auto& feature : features)
-    if (parser.getGrammar().terminalText(feature.feature) == literal)
-      return true;
+    for (const std::string_view s :
+         parser.getGrammar().terminalSpellings(feature.feature))
+      if (s == literal) return true;
   return false;
 }
 
@@ -252,11 +254,18 @@ void guarded_completion(const Case& c) {
     const auto r = parser.parse(text);
     std::vector<cursiv::NextFeature> features;
     parser.nextFeaturesAt(r.cst(), at, at + replaced, features);
-    for (const auto& feature : features)
-      if (parser.getGrammar().terminalText(feature.feature) == literal &&
-          (name.empty() ||
-           parser.getGrammar().terminalName(feature.feature) == name))
+    // An empty literal asks for a terminal with no spelling.
+    for (const auto& feature : features) {
+      const auto spellings =
+          parser.getGrammar().terminalSpellings(feature.feature);
+      const bool spelled =
+          literal.empty()
+              ? spellings.empty()
+              : std::ranges::find(spellings, literal) != spellings.end();
+      if (spelled && (name.empty() || parser.getGrammar().terminalName(
+                                          feature.feature) == name))
         return true;
+    }
     return false;
   };
   CHECK(offers("call |();", 1, "("));

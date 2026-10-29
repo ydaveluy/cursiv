@@ -32,6 +32,13 @@ LrShapeId LrLowerer::lay_ref(unsigned cfg, std::uint32_t rule) {
     _cfg.cfgEntry[cfg] = nt_index(static_cast<std::uint16_t>(_p.e[at].sym));
     return at;
   }
+  // A rule read in place lays its body here, its conversion over what that
+  // reads, as the rule's own definition would.
+  if (stage(rule).inPlace) {
+    const LrShapeId at = lay(cfg, body_in(cfg, rule));
+    convert_over(_p, at, row_id(stage(rule).convertRow));
+    return at;
+  }
   const std::uint16_t sym = sym_of(cfg, rule);
   if (cfg != 0 && !is_term(sym)) _cfg.cloneNeeded[nt_index(sym)] = true;
   return _p.push_sym(sym, static_cast<std::uint8_t>(cfg));
@@ -47,7 +54,7 @@ LrShapeId LrLowerer::lay_embed(unsigned cfg, ImageId e) {
   const ImageId open = kid(inner, 0);
   const ImageId entry = kid(inner, 1);
   const ImageId close = kid(inner, 2);
-  const unsigned in = section_of(cfg, n.a, token_core(close));
+  const unsigned in = section_of(n.a, token_core(close));
   const LrShapeId o = lay(cfg, open);
   const LrShapeId m = lay(in, entry);
   const LrShapeId c = lay(in, close);
@@ -96,6 +103,14 @@ std::uint16_t LrLowerer::open_tail(std::uint16_t reading, std::uint8_t tail) {
   return nt;
 }
 
+// A condition, bare or under a repetition or a scope: it takes no position.
+bool LrLowerer::is_condition(LrShapeId at) const {
+  while (_p.e[at].kind == LrShape::rep || _p.e[at].kind == LrShape::scope)
+    at = _p.e[at].sym;
+  return _p.e[at].kind == LrShape::sym &&
+         _p.is_gap(static_cast<std::uint16_t>(_p.e[at].sym));
+}
+
 void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
   (open ? _p.e[at].lead : _p.e[at].trail) = edge;
   const auto kind = _p.e[at].kind;
@@ -117,7 +132,10 @@ void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
     for (unsigned j = 0; j < count; ++j) {
       const LrShapeId k = _p.kid[base + (open ? j : count - 1 - j)];
       ambient(k, open, edge);
-      if (_p.e[k].kind != LrShape::none &&
+      // A condition that ends the region reads past it, so what it follows
+      // ends the region too.
+      const bool reads = !open && is_condition(k);
+      if (_p.e[k].kind != LrShape::none && !reads &&
           (!open || _p.e[k].kind != LrShape::end))
         break;
     }
@@ -189,9 +207,9 @@ LrShapeId LrLowerer::lay_write(unsigned cfg, ImageId e) {
 LrShapeId LrLowerer::lay_flag(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   LrShapeId node = capture_created(lay(cfg, kid(n, 0)));
-  // A flag over an option sets on the absent arm too: the row stands on a
-  // sequence around it, not on the item.
-  if (_p.e[node].kind == LrShape::rep && _p.e[node].max == 1)
+  // A flag over a repetition that may read nothing sets on the empty path
+  // too: the row stands on a sequence around it, not on the item.
+  if (_p.e[node].kind == LrShape::rep && _p.e[node].min == 0)
     node = gather(cfg, LrShape::seq, {node});
   _p.e[node].row.push_back(row_id(n.row));
   return node;
@@ -213,8 +231,12 @@ LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
     case ImageKind::choice:
       return gap(e) ? lay_gap(cfg, e)
                     : lay_kids(cfg, LrShape::alt, kids_of(n));
-    case ImageKind::unordered:
-      return lay_kids(cfg, LrShape::unordered, kids_of(n));
+    case ImageKind::unordered: {
+      const std::vector<ImageId> ks = kids_of(n);
+      const LrShapeId node = lay_kids(cfg, LrShape::unordered, ks);
+      present_optional_items(_p, node, ks);
+      return node;
+    }
     case ImageKind::repeat:
       return lay_repeat(cfg, e);
     case ImageKind::skip:

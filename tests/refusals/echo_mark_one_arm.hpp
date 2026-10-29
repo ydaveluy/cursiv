@@ -13,7 +13,7 @@ struct G : Base {
                         lit<"!">> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<TAG>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

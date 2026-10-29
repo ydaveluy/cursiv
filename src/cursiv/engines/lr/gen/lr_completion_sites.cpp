@@ -1,5 +1,6 @@
 #include "cursiv/engines/lr/gen/lr_completion_sites.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string_view>
@@ -9,11 +10,13 @@ namespace cursiv {
 
 std::vector<RecordGen> lr_record_gens(const AstEntryTable& table,
                                       std::span<const AstRowGen> rows) {
-  return record_gens(rows, table.count,
-                     [&](std::uint16_t e, std::vector<std::uint16_t>& held,
-                         std::vector<std::uint16_t>& over) {
-                       table.rows(e, held, over);
-                     });
+  std::vector<RecordGen> records(table.count);
+  std::vector<std::uint16_t> held, over;
+  for (std::size_t e = 0; e < records.size(); ++e) {
+    table.rows(static_cast<std::uint32_t>(e), held, over);
+    records[e] = record_gen(rows, held, over);
+  }
+  return records;
 }
 
 std::vector<ElementId> lr_completion_sites(

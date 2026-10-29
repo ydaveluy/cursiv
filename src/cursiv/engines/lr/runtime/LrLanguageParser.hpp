@@ -4,7 +4,6 @@
 // language.
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -42,11 +41,8 @@ class LrLanguageParser final : public Parser {
         _actions(&actions),
         _drive(&drive),
         _budget(budget),
-        _sampleReads(drive.condText == nullptr
-                         ? nullptr
-                         : std::make_unique<std::atomic<std::uint32_t>[]>(
-                               kCaret.modeTight.size() * kCaret.terms.size())),
-        _caret(caret_of(drive, _sampleReads.get())) {}
+        _caret(caret_of(drive,
+                        drive.condText == nullptr ? nullptr : &_sampleReads)) {}
 
   [[nodiscard]] const Grammar& getGrammar() const noexcept override {
     return *_grammar;
@@ -76,8 +72,14 @@ class LrLanguageParser final : public Parser {
   // The caret's half of this table, borrowed once, so the answer is one
   // compiled function; the sweep is the module's and joins at construction.
   static constinit const LrCaretTable kCaret;
-  static LrCaretTable caret_of(
-      const LrDrive& drive, std::atomic<std::uint32_t>* sampleReads) noexcept {
+  // The walk without a flagged winner, bound only where a mode flags one.
+  static constexpr auto without_of() {
+    decltype(LrCaretTable::lexWithout) f = nullptr;
+    if constexpr (A.has_flags()) f = &lr_match_without<A>;
+    return f;
+  }
+  static LrCaretTable caret_of(const LrDrive& drive,
+                               const LrSampleReads* sampleReads) noexcept {
     LrCaretTable t = kCaret;
     t.sampleReads = sampleReads;
     t.scan = drive.scanText;
@@ -91,13 +93,17 @@ class LrLanguageParser final : public Parser {
   const AstActions* _actions;
   const LrDrive* _drive;
   RepairBudget _budget;
-  std::unique_ptr<std::atomic<std::uint32_t>[]> _sampleReads;
+  LrSampleReads _sampleReads;
   const LrCaretTable _caret;
 };
 
 template <const auto& A>
 constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .lex = &lr_match_halt<A>,
+    .flagged = A.has_flags() ? +[](std::uint16_t mode, SymbolId sym) {
+      return sym < A.cfg.nterms && A.flagged(mode, sym);
+    } : nullptr,
+    .lexWithout = without_of(),
     .maxCands = A.maxCands,
     .chooses = A.nconflicts != 0 || A.npeeks != 0 || A.multiCand,
     .stamp = A.stamp,
@@ -129,6 +135,7 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .guardOps = A.guardOps,
     .held = A.held,
     .terms = A.cfg.terms,
+    .names = A.cfg.names.data(),
     .prods = A.cfg.prods,
 };
 

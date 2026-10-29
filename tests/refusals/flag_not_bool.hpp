@@ -9,7 +9,7 @@ struct G : Base {
   struct Root : rule<create<ast::Node>(flag<&ast::Node::name>(kw<"on">))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

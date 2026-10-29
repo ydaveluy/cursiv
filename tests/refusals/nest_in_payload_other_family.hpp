@@ -31,7 +31,7 @@ struct G : Base {
                     lit<"("> + assign<&ast::Call::arg>(ref<ID>) + lit<")">))) +
             lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

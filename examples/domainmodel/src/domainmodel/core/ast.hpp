@@ -1,6 +1,7 @@
 // The domainmodel example language: its AST. A bracket filter
 // (`type=[Type]`) is spelled as the base it names: `reference<Type>` accepts
-// a DataType or an Entity through the tag's family test, so one field serves both.
+// a DataType or an Entity through the tag's family test, so one field serves
+// both.
 #pragma once
 
 #include "cursiv/core/syntax-tree/AstNode.hpp"

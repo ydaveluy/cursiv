@@ -21,7 +21,7 @@ struct G : cursiv::GrammarSpec {
   struct N : rule<ref<M> + lit<"x">> {};
   struct Root : rule<(lit<"k"> + ref<N>) | create<ast::Doc>(eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tempty

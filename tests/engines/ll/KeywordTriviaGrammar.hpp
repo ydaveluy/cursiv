@@ -4,29 +4,9 @@
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/KeywordTriviaAst.hpp"
 
 namespace tllkwtrivia {
-struct Part : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
-struct Value : cursiv::Extends<cursiv::AstNode> {};
-struct Ref : cursiv::Extends<Value> {
-  string_view text;
-};
-struct Quotient : cursiv::Extends<Value> {
-  Value* left{};
-  Value* right{};
-};
-struct Assign : cursiv::Extends<cursiv::AstNode> {
-  string_view target;
-  vector<Part*> parts;
-  Value* value{};
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Assign*> statements;
-};
-
 struct Basic : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct REMARK
@@ -62,7 +42,7 @@ struct Basic : cursiv::GrammarSpec {
   struct Root
       : rule<create<Doc>(many(append<&Doc::statements>(ref<AssignRule>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<REMARK, LINE, BLOCK>;
 };
 struct BasicLl : Basic {};
@@ -96,10 +76,10 @@ struct CapturedLr : Captured {};
 // scopes keep their trivia independent inside one generated parser.
 struct Variants : cursiv::GrammarSpec {
   struct Root
-      : rule<skip(ignored<Basic::WS>,
+      : rule<skip(ignore<Basic::WS>,
                   hide<Recognized::RecursiveRemark, Basic::LINE, Basic::BLOCK>,
                   lit<"recognized:"> + ref<Basic::Root> + eof) |
-             skip(ignored<Basic::WS>,
+             skip(ignore<Basic::WS>,
                   hide<Captured::CapturedRemark, Basic::LINE, Basic::BLOCK>,
                   lit<"captured:"> + ref<Basic::Root> + eof)> {};
   using entry = Root;
@@ -124,15 +104,11 @@ struct Wide : cursiv::GrammarSpec {
   struct Root
       : rule<create<Doc>(many(append<&Doc::statements>(ref<AssignRule>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = REMARK;
 };
 struct WideLl : Wide {};
 struct WideLr : Wide {};
-
-struct Parts : cursiv::Extends<cursiv::AstNode> {
-  vector<Part*> parts;
-};
 
 // A comment that reads no more than a name yields to it: a bare `REM` is a
 // name, `REM hello` a comment, and `REMx` a name.
@@ -148,7 +124,7 @@ struct Bare : cursiv::GrammarSpec {
       : rule<create<Parts>(many(append<&Parts::parts>(ref<Entry>) | ref<NL>))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = REMARK;
 };
 struct BareLl : Bare {};

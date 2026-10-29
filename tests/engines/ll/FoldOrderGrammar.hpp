@@ -105,7 +105,7 @@ struct Base : cursiv::GrammarSpec {
                  (lit<"i2"> + assign<&Doc::value>(ref<ViaLast>))) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

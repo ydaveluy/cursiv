@@ -79,5 +79,6 @@ if(CURSIV_BUILD_TESTS)
           "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
           -DOUT=${CMAKE_CURRENT_BINARY_DIR}/recovery_metric_lane
           -DTSV=${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/lane.tsv
+          -DENGINE=${CURSIV_DEFAULT_ENGINE}
           -P ${CMAKE_CURRENT_SOURCE_DIR}/recovery_metric/lane.cmake)
 endif()

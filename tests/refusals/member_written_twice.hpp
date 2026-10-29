@@ -17,7 +17,7 @@ struct G : Base {
                     assign<&ast::Holder::first>(ref<Item>) + lit<","> +
                     assign<&ast::Holder::first>(ref<Item>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -40,7 +40,7 @@ struct G : cursiv::GrammarSpec {
             append<&ast::Doc::items>(ref<LONG> | ref<ID>) |
             (ref<LBRACK> + ref<RBRACK>) | ref<EQ>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 }  // namespace lua
@@ -151,7 +151,7 @@ struct G : cursiv::GrammarSpec {
                       (kw<"multi"> + ref<multi::G::Root>) |
                       (kw<"repeat"> + ref<repeat::G::Root>)> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tbackref

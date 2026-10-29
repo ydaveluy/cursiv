@@ -54,9 +54,10 @@ bool repaired(const Parser& p, std::string_view text, TextOffset at,
 // Some repair of `r` owes the token `text` spells.
 bool owes(const Parser& p, const ParseResult& r, std::string_view text) {
   for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-    if (d.element != cursiv::kNoElement &&
-        p.getGrammar().terminalText(d.element) == text)
-      return true;
+    if (d.element != cursiv::kNoElement)
+      for (const std::string_view s :
+           p.getGrammar().terminalSpellings(d.element))
+        if (s == text) return true;
   return false;
 }
 
@@ -127,10 +128,9 @@ std::string offered(const Parser& p, std::string_view text) {
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at, out);
   std::string seen;
-  for (const auto& f : out) {
-    const std::string_view t = p.getGrammar().terminalText(f.feature);
-    if (!t.empty() && seen.find(t) == std::string::npos) seen += t;
-  }
+  for (const auto& f : out)
+    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
+      if (seen.find(t) == std::string::npos) seen += t;
   return seen;
 }
 

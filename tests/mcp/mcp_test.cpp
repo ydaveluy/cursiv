@@ -36,6 +36,7 @@
 #include "cursiv/mcp/McpServer.hpp"
 #include "cursiv/mcp/McpToolKit.hpp"
 #include "cursiv/test/Check.hpp"
+#include "wordslr/generated/Lr/Module.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
@@ -309,6 +310,17 @@ constexpr std::string_view kA = "file:///w/a.ws";
 constexpr std::string_view kB = "file:///w/b.ws";
 constexpr std::string_view kC = "file:///w/c.ws";
 
+// The generated module a language reads with: the workspace's unless another
+// is named.
+struct GeneratedModule {
+  std::unique_ptr<cursiv::Parser> (*parser)() =
+      &ws::generated::Workspace::create_parser;
+  std::unique_ptr<cursiv::AstReflection> (*reflection)() =
+      &ws::generated::Workspace::create_ast_reflection;
+  std::unique_ptr<const cursiv::GrammarSource> (*source)() =
+      &ws::generated::Workspace::create_grammar_source;
+};
+
 struct World {
   struct Shared : cursiv::SharedCoreServices {};
   struct Language : cursiv::CoreServices {
@@ -325,14 +337,14 @@ struct World {
   }
 
   void addLanguage(std::string id, std::vector<std::string> extensions,
-                   std::string diagnostic = {}) {
+                   std::string diagnostic = {}, GeneratedModule from = {}) {
     auto language = std::make_unique<Language>(shared);
     language->languageMetaData = {std::move(id), std::move(extensions), {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
+    language->parser = from.parser();
+    language->astReflection = from.reflection();
     language->nameProvider =
         std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->grammarSource = ws::generated::Workspace::create_grammar_source();
+    language->grammarSource = from.source();
     cursiv::install_default_core_services(*language);
     if (!diagnostic.empty())
       language->validationRegistry->registerAfterDocument(
@@ -481,6 +493,31 @@ void expected_at_answers_in_place_of_the_word_typed() {
   CHECK(!answer.isError);
   CHECK(contains(answer.text, "in place of 'ent'"));
   CHECK(contains(answer.text, "'entity'"));
+}
+
+// A terminal that reads a choice of words is answered by each word, in both
+// of its forms, as the data rule reading the same words is by its keywords.
+void expected_at_spells_the_words_of_a_terminal() {
+  World own;
+  own.addLanguage("words", {".words"}, {},
+                  {&twords::generated::Lr::create_parser,
+                   &twords::generated::Lr::create_ast_reflection,
+                   &twords::generated::Lr::create_grammar_source});
+  own.build({{"file:///w/b.words", "branch:\na "},
+             {"file:///w/w.words", "whole:\na "},
+             {"file:///w/r.words", "rule:\na "}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  cursiv::McpServer server = std::move(*service.createServer());
+  for (const std::string_view uri :
+       {"file:///w/b.words", "file:///w/w.words", "file:///w/r.words"}) {
+    const Answer answer = call_tool(
+        server, "expected-at",
+        R"({"file":")" + std::string(uri) + R"(","line":2,"column":3})");
+    CHECK(!answer.isError);
+    CHECK(contains(answer.text, "'TRUE'"));
+    CHECK(contains(answer.text, "'FALSE'"));
+    CHECK(!contains(answer.text, "(token)"));
+  }
 }
 
 void scope_candidates_answer_the_scope() {
@@ -835,6 +872,7 @@ void run() {
   references_answer_declaration_and_uses();
   expected_at_names_the_member_being_filled();
   expected_at_answers_in_place_of_the_word_typed();
+  expected_at_spells_the_words_of_a_terminal();
   scope_candidates_answer_the_scope();
   documents_list_the_store();
   text_document_content_serves_the_held_text();

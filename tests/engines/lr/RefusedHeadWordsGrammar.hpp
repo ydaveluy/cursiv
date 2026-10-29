@@ -77,7 +77,7 @@ struct G : cursiv::GrammarSpec {
                           lit<";">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace trefusedheads

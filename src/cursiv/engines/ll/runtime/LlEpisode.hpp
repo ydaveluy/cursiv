@@ -92,20 +92,15 @@ inline LlThreadSetKey ll_thread_set_key(const LlEpisodeSim& sim,
 inline bool ll_plan_path(const LlHistory& arms, LlHistory::Node node,
                          std::vector<LlPlanEntry>& out,
                          LlHistory::Node from = LlHistory::kRoot) {
-  thread_local std::vector<LlHistory::Node> path;
-  path.clear();
-  auto n = node;
-  for (; n != from && n != LlHistory::kRoot; n = arms.parent(n))
-    path.push_back(n);
-  if (n != from) return false;
-  for (std::size_t i = path.size(); i-- > 0;) {
-    const std::uint32_t word = arms.word(path[i]);
-    if ((word >> 16) == 0xFFFFu) return false;
-    out.push_back({arms.at(path[i]), arms.lull(path[i]),
-                   static_cast<std::uint16_t>(word >> 16),
-                   static_cast<std::uint16_t>(word & 0xFFFFu)});
-  }
-  return true;
+  if (!arms.starts_with(node, from)) return false;
+  bool laid = true;
+  arms.each(node, arms.depth(from), [&](const LlHistory::Event& e) {
+    if ((e.word >> 16) == 0xFFFFu) return laid = false;
+    out.push_back({e.at, e.lull, static_cast<std::uint16_t>(e.word >> 16),
+                   static_cast<std::uint16_t>(e.word & 0xFFFFu)});
+    return true;
+  });
+  return laid;
 }
 
 // What every reading of a frontier agrees on (`common`), and the choice where
@@ -116,35 +111,42 @@ inline void ll_plan_dead_end(const LlHistory& arms, LlHistory::Node common,
                              std::vector<LlPlanEntry>& out,
                              LlHistory::Node from = LlHistory::kRoot) {
   if (!ll_plan_path(arms, common, out, from) || deeper == nullptr) return;
-  const auto n = arms.ancestor(*deeper, arms.depth(common) + 1);
-  const std::uint32_t word = arms.word(n);
+  const LlHistory::Event n = arms.event(*deeper, arms.depth(common));
+  const std::uint32_t word = n.word;
   if ((word >> 16) != 0xFFFFu)
-    out.push_back({arms.at(n), arms.lull(n),
-                   static_cast<std::uint16_t>(word >> 16), kNoRow});
+    out.push_back(
+        {n.at, n.lull, static_cast<std::uint16_t>(word >> 16), kNoRow});
 }
 
-// The descent follows the plan: it is installed where the parse can keep it.
+// The descent follows the plan: it is installed where the parse can keep it,
+// with the ways its refusals below hold on where it has any. Zero where there
+// is no parse to keep it.
 template <const auto& T>
-inline void ll_plan_install(const LlContext& c,
-                            std::vector<LlPlanEntry>& entries) {
+inline LlPlan::Laid ll_plan_install(const LlContext& c,
+                                    std::vector<LlPlanEntry>& entries,
+                                    std::vector<LlPlanWay>* ways = nullptr) {
+  auto* slot = ll_episode_session_slot<T>();
+  if (slot == nullptr || !slot->has_value()) return 0;
+  return (*slot)->plan.install(entries, ways, c.repaired.count());
+}
+
+// The descent took `arm` at a choice the plan did not answer.
+template <const auto& T>
+inline void ll_plan_went(const LlContext& c, std::uint16_t decision,
+                         std::uint16_t arm) {
   auto* slot = ll_episode_session_slot<T>();
   if (slot == nullptr || !slot->has_value()) return;
-  LlPlan& plan = (*slot)->plan;
-  plan.entries().swap(entries);
-  plan.hold(c.repaired.count());
+  (*slot)->plan.went(decision, c.at, c.lull, arm);
 }
 
 // The decisions the readings have gone by since the plan was laid, put after
 // it; false when the plan is no longer the one laid.
 template <const auto& T>
-inline bool ll_plan_extend(const std::vector<LlPlanEntry>& path,
-                           std::size_t laid) {
+inline bool ll_plan_extend(LlPlan::Laid laid,
+                           const std::vector<LlPlanEntry>& path) {
   auto* slot = ll_episode_session_slot<T>();
-  if (slot == nullptr || !slot->has_value()) return false;
-  std::vector<LlPlanEntry>& have = (*slot)->plan.entries();
-  if (have.size() != laid) return false;
-  have.insert(have.end(), path.begin(), path.end());
-  return true;
+  return slot != nullptr && slot->has_value() &&
+         (*slot)->plan.extend(laid, path);
 }
 
 // What the plan of the parse says of a choice where the descent stands.
@@ -152,20 +154,15 @@ template <const auto& T>
 inline std::uint16_t ll_planned(const LlContext& c, std::uint16_t decision) {
   auto* slot = ll_episode_session_slot<T>();
   if (slot == nullptr || !slot->has_value()) return kLlUnplanned;
-  const std::uint16_t rule = T.decisions[decision].rule;
-  const std::uint16_t climb = rule != kNoRow ? T.rules[rule].climb : kNoRow;
-  return (*slot)->plan.say(
-      decision, c.at, c.lull, c.repaired.count(),
-      climb != kNoRow && T.climbs[climb].decision == decision);
+  return (*slot)->plan.say(decision, c.at, c.lull, c.repaired.count(),
+                           T.decisions[decision].again);
 }
 
 template <const auto& T>
 class LlEpisode {
  public:
-  std::uint16_t run(LlContext& c, std::uint16_t decision,
-                    const LlTable::Decision& dec) {
+  std::uint16_t run(LlContext& c, std::uint16_t decision) {
     _cp = &c;
-    _dp = &dec;
     _decision = decision;
     _inspected = _chosenAt = 0;
     _ended = _chosenEnded = false;
@@ -207,7 +204,7 @@ class LlEpisode {
       }
     } keep{*this};
     const std::uint16_t reached = drive();
-    keep.on = reached == kHeldOn;
+    keep.on = reached == kHeldOn && _sim->arms().depth(_laidAt) < kHeldReach;
     if (reached == kRestart || reached == kLost) return false;
     arm = ll_planned<T>(c, decision);
     return arm != kLlUnplanned;
@@ -234,17 +231,13 @@ class LlEpisode {
     touch(first);
     _firstTerms = scratch.read;
     _firstTop = first.top;
-    bool tracked = first.different;
-    for (;;) {
-      const std::uint16_t arm = attempt(tracked);
-      if (arm != kRestart) return arm;
-      tracked = true;
-    }
+    // Only a plain attempt asks to start over, and it starts over tracked.
+    const std::uint16_t arm = attempt(first.different);
+    return arm != kRestart ? arm : attempt(true);
   }
 
   // What the episode has read since it was last asked.
   std::uint64_t take_steps() { return std::exchange(_steps, 0); }
-  std::uint64_t take_readings() { return std::exchange(_readings, 0); }
 
  private:
   using Key = std::array<std::uint32_t, 5>;
@@ -252,6 +245,10 @@ class LlEpisode {
   // "The episode stands, held, with readings left" and "it cannot name the
   // choice asked".
   static constexpr std::uint16_t kHeldOn = 0xFFFBu;
+  // How many decisions a held episode lays before the next choice starts an
+  // episode of its own: past them its readings cost every token they cross,
+  // and a fresh episode reads only what its own choice needs.
+  static constexpr std::uint32_t kHeldReach = 256;
   static constexpr std::uint16_t kLost = 0xFFFAu;
   static constexpr std::uint32_t kStart = LlEpisodeSim::kStart;
   static constexpr TextOffset kNoGap = ~TextOffset{0};
@@ -275,11 +272,11 @@ class LlEpisode {
     bool operator==(const LlMeetKey&) const = default;
   };
   struct LlMeetHash {
-    std::size_t operator()(const LlMeetKey& k) const noexcept {
+    std::uint64_t operator()(const LlMeetKey& k) const noexcept {
       std::uint64_t h = k.state;
       h = (h * 1099511628211ull) ^ k.canon;
       h = (h * 1099511628211ull) ^ k.root;
-      return static_cast<std::size_t>(h);
+      return h;
     }
   };
 
@@ -300,7 +297,7 @@ class LlEpisode {
   // The token every reading of one history crosses, and where it stands.
   struct Crossing {
     TextOffset begin, end, gapFrom;
-    std::uint32_t lull, group;
+    std::uint32_t lull;
     IndentAt at;
     TextOffset held;
   };
@@ -330,6 +327,8 @@ class LlEpisode {
     _entryRule = ctx().document;
     _positions.clear();
     _entries.clear();
+    _below.clear();
+    _ways.clear();
     _frontier.clear();
     _final.clear();
     _ends.clear();
@@ -356,7 +355,6 @@ class LlEpisode {
       Position p = std::move(_positions.front());
       _positions.erase(_positions.begin());
       ++_steps;
-      _readings += p.threads.size();
       const Verdict verdict = visit(p);
       if (verdict == Verdict::restart) return kRestart;
       spare(std::move(p.threads));
@@ -421,6 +419,10 @@ class LlEpisode {
     if (row->count != 0) {
       kept->lay(*row, q.begin, _entries);
       ll_plan_install<T>(ctx(), _entries);
+    } else if (auto* slot = ll_episode_session_slot<T>();
+               slot != nullptr && slot->has_value()) {
+      // The arm remembered may leave the way of the refusals below.
+      (*slot)->plan.drop_below();
     }
     arm = row->arm;
     return true;
@@ -567,7 +569,6 @@ class LlEpisode {
         _final.insert(_final.end(), p.threads.begin(), p.threads.end());
       return conclude();
     }
-    _laid = _entries.size();
     _laidAt = _common;
     _held = true;
     _heldBy = &slot->value();
@@ -591,8 +592,7 @@ class LlEpisode {
               path[i].decision == _want.decision;
     if (!named)
       return open && path.back().at <= _want.at ? kLlUnplanned : kLost;
-    if (!ll_plan_extend<T>(path, _laid)) return kLost;
-    _laid += path.size();
+    if (!ll_plan_extend<T>(_plan, path)) return kLost;
     _laidAt = _common;
     return kHeldOn;
   }
@@ -610,6 +610,7 @@ class LlEpisode {
     if (!_frontier.empty() && at < _frontierAt) return;
     _frontier = threads;
     _frontierAt = at;
+    _frontierStep = _steps;
   }
 
   LlHistory::Node from() const { return _resumed ? _laidAt : LlHistory::kRoot; }
@@ -632,6 +633,7 @@ class LlEpisode {
       ll_plan_path(arms, winner.arm, _entries, from());
     } else if (!_decided) {
       _entries.push_back({ctx().at, ctx().lull, _decision, kNoRow});
+      refuse_below();
     } else if (!_frontier.empty()) {
       const LlHistory::Node common = common_of(_frontier);
       LlHistory::Node parts = LlHistory::kRoot;
@@ -650,12 +652,59 @@ class LlEpisode {
     return done();
   }
 
+  // Every reading died and none chose an arm: all the arms of the choice
+  // still stood among the last readings. A choice below that they went by is
+  // refused as well where, after every way to it, all its arms still stood
+  // among them too: an episode asked there would read the same text and
+  // refuse it. The refusals hold while the descent stays on the way of the
+  // readings: any arm of a refused choice keeps it there, and where the
+  // generated automaton answers, `LlPlan::went` checks the arm it takes. An
+  // episode that tracks lexical choices, a grammar with gap conditions or
+  // indentation, and readings that leave a rule with no caller under them
+  // keep the one refusal.
+  void refuse_below() {
+    if constexpr (T.ngapConds != 0 || kIndented<T>) {
+      return;
+    } else {
+      if (_tracked || !_entryRule || _frontierStep != _steps ||
+          _sim->stopped() || !_sim->choices(_frontier, _choices))
+        return;
+      const auto all = [](std::uint16_t decision) {
+        const std::uint32_t n = T.atn.state(T.decisions[decision].state).nedges;
+        return n < 2 || n > 63 ? std::uint64_t{0}
+                               : (std::uint64_t{1} << n) - 1u;
+      };
+      bool rooted = false;
+      for (const LlChoiceArms& k : _choices) {
+        if (k.decision >= T.ndecisions || k.arms == 0) continue;
+        if (k.decision == _decision && k.at == ctx().at &&
+            k.lull == ctx().lull) {
+          rooted = k.arms == all(_decision);
+          continue;
+        }
+        const LlTable::Decision& d = T.decisions[k.decision];
+        if (d.how == LlPredict::staged)
+          _ways.push_back({k.at, k.lull, k.decision, k.arms});
+        else if (d.how == LlPredict::adaptive && k.at < _frontierAt &&
+                 k.arms == all(k.decision) && T.modeMulti[d.mode] == 0)
+          _below.push_back({k.at, k.lull, k.decision, kNoRow, false, true});
+      }
+      if (!rooted || _below.empty()) {
+        _below.clear();
+        _ways.clear();
+      }
+    }
+  }
+
   std::uint16_t done() {
     if (_resumed) {
-      if (!ll_plan_extend<T>(_entries, _laid)) return kLost;
+      if (!ll_plan_extend<T>(_plan, _entries)) return kLost;
     } else {
       remember();
-      ll_plan_install<T>(ctx(), _entries);
+      // The memo keeps the choice asked; the refusals below are the plan's.
+      _entries.insert(_entries.end(), _below.begin(), _below.end());
+      _plan = ll_plan_install<T>(ctx(), _entries,
+                                 _below.empty() ? nullptr : &_ways);
     }
     return _decided ? _answer : kNoRow;
   }
@@ -712,7 +761,7 @@ class LlEpisode {
         if (threads[a].kernel != stray.kernel) return false;
         const auto shared = arms.depth(arms.common(stray.arm, threads[a].arm));
         return arms.depth(stray.arm) <= shared ||
-               arms.at(arms.ancestor(stray.arm, shared + 1)) >= gap;
+               arms.event(stray.arm, shared).at >= gap;
       });
     });
   }
@@ -864,8 +913,7 @@ class LlEpisode {
       std::erase_if(threads,
                     [&](const LlThread& t) { return t.root != _answer; });
       if (threads.empty()) return Verdict::go;
-      if (threads.size() == 1 && _sim->standing(threads.front().stack) == 1 &&
-          _positions.empty()) {
+      if (threads.size() == 1 && _sim->standing(threads.front().stack) == 1) {
         _final = threads;
         _early = true;
         return Verdict::done;
@@ -889,17 +937,42 @@ class LlEpisode {
   // the token that stands after the gap: nothing its condition names or its
   // normal continuation reads begins there, and the condition does not hold
   // on no token at all. What follows an insertion then joins no election.
+  // The condition may read past what the episode lexes there; those bytes
+  // count among the episode's, so the memo answers only text that reads the
+  // same.
   bool insertion_apart(std::uint32_t edge, TextOffset from,
                        TextOffset gapFrom) {
-    LlAhead a = ll_ahead<T>(ctx());
+    LlAhead a = ll_ahead(ctx());
     a.p = from;
     a.head = false;
-    const Token t = ll_ahead_peek<T>(ctx(), a, T.nodes[T.edgeNode[edge]].mode);
+    const Token t = ll_ahead_peek<T>(ctx(), ctx().indentArena, a,
+                                     T.nodes[T.edgeNode[edge]].mode);
     if (t.sym != kInvalidSymbol) return false;
     LlLookRead sink;
-    return !ll_predict_condition<T>(ctx(), T.atn.edge(edge).label,
-                                    Token{t.begin, t.begin, kInvalidSymbol},
-                                    gapFrom, sink);
+    const bool holds = ll_predict_condition<T>(
+        ctx(), T.atn.edge(edge).label, Token{t.begin, t.begin, kInvalidSymbol},
+        gapFrom, sink);
+    touch(sink);
+    return !holds;
+  }
+
+  // Whether some reading takes `token`, which an implied position reads where
+  // the crossing reads the terminals `read` up to `end`: a longer token is its
+  // own, and any other is the crossing's.
+  static bool takes(const std::vector<LlThread>& threads, const Token& token,
+                    TextOffset end, const std::vector<std::uint16_t>& read) {
+    for (const LlThread& t : threads) {
+      const LlAtnState& s = T.atn.state(t.state);
+      for (std::uint32_t i = 0; i < s.nedges; ++i) {
+        const LlAtnEdge& e = T.atn.edge(s.edge + i);
+        if (e.kind != LlEdgeKind::atom) continue;
+        if (token.end > end
+                ? e.label == token.sym
+                : std::find(read.begin(), read.end(), e.label) != read.end())
+          return true;
+      }
+    }
+    return false;
   }
 
   bool held_back(std::uint32_t edge, TextOffset from, TextOffset gapFrom) {
@@ -944,7 +1017,7 @@ class LlEpisode {
     LlMask<T.termWords>& viable = scratch.viable;
     std::vector<std::uint16_t>& read = scratch.read;
     std::vector<LlThread>& threads = p.threads;
-    Crossing x{0, 0, gapFrom, lull, 0, {}, 0};
+    Crossing x{0, 0, gapFrom, lull, {}, 0};
     std::size_t top = 0;
     // The token in hand was elected by the descent's alphabet, which takes in
     // what follows an insertion: read again where none is within reach.
@@ -1138,7 +1211,7 @@ class LlEpisode {
         TextOffset inspected = begin;
         bool ended = false;
         ll_match_in<T>(ctx().src, ctx().len, begin, alphabet, read, &inspected,
-                       &ended, nullptr, &lengths, true, nullptr, dec().mode);
+                       &ended, nullptr, &lengths, dec().mode);
         touch({{}, inspected, ended});
         seen.emplace_back(alphabetKey, begin, _readingsOf.size());
         for (const auto& reading : lengths)
@@ -1269,7 +1342,7 @@ class LlEpisode {
                rank(_readingsOf[i]) == ranked &&
                _readingsOf[i].group == group &&
                shiftKey(_readingsOf[i].term) == effect);
-      const Crossing x{begin, end, gapFrom, lull, group, _own.at, _own.held};
+      const Crossing x{begin, end, gapFrom, lull, _own.at, _own.held};
       for (auto history = histories.lower_bound({group, 0});
            history != histories.end() && history->first.first == group;
            ++history) {
@@ -1293,14 +1366,37 @@ class LlEpisode {
       _sim->at(x.gapFrom, x.lull);
       _before = _stepping;
       LlLookRead sink;
-      _sim->filter(_stepping, [&](std::uint16_t condition, std::uint32_t edge) {
-        Token token{x.begin, x.end, read.front()};
-        if (implied_edge(edge))
-          token = ll_normal_token<T>(ctx(), token,
-                                     T.nodes[T.edgeNode[edge]].mode);
-        return ll_predict_condition<T>(ctx(), condition, token, x.gapFrom,
-                                       sink);
+      // An implied token is inserted only where no reading takes the token
+      // its position reads: a normal continuation blocks the insertion, even
+      // one that fails later. The readings cross without insertions first,
+      // then again with those that nothing they read blocks.
+      _insertions.clear();
+      bool first = true;
+      const auto crosses = [&](std::uint16_t condition, std::uint32_t edge) {
+        const Token token{x.begin, x.end, read.front()};
+        if (!implied_edge(edge))
+          return ll_predict_condition<T>(ctx(), condition, token, x.gapFrom,
+                                         sink);
+        const auto at =
+            std::find_if(_insertions.begin(), _insertions.end(),
+                         [&](const auto& i) { return i.first == edge; });
+        if (!first) return at != _insertions.end();
+        const Token own =
+            ll_normal_token<T>(ctx(), token, T.nodes[T.edgeNode[edge]].mode);
+        if (at == _insertions.end() &&
+            ll_predict_condition<T>(ctx(), condition, own, x.gapFrom, sink))
+          _insertions.emplace_back(edge, own);
+        return false;
+      };
+      _sim->filter(_stepping, crosses);
+      std::erase_if(_insertions, [&](const auto& i) {
+        return takes(_stepping, i.second, x.end, read);
       });
+      if (!_insertions.empty()) {
+        first = false;
+        _stepping = _before;
+        _sim->filter(_stepping, crosses);
+      }
       touch(sink);
       if (_stepping.empty()) {
         note_death(_before, x.begin);
@@ -1386,10 +1482,9 @@ class LlEpisode {
   }
 
   LlContext& ctx() const { return *_cp; }
-  const LlTable::Decision& dec() const { return *_dp; }
+  const LlTable::Decision& dec() const { return T.decisions[_decision]; }
 
   LlContext* _cp = nullptr;
-  const LlTable::Decision* _dp = nullptr;
   std::uint16_t _decision = 0;
   std::optional<LlExactWalk<T>> _walk;
   LlEpisodeSim* _sim = nullptr;
@@ -1400,11 +1495,20 @@ class LlEpisode {
   std::vector<Position> _positions;
   std::vector<std::vector<LlThread>> _spare;
   std::vector<LlPlanEntry> _entries;
+  // The refusals below the choice asked, and the ways they hold on.
+  std::vector<LlPlanEntry> _below;
+  std::vector<LlPlanWay> _ways;
+  std::vector<LlChoiceArms> _choices;
   std::vector<LlThread> _frontier, _final, _stepping, _before, _origins, _grown,
       _lent;
+  // The implied tokens a step inserts: each edge, with the token it reads.
+  std::vector<std::pair<std::uint32_t, Token>> _insertions;
   // Whether the last laid path met a reading or a candidate.
   bool _stood = false;
   TextOffset _frontierAt = 0;
+  // The step that met the frontier: where it is the last step, the frontier
+  // is every reading that was left.
+  std::uint64_t _frontierStep = 0;
   bool _decided = false, _early = false, _halted = false;
   std::uint16_t _answer = kNoRow;
   Candidate _completed, _atEnd, _provenEnd;
@@ -1423,7 +1527,7 @@ class LlEpisode {
   };
   std::vector<Action> _actions;
   std::uint32_t _round = 0;
-  std::uint64_t _steps = 0, _readings = 0;
+  std::uint64_t _steps = 0;
   // The episode kept after its choice was made: the parse and the place it
   // was kept in, the plan entries it has laid, and the choice asked of it.
   struct Want {
@@ -1436,7 +1540,7 @@ class LlEpisode {
   std::uint32_t _heldRepairs = 0;
   const char* _heldSrc = nullptr;
   TextOffset _heldAt = 0;
-  std::size_t _laid = 0;
+  LlPlan::Laid _plan = 0;
   LlHistory::Node _common = LlHistory::kRoot, _laidAt = LlHistory::kRoot;
   Want _want{};
   // How far into the text the episode looked, and whether it saw the end.

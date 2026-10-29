@@ -18,6 +18,7 @@
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/LlPredictionSession.hpp"
+#include "cursiv/engines/ll/runtime/LlPredictionWork.hpp"
 #include "cursiv/engines/ll/runtime/ll_caret.hpp"
 #include "cursiv/engines/ll/runtime/ll_repair.hpp"
 #include "cursiv/engines/shared/runtime/AstActions.hpp"
@@ -31,6 +32,7 @@ namespace cursiv {
 // last token and the end is trivia the tree keeps.
 template <const auto& T>
 inline void ll_finish(LlContext& c) {
+  ll_span_region_end(c);
   // Text no rule wanted is still text: it goes on the tape, and the verdict
   // says the document was not the grammar's.
   ll_tail<T>(c);
@@ -69,12 +71,18 @@ class LlLanguageParser final : public Parser {
     Cst cst(text);
     CstBuilder builder(cst);
     builder.reserve_stream(text.size());
+    // The descent polls nothing: the stream reads the stop as it fills.
+    CstRun::Watch watch(builder.stream(), cancelToken);
     builder.bind_stream();
     LlContext c(text, builder, _budget);
     c.stop = CancellationPoll(cancelToken);
+    if constexpr (kLlAnyRecorded<T>) c.pending.reserve(8);
     const NodeId first = 0;
     _drive(c);
     ll_finish<T>(c);
+    // What the predictions read goes to the thread's count, as the searches'.
+    const LlPredictionWork read = predictionSession.work();
+    LlPredictionWork::current().tokens += read.tokens;
     builder.bind_entry(first, static_cast<NodeId>(cst.size()), c.last);
     // Converting the tree is another phase; answer a stop requested after
     // the descent's last periodic poll before materialising the AST.

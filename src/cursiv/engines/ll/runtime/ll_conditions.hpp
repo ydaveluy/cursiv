@@ -21,7 +21,7 @@ inline void ll_condition_node(LlContext& c, std::uint16_t mode,
     }
     // A guard refuses a reading just as a token does. Its deletion and the
     // caller's abandon belong to the same election, with the same costs.
-    ll_repair_peek<T>(c, ll_err_mode<T>(c));
+    ll_repair_peek<T>(c);
     const LlPause pause = ll_pause<T>(c, LlRoot{kNoRow, node});
     if (const LlGesture* g = pause.gesture;
         g != nullptr && g->kind != LlGesture::ins) {

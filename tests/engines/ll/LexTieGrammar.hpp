@@ -33,7 +33,7 @@ struct Cell : cursiv::GrammarSpec {
                          ref<BangRule> | ref<NumberRule> | ref<NameRule>)) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Member : cursiv::Extends<cursiv::AstNode> {};
@@ -81,7 +81,7 @@ struct CtorFirst : Members {
                     ref<K_CLASS> + assign<&Class::name>(ref<ID>) + lit<"{"> +
                     many(append<&Class::members>(ref<Entry>)) + lit<"}">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct MethodFirst : Members {
@@ -90,7 +90,7 @@ struct MethodFirst : Members {
                     ref<K_CLASS> + assign<&Class::name>(ref<ID>) + lit<"{"> +
                     many(append<&Class::members>(ref<Entry>)) + lit<"}">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Two names over one spelling, which a keyword reserves where it is read
@@ -110,7 +110,7 @@ struct Reserved : cursiv::GrammarSpec {
       : rule<create<Doc>(assign<&Doc::value>(ref<Plain> | ref<Tied>)) + eof> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct ReservedLl : Reserved {};
 struct ReservedLr : Reserved {};
@@ -163,7 +163,7 @@ struct Clauses : cursiv::GrammarSpec {
       : rule<create<Query>(some(append<&Query::clauses>(ref<Clause>))) + eof> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Suite : Members {
@@ -172,7 +172,7 @@ struct Suite : Members {
                      (lit<"method:"> + ref<MethodFirst::Root>) |
                      (lit<"clauses:"> + ref<Clauses::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Suite {};
 struct Lr : Suite {};

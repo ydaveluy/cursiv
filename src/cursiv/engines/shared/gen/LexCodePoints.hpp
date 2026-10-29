@@ -339,11 +339,4 @@ struct LexCodePoints {
   }
 };
 
-// The lead bytes of the scalars a row of ranges holds.
-inline ByteSet lex_leads_of(const unicode::Range* r, std::size_t n) {
-  LexCodePoints cps;
-  cps.ranges.assign(r, r + n);
-  return cps.leads();
-}
-
 }  // namespace cursiv

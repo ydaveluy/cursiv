@@ -16,7 +16,7 @@ struct G : Base {
   struct Root
       : rule<create<ast::Bag>(many(assign<&ast::Bag::names>(ref<ID>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

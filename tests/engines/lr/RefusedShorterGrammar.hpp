@@ -43,7 +43,7 @@ struct Base : cursiv::GrammarSpec {
                     (lit<"wide"> + many(append<&Doc::items>(ref<WideItem>))) |
                     (lit<"run"> + many(append<&Doc::items>(ref<RunItem>))))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

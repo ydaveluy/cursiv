@@ -110,7 +110,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Doc>(some(
                     append<&ast::Doc::items>(ref<ItemRule>), lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<BLOCK, LINE>;
 };
 

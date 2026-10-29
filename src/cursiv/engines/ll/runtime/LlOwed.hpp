@@ -4,7 +4,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <queue>
+#include <utility>
 #include <vector>
 
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
@@ -17,19 +21,7 @@ template <const auto& T>
 class LlOwed {
  public:
   LlOwed() : _owes(T.atn.nstates, kNone) {
-    for (bool moved = true; moved;) {
-      moved = false;
-      for (std::uint32_t s = 0; s < T.atn.nstates; ++s) {
-        const LlAtnState& state = T.atn.state(s);
-        unsigned least = state.kind == LlAtnKind::ruleStop ? 0 : kNone;
-        for (std::uint32_t i = 0; i < state.nedges; ++i)
-          least = std::min(least, way(T.atn.edge(state.edge + i)));
-        if (least < _owes[s]) {
-          _owes[s] = static_cast<std::uint16_t>(least);
-          moved = true;
-        }
-      }
-    }
+    settle_distances();
     // A rule not yet begun owes nothing: the positions its entry reaches
     // without reading are the ones it has not left.
     std::vector<std::uint8_t> entry(T.atn.nstates, 0);
@@ -56,9 +48,6 @@ class LlOwed {
 
   // A completed alternative owes nothing in that call. It rules out optional
   // continuations there, but not a closer owed by a different, enclosing call.
-  void due(const LlSimulation& sim, std::vector<std::uint16_t>& out) const {
-    due(sim, out, [](std::uint32_t) { return false; });
-  }
   template <class Begun>
   void due(const LlSimulation& sim, std::vector<std::uint16_t>& out,
            Begun&& begun) const {
@@ -86,20 +75,14 @@ class LlOwed {
     for (const LlConfig& x : sim.configs())
       if (pending(x)) fewest = std::min<unsigned>(fewest, _owes[x.state]);
     if (fewest == kNone) return;
-    thread_local std::vector<std::uint32_t> seen;
-    thread_local std::uint32_t round = 0;
-    if (seen.size() < _owes.size()) seen.assign(_owes.size(), 0u);
-    if (++round == 0) {
-      std::ranges::fill(seen, 0u);
-      round = 1;
-    }
-    for (const LlConfig& x : sim.configs())
-      if (pending(x) && _owes[x.state] == fewest)
-        begin(x.state, out, seen, round);
+    begin(sim, out, [&](const LlConfig& x) {
+      return pending(x) && _owes[x.state] == fewest;
+    });
   }
 
   // The shortest unfinished way names what an abandon left absent, including
   // a rule whose guarded entry has not read anything. It grants no free run.
+  // Only one terminal is a name: the walk stops at the second.
   SymbolId first(const LlSimulation& sim) const {
     unsigned fewest = kNone;
     for (const LlConfig& x : sim.configs())
@@ -107,9 +90,8 @@ class LlOwed {
         fewest = std::min<unsigned>(fewest, _owes[x.state]);
     if (fewest == kNone) return kNoElement;
     std::vector<std::uint16_t> out;
-    std::vector<std::uint32_t> seen(_owes.size(), 0u);
-    for (const LlConfig& x : sim.configs())
-      if (_owes[x.state] == fewest) begin(x.state, out, seen, 1u);
+    begin(sim, out, [&](const LlConfig& x) { return _owes[x.state] == fewest; },
+          2);
     return out.size() == 1 ? out.front() : kNoElement;
   }
 
@@ -117,6 +99,56 @@ class LlOwed {
 
  private:
   static constexpr unsigned kNone = 0xFFFFu;
+
+  void settle_distances() {
+    // An edge depends on its target, or on both the called rule and its
+    // continuation. Settle the cheapest positions first; a sum cannot be
+    // cheaper than either of its non-negative operands.
+    struct Into {
+      std::uint32_t from, edge;
+    };
+    std::vector<std::uint32_t> base(T.atn.nstates + 1u, 0);
+    const auto dependencies = [&](auto&& each) {
+      for (std::uint32_t s = 0; s < T.atn.nstates; ++s) {
+        const auto& state = T.atn.state(s);
+        for (std::uint32_t i = 0; i < state.nedges; ++i) {
+          const auto at = state.edge + i;
+          const auto& e = T.atn.edge(at);
+          each(e.kind == LlEdgeKind::rule ? T.atn.ruleStart[e.label] : e.target,
+               Into{s, at});
+          if (e.kind == LlEdgeKind::rule) each(e.follow, Into{s, at});
+        }
+      }
+    };
+    dependencies([&](std::uint32_t to, Into) { ++base[to + 1]; });
+    for (std::uint32_t s = 0; s < T.atn.nstates; ++s) base[s + 1] += base[s];
+    std::vector<Into> into(base.back());
+    {
+      auto next = base;
+      dependencies(
+          [&](std::uint32_t to, Into from) { into[next[to]++] = from; });
+    }
+    using Distance = std::pair<unsigned, std::uint32_t>;
+    std::priority_queue<Distance, std::vector<Distance>, std::greater<>>
+        pending;
+    for (std::uint32_t s = 0; s < T.atn.nstates; ++s)
+      if (T.atn.state(s).kind == LlAtnKind::ruleStop) {
+        _owes[s] = 0;
+        pending.emplace(0u, s);
+      }
+    while (!pending.empty()) {
+      const auto [distance, s] = pending.top();
+      pending.pop();
+      if (distance != _owes[s]) continue;
+      for (auto i = base[s]; i < base[s + 1]; ++i) {
+        const Into from = into[i];
+        const auto least = way(T.atn.edge(from.edge));
+        if (least >= _owes[from.from]) continue;
+        _owes[from.from] = static_cast<std::uint16_t>(least);
+        pending.emplace(least, from.from);
+      }
+    }
+  }
 
   bool stands(std::uint32_t s) const {
     const LlAtnState& state = T.atn.state(s);
@@ -126,33 +158,62 @@ class LlOwed {
     return false;
   }
 
-  // The terminals that begin the shortest ways out of state `s`.
-  void begin(std::uint32_t s, std::vector<std::uint16_t>& out,
-             std::vector<std::uint32_t>& seen, std::uint32_t round) const {
-    if (seen[s] == round) return;
-    seen[s] = round;
-    const LlAtnState& state = T.atn.state(s);
-    for (std::uint32_t i = 0; i < state.nedges; ++i) {
-      const LlAtnEdge& e = T.atn.edge(state.edge + i);
-      if (way(e) != _owes[s]) continue;
+  // The terminals that begin the shortest ways out of the positions `from`
+  // picks, in their order, until `out` holds `most` of them. A state is walked
+  // once: a new round of marks clears the last one's.
+  template <class From>
+  void begin(const LlSimulation& sim, std::vector<std::uint16_t>& out,
+             From&& from, std::size_t most = SIZE_MAX) const {
+    thread_local std::vector<std::uint32_t> seen;
+    thread_local std::uint32_t round = 0;
+    if (seen.size() < _owes.size()) seen.assign(_owes.size(), 0u);
+    if (++round == 0) {
+      std::ranges::fill(seen, 0u);
+      round = 1;
+    }
+    struct Frame {
+      std::uint32_t state, next = 0;
+    };
+    std::vector<Frame> todo;
+    for (auto x = sim.configs().rbegin(); x != sim.configs().rend(); ++x)
+      if (from(*x)) todo.push_back({x->state});
+    while (!todo.empty()) {
+      Frame& f = todo.back();
+      const auto& state = T.atn.state(f.state);
+      if (f.next == 0) {
+        if (seen[f.state] == round) {
+          todo.pop_back();
+          continue;
+        }
+        seen[f.state] = round;
+      }
+      if (f.next == state.nedges) {
+        todo.pop_back();
+        continue;
+      }
+      const auto& e = T.atn.edge(state.edge + f.next++);
+      if (way(e) != _owes[f.state]) continue;
       if (e.kind == LlEdgeKind::atom) {
         if (e.label != kEofSymbol && T.terms[e.label].laid != kLaidImplied &&
-            std::ranges::find(out, e.label) == out.end())
+            std::ranges::find(out, e.label) == out.end()) {
           out.push_back(e.label);
+          if (out.size() == most) return;
+        }
       } else if (e.kind == LlEdgeKind::rule) {
-        begin(T.atn.ruleStart[e.label], out, seen, round);
-        if (_owes[T.atn.ruleStart[e.label]] == 0)
-          begin(e.follow, out, seen, round);
+        if (_owes[T.atn.ruleStart[e.label]] == 0) todo.push_back({e.follow});
+        todo.push_back({T.atn.ruleStart[e.label]});
       } else {
-        begin(e.target, out, seen, round);
+        todo.push_back({e.target});
       }
     }
   }
 
+  // The end of the text is no token a repair writes: a way out at it owes
+  // nothing more than the rule's own end does.
   unsigned way(const LlAtnEdge& e) const {
     unsigned there = 0;
     if (e.kind == LlEdgeKind::atom)
-      there = 1u + _owes[e.target];
+      there = (e.label == kEofSymbol ? 0u : 1u) + _owes[e.target];
     else if (e.kind == LlEdgeKind::rule)
       there = _owes[T.atn.ruleStart[e.label]] + _owes[e.follow];
     else

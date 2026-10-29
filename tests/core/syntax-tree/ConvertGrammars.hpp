@@ -5,9 +5,11 @@
 // grammar of its own as well, which a guard lane lowers.
 
 #include <cstddef>
+#include <cstdint>
 #include <memory_resource>
 #include <string_view>
 
+#include "cursiv/core/grammar/Conversion.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
@@ -29,7 +31,7 @@ struct G : cursiv::GrammarSpec {
   struct Name : rule<!kw<"state"> + ref<IDT>> {};
   struct Root : rule<kw<"init"> + assign<&N::name>(ref<Name>) + kw<"end">> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace inv
 
@@ -88,6 +90,23 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace dv
 
+// Converters of a data rule's calls: the text a data rule joins is the one its
+// calls convert to.
+namespace calls {
+inline constexpr auto none_if_empty = [](std::string_view text) {
+  return text.empty() ? std::string_view("none") : text;
+};
+inline constexpr auto refuse_z = [](std::string_view text) {
+  using Result = cursiv::ConversionResult<std::string_view>;
+  return text.find('z') == std::string_view::npos ? Result::ok(text)
+                                                  : Result::err("no z");
+};
+inline constexpr auto length = [](std::string_view text) {
+  return static_cast<std::int32_t>(text.size());
+};
+inline constexpr auto fixed = [] { return std::string_view("fixed"); };
+}  // namespace calls
+
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct CM : terminal<through(lit<"/*">, lit<"*/">)> {};
@@ -95,8 +114,8 @@ struct G : cursiv::GrammarSpec {
   // Its converter is what the join must read; outside QN/Path, its presence
   // must not change the meaning or the direct source view of those
   // independent data rules.
-  struct QUOTED : terminal<lit<"'"> + some(cr<"a-z">) + lit<"'">,
-                           cursiv::text_conv<comp::unquote>> {};
+  struct QUOTED
+      : terminal<as<comp::unquote>(lit<"'"> + some(cr<"a-z">) + lit<"'">)> {};
   struct QN : rule<ref<ID> + some(lit<"."> + ref<ID>)> {};
   struct QN1 : rule<ref<QN>> {};
   struct Path : rule<ref<QN> + lit<"/"> + ref<QN>> {};
@@ -109,26 +128,44 @@ struct G : cursiv::GrammarSpec {
   struct CompName : rule<ref<ID> + lit<"."> + ref<QUOTED>> {};
   struct CompRoot : rule<cursiv::create<comp::N> +
                          assign<&comp::N::name>(ref<CompName>)> {};
-  struct COPIED : terminal<lit<"\""> + many(cr<"a-z">) + lit<"\"">,
-                           text_conv<materialized::copy_unquoted>> {};
-  struct WRITTEN : terminal<lit<"`"> + many(cr<"a-z">) + lit<"`">,
-                            text_conv<materialized::write_unquoted>> {};
+  struct COPIED : terminal<as<materialized::copy_unquoted>(
+                      lit<"\""> + many(cr<"a-z">) + lit<"\"">)> {};
+  struct WRITTEN : terminal<as<materialized::write_unquoted>(
+                       lit<"`"> + many(cr<"a-z">) + lit<"`">)> {};
   struct MaterializedRoot
       : rule<kw<"materialized"> +
              assign<&materialized::Doc::copied>(ref<COPIED>) +
              assign<&materialized::Doc::written>(ref<WRITTEN>)> {};
+  // Parts that are all present, each converting to empty text.
+  struct BlankName : rule<ref<COPIED> + ref<COPIED>> {};
+  struct BlankRoot
+      : rule<kw<"blank"> + assign<&comp::N::name>(ref<BlankName>)> {};
   inline static constexpr auto operator_text = [](std::string_view text) {
     return text;
   };
   template <auto Expression>
-  struct Operator : rule<Expression, text_conv<operator_text>> {};
+  struct Operator : rule<as<operator_text>(Expression)> {};
   struct KeywordRoot
       : rule<kw<"keyword"> + assign<&comp::N::name>(ref<Operator<kw<"is">>>)> {
   };
+  // A call that read nothing, in a grammar no converter takes parts in.
+  struct Maybe : rule<as<calls::none_if_empty>(option(lit<"!">))> {};
+  struct EmptyCallName : rule<ref<Maybe> + ref<ID>> {};
+  struct EmptyCallRoot
+      : rule<kw<"emptycall"> + assign<&comp::N::name>(ref<EmptyCallName>)> {};
+  // A converter that reads nothing, over a record whose own converter makes no
+  // text: its calls below are not its input.
+  struct VETTED : terminal<as<calls::refuse_z>(lit<"!"> + some(cr<"a-z">))> {};
+  struct Counted : rule<as<calls::length>(ref<VETTED> + lit<"."> + ref<ID>)> {};
+  struct Fixed : rule<as<calls::fixed>(ref<Counted>)> {};
+  struct FixedName : rule<ref<Fixed> + lit<"/"> + ref<ID>> {};
+  struct FixedRoot
+      : rule<kw<"fixed"> + assign<&comp::N::name>(ref<FixedName>)> {};
   struct Entry : rule<ref<DvRoot> | ref<CompRoot> | ref<inv::G::Root> |
-                      ref<MaterializedRoot> | ref<KeywordRoot>> {};
+                      ref<MaterializedRoot> | ref<KeywordRoot> |
+                      ref<EmptyCallRoot> | ref<FixedRoot> | ref<BlankRoot>> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = CM;
 };
 

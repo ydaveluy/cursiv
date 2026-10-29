@@ -24,8 +24,8 @@ struct LrProdBuild {
   bool endOnly = false;
   // The configuration the boundary after the last symbol is read under.
   std::uint8_t tailCfg = 0;
-  // Empty where a region closes: it stands on the boundary past the region,
-  // not on the caller's in front of it.
+  // Empty, or conditions alone, where a region closes: it stands on the
+  // boundary past the region, not on the caller's in front of it.
   bool closesRegion = false;
   // The empty production that stops a commit's loop on a token no cut names:
   // its cut plus one, zero for any other.

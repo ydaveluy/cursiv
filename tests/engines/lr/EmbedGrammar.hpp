@@ -64,7 +64,7 @@ struct Json : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\r\n)">)> {};
   struct COMMENT : terminal<lit<"//"> + many(cr<R"(^\n)">)> {};
   struct STRING : terminal<lit<"\""> + many(cr<R"(^"\n)">) + lit<"\"">> {};
-  struct NUMBER : terminal<some(d), std::int64_t> {};
+  struct NUMBER : terminal<as<std::int64_t>(some(d))> {};
   struct Value;
   struct Pair
       : rule<create<ast::Pair>(assign<&ast::Pair::key>(ref<STRING>) + lit<":"> +
@@ -87,7 +87,7 @@ struct Json : cursiv::GrammarSpec {
   };
   struct Text : rule<ref<Value> + eof> {};
   using entry = Text;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
   static constexpr auto word_boundary = cr<"a-zA-Z_">;
 };
@@ -98,7 +98,7 @@ struct Script : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NL : terminal<some(cr<R"(\r\n)">)> {};
   struct ID : terminal<cr<"a-z"> + many(cr<"a-z0-9">)> {};
-  struct INT : terminal<some(d), std::int64_t> {};
+  struct INT : terminal<as<std::int64_t>(some(d))> {};
   struct Line
       : rule<create<ast::Set>(assign<&ast::Set::name>(ref<ID>) + lit<"="> +
                               assign<&ast::Set::value>(ref<INT>) +
@@ -106,7 +106,7 @@ struct Script : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Lines>(
                     many(append<&ast::Lines::sets>(ref<Line>)) + eof)> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
 };
 
 // Names under a word boundary of its own, and the keywords it reserves: a
@@ -135,7 +135,7 @@ struct Names : cursiv::GrammarSpec {
                                                    ref<Note> | ref<Use>)) +
                     eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<REM>;
 };
 // A word class the host's `w` is wider than, and one it is narrower than.
@@ -161,7 +161,7 @@ struct Letters : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Lines>(
                     many(append<&ast::Lines::sets>(ref<Item>)) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto word_boundary = uc::L | uc::Nd | cr<"_">;
 };
 
@@ -190,8 +190,7 @@ struct Doc : cursiv::GrammarSpec {
   struct override;
   template <class T>
     requires std::same_as<T, Json::NUMBER>
-  struct override<T>
-      : terminal<lit<"0x"> + some(cr<"0-9a-f">), cursiv::text_conv<from_hex>> {
+  struct override<T> : terminal<as<from_hex>(lit<"0x"> + some(cr<"0-9a-f">))> {
   };
 
   struct Data : rule<create<ast::Block>(kw<"json"> +
@@ -242,7 +241,7 @@ struct DocLl : Doc {
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<CM>;
 };
 
@@ -256,7 +255,7 @@ struct DocLr : Doc {
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<CM>;
 };
 

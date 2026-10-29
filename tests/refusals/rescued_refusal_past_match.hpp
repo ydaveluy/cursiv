@@ -13,7 +13,7 @@ struct G : Base {
                       some(cr<"a-zA-Z0-9">)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<W>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

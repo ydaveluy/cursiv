@@ -52,25 +52,38 @@ inline bool ll_mode_ends(std::uint16_t mode) {
   return ll_end_stands<T>([&](auto t) { return T.mode_admits(mode, t); });
 }
 
-// Whether the readings take the pending dedent over the end of input.
+// Whether one of the readings stands before an edge that reads `term`.
 template <const auto& T, class Readings>
-inline bool ll_dedent_over_end(const Readings& readings) {
+inline bool ll_readings_read(const Readings& readings, SymbolId term) {
   for (const auto& config : readings) {
     const auto& state = T.atn.state(config.state);
     for (std::uint32_t k = 0; k < state.nedges; ++k) {
       const auto& edge = T.atn.edge(state.edge + k);
-      if (edge.kind == LlEdgeKind::atom && edge.label == kLaid<T, kLaidDedent>)
-        return true;
+      if (edge.kind == LlEdgeKind::atom && edge.label == term) return true;
     }
   }
   return false;
+}
+
+// Whether the readings take the pending dedent over the end of input.
+template <const auto& T, class Readings>
+inline bool ll_dedent_over_end(const Readings& readings) {
+  return ll_readings_read<T>(readings, kLaid<T, kLaidDedent>);
+}
+
+// Whether the readings take the end of input as the end: one reads it and none
+// reads a dedent, as `ll_mode_ends` asks of a mode.
+template <const auto& T, class Readings>
+inline bool ll_end_stands_over(const Readings& readings) {
+  return ll_end_stands<T>(
+      [&](SymbolId t) { return ll_readings_read<T>(readings, t); });
 }
 
 // A line's run is read at the head of the blank after the last token only:
 // a line a trivia ends on says nothing.
 template <const auto& T>
 inline bool ll_indent_read(const char* src, TextOffset len,
-                           std::vector<IndentLevel>& arena, IndentAt& at,
+                           const std::vector<IndentLevel>& arena, IndentAt& at,
                            TextOffset p, bool head, TextOffset held, Token& out,
                            bool admitsEof = false,
                            TextOffset* reached = nullptr) {

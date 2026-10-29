@@ -18,6 +18,8 @@
 #include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
+namespace metric = cursiv::recovery_metric;
+
 namespace {
 
 namespace g = tindent::generated::G;
@@ -59,7 +61,7 @@ std::string document(std::uint64_t seed, int depth) {
   return out;
 }
 
-const recovery_metric::Registered kLanguage{{
+const metric::Registered kLanguage{{
     .rank = 7,
     .name = "indent",
     .parser = &g::create_parser,
@@ -71,9 +73,9 @@ const recovery_metric::Registered kLanguage{{
                                           document(0x1d3e8, 4),
                                           document(0x1d3e9, 5)};
         },
-    .ceilings = &recovery_metric::ceilings<g::kTable, g::kDrive,
+    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
                                           g::kGrammarMetaData, g::kAstActions>,
-    .searching = &recovery_metric::searching<g::kTable, g::kDrive,
+    .searching = &metric::searching<g::kTable, g::kDrive,
                                                 g::kGrammarMetaData,
                                                 g::kAstActions>,
 }};

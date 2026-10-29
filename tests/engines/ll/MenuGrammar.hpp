@@ -35,7 +35,7 @@ struct Base : cursiv::GrammarSpec {
   struct UnitRule : rule<create<ast::Unit>(some(ref<CommandRule>))> {};
 
   using entry = UnitRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Lr : Base {};

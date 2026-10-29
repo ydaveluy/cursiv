@@ -58,7 +58,10 @@ template <class G, std::size_t I>
 using rule_bound_t = tl_at_t<I, typename GrammarBindings<G>::rules>;
 
 template <class G, std::size_t I>
-using rule_override_t = ov::slot_decl_t<
-    typename GrammarBindings<G>::stage::template rule<rule_bound_t<G, I>>>;
+using rule_staged_t =
+    typename GrammarBindings<G>::stage::template rule<rule_bound_t<G, I>>;
+
+template <class G, std::size_t I>
+using rule_override_t = ov::slot_decl_t<rule_staged_t<G, I>>;
 
 }  // namespace cursiv::detail

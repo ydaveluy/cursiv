@@ -26,7 +26,7 @@ struct G : cursiv::GrammarSpec {
                       (lit<"runs:"> +
                        tight(ref<tasciiruns::AsciiRunsGrammar::Entry> + eof))> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tcandrun

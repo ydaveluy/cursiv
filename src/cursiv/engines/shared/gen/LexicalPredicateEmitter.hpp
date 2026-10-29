@@ -246,11 +246,16 @@ class LexicalPredicateEmitter {
     return std::popcount(seen) == 1 ? std::countr_zero(seen) : -1;
   }
 
+  // The readings each byte can open. Where one reading opens on ASCII, the
+  // dispatch returns on every ASCII byte first: the table holds the high half
+  // alone, indexed with the high bit stripped.
   std::string first_table(std::uint16_t id) const {
     const LexNode& e = _g.lex[id];
+    const unsigned from = ascii_reading(id) >= 0 ? 0x80 : 0;
     std::string out = std::format(
-        "inline constexpr ::std::uint32_t lexical_first_{}[256] = {{", id);
-    for (unsigned b = 0; b < 256; ++b) {
+        "inline constexpr ::std::uint32_t lexical_first_{}[{}] = {{", id,
+        256 - from);
+    for (unsigned b = from; b < 256; ++b) {
       std::uint32_t mask = 0;
       for (unsigned i = 0; i < e.b; ++i)
         if (first_bytes(_g.lexKid[e.a + i])
@@ -268,7 +273,8 @@ class LexicalPredicateEmitter {
     const LexNode& e = _g.lex[id];
     std::string out = std::format(
         "{}const auto b = static_cast<unsigned char>(src[c.at]);\n", indent);
-    if (const int ascii = ascii_reading(id); ascii >= 0)
+    const int ascii = ascii_reading(id);
+    if (ascii >= 0)
       out += std::format(
           "{0}if (b < 0x80) {{\n"
           "{0}  auto p = c;\n"
@@ -277,11 +283,11 @@ class LexicalPredicateEmitter {
           "{0}}}\n",
           indent, _g.lexKid[e.a + static_cast<unsigned>(ascii)], take, miss);
     out += std::format(
-        "{0}for (auto m = lexical_first_{1}[b]; m != 0; m &= m - 1) {{\n"
+        "{0}for (auto m = lexical_first_{1}[b{2}]; m != 0; m &= m - 1) {{\n"
         "{0}  auto p = c;\n"
         "{0}  bool read = false;\n"
         "{0}  switch (::std::countr_zero(m)) {{\n",
-        indent, id);
+        indent, id, ascii >= 0 ? " & 0x7fu" : "");
     for (unsigned i = 0; i < e.b; ++i)
       out += std::format(
           "{0}    case {1}u: read = lexical_fixed_{2}(src, len, p.at, seen); "
@@ -332,8 +338,8 @@ class LexicalPredicateEmitter {
     if (opener.kind != LexKind::seq || opener.b < 2) return false;
     const auto& mark = _g.lex[_g.lexKid[opener.a + opener.b - 2]];
     if (mark.kind != LexKind::mark || mark.min != e.max) return false;
-    std::string fence, after;
-    if (!LexRelayGen::literal(_g, _g.lexKid[opener.a + opener.b - 1], fence) ||
+    std::string after;
+    if (!LexRelayGen::literal_size(_g, _g.lexKid[opener.a + opener.b - 1]) ||
         (_g.lexKid[e.b + 1] != kNoLexNode &&
          !LexRelayGen::literal(_g, _g.lexKid[e.b + 1], after)))
       return false;
@@ -527,24 +533,24 @@ class LexicalPredicateEmitter {
           out += request(e.a, "f.cur") +
                  "      }\n      m.finish(::std::move(f.out)); return;\n";
           break;
-        case LexKind::call:
+        case LexKind::call: {
+          const std::uint16_t callee = lex_callee(_g, e);
           out += std::format(
               "      if (f.stage) {{\n"
-              "        m.remember({0}u, "
-              "::cursiv::LexicalCursor{{f.in[f.at].at}}, "
-              "m.returned());\n"
+              "        m.remember({0}u, f.in[f.at].at, m.returned());\n"
               "        f.out.unite(m.resume(f.in[f.at], m.returned()));\n"
               "        ++f.at; f.stage = 0;\n      }}\n"
               "      while (f.at < f.in.size()) {{\n"
               "        const auto c = f.in[f.at];\n"
               "        const auto local = ::cursiv::LexicalCursor{{c.at}};\n"
-              "        if (const auto* cached = m.cached({0}u, local)) {{\n"
+              "        if (const auto* cached = m.cached({0}u, c.at)) {{\n"
               "          f.out.unite(m.resume(c, *cached)); ++f.at; continue;\n"
               "        }}\n        f.stage = 1;\n        ",
-              e.a);
-          out += request(e.a, "::cursiv::LexicalState{local}") +
+              callee);
+          out += request(callee, "::cursiv::LexicalState{local}") +
                  "      }\n      m.finish(::std::move(f.out)); return;\n";
           break;
+        }
         case LexKind::mark:
         case LexKind::positive:
         case LexKind::negative:

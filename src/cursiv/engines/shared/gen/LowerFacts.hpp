@@ -18,8 +18,9 @@ template <class G, class Rewrite>
 struct LowerFacts {
   using resolved = ResolveOverride<G>;
   using materialized = MaterializeCreate<resolved>;
-  // The rules `entry`, `ignore` and `hidden` reach, in the symbol order.
-  using declared = reached_t<resolved>;
+  // The rules `entry`, `ignored` and `hidden` reach, in the symbol order,
+  // named by the grammar alone.
+  using declared = reached_of<resolved>;
   using predicate_terms = predicate_only_t<resolved>;
   using staged = typename Rewrite::template stages<materialized, declared>;
   using stage = typename staged::stage;

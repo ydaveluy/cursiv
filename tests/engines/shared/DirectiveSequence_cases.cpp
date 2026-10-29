@@ -1,5 +1,6 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
 #include "asttreell/generated/Ll/Module.hpp"
@@ -172,12 +173,18 @@ struct Parsed {
   std::string text;
 };
 
-Parsed read(const cursiv::Parser& parser, std::string_view source) {
+// `misspelt`: the source holds one misspelling, which the parse replaces.
+Parsed read(const cursiv::Parser& parser, std::string_view source,
+            bool misspelt) {
   const std::string input = "dir:data:" + std::string(source);
   const cursiv::ParseResult r = parser.parse(input);
   const auto* name = r.value_as<Name>();
+  const bool expected =
+      misspelt ? r.diagnostics.size() == 1 &&
+                     r.diagnostics[0].kind == cursiv::DiagnosticKind::replaced
+               : r.diagnostics.empty();
   Parsed out;
-  out.clean = r.accepted && r.diagnostics.empty() && name != nullptr;
+  out.clean = r.accepted && expected && name != nullptr;
   if (out.clean) {
     out.parts = std::string(name->parts);
     out.text = std::string(name->text);
@@ -186,8 +193,9 @@ Parsed read(const cursiv::Parser& parser, std::string_view source) {
 }
 
 void check(const cursiv::Parser& parser, std::string_view source,
-           std::string_view parts, std::string_view text = {}) {
-  const Parsed got = read(parser, source);
+           std::string_view parts, std::string_view text = {},
+           bool misspelt = false) {
+  const Parsed got = read(parser, source, misspelt);
   if (!got.clean || got.parts != parts || got.text != text)
     std::printf("  %.*s\n    got      %s | %s\n    expected %.*s | %.*s\n",
                 static_cast<int>(source.size()), source.data(),
@@ -228,6 +236,17 @@ void a_token_whose_converter_is_no_text_gives_its_spelling(
   check(parser, "n 7 , 300", "7|,|300");
 }
 
+void a_call_of_one_token_gives_that_token(const cursiv::Parser& parser) {
+  check(parser, "p literal;", "literal");
+  check(parser, "l a literal b", "a|LITERAL|b");
+}
+
+void a_misspelt_token_keeps_its_text_in_a_call(const cursiv::Parser& parser) {
+  check(parser, "p litera;", "litera", {}, true);
+  check(parser, "l a litera b", "a|LITERA|b", {}, true);
+  check(parser, "k litera;", "", "LITERA", true);
+}
+
 void every_engine(const cursiv::Parser& parser) {
   a_token_is_a_part(parser);
   a_data_rule_call_is_one_part(parser);
@@ -235,6 +254,8 @@ void every_engine(const cursiv::Parser& parser) {
   a_unit_rule_converts_the_text_of_its_call(parser);
   a_call_that_read_nothing_is_an_empty_part(parser);
   a_token_whose_converter_is_no_text_gives_its_spelling(parser);
+  a_call_of_one_token_gives_that_token(parser);
+  a_misspelt_token_keeps_its_text_in_a_call(parser);
 }
 
 }  // namespace
@@ -279,13 +300,27 @@ std::string show_decl(const ast::Decl& d) {
          " committed=" + yes(d.isStatic);
 }
 
-std::string show_dims(const ast::Decl& d) {
-  std::string out = std::string(d.name) + " isArray=" + yes(d.isArray) + " [";
+std::string show_list(const ast::Decl& d) {
+  std::string out;
   for (const auto* dim : d.dims) {
     out += ' ';
     out += dim->name;
   }
-  return out + " ]";
+  return " [" + out + " ]";
+}
+
+std::string show_counted(const ast::Decl& d) {
+  return std::string(d.name) + " plus=" + yes(d.isStatic) +
+         " minus=" + yes(d.isConst) + " list=" + yes(d.isArray) + show_list(d);
+}
+
+std::string show_turned(const ast::Decl& d) {
+  return std::string(d.name) + " bang=" + yes(d.hasInit) +
+         " turn=" + yes(d.raw) + show_list(d);
+}
+
+std::string show_dims(const ast::Decl& d) {
+  return std::string(d.name) + " isArray=" + yes(d.isArray) + show_list(d);
 }
 
 std::string show_raw(const ast::Decl& d) {
@@ -362,6 +397,22 @@ void a_flag_over_a_write_sets_its_member_and_writes_the_node(const Parsers& p) {
   check<ast::Decl>(*p.parser, "init:x =", show_decl, "<refused>");
 }
 
+void a_flag_over_a_repetition_that_reads_nothing_still_sets(const Parsers& p) {
+  check<ast::Decl>(*p.parser, "counted:x", show_counted,
+                   "x plus=yes minus=yes list=yes [ ]");
+  check<ast::Decl>(*p.parser, "counted:x ++ --- a b", show_counted,
+                   "x plus=yes minus=yes list=yes [ a b ]");
+  check<ast::Decl>(*p.parser, "counted:x ----", show_counted, "<refused>");
+  check<ast::Decl>(*p.parser, "turned:x", show_turned,
+                   "x bang=no turn=no [ ]");
+  check<ast::Decl>(*p.parser, "turned:x !", show_turned,
+                   "x bang=yes turn=no [ ]");
+  check<ast::Decl>(*p.parser, "turned:x a", show_turned,
+                   "x bang=no turn=yes [ a ]");
+  check<ast::Decl>(*p.parser, "turned:x **! ~a b", show_turned,
+                   "x bang=yes turn=yes [ a b ]");
+}
+
 void a_flag_over_a_list_collects_into_the_node(const Parsers& p) {
   check<ast::Decl>(*p.parser, "dims:x(a, b)", show_dims, "x isArray=yes [ a b ]");
   check<ast::Decl>(*p.parser, "dims:x(a)", show_dims, "x isArray=yes [ a ]");
@@ -433,6 +484,7 @@ void a_create_inside_a_flag_heads_the_node_the_flag_marks(const Parsers& p) {
 
 void every_engine(const Parsers& p) {
   a_flag_over_a_write_sets_its_member_and_writes_the_node(p);
+  a_flag_over_a_repetition_that_reads_nothing_still_sets(p);
   a_flag_over_a_list_collects_into_the_node(p);
   a_flag_over_a_value_write_takes_the_value(p);
   a_flag_over_a_nest_sets_its_member_on_the_wrapper(p);

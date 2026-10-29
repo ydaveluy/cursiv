@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/shared/gen/LexCodePoints.hpp"
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
@@ -42,21 +41,29 @@ struct LexKeywordCut {
   }
 
   // The branches of a token graph that consume one keyword, conditions
-  // aside: whether there are any, whether the graph has no other, the sets
-  // their bytes read in, and the longest.
-  struct Branches {
+  // aside: whether there are any, and whether the graph has no other.
+  struct Shape {
     bool any = false;
     bool all = true;
+  };
+
+  template <class Cfg>
+  static Shape shape(const Cfg& g, std::uint16_t node) {
+    Shape out;
+    out.all = collect(g, node, out, nullptr);
+    return out;
+  }
+
+  // The same, with the sets their bytes read in, and the longest.
+  struct Branches : Shape {
     std::vector<std::uint16_t> sets;
     std::size_t longest = 0;
   };
 
   template <class Cfg>
   static Branches branches(const Cfg& g, std::uint16_t node) {
-    const ByteSet leads =
-        lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
     Branches out;
-    out.all = collect(g, node, leads, out);
+    out.all = collect(g, node, out, &out);
     std::ranges::sort(out.sets);
     out.sets.erase(std::ranges::unique(out.sets).begin(), out.sets.end());
     return out;
@@ -67,8 +74,6 @@ struct LexKeywordCut {
                           const std::vector<int>& startOf) {
     LexKeywordCut cut;
     const std::size_t n = nfa.s.size();
-    const ByteSet leads =
-        lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
     cut.reads.assign(n, {});
     std::vector<std::uint32_t> into;
     for (std::size_t t = 1; t < startOf.size(); ++t) {
@@ -77,7 +82,7 @@ struct LexKeywordCut {
       if (!own.any) continue;
       if (into.empty()) into = entering(nfa);
       std::vector<Spelling> found;
-      cut.spell(g, nfa, static_cast<int>(t), startOf[t], Spelling{}, leads, own,
+      cut.spell(g, nfa, static_cast<int>(t), startOf[t], Spelling{}, own,
                 found);
       cut.settle(found, into);
     }
@@ -176,13 +181,12 @@ struct LexKeywordCut {
   // is not behind it, and ends the spelling.
   template <class Cfg>
   void spell(const Cfg& g, const LexNfaPool& nfa, int t, int x, Spelling walk,
-             const ByteSet& leads, const Branches& own,
-             std::vector<Spelling>& found) {
+             const Branches& own, std::vector<Spelling>& found) {
     for (; x >= 0 && walk.steps <= nfa.s.size(); ++walk.steps) {
       const LexNfaState& st = nfa.s[static_cast<std::size_t>(x)];
       if (st.accept >= 0) {
         if (st.accept == t && !walk.read.empty() && walk.asserted > walk.tail &&
-            bounded(g, st, walk, leads))
+            bounded(g, st, walk))
           found.push_back(std::move(walk));
         return;
       }
@@ -209,7 +213,7 @@ struct LexKeywordCut {
         if (st.t2 >= 0) {
           Spelling other = walk;
           other.edges.emplace_back(x, st.t2);
-          spell(g, nfa, t, st.t2, std::move(other), leads, own, found);
+          spell(g, nfa, t, st.t2, std::move(other), own, found);
         }
         next = st.t1;
       }
@@ -221,14 +225,13 @@ struct LexKeywordCut {
   // Whether `walk` ends on the word class: the bound of `accept`, or a
   // refusal behind the spelling.
   template <class Cfg>
-  static bool bounded(const Cfg& g, const LexNfaState& accept, Spelling& walk,
-                      const ByteSet& leads) {
+  static bool bounded(const Cfg& g, const LexNfaState& accept, Spelling& walk) {
     if (accept.bound >= 0 &&
-        lex_word_set(g, static_cast<std::uint16_t>(accept.bound), leads))
+        lex_word_set(g, static_cast<std::uint16_t>(accept.bound)))
       walk.word.bound = static_cast<std::uint16_t>(accept.bound);
     return walk.word.bound != kNoSet ||
            std::ranges::any_of(walk.word.after, [&](std::uint16_t node) {
-             return word_refusal(g, node, leads);
+             return word_refusal(g, node);
            });
   }
 
@@ -256,11 +259,10 @@ struct LexKeywordCut {
   }
 
   template <class Cfg>
-  static bool word_refusal(const Cfg& g, std::uint16_t node,
-                           const ByteSet& leads) {
+  static bool word_refusal(const Cfg& g, std::uint16_t node) {
     const LexNode& e = g.lex[node];
     return e.kind == LexKind::nguard && e.a == kNoSet && e.min == 1 &&
-           lex_word_set(g, g.lexKid[e.b], leads);
+           lex_word_set(g, g.lexKid[e.b]);
   }
 
   template <class Cfg>
@@ -274,29 +276,32 @@ struct LexKeywordCut {
     }
   }
 
-  // Whether `node` consumes keywords alone; `out` hears those branches.
+  // Whether `node` consumes keywords alone; `out` hears those branches, and
+  // `spelled`, when given, the sets they read in.
   template <class Cfg>
-  static bool collect(const Cfg& g, std::uint16_t node, const ByteSet& leads,
-                      Branches& out) {
+  static bool collect(const Cfg& g, std::uint16_t node, Shape& out,
+                      Branches* spelled) {
     std::vector<std::uint16_t> read;
     leaves(g, node, read);
     std::size_t core = read.size();
     bool word = false;
     while (core != 0 && g.lex[read[core - 1]].kind == LexKind::nguard)
-      if (word_refusal(g, read[--core], leads)) word = true;
+      if (word_refusal(g, read[--core])) word = true;
     if (core == 1 && g.lex[read[0]].kind == LexKind::alt) {
       const LexNode& e = g.lex[read[0]];
       bool all = e.b != 0;
       for (unsigned i = 0; i < e.b; ++i)
-        all = collect(g, g.lexKid[e.a + i], leads, out) && all;
+        all = collect(g, g.lexKid[e.a + i], out, spelled) && all;
       return all;
     }
     if (core == 0 || !word) return false;
     for (std::size_t i = 0; i < core; ++i)
       if (g.lex[read[i]].kind != LexKind::chars) return false;
-    for (std::size_t i = 0; i < core; ++i) out.sets.push_back(g.lex[read[i]].a);
     out.any = true;
-    out.longest = std::max(out.longest, core);
+    if (spelled == nullptr) return true;
+    for (std::size_t i = 0; i < core; ++i)
+      spelled->sets.push_back(g.lex[read[i]].a);
+    spelled->longest = std::max(spelled->longest, core);
     return true;
   }
 };

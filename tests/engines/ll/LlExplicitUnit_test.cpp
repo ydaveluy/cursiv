@@ -4,7 +4,7 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/ExplicitUnitGrammar.hpp"
+#include "engines/ll/ExplicitUnitAst.hpp"
 #include "unitsll/generated/Ll/Module.hpp"
 
 int main() {

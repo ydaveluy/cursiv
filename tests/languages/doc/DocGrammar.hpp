@@ -57,7 +57,7 @@ struct DocG : cursiv::GrammarSpec {
                           lit<"]">> {};
   struct DocRule : rule<assign<&ast::Doc::value>(value)> {};
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace fdoc

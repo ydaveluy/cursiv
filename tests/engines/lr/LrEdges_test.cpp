@@ -17,6 +17,7 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
+#include "cursiv/engines/ll/runtime/ll_lex_reading.hpp"
 #include "cursiv/engines/ll/runtime/ll_section.hpp"
 #include "cursiv/engines/lr/runtime/LrContext.hpp"
 #include "cursiv/engines/lr/runtime/LrParseStats.hpp"
@@ -73,7 +74,7 @@ int run() {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
-      nest, cst, &stats, tedges::generated::G::kDrivePtr));
+      nest, cst, &stats, &tedges::generated::G::kDrive));
   CHECK(cst.diagnostics().empty());
   CHECK(stats.splits == 0);
   for (const auto text : {"k j = r t l = r t j = r l = r", "k j = r l = r"})
@@ -132,10 +133,11 @@ void a_region_past_the_head_keeps_the_callers_boundary() {
   std::vector<cursiv::NextFeature> out;
   p->nextFeaturesAt(r.cst(), at, at, out);
   bool closes = false, opens = false;
-  for (const auto& f : out) {
-    closes = closes || p->getGrammar().terminalText(f.feature) == "]";
-    opens = opens || p->getGrammar().terminalText(f.feature) == "e";
-  }
+  for (const auto& f : out)
+    for (const auto s : p->getGrammar().terminalSpellings(f.feature)) {
+      closes = closes || s == "]";
+      opens = opens || s == "e";
+    }
   CHECK(!closes && opens);
 }
 
@@ -306,10 +308,9 @@ std::string offered(const cursiv::Parser& p, std::string_view text) {
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at, out);
   std::string seen;
-  for (const auto& f : out) {
-    const std::string_view t = p.getGrammar().terminalText(f.feature);
-    if (!t.empty() && seen.find(t) == std::string::npos) seen += t;
-  }
+  for (const auto& f : out)
+    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
+      if (seen.find(t) == std::string::npos) seen += t;
   return seen;
 }
 
@@ -465,7 +466,7 @@ std::string join(const std::vector<std::string>& words) {
 std::string shape(const cursiv::ParseResult& r) {
   std::vector<std::string> words, extra;
   std::size_t marks = 0;
-  if (const auto* doc = r.value_as<twide::ast::Doc>()) {
+  if (const auto* doc = r.value_as<twideoptional::ast::Doc>()) {
     for (const std::string_view w : doc->words) words.emplace_back(w);
     for (const std::string_view w : doc->extra) extra.emplace_back(w);
     marks = doc->marks.size();
@@ -662,10 +663,9 @@ std::set<std::string> offered(const cursiv::Parser& p,
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at, out);
   std::set<std::string> seen;
-  for (const auto& f : out) {
-    const std::string_view t = p.getGrammar().terminalText(f.feature);
-    if (!t.empty()) seen.emplace(t);
-  }
+  for (const auto& f : out)
+    for (const std::string_view t : p.getGrammar().terminalSpellings(f.feature))
+      seen.emplace(t);
   return seen;
 }
 
@@ -743,7 +743,7 @@ void a_required_token_after_an_assertion(const Engine& e) {
 }  // namespace
 
 int run() {
-  const auto lr = twide::generated::Lr::create_parser();
+  const auto lr = twideoptional::generated::Lr::create_parser();
   const Engine e{*lr};
   tight_regions(e);
   a_region_opening_on_optional_parts(e);
@@ -835,11 +835,30 @@ void the_section_end_is_looked_for_in_linear_work() {
     {
       LlRoom room(text);
       g_steps = 0;
-      const auto end = cursiv::ll_text_end<kLl>(room.context, 1,
-                                                room.context.len);
+      cursiv::TextOffset reached = 1;
+      const auto end =
+          cursiv::ll_text_end<kLl>(room.context, 1, room.context.len, reached);
       CHECK(end == n + 1);
       CHECK(g_steps < 40ull * n);
+      CHECK(reached > n && reached < 40ull * n);
     }
+  }
+}
+
+// A byte no terminal reads, dropped inside the section, asks where a token
+// left open there would end: the closer is looked for no further than that
+// reading read, so dropping each byte of a run costs the run, not its square.
+void the_section_end_is_looked_for_once_per_drop() {
+  for (const unsigned n : {1024u, 4096u}) {
+    std::string text = "<";
+    for (unsigned i = 0; i < n; ++i) text += "@ab";
+    text += ">";
+    LlRoom room(text);
+    g_steps = 0;
+    for (cursiv::TextOffset p = 1; p < text.size() - 1; p += 3)
+      CHECK(cursiv::ll_drop_end<kLl>(room.context,
+                                     {p, p, cursiv::kInvalidSymbol}) == p + 1);
+    CHECK(g_steps < 40ull * text.size());
   }
 }
 
@@ -847,7 +866,7 @@ void a_whole_parse_of_the_run_is_linear(const cursiv::RepairBudget& budget) {
   std::uint64_t steps[std::size(kRuns)] = {};
   for (std::size_t k = 0; k < std::size(kRuns); ++k) {
     const std::string text = open_run(kRuns[k]);
-    cursiv::LrDrive drive = *tsection::generated::Lr::kDrivePtr;
+    cursiv::LrDrive drive = tsection::generated::Lr::kDrive;
     drive.walk = [](const char* src, cursiv::TextOffset len,
                     std::uint16_t mode, cursiv::TextOffset at) {
       return cursiv::lr_match_text<kLr>(src, len, mode, at);
@@ -885,7 +904,9 @@ void the_engines_tell_a_cancelled_scan() {
     room.context.stop = cursiv::CancellationPoll(token);
     bool told = false;
     try {
-      (void)cursiv::ll_text_end<kLl>(room.context, 1, room.context.len);
+      cursiv::TextOffset reached = 1;
+      (void)cursiv::ll_text_end<kLl>(room.context, 1, room.context.len,
+                                     reached);
     } catch (const cursiv::OperationCancelled&) {
       told = true;
     }
@@ -909,6 +930,7 @@ void both_engines_read_the_run_as_one_fault() {
 
 int run() {
   the_section_end_is_looked_for_in_linear_work();
+  the_section_end_is_looked_for_once_per_drop();
   a_whole_parse_of_the_run_is_linear({});
   a_whole_parse_of_the_run_is_linear({64, 0, 64, 64});
   the_engines_tell_a_cancelled_scan();

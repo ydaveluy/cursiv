@@ -27,6 +27,9 @@ struct LrShadow {
   bool dead = false;
   // Shifted a token of the text since its round began.
   bool shifted = false;
+  // The token in hand's weight once a tie of extents read it.
+  static constexpr std::uint8_t kUnweighed = 0xFF;
+  std::uint8_t laWeight = kUnweighed;
   LrVirtualAt virt;
   IndentAt indent;
   // Where the token in hand was charged to the look depth.

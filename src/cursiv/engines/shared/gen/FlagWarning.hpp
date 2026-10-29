@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/core/grammar/GrammarImage.hpp"
-
 namespace cursiv {
+
+class WarningFound;
 
 struct FlagWarning {
   std::string rule;
@@ -18,7 +18,7 @@ struct FlagWarning {
 };
 
 // Each flag once per rule, in the order the rules were reached.
-std::vector<FlagWarning> flag_warnings(GrammarImage& image);
+std::vector<FlagWarning> flag_warnings(WarningFound& found);
 
 std::string flag_warning_text(const FlagWarning& w);
 

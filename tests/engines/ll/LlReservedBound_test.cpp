@@ -30,7 +30,7 @@
 #include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/ReservedBoundGrammar.hpp"
+#include "engines/ll/ReservedBoundAst.hpp"
 
 namespace {
 

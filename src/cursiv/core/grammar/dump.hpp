@@ -10,7 +10,8 @@
 
 // Renders a grammar as reviewable text. `dump_declared<G>()` prints the
 // grammar as written, `dump_compiled<G>()` its resolved form, so a rewrite is
-// reviewable side by side rather than merely asserted.
+// reviewable side by side rather than merely asserted. Each call reads an
+// image of its own, so dumps may run on several threads at once.
 
 namespace cursiv {
 
@@ -23,7 +24,8 @@ std::string dump_expr() {
 
 template <class G>
 std::string dump_declared() {
-  return GrammarPrinter(grammar_image<G>(), ImageView::written).render().text;
+  GrammarImage image = grammar_image<G>();
+  return GrammarPrinter(image, ImageView::written).render().text;
 }
 
 // One rule, as `Name: body;`.
@@ -45,12 +47,14 @@ std::string dump_closure() {
 
 template <class C>
 std::string dump_compiled() {
-  return GrammarPrinter(grammar_image<C>(), ImageView::resolved).render().text;
+  GrammarImage image = grammar_image<C>();
+  return GrammarPrinter(image, ImageView::resolved).render().text;
 }
 
 template <class C>
 GrammarDump dump_compiled_indexed() {
-  return GrammarPrinter(grammar_image<C>(), ImageView::resolved).render();
+  GrammarImage image = grammar_image<C>();
+  return GrammarPrinter(image, ImageView::resolved).render();
 }
 
 }  // namespace cursiv

@@ -190,8 +190,11 @@ std::vector<std::string> DefaultDocumentBuilder::findChangedUris(
   const WorkspaceManager& workspace = *_shared.workspaceManager;
   try {
     const FileSystemNode entry = files.stat(changed);
+    // The scan's own filter, the folders above the entry included: an event
+    // inside a folder the scan leaves out brings nothing in.
+    if (!workspace.isIncluded(entry)) return {};
     if (entry.isDirectory) return workspace.searchFolder(changed);
-    if (workspace.shouldIncludeEntry(entry)) return {std::string(changed)};
+    return {std::string(changed)};
   } catch (const FileSystemError&) {
     // Nothing readable there: a deletion reported as a change, a race with the
     // editor. It touched nothing this workspace can name.
@@ -270,16 +273,14 @@ void DefaultDocumentBuilder::prepareBuild(std::span<Document* const> documents,
 void DefaultDocumentBuilder::build(std::span<Document* const> documents,
                                    const BuildOptions& options,
                                    const CancellationToken& token) const {
-  prepareBuild(documents, options);
-  {
-    const std::scoped_lock lock(_stateMutex);
-    _currentState = DocumentState::Changed;
-  }
-  std::vector<std::string_view> uris;
-  uris.reserve(documents.size());
-  for (const Document* const d : documents) uris.push_back(d->uri);
-  emitUpdate(uris, {});
-  buildDocuments(documents, token);
+  runAttempt([&] {
+    prepareBuild(documents, options);
+    std::vector<std::string_view> uris;
+    uris.reserve(documents.size());
+    for (const Document* const d : documents) uris.push_back(d->uri);
+    emitUpdate(uris, {});
+    buildDocuments(documents, token);
+  });
 }
 
 void DefaultDocumentBuilder::buildDocuments(
@@ -287,160 +288,154 @@ void DefaultDocumentBuilder::buildDocuments(
     const CancellationToken& token) const {
   IndexManager& index = *_shared.indexManager;
   DocumentFactory& factory = *_shared.documentFactory;
-  const std::uint64_t attempt = beginAttempt();
 
-  try {
-    const auto held = _shared.documents->all();
-    std::vector<Document*> work(documents.begin(), documents.end());
-    std::unordered_set<Document*> scheduled(work.begin(), work.end());
-    const auto rebuild = [&](Document* d) {
-      if (d->state.load() >= DocumentState::IndexedContent) {
-        std::optional<BuildOptions> requested;
-        {
-          const std::scoped_lock lock(_stateMutex);
-          if (const auto at = _buildOptions.find(d->id);
-              at != _buildOptions.end() && !at->second.completed)
-            requested = at->second.options;
-        }
-        resetToState(*d, DocumentState::IndexedContent);
-        if (requested) prepareBuild({&d, 1}, *requested);
+  const auto held = _shared.documents->all();
+  std::vector<Document*> work(documents.begin(), documents.end());
+  std::unordered_set<Document*> scheduled(work.begin(), work.end());
+  const auto rebuild = [&](Document* d) {
+    if (d->state.load() >= DocumentState::IndexedContent) {
+      std::optional<BuildOptions> requested;
+      {
+        const std::scoped_lock lock(_stateMutex);
+        if (const auto at = _buildOptions.find(d->id);
+            at != _buildOptions.end() && !at->second.completed)
+          requested = at->second.options;
       }
-      if (scheduled.insert(d).second) work.push_back(d);
-    };
-    const std::unordered_set<DocumentId> none;
-    for (const auto& heldDocument : held) {
-      auto* const d = heldDocument.get();
-      if (d->state.load() >= DocumentState::IndexedContent &&
-          index.isAffected(*d, none))
-        rebuild(d);
+      resetToState(*d, DocumentState::IndexedContent);
+      if (requested) prepareBuild({&d, 1}, *requested);
     }
-    std::unordered_set<DocumentId> changed;
-    for (Document* d : work)
-      if (d->state.load() < DocumentState::IndexedContent) changed.insert(d->id);
-    const bool prepareContent = !changed.empty() && std::ranges::any_of(
-        held, [&](const auto& d) {
-          return !changed.contains(d->id) &&
-                 d->state.load() >= DocumentState::ComputedScopes;
-        });
+    if (scheduled.insert(d).second) work.push_back(d);
+  };
+  const std::unordered_set<DocumentId> none;
+  for (const auto& heldDocument : held) {
+    auto* const d = heldDocument.get();
+    if (d->state.load() >= DocumentState::IndexedContent &&
+        index.isAffected(*d, none))
+      rebuild(d);
+  }
+  std::unordered_set<DocumentId> changed;
+  for (Document* d : work)
+    if (d->state.load() < DocumentState::IndexedContent) changed.insert(d->id);
+  const bool prepareContent = !changed.empty() && std::ranges::any_of(
+      held, [&](const auto& d) {
+        return !changed.contains(d->id) &&
+               d->state.load() >= DocumentState::ComputedScopes;
+      });
 
-    for (Document* d : work) {
-      // A document `Validated` by a narrower request re-enters the validating
-      // phase alone: the tree, the scopes and both index halves stand.
-      if (d->state.load() == DocumentState::Validated && resultsAreIncomplete(*d))
-        d->state = DocumentState::IndexedReferences;
-      // Below `IndexedReferences` a memoised resolution has no index row to
-      // protect it from the next reset: dropped here, while the write still
-      // excludes every reader.
-      if (d->state.load() < DocumentState::IndexedReferences)
-        if (const CoreServices* language = languageOf(*d); language != nullptr) {
-          language->linker->unlink(*d);
-          if (d->state.load() == DocumentState::Linked)
-            d->state = DocumentState::ComputedScopes;
-          // A resumed document may retain its scopes and skip that phase.
-          if (d->state.load() >= DocumentState::ComputedScopes)
-            bindReferences(*d, *language);
-        }
-    }
-
-    if (!prepareContent) _shared.workspaceLock->settle();
-
-    const auto publishContent = [&] {
-      for (const auto& heldDocument : held) {
-        auto* const d = heldDocument.get();
-        if (changed.contains(d->id)) continue;
-        if (d->state.load() <= DocumentState::IndexedContent &&
-            scheduled.contains(d))
-          continue;
-        if (index.isAffected(*d, changed)) rebuild(d);
-      }
-      _shared.workspaceLock->settle();
-    };
-
-    runPhase(
-        work,
-        {{DocumentState::Parsed,
-          [&](Document& d, const CoreServices&,
-              const CancellationToken& phase) { factory.update(d, phase); }},
-         {DocumentState::IndexedContent,
-          [&](Document& d, const CoreServices&,
-              const CancellationToken& phase) {
-            index.updateContent(d, phase);
-          }}},
-        token, prepareContent
-                   ? std::optional<cursiv::function_ref<void()>>{publishContent}
-                   : std::nullopt);
-
-    try {
-      // A barrier, not a stage of the linking phase: a derived scope provider
-      // may hunt cross-document, and a hunt reading a document another worker
-      // was still scoping would memoise a false "not found", differently on
-      // each run. Every local scope is written before the first link reads one.
-      runPhase(work,
-               {{DocumentState::ComputedScopes,
-                 [](Document& d, const CoreServices& language,
-                    const CancellationToken& phase) {
-                   computeLocalScopes(d, language, phase);
-                 }}},
-               token);
-
-      runPhase(work,
-               {{DocumentState::Linked,
-                 [](Document& d, const CoreServices& language,
-                    const CancellationToken& phase) {
-                   language.linker->link(d, phase);
-                 }},
-                {DocumentState::IndexedReferences,
-                 [&](Document& d, const CoreServices&,
-                     const CancellationToken& phase) {
-                   index.updateReferences(d, phase);
-                 }}},
-               token);
-    } catch (...) {
-      // Linked but not indexed is a rung the document cannot keep: back to
-      // `ComputedScopes`, so the next build relinks it. Its memo is dropped
-      // there, before that build settles -- nothing is touched past this one's.
-      for (Document* d : work)
+  for (Document* d : work) {
+    // A document `Validated` by a narrower request re-enters the validating
+    // phase alone: the tree, the scopes and both index halves stand.
+    if (d->state.load() == DocumentState::Validated && resultsAreIncomplete(*d))
+      d->state = DocumentState::IndexedReferences;
+    // Below `IndexedReferences` a memoised resolution has no index row to
+    // protect it from the next reset: dropped here, while the write still
+    // excludes every reader.
+    if (d->state.load() < DocumentState::IndexedReferences)
+      if (const CoreServices* language = languageOf(*d); language != nullptr) {
+        language->linker->unlink(*d);
         if (d->state.load() == DocumentState::Linked)
           d->state = DocumentState::ComputedScopes;
-      throw;
-    }
+        // A resumed document may retain its scopes and skip that phase.
+        if (d->state.load() >= DocumentState::ComputedScopes)
+          bindReferences(*d, *language);
+      }
+  }
 
+  if (!prepareContent) _shared.workspaceLock->settle();
+
+  const auto publishContent = [&] {
+    for (const auto& heldDocument : held) {
+      auto* const d = heldDocument.get();
+      if (changed.contains(d->id)) continue;
+      if (d->state.load() <= DocumentState::IndexedContent &&
+          scheduled.contains(d))
+        continue;
+      if (index.isAffected(*d, changed)) rebuild(d);
+    }
+    _shared.workspaceLock->settle();
+  };
+
+  runPhase(
+      work,
+      {{DocumentState::Parsed,
+        [&](Document& d, const CoreServices&,
+            const CancellationToken& phase) { factory.update(d, phase); }},
+       {DocumentState::IndexedContent,
+        [&](Document& d, const CoreServices&,
+            const CancellationToken& phase) {
+          index.updateContent(d, phase);
+        }}},
+      token, prepareContent
+                 ? std::optional<cursiv::function_ref<void()>>{publishContent}
+                 : std::nullopt);
+
+  try {
+    // A barrier, not a stage of the linking phase: a derived scope provider
+    // may hunt cross-document, and a hunt reading a document another worker
+    // was still scoping would memoise a false "not found", differently on
+    // each run. Every local scope is written before the first link reads one.
     runPhase(work,
-             {{DocumentState::Validated,
-               [this](Document& d, const CoreServices& language,
-                      const CancellationToken& phase) {
-                 // Per document, not per build: each keeps what it was asked.
-                 const BuildOptions owed = getBuildOptions(d);
-                 validate(d, language, owed.validationCategories, phase);
+             {{DocumentState::ComputedScopes,
+               [](Document& d, const CoreServices& language,
+                  const CancellationToken& phase) {
+                 computeLocalScopes(d, language, phase);
                }}},
              token);
 
-    const std::scoped_lock lock(_stateMutex);
-    for (const Document* const d : work)
-      if (const auto at = _buildOptions.find(d->id); at != _buildOptions.end()) {
-        const DocumentState last = at->second.options.validation
-                                       ? DocumentState::Validated
-                                       : DocumentState::IndexedReferences;
-        if (d->state.load() >= last)
-          at->second.completed = true;
-      }
-  } catch (const OperationCancelled&) {
-    throw;
+    runPhase(work,
+             {{DocumentState::Linked,
+               [](Document& d, const CoreServices& language,
+                  const CancellationToken& phase) {
+                 language.linker->link(d, phase);
+               }},
+              {DocumentState::IndexedReferences,
+               [&](Document& d, const CoreServices&,
+                   const CancellationToken& phase) {
+                 index.updateReferences(d, phase);
+               }}},
+             token);
   } catch (...) {
-    publishFailure(attempt);
+    // Linked but not indexed is a rung the document cannot keep: back to
+    // `ComputedScopes`, so the next build relinks it. Its memo is dropped
+    // there, before that build settles -- nothing is touched past this one's.
+    for (Document* d : work)
+      if (d->state.load() == DocumentState::Linked)
+        d->state = DocumentState::ComputedScopes;
     throw;
   }
+
+  runPhase(work,
+           {{DocumentState::Validated,
+             [this](Document& d, const CoreServices& language,
+                    const CancellationToken& phase) {
+               // Per document, not per build: each keeps what it was asked.
+               const BuildOptions owed = getBuildOptions(d);
+               validate(d, language, owed.validationCategories, phase);
+             }}},
+           token);
+
+  const std::scoped_lock lock(_stateMutex);
+  for (const Document* const d : work)
+    if (const auto at = _buildOptions.find(d->id); at != _buildOptions.end()) {
+      const DocumentState last = at->second.options.validation
+                                     ? DocumentState::Validated
+                                     : DocumentState::IndexedReferences;
+      if (d->state.load() >= last)
+        at->second.completed = true;
+    }
 }
 
 void DefaultDocumentBuilder::update(std::span<const std::string_view> changed,
                                     std::span<const std::string_view> deleted,
                                     const CancellationToken& token) const {
-  // Down before anything can cut the update short: a wait must not read the
-  // rung of the last build as passed by documents this update resets.
-  {
-    const std::scoped_lock lock(_stateMutex);
-    _currentState = DocumentState::Changed;
-  }
+  runAttempt(
+      [&] { buildDocuments(applyUpdate(changed, deleted, token), token); });
+}
+
+std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
+    std::span<const std::string_view> changed,
+    std::span<const std::string_view> deleted,
+    const CancellationToken& token) const {
   Documents& store = *_shared.documents;
 
   // Expanded first, and everything below reads the expansion: a folder reported
@@ -592,7 +587,7 @@ void DefaultDocumentBuilder::update(std::span<const std::string_view> changed,
         resultsAreIncomplete(*d))
       work.push_back(d);
   }
-  buildDocuments(work, token);
+  return work;
 }
 
 bool DefaultDocumentBuilder::requestUnfinished(const Document& document) const {
@@ -733,6 +728,25 @@ void DefaultDocumentBuilder::validate(
   document.diagnostics = std::move(all);
 
   markAsCompleted(document, missing);
+}
+
+// One call to `build` or `update` is one attempt, from its first step. The
+// rung goes down before anything can cut the call short: a wait must not read
+// the rung of the last build as passed by documents this one resets. Whatever
+// fails the call -- a phase, a listener told of the update, the update's own
+// resets -- answers the waiters with `BuildFailed`. A cancellation is not a
+// failure: the write that supersedes it answers them.
+void DefaultDocumentBuilder::runAttempt(
+    cursiv::function_ref<void()> body) const {
+  const std::uint64_t attempt = beginAttempt();
+  try {
+    body();
+  } catch (const OperationCancelled&) {
+    throw;
+  } catch (...) {
+    publishFailure(attempt);
+    throw;
+  }
 }
 
 std::uint64_t DefaultDocumentBuilder::beginAttempt() const {

@@ -2,7 +2,7 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/engines/shared/runtime/LexicalMachine.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/shared/LexicalBackendsGrammar.hpp"
+#include "engines/shared/LexicalBackendsAst.hpp"
 #include "lexicalbackendsll/generated/Ll/Module.hpp"
 #include "lexicalbackendsll/generated/Ll/Table.hpp"
 #include "lexicalbackendslr/generated/Lr/Module.hpp"
@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace lexical_backends_cases {
@@ -46,22 +47,15 @@ std::string_view term_name(const Table& table, std::uint16_t term) {
 }
 template <class Table>
 void selected_backends(const Table& table) {
-  for (auto term :
-       {"Swift", "Suffix", "Cpp", "Multiple", "Overlap", "Empty", "After"}) {
+  for (const auto& [term, recognizes] :
+       {std::pair{"Swift", true}, {"Suffix", true}, {"Cpp", true},
+        {"Multiple", true}, {"Overlap", true}, {"Empty", true}, {"After", true},
+        {"Fast", false}, {"Twin", false}}) {
     bool found = false;
     for (unsigned i = 0; i < table.nrelays; ++i)
       if (term_name(table, table.relays[i].term) == term) {
         found = true;
-        CHECK(table.relays[i].recognizes != nullptr);
-      }
-    CHECK(found);
-  }
-  for (auto term : {"Fast", "Twin"}) {
-    bool found = false;
-    for (unsigned i = 0; i < table.nrelays; ++i)
-      if (term_name(table, table.relays[i].term) == term) {
-        found = true;
-        CHECK(table.relays[i].recognizes == nullptr);
+        CHECK((table.relays[i].recognizes != nullptr) == recognizes);
       }
     CHECK(found);
   }
@@ -99,13 +93,6 @@ void exercise(const cursiv::Parser& parser, const char* engine) {
           .count());
 }
 }  // namespace
-void run() {
-  selected_backends(tlexbackends::generated::Lr::kTable);
-  selected_backends(tlexbackends::generated::Ll::kTable);
-  exercise(*tlexbackends::generated::Lr::create_parser(), "LR");
-  exercise(*tlexbackends::generated::Ll::create_parser(), "LL");
-
-}
 
 }  // namespace lexical_backends_cases
 
@@ -191,13 +178,6 @@ void states() {
 }
 }  // namespace
 
-void run() {
-  states();
-  exercise(*tlexbackends::generated::Ll::create_parser());
-  exercise(*tlexbackends::generated::Lr::create_parser());
-
-}
-
 }  // namespace lexical_captures_cases
 
 namespace lexical_through_cases {
@@ -265,11 +245,6 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "writing:", "#[body]==x}==:==", false);
 }
 }  // namespace
-void run() {
-  exercise(*tlexbackends::generated::Ll::create_parser());
-  exercise(*tlexbackends::generated::Lr::create_parser());
-
-}
 
 }  // namespace lexical_through_cases
 
@@ -349,19 +324,21 @@ void exercise(const cursiv::Parser& parser) {
 
 }  // namespace
 
-void run() {
-  exercise(*tlexbackends::generated::Ll::create_parser());
-  exercise(*tlexbackends::generated::Lr::create_parser());
-
-}
-
 }  // namespace rule_through_cases
 
 int main() {
   cursiv::test::count_expectations();
-  lexical_backends_cases::run();
-  lexical_captures_cases::run();
-  lexical_through_cases::run();
-  rule_through_cases::run();
+  lexical_backends_cases::selected_backends(tlexbackends::generated::Lr::kTable);
+  lexical_backends_cases::selected_backends(tlexbackends::generated::Ll::kTable);
+  const auto ll = tlexbackends::generated::Ll::create_parser();
+  const auto lr = tlexbackends::generated::Lr::create_parser();
+  lexical_backends_cases::exercise(*lr, "LR");
+  lexical_backends_cases::exercise(*ll, "LL");
+  lexical_captures_cases::states();
+  for (const auto* parser : {ll.get(), lr.get()}) {
+    lexical_captures_cases::exercise(*parser);
+    lexical_through_cases::exercise(*parser);
+    rule_through_cases::exercise(*parser);
+  }
   return cursiv::test::report("LexicalBackends_test");
 }

@@ -22,12 +22,6 @@ namespace cursiv {
 inline std::vector<bool> lex_guard_heads(const LexNfaPool& n,
                                          const std::vector<int>& startOf) {
   std::vector<bool> head(n.guards.size());
-  std::vector<int> byHole(n.s.size(), -1), nextHole(n.guards.size(), -1);
-  for (std::size_t k = n.guards.size(); k-- > 0;) {
-    const auto hole = static_cast<std::size_t>(n.guards[k].hole);
-    nextHole[k] = byHole[hole];
-    byHole[hole] = static_cast<int>(k);
-  }
   std::vector<std::uint16_t> terms;
   for (const LexNfaGuard& gd : n.guards)
     if (std::ranges::find(terms, gd.term) == terms.end())
@@ -46,9 +40,8 @@ inline std::vector<bool> lex_guard_heads(const LexNfaPool& n,
       if (st.set >= 0) continue;
       todo.push_back(st.t1);
       todo.push_back(st.t2);
-      for (int k = byHole[static_cast<std::size_t>(x)]; k >= 0;
-           k = nextHole[static_cast<std::size_t>(k)])
-        todo.push_back(n.guards[static_cast<std::size_t>(k)].out);
+      if (st.guard >= 0)
+        todo.push_back(n.guards[static_cast<std::size_t>(st.guard)].out);
     }
     for (std::size_t k = 0; k < n.guards.size(); ++k)
       if (n.guards[k].term == term)

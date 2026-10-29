@@ -23,28 +23,28 @@ struct SM : cursiv::GrammarSpec {
 
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
 
-  struct EventRule : rule<assign<&ast::Event::name>(ref<ID>)> {};
-  struct CommandRule : rule<assign<&ast::Command::name>(ref<ID>)> {};
-  struct TransitionRule
-      : rule<assign<&ast::Transition::event>(ref<ID>) + kw<"=>"> +
-             assign<&ast::Transition::state>(ref<ID>)> {};
-  struct StateRule
-      : rule<stateKw + assign<&ast::State::name>(ref<ID>) +
-             option(ikw<"actions"> + kw<"{"> +
-                    some(append<&ast::State::actions>(ref<ID>)) + kw<"}">) +
-             many(append<&ast::State::transitions>(ref<TransitionRule>)) +
-             endKw> {};
-  struct StatemachineRule
-      : rule<ikw<"statemachine"> + assign<&ast::Statemachine::name>(ref<ID>) +
-             option(eventsKw +
-                    some(append<&ast::Statemachine::events>(ref<EventRule>))) +
-             option(ikw<"commands"> + some(append<&ast::Statemachine::commands>(
-                                          ref<CommandRule>))) +
-             initialStateKw + assign<&ast::Statemachine::init>(ref<ID>) +
-             many(append<&ast::Statemachine::states>(ref<StateRule>))> {};
+  struct Event : rule<assign<&ast::Event::name>(ref<ID>)> {};
+  struct Command : rule<assign<&ast::Command::name>(ref<ID>)> {};
+  struct Transition : rule<assign<&ast::Transition::event>(ref<ID>) + kw<"=>">
+                           + assign<&ast::Transition::state>(ref<ID>)> {};
+  struct State
+      : rule<stateKw + assign<&ast::State::name>(ref<ID>)
+             + option(ikw<"actions"> + kw<"{">
+                      + some(append<&ast::State::actions>(ref<ID>)) + kw<"}">)
+             + many(append<&ast::State::transitions>(ref<Transition>))
+             + endKw> {};
+  struct Statemachine
+      : rule<ikw<"statemachine"> + assign<&ast::Statemachine::name>(ref<ID>)
+             + option(eventsKw
+                      + some(append<&ast::Statemachine::events>(ref<Event>)))
+             + option(
+                 ikw<"commands">
+                 + some(append<&ast::Statemachine::commands>(ref<Command>)))
+             + initialStateKw + assign<&ast::Statemachine::init>(ref<ID>)
+             + many(append<&ast::Statemachine::states>(ref<State>))> {};
 
-  using entry = StatemachineRule;
-  using ignore = WS;
+  using entry = Statemachine;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

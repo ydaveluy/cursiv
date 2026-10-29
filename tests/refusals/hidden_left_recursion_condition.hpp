@@ -17,7 +17,7 @@ struct G : Base {
                                  lit<"+">) |
                   create<ast::X>(assign<&ast::X::name>(ref<ID>))> {};
   using entry = X;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

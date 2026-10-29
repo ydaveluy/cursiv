@@ -121,11 +121,39 @@ void an_artificial_end_is_no_dedent_or_section_end() {
   }
 }
 
+// A fingerprint selects the readings that may share a future; their futures
+// decide. A reading whose fingerprint a cheaper one holds, as a collision
+// would have it, still stands where its positions differ, and one whose
+// positions are the same dies to it.
+void a_shared_fingerprint_drops_only_a_shared_future() {
+  cursiv::LlSearch s(kPlain.atn, 0);
+  s.pool = {cursiv::LlConfig{0, cursiv::kLlCtxNone, 0},
+            cursiv::LlConfig{1, cursiv::kLlCtxNone, 0}};
+  cursiv::LlReading cheap;
+  cheap.ncfg = 1;
+  cheap.queued = true;
+  cursiv::LlReading other = cheap;
+  other.cfg = 1;
+  other.cost = 4;
+  other.queued = false;
+  cursiv::LlReading twin = cheap;
+  twin.cost = 4;
+  twin.queued = false;
+  s.nodes = {cheap, other, twin};
+  s.seen.emplace(cursiv::ll_search_future<kPlain>(s, s.nodes[1]), 0u);
+  cursiv::ll_search_admit<kPlain>(s, 1);
+  CHECK(!s.nodes[1].gone && s.nodes[1].queued && !s.nodes[0].gone);
+  s.seen.emplace(cursiv::ll_search_future<kPlain>(s, s.nodes[0]), 0u);
+  cursiv::ll_search_admit<kPlain>(s, 2);
+  CHECK(s.nodes[2].gone && !s.nodes[2].queued && !s.nodes[0].gone);
+}
+
 }  // namespace
 
 int main() {
   a_clipped_token_is_not_memoized();
   a_guard_reads_only_its_share_of_a_long_gap();
   an_artificial_end_is_no_dedent_or_section_end();
+  a_shared_fingerprint_drops_only_a_shared_future();
   return cursiv::test::report("LlSearchBound_test");
 }

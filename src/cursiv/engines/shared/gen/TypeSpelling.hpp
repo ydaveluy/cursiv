@@ -141,12 +141,9 @@ inline std::string gen_qualified(std::string_view name) {
                                               : "::" + std::string(name)));
 }
 
-inline std::string tag_spelling(std::string_view ptr) {
-  return "::cursiv::detail::field_tag<&" + gen_qualified(ptr.substr(1)) + ">";
-}
-
+// The narrowings are spelled qualified already.
 inline std::string narrow_list(const auto& narrows) {
-  return "::cursiv::TypeList<" + join(narrows, ", ", gen_qualified) + ">";
+  return "::cursiv::TypeList<" + join(narrows, ", ") + ">";
 }
 
 }  // namespace cursiv

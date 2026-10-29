@@ -11,7 +11,7 @@ struct G : Base {
   struct Path : rule<(ref<Sign> + ref<Path> + lit<"."> + ref<ID>) | ref<ID>> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<Path>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

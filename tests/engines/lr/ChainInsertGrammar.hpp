@@ -50,7 +50,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(kw<"x"> + kw<"c">) |
                      create<Doc>(kw<"a"> + kw<"q">) | ref<S> | ref<T>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tchaininsert

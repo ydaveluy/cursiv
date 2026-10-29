@@ -16,56 +16,55 @@ struct DomainModel : cursiv::GrammarSpec {
   // QualifiedName returns string: ID ('.' ID)*;
   struct QualifiedName : rule<some(ref<ID>, lit<".">)> {};
 
-  struct AbstractElementRule;
-  struct TypeRule;
-  struct DataTypeRule;
-  struct EntityRule;
-  struct FeatureRule;
-  struct PackageDeclarationRule;
+  struct AbstractElement;
+  struct Type;
+  struct DataType;
+  struct Entity;
+  struct Feature;
+  struct PackageDeclaration;
 
   // Feature returns Feature: many?='many'i? name=ID ':' type=QualifiedName;
-  struct FeatureRule
-      : rule<option(flag<&ast::Feature::many>(ikw<"many">)) +
-             assign<&ast::Feature::name>(ref<ID>) + lit<":"> +
-             assign<&ast::Feature::type>(ref<QualifiedName>)> {};
+  struct Feature : rule<option(flag<&ast::Feature::many>(ikw<"many">))
+                        + assign<&ast::Feature::name>(ref<ID>) + lit<":">
+                        + assign<&ast::Feature::type>(ref<QualifiedName>)> {};
 
   // DataType returns DataType: 'datatype'i name=ID;
-  struct DataTypeRule : rule<create<ast::DataType> + ikw<"datatype"> +
-                             assign<&ast::DataType::name>(ref<ID>)> {};
+  struct DataType : rule<create<ast::DataType> + ikw<"datatype">
+                         + assign<&ast::DataType::name>(ref<ID>)> {};
 
   // Entity returns Entity:
   // 'entity'i name=ID ('extends'i superType=QualifiedName)?
   // '{' features+=Feature* '}';
-  struct EntityRule
-      : rule<ikw<"entity"> + assign<&ast::Entity::name>(ref<ID>) +
-             option(ikw<"extends"> +
-                    assign<&ast::Entity::superType>(ref<QualifiedName>)) +
-             lit<"{"> + many(append<&ast::Entity::features>(ref<FeatureRule>)) +
-             lit<"}">> {};
+  struct Entity
+      : rule<ikw<"entity"> + assign<&ast::Entity::name>(ref<ID>)
+             + option(ikw<"extends">
+                      + assign<&ast::Entity::superType>(ref<QualifiedName>))
+             + lit<"{"> + many(append<&ast::Entity::features>(ref<Feature>))
+             + lit<"}">> {};
 
   // Type returns Type: DataType | Entity;
-  struct TypeRule : rule<ref<DataTypeRule> | ref<EntityRule>> {};
+  struct Type : rule<ref<DataType> | ref<Entity>> {};
 
   // PackageDeclaration returns PackageDeclaration:
   // 'package'i name=QualifiedName '{' elements+=AbstractElement* '}';
-  struct PackageDeclarationRule
-      : rule<ikw<"package"> +
-             assign<&ast::PackageDeclaration::name>(ref<QualifiedName>) +
-             lit<"{"> +
-             many(append<&ast::PackageDeclaration::elements>(
-                 ref<AbstractElementRule>)) +
-             lit<"}">> {};
+  struct PackageDeclaration
+      : rule<ikw<"package">
+             + assign<&ast::PackageDeclaration::name>(ref<QualifiedName>)
+             + lit<"{">
+             + many(append<&ast::PackageDeclaration::elements>(
+                 ref<AbstractElement>))
+             + lit<"}">> {};
 
   // AbstractElement returns AbstractElement: PackageDeclaration | Type;
-  struct AbstractElementRule
-      : rule<ref<PackageDeclarationRule> | ref<TypeRule>> {};
+  struct AbstractElement : rule<ref<PackageDeclaration> | ref<Type>> {};
 
   // Domainmodel returns DomainModel: elements+=AbstractElement+;
-  struct Domainmodel : rule<some(append<&ast::DomainModel::elements>(
-                           ref<AbstractElementRule>))> {};
+  struct Domainmodel
+      : rule<some(append<&ast::DomainModel::elements>(ref<AbstractElement>))> {
+  };
 
   using entry = Domainmodel;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

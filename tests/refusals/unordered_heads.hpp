@@ -5,10 +5,10 @@
 namespace refuse {
 
 struct G : Base {
-  struct Root
-      : rule<create<ast::Node>(lit<"a">) & create<ast::Node>(lit<"b">)> {};
+  struct Root : rule<unordered(create<ast::Node>(lit<"a">),
+                               create<ast::Node>(lit<"b">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

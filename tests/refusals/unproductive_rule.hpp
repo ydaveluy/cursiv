@@ -16,7 +16,7 @@ struct G : Base {
                                         lit<"x">)> {};
   struct Root : rule<create<ast::Chain>(lit<"a">) | ref<Loop>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

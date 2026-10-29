@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -107,7 +108,8 @@ constexpr std::size_t kMaxItems = 1000;
 
 // The word is the token the lexer cut: the leaf ending at the caret, else the
 // one holding it or starting there, past the caret too -- the whole word is
-// what an item replaces.
+// what an item replaces. A token may span lines: the anchor is still the whole
+// token, and `getCompletion` clips the edit to the caret's line.
 DefaultCompletionProvider::Anchor DefaultCompletionProvider::anchorAt(
     const Cst& cst, TextOffset offset) {
   const CstLeaf word = word_at(cst, offset);
@@ -230,10 +232,20 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
   // stops at the caret, replace takes the whole word. A single range would
   // force insert, which is what leaves `Boolol` when `Bool` is accepted
   // mid-word.
+  //
+  // Both stay on the caret's line, as the protocol requires of a completion
+  // edit: a token may span lines, and only its part on that line is the word.
+  const TextDocument& lines = document.textDocument();
+  const std::uint32_t line = lines.positionAt(offset).line;
+  const TextOffset from = std::max(anchor.from, lines.offsetAt({line, 0}));
+  const TextOffset to = std::min(
+      anchor.to,
+      lines.offsetAt({line, std::numeric_limits<std::uint32_t>::max()}));
   lsp::InsertReplaceEdit word;
-  word.insert = to_lsp(document.textDocument().rangeAt(anchor.from, offset));
-  word.replace =
-      to_lsp(document.textDocument().rangeAt(anchor.from, anchor.to));
+  word.insert = to_lsp(lines.rangeAt(from, offset));
+  word.replace = to_lsp(lines.rangeAt(from, to));
+  // What the client filters on: the text the insert range covers.
+  const std::string_view typed = anchor.prefix.substr(from - anchor.from);
 
   std::unordered_set<std::string> seen;
   const FuzzyMatcher& matcher = *services.lspShared.fuzzyMatcher;
@@ -241,6 +253,9 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
   // continuation the grammar recognizes. Same for text a repair discarded --
   // the parse read neither as grammar.
   if (caret_in_unread_text(cst, offset)) return list;
+  // `caret` and `caretEnd` bound the whole word the engine is asked about,
+  // over several lines when the token spans them; `filter` and `edit` are only
+  // its part on the caret's line, what the client filters on and replaces.
   const auto harvest = [&](TextOffset caret, TextOffset caretEnd,
                            std::string_view filter,
                            const lsp::InsertReplaceEdit& edit) {
@@ -275,21 +290,25 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
         continue;
       // Everything else is a keyword or nothing at all: a terminal's name is
       // not its text, and an item labelled `ID` would insert those letters.
-      const std::string_view spelled = grammar.terminalText(next.feature);
-      if (spelled.empty() || !filterKeyword(context, spelled)) continue;
-      if (!matcher.match(filter, spelled)) continue;
-      lsp::CompletionItem item = item_for(grammar, next.feature, spelled);
-      lsp::InsertReplaceEdit own = edit;
-      own.newText = item.label;
-      item.textEdit = buildCompletionTextEdit(std::move(own));
-      if (seen.insert(dedup_key(item)).second)
-        list.items.push_back(std::move(item));
+      // A terminal that reads a choice of words offers each, as the keywords
+      // of a rule reading the same words would.
+      for (const std::string_view spelled :
+           grammar.terminalSpellings(next.feature)) {
+        if (!filterKeyword(context, spelled) || !matcher.match(filter, spelled))
+          continue;
+        lsp::CompletionItem item = item_for(grammar, next.feature, spelled);
+        lsp::InsertReplaceEdit own = edit;
+        own.newText = item.label;
+        item.textEdit = buildCompletionTextEdit(std::move(own));
+        if (seen.insert(dedup_key(item)).second)
+          list.items.push_back(std::move(item));
+      }
     }
   };
 
   // The word's own end, not the caret: a literal is offered only where the
   // lexer would still read it spliced in with what the edit leaves behind.
-  harvest(anchor.from, anchor.to, anchor.prefix, word);
+  harvest(anchor.from, anchor.to, typed, word);
 
   // Where the word answers nothing, the caret itself is asked: anchoring at
   // the token start is wrong when the word is already a complete token the

@@ -15,7 +15,7 @@ struct G : Base {
                      many(nest<ast::Wrapper, &ast::Wrapper::inner>(lit<"!">))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

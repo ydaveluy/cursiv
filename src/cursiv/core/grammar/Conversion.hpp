@@ -60,14 +60,14 @@ inline constexpr bool has_default_convert =
 //   `static ConversionResult<T> convert(std::string_view)`  is the
 //                        conversion, for a target of your own, and takes the
 //                        optional `std::pmr::memory_resource*` second
-//                        parameter exactly as `text_conv` does.
+//                        parameter exactly as a converter function does.
 // A specialisation announcing a `result` `default_convert` does not reach is
 // the named refusal on the member that reads it. Unspecialised it is the
 // named refusal in `rule_type`.
 //
 // No `std::string` here, deliberately: an owning string materialises, and
 // the text law leaves no member to hold one. A rule that has to build its
-// answer takes the arena through a `text_conv` whose lambda names the
+// answer takes the arena through a converter function that names the
 // resource.
 template <class T>
 struct default_converter;
@@ -84,7 +84,7 @@ struct ConversionResult {
   constexpr explicit operator bool() const { return value.has_value(); }
   static constexpr ConversionResult ok(T v) { return {std::move(v), {}}; }
   // The words only: the builder ranges the diagnostic over the record it was
-  // reading, which for a `parts_conv` is the whole rule and never the part
+  // reading, which for a parts converter is the whole rule and never the part
   // that failed. A converter that has to say which part says it in the
   // message.
   static constexpr ConversionResult err(std::string msg) {

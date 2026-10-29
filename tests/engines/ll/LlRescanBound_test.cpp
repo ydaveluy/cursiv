@@ -14,7 +14,7 @@
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/engines/ll/runtime/ll_rescan.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/RescanBoundGrammar.hpp"
+#include "engines/ll/RescanBoundAst.hpp"
 #include "rescannarrowll/generated/NarrowLl/Module.hpp"
 #include "rescannarrowll/generated/NarrowLl/Table.hpp"
 #include "rescanshadowll/generated/ShadowLl/Module.hpp"
@@ -45,12 +45,11 @@ cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
   for (const char c : word)
     state = T.next_byte(state, static_cast<unsigned char>(c));
   std::uint64_t read = 0;
-  const cursiv::LlTypoTape<T> tape{text.data(),
-                                   static_cast<cursiv::TextOffset>(text.size()),
-                                   static_cast<cursiv::TextOffset>(text.size()),
-                                   want.data(),
-                                   &read,
-                                   0};
+  const cursiv::LlTypoTape<T> tape{
+      {text.data(), static_cast<cursiv::TextOffset>(text.size()),
+       static_cast<cursiv::TextOffset>(text.size()), &read},
+      want.data(),
+      0};
   cursiv::SymbolId first = cursiv::kInvalidSymbol;
   tape.owed(state, static_cast<cursiv::TextOffset>(word.size()),
             [&](cursiv::SymbolId t) {

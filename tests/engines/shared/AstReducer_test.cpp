@@ -1,8 +1,12 @@
 #include "cursiv/engines/shared/runtime/AstReducer.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <memory_resource>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -392,9 +396,268 @@ void unrelated_repairs_leave_a_long_nest_chain_intact() {
   CHECK(depth == count && num != nullptr && num->flag);
 }
 
+void a_deep_repair_keeps_turns_over_an_earlier_receiver() {
+  constexpr unsigned count = 4096;
+  std::string source(count + 1, '(');
+  source[0] = '1';
+  cursiv::Cst c(source);
+  cursiv::CstBuilder b(c);
+  b.bind_stream();
+  const auto all = b.enter();
+  b.leaf(0, 1, kStamp.make(0, 0));
+  std::vector<cursiv::CstBuilder::Open> open;
+  for (unsigned i = 0; i < count; ++i) open.push_back(b.enter());
+  const auto bad = b.enter();
+  for (unsigned i = 0; i < count; ++i)
+    b.leaf(i + 1, i + 2, kStamp.make(1, 0));
+  const auto repaired = b.exit(bad, 1, kStamp.make(cursiv::kNoElement, 0));
+  b.stream().at(repaired).recovered = true;
+  for (unsigned i = count; i-- > 0;)
+    b.exit(open[i], 1, kStamp.make(cursiv::kNoElement, 0));
+  const auto top = b.exit(all, 0, kStamp.make(2, 0));
+  b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1,
+                 count + 1);
+  b.bind_entry(0, c.size(), top);
+  b.bind_accepted(true);
+  const auto start = std::chrono::steady_clock::now();
+  const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
+  CHECK(r.error == cursiv::AstBuildError::none);
+  CHECK(r.nodes.size() == count + 1);
+  unsigned depth = 0;
+  const cursiv::AstNode* current = r.value;
+  while (const auto* call = cursiv::ast_cast<nest::Call>(current)) {
+    CHECK(call->callee != nullptr && call->callee->parent == call);
+    current = call->callee;
+    ++depth;
+  }
+  const auto* num = cursiv::ast_cast<nest::Num>(current);
+  CHECK(depth == count && num != nullptr && num->flag);
+}
+
+void the_first_repair_below_the_consumer_decides_the_turn() {
+  for (bool outerRepair : {false, true}) {
+    cursiv::Cst c("1(");
+    cursiv::CstBuilder b(c);
+    b.bind_stream();
+    const auto all = b.enter();
+    const auto outer = b.enter();
+    b.leaf(0, 1, kStamp.make(0, 0));
+    const auto inner = b.enter();
+    b.leaf(1, 2, kStamp.make(1, 0));
+    const auto r1 = b.exit(inner, 1, kStamp.make(cursiv::kNoElement, 0));
+    b.stream().at(r1).recovered = true;
+    const auto r2 = b.exit(outer, 0, kStamp.make(cursiv::kNoElement, 0));
+    b.stream().at(r2).recovered = outerRepair;
+    const auto top = b.exit(all, 0, kStamp.make(2, 0));
+    // A repair on the consumer itself does not give up its own effects.
+    b.stream().at(top).recovered = true;
+    b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
+    b.bind_entry(0, c.size(), top);
+    b.bind_accepted(true);
+    const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+    CHECK(r.error == cursiv::AstBuildError::none);
+    CHECK(r.nodes.size() == (outerRepair ? 1u : 2u));
+    CHECK((cursiv::ast_cast<nest::Num>(r.value) != nullptr) == outerRepair);
+    CHECK((cursiv::ast_cast<nest::Call>(r.value) != nullptr) == !outerRepair);
+  }
+}
+
+void only_a_nest_outside_the_repair_changes_its_receiver() {
+  for (bool outside : {false, true}) {
+    cursiv::Cst c("1(");
+    cursiv::CstBuilder b(c);
+    b.bind_stream();
+    const auto all = b.enter();
+    b.leaf(0, 1, kStamp.make(0, 0));
+    const auto outer = b.enter();
+    const auto inner = b.enter();
+    b.leaf(1, 2, kStamp.make(1, 0));
+    const auto a = b.exit(inner, 1,
+                          kStamp.make(outside ? cursiv::kNoElement : 1, 0));
+    const auto z = b.exit(outer, 1,
+                          kStamp.make(outside ? 1 : cursiv::kNoElement, 0));
+    b.stream().at(outside ? a : z).recovered = true;
+    const auto top = b.exit(all, 0, kStamp.make(2, 0));
+    b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1, 2);
+    b.bind_entry(0, c.size(), top);
+    b.bind_accepted(true);
+    const auto r = cursiv::AstReducer::build<kStamp>(nest::byState, std::move(c));
+    CHECK(r.error == cursiv::AstBuildError::none);
+    CHECK(r.nodes.size() == (outside ? 2u : 3u));
+    const auto* call = cursiv::ast_cast<nest::Call>(r.value);
+    CHECK(call != nullptr);
+    if (call == nullptr) continue;
+    CHECK(call->cstNodeId == top);
+    if (outside) CHECK(cursiv::ast_cast<nest::Num>(call->callee) != nullptr);
+    else CHECK(cursiv::ast_cast<nest::Call>(call->callee) != nullptr);
+  }
+}
+
+namespace text_cases {
+
+std::vector<cursiv::NodeId> converted;
+unsigned constantCalls = 0, failedCalls = 0;
+
+std::optional<std::string_view> echo(cursiv::AstBuildCtx& ctx,
+                                     cursiv::NodeId id) {
+  const auto text = cursiv::detail::joined_parts<true, true>(ctx, id);
+  if (text) converted.push_back(id);
+  return text;
+}
+std::optional<std::string_view> constant(cursiv::AstBuildCtx&, cursiv::NodeId) {
+  ++constantCalls;
+  return "constant";
+}
+std::optional<std::string_view> refuse(cursiv::AstBuildCtx& ctx,
+                                       cursiv::NodeId id) {
+  if (!cursiv::detail::joined_parts<true, true>(ctx, id)) return std::nullopt;
+  ++failedCalls;
+  return std::nullopt;
+}
+constexpr cursiv::detail::TextFn conversions[] = {nullptr, echo, constant,
+                                                  refuse};
+constexpr std::uint8_t inputs[] = {0, 3, 0, 3};
+constexpr cursiv::AstActions textActions{.texts = conversions,
+                                         .calls = conversions,
+                                         .entryCount = 4,
+                                         .textInputs = inputs};
+
+void deep_conversions_keep_order_and_stop_at_constants() {
+  constexpr unsigned depth = 16384;
+  cursiv::Cst tree("a");
+  cursiv::CstBuilder builder(tree);
+  std::vector<cursiv::CstBuilder::Open> open;
+  for (unsigned i = 0; i < depth; ++i) open.push_back(builder.enter());
+  builder.leaf(0, 1, kStamp.make(0, 0));
+  cursiv::NodeId root = 0;
+  for (unsigned i = depth; i-- > 0;)
+    root = builder.exit(open[i], 0, kStamp.make(1, 0));
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.mem = tree.memory();
+  ctx.actions = &textActions;
+  for (unsigned query = 0; query < 2; ++query) {
+    converted.clear();
+    const auto value = cursiv::detail::joined_parts(ctx, root);
+    CHECK(value && *value == "a");
+    CHECK(converted.size() == depth);
+    for (unsigned i = 0; i < converted.size(); ++i)
+      CHECK(converted[i] == i + 1);
+    CHECK(ctx.textValues == nullptr);
+  }
+  // This converter reads no input: none of the child converters may run.
+  builder.stream().at(root).engine = kStamp.make(2, 0);
+  converted.clear();
+  constantCalls = 0;
+  const auto value = cursiv::detail::joined_parts(ctx, root);
+  CHECK(value && *value == "constant");
+  CHECK(converted.empty() && constantCalls == 1);
+}
+
+void a_failed_conversion_stops_before_later_siblings() {
+  cursiv::Cst tree("ab");
+  cursiv::CstBuilder builder(tree);
+  const auto all = builder.enter();
+  auto child = builder.enter();
+  builder.leaf(0, 1, kStamp.make(0, 0));
+  builder.exit(child, 0, kStamp.make(3, 0));
+  child = builder.enter();
+  builder.leaf(1, 2, kStamp.make(0, 0));
+  builder.exit(child, 1, kStamp.make(1, 0));
+  const auto root = builder.exit(all, 0, kStamp.make(1, 0));
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.mem = tree.memory();
+  ctx.actions = &textActions;
+  converted.clear();
+  failedCalls = 0;
+  CHECK(!cursiv::detail::joined_parts(ctx, root));
+  CHECK(failedCalls == 1 && converted.empty());
+  CHECK(ctx.textValues == nullptr);
+}
+
+struct Meter : std::pmr::memory_resource {
+  std::pmr::memory_resource* upstream;
+  std::size_t bytes = 0;
+  explicit Meter(std::pmr::memory_resource* resource) : upstream(resource) {}
+  void* do_allocate(std::size_t size, std::size_t alignment) override {
+    bytes += size;
+    return upstream->allocate(size, alignment);
+  }
+  void do_deallocate(void* pointer, std::size_t size,
+                     std::size_t alignment) override {
+    upstream->deallocate(pointer, size, alignment);
+  }
+  bool do_is_equal(
+      const std::pmr::memory_resource& other) const noexcept override {
+    return this == &other;
+  }
+};
+
+void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
+  constexpr unsigned depth = 4096;
+  std::string source;
+  for (unsigned i = 0; i < depth; ++i) source += "a ";
+  source += 'a';
+  cursiv::Cst tree(source);
+  cursiv::CstBuilder builder(tree);
+  std::vector<cursiv::CstBuilder::Open> open;
+  for (unsigned i = 0; i <= depth; ++i) {
+    open.push_back(builder.enter());
+    builder.leaf(2 * i, 2 * i + 1, kStamp.make(0, 0));
+    if (i != depth) builder.hidden(2 * i + 1, 2 * i + 2, 0);
+  }
+  cursiv::NodeId root = 0;
+  for (unsigned i = depth + 1; i-- > 0;)
+    root = builder.exit(open[i], 2 * i, kStamp.make(0, 0));
+  Meter memory(tree.memory());
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.mem = &memory;
+  ctx.actions = &textActions;
+  const auto value = cursiv::detail::joined_parts<false>(ctx, root);
+  CHECK(value && *value == std::string(depth + 1, 'a'));
+  CHECK(memory.bytes <= 2u * (depth + 1));
+  const auto parts = cursiv::detail::parts_of<false>(ctx, root);
+  CHECK(parts && parts->size() == 2);
+  if (parts && parts->size() == 2) {
+    CHECK((*parts)[0] == "a");
+    CHECK((*parts)[1] == std::string(depth, 'a'));
+  }
+}
+
+void invented_text_never_runs_its_converter() {
+  cursiv::Cst tree("a");
+  cursiv::CstBuilder builder(tree);
+  const auto open = builder.enter();
+  const auto invented = builder.leaf(0, 0, kStamp.make(1, 0));
+  builder.stream().at(invented).recovered = true;
+  builder.leaf(0, 1, kStamp.make(0, 0));
+  const auto root = builder.exit(open, 0, kStamp.make(0, 0));
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.mem = tree.memory();
+  ctx.actions = &textActions;
+  converted.clear();
+  const auto parts = cursiv::detail::parts_of(ctx, root);
+  CHECK(parts && parts->size() == 1 && (*parts)[0] == "a");
+  CHECK(converted.empty());
+}
+
+void run() {
+  deep_conversions_keep_order_and_stop_at_constants();
+  a_failed_conversion_stops_before_later_siblings();
+  raw_nested_text_is_joined_once_and_parts_keep_their_groups();
+  invented_text_never_runs_its_converter();
+}
+
+}  // namespace text_cases
+
 }  // namespace
 
 int main() {
+  text_cases::run();
   only_retained_owners_keep_active_reference_ranks();
   for (bool own : {false, true})
     for (bool parent : {false, true})
@@ -412,5 +675,8 @@ int main() {
   a_node_no_member_takes_leaves_the_node_list();
   a_turn_reads_the_same_by_state_or_by_row();
   unrelated_repairs_leave_a_long_nest_chain_intact();
+  a_deep_repair_keeps_turns_over_an_earlier_receiver();
+  the_first_repair_below_the_consumer_decides_the_turn();
+  only_a_nest_outside_the_repair_changes_its_receiver();
   return cursiv::test::report("AstReducer_test");
 }

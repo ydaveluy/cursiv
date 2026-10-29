@@ -1,5 +1,6 @@
 // A relay as a generator builds it, the lexical predicate it asserts by node,
-// and the pool both engines intern relay chains into.
+// the pool both engines intern relay chains into, and the name pool a table
+// keeps of what terminals and relays name.
 #pragma once
 
 #include <algorithm>
@@ -7,6 +8,8 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -37,21 +40,39 @@ struct LexRelayGen : LexRelay {
              !pad.has(static_cast<unsigned char>(after.front()))));
   }
 
-  template <class Cfg>
-  static bool literal(const Cfg& g, std::uint16_t node, std::string& out) {
+  // Walks the literal `node` spells, one byte per single-byte class, handing
+  // each byte to `emit`. Answers its length, or nothing where `node` is no
+  // literal.
+  template <class Cfg, class Emit>
+  static std::optional<std::size_t> walk_literal(const Cfg& g,
+                                                 std::uint16_t node,
+                                                 Emit&& emit) {
     const auto one = [&](std::uint16_t kid) {
       const auto& c = g.lex[kid];
       if (c.kind != LexKind::chars || g.sets[c.a].count() != 1) return false;
       each_bit(g.sets[c.a].w, 4,
-               [&](std::size_t b) { out += static_cast<char>(b); });
+               [&](std::size_t b) { emit(static_cast<char>(b)); });
       return true;
     };
     const LexNode& e = g.lex[node];
-    if (e.kind == LexKind::chars) return one(node);
-    if (e.kind != LexKind::seq) return false;
+    if (e.kind == LexKind::chars)
+      return one(node) ? std::optional<std::size_t>{1} : std::nullopt;
+    if (e.kind != LexKind::seq || e.b == 0) return std::nullopt;
     for (unsigned i = 0; i < e.b; ++i)
-      if (!one(g.lexKid[e.a + i])) return false;
-    return !out.empty();
+      if (!one(g.lexKid[e.a + i])) return std::nullopt;
+    return std::size_t{e.b};
+  }
+
+  template <class Cfg>
+  static bool literal(const Cfg& g, std::uint16_t node, std::string& out) {
+    return walk_literal(g, node, [&](char c) { out += c; }).has_value();
+  }
+
+  // The length of the literal `node` spells, without its bytes.
+  template <class Cfg>
+  static std::optional<std::size_t> literal_size(const Cfg& g,
+                                                 std::uint16_t node) {
+    return walk_literal(g, node, [](char) {});
   }
 };
 
@@ -102,6 +123,58 @@ struct LexRelayChains {
     }
     return head;
   }
+
+  // The chain a state launches: the relays of its reading `r`, and a gate row
+  // per trivia the keywords standing beside it hold back, each asserting
+  // `cut.gate` of what they wait on.
+  template <class Cfg, class Cut, class Reading, class Rows, class Push>
+  std::uint16_t launched(Cfg& g, Cut& cut, const Reading& r, const Rows& rows,
+                         Push&& push) {
+    std::vector<std::uint16_t> group = r.relays;
+    const std::uint16_t predicate =
+        r.gates.empty() ? kNoLexNode : cut.gate(g, r.gated);
+    for (const auto& gate : r.gates) {
+      LexRelayGen row;
+      row.term = gate.term;
+      row.predicate = predicate;
+      row.resume = gate.resume;
+      row.gate = true;
+      group.push_back(lex_relay_push(push, row));
+    }
+    return intern(group, rows, push);
+  }
+};
+
+// The name pool as a reading takes it: only the bytes a terminal or a relay
+// names, each offset moved down past the bytes nothing reads. Lengths stay
+// explicit, since a relay's range may hold bytes that are no text.
+struct LexNamePool {
+  std::vector<char> bytes;
+  // The new offset of every old one, the end of the pool included.
+  std::vector<std::uint16_t> at;
+
+  template <class Cfg>
+  LexNamePool(const Cfg& g, std::span<const LexRelayGen> relays) {
+    std::vector<bool> kept(g.nameLen, false);
+    const auto keep = [&](std::uint16_t off, std::uint16_t len) {
+      std::fill_n(kept.begin() + off, len, true);
+    };
+    for (unsigned t = 0; t < g.nterms; ++t) {
+      keep(g.terms[t].nameOff, g.terms[t].nameLen);
+      keep(g.terms[t].textOff, g.terms[t].textLen);
+    }
+    for (const LexRelayGen& r : relays) {
+      keep(r.beforeOff, r.beforeLen);
+      keep(r.afterOff, r.afterLen);
+    }
+    at.resize(std::size_t{g.nameLen} + 1u);
+    for (std::size_t i = 0; i <= g.nameLen; ++i) {
+      at[i] = static_cast<std::uint16_t>(bytes.size());
+      if (i < g.nameLen && kept[i]) bytes.push_back(g.names[i]);
+    }
+  }
+
+  std::uint16_t operator()(std::uint16_t off) const { return at[off]; }
 };
 
 // The row as a designated initializer, defaults left out; `name` maps an

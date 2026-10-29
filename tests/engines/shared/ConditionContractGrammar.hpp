@@ -38,8 +38,8 @@ inline constexpr auto name_text = [](std::string_view t,
 
 struct Main : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct ID : terminal<some(cr<"a-zA-Z">), cursiv::text_conv<id_text>> {};
-  struct NAME : terminal<some(cr<"a-zA-Z">), cursiv::text_conv<name_text>> {};
+  struct ID : terminal<as<id_text>(some(cr<"a-zA-Z">))> {};
+  struct NAME : terminal<as<name_text>(some(cr<"a-zA-Z">))> {};
   struct LOW : terminal<some(cr<"a-z">)> {};
   struct REST : terminal<some(any)> {};
   struct CLOSER : terminal<cr<"})">> {};
@@ -109,18 +109,18 @@ struct Main : cursiv::GrammarSpec {
                   lit<"<<">)) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Own : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct LOW : terminal<some(cr<"a-z">), int> {};
+  struct LOW : terminal<as<int>(some(cr<"a-z">))> {};
   struct NAME : terminal<some(cr<"a-zA-Z">)> {};
   struct Root
       : rule<create<Holder>(&ref<LOW> + assign<&Holder::name>(ref<NAME>)) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Spelled : cursiv::GrammarSpec {
@@ -132,7 +132,7 @@ struct Spelled : cursiv::GrammarSpec {
   struct Stmt : rule<ref<Block> | ref<Name>> {};
   struct Root : rule<create<Doc>(many(ref<Stmt>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Classed : cursiv::GrammarSpec {
@@ -144,7 +144,7 @@ struct Classed : cursiv::GrammarSpec {
   struct Stmt : rule<ref<Block> | ref<Name>> {};
   struct Root : rule<create<Doc>(many(ref<Stmt>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Remark : cursiv::GrammarSpec {
@@ -155,7 +155,7 @@ struct Remark : cursiv::GrammarSpec {
                                  (lit<"%"> + !kw<"REM"> + ref<X>)) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = REMARK;
 };
 
@@ -165,7 +165,7 @@ struct Tie : cursiv::GrammarSpec {
       : rule<create<Doc>((&lit<"if"> + kw<"if">) | (lit<"if"> + lit<";">)) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tcondcontract
@@ -194,7 +194,7 @@ struct Base : cursiv::GrammarSpec {
   };
   struct Root : rule<create<Doc>(many(ref<Fn>)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace ttemplatetail
 
@@ -206,7 +206,7 @@ struct Suite : Main {
                      (lit<"spelled:"> + ref<Spelled::Root>) |
                      (lit<"classed:"> + ref<Classed::Root>) |
                      (lit<"tie:"> + ref<Tie::Root>) |
-                     skip(ignored<Remark::WS>, hide<Remark::REMARK>,
+                     skip(ignore<Remark::WS>, hide<Remark::REMARK>,
                           ref<Remark::Root> + eof)> {};
   using entry = Root;
 };

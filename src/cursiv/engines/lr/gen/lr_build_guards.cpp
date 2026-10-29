@@ -14,17 +14,12 @@
 namespace cursiv {
 namespace {
 
-// A new condition: `a`, and `b` where not zero, read tight where `tight`
-// says. Zero when no id is left.
-std::uint8_t lr_guard_lay(LrBuildCfg& g, std::uint8_t a, std::uint8_t b,
-                          bool tight) {
+// A new condition: `a` and `b`. Zero when no id is left.
+std::uint8_t lr_guard_lay(LrBuildCfg& g, std::uint8_t a, std::uint8_t b) {
   const std::uint16_t two[] = {static_cast<std::uint16_t>(a - 1u),
                                static_cast<std::uint16_t>(b - 1u)};
-  const std::uint16_t k =
-      g.gap_conjoin(std::span(two, b != 0 ? 2u : 1u));
-  if (k == kNoRow) return 0;
-  g.gapTight[k] = tight ? 1u : 0u;
-  return static_cast<std::uint8_t>(k + 1u);
+  const std::uint16_t k = g.gap_conjoin(std::span(two));
+  return k == kNoRow ? 0 : static_cast<std::uint8_t>(k + 1u);
 }
 
 }  // namespace
@@ -32,7 +27,6 @@ std::uint8_t lr_guard_lay(LrBuildCfg& g, std::uint8_t a, std::uint8_t b,
 bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   const unsigned nN = g.nnts;
   const unsigned nP = g.nprods;
-  g.gapTight.row(0, g.ngapConds);
   std::vector<unsigned> count(nN, 0u);
   for (unsigned p = 0; p < nP; ++p) ++count[g.prods[p].lhs];
   // The rules that are a condition: one empty, gated production. A record
@@ -47,35 +41,21 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   const auto cond_of = [&](std::uint16_t s) -> std::uint8_t {
     return is_term(s) ? 0 : cond[nt_index(s)];
   };
-  // One id per conjunction and per condition read tight.
+  // One id per conjunction.
   std::vector<std::vector<std::uint8_t>> joined(g.ngapConds + 1u);
-  std::vector<std::uint8_t> tightOf(g.ngapConds + 1u, std::uint8_t{});
   bool ok = true;
   const auto join = [&](std::uint8_t a, std::uint8_t b) -> std::uint8_t {
     if (a == 0 || a == b) return b;
     if (b == 0) return a;
     if (joined[a].size() <= b) joined[a].resize(b + 1u, 0);
     if (joined[a][b] == 0) {
-      const std::uint8_t id = lr_guard_lay(g, a, b, false);
+      const std::uint8_t id = lr_guard_lay(g, a, b);
       joined.resize(g.ngapConds + 1u);
-      tightOf.resize(g.ngapConds + 1u, 0);
       joined[a][b] = id;
     }
     ok = ok && joined[a][b] != 0;
     return joined[a][b];
   };
-  const auto tight_twin = [&](std::uint8_t k) -> std::uint8_t {
-    if (k == 0 || g.gapTight[k - 1u] != 0) return k;
-    if (tightOf[k] == 0) {
-      const std::uint8_t id = lr_guard_lay(g, k, 0, true);
-      joined.resize(g.ngapConds + 1u);
-      tightOf.resize(g.ngapConds + 1u, 0);
-      tightOf[k] = id;
-    }
-    ok = ok && tightOf[k] != 0;
-    return tightOf[k];
-  };
-
   // A run of conditions and the position after it stand on one boundary:
   // where a region edge parts them, the one naming no trivia yields.
   const auto bare = [&](std::uint8_t k) {
@@ -122,25 +102,25 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
         row = writes.concat(row, g.row_at(q, i));
       }
       // A region naming no trivia the next position leaves keeps that
-      // position's boundary, and the condition reads the region's own bytes.
+      // position's boundary, and the condition reads it too: the trivia past
+      // a region is the caller's.
       const std::uint8_t before = g.cfg_at(self, first);
-      const bool twin = bare(before);
       if (i < q.len) {
-        const std::uint8_t after = g.cfg_at(self, i);
         land(i + 1u);
         push(LrLowSlot{writes.concat(row, g.row_at(q, i))}, g.sym_at(q, i),
-             edge(before, after), twin && before != after ? tight_twin(k) : k);
+             edge(before, g.cfg_at(self, i)), k);
         ++i;
       } else if (row != kNoRow) {
-        // Nothing follows to carry the run's writes: it stays a reduction.
+        // Nothing follows to carry the run's writes: it stays a reduction,
+        // on the boundary past it.
+        const std::uint8_t past = edge(before, b.tailCfg);
         for (unsigned j = first; j < q.len; ++j) {
           land(j + 1u);
-          push(g.slots[q.at + j], g.sym_at(q, j), g.cfg_at(self, j), 0);
+          push(g.slots[q.at + j], g.sym_at(q, j), past, 0);
         }
       } else {
-        const std::uint8_t after = b.tailCfg;
-        q.gap = twin && before != after ? tight_twin(k) : k;
-        b.tailCfg = edge(before, after);
+        q.gap = k;
+        b.tailCfg = edge(before, b.tailCfg);
       }
     }
     land(q.len + 1u);

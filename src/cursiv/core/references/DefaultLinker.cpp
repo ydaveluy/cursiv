@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,6 +29,19 @@
 namespace cursiv {
 
 namespace {
+
+// What makes two candidates the same answer to a plural lookup.
+struct CandidateKey {
+  std::uint64_t symbol;  // (document, symbol)
+  const AstNode* node;
+  bool operator==(const CandidateKey&) const = default;
+};
+struct CandidateKeyHash {
+  std::size_t operator()(const CandidateKey& key) const noexcept {
+    return std::hash<std::uint64_t>{}(key.symbol) ^
+           std::hash<const AstNode*>{}(key.node);
+  }
+};
 
 // The name of what the member declares first, and `?` whenever anything on the
 // way is absent.
@@ -143,16 +157,18 @@ AstNodeDescriptionsOrError DefaultLinker::getCandidates(
   // counts as "named that" is the scope provider's answer -- the case policy
   // lives there, and a comparison here would resurrect the default.
   std::vector<const AstNodeDescription*> candidates;
-  // One answer per symbol, keyed as a description names it -- (document,
-  // symbol): an outer scope re-surfaces what an inner one already gave, and a
-  // multi-reference must not hold a target twice. A few are compared in
-  // place; past them, a set keeps a thousand homonyms linear.
+  // One answer per declaration: an outer scope re-surfaces what an inner one
+  // already gave, and a multi-reference must not hold a target twice. The key
+  // is (document, symbol) and the node: two nodes built on one CST record
+  // share a symbol and are still two targets. A few are compared in place;
+  // past them, a set keeps a thousand homonyms linear.
   constexpr std::size_t kCompared = 16;
   const auto key = [](const AstNodeDescription& entry) {
-    return (static_cast<std::uint64_t>(entry.documentId) << 32) |
-           entry.symbolId;
+    return CandidateKey{
+        (static_cast<std::uint64_t>(entry.documentId) << 32) | entry.symbolId,
+        entry.node};
   };
-  std::unordered_set<std::uint64_t> seen;
+  std::unordered_set<CandidateKey, CandidateKeyHash> seen;
   const auto fresh = [&](const AstNodeDescription& entry) {
     if (candidates.size() < kCompared)
       return std::ranges::none_of(candidates, [&](const auto* held) {

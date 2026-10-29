@@ -105,6 +105,24 @@ inline std::uint32_t indent_push(std::vector<IndentLevel>& arena,
   return n;
 }
 
+// Whether two positions stand in the same levels at the same depth. A search
+// can write one level twice, since `indent_push` finds a level again only
+// among the latest pushes: the levels compare by content, down to one both
+// share.
+inline bool indent_same(const std::vector<IndentLevel>& arena, IndentAt a,
+                        IndentAt b) {
+  if (a.depth != b.depth) return false;
+  for (; a.head != b.head && a.head != kNoIndent && b.head != kNoIndent;
+       a.head = arena[a.head].prev, b.head = arena[b.head].prev) {
+    const IndentLevel& u = arena[a.head];
+    const IndentLevel& v = arena[b.head];
+    if (u.begin != v.begin || u.len != v.len || u.virt != v.virt ||
+        u.mute != v.mute)
+      return false;
+  }
+  return a.head == b.head;
+}
+
 // The levels under those whose indent a repair dropped: what a reading's
 // dedent closes, since a dropped indent opened no block.
 inline std::uint32_t indent_unmute(const std::vector<IndentLevel>& arena,
@@ -167,7 +185,7 @@ inline bool indent_virtual_at(const char* src, TextOffset len,
       break;
   }
   if (reached != nullptr) *reached = q < len ? q + 1 : q;
-  if (formFeed && q != len) {
+  if (formFeed) {
     out = Token{p, q, kInvalidSymbol};
     return true;
   }
@@ -179,19 +197,40 @@ inline bool indent_virtual_at(const char* src, TextOffset len,
   return indent_token(src, arena, head, indentTerm, dedentTerm, p, q, out);
 }
 
+// What shifting an indent does to a reading's levels: its run opens a level.
+// A generated parser calls the helper of the kind it shifts, `indent_shift`
+// the one of the token in hand.
+inline void indent_shift_indent(std::vector<IndentLevel>& arena, IndentAt& at,
+                                const Token& t) {
+  at.head = indent_push(arena, at.head, t.begin, t.end - t.begin, false);
+}
+
+// ...a dedent: it closes the level under the muted ones.
+inline void indent_shift_dedent(const std::vector<IndentLevel>& arena,
+                                IndentAt& at) {
+  at.head = indent_pop(arena, indent_unmute(arena, at.head));
+}
+
+// ...a terminal whose bracket kind is `delim`: +1 opens a bracket, -1 closes
+// the innermost open one.
+inline void indent_shift_delim(IndentAt& at, std::int8_t delim) {
+  if (delim > 0)
+    ++at.depth;
+  else if (delim < 0 && at.depth != 0)
+    --at.depth;
+}
+
 // What shifting `t` does to a reading's levels and bracket depth, `delim`
-// being the terminal's own. A dedent closes the level under the muted ones.
+// being the terminal's own.
 inline void indent_shift(std::vector<IndentLevel>& arena, IndentAt& at,
                          const Token& t, SymbolId indentTerm,
                          SymbolId dedentTerm, std::int8_t delim) {
   if (indentTerm != 0 && t.sym == indentTerm)
-    at.head = indent_push(arena, at.head, t.begin, t.end - t.begin, false);
+    indent_shift_indent(arena, at, t);
   else if (dedentTerm != 0 && t.sym == dedentTerm)
-    at.head = indent_pop(arena, indent_unmute(arena, at.head));
-  else if (delim > 0)
-    ++at.depth;
-  else if (delim < 0 && at.depth != 0)
-    --at.depth;
+    indent_shift_dedent(arena, at);
+  else
+    indent_shift_delim(at, delim);
 }
 
 template <const auto& C>

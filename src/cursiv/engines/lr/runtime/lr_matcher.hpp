@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <type_traits>
 
 #include "cursiv/core/utils/Utf8.hpp"
@@ -97,6 +98,9 @@ template <const auto& A, bool Skips = false>
 struct LrLexTape : LexTape<A> {
   using Skip = typename std::remove_cvref_t<decltype(A)>::TermSet;
   using Skipping = LrLexTape<A, true>;
+  // Only a walk that takes terminals off the position elects with `qualified`;
+  // the rest read the fallback rows.
+  static constexpr bool kQualified = Skips;
   struct NoSkip {};
   [[no_unique_address]] std::conditional_t<Skips, const Skip*, NoSkip> skip{};
 
@@ -117,8 +121,9 @@ struct LrLexTape : LexTape<A> {
       return A.dfa_bounded(s);
     }
   }
-  TextOffset bound_reach(std::uint16_t s, const char* src, TextOffset i,
-                         TextOffset len) const {
+  CURSIV_ALWAYS_INLINE TextOffset bound_reach(std::uint16_t s,
+                                              const char* src, TextOffset i,
+                                              TextOffset len) const {
     const TextOffset own =
         lex_boundary(A.cfg).reach(A.dfaBound[s], src, i, len);
     if constexpr (kElseAsksScalar<A>) {
@@ -162,11 +167,12 @@ template <const auto& A>
 CURSIV_ALWAYS_INLINE inline Scan lr_unrefused_hot(const char* src,
                                                   TextOffset len,
                                                   std::uint16_t st,
-                                                  TextOffset from, Scan out) {
+                                                  TextOffset from, Scan out,
+                                                  std::uint16_t ended) {
   if (A.head_refuses(out.term, src + from, len - from)) {
     TextOffset far = from;
     return lex_unrefused_walk<true>(LrLexTape<A>{}, src, len, st, from, out,
-                                    far);
+                                    far, ended);
   }
   return out;
 }
@@ -177,6 +183,20 @@ inline Scan lr_match_halt(const char* src, TextOffset len, std::uint16_t mode,
   return lex_match_halt(LrLexTape<A>{}, src, len, mode, from, halt);
 }
 
+// The same with the terminals of `skip` off the position: a flagged winner
+// the stack refused, read again.
+template <const auto& A>
+inline Scan lr_match_without(const char* src, TextOffset len,
+                             std::uint16_t mode, TextOffset from,
+                             std::span<const SymbolId> skip, TextOffset& halt) {
+  typename LrLexTape<A>::Skip off{};
+  for (const SymbolId t : skip) off.set(t);
+  const typename LrLexTape<A>::Skipping tape{.skip = &off};
+  return lex_match_halt(tape, src, len, mode, from, halt);
+}
+
+// The token the table's own walk reads, no generated walk asked: what a test
+// holds the generated walks to.
 template <const auto& A>
 inline Scan lr_match_text(const char* src, TextOffset len, std::uint16_t mode,
                           TextOffset from) {

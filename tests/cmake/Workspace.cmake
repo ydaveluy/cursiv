@@ -15,15 +15,20 @@ cursiv_grammar(ws workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .
 
 file(GLOB_RECURSE _ws_core CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace/core/*.cpp)
-add_library(wsCore ${_ws_core})
-target_link_libraries(wsCore PUBLIC wsGenerated)
-target_include_directories(wsCore PUBLIC
+list(FILTER _ws_core EXCLUDE REGEX "/CoreModule[.]cpp$")
+add_library(wsCoreObjects OBJECT ${_ws_core})
+target_link_libraries(wsCoreObjects PUBLIC cursiv::core)
+target_include_directories(wsCoreObjects PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/languages>)
 
 file(GLOB_RECURSE _ws_lsp CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace/lsp/*.cpp)
-add_library(wsLsp ${_ws_lsp})
-target_link_libraries(wsLsp PUBLIC wsCore cursiv::lsp)
+list(FILTER _ws_lsp EXCLUDE REGEX "/LspModule[.]cpp$")
+add_library(wsLspObjects OBJECT ${_ws_lsp})
+target_link_libraries(wsLspObjects PUBLIC wsCoreObjects cursiv::lsp)
+if(BUILD_SHARED_LIBS)
+  set_target_properties(wsCoreObjects wsLspObjects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
 
 # The same fixture with its stamp's row forced narrow, as a table whose states
 # need the room lays it out: no grammar small enough to build here gets there
@@ -32,12 +37,12 @@ set(CURSIV_NARROW_ROW_BITS 7)
 cursiv_grammar(wsnarrow workspace/core/WorkspaceGrammar.hpp ws::Workspace EXTENSIONS .ws
     OUT narrow/workspace/generated INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/languages ENGINE LR
     GENERATOR_ARGS --stamp-row-bits=${CURSIV_NARROW_ROW_BITS})
-add_library(wsnarrowCore ${_ws_core})
-target_link_libraries(wsnarrowCore PUBLIC wsnarrowGenerated)
-target_include_directories(wsnarrowCore PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/languages>)
-add_library(wsnarrowLsp ${_ws_lsp})
-target_link_libraries(wsnarrowLsp PUBLIC wsnarrowCore cursiv::lsp)
+foreach(_variant IN ITEMS ws wsnarrow)
+  add_library(${_variant}Core languages/workspace/core/CoreModule.cpp)
+  target_link_libraries(${_variant}Core PUBLIC ${_variant}Generated wsCoreObjects)
+  add_library(${_variant}Lsp languages/workspace/lsp/LspModule.cpp)
+  target_link_libraries(${_variant}Lsp PUBLIC ${_variant}Core wsLspObjects)
+endforeach()
 
 # The runtime's own state: contexts, stacks, ranks, the roof, a reading handed
 # over, and records read through a narrow stamp.
@@ -51,6 +56,11 @@ cursiv_test(edits_narrow_test lsp/edits_test.cpp cursiv::lsp wsnarrowLsp)
 
 # The erased door: a service holds a `Parser&`, not a grammar.
 cursiv_test(Parser_test core/parser/Parser_test.cpp wsCore)
+# A text translated before its tokens are read, on both engines.
+cursiv_grammar_pair(translate core/parser/TranslationGrammar.hpp ttrans::Lr
+    ttrans::Ll)
+cursiv_test(SourceTranslation_test core/parser/SourceTranslation_test.cpp
+    translatelrGenerated translatellGenerated)
 
 # Its own operator new, which ThreadSanitizer's runtime also defines.
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
@@ -66,8 +76,10 @@ cursiv_grammar(comments core/documentation/CommentsGrammar.hpp tcomment::Comment
 cursiv_test(documentation_test core/documentation/documentation_test.cpp commentsGenerated wsCore)
 
 cursiv_grammar(narrowedsite core/references/NarrowedSiteGrammar.hpp tns::NarrowedSite)
+cursiv_grammar(sharedrecord core/references/SharedRecordGrammar.hpp tsr::SharedRecord)
 
-cursiv_test(references_test core/references/references_test.cpp wsCore narrowedsiteGenerated multirefGenerated)
+cursiv_test(references_test core/references/references_test.cpp wsCore narrowedsiteGenerated
+    multirefGenerated sharedrecordGenerated)
 
 cursiv_test(workspace_test core/workspace/workspace_test.cpp wsCore)
 target_compile_definitions(workspace_test PRIVATE

@@ -302,8 +302,8 @@ class ValidationAcceptor {
 
   // The CST span of a node, `{0, 0}` for one no CST node produced.
   [[nodiscard]] TextRange spanOf(const AstNode& node) const noexcept;
-  // The span of a name the node borrows from the document, and the node's own
-  // span when the view does not slice it.
+  // The span of a name the node borrows from the document (or from its
+  // translated text), and the node's own span when the view does not slice it.
   [[nodiscard]] TextRange spanOfName(std::string_view borrowed,
                                      const AstNode& node) const noexcept;
 

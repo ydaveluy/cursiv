@@ -32,7 +32,7 @@ struct Toml : cursiv::GrammarSpec {
   static constexpr auto value = ref<ScalarRule> | ref<ListRule>;
   struct ListRule
       : rule<create<List>(
-            skip(ignored<WS, NL>, hide<COMMENT>,
+            skip(ignore<WS, NL>, hide<COMMENT>,
                  lit<"["> +
                      option(append<&List::items>(value) +
                             many(lit<","> + append<&List::items>(value)) +
@@ -47,7 +47,7 @@ struct Toml : cursiv::GrammarSpec {
       option(append<&File::entries>(ref<EntryRule>)) + trailing;
   struct Root : rule<create<File>(line + many(ref<NL> + line))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Toml {};

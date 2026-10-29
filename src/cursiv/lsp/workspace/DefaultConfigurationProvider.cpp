@@ -93,6 +93,11 @@ void DefaultConfigurationProvider::initialize(
     const lsp::InitializeParams& params) {
   _supported = params.capabilities.workspace.has_value() &&
                params.capabilities.workspace->configuration.value_or(false);
+  _dynamicRegistration =
+      params.capabilities.workspace.has_value() &&
+      params.capabilities.workspace->didChangeConfiguration.has_value() &&
+      params.capabilities.workspace->didChangeConfiguration->dynamicRegistration
+          .value_or(false);
 }
 
 void DefaultConfigurationProvider::initialized(LanguageClient* client) {
@@ -109,22 +114,25 @@ void DefaultConfigurationProvider::initialized(LanguageClient* client) {
   }
 
   // Subscribe before pulling. A change arriving before the reply takes
-  // precedence over the initial snapshot.
-  lsp::DidChangeConfigurationRegistrationOptions options;
-  if (names.size() == 1)
-    options.section = names.front();
-  else
-    options.section = lsp::Array<lsp::String>(names.begin(), names.end());
-  lsp::Registration registration;
-  registration.id = std::string(kDidChangeConfigurationId);
-  registration.method =
-      std::string(lsp::notifications::WorkspaceDidChangeConfiguration::Method);
-  lsp::json::Writer writer;
-  lsp::writeJson(options, writer);
-  registration.registerOptions = lsp::json::parse(writer.text());
-  lsp::RegistrationParams registrationParams;
-  registrationParams.registrations.push_back(std::move(registration));
-  client->registerCapability(std::move(registrationParams));
+  // precedence over the initial snapshot. Only a client that accepts the
+  // registration is asked; another may still send the notification itself.
+  if (_dynamicRegistration) {
+    lsp::DidChangeConfigurationRegistrationOptions options;
+    if (names.size() == 1)
+      options.section = names.front();
+    else
+      options.section = lsp::Array<lsp::String>(names.begin(), names.end());
+    lsp::Registration registration;
+    registration.id = std::string(kDidChangeConfigurationId);
+    registration.method = std::string(
+        lsp::notifications::WorkspaceDidChangeConfiguration::Method);
+    lsp::json::Writer writer;
+    lsp::writeJson(options, writer);
+    registration.registerOptions = lsp::json::parse(writer.text());
+    lsp::RegistrationParams registrationParams;
+    registrationParams.registrations.push_back(std::move(registration));
+    client->registerCapability(std::move(registrationParams));
+  }
 
   pullConfiguration(std::move(names));
 }

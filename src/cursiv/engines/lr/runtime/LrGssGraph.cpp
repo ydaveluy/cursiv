@@ -87,7 +87,6 @@ void LrGssGraph::clear() {
   _accepts.clear();
   _arcs.clear();
   _readEnds.clear();
-  _readPast = 0;
   _frozen.clear();
   _tokens.clear();
   _digest.clear();
@@ -100,21 +99,24 @@ void LrGssGraph::clear() {
   _shifts.clear();
   _lastDeath = 0;
   _died = false;
+  _held = none;
+  _owed = 0;
   _root = none;
   _seedDepth = 0;
-  _reopenCost = 0;
+  _seedBase = 0;
+  _underflow = false;
   _accepted = false;
 }
 
 void LrGssGraph::seed(const LrStack& stack, const Reading& start,
-                      std::span<const std::uint16_t> stood) {
-  const bool reopening = _seedDepth != 0;
+                      std::span<const std::uint16_t> stood,
+                      std::uint32_t window) {
   clear();
   _stood = stood;
-  _seedDepth = stack.size();
-  _reopenCost = reopening ? _seedDepth : 0;
+  _seedBase = stack.size() > window ? stack.size() - window : 0;
+  _seedDepth = stack.size() - _seedBase;
   Id previous = none;
-  for (std::uint32_t i = 0; i < stack.size(); ++i) {
+  for (std::uint32_t i = _seedBase; i < stack.size(); ++i) {
     Reading r;
     r.run.state = stack[i].state;
     r.at = stack[i].begin;
@@ -204,8 +206,7 @@ Id LrGssGraph::intern(Id to, Id from, std::uint32_t symbol, bool held,
       [&](Id at) { return _vertices[_edges[at].to].reading.at < _settled; });
   made = e == fresh;
   if (!made) return e;
-  const Id f = _forest.node(symbol, _vertices[from].reading.at,
-                            _vertices[to].reading.at);
+  const Id f = _forest.node();
   _edges.push_back(Edge{from, f, to, symbol});
   if (held) return e;
   Vertex& v = _vertices[to];
@@ -250,8 +251,14 @@ void LrGssGraph::edge(Id to, Id from, std::uint32_t symbol,
   else
     _forest.add(f, children, step, words, at,
                 token ? LrGssForest::Kind::token : LrGssForest::Kind::inner);
-  _arcs.push_back(
-      Arc{to, s.shifts ? from : s.vertex, token ? s.reading.la.end : 0});
+  const Id under = s.shifts ? from : s.vertex;
+  _arcs.push_back(Arc{to, under, token ? s.reading.la.end : 0});
+  if (_held != none) {
+    const auto ahead = static_cast<std::uint8_t>(
+        std::min(_vertices[under].ahead + std::uint32_t{token},
+                 kRepairValidateShifts));
+    if (ahead > _vertices[to].ahead) _vertices[to].ahead = ahead;
+  }
 }
 
 void LrGssGraph::settle(TextOffset before, bool last) {
@@ -745,10 +752,10 @@ bool LrGssGraph::linear(Id v) const {
 }
 
 // A dead arm is a frozen reading, a repair's source until a rival reads
-// `kRepairValidateShifts` real tokens past it: the graph hands the text back no
-// earlier. `v`'s stack must be linear.
-bool LrGssGraph::validated(Id v) {
-  if (!_died) return true;
+// `kRepairValidateShifts` real tokens past it: the real tokens `v`'s path
+// shifted past the last one, up to that many. `v`'s stack must be linear.
+std::uint32_t LrGssGraph::validated(Id v) {
+  if (!_died) return kRepairValidateShifts;
   std::uint32_t read = 0;
   for (Id x = v; _vertices[x].edges != none &&
                  _vertices[x].reading.at > _lastDeath &&
@@ -760,19 +767,41 @@ bool LrGssGraph::validated(Id v) {
       if (t.end <= _lastDeath) return false;
       return ++read < kRepairValidateShifts;
     });
-  return read >= kRepairValidateShifts;
+  return read;
 }
 
-// A later cursor cannot add edges to a closed vertex's reading key.
+// A dead arm is a repair's source until a rival validates it, so the text
+// comes back only past that. A vertex alone whose own path did not validate
+// the arms is held: the vertices past it count the real tokens their
+// derivations shifted from it, and the first opened with as many as it owed
+// gives the text back at it, its stack still one path. What the graph read
+// past it is dropped: the drive reads that text again and decides its cells
+// itself.
 bool LrGssGraph::hand_back(Id v, TextOffset openedAt) {
-  if (_fresh.size() != 1 || !_accepts.empty() || _vertices[v].reading.at <= openedAt)
-    return false;
-  // Reopening copies the frozen stack: keep an episode until it paid for it.
-  if (_steps.size() < _reopenCost) return false;
-  prune(v);
-  if (!linear(v) || !validated(v)) return false;
-  accept(v, none);
-  return true;
+  bool alone = _fresh.size() == 1 && _accepts.empty() &&
+               _vertices[v].reading.at > openedAt;
+  if (alone) {
+    prune(v);
+    alone = linear(v);
+  }
+  const std::uint32_t read = alone ? validated(v) : 0;
+  Id back = none;
+  if (read >= kRepairValidateShifts)
+    back = v;
+  else if (_held != none && v > _held && _accepts.empty() &&
+           _vertices[v].ahead >= _owed &&
+           _vertices[_held].edges == _vertices[_held].lastEdge)
+    back = _held;
+  if (back != none) {
+    accept(back, none);
+    return true;
+  }
+  if (alone) {
+    _held = v;
+    _owed = kRepairValidateShifts - read;
+    _vertices[v].ahead = 0;
+  }
+  return false;
 }
 
 std::vector<LrGssGraph::Id> LrGssGraph::elected() {
@@ -836,7 +865,8 @@ void LrGssGraph::accept(Id v, Id step) {
 
 // The furthest position a derivation read kRepairValidateShifts real tokens past:
 // the ends of each vertex's last tokens, the most over its derivations, held
-// until no step moves them.
+// until no step moves them. Those ends only grow until `clear()`, so the
+// answer never falls between calls.
 TextOffset LrGssGraph::read_past() {
   using Ends = std::array<TextOffset, kRepairValidateShifts>;
   auto& ends = _readEnds;
@@ -857,11 +887,10 @@ TextOffset LrGssGraph::read_past() {
         }
     }
   }
-  TextOffset most = _readPast;
+  TextOffset most = 0;
   for (const Ends& e : ends) {
     most = std::max(most, e.back());
   }
-  _readPast = most;
   return most;
 }
 

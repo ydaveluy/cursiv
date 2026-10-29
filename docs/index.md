@@ -3,18 +3,16 @@
 cursiv++ is a C++20 framework for building languages, compilers and language
 tools, with built-in Language Server Protocol (LSP) support.
 
-Define the syntax and abstract syntax tree (AST) in C++. Cursiv generates a
-parser and provides services for references, validation and editor features.
-For example, this
-rule reads a `person` declaration and stores its name in an AST member:
+You define the syntax and the abstract syntax tree (AST) in C++. Cursiv
+generates the parser and provides references, validation and editor
+features. For example, this rule reads a `person` declaration and stores its
+name, read by the `ID` terminal, in your `ast::Person` type:
 
 ```cpp
-struct PersonRule
-    : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
+struct Person : rule<kw<"person"> + assign<&ast::Person::name>(ref<ID>)> {};
 ```
 
-`ID` matches an identifier and `ast::Person` is your AST type. The
-[tutorial](learn/walkthrough.md) shows a complete language with these pieces.
+The [tutorial](learn/walkthrough.md) builds a complete language this way.
 
 ## Start here
 
@@ -56,7 +54,7 @@ struct PersonRule
 
 ## Create your first project
 
-Use the compiler and build tools listed in [Create a project](learn/scaffold.md).
+With the [required tools](learn/index.md#before-you-start) installed, run:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ydaveluy/cursiv/main/docs/cursiv-new.cmake
@@ -67,7 +65,6 @@ cmake --build build --parallel
 ./build/src/mylang_cli example/hello.mylang
 ```
 
-The project includes a working grammar, AST, CLI, language server and VS Code
-extension. The [project guide](learn/scaffold.md) explains which files to edit.
+You get a working grammar, AST, CLI, language server and VS Code extension.
 
 [Create a project :octicons-arrow-right-24:](learn/scaffold.md){ .md-button .md-button--primary }

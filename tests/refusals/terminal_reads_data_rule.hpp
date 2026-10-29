@@ -11,7 +11,7 @@ struct G : Base {
   struct PATH : terminal<lit<"@"> + ref<Dotted>> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<PATH>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

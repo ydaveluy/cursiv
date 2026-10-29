@@ -32,10 +32,7 @@ class LlPredictionSession {
   // What the predictions of this session have read so far.
   LlPredictionWork work() const {
     LlPredictionWork sum{.tokens = ll_staged_reads<T>() - _stagedFrom};
-    if (_episodes) {
-      sum.tokens += _episodes->work.tokens;
-      sum.readings += _episodes->work.readings;
-    }
+    if (_episodes) sum.tokens += _episodes->work.tokens;
     return sum;
   }
 

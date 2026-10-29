@@ -8,6 +8,7 @@
 #include "cursiv/core/grammar/ExprShape.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/grammar/InGrammar.hpp"
+#include "cursiv/core/grammar/PayloadOf.hpp"
 #include "cursiv/core/grammar/RuleTraits.hpp"
 #include "cursiv/core/grammar/expr.hpp"
 #include "cursiv/core/utils/typelist.hpp"
@@ -40,7 +41,7 @@ struct refs<Ref<R>, TypeList<>> {
 // tokens around.
 template <class G, class O, class M, class C>
 struct refs<Embed<G, Seq<O, M, C>>, TypeList<Seq<O, M, C>>>
-    : tl_cat<TypeList<section_entry_t<G>>, section_ignore_t<G>,
+    : tl_cat<TypeList<section_entry_t<G>>, section_ignored_t<G>,
              section_hidden_t<G>, refs_t<O>, refs_t<C>> {};
 // A region's configuration names rules: they are reachable through it.
 template <class I, class H, class E>
@@ -133,7 +134,7 @@ struct as_declared<TypeList<Rs...>> {
 template <class S>
 struct roots
     : dedupe<tl_cat_t<TypeList<declared_of_t<typename S::entry>>,
-                      typename as_declared<typename S::ignore>::type,
+                      typename as_declared<typename S::ignored>::type,
                       typename as_declared<typename S::hidden>::type>> {};
 template <class S>
 using reached_all_t =
@@ -155,6 +156,14 @@ struct visible_rules<TypeList<Rs...>>
 
 template <class S>
 using reached_t = typename visible_rules<reached_all_t<S>>::type;
+
+// The same rules, named by `S` alone. A stage takes its rules through this
+// name, so the list is spelled neither in the stage's name nor in the name of
+// anything keyed on the stage: every row, check and rule it reads.
+template <class S>
+struct reached_of {
+  using type = reached_t<S>;
+};
 
 // An inline terminal a condition names is spelled in place, unless captures
 // keep its call: a call names a terminal.
@@ -185,12 +194,53 @@ struct predicate_rules<S, TypeList<Rs...>>
 template <class S>
 using predicate_only_t = typename predicate_rules<S, reached_all_t<S>>::type;
 
+// A rule a grammar declares derives from its kind; one spelled directly is
+// the kind itself.
+template <auto Body, class... Opts>
+std::true_type declares_rule(const Rule<Body, Opts...>*);
+std::false_type declares_rule(const void*);
+
+// A body that reads one token: a word, a terminal, or a choice of those, each
+// alternative under its own `as` or not.
+template <class S, class E>
+inline constexpr bool reads_token = word_of<E>;
+template <class S, class... Es>
+inline constexpr bool reads_token<S, Choice<Es...>> = (reads_token<S, Es> && ...);
+template <class S, class R>
+inline constexpr bool reads_token<S, Ref<R>> =
+    is_terminal_rule<typename S::template rule<declared_of_t<R>>>;
+template <class S, auto Body, class C>
+inline constexpr bool reads_token<S, Ref<Rule<Body, C>>> =
+    reads_token<S, std::remove_cv_t<decltype(Body)>>;
+
+// A rule never called, its body read where it is named, the conversion riding
+// the record of what that reads: the inline data rule an `as<X>(e)` stands
+// for, and a declared data rule that reads one token and gives it a value --
+// a converter of its own, or an `as` per alternative. A rule that keeps the
+// token's text keeps its call: two of them reading one token, offered side by
+// side, are two readings a call tells apart.
+template <class S, class R,
+          class RR = typename S::template rule<declared_of_t<R>>>
+inline constexpr bool read_in_place = false;
+template <class S, class R, auto Body, class C>
+inline constexpr bool read_in_place<S, R, Rule<Body, C>> = true;
+template <class S, class R, class RR>
+  requires(decltype(declares_rule(static_cast<const RR*>(nullptr)))::value &&
+           !is_anonymous_rule<RR> && is_data_rule<RR>)
+inline constexpr bool read_in_place<S, R, RR> =
+    reads_token<S, std::remove_cv_t<body_of<S, R>>> &&
+    (!slot_empty<RR> || !std::is_void_v<converter_rule_t<RR>>);
+
+// The terminals, or the other rules but those read in place: they name no
+// symbol.
+template <class S, class R, bool Term,
+          class RR = typename S::template rule<declared_of_t<R>>>
+inline constexpr bool sifted =
+    is_terminal_rule<RR> == Term && !read_in_place<S, R>;
 template <class S, class L, bool Term>
 struct sift;
 template <class S, class... Rs, bool Term>
 struct sift<S, TypeList<Rs...>, Term>
-    : tl_cat<cond_t<is_terminal_rule<
-                        typename S::template rule<declared_of_t<Rs>>> == Term,
-                    TypeList<Rs>, TypeList<>>...> {};
+    : tl_cat<cond_t<sifted<S, Rs, Term>, TypeList<Rs>, TypeList<>>...> {};
 
 }  // namespace cursiv::detail

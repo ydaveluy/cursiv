@@ -29,7 +29,21 @@ NodeId lr_roof_forest(CstRun& stream, NodeId root, ElementId entryRow) {
     return false;
   };
   const bool after = orphan(root + 1, records);
-  if (!orphan(0, lo) && !after) return root;
+  if (!orphan(0, lo) && !after) {
+    // What a repair dropped before the first token or after the last is the
+    // document's text: the root takes it, though not the trivia around it.
+    NodeId first = 0;
+    while (first < lo && stream.at(first).hidden) ++first;
+    NodeId last = records;
+    while (last > root + 1 && stream.at(last - 1).hidden) --last;
+    CstNode r = stream.at(root);
+    if (first < lo) r.begin = stream.at(first).begin;
+    for (NodeId i = root; i + 1 < last; ++i) stream.at(i) = stream.at(i + 1);
+    if (last > root + 1) r.end = stream.at(last - 2).end;
+    r.subtreeSize = last - first;
+    stream.at(last - 1) = r;
+    return last - 1;
+  }
   // A root that names the document already is the one node over it: a second
   // would leave the first one's text out of the tree. Its own record takes
   // what stands before it; one it shares with other nodes is roofed bare.

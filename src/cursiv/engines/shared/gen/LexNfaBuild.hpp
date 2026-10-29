@@ -46,7 +46,7 @@ struct LexNfaBuild {
       for (unsigned i = 0; i < e.b; ++i) out |= tiers_of(g.lexKid[e.a + i]);
       return out;
     }
-    if (const auto own = LexKeywordCut::branches(g, node); own.any && own.all)
+    if (const auto own = LexKeywordCut::shape(g, node); own.any && own.all)
       return kKeyword;
     if (e.kind != LexKind::seq) return kPattern;
     if (e.min == 1) return kLiteral;
@@ -61,24 +61,24 @@ struct LexNfaBuild {
     return core == 1 ? tiers_of(only) : kPattern;
   }
 
-  // The classes a node can end on, for the fence in front of a mark: the byte
-  // before a run must break its class.
-  bool last_sets(std::uint16_t node, std::vector<std::uint16_t>& sets) {
+  // Whether every class a node can end on breaks `run`, for the fence in
+  // front of a mark: the byte before a run must break its class. False where
+  // a class it ends on is not known.
+  bool ends_apart(std::uint16_t node, const ByteSet& run) const {
     const LexNode& e = g.lex[node];
     switch (e.kind) {
       case LexKind::chars:
-        sets.push_back(e.a);
-        return true;
+        return !g.sets[e.a].intersects(run);
       case LexKind::seq:
         for (unsigned i = e.b; i-- > 0;) {
           const std::uint16_t kid = g.lexKid[e.a + i];
           if (g.lex[kid].kind == LexKind::nguard) continue;
-          return last_sets(kid, sets);
+          return ends_apart(kid, run);
         }
         return false;
       case LexKind::alt:
         for (unsigned i = 0; i < e.b; ++i)
-          if (!last_sets(g.lexKid[e.a + i], sets)) return false;
+          if (!ends_apart(g.lexKid[e.a + i], run)) return false;
         return true;
       default:
         return false;
@@ -102,19 +102,16 @@ struct LexNfaBuild {
     if (run.kind != LexKind::rep || g.lex[run.a].kind != LexKind::chars)
       return false;
     const auto markSet = g.lex[run.a].a;
-    std::string fence;
-    if (!LexRelayGen::literal(g, g.lexKid[q.a + at + 1], fence)) return false;
-    std::vector<std::uint16_t> last;
-    if (!last_sets(g.lexKid[q.a + at - 1], last)) return false;
-    for (const auto set : last)
-      if (g.sets[set].intersects(g.sets[markSet])) return false;
+    const auto fence = LexRelayGen::literal_size(g, g.lexKid[q.a + at + 1]);
+    if (!fence) return false;
+    if (!ends_apart(g.lexKid[q.a + at - 1], g.sets[markSet])) return false;
     if ((before != kNoLexNode &&
          !LexRelayGen::literal(g, before, shape.before)) ||
         (after != kNoLexNode && !LexRelayGen::literal(g, after, shape.after)))
       return false;
     auto& row = shape.relay.row;
     row.markSet = markSet;
-    row.fence = static_cast<std::uint16_t>(fence.size());
+    row.fence = static_cast<std::uint16_t>(*fence);
     if (pad != kNoLexNode) {
       const LexNode& p = g.lex[pad];
       if (before == kNoLexNode || p.kind != LexKind::rep ||
@@ -192,6 +189,10 @@ struct LexNfaBuild {
     r.row.afterLen = static_cast<std::uint16_t>(after.size());
     r.row.several = several;
     r.row.eof = eof;
+    if (!several) {
+      r.open = o.front();
+      r.close = c.front();
+    }
     return lex_push_relay(n, r, resumeOut);
   }
 
@@ -439,7 +440,7 @@ struct LexNfaBuild {
         const LexNode& e = g.lex[at];
         switch (e.kind) {
           case LexKind::call:
-            callsHere.push_back(e.a);
+            callsHere.push_back(lex_callee(g, e));
             return;
           case LexKind::mark:
             walkSelf(walkSelf, e.a, marks);
@@ -624,9 +625,7 @@ struct LexNfaBuild {
           if (nativeGuards && !crossing) {
             for (const int at : n.eclose(out))
               if (n.s[static_cast<std::size_t>(at)].relay >= 0 ||
-                  std::ranges::any_of(n.guards, [&](const LexNfaGuard& guard) {
-                    return guard.hole == at;
-                  }))
+                  n.s[static_cast<std::size_t>(at)].guard >= 0)
                 crossing = true;
           }
           if (!crossing) return n.guard(node, out);

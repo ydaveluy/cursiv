@@ -1,5 +1,7 @@
 #include "cursiv/engines/ll/gen/LlLowerer.hpp"
 
+#include <algorithm>
+
 #include "cursiv/engines/ll/gen/LlRecordPlan.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 
@@ -75,15 +77,24 @@ ImageId LlLowerer::ended_in(ImageId id, bool inPredicate) {
   return out;
 }
 
-ImageId LlLowerer::operator_body(unsigned cfg, ImageId op) {
+// An operator reads its rules in place, except a rule it reaches again inside
+// its own body: that one stays a call.
+ImageId LlLowerer::operator_body(unsigned cfg, ImageId op,
+                                 std::vector<std::uint32_t>& reading) {
   const ImageNode n = at(op);
   switch (n.kind) {
-    case ImageKind::ref:
-      if (terminal_rule(n.a)) return op;
-      return operator_body(cfg, body_in(cfg, n.a));
+    case ImageKind::ref: {
+      if (terminal_rule(n.a) || std::ranges::count(reading, n.a) != 0)
+        return op;
+      reading.push_back(n.a);
+      const ImageId body = operator_body(cfg, body_in(cfg, n.a), reading);
+      reading.pop_back();
+      return body;
+    }
     case ImageKind::seq:
     case ImageKind::choice:
-      return map_kids(op, [&](ImageId k) { return operator_body(cfg, k); });
+      return map_kids(
+          op, [&](ImageId k) { return operator_body(cfg, k, reading); });
     default:
       return op;
   }
@@ -99,7 +110,8 @@ void LlLowerer::emit_op(unsigned cfg, ImageId op, const void* opRow,
   const std::uint32_t opRule = op_rule_of(op);
   const bool buildsNode =
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
-  const std::uint16_t laid = lay(cfg, operator_body(cfg, op));
+  std::vector<std::uint32_t> reading;
+  const std::uint16_t laid = lay(cfg, operator_body(cfg, op, reading));
   const auto atomic = [&](const auto& self, std::uint16_t id) -> bool {
     const Node& n = _p.e[id];
     if (n.kind == Shape::sym) return is_term(n.sym);
@@ -221,7 +233,6 @@ void LlLowerer::note_nests() {
 
 LlLowered LlLowerer::run() {
   index();
-  _o.cfg.optionalGate = _d.optionalGate;
   _lex.declare_word(_d.bound);
   const std::uint32_t entry = _im.rule(*_d.entry);
   _cfg.entryRule = static_cast<std::uint16_t>(1 + _ntIdx.at(entry));

@@ -27,7 +27,7 @@ struct MessageG : cursiv::GrammarSpec {
   struct Choice : rule<create<Sum>(ref<ExprRule> + lit<";">)> {};
   struct Root : rule<ref<Tight> | ref<Choice>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tmsg

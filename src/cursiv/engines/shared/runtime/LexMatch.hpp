@@ -44,6 +44,9 @@ CURSIV_ALWAYS_INLINE inline bool lex_bound_refuses(const Ad& ad,
 struct LexMatch {
   TextOffset end;
   SymbolId term;
+  // The state the match was read in, so a reading ranked against it need not
+  // walk the token again.
+  std::uint16_t state = kDeadState;
 
   // Reads state `st` at `i`; `far` covers what a boundary decoded past `i`.
   template <class Ad>
@@ -67,7 +70,9 @@ struct LexMatch {
     }
     end = i;
     term = t;
+    state = st;
   }
 };
+static_assert(sizeof(LexMatch) == 8, "the state fills the padding");
 
 }  // namespace cursiv

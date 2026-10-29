@@ -25,19 +25,30 @@ DefaultReferenceDescriptionProvider::createDescriptions(
   // One row per resolved target and not one per reference: a multi reference
   // names its whole overload set, and the inverse table groups rows by target
   // -- so a reference described only through its first target would be
-  // invisible when asked from any other member of the set.
+  // invisible when asked from any other member of the set. Two targets built
+  // on one CST record share their symbol and draw one row.
+  const auto drawn = [&rows](const ReferenceDescription& row) {
+    // A reference's targets are visited in a run: its rows are at the back.
+    for (auto it = rows.rbegin();
+         it != rows.rend() && it->sourceBegin == row.sourceBegin &&
+         it->sourceEnd == row.sourceEnd;
+         ++it)
+      if (*it == row) return true;
+    return false;
+  };
   references->visitResolved(cst, [&](TextOffset begin, TextOffset end,
                                      const AstNode& target, bool multi) {
     throw_if_cancelled(cancelToken);
     const Document* const home = target.getDocument();
-    rows.push_back(
-        {.sourceDocumentId = document.id,
-         .sourceBegin = begin,
-         .sourceEnd = end,
-         .targetDocumentId = home == nullptr ? kNoDocument : home->id,
-         .targetSymbolId = target.cstNodeId,
-         .local = home == &document,
-         .multiReference = multi});
+    const ReferenceDescription row{
+        .sourceDocumentId = document.id,
+        .sourceBegin = begin,
+        .sourceEnd = end,
+        .targetDocumentId = home == nullptr ? kNoDocument : home->id,
+        .targetSymbolId = target.cstNodeId,
+        .local = home == &document,
+        .multiReference = multi};
+    if (!drawn(row)) rows.push_back(row);
   });
 
   // Only what resolved is described: a reference pointing nowhere puts no

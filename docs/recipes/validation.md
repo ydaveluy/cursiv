@@ -1,39 +1,22 @@
 # Custom validation
 
-A validation check is a method registered for an AST type. This example uses
+A validation check is a method registered for an AST type. This recipe uses
 the Recipe language from the [tutorial](../learn/walkthrough.md).
 
 ## Write it
 
-`src/recipe/core/validation/RecipeValidator.hpp`:
+Declare the check in your validator class, here the tutorial's
+`RecipeValidator`:
 
-```cpp
-#pragma once
-
-#include "cursiv/core/services/DefaultCoreService.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "recipe/core/ast.hpp"
-
-namespace recipe {
-
-class RecipeValidator final : public cursiv::DefaultCoreService {
- public:
-  using cursiv::DefaultCoreService::DefaultCoreService;
-
-  void checkNoDuplicateUse(const ast::Recipe& recipe,
-                           cursiv::ValidationAcceptor& accept) const;
-};
-
-}  // namespace recipe
+```cpp title="src/recipe/core/validation/RecipeValidator.hpp"
+void checkNoDuplicateUse(const ast::Recipe& recipe,
+                         cursiv::ValidationAcceptor& accept) const;
 ```
 
-The first parameter is what keys the check: this one runs on every `Recipe`
-node and on no other. You do not walk the tree — the framework visits, and
-calls what matches.
+The type of the first parameter selects the nodes: this check runs on every
+`Recipe` node. You do not walk the tree yourself.
 
-`src/recipe/core/validation/RecipeValidator.cpp`:
-
-```cpp
+```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
 #include "recipe/core/validation/RecipeValidator.hpp"
 
 #include <unordered_set>
@@ -57,9 +40,9 @@ void RecipeValidator::checkNoDuplicateUse(
 
 ## Choose the diagnostic range
 
-`accept.error(node, message)` underlines the **node's** span — the whole `use`
-line here. `.property<&ast::Use::ingredient>()` moves it to where that member
-was written, which is almost always what an author wants:
+`accept.error(node, message)` underlines the whole node.
+`.property<&ast::Use::ingredient>()` underlines only that member, which is
+usually what the author needs:
 
 ```
   use Flour 200
@@ -67,45 +50,45 @@ was written, which is almost always what an author wants:
   ^^^^^^^^^^^^^  without
 ```
 
-`accept.warning(...)`, `accept.information(...)` and `accept.hint(...)` are the
-other severities, and all four take the same continuation. Each also has an
-overload taking a `TextRange` instead of a node, for a span you computed.
+`accept.warning`, `accept.information` and `accept.hint` work the same way.
+Each also accepts a `TextRange` instead of a node.
 
 ## Register it
 
-In `CoreModule.cpp`, include `RecipeValidator.hpp` and add this function inside
-`namespace recipe`. Call it after installing the generated module:
+The scaffold's `register_validation_checks`, in the validator's `.cpp` file,
+lists the checks. Add yours to the list:
 
-`src/recipe/core/CoreModule.cpp`:
-
-```cpp
-void register_validation_checks(RecipeCoreServices& services) {
-  using V = RecipeValidator;
-  services.validator = std::make_unique<const V>(services);
-  const V& validator = *services.validator;
-  services.validationRegistry->registerChecks(
-      {cursiv::ValidationRegistry::makeValidationCheck<&V::checkNoDuplicateUse>(
-           validator)});
-}
+```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
+services.validationRegistry->registerChecks(
+    {cursiv::ValidationRegistry::makeValidationCheck<&V::checkNoDuplicateUse>(
+        *services.validator)});
 ```
 
-The validator passed to `makeValidationCheck` must outlive the registry.
+The validator must outlive the registry; the scaffold keeps it in
+`services.validator`.
 
 ## What belongs here, and what does not
 
-A check is for **what the grammar accepts but the language does not**: a naming
-convention, a duplicate, a fact no single node can see, a constraint between
-two declarations.
+A check is for what the grammar accepts but the language forbids: a naming
+convention, a duplicate, a constraint between two declarations. If a
+construct is never legal, refuse it in the grammar instead: the parser then
+reports a syntax error and recovers.
 
-It is not for what the grammar can refuse on its own. If a construct is never
-legal, spell that in the grammar and get a syntax error with recovery, rather
-than a clean parse followed by a diagnostic.
+Reserved words are the exception. Keywords are contextual, so
+`ingredient recipe in gram` parses with `recipe` as the name. To reserve a
+word, keep the grammar permissive and report the name in a check:
 
-Nor is it for unresolved references — the linker already reports those:
-
+```cpp
+void RecipeValidator::checkNameNotReserved(
+    const ast::Ingredient& ingredient,
+    cursiv::ValidationAcceptor& accept) const {
+  if (ingredient.name == "recipe" || ingredient.name == "use")
+    accept.error(ingredient, "This name is a reserved word.")
+        .property<&ast::Ingredient::name>();
+}
 ```
-a.recipe:9:7: error: Could not resolve reference to Ingredient named 'Sugar'. [recipe:linking-error]
-```
+
+Unresolved references need no check: the linker already reports them.
 
 ## Check the check
 
@@ -118,5 +101,5 @@ ct::expectError(result, "This ingredient is already used in this recipe.");
 result.dispose();
 ```
 
-Also check a valid document with `ct::expectNoIssues(result)`. See
-[Test your language](../learn/testing.md) for the setup and both cases.
+Also check that a valid document passes, with `ct::expectNoIssues(result)`.
+See [Test your language](../learn/testing.md) for the setup.

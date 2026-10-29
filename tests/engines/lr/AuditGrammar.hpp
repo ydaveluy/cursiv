@@ -46,27 +46,24 @@ struct G : cursiv::GrammarSpec {
   struct Empty : rule<option(lit<"e">)> {};
   struct Leaf : rule<create<Doc>(lit<"n">)> {};
   struct Tree : rule<create<Doc>(assign<&Doc::child>(ref<Leaf>))> {};
-  struct Converted : terminal<lit<"j">, cursiv::text_conv<Overloaded{}>> {};
+  struct Converted : terminal<as<Overloaded{}>(lit<"j">)> {};
   struct Joined : rule<ref<Converted> + ref<Converted>> {};
   struct Single : rule<ref<Converted> + option(lit<"!">)> {};
-  struct Part : terminal<lit<"part">, cursiv::parts_conv<[](
-      std::span<const std::string_view> parts) {
+  struct Part : terminal<as<[](std::span<const std::string_view> parts) {
     ++conversions;
     return parts.size() == 1 && parts[0] == "part"
       ? std::string_view{"converted part"} : std::string_view{"wrong"};
-  }>> {};
+  }>(lit<"part">)> {};
   struct PartJoined : rule<ref<Part> + option(lit<"!">)> {};
-  struct Wrapped : rule<ref<Converted> + option(lit<"!">),
-      cursiv::text_conv<[](std::string_view s) {
-        return s == "1" ? std::string_view{"wrapped"} : std::string_view{"wrong"};
-      }>> {};
-  struct Constant : terminal<lit<"k">, cursiv::text_conv<[] {
-    return std::string_view{"constant"};
-  }>> {};
+  struct Wrapped : rule<as<[](std::string_view s) {
+    return s == "1" ? std::string_view{"wrapped"} : std::string_view{"wrong"};
+  }>(ref<Converted> + option(lit<"!">))> {};
+  struct Constant
+      : terminal<as<[] { return std::string_view{"constant"}; }>(lit<"k">)> {};
   struct Constants : rule<ref<Constant> + ref<Constant>> {};
-  struct Failed : terminal<lit<"bad">, cursiv::text_conv<[] {
+  struct Failed : terminal<as<[] {
     return cursiv::ConversionResult<std::string_view>::err("bad part");
-  }>> {};
+  }>(lit<"bad">)> {};
   struct Failure : rule<ref<Failed> + ref<Failed>> {};
   struct SingleFailure : rule<ref<Failed> + option(lit<"!">)> {};
   struct Band : rule<lit<"("> + assign<&Doc::text>(ref<WS>) + lit<")">> {};
@@ -106,7 +103,7 @@ struct G : cursiv::GrammarSpec {
             flag<&Doc::flagged>(ikw<"FLAG">.doc<"flag documentation">()) |
             lit<"a\0b">.doc<"binary literal">())> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = Hidden;
 };
 }  // namespace taudit

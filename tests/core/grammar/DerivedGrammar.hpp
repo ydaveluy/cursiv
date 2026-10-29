@@ -33,7 +33,7 @@ struct Base : cursiv::GrammarSpec {
                        many(append<&ast::Doc::items>(ref<IN> | ref<NUM>)))> {};
 
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tguard
@@ -59,7 +59,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\r\n)">)> {};
   struct ID : terminal<cr<"a-z"> + many(cr<"a-z0-9">)> {};
-  struct NUM : terminal<some(d), double> {};
+  struct NUM : terminal<as<double>(some(d))> {};
   struct KW : terminal<kw<"let">> {};
 
   struct ItemRule : rule<!ref<KW> + assign<&ast::Item::name>(ref<ID>) +
@@ -68,11 +68,11 @@ struct Base : cursiv::GrammarSpec {
   struct Entry
       : rule<ref<DocRule> |
              (lit<"guard:"> +
-              skip(ignored<tguard::Base::WS>, hide<>,
+              skip(ignore<tguard::Base::WS>, hide<>,
                    ref<tguard::Base::DocRule> + eof))> {};
 
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 inline constexpr auto hex_or_dec = [](std::string_view t) {
@@ -92,8 +92,8 @@ struct Dialect : cursiv::extends<Base> {
 
   template <class T>
     requires std::same_as<T, Base::NUM>
-  struct override<T> : terminal<(lit<"0x"> + some(cr<"0-9a-f">)) | some(d),
-                                cursiv::text_conv<hex_or_dec>> {};
+  struct override<T>
+      : terminal<as<hex_or_dec>((lit<"0x"> + some(cr<"0-9a-f">)) | some(d))> {};
 
   template <class T>
     requires std::same_as<T, Base::KW>
@@ -145,14 +145,13 @@ inline constexpr auto drop_two = [](std::string_view t) { return t.substr(2); };
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct WORD
-      : terminal<lit<"@"> + some(cr<"a-z@">), cursiv::text_conv<drop_one>> {};
+  struct WORD : terminal<as<drop_one>(lit<"@"> + some(cr<"a-z@">))> {};
   struct Path : rule<ref<WORD> + lit<"."> + ref<WORD>> {};
   struct DocRule
       : rule<create<ast::Doc>(many(append<&ast::Doc::paths>(ref<Path>)))> {};
 
   using entry = DocRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Dialect : cursiv::extends<Base> {
@@ -161,8 +160,7 @@ struct Dialect : cursiv::extends<Base> {
 
   template <class T>
     requires std::same_as<T, Base::WORD>
-  struct override<T>
-      : terminal<lit<"@@"> + some(cr<"a-z">), cursiv::text_conv<drop_two>> {};
+  struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
 };
 
 struct BaseLl : Base {};
@@ -173,8 +171,7 @@ struct DialectLl : cursiv::extends<BaseLl> {
 
   template <class T>
     requires std::same_as<T, Base::WORD>
-  struct override<T>
-      : terminal<lit<"@@"> + some(cr<"a-z">), cursiv::text_conv<drop_two>> {};
+  struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
 };
 
 }  // namespace ttext

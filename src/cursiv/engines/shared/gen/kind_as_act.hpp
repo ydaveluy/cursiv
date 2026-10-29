@@ -1,5 +1,5 @@
-// The kind a record answers the enclosing region with: a new `WriteKind` is a
-// compile error here, for both engines.
+// The kind a record answers the enclosing region with: the switch names every
+// `WriteKind`, so a new one is a -Wswitch diagnostic here, for both engines.
 #pragma once
 
 #include "cursiv/core/syntax-tree/AstField.hpp"
@@ -7,7 +7,7 @@
 
 namespace cursiv {
 
-consteval ActKind kind_as_act(WriteKind k) {
+constexpr ActKind kind_as_act(WriteKind k) {
   switch (k) {
     case WriteKind::create:
     case WriteKind::close:
@@ -22,10 +22,9 @@ consteval ActKind kind_as_act(WriteKind k) {
     case WriteKind::flag:
       return ActKind::flag;
     case WriteKind::convert:
-      return ActKind::none;
+      break;
   }
+  return ActKind::none;
 }
-template <WriteKind K>
-inline constexpr ActKind kKindAsAct = kind_as_act(K);
 
 }  // namespace cursiv

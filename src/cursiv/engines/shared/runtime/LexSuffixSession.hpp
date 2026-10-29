@@ -1,6 +1,8 @@
-// Predicate searches of one immutable document share their DFA suffixes.
+// Lexical searches of one immutable document share their DFA suffixes.
 // A suffix belongs to its state and text position, including the boundaries
-// it inspected. Token-head refusals and echoing relays still use the matcher.
+// it inspected. Echoing relays, and a mode that reads a refusing terminal,
+// still use the matcher. The conditions read over the document share the
+// rounds of their runs.
 #pragma once
 
 #include <algorithm>
@@ -11,7 +13,9 @@
 #include <vector>
 
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/shared/runtime/LexMatch.hpp"
+#include "cursiv/engines/shared/runtime/PredicateRuns.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
@@ -27,28 +31,96 @@ class LexSuffixSession {
   LexSuffixSession(const LexSuffixSession&) = delete;
   LexSuffixSession& operator=(const LexSuffixSession&) = delete;
 
+  // Whether walks of `mode` share suffixes. A refusal answers for its
+  // token's head, which a suffix does not see: in a table that refuses words,
+  // only the modes the generator marks share them (`LexBacktrack.hpp`).
+  static bool shares(const Tape& tape, std::uint16_t mode) {
+    if constexpr (Tape::kRefuses)
+      return tape.backtracks(mode);
+    else
+      return true;
+  }
+
   // Other buffers and shorter views (a section's second reading) fall back.
   template <class Fallback>
   static Scan match(const Tape& tape, const char* src, TextOffset len,
                     std::uint16_t mode, TextOffset from, TextOffset* seen,
                     Fallback&& fallback) {
-    if constexpr (Tape::kRefuses) {
+    LexSuffixSession* const session = active();
+    if (session == nullptr || src != session->_src || len != session->_len ||
+        !shares(tape, mode))
       return fallback();
-    } else {
-      LexSuffixSession* const session = active();
-      if (session == nullptr || src != session->_src || len != session->_len)
-        return fallback();
-      if (!session->_cache) session->_cache.emplace();
-      Scan out{from, kInvalidSymbol};
-      TextOffset halt = from;
-      if (!session->_cache->match(tape, src, len, mode, from, out, halt))
-        return fallback();
-      if (seen) *seen = std::max(*seen, halt < len ? halt + 1 : len);
-      return out;
-    }
+    if (!session->_cache) session->_cache.emplace();
+    Scan out{from, kInvalidSymbol};
+    TextOffset halt = from;
+    if (!session->_cache->match(tape, src, len, tape.start(mode), from, out,
+                                halt))
+      return fallback();
+    if (seen) *seen = std::max(*seen, halt < len ? halt + 1 : len);
+    return out;
+  }
+
+  // The answers of the conditions' runs over this document; none for any
+  // other text.
+  static PredicateRuns* runs(const char* src, TextOffset len) {
+    LexSuffixSession* const session = active();
+    return session != nullptr && src == session->_src && len == session->_len
+               ? &session->_runs
+               : nullptr;
+  }
+
+  struct Continued {
+    Scan best;
+    TextOffset halt = 0;
+    bool available = false;
+  };
+
+  CURSIV_ALWAYS_INLINE static bool has_backtracked() {
+    const auto* session = active();
+    return session != nullptr && session->_backtracking;
+  }
+
+  // Generated walks ask only where they enter a cycle that may leave a long
+  // unmatched tail. Returning by value keeps the fast walk's locals in
+  // registers; a token that never enters such a state makes no cache call.
+  CURSIV_NOINLINE static Continued continue_at(
+      Tape tape, const char* src, TextOffset len, std::uint16_t state,
+      TextOffset at) {
+    LexSuffixSession* const session = active();
+    if (session == nullptr || !session->_backtracking ||
+        src != session->_src || len != session->_len)
+      return {};
+    Continued out;
+    out.best.end = at;
+    out.halt = at;
+    out.available = session->_cache->match(tape, src, len, state, at,
+                                           out.best, out.halt);
+    return out;
+  }
+
+  CURSIV_NOINLINE static Scan finish(
+      Tape tape, const char* src, TextOffset len, std::uint16_t state,
+      TextOffset from, TextOffset halt, Scan out) {
+    if (halt > out.end && halt - out.end > kBacktrack)
+      remember(tape, src, len, state, from);
+    return out;
   }
 
  private:
+  static constexpr TextOffset kBacktrack = 64;
+  CURSIV_NOINLINE static void remember(Tape tape, const char* src,
+                                       TextOffset len, std::uint16_t state,
+                                       TextOffset from) {
+    LexSuffixSession* const session = active();
+    if (session == nullptr || src != session->_src || len != session->_len)
+      return;
+    if (!session->_cache) session->_cache.emplace();
+    Scan out{from, kInvalidSymbol};
+    TextOffset halt = from;
+    if (session->_cache->match(tape, src, len, state, from, out, halt))
+      session->_backtracking = true;
+  }
+
   struct Answer {
     // An invalid match has no endpoint: it must not replace the caller's
     // earlier acceptance or change the start of a wholly failed walk.
@@ -70,9 +142,8 @@ class LexSuffixSession {
     std::vector<Stood> path;
 
     bool match(const Tape& tape, const char* src, TextOffset len,
-               std::uint16_t mode, TextOffset from, Scan& out,
+               std::uint16_t state, TextOffset from, Scan& out,
                TextOffset& halt) {
-      auto state = tape.start(mode);
       TextOffset at = from;
       Answer head, tail;
       path.clear();
@@ -125,7 +196,9 @@ class LexSuffixSession {
   const char* _src;
   TextOffset _len;
   LexSuffixSession* _previous;
+  bool _backtracking = false;
   std::optional<Cache> _cache;
+  PredicateRuns _runs;
 };
 
 }  // namespace cursiv

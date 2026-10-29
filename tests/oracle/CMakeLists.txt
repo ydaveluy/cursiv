@@ -4,7 +4,7 @@
 
 add_library(rgramOracle STATIC RgramGrammar.cpp RgramCfg.cpp rgram_lane.cpp)
 target_include_directories(rgramOracle PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(rgramOracle PUBLIC cursiv::core)
+target_link_libraries(rgramOracle PUBLIC cursiv::test)
 
 add_executable(rgram_write rgram_write.cpp)
 target_link_libraries(rgram_write PRIVATE rgramOracle)
@@ -36,20 +36,19 @@ function(cursiv_rgram seed)
               -P ${CMAKE_CURRENT_SOURCE_DIR}/rgram_generate.cmake
       DEPENDS ${id}_gen ${CMAKE_CURRENT_SOURCE_DIR}/rgram_generate.cmake
       COMMENT "${id}: generating its parser")
-  # A unit compiles to nothing where the grammar was refused, so each one
-  # recompiles after every run of the generator.
-  file(CONFIGURE OUTPUT ${own}/check.cpp
-       CONTENT "#include \"${CMAKE_CURRENT_SOURCE_DIR}/rgram_check.cpp\"\n")
-  set(units ${own}/check.cpp)
+  # The generated code and checker share one unit, empty of parser code when
+  # the grammar was refused. Recompile it after every generator run.
+  set(source "")
   foreach(unit ParserStates AstReflection Grammar Module)
     set(inc "${id}/generated/G/${unit}.cpp")
-    file(CONFIGURE OUTPUT ${own}/${unit}.cpp CONTENT
-         "#if __has_include(\"${inc}\")\n#include \"${inc}\"\n#endif\n")
-    list(APPEND units ${own}/${unit}.cpp)
+    string(APPEND source
+        "#if __has_include(\"${inc}\")\n#include \"${inc}\"\n#endif\n")
   endforeach()
-  set_source_files_properties(${units} PROPERTIES
+  string(APPEND source "#include \"${CMAKE_CURRENT_SOURCE_DIR}/rgram_check.cpp\"\n")
+  file(CONFIGURE OUTPUT ${own}/check.cpp CONTENT "${source}")
+  set_source_files_properties(${own}/check.cpp PROPERTIES
       OBJECT_DEPENDS ${own}/generated.stamp)
-  add_executable(${id}_check ${units})
+  add_executable(${id}_check ${own}/check.cpp)
   target_include_directories(${id}_check PRIVATE ${root})
   target_compile_definitions(${id}_check PRIVATE
       RGRAM_SEED=${seed} RGRAM_NS=${id}

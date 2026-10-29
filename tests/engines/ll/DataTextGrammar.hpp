@@ -19,7 +19,6 @@ inline constexpr auto untick = [](std::string_view text) {
   ++untickCalls;
   return text.substr(1, text.size() - 2);
 };
-using Unticked = cursiv::text_conv<untick>;
 inline constexpr auto prefix = [](std::string_view text,
                                   std::pmr::memory_resource* memory) {
   const auto room = cursiv::text_room(memory, text.size() + 1);
@@ -27,24 +26,22 @@ inline constexpr auto prefix = [](std::string_view text,
   std::copy(text.begin(), text.end(), room.begin() + 1);
   return std::string_view(room.data(), room.size());
 };
-using Prefixed = cursiv::text_conv<prefix>;
 inline constexpr auto refuseZ = [](std::string_view text) {
   using Result = cursiv::ConversionResult<std::string_view>;
   return text.find('z') == std::string_view::npos ? Result::ok(text)
                                                   : Result::err("no z");
 };
-using RefusesZ = cursiv::text_conv<refuseZ>;
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(w)> {};
-  struct QUOTED : terminal<through(lit<"`">, lit<"`">), Unticked> {};
-  struct CHECKED : terminal<lit<"!"> + some(w), RefusesZ> {};
+  struct QUOTED : terminal<as<untick>(through(lit<"`">, lit<"`">))> {};
+  struct CHECKED : terminal<as<refuseZ>(lit<"!"> + some(w))> {};
   struct Symbol : rule<ref<QUOTED> | ref<ID>> {};
   struct Forward : rule<ref<Symbol>> {};
   struct Path : rule<ref<Symbol> + lit<"."> + ref<Symbol>> {};
-  struct Converted : rule<ref<Symbol>, Prefixed> {};
-  struct Literal : rule<lit<"literal">, Prefixed> {};
+  struct Converted : rule<as<tlldatatext::prefix>(ref<Symbol>)> {};
+  struct Literal : rule<as<tlldatatext::prefix>(lit<"literal">)> {};
   struct ForwardConverted : rule<ref<Converted>> {};
   struct ConvertedPath : rule<ref<Converted> + lit<"."> + ref<Converted>> {};
   struct CheckedPath : rule<ref<CHECKED> + lit<"."> + ref<Symbol>> {};
@@ -63,7 +60,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root
       : rule<many(append<&Document::values>(ref<Item>) + lit<";">) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

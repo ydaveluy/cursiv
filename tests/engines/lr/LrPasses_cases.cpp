@@ -34,11 +34,11 @@ const cursiv::Parser& passes() {
 }
 
 bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(text));
+  const cursiv::ParseResult r = p.parse(text);
   return r.accepted && r.diagnostics.empty() && r.value != nullptr;
 }
 bool repaired(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(text));
+  const cursiv::ParseResult r = p.parse(text);
   return r.accepted && !r.diagnostics.empty();
 }
 
@@ -109,10 +109,11 @@ void a_peek_never_crosses_a_lex_mode() {
     bool id = false, in = false;
     for (const auto& feature : next) {
       const auto name = p->getGrammar().terminalName(feature.feature);
-      const auto spelling = p->getGrammar().terminalText(feature.feature);
+      const auto spellings = p->getGrammar().terminalSpellings(feature.feature);
+      const bool spellsIn = spellings.size() == 1 && spellings.front() == "in";
       id = id || name == "ID";
-      in = in || spelling == "in";
-      CHECK(name == "ID" || spelling == "in");
+      in = in || spellsIn;
+      CHECK(name == "ID" || spellsIn);
     }
     CHECK(id && in);
   }

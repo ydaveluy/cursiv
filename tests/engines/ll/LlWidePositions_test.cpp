@@ -68,11 +68,6 @@ constexpr auto kAfter = [] {
   for (std::uint32_t i = 0; i < after.size(); ++i) after[i] = i + 1;
   return after;
 }();
-constexpr auto kModes = [] {
-  std::array<std::uint16_t, kPositions> modes{};
-  modes.fill(kLexer.errMode);
-  return modes;
-}();
 constexpr auto kEdgeNodes = [] {
   std::array<std::uint16_t, kPositions> nodes{};
   for (std::uint16_t i = 0; i < nodes.size(); ++i) nodes[i] = i;
@@ -90,7 +85,6 @@ constexpr auto kTable = [] {
   auto table = kLexer;
   table.nodes = kNodes.data();
   table.nodeAfter = kAfter.data();
-  table.nodeAfterMode = kModes.data();
   table.nodeAfterGap = nullptr;
   table.nafter = kPositions;
   table.edgeNode = kEdgeNodes.data();
@@ -111,8 +105,11 @@ std::vector<std::string> offered(const cursiv::StampedGrammar& grammar,
   const auto where = static_cast<cursiv::TextOffset>(at);
   cursiv::ll_next_features_at<kTable>(grammar, tree, where, where, next);
   std::vector<std::string> spellings;
-  for (const cursiv::NextFeature& f : next)
-    spellings.emplace_back(grammar.terminalText(f.feature));
+  for (const cursiv::NextFeature& f : next) {
+    const auto spelled = grammar.terminalSpellings(f.feature);
+    if (spelled.empty()) spellings.emplace_back();
+    for (const std::string_view s : spelled) spellings.emplace_back(s);
+  }
   return spellings;
 }
 

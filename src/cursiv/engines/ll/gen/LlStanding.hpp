@@ -15,13 +15,14 @@
 namespace cursiv {
 
 struct LlStanding {
-  // Per position, the condition ids at its head, and those that stand at the
-  // token it reads first.
-  std::vector<DynSet> lead, point;
+  // Per position, the condition ids that stand at the token it reads first.
+  std::vector<DynSet> point;
 
-  explicit LlStanding(const LlBuiltProgram& b)
-      : lead(b.cfg.nnodes), point(b.cfg.nnodes) {
+  explicit LlStanding(const LlBuiltProgram& b) : point(b.cfg.nnodes) {
     const auto& g = b.cfg;
+    // Per position, the condition ids at its head: what `point` is spread
+    // from, freed once it is.
+    std::vector<DynSet> lead(g.nnodes);
     std::vector<std::uint8_t> done(g.nnodes, 0);
     const auto walk = [&](auto&& self, std::uint16_t id) -> void {
       if (done[id] != 0) return;
@@ -97,9 +98,12 @@ struct LlStanding {
         }
       }
     };
+    // A rule's body, and a climb's operators: each begins at a token.
     for (std::uint16_t r = 1; r < g.nrules; ++r)
       if (g.rules[r].climb == kNoRow && g.rules[r].body != kNoRow)
         spread(g.rules[r].body);
+    for (std::uint16_t k = 0; k < g.nclimbs; ++k)
+      if (g.climbs[k].selectNode != kNoRow) spread(g.climbs[k].selectNode);
   }
 };
 

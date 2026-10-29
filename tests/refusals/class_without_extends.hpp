@@ -29,7 +29,7 @@ struct G : Base {
       : rule<create<ast::Doc>(many(append<&ast::Doc::people>(
             ref<PersonRule> | ref<GuestRule>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -21,7 +21,7 @@ struct DeepIf : cursiv::GrammarSpec {
                          kw<"else"> + assign<&ast::Stmt::else_>(ref<Stmt>)) |
                      create<ast::Stmt>(assign<&ast::Stmt::cond>(ref<ID>))> {};
   using entry = Stmt;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tdang

@@ -1,8 +1,10 @@
 #include <cstddef>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionsll/generated/Ll/Table.hpp"
@@ -12,14 +14,20 @@
 #include "cursiv/engines/ll/gen/ll_build.hpp"
 #include "cursiv/engines/ll/runtime/LlPredictionSession.hpp"
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
+#include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/engines/ll/runtime/ll_repair.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
 #include "cursiv/engines/shared/runtime/GapPositions.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
+#include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/ConditionsGrammar.hpp"
+#include "gluedll/generated/GluedLl/Module.hpp"
+#include "impliedrivalll/generated/RivalLl/Module.hpp"
+#include "impliedrivallr/generated/RivalLr/Module.hpp"
+#include "reachpredictll/generated/ReachLl/Module.hpp"
 #include "triviapredictll/generated/TriviaLl/Module.hpp"
 #include "triviapredictll/generated/TriviaLl/Table.hpp"
 
@@ -103,7 +111,7 @@ struct Asking {
     cursiv::ll_peek<T>(context, T.decisions[0].mode);
     cursiv::ll_episode_engine<T>().abandon();
     cursiv::ll_episode_cache<T>().plan.clear();
-    return cursiv::ll_episode<T>(context, 0, T.decisions[0]);
+    return cursiv::ll_episode<T>(context, 0);
   }
 
   std::string_view text;
@@ -138,7 +146,7 @@ void predicates_and_implied_tokens_match_the_table_engine() {
   for (const std::string_view text :
        {"", "one;two;", "one\ntwo", "one.two;", "return one;", "return\none;",
         "{one\ntwo}", "one/*\n*/two", "{return}", "one .two;", "one. two;",
-        "reserved;", "one two;"}) {
+        "reserved;", "one two;", "1\n.return", "return\n#return}"}) {
     const auto a = ll->parse(text);
     const auto b = lr->parse(text);
     CHECK(a.accepted == b.accepted);
@@ -149,6 +157,67 @@ void predicates_and_implied_tokens_match_the_table_engine() {
     const auto b = lr->parse(text);
     CHECK(a.accepted == b.accepted);
     CHECK(a.diagnostics.empty() == b.diagnostics.empty());
+  }
+  // One tree: a guarded token alone is the node over it, and a comment after
+  // the last token owes the root nothing.
+  for (const std::string_view text : {"4242 + 4242", "1 + \n 42", "42/*c*/"}) {
+    const auto a = ll->parse(text);
+    const auto b = lr->parse(text);
+    CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
+  }
+}
+
+// After a name, `#` continues `a #b?`: the implied `;` is not inserted there,
+// even where that reading fails at `c`. After a number it is.
+void a_normal_continuation_blocks_an_implied_token() {
+  const auto ll = tllconditions::generated::RivalLl::create_parser();
+  const auto lr = tllconditions::generated::RivalLr::create_parser();
+  const std::pair<std::string_view, bool> cases[] = {
+      {"a #b c d!", false},  {"a #b c d! a #b?", false},
+      {"1 #b c d!", true},   {"1 #b c d! a #b?", true},
+      {"a ; #b c d!", true}, {"a #b?", true},
+      {"a b", true},         {"1 #b c d", false}};
+  for (const auto& [text, clean] : cases) {
+    const auto a = ll->parse(text);
+    const auto b = lr->parse(text);
+    CHECK(a.accepted == b.accepted);
+    CHECK(a.diagnostics.empty() == clean);
+    CHECK(b.diagnostics.empty() == clean);
+  }
+}
+
+// A token no terminal names stands in no row of the mode matrix. Here every
+// row, and every word past them, admits everything: a read of the matrix for
+// the refusal would keep it, where the position of an implied token reads
+// its text again under its own alphabet.
+namespace refused_test {
+constexpr const auto& base = tllconditions::generated::Ll::kTable;
+constexpr std::size_t kWords = std::size_t{base.nmodes} * base.termWords +
+                               (cursiv::kInvalidSymbol >> 6) + 1u;
+constexpr auto admitAll = [] {
+  std::array<std::uint64_t, kWords> words{};
+  words.fill(~std::uint64_t{0});
+  return words;
+}();
+constexpr auto open = [] {
+  auto t = base;
+  t.modeTerms = admitAll.data();
+  return t;
+}();
+}  // namespace refused_test
+
+void an_implied_position_reads_a_refused_token_again() {
+  using refused_test::base;
+  cursiv::Cst tree("abc");
+  cursiv::CstBuilder builder(tree);
+  builder.bind_stream();
+  const cursiv::LlContext context(tree.text(), builder);
+  for (std::uint16_t mode = 0; mode < base.nmodes; ++mode) {
+    if (!base.mode_admits(mode, cache_test::identifier)) continue;
+    const cursiv::Token read = cursiv::ll_normal_token<refused_test::open>(
+        context, cursiv::Token{0, 0, cursiv::kInvalidSymbol}, mode);
+    CHECK(read.sym == cache_test::identifier && read.begin == 0 &&
+          read.end == 3);
   }
 }
 
@@ -192,6 +261,45 @@ void deferred_guards_reserve_only_reachable_keywords() {
   }
   const auto a = ll->parse("f reserved=a;");
   CHECK(!a.diagnostics.empty());
+}
+
+// The second `x abd` remembers that `abd` refused the implied `;` at its third
+// byte: the `x abc` after it, the same in its first two, is predicted anew.
+void a_remembered_prediction_keeps_what_an_implied_token_read() {
+  const auto ll = tllconditions::generated::ReachLl::create_parser();
+  for (const std::string_view text :
+       {"x abc", "x abd", "x abd x abd x abc", "x abc x abd x abd x abc"}) {
+    const auto a = ll->parse(text);
+    CHECK(a.accepted && a.diagnostics.empty() && a.value != nullptr);
+  }
+}
+
+// A tag the gap refuses after its `#` is given up whole: its number is an
+// item of its own, and no tag stands over the `#`.
+void a_given_up_tag_leaves_no_node() {
+  const auto ll = tllconditions::generated::GluedLl::create_parser();
+  const auto reflection =
+      tllconditions::generated::GluedLl::create_ast_reflection();
+  struct Case {
+    std::string_view text, tree;
+    cursiv::TextOffset at;
+  };
+  for (const auto& [text, tree, at] :
+       {Case{"# 1 2", "Document{items0=Number{} items1=Number{} }", 0},
+        Case{"1 # 2 3",
+             "Document{items0=Number{} items1=Number{} items2=Number{} }", 2},
+        Case{"#1 # 2 3",
+             "Document{items0=StatementNode{value=Number{} } "
+             "items1=Number{} items2=Number{} }",
+             3}}) {
+    const auto a = ll->parse(text);
+    std::string out;
+    if (a.value) cursiv::test::ast_of(*reflection, *a.value, out);
+    CHECK(out == tree);
+    CHECK(a.diagnostics.size() == 1 &&
+          a.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete &&
+          a.diagnostics[0].begin == at && a.diagnostics[0].end == at + 1);
+  }
 }
 
 void predicates_survive_lowering_and_prevent_static_token_decisions() {
@@ -291,9 +399,13 @@ int main() {
   predicates_survive_lowering_and_prevent_static_token_decisions();
   conditions_past_the_table_are_refused();
   predicates_and_implied_tokens_match_the_table_engine();
+  a_normal_continuation_blocks_an_implied_token();
   prediction_crosses_only_the_active_trivia();
+  an_implied_position_reads_a_refused_token_again();
   document_end_elects_default_trivia_before_other_regions();
   predictions_keep_the_gap_and_embedded_section();
   deferred_guards_reserve_only_reachable_keywords();
+  a_remembered_prediction_keeps_what_an_implied_token_read();
+  a_given_up_tag_leaves_no_node();
   return cursiv::test::report("LlConditions_test");
 }

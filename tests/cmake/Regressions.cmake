@@ -19,7 +19,7 @@ cursiv_test(LrCeilings_test engines/lr/LrCeilings_test.cpp
     room221Generated
     ambtailGenerated
     ceilingsGenerated)
-set_tests_properties(LrCeilings_test PROPERTIES TIMEOUT 120)
+cursiv_timeout(LrCeilings_test 120)
 cursiv_grammar(runonlr engines/lr/RunOnEquationsGrammar.hpp trunon::Lr ENGINE LR)
 cursiv_test(RunOnEquations_test engines/lr/RunOnEquations_test.cpp
     runonlrGenerated)

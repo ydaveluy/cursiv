@@ -1,9 +1,9 @@
 # Qualified names and scoping
 
-A scope is the set of declarations a reference can resolve to. By default,
-named nodes are visible inside their container, and top-level declarations
-are exported to other documents. To reference a declaration inside a package
-from another document, export its qualified name:
+A scope is the set of declarations a reference can resolve to. By default, a
+named node is visible inside its container, and top-level declarations are
+visible from other documents. To reach a declaration nested in a package from
+another document, export it under its qualified name:
 
 ```
 package foo.bar {
@@ -15,18 +15,15 @@ package other {
 }
 ```
 
-This recipe uses the AST from the
-[Domainmodel example](../examples/index.md).
+This recipe uses the AST of the [Domainmodel example](../examples/index.md).
 
 ## Export a qualified name
 
-Override `collectExportedSymbols` to visit nested types and export them under
-their full names. This small implementation keeps the default local scopes,
-so `Thing` still resolves inside its own package:
+Override `collectExportedSymbols` to export each type under its full name.
+Local scopes keep their default, so `Thing` still resolves inside its own
+package:
 
-`core/references/QualifiedScopeComputation.hpp`:
-
-```cpp
+```cpp title="core/references/QualifiedScopeComputation.hpp"
 #pragma once
 
 #include <string>
@@ -73,33 +70,28 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
 }  // namespace dm
 ```
 
-Descriptions borrow their names. `copy_into` keeps a computed name in the
-document's parse memory, rather than leaving a view into a temporary string.
-Do not resolve references during export or local-scope computation; linking
-starts after all documents have their scopes prepared.
+A description borrows its name, so `copy_into` stores the computed name in
+the document's memory. Do not resolve references here: linking starts only
+after every document's scopes are ready.
 
 ## Install the implementation
 
-After installing the generated module in `install_core_module`, replace the
-default service:
+In `install_core_module`, after the generated module, replace the default
+service:
 
 ```cpp
 services.scopeComputation =
     std::make_unique<dm::QualifiedScopeComputation>(services);
 ```
 
-The default `ScopeProvider` searches local containers first, then the global
-index, filtering candidates by the reference's target types. It can therefore
-find the exported `foo.bar.Thing` without a custom provider.
-
-For cross-file references, build both documents in the same workspace. The CLI
-does this when passed `--root <dir>`.
+The default scope provider then finds `foo.bar.Thing` among the exported
+names. Both documents must be built in the same workspace; the CLI does this
+with `--root <dir>`.
 
 ## Check the result
 
-With your LSP services and the test helpers from
-[Test your language](../learn/testing.md), mark both the declaration and the
-reference:
+With the test helpers from [Test your language](../learn/testing.md), mark the
+declaration and the reference:
 
 ```cpp
 (void)ct::expectGoToDefinition(*services,
@@ -110,10 +102,9 @@ reference:
 
 ## Advanced: partially qualified names
 
-The implementation above supports full names globally and bare names in
-their local container. The Domainmodel example's
-`DomainModelScopeComputation` also overrides `collectLocalSymbols` to support
-partially qualified names in enclosing packages. See
-[Services](../reference/services.md#document-lifecycle) for the processing
-order, and [Case-insensitive languages](case-insensitive.md) to change name
-comparison.
+The code above accepts full names everywhere and bare names in their own
+package. To also accept partially qualified names in enclosing packages, the
+Domainmodel example's `DomainModelScopeComputation` overrides
+`collectLocalSymbols`. See [Services](../reference/services.md#document-lifecycle)
+for the processing order, and [Case-insensitive languages](case-insensitive.md)
+to compare names without case.

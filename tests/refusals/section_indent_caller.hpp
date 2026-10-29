@@ -11,7 +11,7 @@ struct Inner : cursiv::GrammarSpec {
   struct NUM : terminal<some(d)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NUM>))> {};
   using entry = Root;
-  using ignore = SP;
+  using ignored = SP;
 };
 
 struct G : cursiv::GrammarSpec {
@@ -25,7 +25,7 @@ struct G : cursiv::GrammarSpec {
              section<Inner>(lit<"<">, lit<">">) + ref<NEWLINE> + ref<DEDENT>> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using indent_newline = NEWLINE;
 };
 

@@ -16,6 +16,9 @@
 #include "cursiv/core/grammar/NextFeature.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
+#include "cursiv/core/syntax-tree/CstBuilder.hpp"
+#include "cursiv/engines/lr/runtime/LrCaretTable.hpp"
+#include "cursiv/engines/lr/runtime/LrGssGraph.hpp"
 #include "cursiv/engines/lr/runtime/LrParseStats.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
@@ -37,6 +40,164 @@ namespace {
 // arms apart.
 constexpr unsigned kPastTheLook = 40;
 
+// The reduction reached after S -> '(' S; on the caller's terminal it folds
+// every pending opening before the outer state can shift that terminal.
+// Only the actions and gotos the lexical probe reads are needed here.
+struct ProbeTable {
+  struct Cfg {
+    unsigned nprods = 1;
+    std::array<cursiv::LrProduction, 1> prods{{{.lhs = 0, .len = 2}}};
+  } cfg;
+  std::array<std::uint16_t, 0> guardOps{};
+  struct Programs {
+    std::array<std::uint32_t, 2> op{
+        (2u << 2) | static_cast<unsigned>(cursiv::LrActionKind::shift),
+        static_cast<unsigned>(cursiv::LrActionKind::reduce)};
+    constexpr unsigned cell(unsigned state, unsigned) const {
+      return state == 3 ? 2 : state == 2 ? 1 : 0;
+    }
+    constexpr unsigned first(unsigned cell) const { return cell ? cell - 1 : 0; }
+    constexpr unsigned count(unsigned cell) const { return cell != 0; }
+  } programs;
+  struct Gotos {
+    unsigned* visits = nullptr;
+    constexpr unsigned get(unsigned state, unsigned) const {
+      if (visits != nullptr) ++*visits;
+      return state == 0 ? 2 : state == 1 ? 3 : cursiv::kInvalidSymbol;
+    }
+  } gotoPrograms;
+};
+constexpr ProbeTable kProbeTable{};
+unsigned probeLandings = 0;
+constexpr unsigned kProbeDiamonds = 24;
+constexpr ProbeTable kWideProbeTable = [] {
+  ProbeTable table;
+  table.cfg.prods[0].len = 2u * kProbeDiamonds;
+  table.gotoPrograms.visits = &probeLandings;
+  return table;
+}();
+
+void lexical_probes_fold_deep_stacks_without_recursion() {
+  constexpr std::uint32_t depth = 65536;
+  cursiv::LrStack stack;
+  stack.push({0, 0, 0, 0, 0});
+  for (std::uint32_t i = 0; i < depth; ++i) stack.push({1, 0, 0, 0, 0});
+  stack.push({3, 0, 0, 0, 0});
+  cursiv::LrGssGraph graph;
+  cursiv::LrGssGraph::Reading start;
+  start.run.state = 3;
+  for (const std::uint32_t window : {32u, 128u, stack.size()}) {
+    graph.seed(stack, start, {}, window);
+    const bool takes = cursiv::lr_gss_takes<kProbeTable>(
+        graph, stack.size() - graph.seed_base() - 1u, 1,
+        [](unsigned) { return true; });
+    CHECK(takes == (window == stack.size()));
+    CHECK(graph.underflow() == (window != stack.size()));
+  }
+}
+
+void lexical_probes_share_paths_at_each_remaining_depth() {
+  using Graph = cursiv::LrGssGraph;
+  Graph graph;
+  cursiv::LrStack stack;
+  stack.push({0, 0, 0, 0, 0});
+  graph.seed(stack, {});
+  const auto shift = [&](Graph::Id from, unsigned at, unsigned state) {
+    auto reading = graph.reading(from);
+    Graph::Step step;
+    step.vertex = from;
+    step.reading = reading;
+    step.reading.la = {reading.at, at, 1};
+    step.shifts = true;
+    reading.at = at;
+    reading.run.state = state;
+    const auto to = graph.vertex(reading);
+    graph.edge(to, from, 1, {}, graph.add(step));
+    return to;
+  };
+  Graph::Id top = 0;
+  for (unsigned i = 0; i < kProbeDiamonds; ++i) {
+    const auto first = shift(top, 2u * i + 1u, 1);
+    const auto second = shift(top, 2u * i + 1u, 2);
+    top = shift(first, 2u * i + 2u, 3);
+    CHECK(shift(second, 2u * i + 2u, 3) == top);
+  }
+  probeLandings = 0;
+  CHECK(cursiv::lr_gss_takes<kWideProbeTable>(
+      graph, top, 1, [](unsigned) { return true; }));
+  // The 2^24 paths all end on the seed's one bottom vertex.
+  CHECK(probeLandings == 1);
+  CHECK(!graph.underflow());
+}
+
+constexpr ProbeTable kUnequalProbeTable = [] {
+  ProbeTable table;
+  table.cfg.prods[0].len = 4;
+  return table;
+}();
+
+void lexical_probes_keep_a_vertex_at_different_remaining_depths() {
+  using Graph = cursiv::LrGssGraph;
+  Graph graph;
+  cursiv::LrStack stack;
+  stack.push({0, 0, 0, 0, 0});
+  graph.seed(stack, {});
+  const auto edge = [&](Graph::Id from, unsigned at) {
+    Graph::Reading reading;
+    reading.at = at;
+    reading.run.state = at == 4 ? 3 : 1;
+    const auto to = graph.vertex(reading);
+    Graph::Step step;
+    step.vertex = from;
+    graph.edge(to, from, 1, {}, graph.add(step));
+    return to;
+  };
+  const auto first = edge(0, 1), second = edge(first, 2);
+  const auto third = edge(second, 3);
+  const auto top = edge(second, 4);  // A shorter path, published first.
+  CHECK(edge(third, 4) == top);
+  // Only the four-edge path reaches the seed at the requested depth. A
+  // global vertex mark would discard the second visit of `second`.
+  CHECK(cursiv::lr_gss_takes<kUnequalProbeTable>(
+      graph, top, 1, [](unsigned) { return true; }));
+}
+
+// A flagged token is probed before it is shifted. Its reductions may cross
+// the seed's floor without entering the ordinary reduction agenda.
+void a_lexical_probe_requests_the_frames_below_a_partial_seed() {
+  for (const std::uint32_t window : {32u, 128u}) {
+    cursiv::LrStack stack;
+    for (std::uint32_t i = 0; i < window + 9; ++i)
+      stack.push({static_cast<std::uint16_t>(i), cursiv::kNoElement, 0, 0,
+                  cursiv::kLrNoWord});
+    cursiv::LrGssGraph graph;
+    cursiv::LrGssGraph::Reading start;
+    start.run.state = stack.top().state;
+    const auto reaches = [&](auto&& self, cursiv::LrGssGraph::Id vertex,
+                             std::uint32_t depth) -> bool {
+      if (depth == 0) return true;
+      bool reached = false;
+      graph.each_below(vertex, [&](cursiv::LrGssGraph::Id below) {
+        reached = self(self, below, depth - 1) || reached;
+      });
+      return reached;
+    };
+    graph.seed(stack, start, {}, window);
+    CHECK(graph.seed_base() == 9 && !graph.underflow());
+    CHECK(reaches(reaches, window - 1, window - 1));
+    CHECK(!graph.underflow());
+    CHECK(!reaches(reaches, window - 1, window));
+    CHECK(graph.underflow());
+
+    graph.seed(stack, start, {}, window * 4);
+    CHECK(graph.seed_base() == 0 && !graph.underflow());
+    CHECK(reaches(reaches, stack.size() - 1, window));
+    CHECK(!graph.underflow());
+    CHECK(!reaches(reaches, stack.size() - 1, stack.size()));
+    CHECK(!graph.underflow());
+  }
+}
+
 }  // namespace
 
 // A ceiling the parse meets is counted, never silently taken.
@@ -55,7 +216,7 @@ cursiv::LrParseStats stats_of(const std::string& body) {
   const std::string text = "nests sixteen " + body;
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr);
+  cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive);
   return stats;
 }
 
@@ -102,7 +263,7 @@ void a_wide_nest_reads_clean_in_every_corner() {
       cursiv::Cst cst;
       cursiv::LrParseStats stats;
       const bool ok = cursiv::lr_parser<wide::kTable>.parse(text, cst, &stats,
-                                                            wide::kDrivePtr);
+                                                            &wide::kDrive);
       CHECK(ok);
       CHECK(cst.diagnostics().empty());
     }
@@ -114,7 +275,7 @@ void a_starved_budget_leaves_the_far_corner_clean() {
   const cursiv::RepairBudget starved{.floor = 1, .perByte = 0};
   cursiv::Cst cst;
   const bool ok = cursiv::lr_parser<wide::kTable>.parse(
-      "huge " + nested(kPastTheLook, 23, 23), cst, nullptr, wide::kDrivePtr, starved);
+      "huge " + nested(kPastTheLook, 23, 23), cst, nullptr, &wide::kDrive, starved);
   CHECK(ok);
   CHECK(cst.diagnostics().empty());
 }
@@ -127,7 +288,7 @@ cursiv::LrParseStats a_deep_nest_is_owed_one_token(unsigned depth) {
   for (unsigned i = 0; i < depth; ++i) text += "if a then ";
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  cursiv::lr_parser<deep::kTable>.parse(text, cst, &stats, deep::kDrivePtr);
+  cursiv::lr_parser<deep::kTable>.parse(text, cst, &stats, &deep::kDrive);
   CHECK(cst.diagnostics().size() == 1);
   cursiv::TextOffset covered = 0;
   for (cursiv::NodeId i = 0; i < cst.size(); ++i)
@@ -180,7 +341,7 @@ void reads_clean(std::string_view text, const cursiv::LrDrive* drive) {
 }
 
 void the_seed_221_reads_clean() {
-  reads_clean<g221::kTable>("acaccdaaaad", g221::kDrivePtr);
+  reads_clean<g221::kTable>("acaccdaaaad", &g221::kDrive);
 }
 
 
@@ -223,7 +384,7 @@ void a_full_room_reads_the_nest_clean() {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<deep::kTable>.parse(text, cst, &stats,
-                                              deep::kDrivePtr));
+                                              &deep::kDrive));
   CHECK(cst.diagnostics().empty());
 }
 
@@ -256,13 +417,13 @@ void reads_without_forking(const std::string& text, const cursiv::LrDrive* d) {
 void an_operand_two_rules_derive_is_one_reading() {
   std::string text = "a";
   for (unsigned i = 0; i < 60; ++i) text += "?a:a";
-  reads_without_forking<twin::kTable>("fold " + text, twin::kDrivePtr);
+  reads_without_forking<twin::kTable>("fold " + text, &twin::kDrive);
 }
 
 void a_cell_whose_arms_reduce_by_different_chains_is_one_reading() {
   std::string text;
   for (unsigned i = 0; i < 40; ++i) text += "p(n) ";
-  reads_without_forking<tail::kTable>(text, tail::kDrivePtr);
+  reads_without_forking<tail::kTable>(text, &tail::kDrive);
 }
 
 int run() {
@@ -287,7 +448,7 @@ void a_deep_nest_reads_its_elses_clean() {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<deep::kTable>.parse(text, cst, &stats,
-                                              deep::kDrivePtr));
+                                              &deep::kDrive));
   CHECK(cst.diagnostics().empty());
 }
 
@@ -320,7 +481,8 @@ void a_caret_behind_a_longer_chain_answers_in_a_moment() {
   const auto took = std::chrono::steady_clock::now() - begin;
   bool offered = false;
   for (const auto& f : out)
-    offered = offered || parser->getGrammar().terminalText(f.feature) == "else";
+    for (const auto s : parser->getGrammar().terminalSpellings(f.feature))
+      offered = offered || s == "else";
   CHECK(offered);
   CHECK(took < std::chrono::seconds(5));
 }
@@ -332,10 +494,100 @@ int run() {
 
 }  // namespace caret_chain
 
-// A graph that forks at every statement and never has fewer than two readings
-// alive is read in a moment, not in the square of its statements: two hundred
-// thousand of them, one graph, which writes and gives back what every later
-// reading stands on.
+// Root -> E0 E1 ... E32759 ('x' | 'y'), each Ei -> epsilon. A candidate
+// reaches thousands of different nodes at one position before its shift.
+namespace caret_nullable {
+
+constexpr unsigned count = 32760;
+
+cursiv::LrCaretTable::Run run(std::uint16_t state, cursiv::SymbolId term) {
+  return (term == 1 || term == 2) && state <= count
+             ? cursiv::LrCaretTable::Run{2u * state + term - 1u, 1}
+             : cursiv::LrCaretTable::Run{};
+}
+cursiv::LrAction action(std::uint32_t index) {
+  const unsigned state = index / 2, term = index % 2 + 1;
+  return {static_cast<cursiv::SymbolId>(term),
+          state < count ? cursiv::LrActionKind::reduce
+                        : cursiv::LrActionKind::shift,
+          static_cast<std::uint16_t>(state < count ? state : count + term)};
+}
+std::uint32_t go(std::uint32_t, cursiv::SymbolId nt) { return nt + 1; }
+cursiv::Scan lex(const char* src, cursiv::TextOffset len, std::uint16_t,
+                 cursiv::TextOffset from, cursiv::TextOffset& halt) {
+  halt = len;
+  if (from == len) return {from, 0};
+  if (src[from] == 'x') return {from + 1, 1};
+  if (src[from] == 'y') return {from + 1, 2};
+  return {from, cursiv::kInvalidSymbol};
+}
+std::span<const std::uint64_t> follow(std::uint16_t) {
+  static constexpr std::uint64_t bits[] = {6};
+  return bits;
+}
+
+void a_wide_nullable_closure_keeps_candidate_order() {
+  std::vector<cursiv::LrProduction> prods(count);
+  for (unsigned i = 0; i < count; ++i)
+    prods[i].lhs = static_cast<cursiv::SymbolId>(i);
+  std::vector<cursiv::TermInfo> terms(3);
+  std::vector<std::uint16_t> mode(count + 3, 0);
+  std::vector<std::uint16_t> sole(count + 3, cursiv::kLrNoProd);
+  std::vector<std::uint32_t> base(count + 4, 0);
+  std::fill(base.begin() + count + 1, base.end(), 2);
+  const std::uint16_t items[] = {0, 1};
+  const cursiv::LrExpect pool[] = {
+      {1, cursiv::kNoElement, cursiv::kNoElement},
+      {2, cursiv::kNoElement, cursiv::kNoElement}};
+  const std::uint8_t tight[] = {0};
+  const std::uint64_t skips[] = {0, 0, 0, 0};
+  cursiv::LrCaretTable table;
+  table.lex = lex;
+  table.run = run;
+  table.action = action;
+  table.go = go;
+  table.follow = follow;
+  table.mode = mode;
+  table.modeTight = tight;
+  table.modeMulti = tight;
+  table.skipSet = skips;
+  table.soleReduce = sole;
+  table.terms = terms;
+  table.prods = prods;
+  table.expectBase = base;
+  table.expectItems = items;
+  table.expectPool = pool;
+  const std::string_view spellings[] = {"x", "y"};
+  const cursiv::GrammarTerminal words[] = {
+      {}, {{}, {}, false, {spellings, 1}}, {{}, {}, false, {spellings + 1, 1}}};
+  const cursiv::GrammarMetaData meta{.terminals = words, .terminalCount = 3};
+  const cursiv::StampedGrammar grammar(meta, table.stamp);
+  cursiv::Cst c("");
+  cursiv::CstBuilder builder(c);
+  builder.bind_stream();
+  std::vector<cursiv::NextFeature> out;
+  const auto start = std::chrono::steady_clock::now();
+  cursiv::lr_next_features_at(table, grammar, c, 0, 0, out);
+  CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
+  CHECK(out.size() == 2);
+  if (out.size() != 2) return;
+  CHECK(out[0].feature == 1 && out[1].feature == 2);
+  for (const auto& feature : out)
+    CHECK(feature.property.empty() && feature.narrow == cursiv::kNoNarrow &&
+          feature.type == nullptr);
+}
+
+int run() {
+  a_wide_nullable_closure_keeps_candidate_order();
+  return 0;
+}
+
+}  // namespace caret_nullable
+
+// One statement past the look-ahead is read by a graph, which gives the text
+// back once a reading past it validates the arm that died there: the two
+// hundred thousand statements after it read as if it were not there, and the
+// graph holds as much however many follow.
 namespace long_episode {
 
 namespace gl = tceilings::generated::G;
@@ -348,13 +600,20 @@ std::string statements(unsigned n) {
   return text;
 }
 
-void a_long_episode_releases_what_it_opened() {
+void a_long_statement_slows_only_itself() {
+  cursiv::LrParseStats one;
+  {
+    cursiv::Cst cst;
+    CHECK(cursiv::lr_parser<gl::kTable>.parse(statements(1), cst, &one,
+                                              &gl::kDrive));
+  }
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<gl::kTable>.parse(statements(200000), cst, &stats,
-                                            gl::kDrivePtr));
+                                            &gl::kDrive));
   CHECK(cst.diagnostics().empty());
-  CHECK(stats.splits >= 1);
+  CHECK(stats.splits == 1);
+  CHECK(stats.alternatives == one.alternatives);
 }
 
 void local_conflicts_share_a_deep_frozen_stack() {
@@ -368,22 +627,26 @@ void local_conflicts_share_a_deep_frozen_stack() {
   text.append(depth, '}');
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<gl::kTable>.parse(text, cst, &stats, gl::kDrivePtr));
+  CHECK(cursiv::lr_parser<gl::kTable>.parse(text, cst, &stats, &gl::kDrive));
   CHECK(cst.diagnostics().empty());
-  CHECK(stats.splits > 0 && stats.splits < depth / 2);
+  // Each conflict's graph copies the frames it reduces, not the deep stack.
+  CHECK(stats.splits > 0 && stats.seeded <= std::uint64_t{64} * depth);
 }
 
-// The same graph refused at the end, long after it last wrote: the readings it
-// froze there are still the repair's to set out from.
+// Refused at the end, long after the first graph gave the text back: the cell
+// whose arms the end refutes opens a graph of its own, and the repair sets out
+// from the readings it froze.
 void a_long_episode_repairs_its_end() {
   cursiv::Cst cst;
+  cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<gl::kTable>.parse(statements(20000) + " x a", cst,
-                                            nullptr, gl::kDrivePtr));
+                                            &stats, &gl::kDrive));
   CHECK(cst.diagnostics().size() == 1);
+  CHECK(stats.splits == 2 && stats.episodeSearches == 1);
 }
 
 int run() {
-  a_long_episode_releases_what_it_opened();
+  a_long_statement_slows_only_itself();
   local_conflicts_share_a_deep_frozen_stack();
   a_long_episode_repairs_its_end();
   return 0;
@@ -424,16 +687,16 @@ Spans read(const std::string& text, const cursiv::LrDrive* drive,
 void a_short_document_reads_as_the_taken_block() {
   cursiv::LrParseStats held, reference;
   const std::string text = equations(8);
-  const Spans spans = read<loose::kTable>("open " + text, loose::kDrivePtr, held);
+  const Spans spans = read<loose::kTable>("open " + text, &loose::kDrive, held);
   CHECK(held.splits >= 1);
-  CHECK(spans == read<taken::kTable>("take " + text, taken::kDrivePtr, reference));
+  CHECK(spans == read<taken::kTable>("take " + text, &taken::kDrive, reference));
 }
 
 void a_long_document_reads_as_the_taken_block() {
   cursiv::LrParseStats held, reference;
   const std::string text = equations(100);
-  const Spans spans = read<loose::kTable>("open " + text, loose::kDrivePtr, held);
-  CHECK(spans == read<taken::kTable>("take " + text, taken::kDrivePtr, reference));
+  const Spans spans = read<loose::kTable>("open " + text, &loose::kDrive, held);
+  CHECK(spans == read<taken::kTable>("take " + text, &taken::kDrive, reference));
 }
 
 void a_long_document_repairs_its_end_as_the_taken_block() {
@@ -442,10 +705,10 @@ void a_long_document_repairs_its_end_as_the_taken_block() {
   cursiv::LrParseStats stats;
   const std::string open = "open " + text, take = "take " + text;
   CHECK(cursiv::lr_parser<loose::kTable>.parse(open, held, &stats,
-                                               loose::kDrivePtr));
+                                               &loose::kDrive));
   CHECK(stats.episodeSearches > 0);
   CHECK(cursiv::lr_parser<taken::kTable>.parse(take, reference, nullptr,
-                                               taken::kDrivePtr));
+                                               &taken::kDrive));
   CHECK(!held.diagnostics().empty());
   CHECK(held.diagnostics().size() == reference.diagnostics().size());
   CHECK(held.size() == reference.size());
@@ -462,6 +725,25 @@ void a_long_document_repairs_its_end_as_the_taken_block() {
     CHECK(held.diagnostics()[i].begin == reference.diagnostics()[i].begin);
     CHECK(held.diagnostics()[i].end == reference.diagnostics()[i].end);
   }
+}
+
+// A fault is repaired, the text after it forks, and the graph cuts readings
+// it cannot hold. The reading has gone on from the fault, so the span the cut
+// says is laid behind the fault's note: notes lie in the order their texts end.
+void a_cut_span_is_said_behind_the_fault_before_it() {
+  const cursiv::RepairBudget starved{.floor = 1, .perByte = 0};
+  cursiv::Cst cst;
+  CHECK(cursiv::lr_parser<loose::kTable>.parse(
+      "open z9 = y where z9 = f ab ab ab x g z9 x x g z9 x = g where y = x "
+      "where f = g ab ab f z9 ab z9 f y z9 ab f y g ; f",
+      cst, nullptr, &loose::kDrive, starved));
+  const auto& found = cst.diagnostics();
+  CHECK(found.size() > 1);
+  if (found.size() < 2) return;
+  CHECK(found[0].kind == cursiv::DiagnosticKind::deleted);
+  CHECK(found[1].kind == cursiv::DiagnosticKind::bounded);
+  for (std::size_t i = 1; i < found.size(); ++i)
+    CHECK(found[i - 1].end <= found[i].end);
 }
 
 // Two hundred open ifs and a hundred elses: each else closes the nearest if
@@ -491,6 +773,7 @@ int run() {
   a_long_document_reads_as_the_taken_block();
   a_deep_nest_binds_each_else_to_the_nearest_if();
   a_long_document_repairs_its_end_as_the_taken_block();
+  a_cut_span_is_said_behind_the_fault_before_it();
   return 0;
 }
 
@@ -506,7 +789,7 @@ int run() {
   for (unsigned i = 0; i != 8000; ++i) text += " a";
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr));
+  CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive));
   CHECK(cst.diagnostics().empty());
   CHECK(stats.splits > 0);
 
@@ -523,6 +806,10 @@ int run() {
 }  // namespace rank_growth
 
 int main() {
+  lexical_probes_fold_deep_stacks_without_recursion();
+  lexical_probes_share_paths_at_each_remaining_depth();
+  lexical_probes_keep_a_vertex_at_different_remaining_depths();
+  a_lexical_probe_requests_the_frames_below_a_partial_seed();
   int status = 0;
   status |= ceilings::run();
   status |= frozen_room::run();
@@ -530,6 +817,7 @@ int main() {
   status |= folding::run();
   status |= waiting_budget::run();
   status |= caret_chain::run();
+  status |= caret_nullable::run();
   status |= long_episode::run();
   status |= held_graph::run();
   status |= rank_growth::run();

@@ -508,7 +508,7 @@ struct CursivLexicon final : GrammarLexicon {
   // The literal column comes off the erased model: a spelling the grammar owns
   // is the same fact whichever door answers it.
   explicit CursivLexicon(const GrammarModel& g)
-      : _sep(lex_separator<C, typename cursiv::Normalize<C>::ignore>::of()) {
+      : _sep(lex_separator<C, typename cursiv::Normalize<C>::ignored>::of()) {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
     _devours.assign(Rows::kReach.size(), false);
     for (std::size_t e = 0; e < Rows::kReach.size(); ++e) {

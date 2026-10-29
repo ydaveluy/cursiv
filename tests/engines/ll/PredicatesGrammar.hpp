@@ -6,13 +6,9 @@
 // hand, the absorbing REST stands alone.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/PredicatesAst.hpp"
 
 namespace tpredicates {
-
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -40,7 +36,7 @@ struct Base : cursiv::GrammarSpec {
   static constexpr auto TailC = lit<"x"> + many(commit(lit<"a">, lit<"b">));
   template <class E>
   static constexpr auto Region =
-      tight(skip(ignored<WS>, hide<COMMENT>, E{} + gap::none + lit<"b">));
+      tight(skip(ignore<WS>, hide<COMMENT>, E{} + gap::none + lit<"b">));
   struct RegionMany : rule<Region<decltype(many(lit<"a">))>> {};
   struct RegionSome : rule<Region<decltype(some(lit<"a">))>> {};
   struct RegionExact : rule<Region<decltype(repeat<2>(lit<"a">))>> {};
@@ -201,7 +197,7 @@ struct Base : cursiv::GrammarSpec {
               assign<&Node::text>(ref<REST>))) +
             eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 

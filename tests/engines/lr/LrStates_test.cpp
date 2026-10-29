@@ -51,9 +51,11 @@ int run() {
     // caller: LALR and conflict-only re-fusion offer both '!' and '?' here.
     splice->nextFeaturesAt(r.cst(), kSpliceHead + 3, kSpliceHead + 4, out);
     CHECK(out.size() == 1);
-    for (const auto& f : out)
-      CHECK(splice->getGrammar().terminalText(f.feature) ==
-            std::string_view(text).substr(3));
+    for (const auto& f : out) {
+      const auto spellings = splice->getGrammar().terminalSpellings(f.feature);
+      CHECK(spellings.size() == 1 &&
+            spellings.front() == std::string_view(text).substr(3));
+    }
   }
   for (const std::string text : {"xAb!", "yAb?", "xb!", "yb?", "x b!", "y b?"}) {
     const std::string source = "splice:" + text;
@@ -76,9 +78,11 @@ int run() {
     splice->nextFeaturesAt(r.cst(), kSpliceHead + at, kSpliceHead + at + 1,
                            out);
     CHECK(out.size() == 1);
-    for (const auto& f : out)
-      CHECK(splice->getGrammar().terminalText(f.feature) ==
-            std::string_view(text).substr(at));
+    for (const auto& f : out) {
+      const auto spellings = splice->getGrammar().terminalSpellings(f.feature);
+      CHECK(spellings.size() == 1 &&
+            spellings.front() == std::string_view(text).substr(at));
+    }
   }
   for (const std::string text : {"foo", "(fao"}) {
     const std::string source = "splice:" + text;
@@ -89,7 +93,8 @@ int run() {
                            kSpliceHead + text.size(), out);
     bool closes = false;
     for (const auto& f : out)
-      closes = closes || splice->getGrammar().terminalText(f.feature) == ")";
+      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
+        closes = closes || s == ")";
     CHECK(out.size() == 1 && closes);
   }
   for (const std::string text : {"u(a!", "u ( a ! "}) {
@@ -101,7 +106,8 @@ int run() {
     splice->nextFeaturesAt(r.cst(), kSpliceHead + at, kSpliceHead + at, out);
     bool next = false;
     for (const auto& f : out)
-      next = next || splice->getGrammar().terminalText(f.feature) == "next";
+      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
+        next = next || s == "next";
     CHECK(out.size() == 1 && next);
   }
   {
@@ -111,7 +117,8 @@ int run() {
     splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
     bool inserts = false;
     for (const auto& f : out)
-      inserts = inserts || splice->getGrammar().terminalText(f.feature) == "b";
+      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
+        inserts = inserts || s == "b";
     CHECK(out.size() == 2 && inserts);
   }
   for (const auto count : {1u, 16u, 65u}) {
@@ -123,7 +130,8 @@ int run() {
     splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
     bool tail = false;
     for (const auto& f : out) {
-      CHECK(splice->getGrammar().terminalText(f.feature) != "b");
+      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
+        CHECK(s != "b");
       tail = tail || splice->getGrammar().terminalName(f.feature) == "Tail";
     }
     CHECK(out.size() == 1 && tail);
@@ -136,11 +144,12 @@ int run() {
     std::vector<cursiv::NextFeature> out;
     splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
     bool keeps = false;
-    for (const auto& f : out) {
-      const auto word = splice->getGrammar().terminalText(f.feature);
-      CHECK(word != "b");
-      keeps = keeps || word == "c";
-    }
+    for (const auto& f : out)
+      for (const auto word :
+           splice->getGrammar().terminalSpellings(f.feature)) {
+        CHECK(word != "b");
+        keeps = keeps || word == "c";
+      }
     CHECK(out.size() == 2 && keeps);
   }
   // A leaf two readings share: a candidate only one of them leads to glues
@@ -150,13 +159,94 @@ int run() {
     std::vector<cursiv::NextFeature> out;
     splice->nextFeaturesAt(r.cst(), kSpliceHead + 2, kSpliceHead + 2, out);
     bool b = false, c = false, d = false;
-    for (const auto& f : out) {
-      const auto word = splice->getGrammar().terminalText(f.feature);
-      b = b || word == "b";
-      c = c || word == "c";
-      d = d || word == "d";
-    }
+    for (const auto& f : out)
+      for (const auto word :
+           splice->getGrammar().terminalSpellings(f.feature)) {
+        b = b || word == "b";
+        c = c || word == "c";
+        d = d || word == "d";
+      }
     CHECK(!b && c && d);
+  }
+  // One terminal two readings read in different modes: a candidate glued to
+  // it is judged in the mode of the reading that goes on with it. The `>`
+  // follows the `-` only where the mode also reads `->`, which takes it in.
+  {
+    const std::string text = "splice:&=-";
+    const auto r = splice->parse(text);
+    std::vector<cursiv::NextFeature> out;
+    const auto at = static_cast<cursiv::TextOffset>(text.size());
+    splice->nextFeaturesAt(r.cst(), at, at, out);
+    bool bang = false, arrow = false;
+    for (const auto& f : out)
+      for (const auto word :
+           splice->getGrammar().terminalSpellings(f.feature)) {
+        bang = bang || word == "!";
+        arrow = arrow || word == ">";
+      }
+    CHECK(bang && !arrow);
+    const auto glued = splice->parse(text + ">");
+    CHECK(!glued.accepted || !glued.diagnostics.empty());
+    for (const std::string_view typed : {"!", " >"}) {
+      const auto parsed = splice->parse(text + std::string(typed));
+      CHECK(parsed.accepted && parsed.diagnostics.empty());
+    }
+  }
+  // One reading through a reduction: the state that reduces the `%` reads the
+  // `-` before the state that shifts it, and only the first reads `->`. A `>`
+  // glued to the `-` makes it `->`, so it follows only after a blank.
+  for (const std::string_view gap : {"", " "}) {
+    const std::string text = "splice:%-" + std::string(gap);
+    const auto r = splice->parse(text);
+    std::vector<cursiv::NextFeature> out;
+    const auto at = static_cast<cursiv::TextOffset>(text.size());
+    splice->nextFeaturesAt(r.cst(), at, at, out);
+    bool arrow = false;
+    for (const auto& f : out)
+      for (const auto s : splice->getGrammar().terminalSpellings(f.feature))
+        arrow = arrow || s == ">";
+    CHECK(arrow == !gap.empty());
+    const auto typed = splice->parse(text + ">");
+    CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
+  }
+  // A condition reads a run of `~` as one token, however many the arms read
+  // it as, and reads on to what follows the run. Past a caret on its first
+  // token it reads the document's text; before a caret in the run it reads
+  // what is typed there, and a `?` makes it refuse the `^` it stands before.
+  {
+    const auto offered = [&](const std::string& text, cursiv::TextOffset at,
+                             cursiv::TextOffset resume) {
+      const auto r = splice->parse(text);
+      std::vector<cursiv::NextFeature> out;
+      splice->nextFeaturesAt(r.cst(), at, resume, out);
+      std::set<std::string_view> words;
+      for (const auto& f : out) {
+        const auto spellings =
+            splice->getGrammar().terminalSpellings(f.feature);
+        if (spellings.empty()) words.insert(std::string_view{});
+        words.insert(spellings.begin(), spellings.end());
+      }
+      return words;
+    };
+    const auto clean = [&](const std::string& text) {
+      const auto r = splice->parse(text);
+      return r.accepted && r.diagnostics.empty();
+    };
+    const std::string run(40, '~');
+    const std::string held = "splice:|" + run + "!";
+    CHECK(clean(held) &&
+          offered(held, kSpliceHead, kSpliceHead + 1).contains("|"));
+    const std::string refused = "splice:^" + run + "?";
+    CHECK(!clean(refused) &&
+          !offered(refused, kSpliceHead, kSpliceHead + 1).contains("^"));
+    const std::string cut = "splice:^" + run.substr(20);
+    const auto at = static_cast<cursiv::TextOffset>(cut.size());
+    for (const std::string& text : {cut + run.substr(20) + "!", cut}) {
+      const auto words =
+          offered(text, at, std::min<cursiv::TextOffset>(at + 1, text.size()));
+      CHECK(words.contains("!") && !words.contains("?"));
+    }
+    CHECK(clean(cut + "!") && !clean(cut + "?"));
   }
   for (const std::string text : {"p@tx!", "p@ty!", "q@tz?", "q@tw?"}) {
     const auto r = parser->parse(text);
@@ -165,7 +255,9 @@ int run() {
     parser->nextFeaturesAt(r.cst(), 3, 4, out);
     bool left = false, right = false;
     for (const auto& f : out) {
-      const auto word = parser->getGrammar().terminalText(f.feature);
+      const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
+      const std::string_view word =
+          spellings.size() == 1 ? spellings.front() : std::string_view{};
       const bool isLeft = word == "x" || word == "z";
       const bool isRight = word == "y" || word == "w";
       if (!isLeft && !isRight)
@@ -188,8 +280,11 @@ int run() {
     std::vector<cursiv::NextFeature> out;
     parser->nextFeaturesAt(r.cst(), 3, 3, out);
     std::vector<std::string_view> words;
-    for (const auto& f : out)
-      words.push_back(parser->getGrammar().terminalText(f.feature));
+    for (const auto& f : out) {
+      const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
+      if (spellings.empty()) words.emplace_back();
+      words.insert(words.end(), spellings.begin(), spellings.end());
+    }
     std::sort(words.begin(), words.end());
     CHECK(
         (words == std::vector<std::string_view>{"#", "$", "w", "x", "y", "z"}));
@@ -298,7 +393,7 @@ int run() {
     const std::string source = "groups:" + std::string(text);
     const cursiv::ParseResult refused = parser->parse(source);
     CHECK(refused.accepted && !refused.diagnostics.empty());
-    const cursiv::ParseResult clean = parser->parse("groups:p ax c");
+    const cursiv::ParseResult clean = parser->parse("groups:p axc");
     CHECK(clean.accepted && clean.diagnostics.empty());
   }
   // A state whose one action reduces the empty rule keeps its refusal label.
@@ -329,12 +424,12 @@ void every_keyword_is_offered_once() {
     parser->nextFeaturesAt(r.cst(), at, at, out);
     std::set<std::string> seen;
     std::size_t texts = 0;
-    for (const auto& f : out) {
-      const std::string_view t = parser->getGrammar().terminalText(f.feature);
-      if (t.empty()) continue;
-      ++texts;
-      seen.insert(std::string(t));
-    }
+    for (const auto& f : out)
+      for (const std::string_view t :
+           parser->getGrammar().terminalSpellings(f.feature)) {
+        ++texts;
+        seen.insert(std::string(t));
+      }
     CHECK(seen.size() == 520);
     CHECK(texts == 520);
     for (unsigned k = 0; k < 520; ++k)
@@ -369,10 +464,10 @@ std::set<std::string> offered(const std::string& text, std::size_t caret) {
   std::vector<cursiv::NextFeature> out;
   parser->nextFeaturesAt(r.cst(), at, at, out);
   std::set<std::string> words;
-  for (const auto& f : out) {
-    const std::string_view t = parser->getGrammar().terminalText(f.feature);
-    if (!t.empty()) words.insert(std::string(t));
-  }
+  for (const auto& f : out)
+    for (const std::string_view t :
+         parser->getGrammar().terminalSpellings(f.feature))
+      words.insert(std::string(t));
   return words;
 }
 
@@ -434,9 +529,10 @@ std::set<std::string> offered(const std::string& text, std::size_t caret) {
   parser->nextFeaturesAt(r.cst(), at, at, out);
   std::set<std::string> words;
   for (const auto& f : out) {
-    const std::string_view t = parser->getGrammar().terminalText(f.feature);
+    const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
     words.insert(std::string(
-        t.empty() ? parser->getGrammar().terminalName(f.feature) : t));
+        spellings.size() == 1 ? spellings.front()
+                              : parser->getGrammar().terminalName(f.feature)));
   }
   return words;
 }

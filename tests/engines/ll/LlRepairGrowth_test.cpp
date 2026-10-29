@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cursiv/core/parser/Parser.hpp"
+#include "cursiv/engines/ll/runtime/LlPredictionWork.hpp"
 #include "cursiv/engines/ll/runtime/LlSearch.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/test/Check.hpp"
@@ -64,14 +65,25 @@ std::uint64_t work_of(const cursiv::Parser& parser, const std::string& text) {
   return cursiv::LlSearchWork::current().work;
 }
 
+// ...and the tokens its predictions read.
+std::uint64_t predictions_of(const cursiv::Parser& parser,
+                             const std::string& text) {
+  cursiv::LlPredictionWork::current() = {};
+  const cursiv::ParseResult result = parser.parse(text);
+  CHECK(result.accepted && !result.diagnostics.empty());
+  return cursiv::LlPredictionWork::current().tokens;
+}
+
 void doubling_costs_at_most_double(
     const char* family, unsigned size,
-    const std::function<std::string(unsigned)>& text) {
+    const std::function<std::string(unsigned)>& text,
+    std::uint64_t (*cost)(const cursiv::Parser&,
+                          const std::string&) = work_of) {
   const auto parser = tpar::generated::Ll::create_parser();
-  std::uint64_t before = work_of(*parser, text(size));
+  std::uint64_t before = cost(*parser, text(size));
   CHECK(before != 0);
   for (unsigned step = 1; step <= 2; ++step) {
-    const std::uint64_t after = work_of(*parser, text(size << step));
+    const std::uint64_t after = cost(*parser, text(size << step));
     const bool within =
         static_cast<double>(after) <= kLinear * static_cast<double>(before);
     CHECK(within);
@@ -125,6 +137,24 @@ void a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands() {
   doubling_costs_at_most_double("noise under parens", 100, [](unsigned n) {
     return "let x = " + repeat("(", n) + "1" + repeat(" @# $%", n) + ");\n";
   });
+}
+
+// A choice whose arms read the same nesting dies with all of them at the
+// fault, and so does the same choice at every level below: the readings are
+// read once, not once per level.
+void a_dead_end_deep_in_nesting_is_read_once() {
+  doubling_costs_at_most_double(
+      "predictions under owed parens", 64,
+      [](unsigned n) { return unclosed(n, "("); }, predictions_of);
+  doubling_costs_at_most_double(
+      "predictions under owed calls", 64,
+      [](unsigned n) { return unclosed(n, "f("); }, predictions_of);
+  doubling_costs_at_most_double(
+      "predictions under strays", 64,
+      [](unsigned n) {
+        return "let x = " + repeat("(", n) + "1" + repeat(" ;", n) + ");\n";
+      },
+      predictions_of);
 }
 
 // A first reading with an unknown caller cannot join a known one. Nor can a
@@ -325,5 +355,6 @@ int main() {
   faults_one_after_another_cost_each_the_same();
   a_parse_costs_the_same_whatever_was_parsed_before();
   a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands();
+  a_dead_end_deep_in_nesting_is_read_once();
   return cursiv::test::report("LlRepairGrowth_test");
 }

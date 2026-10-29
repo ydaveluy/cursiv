@@ -17,7 +17,7 @@ namespace cursiv {
 // bit says which parts to trust.
 inline void ll_mark(LlContext& c, NodeId id) {
   c.tape.stream().at(id).recovered = true;
-  c.repaired = true;
+  c.repaired.mark();
 }
 
 // A word read as the one it misspells was read for real: its leaf keeps the

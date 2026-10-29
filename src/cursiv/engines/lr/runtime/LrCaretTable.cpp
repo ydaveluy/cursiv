@@ -18,9 +18,11 @@
 
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/syntax-tree/CstLeaf.hpp"
+#include "cursiv/core/text/white_space.hpp"
 #include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/engines/lr/runtime/lr_lookahead.hpp"
+#include "cursiv/engines/lr/runtime/lr_refusal.hpp"
 #include "cursiv/engines/lr/table/LrProduction.hpp"
 #include "cursiv/engines/shared/runtime/IndentLevel.hpp"
 #include "cursiv/engines/shared/runtime/token_end_from.hpp"
@@ -57,9 +59,16 @@ struct CaretLaid {
   IndentAt indent;
   // The reading of the leaf glued to the caret it descends from.
   SymbolId reading = 0;
+  // The mode that read that leaf on the way here: the same terminal read in
+  // another mode may take in what is typed behind it.
+  std::uint16_t mode = kNoMode;
   // The issues it took of conditions left to the candidates: a link of the
   // replay's chains, 0 for none.
   std::uint32_t assumes = 0;
+  // The reductions taken before that mode shifted the leaf, whose states read
+  // it first in their own modes: a link of the replay's pass chains, 0 for
+  // none.
+  std::uint32_t passes = 0;
   bool operator==(const CaretLaid&) const = default;
 };
 
@@ -90,7 +99,7 @@ class CaretStacks {
     std::uint16_t state;
     std::uint16_t laMode;
     TextOffset at;
-    std::size_t rank;
+    NodeCount rank;
     Token la;
     Laid laid{};
     // Predecessors in increasing order, the first inline and the others in a
@@ -100,14 +109,17 @@ class CaretStacks {
   };
   // One cache line: the replay mints and compares frames by the thousand.
   static_assert(sizeof(Frame) <= 64, "a caret frame fits one cache line");
-  // A stage holds a handful of nodes: its dedup is a scan of what it minted.
+  // Only nodes minted by this stage are indexed; its initial heads remain
+  // distinct. Hashes select candidates, whose frame fields compare exactly.
   struct Stage {
     std::size_t rank = 0;
     std::vector<Id> active;
+    std::unordered_multimap<std::size_t, Id> index;
     std::size_t seeds = 0;
     void reset(std::size_t r, std::span<const Id> heads = {}) {
       rank = r;
       active.assign(heads.begin(), heads.end());
+      index.clear();
       seeds = heads.size();
     }
     std::span<const Id> nodes() const {
@@ -120,7 +132,8 @@ class CaretStacks {
   CaretStacks(const LrCaretTable& table, std::string_view text,
               TextOffset edge = kNoEdge)
       : _table(table), _text(text), _edge(edge), _room(table.maxCands) {
-    for (SymbolId t = 1; t < table.terms.size(); ++t) {
+    for (std::size_t i = 1; i < table.terms.size(); ++i) {
+      const auto t = static_cast<SymbolId>(i);
       const auto laid = table.terms[t].laid;
       if (laid == kLaidIndent) _indent = t;
       if (laid == kLaidDedent) _dedent = t;
@@ -161,6 +174,11 @@ class CaretStacks {
     forget_scans();
     _next.reset(_rank + 1);
     _leafReads.clear();
+    const bool edge = leaf.end == _edge;
+    // A token of the text that ends at the edge is read first in the modes of
+    // the states that reduce before it is shifted.
+    _passing = edge && leaf.begin != leaf.end;
+    if (_passing) _edgeHeads = _heads;
     close(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
@@ -169,12 +187,14 @@ class CaretStacks {
             _virt = Token{leaf.begin, leaf.end, virt};
             return {&_virt, 1};
           }
-          return reading(frame, held);
+          return reading(head, held);
         },
         [&](Id from, const LrAction& action, const Token& token,
             std::uint32_t assumes) {
           // A reduction may re-lex in a different mode, changing the pending
           // token's extent. Only a shift must match the recorded extent.
+          // A leaf that ends where the candidates stand keeps, in each head,
+          // the mode that read it and the reductions it was read through.
           if (token.begin == leaf.begin && token.end == leaf.end) {
             const LeafRead read{_table.mode[_frames[from].state], token.sym};
             if (std::find(_leafReads.begin(), _leafReads.end(), read) ==
@@ -182,9 +202,12 @@ class CaretStacks {
               _leafReads.push_back(read);
             add(_next, action.arg, token.end, from, {}, kDeadState,
                 Laid{.indent = levels_after(_frames[from].laid.indent, token),
-                     .assumes = assumes});
+                     .mode = edge ? read.mode : kNoMode,
+                     .assumes = assumes,
+                     .passes = edge ? _frames[from].laid.passes : 0});
           }
         });
+    _passing = false;
     _heads.swap(_next.active);
     ++_rank;
     if (leaf.begin != leaf.end) _gapFrom = leaf.end;
@@ -242,9 +265,12 @@ class CaretStacks {
   }
 
   // Text the parser dropped: the stack stands, the position moves past it,
-  // and the token is read again there.
+  // and the token is read again there. Where no reading refuses it -- the
+  // replay does not assume the token a repair invented before it -- the
+  // readings stand as they were.
   bool skip(TextOffset begin, TextOffset end) {
-    if (!errors()) return false;
+    _stood.assign(_heads.begin(), _heads.end());
+    if (!errors()) _heads.swap(_stood);
     _next.reset(_rank);
     for (const Id head : _heads) copy(_next, head, end);
     _heads.swap(_next.active);
@@ -325,6 +351,41 @@ class CaretStacks {
     bool operator==(const LeafRead&) const = default;
   };
   std::span<const LeafRead> leaf_reads() const { return _leafReads; }
+  // Whether a reading that read the leaf at the edge takes `token`.
+  bool edge_takes(const Token& token) {
+    return _edgeHeads.empty() ||
+           std::ranges::any_of(_edgeHeads,
+                               [&](Id head) { return takes(head, token); });
+  }
+  // `la`, a winner of `mode`, read again by `rescan(skip, from)` while the
+  // mode flags it and `taken` refuses it, as the drive reads it.
+  template <class Taken, class Rescan>
+  bool refused(std::uint16_t mode, Token& la, Taken&& taken, Rescan&& rescan) {
+    if (_table.flagged == nullptr) return false;
+    _skip.clear();
+    return lr_refused(
+        [&](SymbolId sym) {
+          return sym < _table.terms.size() && _table.flagged(mode, sym);
+        },
+        taken, la, [&](const Token& t) {
+          _skip.push_back(t.sym);
+          return rescan(std::span<const SymbolId>(_skip), t.begin);
+        });
+  }
+  // A reduction the leaf at the edge was read through before its shift: the
+  // state that took it, whose mode read the leaf first, and the rule.
+  struct Pass {
+    std::uint16_t state;
+    std::uint16_t prod;
+    std::uint32_t rest;
+  };
+  // Whether `visit` holds of every pass of chain `passes`.
+  template <class Visit>
+  bool each_pass(std::uint32_t passes, Visit&& visit) const {
+    for (; passes != 0; passes = _passes[passes].rest)
+      if (!visit(_passes[passes].state, _passes[passes].prod)) return false;
+    return true;
+  }
   // Each head names the reading of the last leaf it shifted, or the tape's
   // where it shifted none: a candidate glued to that leaf is judged by it.
   void name_readings(SymbolId recorded) {
@@ -515,19 +576,30 @@ class CaretStacks {
               held.end == at && implied_of(held.sym) >= 0)
             return {&held, 1};
           const auto mode = _table.mode[frame.state];
+          if (_table.cond != nullptr) typed_in(mode);
           // Trivia belongs to the current mode, including after a reduction.
           // A region must not jump a blank that only its caller ignored.
           if (!trivia_to(mode, frame.at, at, frame.laid.indent.depth) ||
-              !glues(frame.laid.reading))
+              !glues(frame.laid.reading, frame.laid.mode, frame.laid.passes))
             return {};
           // What the mode reads where the candidate is typed: the drive
           // holds it, and may lay an implied token before it if refused.
           auto kept = std::ranges::find(_allowed, mode, &Allowed::mode);
           if (kept == _allowed.end()) {
-            _allowed.emplace_back(mode, allows(mode));
+            _allowed.emplace_back(mode,
+                                  allows(mode, std::span<const SymbolId>{}));
             kept = _allowed.end() - 1;
           }
-          const Scan read = kept->scan;
+          Scan read = kept->scan;
+          if (Token la{at, at + read.end, read.term};
+              read.end != 0 &&
+              refused(
+                  mode, la, [&](const Token& t) { return takes(head, t); },
+                  [&](std::span<const SymbolId> skip, TextOffset) {
+                    const Scan s = allows(mode, skip);
+                    return Token{at, at + s.end, s.term};
+                  }))
+            read = Scan{la.end - at, la.sym};
           const bool typed = read.term == term && read.end == spelling.size();
           const Token hand =
               typed ? token
@@ -566,7 +638,25 @@ class CaretStacks {
                                                 TextOffset at, Token la,
                                                 std::uint16_t laMode,
                                                 Laid laid) {
-    for (const Id id : stage.nodes()) {
+    std::size_t hash = state;
+    const auto mix = [&](std::size_t value) {
+      hash ^= value + std::size_t{0x9e3779b9u} + (hash << 6) + (hash >> 2);
+    };
+    mix(at);
+    mix(laMode);
+    mix(la.begin);
+    mix(la.end);
+    mix(la.sym);  // Token equality deliberately ignores its scanner mode.
+    mix(laid.implied);
+    mix(laid.indent.head);
+    mix(laid.indent.depth);
+    mix(laid.reading);
+    mix(laid.mode);
+    mix(laid.assumes);
+    mix(laid.passes);
+    const auto [first, last] = stage.index.equal_range(hash);
+    for (auto candidate = first; candidate != last; ++candidate) {
+      const Id id = candidate->second;
       const Frame& f = _frames[id];
       if (f.state == state && f.at == at && f.laMode == laMode && f.la == la &&
           f.laid == laid)
@@ -576,10 +666,11 @@ class CaretStacks {
     _frames.push_back(Frame{.state = state,
                             .laMode = laMode,
                             .at = at,
-                            .rank = stage.rank,
+                            .rank = static_cast<NodeCount>(stage.rank),
                             .la = la,
                             .laid = laid});
     stage.active.push_back(id);
+    stage.index.emplace(hash, id);
     return {id, true};
   }
 
@@ -673,7 +764,7 @@ class CaretStacks {
           const Frame& frame = _frames[head];
           if (frame.laMode != kDeadState && implied_of(held.sym) >= 0)
             return {&held, 1};
-          const auto read = reading(frame, held);
+          const auto read = reading(head, held);
           if (read.size() != 1) return read;
           const int q = implied_before(frame, read.front());
           if (q < 0) return read;
@@ -873,6 +964,8 @@ class CaretStacks {
               [&](Id parent, std::uint32_t target, std::uint32_t taken) {
                 Laid into = Repair ? Laid{.indent = laid.indent} : laid;
                 into.assumes = taken;
+                if (_passing) [[unlikely]]
+                  into.passes = pass(laid.passes, state, by);
                 landed = true;
                 add(stage, static_cast<std::uint16_t>(target), committed,
                     parent, Repair ? held : token,
@@ -1047,24 +1140,54 @@ class CaretStacks {
     }
     _conditionText.resize(gap);
     _conditionText.append(word);
-    _conditionText.append(
-        _text.substr(to, std::max<std::size_t>(
-                             _widest.look, _readEnd > to ? _readEnd - to : 0)));
+    const std::size_t kept = std::max<std::size_t>(
+        {_widest.look, _readEnd > to ? _readEnd - to : 0, _tailKept});
+    _conditionText.append(_text.substr(to, kept));
+    _tailFrom = to;
+    _tailEnd =
+        static_cast<TextOffset>(std::min<std::size_t>(_text.size(), to + kept));
+  }
+  // The tokens a phrase reads past its own are its own, which the leaves of
+  // the tape need not bound: a phrase that read to the end of the text kept
+  // is asked again over more of it, and the candidate's token is read again
+  // where the lexer read it to that end. Whether more was kept.
+  bool grow() const {
+    if (_tailEnd >= _text.size()) return false;
+    const std::size_t more = std::max<std::size_t>(_tailEnd - _tailFrom, 16);
+    _conditionText.append(_text.substr(_tailEnd, more));
+    _tailEnd = static_cast<TextOffset>(
+        std::min<std::size_t>(_text.size(), _tailEnd + more));
+    _tailKept = _tailEnd - _tailFrom;
+    if (_typedCut) typed_end();
+    return true;
   }
 
   // The candidate typed as `word` is the token the lexer reads over the word
-  // and the text behind it, which can run on past the word.
+  // and the text behind it, which can run on past the word: in the mode of the
+  // reading that takes it, the one that admits everything until one does.
   void typed_as(SymbolId term, TextOffset at, std::string_view word) {
     _typedTerm = term;
     _typedAt = at;
-    _typedEnd = static_cast<TextOffset>(at + word.size());
-    if (word.empty()) return;
-    const TextOffset from = at - _conditionFrom;
+    _typedWord = static_cast<TextOffset>(at + word.size());
+    _typedEnd = _typedWord;
+    _typedMode = _table.errMode;
+    _typedCut = false;
+    if (!word.empty()) typed_end();
+  }
+  void typed_in(std::uint16_t mode) {
+    if (_typedWord == _typedAt || _typedMode == mode) return;
+    _typedMode = mode;
+    typed_end();
+  }
+  void typed_end() const {
+    const TextOffset from = _typedAt - _conditionFrom;
+    const auto len = static_cast<TextOffset>(_conditionText.size());
     TextOffset halt = 0;
-    const Scan s = _table.lex(_conditionText.data(),
-                              static_cast<TextOffset>(_conditionText.size()),
-                              _table.errMode, from, halt);
-    if (s.term == term && s.end > from) _typedEnd = _conditionFrom + s.end;
+    const Scan s =
+        _table.lex(_conditionText.data(), len, _typedMode, from, halt);
+    _typedCut = halt >= len;
+    _typedEnd = s.term == _typedTerm && s.end > from ? _conditionFrom + s.end
+                                                     : _typedWord;
   }
 
   bool condition(unsigned gap, Token token) const {
@@ -1077,13 +1200,22 @@ class CaretStacks {
     return holds;
   }
   // The condition on the candidate's text, which begins at `_conditionFrom`.
-  bool spliced(unsigned gap, TextOffset from, Token token) const {
-    if (token.begin == _typedAt && token.sym == _typedTerm)
-      token.end = _typedEnd;
-    token.begin -= _conditionFrom;
-    token.end -= _conditionFrom;
-    return _table.cond(_conditionText, gap - 1, from - _conditionFrom, token,
-                       _known, &_conditionGaps);
+  bool spliced(unsigned gap, TextOffset from, const Token& token) const {
+    from -= _conditionFrom;
+    for (;;) {
+      Token in = token;
+      if (in.begin == _typedAt && in.sym == _typedTerm) in.end = _typedEnd;
+      in.begin -= _conditionFrom;
+      in.end -= _conditionFrom;
+      const bool holds = _table.cond(_conditionText, gap - 1, from, in, _known,
+                                     &_conditionGaps);
+      if (!_known || _table.condSeen == nullptr ||
+          !_table.condReach[gap - 1u].phrase ||
+          _table.condSeen(_conditionText, gap - 1u, from, in) <
+              _conditionText.size() ||
+          !grow())
+        return holds;
+    }
   }
   // The same, 0 false, 1 unknown, 2 true: what may hold is certain only
   // where its bytes are, and a loose closure refuses nothing.
@@ -1167,6 +1299,20 @@ class CaretStacks {
         });
   }
 
+  // `chain` grown by the reduction `prod` that `state` took. A chain is a
+  // set, so a closure through a nullable cycle still saturates.
+  CURSIV_NOINLINE std::uint32_t pass(std::uint32_t chain, std::uint16_t state,
+                                     std::uint16_t prod) {
+    for (auto l = chain; l != 0; l = _passes[l].rest)
+      if (_passes[l].state == state && _passes[l].prod == prod) return chain;
+    if (_passes.empty()) _passes.emplace_back();
+    const auto [it, fresh] = _passed.try_emplace(
+        (std::uint64_t{chain} << 32) | (std::uint32_t{state} << 16) | prod,
+        static_cast<std::uint32_t>(_passes.size()));
+    if (fresh) _passes.push_back(Pass{state, prod, chain});
+    return it->second;
+  }
+
   // `set` grown by issue `holds` of condition `gap` on `token`, or
   // kContradicted where it took the other. One set grown by one issue is
   // one link: a closure through deferred conditions still saturates.
@@ -1225,23 +1371,69 @@ class CaretStacks {
   }
 
   // What a head reads: the token it holds where its mode is the one that
-  // read it, else what its mode lexes where it stands.
-  std::span<const Token> reading(const Frame& frame, const Token& held) {
+  // read it, else what its mode lexes where it stands. A flagged winner its
+  // stacks refuse is taken off the position and the position read again, as
+  // the drive reads it.
+  std::span<const Token> reading(Id head, const Token& held) {
+    const Frame& frame = _frames[head];
     const auto mode = _table.mode[frame.state];
     if (frame.laMode == mode) return {&held, 1};
-    return lex(mode, frame.at, frame.laid.indent.depth != 0);
+    const auto& seen =
+        _scanned[lex(mode, frame.at, frame.laid.indent.depth != 0)];
+    _unrefused = seen.won;
+    if (!refused(
+            mode, _unrefused, [&](const Token& t) { return takes(head, t); },
+            [&](std::span<const SymbolId> skip, TextOffset from) {
+              // A terminal taken off a position never leaves it to a trivia.
+              TextOffset halt = 0;
+              const Scan t = _table.lexWithout(
+                  _text.data(), static_cast<TextOffset>(_text.size()), mode,
+                  from, skip, halt);
+              return t.term == kInvalidSymbol || t.end <= from
+                         ? Token{from, from, kInvalidSymbol}
+                         : Token{from, t.end, t.term};
+            }))
+      return {_tokens.data() + seen.first, seen.count};
+    return {&_unrefused, 1};
   }
 
-  std::span<const Token> lex(std::uint16_t mode, TextOffset from, bool inside) {
-    for (const Scanned& seen : _scanned)
-      if (seen.mode == mode && seen.at == from && seen.inside == inside)
-        return {_tokens.data() + seen.first, seen.count};
+  // The scan of `mode` at `from`, by its place among the scans kept.
+  std::size_t lex(std::uint16_t mode, TextOffset from, bool inside) {
+    for (std::size_t i = 0; i < _scanned.size(); ++i)
+      if (_scanned[i].mode == mode && _scanned[i].at == from &&
+          _scanned[i].inside == inside)
+        return i;
     const auto first = static_cast<std::uint32_t>(_tokens.size());
-    scan(mode, from, inside);
-    const Scanned done{mode, inside, from, first,
-                       static_cast<std::uint32_t>(_tokens.size() - first)};
-    _scanned.push_back(done);
-    return {_tokens.data() + done.first, done.count};
+    const Token won = scan(mode, from, inside);
+    _scanned.push_back(
+        Scanned{mode, inside, from, first,
+                static_cast<std::uint32_t>(_tokens.size() - first), won});
+    return _scanned.size() - 1;
+  }
+
+  // Whether some stack under `head` shifts `token` after the reductions the
+  // table lays for it. What the gap decides counts as taken.
+  bool takes(Id head, const Token& token) {
+    return lr_graph_takes(
+        head, [&](Id v) { return std::uint32_t{_frames[v].state}; },
+        [&](Id v, auto&& f) { each_parent(_frames[v], f); },
+        [&](std::uint32_t top, std::uint32_t& prod, std::uint32_t& len) {
+          const auto cell =
+              _table.run(static_cast<std::uint16_t>(top), token.sym);
+          if (cell.count == 0) return 0;
+          const LrAction action = _table.action(cell.first);
+          if (cell.count != 1 || action.kind != LrActionKind::reduce) return 1;
+          const LrProduction& p = _table.prods[action.arg];
+          if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
+            return 0;
+          if (p.guarded != 0) return 1;
+          prod = action.arg;
+          len = p.len;
+          return -1;
+        },
+        [&](std::uint32_t from, std::uint32_t prod) {
+          return _table.go(from, _table.prods[prod].lhs);
+        });
   }
 
   // A trivia, or a statement's newline inside a bracket.
@@ -1249,24 +1441,20 @@ class CaretStacks {
     return _table.terms[t].trivia || (inside && _table.terms[t].joins);
   }
 
-  // The tokens one position reads in one mode, appended to the arena.
-  void scan(std::uint16_t mode, TextOffset from, bool inside) {
+  // The tokens one position reads in one mode, appended to the arena, and
+  // the one the lexer elects.
+  Token scan(std::uint16_t mode, TextOffset from, bool inside) {
     auto& result = _tokens;
     const auto found = result.size();
     const auto len = static_cast<TextOffset>(_text.size());
     auto at = from;
     for (;;) {
       while (at < len && ignored(mode, at)) ++at;
-      if (at == len) {
-        result.push_back(Token{at, at, kEofSymbol});
-        return;
-      }
+      if (at == len) return result.emplace_back(Token{at, at, kEofSymbol});
       std::uint32_t count = 0;
       const Scan first = elect(mode, at, true, count);
-      if (first.term == kInvalidSymbol || first.end == at) {
-        result.push_back(Token{at, at, kInvalidSymbol});
-        return;
-      }
+      if (first.term == kInvalidSymbol || first.end == at)
+        return result.emplace_back(Token{at, at, kInvalidSymbol});
       if (crosses(first.term, inside)) {
         at = first.end;
         continue;
@@ -1278,7 +1466,7 @@ class CaretStacks {
       // A capped sweep can hold rivals alone: the elected token is always read.
       if (result.size() == found)
         result.push_back(Token{at, first.end, first.term});
-      return;
+      return Token{at, first.end, first.term};
     }
   }
 
@@ -1315,15 +1503,16 @@ class CaretStacks {
   }
 
   // Whether the token read at `at` still ends at `to` with a word right
-  // behind: a blank run does, and a line comment goes on over the word.
+  // behind, as `StampedGrammar::ends_before_word` asks it.
   bool ends_before_word(std::uint16_t mode, TextOffset at, TextOffset to,
                         SymbolId term) {
-    _probe.assign(_text.data() + at, to - at);
-    _probe.push_back('a');
-    TextOffset halt = 0;
-    const Scan s = _table.lex(
-        _probe.data(), static_cast<TextOffset>(_probe.size()), mode, 0, halt);
-    return s.term == term && s.end == to - at;
+    return StampedGrammar::ends_before_word(
+        _probe, _text.substr(at, to - at), term, _table.terms, _table.names,
+        [&](std::string_view s) {
+          TextOffset halt = 0;
+          return _table.lex(s.data(), static_cast<TextOffset>(s.size()), mode,
+                            0, halt);
+        });
   }
 
   bool ignored(std::uint16_t mode, TextOffset at) const {
@@ -1399,10 +1588,19 @@ class CaretStacks {
   bool _loose = false;
   // The gap before the caret, its spelled candidate and what follows it: the
   // gap is copied, and its conditions read, once for every candidate.
-  std::string _conditionText;
+  mutable std::string _conditionText;
+  // Where the text kept past the candidate begins and ends, and how much of
+  // it a condition read so far.
+  TextOffset _tailFrom = 0;
+  mutable TextOffset _tailEnd = 0;
+  mutable std::size_t _tailKept = 0;
   SymbolId _typedTerm = kInvalidSymbol;
   TextOffset _typedAt = 0;
-  TextOffset _typedEnd = 0;
+  TextOffset _typedWord = 0;
+  mutable TextOffset _typedEnd = 0;
+  std::uint16_t _typedMode = 0;
+  // Whether the lexer read the candidate's token to the end of the text kept.
+  mutable bool _typedCut = false;
   bool _conditionKept = false;
   TextOffset _conditionFrom = 0;
   TextOffset _conditionAt = 0;
@@ -1413,12 +1611,18 @@ class CaretStacks {
   std::vector<Id> _pool;
   std::vector<Id> _parentsOf;
   std::vector<Id> _heads;
+  std::vector<Id> _stood;
+  // The readings before the leaf at the edge.
+  std::vector<Id> _edgeHeads;
   Id _singleton = 0;
   std::uint32_t _epoch = 0;
   // The last unwind walk that passed each frame.
   std::vector<std::uint32_t> _seen;
   Token _virt{};
   Token _rival{};
+  // A flagged winner read again, and the terminals taken off its position.
+  Token _unrefused{};
+  std::vector<SymbolId> _skip;
   bool _outlasted = false;
   std::vector<std::pair<std::uint16_t, std::uint16_t>> _shifted;
   // What a mode reads of the candidate in hand, kept for the one `next`.
@@ -1432,6 +1636,11 @@ class CaretStacks {
   // The levels every reading of the replay opened, chained as the drive's.
   std::vector<IndentLevel> _levels;
   std::vector<LeafRead> _leafReads;
+  // The chains of passes, sharing their tails; link 0 is the empty chain.
+  // Only the closure that reads the leaf at the edge grows them.
+  std::vector<Pass> _passes;
+  std::unordered_map<std::uint64_t, std::uint32_t> _passed;
+  bool _passing = false;
   std::vector<Id> _below;
   std::vector<Id> _belowNext;
   std::size_t _rank = 0;
@@ -1456,12 +1665,15 @@ class CaretStacks {
   // Predecessor and successor, both nodes of the closure: what reads through
   // the one reads the predecessors it gains.
   std::vector<std::pair<Id, Id>> _inner;
+  // The tokens one mode reads at one place, in the arena, and the one the
+  // lexer elects of them.
   struct Scanned {
     std::uint16_t mode;
     bool inside;
     TextOffset at;
     std::uint32_t first;
     std::uint32_t count;
+    Token won;
   };
   std::vector<Scanned> _scanned;
   struct Crossed {
@@ -1659,12 +1871,21 @@ void step_before_invented(const LrCaretTable& table, const Cst& cst,
       return;
     }
     if (l.hidden || l.begin == l.end) continue;
-    if (text.substr(l.begin, l.end - l.begin)
-            .find_first_not_of(" \t\r\n\f\v") != std::string_view::npos)
-      return;
+    if (!white_space_only(text.substr(l.begin, l.end - l.begin))) return;
   }
 }
 }  // namespace
+
+std::atomic<std::uint32_t>* LrSampleReads::cells(std::size_t count) const {
+  std::atomic<std::uint32_t>* held = _cells.load(std::memory_order_acquire);
+  if (held != nullptr) return held;
+  auto* const made = new std::atomic<std::uint32_t>[count]();
+  if (_cells.compare_exchange_strong(held, made, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+    return made;
+  delete[] made;
+  return held;
+}
 
 void lr_next_features_at(const LrCaretTable& table,
                          const StampedGrammar& grammar, const Cst& cst,
@@ -1701,11 +1922,12 @@ void lr_next_features_at(const LrCaretTable& table,
   // A literal is answered only where the lexer accepts it spliced in: the
   // boundary is the literal's own, and a guard may refuse anything the
   // grammar declared. An indentation's or an implied token's leaf is the
-  // tape's: no lexer reads it back, so nothing glues onto it.
+  // tape's: no lexer reads it back, so nothing glues onto it. A word a repair
+  // read as another is the author's, and what is typed behind it may glue to
+  // it.
   const SymbolId leafTerm =
       leaf && shifted < table.shiftTerm.size() ? table.shiftTerm[shifted] : 0;
-  const bool glued =
-      leaf && !leaf.recovered && leaf.end == at && !table.laid(leafTerm);
+  const bool glued = leaf && leaf.end == at && !table.laid(leafTerm);
   CaretStacks stacks(table, text, at);
   if (const unsigned tokens = stacks.phrase_tokens(); tokens != 0) {
     const NodeCount onward = cst.leaves_before(resume);
@@ -1737,9 +1959,13 @@ void lr_next_features_at(const LrCaretTable& table,
   // What the position reads THIS terminal as, which is the only reading that
   // makes it typeable here: a guard belongs to the acceptance that declares
   // it, so a twin of the same spelling answers for itself alone, and the
-  // sweep is where that twin lives.
-  const auto reads = [&](std::uint16_t mode, SymbolId term, TextOffset& halt) {
+  // sweep is where that twin lives. A refused winner is read without the
+  // terminals of `skip`.
+  const auto reads = [&](std::uint16_t mode, SymbolId term, TextOffset& halt,
+                         std::span<const SymbolId> skip = {}) {
     const auto len = static_cast<TextOffset>(splice.size());
+    if (!skip.empty())
+      return table.lexWithout(splice.data(), len, mode, 0, skip, halt);
     const Scan s = table.lex(splice.data(), len, mode, 0, halt);
     if (s.term == term || room.empty()) return s;
     const std::uint32_t found =
@@ -1756,24 +1982,99 @@ void lr_next_features_at(const LrCaretTable& table,
   // Glued to the leaf, the leaf's token re-lexed with the candidate behind it
   // must still end at `at` ("E" then "extends" re-lexes as one identifier) and
   // still be the reading the candidate follows: a guard can swap the token for
-  // a twin of the same length. A leaf the replay did not read is asked in the
-  // mode before it.
-  const auto glues = [&](std::string_view spelling, SymbolId reading) {
+  // a twin of the same length. A head that names the mode it read the leaf in
+  // is asked in that mode alone; a leaf the replay did not read is asked in
+  // the mode before it.
+  const auto glues = [&](std::string_view spelling, SymbolId reading,
+                         std::uint16_t mode) {
     return spliced(leaf.begin, spelling, [&](TextOffset& halt) {
       bool ok = false;
       bool asked = false;
       const auto ask = [&](std::uint16_t m) {
         TextOffset h = 0;
-        const Scan s = reads(m, reading, h);
+        // A word the repair read as another is no token of its reading: read
+        // under the alphabet that admits everything, the candidate only must
+        // not make one word with it.
+        if (leaf.recovered) {
+          const Scan s = table.lex(splice.data(),
+                                   static_cast<TextOffset>(splice.size()),
+                                   table.errMode, 0, h);
+          ok = ok || s.term == kInvalidSymbol || s.end <= at - leaf.begin;
+          halt = std::max(halt, h);
+          asked = true;
+          return;
+        }
+        Scan s = reads(m, reading, h);
+        if (Token la{leaf.begin, leaf.begin + s.end, s.term};
+            s.term != reading && s.end != 0 &&
+            stacks.refused(
+                m, la, [&](const Token& t) { return stacks.edge_takes(t); },
+                [&](std::span<const SymbolId> skip, TextOffset) {
+                  const Scan r = reads(m, reading, h, skip);
+                  return Token{leaf.begin, leaf.begin + r.end, r.term};
+                }))
+          s = Scan{la.end - leaf.begin, la.sym};
         if (s.term == reading && s.end == at - leaf.begin) ok = true;
         halt = std::max(halt, h);
         asked = true;
       };
-      for (const auto& read : stacks.leaf_reads())
-        if (read.term == reading) ask(read.mode);
+      if (mode != kNoMode)
+        ask(mode);
+      else
+        for (const auto& read : stacks.leaf_reads())
+          if (read.term == reading) ask(read.mode);
       if (!asked) ask(spliceable ? table.mode[preState] : table.errMode);
       return ok;
     });
+  };
+  // Before the mode that shifts the leaf, the states that reduce on the way to
+  // it read the leaf in their own modes. With the candidate behind it, each
+  // of those modes still reads what it read, or a token its state reduces by
+  // the same rule: `%` then `-` is reduced one way, `%` then `->` another,
+  // and the shift's mode may not read `->` at all. A pass in the shift's mode
+  // is asked with the shift.
+  const auto reduces = [&](std::uint16_t state, SymbolId term,
+                           std::uint16_t prod) {
+    if (term == kInvalidSymbol) return false;
+    const auto cell = table.run(state, term);
+    for (std::uint32_t k = cell.first; k < cell.first + cell.count; ++k) {
+      const LrAction action = table.action(k);
+      if (action.kind == LrActionKind::reduce && action.arg == prod)
+        return true;
+    }
+    return false;
+  };
+  const auto passes_hold = [&](std::string_view spelling, std::uint16_t mode,
+                               std::uint32_t passes) {
+    return stacks.each_pass(passes, [&](std::uint16_t state,
+                                        std::uint16_t prod) {
+      const std::uint16_t m = table.mode[state];
+      if (m == mode) return true;
+      TextOffset h = 0;
+      const Scan was = table.lex(
+          text.data(), static_cast<TextOffset>(text.size()), m, leaf.begin, h);
+      const bool none = was.term == kInvalidSymbol || was.end <= leaf.begin;
+      return spliced(leaf.begin, spelling, [&](TextOffset& halt) {
+        const auto len = static_cast<TextOffset>(splice.size());
+        const Scan now = table.lex(splice.data(), len, m, 0, halt);
+        const bool read = now.term != kInvalidSymbol && now.end != 0;
+        if (read ? now.term == was.term && leaf.begin + now.end == was.end
+                 : none)
+          return true;
+        if (reduces(state, now.term, prod)) return true;
+        if (room.empty()) return false;
+        const std::uint32_t found =
+            table.scan(splice.data(), len, m, 0, room.data(), table.maxCands);
+        for (std::uint32_t k = 0; k < found; ++k)
+          if (reduces(state, room[k].term, prod)) return true;
+        return false;
+      });
+    });
+  };
+  const auto fits = [&](std::string_view spelling, SymbolId reading,
+                        std::uint16_t mode, std::uint32_t passes) {
+    return glues(spelling, reading, mode) &&
+           passes_hold(spelling, mode, passes);
   };
 
   // The prefix: every record up to the last token the caret stands behind.
@@ -1858,7 +2159,9 @@ void lr_next_features_at(const LrCaretTable& table,
   const auto sampled_in = [&](std::uint16_t mode, SymbolId term) {
     std::atomic<std::uint32_t>* const kept =
         table.sampleReads != nullptr
-            ? table.sampleReads + std::size_t{mode} * table.terms.size() + term
+            ? table.sampleReads->cells(table.modeTight.size() *
+                                       table.terms.size()) +
+                  std::size_t{mode} * table.terms.size() + term
             : nullptr;
     if (kept != nullptr)
       if (const std::uint32_t held = kept->load(std::memory_order_relaxed);
@@ -1875,105 +2178,124 @@ void lr_next_features_at(const LrCaretTable& table,
     return found;
   };
   // Each candidate supplies its own lookahead and must reach a real shift on
-  // one of the stacks the prefix admits.
-  std::vector<std::pair<SymbolId, bool>> glue;
+  // one of the stacks the prefix admits. Whether it glues to the leaf is
+  // asked once per reading of the leaf, mode that read it and reductions it
+  // was read through.
+  struct Glue {
+    SymbolId reading;
+    std::uint16_t mode;
+    std::uint32_t passes;
+    bool ok;
+  };
+  std::vector<Glue> glue;
   // The shifts one candidate takes, each read once for its sites.
   std::vector<std::uint32_t> emitted;
   for (const auto term : stacks.terminals(at)) {
-    const auto spelling = grammar.terminalText(term);
-    if (comment.scan.term != kInvalidSymbol && !spelling.empty() &&
-        !comment_ends(spelling))
-      continue;
-    glue.clear();
-    emitted.clear();
     const std::size_t mine = out.size();
-    // A terminal that spells none is tried as the words it reads as: glued to
-    // the token before the caret, a name can read as one word with it.
-    const auto words_fit = [&](SymbolId reading) {
-      std::uint32_t read = 0;
-      for (std::uint16_t m = 0; m < table.modeTight.size(); ++m)
-        read |= sampled_in(m, term);
-      if (read == 0) return true;
-      for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i)
-        if (((read >> i) & 1u) != 0 &&
-            glues(StampedGrammar::samples[i], reading))
-          return true;
-      return false;
-    };
-    // A candidate that spells none has its conditions asked of each word its
-    // terminal is read as, once a closure shows it asks any.
-    const auto type = [&](std::string_view word) {
-      stacks.next(
-          term, at, resume, spelling, word,
-          [&](SymbolId reading) {
-            if (!glued) return true;
-            const auto judged = [&](SymbolId r) {
-              for (const auto& [seen, ok] : glue)
-                if (seen == r) return ok;
-              glue.emplace_back(
-                  r, spelling.empty() ? words_fit(r) : glues(spelling, r));
-              return glue.back().second;
-            };
-            return judged(reading);
-          },
-          [&](std::uint16_t mode) {
-            if (spelling.empty())
-              return comment_lets_word(mode, term) ? Scan{0, term}
-                                                   : Scan{0, kInvalidSymbol};
-            return spliced(at, spelling, [&](TextOffset& halt) {
-              return reads(mode, term, halt);
+    // The candidate typed as one of its spellings, or as the sample words its
+    // terminal reads where it has none.
+    const auto offer = [&](std::string_view spelling) {
+      if (comment.scan.term != kInvalidSymbol && !spelling.empty() &&
+          !comment_ends(spelling))
+        return;
+      glue.clear();
+      emitted.clear();
+      // A terminal that spells none is tried as the words it reads as: glued to
+      // the token before the caret, a name can read as one word with it.
+      const auto words_fit = [&](SymbolId reading, std::uint16_t mode,
+                                 std::uint32_t passes) {
+        std::uint32_t read = 0;
+        for (std::size_t m = 0; m < table.modeTight.size(); ++m)
+          read |= sampled_in(static_cast<std::uint16_t>(m), term);
+        if (read == 0) return true;
+        for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i)
+          if (((read >> i) & 1u) != 0 &&
+              fits(StampedGrammar::samples[i], reading, mode, passes))
+            return true;
+        return false;
+      };
+      // A candidate that spells none has its conditions asked of each word its
+      // terminal is read as, once a closure shows it asks any.
+      const auto type = [&](std::string_view word) {
+        stacks.next(
+            term, at, resume, spelling, word,
+            [&](SymbolId reading, std::uint16_t mode, std::uint32_t passes) {
+              if (!glued) return true;
+              for (const Glue& seen : glue)
+                if (seen.reading == reading && seen.mode == mode &&
+                    seen.passes == passes)
+                  return seen.ok;
+              glue.push_back({reading, mode, passes,
+                              spelling.empty()
+                                  ? words_fit(reading, mode, passes)
+                                  : fits(spelling, reading, mode, passes)});
+              return glue.back().ok;
+            },
+            [&](std::uint16_t mode, std::span<const SymbolId> skip) {
+              if (spelling.empty())
+                return comment_lets_word(mode, term) ? Scan{0, term}
+                                                     : Scan{0, kInvalidSymbol};
+              return spliced(at, spelling, [&](TextOffset& halt) {
+                return reads(mode, term, halt, skip);
+              });
+            },
+            [&](std::uint16_t st, std::uint16_t landing) {
+              const std::uint32_t shift = std::uint32_t{st} << 16 | landing;
+              if (std::find(emitted.begin(), emitted.end(), shift) !=
+                  emitted.end())
+                return;
+              emitted.push_back(shift);
+              const auto items = table.expectItems.begin();
+              const auto end = items + table.expectBase[st + 1u];
+              for (auto at = std::lower_bound(
+                       items + table.expectBase[st], end, term,
+                       [&](std::uint16_t item, SymbolId t) {
+                         return table.expectPool[item].feature < t;
+                       });
+                   at != end && table.expectPool[*at].feature == term; ++at) {
+                const auto& e = table.expectPool[*at];
+                if (e.landing != kNoElement && e.landing != landing) continue;
+                const NextFeature feature{e.feature, grammar.rowFeature(e.site),
+                                          grammar.rowNarrow(e.site),
+                                          grammar.rowType(e.site)};
+                const bool seen =
+                    std::any_of(out.begin() + static_cast<std::ptrdiff_t>(mine),
+                                out.end(), [&](const NextFeature& f) {
+                                  return f.feature == feature.feature &&
+                                         f.property == feature.property &&
+                                         f.narrow == feature.narrow &&
+                                         f.type == feature.type;
+                                });
+                if (!seen) out.push_back(feature);
+              }
             });
-          },
-          [&](std::uint16_t st, std::uint16_t landing) {
-            const std::uint32_t shift = std::uint32_t{st} << 16 | landing;
-            if (std::find(emitted.begin(), emitted.end(), shift) !=
-                emitted.end())
-              return;
-            emitted.push_back(shift);
-            const auto items = table.expectItems.begin();
-            const auto end = items + table.expectBase[st + 1u];
-            for (auto at = std::lower_bound(
-                     items + table.expectBase[st], end, term,
-                     [&](std::uint16_t item, SymbolId t) {
-                       return table.expectPool[item].feature < t;
-                     });
-                 at != end && table.expectPool[*at].feature == term; ++at) {
-              const auto& e = table.expectPool[*at];
-              if (e.landing != kNoElement && e.landing != landing) continue;
-              const NextFeature feature{e.feature, grammar.rowFeature(e.site),
-                                        grammar.rowNarrow(e.site),
-                                        grammar.rowType(e.site)};
-              const bool seen = std::any_of(
-                  out.begin() + static_cast<std::ptrdiff_t>(mine), out.end(),
-                  [&](const NextFeature& f) {
-                    return f.feature == feature.feature &&
-                           f.property == feature.property &&
-                           f.narrow == feature.narrow && f.type == feature.type;
-                  });
-              if (!seen) out.push_back(feature);
-            }
-          });
-    };
-    type(spelling);
-    if (spelling.empty() && table.cond != nullptr && stacks.asked()) {
-      std::uint32_t read = 0;
-      for (std::uint16_t m = 0; m < table.modeTight.size(); ++m)
-        read |= sampled_in(m, term);
-      if (read != 0) {
-        out.resize(mine);
-        emitted.clear();
-        stacks.keep_answers(true);
-        bool first = true;
-        for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i) {
-          if (((read >> i) & 1u) == 0) continue;
-          const std::string_view word = StampedGrammar::samples[i];
-          if (!first && stacks.unchanged(term, at, resume, word)) continue;
-          first = false;
-          type(word);
+      };
+      type(spelling);
+      if (spelling.empty() && table.cond != nullptr && stacks.asked()) {
+        std::uint32_t read = 0;
+        for (std::size_t m = 0; m < table.modeTight.size(); ++m)
+          read |= sampled_in(static_cast<std::uint16_t>(m), term);
+        if (read != 0) {
+          out.resize(mine);
+          emitted.clear();
+          stacks.keep_answers(true);
+          bool first = true;
+          for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i) {
+            if (((read >> i) & 1u) == 0) continue;
+            const std::string_view word = StampedGrammar::samples[i];
+            if (!first && stacks.unchanged(term, at, resume, word)) continue;
+            first = false;
+            type(word);
+          }
+          stacks.keep_answers(false);
         }
-        stacks.keep_answers(false);
       }
-    }
+    };
+    // A terminal of several spellings is offered where one of them would be.
+    const std::span<const std::string_view> spellings =
+        grammar.terminalSpellings(term);
+    if (spellings.empty()) offer({});
+    for (const std::string_view spelling : spellings) offer(spelling);
   }
 }
 

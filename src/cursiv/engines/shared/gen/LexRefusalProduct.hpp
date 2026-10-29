@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
@@ -18,7 +18,6 @@
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
 #include "cursiv/engines/shared/gen/LexWordClass.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/engines/shared/gen/lex_boundary_misses.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/gen/lex_prefix_meets.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
@@ -45,6 +44,8 @@ struct LexRefusalProduct {
   LexNfaPool& n;
   Cfg& g;
   Refuse refuse;
+  // The refusals a matcher took: the product leaves them be.
+  const std::vector<bool>& taken;
   // Per refusal, the one read in a row right in front of it, the only way
   // into it, -1 for none; and the frontier those in front lay, once asked.
   std::vector<int> front{};
@@ -60,19 +61,20 @@ struct LexRefusalProduct {
   std::vector<Laid> laid{};
 
   // Every refusal `taken` leaves, once the graph it points into is complete.
-  void run(const std::vector<bool>& taken) {
-    std::unordered_map<int, std::size_t> owner;
-    for (std::size_t k = 0; k < n.guards.size(); ++k)
-      owner.emplace(n.guards[k].hole, k);
+  void run() {
+    // The refusal whose hole `to` is, -1 for none.
+    const auto owner = [&](int to) {
+      return to < 0 ? -1 : n.s[static_cast<std::size_t>(to)].guard;
+    };
     front.assign(n.guards.size(), -1);
     for (std::size_t i = 0; i < n.guards.size(); ++i)
-      if (const auto at = owner.find(n.guards[i].out); at != owner.end()) {
-        int& f = front[at->second];
+      if (const int at = owner(n.guards[i].out); at >= 0) {
+        int& f = front[static_cast<std::size_t>(at)];
         f = f != -1 || taken[i] ? -2 : static_cast<int>(i);
       }
     const auto entered = [&](int to) {
-      if (const auto at = owner.find(to); at != owner.end())
-        front[at->second] = -2;
+      if (const int at = owner(to); at >= 0)
+        front[static_cast<std::size_t>(at)] = -2;
     };
     for (const LexNfaState& st : n.s) {
       entered(st.t1);
@@ -85,11 +87,8 @@ struct LexRefusalProduct {
     laid.assign(n.guards.size(), Laid{});
     for (std::size_t k = 0; k < n.guards.size(); ++k) {
       if (taken[k]) continue;
-      std::vector<int> pending{n.guards[k].hole};
-      for (std::size_t j = k + 1; j < n.guards.size(); ++j)
-        if (!taken[j]) pending.push_back(n.guards[j].hole);
-      std::vector<int> memo;
-      level(k, pending, memo, 0, n.guards[k].out, n.guards[k].hole);
+      std::map<std::pair<unsigned, int>, int> memo;
+      level(k, memo, 0, n.guards[k].out, n.guards[k].hole);
     }
   }
 
@@ -128,7 +127,9 @@ struct LexRefusalProduct {
   }
 
   // Whether every continuation of this prefix admits a match somewhere, over
-  // the NFA subsets, each once: `[^\n]* ![^\n]` is total.
+  // the NFA subsets, each once: `[^\n]* ![^\n]` is total. A match ends before
+  // a byte its bound neither refuses nor decodes at: where the bound decodes,
+  // the scalar there may be one it refuses, so the walk reads on.
   bool total(std::vector<int> start) const {
     std::sort(start.begin(), start.end());
     std::vector<std::vector<int>> work{start};
@@ -140,7 +141,11 @@ struct LexRefusalProduct {
         const auto c = static_cast<unsigned char>(b);
         if (std::ranges::any_of(current, [&](int x) {
               const auto& s = n.s[x];
-              return s.accept >= 0 && (s.bound < 0 || !g.sets[s.bound].has(c));
+              return s.accept >= 0 &&
+                     (s.bound < 0 ||
+                      !(g.sets[s.bound].has(c) ||
+                        lex_decode_bytes(g, static_cast<std::uint16_t>(s.bound))
+                            .has(c)));
             }))
           continue;
         std::vector<int> next = lex_nfa_step(n, g.sets.data(), current, c);
@@ -226,11 +231,10 @@ struct LexRefusalProduct {
 
   // `lvl` bytes of guard `k`'s word spelled and the continuation at `q`; each
   // level re-spells the continuation's edges, `into` the state it fills.
-  int level(std::size_t k, const std::vector<int>& pending,
-            std::vector<int>& memo, unsigned lvl, int q, int into) {
-    for (std::size_t i = 0; i < memo.size(); i += 3)
-      if (memo[i] == static_cast<int>(lvl) && memo[i + 1] == q)
-        return memo[i + 2];
+  int level(std::size_t k, std::map<std::pair<unsigned, int>, int>& memo,
+            unsigned lvl, int q, int into) {
+    if (const auto at = memo.find({lvl, q}); at != memo.end())
+      return at->second;
     const LexNode e = g.lex[n.guards[k].node];
     const bool done = lvl == e.min;
     // The word fully spelled and nothing rescuing it: the reading is dead.
@@ -274,8 +278,7 @@ struct LexRefusalProduct {
         ByteSet on = g.sets[st.set] & pickSet;
         if (st.minus >= 0) on.andnot(g.sets[st.minus]);
         if (on.any()) {
-          const int to =
-              done ? st.t1 : level(k, pending, memo, lvl + 1, st.t1, -1);
+          const int to = done ? st.t1 : level(k, memo, lvl + 1, st.t1, -1);
           // A level that keeps nothing is not an edge.
           if (to >= 0) {
             leads = leads || ByteSet{on}.andnot(g.sets[pick]).any();
@@ -344,8 +347,9 @@ struct LexRefusalProduct {
         }
         // A refusal not yet resolved stands in the way, its own hole
         // included: its continuation is not there to be narrowed.
-        for (int h : pending)
-          if (h == x) refuse(LexRefusalFault::inLoop, k, ByteSet{});
+        if (st.guard >= static_cast<int>(k) &&
+            !taken[static_cast<std::size_t>(st.guard)])
+          refuse(LexRefusalFault::inLoop, k, ByteSet{});
       }
     }
     // A byte past the word that only a decoded scalar rescues: what the body
@@ -354,85 +358,85 @@ struct LexRefusalProduct {
       refuse(LexRefusalFault::readsPast, k, ByteSet{});
     const int self = into >= 0 ? into : (chain < 0 ? -1 : n.hole());
     if (self >= 0) n.s[static_cast<std::size_t>(self)].t1 = chain;
-    memo.push_back(static_cast<int>(lvl));
-    memo.push_back(q);
-    memo.push_back(self);
-    return self;
+    return memo[{lvl, q}] = self;
   }
 };
 
 // The spine refusals a matcher asks: those at a terminal's head, and behind
 // it those the product cannot spell without text past the token -- tried on a
 // copy until what is taken leaves no other such. `offsets` are the spine's.
+// The last trial is the product: `n` and the set pools keep it, and what it
+// cannot spell is named on the verdicts.
 template <class Cfg>
-std::vector<bool> lex_matcher_takes(const LexNfaPool& n, Cfg& g,
+std::vector<bool> lex_matcher_takes(LexNfaPool& n, Cfg& g,
                                     const std::vector<int>& offsets) {
   std::vector<bool> taken(n.guards.size(), false);
-  bool behind = false;
-  for (std::size_t k = 0; k < n.guards.size(); ++k) {
-    taken[k] = offsets[k] == 0;
-    behind = behind || offsets[k] > 0;
-  }
-  if (!behind) return taken;
+  for (std::size_t k = 0; k < n.guards.size(); ++k) taken[k] = offsets[k] == 0;
+  // A trial only appends to the set pools: `lex_intern_set` and
+  // `lex_intern_cps_bound` write behind `nsets` and the end of
+  // `scalarRanges`, and never change an entry already there. Cutting each pool
+  // back to its size and `nsets` to its count therefore undoes a trial.
   const auto nsets = g.nsets;
-  const auto sets = g.sets;
-  const auto decode = g.setDecode;
-  const auto scalars = g.setScalars;
-  const auto ranges = g.scalarRanges;
-  for (bool grew = true; grew;) {
-    grew = false;
-    LexNfaPool trial = n;
+  const auto setsSize = g.sets.size();
+  const auto decodeSize = g.setDecode.size();
+  const auto scalarsSize = g.setScalars.size();
+  const auto rangesSize = g.scalarRanges.size();
+  struct Fault {
+    LexRefusalFault why;
+    std::size_t k;
+    ByteSet bytes;
+  };
+  std::vector<Fault> faults;
+  for (LexNfaPool trial;;) {
+    trial = n;
     for (std::size_t k = 0; k < n.guards.size(); ++k)
       if (taken[k])
         trial.s[static_cast<std::size_t>(trial.guards[k].hole)].t1 =
             trial.guards[k].out;
-    std::vector<bool> faulted(n.guards.size(), false);
-    const auto mark = [&](LexRefusalFault, std::size_t k, const ByteSet&) {
-      faulted[k] = true;
+    faults.clear();
+    const auto mark = [&](LexRefusalFault why, std::size_t k,
+                          const ByteSet& bytes) {
+      faults.push_back({why, k, bytes});
     };
-    LexRefusalProduct<Cfg, decltype(mark)>{trial, g, mark}.run(taken);
-    g.nsets = nsets;
-    g.sets = sets;
-    g.setDecode = decode;
-    g.setScalars = scalars;
-    g.scalarRanges = ranges;
-    for (std::size_t k = 0; k < n.guards.size(); ++k)
-      if (offsets[k] > 0 && !taken[k] && faulted[k]) {
-        taken[k] = true;
+    LexRefusalProduct<Cfg, decltype(mark)>{trial, g, mark, taken}.run();
+    bool grew = false;
+    for (const Fault& f : faults)
+      if (offsets[f.k] > 0 && !taken[f.k]) {
+        taken[f.k] = true;
         grew = true;
       }
+    if (!grew) {
+      n = std::move(trial);
+      break;
+    }
+    g.nsets = nsets;
+    g.sets.truncate(setsSize);
+    g.setDecode.truncate(decodeSize);
+    g.setScalars.truncate(scalarsSize);
+    g.scalarRanges.truncate(rangesSize);
   }
-  return taken;
-}
-
-// What no matcher took and the graph cannot spell, and a head refusal whose
-// rescue leaves out bytes the terminal reads: each named on the verdicts.
-template <class Cfg>
-void lex_refuse_unspelled(LexNfaPool& n, Cfg& g, const std::vector<bool>& head,
-                          const std::vector<bool>& taken) {
-  const auto refuse = [&](LexRefusalFault f, std::size_t k,
-                          const ByteSet& bytes) {
+  for (const auto& [why, k, bytes] : faults) {
     const LexNfaGuard& gd = n.guards[k];
-    switch (f) {
+    switch (why) {
       case LexRefusalFault::inLoop:
-        return lower_refuse(g, LowerFail::wordRefusedInLoop, gd.term);
+        lower_refuse(g, LowerFail::wordRefusedInLoop, gd.term);
+        break;
       case LexRefusalFault::endsOnWord:
-        return lower_refuse(g, LowerFail::rescuedRefusalPastMatch, gd.term,
-                            bytes);
+        lower_refuse(g, LowerFail::rescuedRefusalPastMatch, gd.term, bytes);
+        break;
       case LexRefusalFault::endsShort:
         if (!g.lowerFail()) g.lowerWord = gd.node;
-        return lower_refuse(g, LowerFail::wordPastMatch, gd.term);
+        lower_refuse(g, LowerFail::wordPastMatch, gd.term);
+        break;
       case LexRefusalFault::intoRelay:
-        return lower_refuse(g, LowerFail::refusalIntoRelay, gd.term);
+        lower_refuse(g, LowerFail::refusalIntoRelay, gd.term);
+        break;
       case LexRefusalFault::readsPast:
-        return lower_refuse(g, LowerFail::rescueReadsPast, gd.term);
+        lower_refuse(g, LowerFail::rescueReadsPast, gd.term);
+        break;
     }
-  };
-  LexRefusalProduct<Cfg, decltype(refuse)>{n, g, refuse}.run(taken);
-  lex_boundary_misses(n, g, head, [&](std::size_t k, const ByteSet& bytes) {
-    if (!g.lowerFail()) g.lowerWord = n.guards[k].node;
-    lower_refuse(g, LowerFail::boundaryMisses, n.guards[k].term, bytes);
-  });
+  }
+  return taken;
 }
 
 }  // namespace cursiv

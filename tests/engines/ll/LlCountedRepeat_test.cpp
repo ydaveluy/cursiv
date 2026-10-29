@@ -369,10 +369,12 @@ int main() {
             std::tuple<std::string, std::string, const cursiv::AstTypeTag*>>
             result;
         for (const auto& f : list) {
-          auto spelling = parser.getGrammar().terminalText(f.feature);
-          if (spelling.empty())
-            spelling = parser.getGrammar().terminalName(f.feature);
-          result.emplace(spelling, f.property, f.type);
+          const auto spellings =
+              parser.getGrammar().terminalSpellings(f.feature);
+          result.emplace(spellings.size() == 1
+                             ? spellings.front()
+                             : parser.getGrammar().terminalName(f.feature),
+                         f.property, f.type);
         }
         return result;
       };
@@ -405,11 +407,11 @@ int main() {
       const auto* range = cursiv::ast_cast<Range>(document->entries[0]);
       return range == nullptr ? ~std::size_t{0} : range->items.size();
     };
-    for (const std::size_t n : {0, 1, 2, 511, 512, 513, 599, 600})
+    for (const std::size_t n : {0, 1, 2, 511, 512, 513})
       CHECK(items(run("x", n)) == n);
-    for (const std::size_t n : {3, 4, 513, 999, 1000})
+    for (const std::size_t n : {3, 4, 511, 512, 513})
       CHECK(items(run("y", n)) == n);
-    for (const std::string& text : {run("x", 601), run("y", 2), run("y", 1001)})
+    for (const std::string& text : {run("x", 514), run("y", 2), run("y", 514)})
       CHECK(!engine->parse("long:" + text).diagnostics.empty());
   }
   return cursiv::test::report("LlCountedRepeat_test");

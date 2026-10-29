@@ -41,7 +41,7 @@ struct Core : cursiv::GrammarSpec {
   struct Doc : rule<create<ast::Doc>(
                    many(append<&ast::Doc::items>(ref<ID> | ref<STRING>)))> {};
   using entry = Doc;
-  using ignore = list<WS, COMMENT, REGION, BLOCK, OPEN>;
+  using ignored = list<WS, COMMENT, REGION, BLOCK, OPEN>;
 };
 
 namespace overlap {
@@ -82,7 +82,7 @@ struct G : cursiv::GrammarSpec {
   struct Doc : rule<create<ast::Doc>(many(append<&ast::Doc::items>(
                    ref<ID> | lit<"{-#"> | lit<"{-$"> | lit<"#-}">)))> {};
   using entry = Doc;
-  using ignore = list<WS, COMMENT>;
+  using ignored = list<WS, COMMENT>;
 };
 }  // namespace pragmas
 
@@ -98,7 +98,7 @@ struct G : cursiv::GrammarSpec {
   struct Doc : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<ID>)))> {
   };
   using entry = Doc;
-  using ignore = list<WS, COMMENT>;
+  using ignored = list<WS, COMMENT>;
 };
 }  // namespace wide
 
@@ -108,7 +108,7 @@ struct G : Core {
                    ref<ID> | ref<STRING> | lit<"{-#"> | lit<"{-$"> |
                    lit<"#-}">)))> {};
   using entry = Doc;
-  using ignore = list<WS, COMMENT, REGION, BLOCK, OPEN,
+  using ignored = list<WS, COMMENT, REGION, BLOCK, OPEN,
                       pragmas::G::COMMENT, wide::G::COMMENT>;
 };
 

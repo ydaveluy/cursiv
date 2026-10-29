@@ -130,14 +130,8 @@ void LocalSymbols::seal() {
   for (std::uint32_t k = 0; k < containers; ++k)
     met[k].next = _groups[met[k].slot].begin;
   std::vector<AstNodeDescription> grouped(count);
-  const auto groupedContainers =
-      std::make_unique_for_overwrite<const AstNode*[]>(count);
-  for (std::size_t i = 0; i < count; ++i) {
-    Met& m = met[metOf[i]];
-    const std::uint32_t slot = m.next++;
-    grouped[slot] = _entries[i];
-    groupedContainers[slot] = m.container;
-  }
+  for (std::size_t i = 0; i < count; ++i)
+    grouped[met[metOf[i]].next++] = _entries[i];
   _entries = std::move(grouped);
 
   // 4. The name table.
@@ -145,30 +139,39 @@ void LocalSymbols::seal() {
   // After the last move and not before: the keys are views of the entries' own
   // names, so indexing an array still to be permuted would leave every key
   // pointing at a description that has since moved away.
+  //
+  // Read group by group: a group knows its container and its run of entries.
+  // The groups are walked from the last and each run backwards, which meets
+  // the entries from the last to the first.
   _names.assign(table_size(count), NameSlot{});
   _nameMask = _names.size() - 1;
   _nextSameName.assign(count, kNone);
-  for (std::uint32_t i = static_cast<std::uint32_t>(count); i-- > 0;) {
-    const AstNode* container = groupedContainers[i];
-    const std::string_view name = _entries[i].name;
-    const std::uint64_t hash = mix(container) ^ hash_name(name);
-    const std::uint32_t tag = static_cast<std::uint32_t>(hash >> 32u);
-    std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
-    for (;;) {
-      NameSlot& slot = _names[at];
-      if (slot.container == nullptr) {
-        slot = NameSlot{container, i, tag};
-        break;
+  for (std::size_t g = _groups.size(); g-- > 0;) {
+    const AstNode* container = _groups[g].container;
+    if (container == nullptr) continue;
+    const std::uint64_t containerHash = mix(container);
+    const std::uint32_t begin = _groups[g].begin;
+    for (std::uint32_t i = begin + _groups[g].count; i-- > begin;) {
+      const std::string_view name = _entries[i].name;
+      const std::uint64_t hash = containerHash ^ hash_name(name);
+      const std::uint32_t tag = static_cast<std::uint32_t>(hash >> 32u);
+      std::size_t at = static_cast<std::size_t>(hash) & _nameMask;
+      for (;;) {
+        NameSlot& slot = _names[at];
+        if (slot.container == nullptr) {
+          slot = NameSlot{container, i, tag};
+          break;
+        }
+        if (slot.container == container && slot.tag == tag &&
+            folded_equal(_entries[slot.first].name, name)) {
+          // Walking backwards lets us prepend in constant time while keeping
+          // declaration order, even for thousands of overloads of one name.
+          _nextSameName[i] = slot.first;
+          slot.first = i;
+          break;
+        }
+        at = (at + 1) & _nameMask;
       }
-      if (slot.container == container && slot.tag == tag &&
-          folded_equal(_entries[slot.first].name, name)) {
-        // Walking backwards lets us prepend in constant time while keeping
-        // declaration order, even for thousands of overloads of one name.
-        _nextSameName[i] = slot.first;
-        slot.first = i;
-        break;
-      }
-      at = (at + 1) & _nameMask;
     }
   }
   // Build scaffolding, and it goes: the containers a lookup needs are in the

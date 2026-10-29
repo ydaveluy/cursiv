@@ -1,16 +1,14 @@
 # Derived grammars
 
-Use a derived grammar to build a dialect of an existing language. It inherits
-the base grammar's rules and can replace selected rules without copying them.
+A derived grammar builds a dialect of an existing language. It inherits the
+base grammar's rules and replaces only the ones you choose.
 
 ## Extend a grammar
 
-Assume `json::JSON` is your base grammar, with a whitespace terminal named
-`WS`. Include its header, then declare the derived grammar:
+Here `json::JSON` is the base grammar, with a whitespace terminal `WS`.
+Include its header, then declare the derived grammar:
 
-`src/json5/core/Json5Grammar.hpp`:
-
-```cpp
+```cpp title="src/json5/core/Json5Grammar.hpp"
 namespace json5 {
 
 struct JSON5 : cursiv::extends<json::JSON> {
@@ -19,25 +17,23 @@ struct JSON5 : cursiv::extends<json::JSON> {
 
   template <class T>
     requires std::same_as<T, JSON::WS>
-  struct override<T> : terminal<some(cr<R"( \t\n\r\v\f)"> | lit<"\xc2\xa0"> |
-                                     lit<"\xef\xbb\xbf">)> {};
+  struct override<T> : terminal<some(cr<R"( \t\n\r\v\f)"> | lit<"\xc2\xa0">
+                                     | lit<"\xef\xbb\xbf">)> {};
 };
 
 }  // namespace json5
 ```
 
-This override accepts whitespace including non-breaking spaces and a
-byte-order mark. The `requires` clause selects the base rule being replaced.
-References to `JSON::WS` use this definition throughout the derived grammar.
+The `requires` clause names the base rule to replace. This `WS` also accepts
+non-breaking spaces and a byte-order mark, and every use of `JSON::WS` in the
+derived grammar gets it.
 
 ## Add it to the build
 
-Declare the base language first, then generate the dialect with `BASE`
-pointing to its CMake language id:
+Declare the base language first, then generate the dialect with `BASE` set
+to the base's language id:
 
-`src/CMakeLists.txt`:
-
-```cmake
+```cmake title="src/CMakeLists.txt"
 cursiv_generate_language(ID         json5
     GRAMMAR    json5/core/Json5Grammar.hpp
     NAMESPACE  json5::JSON5
@@ -46,16 +42,14 @@ cursiv_generate_language(ID         json5
     OUT        json5/generated)
 ```
 
-Here `json` is the id from the base's `cursiv_generate_language` call.
-A base with no `EXTENSIONS` is only used through its dialects. Give the base
-its own extensions and register its services if you also want to serve base
-documents.
+Here `json` is the `ID` of the base's `cursiv_generate_language` call. To
+also serve base documents, give the base its own `EXTENSIONS` and register
+its services.
 
 ## Advanced: extend a rule's body
 
-`super` inserts the replaced rule's body. For example, use this `WS`
-override in place of the one above to add non-breaking spaces while keeping
-the base's whitespace definition:
+`super` stands for the replaced rule's body. In place of the override above,
+this one adds non-breaking spaces to the base's whitespace:
 
 ```cpp
   template <class T>
@@ -64,13 +58,12 @@ the base's whitespace definition:
       : terminal<lit<"\xc2\xa0"> | super> {};
 ```
 
-An override can supply a converter with `terminal<Body, Converter>`; otherwise
-it inherits the base rule's converter. See
-[Conversion](../reference/grammar.md#conversion).
+An override keeps the base rule's converter unless it supplies one with
+`terminal<as<X>(Body)>`. See [Conversion](../reference/grammar.md#conversion).
 
 ## Rule constraints
 
-An override preserves the rule's kind and whether it builds an AST node or
-returns a data value. A node-producing rule can return the original class or
-a derived class. It cannot return an unrelated class or become a data rule.
-For unrelated AST shapes, use separate grammars and share common AST types.
+An override keeps the rule's kind, and whether it builds an AST node or
+returns a data value. A node rule can return the same class or a derived one,
+not an unrelated class. For unrelated AST shapes, use separate grammars that
+share AST types.

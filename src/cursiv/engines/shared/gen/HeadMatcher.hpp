@@ -10,10 +10,12 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
+#include "cursiv/engines/shared/gen/SetIndex.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
@@ -43,143 +45,264 @@ struct HeadMatcher {
   // starts past them, `reach` reads them as the token does, its walk dying
   // where one is left.
   std::uint32_t offset = 0;
-  // What a matcher counts as read past `p`: nothing; or past a word spelled
-  // whole the byte that would rescue it, and each byte a word's prefix read
-  // up to the first that leaves it, the end of the text included -- `walked`,
-  // that one left where a walk dies, at the end of what it read.
-  enum class Reach : std::uint8_t { none, prefixes, walked };
 
   // `bool name(const char* p, TextOffset n, TextOffset rest)`: whether a word
   // starts at `p`, reading at most `n` bytes; a refusal looks as far as
-  // `rest`, and `ranges` names the scalars of its class. Past `Reach::none`, a
-  // last `TextOffset& seen` rises past what `reach` counts as read.
+  // `rest`, and `ranges` names the scalars of its class. With `reach`, a last
+  // `TextOffset& seen` rises as a walk's halt does: to the byte no word
+  // continues with, or to the end of the text; past a word spelled whole, to
+  // past the byte that would rescue it, or to the end of the text where none
+  // follows.
   std::string source(std::string_view linkage, std::string_view name,
-                     const Ranges& ranges, Reach reach = Reach::none) const {
+                     const Ranges& ranges, bool reach = false) const {
     std::string out = std::format(
         "{} bool {}(const char* p, ::cursiv::TextOffset n,\n"
         "    ::cursiv::TextOffset rest{}) {{\n"
-        "  (void)n;\n  (void)rest;\n",
-        linkage, name,
-        reach != Reach::none ? ", ::cursiv::TextOffset& seen" : "");
+        "  (void)p;\n  (void)n;\n  (void)rest;\n",
+        linkage, name, reach ? ", ::cursiv::TextOffset& seen" : "");
+    using Items = std::vector<std::pair<std::uint32_t, std::uint32_t>>;
+    enum Kind { miss, accept, read, refuse };
+    struct Row {
+      std::uint32_t at = 0, first = 0, count = 0, yes = 0, no = 0, scalars = 0;
+      Kind kind = miss;
+    };
+    struct Edge {
+      std::uint32_t set, next;
+    };
+    struct Work {
+      std::uint32_t at;
+      Items items;
+    };
     std::vector<ByteSet> sets;
-    for (const auto& word : words)
-      for (const Step& s : word)
-        for (const ByteSet& b : {s.bytes, s.lead})
-          if (s.refused && b.any() &&
-              std::find(sets.begin(), sets.end(), b) == sets.end()) {
-            out += std::format(
-                "  static constexpr ::cursiv::ByteSet r{}{{{{{}ull, {}ull, "
-                "{}ull, {}ull}}}};\n",
-                sets.size(), b.w[0], b.w[1], b.w[2], b.w[3]);
-            sets.push_back(b);
-          }
-    const std::uint32_t from = reach == Reach::none ? offset : 0;
+    std::unordered_map<detail::SetKey, std::uint32_t, detail::SetKeyHash>
+        setIndex;
+    const auto set_of = [&](const ByteSet& bytes) {
+      const auto [at, fresh] = setIndex.try_emplace(
+          detail::SetKey{bytes}, static_cast<std::uint32_t>(sets.size()));
+      if (fresh) sets.push_back(bytes);
+      return at->second;
+    };
+    std::vector<Row> rows;
+    std::vector<Edge> edges;
+    std::vector<Work> work;
+    const auto add = [&](std::uint32_t at, Items items) {
+      const auto id = static_cast<std::uint32_t>(work.size());
+      work.push_back({at, std::move(items)});
+      return id;
+    };
+    const std::uint32_t from = reach ? 0 : offset;
     Items all;
     for (std::uint32_t w = 0; w < words.size(); ++w) all.push_back({w, from});
-    node(out, from, std::move(all), 1, ranges, sets, reach);
-    out += "}\n";
-    return out;
-  }
-
- private:
-  using Items = std::vector<std::pair<std::uint32_t, std::uint32_t>>;
-
-  void node(std::string& out, std::uint32_t d, Items items, unsigned depth,
-            const Ranges& ranges, const std::vector<ByteSet>& sets,
-            Reach reach) const {
-    const std::string pad(depth * 2u, ' ');
-    const bool prefix = reach != Reach::none && d != 0;
-    for (const auto& [w, i] : items)
-      if (i == words[w].size()) {
-        if (reach != Reach::none && (i == 0 || !words[w][i - 1].refused))
-          out += pad + std::format(
-                           "if (rest > {0}u && seen < {1}u) seen = {1}u;\n", d,
-                           d + 1u);
-        out += pad + "return true;\n";
-        return;
-      }
-    const auto set_of = [&](const ByteSet& b) {
-      return std::format(
-          "r{}", std::find(sets.begin(), sets.end(), b) - sets.begin());
-    };
-    for (const auto& [w, i] : items) {
-      const Step& r = words[w][i];
-      if (!r.refused) continue;
-      Items kept, passed;
-      for (const auto& [v, j] : items) {
-        const Step& s = words[v][j];
-        const bool same = s.refused && s.bytes == r.bytes && s.lead == r.lead &&
-                          s.scalars == r.scalars;
-        if (!same) kept.push_back({v, j});
-        passed.push_back({v, same ? j + 1u : j});
-      }
-      const std::string c =
-          std::format("static_cast<unsigned char>(p[{}u])", d);
-      std::string test =
-          r.bytes.any() ? std::format("{}.has({})", set_of(r.bytes), c)
-                        : std::string("false");
-      if (r.lead.any())
-        test += std::format(
-            " || ({}.has({}) && ::cursiv::lex_scalar_in({}, p + {}u, rest - "
-            "{}u))",
-            set_of(r.lead), c,
-            r.scalars != 0 ? std::format("{} + {}u, {}u", ranges.pool,
-                                         r.scalars >> 16, r.scalars & 0xFFFFu)
-                           : std::string(ranges.word),
-            d, d);
-      if (reach != Reach::none)
-        out += pad + std::format(
-                         "if (rest > {0}u) {{\n{1}  const ::cursiv::TextOffset w "
-                         "= {2};\n{1}  if (seen < {0}u + w) seen = {0}u + w;\n{1}}}\n",
-                         d, pad,
-                         r.lead.any()
-                             ? std::format(
-                                   "{}.has({}) ? ::std::min<::cursiv::TextOffset>("
-                                   "::cursiv::utf8_width(p[{}u]), rest - {}u) : 1u",
-                                   set_of(r.lead), c, d, d)
-                             : std::string("1u"));
-      out += pad + std::format("if (rest > {}u && ({})) {{\n", d, test);
-      node(out, d, std::move(kept), depth + 1u, ranges, sets, reach);
-      out += pad + "}\n";
-      node(out, d, std::move(passed), depth, ranges, sets, reach);
-      return;
-    }
-    if (items.empty()) {
-      out += pad + "return false;\n";
-      return;
-    }
-    std::array<Items, 256> next;
-    for (unsigned b = 0; b < 256; ++b)
-      for (const auto& [w, i] : items)
-        if (words[w][i].bytes.has(static_cast<unsigned char>(b)))
-          next[b].push_back({w, i + 1u});
-    if (prefix)
-      out += pad + std::format(
-                       "if (n <= {0}u) {{\n{1}  if (seen < {0}u) seen = {0}u;\n"
-                       "{1}  return false;\n{1}}}\n",
-                       d, pad);
-    else
-      out += pad + std::format("if (n <= {}u) return false;\n", d);
-    out += pad + std::format(
-                     "switch (static_cast<unsigned char>(p[{}u])) {{\n", d);
-    std::array<bool, 256> done{};
-    for (unsigned b = 0; b < 256; ++b) {
-      if (done[b] || next[b].empty()) continue;
-      for (unsigned c = b; c < 256; ++c)
-        if (!done[c] && next[c] == next[b]) {
-          out += pad + std::format("  case {}u:\n", c);
-          done[c] = true;
+    add(from, std::move(all));
+    bool refused = false, decoded = false, ownScalars = false;
+    for (std::size_t at = 0; at < work.size(); ++at) {
+      // Enqueuing a child may move the worklist. Keep this node by value and
+      // release its items once it has been emitted, rather than retaining a
+      // copy of every prefix in the trie.
+      auto [d, items] = std::move(work[at]);
+      Row row{.at = d};
+      const auto ended = std::ranges::find_if(items, [&](const auto& item) {
+        return item.second == words[item.first].size();
+      });
+      if (ended != items.end()) {
+        row.kind = accept;
+        row.yes = ended->second == 0 ||
+                  !words[ended->first][ended->second - 1].refused;
+      } else if (!items.empty()) {
+        const auto guard = std::ranges::find_if(items, [&](const auto& item) {
+          return words[item.first][item.second].refused;
+        });
+        if (guard != items.end()) {
+          const Step r = words[guard->first][guard->second];
+          Items kept, passed;
+          for (const auto& [w, i] : items) {
+            const Step& s = words[w][i];
+            const bool same = s.refused && s.bytes == r.bytes &&
+                              s.lead == r.lead && s.scalars == r.scalars;
+            if (!same) kept.push_back({w, i});
+            passed.push_back({w, same ? i + 1u : i});
+          }
+          row.kind = refuse;
+          row.first = set_of(r.bytes);
+          row.count = set_of(r.lead);
+          row.scalars = r.scalars;
+          row.yes = add(d, std::move(kept));
+          row.no = add(d, std::move(passed));
+          refused = true;
+          decoded = decoded || r.lead.any();
+          ownScalars = ownScalars || (r.lead.any() && r.scalars != 0);
+        } else {
+          std::array<Items, 256> next;
+          for (unsigned b = 0; b < 256; ++b)
+            for (const auto& [w, i] : items)
+              if (words[w][i].bytes.has(static_cast<unsigned char>(b)))
+                next[b].push_back({w, i + 1u});
+          row.kind = read;
+          row.first = static_cast<std::uint32_t>(edges.size());
+          std::array<bool, 256> done{};
+          for (unsigned b = 0; b < 256; ++b) {
+            if (done[b] || next[b].empty()) continue;
+            ByteSet bytes;
+            for (unsigned c = b; c < 256; ++c)
+              if (!done[c] && next[c] == next[b]) {
+                bytes.add(static_cast<unsigned char>(c));
+                done[c] = true;
+              }
+            edges.push_back({set_of(bytes), add(d + 1u, std::move(next[b]))});
+          }
+          row.count = static_cast<std::uint32_t>(edges.size()) - row.first;
         }
-      out += pad + "  {\n";
-      node(out, d + 1u, next[b], depth + 2u, ranges, sets, reach);
-      out += pad + "  }\n";
+      }
+      rows.push_back(row);
     }
-    out += pad + "  default:\n";
-    if (prefix)
-      out += pad + std::format("    if (seen < {0}u) seen = {0}u;\n",
-                               reach == Reach::walked || d < offset ? d
-                                                                    : d + 1u);
-    out += pad + "    return false;\n" + pad + "}\n";
+    out += "  [[maybe_unused]] static constexpr ::cursiv::ByteSet sets[] = {\n";
+    for (const ByteSet& s : sets)
+      out += std::format("    {{{{{}ull, {}ull, {}ull, {}ull}}}},\n", s.w[0],
+                         s.w[1], s.w[2], s.w[3]);
+    if (sets.empty()) out += "    {},\n";
+    out += "  };\n";
+    // Small tries stay direct, with flat labels instead of nesting one
+    // switch per byte. The bound also bounds the emitted function's graph.
+    if (rows.size() <= 16) {
+      for (std::size_t i = 0; i < rows.size(); ++i) {
+        const Row& r = rows[i];
+        out += i == 0 ? "  {\n" : std::format("  s{}: {{\n", i);
+        if (r.kind == accept) {
+          if (reach && r.yes)
+            out += std::format(
+                "    if (seen <= {0}u)\n"
+                "      seen = rest > {0}u ? {0}u + 1u : rest;\n",
+                r.at);
+          out += "    return true;\n";
+        } else if (r.kind == miss) {
+          out += "    return false;\n";
+        } else if (r.kind == refuse) {
+          const std::string c =
+              std::format("static_cast<unsigned char>(p[{}u])", r.at);
+          const auto bytes = std::format("sets[{}u].has({})", r.first, c);
+          const auto lead = std::format("sets[{}u].has({})", r.count, c);
+          out += std::format("    if (rest > {}u) {{\n", r.at);
+          if (reach) {
+            out += "      const ::cursiv::TextOffset width = ";
+            out += sets[r.count].any()
+                       ? std::format(
+                             "{} ? "
+                             "::std::min<::cursiv::TextOffset>(::cursiv::utf8_"
+                             "width(p[{}u]), rest - {}u) : 1u;\n",
+                             lead, r.at, r.at)
+                       : "1u;\n";
+            out += std::format(
+                "      if (seen < {0}u + width) seen = {0}u + width;\n", r.at);
+          }
+          std::string test = bytes;
+          if (sets[r.count].any())
+            test += std::format(
+                " || ({} && ::cursiv::lex_scalar_in({}, p + {}u, rest - {}u))",
+                lead,
+                r.scalars == 0
+                    ? std::string(ranges.word)
+                    : std::format("{} + {}u, {}u", ranges.pool, r.scalars >> 16,
+                                  r.scalars & 0xFFFFu),
+                r.at, r.at);
+          out += std::format("      if ({}) goto s{};\n    }}", test, r.yes);
+          if (reach)
+            out += " else if (seen < rest) {\n      seen = rest;\n    }";
+          out += std::format("\n    goto s{};\n", r.no);
+        } else {
+          out += std::format("    if (n <= {}u) {{\n", r.at);
+          if (reach && r.at != 0)
+            out += std::format("      if (seen < {0}u) seen = {0}u;\n", r.at);
+          out += "      return false;\n    }\n";
+          out += std::format(
+              "    switch (static_cast<unsigned char>(p[{}u])) {{\n", r.at);
+          for (auto e = r.first; e < r.first + r.count; ++e) {
+            for (unsigned b = 0; b < 256; ++b)
+              if (sets[edges[e].set].has(static_cast<unsigned char>(b)))
+                out += std::format("      case {}u:\n", b);
+            out += std::format("        goto s{};\n", edges[e].next);
+          }
+          out += "      default: break;\n    }\n";
+          if (reach && r.at != 0)
+            out += std::format("    if (seen < {0}u) seen = {0}u;\n", r.at);
+          out += "    return false;\n";
+        }
+        out += "  }\n";
+      }
+      return out + "}\n";
+    }
+    // A table keeps long spellings out of the C++ and Wasm control-flow
+    // graphs. Both generation and matching use constant call-stack space.
+    out +=
+        "  struct Row { ::std::uint32_t at, first, count, yes, no, scalars, "
+        "kind; };\n"
+        "  struct Edge { ::std::uint32_t set, next; };\n"
+        "  static constexpr Edge edges[] = {\n";
+    for (const Edge& e : edges)
+      out += std::format("    {{{}u, {}u}},\n", e.set, e.next);
+    if (edges.empty()) out += "    {},\n";
+    out += "  };\n  static constexpr Row rows[] = {\n";
+    for (const Row& r : rows)
+      out += std::format("    {{{}u, {}u, {}u, {}u, {}u, {}u, {}u}},\n", r.at,
+                         r.first, r.count, r.yes, r.no, r.scalars,
+                         static_cast<unsigned>(r.kind));
+    out +=
+        "  };\n  ::std::uint32_t state = 0;\n  for (;;) {\n"
+        "    const auto& r = rows[state];\n"
+        "    if (r.kind == 0u) return false;\n"
+        "    if (r.kind == 1u) {\n";
+    if (reach)
+      out +=
+          "      if (r.yes && seen <= r.at)\n"
+          "        seen = rest > r.at ? r.at + 1u : rest;\n";
+    out += "      return true;\n    }\n";
+    if (refused) {
+      out +=
+          "    if (r.kind == 3u) {\n"
+          "      bool hit = false;\n      if (rest > r.at) {\n"
+          "        const auto c = static_cast<unsigned char>(p[r.at]);\n";
+      if (reach) {
+        out += "        const ::cursiv::TextOffset width = ";
+        out += decoded ? "sets[r.count].has(c) ? "
+                         "::std::min<::cursiv::TextOffset>(::cursiv::utf8_"
+                         "width(p[r.at]), rest - r.at) : 1u;\n"
+                       : "1u;\n";
+        out += "        if (seen < r.at + width) seen = r.at + width;\n";
+      }
+      out += "        hit = sets[r.first].has(c)";
+      if (decoded) {
+        out += " || (sets[r.count].has(c) &&\n            ";
+        if (ownScalars)
+          out += std::format(
+              "(r.scalars != 0u\n"
+              "             ? ::cursiv::lex_scalar_in({} + (r.scalars >> 16), "
+              "r.scalars & 0xFFFFu, p + r.at, rest - r.at)\n"
+              "             : ::cursiv::lex_scalar_in({}, p + r.at, rest - "
+              "r.at))",
+              ranges.pool, ranges.word);
+        else
+          out +=
+              std::format("::cursiv::lex_scalar_in({}, p + r.at, rest - r.at)",
+                          ranges.word);
+        out += ")";
+      }
+      out += ";\n      }";
+      if (reach)
+        out += " else if (seen < rest) {\n        seen = rest;\n      }";
+      out += "\n      state = hit ? r.yes : r.no;\n      continue;\n    }\n";
+    }
+    out += "    if (n <= r.at) {\n";
+    if (reach) out += "      if (r.at != 0u && seen < r.at) seen = r.at;\n";
+    out +=
+        "      return false;\n    }\n"
+        "    const auto c = static_cast<unsigned char>(p[r.at]);\n"
+        "    bool found = false;\n"
+        "    for (auto e = r.first; e < r.first + r.count; ++e) {\n"
+        "      if (!sets[edges[e].set].has(c)) continue;\n"
+        "      state = edges[e].next;\n      found = true;\n      break;\n    "
+        "}\n"
+        "    if (found) continue;\n";
+    if (reach) out += "    if (r.at != 0u && seen < r.at) seen = r.at;\n";
+    return out + "    return false;\n  }\n}\n";
   }
 };
 
@@ -197,20 +320,19 @@ inline std::string lex_head_switch(const std::vector<HeadMatcher>& heads,
 // Each terminal's matcher; `refuses`, the function answering for terminal `t`
 // at `p` with `rest` bytes left whether its token there spells a word; and
 // `reach`, the one answering for mode `m` how far its terminals' words at `p`
-// are read, as `modeHeads` names them per mode and `read` counts.
+// are read, as `modeHeads` names them per mode.
 inline std::string lex_head_source(const std::vector<HeadMatcher>& heads,
                                    const std::vector<DynSet>& modeHeads,
                                    std::string_view refuses,
                                    std::string_view reach,
-                                   const HeadMatcher::Ranges& ranges,
-                                   HeadMatcher::Reach read) {
+                                   const HeadMatcher::Ranges& ranges) {
   std::string out;
   for (std::size_t t = 0; t < heads.size(); ++t)
     if (!heads[t].words.empty())
-      out += heads[t].source("CURSIV_NOINLINE inline",
-                             std::format("refuses_{}", t), ranges) +
-             heads[t].source("inline", std::format("reaches_{}", t), ranges,
-                             read);
+      out +=
+          heads[t].source("CURSIV_NOINLINE inline",
+                          std::format("refuses_{}", t), ranges) +
+          heads[t].source("inline", std::format("reaches_{}", t), ranges, true);
   out += lex_head_switch(heads, refuses, "refuses");
   out += std::format(
       "{} {{\n  ::cursiv::TextOffset seen = 0;\n  switch (m) {{\n", reach);
@@ -250,12 +372,11 @@ inline bool lex_split_refusals(const LexNfaPool& n, int x,
                                std::vector<std::size_t>& leaves,
                                unsigned depth = 0) {
   if (x < 0 || depth > 32) return false;
-  for (std::size_t k = 0; k < n.guards.size(); ++k)
-    if (n.guards[k].hole == x) {
-      leaves.push_back(k);
-      return true;
-    }
   const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
+  if (st.guard >= 0) {
+    leaves.push_back(static_cast<std::size_t>(st.guard));
+    return true;
+  }
   return st.set < 0 && st.accept < 0 && st.relay < 0 && st.t1 >= 0 &&
          st.t2 >= 0 && lex_split_refusals(n, st.t1, leaves, depth + 1) &&
          lex_split_refusals(n, st.t2, leaves, depth + 1);
@@ -271,14 +392,13 @@ void lex_spine(const LexNfaPool& n, const Cfg& g, int start, At&& at,
                End&& end) {
   std::vector<HeadMatcher::Step> head;
   for (int x = start; x >= 0;) {
-    std::size_t k = 0;
-    while (k < n.guards.size() && n.guards[k].hole != x) ++k;
-    if (k < n.guards.size()) {
+    const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
+    if (st.guard >= 0) {
+      const auto k = static_cast<std::size_t>(st.guard);
       at(k, head);
       x = n.guards[k].out;
       continue;
     }
-    const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
     if (st.accept >= 0 && st.t1 < 0 && st.t2 < 0) end(head);
     if (st.set < 0 && st.t2 >= 0) {
       std::vector<std::size_t> leaves;
@@ -306,7 +426,8 @@ std::vector<int> lex_spine_offsets(const LexNfaPool& n, const Cfg& g,
         n, g, start,
         [&](std::size_t k, const std::vector<HeadMatcher::Step>& head) {
           const LexNode e = g.lex[n.guards[k].node];
-          if (e.min > 1 || e.a != kNoSet) out[k] = static_cast<int>(head.size());
+          if (e.min > 1 || e.a != kNoSet)
+            out[k] = static_cast<int>(head.size());
         },
         [](const std::vector<HeadMatcher::Step>&) {});
   return out;

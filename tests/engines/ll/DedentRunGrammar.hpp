@@ -30,7 +30,7 @@ struct Some : Common {
                           some(append<&Node::closures>(ref<Closing>)) +
                           lit<"d"> + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct SomeLl : Some {};
 struct SomeLr : Some {};
@@ -42,7 +42,7 @@ struct Many : Common {
                           many(append<&Node::closures>(ref<Closing>)) +
                           lit<"d"> + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct ManyLl : Many {};
 struct ManyLr : Many {};
@@ -58,16 +58,19 @@ struct Flat : cursiv::GrammarSpec {
                     append<&Marks::indents>(ref<INDENT>) |
                     append<&Marks::dedents>(ref<DEDENT>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using indent_newline = NEWLINE;
 };
 struct FlatLl : Flat {};
 struct FlatLr : Flat {};
+// `tail:` ends its entry two levels deep, before the text does.
 struct Combined : Common {
   struct Root : rule<(lit<"some:"> + ref<Some::Root>) |
-                     (lit<"many:"> + ref<Many::Root>)> {};
+                     (lit<"many:"> + ref<Many::Root>) |
+                     create<Node>(lit<"tail:"> + lit<"a"> + ref<NL> + indent +
+                                  lit<"b"> + ref<NL> + indent + lit<"c">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Combined {};
 }  // namespace tlldedentrun

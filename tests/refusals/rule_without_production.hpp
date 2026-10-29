@@ -18,7 +18,7 @@ struct G : Base {
   struct Root : rule<create<ast::Holder>(
                     lit<"x"> + assign<&ast::Holder::tail>(ref<Tail>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

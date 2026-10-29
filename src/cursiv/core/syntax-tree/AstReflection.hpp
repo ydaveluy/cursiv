@@ -147,7 +147,9 @@ struct AstReflection {
   // What a reference accepts, one bit per type index, computed with the
   // grammar. Read once per query -- what the site accepts does not change
   // across a walk; then `accepts` below is a single bit test whatever the
-  // grammar's size. Empty for `kNoReference`, which accepts everything.
+  // grammar's size. Empty, which accepts everything, for `kNoReference` and
+  // any index past the last reference member. A member before it that is not
+  // a reference has an all-clear row.
   [[nodiscard]] virtual AcceptSet referenceAccepts(
       std::uint16_t reference) const noexcept = 0;
 

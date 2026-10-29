@@ -4,13 +4,13 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <new>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,6 +30,7 @@
 #include "cursiv/engines/shared/runtime/Made.hpp"
 #include "cursiv/engines/shared/runtime/Pending.hpp"
 #include "cursiv/engines/shared/runtime/ast_write.hpp"
+#include "cursiv/engines/shared/table/FlatMap.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 
 namespace cursiv {
@@ -53,45 +54,45 @@ inline NodeId payload_node(const Cst& c, NodeId id) {
 }
 
 // Nodes the root no longer reaches leave the list; their references stay as
-// tombstones so the surviving ranks stay put.
+// tombstones so the surviving ranks stay put. Each node's answer is kept, read
+// from the list's end: it is in creation order, and a node is made before the
+// one it is wired to, so a parent is mostly answered before its children. A
+// chain longer than the list is a cycle, which no root ends.
 template <class Check>
 void prune_orphans(std::pmr::vector<AstNode*>& nodes,
                    std::vector<RefHandle>& handles, const AstNode* root,
                    Check check) {
-  std::unordered_map<const AstNode*, bool> reaches{{root, true}};
+  const auto key = [](const AstNode* node) {
+    return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(node));
+  };
+  FlatMap<std::uint8_t> reaches;
+  reaches.emplace(key(root)).first = 1;
   std::vector<const AstNode*> path;
   const auto reached = [&](const AstNode* node) {
-    // Most nodes stand a few parents under the root, or under none: no memo.
-    const AstNode* near = node;
-    for (int hops = 0; hops != 4 && near != nullptr && near != root; ++hops)
-      near = near->parent;
-    if (near == nullptr || near == root) return near == root;
     path.clear();
     bool ok = false;
     for (const AstNode* at = node; at != nullptr && path.size() <= nodes.size();
          at = at->parent) {
       check();
-      if (const auto known = reaches.find(at); known != reaches.end()) {
-        ok = known->second;
+      if (const std::uint8_t* known = reaches.find(key(at))) {
+        ok = *known != 0;
         break;
       }
       path.push_back(at);
     }
-    for (const AstNode* visited : path) {
-      check();
-      reaches[visited] = ok;
-    }
+    for (const AstNode* visited : path)
+      reaches.emplace(key(visited)).first = ok;
     return ok;
   };
-  std::erase_if(nodes, [&](const AstNode* node) {
-    check();
-    return !reached(node);
-  });
-  for (RefHandle& handle : handles) {
-    check();
+  std::vector<bool> kept(nodes.size());
+  for (std::size_t i = nodes.size(); i-- > 0;) kept[i] = reached(nodes[i]);
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < nodes.size(); ++i)
+    if (kept[i]) nodes[n++] = nodes[i];
+  nodes.resize(n);
+  for (RefHandle& handle : handles)
     if (handle.owner != nullptr && !reached(handle.owner))
       handle.owner = nullptr;
-  }
 }
 
 }  // namespace detail
@@ -136,26 +137,36 @@ class AstReducer {
     // what is reserved past the need is never written, so never resident.
     const std::size_t records = out.cst().size();
     out.nodes.reserve(records);
-    if (actions.anyRef) out.references->handles.reserve(records / 2u);
+    if (actions.meta->referenceBound != 0)
+      out.references->handles.reserve(records / 2u);
 
     AstReducer self(actions, out, L, cancelToken);
     self.run<L>();
+    self._ctx.list_made();
     out.error = self._ctx.error;
     if (out.error == AstBuildError::none) {
       out.value = self.result(*self._ctx.cst);
-      if (out.value == nullptr) out.error = AstBuildError::malformed_cst;
+      // On a repaired tape, the repairs gave up every node: their own
+      // diagnostics say why.
+      if (out.value == nullptr)
+        out.error = self._ctx.repaired ? AstBuildError::no_entry
+                                       : AstBuildError::malformed_cst;
     }
     if (out.error != AstBuildError::none) {
-      self._ctx.diag("the AST could not be materialised from this node",
-                     self._ctx.errorNode);
+      if (out.error == AstBuildError::malformed_cst)
+        self._ctx.diag("the AST could not be materialised from this node",
+                       self._ctx.errorNode);
     } else if (!out.accepted) {
       out.error = AstBuildError::not_accepted;
     }
     // The root's parent is the document's to set: a stale in-arena parent from
     // a partial reduction would read as a real container.
     if (out.value != nullptr) out.value->parent = nullptr;
-    if (out.value != nullptr && (self._ctx.repaired || self._ctx.detached ||
-                                 out.nodes.size() != self._ctx.attached + 1u))
+    // Every node made is on the list, and one member at most takes it: where
+    // none gave a node up, one node more than the members took is the root
+    // alone, and every node reaches it.
+    if (out.value != nullptr &&
+        (self._ctx.detached || out.nodes.size() != self._ctx.attached + 1u))
       detail::prune_orphans(out.nodes, out.references->handles, out.value,
                             [&self] { self._stop.poll(); });
     // Nest wrappers are created out of scan order; without a nest or a
@@ -189,7 +200,8 @@ class AstReducer {
   }
 
   // Returns the outermost node, since a nest region re-wraps it. `Nest` says
-  // whether any region of the grammar can wrap.
+  // whether any region of the grammar can wrap. Not forced inline: the
+  // compiler may keep one copy per class for every record that creates it.
   template <detail::MakeFn Mk, AstApplyFn Ap, bool Nest>
   Made create(std::uint16_t type, NodeId id) {
     const std::size_t first = suffix_begin(id);
@@ -243,9 +255,10 @@ class AstReducer {
 
   // A flag lands on the node this run has in hand, rather than owed: the
   // region above may open a second node and claim it.
-  CURSIV_ALWAYS_INLINE void flag(NodeId id, std::uint16_t type,
-                                 std::uint16_t field, const Made& m) {
-    const Pending p = effect(id, type, field, ActKind::flag, nullptr);
+  CURSIV_ALWAYS_INLINE void flag(NodeId id, std::uint16_t field,
+                                 const Made& m) {
+    const Pending p =
+        effect(id, detail::kNoIndex, field, ActKind::flag, nullptr);
     if (!_f.applies[m.type](*this, p, m) && !under_repair(id)) broken(id);
   }
 
@@ -355,7 +368,12 @@ class AstReducer {
   // One pending nest, keyed by where the region it wraps begins.
   struct WrapAt {
     NodeId begin = kNoNode;
+    NodeId repair = kNoNode;
     std::size_t at = 0;
+  };
+  struct WrapAbove {
+    NodeId root;
+    NodeId above = kNoNode;
   };
 
   static constexpr std::size_t kPendingStart = 4096 / sizeof(Pending);
@@ -372,9 +390,14 @@ class AstReducer {
   bool _moved = false;
   // The nearest recovered ancestor, excluding the record itself.
   mutable std::vector<NodeId> _repairedBy;
+  // Repaired roots in postorder, with a minimum-start tree over their runs.
+  // It finds the outermost repair below a consumer without walking ancestors.
+  mutable std::vector<NodeId> _repairRoots;
+  mutable std::vector<NodeId> _repairBegins;
   // Scratch for `consume`: nothing `consume` calls re-enters the reducer, so
   // one use is live at a time.
   std::vector<WrapAt> _wraps;
+  std::vector<WrapAbove> _wrapAncestors;
   mutable std::vector<NodeId> _kids;
   mutable NodeId _kidsOf = kNoNode;
   mutable bool _kidsSound = true;
@@ -437,8 +460,47 @@ class AstReducer {
         open.pop_back();
       }
       if (!open.empty()) _repairedBy[r] = open.back();
-      if (c[r].recovered && c.subtree_begin(r) <= r) open.push_back(r);
+      if (c[r].recovered && c.subtree_begin(r) <= r) {
+        open.push_back(r);
+        _repairRoots.push_back(r);
+      }
     }
+    std::ranges::reverse(_repairRoots);
+    const std::size_t n = _repairRoots.size();
+    const std::size_t base = std::bit_ceil(n);
+    _repairBegins.assign(base * 2, kNoNode);
+    for (std::size_t i = 0; i < n; ++i)
+      _repairBegins[base + i] = c.subtree_begin(_repairRoots[i]);
+    for (std::size_t i = base; i-- > 1;)
+      _repairBegins[i] =
+          std::min(_repairBegins[i * 2], _repairBegins[i * 2 + 1]);
+  }
+
+  // The last repaired root before `owner` containing `nest`: the first repair
+  // a descent from that consumer would reach. Search prefix blocks from right
+  // to left, then descend only the one containing that ancestor.
+  CURSIV_COLD NodeId repair_between(NodeId nest, NodeId owner) const {
+    const std::size_t base = _repairBegins.size() / 2;
+    std::size_t at = std::lower_bound(_repairRoots.begin(), _repairRoots.end(),
+                                    owner) - _repairRoots.begin();
+    if (at == 0) return kNoNode;
+    at += base;
+    while (at > 1) {
+      _stop.poll();
+      --at;
+      while (at > 1 && (at & 1u) != 0) at /= 2;
+      if (_repairBegins[at] <= nest) {
+        while (at < base) {
+          _stop.poll();
+          at = at * 2 + 1;
+          if (_repairBegins[at] > nest) --at;
+        }
+        const NodeId root = _repairRoots[at - base];
+        return root > nest ? root : kNoNode;
+      }
+      if (std::has_single_bit(at)) break;
+    }
+    return kNoNode;
   }
 
   CURSIV_COLD bool under_repair(NodeId id) const {
@@ -457,22 +519,33 @@ class AstReducer {
     const CstNode* node = &c[id];
     // Held here: a run is opaque, so the table would be reloaded per record.
     const auto* const entries = _f.entries;
-    const auto entryCount = _f.entryCount;
-    for (; id <= root; ++id, ++node) {
-      if (node->hidden) continue;
-      // A record that owes nothing names no entry, and a hand-built tape may
-      // name one past the table.
-      const ElementId e = L.row(*node);
-      if (e == kNoElement) continue;
-      if (e >= entryCount) [[unlikely]] {
-        broken(id);
-        break;
+    // No entry is `kNoElement`, so one test parts the records that owe an
+    // entry from the rest.
+    const std::uint32_t entryCount =
+        std::min<std::uint32_t>(_f.entryCount, kNoElement);
+    // The stop is read between runs of records: the inner bound replaces the
+    // root, so a record pays no more than it did.
+    for (; id <= root; _stop.check()) {
+      const NodeId last =
+          root - id < kStopRecords ? root : id + (kStopRecords - 1);
+      for (; id <= last; ++id, ++node) {
+        if (node->hidden) continue;
+        // A record that owes nothing names no entry, and a hand-built tape
+        // may name one past the table.
+        const ElementId e = L.row(*node);
+        if (e >= entryCount) {
+          if (e == kNoElement) continue;
+          broken(id);
+          return;
+        }
+        entries[e](*this, id);
+        if (_ctx.failed()) [[unlikely]]
+          return;
       }
-      entries[e](*this, id);
-      if (_ctx.failed()) [[unlikely]]
-        break;
     }
   }
+  // About a millisecond of materialisation between two reads of the stop.
+  static constexpr NodeId kStopRecords = 64 * 1024;
 
   static Pending effect(NodeId id, std::uint16_t type, std::uint16_t field,
                         ActKind kind, AstNode* value,
@@ -552,7 +625,7 @@ class AstReducer {
   // A nest wraps where its turn begins, its record closing after the effects
   // it wraps. The list is sorted by that start, an order a nest written
   // inside another's turn does not arrive in.
-  void collect_wraps(std::size_t first) {
+  void collect_wraps(std::size_t first, NodeId owner) {
     _wraps.clear();
     const Pending* const stack = _stack;
     const std::size_t last = _depth;
@@ -560,14 +633,58 @@ class AstReducer {
       if (stack[i].kind != ActKind::nest) continue;
       const NodeId begin = turn_begin(stack[i].root);
       if (_ctx.failed()) return;
-      _wraps.push_back(WrapAt{begin, i});
+      _wraps.push_back(WrapAt{.begin = begin, .at = i});
     }
+    if (_ctx.repaired) index_wrap_repairs(owner);
     // Equal starts: the enclosing (later) pending first.
     const auto before = [](const WrapAt& a, const WrapAt& b) {
       return a.begin != b.begin ? a.begin < b.begin : a.at > b.at;
     };
     if (!std::is_sorted(_wraps.begin(), _wraps.end(), before))
       std::sort(_wraps.begin(), _wraps.end(), before);
+  }
+
+  // Only a pending nest outside the repair can change the receiver before a
+  // descent reaches that repair. Merge the repaired roots with the nests in
+  // reverse postorder to find their closest enclosing pending nest once.
+  CURSIV_COLD void index_wrap_repairs(NodeId owner) {
+    index_repairs();
+    _wrapAncestors.clear();
+    for (WrapAt& w : _wraps) {
+      w.repair = repair_between(_stack[w.at].root, owner);
+      if (w.repair != kNoNode) _wrapAncestors.push_back({w.repair});
+    }
+    const auto before = [](const WrapAbove& a, const WrapAbove& b) {
+      return a.root < b.root;
+    };
+    std::sort(_wrapAncestors.begin(), _wrapAncestors.end(), before);
+    _wrapAncestors.erase(
+        std::unique(_wrapAncestors.begin(), _wrapAncestors.end(),
+                    [](const WrapAbove& a, const WrapAbove& b) {
+                      return a.root == b.root;
+                    }),
+        _wrapAncestors.end());
+    const Cst& c = *_ctx.cst;
+    std::vector<NodeId> open;
+    std::size_t w = _wraps.size();
+    for (std::size_t i = _wrapAncestors.size(); i-- > 0;) {
+      _stop.poll();
+      WrapAbove& query = _wrapAncestors[i];
+      while (w != 0 && _stack[_wraps[w - 1].at].root > query.root) {
+        _stop.poll();
+        const NodeId root = _stack[_wraps[--w].at].root;
+        while (!open.empty() && c.subtree_begin(open.back()) > root) {
+          _stop.poll();
+          open.pop_back();
+        }
+        if (open.empty() || open.back() != root) open.push_back(root);
+      }
+      while (!open.empty() && c.subtree_begin(open.back()) > query.root) {
+        _stop.poll();
+        open.pop_back();
+      }
+      if (!open.empty()) query.above = open.back();
+    }
   }
 
   // The child of `owner` that holds `nest` in its subtree, or `kNoNode`: the
@@ -601,32 +718,20 @@ class AstReducer {
   // Whether a repair gave up on the rule a nest belongs to: a recovered record
   // stands between the nest and the consumer, and the node in hand -- the
   // owner, or the wrapper of a nest holding this one -- was not built before
-  // it. Descends from the consumer, one whole subtree per step.
-  CURSIV_COLD bool stranded(NodeId nest, NodeId origin, NodeId owner) const {
+  // it. The repair and its pending nest ancestor were indexed before sorting
+  // the wraps into application order.
+  CURSIV_COLD bool stranded(const WrapAt& wrap, NodeId origin,
+                           NodeId owner) const {
     const Cst& c = *_ctx.cst;
-    index_repairs();
-    if (nest >= _repairedBy.size() || _repairedBy[nest] >= owner) return false;
-    NodeId at = owner;
-    while (at > nest) {
-      _stop.poll();
-      NodeId k = at == owner ? holding(owner, nest) : at - 1;
-      if (at == owner) {
-        if (k == kNoNode) return false;
-      } else {
-        while (k > nest && c.subtree_begin(k) > nest) {
-          _stop.poll();
-          const NodeId b = c.subtree_begin(k);
-          if (b > k) return false;  // an extent naming no room
-          k = b - 1;
-        }
-        if (k <= nest) return false;
-      }
-      if (c[k].recovered) return origin >= c.subtree_begin(k);
-      for (const WrapAt& w : _wraps)
-        if (_stack[w.at].root == k) origin = k;
-      at = k;
-    }
-    return false;
+    if (wrap.repair == kNoNode ||
+        holding(owner, _stack[wrap.at].root) == kNoNode)
+      return false;
+    if (origin >= c.subtree_begin(wrap.repair)) return true;
+    const auto at = std::lower_bound(
+        _wrapAncestors.begin(), _wrapAncestors.end(), wrap.repair,
+        [](const WrapAbove& a, NodeId root) { return a.root < root; });
+    return at != _wrapAncestors.end() && at->root == wrap.repair &&
+           at->above < owner;
   }
 
   // Applies and drops every effect of the region, in source order. `Ap` is
@@ -634,12 +739,13 @@ class AstReducer {
   // to another class. Nothing an effect reaches pushes a pending. `origin` is
   // where the owner was built, `id` the record consuming the region.
   template <AstApplyFn Ap, bool Nest>
-  Made consume(Made owner, std::size_t first, [[maybe_unused]] NodeId origin,
-               [[maybe_unused]] NodeId id) {
+  CURSIV_ALWAYS_INLINE Made consume(Made owner, std::size_t first,
+                                    [[maybe_unused]] NodeId origin,
+                                    [[maybe_unused]] NodeId id) {
     Made current = owner;
     [[maybe_unused]] const bool wraps = Nest && _nests != 0;
     if (wraps) {
-      collect_wraps(first);
+      collect_wraps(first, id);
       if (_ctx.failed()) return current;
     }
     [[maybe_unused]] std::size_t w = 0;
@@ -649,9 +755,10 @@ class AstReducer {
       const Pending& p = stack[i];
       if (wraps) {
         while (w < _wraps.size() && _wraps[w].begin <= p.root) {
-          const Pending& n = stack[_wraps[w].at];
+          const WrapAt& wrapAt = _wraps[w];
+          const Pending& n = stack[wrapAt.at];
           ++w;
-          if (_ctx.repaired && stranded(n.root, origin, id)) [[unlikely]]
+          if (_ctx.repaired && stranded(wrapAt, origin, id)) [[unlikely]]
             continue;
           current = wrap(n, current);
           if (_ctx.failed()) break;

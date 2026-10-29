@@ -14,6 +14,7 @@
 #include "cursiv/engines/ll/table/LlAtnView.hpp"
 #include "cursiv/engines/ll/table/LlDecision.hpp"
 #include "cursiv/engines/ll/table/LlLexAccept.hpp"
+#include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/CondReach.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
@@ -43,12 +44,10 @@ using LlConditionNamed = unsigned (*)(const char*, TextOffset, unsigned,
                                       const Token&, TextOffset);
 
 struct LlTable {
-  struct Rule {
-    std::uint16_t nameOff = 0, nameLen = 0;
-    std::uint16_t climb = kNoRow;
-  };
   struct Node {
     std::uint16_t row = kNoRow;
+    // The alphabet the position reads under; an operator a climb switches on
+    // reads the climb's.
     std::uint16_t mode = kNoRow;
     // The terminal a position reads, `kNoRow` where it reads none.
     std::uint16_t term = kNoRow;
@@ -56,26 +55,21 @@ struct LlTable {
     // How many records that name their rule stand open around this position.
     std::uint8_t covers = 0;
   };
-  struct Climb {
-    std::uint32_t atnEntry = 0;
-    std::uint16_t opCount = 0;
-    std::uint16_t decision = kNoRow;
-  };
   struct Decision {
-    bool repeat = false;
+    // A climb's choice of operator, which a plan answers each time it is
+    // asked: the climb asks it once per level it unwinds over one token.
+    bool again = false;
     LlPredict how = LlPredict::single;
     std::uint16_t mode = kNoRow;
     std::uint32_t state = 0;
-    std::uint16_t rule = kNoRow;
   };
 
-  // The grammar, as the tree asks about it.
+  // The grammar, as the tree asks about it. `names` holds the bytes the
+  // terminals and the relays name, each range by offset and length.
   const char* names = nullptr;
   const TermInfo* terms = nullptr;
   std::uint16_t nterms = 0;
-  const Rule* rules = nullptr;
   std::uint16_t nrules = 0;
-  std::uint16_t entryRule = 0;
   const Node* nodes = nullptr;
   const Decision* decisions = nullptr;
   std::uint16_t ndecisions = 0;
@@ -83,28 +77,30 @@ struct LlTable {
   LlConditionNamed conditionNamed = nullptr;
   std::uint16_t ngapConds = 0;
   CondReach condReach{};
-  // What a repair reads: the tokens a choice admits, and the tokens the rule
-  // it stands in can carry on from. A parse that finds neither skips text
-  // until it does.
+  // What a repair reads: the tokens a choice admits. A parse that finds none
+  // skips text until it does.
   const std::uint64_t* decFirst = nullptr;
-  const std::uint64_t* ruleFollow = nullptr;
   // What a caret walks: the state the graph stands in once each position is
   // read, the position each token edge belongs to, and where a document that
   // has read nothing starts.
   const std::uint32_t* nodeAfter = nullptr;
-  const std::uint16_t* nodeAfterMode = nullptr;
   // The alphabet the gap after a position is crossed under, where every
   // reading that may follow agrees on it; null where the grammar has no
   // regions.
   const std::uint16_t* nodeAfterGap = nullptr;
+  // The operator step a position opens, in a climb with a step that groups
+  // nothing: the climb plus one in the high half, then the step's number and
+  // whether it groups nothing; null where no climb has such a step.
+  const std::uint32_t* nodeStep = nullptr;
   std::uint16_t nafter = 0;
   const std::uint16_t* edgeNode = nullptr;
   const std::uint16_t* returnNode = nullptr;
   std::uint32_t atnStart = 0;
-  const Climb* climbs = nullptr;
 
   // The lexer. `setDecode` names, per set, the set of lead bytes at which
-  // the word class's scalar decides for it, `kNoSet` for a plain class.
+  // the word class's scalar decides for it, `kNoSet` for a plain class; null
+  // where the table has neither word ranges nor scalar ranges, and no
+  // boundary reads it.
   const ByteSet* sets = nullptr;
   const std::uint16_t* setDecode = nullptr;
   ByteSet wordBytes{};
@@ -121,8 +117,8 @@ struct LlTable {
   // are read, as a walk through them reads them.
   TextOffset (*head_reach)(unsigned m, const char* p,
                            TextOffset rest) = nullptr;
-  // The same for the words terminal `t` refuses behind a head, which no walk
-  // reads where the token ends before them; null where none stands there.
+  // The same for the words terminal `t` refuses, which a walk need not read:
+  // its token may end before them.
   TextOffset (*termReach)(SymbolId t, const char* p, TextOffset rest) = nullptr;
   // Whether a word terminal `t` refuses where its token ends is spelled at
   // `p`; null where no terminal refuses one there.
@@ -138,6 +134,8 @@ struct LlTable {
   const std::uint16_t* lookMode = nullptr;
   const std::uint16_t* modeStart = nullptr;
   const std::uint8_t* modeMulti = nullptr;
+  const std::uint8_t* modeBacktrack = nullptr;
+  constexpr bool has_backtrack() const { return modeBacktrack != nullptr; }
   // Per mode, the mode that lexes what it takes for the length of its token
   // alone; null where no mode has one.
   const std::uint16_t* modeLonger = nullptr;
@@ -152,6 +150,18 @@ struct LlTable {
   const std::uint64_t* modeTerms = nullptr;
   const std::uint64_t* modeSub = nullptr;
   std::uint32_t subWords = 0;
+  // Per mode, four words of the bytes a run of blanks is made of: such a run
+  // is the one unrecorded trivia token the walk would read there. Null where
+  // no mode crosses any blind.
+  const std::uint64_t* skipSet = nullptr;
+  // Per mode, the one-byte literal each first byte reads whole,
+  // `kInvalidSymbol` where the walk reads it: rows of 256, and per mode where
+  // its row starts. Null where no mode reads one.
+  const std::uint16_t* byteTerms = nullptr;
+  const std::uint32_t* modeBytes = nullptr;
+  // The walk of every mode, generated: the token a mode reads at a position,
+  // as `lex_walk` reads it over these rows.
+  Scan (*walk)(const char*, TextOffset, std::uint16_t, TextOffset) = nullptr;
   const std::uint16_t* lexNext = nullptr;
   const std::uint32_t* typoSuccBase = nullptr;
   const std::uint16_t* typoSucc = nullptr;
@@ -172,11 +182,15 @@ struct LlTable {
   TextOffset (*relay_run)(std::uint16_t, const char*, TextOffset,
                           TextOffset) = nullptr;
   // The terminals a state accepts and those it reserves, pooled: the row of
-  // state `s` starts at word `lexAccAt[s]` of `lexAcc`.
+  // state `s` starts at word `lexAccAt[s]` of `lexAcc`. No state reserves
+  // where `lexRes` is null.
   const std::uint64_t* lexAcc = nullptr;
   const std::uint32_t* lexAccAt = nullptr;
   const std::uint64_t* lexRes = nullptr;
   const std::uint32_t* lexResAt = nullptr;
+  // What a walk can still accept from a state on, the state included.
+  const std::uint64_t* lexLive = nullptr;
+  const std::uint32_t* lexLiveAt = nullptr;
   // What a keyword read behind conditions takes in a state, if it stands.
   const std::uint64_t* lexRelayRes = nullptr;
   const std::uint32_t* lexRelayResAt = nullptr;
@@ -190,7 +204,19 @@ struct LlTable {
 
   // The graph a prediction walks, and the automata the construction closed.
   LlAtnView atn{};
+  // What a caller reads once a climb it called is done, per state a call
+  // returns into: the terminals its rule reads from there on, the row at word
+  // `climbExitAt[s] >> 1` of `climbExits`, and in the low bit whether the
+  // rule may end reading none. Null where the grammar climbs nowhere.
+  const std::uint64_t* climbExits = nullptr;
+  const std::uint32_t* climbExitAt = nullptr;
   std::uint16_t (*staged)(const LlContext&, std::uint16_t) = nullptr;
+  // What an episode reads besides the graph: per rule, whether the callers
+  // two ways out of one choice reach it from share its body; per choice,
+  // whether it is a repetition that ranks its arms over the lexical choices.
+  // Null where none is.
+  const std::uint8_t* sharedRules = nullptr;
+  const std::uint8_t* repeatScopes = nullptr;
 
   // Per section configuration where the grammar embeds others: the mode a
   // fault is lexed with -- its grammar's terminals and the token that closes
@@ -222,8 +248,13 @@ struct LlTable {
   constexpr LlTermRow dfa_acc_set(std::uint16_t s) const {
     return LlTermRow{lexAcc + lexAccAt[s], termWords};
   }
+  constexpr LlTermRow dfa_live_set(std::uint16_t s) const {
+    return LlTermRow{lexLive + lexLiveAt[s], termWords};
+  }
   constexpr LlTermRow dfa_res_set(std::uint16_t s) const {
-    return LlTermRow{lexRes + lexResAt[s], termWords};
+    return lexRes == nullptr
+               ? LlTermRow{}
+               : LlTermRow{lexRes + lexResAt[s], termWords};
   }
   constexpr LlTermRow dfa_relay_res_set(std::uint16_t s) const {
     return lexRelayRes == nullptr
@@ -252,9 +283,6 @@ struct LlTable {
   constexpr const std::uint64_t* dec_first(std::uint16_t d) const {
     return decFirst + std::size_t{d} * termWords;
   }
-  constexpr const std::uint64_t* rule_follow(std::uint16_t r) const {
-    return ruleFollow + std::size_t{r} * termWords;
-  }
   // Bounded, and it must be: a byte no terminal matches leaves the lookahead
   // naming no symbol at all, and that name is wider than any row.
   constexpr bool holds(const std::uint64_t* row, std::uint16_t t) const {
@@ -265,9 +293,6 @@ struct LlTable {
   }
   constexpr std::string_view term_text(std::uint16_t t) const {
     return {names + terms[t].textOff, terms[t].textLen};
-  }
-  constexpr std::string_view rule_name(std::uint16_t r) const {
-    return {names + rules[r].nameOff, rules[r].nameLen};
   }
 };
 

@@ -16,7 +16,7 @@ struct G : Base {
   };
   struct Root : rule<ref<ItemRule> + lit<"|"> + ref<ItemRule>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

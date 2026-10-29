@@ -35,7 +35,7 @@ struct Base : cursiv::GrammarSpec {
                    lit<"]">))) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 // Inline anonymous leaves still belong to the surrounding parent.
@@ -51,7 +51,7 @@ struct Tree : cursiv::GrammarSpec {
                           assign<&Node::name>(ref<ID>))> {};
   struct Root : rule<clade + lit<";">> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct TreeLl : Tree {};
 struct TreeLr : Tree {};

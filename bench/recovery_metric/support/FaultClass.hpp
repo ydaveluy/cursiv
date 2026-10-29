@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 enum class FaultClass : std::uint8_t {
   byte,        // one byte inserted, deleted or replaced
@@ -34,4 +34,4 @@ inline constexpr std::size_t kFaultClasses = 13;
   return kName[static_cast<std::size_t>(k)];
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

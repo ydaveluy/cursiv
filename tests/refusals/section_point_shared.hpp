@@ -12,7 +12,7 @@ struct Inner : cursiv::GrammarSpec {
   struct NUM : terminal<some(d)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NUM>))> {};
   using entry = Root;
-  using ignore = SP;
+  using ignored = SP;
 };
 
 struct G : Base {
@@ -21,7 +21,7 @@ struct G : Base {
              create<ast::Node>(lit<"<"> + assign<&ast::Node::name>(ref<ID>) +
                                lit<">">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

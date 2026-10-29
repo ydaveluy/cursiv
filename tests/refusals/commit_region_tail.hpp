@@ -11,6 +11,6 @@ struct G : Base {
             lit<"x"> + tight(lit<"c"> + option(commit(lit<"a">, lit<"b">))) +
             lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace refuse

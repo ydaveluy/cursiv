@@ -92,7 +92,7 @@ Run `mkdocs serve` to preview the site locally.
 
 ## Update the scaffolder
 
-After editing `templates/project/`, `.clang-format`, `CMakePresets.json`,
+After editing `templates/project/`, `CMakePresets.json`,
 `cmake/wasi.cmake` or `cmake/cursiv-new.cmake.in`, regenerate the distributed
 script:
 

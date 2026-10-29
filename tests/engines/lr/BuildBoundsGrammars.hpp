@@ -8,6 +8,7 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/LongRunGrammar.hpp"
 
 namespace tbounds {
 
@@ -34,34 +35,23 @@ struct G : Parts {
   struct Item : rule<callers<Stmt>(std::make_index_sequence<256>{})> {};
   struct S : rule<many(ref<Item>)> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace transitions
 
-// One production past what a byte counts: both its items' dot and the
-// insertions its first state owes run beyond 255.
-namespace longrun {
-namespace ast {
-struct Doc : cursiv::Extends<cursiv::AstNode> {};
-}  // namespace ast
-template <std::size_t... Is>
-constexpr auto run(std::index_sequence<Is...>) {
-  return ((void(Is), cursiv::lit<"a">) + ...);
-}
-struct G : cursiv::GrammarSpec {
-  struct WS : terminal<some(s)> {};
-  struct S : rule<create<ast::Doc>(run(std::make_index_sequence<256>{}))> {};
-  using entry = S;
-  using ignore = WS;
-};
-}  // namespace longrun
-
-// A cell the second token decides in every context: after `x c q`, `z` or
-// `w` says whether `c` was an `A` or a `B`.
+// A cell the second token decides in every context: after `xaa c q`, `z` or
+// `w` says whether `c` was an `A` or a `B`. Each cell opens on a word of its
+// own, or the cells would read alike and only the first would stay.
 namespace peeks {
+template <std::size_t I>
+constexpr cursiv::str<4> opening() {
+  const char s[4] = {'x', static_cast<char>('a' + I / 26),
+                     static_cast<char>('a' + I % 26), 0};
+  return cursiv::str<4>(s);
+}
 struct Parts : cursiv::GrammarSpec {
   template <std::size_t I>
-  struct X : rule<lit<"x">> {};
+  struct X : rule<lit<opening<I>()>> {};
   template <std::size_t I>
   struct A : rule<lit<"c">> {};
   template <std::size_t I>
@@ -79,7 +69,7 @@ struct G : Parts {
   struct WS : terminal<some(s)> {};
   struct S : rule<cells(std::make_index_sequence<32>{})> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace peeks
 
@@ -103,7 +93,7 @@ struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct S : rule<create<ast::Doc>(words(std::make_index_sequence<70>{}))> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace probes
 

@@ -196,7 +196,8 @@ void a_site_that_narrows_nothing_offers_the_whole_member(
   parser.nextFeaturesAt(result.cst(), at, at, out);
   const cursiv::Grammar& grammar = parser.getGrammar();
   for (const cursiv::NextFeature& f : out)
-    if (grammar.terminalText(f.feature) == spelling) return f.property;
+    for (const std::string_view s : grammar.terminalSpellings(f.feature))
+      if (s == spelling) return f.property;
   return "<absent>";
 }
 

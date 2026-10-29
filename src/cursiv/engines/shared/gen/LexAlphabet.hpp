@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "cursiv/engines/shared/gen/HeadMatcher.hpp"
+#include "cursiv/engines/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/engines/shared/gen/LexNfaBuild.hpp"
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
@@ -19,6 +20,7 @@
 #include "cursiv/engines/shared/gen/LexStrayExpansion.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/bit_words.hpp"
+#include "cursiv/engines/shared/gen/lex_boundary_misses.hpp"
 #include "cursiv/engines/shared/gen/lex_prefix_meets.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
@@ -36,7 +38,6 @@ struct LexAlphabet {
   template <class Built, class Intern>
   void terminals(Built& A, Intern internName) {
     auto& g = A.cfg;
-    normalize_lex_calls(g);
     validate_lex_recursion(g);
     if (g.lowerFail()) return;
     startOf.assign(g.nterms, -1);
@@ -47,13 +48,13 @@ struct LexAlphabet {
           std::exchange(levels[v - kLaidIndent], true))
         lower_refuse(g, LowerFail::indentTwice, t);
     LexNfaBuild builder{nfa, g, internName};
-    std::vector<LexKeywordCut::Branches> keyword(g.nterms);
+    std::vector<LexKeywordCut::Shape> keyword(g.nterms);
     for (std::uint16_t t = 1; t < g.nterms; ++t) {
       if (g.terms[t].laid != 0) continue;
       nfa.term = t;
       const int match = nfa.match(t);
       startOf[t] = builder.terminal(g.termBuild[t].lex, match);
-      keyword[t] = LexKeywordCut::branches(g, g.termBuild[t].lex);
+      keyword[t] = LexKeywordCut::shape(g, g.termBuild[t].lex);
     }
     const auto heads = lex_guard_heads(nfa, startOf);
     const auto taken =
@@ -61,18 +62,20 @@ struct LexAlphabet {
     A.termHeads = lex_head_words(nfa, g, startOf, taken, A.termTails);
     for (std::uint16_t t = 1; t < g.nterms; ++t)
       g.terms[t].refuses = !A.termHeads[t].words.empty();
-    lex_refuse_unspelled(nfa, g, heads, taken);
+    // A head refusal whose rescue leaves out bytes the terminal reads.
+    lex_boundary_misses(nfa, g, heads, [&](std::size_t k, const ByteSet& b) {
+      if (!g.lowerFail()) g.lowerWord = nfa.guards[k].node;
+      lower_refuse(g, LowerFail::boundaryMisses, nfa.guards[k].term, b);
+    });
     LexStrayExpansion(nfa, g).run();
-    const ByteSet leads =
-        lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
     for (const LexNfaState& x : nfa.s) {
       if (x.accept < 0 || x.bound < 0) continue;
       const auto& own = keyword[static_cast<std::size_t>(x.accept)];
       const auto bound = static_cast<std::uint16_t>(x.bound);
-      if (own.any && !lex_word_set(g, bound, leads) &&
+      if (own.any && !lex_word_set(g, bound) &&
           (own.all ||
            (g.sets[bound].covers(g.wordBytes) &&
-            (g.sets[bound] | lex_decode_bytes(g, bound)).covers(leads))))
+            (g.sets[bound] | lex_decode_bytes(g, bound)).covers(g.wordLeads))))
         g.keywordBounds.v.push_back(bound);
     }
     tied_trivia(g);
@@ -83,16 +86,14 @@ struct LexAlphabet {
   // Whether one text is matched whole by both graphs and read at one rank: a
   // literal's or a keyword's branch outranks a pattern's on the text.
   template <class Cfg>
-  bool text_tied(const Cfg& g, int a, int b) const {
-    const ByteSet leads =
-        lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
+  LexOverlap text_tied(const Cfg& g, int a, int b) const {
     const auto outranks = [&](const std::vector<int>& sub) {
       return std::ranges::any_of(sub, [&](int x) {
         const LexNfaState& st = nfa.s[static_cast<std::size_t>(x)];
         return st.accept >= 0 &&
                (st.lit ||
                 (st.bound >= 0 &&
-                 lex_word_set(g, static_cast<std::uint16_t>(st.bound), leads)));
+                 lex_word_set(g, static_cast<std::uint16_t>(st.bound))));
       });
     };
     return lex_pair_search(
@@ -104,7 +105,8 @@ struct LexAlphabet {
   }
 
   // Two trivia that read one text at one rank leave the tree to the order
-  // they are declared in, unless neither is kept in it.
+  // they are declared in, unless neither is kept in it. A walk that cannot
+  // conclude leaves the pair standing, with a warning.
   template <class Cfg>
   void tied_trivia(Cfg& g) const {
     std::vector<std::vector<std::uint16_t>> skippers;
@@ -124,17 +126,24 @@ struct LexAlphabet {
         for (std::size_t j = i + 1; j < skipped.size(); ++j) {
           const TermInfo& x = g.terms[skipped[i]];
           const TermInfo& y = g.terms[skipped[j]];
-          if ((x.recorded || y.recorded) &&
-              apart.insert(std::uint32_t{skipped[i]} << 16 | skipped[j])
-                  .second &&
-              text_tied(g, startOf[skipped[i]], startOf[skipped[j]]))
+          if (!(x.recorded || y.recorded) ||
+              !apart.insert(std::uint32_t{skipped[i]} << 16 | skipped[j])
+                   .second)
+            continue;
+          const LexOverlap tie =
+              text_tied(g, startOf[skipped[i]], startOf[skipped[j]]);
+          if (tie == LexOverlap::found)
             return lower_refuse(g, LowerFail::triviaTied, skipped[j]);
+          if (tie == LexOverlap::incomplete)
+            lex_check_incomplete(g.lexIncomplete, {LowerFail::triviaTied,
+                                                   skipped[i], skipped[j]});
         }
   }
 
   // A section ends where its closing token stands, which no token of its
   // grammar may read or begin with; and the document's indentation is no
-  // section's. `reads(g)` is what each section's grammar reads.
+  // section's. `reads(g)` is what each section's grammar reads. A walk that
+  // cannot conclude leaves the token standing, with a warning.
   template <class Cfg, class Reads>
   void section_ends(Cfg& g, Reads&& reads) const {
     if (!g.sections()) return;
@@ -148,8 +157,14 @@ struct LexAlphabet {
       if (g.cfgHome[h] != h) continue;
       const int end = startOf[g.cfgEnd[h]];
       each_bit(own[h].w.data(), own[h].w.size(), [&](std::size_t t) {
-        if (lex_prefix_meets(nfa, g.sets.data(), end, startOf[t]))
+        const LexOverlap meets =
+            lex_prefix_meets(nfa, g.sets.data(), end, startOf[t]);
+        if (meets == LexOverlap::found)
           lower_refuse(g, LowerFail::sectionEndShared);
+        else if (meets == LexOverlap::incomplete)
+          lex_check_incomplete(g.lexIncomplete,
+                               {LowerFail::sectionEndShared, g.cfgEnd[h],
+                                static_cast<std::uint16_t>(t)});
       });
     }
   }

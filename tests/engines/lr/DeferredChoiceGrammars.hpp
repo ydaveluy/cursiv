@@ -41,7 +41,7 @@ struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Comment : terminal<through(lit<"/*">, lit<"*/">)> {};
   struct ID : terminal<some(cr<"a-zA-Z">)> {};
-  using ignore = list<WS, Comment>;
+  using ignored = list<WS, Comment>;
   struct QualName : rule<some(ref<ID>, lit<".">)> {};
   struct Text : rule<ref<QualName> + option(lit<"'"> + ikw<"class">)> {};
   struct IdentRule : rule<assign<&Ident::text>(ref<ID>)> {};

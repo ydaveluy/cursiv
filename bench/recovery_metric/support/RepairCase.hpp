@@ -12,7 +12,7 @@
 #include "cursiv/core/text/TextOffset.hpp"
 #include "recovery_metric/support/RepairFault.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairCase {
   std::string text;
@@ -70,4 +70,4 @@ struct RepairCase {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

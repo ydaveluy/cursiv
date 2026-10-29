@@ -23,7 +23,7 @@
 #include "recovery_metric/support/FaultWindow.hpp"
 #include "recovery_metric/support/RepairCase.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct TextKept {
   // Bytes of the twin's tokens no fault touches.
@@ -134,4 +134,4 @@ struct TextKept {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

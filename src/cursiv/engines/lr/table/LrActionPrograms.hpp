@@ -9,9 +9,9 @@
 
 namespace cursiv {
 
-template <class Index, class Cell, class Op>
+template <class Row, class Index, class Cell, class Op>
 struct LrActionPrograms {
-  LrProgramRows<Index, Cell> rows;
+  LrProgramRows<Row, Index, Cell> rows;
   std::span<const Op> op;
   unsigned countBits = 0;
 

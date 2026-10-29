@@ -10,7 +10,7 @@ namespace tiny {
 
 struct Tiny : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t\n\r)">)> {};
-  struct NUM : terminal<some(cr<"0-9">), int> {};
+  struct NUM : terminal<as<int>(some(cr<"0-9">))> {};
 
   struct TermRule : rule<assign<&ast::Term::value>(ref<NUM>)> {};
   struct SumRule
@@ -18,7 +18,7 @@ struct Tiny : cursiv::GrammarSpec {
              some(lit<"+"> + append<&ast::Sum::terms>(ref<TermRule>))> {};
 
   using entry = SumRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tiny

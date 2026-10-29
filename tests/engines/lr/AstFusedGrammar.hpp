@@ -35,8 +35,7 @@ struct Base : cursiv::GrammarSpec {
     ++conversions;
     return text;
   };
-  struct CountedID
-      : terminal<some(cr<"a-z">), cursiv::text_conv<counted_text>> {};
+  struct CountedID : terminal<as<counted_text>(some(cr<"a-z">))> {};
   struct Text0 : rule<ref<CountedID>> {};
   struct Text1 : rule<ref<Text0>> {};
   struct Text2 : rule<ref<Text1>> {};
@@ -119,7 +118,7 @@ struct Base : cursiv::GrammarSpec {
              (kw<"$u"> + ref<AppendOption>) |
              (kw<"$h"> + ref<NodeCommitOption>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Lr : Base {

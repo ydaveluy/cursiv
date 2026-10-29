@@ -180,7 +180,7 @@ struct Cases : cursiv::GrammarSpec {
              (kw<"stump"> + ref<stump::G::Root>) |
              (kw<"twin"> + ref<twin::G::Root>)> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A guard that is a word, or two: `<!` stands unless `--` or `[CDATA[`
@@ -202,7 +202,7 @@ struct G : cursiv::GrammarSpec {
                                       ref<LT> | ref<BANG> | ref<HASH> |
                                       ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace deep
 
@@ -230,7 +230,7 @@ struct G : cursiv::GrammarSpec {
                                       ref<REFUSES> | ref<CONJ> | ref<CONJS> |
                                       ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace behind
 
@@ -251,7 +251,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Items>(
                     many(append<&Items::items>(ref<E> | ref<U> | ref<BANG>)))> {};
   using entry = Root;
-  using ignore = list<WS, W>;
+  using ignored = list<WS, W>;
 };
 }  // namespace trivia
 
@@ -264,7 +264,7 @@ struct G : cursiv::GrammarSpec {
   struct Root
       : rule<create<Doc>(assign<&Doc::value>(ref<B>) + lit<";"> + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace typomulti
 

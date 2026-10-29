@@ -73,15 +73,27 @@ class LrGssGraph {
     Id next = none;
   };
 
-  // The seed's stack as a private chain under `start`, the one vertex to open;
-  // each frame stands for the symbol `stood`, per state, names, if any.
+  // The top `window` frames of the seed's stack as a private chain under
+  // `start`, the one vertex to open; each frame stands for the symbol `stood`,
+  // per state, names, if any.
   void seed(const LrStack& stack, const Reading& start,
-            std::span<const std::uint16_t> stood = {});
+            std::span<const std::uint16_t> stood = {},
+            std::uint32_t window = ~std::uint32_t{0});
+  // The stack frames under the seed's lowest vertex, which the graph does not
+  // hold; and whether a reduction reached below it, so the episode must be
+  // seeded wider.
+  std::uint32_t seed_base() const { return _seedBase; }
+  bool underflow() const { return _underflow; }
 
   const Reading& reading(Id v) const { return _vertices[v].reading; }
-  // Calls `f` with the vertex under each edge out of `v`.
+  // Calls `f` with the vertex under each edge out of `v`. A lexical probe
+  // below the partial seed needs a wider episode, as a reduction does.
   template <class F>
-  void each_below(Id v, F&& f) const {
+  void each_below(Id v, F&& f) {
+    if (v == 0 && _seedBase != 0) {
+      _underflow = true;
+      return;
+    }
     for (Id e = _vertices[v].edges; e != none; e = _edges[e].next)
       f(_edges[e].previous);
   }
@@ -136,6 +148,8 @@ class LrGssGraph {
     const Id id = static_cast<Id>(_pops.size());
     _pops.push_back(pop);
     Vertex& v = _vertices[pop.vertex];
+    // The seed's lowest vertex has frames under it the graph does not hold.
+    if (pop.vertex == 0 && _seedBase != 0) _underflow = true;
     if (v.watchers == none)
       v.watchers = id;
     else
@@ -189,21 +203,25 @@ class LrGssGraph {
   // their places.
   void retire(std::span<const Id> vertices);
   // The real tokens shifted that no rival token has been compared to yet: the
-  // vertex each landed on and its extent, and whether a rival from the same
-  // place outlasts it.
+  // vertex each landed on and the token, whether the lexer elects a rival
+  // from the same place over it, and the token's weight once a tie read it.
   struct Shift {
+    static constexpr std::uint8_t kUnweighed = 0xFF;
     Id vertex;
-    TextOffset begin, end;
+    Token token;
     bool beaten = false;
+    std::uint8_t weight = kUnweighed;
   };
   std::vector<Shift>& shifts() { return _shifts; }
 
   // Vertices before `before` gain no edge any more; neither do their forests.
   // `last`: no more text follows, so no pop reads what a prune would drop.
   void settle(TextOffset before, bool last = false);
-  // Whether `v`, alone and past every opened vertex, can take the text back:
-  // its stack has one path once pruned, and that path validated the arms that
-  // died. It is then the graph's one derivation.
+  // Whether the text goes back to the drive before `v` opens: at `v`, alone
+  // and past every opened vertex, when its stack has one path once pruned and
+  // that path validated the arms that died; else at the last vertex alone
+  // short of that, once a reading through it validated them. That stack is
+  // then the graph's one derivation.
   bool hand_back(Id v, TextOffset openedAt);
   // The derivations every accept closes; false for none.
   bool close();
@@ -251,6 +269,9 @@ class LrGssGraph {
     Rope::Id forksUnder = Rope::none;
     // The first of the steps taken at it, which follow one another.
     Id steps = none;
+    // While a vertex is held: the most real tokens a derivation shifted from
+    // it to this one, up to `kRepairValidateShifts`.
+    std::uint8_t ahead = 0;
   };
   // A stack of a repair's sources is widened level by level from the top; its
   // widening ends once this many children in a row fall outside the stacks
@@ -325,7 +346,7 @@ class LrGssGraph {
   int fork_order(const Step& x, const Step& y, bool& table) const;
   void chain(Id v);
   bool linear(Id v) const;
-  bool validated(Id v);
+  std::uint32_t validated(Id v);
   template <bool KeepVertices, class Take>
   void each_path(Id v, std::vector<Id>& forests, std::vector<Id>& next,
                  std::vector<Id>* vertices, Take&& take);
@@ -352,7 +373,6 @@ class LrGssGraph {
   std::vector<std::pair<Id, Id>> _accepts;
   LrGssPool<Arc> _arcs;
   std::vector<std::array<TextOffset, kRepairValidateShifts>> _readEnds;
-  TextOffset _readPast = 0;
   std::vector<std::pair<Id, Reading>> _frozen;
   std::vector<std::uint32_t> _tokens;
   // The step each stack took at a vertex, as of the comparison its round names.
@@ -386,6 +406,11 @@ class LrGssGraph {
   TextOffset _settled = 0;
   TextOffset _lastDeath = 0;
   bool _died = false;
+  // The last vertex alone whose path had not validated the arms that died,
+  // and the real tokens a reading must still shift from it; `none` while no
+  // vertex is held.
+  Id _held = none;
+  std::uint32_t _owed = 0;
   std::vector<Candidate> _group;
   std::vector<Id> _batch;
   std::vector<Id> _walk;
@@ -394,7 +419,8 @@ class LrGssGraph {
   std::vector<std::pair<Id, Id>> _partedLeft, _partedRight;
   Id _root = none;
   std::uint32_t _seedDepth = 0;
-  std::uint32_t _reopenCost = 0;
+  std::uint32_t _seedBase = 0;
+  bool _underflow = false;
   bool _accepted = false;
 };
 

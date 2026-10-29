@@ -127,7 +127,7 @@ struct Torture : cursiv::GrammarSpec {
   };
 
   using entry = ProgramRule;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<BLOCK, LINE>;
 };
 

@@ -11,7 +11,7 @@ struct Dashed : Base {
   struct Top : rule<create<ast::Node>(kw<"if"> +
                                       assign<&ast::Node::name>(ref<ID>))> {};
   using entry = Top;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Other : Base {
   struct NUM : terminal<some(d)> {};
@@ -19,7 +19,7 @@ struct Other : Base {
 
 struct G : cursiv::extends<Dashed, Other> {
   using entry = Dashed::Top;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -7,6 +7,7 @@
 #include <type_traits>
 
 #include "cursiv/engines/lr/table/LrBitSet.hpp"
+#include "cursiv/engines/lr/table/LrSetStore.hpp"
 #include "cursiv/engines/lr/table/LrSizes.hpp"
 
 namespace cursiv {
@@ -22,8 +23,8 @@ struct LrColdTables {
   using AccBoundOffset = std::conditional_t<(S.accBounds <= 0xFFFFu),
                                             std::uint16_t, std::uint32_t>;
 
-  // Terminals with an action, per state.
-  std::array<TermSet, S.states> follow{};
+  // Terminals with an action, per state, one set per distinct row.
+  LrSetStore<S, S.states, S.followSets> follow{};
 
   // The guard each accepted terminal declares: a row per DFA state, one entry
   // per member of `dfaAcc[s]`, in bit order.
@@ -36,8 +37,9 @@ struct LrColdTables {
   std::array<std::uint16_t, S.states> soleReduce{};
   std::array<std::uint8_t, S.states> readsToken{};
   // States that take the same gotos and hold the same conditions of the gap
-  // are one class: below its top, a frame is read for nothing else.
-  std::array<std::uint16_t, S.states> gotoClass{};
+  // are one class: below its top, a frame is read for nothing else. Laid
+  // only where a reading can split.
+  std::array<std::uint16_t, S.gotoClasses ? S.states : 0> gotoClass{};
 
   // The terminals a state owes, one set per distinct row, and the most
   // tokens any production's shortest reading holds.

@@ -1,4 +1,5 @@
 #include "cursiv/engines/shared/runtime/GestureRank.hpp"
+#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
 #include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
 #include "cursiv/test/Check.hpp"
 #include <algorithm>
@@ -170,9 +171,69 @@ void run() {
 
 }  // namespace gesture_rank_cases
 
+namespace tied_inserts_cases {
+
+// What a dropped path first inserted stays named under the path that kept its
+// future, and moves with that path when it takes the dropped one's links.
+
+namespace {
+
+using cursiv::kNoGestureLink;
+using cursiv::TiedInserts;
+
+struct Link {
+  std::uint32_t parent = kNoGestureLink;
+  std::uint32_t choice = 0;
+  std::uint32_t kind = TiedInserts::kArm;
+};
+
+std::vector<cursiv::ElementId> named(TiedInserts& tied,
+                                     const std::vector<Link>& links,
+                                     std::uint32_t link) {
+  std::vector<cursiv::ElementId> out;
+  tied.open();
+  tied.name(links, link, [](const Link& l) { return l.kind; }, out);
+  TiedInserts::order(out);
+  return out;
+}
+
+// A path that dies on the kept path's own link leaves its insertion there;
+// when the kept path then takes a better-ranked path through the links both
+// share, that insertion is still named.
+void a_handed_path_keeps_what_its_own_links_held() {
+  std::vector<Link> links = {
+      {kNoGestureLink, 0, TiedInserts::kArm},  // the root
+      {0, 0, 10},                              // an insertion both share
+      {1, 0, TiedInserts::kArm},               // where the two part
+      {2, 1, TiedInserts::kArm},               // the kept path's own link
+      {3, 0, TiedInserts::kArm},               // the kept path's end
+      {2, 0, TiedInserts::kArm},               // the better-ranked path's end
+      {0, 1, 20},                              // a third path's insertion
+      {6, 0, TiedInserts::kArm},               // its end
+  };
+  const auto kind = [](const Link& l) { return l.kind; };
+  cursiv::GestureRank rank;
+  TiedInserts tied;
+  tied.tie(links, 3, 7, rank.part(links, 7, 3), false, kind);
+  CHECK((named(tied, links, 4) == std::vector<cursiv::ElementId>{10, 20}));
+  const cursiv::GestureRank::Parting p = rank.part(links, 5, 4);
+  const bool handed = cursiv::GestureRank::before(links, p);
+  CHECK(handed);
+  tied.tie(links, 4, 5, p, handed, kind);
+  if (handed) links[4] = links[5];
+  CHECK((named(tied, links, 4) == std::vector<cursiv::ElementId>{10, 20}));
+}
+
+}  // namespace
+
+void run() { a_handed_path_keeps_what_its_own_links_held(); }
+
+}  // namespace tied_inserts_cases
+
 int main() {
   cursiv::test::count_expectations();
   typo_candidates_cases::run();
   gesture_rank_cases::run();
+  tied_inserts_cases::run();
   return cursiv::test::report("TypoCandidates_test");
 }

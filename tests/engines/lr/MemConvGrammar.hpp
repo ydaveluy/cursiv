@@ -31,15 +31,14 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct Q : terminal<lit<"'"> + some(cr<"a-z">) + lit<"'">,
-                      cursiv::text_conv<strip>> {};
+  struct Q : terminal<as<strip>(lit<"'"> + some(cr<"a-z">) + lit<"'">)> {};
   // The same terminal as one part of a rule that joins what its parts mean.
   struct Joined : rule<ref<Q> + ref<Q>> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::direct>(ref<Q>) +
                                       assign<&ast::Doc::joined>(ref<Joined>))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tmemconv

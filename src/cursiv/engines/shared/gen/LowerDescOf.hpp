@@ -61,15 +61,13 @@ struct StageLevelsOf;
 template <class V, class St, class RR, class Lvls, std::size_t... Is>
 struct StageLevelsOf<V, St, RR, Lvls, std::index_sequence<Is...>> {
   static constexpr ImageStageLevelDesc kAll[] = {
-      {Lvls::template at<Is>::kGroup == Association::right ? ImageGroup::right
-       : Lvls::template at<Is>::kGroup == Association::non ? ImageGroup::non
-                                                           : ImageGroup::left,
+      {image_group(Lvls::template at<Is>::kGroup),
        OpsOf<V, St, RR,
              typename alts_list<
                  typename Lvls::template at<Is>::op_expr>::type>::kAll,
-       static_cast<std::uint32_t>(tl_size<typename alts_list<
-                                      typename Lvls::template at<Is>::op_expr>::
-                                      type>::value)}...};
+       static_cast<std::uint32_t>(
+           tl_size<typename alts_list<
+               typename Lvls::template at<Is>::op_expr>::type>::value)}...};
 };
 
 template <class V, class D>
@@ -98,6 +96,7 @@ consteval ImageStageDesc lower_stage_desc() {
       s.body = &kNode<V, normalize_writes_t<Body>>;
     }
     s.folded = requires { RR::ll_folded; };
+    s.inPlace = read_in_place<St, D>;
     s.convertRow = kRowPtr<St, typename ConvertOf<RR>::row>;
     if constexpr (is_node_rule<RR>)
       s.closeRow = kRowPtr<St, close_row_t<RR>>;

@@ -111,7 +111,9 @@ template <class B, class D>
 struct plug<B, SuperT<D>, TypeList<>> {
   using type = B;
 };
-// The three sets rebuild through their own operator, which flattens.
+// A sequence and a choice rebuild through their own operator, which
+// flattens. An unordered group does not: a group spliced in as one of its
+// items stays one item.
 template <class B, class... Es>
 struct plug<B, Seq<Es...>, TypeList<Es...>> {
   using type = flat_seq_t<plug_t<B, Es>...>;
@@ -119,10 +121,6 @@ struct plug<B, Seq<Es...>, TypeList<Es...>> {
 template <class B, class... Es>
 struct plug<B, Choice<Es...>, TypeList<Es...>> {
   using type = flat_of_t<Choice, plug_t<B, Es>...>;
-};
-template <class B, class... Es>
-struct plug<B, Unordered<Es...>, TypeList<Es...>> {
-  using type = flat_of_t<Unordered, plug_t<B, Es>...>;
 };
 
 // On a bool, never a `conditional_t`: the absent branch would instantiate
@@ -236,7 +234,8 @@ struct stage_body<X> {
   using type = std::remove_cv_t<decltype(X::body)>;
 };
 
-// `ignore` and `hidden` each accept a rule or a list and resolve like any rule.
+// `ignored` and `hidden` each accept a rule or a list and resolve like any
+// rule.
 template <class G, class X>
 struct as_rules {
   using type = TypeList<typename eff_rule<G, X>::type>;
@@ -303,7 +302,7 @@ struct ResolveOverride {
   // The whole public surface, answered again. A stage that dropped any of it
   // would end the pipeline: what comes after has no other way to ask.
   using entry = rule<typename G::entry>;
-  using ignore = typename detail::ov::as_rules<G, typename G::ignore>::type;
+  using ignored = typename detail::ov::as_rules<G, typename G::ignored>::type;
   using hidden = typename detail::ov::as_rules<G, typename G::hidden>::type;
   static constexpr auto word_boundary = detail::ov::bound_of<G>();
 };
@@ -749,7 +748,7 @@ struct MaterializeCreate {
   // With this stage's rules: an `entry` whose body still implied its
   // creation would make the stage a matter of which way you asked.
   using entry = typename detail::mat::mat_rule<typename S::entry>::type;
-  using ignore = typename detail::mat::mat_each<typename S::ignore>::type;
+  using ignored = typename detail::mat::mat_each<typename S::ignored>::type;
   using hidden = typename detail::mat::mat_each<typename S::hidden>::type;
   static constexpr auto word_boundary = S::word_boundary;
 };

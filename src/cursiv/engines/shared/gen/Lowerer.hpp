@@ -18,8 +18,10 @@
 #include "cursiv/engines/shared/gen/LowerDesc.hpp"
 #include "cursiv/engines/shared/gen/LowerPool.hpp"
 #include "cursiv/engines/shared/gen/LowerPools.hpp"
+#include "cursiv/engines/shared/gen/TwinBranch.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
+#include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
 namespace cursiv {
@@ -90,6 +92,29 @@ class Lowerer {
     }
     return changed ? _im.derive(n, next) : id;
   }
+  // Over a choice of tokens, a conversion rides the record of each token, as a
+  // directive over a choice rides each alternative: none opens over the
+  // choice. `p` is the engine's pool of laid nodes.
+  template <class Pool, class Id>
+  static bool one_token(const Pool& p, Id at) {
+    const auto& n = p.e[at];
+    using Kind = decltype(n.kind);
+    if (n.kind == Kind::sym) return is_term(static_cast<std::uint16_t>(n.sym));
+    if (n.kind != Kind::alt || !n.made.empty() || !n.row.empty()) return false;
+    for (decltype(n.count) k = 0; k < n.count; ++k)
+      if (!one_token(p, p.kid[n.sym + k])) return false;
+    return true;
+  }
+  template <class Pool, class Id>
+  static void convert_over(Pool& p, Id at, std::uint16_t row) {
+    auto& n = p.e[at];
+    if (n.kind != decltype(n.kind)::alt || !one_token(p, at)) {
+      n.made.push_back(row);
+      return;
+    }
+    for (decltype(n.count) k = 0; k < n.count; ++k)
+      convert_over(p, p.kid[n.sym + k], row);
+  }
   // `&close | eof`: where a section's text ends, or the document's.
   ImageId section_end();
   std::uint64_t key(Key kind, unsigned cfg, ImageId node);
@@ -110,9 +135,32 @@ class Lowerer {
   bool creates(ImageId id, const void* row) const;
   bool reads_under(unsigned cfg, std::uint32_t rule) const;
   unsigned region_of(unsigned cfg, const ImageNode& skip) const;
-  unsigned section_of(unsigned cfg, std::uint32_t grammar, ImageId end) const;
+  unsigned section_of(std::uint32_t grammar, ImageId end) const;
   ImageId token_core(ImageId id) const;
   std::uint32_t op_rule_of(ImageId op) const;
+  bool buries(ImageId id) const;
+  ImageId optional_item(ImageId item) const;
+  // An unordered group laid from `items`: each optional item is read in its
+  // present form, `x` for `option(x)` and one turn at least for any other
+  // repetition, and marked, one bit each, as one the text may leave out.
+  template <class Pool>
+  void present_optional_items(Pool& p, std::size_t group,
+                              const std::vector<ImageId>& items) const {
+    std::uint32_t optional = 0;
+    for (std::size_t i = 0; i < items.size() && i < 32; ++i) {
+      auto& laid = p.kid[p.e[group].sym + i];
+      auto& item = p.e[laid];
+      if (optional_item(items[i]) == kNoImage ||
+          item.kind != decltype(item.kind)::rep)
+        continue;
+      optional |= std::uint32_t{1} << i;
+      if (item.max == 1)
+        laid = item.sym;
+      else
+        item.min = 1;
+    }
+    p.e[group].unorderedOptional = optional;
+  }
   void index();
   void declare();
   void define();
@@ -123,6 +171,7 @@ class Lowerer {
                                bool charset, bool folded,
                                const std::function<std::uint16_t()>& lex);
   void spell_literal(std::uint16_t t, const ImageNode& lit);
+  bool list_words(ImageId id, std::vector<std::string_view>& words) const;
   std::uint16_t lay_laid(ImageId e, std::uint8_t laid, std::string_view name);
   void unspell(std::uint16_t t, std::uint8_t laid);
   bool implied_token_ok(unsigned cfg, ImageId e);
@@ -155,6 +204,8 @@ class Lowerer {
   void cut_terms(unsigned cfg, ImageId token, DynSet& out);
 
   GrammarImage& _im;
+  // A rule's body is laid without the branches that repeat earlier ones.
+  TwinReader _twins;
   const LowerDesc& _d;
   LowerPools& _c;
   std::uint16_t& _nterms;
@@ -178,6 +229,7 @@ class Lowerer {
 
  private:
   void open_configs();
+  void refuse_empty_items();
   bool clone_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs);
   void declare_term(std::uint32_t rule);
   void declare_role_term(std::size_t at);

@@ -22,7 +22,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(
                     many(kw<"go"> + (kw<"north"> | kw<"south">)+lit<";">))> {};
   using entry = Root;
-  using ignore = list<WS, NL, COMMENT>;
+  using ignored = list<WS, NL, COMMENT>;
 };
 
 }  // namespace tcarettrivia
@@ -39,10 +39,10 @@ struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Bang : rule<option(lit<"x">) + !lit<"z">> {};
   struct Item
-      : rule<lit<"p"> + tight(lit<"a"> + &lit<"x"> + ref<Bang>) + lit<"c">> {};
+      : rule<lit<"p"> + tight(lit<"a"> + &lit<"x"> + ref<Bang> + lit<"c">)> {};
   struct Root : rule<create<ast::Doc>(ref<Item>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace small
 
@@ -59,7 +59,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(lit<"p"> + &lit<"y"> +
                                  assign<&Doc::e>(ref<C>) + lit<"x">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace landing
 
@@ -99,7 +99,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<ref<Tail> | create<ast::Doc>(lit<"x"> + lit<"z">) |
                      ref<Ahead> | ref<Word>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tfallback
@@ -130,7 +130,7 @@ struct G : cursiv::GrammarSpec {
             (assign<&ast::Doc::p0>(ref<A0>) + many(lit<"a">) + lit<"o0">) |
             (assign<&ast::Doc::p1>(ref<A1>) + many(lit<"a">) + lit<"o1">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tunsettled
@@ -149,6 +149,16 @@ struct Splice : cursiv::GrammarSpec {
   struct PairHead : terminal<lit<"a">> {};
   struct PairTail : terminal<lit<"b">> {};
   struct Pair : rule<ref<PairHead> + ref<PairTail>> {};
+  // One `&` reduced by a rule in one arm and shifted in the other: past the
+  // `=`, each arm reads `-` in its own mode, and only one of them reads `->`.
+  struct Lead : rule<lit<"&">> {};
+  // One `%` two rules reduce, told apart by the token behind it: the state
+  // that reduces it reads `->`, the one that shifts the `-` after it does not.
+  struct ByDash : rule<lit<"%">> {};
+  struct ByArrow : rule<lit<"%">> {};
+  // A condition reads the tokens after its own on its own: a run of `~` the
+  // arms read one at a time is one token to the conditions.
+  struct Tildes : terminal<some(lit<"~">)> {};
   struct Root
       : rule<create<Doc>(
             (lit<"("> + lit<"foo"> + lit<")">) |
@@ -161,9 +171,17 @@ struct Splice : cursiv::GrammarSpec {
             (lit<"x"> + ref<Pair> + lit<"!">) |
             (lit<"y"> + ref<Pair> + lit<"?">) |
             (lit<"u"> + many(lit<"("> + lit<"a"> + lit<"b"> + lit<")">) +
-             lit<"!"> + option(lit<"next">)))> {};
+             lit<"!"> + option(lit<"next">)) |
+            (ref<Lead> + lit<"="> + lit<"-"> + lit<"!">) |
+            (lit<"&"> + lit<"="> + (lit<"-"> | lit<"->">)+lit<">">) |
+            (ref<ByDash> + lit<"-"> + lit<">">) |
+            (ref<ByArrow> + lit<"->"> + lit<"!">) |
+            (&(lit<"|"> + ref<Tildes> + lit<"!">)+lit<"|"> + some(lit<"~">) +
+             lit<"!">) |
+            (!(lit<"^"> + ref<Tildes> + lit<"?">)+lit<"^"> + some(lit<"~">) +
+             (lit<"!"> | lit<"?">)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tpeekcaret
 
@@ -229,8 +247,8 @@ struct G : tedges::Words {
       : rule<create<ast::Item>(
             lit<"o"> + tight(option(lit<"a">) + lit<"b">) +
             assign<&ast::Item::name>(ref<ID>))> {};
-  // A refusal at either edge reads the region's own bytes: at the tail, a
-  // blank the tight mode reads no token of.
+  // A refusal at either edge reads across the caller's trivia: before the
+  // region's first token and after its last.
   struct EmptyEdges
       : rule<create<ast::Item>(
             lit<"p"> +
@@ -254,7 +272,7 @@ struct G : tedges::Words {
                     ref<Paren> | ref<EmptyEdges> | ref<Closing> |
                     ref<Whole>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tregion
@@ -293,7 +311,7 @@ struct G : tedges::Words {
 
 // Two terminals match the same byte, and what tells them apart lies past a
 // repetition nothing bounds: no budget reaches it. A position no look-ahead
-// settles is split, never guessed, and the next in the same state at once.
+// settles is split, never guessed.
 namespace tlexsplit {
 
 namespace ast {
@@ -321,11 +339,11 @@ struct G : Words {
              (lit<"fallback:"> + ref<tfallback::G::Root>) |
              (lit<"groups:"> + ref<tgroupguard::G::Case>) |
              (lit<"splice:"> + ref<tpeekcaret::Splice::Root>) |
-             skip(ignored<tcarettrivia::G::WS, tcarettrivia::G::NL,
-                          tcarettrivia::G::COMMENT>,
+             skip(ignore<tcarettrivia::G::WS, tcarettrivia::G::NL,
+                         tcarettrivia::G::COMMENT>,
                   hide<>, lit<"trivia:"> + ref<tcarettrivia::G::Root> + eof)> {
   };
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tedges

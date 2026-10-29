@@ -24,7 +24,7 @@ struct TermInfo {
   ElementId element = kNoElement;
   bool trivia = false;
   // Trivia a `hidden` rule spells: the parse does not see it either, but a tree
-  // keeps it -- what `ignore` spells is dropped.
+  // keeps it -- what `ignored` spells is dropped.
   bool recorded = false;
   // Its body is one literal, so its bytes are known and insertable. A named
   // terminal is spelled too: `textOff`, not `nameOff`, holds those bytes,

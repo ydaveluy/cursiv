@@ -241,6 +241,8 @@ struct Session {
   bool declarationLinks = false;
   bool typeDefinitionLinks = false;
   bool implementationLinks = false;
+  bool hierarchicalSymbols = false;
+  bool codeActionLiterals = false;
 };
 
 // Stop the producer before destroying the endpoint: its builds publish
@@ -324,6 +326,11 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
           text.typeDefinition && text.typeDefinition->linkSupport.value_or(false);
       session.implementationLinks =
           text.implementation && text.implementation->linkSupport.value_or(false);
+      session.hierarchicalSymbols =
+          text.documentSymbol &&
+          text.documentSymbol->hierarchicalDocumentSymbolSupport.value_or(false);
+      session.codeActionLiterals =
+          text.codeAction && text.codeAction->codeActionLiteralSupport.has_value();
     }
     return server.initialize(params);
   });
@@ -371,6 +378,40 @@ lsp::TextDocumentDefinitionResult navigation_result(
   return result;
 }
 
+// The outline as a flat list, each parent before its children. A symbol keeps
+// its whole range and names its parent in `containerName`. A stack, not
+// recursion: an outline is as deep as the document nests.
+std::vector<lsp::SymbolInformation> flat_symbols(
+    const lsp::DocumentUri& uri, std::vector<lsp::DocumentSymbol> symbols) {
+  constexpr std::size_t kTopLevel = static_cast<std::size_t>(-1);
+  struct Pending {
+    lsp::DocumentSymbol* symbol;
+    std::size_t parent;
+  };
+  std::vector<Pending> pending;
+  for (auto it = symbols.rbegin(); it != symbols.rend(); ++it)
+    pending.push_back({&*it, kTopLevel});
+  std::vector<lsp::SymbolInformation> flat;
+  while (!pending.empty()) {
+    const Pending next = pending.back();
+    pending.pop_back();
+    lsp::DocumentSymbol& symbol = *next.symbol;
+    lsp::SymbolInformation info;
+    info.name = std::move(symbol.name);
+    info.kind = symbol.kind;
+    info.tags = std::move(symbol.tags);
+    info.deprecated = symbol.deprecated;
+    if (next.parent != kTopLevel) info.containerName = flat[next.parent].name;
+    info.location = {uri, symbol.range};
+    flat.push_back(std::move(info));
+    if (symbol.children.has_value())
+      for (auto it = symbol.children->rbegin(); it != symbol.children->rend();
+           ++it)
+        pending.push_back({&*it, flat.size() - 1});
+  }
+  return flat;
+}
+
 void add_text_document_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
@@ -389,13 +430,19 @@ void add_text_document_handlers(Session& session) {
         server.didClose(params);
       }));
 
-  // The hierarchical arm of the answer: the flat `SymbolInformation` list is
-  // the legacy one, and the outline this storey builds is a tree.
+  // The hierarchical arm of the answer for a client that reads it: the
+  // outline this storey builds is a tree. Any other client gets the flat
+  // `SymbolInformation` list.
   endpoint.onTextDocumentDocumentSymbol(
-      request(session, [&server](lsp::DocumentSymbolParams&& params,
-                                 const CancellationToken& token) {
+      request(session, [&session, &server](lsp::DocumentSymbolParams&& params,
+                                           const CancellationToken& token) {
         lsp::TextDocumentDocumentSymbolResult result;
-        result = server.documentSymbol(params, token);
+        std::vector<lsp::DocumentSymbol> symbols =
+            server.documentSymbol(params, token);
+        if (session.hierarchicalSymbols)
+          result = std::move(symbols);
+        else
+          result = flat_symbols(params.textDocument.uri, std::move(symbols));
         return result;
       }));
 
@@ -546,19 +593,23 @@ void add_text_document_handlers(Session& session) {
       }));
 
   // Null for "nothing to offer", the protocol's own spelling: an empty array
-  // would still draw a lightbulb on some clients.
+  // would still draw a lightbulb on some clients. A client without code action
+  // literals reads commands only: an action that is just a command goes as
+  // that command, and one with an edit or marked disabled is left out.
   endpoint.onTextDocumentCodeAction(
-      request(session, [&server](lsp::CodeActionParams&& params,
-                                 const CancellationToken& token) {
+      request(session, [&session, &server](lsp::CodeActionParams&& params,
+                                           const CancellationToken& token) {
         lsp::TextDocumentCodeActionResult result;
         std::vector<lsp::CodeAction> actions = server.codeAction(params, token);
-        if (!actions.empty()) {
-          lsp::Array<lsp::OneOf<lsp::Command, lsp::CodeAction>> encoded;
-          encoded.reserve(actions.size());
-          for (lsp::CodeAction& action : actions)
+        lsp::Array<lsp::OneOf<lsp::Command, lsp::CodeAction>> encoded;
+        encoded.reserve(actions.size());
+        for (lsp::CodeAction& action : actions) {
+          if (session.codeActionLiterals)
             encoded.emplace_back(std::move(action));
-          result = std::move(encoded);
+          else if (action.command && !action.edit && !action.disabled)
+            encoded.emplace_back(std::move(*action.command));
         }
+        if (!encoded.empty()) result = std::move(encoded);
         return result;
       }));
 

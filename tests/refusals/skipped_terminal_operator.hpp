@@ -17,10 +17,9 @@ struct G : Base {
   struct NUM : terminal<some(d)> {};
   struct Plus : rule<lit<"+"> + ref<WS>> {};
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(ref<Plus>))> {};
+  struct Sum : infix<Primary, ast::Bin, (left(ref<Plus>))> {};
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

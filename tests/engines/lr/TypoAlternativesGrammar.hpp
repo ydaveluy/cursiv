@@ -19,6 +19,6 @@ struct G : cursiv::GrammarSpec {
       (lit<"["> + ((assign<&Doc::value>(ref<WordBang>) + lit<"!">) |
                     (assign<&Doc::value>(ref<WordQuestion>) + lit<"?">))))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace ttyporead

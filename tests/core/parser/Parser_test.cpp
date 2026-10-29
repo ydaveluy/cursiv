@@ -38,7 +38,7 @@ const cursiv::Parser& service() {
 // data, with no service in front of them.
 bool direct_parse(std::string_view text, cursiv::Cst& cst) {
   return cursiv::lr_parser<dmg::kTable>.parse(text, cst, nullptr,
-                                              dmg::kDrivePtr);
+                                              &dmg::kDrive);
 }
 
 // The erased door answers about records and tokens, which is all a service
@@ -51,7 +51,7 @@ void the_grammar_is_reachable_without_the_template() {
   CHECK(g.recordRule(cst[cst.entry_root()]).empty() ||
         !g.recordRule(cst[cst.entry_root()]).empty());
   // A terminal is spelled or it is named, never both and never neither.
-  CHECK(!g.terminalText(1).empty() || !g.terminalName(1).empty());
+  CHECK(!g.terminalSpellings(1).empty() || !g.terminalName(1).empty());
 }
 
 void a_parse_through_the_interface_builds_the_same_tree() {
@@ -244,6 +244,53 @@ void a_stop_during_ast_work_is_observed() {
   CHECK(source.stop_requested() && threw);
 }
 
+// The materialisation reads the stop between runs of records: a stop
+// requested at the first entry leaves most of a long document unbuilt.
+std::vector<cursiv::AstEntryFn> countedEntries;
+std::vector<cursiv::ElementId> rowById;
+std::size_t entryCalls = 0;
+
+void count_an_ast_entry(cursiv::AstReducer& builder, cursiv::NodeId id) {
+  if (++entryCalls == 1 && astStop != nullptr) astStop->request_stop();
+  countedEntries[rowById[id]](builder, id);
+}
+
+std::size_t entries_built(const std::string& src,
+                          cursiv::CancellationTokenSource* stop) {
+  cursiv::Cst cst;
+  CHECK(direct_parse(src, cst));
+  rowById.assign(cst.size(), cursiv::kNoElement);
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+    rowById[id] = dmg::kTable.stamp.row(cst[id]);
+  auto actions = dmg::kAstActions;
+  countedEntries.assign(actions.entries, actions.entries + actions.entryCount);
+  std::vector<cursiv::AstEntryFn> entries(countedEntries);
+  for (cursiv::AstEntryFn& e : entries)
+    if (e != nullptr) e = &count_an_ast_entry;
+  actions.entries = entries.data();
+  entryCalls = 0;
+  astStop = stop;
+  try {
+    (void)cursiv::AstReducer::build<dmg::kTable.stamp>(
+        actions, std::move(cst),
+        stop != nullptr ? stop->get_token() : cursiv::kNoCancel);
+  } catch (const cursiv::OperationCancelled&) {
+  }
+  astStop = nullptr;
+  return entryCalls;
+}
+
+void a_stop_during_a_long_ast_build_is_observed_early() {
+  std::string src = "datatype String\n";
+  for (int i = 0; i < 40000; ++i)
+    src += "entity E" + std::to_string(i) + " { x : String }\n";
+  const std::size_t whole = entries_built(src, nullptr);
+  cursiv::CancellationTokenSource source;
+  const std::size_t stopped = entries_built(src, &source);
+  CHECK(whole > 2 * 64 * 1024);
+  CHECK(stopped < whole / 2);
+}
+
 }  // namespace
 
 int main() {
@@ -255,5 +302,6 @@ int main() {
   a_long_reading_runs_whole_and_the_door_answers();
   a_cancelled_token_stops_the_ast_before_work();
   a_stop_during_ast_work_is_observed();
+  a_stop_during_a_long_ast_build_is_observed_early();
   return cursiv::test::report("parser_service");
 }

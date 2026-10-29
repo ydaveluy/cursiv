@@ -9,7 +9,7 @@
 
 #include "cursiv/engines/shared/gen/LexRightLinear.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/engines/shared/gen/StrongComponents.hpp"
+#include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/LexNode.hpp"
@@ -29,7 +29,7 @@ void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
       for (unsigned i = 0; i < e.b; ++i) visit(g.lexKid[e.a + i]);
       break;
     case LexKind::call:
-      if (calls) visit(e.a);
+      if (calls) visit(lex_callee(g, e));
       break;
     case LexKind::rep:
       if (e.max != 0) visit(e.a);
@@ -50,7 +50,7 @@ void lex_children(const Cfg& g, std::uint16_t at, Visit&& visit,
         if (g.lexKid[e.b + i] != kNoLexNode) visit(g.lexKid[e.b + i]);
       break;
     case LexKind::token:
-      visit(e.b);
+      visit(lex_token_body(g, e));
       break;
     default:
       break;
@@ -73,6 +73,7 @@ bool lex_derives(const Cfg& g, std::uint16_t at, Facts&& facts,
         if (facts(g.lexKid[e.a + i])) return true;
       return false;
     case LexKind::call:
+      return facts(lex_callee(g, e));
     case LexKind::mark:
     case LexKind::through_nested:
       return facts(e.a);
@@ -81,7 +82,7 @@ bool lex_derives(const Cfg& g, std::uint16_t at, Facts&& facts,
     case LexKind::through_same:
       return productive && facts(e.a);
     case LexKind::token:
-      return facts(e.b);
+      return facts(lex_token_body(g, e));
     case LexKind::rep:
       return e.min == 0 || facts(e.a);
     case LexKind::indent:
@@ -94,16 +95,6 @@ bool lex_derives(const Cfg& g, std::uint16_t at, Facts&& facts,
 }
 
 }  // namespace detail
-
-template <class Cfg>
-void normalize_lex_calls(Cfg& g) {
-  for (std::uint16_t at = 0; at < g.nlex; ++at) {
-    LexNode& e = g.lex[at];
-    // Internal calls to normalized regular closures already name their node.
-    if (e.kind == LexKind::call && e.b != kNoLexNode)
-      e.a = g.termBuild[e.b].lex;
-  }
-}
 
 template <class Cfg>
 std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
@@ -249,6 +240,7 @@ std::pair<ByteSet, bool> lex_first_bytes(const Cfg& g, std::uint16_t node) {
     case LexKind::chars:
       return {g.sets[e.a] | lex_decode_bytes(g, e.a), false};
     case LexKind::call:
+      return lex_first_bytes(g, lex_callee(g, e));
     case LexKind::mark:
       return lex_first_bytes(g, e.a);
     case LexKind::seq:

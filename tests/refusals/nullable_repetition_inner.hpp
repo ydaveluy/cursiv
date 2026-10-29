@@ -20,7 +20,7 @@ struct G : Base {
                       option(append<&ast::Pair::other>(lit<"b">))) +
                  lit<";">)> {};
   using entry = X;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

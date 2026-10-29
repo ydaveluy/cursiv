@@ -60,8 +60,7 @@ class LexRightLinear {
       }
       const auto closure = _g.nlex;
       _g.lex[_g.nlex++] = LexNode{LexKind::rep, one, kNoLexNode, 1, kEndless};
-      // b == kNoLexNode names an internal, already linked call. Relinking
-      // terminal references must never turn it back into a self-call.
+      // An internal call: the root reads the closure, not the terminal.
       _g.lex[root] = LexNode{LexKind::call, closure, kNoLexNode};
     }
   }
@@ -137,7 +136,8 @@ class LexRightLinear {
       last = opt.a;
     }
     const LexNode call = _g.lex[last];
-    if (call.kind != LexKind::call || call.a != root) return false;
+    if (call.kind != LexKind::call || lex_callee(_g, call) != root)
+      return false;
     for (unsigned i = 0; i + 1 < e.b; ++i) prefix.push_back(_g.lexKid[e.a + i]);
     _prefixSeq = at;
     return true;

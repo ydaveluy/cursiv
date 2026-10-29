@@ -35,14 +35,13 @@ struct Shift : cursiv::GrammarSpec {
   struct Expr;
   struct Atom : rule<assign<&ast::Number::text>(ref<NUMBER>) |
                      (lit<"("> + ref<Expr> + lit<")">)> {};
-  struct Expr
-      : infix<Atom, &ast::Binary::left, &ast::Binary::op, &ast::Binary::right,
-              (left(lit<"*">) >> left(lit<"+"> | lit<"-">) >>
-               left(ref<ShiftOp>) >> left(lit<"<"> | lit<">">) >>
-               right(ref<ArrowOp>))> {};
+  struct Expr : infix<Atom, ast::Binary,
+                      levels(left(lit<"*">), left(lit<"+"> | lit<"-">),
+                             left(ref<ShiftOp>), left(lit<"<"> | lit<">">),
+                             right(ref<ArrowOp>))> {};
   struct Root : rule<assign<&ast::Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct ShiftLr : Shift {};
 
@@ -57,13 +56,12 @@ struct Negated : cursiv::GrammarSpec {
                  kw<"not"> + assign<&ast::Negation::operand>(ref<Unary>))  //
              | assign<&ast::Number::text>(ref<NUMBER>)                     //
              | (lit<"("> + ref<Expr> + lit<")">)> {};
-  struct Expr
-      : infix<Unary, &ast::Binary::left, &ast::Binary::op, &ast::Binary::right,
-              (left(lit<"+">) >> left(kw<"like"> | ref<NotLike>) >>
-               left(kw<"in"> | ref<NotIn>) >> left(kw<"and">))> {};
+  struct Expr : infix<Unary, ast::Binary,
+                      levels(left(lit<"+">), left(kw<"like"> | ref<NotLike>),
+                             left(kw<"in"> | ref<NotIn>), left(kw<"and">))> {};
   struct Root : rule<assign<&ast::Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Two tables, the inner one tighter: the shift of the outer table opens on the
@@ -74,14 +72,12 @@ struct Tables : cursiv::GrammarSpec {
   struct NUMBER : terminal<some(d)> {};
   struct ShiftOp : rule<lit<"="> + lit<"=">> {};
   struct Atom : rule<assign<&ast::Number::text>(ref<NUMBER>)> {};
-  struct Compare : infix<Atom, &ast::Binary::left, &ast::Binary::op,
-                         &ast::Binary::right, left(lit<"="> | lit<"!">)> {};
-  struct Expr
-      : infix<Compare, &ast::Binary::left, &ast::Binary::op,
-              &ast::Binary::right, (left(ref<ShiftOp>) >> left(lit<"?">))> {};
+  struct Compare : infix<Atom, ast::Binary, left(lit<"="> | lit<"!">)> {};
+  struct Expr : infix<Compare, ast::Binary,
+                      levels(left(ref<ShiftOp>), left(lit<"?">))> {};
   struct Root : rule<assign<&ast::Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Operators a rule says whole: one behind a condition, one that is a choice,
@@ -93,13 +89,12 @@ struct Composite : cursiv::GrammarSpec {
   struct Words : rule<lit<":"> | (lit<"a"> + lit<"b">)> {};
   struct Starred : rule<lit<"@"> + (lit<"x"> | lit<"y">)> {};
   struct Atom : rule<assign<&ast::Number::text>(ref<NUMBER>)> {};
-  struct Expr
-      : infix<Atom, &ast::Binary::left, &ast::Binary::op, &ast::Binary::right,
-              (left(ref<Starred>) >> left(lit<"@">) >> left(ref<SameLine>) >>
-               left(ref<Words>))> {};
+  struct Expr : infix<Atom, ast::Binary,
+                      levels(left(ref<Starred>), left(lit<"@">),
+                             left(ref<SameLine>), left(ref<Words>))> {};
   struct Root : rule<assign<&ast::Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // All four operator contracts share the same whitespace and AST. Distinct
@@ -111,7 +106,7 @@ struct Ll : cursiv::GrammarSpec {
                      (lit<"tables:"> + ref<Tables::Root>) |
                      (lit<"composite:"> + ref<Composite::Root>)> {};
   using entry = Root;
-  using ignore = Shift::WS;
+  using ignored = Shift::WS;
 };
 
 }  // namespace topening

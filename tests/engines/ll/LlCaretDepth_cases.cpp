@@ -32,12 +32,12 @@ std::vector<Entry> features_at(const cursiv::Parser& parser,
   parser.nextFeaturesAt(parsed.cst(), at, at, next);
   std::vector<Entry> out;
   for (const cursiv::NextFeature& f : next) {
-    const std::string_view spelled =
-        parser.getGrammar().terminalText(f.feature);
-    out.push_back({std::string(spelled.empty()
-                                   ? parser.getGrammar().terminalName(f.feature)
-                                   : spelled),
-                   std::string(f.property)});
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    out.push_back(
+        {std::string(spellings.size() == 1
+                         ? spellings.front()
+                         : parser.getGrammar().terminalName(f.feature)),
+         std::string(f.property)});
   }
   std::sort(out.begin(), out.end());
   return out;

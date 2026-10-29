@@ -12,7 +12,7 @@ struct G : Base {
                                (kw<"if">.doc<"a conditional">() + lit<"!"> +
                                 assign<&ast::Node::name>(ref<ID>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

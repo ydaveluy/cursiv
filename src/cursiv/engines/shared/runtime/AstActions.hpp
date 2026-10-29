@@ -30,6 +30,12 @@ struct ConvSlot {
   const void* value = nullptr;
 };
 using MakeFn = AstNode* (*)(AstBuildCtx&, NodeId);
+// The value a record holds for the rule above it that passes it on: the
+// record's own conversion, into the type `type` tags.
+struct ValueSlot {
+  bool (*fn)(AstBuildCtx&, NodeId, void*) = nullptr;
+  const void* type = nullptr;
+};
 
 }  // namespace detail
 
@@ -45,8 +51,8 @@ struct AstActions {
   const detail::MakeFn* makes = nullptr;
 
   const AstEntryFn* entries = nullptr;
-  // Per entry: the text of a payload, and the text the same record gives its
-  // parent as a part -- the rule a site converts stands in the second only.
+  // Per entry: a payload's text, and the text the same record gives its parent
+  // as a part, its site's rule applied -- one table where they agree.
   const detail::TextFn* texts = nullptr;
   const detail::TextFn* calls = nullptr;
   // Per entry, non-zero where the record is a data rule's own, empty or not.
@@ -58,12 +64,17 @@ struct AstActions {
   const std::uint64_t* takeBits = nullptr;
 
   bool anyNest = false;
-  bool anyRef = false;
   // Whether a nest turn that reached back over its receiver says so by the
   // low bit of the state on its record, or by its row: then `turns` lists, per
   // entry, the rows that do.
   bool turnsByState = false;
   const std::uint8_t* turns = nullptr;
+  // A text thunk reads its record's children before converting: bit 0 for
+  // `texts`, bit 1 for `calls`. This lets deep conversions run in postorder.
+  const std::uint8_t* textInputs = nullptr;
+  // Per entry, where a data rule passes a value other than text: the value
+  // the record holds, or none where it holds only the record below.
+  const detail::ValueSlot* values = nullptr;
 
   // A leaf that owes nothing names no entry, and denotes its own bytes.
   detail::TextFn text_at(ElementId e) const {
@@ -71,6 +82,13 @@ struct AstActions {
   }
   detail::TextFn call_at(ElementId e) const {
     return calls != nullptr && e < entryCount ? calls[e] : nullptr;
+  }
+  const detail::ValueSlot* value_at(ElementId e) const {
+    return values != nullptr && e < entryCount ? &values[e] : nullptr;
+  }
+  bool text_children(ElementId e, bool call) const {
+    return textInputs != nullptr && e < entryCount &&
+           (textInputs[e] & (call ? 2u : 1u)) != 0;
   }
   bool is_call(ElementId e) const {
     return callRecords != nullptr && e < entryCount && callRecords[e] != 0;

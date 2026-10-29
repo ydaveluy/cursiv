@@ -23,7 +23,7 @@ struct LexNfaSubsets {
   std::vector<std::uint64_t> pool;
   std::vector<std::uint32_t> off, lo, hi;
   std::vector<std::uint64_t> cur;  // the one being built
-  std::vector<int> touched;        // the states set in `cur`
+  std::vector<std::size_t> touched;  // the words of `cur` that became non-zero
   std::size_t tn = 0;      // ...and how many of them, the room being fixed
   std::vector<int> stack;  // the epsilon walk, explicit
   std::size_t curLo = 0, curHi = 0;
@@ -44,7 +44,7 @@ struct LexNfaSubsets {
     // edge that reaches it; what bounds the stack is that it EXPANDS at most
     // once, and an expansion pushes at most two.
     stack.assign(nstates * 2 + 4, 0);
-    touched.assign(nstates + 1, 0);
+    touched.assign(words, 0);
     tn = 0;
     curLo = words;
     curHi = 0;
@@ -57,7 +57,7 @@ struct LexNfaSubsets {
     int* const st = stack.data();
     const LexNfaState* const ns = n.s.data();
     std::uint64_t* const cw = cur.data();
-    int* const tw = touched.data();
+    std::size_t* const tw = touched.data();
     std::size_t sp = 0;
     st[sp++] = s;
     while (sp != 0) {
@@ -65,8 +65,8 @@ struct LexNfaSubsets {
       const std::size_t k = static_cast<std::size_t>(x) >> 6;
       const std::uint64_t b = std::uint64_t{1} << (x & 63);
       if (cw[k] & b) continue;
+      if (cw[k] == 0) tw[tn++] = k;
       cw[k] |= b;
-      tw[tn++] = x;
       curLo = std::min(k, curLo);
       curHi = std::max(k, curHi);
       const LexNfaState& e = ns[static_cast<std::size_t>(x)];
@@ -76,7 +76,7 @@ struct LexNfaSubsets {
     }
   }
 
-  // Interns the row being built and clears it: every bit it holds is in
+  // Interns the row being built and clears it: every word it holds is in
   // `touched`, so zeroing those words empties it whole. Equal content gives
   // the same span, so the span is part of the identity and not a hint.
   unsigned intern() {
@@ -108,9 +108,8 @@ struct LexNfaSubsets {
       for (std::size_t k = curLo; k <= curHi; ++k) pool.push_back(cw[k]);
       ix.add(h, found);
     }
-    const int* const tw = touched.data();
-    for (std::size_t q = 0; q < tn; ++q)
-      cw[static_cast<std::size_t>(tw[q]) >> 6] = 0;
+    const std::size_t* const tw = touched.data();
+    for (std::size_t q = 0; q < tn; ++q) cw[tw[q]] = 0;
     tn = 0;
     curLo = words;
     curHi = 0;

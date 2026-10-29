@@ -17,7 +17,7 @@ struct G : Base {
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::n>(ref<ID>) +
                                       flag<&ast::Doc::last>(eof))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

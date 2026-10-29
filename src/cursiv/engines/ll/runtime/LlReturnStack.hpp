@@ -24,7 +24,6 @@ class LlReturnStack {
     _met = std::min(_met, _frames.size());
   }
 
-  bool empty() const { return _frames.empty(); }
   std::size_t size() const { return _frames.size(); }
   std::uint32_t operator[](std::size_t i) const { return _frames[i].ret; }
   std::uint32_t begin(std::size_t i) const { return _frames[i].begin; }

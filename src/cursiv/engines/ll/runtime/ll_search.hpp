@@ -13,6 +13,7 @@
 #include <memory>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/core/grammar/ElementId.hpp"
@@ -43,6 +44,12 @@ namespace cursiv {
 inline std::uint32_t ll_search_link(LlSearch& s, const LlGesture& g) {
   s.links.push_back(g);
   return static_cast<std::uint32_t>(s.links.size()) - 1;
+}
+
+// What a gesture is to the expected set: the terminal it inserts, if any.
+inline std::uint32_t ll_search_kind(const LlGesture& g) {
+  return g.kind == LlGesture::ins ? std::uint32_t{g.term}
+                                  : std::uint32_t{kNoElement};
 }
 
 inline std::strong_ordering ll_key_cmp(const LlReading& a, const LlReading& b) {
@@ -111,14 +118,14 @@ LlSearch::Future ll_search_future(const LlSearch& s, const LlReading& r) {
   mix(r.ahead.head);
   mix(r.shifts | std::uint64_t{r.phase} << 8 | std::uint64_t{r.fresh} << 16 |
       std::uint64_t{r.done} << 17 | std::uint64_t{r.faults != 0} << 18 |
-      std::uint64_t{r.settled} << 19);
+      std::uint64_t{r.settled} << 19 | std::uint64_t{r.inHand} << 20);
   if constexpr (kIndented<T>) {
-    // The levels by content: two copies of an arena number alike the levels
-    // they made apart.
-    mix(std::uint64_t{r.ahead.indent.held} << 32 | r.ahead.indent.at.depth);
-    for (std::uint32_t at = r.ahead.indent.at.head; at != kNoIndent;
-         at = r.ahead.indent.arena[at].prev) {
-      const IndentLevel& level = r.ahead.indent.arena[at];
+    // The levels by content: readings that made a level apart number it
+    // apart.
+    mix(std::uint64_t{r.ahead.held} << 32 | r.ahead.at.depth);
+    for (std::uint32_t at = r.ahead.at.head; at != kNoIndent;
+         at = s.indent.arena[at].prev) {
+      const IndentLevel& level = s.indent.arena[at];
       mix(std::uint64_t{level.begin} << 32 | level.len);
       mix(std::uint64_t{level.virt} | std::uint64_t{level.mute} << 1);
     }
@@ -127,21 +134,64 @@ LlSearch::Future ll_search_future(const LlSearch& s, const LlReading& r) {
   return f;
 }
 
+// Whether two readings have the same future: what `ll_search_future` folds,
+// compared field by field.
+template <const auto& T>
+bool ll_search_same_future(const LlSearch& s, const LlReading& a,
+                           const LlReading& b) {
+  if (a.ahead.p != b.ahead.p || a.gapFrom != b.gapFrom ||
+      a.tokens != b.tokens || a.ahead.head != b.ahead.head ||
+      a.shifts != b.shifts || a.phase != b.phase || a.fresh != b.fresh ||
+      a.done != b.done || (a.faults != 0) != (b.faults != 0) ||
+      a.settled != b.settled)
+    return false;
+  // The places in order, each run of one place read as one.
+  const auto place = [&](std::uint32_t k) {
+    const LlConfig& x = s.pool[k];
+    return std::uint64_t{x.state} << 32 | x.ctx;
+  };
+  std::uint32_t i = a.cfg, j = b.cfg;
+  const std::uint32_t endA = a.cfg + a.ncfg, endB = b.cfg + b.ncfg;
+  while (i != endA && j != endB) {
+    const std::uint64_t at = place(i);
+    if (place(j) != at) return false;
+    while (i != endA && place(i) == at) ++i;
+    while (j != endB && place(j) == at) ++j;
+  }
+  if (i != endA || j != endB) return false;
+  if constexpr (kIndented<T>)
+    return a.ahead.held == b.ahead.held &&
+           indent_same(s.indent.arena, a.ahead.at, b.ahead.at);
+  return true;
+}
+
 // A reading dies to another of its future at a worse key and no longer an
 // owed run, or at an equal key and run, where the kept one takes the better
-// rank's path: what descends from it follows. Two at an equal key and
-// different runs both stand, as two that neither outdoes do.
+// rank's path: what descends from it follows, and what the dropped path first
+// inserted stays named. Two at an equal key and different runs both stand, as
+// two that neither outdoes do.
 template <const auto& T>
 void ll_search_admit(LlSearch& s, std::uint32_t i) {
   LlReading& r = s.nodes[i];
-  const auto [it, fresh] = s.seen.try_emplace(ll_search_future<T>(s, r), i);
-  if (!fresh) {
+  const LlSearch::Future future = ll_search_future<T>(s, r);
+  auto [it, last] = s.seen.equal_range(future);
+  while (it != last && !ll_search_same_future<T>(s, r, s.nodes[it->second]))
+    ++it;
+  if (it == last) {
+    s.seen.emplace(future, i);
+  } else {
     LlReading& x = s.nodes[it->second];
     const auto k = x.gone ? std::strong_ordering::less : ll_key_cmp(r, x);
     if (k > 0 ? r.owing <= x.owing : k == 0 && r.owing == x.owing) {
-      if (k == 0 && s.rank.before(s.links, r.link, x.link)) {
-        s.links[x.link] = s.links[r.link];
-        ++s.handed;
+      if (k == 0) {
+        const GestureRank::Parting p = s.rank.part(s.links, r.link, x.link);
+        const bool handed = r.link != x.link && GestureRank::before(s.links, p);
+        s.work +=
+            s.tied.tie(s.links, x.link, r.link, p, handed, ll_search_kind);
+        if (handed) {
+          s.links[x.link] = s.links[r.link];
+          ++s.handed;
+        }
       }
       r.gone = true;
       return;
@@ -161,25 +211,16 @@ inline void ll_search_load(LlSearch& s, const LlReading& r) {
 }
 
 // The simulation's set laid in the pool as the reading's own: the positions
-// that can take a token or are in the middle of a rule, the others being
-// routes to those.
+// that can take a token or end their rule, the others being routes to those.
 template <const auto& T>
 void ll_search_keep(LlSearch& s, LlReading& r) {
-  static const std::vector<std::uint8_t> kept = [] {
-    std::vector<std::uint8_t> out(T.atn.nstates, 0);
-    for (std::uint32_t q = 0; q < T.atn.nstates; ++q)
-      out[q] = ll_atoms<T>().reads_text(q) || ll_owed<T>().standing(q) ? 1
-               : T.atn.state(q).kind == LlAtnKind::ruleStop            ? 2
-                                                                       : 0;
-    return out;
-  }();
+  const LlOwed<T>& owed = ll_owed<T>();
   r.cfg = static_cast<std::uint32_t>(s.pool.size());
   if (s.facts.cfg >= r.cfg) s.facts.cfg = kLlNoNode;
   std::uint16_t first = kNoRow;
   r.settled = true;
   for (const LlConfig& x : s.sim.configs())
-    if (const std::uint8_t k = kept[x.state];
-        k == 1 || (k == 2 && x.ctx == kLlCtxNone)) {
+    if (owed.standing(x.state)) {
       s.pool.push_back(x);
       if (first == kNoRow) first = x.alt;
       r.settled = r.settled && first == x.alt;
@@ -290,13 +331,26 @@ TextOffset ll_search_text_end(const LlContext& c, LlSearch& s, TextOffset at,
   return c.len;
 }
 
-// The visible token, trivia crossed; only complete, level-independent reads
-// enter the memo. An artificial end never synthesizes EOF or a dedent.
+// A read ahead of the descent whose levels stand in the search's arena: the
+// descent's own, copied there.
+template <const auto& T>
+LlAhead ll_search_ahead(const LlContext& c, LlSearch& s) {
+  LlAhead a = ll_ahead(c);
+  if constexpr (kIndented<T>) {
+    ll_indent_copy(c, s.indent);
+    a.at = s.indent.at;
+  }
+  return a;
+}
+
+// The visible token, trivia crossed unless `cross` is false; only complete,
+// level-independent reads enter the memo. An artificial end never synthesizes
+// EOF or a dedent.
 template <const auto& T>
 Token ll_search_peek_ahead(
     const LlContext& c, LlSearch& s, LlAhead& ahead,
     std::uint16_t look = kNoRow,
-    const LlMask<T.termWords>* viable = nullptr) {
+    const LlMask<T.termWords>* viable = nullptr, bool cross = true) {
   const auto mode = ll_err_mode<T>(c);
   TextOffset p = ahead.p;
   bool head = ahead.head;
@@ -308,15 +362,15 @@ Token ll_search_peek_ahead(
       TextOffset reached = p;
       Token virtualToken;
       const bool found = ll_indent_read<T>(
-          c.src, end, ahead.indent.arena, ahead.indent.at, p, head,
-          ahead.indent.held, virtualToken, ll_mode_ends<T>(mode), &reached);
+          c.src, end, s.indent.arena, ahead.at, p, head, ahead.held,
+          virtualToken, ll_mode_ends<T>(mode), &reached);
       if (ll_search_walked(c, s, p, end, reached))
         return Token{p, p, kInvalidSymbol};
       if (found) return virtualToken;
     }
     if (p >= c.len) return Token{p, p, kEofSymbol};
-    if (look != kNoRow) {
-      const bool joined = kIndented<T> && ahead.indent.at.depth != 0;
+    if (cross && look != kNoRow) {
+      const bool joined = kIndented<T> && ahead.at.depth != 0;
       const auto blanks = joined ? T.modeJoinedTrivia[look] : T.modeTrivia[look];
       const Scan blank = ll_search_scan<T>(c, s, ll_search_row<T>(s, p),
                                            blanks, p);
@@ -340,10 +394,10 @@ Token ll_search_peek_ahead(
     const Scan sc = ll_search_scan<T>(c, s, ll_search_row<T>(s, p), mode, p);
     if (ll_search_spent(s) || sc.term == kInvalidSymbol || sc.end == p)
       return Token{p, p, kInvalidSymbol};
-    bool blank = look == kNoRow && T.terms[sc.term].trivia;
+    bool blank = cross && look == kNoRow && T.terms[sc.term].trivia;
     if constexpr (kIndented<T>)
-      blank = blank || (look == kNoRow && T.terms[sc.term].joins &&
-                        ahead.indent.at.depth != 0);
+      blank = blank || (cross && look == kNoRow && T.terms[sc.term].joins &&
+                        ahead.at.depth != 0);
     if (!blank) return Token{p, sc.end, sc.term, mode};
     p = sc.end;
     head = false;
@@ -381,21 +435,24 @@ std::uint16_t ll_search_look(const LlConfig* cfg, std::size_t n,
   return mode;
 }
 
+// The token in hand as the positions' own alphabet reads it, as the descent
+// does: the broad one may read a terminal none of them takes over a blank
+// they skip, a line's end over a statement's. The descent's own token in hand
+// is read where it begins: its gap is the point's, which may be a caller's
+// that skips less than the positions do.
 template <const auto& T>
 Token ll_search_peek(const LlContext& c, LlSearch& s, LlReading& r) {
   LlMask<T.termWords> viable;
-  const bool joined = kIndented<T> && r.ahead.indent.at.depth != 0;
-  auto look = ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable, joined);
-  const auto blanks = joined ? T.modeJoinedTrivia : T.modeTrivia;
-  if (look != kNoRow && blanks[look] == blanks[ll_err_mode<T>(c)])
-    look = kNoRow;
-  if constexpr (!kIndented<T>)
-    if (look == kNoRow)
-      if (const auto it = s.lexed.find(r.ahead.p); it != s.lexed.end())
-        return it->second;
-  const Token t = ll_search_peek_ahead<T>(c, s, r.ahead, look, &viable);
-  if constexpr (!kIndented<T>)
-    if (look == kNoRow && !ll_search_spent(s)) s.lexed.emplace(r.ahead.p, t);
+  const bool joined = kIndented<T> && r.ahead.at.depth != 0;
+  const auto look =
+      ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable, joined);
+  const bool memo = !kIndented<T> && look == kNoRow && !r.inHand;
+  if (memo)
+    if (const auto it = s.lexed.find(r.ahead.p); it != s.lexed.end())
+      return it->second;
+  const Token t =
+      ll_search_peek_ahead<T>(c, s, r.ahead, look, &viable, !r.inHand);
+  if (memo && !ll_search_spent(s)) s.lexed.emplace(r.ahead.p, t);
   return t;
 }
 
@@ -468,7 +525,6 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
   f.reading = i;
   f.cfg = r.cfg;
   f.n = r.ncfg;
-  f.words = T.termWords;
   f.viable.clear();
   f.due.clear();
   f.rest.clear();
@@ -500,10 +556,11 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
       const auto m = static_cast<std::size_t>(at - f.modes.begin());
       if (at == f.modes.end() || *at != a.mode) {
         f.modes.insert(at, a.mode);
-        f.bits.insert(f.bits.begin() + static_cast<std::ptrdiff_t>(m * f.words),
-                      f.words, 0);
+        f.bits.insert(
+            f.bits.begin() + static_cast<std::ptrdiff_t>(m * T.termWords),
+            T.termWords, 0);
       }
-      f.bits[m * f.words + (a.label >> 6)] |= bit;
+      f.bits[m * T.termWords + (a.label >> 6)] |= bit;
       f.written.emplace_back(place, a.label);
     }
   }
@@ -571,11 +628,19 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
   if (tok.sym == kInvalidSymbol) return LlRead::refused;
   s.work += 8;
   ll_search_load(s, r);
-  if constexpr (kIndented<T>)
+  // The end of input while a level is open is read as the drive reads it:
+  // the end where the readings take it and no dedent, and the dedent first
+  // where they take one. A line's dedent never stands at the end.
+  if constexpr (kIndented<T>) {
     if (tok.sym == kEofSymbol &&
-        ll_end_dedents<T>(r.ahead.indent.arena, r.ahead.indent.at, false) &&
+        ll_end_dedents<T>(s.indent.arena, r.ahead.at, false) &&
         ll_dedent_over_end<T>(s.sim.configs()))
       tok.sym = kLaid<T, kLaidDedent>;
+    else if (kLaid<T, kLaidDedent> != 0 &&
+             tok.sym == kLaid<T, kLaidDedent> && tok.begin == c.len &&
+             ll_end_stands_over<T>(s.sim.configs()))
+      tok.sym = kEofSymbol;
+  }
   const bool ends = ll_ends<T>(c, tok.sym);
   bool passed = true;
   if constexpr (T.ngapConds != 0) {
@@ -596,7 +661,8 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
       return LlRead::done;
     }
     r.gapFrom = tok.end;
-    ll_ahead_step<T>(r.ahead, tok, false);
+    r.inHand = false;
+    ll_ahead_step<T>(s.indent.arena, r.ahead, tok, false);
     if (!ll_search_laid<T>(tok)) {
       ++r.tokens;
       r.shifts = static_cast<std::uint8_t>(
@@ -643,10 +709,11 @@ inline std::uint32_t ll_search_child(LlSearch& s, std::uint32_t from,
                                        .term = term,
                                        .end = end,
                                        .at = e.gapFrom,
-                                       .begin = begin,
-                                       .cost = e.cost});
+                                       .begin = begin});
   e.faults += e.fresh ? 1u : 0u;
   e.fresh = false;
+  // An insertion or an abandon leaves the token in hand where it stood.
+  e.inHand = e.inHand && (kind == LlGesture::ins || kind == LlGesture::abandon);
   e.shifts = 0;
   e.gone = e.queued = e.gen = e.genAbandon = false;
   ++s.work;
@@ -702,10 +769,13 @@ void ll_search_insert(LlContext& c, LlSearch& s, std::uint32_t bi,
   r.owing = owed;
   r.invented += 1;
   r.phase = 2;
+  // A level the token moves is read again, as the descent reads it.
   if constexpr (kIndented<T>)
-    if (indent_moves<T>(term))
-      indent_shift_invented<T>(r.ahead.indent.arena, r.ahead.indent.at,
+    if (indent_moves<T>(term)) {
+      indent_shift_invented<T>(s.indent.arena, r.ahead.at,
                                Token{b.gapFrom, b.gapFrom, term});
+      r.inHand = false;
+    }
   ll_search_read<T>(c, s, e);
 }
 
@@ -770,7 +840,7 @@ void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
   if (kind == LlGesture::skip) {
     r.phase = 3;
     r.gapFrom = end;
-    ll_ahead_step<T>(r.ahead, read, true);
+    ll_ahead_step<T>(s.indent.arena, r.ahead, read, true);
   } else {
     ll_search_load(s, r);
     if constexpr (T.ngapConds != 0)
@@ -783,7 +853,7 @@ void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
     ++r.tokens;
     ll_search_keep<T>(s, r);
     r.gapFrom = end;
-    ll_ahead_step<T>(r.ahead, read, false);
+    ll_ahead_step<T>(s.indent.arena, r.ahead, read, false);
     r.fresh = true;
     r.phase = 0;
   }
@@ -850,7 +920,10 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
                                          std::uint32_t bi, const Token& tok) {
   const LlFacts& f = ll_search_facts<T>(c, s, bi);
   const std::uint64_t key = (f.key ^ tok.begin) * 1099511628211ull;
-  if (const auto it = s.typos.find(key); it != s.typos.end()) return it->second;
+  for (auto [it, last] = s.typos.equal_range(key); it != last; ++it)
+    if (it->second.begin == tok.begin && it->second.modes == f.modes &&
+        it->second.bits == f.bits)
+      return it->second.typos;
   TypoCandidates found;
   const TextOffset len = ll_search_text_end<T>(
       c, s, tok.begin, ll_search_walk_end(c, s, tok.begin));
@@ -861,7 +934,7 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
   std::uint64_t read = 0;
   bool cut = ll_search_spent(s);
   for (std::size_t m = 0; m < f.modes.size() && !cut; ++m)
-    ll_rescan_within<T>(c, f.modes[m], f.bits.data() + m * f.words,
+    ll_rescan_within<T>(c, f.modes[m], f.bits.data() + m * T.termWords,
                         tok.begin, tok.end, len, horizon, read, found, most,
                         cut);
   s.work += 1 + read / kRepairLexBytes;
@@ -870,7 +943,10 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
     s.cutTypos = found.ranked();
     return s.cutTypos;
   }
-  return s.typos.emplace(key, found.ranked()).first->second;
+  return s.typos
+      .emplace(key, LlSearch::TypoMemo{tok.begin, f.modes, f.bits,
+                                       found.ranked()})
+      ->second.typos;
 }
 
 template <const auto& T>
@@ -989,11 +1065,21 @@ void ll_search_abandons(const LlContext& c, LlSearch& s, std::uint32_t bi,
     std::uint16_t alt;
     bool operator==(const At&) const = default;
   };
+  struct AtHash {
+    std::size_t operator()(const At& a) const {
+      return std::hash<std::uint64_t>{}(std::uint64_t{a.ctx} << 32 ^
+                                        std::uint64_t{a.depth} << 16 ^ a.alt);
+    }
+  };
+  // A deep nest's callers are many: the visited set is not searched linearly.
   std::vector<At> todo;
+  std::unordered_set<At, AtHash> seen;
+  const auto visit = [&](const At& at) {
+    if (seen.insert(at).second) todo.push_back(at);
+  };
   for (std::uint32_t k = 0; k < b.ncfg; ++k) {
     const LlConfig& x = s.pool[b.cfg + k];
-    const At at{x.ctx, 1, x.alt};
-    if (std::ranges::find(todo, at) == todo.end()) todo.push_back(at);
+    visit(At{x.ctx, 1, x.alt});
   }
   for (std::size_t k = 0; k < todo.size() && !ll_search_spent(s); ++k) {
     const At at = todo[k];
@@ -1004,8 +1090,7 @@ void ll_search_abandons(const LlContext& c, LlSearch& s, std::uint32_t bi,
       const std::uint32_t ret = s.sim.contexts().ret(at.ctx, j);
       const std::uint32_t parent = s.sim.contexts().parent(at.ctx, j);
       const std::int64_t start = s.sim.contexts().start(at.ctx, j);
-      const At next{parent, at.depth + 1, at.alt};
-      if (std::ranges::find(todo, next) == todo.end()) todo.push_back(next);
+      visit(At{parent, at.depth + 1, at.alt});
       const std::uint32_t lost = start >= 0
                                     ? b.tokens - static_cast<std::uint32_t>(start)
                                     : std::max(b.tokens, 1u);
@@ -1101,23 +1186,12 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
     r.phase = 3;
     r.owing = false;
     r.gapFrom = end;
-    ll_ahead_step<T>(r.ahead, Token{tok.begin, end, tok.sym}, true);
+    ll_ahead_step<T>(s.indent.arena, r.ahead, Token{tok.begin, end, tok.sym},
+                     true);
     ll_search_lay<T>(c, s, e);
     ll_search_trim(s, pools);
   }
   ll_search_abandons<T>(c, s, bi, choice);
-}
-
-// The terminal the path's first gesture inserts, or 0.
-inline SymbolId ll_search_first_insert(const LlSearch& s, std::uint32_t link) {
-  std::uint32_t first = kNoGestureLink;
-  for (std::uint32_t l = link;
-       l != kNoGestureLink && s.links[l].parent != kNoGestureLink;
-       l = s.links[l].parent)
-    first = l;
-  return first != kNoGestureLink && s.links[first].kind == LlGesture::ins
-             ? s.links[first].term
-             : 0;
 }
 
 inline constexpr TextOffset kLlReachAll = 0xFFFFFFFFu;
@@ -1169,7 +1243,8 @@ bool ll_search_race(LlContext& c, LlSearch& s,
         return false;
     return true;
   };
-  std::unordered_map<LlSearch::Future, std::uint32_t, LlSearch::FutureHash> met;
+  std::unordered_multimap<LlSearch::Future, std::uint32_t, LlSearch::FutureHash>
+      met;
   while (!queue.empty()) {
     c.stop.poll();
     const bool settled = level();
@@ -1181,9 +1256,12 @@ bool ll_search_race(LlContext& c, LlSearch& s,
     const std::uint32_t w = queue.back();
     queue.pop_back();
     const std::uint32_t i = runners[w].node;
-    if (const auto it = met.find(ll_search_future<T>(s, s.nodes[i]));
-        it != met.end() && it->second == w)
-      met.erase(it);
+    for (auto [it, last] = met.equal_range(ll_search_future<T>(s, s.nodes[i]));
+         it != last; ++it)
+      if (it->second == w) {
+        met.erase(it);
+        break;
+      }
     s.nodes[i].shifts = 0;
     const LlRead read = ll_search_step<T>(c, s, i);
     if (read == LlRead::spent) {
@@ -1201,15 +1279,20 @@ bool ll_search_race(LlContext& c, LlSearch& s,
         reach[k] = std::max(reach[k], at);
       continue;
     }
-    const auto [it, fresh] =
-        met.try_emplace(ll_search_future<T>(s, s.nodes[i]), w);
-    if (!fresh) {
+    const LlSearch::Future future = ll_search_future<T>(s, s.nodes[i]);
+    auto [it, last] = met.equal_range(future);
+    while (it != last &&
+           !ll_search_same_future<T>(s, s.nodes[i],
+                                     s.nodes[runners[it->second].node]))
+      ++it;
+    if (it != last) {
       std::vector<std::uint32_t> both;
       std::ranges::set_union(runners[it->second].of, runners[w].of,
                              std::back_inserter(both));
       runners[it->second].of = std::move(both);
       continue;
     }
+    met.emplace(future, w);
     queue.push_back(w);
     std::ranges::push_heap(queue, behind);
   }
@@ -1277,14 +1360,13 @@ std::uint32_t ll_search_elect(LlContext& c, LlSearch& s, bool& raced) {
   for (std::size_t k = 1; k < s.goals.size(); ++k)
     if (before(k, w)) w = k;
   s.also.clear();
+  s.tied.open();
   for (std::size_t k = 0; k < s.goals.size(); ++k) {
     if (reach[of[k]] != reach[of[w]] || ll_key_cmp(goal(k), goal(w)) != 0)
       continue;
-    if (const SymbolId t = ll_search_first_insert(s, goal(k).link);
-        t != 0 &&
-        std::ranges::find(s.also, static_cast<ElementId>(t)) == s.also.end())
-      s.also.push_back(static_cast<ElementId>(t));
+    s.tied.name(s.links, goal(k).link, ll_search_kind, s.also);
   }
+  TiedInserts::order(s.also);
   return s.goals[w];
 }
 
@@ -1293,7 +1375,7 @@ std::uint32_t ll_search_elect(LlContext& c, LlSearch& s, bool& raced) {
 inline void ll_search_reset(LlSearch& s) {
   const auto clear = [](auto&... x) { (x.clear(), ...); };
   clear(s.pool, s.nodes, s.links, s.heap, s.seen, s.goals, s.lexed, s.scans,
-        s.readings, s.ends, s.typos, s.drops, s.plan, s.also);
+        s.readings, s.ends, s.typos, s.drops, s.plan, s.also, s.tied);
   s.facts.cfg = kLlNoNode;
   s.depths.clear();
   s.sourceTokens.clear();
@@ -1424,7 +1506,8 @@ std::uint32_t ll_search_root(LlContext& c, LlSearch& s, const LlRoot& root,
   sim.load(roots);
   LlReading r;
   ll_search_keep<T>(s, r);
-  r.ahead = ll_ahead<T>(c);
+  r.ahead = ll_search_ahead<T>(c, s);
+  r.inHand = true;
   r.gapFrom = c.at;
   r.link = ll_search_link(s, LlGesture{});
   s.nodes.push_back(std::move(r));
@@ -1448,30 +1531,29 @@ void ll_search_bounded(LlContext& c, bool whole) {
 
 // The arm of the choice `decision` the plan's path enters from here: the path
 // laid again over the positions of that choice and the text after it, until one
-// arm stands, the arm still reading where the text refuses or it stops being
-// asked, the lowest if several are. The plan's next gesture is the one at this
-// pause.
+// arm stands -- whatever gestures the plan has left, they cannot name another
+// -- the arm still reading where the text refuses or it stops being asked,
+// the lowest if several are. The plan's next gesture is the one at this pause.
 template <const auto& T>
 std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
                                std::uint16_t decision) {
   LlSimulation& sim = s.sim;
   sim.start(T.decisions[decision].state,
             ll_search_open(c, sim, kLlSearchFrames));
-  LlAhead ahead = ll_ahead<T>(c);
+  LlAhead ahead = ll_search_ahead<T>(c, s);
   TextOffset gap = c.at;
   std::uint16_t arm = kNoRow;
   std::size_t k = s.next;
   std::uint32_t shifts = 0;
   std::uint32_t tokens = 0;
+  bool inHand = true;
   for (bool first = true;; first = false) {
     LlMask<T.termWords> viable;
-    const bool joined = kIndented<T> && ahead.indent.at.depth != 0;
-    auto look = ll_search_look<T>(sim.configs().data(), sim.configs().size(),
-                                   viable, joined);
-    const auto blanks = joined ? T.modeJoinedTrivia : T.modeTrivia;
-    if (look != kNoRow && blanks[look] == blanks[ll_err_mode<T>(c)])
-      look = kNoRow;
-    const Token tok = ll_search_peek_ahead<T>(c, s, ahead, look, &viable);
+    const bool joined = kIndented<T> && ahead.at.depth != 0;
+    const auto look = ll_search_look<T>(
+        sim.configs().data(), sim.configs().size(), viable, joined);
+    const Token tok =
+        ll_search_peek_ahead<T>(c, s, ahead, look, &viable, !inHand);
     if (ll_search_spent(s)) return arm;
     sim.at_token(tokens);
     if constexpr (T.ngapConds != 0)
@@ -1485,9 +1567,11 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
       if (g.kind == LlGesture::ins) {
         if (!sim.step(g.term)) return first ? kNoRow : arm;
         if constexpr (kIndented<T>)
-          if (indent_moves<T>(g.term))
-            indent_shift_invented<T>(ahead.indent.arena, ahead.indent.at,
+          if (indent_moves<T>(g.term)) {
+            indent_shift_invented<T>(s.indent.arena, ahead.at,
                                      Token{gap, gap, g.term});
+            inHand = false;
+          }
       } else if (g.kind == LlGesture::abandon) {
         if (!sim.leave(g.end, g.state)) return arm;
       } else {
@@ -1495,13 +1579,16 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
           sim.at_token(++tokens);
           if (!sim.step(g.term)) return arm;
         }
-        ll_ahead_step<T>(ahead, Token{tok.begin, g.end,
-                                    g.kind == LlGesture::del ? tok.sym : g.term},
+        ll_ahead_step<T>(s.indent.arena, ahead,
+                         Token{tok.begin, g.end,
+                               g.kind == LlGesture::del ? tok.sym : g.term},
                          g.kind != LlGesture::rep);
         gap = g.end;
         shifts = 0;
+        inHand = false;
       }
       arm = sim.lowest();
+      if (sim.settled() != kNoRow) return arm;
       continue;
     }
     if (tok.sym == kInvalidSymbol ||
@@ -1519,9 +1606,11 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
     sim.at_token(tokens);
     if (!sim.step(s.terms.data(), s.terms.size())) return arm;
     arm = sim.lowest();
-    ll_ahead_step<T>(ahead, tok, false);
+    if (sim.settled() != kNoRow) return arm;
+    ll_ahead_step<T>(s.indent.arena, ahead, tok, false);
     gap = tok.end;
     ++shifts;
+    inHand = false;
   }
 }
 

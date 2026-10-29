@@ -19,6 +19,7 @@
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
 namespace condition_contract_cases {
 void run();
@@ -30,6 +31,9 @@ namespace section_predicate_cases {
 void run();
 }
 namespace conformance_section_close_cases {
+void run();
+}
+namespace branch_values_cases {
 void run();
 }
 
@@ -239,6 +243,47 @@ int main() {
     return n.low == "abc" && n.name.empty();
   });
 
+  // A branch, or an optional item, that reads what an earlier one reads is
+  // dropped: each case reads as the rule written without it.
+  const Pair twins{"twins:"};
+  const auto unchanged = [&](std::string_view twin, std::string_view text) {
+    const std::string with =
+        twins.source(std::string(twin) + " " + std::string(text));
+    const std::string without =
+        twins.source(std::string(twin) + ". " + std::string(text));
+    for (unsigned i = 0; i < 2; ++i) {
+      const auto a = twins[i]->parse(with);
+      const auto b = twins[i]->parse(without);
+      const auto* x = exactly<ast::Won>(a);
+      const auto* y = exactly<ast::Won>(b);
+      const bool ok = clean(a) && clean(b) && x != nullptr && y != nullptr &&
+                      x->token == y->token && x->name == y->name;
+      if (!ok)
+        std::printf("%s [%s]: reads unlike the rule without its twin\n",
+                    kEngine[i], with.c_str());
+      CHECK(ok);
+    }
+  };
+  const auto twin = [&](std::string_view text, std::string_view token,
+                        std::string_view name) {
+    tree<ast::Won>(twins, text, [&](const ast::Won& n) {
+      return n.token == token && n.name == name;
+    });
+  };
+  for (const char* id : {"1", "2", "3", "4"}) unchanged(id, "x");
+  unchanged("4", "x;");
+  for (const char* text : {"", "x", "x y"}) unchanged("5", text);
+  twin("2 x", "x", "");
+  twin("3 x", "x", "");
+  twin("4 x", "x", "");
+  twin("5 x", "x", "");
+  twin("5 x y", "x", "y");
+  twin("6 x;", "x", "");
+  twin("6 x", "", "x");
+  // A text both branches read goes to the first; the rest to the second.
+  twin("7 x", "x", "");
+  twin("7 x;", "", "x");
+
   const Pair separated{"separated:"};
   tree<ast::List>(separated, "",
                   [](const ast::List& n) { return n.items.empty(); });
@@ -316,9 +361,25 @@ int main() {
     std::vector<cursiv::NextFeature> next;
     const auto at = static_cast<cursiv::TextOffset>(many.prefix.size() + 3u);
     parser->nextFeaturesAt(parsed.cst(), at, at, next);
-    CHECK(next.size() == 1 &&
-          parser->getGrammar().terminalText(next[0].feature) == "ab");
+    CHECK(next.size() == 1);
+    for (const cursiv::NextFeature& f : next) {
+      const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
+      CHECK(spellings.size() == 1 && spellings.front() == "ab");
+    }
   }
+
+  // The caret reads a path as the parse does: the longer `TEXT` a merged
+  // state flags is refused where the path's stack takes no `TEXT`, behind
+  // the caret and in what is typed there.
+  const Pair merged{"mergedlookahead:"};
+  const std::string path = merged.source(" a.b");
+  for (cursiv::TextOffset at = 17; at <= path.size(); ++at) {
+    const auto ll = caret_offers::offered(*merged[0], path, at);
+    const auto lr = caret_offers::offered(*merged[1], path, at);
+    CHECK(!lr.empty() && ll == lr);
+  }
+  CHECK((caret_offers::offered(*merged[1], path, 19) ==
+         std::vector<std::string>{"ID"}));
 
   const Pair word{"wordhost:"};
   tree<ast::Leaf>(word, "[x]",
@@ -334,9 +395,23 @@ int main() {
            n.statements[0]->type == &cursiv::ast_type_tag<ast::Name>;
   });
 
+  // A token alone stands for the node over it, a node that read nothing
+  // stands where the text before it stops, the trivia a region crosses to its
+  // own end is that region's, a token dropped after a whole construct stands
+  // outside it, and the root holds what a repair dropped before its first
+  // token.
+  const Pair all{""};
+  for (const std::string_view text :
+       {"tie: if", "atendhost: [  a ]", "trailing: \n", "turn: ", "calls: ",
+        "callermany: ", "keywordtrivia: bc   ", "keywordtrivia:shared\n",
+        "%% trailing:", "calls: a) ", "calls: a a }",
+        "conditionedtrivia: a) ", "conditionedtrivia: ) a"})
+    one_tree(all, text);
+
   condition_contract_cases::run();
   template_tail_cases::run();
   section_predicate_cases::run();
   conformance_section_close_cases::run();
+  branch_values_cases::run();
   return cursiv::test::report("Conformance_test");
 }

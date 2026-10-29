@@ -61,31 +61,24 @@ CURSIV_ALWAYS_INLINE inline void lr_push_leaf(LrContext& c,
 
 // Whether `word`'s record still ends the derivation: past it stands only what
 // owes the tree nothing -- trivia, and recovered regions holding no chain.
-template <StampLayout L, class At>
-inline bool lr_last_real_word_at(std::uint32_t words, At at,
-                                 std::uint32_t word) {
-  std::uint32_t w = words;
+template <StampLayout L = StampLayout{}>
+CURSIV_NOINLINE inline bool lr_last_real_word(const LrContext& c,
+                                              std::uint32_t word) {
+  std::uint32_t w = c.tape.len();
   while (w > word + 1) {
-    const CstNode& r = at(w - 1);
+    const CstNode& r = c.tape.at(w - 1);
     if (r.hidden) {
       --w;
       continue;
     }
     if (!r.recovered) return false;
     for (std::uint32_t k = w - r.subtreeSize; k < w; ++k) {
-      const CstNode& s = at(k);
+      const CstNode& s = c.tape.at(k);
       if (!s.hidden && L.row(s) != kNoElement) return false;
     }
     w -= r.subtreeSize;
   }
   return w == word + 1;
-}
-template <StampLayout L = StampLayout{}>
-CURSIV_NOINLINE inline bool lr_last_real_word(const LrContext& c,
-                                              std::uint32_t word) {
-  return lr_last_real_word_at<L>(
-      c.tape.len(),
-      [&](std::uint32_t w) -> const CstNode& { return c.tape.at(w); }, word);
 }
 
 // Where the record is a creation, the directive does not replace it: `folds`

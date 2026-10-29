@@ -26,7 +26,7 @@ struct Choice : cursiv::GrammarSpec {
                                    lit<";">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Entry>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct ChoiceLl : Choice {};
 struct ChoiceLr : Choice {};

@@ -142,7 +142,7 @@ struct Election : cursiv::GrammarSpec {
              ref<tdang::DeepIf::Stmt>> {};
 
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace telect

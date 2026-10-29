@@ -202,12 +202,12 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
              "and the word splits in two tokens -- let the word boundary, or "
              "the refused literal's guard, hold {bytes}";
     case LowerFail::unorderedTooWide:
-      return "holds an unordered group of too many items: `a & b & ...` is "
-             "spelled once for every subset of its items, and once for every "
-             "order of them where an item nests, and those outgrow the 16-bit "
-             "pools of the program -- group fewer items, or read them as a "
-             "repetition of a choice and check each was read once where the "
-             "tree is read";
+      return "holds an unordered group of too many items: `unordered(a, b, "
+             "...)` is spelled once for every subset of its items, and once "
+             "for every order of them where an item nests, and those outgrow "
+             "the 16-bit pools of the program -- group fewer items, or read "
+             "them as a repetition of a choice and check each was read once "
+             "where the tree is read";
     case LowerFail::terminalCycle:
       return "calls itself without consuming input: every recursive cycle "
              "must read at least one byte before the next call";
@@ -231,7 +231,7 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
       return "is trivia that reads the same text as another trivia terminal, "
              "at the same length and rank, and one of the two is hidden: "
              "which of them the tree keeps would turn on the order they are "
-             "declared in -- put both in `ignore`, or make them read "
+             "declared in -- put both in `ignored`, or make them read "
              "different texts";
     case LowerFail::none:
       break;

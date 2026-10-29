@@ -13,7 +13,7 @@ struct G : Base {
                          many(w | uc::L | uc::So)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NAME>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

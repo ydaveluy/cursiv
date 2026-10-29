@@ -127,8 +127,9 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
       auto& rows = changes[lsp::DocumentUri::parse(std::string(source->uri))];
       const auto at =
           std::ranges::find_if(rows, [&rewrite](const lsp::TextEdit& other) {
-            return other.range.start.line == rewrite.range.start.line &&
-                   other.range.start.character == rewrite.range.start.character;
+            return other.range.start.line == rewrite.range.start.line
+                   && other.range.start.character
+                          == rewrite.range.start.character;
           });
       if (at != rows.end())
         at->newText = std::move(rewrite.newText);

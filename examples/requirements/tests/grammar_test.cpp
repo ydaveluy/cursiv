@@ -27,12 +27,12 @@
 #include "cursiv/core/workspace/DocumentBuilder.hpp"
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
+#include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectDiagnosticOptions.hpp"
 #include "cursiv/test/ValidationResult.hpp"
 #include "requirements/core/CoreModule.hpp"
 #include "requirements/core/ast.hpp"
 #include "requirements/core/validation/RequirementsValidator.hpp"
-#include "cursiv/test/Check.hpp"
 
 namespace {
 
@@ -122,7 +122,8 @@ void an_uncovered_requirement_is_the_workspace_speaking() {
   world.add("file:///w/a.req", std::string(kRequirements));
   world.build();
   CHECK(count(world.said("file:///w/a.req"),
-              "Requirement Req1 not covered by a test.") == 1);
+              "Requirement Req1 not covered by a test.")
+        == 1);
 }
 
 // The `.tst` half: a name with no digit, and an environment none of the
@@ -190,7 +191,8 @@ void simultaneous_coverage_checks_scan_the_workspace_once() {
   world.build(options);
   const auto& document = *world.opened.front();
   const auto& requirement = *static_cast<const req::ast::RequirementModel*>(
-                                document.parseResult.value)->requirements[0];
+                                 document.parseResult.value)
+                                 ->requirements[0];
   counted.counting = true;
 
   std::barrier start(4);

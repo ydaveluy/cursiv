@@ -24,6 +24,9 @@ struct LlNode {
   // rep: the kid.
   std::uint16_t sym = 0;
   std::uint16_t count = 0;  // seq,alt: the kid count
+  // rep: the turns, one of `(0, 1)`, `(0, kEndless)` and `(1, kEndless)`; the
+  // lowering spells every other count out as copies of the body. implied:
+  // `min` is the condition the token is laid on.
   std::uint32_t min = 0, max = 0;
   // What a directive standing over this position owes the record that position
   // produced. A directive takes no position of its own -- it says what the
@@ -34,8 +37,8 @@ struct LlNode {
   // the rule it names lays none.
   bool owns = false;
   // The alphabet the lexer reads with here: what this position admits, and
-  // the trivia it crosses. Only a `term` carries one -- a choice's is its
-  // decision's.
+  // the trivia it crosses. A token, an end mark, a condition and a call that
+  // peeks its callee's first token carry one -- a choice's is its decision's.
   std::uint16_t mode = kNoRow;
   // The choice this position is: `alt` picks an arm, `rep` decides each turn.
   // `kNoRow` for everything that decides nothing.

@@ -195,6 +195,25 @@ void run() {
     CHECK(var != nullptr && var->name == "f");
   }
 
+  // The node of a call a repair gave up is absent, and only the repair says
+  // so: the build adds no diagnostic, whether the document or a member was
+  // owed that node. Where the repair gives up the call alone, the holder
+  // stands without it.
+  const Pair givenUp{
+      Reader{g::Ll::create_parser(), g::Ll::create_ast_reflection(), {}},
+      Reader{g::Lr::create_parser(), g::Lr::create_ast_reflection(), {}}};
+  for (const Reader& r : givenUp)
+    for (const char* text : {"mat:givenup:x n a ? ;", "mat:passed:n a ?"}) {
+      const auto result = r.parser->parse(text);
+      CHECK(result.accepted && !result.diagnostics.empty());
+      CHECK(result.value != nullptr ||
+            result.error == cursiv::AstBuildError::no_entry);
+      for (const cursiv::ParseDiagnostic& d : result.diagnostics)
+        CHECK(d.kind != cursiv::DiagnosticKind::conversion_error);
+    }
+  const auto held = givenUp[0].parser->parse("mat:givenup:x n a ? ;");
+  CHECK(tree(givenUp[0], held) == "Holder{}");
+
 
   const Reader ll{g::Ll::create_parser(), g::Ll::create_ast_reflection(), {}};
   const Reader lr{g::Lr::create_parser(), g::Lr::create_ast_reflection(), {}};

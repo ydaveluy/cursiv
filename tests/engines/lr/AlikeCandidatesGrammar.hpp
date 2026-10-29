@@ -39,7 +39,7 @@ struct Reduced : Base {
                                  kw<"enum"> +
                                  many(append<&Doc::items>(ref<Choice>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Shifted : Base {
@@ -49,7 +49,7 @@ struct Shifted : Base {
                            flag<&Item::value>(lit<"=">)))> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Mixed>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace talike

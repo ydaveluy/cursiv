@@ -41,7 +41,7 @@ struct MultiG : cursiv::GrammarSpec {
              some(append<&ast::Query::items>(ref<ItemRule>), lit<",">)> {};
   struct ModelRule : rule<assign<&ast::Model::query>(ref<QueryRule>)> {};
   using entry = ModelRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace fmulti

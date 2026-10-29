@@ -10,7 +10,7 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/KeywordTriviaGrammar.hpp"
+#include "engines/ll/KeywordTriviaAst.hpp"
 #include "keywordtriviabarell/generated/BareLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Table.hpp"
@@ -77,7 +77,7 @@ std::set<std::string> offered(const Parser& p, std::string_view text) {
   p->nextFeaturesAt(r.cst(), at, at, out);
   std::set<std::string> seen;
   for (const auto& f : out)
-    if (const auto t = p->getGrammar().terminalText(f.feature); !t.empty())
+    for (const auto t : p->getGrammar().terminalSpellings(f.feature))
       seen.insert(std::string(t));
   return seen;
 }

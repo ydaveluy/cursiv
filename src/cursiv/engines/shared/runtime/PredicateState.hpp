@@ -60,7 +60,27 @@ class PredicateStates {
     ++_size;
   }
   void unite(const PredicateStates& other) {
-    for (std::size_t i = 0; i < other.size(); ++i) add(other[i]);
+    if (this == &other || other.empty()) return;
+    if (empty()) {
+      *this = other;
+      return;
+    }
+    add(other._one);
+    if (other._more.empty()) return;
+    // Both tails are sorted. Inserting one interleaved endpoint at a time
+    // shifts a growing tail quadratically; merge them in a single pass, from
+    // where the other's first cursor falls: the cursors before it stay in
+    // place, so a set that grows at its end is never copied whole.
+    const auto from =
+        std::lower_bound(_more.begin(), _more.end(), other._more.front()) -
+        _more.begin();
+    const auto mid = static_cast<std::ptrdiff_t>(_more.size());
+    _more.insert(_more.end(), other._more.begin(), other._more.end());
+    std::inplace_merge(_more.begin() + from, _more.begin() + mid, _more.end());
+    _more.erase(std::unique(_more.begin() + from, _more.end()), _more.end());
+    const auto own = std::lower_bound(_more.begin() + from, _more.end(), _one);
+    if (own != _more.end() && *own == _one) _more.erase(own);
+    _size = _more.size() + 1u;
   }
   PredicateStates without(const PredicateStates& other) const {
     PredicateStates out;

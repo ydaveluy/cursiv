@@ -54,7 +54,8 @@ bool offers(const cursiv::Parser& p, std::string text, unsigned replaced,
   std::vector<cursiv::NextFeature> out;
   p.nextFeaturesAt(r.cst(), at, at + replaced, out);
   for (const auto& f : out)
-    if (p.getGrammar().terminalText(f.feature) == literal) return true;
+    for (const std::string_view s : p.getGrammar().terminalSpellings(f.feature))
+      if (s == literal) return true;
   return false;
 }
 
@@ -191,8 +192,9 @@ bool offers(const cursiv::Parser& parser, std::string_view body,
   std::vector<cursiv::NextFeature> features;
   parser.nextFeaturesAt(r.cst(), at, at + 1, features);
   for (const auto& feature : features)
-    if (parser.getGrammar().terminalText(feature.feature) == literal)
-      return true;
+    for (const std::string_view s :
+         parser.getGrammar().terminalSpellings(feature.feature))
+      if (s == literal) return true;
   return false;
 }
 

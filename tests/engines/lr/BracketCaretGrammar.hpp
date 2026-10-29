@@ -34,7 +34,7 @@ struct G : cursiv::GrammarSpec {
                          lit<"}">)) +
                  ref<NEWLINE>))> {};
   using entry = Root;
-  using ignore = list<WS, NL>;
+  using ignored = list<WS, NL>;
   static constexpr auto indent_open = lit<"("> | lit<"["> | lit<"{">;
   static constexpr auto indent_close = lit<")"> | lit<"]"> | lit<"}">;
   using indent_newline = NEWLINE;

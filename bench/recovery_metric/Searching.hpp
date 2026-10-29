@@ -11,7 +11,7 @@
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
-namespace recovery_metric {
+namespace cursiv::recovery_metric {
 
 template <const auto& Table, const auto& Drive,
           const cursiv::GrammarMetaData& Grammar,
@@ -52,4 +52,4 @@ Ceilings ceilings(std::string_view text, const cursiv::RepairBudget& budget) {
   return counts;
 }
 
-}  // namespace recovery_metric
+}  // namespace cursiv::recovery_metric

@@ -19,7 +19,7 @@ struct G : Base {
   struct Root : rule<ref<Name> + many(nest<ast::Call, &ast::Call::callee>(
                                      lit<"("> + ref<Name> + lit<")">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

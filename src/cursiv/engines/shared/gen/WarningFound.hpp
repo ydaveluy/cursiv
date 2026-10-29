@@ -4,7 +4,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,35 +26,62 @@ class WarningFound {
   // Terminals, operator tables and the rules of another grammar are not
   // walked; each rule comes once, in the order reached.
   const std::vector<std::uint32_t>& rules() const { return _rules; }
+  // ...and the operator tables, for a walk of their operators.
+  const std::vector<std::uint32_t>& tables() const { return _tables; }
   // The body of a rule, as the pipeline resolved it.
   ImageId body(std::uint32_t rule);
 
   std::string name(std::uint32_t rule) { return _printer.name_for(rule); }
   std::string spell(ImageId node) { return _printer.spell(node); }
 
+  // Each node under `roots` once, in the order a walk of the tree reaches it
+  // first: a node several paths share is read on the first. `enter(node)`
+  // answers whether to walk the node's parts.
+  template <class Enter>
+  void each_node(std::span<const ImageId> roots, Enter enter) {
+    ++_walk;
+    _todo.assign(roots.rbegin(), roots.rend());
+    while (!_todo.empty()) {
+      const ImageId id = _todo.back();
+      _todo.pop_back();
+      if (id >= _seen.size())
+        _seen.resize(std::max<std::size_t>(id + 1u, _image.nodes.size()));
+      if (_seen[id] == _walk) continue;
+      _seen[id] = _walk;
+      if (!enter(id)) continue;
+      const std::span<const ImageId> kids = _image.shape_kids(id);
+      _todo.insert(_todo.end(), kids.rbegin(), kids.rend());
+    }
+  }
+
  private:
   GrammarImage& _image;
   GrammarPrinter _printer;
   WrittenReads _reads;
   std::vector<std::uint32_t> _rules;
+  std::vector<std::uint32_t> _tables;
+  // The walk in hand, and the last walk that read each node.
+  std::uint32_t _walk = 0;
+  std::vector<std::uint32_t> _seen;
+  std::vector<ImageId> _todo;
 };
 
 // `W{rule, spelling}` for each node `hit(found, node)` names under the rules
 // walked, once each.
 template <class W, class Hit>
-std::vector<W> walk_warnings(GrammarImage& image, Hit hit) {
-  WarningFound found(image);
+std::vector<W> walk_warnings(WarningFound& found, Hit hit) {
   std::vector<W> out;
-  const auto walk = [&](auto& self, const std::string& rule,
-                        ImageId id) -> void {
-    if (hit(found, id)) {
-      W w{rule, found.spell(id)};
-      if (std::ranges::find(out, w) == out.end()) out.push_back(std::move(w));
-    }
-    for (const ImageId kid : image.shape_kids(id)) self(self, rule, kid);
-  };
-  for (const std::uint32_t rule : found.rules())
-    walk(walk, found.name(rule), found.body(rule));
+  for (const std::uint32_t rule : found.rules()) {
+    const std::string name = found.name(rule);
+    const ImageId body = found.body(rule);
+    found.each_node({&body, 1}, [&](ImageId id) {
+      if (hit(found, id)) {
+        W w{name, found.spell(id)};
+        if (std::ranges::find(out, w) == out.end()) out.push_back(std::move(w));
+      }
+      return true;
+    });
+  }
   return out;
 }
 

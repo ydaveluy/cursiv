@@ -22,7 +22,7 @@ struct G : Base {
       : rule<create<ast::Holder>(assign<&ast::Holder::first>(ref<ItemRule>) +
                                  lit<"|"> + ref<ItemRule> + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

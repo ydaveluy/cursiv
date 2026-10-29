@@ -20,7 +20,7 @@
 #include "cursiv/engines/shared/gen/InfixOp.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/OperatorWords.hpp"
-#include "cursiv/engines/shared/gen/StrongComponents.hpp"
+#include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 
 namespace cursiv {
@@ -174,8 +174,9 @@ inline void lr_no_rule_without_production(LrLowered& o) {
   }
 }
 
-// Two alternatives spelling the same symbols: identical ones are one, and
-// ones that write different things are a reduce nobody can arbitrate.
+// Two productions of one rule spelling the same symbols, as the subsets of
+// optional positions or the orders of an unordered group may: the parse takes
+// the one its source ranks first, so the other goes.
 inline void lr_drop_twins(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> gone(c.nprods, false);
@@ -209,10 +210,6 @@ inline void lr_drop_twins(LrLowered& o) {
           writes = writes || c.row_at(x, i) != c.row_at(y, i);
         if (writes && bx.permuted && by.permuted) {
           gone[b] = true;
-          continue;
-        }
-        if (writes) {
-          o.fault.raise(GrammarFaultCode::twinProductions, bx.owner);
           continue;
         }
         // Source priority decides which duplicate stays.
@@ -455,30 +452,57 @@ inline void lr_bind_step(LrLowered& o, std::uint16_t term, std::uint8_t prec,
   t.assoc = group;
 }
 
+// The walk over the rules an operator spells: the rules on its path, how many
+// of each component of the call graph stand there, and what a rule spells.
+// Entered where no rule of its component stands on the path, a rule reaches
+// none of the rules there, so it spells the same wherever the walk meets it
+// and is read once.
+struct LrWordsWalk {
+  explicit LrWordsWalk(const LrBuildCfg& c)
+      : walking(c.nnts, false), onPath(c.nnts, 0), known(c.nnts) {
+    std::vector<std::vector<std::uint16_t>> calls(c.nnts);
+    for (std::uint16_t k = 0; k < c.nprods; ++k)
+      for (unsigned i = 0; i < c.prods[k].len; ++i)
+        if (const std::uint16_t s = c.sym_at(c.prods[k], i); !is_term(s))
+          calls[c.prods[k].lhs].push_back(nt_index(s));
+    scc = StrongComponents<>::of(calls);
+  }
+
+  StrongComponents<> scc;
+  std::vector<bool> walking;
+  std::vector<std::uint16_t> onPath;
+  std::vector<std::optional<OperatorWords>> known;
+};
+
 // The strings of tokens a symbol can spell, read off its productions.
 inline OperatorWords lr_operator_words(const LrBuildCfg& c,
                                        const LrFirstSets& fl,
                                        const LrBuckets<std::uint16_t>& ix,
-                                       std::uint16_t sym,
-                                       std::vector<std::uint16_t>& walking) {
+                                       std::uint16_t sym, LrWordsWalk& walk) {
   if (is_term(sym)) return OperatorWords::token(sym);
   const std::uint16_t nt = nt_index(sym);
-  if (std::ranges::count(walking, nt) != 0) {
+  if (walk.walking[nt]) {
     std::vector<std::uint16_t> opening;
     for (std::uint16_t t = 0; t < c.nterms; ++t)
       if (fl.first[nt].test(t)) opening.push_back(t);
     return OperatorWords::unlisted(opening);
   }
-  walking.push_back(nt);
+  const std::uint32_t part = walk.scc.component[nt];
+  const bool settled = walk.onPath[part] == 0;
+  if (settled && walk.known[nt]) return *walk.known[nt];
+  walk.walking[nt] = true;
+  ++walk.onPath[part];
   OperatorWords out = OperatorWords::none();
   for (const std::uint16_t k : ix.of(nt)) {
     OperatorWords spelt = OperatorWords::nothing();
     for (unsigned i = 0; i < c.prods[k].len; ++i)
       spelt = spelt.then(
-          lr_operator_words(c, fl, ix, c.sym_at(c.prods[k], i), walking));
+          lr_operator_words(c, fl, ix, c.sym_at(c.prods[k], i), walk));
     out.unite(spelt);
   }
-  walking.pop_back();
+  walk.walking[nt] = false;
+  --walk.onPath[part];
+  if (settled) walk.known[nt] = out;
   return out;
 }
 
@@ -527,10 +551,12 @@ inline std::uint16_t lr_clone_opening(
   return to;
 }
 
-// Two operators on different steps open on one token only where the text
-// after it tells them apart. Each then reads a token of its own, spelled as
-// the other is: the lexer offers both where the state takes either, and the
-// reading the next token refutes dies within the operator's length.
+// Two operators of one table on different steps open on one token only where
+// the text after it tells them apart. Each then reads a token of its own,
+// spelled as the other is: the lexer offers both where the state takes either,
+// and the reading the next token refutes dies within the operator's length.
+// Two tables never clash: a text on a different step in each also reads a
+// token of its own per step.
 inline void lr_settle_infix_ops(LrLowered& o) {
   if (o.infixOps.empty()) return;
   LrBuildCfg& c = o.cfg;
@@ -547,13 +573,14 @@ inline void lr_settle_infix_ops(LrLowered& o) {
   };
   const std::size_t n = o.infixOps.size();
   std::vector<OperatorWords> words;
-  std::vector<std::uint16_t> walking;
+  LrWordsWalk walk(c);
   for (std::size_t i = 0; i < n; ++i) {
     const InfixOp& op = o.infixOps[i];
-    words.push_back(lr_operator_words(c, fl, ix, spells(op), walking));
+    words.push_back(lr_operator_words(c, fl, ix, spells(op), walk));
     for (std::size_t j = 0; j < i; ++j) {
       const InfixOp& was = o.infixOps[j];
-      if ((was.prec != op.prec || was.group != op.group) &&
+      if (was.owner == op.owner &&
+          (was.prec != op.prec || was.group != op.group) &&
           words[j].meets(words[i])) {
         o.fault.raise(GrammarFaultCode::precedenceClash, op.owner);
         return;
@@ -569,8 +596,9 @@ inline void lr_settle_infix_ops(LrLowered& o) {
       const std::uint16_t sym = spells(op);
       if (is_term(sym) == byRule) continue;
       const DynSet at = opens(sym);
-      for (std::uint16_t t = 0; t < kept.size(); ++t)
-        if (at.test(t) && !kept[t]) kept[t] = Step{op.prec, op.group};
+      for (std::size_t t = 0; t < kept.size(); ++t)
+        if (at.test(static_cast<std::uint16_t>(t)) && !kept[t])
+          kept[t] = Step{op.prec, op.group};
     }
   std::map<std::pair<std::uint16_t, Step>, std::uint16_t> given;
   bool rewrote = false;
@@ -579,7 +607,8 @@ inline void lr_settle_infix_ops(LrLowered& o) {
     const Step step{op.prec, op.group};
     const DynSet at = opens(sym);
     std::map<std::uint16_t, std::uint16_t> swap;
-    for (std::uint16_t t = 0; t < kept.size(); ++t) {
+    for (std::size_t i = 0; i < kept.size(); ++i) {
+      const auto t = static_cast<std::uint16_t>(i);
       if (!at.test(t) || *kept[t] == step) continue;
       const auto [own, fresh] = given.try_emplace(std::make_pair(t, step), t);
       if (fresh) own->second = lr_clone_term(c, t);

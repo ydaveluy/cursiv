@@ -33,7 +33,7 @@ struct Base : cursiv::GrammarSpec {
                                  assign<&Doc::keyed>(ref<KeyedRule>)) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The same behind a token both arms share.

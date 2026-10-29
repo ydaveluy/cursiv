@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "cursiv/core/grammar/ElementId.hpp"
@@ -51,9 +52,10 @@ struct LrParser {
   // after one terminal's guard is otherwise handed another's.
   static_assert(
       [] {
-        for (std::uint16_t s = 0; s < A.dfaAccept.size(); ++s)
+        for (std::size_t s = 0; s < A.dfaAccept.size(); ++s)
           if (A.dfaAccept[s] != 0 &&
-              A.dfa_acc_bound(s, A.dfaAccept[s] - 1u) != A.dfaBound[s])
+              A.dfa_acc_bound(static_cast<std::uint16_t>(s),
+                              A.dfaAccept[s] - 1u) != A.dfaBound[s])
             return false;
         return true;
       }(),
@@ -73,6 +75,8 @@ struct LrParser {
         text.data(), static_cast<TextOffset>(text.size()));
     CstBuilder builder(cst);
     builder.reserve_stream(text.size());
+    // The drive polls nothing: the stream reads the stop as it fills.
+    CstRun::Watch watch(builder.stream(), cancelToken);
     LrContext c(text, builder);
     c.stop = CancellationPoll(cancelToken);
     if constexpr (kLrAnyRecorded<A>) c.pending.reserve(8);
@@ -80,7 +84,7 @@ struct LrParser {
     ScanRoom<(A.maxCands != 0 ? A.maxCands : 1)> room;
     c.cand = room.data();
     c.drive = drive;
-    LrSearch search(c.len, budget);
+    LrSearch search(c.len, budget, c.indentArena);
     c.search = &search;
     install_hooks(c);
     c.stack.push(LrFrame{0, kNoElement, 0, 0, kLrNoWord});
@@ -147,18 +151,29 @@ struct LrParser {
     return kNoNode;
   }
 
+  // Only the `resolveAt` and `candAt` hooks that `install_hooks` sets can
+  // split a parse, so a table without either never needs the graph.
+  static constexpr bool kSplits = A.nconflicts != 0 || A.multiCand;
+  // The same condition lays the goto classes that those hooks read.
+  static_assert(A.cold.gotoClass.size() == (kSplits ? A.nstates : 0u),
+                "cursiv: this table's goto classes do not follow its splits");
+  struct NoGraph {};
+
   // The drive reads until it accepts, fails, freezes on a token -- which a
   // search repairs -- or stops on what the look-ahead left open, which the
   // graph reads; both go back to the drive.
   static LrExit run(LrContext& c) {
     // One graph for the whole parse: its buffers outlive each read.
-    LrGssGraph graph;
+    [[maybe_unused]] std::conditional_t<kSplits, LrGssGraph, NoGraph> graph;
     LrExit e = c.drive->enter(c);
     for (;;) {
-      if (c.split != LrSplit::none) {
-        e = LrGss<A>::read(c, graph);
-        continue;
+      if constexpr (kSplits) {
+        if (c.split != LrSplit::none) {
+          e = LrGss<A>::read(c, graph);
+          continue;
+        }
       }
+      assert(c.split == LrSplit::none);
       if (e != LrExit::pause) return e;
       e = lr_search_pause<A>(c);
     }

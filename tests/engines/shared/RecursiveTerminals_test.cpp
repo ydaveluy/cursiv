@@ -221,7 +221,6 @@ bool native(const Table& table, std::string_view name) {
 }
 template <class Cfg>
 bool normalized(Cfg cfg) {
-  cursiv::normalize_lex_calls(cfg);
   cursiv::validate_lex_recursion(cfg);
   bool optimized = true;
   for (auto name :
@@ -389,7 +388,7 @@ class Oracle {
           out.insert(pos + 1);
         break;
       case LexKind::call:
-        out = read(e.a, pos);
+        out = read(cursiv::lex_callee(_g, e), pos);
         break;
       case LexKind::seq:
         out.insert(pos);
@@ -471,7 +470,7 @@ Graph grammar(Prefix shape, Form form) {
       prefix = {g.repeat(a, 0, 1), b};
       break;
   }
-  const auto call = g.node({LexKind::call, 0, 1});
+  const auto call = g.node({LexKind::call, kNoLexNode, 1});
   std::uint16_t root;
   if (form == Form::optional) {
     prefix.push_back(g.repeat(call, 0, 1));
@@ -488,7 +487,6 @@ Graph grammar(Prefix shape, Form form) {
                                  ? std::vector<std::uint16_t>{base, recursive}
                                  : std::vector<std::uint16_t>{recursive, base});
   }
-  g.lex[call].a = root;
   g.termBuild[1].lex = root;
   return g;
 }
@@ -510,7 +508,6 @@ void endpoint_differential() {
       CHECK(before.lexKid == after.lexKid);
       const auto once = after.lex;
       const auto count = after.nlex;
-      cursiv::normalize_lex_calls(after);
       cursiv::detail::LexRightLinear<Graph>{after}.run();
       CHECK(after.nlex == count && after.lex == once);
       for (unsigned n = 0; n <= 8; ++n)
@@ -522,7 +519,7 @@ void endpoint_differential() {
                 Oracle(after, text).read(root, 0));
         }
 
-      const auto call = before.node({LexKind::call, root, 1});
+      const auto call = before.node({LexKind::call, kNoLexNode, 1});
       const auto caller =
           before.list(LexKind::seq, {call, before.character('a')});
       auto called = before;

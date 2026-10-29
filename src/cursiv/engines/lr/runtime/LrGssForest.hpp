@@ -43,16 +43,8 @@ class LrGssForest {
     _visits.clear();
   }
 
-  // The node a symbol's edge reads between two offsets; `none` where it
-  // stands for no symbol.
-  Id node(std::uint32_t symbol = none, std::uint32_t begin = 0,
-          std::uint32_t end = 0) {
-    Node n{};
-    n.symbol = symbol;
-    n.begin = begin;
-    n.end = end;
-    return static_cast<Id>(_nodes.push_back(n));
-  }
+  // A fresh node, with no alternative yet.
+  Id node() { return static_cast<Id>(_nodes.push_back(Node{})); }
 
   // The producer emits each path once; election also tolerates duplicates.
   // Words follow every child unless `at` places each before one.
@@ -170,24 +162,12 @@ class LrGssForest {
     }
   }
 
-  // A node's alternatives as they were added, `none` past the last.
-  [[nodiscard]] Id first(Id node) const { return _nodes[node].first; }
-  [[nodiscard]] Id next(Id alternative) const {
-    return _alternatives[alternative].next;
-  }
   [[nodiscard]] Id step(Id alternative) const {
     return _alternatives[alternative].step;
-  }
-  [[nodiscard]] Kind kind(Id alternative) const {
-    return _alternatives[alternative].kind;
   }
   [[nodiscard]] std::span<const Id> children(Id alternative) const {
     const Range r = _alternatives[alternative].children;
     return _children.span(r.at, r.size);
-  }
-  [[nodiscard]] std::span<const std::uint32_t> choices(Id alternative) const {
-    const Range r = _alternatives[alternative].choices;
-    return _choices.span(r.at, r.size);
   }
   [[nodiscard]] std::span<const std::uint16_t> choice_at(Id alternative) const {
     const Range r = _alternatives[alternative].choices;
@@ -288,9 +268,6 @@ class LrGssForest {
     // where that token has none; whether it reads one.
     std::uint32_t lead = 0;
     std::uint32_t flatAt = 0;
-    std::uint32_t symbol = none;
-    std::uint32_t begin = 0;
-    std::uint32_t end = 0;
     Mark mark = kFresh;
     bool text = false;
     std::uint8_t flatLen = 0;
@@ -423,13 +400,15 @@ class LrGssForest {
 
   // Flat ranks are dropped for ropes, which a rank takes when next asked for.
   // A parent that already has a rope must revisit its children too: opening
-  // its derivation still reads their ranks, including in the spine index.
+  // its derivation still reads their ranks, including in the spine index. No
+  // node reads `_flats` past this point, so its words are freed.
   void flatten_no_more() {
     for (std::size_t i = 0; i != _nodes.size(); ++i) {
       Node& n = _nodes[i];
       n.flatLen = 0;
       if (n.mark == kRanked) n.mark = kElected;
     }
+    _flats.clear();
     _small = false;
   }
 

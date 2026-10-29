@@ -9,7 +9,9 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "cursiv/core/grammar/Conversion.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
@@ -33,7 +35,7 @@ template <class T>
 AstNode* make_node(AstBuildCtx& ctx, NodeId id) {
   AstNode* const base = ctx.arena->template make<T>();
   base->cstNodeId = id;
-  ctx.nodes->push_back(base);
+  ctx.list(base);
   return base;
 }
 
@@ -46,16 +48,32 @@ bool texting(const AstBuildCtx& ctx) {
   return Text || ctx.repaired;
 }
 
+// A token a repair dropped: a recovered leaf with neither a row nor a state
+// that read it. It holds no value and invents nothing, even with no width, as
+// a dropped indent or dedent has. An invented keyword has no row either, but
+// it has its state.
+inline bool dropped_token(const AstBuildCtx& ctx, const CstNode& n) {
+  return n.recovered && n.subtreeSize == 1 && ctx.stamp.row(n) == kNoElement &&
+         ctx.stamp.state(n) == 0;
+}
+
 // A leaf that gives its parent a part: read text, or a word a repair read as
 // the one it misspells -- a skip carries no state and an insertion no width.
-// A token laid with no width gives none; a call that read nothing gives one.
+// A token laid with no width gives none; a call that read nothing gives one,
+// told by its record or, where no converter takes parts, by the text it
+// converts to.
 inline bool part_leaf(const AstBuildCtx& ctx, const CstNode& n) {
   if (n.hidden) return false;
   if (n.recovered) return n.begin != n.end && ctx.stamp.state(n) != 0;
-  return n.begin != n.end || ctx.actions->is_call(ctx.stamp.row(n));
+  if (n.begin != n.end) return true;
+  const ElementId row = ctx.stamp.row(n);
+  return ctx.actions->is_call(row) || ctx.actions->call_at(row) != nullptr;
 }
 
 // The parts in one text. Adjacent in the source, they are a view of it.
+// Parts that are present but empty join to an empty text: the null view marks
+// a member never written, so only a run with no part pointing anywhere gives
+// it.
 inline std::string_view join_parts(AstBuildCtx& ctx, const PartRun& run) {
   std::size_t total = 0;
   const char* first = nullptr;
@@ -70,7 +88,11 @@ inline std::string_view join_parts(AstBuildCtx& ctx, const PartRun& run) {
       verbatim = false;
     end = part.data() + part.size();
   }
-  if (total == 0) return std::string_view{};
+  if (total == 0) {
+    for (const std::string_view part : run)
+      if (part.data() != nullptr) return part;
+    return std::string_view{};
+  }
   if (verbatim) return std::string_view(first, total);
   char* const buf = static_cast<char*>(ctx.mem->allocate(total, alignof(char)));
   char* out = buf;
@@ -79,56 +101,177 @@ inline std::string_view join_parts(AstBuildCtx& ctx, const PartRun& run) {
   return std::string_view(buf, total);
 }
 
-template <bool Text>
-bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out);
+// Whether a converter is handed what it converts, its parts or its text; one
+// that is not reads nothing.
+template <class Cv>
+inline constexpr bool converts_input =
+    ConvertsPartsMem<Cv> || ConvertsParts<Cv> || ConvertsTextMem<Cv> ||
+    ConvertsText<Cv>;
 
-// What a record gives its parent as a part. A call is one: its text through
-// the conversions of the rules it stands for when one converts text, else its
-// own parts joined; a repair's span is not a call, its leaves count as they
-// stand.
-template <bool Text>
-CURSIV_NOINLINE bool child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
+struct TextValues {
+  // A converter that failed is never recorded: the evaluation stops there.
+  struct Value {
+    TextFn fn;
+    std::string_view text;
+  };
+  std::unordered_map<NodeId, Value> calls;
+};
+
+inline void text_children(const Cst& cst, NodeId id,
+                          std::vector<NodeId>& pending) {
+  for (const NodeId child : cst.reverse_children(id)) pending.push_back(child);
+}
+
+// Text thunks only depend on the calls below their record. Discover that
+// frontier without running converters, then evaluate it in source order.
+inline void text_dependencies(AstBuildCtx& ctx, NodeId id,
+                              std::vector<NodeId>& dependencies) {
   const Cst& cst = *ctx.cst;
-  const CstNode& n = cst[id];
-  if (n.hidden) return true;
-  const ElementId row = ctx.stamp.row(n);
-  const bool leaf = n.subtreeSize == 1;
-  if (leaf) {
-    if (!part_leaf(ctx, n)) return true;
-  } else if (n.recovered && !ctx.actions->is_call(row)) {
-    return each_child_part<Text>(ctx, id, out);
-  }
-  if (texting<Text>(ctx))
-    if (const TextFn fn = ctx.actions->call_at(row)) {
-      const auto part = fn(ctx, id);
-      if (!part) return false;
-      out.push_back(*part);
-      return true;
+  std::vector<NodeId> pending;
+  text_children(cst, id, pending);
+  while (!pending.empty()) {
+    const auto child = pending.back();
+    pending.pop_back();
+    const CstNode& n = cst[child];
+    if (n.hidden) continue;
+    const bool leaf = n.subtreeSize == 1;
+    if (leaf && !part_leaf(ctx, n)) continue;
+    const auto row = ctx.stamp.row(n);
+    if (!(n.recovered && !leaf && !ctx.actions->is_call(row)) &&
+        ctx.actions->call_at(row) != nullptr) {
+      dependencies.push_back(child);
+    } else if (!leaf) {
+      text_children(cst, child, pending);
     }
-  if (leaf) {
-    out.push_back(cst.text(id));
-    return true;
   }
-  PartRun inner;
-  if (!each_child_part<Text>(ctx, id, inner)) return false;
-  out.push_back(join_parts(ctx, inner));
+}
+
+// One query's conversions, in postorder on the heap. A converter that reads
+// nothing has no dependencies; failures stop before later siblings run.
+inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
+                                                     NodeId id, TextFn fn,
+                                                     bool children) {
+  if (ctx.textValues != nullptr) {
+    const auto found = ctx.textValues->calls.find(id);
+    if (found != ctx.textValues->calls.end() && found->second.fn == fn)
+      return found->second.text;
+  }
+  if (!children) return fn(ctx, id);
+  TextValues values;
+  struct Scope {
+    AstBuildCtx& ctx;
+    TextValues* previous;
+    ~Scope() { ctx.textValues = previous; }
+  } scope{ctx, std::exchange(ctx.textValues, &values)};
+  struct Frame {
+    NodeId id;
+    TextFn fn;
+    std::size_t begin, next, end;
+  };
+  std::vector<Frame> frames;
+  std::vector<NodeId> dependencies;
+  const auto enter = [&](NodeId node, TextFn call, bool reads) {
+    const auto begin = dependencies.size();
+    if (reads) text_dependencies(ctx, node, dependencies);
+    frames.push_back({node, call, begin, begin, dependencies.size()});
+  };
+  enter(id, fn, true);
+  while (!frames.empty()) {
+    Frame& current = frames.back();
+    if (current.next != current.end) {
+      const auto child = dependencies[current.next++];
+      const auto row = ctx.stamp.row((*ctx.cst)[child]);
+      const auto call = ctx.actions->call_at(row);
+      if (const auto found = values.calls.find(child);
+          found == values.calls.end() || found->second.fn != call)
+        enter(child, call, ctx.actions->text_children(row, true));
+      continue;
+    }
+    const Frame done = current;
+    const auto value = done.fn(ctx, done.id);
+    if (!value) return std::nullopt;
+    values.calls.emplace(done.id, TextValues::Value{done.fn, *value});
+    frames.pop_back();
+    dependencies.resize(done.begin);
+    if (frames.empty()) return value;
+  }
+  return std::nullopt;
+}
+
+// Raw data-rule groups need no intermediate strings when their text is being
+// joined. Converted calls remain atomic and keep their own conversion order.
+// The parts are those below `id`, not `id` itself.
+template <bool Text>
+bool flat_text_parts(AstBuildCtx& ctx, NodeId id, PartRun& out) {
+  const Cst& cst = *ctx.cst;
+  std::vector<NodeId> pending;
+  text_children(cst, id, pending);
+  while (!pending.empty()) {
+    const auto child = pending.back();
+    pending.pop_back();
+    const CstNode& n = cst[child];
+    if (n.hidden) continue;
+    const bool leaf = n.subtreeSize == 1;
+    if (leaf && !part_leaf(ctx, n)) continue;
+    const auto row = ctx.stamp.row(n);
+    if (!(n.recovered && !leaf && !ctx.actions->is_call(row)) &&
+        texting<Text>(ctx))
+      if (const TextFn fn = ctx.actions->call_at(row)) {
+        const auto value = evaluate_text(ctx, child, fn,
+                                         ctx.actions->text_children(row, true));
+        if (!value) return false;
+        out.push_back(*value);
+        continue;
+      }
+    if (leaf)
+      out.push_back(cst.text(child));
+    else
+      text_children(cst, child, pending);
+  }
   return true;
 }
 
+// Parts converters observe each data-rule call as one part. Repaired wrapper
+// records are transparent; all other raw subtrees are flattened and joined
+// once, rather than materialising a string at every nesting level.
 template <bool Text>
 bool each_child_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   const Cst& cst = *ctx.cst;
-  SmallRun<NodeId, 16> kids;
-  for (const NodeId child : cst.reverse_children(id)) kids.push_back(child);
-  for (std::size_t k = kids.size(); k-- > 0;)
-    if (!child_part<Text>(ctx, kids[k], out)) return false;
+  std::vector<NodeId> pending;
+  text_children(cst, id, pending);
+  while (!pending.empty()) {
+    const auto child = pending.back();
+    pending.pop_back();
+    const CstNode& n = cst[child];
+    if (n.hidden) continue;
+    if (n.subtreeSize == 1 && !part_leaf(ctx, n)) continue;
+    if (n.subtreeSize != 1 && n.recovered &&
+        !ctx.actions->is_call(ctx.stamp.row(n))) {
+      text_children(cst, child, pending);
+      continue;
+    }
+    if (texting<Text>(ctx))
+      if (const auto fn = ctx.actions->call_at(ctx.stamp.row(n))) {
+        const auto value = evaluate_text(
+            ctx, child, fn, ctx.actions->text_children(ctx.stamp.row(n), true));
+        if (!value) return false;
+        out.push_back(*value);
+        continue;
+      }
+    if (n.subtreeSize == 1) {
+      if (part_leaf(ctx, n)) out.push_back(cst.text(child));
+      continue;
+    }
+    PartRun inner;
+    if (!flat_text_parts<Text>(ctx, child, inner)) return false;
+    out.push_back(join_parts(ctx, inner));
+  }
   return true;
 }
 
-// The parts of a payload. A record that stands for rules whose converters
-// yield text is one part: that text. `Base` leaves the record's own
-// conversions out, for the conversion that is computing them.
-template <bool Text, bool Base>
+// The payload's own text stops before the converter run at this site. `Flat`
+// is for a text consumer; parts consumers retain the grouping above.
+template <bool Text, bool Base, bool Flat = false>
 bool each_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   const Cst& cst = *ctx.cst;
   const CstNode& n = cst[id];
@@ -136,18 +279,26 @@ bool each_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   if constexpr (!Base)
     if (texting<Text>(ctx))
       if (const TextFn fn = ctx.actions->text_at(row)) {
-        const auto part = fn(ctx, id);
+        const auto part =
+            evaluate_text(ctx, id, fn, ctx.actions->text_children(row, false));
         if (!part) return false;
         out.push_back(*part);
         return true;
       }
-  if (n.subtreeSize != 1) return each_child_part<Text>(ctx, id, out);
-  if (!ctx.actions->is_call(row) && part_leaf(ctx, n))
+  if (n.subtreeSize != 1) {
+    if constexpr (Flat)
+      return flat_text_parts<Text>(ctx, id, out);
+    else
+      return each_child_part<Text>(ctx, id, out);
+  }
+  // A call that read nothing has no part; one that read a token, repaired or
+  // not, has that token.
+  if ((n.begin != n.end || !ctx.actions->is_call(row)) && part_leaf(ctx, n))
     out.push_back(cst.text(id));
   return true;
 }
 
-// Materialised in the tree's arena and not on a frame: what a `parts_conv`
+// Materialised in the tree's arena and not on a frame: what a parts converter
 // receives outlives the call that builds it.
 template <bool Text = true, bool Base = false>
 CURSIV_COLD
@@ -187,7 +338,7 @@ template <bool Text = true, bool Base = false>
 CURSIV_NOINLINE inline std::optional<std::string_view> joined_parts(
     AstBuildCtx& ctx, NodeId id) {
   PartRun run;
-  if (!each_part<Text, Base>(ctx, id, run)) return std::nullopt;
+  if (!each_part<Text, Base, true>(ctx, id, run)) return std::nullopt;
   return join_parts(ctx, run);
 }
 
@@ -211,7 +362,8 @@ std::optional<std::string_view> payload_text(AstBuildCtx& ctx, NodeId id) {
 
 // Text that was never written denotes nothing: a repair may invent the
 // zero-width record a missing terminal would have had, and the `inserted`
-// diagnostic already said so. One invented part of a data rule is enough.
+// diagnostic already said so. One invented part of a data rule is enough; a
+// token the repair dropped is no part.
 template <bool Data>
 CURSIV_COLD bool never_written(const AstBuildCtx& ctx, NodeId id) {
   const Cst& cst = *ctx.cst;
@@ -221,7 +373,7 @@ CURSIV_COLD bool never_written(const AstBuildCtx& ctx, NodeId id) {
   if (invented(id)) return true;
   if constexpr (Data)
     for (NodeId i = cst.subtree_begin(id); i < id; ++i)
-      if (invented(i)) return true;
+      if (invented(i) && !dropped_token(ctx, cst[i])) return true;
   return false;
 }
 
@@ -278,10 +430,50 @@ CURSIV_ALWAYS_INLINE inline bool convert_with(AstBuildCtx& ctx, NodeId id,
   }
 }
 
-// One symbol per (converter, member) pair. `out` points at the member's type,
-// `conv_target_t` on both sides.
+// The type a value slot writes, told by address.
+template <class T>
+inline constexpr char value_tag = 0;
+
+// The value a data rule passed on, from its record or the one record under it
+// that holds a value: the rule took one branch, and the branch's record holds
+// what it converted to. A token a repair dropped may stand beside that record:
+// it holds no value, and the record still passes its own.
+template <class T>
+bool pass_value(AstBuildCtx& ctx, NodeId id, T& out) {
+  const Cst& cst = *ctx.cst;
+  for (NodeId at = id;;) {
+    const ValueSlot* const slot = ctx.actions->value_at(ctx.stamp.row(cst[at]));
+    if (slot != nullptr && slot->fn != nullptr)
+      return slot->type == &value_tag<T> && slot->fn(ctx, at, &out);
+    NodeId only = kNoNode;
+    for (const NodeId child : cst.reverse_children(at)) {
+      const CstNode& n = cst[child];
+      if (n.hidden || dropped_token(ctx, n)) continue;
+      if (only != kNoNode) return false;
+      only = child;
+    }
+    if (only == kNoNode) return false;
+    at = only;
+  }
+}
+
 template <class CR, class M, std::size_t Alt, bool Data, bool Text = true,
           bool Guarded = true, bool Base = false>
+bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out);
+
+// What a record holds for a rule that passes its value on: its own rule's
+// conversion, into that rule's type.
+template <class R>
+consteval ValueSlot value_slot() {
+  using T = rule_type_t<R>;
+  return {&invoke_conv<converter_rule_t<R>, T, 0, is_data_rule<R>>,
+          &value_tag<T>};
+}
+
+// One symbol per (converter, member) pair. `out` points at the member's type,
+// `conv_target_t` on both sides.
+template <class CR, class M, std::size_t Alt, bool Data, bool Text,
+          bool Guarded, bool Base>
 bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
   using A = typename conv_alt_at<M, Alt>::type;
   M& slot = *static_cast<M*>(out);
@@ -297,7 +489,12 @@ bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
     conv_store<M, A>(slot, std::forward<decltype(value)>(value));
   };
 
-  if constexpr (!std::is_void_v<CR>) {
+  if constexpr (is_pass_conv<CR>) {
+    typename CR::type value{};
+    if (!pass_value(ctx, id, value)) return false;
+    store(std::move(value));
+    return true;
+  } else if constexpr (!std::is_void_v<CR>) {
     // A converter that materialises allocates in the tree's resource, so its
     // view lives as long as the ParseResult.
     return convert_with<CR>(
@@ -369,9 +566,15 @@ std::optional<std::string_view> denoted_chain(AstBuildCtx& ctx, NodeId id) {
   if constexpr (First::lead) {
     value = denoted_text<typename First::conv, First::data>(ctx, id);
   } else {
-    const auto base = payload_text<BaseData, true, true>(ctx, id);
-    if (!base) return std::nullopt;
-    value = convert_text<typename First::conv>(ctx, id, *base);
+    // A converter that reads nothing is not handed the record's text, so the
+    // calls below the record are not run for it.
+    std::string_view base;
+    if constexpr (converts_input<typename First::conv>) {
+      const auto text = payload_text<BaseData, true, true>(ctx, id);
+      if (!text) return std::nullopt;
+      base = *text;
+    }
+    value = convert_text<typename First::conv>(ctx, id, base);
   }
   ((value = value ? convert_text<typename Rest::conv>(ctx, id, *value) : value),
    ...);
@@ -414,6 +617,18 @@ consteval ConvSlot conv_slot() {
   if constexpr (Alt == 0 && !Data && StatesValue<CR, M>)
     s.value = &kConvValue<CR, M>;
   return s;
+}
+
+// A write whose payload passes on what its record holds, at a record whose
+// holding rule `R` is known: R's conversion straight into the member, as
+// `pass_value` would find it there. A holder of another type passes nothing,
+// and the write keeps the passing slot.
+template <class R, class Pass, class M, std::size_t Alt, bool Data, bool Text>
+consteval ConvSlot held_slot() {
+  if constexpr (std::is_same_v<rule_type_t<R>, typename Pass::type>)
+    return conv_slot<converter_rule_t<R>, M, Alt, is_data_rule<R>>();
+  else
+    return conv_slot<Pass, M, Alt, Data, Text>();
 }
 
 }  // namespace cursiv::detail

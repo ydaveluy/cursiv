@@ -23,6 +23,24 @@
 
 namespace cursiv {
 
+namespace {
+
+// A provider that throws fails the reference it was asked for, as a lookup
+// that found nothing does: the empty answer is returned, and a provider that
+// read this reference goes on. Only cancellation leaves the read.
+template <class Lookup>
+auto contained(Lookup lookup) -> decltype(lookup()) {
+  try {
+    return lookup();
+  } catch (const OperationCancelled&) {
+    throw;
+  } catch (...) {
+    return {};
+  }
+}
+
+}  // namespace
+
 DocumentReferences::Answer DefaultDocumentReferences::resolve(
     std::uint32_t rank) const {
   if (rank >= handles.size()) return {};
@@ -47,18 +65,9 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
 
-  // A provider that throws fails this reference, as a lookup that found
-  // nothing does; a provider reading it goes on.
-  const AstNodeDescriptionOrError found =
-      [&]() -> AstNodeDescriptionOrError {
-    try {
-      return l->getCandidate(info(h, ops.text(*h.owner, h.index), narrow));
-    } catch (const OperationCancelled&) {
-      throw;
-    } catch (...) {
-      return nullptr;
-    }
-  }();
+  const AstNodeDescriptionOrError found = contained([&] {
+    return l->getCandidate(info(h, ops.text(*h.owner, h.index), narrow));
+  });
   if (!found.has_value() || *found == nullptr) return failed();
 
   AstNode* const target = (*found)->node;
@@ -94,6 +103,14 @@ void DefaultDocumentReferences::visitResolved(
   for (const RefHandle& h : handles) {
     if (h.owner == nullptr) continue;
     const RefOps& ops = _f.refOps[h.field];
+    // A single reference, the common site, is read in one call.
+    if (!ops.multi) {
+      const SingleRefRead read = ops.single(*h.owner, h.index);
+      if (read.target == nullptr || read.name == kNoNode) continue;
+      const CstNode& n = cst[read.name];
+      visitor(n.begin, n.end, *read.target, false);
+      continue;
+    }
     const std::size_t count = ops.size(*h.owner, h.index);
     if (count == 0) continue;
     const NodeId named = ops.name_id(*h.owner, h.index);
@@ -166,8 +183,9 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
 
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
-  const AstNodeDescriptionsOrError found = l->getCandidates(
-      info(h, ops.text(*h.owner, h.index), narrow));
+  const AstNodeDescriptionsOrError found = contained([&] {
+    return l->getCandidates(info(h, ops.text(*h.owner, h.index), narrow));
+  });
   if (!found.has_value()) return RefState::ErrorNotFound;
 
   const RefFilter filter{&ops, narrow};

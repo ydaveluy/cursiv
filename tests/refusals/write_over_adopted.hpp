@@ -16,7 +16,7 @@ struct G : Base {
   struct Root
       : rule<ref<ItemRule> + lit<":"> + assign<&ast::Item::name>(ref<ID>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

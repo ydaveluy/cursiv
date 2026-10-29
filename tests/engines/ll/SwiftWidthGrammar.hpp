@@ -1,13 +1,7 @@
 #pragma once
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/SwiftWidthAst.hpp"
 namespace tllswiftwidth {
-struct Raw : cursiv::Extends<cursiv::AstNode> {
-  string_view opening;
-};
-struct Document : cursiv::Extends<cursiv::AstNode> {
-  vector<Raw*> values;
-};
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Open : terminal<some(lit<"#">) + lit<"\"\"\"">> {};
@@ -24,7 +18,7 @@ struct Base : cursiv::GrammarSpec {
                  (lit<"g"> + append<&Document::values>(ref<GuardedValue>))) +
             eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

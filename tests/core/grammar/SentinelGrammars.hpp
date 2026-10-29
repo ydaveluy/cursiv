@@ -28,7 +28,7 @@ struct Word : cursiv::GrammarSpec {
   struct Doc
       : rule<create<ast::Node>((ref<NAME> + lit<";">) | ref<STR>)> {};
   using entry = Doc;
-  using ignore = list<WS, BLOCK, LINE>;
+  using ignored = list<WS, BLOCK, LINE>;
 };
 
 struct Free : cursiv::GrammarSpec {

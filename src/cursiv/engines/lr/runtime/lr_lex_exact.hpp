@@ -14,6 +14,7 @@
 #include "cursiv/engines/lr/runtime/LrStack.hpp"
 #include "cursiv/engines/lr/runtime/LrWalkMemo.hpp"
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
+#include "cursiv/engines/lr/runtime/lr_refusal.hpp"
 #include "cursiv/engines/lr/runtime/lr_states.hpp"
 #include "cursiv/engines/lr/table/LrAction.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
@@ -89,13 +90,15 @@ bool lr_climb_takes(Climb climb, SymbolId term, Holds&& holds,
 template <const auto& A>
 using LrSkipped = typename LrLexTape<A>::Skip;
 
-// The token at `from` in `mode`, trivia crossed, the terminals of `skip` off
-// the position. `crossed(end, trivia)` is told each stretch of trivia read:
-// the bytes the mode skips (`trivia` null), or one token. A read that crossed
-// none is the same for every reading that asks it.
+// The token at `from` in `mode` under bracket depth `depth`, trivia crossed,
+// the terminals of `skip` off the position. `crossed(end, trivia)` is told
+// each stretch of trivia read: the bytes the mode skips (`trivia` null), or
+// one token. A read that crossed none is the same for every reading that asks
+// it at that depth.
 template <const auto& A, class Crossed>
 Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
-                       const LrSkipped<A>& skip, Crossed&& crossed) {
+                       std::uint32_t depth, const LrSkipped<A>& skip,
+                       Crossed&& crossed) {
   std::uint16_t names[LrSkipMemo::kSkips];
   std::uint32_t n = 0;
   bool named = true;
@@ -110,7 +113,7 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
     }
   }
   if (named)
-    if (const Token* seen = c.skipMemo.find(from, mode, c.indent.depth, names, n))
+    if (const Token* seen = c.skipMemo.find(from, mode, depth, names, n))
       return *seen;
   const typename LrLexTape<A>::Skipping tape{.skip = &skip};
   bool crossing = false;
@@ -127,13 +130,13 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
     const Scan s = lex_match(tape, c.src, c.len, mode, p);
     if (s.term == kInvalidSymbol || s.end == p)
       return Token{p, p, kInvalidSymbol};
-    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(c, s.term)) {
-      const Token token{p, s.end, s.term};
+    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(depth, s.term)) {
+      const Token token{p, s.end, s.term, mode};
       if (named && !crossing)
-        c.skipMemo.put(from, mode, c.indent.depth, names, n, token);
+        c.skipMemo.put(from, mode, depth, names, n, token);
       return token;
     }
-    const Token trivia{p, s.end, s.term};
+    const Token trivia{p, s.end, s.term, mode};
     p = s.end;
     crossed(p, &trivia);
     crossing = true;
@@ -148,13 +151,12 @@ template <const auto& A, class Takes, class Rescan>
 CURSIV_NOINLINE bool lr_lex_refused(Takes&& takes, std::uint16_t mode,
                                     Token& la, Rescan&& rescan) {
   LrSkipped<A> skip{};
-  bool refused = false;
-  while (la.sym < A.cfg.nterms && A.flagged(mode, la.sym) && !takes(la)) {
-    skip.set(la.sym);
-    la = rescan(skip, la.begin);
-    refused = true;
-  }
-  return refused;
+  return lr_refused(
+      [&](SymbolId sym) { return sym < A.cfg.nterms && A.flagged(mode, sym); },
+      takes, la, [&](const Token& t) {
+        skip.set(t.sym);
+        return rescan(skip, t.begin);
+      });
 }
 
 // The drive's token, a winner of `mode` that the mode flags: read again from
@@ -172,7 +174,8 @@ CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
       },
       mode, la, [&](const LrSkipped<A>& skip, TextOffset from) {
         return lr_scan_skipping<A>(
-            c, mode, from, skip, [&](TextOffset end, const Token* t) {
+            c, mode, from, c.indent.depth, skip,
+            [&](TextOffset end, const Token* t) {
               if (t != nullptr && A.cfg.terms[t->sym].recorded)
                 c.pending.push_back(*t);
               c.pendEnd = end;

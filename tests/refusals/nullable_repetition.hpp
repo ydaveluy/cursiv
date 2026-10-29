@@ -8,7 +8,7 @@ namespace refuse {
 struct G : Base {
   struct Root : rule<create<ast::Node>(many(option(ref<ID>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

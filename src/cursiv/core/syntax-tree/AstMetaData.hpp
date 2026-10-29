@@ -67,10 +67,12 @@ struct AstMetaData {
   std::uint16_t typeWords = 0;
 
   const detail::FieldDesc* fields = nullptr;
+  // `refOps`, `acceptBits` and `referenceTags` have one row per member below
+  // `referenceBound`; with `referenceRows`, they are null for a grammar with
+  // no reference member.
   const RefOps* refOps = nullptr;
-  // One row of `typeWords` per field: what a reference site accepts.
+  // One row of `typeWords` per member: what a reference site accepts.
   const std::uint64_t* acceptBits = nullptr;
-  const PropertyMetaData* properties = nullptr;
   const detail::PropertyRow* propertyRows = nullptr;
   const AstTypeTag* const* referenceTags = nullptr;
   // One dispatch per known type, with inherited members selected at generation.
@@ -80,8 +82,10 @@ struct AstMetaData {
   std::span<const std::uint16_t> referenceFields;
   const std::span<const std::uint16_t>* referenceRows = nullptr;
   std::uint16_t fieldCount = 0;
+  // One past the last reference member, 0 when there is none: the one bound
+  // a reference row is checked against.
+  std::uint16_t referenceBound = 0;
 
-  bool anyVariantField = false;
   bool anyMultiReference = false;
 
   // `subtypes` puts a type's own tag at rank 0, so no second array is needed.
@@ -106,16 +110,6 @@ struct AstMetaData {
     for (std::uint16_t i = 0; i < f.target_count; ++i)
       if (derives(f.targets[i], sub)) return i;
     return detail::kNoIndex;
-  }
-
-  // Only a variant member asks it: every other nature drops the answer
-  // (`write_slot` says `(void)alt`), and a grammar with no variant member
-  // never scans.
-  constexpr std::uint16_t alt_for(const detail::FieldDesc& f,
-                                  std::uint16_t sub) const {
-    if (!anyVariantField) return 0;
-    return f.nature == detail::FieldNature::variant ? field_alt_of(f, sub)
-                                                    : std::uint16_t{0};
   }
 };
 }  // namespace cursiv

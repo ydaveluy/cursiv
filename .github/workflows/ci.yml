@@ -29,6 +29,11 @@ jobs:
       fail-fast: false
       matrix:
         preset: [gcc-debug, gcc-release]
+        include:
+          # Keep generated tables within the GCC Debug runner's memory.
+          - preset: gcc-debug
+            jobs: 2
+            debug-info: -g1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,8 +50,10 @@ jobs:
         # Keep shared DWARF separate and compressed across the many binaries.
         run: >-
           cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_FLAGS_DEBUG="-g -gsplit-dwarf -gz=zlib"
+          -DCMAKE_CXX_FLAGS_DEBUG="${{ matrix.debug-info || '-g' }} -gsplit-dwarf -gz=zlib"
       - name: build
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.jobs || env.CMAKE_BUILD_PARALLEL_LEVEL }}
         run: |
           sed -n '1,5p' /proc/meminfo
           df -h .
@@ -118,7 +125,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # V8 in Node 24 exhausts memory optimizing large Unicode lexers.
+          node-version: 26
       - name: Install compilation cache
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ccache
       - name: cache compilation

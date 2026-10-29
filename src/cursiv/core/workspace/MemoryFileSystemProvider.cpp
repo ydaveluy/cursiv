@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/core/utils/UriUtils.hpp"
 #include "cursiv/core/workspace/FileSystemProvider.hpp"
 
 namespace cursiv {
@@ -17,15 +18,15 @@ namespace {
 // Both spellings of one folder name it: `mem:///src` and `mem:///src/` differ
 // by a byte and by nothing else.
 [[nodiscard]] std::string folder_prefix(std::string_view uri) {
-  std::string prefix(uri);
+  std::string prefix = normalize_uri(uri);
   if (!prefix.empty() && prefix.back() != '/') prefix.push_back('/');
   return prefix;
 }
 
 }  // namespace
 
-void MemoryFileSystemProvider::addFile(std::string uri, std::string text) {
-  _files.insert_or_assign(std::move(uri), std::move(text));
+void MemoryFileSystemProvider::addFile(std::string_view uri, std::string text) {
+  _files.insert_or_assign(normalize_uri(uri), std::move(text));
 }
 
 bool MemoryFileSystemProvider::isFolder(std::string_view uri) const {
@@ -35,13 +36,15 @@ bool MemoryFileSystemProvider::isFolder(std::string_view uri) const {
 }
 
 FileSystemNode MemoryFileSystemProvider::stat(std::string_view uri) const {
-  if (_files.contains(uri)) return {true, false, std::string(uri)};
-  if (isFolder(uri)) return {false, true, std::string(uri)};
+  std::string key = normalize_uri(uri);
+  if (_files.contains(key)) return {true, false, std::move(key)};
+  if (isFolder(key)) return {false, true, std::move(key)};
   throw FileSystemError(std::format("cursiv: nothing at '{}'", uri));
 }
 
 bool MemoryFileSystemProvider::exists(std::string_view uri) const {
-  return _files.contains(uri) || isFolder(uri);
+  const std::string key = normalize_uri(uri);
+  return _files.contains(key) || isFolder(key);
 }
 
 std::vector<std::uint8_t> MemoryFileSystemProvider::readBinary(
@@ -51,7 +54,7 @@ std::vector<std::uint8_t> MemoryFileSystemProvider::readBinary(
 }
 
 std::string MemoryFileSystemProvider::readFile(std::string_view uri) const {
-  const auto it = _files.find(uri);
+  const auto it = _files.find(normalize_uri(uri));
   if (it == _files.end())
     throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
   return it->second;

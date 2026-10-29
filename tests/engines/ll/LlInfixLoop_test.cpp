@@ -8,7 +8,6 @@
 
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/InfixLoopGrammar.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
 
 namespace infix_loop_cases {

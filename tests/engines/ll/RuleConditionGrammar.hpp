@@ -46,7 +46,7 @@ struct Base : cursiv::GrammarSpec {
             (kw<"r2opt"> + !(A + B) + many(Name)) |
             (kw<"r2rep"> + !(some(B) + A) + Names) |
             (kw<"r2dash"> +
-             skip(ignored<DASHES>, hide<>,
+             skip(ignore<DASHES>, hide<>,
                   lit<"["> + !(A + B) + Names + lit<"]">)) |
             (kw<"r3"> + !A + !B + ((!C + Call) | (!E + Bind) | Name)) |
             (kw<"r3and"> + (&A | &C | &E | &X) +
@@ -64,7 +64,7 @@ struct Base : cursiv::GrammarSpec {
   struct Tight : rule<tight(lit<"is"> + lit<"not">)> {};
   struct DOTS : terminal<some(lit<".">)> {};
   struct Dotty
-      : rule<kw<"a"> + skip(ignored<DOTS>, hide<>, kw<"b"> + kw<"c">)> {};
+      : rule<kw<"a"> + skip(ignore<DOTS>, hide<>, kw<"b"> + kw<"c">)> {};
   struct Text
       : rule<create<Item>(
             (kw<"q1"> + !ref<QName> + Words) |
@@ -89,7 +89,7 @@ struct Base : cursiv::GrammarSpec {
                          lit<";">) +
                     eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = CMT;
 };
 struct Ll : Base {};
@@ -107,7 +107,7 @@ struct Nested : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(
                     many(append<&Doc::items>(ref<Stmt>) + lit<";">) + eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = CMT;
 };
 }  // namespace tllrcond
@@ -168,7 +168,7 @@ struct Base : cursiv::GrammarSpec {
                                              ref<Line> | ref<Pair>) +
                          lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

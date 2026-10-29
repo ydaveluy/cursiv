@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -48,6 +49,19 @@ void closes(const Parser& parser, std::string_view text, std::size_t levels) {
         levels);
 }
 
+// A dropped dedent closes a level and owns no byte: the text past it is still
+// dropped, whether the entry stops at `eof` or before the text does.
+template <class Parser>
+void drops_past_dedents_to_the_end(const Parser& parser,
+                                   std::string_view text) {
+  const auto result = parser->parse(text);
+  const auto& cst = result.cst();
+  cursiv::TextOffset end = 0;
+  for (cursiv::NodeId i = 0; i < cst.size(); ++i)
+    end = std::max(end, cst[i].end);
+  CHECK(!result.diagnostics.empty() && end == text.size());
+}
+
 }  // namespace
 
 int main() {
@@ -59,6 +73,8 @@ int main() {
   expect_closures(ll, "many:a\n b\n  c\n d", 1, true);
   expect_closures(ll, "many:a\n b\n  c\n  d", 0, true);
   expect_closures(ll, "some:a\n b\n  c\n  d", 0, false);
+  drops_past_dedents_to_the_end(ll.first, "many:a\n b\n  c\n  d\n e\nf");
+  drops_past_dedents_to_the_end(ll.first, "tail:a\n b\n  c\nd");
   const auto flatLl = g::FlatLl::create_parser();
   for (const auto text : {"a:\n  b:\n    c", "a:\n  b:\n    c\n"}) {
     closes(flatLl, text, 2);

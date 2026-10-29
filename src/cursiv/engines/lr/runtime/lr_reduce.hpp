@@ -79,8 +79,10 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
   ElementId pendNode = reach           ? plan.turnRow
                        : plan.closes() ? p.node
                                        : kNoElement;
-  if (plan.form == LrReduceForm::foldClose && held != kNoElement && !reach) {
-    const ElementId one = folds(held, p.node);
+  // A record naming no row takes the node's own: two records over one span
+  // would be a node nobody wrote.
+  if (plan.form == LrReduceForm::foldClose && last && !reach) {
+    const ElementId one = held == kNoElement ? p.node : folds(held, p.node);
     if (one != kNoElement) {
       c.tape.rename<A.stamp>(pendWord, one);
       pendNode = kNoElement;
@@ -88,14 +90,19 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
     }
   }
   if (pendNode != kNoElement) pendRow = pendNode;
-  const std::uint32_t first = reach ? base - 1 : base;
-  const auto open = p.len == 0 ? c.tape.len() : c.stack[first].open;
-  const auto begin = p.len == 0 ? c.committed : c.stack[first].begin;
   c.stack.reduce(p.len);
+  // The result takes the slot of the first symbol it pops, whose span is
+  // already its own: only an empty production, or a turn reaching the frame
+  // below, opens elsewhere.
   LrFrame& top = c.stack.top();
+  if (p.len == 0) {
+    top.open = c.tape.len();
+    top.begin = c.committed;
+  } else if (reach) {
+    top.open = c.stack[base - 1].open;
+    top.begin = c.stack[base - 1].begin;
+  }
   top.row = pendRow;
-  top.open = open;
-  top.begin = begin;
   top.word = last ? pendWord : kLrNoWord;
   assert((plan.row(p.len) == LrReduceRow::none) == (pendNode == kNoElement) ||
          plan.row(p.len) == LrReduceRow::any);

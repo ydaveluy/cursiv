@@ -13,13 +13,13 @@ struct Inner : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NUM>) +
                                        option(ref<INDENT>))> {};
   using entry = Root;
-  using ignore = SP;
+  using ignored = SP;
 };
 
 struct G : Base {
   struct Root : rule<section<Inner>(lit<"<">, lit<">">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

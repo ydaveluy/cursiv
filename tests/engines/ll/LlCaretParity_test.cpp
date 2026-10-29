@@ -46,12 +46,12 @@ std::vector<Entry> features_between(const cursiv::Parser& parser,
   parser.nextFeaturesAt(parsed.cst(), at + offset, resume + offset, next);
   std::vector<Entry> out;
   for (const cursiv::NextFeature& f : next) {
-    const std::string_view spelled =
-        parser.getGrammar().terminalText(f.feature);
-    out.push_back({std::string(spelled.empty()
-                                   ? parser.getGrammar().terminalName(f.feature)
-                                   : spelled),
-                   std::string(f.property)});
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    out.push_back(
+        {std::string(spellings.size() == 1
+                         ? spellings.front()
+                         : parser.getGrammar().terminalName(f.feature)),
+         std::string(f.property)});
   }
   std::sort(out.begin(), out.end());
   return out;
@@ -180,7 +180,7 @@ void statements_ended_by_a_gap_or_a_semicolon() {
 // third of `x y z`, or one that ends the document, replaces text it still
 // reads, wherever the replay starts.
 
-// A comment in `ignore` leaves no leaf: the caret has to read the blanks and
+// A comment in `ignored` leaves no leaf: the caret has to read the blanks and
 // the comments before it again to know that what is typed there goes into the
 // comment, and a word the comment absorbs is not the keyword it spells.
 
@@ -225,6 +225,52 @@ void the_twin_of_the_operator_is_not_offered_behind_it() {
   }
 }
 
+// The choice between two rules that read `%` is made on the token behind it,
+// and the choice reads `->` where the position of the `-` does not: a `>`
+// glued to the `-` makes it `->`, so it follows only after a blank.
+void a_token_the_choice_read_glues_as_the_choice_reads_it() {
+  const auto ll = tllexpressions::generated::Ll::create_parser();
+  for (const std::string gap : {"", " "}) {
+    const std::string text = "glue:%-" + gap;
+    const auto at = static_cast<cursiv::TextOffset>(text.size());
+    const auto offered = spellings(features_between(*ll, text, at, at));
+    CHECK(offered == (gap.empty() ? std::vector<std::string>{}
+                                  : std::vector<std::string>{">"}));
+    const auto typed = ll->parse(text + ">");
+    CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
+  }
+}
+
+// A condition reads a run of `~` as one token, however many the arms read it
+// as, and reads on to what follows the run. Past a caret on its first token it
+// reads the document's text; before a caret in the run it reads what is typed
+// there, and a `?` makes it refuse the `|` it stands before.
+void a_condition_reads_the_tokens_behind_the_caret_its_own_way() {
+  const auto ll = tllexpressions::generated::Ll::create_parser();
+  const auto clean = [&](const std::string& text) {
+    const auto parsed = ll->parse(text);
+    return parsed.accepted && parsed.diagnostics.empty();
+  };
+  const auto offers = [](const std::vector<Entry>& entries,
+                         std::string_view word) {
+    return std::ranges::any_of(
+        entries, [&](const Entry& e) { return e.spelling == word; });
+  };
+  const std::string run(40, '~');
+  const std::string held = "cond:|" + run + "!";
+  CHECK(clean(held) && offers(features_between(*ll, held, 5, 6), "|"));
+  const std::string refused = "not:|" + run + "?";
+  CHECK(!clean(refused) && !offers(features_between(*ll, refused, 4, 5), "|"));
+  const std::string cut = "not:|" + run.substr(20);
+  const auto at = static_cast<cursiv::TextOffset>(cut.size());
+  for (const std::string& text : {cut + run.substr(20) + "!", cut}) {
+    const auto words = features_between(
+        *ll, text, at, std::min<cursiv::TextOffset>(at + 1, text.size()));
+    CHECK(offers(words, "!") && !offers(words, "?"));
+  }
+  CHECK(clean(cut + "!") && !clean(cut + "?"));
+}
+
 // The document fails the condition of a word and a candidate would satisfy it:
 // `a;` is refused while `x y` stands behind it, and what is typed in front of
 // them lets it stand. Every caret and every span a candidate may replace.
@@ -243,6 +289,20 @@ void carets_behind_a_repair_are_the_table_engines() {
                  {"a.(b;\n1 + 2 + 3\nreturn", "{ return y\n a.}b.c\n}"}, false);
 }
 
+// A word a repair read as the keyword it misspells is the author's: a word
+// typed right behind it makes one word with it and is not offered there, a
+// `(` is.
+void a_misspelt_word_glues_what_is_typed_behind_it() {
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  const std::string text = "shw all x, y;";
+  for (const cursiv::Parser* parser : {lr.get(), ll.get()}) {
+    const auto behind = features_at(*parser, text, 3);
+    CHECK(offers(behind, "(") && !offers(behind, "all", "all"));
+    CHECK(offers(features_between(*parser, text, 4, 7), "all", "all"));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -252,6 +312,9 @@ int main() {
   a_word_read_as_two_terminals_goes_on_as_either();
   a_literal_takes_its_spelling_from_the_name();
   the_twin_of_the_operator_is_not_offered_behind_it();
+  a_token_the_choice_read_glues_as_the_choice_reads_it();
+  a_condition_reads_the_tokens_behind_the_caret_its_own_way();
   carets_behind_a_repair_are_the_table_engines();
+  a_misspelt_word_glues_what_is_typed_behind_it();
   return cursiv::test::report("LlCaretParity_test");
 }

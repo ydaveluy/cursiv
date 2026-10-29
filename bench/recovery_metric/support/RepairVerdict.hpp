@@ -8,7 +8,7 @@
 #include "recovery_metric/support/AstOverlap.hpp"
 #include "recovery_metric/support/TextKept.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairVerdict {
   std::uint32_t faults = 0, diagnostics = 0;
@@ -29,4 +29,4 @@ struct RepairVerdict {
   std::vector<std::uint32_t> ceilings;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

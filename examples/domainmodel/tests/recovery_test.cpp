@@ -3,15 +3,14 @@
 #include <string_view>
 
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/test/MutationOracle.hpp"
+#include "cursiv/test/RecoveryLane.hpp"
 #include "domainmodel/core/ast.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
-#include "cursiv/test/MutationOracle.hpp"
 
 namespace {
 using namespace cursiv::test;
 
-#if !defined(CURSIV_ENGINE_LL)
 void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
   const auto seed = document("valid.dmodel");
   const auto start = seed.find("entity E3");
@@ -42,7 +41,8 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
             *element, &cursiv::ast_type_tag<dm::ast::PackageDeclaration>);
         CHECK(package);
         if (!package) continue;
-        const auto* baz = static_cast<const dm::ast::PackageDeclaration*>(element);
+        const auto* baz =
+            static_cast<const dm::ast::PackageDeclaration*>(element);
         CHECK(baz->elements.size() == 3);
         if (baz->elements.size() != 3) continue;
         for (unsigned i = 0; i < 2; ++i) {
@@ -71,13 +71,11 @@ void split_keywords_preserve_the_package(const cursiv::Parser& engine) {
     }
   }
 }
-#endif
 
 void run(Lane& lane) {
   lane.lang = "domainmodel";
   const std::unique_ptr<cursiv::Parser> engine =
       dm::generated::DomainModel::create_parser();
-#if !defined(CURSIV_ENGINE_LL)
   split_keywords_preserve_the_package(*engine);
   {
     // EOF repair must retain the already read package, including its complete
@@ -90,8 +88,8 @@ void run(Lane& lane) {
     const dm::ast::PackageDeclaration* baz = nullptr;
     if (model) {
       for (const auto* element : model->elements)
-        if (element->name == "baz" &&
-            reflection->isInstance(
+        if (element->name == "baz"
+            && reflection->isInstance(
                 *element, &cursiv::ast_type_tag<dm::ast::PackageDeclaration>))
           baz = static_cast<const dm::ast::PackageDeclaration*>(element);
     }
@@ -104,19 +102,17 @@ void run(Lane& lane) {
         CHECK(entity);
         CHECK(element->name == (i == 0 ? "E3" : "E4"));
         if (entity)
-          CHECK(static_cast<const dm::ast::Entity*>(element)->features.size() ==
-                (i == 0 ? 3u : 0u));
+          CHECK(static_cast<const dm::ast::Entity*>(element)->features.size()
+                == (i == 0 ? 3u : 0u));
       }
     }
   }
-#endif
   language(lane, *engine, "valid.dmodel",
            {"01_typo1.dmodel", "02_typo2.dmodel", "03_closer_block.dmodel",
             "04_closer_eof.dmodel", "05_intruder.dmodel", "06_truncated.dmodel",
             "07_two_faults.dmodel", "08_head_fault.dmodel",
             "09_list_delim.dmodel", "10_noise.dmodel", "11_head_typo.dmodel"});
-  mutation_oracle(*engine, "domainmodel",
-                  document("valid.dmodel"));
+  mutation_oracle(*engine, "domainmodel", document("valid.dmodel"));
 }
 }  // namespace
 

@@ -27,7 +27,7 @@ struct Inline : Base {
       : rule<create<Doc>(lit<"("> + assign<&Doc::mark>(ref<Pick>) + lit<")">)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Named : Base {
@@ -39,7 +39,7 @@ struct Named : Base {
       : rule<create<Doc>(lit<"("> + assign<&Doc::mark>(ref<Pick>) + lit<")">)> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tguardedchoice

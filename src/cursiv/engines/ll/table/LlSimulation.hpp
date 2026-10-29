@@ -91,9 +91,8 @@ class LlStamped {
   // ends in one leaves the index naming the last field the hash mixed in --
   // for a reading, its arm, and a walk of a thousand readings then queues on
   // four slots. 2^64 / phi is the multiplier that spreads them.
-  std::size_t slot(std::size_t h) const {
-    return static_cast<std::size_t>(
-        (static_cast<std::uint64_t>(h) * 0x9E3779B97F4A7C15ull) >> _shift);
+  std::size_t slot(std::uint64_t h) const {
+    return static_cast<std::size_t>((h * 0x9E3779B97F4A7C15ull) >> _shift);
   }
 
   CURSIV_NOINLINE void grow() {
@@ -130,8 +129,8 @@ class LlStamped {
 };
 
 struct LlKeyHash {
-  std::size_t operator()(std::uint64_t k) const noexcept {
-    return static_cast<std::size_t>(k * 1099511628211ull);
+  std::uint64_t operator()(std::uint64_t k) const noexcept {
+    return k * 1099511628211ull;
   }
 };
 
@@ -171,6 +170,10 @@ class LlCtxPool {
     _scratching = false;
   }
 
+  // Whether `c` was made before the walk that holds the pool began: false for
+  // every node while no walk holds it.
+  bool before_walk(std::uint32_t c) const { return _scratching && c < _mark; }
+
   std::uint32_t push(std::uint32_t parent, std::uint32_t ret,
                      std::int64_t start = 0) {
     const std::uint32_t pair[2] = {ret, parent};
@@ -187,13 +190,9 @@ class LlCtxPool {
   std::uint32_t merge(std::uint32_t a, std::uint32_t b) {
     if (a == b) return a;
     if (a == kLlCtxNone || b == kLlCtxNone) return kLlCtxApart;
-    const std::uint64_t key =
-        a < b ? (std::uint64_t{a} << 32) | b : (std::uint64_t{b} << 32) | a;
+    const std::uint64_t key = merge_key(a, b);
     if (const std::uint32_t* at = _memo.find(key)) return *at;
-    const std::uint32_t r = join(a, b);
-    bool fresh = false;
-    _memo.at(key, fresh) = r;
-    return r;
+    return join(a, b);
   }
 
   unsigned count(std::uint32_t c) const { return _n[c]; }
@@ -216,6 +215,7 @@ class LlCtxPool {
     _index.clear();
     _scratchIndex.clear();
     _memo.clear();
+    std::vector<Join>{}.swap(_joins);
     _scratching = false;
     _life = ++lives();
   }
@@ -225,41 +225,78 @@ class LlCtxPool {
   // readings apart instead, which costs configurations and never precision.
   static constexpr unsigned kLlCtxWidth = 16;
 
-  // The two runs of (return, parent) as one, on the stack: a node is at most
-  // `kLlCtxWidth` pairs, so the join of two of them fits without a heap.
+  struct Join {
+    std::uint32_t a, b;
+    unsigned i = 0, j = 0, n = 0;
+    std::uint32_t pairs[2 * kLlCtxWidth]{};
+    std::int64_t starts[kLlCtxWidth]{};
+  };
+
+  static std::uint64_t merge_key(std::uint32_t a, std::uint32_t b) {
+    return a < b ? (std::uint64_t{a} << 32) | b : (std::uint64_t{b} << 32) | a;
+  }
+
+  // Parents precede their joins, without one native frame per stack level.
+  // A child is memoised before its parent resumes at that same pair.
   std::uint32_t join(std::uint32_t a, std::uint32_t b) {
-    std::uint32_t out[4 * kLlCtxWidth];
-    std::int64_t starts[2 * kLlCtxWidth];
-    unsigned n = 0;
-    const unsigned na = _n[a], nb = _n[b];
-    unsigned i = 0, j = 0;
-    while (i < na || j < nb) {
-      const std::uint32_t ra = i < na ? _pair[_base[a] + 2 * i] : 0xFFFFFFFFu;
-      const std::uint32_t rb = j < nb ? _pair[_base[b] + 2 * j] : 0xFFFFFFFFu;
-      if (n >= 2 * kLlCtxWidth) return kLlCtxApart;
-      if (ra == rb) {
-        if (start(a, i) != start(b, j)) return kLlCtxApart;
-        const std::uint32_t p =
-            merge(_pair[_base[a] + 2 * i + 1], _pair[_base[b] + 2 * j + 1]);
-        if (p == kLlCtxApart) return kLlCtxApart;
-        starts[n / 2] = start(a, i);
-        out[n++] = ra;
-        out[n++] = p;
-        ++i;
-        ++j;
-      } else if (ra < rb) {
-        starts[n / 2] = start(a, i);
-        out[n++] = ra;
-        out[n++] = _pair[_base[a] + 2 * i + 1];
-        ++i;
-      } else {
-        starts[n / 2] = start(b, j);
-        out[n++] = rb;
-        out[n++] = _pair[_base[b] + 2 * j + 1];
-        ++j;
+    _joins.clear();
+    _joins.push_back({a, b});
+    for (;;) {
+      Join& q = _joins.back();
+      bool pending = false, apart = false;
+      while (q.i < _n[q.a] || q.j < _n[q.b]) {
+        const auto ra = q.i < _n[q.a] ? ret(q.a, q.i) : kLlCtxNone;
+        const auto rb = q.j < _n[q.b] ? ret(q.b, q.j) : kLlCtxNone;
+        if (q.n == kLlCtxWidth) {
+          apart = true;
+          break;
+        }
+        std::uint32_t p;
+        if (ra == rb) {
+          if (start(q.a, q.i) != start(q.b, q.j)) {
+            apart = true;
+            break;
+          }
+          p = parent(q.a, q.i);
+          const auto other = parent(q.b, q.j);
+          if (p != other) {
+            if (p == kLlCtxNone || other == kLlCtxNone) {
+              apart = true;
+              break;
+            }
+            if (const auto* kept = _memo.find(merge_key(p, other))) {
+              p = *kept;
+              if (p == kLlCtxApart) {
+                apart = true;
+                break;
+              }
+            } else {
+              _joins.push_back({p, other});
+              pending = true;
+              break;
+            }
+          }
+          q.starts[q.n] = start(q.a, q.i);
+          ++q.i;
+          ++q.j;
+        } else if (ra < rb) {
+          q.starts[q.n] = start(q.a, q.i);
+          p = parent(q.a, q.i++);
+        } else {
+          q.starts[q.n] = start(q.b, q.j);
+          p = parent(q.b, q.j++);
+        }
+        q.pairs[2 * q.n] = std::min(ra, rb);
+        q.pairs[2 * q.n + 1] = p;
+        ++q.n;
       }
+      if (pending) continue;
+      const auto result = apart ? kLlCtxApart : intern(q.pairs, q.n, q.starts);
+      bool fresh = false;
+      _memo.at(merge_key(q.a, q.b), fresh) = result;
+      _joins.pop_back();
+      if (_joins.empty()) return result;
     }
-    return intern(out, n / 2, starts);
   }
 
   static std::uint64_t hash(const std::uint32_t* pairs, unsigned n,
@@ -328,6 +365,7 @@ class LlCtxPool {
   LlStamped<std::uint64_t, LlKeyHash> _index;
   LlStamped<std::uint64_t, LlKeyHash> _scratchIndex;
   LlStamped<std::uint64_t, LlKeyHash> _memo;
+  std::vector<Join> _joins;
   static std::atomic<std::uint64_t>& lives() {
     static std::atomic<std::uint64_t> count{0};
     return count;
@@ -348,11 +386,11 @@ struct LlConfig {
 };
 
 struct LlConfigHash {
-  std::size_t operator()(const LlConfig& c) const noexcept {
+  std::uint64_t operator()(const LlConfig& c) const noexcept {
     std::uint64_t h = c.state;
     h = (h * 1099511628211ull) ^ c.ctx;
     h = (h * 1099511628211ull) ^ c.alt;
-    return static_cast<std::size_t>(h);
+    return h;
   }
 };
 
@@ -401,9 +439,6 @@ class LlSimulation : public LlReturnPool {
   void truncated(bool on) { _truncated = on; }
   bool unbound() const { return _unbound; }
 
-  void read_returns_by_class() {
-    LlReturnPool::read_returns_by_class(_atn.returnClass);
-  }
   // Repair weighing keeps epsilon positions as unions too, not one copy per
   // route.
   void share_epsilon_contexts() {
@@ -425,13 +460,6 @@ class LlSimulation : public LlReturnPool {
     return follow == kNoFollow
                ? ctx
                : _ctx.push(ctx, follow & ~kLlTailReturn, _callFrom);
-  }
-
-  // Between two walks: the tables of the one that ended give back what the
-  // next one will not fill.
-  void trim() {
-    _seen.trim();
-    _at.trim();
   }
 
   // The contexts stand: an exploration interns them once and resumes from

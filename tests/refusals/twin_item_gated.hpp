@@ -1,6 +1,7 @@
-// Two optional positions on one symbol writing different members, in a
-// production so wide that the gate spells its first positions as auxiliaries:
-// the refusal stands as it does for a narrow one.
+// Two optional items reading the same tokens and writing different members, in
+// a sequence so wide that the gate spells its first positions as auxiliaries:
+// the second read in place of the first is named and dropped as in a narrow
+// one.
 #pragma once
 
 #include "refusals/head.hpp"
@@ -20,7 +21,7 @@ struct G : Base {
             option(lit<"2">) + option(lit<"3">) + option(lit<"4">) +
             option(lit<"5">) + option(lit<"6">) + option(lit<"7">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

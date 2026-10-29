@@ -71,7 +71,7 @@ struct Base : cursiv::GrammarSpec {
   };
 
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct G : Base {};

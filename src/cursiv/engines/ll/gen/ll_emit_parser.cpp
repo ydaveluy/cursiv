@@ -1,7 +1,10 @@
 // The descent as source: one step per rule, the program's shape spelled
 // straight out. A choice one token separates is a switch on that token; every
-// other one asks the prediction. A call is not a C++ call: the step hands its
-// frame to the machine, which runs the callee and resumes it at a label.
+// other one asks the prediction. A callee that can finish without a call of
+// its own runs in place, its frame on the native stack; any other call goes to
+// the machine, which runs it and resumes the step at a label. A rule that
+// reaches no climb and no rule that calls itself never resumes: it is a plain
+// function with no frame, unless too many of them would stand on one another.
 #include "cursiv/engines/ll/gen/ll_emit_parser.hpp"
 
 #include <algorithm>
@@ -12,8 +15,10 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/ll/gen/LlStampPlan.hpp"
+#include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
+#include "cursiv/engines/ll/gen/ll_emit_walk.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
+#include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/table/LexNode.hpp"
 
 namespace cursiv {
@@ -45,11 +50,14 @@ class Anchored {
   Anchor _outer;
 };
 
-// Shared by every rule's emitter: what a position calls and the first mode it
-// reads do not depend on the rule. A search stamps the rules it visits by
-// round, so the next one starts clean without clearing.
+// Shared by every rule's emitter: which rules are plain, whether a position
+// may suspend and the first mode it reads do not depend on the rule. A search
+// stamps the rules it visits by round, so the next one starts clean without
+// clearing.
 struct Memos {
-  std::vector<std::int8_t> calls{};
+  std::vector<std::uint8_t> plain{};
+  std::vector<std::int8_t> suspends{};
+  std::vector<std::int8_t> clean{};
   std::vector<std::uint32_t> visited{};
   std::uint32_t round = 0;
 };
@@ -77,7 +85,16 @@ struct Emit : EmitOutput {
   // What outlives a call goes in the rule's frame; the calls are numbered by
   // the label each resumes at.
   std::vector<std::pair<std::string, std::string>> fields{};
+  // The fields the open scopes hold, and the ones closed scopes gave back. A
+  // field is named only inside the scope that took it, so a later scope may
+  // take it again: positions that are never live at once share frame bytes.
+  std::vector<std::size_t> inUse{}, spare{};
   unsigned resumes = 0;
+  // A counted tail of nest turns is spelt one turn inside the other, a block
+  // deeper each: past this many the source outgrows the nesting a compiler
+  // must take, and the walk that writes it its stack.
+  static constexpr unsigned kMaxNestedTurns = 64;
+  unsigned nestedTurns = 0;
   bool exits = false;
   std::string frame{};
 
@@ -85,11 +102,36 @@ struct Emit : EmitOutput {
     if (foldAt.live()) regionAt = foldAt;
   }
 
+  // A spare field of the type if one is left, a new one otherwise.
   std::string field(std::string_view type, std::string_view stem) {
-    std::string n = name(stem);
-    fields.emplace_back(std::string(type), n);
-    return "f." + n;
+    for (std::size_t k = spare.size(); k-- > 0;)
+      if (fields[spare[k]].first == type) {
+        inUse.push_back(spare[k]);
+        spare.erase(spare.begin() + static_cast<std::ptrdiff_t>(k));
+        return "f." + fields[inUse.back()].second;
+      }
+    inUse.push_back(fields.size());
+    fields.emplace_back(std::string(type), name(stem));
+    return "f." + fields.back().second;
   }
+
+  // Open while one position's code is written: the fields taken meanwhile go
+  // back to the pool when it closes.
+  class FieldScope {
+   public:
+    explicit FieldScope(Emit& e) : _e(e), _mark(e.inUse.size()) {}
+    ~FieldScope() {
+      for (std::size_t k = _mark; k < _e.inUse.size(); ++k)
+        _e.spare.push_back(_e.inUse[k]);
+      _e.inUse.resize(_mark);
+    }
+    FieldScope(const FieldScope&) = delete;
+    FieldScope& operator=(const FieldScope&) = delete;
+
+   private:
+    Emit& _e;
+    std::size_t _mark;
+  };
 
   // Past this depth a block deepens the code and not its indentation, whose
   // bytes would grow with the square of a nest's depth.
@@ -148,13 +190,16 @@ struct Emit : EmitOutput {
   bool ladder_flat(std::uint16_t id) const;
   void ladder(std::uint16_t id);
   void call_site(std::uint16_t id);
-  bool calls(std::uint16_t id);
+  bool may_suspend(std::uint16_t id);
   bool turns(std::uint16_t id) const { return plan.turns(id); }
   bool head_turns(std::uint16_t id) const { return plan.head_turns(id); }
-  bool pins(std::uint16_t id, std::uint16_t hand) const;
   bool reaches_back(std::uint16_t id) const {
     return !inTurn && plan.reaches_back(id);
   }
+  // A rule that opens no frame and never resumes.
+  bool plain(std::uint16_t r) const { return memo.plain[r] != 0; }
+  bool clean(std::uint16_t id);
+  bool finishes(std::uint16_t r);
   void invoke(std::uint16_t callee, std::string_view arg);
   void climb(std::uint16_t r);
   void rule(std::uint16_t r);
@@ -213,71 +258,125 @@ void Emit::join(std::uint32_t base, std::uint32_t count,
 }
 
 void Emit::call_site(std::uint16_t id) {
+  const FieldScope scope(*this);
   const LlNode& n = at(id);
-  if (n.mode != kNoRow) put("::cursiv::ll_peek<kTable>(c, {}u);", n.mode);
+  if (n.mode != kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", n.mode);
   const std::uint32_t base = a.fuseBase[id];
   const std::uint32_t count = a.fuseBase[id + 1] - base;
-  const std::string was =
-      count != 0 ? field("::cursiv::NodeId", "w") : std::string{};
-  if (count != 0) put("{} = c.last;", was);
   // A section reads its grammar alone, and what its entry left is dropped
   // up to the token that closes it.
   const std::uint8_t section = a.cfg.nodeBuild[id].section;
+  // What the site keeps across a plain callee ends with it, as a group's
+  // locals do.
+  const bool held = may_suspend(id);
+  const bool scoped = !held && (count != 0 || section != 0);
+  if (scoped) {
+    line("{");
+    open();
+  }
+  const std::string was = count == 0 ? std::string{}
+                          : held     ? field("::cursiv::NodeId", "w")
+                                     : name("w");
+  if (count != 0)
+    put("{}{} = c.last;", held ? "" : "const ::cursiv::NodeId ", was);
   std::string outer;
   if (section != 0) {
-    outer = field("::cursiv::LlSection", "s");
-    put("{} = ::cursiv::ll_section_open<kTable>(c, {}u);", outer, section);
+    outer = held ? field("::cursiv::LlSection", "sec") : name("sec");
+    put("{}{} = ::cursiv::ll_section_open<kTable>(c, {}u);",
+        held ? "" : "const ::cursiv::LlSection ", outer, section);
   }
   put("c.stack.push_back({}u, c.tape.stream().records());", a.nodeFollow[id]);
   invoke(n.sym, "1u");
   line("::cursiv::ll_return(c);");
   if (section != 0) put("::cursiv::ll_section_close<kTable>(c, {});", outer);
   join(base, count, was);
+  if (scoped) {
+    close();
+    line("}");
+  }
 }
 
-// Whether a position calls a rule anywhere inside: a record open across it
+// Whether a position calls, anywhere inside, a rule that is not plain: the
+// call may leave the step to resume at a label, so a record open across it
 // keeps its handles in the frame.
-bool Emit::calls(std::uint16_t id) {
-  if (memo.calls.empty()) memo.calls.assign(a.cfg.nnodes, -1);
-  if (memo.calls[id] >= 0) return memo.calls[id] != 0;
+bool Emit::may_suspend(std::uint16_t id) {
+  if (memo.suspends.empty()) memo.suspends.assign(a.cfg.nnodes, -1);
+  if (memo.suspends[id] >= 0) return memo.suspends[id] != 0;
   const LlNode& n = at(id);
-  bool any = n.kind == LlShape::call;
+  bool any = n.kind == LlShape::call && !plain(n.sym);
   if (n.kind == LlShape::seq || n.kind == LlShape::alt)
-    for (unsigned i = 0; i < n.count; ++i) any = calls(kid(n, i)) || any;
+    for (unsigned i = 0; i < n.count; ++i) any = may_suspend(kid(n, i)) || any;
   if (n.kind == LlShape::rep) {
     // A tail of counted options is walked, never descended: it may be as
     // deep as the count.
     std::uint16_t turn = id;
     while (a.cfg.nodeBuild[turn].ladder &&
            a.cfg.nodeBuild[at(turn).sym].ladder) {
-      any = calls(kid(at(at(turn).sym), 0)) || any;
+      any = may_suspend(kid(at(at(turn).sym), 0)) || any;
       turn = kid(at(at(turn).sym), 1);
     }
-    any = calls(at(turn).sym) || any;
+    any = may_suspend(at(turn).sym) || any;
   }
-  memo.calls[id] = any ? 1 : 0;
+  memo.suspends[id] = any ? 1 : 0;
   return any;
 }
 
-// Whether a position takes the token in hand as its head terminal without
-// reading it.
-bool Emit::pins(std::uint16_t id, std::uint16_t hand) const {
-  if (hand == kNoRow || hand == kAnyToken) return false;
+// Whether a position has a reading that calls no rule with a frame.
+bool Emit::clean(std::uint16_t id) {
+  if (memo.clean.empty()) memo.clean.assign(a.cfg.nnodes, -1);
+  if (memo.clean[id] >= 0) return memo.clean[id] != 0;
   const LlNode& n = at(id);
-  if (n.kind == LlShape::term) return n.sym == hand;
-  if (n.kind == LlShape::seq) return n.count != 0 && pins(kid(n, 0), hand);
-  return false;
+  bool any = true;
+  if (n.kind == LlShape::call) any = plain(n.sym);
+  if (n.kind == LlShape::seq)
+    for (unsigned i = 0; i < n.count && any; ++i) any = clean(kid(n, i));
+  if (n.kind == LlShape::alt) {
+    any = false;
+    for (unsigned i = 0; i < n.count && !any; ++i) any = clean(kid(n, i));
+  }
+  if (n.kind == LlShape::rep && n.min != 0) any = clean(n.sym);
+  memo.clean[id] = any ? 1 : 0;
+  return any;
 }
 
-// The step returns the callee with its frame saying where it resumes; the
-// machine runs the callee, then comes back to the label. A local declared
-// before the label and read after it is a field of the frame: a jump to the
-// label skips every initialisation in front of it.
+// Whether a rule can finish where its caller runs it: a reading of it calls no
+// rule that would hand its frame over. A climb calls its primary first.
+bool Emit::finishes(std::uint16_t r) {
+  const LlRuleInfo& u = a.cfg.rules[r];
+  if (u.climb != kNoRow) {
+    const std::uint16_t primary = a.cfg.climbs[u.climb].primary;
+    return primary == kNoRow || plain(primary);
+  }
+  return u.body == kNoRow || clean(u.body);
+}
+
+// A callee that can finish in place runs there; one that calls in turn, or
+// one that cannot finish there, leaves the step to return the call to the
+// machine, its frame saying where it resumes: the machine runs the call, then
+// comes back to the label. A local declared before the label and read after it
+// is a field of the frame: a jump to the label skips every initialisation in
+// front of it. A plain callee is a plain call. The frame names the
+// label in sixteen bits: a rule whose labels outrun them is refused.
 void Emit::invoke(std::uint16_t callee, std::string_view arg) {
+  if (plain(callee)) {
+    put("s{}(c);", callee);
+    return;
+  }
+  if (resumes == 0xFFFFu)
+    refuse_lowering(std::format("rule `{}` {}", a.cfg.rule_name(inRule),
+                                lower_fail_text(LowerFail::tooManyPositions)));
   if (a.cfg.rules[callee].climb != kNoRow) put("c.arg = {};", arg);
   const unsigned k = ++resumes;
   put("f.pc = {}u;", k);
-  put("return {}u;", callee);
+  if (finishes(callee)) {
+    put("if (const ::std::uint16_t next = "
+        "::cursiv::ll_call<F{0}, &s{0}>(c, {0}u);",
+        callee);
+    put("    next != ::cursiv::kLlDone)");
+    put("  return next;");
+  } else {
+    put("return {}u;", callee);
+  }
   put("L{}:;", k);
 }
 
@@ -285,13 +384,14 @@ void Emit::invoke(std::uint16_t callee, std::string_view arg) {
 // trivia that precedes it lands outside and the record begins where the text
 // does.
 void Emit::group(std::uint16_t id, std::uint16_t hand) {
+  const FieldScope scope(*this);
   const LlNode& n = at(id);
   // An empty position has no token to wait for: it lays its own record.
   if (!n.owns || n.kind == LlShape::empty) {
     node(id, hand);
     return;
   }
-  const bool held = calls(id);
+  const bool held = may_suspend(id);
   const std::uint32_t ob = a.ownBase[id];
   const std::uint32_t oc = a.ownBase[id + 1] - ob;
   const bool step = a.cfg.nodeBuild[id].foldStep;
@@ -317,7 +417,7 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   const std::string l = !turn  ? std::string("0")
                         : held ? field("::std::uint16_t", "l")
                                : name("l");
-  if (hand == kNoRow) put("::cursiv::ll_peek<kTable>(c, {}u);", mode_of(id));
+  if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
   line("::cursiv::ll_flush_trivia<kTable>(c);");
   // Its locals end with it: a label further on in the block may not cross
   // their initialisation.
@@ -363,6 +463,11 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   node(id, hand);
   inStep = outerStep;
   inTurn = outerTurn;
+  // The hand-over ends with the group, whose fields go back to the pool.
+  if (region) {
+    ownRegion = kNoRow;
+    ownAt = {};
+  }
   // A record that opens no node states over one its body builds.
   const std::string closer =
       a.writes.chainBuild[n.row].creates ? "::cursiv::ll_close<kTable>("
@@ -395,6 +500,7 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
 // where the sequence did -- or to the caller's, where the head may have
 // reached back over it -- short of a nest, which holds what follows it.
 void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
+  const FieldScope scope(*this);
   const LlNode& n = at(id);
   const bool region = reaches_back(id);
   // A fold that owns no record anchors its steps where its base begins.
@@ -410,8 +516,8 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   } else if (region && ownRegion == id) {
     start = ownAt;
   } else if (region || folds) {
-    const bool held = calls(id);
-    if (hand == kNoRow) put("::cursiv::ll_peek<kTable>(c, {}u);", mode_of(id));
+    const bool held = may_suspend(id);
+    if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
     line("::cursiv::ll_flush_trivia<kTable>(c);");
     if (!held) {
       line("{");
@@ -485,7 +591,7 @@ void Emit::decision(std::uint16_t id) {
   const bool direct = !ended && (dec.how == LlPredict::single || !shared);
   const std::string none = name("none");
   const std::string k = name("k");
-  put("::cursiv::ll_peek<kTable>(c, {}u);", dec.mode);
+  put("::cursiv::ll_peek<kTable, {}u>(c);", dec.mode);
   if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
   if (asks) {
     put("bool {};", none);
@@ -496,11 +602,8 @@ void Emit::decision(std::uint16_t id) {
     put("{} = 0xFFFFu;", k);
   }
   // A token no arm takes: the repair names the arm it enters with the token
-  // it owes invented. An arm whose head would take the token in hand as its
-  // own is entered through a copy that reads that head again.
+  // it owes invented. Every arm is spelt once, and entered there.
   std::vector<std::string> entry(db.nalts);
-  const std::string after = name("E");
-  bool copies = false;
   put("if (!kTable.holds(kTable.dec_first({}u), c.la.sym)) {{", n.decision);
   open();
   const std::string fix =
@@ -511,18 +614,8 @@ void Emit::decision(std::uint16_t id) {
     open();
     for (std::uint16_t i = 0; i < db.nalts; ++i) {
       if (byArm[i].empty()) continue;
-      if (!pins(kid(n, i), byArm[i].size() == 1 ? byArm[i][0] : kAnyToken)) {
-        entry[i] = name("A");
-        put("case {}u: goto {};", i, entry[i]);
-        continue;
-      }
-      put("case {}u: {{", i);
-      open();
-      group(kid(n, i), kNoRow);
-      put("goto {};", after);
-      close();
-      line("}");
-      copies = true;
+      entry[i] = name("A");
+      put("case {}u: goto {};", i, entry[i]);
     }
     line("default: break;");
     close();
@@ -594,13 +687,20 @@ void Emit::decision(std::uint16_t id) {
     close();
     line("}");
   };
+  // The arm invented is entered where the switch spells it, if it does.
+  const auto invent = [&] {
+    if (!entry[dec.repair].empty())
+      put("goto {};", entry[dec.repair]);
+    else
+      group(kid(n, dec.repair), kNoRow);
+  };
   if (db.repairCost <= 1) {
     line("default: {");
     open();
     reread();
     line("if (c.invented < ::cursiv::kLlInventRun) {");
     open();
-    group(kid(n, dec.repair), kNoRow);
+    invent();
     close();
     line("}");
     line("break;");
@@ -619,7 +719,7 @@ void Emit::decision(std::uint16_t id) {
       line("if (::cursiv::ll_ends<kTable>(c, c.la.sym) && "
            "c.invented < ::cursiv::kLlInventRun) {");
       open();
-      group(kid(n, dec.repair), kNoRow);
+      invent();
       close();
       line("} else {");
       open();
@@ -634,12 +734,12 @@ void Emit::decision(std::uint16_t id) {
   }
   close();
   line("}");
-  if (copies) put("{}:;", after);
 }
 
 // One turn of a loop, or with `body` the turn of a flat chain: the choice to
 // take it, then what it reads, under the loop the chain stands in.
 void Emit::repetition(std::uint16_t id, std::uint16_t body) {
+  const FieldScope scope(*this);
   const LlNode& n = at(id);
   const LlDecision& dec = a.cfg.decisions[n.decision];
   const bool flat = body != kNoRow;
@@ -647,7 +747,14 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     ladder(id);
     return;
   }
-  const bool held = !flat && calls(n.sym);
+  const bool nested = !flat && a.cfg.nodeBuild[id].ladder;
+  if (nested && ++nestedTurns > kMaxNestedTurns)
+    refuse_lowering(std::format(
+        "rule `{}` repeats a `nest` more than {} times in a row: narrow the "
+        "range, or repeat with `many` and check the count where the tree is "
+        "read",
+        a.cfg.rule_name(inRule), kMaxNestedTurns));
+  const bool held = !flat && may_suspend(n.sym);
   // The turns are counted wherever a bound reads them: a floor guards the
   // choice, a ceiling ends the loop.
   const bool counts = !flat && (n.min != 0 || n.max != kEndless);
@@ -677,7 +784,10 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   const bool guarded = n.min != 0;
   if (guarded) put("if ({} >= {}u) {{", i, n.min);
   if (guarded) open();
-  put("::cursiv::ll_peek<kTable>(c, {});", mode);
+  if (split)
+    put("::cursiv::ll_peek<kTable>(c, {});", mode);
+  else
+    put("::cursiv::ll_peek<kTable, {}>(c);", mode);
   if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
   // A token neither turn nor exit admits ends the loop where it stands, and
   // everything after it is text nobody reads again -- one misspelt keyword
@@ -771,6 +881,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   if (levels) put("{}{} = c.indent;", held ? "" : "const auto ", level);
   if (inStep) over_fold();
   group(n.sym, guarded ? kNoRow : kAnyToken);
+  if (nested) --nestedTurns;
   // A turn that gave up hands the text back to the loop, which takes another
   // on it. A turn that read nothing would turn for ever: a repair inside it
   // may have left the cursor where it found it.
@@ -805,6 +916,7 @@ bool Emit::ladder_flat(std::uint16_t id) const {
 }
 
 void Emit::ladder(std::uint16_t id) {
+  const FieldScope scope(*this);
   std::vector<std::pair<std::uint16_t, std::uint16_t>> turns;
   bool held = false;
   for (;;) {
@@ -812,7 +924,7 @@ void Emit::ladder(std::uint16_t id) {
     const bool more = a.cfg.nodeBuild[next].ladder;
     const std::uint16_t body = more ? kid(at(next), 0) : next;
     turns.emplace_back(id, body);
-    held = calls(body) || held;
+    held = may_suspend(body) || held;
     if (!more) break;
     id = kid(at(next), 1);
   }
@@ -841,15 +953,16 @@ void Emit::ladder(std::uint16_t id) {
   }
 }
 
-// The token the point that read it already pinned down is taken as read;
-// anything else is matched or repaired.
+// The token the point that read it pinned down is taken as read; anything
+// else, or the token a repair entered the arm with, is matched or repaired.
 void Emit::leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row) {
   const LlNode& n = at(id);
   if (hand == n.sym)
-    put("::cursiv::ll_consume<kTable>(c, {}u, {}u);", row, id + 1);
-  else
-    put("::cursiv::ll_expect<kTable>(c, {}u, {}u, {}u, {}u);", n.mode, n.sym,
-        row, id + 1);
+    put("if (c.la.sym == {}u) [[likely]] ::cursiv::ll_consume<kTable>(c, {}u, "
+        "{}u); else",
+        n.sym, row, id + 1);
+  put("{}::cursiv::ll_expect<kTable, {}u, {}u>(c, {}u, {}u);",
+      hand == n.sym ? "  " : "", n.mode, n.sym, row, id + 1);
 }
 
 void Emit::node(std::uint16_t id, std::uint16_t hand) {
@@ -906,31 +1019,39 @@ void Emit::climb(std::uint16_t r) {
            LlPredict::single ||
        a.modeMulti[cl.mode] == 1 ||
        a.decEnded[a.cfg.nodes[cl.selectNode].decision] != 0);
+  // A step that groups nothing leaves the next operator of the chain to the
+  // caller, and the caller does not take what the step refused either: after a
+  // turn only an operator on a looser step goes on. Without a right-grouping
+  // operator the operand is always one step tighter, and the frame keeps no
+  // flag for it.
+  bool anyNon = false, anyRight = false;
+  for (std::uint16_t k = 0; k < cl.opCount; ++k) {
+    const Association assoc = a.cfg.climbOps[cl.opBase + k].assoc;
+    anyNon = anyNon || assoc == Association::non;
+    anyRight = anyRight || assoc == Association::right;
+  }
   for (const auto& [type, n] : {std::pair{"unsigned", "least"},
                                 {"::cursiv::CstBuilder::Open", "o"},
                                 {"::cursiv::TextOffset", "b"},
                                 {"::cursiv::NodeId", "w0"},
                                 {"::cursiv::TextOffset", "before"},
-                                {"unsigned", "prec"},
-                                {"bool", "right"},
-                                {"::cursiv::NodeId", "w1"}})
+                                {"unsigned", "prec"}})
     fields.emplace_back(type, n);
-  // A step that groups nothing leaves the next operator of the chain to the
-  // caller, and the caller does not take what the step refused either: after a
-  // turn only an operator on a looser step goes on.
-  bool anyNon = false;
-  for (std::uint16_t k = 0; k < cl.opCount; ++k)
-    anyNon = anyNon || a.cfg.climbOps[cl.opBase + k].assoc == Association::non;
+  if (anyRight) fields.emplace_back("bool", "right");
+  fields.emplace_back("::cursiv::NodeId", "w1");
   if (anyNon) {
     fields.emplace_back("unsigned", "limit");
     fields.emplace_back("bool", "non");
   }
+  // The statements, each led by a space, that state how an operator's step
+  // groups.
   const auto grouping = [&](const LlClimbOp& op) {
-    const std::string right =
-        std::format("f.right = {};", op.assoc == Association::right);
-    return anyNon ? std::format("{} f.non = {};", right,
-                                op.assoc == Association::non)
-                  : right;
+    std::string stated;
+    if (anyRight)
+      stated += std::format(" f.right = {};", op.assoc == Association::right);
+    if (anyNon)
+      stated += std::format(" f.non = {};", op.assoc == Association::non);
+    return stated;
   };
   line("f.least = c.arg;");
   if (anyNon) line("f.limit = 255u;");
@@ -938,14 +1059,14 @@ void Emit::climb(std::uint16_t r) {
   const std::uint16_t m = cl.primary != kNoRow
                               ? rule_mode(cl.primary)
                               : a.cfg.nodes[cl.primaryNode].mode;
-  put("::cursiv::ll_peek<kTable>(c, {}u);", m == kNoRow ? a.errMode : m);
+  put("::cursiv::ll_peek<kTable, {}u>(c);", m == kNoRow ? a.errMode : m);
   line("::cursiv::ll_flush_trivia<kTable>(c);");
   line("f.o = c.tape.enter();");
   line("f.b = c.la.begin;");
   line("f.w0 = c.last;");
   if (cl.primary == kNoRow) {
     const LlNode& q = a.cfg.nodes[cl.primaryNode];
-    put("::cursiv::ll_expect<kTable>(c, {}u, {}u, {}u, {}u);", q.mode, q.sym,
+    put("::cursiv::ll_expect<kTable, {}u, {}u>(c, {}u, {}u);", q.mode, q.sym,
         q.row, cl.primaryNode + 1);
   } else {
     put("c.stack.push_back({}u, c.tape.stream().records());", cl.atnEntry);
@@ -956,21 +1077,23 @@ void Emit::climb(std::uint16_t r) {
   line("if (c.give) goto done;");
   line("for (;;) {");
   open();
+  const std::uint16_t selectDec =
+      cl.selectNode != kNoRow ? a.cfg.nodes[cl.selectNode].decision : kNoRow;
   line("f.before = c.at;");
-  put("::cursiv::ll_peek<kTable>(c, {}u);", cl.mode);
+  put("::cursiv::ll_peek<kTable, {}u>(c);", cl.mode);
+  if (selectDec != kNoRow && a.decStands[selectDec] != 0)
+    put("::cursiv::ll_hold<kTable>(c);");
   // Prediction can keep the first unfinished arm at the end of a document.
   // An infix has no operator there: consuming that zero-width EOF would
   // reset the repair budget and recursively invent another operand forever.
   line("if (c.la.sym == ::cursiv::kEofSymbol) break;");
   line("f.prec = 0;");
-  line("f.right = false;");
+  if (anyRight) line("f.right = false;");
   if (anyNon) line("f.non = false;");
   bool bodies = false;
   for (std::uint16_t k = 0; k < cl.opCount; ++k)
     bodies = bodies || a.cfg.atomic_operator(
                            a.cfg.climbOps[cl.opBase + k].body) == kNoRow;
-  const std::uint16_t selectDec =
-      cl.selectNode != kNoRow ? a.cfg.nodes[cl.selectNode].decision : kNoRow;
   bool lays = false;
   for (std::uint16_t k = 0; k < cl.opCount; ++k)
     lays = lays ||
@@ -991,19 +1114,20 @@ void Emit::climb(std::uint16_t r) {
       const auto leaf = a.cfg.atomic_operator(op.body);
       if (leaf == kNoRow) {
         if (!select)
-          put("case {}u: f.prec = {}u; {} body = {}u; break;", k, op.prec,
+          put("case {}u: f.prec = {}u;{} body = {}u; break;", k, op.prec,
               grouping(op), k);
         continue;
       }
       put("case {}u:", k);
       open();
       put("f.prec = {}u;", op.prec);
-      put("{}", grouping(op));
+      if (const std::string stated = grouping(op); !stated.empty())
+        line(std::string_view(stated).substr(1));
       line("if (f.prec < f.least) break;");
       join(cl.leftBase, cl.leftCount, "f.w0");
       const auto& token = at(leaf);
-      put("::cursiv::ll_insert<kTable>(c, {}u, {}u, {}u);", token.sym,
-          token.row, leaf + 1);
+      put("::cursiv::ll_insert_planned<kTable>(c, {}u, {}u, {}u);",
+          token.sym, token.row, leaf + 1);
       put("goto {};", invented);
       close();
     }
@@ -1045,7 +1169,7 @@ void Emit::climb(std::uint16_t r) {
   for (std::uint16_t k = 0; k < cl.opCount; ++k) {
     const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
     if (select) {
-      put("case {}u: f.prec = {}u; {} break;", k, op.prec, grouping(op));
+      put("case {}u: f.prec = {}u;{} break;", k, op.prec, grouping(op));
       continue;
     }
     const auto leaf = a.cfg.atomic_operator(op.body);
@@ -1056,7 +1180,7 @@ void Emit::climb(std::uint16_t r) {
       for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
         if (a.laSet[choice.set + k].test(t))
           labels += std::format("case {}u: ", t);
-      put("{}f.prec = {}u; {} body = {}u; break;", labels, op.prec,
+      put("{}f.prec = {}u;{} body = {}u; break;", labels, op.prec,
           grouping(op), k);
       continue;
     }
@@ -1065,7 +1189,7 @@ void Emit::climb(std::uint16_t r) {
       throw std::logic_error("cursiv: an LL operator switch reads a condition");
     const auto& token = at(leaf);
     put("case {}u:", token.sym);
-    put("f.prec = {}u; {} row = {}u; pos = {}u; break;", op.prec, grouping(op),
+    put("f.prec = {}u;{} row = {}u; pos = {}u; break;", op.prec, grouping(op),
         token.row, leaf + 1);
   }
   if (select || selectDec == kNoRow) {
@@ -1105,7 +1229,7 @@ void Emit::climb(std::uint16_t r) {
         // held by the wider climb alphabet. Its terminal position reads the
         // selected spelling again before consuming the operator's own span.
         const auto& token = at(leaf);
-        put("::cursiv::ll_expect<kTable>(c, {}u, {}u, {}u, {}u);", token.mode,
+        put("::cursiv::ll_expect<kTable, {}u, {}u>(c, {}u, {}u);", token.mode,
             token.sym, token.row, leaf + 1);
       } else {
         group(op.body, kAnyToken);
@@ -1122,7 +1246,7 @@ void Emit::climb(std::uint16_t r) {
   line("if (c.give || c.at == f.before) break;");
   if (lays) put("{}:;", invented);
   line("f.w1 = c.last;");
-  invoke(r, "f.right ? f.prec : f.prec + 1");
+  invoke(r, anyRight ? "f.right ? f.prec : f.prec + 1" : "f.prec + 1");
   if (anyNon) line("f.limit = f.non ? f.prec - 1u : f.prec;");
   join(cl.rightBase, cl.rightCount, "f.w1");
   put("c.last = ::cursiv::ll_close<kTable>(c, f.o, f.b, kTable.stamp.make({}u, "
@@ -1134,8 +1258,9 @@ void Emit::climb(std::uint16_t r) {
 }
 
 // One rule, as a step: its frame holds what outlives a call, and the step
-// jumps back to the label a call resumes at. A rule entered after the rule in
-// hand gave up opens nothing.
+// jumps back to the label a call resumes at. A plain rule is a function with
+// no frame. A rule entered after the rule in hand gave up opens
+// nothing.
 void Emit::rule(std::uint16_t r) {
   const LlRuleInfo& u = a.cfg.rules[r];
   ind = 2;
@@ -1146,6 +1271,16 @@ void Emit::rule(std::uint16_t r) {
     group(u.body);
   std::string body = std::move(out);
   out.clear();
+  if (plain(r)) {
+    if (resumes != 0 || !fields.empty() || exits)
+      throw std::logic_error("cursiv: a plain LL rule resumes");
+    frame.clear();
+    out += std::format("void s{}(::cursiv::LlContext& c) {{\n", r);
+    out += "  if (c.give) {\n    c.repaired.mark();\n    return;\n  }\n";
+    out += body;
+    out += "}\n\n";
+    return;
+  }
   frame = std::format("struct F{} {{\n  ::std::uint16_t pc;\n", r);
   for (const auto& [type, n] : fields)
     frame += std::format("  {} {};\n", type, n);
@@ -1158,7 +1293,7 @@ void Emit::rule(std::uint16_t r) {
   for (unsigned k = 1; k <= resumes; ++k)
     out += std::format("    case {}u: goto L{};\n", k, k);
   out += "    default: break;\n  }\n";
-  out += "  if (c.give) {\n    c.repaired = true;\n"
+  out += "  if (c.give) {\n    c.repaired.mark();\n"
        "    return ::cursiv::kLlDone;\n  }\n";
   out += body;
   if (exits) out += "done:\n";
@@ -1166,6 +1301,40 @@ void Emit::rule(std::uint16_t r) {
 }
 
 }  // namespace
+
+// How many plain rules stand on the native stack from each rule down, zero for
+// a rule that is not plain: one with a climb, one that calls a rule that is
+// not plain -- so none reaches a rule that calls itself -- or one that would
+// stack more than `kLlPlainDepth`. Callees settle first, with no recursion: a
+// chain of rules may be as long as the grammar.
+std::vector<std::uint8_t> ll_plain_depths(const LlLowCfg& c) {
+  std::vector<std::vector<std::uint16_t>> callers(c.nrules);
+  std::vector<std::uint16_t> waits(c.nrules, 0), ready, nodes;
+  for (std::uint16_t r = 0; r < c.nrules; ++r) {
+    if (c.rules[r].climb == kNoRow && c.rules[r].body != kNoRow)
+      nodes.push_back(c.rules[r].body);
+    while (!nodes.empty()) {
+      const LlNode& n = c.nodes[nodes.back()];
+      nodes.pop_back();
+      if (n.kind == LlShape::call) callers[n.sym].push_back(r), ++waits[r];
+      for (const auto k : c.children(n)) nodes.push_back(k);
+    }
+    if (waits[r] == 0) ready.push_back(r);
+  }
+  // A rule that is not plain weighs as one at the limit.
+  std::vector<std::uint8_t> depth(c.nrules, 0), below(c.nrules, 0);
+  while (!ready.empty()) {
+    const std::uint16_t r = ready.back();
+    ready.pop_back();
+    if (c.rules[r].climb == kNoRow && below[r] < kLlPlainDepth)
+      depth[r] = below[r] + 1;
+    for (const auto p : callers[r]) {
+      below[p] = std::max(below[p], depth[r] == 0 ? kLlPlainDepth : depth[r]);
+      if (--waits[p] == 0) ready.push_back(p);
+    }
+  }
+  return depth;
+}
 
 std::string ll_emit_parser_decl(const std::string& ns) {
   std::string s;
@@ -1181,7 +1350,9 @@ std::string ll_emit_parser_decl(const std::string& ns) {
 }
 
 std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
-    const Built& a, const LlStampPlan& plan, const std::string& ns) {
+    const LlFinalProgram& done, const std::string& ns) {
+  const Built& a = done.program();
+  const LlStampPlan& plan = done.plan();
   // A bounded set of translation units keeps the optimizer from repeatedly
   // opening an entire language. The frames are declared once, so the
   // machine's unit sizes every one of them.
@@ -1193,7 +1364,7 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
     levels = levels || a.cfg.terms[t].laid == kLaidIndent ||
              a.cfg.terms[t].laid == kLaidDedent;
-  Memos memo;
+  Memos memo{.plain = ll_plain_depths(a.cfg)};
   std::string declarations(banner);
   declarations +=
       "#pragma once\n\n#include <cstdint>\n\n#include \"Parser.hpp\"\n"
@@ -1205,24 +1376,36 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   declarations += std::format("\nnamespace {} {{\n", ns);
   std::vector<std::string> bodies;
   std::size_t bytes = 0;
+  // The machine steps the rules that resume, and the entry whatever it is:
+  // a plain rule is only ever called in place.
+  std::vector<bool> stepped(a.cfg.nrules, false);
   for (std::uint16_t r = 1; r < a.cfg.nrules; ++r)
     if (live[r]) {
       Emit e{{}, a, plan, memo};
       e.levels = levels;
       e.rule(r);
-      declarations += e.frame;
-      declarations +=
-          std::format("::std::uint16_t s{}(::cursiv::LlContext&, void*);\n", r);
+      stepped[r] = !e.frame.empty();
+      if (stepped[r])
+        declarations += e.frame + std::format(
+            "::std::uint16_t s{}(::cursiv::LlContext&, void*);\n", r);
+      else
+        declarations += std::format("void s{}(::cursiv::LlContext&);\n", r);
       bytes += e.out.size();
       bodies.push_back(std::move(e.out));
     }
   declarations += std::format("}}  // namespace {}\n", ns);
   std::string steps, sizes;
+  const std::uint16_t entry = a.cfg.entryRule;
   for (std::uint16_t r = 1; r < a.cfg.nrules; ++r)
-    if (live[r])
+    if (stepped[r])
       steps += std::format("    case {}u: return s{}(c, f);\n", r, r);
+    else if (r == entry)
+      steps += std::format(
+          "    case {}u: s{}(c); return ::cursiv::kLlDone;\n", r, r);
   for (std::uint16_t r = 0; r < a.cfg.nrules; ++r)
-    sizes += live[r] && r != 0 ? std::format("sizeof(F{}), ", r) : "0u, ";
+    sizes += stepped[r]  ? std::format("sizeof(F{}), ", r)
+             : r == entry ? "sizeof(::std::uint16_t), "
+                          : "0u, ";
   const std::size_t budget =
       std::max<std::size_t>(32768, (bytes + units - 1) / units);
   std::vector<std::pair<std::string, std::string>> files;
@@ -1232,11 +1415,13 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
       std::string(banner) +
           "#include <cstdint>\n\n#include \"ParserRules.hpp\"\n" +
           "#include \"cursiv/engines/ll/runtime/LlContext.hpp\"\n" +
-          "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n\n" +
+          "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n" +
+          ll_emit_walk_includes(a) + "\n" +
+          std::format("namespace {} {{\n\n", ns) + ll_emit_walk(a) +
           std::format(
-              "namespace {} {{\nnamespace {{\n"
+              "\nnamespace {{\n"
               "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
-              "void* f) {{\n  switch (r) {{\n{}"
+              "[[maybe_unused]] void* f) {{\n  switch (r) {{\n{}"
               "    default: return ::cursiv::kLlDone;\n  }}\n}}\n"
               "constexpr ::std::uint32_t kFrameBytes[] = {{{}}};\n"
               "}}  // namespace\n"
@@ -1246,8 +1431,7 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
               "  machine.run<&step>(c, {}u, kFrameBytes);\n"
               "  c.document = false;\n}}\n"
               "}}  // namespace {}\n",
-              ns, steps, sizes, "  c.stack.reserve(64);\n",
-              a.cfg.entryRule, ns));
+              steps, sizes, "  c.stack.reserve(64);\n", entry, ns));
   std::size_t next = 0;
   for (unsigned u = 0; u < units; ++u) {
     std::string source(banner);

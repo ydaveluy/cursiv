@@ -13,6 +13,7 @@
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/syntax-tree/CstNodeView.hpp"
 #include "cursiv/core/syntax-tree/CstUtils.hpp"
+#include "cursiv/core/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/core/workspace/Document.hpp"
 
 namespace cursiv {
@@ -44,17 +45,23 @@ TextRange ValidationAcceptor::spanOf(const AstNode& node) const noexcept {
 // or in whatever a converter allocated -- is not a slice of the document, and
 // subtracting the two pointers would be undefined and wrong. The comparison is
 // on `data()`, which is the one question that can be asked of two unrelated
-// buffers without arithmetic between them.
+// buffers without arithmetic between them. A translated document's AST
+// borrows the translated text, whose spans map back to the document.
 TextRange ValidationAcceptor::spanOfName(std::string_view borrowed,
                                          const AstNode& node) const noexcept {
-  const char* const begin = _text.data();
-  const char* const end = begin + _text.size();
-  if (borrowed.data() == nullptr || _text.data() == nullptr ||
+  const SourceTranslation* const translation =
+      _cst != nullptr ? _cst->translation() : nullptr;
+  const std::string_view text =
+      translation != nullptr ? translation->text() : _text;
+  const char* const begin = text.data();
+  const char* const end = begin + text.size();
+  if (borrowed.data() == nullptr || text.data() == nullptr ||
       std::less<const char*>{}(borrowed.data(), begin) ||
       std::less<const char*>{}(end, borrowed.data() + borrowed.size()))
     return spanOf(node);
   const auto at = static_cast<TextOffset>(borrowed.data() - begin);
-  return TextRange{at, static_cast<TextOffset>(at + borrowed.size())};
+  const TextRange span{at, static_cast<TextOffset>(at + borrowed.size())};
+  return translation != nullptr ? translation->original(span) : span;
 }
 
 // Where a member was written; an anchor that missed still points at the

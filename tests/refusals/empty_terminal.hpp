@@ -10,7 +10,7 @@ struct G : Base {
   struct MaybeNum : terminal<many(d)> {};
   struct Root : rule<create<ast::Node>(some(ref<MaybeNum> + lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

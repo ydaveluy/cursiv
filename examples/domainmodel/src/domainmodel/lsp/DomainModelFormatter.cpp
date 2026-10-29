@@ -60,10 +60,10 @@ void DomainModelFormatter::formatMultilineComment(
   const auto docComment = has_doc_marker(comment.text());
   comment.replace(cursiv::AbstractFormatter::formatMultilineComment(
       comment, {.start = docComment ? "/**" : "/*",
-                       .end = "*/",
-                       .newLineStart = docComment ? " *" : "",
-                       .tagStart = docComment ? std::optional<std::string>{"@"}
-                                              : std::nullopt}));
+                .end = "*/",
+                .newLineStart = docComment ? " *" : "",
+                .tagStart = docComment ? std::optional<std::string>{"@"}
+                                       : std::nullopt}));
 }
 
 void DomainModelFormatter::formatLineComment(

@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "cursiv/engines/shared/table/ByteSet.hpp"
+#include "cursiv/engines/shared/table/LexNode.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
+#include "cursiv/engines/shared/table/TermInfo.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
 namespace cursiv {
@@ -97,5 +100,40 @@ LexOwedRows lex_owed_rows(const Dfa& d) {
   }
   return rows;
 }
+
+// An engine's automaton `View` (`LexFirstByte.hpp`, with `relay_of(k)` and
+// `tier(s, t)`, the tier of its acceptance of `t`) as `lex_owed_rows` reads
+// it: `n` states, the successors of `s` from `succ[base[s]]` on.
+template <class View>
+struct LexOwedView {
+  View v;
+  std::size_t n;
+  std::span<const std::uint32_t> base;
+  std::span<const std::uint16_t> succ;
+
+  std::size_t states() const { return n; }
+  std::span<const std::uint16_t> successors(std::uint16_t s) const {
+    return succ.subspan(base[s], base[s + 1] - base[s]);
+  }
+  std::uint16_t accept(std::uint16_t s) const { return v.accept(s); }
+  std::uint16_t relay(std::uint16_t s) const { return v.relay(s); }
+  std::vector<std::uint16_t> hops(std::uint16_t s) const {
+    std::vector<std::uint16_t> to;
+    for (auto k = v.relay(s); k != kNoRelay; k = v.relay_of(k).next)
+      if (v.relay_of(k).predicate != kNoLexNode)
+        to.push_back(v.relay_of(k).resume);
+    return to;
+  }
+  std::size_t modes() const { return v.modes(); }
+  std::uint16_t start(std::uint16_t m) const { return v.start(m); }
+  std::uint16_t next(std::uint16_t s, unsigned char b) const {
+    return v.next(s, v.cls(b));
+  }
+  bool before(std::uint16_t x, std::uint16_t y) const {
+    const unsigned tx = v.accept(x) - 1u, ty = v.accept(y) - 1u;
+    return lex_term_before(v.term(tx), v.tier(x, tx), tx, v.term(ty),
+                           v.tier(y, ty), ty);
+  }
+};
 
 }  // namespace cursiv

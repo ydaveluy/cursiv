@@ -48,7 +48,7 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"commit"> + assign<&Doc::stmt>(ref<ElseCommit>))) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 }  // namespace tlldangling

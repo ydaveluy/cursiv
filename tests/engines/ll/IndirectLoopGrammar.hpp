@@ -82,12 +82,10 @@ inline constexpr auto wrapB = [](std::string_view text,
                                  std::pmr::memory_resource* memory) {
   return wrapped<'B'>(text, memory);
 };
-using MarkA = cursiv::text_conv<wrapA>;
-using MarkB = cursiv::text_conv<wrapB>;
 
 struct Common : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Cycle : Common {
@@ -245,8 +243,8 @@ struct Cycle : Common {
   template <int>
   struct Valued {
     struct B;
-    struct A : rule<(ref<B> + lit<"x">) | (lit<"a"> + lit<"x">), MarkA> {};
-    struct B : rule<(ref<A> + lit<"y">) | lit<"a">, MarkB> {};
+    struct A : rule<as<wrapA>((ref<B> + lit<"x">) | (lit<"a"> + lit<"x">))> {};
+    struct B : rule<as<wrapB>((ref<A> + lit<"y">) | lit<"a">)> {};
     struct ReadA : rule<create<Val>(assign<&Val::text>(ref<A>))> {};
     struct ReadB : rule<create<Val>(assign<&Val::text>(ref<B>))> {};
   };
@@ -400,8 +398,8 @@ struct Shared : Common {
   template <int>
   struct FValued {
     struct W;
-    struct A : rule<ref<W> | (lit<"a"> + lit<"x">), MarkA> {};
-    struct W : rule<(ref<A> + lit<"x">) | lit<"a">, MarkB> {};
+    struct A : rule<as<wrapA>(ref<W> | (lit<"a"> + lit<"x">))> {};
+    struct W : rule<as<wrapB>((ref<A> + lit<"x">) | lit<"a">)> {};
     struct ReadA : rule<create<Val>(assign<&Val::text>(ref<A>))> {};
     struct ReadW : rule<create<Val>(assign<&Val::text>(ref<W>))> {};
   };

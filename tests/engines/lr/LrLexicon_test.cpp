@@ -201,7 +201,7 @@ void every_distinct_reading_is_a_ranked_candidate() {
   cursiv::Cst cst;
   cursiv::CstBuilder builder(cst);
   cursiv::LrContext c(text, builder);
-  c.drive = g::kDrivePtr;
+  c.drive = &g::kDrive;
   std::uint64_t read = 0;
   bool cut = false;
   const auto candidates = cursiv::lr_rescan_candidates<g::kTable>(
@@ -246,7 +246,8 @@ int run() {
     parser->nextFeaturesAt(r.cst(), at, at, out);
     bool found = false;
     for (const auto& f : out) {
-      if (parser->getGrammar().terminalText(f.feature) != word) continue;
+      const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
+      if (std::ranges::find(spellings, word) == spellings.end()) continue;
       found = true;
       CHECK(f.property == (text.starts_with("bare") ? "" : "text"));
       if (text.starts_with("bare"))
@@ -390,11 +391,12 @@ namespace mem_conv {
 namespace {
 
 cursiv::ConversionResult<std::string_view> borrowed;
-using BorrowedConverter = cursiv::text_conv<[]() -> auto& { return borrowed; }>;
+using BorrowedConverter =
+    cursiv::detail::text_conv<[]() -> auto& { return borrowed; }>;
 static_assert(cursiv::detail::DenotesText<BorrowedConverter>);
 cursiv::ConversionResult<std::string> borrowedString;
 using BorrowedStringConverter =
-    cursiv::text_conv<[]() -> auto& { return borrowedString; }>;
+    cursiv::detail::text_conv<[]() -> auto& { return borrowedString; }>;
 
 void borrowed_conversion_results_are_not_consumed() {
   std::vector<cursiv::ParseDiagnostic> diagnostics;
@@ -1121,7 +1123,7 @@ const cursiv::Parser& parser() {
 void reads(std::string_view lead, const char* text, bool clean) {
   cursiv::Cst cst;
   const std::string doc = in(lead, text);
-  cursiv::lr_parser<g::kTable>.parse(doc, cst, nullptr, g::kDrivePtr);
+  cursiv::lr_parser<g::kTable>.parse(doc, cst, nullptr, &g::kDrive);
   const bool got = cst.diagnostics().empty();
   if (got != clean) {
     std::printf("FAIL %s: %s, %zu diagnostic(s)\n", doc.c_str(),
@@ -1189,7 +1191,7 @@ void repairs_in(const std::string& doc, bool alone,
 }
 
 void repairs(const char* text, bool alone) {
-  repairs_in<g::kTable>(in("typo", text), alone, g::kDrivePtr);
+  repairs_in<g::kTable>(in("typo", text), alone, &g::kDrive);
 }
 
 // `abc;` is no reading at all, so a repair that re-reads `axbc;` as one may
@@ -1205,8 +1207,8 @@ void a_re_reading_keeps_the_guard_of_what_it_names() {
   repairs("abx ;", true);
   repairs("abx;", false);
   // A refused word of two bytes takes the match back just as a byte does.
-  repairs_in<gm::kTable>("typomulti dxef ; ;", true, gm::kDrivePtr);
-  repairs_in<gm::kTable>("typomulti dxef;;", false, gm::kDrivePtr);
+  repairs_in<gm::kTable>("typomulti dxef ; ;", true, &gm::kDrive);
+  repairs_in<gm::kTable>("typomulti dxef;;", false, &gm::kDrive);
 }
 
 // The caret's own reading of the same law: one spelling, two terminals, and
@@ -1286,7 +1288,9 @@ void a_caret_offers_only_what_the_position_reads() {
     std::vector<cursiv::NextFeature> out;
     parser().nextFeaturesAt(r.cst(), at + from, at + to, out);
     for (const cursiv::NextFeature& f : out)
-      if (parser().getGrammar().terminalText(f.feature) == want) return true;
+      for (const std::string_view s :
+           parser().getGrammar().terminalSpellings(f.feature))
+        if (s == want) return true;
     return false;
   };
   const auto offers = [&](const char* text, cursiv::TextOffset from,
@@ -1434,7 +1438,7 @@ void audit() {
   CHECK(rows.typoSuccBase.back() == rows.typoSucc.size());
   std::uint32_t stops = 0;
   std::uint64_t read = 0;
-  const LrTypoTape<A> tape{nullptr, 0, 0, nullptr, &stops, &read};
+  const LrTypoTape<A> tape{{nullptr, 0, 0, &read}, nullptr, &stops};
   for (std::uint16_t s = 0; s < A.dfaAccept.size(); ++s) {
     coverage.reserved |= A.dfa_res_set(s).any();
     CHECK(rows.lexElseBase[s] <= rows.lexElseBase[s + 1u]);

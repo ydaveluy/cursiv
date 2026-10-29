@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <format>
+#include <functional>
 #include <map>
+#include <stdexcept>
+#include <utility>
 
 #include "cursiv/engines/shared/gen/CLiteral.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
-#include "cursiv/engines/shared/gen/TypeSpelling.hpp"
 
 namespace cursiv {
 
@@ -19,18 +21,17 @@ RecordGen record_gen(std::span<const AstRowGen> rows,
   const auto read = [&](const auto& run, auto& features, bool own) {
     for (const std::uint16_t r : run) {
       const auto& row = rows[r];
-      if (row.writes || row.kind == WriteKind::flag) {
+      if (row.writes() || row.kind == WriteKind::flag) {
         features.push_back(row.feature);
         if (!named) {
           rec.feature = row.feature;
-          rec.type = row.typeName;
           rec.typeSlot = row.declType;
           rec.narrow = row.narrowSlot;
           named = true;
         }
       }
-      rec.made |= own && row.makes;
-      if (!converted && row.converts) {
+      rec.made |= own && row.makes();
+      if (!converted && row.converts() && !row.rule.empty()) {
         rec.rule = row.rule;
         converted = true;
       }
@@ -47,14 +48,17 @@ namespace {
 std::string record_literal(std::string_view s) {
   return std::format("::std::string_view{{{}, {}}}", c_literal(s), s.size());
 }
+std::string record_text(std::string_view s) {
+  return s.empty() ? std::string("{}") : record_literal(s);
+}
 
 }  // namespace
 
-std::string emit_records(std::string_view ns, std::string_view header,
-                         const std::vector<RecordTerminal>& terminals,
+std::string emit_records(std::string_view ns,
+                         const std::vector<TerminalGen>& terminals,
                          const std::vector<RecordGen>& records,
                          const AstRegistry& registry) {
-  // One function per distinct answer.
+  // One function per distinct set of members.
   std::map<std::string, std::string> bodies;
   std::string funs;
   const auto take = [&](const std::string& body, const std::string& prefix) {
@@ -68,8 +72,12 @@ std::string emit_records(std::string_view ns, std::string_view header,
     }
     return found->second;
   };
-  const auto ask = [&](const std::vector<std::string_view>& set,
+  // The comparison is a set: the same members, in any order and however often
+  // listed, give one function.
+  const auto ask = [&](std::vector<std::string_view> set,
                        const std::string& prefix) {
+    std::ranges::sort(set);
+    set.erase(std::ranges::unique(set).begin(), set.end());
     std::string body;
     if (set.empty()) {
       body = "bool @(::std::string_view) { return false; }";
@@ -82,69 +90,75 @@ std::string emit_records(std::string_view ns, std::string_view header,
     }
     return take(body, prefix);
   };
-  const auto say = [&](std::string_view text, const std::string& prefix) {
-    return take("::std::string_view @() { return " +
-                    (text.empty() ? std::string("::std::string_view{}")
-                                  : record_literal(text)) +
-                    "; }",
-                prefix);
+  // One pool of the names answers give, the empty one first.
+  std::map<std::string_view, std::size_t> nameIds{{std::string_view{}, 0}};
+  std::vector<std::string_view> names{std::string_view{}};
+  const auto name_of = [&](std::string_view text) {
+    const auto [at, fresh] = nameIds.try_emplace(text, names.size());
+    if (fresh) names.push_back(text);
+    return at->second;
+  };
+  // A record names its member's class by its index in the AST tables.
+  const auto type_of = [&](const RecordGen& rec) -> std::string {
+    if (rec.typeSlot == detail::kNoIndex) return "::cursiv::detail::kNoIndex";
+    if (rec.typeSlot >= registry.types.size())
+      throw std::logic_error(std::format(
+          "a record writes class {}, past the {} of the AST registry",
+          rec.typeSlot, registry.types.size()));
+    return std::format("{}u", rec.typeSlot);
   };
 
-  std::vector<std::string> w, f, g, r;
+  // One answer per distinct row, in the order first met.
+  std::map<std::string, std::size_t> answerIds;
+  std::vector<std::string> answers;
+  std::vector<std::size_t> recordAnswers;
   for (const RecordGen& rec : records) {
     std::vector<std::string_view> writes = rec.made ? rec.over : rec.held;
     if (!rec.made)
       writes.insert(writes.end(), rec.over.begin(), rec.over.end());
-    w.push_back(ask(writes, "w"));
-    f.push_back(
-        ask(rec.made ? rec.held : std::vector<std::string_view>{}, "l"));
-    g.push_back(say(rec.feature, "g"));
-    r.push_back(say(rec.rule, "r"));
+    const std::string w = ask(std::move(writes), "w");
+    const std::string f =
+        ask(rec.made ? rec.held : std::vector<std::string_view>{}, "l");
+    const std::size_t g = name_of(rec.feature);
+    const std::size_t r = name_of(rec.rule);
+    const std::string answer =
+        std::format("{{&{}, &{}, {}u, {}u, {}}}", w, f, g, r, type_of(rec));
+    const auto [at, fresh] = answerIds.try_emplace(answer, answers.size());
+    if (fresh) answers.push_back(answer);
+    recordAnswers.push_back(at->second);
   }
+  if (answers.size() > 0xFFFFu)
+    throw std::runtime_error(
+        "this grammar's records answer in more distinct ways than a record's "
+        "answer index can name");
+  if (names.size() > 0xFFFFu)
+    throw std::runtime_error(
+        "this grammar's records give more distinct names than an answer's "
+        "name index can name");
 
-  // The grammar's header first, in angle brackets: it declares the type
-  // `Grammar.hpp` specialises the door for, and quoted it would find a
-  // generated sibling of its name.
   std::string out = std::format(R"(// generated by cursiv gen -- do not edit
-#include <{0}>
 #include "Grammar.hpp"
 
 #include <cstdint>
 #include <string_view>
 
+#include "AstReflection.hpp"
 #include "cursiv/core/grammar/GrammarMetaData.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-{1}
 
-namespace {2} {{
+namespace {0} {{
 namespace grammar_detail {{
 
 )",
-                                header, registry.boundTypes
-                                    ? "#include \"cursiv/engines/shared/gen/GrammarBindings.hpp\""
-                                    : "", ns);
+                                ns);
   out += funs;
   out += '\n';
-  const auto table = [&](std::string_view type, std::string_view name,
-                         const std::vector<std::string>& v) {
-    out += emit_table(
-        std::format("constexpr ::cursiv::GrammarMetaData::{} {}[]", type, name),
-        v, [](const std::string& s) { return "&" + s; }, "nullptr");
-  };
-  table("AskFn", "kWrites", w);
-  table("AskFn", "kFills", f);
-  table("SayFn", "kFeatures", g);
-  table("SayFn", "kRules", r);
+  out += emit_table("constexpr ::cursiv::GrammarMetaData::Answer kAnswers[]",
+                    answers, std::identity{}, "{}");
   out += emit_table(
-      "constexpr const ::cursiv::AstTypeTag* kRecordTypes[]", records,
-      [&](const RecordGen& rec) {
-        const auto& type = rec.typeSlot < registry.types.size()
-            ? registry.types[rec.typeSlot].source : std::string{};
-        return rec.type.empty() ? std::string("nullptr")
-                                : std::format("&::cursiv::ast_type_tag<{}>",
-                                              gen_qualified(type.empty() ? rec.type : type));
-      },
-      "nullptr");
+      "constexpr ::std::uint16_t kRecordAnswers[]", recordAnswers,
+      [](std::size_t a) { return std::format("{}u", a); }, "0u");
+  out +=
+      emit_table("constexpr ::std::string_view kNames[]", names, record_text);
 
   // A null table reads `kNoNarrow` everywhere.
   const bool anyNarrow = std::ranges::any_of(
@@ -154,25 +168,43 @@ namespace grammar_detail {{
         "constexpr ::std::uint8_t kNarrows[]", records,
         [](const RecordGen& rec) { return std::format("{}", rec.narrow); });
 
+  // The words of every terminal in one pool, a list the pool already holds in
+  // a row read there again: a grammar that spells none writes no pool, and
+  // its rows no spellings.
+  std::vector<std::string_view> spellings;
+  std::vector<std::size_t> spellingAt;
+  for (const TerminalGen& t : terminals) {
+    const auto run = std::ranges::search(spellings, t.spellings);
+    spellingAt.push_back(
+        static_cast<std::size_t>(run.begin() - spellings.begin()));
+    if (run.empty())
+      spellings.insert(spellings.end(), t.spellings.begin(), t.spellings.end());
+  }
+  if (!spellings.empty())
+    out += emit_table("constexpr ::std::string_view kSpellings[]", spellings,
+                      record_literal);
+
+  std::size_t row = 0;
   out += emit_table(
       "constexpr ::cursiv::GrammarTerminal kTerminals[]", terminals,
-      [](const RecordTerminal& t) {
-        const std::string word = record_literal(t.word);
-        const std::string doc =
-            t.doc.empty() ? std::string("{}") : record_literal(t.doc);
-        return std::format("{{{}, {}, {}, {}}}", t.spelled ? word : "{}",
-                           t.spelled ? "{}" : word, doc, t.folded);
+      [&](const TerminalGen& t) {
+        std::string cell = std::format("{{{}, {}, {}", record_text(t.name),
+                                       record_text(t.doc), t.folded);
+        if (!t.spellings.empty())
+          cell += std::format(", {{kSpellings + {}, {}u}}", spellingAt[row],
+                              t.spellings.size());
+        ++row;
+        return cell + '}';
       },
       "{}");
   out += std::format(R"(
 }}  // namespace grammar_detail
 
 constexpr ::cursiv::GrammarMetaData kGrammarMetaData{{
-    .writes = grammar_detail::kWrites,
-    .fills = grammar_detail::kFills,
-    .features = grammar_detail::kFeatures,
-    .rules = grammar_detail::kRules,
-    .types = grammar_detail::kRecordTypes,
+    .answers = grammar_detail::kAnswers,
+    .recordAnswers = grammar_detail::kRecordAnswers,
+    .names = grammar_detail::kNames,
+    .ast = &kAstMetaData,
 )");
   if (anyNarrow) out += "    .narrows = grammar_detail::kNarrows,\n";
   out += std::format(R"(    .recordCount = {0}u,

@@ -328,7 +328,9 @@ bool one_text([[maybe_unused]] typename F::owner& o,
       } else if constexpr (detail::ConvertsText<CR>) {
         return accept<F, A>(o, ar, CR::convert(text));
       } else {
-        return false;  // a converter reading `Parts` is not modelled
+        // A converter reading `Parts`, or a value a data rule passes on, is
+        // not modelled.
+        return false;
       }
     } else if constexpr (std::is_void_v<A> || !has_default_convert<A>) {
       return false;
@@ -399,7 +401,7 @@ consteval MakeFn make_entry() {
     // A climb builds one node per fold; a rule whose alternatives build no
     // head node carries the creation, its own element making it.
     if constexpr (is_infix_rule<T>)
-      return &make_node<rule_type_t<T>>;
+      return &make_node<typename T::node_type>;
     else if constexpr (is_node_rule<T> && rule_creates<C, T>)
       return &make_node<rule_type_t<T>>;
     else
@@ -428,10 +430,12 @@ struct ops_of_level<C, TypeList<As...>, Prec, Right> {
 };
 
 // The operators as declared: substituting the word boundary into a `kw<>`
-// guard is the lowering's reading of them, not the author's.
-template <class Lvls, std::size_t I>
+// guard is the lowering's reading of them, not the author's. The chains
+// written are binary: a unary level offers none.
+template <class Lvls, std::size_t I, class L = typename Lvls::template at<I>>
 using level_alts_t =
-    typename detail::alts_list<typename Lvls::template at<I>::op_expr>::type;
+    detail::cond_t<is_unary_level<L>, TypeList<>,
+                   typename detail::alts_list<typename L::op_expr>::type>;
 
 template <class C, class R, class Is>
 struct infix_ops;

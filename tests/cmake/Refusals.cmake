@@ -100,11 +100,17 @@ if(NOT CMAKE_CROSSCOMPILING)
       "this directive writes a member of a class the node in hand may not be")
   cursiv_refusal(unordered_write_order
       "[ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Node::name")
+  cursiv_refusal(unordered_one_item
+      "an unordered group needs at least two items: .unordered.a, b.")
+  cursiv_refusal(levels_of_an_operator
+      "levels.[.][.][.]. lists the levels of a table, tightest-binding first")
   cursiv_refusal(nullable_repetition_inner
       "refused .nullableRepetition..*rule .X. repeats an item that may match nothing.*X returns Pair" LR LL)
   cursiv_refusal(hidden_left_recursion
       "refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind an item that may match nothing" LR)
   cursiv_refusal(hidden_left_recursion_gated
+      "refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind more than 7 optional items" LR)
+  cursiv_refusal(hidden_left_recursion_behind
       "refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind more than 7 optional items" LR)
   cursiv_refusal(hidden_left_recursion_edges
       "refused .hiddenLeftRecursion..*rule .Type. reaches itself at its left edge behind more than 7 optional items" LR)
@@ -131,13 +137,20 @@ if(NOT CMAKE_CROSSCOMPILING)
       "refusal_left_recursion_indirect_ll: terms=" LL)
   cursiv_refusal(left_recursion_indirect
       "refusal_left_recursion_indirect: states=" LR)
+  # A call inside a repetition: LR reads it, the descent refuses it.
+  cursiv_refusal(left_recursion_repeated
+      "refusal_left_recursion_repeated: states=" LR)
+  cursiv_refusal(left_recursion_repeated
+      "refused .leftRecursion..*rule .Path. reaches itself before matching anything inside a repetition" LL)
   # ...and the grammars both refuse, each in its own words.
   cursiv_refusal(unit_cycle
       "refused .leftRecursion..*rule .A. reaches itself before matching anything.*cycle: .A. -> .B. -> .A." LL)
   cursiv_refusal(hidden_left_recursion
       "refused .leftRecursion..*rule .Type. reaches itself before matching anything" LL)
   cursiv_refusal(hidden_left_recursion_gated
-      "refused .leftRecursion..*rule .Type. reaches itself before matching anything" LL)
+      "refused .leftRecursion..*rule .Type. reaches itself before matching anything inside a repetition or behind optional items.*at most 7 optional items" LL)
+  cursiv_refusal(hidden_left_recursion_behind
+      "refused .leftRecursion..*rule .Type. reaches itself before matching anything inside a repetition or behind optional items.*at most 7 optional items" LL)
   cursiv_refusal(hidden_left_recursion_edges
       "refused .leftRecursion..*rule .Type. reaches itself before matching anything" LL)
   cursiv_refusal(hidden_left_recursion_condition
@@ -155,10 +168,20 @@ if(NOT CMAKE_CROSSCOMPILING)
     cursiv_refusal(${_case}
         "refused: rule .Root. holds an unordered group of too many items" LR LL)
   endforeach()
+  # An item that may read nothing and is no optional item, refused by both
+  # engines in one sentence that names it...
+  cursiv_refusal(unordered_empty_item
+      "refused .nullableUnorderedItem..*rule .Root. holds an unordered item that may match nothing, .\"final\"[?] \"static\"[?].: an unordered item must read input" LR LL)
+  # ...and an optional item in a group that holds a nest.
+  cursiv_refusal(unordered_optional_nest
+      "refused .nullableUnorderedItem..*rule .Root. holds an optional unordered item, .*Wrap.inner=.*, in a group whose items hold a .nest." LR LL)
   cursiv_refusal(repeat_too_many
       "refused: the grammar spells a right-hand side of more than 65 535 positions" LR)
   cursiv_refusal(repeat_too_many
       "refused: rule .Root. lowers to more than 65 535 positions" LL)
+  # A counted tail of nest turns, one block deeper each in the LL source.
+  cursiv_refusal(nest_turns_too_many
+      "refused: rule .Root. repeats a .nest. more than 64 times in a row" LL)
   # The graph counts a state per subset of the conditions read under a token.
   cursiv_refusal(conditions_state_index
       "refused by the 16-bit index of an LR state, counted before minimisation" LR)
@@ -176,12 +199,28 @@ if(NOT CMAKE_CROSSCOMPILING)
       "refused: terminal .(WS|NOTE). is trivia that reads the same text as another trivia terminal")
   cursiv_refusal(trivia_tied_guarded
       "refused: terminal .NOTE. is trivia that reads the same text as another trivia terminal")
+  cursiv_refusal(trivia_tied_nested
+      "refused: terminal .NOTE. is trivia that reads the same text as another trivia terminal")
+  # Two trivia the check cannot follow past a capture: a warning from both
+  # generators, and the grammar stands.
+  cursiv_refusal(trivia_tied_unsure
+      "warning: terminals .LONG. and .TAG. are trivia, and the check that they never read the same text at the same length and rank could not be completed" LR LL)
+  # Nor past an assertion it does not read, whether the trivia tie where it
+  # holds or never do, nor past too many assertions at one position.
+  cursiv_refusal(trivia_tied_asserted
+      "warning: terminals .(NOTE|SKIP). and .(NOTE|SKIP). are trivia, and the check that they never read the same text at the same length and rank could not be completed")
+  cursiv_refusal(trivia_tied_apart
+      "warning: terminals .(MARK|NOTE). and .(MARK|NOTE). are trivia, and the check that they never read the same text at the same length and rank could not be completed")
+  cursiv_refusal(trivia_tied_many_assertions
+      "warning: terminals .(WS|NOTE). and .(WS|NOTE). are trivia, and the check that they never read the same text at the same length and rank could not be completed")
   cursiv_refusal(doc_conflict
       "refused .docConflict..*rule .Root. documents one word twice with different prose")
-  cursiv_refusal(twin_productions
-      "refused .twinProductions..*rule .Root. holds two alternatives that spell the same symbols" LR LL)
-  cursiv_refusal(twin_productions_gated
-      "refused .twinProductions..*rule .Root. holds two alternatives that spell the same symbols" LR LL)
+  # An alternative, or an optional item, that reads what an earlier one reads:
+  # a warning from both generators, and the twin is dropped.
+  cursiv_refusal(twin_branch
+      "warning: rule .Root.: branch 2 of 2 .b=ID. reads the same tokens as branch 1, so it is never chosen and is dropped" LR LL)
+  cursiv_refusal(twin_item_gated
+      "warning: rule .Root.: ..b=ID... reads the same tokens as the earlier ..a=ID..., so reading it in place of that item is never chosen and is dropped" LR LL)
   cursiv_refusal(optional_condition
       "refused .optionalCondition..*rule .Root. makes a condition optional" LR LL)
   cursiv_refusal(optional_end_mark
@@ -194,6 +233,12 @@ if(NOT CMAKE_CROSSCOMPILING)
       "states more than 255 gap conditions, or more implied tokens than a reading holds a bit for" LR)
   cursiv_refusal(region_boundary_shared
       "refused: the grammar reaches one point through a .* region and outside it at once" LR)
+  # The same where a called rule that may read nothing ends the region.
+  cursiv_refusal(region_called_tail
+      "refused: the grammar reaches one point through a .* region and outside it at once" LR LL)
+  # ...and where that rule ends on a condition, which reads past the region.
+  cursiv_refusal(region_called_tail_cond
+      "refused: the grammar reaches one point through a .* region and outside it at once" LR LL)
   # A region whose last part may go on or leave, the end of input behind it.
   cursiv_refusal(region_counted_tail
       "refused: the grammar reaches one point through a .* region and outside it at once" LR LL)
@@ -213,8 +258,15 @@ if(NOT CMAKE_CROSSCOMPILING)
       "refused: the grammar reaches one point inside a .section<>. and outside it at once" LR LL)
   cursiv_refusal(section_end_shared
       "refused: the grammar closes a .section<>. on a token the embedded grammar reads" LR LL)
+  # A closing token the check meets only where an assertion holds, or beside
+  # a terminal that calls itself, whether or not they meet: a warning, and the
+  # grammar stands.
+  cursiv_refusal(section_end_asserted
+      "warning: terminal ... closes a .section<>., and the check that ...., a terminal its grammar reads, neither reads it nor begins with it could not be completed" LR LL)
   cursiv_refusal(section_end_recursive
-      "refused: the grammar closes a .section<>. on a token the embedded grammar reads" LR LL)
+      "warning: terminal .END. closes a .section<>., and the check that .Inner::REGION., a terminal its grammar reads, neither reads it nor begins with it could not be completed" LR LL)
+  cursiv_refusal(section_end_recognized
+      "warning: terminal .a!. closes a .section<>., and the check that .Inner::RUN., a terminal its grammar reads, neither reads it nor begins with it could not be completed")
   cursiv_refusal(section_indent
       "a grammar embedded with .section<>. reads no indentation" LR)
   cursiv_refusal(rescue_scalars
@@ -235,15 +287,24 @@ if(NOT CMAKE_CROSSCOMPILING)
       "refused .precedenceClash..*rule .Sum. names the same operator text on two levels" LR LL)
   cursiv_refusal(precedence_clash_sequence
       "refused .precedenceClash..*rule .Sum. names the same operator text on two levels" LR LL)
-  cursiv_refusal(precedence_clash_grouping
-      "refused .precedenceClash..*rule .Inner. names the same operator text on two levels" LR LL)
+  cursiv_refusal(prefix_precedence_clash
+      "refused .precedenceClash..*rule .Sum. names the same operator text on two levels")
+  cursiv_refusal(postfix_binary_clash
+      "refused .postfixBinaryClash..*rule .Sum. reads .!. as a postfix operator on level 1 and as a binary operator on level 3" LR LL)
+  # A text the check cannot list may be shared: refused alike.
+  cursiv_refusal(postfix_binary_clash_unlisted
+      "refused .postfixBinaryClash..*rule .Sum. cannot compare the text of the postfix operator on level 1 with the binary operator on level 2" LR LL)
   # An infix body carries no directive, so nothing else can refuse an
   # operand the climb never fills.
   cursiv_refusal(infix_operand_mismatch
       "this member holds a node of its own type")
+  cursiv_refusal(infix_member_count
+      "an infix rule names zero or three members")
   cursiv_refusal(infix_operator_not_text
       "refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node" LR LL)
   cursiv_refusal(infix_operator_sequence_node
+      "refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node" LR LL)
+  cursiv_refusal(infix_operator_scoped_condition
       "refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node" LR LL)
   cursiv_refusal(infix_operator_not_enumerator
       "[ '‘]EnumLiteral.*refuse::ast::Bin::op.*[+].*refuse::Op::add.*refuse::Op::mul")
@@ -303,6 +364,28 @@ if(NOT CMAKE_CROSSCOMPILING)
       "a condition reads a data rule that reaches itself")
   cursiv_refusal(commit_terminal
       "a commit stands in a rule, not in a terminal")
+  cursiv_refusal(as_nested
+      "as<X>.as<Y>.e.. is refused: compose the two conversions in one function")
+  cursiv_refusal(as_generic_function
+      "as<f>.e.: f accepts more than one input")
+  cursiv_refusal(as_inside_terminal
+      "inside a terminal, as<X>.e. wraps the whole body or each of its alternatives")
+  foreach(_case IN ITEMS as_branch_partial as_branch_and_body)
+    cursiv_refusal(${_case}
+        "inside a terminal, as<X>.e. wraps the whole body or each of its alternatives")
+  endforeach()
+  cursiv_refusal(as_branch_type
+      "inside a terminal, as<V>.e. on an alternative names a constant")
+  cursiv_refusal(as_branch_pattern
+      "inside a terminal, an alternative with its own as<V>.e. reads words only")
+  cursiv_refusal(as_branch_types
+      "inside a terminal, the constants of the alternatives. as<V>.e. have different types")
+  cursiv_refusal(as_over_directive
+      "as<X>.e. converts text, and this e writes the AST")
+  cursiv_refusal(as_over_node
+      "as<X>.e. gives a value to text, and this e builds an AST node")
+  cursiv_refusal(data_rule_mixed_values
+      "the alternatives of this data rule pass values of different types")
   foreach(_case IN ITEMS commit_outside commit_choice)
     cursiv_refusal(${_case}
         "commit.prefix, body. stands only as the direct item of option, many, some or repeat")
@@ -319,11 +402,11 @@ if(NOT CMAKE_CROSSCOMPILING)
   cursiv_refusal(through_echo_unmarked
       "echoes a mark<> not set in its scope")
   cursiv_refusal(nonterminal_ignore
-      ".ignore., .hidden. and .skip... list terminals only")
+      ".ignored., .hidden. and .skip... list terminals only")
   cursiv_refusal(nonterminal_hidden
-      ".ignore., .hidden. and .skip... list terminals only")
+      ".ignored., .hidden. and .skip... list terminals only")
   cursiv_refusal(trivia_in_both_lists
-      "belongs to at most one of .ignore. and .hidden.")
+      "belongs to at most one of .ignored. and .hidden.")
   cursiv_refusal(class_not_scalar
       "names a value that is no scalar" LR)
   cursiv_refusal(class_unknown_escape
@@ -386,6 +469,9 @@ if(NOT CMAKE_CROSSCOMPILING)
   # pinned the same way.
   cursiv_refusal(nested_run
       "warning: rule .Root.: .*repeats a run, so a run of items reads as one group")
+  # A word-like literal with no guard, from both generators.
+  cursiv_refusal(word_literal
+      "warning: rule .Root.: .'begin'. is a literal with no guard that ends in a word character, so it also matches the start of a longer word.*write .kw<.begin.>." LR LL)
   # The CLI diagnostic; wrapped and conditional shapes are covered by
   # NonConsuming_test's self-bounded-arm checks.
   cursiv_refusal(self_bounded_plain
@@ -396,7 +482,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "calls a rule that builds a node after the node in hand was written, created or nested")
   endforeach()
   foreach(_case IN ITEMS call_inside_create call_before_create
-                         call_twice call_in_nest)
+                         call_twice call_twice_chain call_in_nest)
     cursiv_refusal(${_case}
         "this alternative can create twice")
   endforeach()
@@ -434,6 +520,12 @@ if(NOT CMAKE_CROSSCOMPILING)
       "[ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Holder::first")
   cursiv_refusal(member_written_each_turn
       "[ '‘]WrittenEachTurn<.*refuse::G::Root.*refuse::ast::Holder::first")
+  # A node created in place, as a directive's operand, is held to it too.
+  foreach(_case IN ITEMS member_written_twice_in_place
+                         member_written_twice_appended)
+    cursiv_refusal(${_case}
+        "[ '‘]WrittenAgain<.*refuse::G::Root.*refuse::ast::Node::name")
+  endforeach()
   # One directive per storage, and `flag` on a bool.
   cursiv_refusal(assign_on_vector
       "names the ONE value a member takes, and this member is a .vector<T>. list")

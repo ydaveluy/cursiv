@@ -1,16 +1,9 @@
 # Test helpers
 
-`cursiv::test` provides document-building helpers, diagnostic assertions and
-expectations for editor features. See [Test your language](../learn/testing.md)
-for complete test programs using the Recipe language.
-
-Link your test target to `cursiv::test`. Add `cursiv::lsp` when using the
-diagnostic or editor expectation headers:
-
-```cmake
-target_link_libraries(mylang_test
-    PRIVATE mylangCore cursiv::test cursiv::lsp)
-```
+`cursiv::test` builds test documents and checks diagnostics and editor
+features. Link it to your test target, with `cursiv::lsp` for the diagnostic
+and editor expectations. [Test your language](../learn/testing.md) shows
+complete test programs.
 
 ## Build a test document
 
@@ -18,11 +11,10 @@ target_link_libraries(mylang_test
 |---|---|
 | `parseHelper(services, text, options)` | A registered and built `std::shared_ptr<Document>` |
 | `parseDocument(services, text, options)` | The same; throws `ExpectationError` if no AST was built |
-| `validationHelper(services, text, options)` | A `ValidationResult` containing the document and diagnostics |
+| `validationHelper(services, text, options)` | A `ValidationResult` with the document and its diagnostics |
 
-All three resolve references and run validation by default. Set
-`options.validation = false` to skip validation. For parsing alone, call
-`services.parser->parse(text)`.
+These helpers resolve references and validate; set `options.validation = false`
+to skip validation. To parse only, call `services.parser->parse(text)`.
 
 ## Check diagnostics
 
@@ -40,8 +32,6 @@ ct::expectError(result, "This ingredient is already used in this recipe.");
 result.dispose();
 ```
 
-Also test a valid document with `ct::expectNoIssues(result)`.
-
 | Helper | Checks |
 |---|---|
 | `expectError` | An error with the expected message |
@@ -49,24 +39,14 @@ Also test a valid document with `ct::expectNoIssues(result)`.
 | `expectNoIssues` | No diagnostics |
 | `expectIssue` | A diagnostic matching the supplied options |
 
-Messages can be exact text or a predicate accepting `std::string_view`.
-Options can restrict the match to an offset, length, range, diagnostic code,
-node or property. Every supplied option must match.
-
-## Clean up documents
-
-A `ValidationResult` has an explicit `dispose()` method that removes its
-document from the workspace. Call it when reusing the same workspace across
-tests, so declarations from one case do not affect the next.
-Destruction alone does not call `dispose()`.
-
-For documents returned by `parseHelper` or `parseDocument`, use
-`clearDocuments(services)` to remove the workspace's test documents.
+A message is exact text or a predicate on `std::string_view`. Options can
+restrict the match to an offset, length, range, diagnostic code, node or
+property; every option supplied must match.
 
 ## Check editor features
 
-Editor helpers take text containing markers: `<|>` marks a caret, and
-`<|text|>` marks an expected range.
+Editor helpers take text with markers: `<|>` for the caret and `<|text|>` for
+an expected range.
 
 | Helper | Checks |
 |---|---|
@@ -82,8 +62,7 @@ Editor helpers take text containing markers: `<|>` marks a caret, and
 | `expectSemanticToken` | Semantic highlighting |
 | `expectFormatting` | Formatted text |
 
-For example, include `cursiv/test/ExpectedHover.hpp` to check hover. Given a
-Recipe LSP services container named `services`:
+For example, with `cursiv/test/ExpectedHover.hpp` and Recipe LSP `services`:
 
 ```cpp
 (void)ct::expectHover(services,
@@ -93,8 +72,13 @@ Recipe LSP services container named `services`:
      .disposeAfterCheck = true});
 ```
 
-These helpers return a `Disposable`: call `dispose()` to remove the document,
-or set `disposeAfterCheck = true` to remove it after the check.
+## Clean up documents
+
+Test documents stay in the workspace until you remove them; destroying a
+result does not. When tests share a workspace, remove them so one case's
+declarations do not leak into the next: call `dispose()` on a `ValidationResult` or on the
+`Disposable` an editor helper returns (or set `disposeAfterCheck = true`), and
+`clearDocuments(services)` for `parseHelper` and `parseDocument` documents.
 
 ## Assertions and the test exit code
 
@@ -106,18 +90,15 @@ Include `cursiv/test/Check.hpp`:
 | `count_expectations()` | Count failed expectations rather than throwing |
 | `report("name")` | Print the result and return a test exit code |
 
-Call `count_expectations()` before the `expect*` helpers if you want a test
-to report all failures. Return `report("name")` from `main` so CTest sees the
-result.
+Call `count_expectations()` first to report every failure, and return
+`report("name")` from `main` so CTest sees the result.
 
 ## Recovery and fuzz
 
-For larger languages, add recovery and generated-input tests:
-
-`cursiv/test/RecoveryLane.hpp` compares repairs of invalid documents with
-a reference file you can regenerate using `--write`. It independently checks
-that repaired input is reported as repaired.
-
-`cursiv/fuzz/FuzzRun.hpp` generates documents and checks their trees against
-the grammar directives, reporting coverage. Each complete example language
-includes both kinds of test in its `tests/` directory.
+`cursiv/test/RecoveryLane.hpp` compares the repairs of broken documents with
+a reference file, regenerated with `--write`. Where an engine repairs a
+document differently, its own `REFERENCE-ll.txt` or `REFERENCE-lr.txt` sits
+beside the shared `REFERENCE.txt`: create it as a copy of the shared file, and
+`--write` then refreshes it. `cursiv/fuzz/FuzzRun.hpp`
+generates documents, checks their trees against the grammar and reports
+coverage. Each example language has both tests in its `tests/` directory.

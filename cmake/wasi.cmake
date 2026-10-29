@@ -59,7 +59,7 @@ if(CURSIV_WASI_THREADS)
   # A shared memory must declare its maximum at link time (wasm format). It is
   # an addressing cap, not a reservation: pages are committed as the heap
   # grows. Must be a multiple of 65536; 4 GiB is the wasm32 ceiling.
-  # The 100,000-level LL stress test exceeds 1 GiB with mimalloc.
+  # The 100,000-level LL stress test needs about 1 GiB with mimalloc.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
       "Shared-memory maximum handed to the linker (bytes)")
   # Clang already selects shared memory for the threaded target.

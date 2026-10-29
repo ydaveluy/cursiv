@@ -22,7 +22,7 @@ namespace cursiv {
 struct RepairBudget;
 }
 
-namespace recovery_metric {
+namespace cursiv::recovery_metric {
 
 inline constexpr std::array<std::string_view, 8> kCeilings = {
     "search", "look", "bounded", "reach", "budget", "degraded", "replan",
@@ -64,4 +64,4 @@ inline std::string source_file(std::string_view path) {
   return ss.str();
 }
 
-}  // namespace recovery_metric
+}  // namespace cursiv::recovery_metric

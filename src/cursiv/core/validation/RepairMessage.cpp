@@ -24,12 +24,11 @@ std::vector<std::string_view> expected_spellings(const Grammar& grammar,
                                                  std::size_t limit) {
   std::vector<std::string_view> spellings;
   const auto add = [&](ElementId owed) {
-    if (owed == kNoElement || spellings.size() >= limit) return;
-    const std::string_view text = grammar.terminalText(owed);
-    if (text.empty()) return;
-    for (const std::string_view had : spellings)
-      if (had == text) return;
-    spellings.push_back(text);
+    if (owed == kNoElement) return;
+    for (const std::string_view text : grammar.terminalSpellings(owed))
+      if (spellings.size() < limit &&
+          std::ranges::find(spellings, text) == spellings.end())
+        spellings.push_back(text);
   };
   if (limit == 0) return spellings;
   add(d.element);

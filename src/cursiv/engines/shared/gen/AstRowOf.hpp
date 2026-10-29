@@ -24,7 +24,6 @@
 #include "cursiv/engines/shared/gen/RowOf.hpp"
 #include "cursiv/engines/shared/gen/WritesOnce.hpp"
 #include "cursiv/engines/shared/gen/ast_refusals.hpp"
-#include "cursiv/engines/shared/gen/kind_as_act.hpp"
 #include "cursiv/engines/shared/gen/reached.hpp"
 #include "cursiv/engines/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/engines/shared/runtime/ast_conv.hpp"
@@ -55,7 +54,7 @@ consteval const AstTypeTag* tag_of() {
 }
 
 template <class T>
-inline constexpr AstTypeDesc kType{raw_type_name<T>(), tag_of<T>()};
+inline constexpr AstTypeDesc kType{tag_of<T>()};
 
 template <class Src, class M>
 inline constexpr AstConvDesc kConv{};
@@ -73,7 +72,6 @@ consteval AstFieldDesc make_field() {
   using F = field_tag<P>;
   using Held = typename held_targets<typename F::held>::type;
   AstFieldDesc d;
-  d.ptr = raw_member_name<P>();
   d.name = F::name;
   d.offset = &field_offset<P>;
   d.nature = F::nature;
@@ -117,18 +115,12 @@ consteval AstRowDesc make_row() {
   AstRowDesc d;
   AstRowGen& g = d.gen;
   g.kind = Row::kind;
-  g.act = kKindAsAct<Row::kind>;
-  g.makes = row_makes<R>;
-  // Opens a node, not merely hands one back: a close adopts what a call
-  // inside built, so it never begins a second node over the span.
-  g.opens = Row::kind == WriteKind::create || Row::kind == WriteKind::climb;
-  g.writes = row_writes<R>;
-  g.effects = Row::kind == WriteKind::nest || Row::kind == WriteKind::flag;
-  g.converts = Row::kind == WriteKind::convert;
-  if constexpr (row_writes<R> || Row::kind == WriteKind::flag)
-    g.typeName = raw_type_name<typename Row::type>();
   if constexpr (Row::kind == WriteKind::convert) {
-    g.rule = type_name<typename Row::type>();
+    // The data rule an `as<X>(e)` stands for has no name of its own: its
+    // record keeps the name of what it reads.
+    if constexpr (!is_anonymous_rule<typename Row::type> ||
+                  slot_empty<typename Row::type>)
+      g.rule = type_name<typename Row::type>();
     g.dataRule = is_data_rule<typename Row::type>;
     // The text path runs an override's converter, which the row type drops.
     using O = ov::slot_decl_t<typename Row::source>;
@@ -136,15 +128,23 @@ consteval AstRowDesc make_row() {
     if constexpr ((is_terminal_rule<typename Row::type> ||
                    is_data_rule<typename Row::type>) &&
                   DenotesText<Cv>) {
-      g.textConv = raw_type_name<declared_of_t<typename Row::type>>();
       d.textType = &kType<declared_of_t<typename Row::type>>;
-      if constexpr (!std::is_void_v<O>) g.textOver = raw_type_name<O>();
+      d.textOverride = !std::is_void_v<O>;
+      g.textInput = ConvertsParts<Cv> || ConvertsPartsMem<Cv> ? TextInput::parts
+                    : converts_input<Cv>                     ? TextInput::text
+                                                             : TextInput::none;
+    }
+    using Src = typename Row::source;
+    if constexpr (is_terminal_rule<Src> || is_data_rule<Src>) {
+      g.passes = is_pass_conv<converter_rule_t<Src>>;
+      g.valued = !g.passes &&
+                 !std::is_same_v<rule_type_t<Src>, std::string_view>;
+      if (g.passes || g.valued)
+        d.valueType = &kType<declared_of_t<typename Row::type>>;
     }
   } else {
     d.decl = &kType<typename Row::type>;
   }
-  if constexpr (row_makes<R> || Row::kind == WriteKind::nest)
-    d.type = &kType<typename Row::type>;
   if constexpr (Row::kind == WriteKind::create ||
                 Row::kind == WriteKind::climb || Row::kind == WriteKind::nest) {
     static_assert(::BuildableNode<typename Row::type>(),
@@ -172,14 +172,16 @@ consteval AstRowDesc make_row() {
         "the converter this site runs is not the one the author's "
         "declarations name: a stage minted it from something else");
     d.conv = &kConv<Src, M>;
-    g.convName =
-        std::is_void_v<D> ? std::string_view("void") : raw_type_name<D>();
-    if constexpr (!std::is_void_v<D>) d.convType = &kType<D>;
-    if constexpr (!std::is_void_v<O>) g.convOver = raw_type_name<O>();
+    if constexpr (std::is_void_v<D>)
+      g.convName = "void";
+    else
+      d.convType = &kType<D>;
+    d.convOverride = !std::is_void_v<O>;
     g.convRank = conv_alt_rank<M, Src>();
     g.convJoins = joins_parts<typename Src::rule>;
     using Site = site_conv_t<D, O>;
     g.convParts = ConvertsParts<Site> || ConvertsPartsMem<Site>;
+    g.convPasses = is_pass_conv<Site>;
     if constexpr (joins_parts<typename Src::rule>) {
       using Inside = dedupe_t<
           tl_cat_t<typename reached_refs<Stage, D>::type,
@@ -243,9 +245,7 @@ AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) 
   const auto rules = []<class... Rs>(TypeList<Rs...>) {
     return std::array<const AstTypeDesc*, sizeof...(Rs)>{&detail::kType<Rs>...};
   }(typename detail::GrammarBindings<G>::rules{});
-  AstRegistry registry = build_ast_registry(rows, types, rules, grammar);
-  registry.embeds = detail::embed_include<typename Low::rules>;
-  return registry;
+  return build_ast_registry(rows, types, rules, grammar);
 }
 
 }  // namespace cursiv

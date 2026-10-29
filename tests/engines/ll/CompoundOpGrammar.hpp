@@ -42,21 +42,20 @@ struct Base : cursiv::GrammarSpec {
             lit<"{"> +
             option(some(append<&Object::pairs>(ref<PairRule>), lit<",">)) +
             lit<"}">)> {};
-  struct Add : terminal<lit<"+">, value<Op::add>> {};
-  struct Sub : terminal<lit<"-">, value<Op::sub>> {};
-  struct Implies : terminal<lit<"->">, value<Op::implies>> {};
-  struct Comma : terminal<lit<",">, value<Op::comma>> {};
-  struct NotIn : rule<!gap::line + kw<"not"> + kw<"in">, value<Op::not_in>> {};
-  struct NotLike
-      : rule<!gap::line + kw<"not"> + kw<"like">, value<Op::not_like>> {};
-  struct Inner : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
-                       left(ref<Add> | ref<Sub>)> {};
-  struct Expr : infix<Inner, &Binary::left, &Binary::op, &Binary::right,
-                      (left(ref<NotIn> | ref<NotLike>) >> right(ref<Implies>) >>
-                       left(ref<Comma>))> {};
+  struct Add : terminal<as<Op::add>(lit<"+">)> {};
+  struct Sub : terminal<as<Op::sub>(lit<"-">)> {};
+  struct Implies : terminal<as<Op::implies>(lit<"->">)> {};
+  struct Comma : terminal<as<Op::comma>(lit<",">)> {};
+  struct NotIn : rule<as<Op::not_in>(!gap::line + kw<"not"> + kw<"in">)> {};
+  struct NotLike : rule<as<Op::not_like>(!gap::line + kw<"not"> + kw<"like">)> {
+  };
+  struct Inner : infix<Atom, Binary, left(ref<Add> | ref<Sub>)> {};
+  struct Expr : infix<Inner, Binary,
+                      levels(left(ref<NotIn> | ref<NotLike>),
+                             right(ref<Implies>), left(ref<Comma>))> {};
   struct Root : rule<assign<&Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 
@@ -66,14 +65,14 @@ struct Plain : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NUMBER : terminal<some(d)> {};
   // Distinct spellings allow different precedence levels in the shared table.
-  struct Add : terminal<lit<"++">, value<Op::add>> {};
-  struct NotIn : rule<kw<"not"> + kw<"within">, value<Op::not_in>> {};
+  struct Add : terminal<as<Op::add>(lit<"++">)> {};
+  struct NotIn : rule<as<Op::not_in>(kw<"not"> + kw<"within">)> {};
   struct Atom : rule<assign<&Number::text>(ref<NUMBER>)> {};
-  struct Expr : infix<Atom, &Binary::left, &Binary::op, &Binary::right,
-                      (left(ref<Add>) >> left(ref<NotIn>))> {};
+  struct Expr : infix<Atom, Binary, levels(left(ref<Add>), left(ref<NotIn>))> {
+  };
   struct Root : rule<assign<&Document::value>(ref<Expr>) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Preserve each mode's lexer policy while sharing generated parsers and AST
@@ -81,11 +80,11 @@ struct Plain : cursiv::GrammarSpec {
 struct Suite : cursiv::GrammarSpec {
   struct Root
       : rule<(lit<"compound:"> +
-              skip(ignored<Base::WS>, hide<Base::COMMENT>, ref<Base::Root>)) |
+              skip(ignore<Base::WS>, hide<Base::COMMENT>, ref<Base::Root>)) |
              (lit<"plain:"> +
-              skip(ignored<Plain::WS>, hide<>, ref<Plain::Root>))> {};
+              skip(ignore<Plain::WS>, hide<>, ref<Plain::Root>))> {};
   using entry = Root;
-  using ignore = Base::WS;
+  using ignored = Base::WS;
   using hidden = Base::COMMENT;
 };
 struct Ll : Suite {};

@@ -13,7 +13,7 @@ struct G : Base {
       : terminal<!kw<"in"> + (cr<"a-z"> | Esc) + many(cr<"a-z"> | Esc)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NAME>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

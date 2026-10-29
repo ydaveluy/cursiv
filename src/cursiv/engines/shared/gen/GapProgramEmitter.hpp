@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <stdexcept>
@@ -32,6 +33,15 @@ class GapProgramEmitter {
     else if (e.kind == LexKind::rep && e.max != 0)
       add(e.a);
     _order.push_back(id);
+  }
+
+  // Whether the source reads the boundary: a class test and a guard do, no
+  // other node of a program does.
+  bool reads_boundary() const {
+    return std::ranges::any_of(_order, [&](std::uint16_t id) {
+      const LexKind kind = _cfg.lex[id].kind;
+      return kind == LexKind::chars || kind == LexKind::nguard;
+    });
   }
 
   std::string expression(std::uint16_t id, bool whole, std::string_view text,

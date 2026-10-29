@@ -104,13 +104,14 @@ bool apply(const cursiv::ParseResult& r, std::string& text, bool& spelled) {
       edits.push_back({n.begin, n.end, {}});
       continue;
     }
-    const std::string_view bytes =
-        cst.grammar()->terminalText(A.derived.expect.shiftTerm[state]);
-    if (bytes.empty()) {
+    const auto spellings =
+        cst.grammar()->terminalSpellings(A.derived.expect.shiftTerm[state]);
+    if (spellings.size() != 1) {
       spelled = false;
       return false;
     }
-    edits.push_back({n.begin, n.end, std::string(" ") + std::string(bytes)});
+    edits.push_back(
+        {n.begin, n.end, std::string(" ") + std::string(spellings.front())});
   }
   for (std::size_t k = edits.size(); k-- > 0;)
     text.replace(edits[k].begin, edits[k].end - edits[k].begin, edits[k].with);
@@ -209,7 +210,8 @@ bool offers(const cursiv::Parser& engine, const std::string& text,
   engine.nextFeaturesAt(r.cst(), at, at, out);
   const cursiv::Grammar& g = engine.getGrammar();
   for (const cursiv::NextFeature& f : out)
-    if (g.terminalText(f.feature) == want) return true;
+    for (const std::string_view s : g.terminalSpellings(f.feature))
+      if (s == want) return true;
   return false;
 }
 
@@ -258,13 +260,19 @@ void a_closed_block_offers_only_its_enclosing_scope() {
     CHECK(offers(*engine, text, "entity"));
     CHECK(offers(*engine, text, "datatype"));
     for (const auto& f : out) {
-      const auto spelling = engine->getGrammar().terminalText(f.feature);
-      const bool opens = spelling == "package" || spelling == "entity" ||
-                         spelling == "datatype";
-      if (!opens)
+      const auto spellings = engine->getGrammar().terminalSpellings(f.feature);
+      const bool opens =
+          std::ranges::any_of(spellings, [](std::string_view spelling) {
+            return spelling == "package" || spelling == "entity" ||
+                   spelling == "datatype";
+          });
+      if (!opens) {
+        const std::string_view shown =
+            spellings.empty() ? engine->getGrammar().terminalName(f.feature)
+                              : spellings.front();
         std::printf("unexpected completion '%.*s' after %s\n",
-                    static_cast<int>(spelling.size()), spelling.data(),
-                    text.c_str());
+                    static_cast<int>(shown.size()), shown.data(), text.c_str());
+      }
       CHECK(opens);
     }
   }
@@ -374,7 +382,8 @@ void a_record_the_text_has_not_decided_is_walked() {
   const auto parser = tedges::generated::G::create_parser();
   bool o0 = false;
   for (const cursiv::ElementId e : offered(*parser, "cell:p x a a o1", 13))
-    o0 = o0 || parser->getGrammar().terminalText(e) == "o0";
+    for (const auto s : parser->getGrammar().terminalSpellings(e))
+      o0 = o0 || s == "o0";
   CHECK(o0);
 }
 

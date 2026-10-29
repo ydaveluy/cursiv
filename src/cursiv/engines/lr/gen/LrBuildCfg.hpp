@@ -31,9 +31,6 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
   Vec<std::uint32_t> priorityNext{};
   Vec<LrLowProd> prods{};
   Vec<LrLowSlot> slots{};
-  // A condition read as the region naming no trivia it stood in reads the
-  // gap: empty. Laid by `lr_guard_positions`.
-  Vec<std::uint8_t> gapTight{};
   // For a section's own configuration, its entry's reading.
   Vec<std::uint16_t> cfgEntry{};
 

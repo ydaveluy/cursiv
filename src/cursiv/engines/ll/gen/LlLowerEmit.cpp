@@ -126,7 +126,7 @@ inline std::uint16_t emit_alt(LlLowered& o, const Pool& p, std::uint16_t at,
   }
   const std::uint16_t id = put_group(
       o, LlShape::alt, ids, kNoRow,
-      LlNodeBuild{.cfg = e.cfg, .section = e.section, .ranked = e.ranked});
+      LlNodeBuild{.cfg = e.cfg, .section = e.section});
   o.cfg.nodes[id].decision = new_decision(o, id, e.count, owner);
   return id;
 }
@@ -162,10 +162,15 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
   }
   if (std::uint32_t{o.cfg.nrules} + (1u << e.count) - 1u > kNtBase)
     return tooWide();
+  // Where only optional items are left, the group may end there.
+  const auto ends = [&](std::uint32_t mask) {
+    return (mask & ~e.unorderedOptional) == 0;
+  };
   std::uint64_t spelt = o.cfg.nnodes;
   for (std::uint32_t mask = 1; mask < (1u << e.count); ++mask) {
     const auto bits = static_cast<unsigned>(std::popcount(mask));
     spelt += bits > 1 ? 3 * bits + 1 : 1;
+    if (ends(mask)) spelt += bits > 1 ? 1 : 2;
   }
   if (spelt > kNoRow) return tooWide();
   const std::uint32_t subsets = 1u << e.count;
@@ -197,6 +202,11 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
         arms.push_back(group(LlShape::seq, {item, suffix}, aux));
       }
     }
+    // The end comes last, as an option's absence does: an item still read is
+    // the preferred reading.
+    if (ends(mask))
+      arms.push_back(put_node(o, LlNode{.kind = LlShape::empty},
+                              LlNodeBuild{.cfg = e.cfg}));
     o.cfg.rules[aux].body =
         arms.size() == 1 ? arms.front() : group(LlShape::alt, arms, aux);
   }
@@ -321,7 +331,8 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
 // creation stays separate until record fusion keeps the caller's writes apart
 // from the writes filling that child.
 void ride_chains_down(LlLowered& o, const LlRecordPlan& plan) {
-  for (std::uint16_t id = 0; id < o.cfg.nnodes; ++id) {
+  for (std::uint32_t i = 0; i < o.cfg.nnodes; ++i) {
+    const auto id = static_cast<std::uint16_t>(i);
     LlNode& n = o.cfg.nodes[id];
     if (n.row == kNoRow || o.cfg.nodeBuild[id].foldStep) continue;
     const std::uint16_t only = plan.single_position(id);
@@ -346,7 +357,7 @@ void ride_chains_down(LlLowered& o, const LlRecordPlan& plan) {
 // where the rule it names lays none, or where it turns: riding the callee's
 // record, a nest could not reach back over its receiver.
 void lay_own_records(LlLowered& o, const LlRecordPlan& plan) {
-  for (std::uint16_t id = 0; id < o.cfg.nnodes; ++id) {
+  for (std::uint32_t id = 0; id < o.cfg.nnodes; ++id) {
     LlNode& n = o.cfg.nodes[id];
     if (n.row == kNoRow || n.kind == LlShape::term ||
         n.kind == LlShape::implied)

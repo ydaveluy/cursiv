@@ -11,6 +11,7 @@
 #include "cursiv/core/grammar/ElementId.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/engines/ll/runtime/LlGesture.hpp"
+#include "cursiv/engines/ll/runtime/LlLookIndent.hpp"
 #include "cursiv/engines/ll/runtime/LlReading.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/shared/runtime/GestureRank.hpp"
@@ -18,6 +19,7 @@
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/engines/shared/runtime/RepairEnds.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
+#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
@@ -69,7 +71,8 @@ struct LlSearch {
   };
   // What a reading's future depends on, its owed run aside: two readings with
   // the same one gain the same increments of key, the one holding the owed
-  // run perhaps more.
+  // run perhaps more. A fingerprint: it selects the readings that may share
+  // a future, and `ll_search_same_future` decides.
   struct Future {
     std::uint64_t a = 0, b = 0;
     bool operator==(const Future&) const = default;
@@ -79,16 +82,27 @@ struct LlSearch {
       return static_cast<std::size_t>(f.a);
     }
   };
+  // The words a position may misspell, and what they were asked for: the
+  // alphabets and their terminals, at that position.
+  struct TypoMemo {
+    TextOffset begin = 0;
+    std::vector<std::uint16_t> modes;
+    std::vector<std::uint64_t> bits;
+    std::vector<Typo> typos;
+  };
   // The positions of every reading, one run each.
   std::vector<LlConfig> pool;
   std::vector<LlReading> nodes;
+  // The levels every reading stands in: the descent's, copied, and those the
+  // readings open. A reading keeps its top alone.
+  LlLookIndent indent;
   std::vector<LlGesture> links;
   // Links a dominated reading handed to the one that kept its future.
   std::uint64_t handed = 0;
   GestureRank rank;
   std::vector<Entry> heap;
   std::uint32_t seq = 0;
-  std::unordered_map<Future, std::uint32_t, FutureHash> seen;
+  std::unordered_multimap<Future, std::uint32_t, FutureHash> seen;
   // The readings one read is still carrying forward, and the goals of the
   // least cost.
   std::vector<std::uint32_t> out;
@@ -108,7 +122,7 @@ struct LlSearch {
   std::unordered_map<TextOffset, std::vector<Scan>> scans;
   std::unordered_map<std::uint64_t, LexReading> readings;
   std::unordered_map<std::uint64_t, RepairEnds> ends;
-  std::unordered_map<std::uint64_t, std::vector<Typo>> typos;
+  std::unordered_multimap<std::uint64_t, TypoMemo> typos;
   std::vector<Typo> cutTypos;
   std::unordered_map<std::uint64_t, TextOffset> drops;
   // What the positions of the reading in hand offer.
@@ -116,11 +130,13 @@ struct LlSearch {
 
   // The elected path: the gestures to write, the next one to, and the arm of
   // the root's choice the path enters. `also` are the terminals the first
-  // insertion could as cheaply have been.
+  // insertion could as cheaply have been, `tied` the paths dropped for one as
+  // cheap.
   std::vector<LlGesture> plan;
   std::size_t next = 0;
   std::uint16_t arm = 0xFFFFu;
   std::vector<ElementId> also;
+  TiedInserts tied;
   // The root and the pause the plan was made for: its arm is that root's
   // alone.
   bool planned = false;

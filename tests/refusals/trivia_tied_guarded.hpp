@@ -11,7 +11,7 @@ struct G : Base {
   struct NOTE : terminal<some(s) + !lit<"y">> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
   using entry = Root;
-  using ignore = BLANK;
+  using ignored = BLANK;
   using hidden = NOTE;
 };
 

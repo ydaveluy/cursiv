@@ -16,7 +16,7 @@ struct G : Base {
   struct Root : rule<create<ast::Item>(flag<&ast::Item::on>(option(kw<"on">)) +
                                        assign<&ast::Item::name>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

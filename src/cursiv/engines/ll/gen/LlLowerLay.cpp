@@ -42,6 +42,13 @@ std::uint16_t LlLowerer::lay_ref(unsigned cfg, std::uint32_t rule) {
     _p.e[at].section = static_cast<std::uint8_t>(cfg + 1u);
     return at;
   }
+  // A rule read in place lays its body here, its conversion over what that
+  // reads, as the rule's own definition would.
+  if (stage(rule).inPlace) {
+    const std::uint16_t at = lay(cfg, body_in(cfg, rule));
+    convert_over(_p, at, row_id(stage(rule).convertRow));
+    return at;
+  }
   const std::uint16_t sym = sym_of(cfg, rule);
   if (cfg != 0 && !is_term(sym)) _cfg.cloneNeeded[nt_index(sym)] = true;
   return _p.push_sym(sym, static_cast<std::uint8_t>(cfg));
@@ -54,7 +61,7 @@ std::uint16_t LlLowerer::lay_embed(unsigned cfg, ImageId e) {
     refuse_lowering(
         "this combinator has no lowering: a body reaching here would "
         "become a right-hand side nobody wrote");
-  const unsigned in = section_of(cfg, n.a, token_core(kid(inner, 2)));
+  const unsigned in = section_of(n.a, token_core(kid(inner, 2)));
   const std::uint16_t open = lay(cfg, kid(inner, 0));
   const std::uint16_t entry = lay(in, kid(inner, 1));
   const std::uint16_t close = lay(cfg, kid(inner, 2));
@@ -102,7 +109,6 @@ std::uint16_t LlLowerer::lay_closed(unsigned cfg, ImageId e) {
   const bool hands = (n.flags & 2) != 0;
   const ImageId inner = kid(n, 0);
   const std::uint16_t child = lay(cfg, inner);
-  if (_p.e[child].kind == Shape::alt) _p.e[child].ranked = true;
   const ImageStageDesc& st = stage(n.a);
   const bool data = st.kind == ImageRuleKind::data;
   if (data && at(inner).kind == ImageKind::closed && _p.e[child].layered &&
@@ -197,9 +203,8 @@ std::uint16_t LlLowerer::lay(unsigned cfg, ImageId e) {
     case ImageKind::unordered: {
       const std::vector<ImageId> ks = kids_of(n);
       const std::uint16_t node = lay_kids(cfg, Shape::unordered, ks);
-      bool turns = false;
-      for (const ImageId k : ks) turns = turns || buries(k);
-      _p.e[node].unorderedTurns = turns;
+      _p.e[node].unorderedTurns = buries(e);
+      present_optional_items(_p, node, ks);
       return node;
     }
     case ImageKind::repeat:
@@ -242,14 +247,6 @@ std::uint16_t LlLowerer::lay(unsigned cfg, ImageId e) {
           "this combinator has no lowering: a body reaching here would "
           "become a right-hand side nobody wrote");
   }
-}
-
-bool LlLowerer::buries(ImageId id) const {
-  const ImageNode& n = at(id);
-  if (n.kind == ImageKind::nest) return true;
-  for (const ImageId k : _im.shape_kids(id))
-    if (buries(k)) return true;
-  return false;
 }
 
 }  // namespace cursiv

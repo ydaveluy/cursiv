@@ -7,12 +7,13 @@
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/LateWidthGrammar.hpp"
+#include "engines/ll/LateWidthAst.hpp"
 #include "latewidthll/generated/Ll/Module.hpp"
 #include "latewidthll/generated/Ll/Table.hpp"
 
 namespace {
 using namespace tlllatewidth;
+
 void expect_value(const cursiv::ParseResult& parsed, unsigned count,
                   bool dimension) {
   CHECK(parsed.accepted && parsed.diagnostics.empty());
@@ -46,14 +47,12 @@ void expect_value(const cursiv::ParseResult& parsed, unsigned count,
 
 void a_long_shared_prefix_is_read_whole() {
   constexpr const auto& table = tlllatewidth::generated::Ll::kTable;
-  constexpr auto decision = [] {
-    for (std::uint16_t i = 0; i < table.ndecisions; ++i)
-      if (table.rule_name(table.decisions[i].rule) == "Root" &&
-          !table.decisions[i].repeat)
-        return i;
-    return cursiv::kNoRow;
-  }();
-  static_assert(decision != cursiv::kNoRow);
+  const auto entry = table.atn.outgoing(table.atnStart).front().target;
+  const auto decision = table.atn.state(entry).decision;
+  CHECK(decision < table.ndecisions);
+  if (decision >= table.ndecisions) return;
+  CHECK(table.decisions[decision].state == entry &&
+        table.decisions[decision].how == cursiv::LlPredict::adaptive);
   std::string text;
   for (unsigned i = 0; i < 128; ++i) text += "word;";
   text += "5px!";
@@ -63,8 +62,7 @@ void a_long_shared_prefix_is_read_whole() {
   cursiv::LlContext context(text, builder);
   cursiv::ll_peek<table>(context, table.decisions[decision].mode);
   cursiv::LlPredictionSession<table> session;
-  const auto selected =
-      cursiv::ll_episode<table>(context, decision, table.decisions[decision]);
+  const auto selected = cursiv::ll_episode<table>(context, decision);
   CHECK(selected != cursiv::kNoRow);
   CHECK(session.work().tokens >= 128);
 }
@@ -72,13 +70,6 @@ void a_long_shared_prefix_is_read_whole() {
 int main() {
   constexpr const auto& table = tlllatewidth::generated::Ll::kTable;
   static_assert(table.ngapConds == 0 && !cursiv::kIndented<table>);
-  // The handoff is for an ordinary choice, not its prefix repetition.
-  bool choice = false;
-  for (unsigned d = 0; d < table.ndecisions; ++d) {
-    const auto& dec = table.decisions[d];
-    choice = choice || (!dec.repeat && dec.how == cursiv::LlPredict::adaptive);
-  }
-  CHECK(choice);
   const auto ll = tlllatewidth::generated::Ll::create_parser();
   for (unsigned n : {1u, 2u, 32u, 128u, 512u, 768u}) {
     std::string prefix;

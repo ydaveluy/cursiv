@@ -1,24 +1,8 @@
 #pragma once
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/LateWidthAst.hpp"
 
 namespace tlllatewidth {
-struct Word : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-};
-struct Value : cursiv::Extends<cursiv::AstNode> {
-  vector<Word*> prefix;
-};
-struct NumberValue : cursiv::Extends<Value> {
-  string_view number;
-};
-struct DimensionValue : cursiv::Extends<Value> {
-  string_view dimension;
-};
-struct Document : cursiv::Extends<cursiv::AstNode> {
-  Value* value = nullptr;
-};
-
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -39,7 +23,7 @@ struct Base : cursiv::GrammarSpec {
                          ref<NumberRule> | ref<DimensionRule>)) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

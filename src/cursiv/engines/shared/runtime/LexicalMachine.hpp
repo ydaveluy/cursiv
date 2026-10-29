@@ -8,7 +8,6 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -34,9 +33,17 @@ class LexicalCaptures {
     auto operator<=>(const Binding&) const = default;
   };
 
+  LexicalCaptures() = default;
+  // `_environments` points into the keys of `_interned`: a copy would point
+  // into the original, while a move takes the map's nodes along.
+  LexicalCaptures(const LexicalCaptures&) = delete;
+  LexicalCaptures& operator=(const LexicalCaptures&) = delete;
+  LexicalCaptures(LexicalCaptures&&) = default;
+  LexicalCaptures& operator=(LexicalCaptures&&) = default;
+
   const Binding* find(std::uint32_t environment, std::uint32_t tag) const {
     if (environment == 0) return nullptr;
-    const auto& bindings = _environments[environment - 1];
+    const auto& bindings = *_environments[environment - 1];
     const auto at = std::ranges::lower_bound(bindings, tag, {}, &Binding::tag);
     return at != bindings.end() && at->tag == tag ? &*at : nullptr;
   }
@@ -47,7 +54,7 @@ class LexicalCaptures {
         old != nullptr && old->begin == begin && old->end == end)
       return environment;
     auto bindings = environment == 0 ? std::vector<Binding>{}
-                                     : _environments[environment - 1];
+                                     : *_environments[environment - 1];
     const auto at = std::ranges::lower_bound(bindings, tag, {}, &Binding::tag);
     if (at != bindings.end() && at->tag == tag)
       *at = {tag, begin, end};
@@ -59,14 +66,16 @@ class LexicalCaptures {
       throw std::overflow_error(
           "cursiv: too many lexical capture environments");
     const auto id = static_cast<std::uint32_t>(_environments.size() + 1);
-    _interned.emplace(bindings, id);
-    _environments.push_back(std::move(bindings));
+    const auto kept = _interned.emplace(std::move(bindings), id).first;
+    _environments.push_back(&kept->first);
     return id;
   }
 
  private:
-  std::vector<std::vector<Binding>> _environments;
+  // Each environment once, as a key of `_interned`, whose nodes never move;
+  // `_environments` names them by id.
   std::map<std::vector<Binding>, std::uint32_t> _interned;
+  std::vector<const std::vector<Binding>*> _environments;
 };
 
 inline PredicateState lexical_endpoints(const LexicalState& state) {
@@ -105,13 +114,14 @@ class LexicalMachine {
     _returned = std::move(out);
   }
 
-  const LexicalState* cached(std::uint16_t node, LexicalCursor cursor) const {
-    const auto at = _memo.find(key(node, cursor));
-    return at == _memo.end() ? nullptr : &at->second;
+  // A call opens with no captures and only its byte endpoints escape: what it
+  // reads is told by where it starts, and kept as those endpoints.
+  const LexicalState* cached(std::uint16_t node, TextOffset at) const {
+    const auto found = _memo.find(key(node, at));
+    return found == _memo.end() ? nullptr : &found->second;
   }
-  void remember(std::uint16_t node, LexicalCursor cursor,
-                const LexicalState& out) {
-    _memo.emplace(key(node, cursor), out);
+  void remember(std::uint16_t node, TextOffset at, const LexicalState& out) {
+    _memo.emplace(key(node, at), resume(LexicalCursor{}, out));
   }
 
   // A lexical call has a local environment. Only its byte endpoints escape;
@@ -126,14 +136,13 @@ class LexicalMachine {
   }
 
  private:
-  using Key = std::tuple<std::uint16_t, TextOffset, std::uint32_t>;
-  static Key key(std::uint16_t node, LexicalCursor c) {
-    return {node, c.at, c.captures};
+  static std::uint64_t key(std::uint16_t node, TextOffset at) {
+    return std::uint64_t{node} << 32 | at;
   }
 
   std::vector<Frame> _frames;
   LexicalState _returned;
-  std::map<Key, LexicalState> _memo;
+  std::map<std::uint64_t, LexicalState> _memo;
 };
 
 }  // namespace cursiv

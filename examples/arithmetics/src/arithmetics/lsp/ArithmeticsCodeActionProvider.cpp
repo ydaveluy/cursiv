@@ -30,8 +30,8 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
 
   for (const cursiv::Diagnostic& diagnostic : document.diagnostics) {
     cursiv::throw_if_cancelled(cancelToken);
-    if (!diagnostic.code.has_value() || !diagnostic.code->isString() ||
-        diagnostic.code->string() != kExpressionNormalizable)
+    if (!diagnostic.code.has_value() || !diagnostic.code->isString()
+        || diagnostic.code->string() != kExpressionNormalizable)
       continue;
     if (diagnostic.range.begin > to || diagnostic.range.end < from) continue;
     if (!diagnostic.data.has_value() || !diagnostic.data->isObject()) continue;

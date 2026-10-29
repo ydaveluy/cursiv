@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "cursiv/engines/shared/gen/TypeSpelling.hpp"
@@ -39,7 +41,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     std::span<const AstTypeDesc* const> rules, std::string_view grammar) {
   Interned<AstTypeDesc> types;
   Interned<AstFieldDesc> fields;
-  Interned<AstConvDesc> convs;
+  // A conversion is numbered, never listed: its count is the map's size.
+  std::unordered_map<const AstConvDesc*, std::uint32_t> convs;
   std::vector<std::vector<const AstTypeDesc*>> narrows;
 
   // Number types in their published order from the start: built classes,
@@ -47,37 +50,58 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
   for (const AstRowDesc* row : rows)
     if (row->field != nullptr) fields.id(row->field);
   for (const AstRowDesc* row : rows)
-    if (row->built) types.id(row->type);
+    if (row->built) types.id(row->decl);
   const std::size_t built = types.keys().size();
   for (const AstRowDesc* row : rows)
-    if (row->named) types.id(row->type);
+    if (row->named) types.id(row->decl);
   for (const AstFieldDesc* f : fields.keys())
     for (std::uint32_t i = 0; i < f->targetCount; ++i) types.id(f->targets[i]);
   for (const AstFieldDesc* f : fields.keys()) types.id(f->owner);
   const auto& typeKeys = types.keys();
 
   AstRegistry out;
-  const auto rule_source = [&](const AstTypeDesc* type, bool over) -> std::string_view {
-    const auto at = std::ranges::find(rules, type);
-    if (at == rules.end())
-      throw std::logic_error("a conversion rule is absent from its grammar bindings");
-    out.sources.push_back(std::format("::cursiv::detail::{}<{}, {}>",
-        over ? "rule_override_t" : "rule_bound_t", gen_qualified(grammar),
-        at - rules.begin()));
-    return out.sources.back();
+  // Every spelling is qualified here, once.
+  const std::string qualified = gen_qualified(grammar);
+  // Where each descriptor stands in `list`, the first place where it is
+  // listed twice.
+  const auto position_in = [](std::span<const AstTypeDesc* const> list) {
+    std::unordered_map<const AstTypeDesc*, std::size_t> at;
+    at.reserve(list.size());
+    for (std::size_t i = 0; i < list.size(); ++i) at.try_emplace(list[i], i);
+    return at;
+  };
+  const auto ruleAt = position_in(rules);
+  // A rule and an alias are spelt once, however many rows name them.
+  std::map<std::pair<const AstTypeDesc*, std::string_view>, std::string_view>
+      spelt;
+  const auto rule_source = [&](const AstTypeDesc* type,
+                                std::string_view alias) -> std::string_view {
+    std::string_view& spelling = spelt[{type, alias}];
+    if (spelling.empty()) {
+      const auto at = ruleAt.find(type);
+      if (at == ruleAt.end())
+        throw std::logic_error(
+            "a conversion rule is absent from its grammar bindings");
+      out.sources.push_back(std::format("::cursiv::detail::{}<{}, {}>", alias,
+                                        qualified, at->second));
+      spelling = out.sources.back();
+    }
+    return spelling;
   };
   for (const AstRowDesc* const row : rows) {
     AstRowGen g = row->gen;
     if (row->convType != nullptr) {
-      g.convName = rule_source(row->convType, false);
-      if (!g.convOver.empty()) g.convOver = rule_source(row->convType, true);
+      g.convName = rule_source(row->convType, "rule_bound_t");
+      if (row->convOverride)
+        g.convOver = rule_source(row->convType, "rule_override_t");
     }
     if (row->textType != nullptr) {
-      g.textConv = rule_source(row->textType, false);
-      if (!g.textOver.empty()) g.textOver = rule_source(row->textType, true);
+      g.textConv = rule_source(row->textType, "rule_bound_t");
+      if (row->textOverride)
+        g.textOver = rule_source(row->textType, "rule_override_t");
     }
-    if (row->type != nullptr)
-      g.typeSlot = types.index(row->type);
+    if (row->valueType != nullptr)
+      g.valueRule = rule_source(row->valueType, "rule_staged_t");
     if (row->decl != nullptr)
       g.declType = types.index(row->decl);
     out.anyNest = out.anyNest || g.kind == WriteKind::nest;
@@ -98,7 +122,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       }
     }
     if (row->conv != nullptr)
-      g.convSlot = static_cast<std::uint16_t>(convs.id(row->conv));
+      g.convSlot = static_cast<std::uint16_t>(
+          convs.try_emplace(row->conv, convs.size()).first->second);
     out.rows.push_back(g);
   }
 
@@ -115,21 +140,21 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     throw std::runtime_error(
         "this grammar names more distinct AST types than a record's type "
         "index can name");
-  if (convs.keys().size() > 0xFFFEu)
+  if (convs.size() > 0xFFFEu)
     throw std::runtime_error(
         "this grammar needs more distinct conversions than a record's "
         "conversion index can name");
 
+  const auto bindingAt = position_in(bindings);
   const auto source = [&](const AstTypeDesc* type) {
-    const auto at = std::ranges::find(bindings, type);
-    if (at == bindings.end())
+    const auto at = bindingAt.find(type);
+    if (at == bindingAt.end())
       throw std::logic_error("an AST type is absent from its grammar bindings");
-    return std::format("::cursiv::detail::ast_bound_t<{}, {}>", gen_qualified(grammar),
-                       at - bindings.begin());
+    return std::format("::cursiv::detail::ast_bound_t<{}, {}>", qualified,
+                       at->second);
   };
   for (std::size_t t = 0; t < typeKeys.size(); ++t)
-    out.types.push_back({typeKeys[t]->name, t < built, source(typeKeys[t])});
-  out.boundTypes = true;
+    out.types.push_back({t < built, source(typeKeys[t])});
 
   out.typeWords = (typeKeys.size() + 63) / 64;
   out.derives.assign(typeKeys.size() * out.typeWords, 0);
@@ -143,39 +168,33 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       if (derives(i, j))
         out.derives[i * out.typeWords + j / 64] |= std::uint64_t{1} << (j % 64);
 
-  std::vector<std::size_t> from;
-  for (const AstFieldDesc* f : fields.keys()) {
-    from.push_back(out.targets.size());
-    for (std::uint32_t i = 0; i < f->targetCount; ++i)
-      out.targets.push_back(types.index(f->targets[i]));
-  }
-
   const std::size_t count = fields.keys().size();
-  out.accepts.assign(count == 0 ? 1 : count * out.typeWords, 0);
+  // Only a reference site accepts, so the rows stop past the last reference
+  // member and a grammar with none keeps no rows.
+  std::size_t bound = 0;
+  for (std::size_t i = 0; i < count; ++i)
+    if (detail::is_ref_nature(fields.keys()[i]->nature)) bound = i + 1;
+  out.accepts.assign(bound * out.typeWords, 0);
   for (std::size_t i = 0; i < count; ++i) {
     const AstFieldDesc& f = *fields.keys()[i];
-    AstRegistry::Field entry{f.ptr, {}, f.offset()};
+    AstRegistry::Field& entry = out.fields.emplace_back();
+    entry.name = f.name;
+    entry.nature = f.nature;
+    entry.storage = f.storage;
+    entry.owner = types.index(f.owner);
+    entry.firstTarget = static_cast<std::uint32_t>(out.targets.size());
+    entry.targetCount = f.targetCount;
+    for (std::uint32_t t = 0; t < f.targetCount; ++t)
+      out.targets.push_back(types.index(f.targets[t]));
     for (const AstTypeDesc* n : narrows[i]) entry.narrows.push_back(source(n));
-    out.fields.push_back(std::move(entry));
-    detail::FieldDesc d;
-    d.name = f.name;
-    d.nature = f.nature;
-    d.storage = f.storage;
-    d.target = f.targetCount == 0 ? detail::kNoIndex : out.targets[from[i]];
-    d.owner = types.index(f.owner);
-    d.targets = out.targets.data() + from[i];
-    d.target_count = static_cast<std::uint16_t>(f.targetCount);
-    out.descs.push_back(d);
+    entry.offset = f.offset();
     if (detail::is_ref_nature(f.nature))
-      for (std::uint32_t t = 0; t < f.targetCount; ++t)
+      for (const std::uint16_t t : out.targets_of(entry))
         for (std::size_t w = 0; w < out.typeWords; ++w)
           out.accepts[i * out.typeWords + w] |=
-              out.derives[out.targets[from[i] + t] * out.typeWords + w];
-    out.anyRef = out.anyRef || detail::is_ref_nature(f.nature);
-    out.anyVariantField =
-        out.anyVariantField || f.nature == detail::FieldNature::variant;
+              out.derives[t * out.typeWords + w];
   }
-  out.convCount = convs.keys().size();
+  out.convCount = convs.size();
   return out;
 }
 

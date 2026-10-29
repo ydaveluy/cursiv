@@ -43,13 +43,13 @@ struct Base : cursiv::GrammarSpec {
                         ref<GlobRule> |
                         create<Wrapped>(assign<&Wrapped::value>(ref<Expr>) +
                                         lit<"!">)> {};
-  struct Expr : infix<Primary, &Binary::left, &Binary::op, &Binary::right,
-                      (left(ref<MULT>) >> left(lit<"+">))> {};
+  struct Expr
+      : infix<Primary, Binary, levels(left(ref<MULT>), left(lit<"+">))> {};
   // A bare next expression remains valid: choosing glob '*' too early in
   // '1+2*3' therefore produces a clean but incorrect AST.
   struct Root : rule<some(append<&Document::values>(ref<Expr>)) + eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct ExposedPrimary : Base {

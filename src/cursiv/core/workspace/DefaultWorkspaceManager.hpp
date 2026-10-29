@@ -48,6 +48,12 @@ class DefaultWorkspaceManager : public WorkspaceManager,
   [[nodiscard]] bool shouldIncludeEntry(
       const FileSystemNode& entry) const override;
 
+  // Walks up from the entry to each root that holds it, asking
+  // `shouldIncludeEntry` of every folder met, as the scan would on its way
+  // down. A workspace folder is `normalize_uri(folder.uri)`, its root
+  // `getRootFolder(folder)`.
+  [[nodiscard]] bool isIncluded(const FileSystemNode& entry) const override;
+
   // One walk with an explicit stack so nesting depth does not decide stack use,
   // and a cancellation check per entry. A refused directory is never entered.
   //

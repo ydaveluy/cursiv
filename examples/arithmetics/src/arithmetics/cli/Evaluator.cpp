@@ -28,8 +28,8 @@ int eval_file(std::string_view path, cursiv::SharedCoreServices& shared) {
   const EvaluationResult results = interpret_evaluations(module);
   const cursiv::TextDocument& text = document.textDocument();
   for (const ast::Statement* const statement : module.statements) {
-    if (statement == nullptr ||
-        statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
+    if (statement == nullptr
+        || statement->type != &cursiv::ast_type_tag<ast::Evaluation>)
       continue;
     const auto& evaluation = static_cast<const ast::Evaluation&>(*statement);
     const auto found = results.find(&evaluation);

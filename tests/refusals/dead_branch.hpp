@@ -13,7 +13,7 @@ struct G : Base {
                                        many((ref<SEMI> + ref<ID>) |
                                             (ref<BAR> + eof + ref<SEMI>)))> {};
   using entry = Para;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

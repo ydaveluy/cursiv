@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <set>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -147,12 +148,10 @@ void the_walks_agree_with_the_plain_ones() {
     for (unsigned t = 0; t < 3; ++t)
       startOf.push_back(static_cast<int>(r.next(size)));
     for (unsigned k = 0, g = r.next(5); k < g; ++k) {
-      const int hole = n.hole();
-      n.guards.push_back(cursiv::LexNfaGuard{
-          hole, static_cast<int>(r.next(size)),
-          static_cast<std::uint16_t>(r.next(3)),
-          static_cast<std::uint16_t>(r.next(3))});
-      n.s[r.next(size)].t2 = hole;
+      const auto out = static_cast<int>(r.next(size));
+      const auto node = static_cast<std::uint16_t>(r.next(3));
+      n.term = static_cast<std::uint16_t>(r.next(3));
+      n.s[r.next(size)].t2 = n.guard(node, out);
     }
 
     for (unsigned k = 0; k < 6; ++k) {
@@ -183,15 +182,129 @@ void the_walks_agree_with_the_plain_ones() {
     for (unsigned k = 0; size <= 14 && k < 4; ++k) {
       const int a = static_cast<int>(r.next(size)),
                 b = static_cast<int>(r.next(size));
-      CHECK(cursiv::lex_prefix_meets(n, sets, a, b) == meets(n, sets, a, b));
+      CHECK(cursiv::lex_prefix_meets(n, sets, a, b) ==
+            (meets(n, sets, a, b) ? cursiv::LexOverlap::found
+                                  : cursiv::LexOverlap::none));
     }
   }
+}
+
+// A relay that asserts resumes its continuation only where the assertion
+// holds, so the pair walk enters it or not: a text read past it may meet,
+// which the walk does not prove, and a tie its continuation would outrank
+// still stands where it fails. Each assertion doubles the subsets a position
+// stands for: past a few dozen, the walk keeps the one none holds in, unsure.
+void an_assertion_is_entered_or_not() {
+  ByteSet sets[2];
+  sets[0].add('#');
+  sets[1].add('!');
+  LexNfaPool n;
+  const auto asserting = [&](int out) {
+    cursiv::LexRelayBuild r;
+    r.row.predicate = 0;
+    r.resumeOut = out;
+    n.relays.push_back(r);
+    return n.relay(static_cast<int>(n.relays.size()) - 1);
+  };
+  const int pattern = n.match(1);
+  const int literal = n.match(1, true);
+  // `#` behind an assertion meets the start of `#!` only where it holds.
+  const int hash = n.chars(0, asserting(pattern));
+  const int bang = n.chars(0, n.chars(1, n.match(2)));
+  CHECK(cursiv::lex_prefix_meets(n, sets, hash, bang) ==
+        cursiv::LexOverlap::incomplete);
+  // `#!` at a literal's rank behind an assertion, or as a pattern, ties with
+  // the pattern `#!` where the assertion fails.
+  const int either = n.split(n.chars(0, n.chars(1, asserting(literal))),
+                             n.chars(0, n.chars(1, pattern)));
+  const auto ranked = [&](const std::vector<int>& sub) {
+    return std::ranges::any_of(sub, [&](int x) {
+      const LexNfaState& st = n.s[static_cast<std::size_t>(x)];
+      return st.accept >= 0 && st.lit;
+    });
+  };
+  CHECK(cursiv::lex_pair_search(
+            n, sets, either, bang,
+            [&](const std::vector<int>& x, const std::vector<int>& y) {
+              return cursiv::lex_accepts(n, x) && cursiv::lex_accepts(n, y) &&
+                     ranked(x) == ranked(y);
+            }) == cursiv::LexOverlap::found);
+  // Sixteen assertions at one position.
+  int many = asserting(pattern);
+  for (int k = 1; k < 16; ++k)
+    many = n.split(asserting(n.chars(1, pattern)), many);
+  std::vector<int> at = n.eclose(many);
+  std::ranges::sort(at);
+  bool unsure = false;
+  CHECK(cursiv::lex_assertion_worlds(n, at, unsure) ==
+        std::vector<std::vector<int>>{at});
+  CHECK(unsure);
+}
+
+// A nested relay's run is followed while no opener deepens it: a text it
+// closes at depth zero ties with another graph's, and one an opener deepens,
+// which the relay reads on past, leaves the walk incomplete.
+void a_nested_run_is_followed_at_depth_zero() {
+  ByteSet sets[3];
+  sets[0].add('/');
+  sets[1].add('*');
+  sets[2].add('x');
+  LexNfaPool n;
+  const auto spell = [&](std::string_view text, int out) {
+    for (std::size_t i = text.size(); i-- > 0;)
+      out = n.chars(text[i] == '/' ? 0 : text[i] == '*' ? 1 : 2, out);
+    return out;
+  };
+  cursiv::LexRelayBuild r;
+  r.row.nested = true;
+  r.open = "/*";
+  r.close = "*/";
+  r.resumeOut = n.match(1);
+  n.relays.push_back(r);
+  const int comment = spell("/*", n.relay(0));
+  const auto ties = [&](int text) {
+    return cursiv::lex_pair_search(
+        n, sets, comment, text,
+        [&](const std::vector<int>& x, const std::vector<int>& y) {
+          return cursiv::lex_accepts(n, x) && cursiv::lex_accepts(n, y);
+        });
+  };
+  using cursiv::LexOverlap;
+  CHECK(ties(spell("/*x*/", n.match(2))) == LexOverlap::found);
+  CHECK(ties(spell("/**/", n.match(2))) == LexOverlap::found);
+  CHECK(ties(spell("/*/**/", n.match(2))) == LexOverlap::incomplete);
+  CHECK(ties(spell("/*x*", n.match(2))) == LexOverlap::none);
+}
+
+// An echo is a relay the walk does not follow: a text that reads on beside it
+// leaves the walk incomplete, and one that parts before it is proven apart.
+void an_echo_leaves_the_walk_incomplete() {
+  ByteSet sets[2];
+  sets[0].add('[');
+  sets[1].add('x');
+  LexNfaPool n;
+  cursiv::LexRelayBuild r;
+  r.row.closes = true;
+  r.resumeOut = n.match(1);
+  n.relays.push_back(r);
+  const int echo = n.chars(0, n.chars(0, n.relay(0)));
+  const auto meets = [&](int text) {
+    return cursiv::lex_prefix_meets(n, sets, text, echo);
+  };
+  using cursiv::LexOverlap;
+  CHECK(meets(n.chars(0, n.chars(0, n.chars(1, n.match(2))))) ==
+        LexOverlap::incomplete);
+  CHECK(meets(n.chars(0, n.chars(1, n.match(2)))) == LexOverlap::none);
+  CHECK(meets(n.chars(0, n.match(2))) == LexOverlap::found);
 }
 
 }  // namespace
 
 void run() {
   the_walks_agree_with_the_plain_ones();
+  an_assertion_is_entered_or_not();
+  a_nested_run_is_followed_at_depth_zero();
+  an_echo_leaves_the_walk_incomplete();
 
 }
 

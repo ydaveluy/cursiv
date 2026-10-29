@@ -40,39 +40,39 @@ std::vector<unsigned> productions_by_rule(const LrBuildCfg& g) {
 
 void lr_state_symbols(LrBuildTable& A) {
   const LrBuildCfg& g = A.cfg;
+  // Each way into a state, `f(from, to, symbol)`: a shift, a goto, or one
+  // landing of a guard's.
+  const auto each_entry = [&](auto&& f) {
+    const auto land = [&](unsigned s, std::uint32_t guard, std::uint16_t x) {
+      for (const std::uint16_t to : A.guards[guard].to)
+        if (to != LrGuard::kNoState) f(s, to, x);
+    };
+    for (unsigned s = 0; s < A.nstates; ++s) {
+      for (const LrAction& action : A.action_row(s)) {
+        if (action.kind == LrActionKind::shift) f(s, action.arg, action.term);
+        if (action.kind == LrActionKind::guard) land(s, action.arg, action.term);
+      }
+      for (const auto& e : A.gotoRows[s]) {
+        const auto x = static_cast<std::uint16_t>(g.nterms + e.nt);
+        if (e.guard == 0)
+          f(s, e.to, x);
+        else
+          land(s, e.guard - 1u, x);
+      }
+    }
+  };
   std::vector<std::uint16_t> sym(A.nstates, kLrNoStateSym);
-  for (unsigned s = 0; s < A.nstates; ++s)
-    for (const LrAction& action : A.action_row(s))
-      if (action.kind == LrActionKind::shift) sym[action.arg] = action.term;
-  for (unsigned s = 0; s < A.nstates; ++s)
-    for (const auto& e : A.gotoRows[s])
-      if (e.guard == 0) sym[e.to] = static_cast<std::uint16_t>(g.nterms + e.nt);
+  each_entry([&](unsigned, unsigned to, std::uint16_t x) { sym[to] = x; });
   std::vector<std::uint16_t> below(A.nstates, kLrNoStateSym);
   std::vector<std::uint8_t> seen(A.nstates, 0);
-  const auto meet = [&](unsigned from, unsigned to) {
-    if (to == LrGuard::kNoState) return;
+  each_entry([&](unsigned from, unsigned to, std::uint16_t) {
     if (!seen[to]) {
       seen[to] = 1;
       below[to] = sym[from];
     } else if (below[to] != sym[from]) {
       below[to] = kLrNoStateSym;
     }
-  };
-  for (unsigned s = 0; s < A.nstates; ++s)
-    for (const LrAction& action : A.action_row(s)) {
-      if (action.kind == LrActionKind::shift) meet(s, action.arg);
-      if (action.kind == LrActionKind::guard)
-        for (const std::uint16_t to : A.guards[action.arg].to)
-          meet(s, to);
-    }
-  for (unsigned s = 0; s < A.nstates; ++s)
-    for (const auto& e : A.gotoRows[s]) {
-      if (e.guard == 0) {
-        meet(s, e.to);
-        continue;
-      }
-      for (const std::uint16_t to : A.guards[e.guard - 1u].to) meet(s, to);
-    }
+  });
   for (unsigned s = 0; s < A.nstates; ++s) {
     A.stateSym[s] = sym[s];
     A.stateBelow[s] = below[s];
@@ -214,56 +214,57 @@ void lr_elect_runs(LrBuildTable& A) {
   A.electChainAt.assign(1, 0);
   A.electChainWord.clear();
   A.electChainPos.clear();
-  if (std::size_t{g.nterms} + nN <= 0xFFFFu) {
-    std::vector<std::vector<unsigned>> below(nN);
-    for (unsigned i = 0; i < nP; ++i) {
-      const unsigned p = order[i];
-      if (lr_unit_passes(g, p)) below[g.prods[p].lhs].push_back(p);
-    }
-    const auto words_at = [&](unsigned p, std::uint16_t pos, auto&& take) {
-      for (std::uint32_t k = A.electAt[p]; k < A.electAt[p + 1]; ++k)
-        if (A.electPos[k] == pos) take(A.electWord[k]);
-    };
-    std::vector<std::uint8_t> carries(nN, 0);
-    std::vector<std::pair<std::uint32_t, std::vector<unsigned>>> runs;
-    std::vector<std::uint8_t> reached;
-    std::vector<std::pair<unsigned, std::vector<unsigned>>> walk;
+  const bool symbolsFit = std::size_t{g.nterms} + nN <= 0xFFFFu;
+  std::vector<std::vector<unsigned>> below(symbolsFit ? nN : 0);
+  bool unitWords = false;
+  if (symbolsFit)
+    for (const unsigned p : order)
+      if (lr_unit_passes(g, p)) {
+        below[g.prods[p].lhs].push_back(p);
+        unitWords = unitWords || A.electAt[p] != A.electAt[p + 1u];
+      }
+  // A path names only the productions that spell decisions. Plain aliases
+  // share that link unchanged, instead of copying an ever longer prefix.
+  constexpr std::size_t noPath = ~std::size_t{0};
+  struct Path {
+    unsigned prod;
+    std::size_t previous;
+  };
+  struct Run {
+    std::uint32_t key;
+    std::size_t path;
+  };
+  std::vector<Path> paths;
+  std::vector<Run> runs;
+  std::vector<std::uint8_t> carries(nN, 0);
+  const auto collect = [&] {
+    std::vector<std::uint8_t> reached(std::size_t{g.nterms} + nN);
+    std::vector<std::pair<unsigned, std::size_t>> walk;
     for (unsigned x = 0; x < nN; ++x) {
-      reached.assign(std::size_t{g.nterms} + nN, 0);
-      walk.assign(1, {x, {}});
+      std::ranges::fill(reached, 0);
+      walk.assign(1, {x, noPath});
       while (!walk.empty()) {
-        auto [at, path] = std::move(walk.back());
+        const auto [at, path] = walk.back();
         walk.pop_back();
         for (const unsigned p : below[at]) {
           const std::uint16_t s = g.sym_at(g.prods[p], 0);
           const unsigned y = is_term(s) ? s : g.nterms + nt_index(s);
           if (reached[y]) continue;
           reached[y] = 1;
-          std::vector<unsigned> run = path;
-          run.push_back(p);
-          for (const unsigned q : run)
-            if (A.electAt[q] != A.electAt[q + 1]) carries[x] = 1;
-          runs.emplace_back(x << 16 | y, run);
-          if (!is_term(s)) walk.emplace_back(nt_index(s), std::move(run));
+          std::size_t run = path;
+          if (A.electAt[p] != A.electAt[p + 1u]) {
+            run = paths.size();
+            paths.push_back({p, path});
+          }
+          if (run != noPath) carries[x] = 1;
+          runs.push_back({x << 16 | y, run});
+          if (!is_term(s)) walk.emplace_back(nt_index(s), run);
         }
       }
     }
-    std::ranges::sort(runs, {}, &decltype(runs)::value_type::first);
-    for (const auto& [key, run] : runs) {
-      A.electChainKey.push_back(key);
-      for (const unsigned q : run)
-        words_at(q, 0, [&](std::uint32_t w) {
-          A.electChainWord.push_back(w);
-          A.electChainPos.push_back(0);
-        });
-      for (auto q = run.rbegin(); q != run.rend(); ++q)
-        words_at(*q, 1, [&](std::uint32_t w) {
-          A.electChainWord.push_back(w);
-          A.electChainPos.push_back(1);
-        });
-      A.electChainAt.push_back(
-          static_cast<std::uint32_t>(A.electChainWord.size()));
-    }
+  };
+  if (unitWords) {
+    collect();
     for (unsigned p = 0; p < nP; ++p) {
       A.electWatchAt[p] = static_cast<std::uint32_t>(A.electWatch.size());
       const LrLowProd& q = g.prods[p];
@@ -282,7 +283,7 @@ void lr_elect_runs(LrBuildTable& A) {
   A.electTwin.clear();
   A.electRhsAt.assign(nP + 1u, 0);
   A.electRhs.clear();
-  if (std::size_t{g.nterms} + nN <= 0xFFFFu) {
+  if (symbolsFit) {
     std::map<std::vector<std::uint32_t>, std::uint32_t> classOf;
     std::vector<std::uint32_t> key, cls(nP);
     std::vector<std::vector<unsigned>> members;
@@ -335,10 +336,31 @@ void lr_elect_runs(LrBuildTable& A) {
   }
   if (A.electWatch.empty()) A.electWatchAt.clear();
   if (A.electWatch.empty() && A.electTwin.empty()) {
-    A.electChainKey.clear();
     A.electChainAt.clear();
-    A.electChainWord.clear();
-    A.electChainPos.clear();
+  } else {
+    // Wordless aliases need their relation only if twins use it. In the
+    // common case with neither watches nor twins, no paths are made at all.
+    if (!unitWords) collect();
+    std::ranges::sort(runs, {}, &Run::key);
+    std::vector<unsigned> decisions;
+    const auto words_at = [&](unsigned p, std::uint16_t pos) {
+      for (std::uint32_t k = A.electAt[p]; k < A.electAt[p + 1u]; ++k)
+        if (A.electPos[k] == pos) {
+          A.electChainWord.push_back(A.electWord[k]);
+          A.electChainPos.push_back(pos);
+        }
+    };
+    for (const Run& run : runs) {
+      A.electChainKey.push_back(run.key);
+      decisions.clear();
+      for (auto path = run.path; path != noPath; path = paths[path].previous)
+        decisions.push_back(paths[path].prod);
+      for (auto p = decisions.rbegin(); p != decisions.rend(); ++p)
+        words_at(*p, 0);
+      for (const unsigned p : decisions) words_at(p, 1);
+      A.electChainAt.push_back(
+          static_cast<std::uint32_t>(A.electChainWord.size()));
+    }
   }
   if (A.electWord.empty()) A.electAt.clear();
 }

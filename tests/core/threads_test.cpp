@@ -21,7 +21,10 @@
 #include <vector>
 
 #include "cursiv/core/execution/TaskScheduler.hpp"
+#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/core/grammar/dump.hpp"
 #include "cursiv/core/references/ImportedNames.hpp"
+#include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/utils/Published.hpp"
 #include "cursiv/core/workspace/DefaultWorkspaceLock.hpp"
@@ -944,10 +947,52 @@ void run() {
 
 }  // namespace imported_names
 
+// Pins that the grammar dumps may run on several threads at once: each reads
+// an image of its own, which fills itself as the printer reads it.
+namespace grammar_dump {
+
+namespace {
+
+struct Item : cursiv::Extends<cursiv::AstNode> {};
+
+// Each rule calls the next, so a dump lays one rule after another.
+struct Chain : cursiv::GrammarSpec {
+  template <int I>
+  struct R : rule<ref<R<I - 1>>> {};
+  using entry = R<24>;
+};
+
+template <>
+struct Chain::R<0> : Chain::rule<Chain::create<Item>(Chain::kw<"item">)> {};
+
+void concurrent_dumps_read_the_same_grammar() {
+  constexpr std::size_t kThreads = 8;
+  std::vector<std::string> dumps(kThreads);
+  std::barrier start(static_cast<std::ptrdiff_t>(kThreads));
+  {
+    std::vector<std::jthread> threads;
+    for (std::size_t t = 0; t < kThreads; ++t)
+      threads.emplace_back([&, t] {
+        start.arrive_and_wait();
+        for (int n = 0; n < 10; ++n) dumps[t] = cursiv::dump_declared<Chain>();
+      });
+  }
+  const std::string expected = cursiv::dump_declared<Chain>();
+  CHECK(expected.find("item") != std::string::npos);
+  for (const std::string& dump : dumps) CHECK(dump == expected);
+}
+
+}  // namespace
+
+void run() { concurrent_dumps_read_the_same_grammar(); }
+
+}  // namespace grammar_dump
+
 int main() {
   task_scheduler::run();
   published::run();
   workspace_lock::run();
   imported_names::run();
+  grammar_dump::run();
   return cursiv::test::report("threads");
 }

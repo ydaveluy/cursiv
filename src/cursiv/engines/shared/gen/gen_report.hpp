@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "cursiv/engines/shared/gen/GrammarFault.hpp"
+#include "cursiv/engines/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/engines/shared/gen/LexRecursion.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
@@ -20,12 +21,14 @@ namespace cursiv {
 
 struct GrammarImage;
 
-// The dead branches, flags that may read nothing and repetitions of a run
-// that a grammar spells: a warning each.
+// The dead branches, branches that repeat earlier ones, flags that may read
+// nothing, repetitions of a run and literals that may stop inside a word that a
+// grammar spells: a warning each.
 void report_grammar_warnings(std::string_view grammar, GrammarImage& image);
 
-// A condition a completion cannot step over, a warning each; `rule_name`
-// answers the name of a rule index, empty where none stands.
+// A condition read to the end of an unbounded run, a warning each: it makes
+// parsing quadratic in the run and a completion replay the tokens before the
+// caret. `rule_name` answers the name of a rule index, empty where none stands.
 template <class Cfg, class RuleName>
 void report_unbounded_conditions(std::string_view grammar, const Cfg& c,
                                  RuleName rule_name) {
@@ -33,6 +36,16 @@ void report_unbounded_conditions(std::string_view grammar, const Cfg& c,
     std::fprintf(stderr, "%.*s: warning: %s\n", static_cast<int>(grammar.size()),
                  grammar.data(),
                  unbounded_condition_text(c, rule_name(u.rule), u).c_str());
+}
+
+// A lexical check that could not conclude, a warning each: the grammar is
+// generated as if the check found nothing.
+template <class Cfg>
+void report_incomplete_lex_checks(std::string_view grammar, const Cfg& c) {
+  for (const LexCheckIncomplete& k : c.lexIncomplete)
+    std::fprintf(stderr, "%.*s: warning: %s\n",
+                 static_cast<int>(grammar.size()), grammar.data(),
+                 lex_check_incomplete_text(c, k).c_str());
 }
 
 // An arm that begins and ends with its own rule, a refusal each: true where

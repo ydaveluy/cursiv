@@ -13,6 +13,6 @@ struct G : Base {
       : rule<create<ast::Node>(&section<Guest>(lit<"[">, lit<"]">) +
                                assign<&ast::Node::name>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace refuse

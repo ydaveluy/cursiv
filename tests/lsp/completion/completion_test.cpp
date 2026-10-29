@@ -11,8 +11,10 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include "block/generated/Block/Module.hpp"
 #include "caret/generated/Caret/AstReflection.hpp"
 #include "caret/generated/Caret/Module.hpp"
 #include "caret/generated/Caret/Table.hpp"
@@ -26,11 +28,14 @@
 #include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
 #include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/lsp/completion/DefaultFuzzyMatcher.hpp"
+#include "cursiv/lsp/runtime/LanguageServer.hpp"
 #include "cursiv/lsp/services/LspServices.hpp"
 #include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "lsp/completion/CaretLane.hpp"
+#include "wordsll/generated/Ll/Module.hpp"
+#include "wordslr/generated/Lr/Module.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
 // What a word boundary forbids at a caret: a literal made of word characters
@@ -333,11 +338,257 @@ void run() {
 
 }  // namespace lr_completion_caret
 
+// A word may span lines, while the protocol keeps both ranges of a completion
+// edit on one line: each stops at the caret's line.
+namespace multiline_word {
+
+namespace g = tblock::generated::Block;
+
+namespace {
+
+struct World {
+  struct Shared : cursiv::SharedLspServices {};
+  struct Language : cursiv::LspServices {
+    explicit Language(Shared& s)
+        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
+  };
+  Shared shared;
+  Language* lang = nullptr;
+
+  World() {
+    shared.fileSystemProvider =
+        std::make_unique<cursiv::EmptyFileSystemProvider>();
+    cursiv::install_default_shared_lsp_services(shared);
+    auto language = std::make_unique<Language>(shared);
+    language->languageMetaData = {"block", {".block"}, {}};
+    language->parser = g::create_parser();
+    language->astReflection = g::create_ast_reflection();
+    language->nameProvider =
+        std::make_unique<cursiv::DefaultNameProvider>(*language);
+    cursiv::install_default_core_services(*language);
+    cursiv::install_default_lsp_services(*language);
+    lang = language.get();
+    shared.serviceRegistry->registerServices(std::move(language));
+    // A client that takes both ranges, so the replace range is sent at all.
+    lsp::InitializeParams params;
+    params.capabilities.textDocument.emplace()
+        .completion.emplace()
+        .completionItem.emplace()
+        .insertReplaceSupport = true;
+    (void)shared.languageServer->initialize(params);
+  }
+};
+
+// The ranges offered for `entity` at the marked caret, as
+// `{insert start, insert end, replace start, replace end}`, line and column
+// each.
+[[nodiscard]] std::vector<lsp::Uint> ranges_of_entity(const World& world,
+                                                      std::string text) {
+  std::vector<lsp::Uint> found;
+  (void)cursiv::test::expectCompletion(
+      *world.lang,
+      cursiv::test::ExpectedCompletionCallback{
+          .text = std::move(text),
+          .assertion =
+              [&](const lsp::CompletionList& list) {
+                for (const lsp::CompletionItem& item : list.items) {
+                  if (item.label != "entity" || !item.textEdit) continue;
+                  const auto* edit =
+                      std::get_if<lsp::InsertReplaceEdit>(&*item.textEdit);
+                  if (edit == nullptr) continue;
+                  found = {
+                      edit->insert.start.line,  edit->insert.start.character,
+                      edit->insert.end.line,    edit->insert.end.character,
+                      edit->replace.start.line, edit->replace.start.character,
+                      edit->replace.end.line,   edit->replace.end.character};
+                }
+              },
+          .disposeAfterCheck = true});
+  return found;
+}
+
+// `begin` to `end` is one token over two lines: the ranges take the caret's
+// line of it only, and what is typed there is the filter.
+void a_word_spanning_lines_is_replaced_on_the_carets_line() {
+  const World world;
+  CHECK(ranges_of_entity(world, "<|>begin\nend") ==
+        std::vector<lsp::Uint>{0, 0, 0, 0, 0, 0, 0, 5});
+  CHECK(ranges_of_entity(world, "begin\nen<|>d") ==
+        std::vector<lsp::Uint>{1, 0, 1, 2, 1, 0, 1, 3});
+}
+
+// ...and a word on one line keeps the ranges it always had.
+void a_word_on_one_line_keeps_its_ranges() {
+  const World world;
+  CHECK(ranges_of_entity(world, "en<|>tity") ==
+        std::vector<lsp::Uint>{0, 0, 0, 2, 0, 0, 0, 6});
+}
+
+}  // namespace
+
+void run() {
+  a_word_spanning_lines_is_replaced_on_the_carets_line();
+  a_word_on_one_line_keeps_its_ranges();
+}
+
+}  // namespace multiline_word
+
+// A terminal that reads a choice of words offers each of them, as the data
+// rule reading the same words offers its keywords: the same items at the same
+// carets, in both engines, whether the terminal gives each word a constant or
+// converts them whole. A terminal matched by a pattern offers none.
+namespace word_terminals {
+
+namespace {
+
+struct World {
+  struct Shared : cursiv::SharedLspServices {};
+  struct Language : cursiv::LspServices {
+    explicit Language(Shared& s)
+        : cursiv::CoreServices(s), cursiv::LspServices(s) {}
+  };
+  Shared shared;
+  const Language* ll = nullptr;
+  const Language* lr = nullptr;
+
+  World() {
+    shared.fileSystemProvider =
+        std::make_unique<cursiv::EmptyFileSystemProvider>();
+    cursiv::install_default_shared_lsp_services(shared);
+    ll = add("words-ll", ".wll", &twords::generated::Ll::create_parser,
+             &twords::generated::Ll::create_ast_reflection);
+    lr = add("words-lr", ".wlr", &twords::generated::Lr::create_parser,
+             &twords::generated::Lr::create_ast_reflection);
+  }
+
+  const Language* add(std::string id, std::string extension, auto parser,
+                      auto reflection) {
+    auto language = std::make_unique<Language>(shared);
+    language->languageMetaData = {std::move(id), {std::move(extension)}, {}};
+    language->parser = parser();
+    language->astReflection = reflection();
+    language->nameProvider =
+        std::make_unique<cursiv::DefaultNameProvider>(*language);
+    cursiv::install_default_core_services(*language);
+    cursiv::install_default_lsp_services(*language);
+    const Language* const out = language.get();
+    shared.serviceRegistry->registerServices(std::move(language));
+    return out;
+  }
+};
+
+// Each item as an editor reads it -- what it shows, how it sorts, what it
+// writes and where -- in label order.
+std::vector<std::string> items_at(const World::Language& language,
+                                  std::string text) {
+  std::vector<std::string> out;
+  (void)cursiv::test::expectCompletion(
+      language,
+      cursiv::test::ExpectedCompletionCallback{
+          .text = std::move(text),
+          .assertion =
+              [&](const lsp::CompletionList& list) {
+                for (const lsp::CompletionItem& item : list.items) {
+                  std::string shown = item.label;
+                  shown +=
+                      '|' +
+                      std::to_string(
+                          item.kind ? static_cast<unsigned>(*item.kind) : 0u);
+                  shown += '|' + item.detail.value_or("");
+                  shown += '|' + item.sortText.value_or("");
+                  shown += item.documentation ? "|doc" : "|";
+                  if (item.textEdit)
+                    if (const auto* edit =
+                            std::get_if<lsp::TextEdit>(&*item.textEdit))
+                      shown += '|' + edit->newText + '@' +
+                               std::to_string(edit->range.start.line) + ':' +
+                               std::to_string(edit->range.start.character) +
+                               '-' + std::to_string(edit->range.end.line) +
+                               ':' + std::to_string(edit->range.end.character);
+                  out.push_back(std::move(shown));
+                }
+              },
+          .disposeAfterCheck = true});
+  std::ranges::sort(out);
+  return out;
+}
+
+std::vector<std::string> labels_at(const World::Language& language,
+                                   std::string text) {
+  std::vector<std::string> out = items_at(language, std::move(text));
+  for (std::string& item : out) item.resize(item.find('|'));
+  std::ranges::sort(out);
+  return out;
+}
+
+constexpr const char* kTerminalForms[] = {"branch:\n", "whole:\n"};
+
+// Every caret of each document, behind each form: the body starts a line of
+// its own, so the edits of the forms read alike. The documents read whole, so
+// the forms agree on the tree and only the words are compared.
+void the_words_are_offered_as_the_data_rule_offers_its_keywords() {
+  const World world;
+  for (const World::Language* language : {world.ll, world.lr})
+    for (const std::string_view body :
+         {"a TRUE; b false; c TRUE;", "a // note\nTRUE; b FALSE;"})
+      for (std::size_t at = 0; at <= body.size(); ++at) {
+        std::string marked(body);
+        marked.insert(at, "<|>");
+        const auto rule = items_at(*language, "rule:\n" + marked);
+        for (const char* form : kTerminalForms) {
+          const auto token = items_at(*language, form + marked);
+          if (token != rule) {
+            std::printf(
+                "%s [%s%s]\n  token:", language == world.ll ? "LL" : "LR", form,
+                marked.c_str());
+            for (const std::string& item : token)
+              std::printf(" %s", item.c_str());
+            std::printf("\n  rule: ");
+            for (const std::string& item : rule)
+              std::printf(" %s", item.c_str());
+            std::printf("\n");
+          }
+          CHECK(token == rule);
+        }
+      }
+}
+
+// The words as written, `ikw` ones too, filtered on what is typed; nested
+// choices give theirs. Glued to a name, or at the end of a comment, a word
+// would join it, and none is offered. A name is matched by a pattern and
+// offers nothing.
+void a_terminal_offers_its_words_and_a_pattern_none() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  for (const World::Language* language : {world.ll, world.lr}) {
+    for (const std::string form : {"branch:\n", "whole:\n", "rule:\n"}) {
+      CHECK(labels_at(*language, form + "a <|>") == Labels{"FALSE", "TRUE"});
+      CHECK(labels_at(*language, form + "a t<|>") == Labels{"TRUE"});
+      CHECK(labels_at(*language, form + "a<|> TRUE;").empty());
+      CHECK(labels_at(*language, form + "a // c<|>").empty());
+      CHECK(labels_at(*language, form + "<|>").empty());
+    }
+    CHECK(labels_at(*language, "size:\na <|>") ==
+          Labels{"L", "large", "s", "small"});
+  }
+}
+
+}  // namespace
+
+void run() {
+  the_words_are_offered_as_the_data_rule_offers_its_keywords();
+  a_terminal_offers_its_words_and_a_pattern_none();
+}
+
+}  // namespace word_terminals
+
 int main() {
   cursiv::test::count_expectations();
   default_completion_provider::run();
   fuzzy_matcher::run();
   caret_repaired::run();
   lr_completion_caret::run();
+  multiline_word::run();
+  word_terminals::run();
   return cursiv::test::report("completion");
 }

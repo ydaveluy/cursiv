@@ -76,7 +76,7 @@ struct Workspace : cursiv::GrammarSpec {
                            ref<AbstractElementRule>))> {};
 
   using entry = Domainmodel;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 

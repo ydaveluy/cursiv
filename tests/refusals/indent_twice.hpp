@@ -17,7 +17,7 @@ struct G : cursiv::GrammarSpec {
                                ref<NEWLINE> + (ref<INDENT> | ref<OPEN>) +
                                ref<ID> + ref<NEWLINE> + ref<DEDENT>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using indent_newline = NEWLINE;
 };
 

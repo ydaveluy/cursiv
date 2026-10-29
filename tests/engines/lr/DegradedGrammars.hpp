@@ -33,7 +33,7 @@ struct Nest : cursiv::GrammarSpec {
              kw<"w37"> | kw<"w38"> | kw<"w39"> | ref<Group>> {};
   struct Root : rule<create<ast::Node>(many(ref<Item>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Deep : cursiv::GrammarSpec {
@@ -42,7 +42,7 @@ struct Deep : cursiv::GrammarSpec {
   struct A : rule<ref<A<K - 1>> + ref<A<K - 1>>> {};
   struct S : rule<create<ast::Node>(ref<A<63>>)> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 template <>
 struct Deep::A<0> : Deep::rule<lit<"x">> {};
@@ -89,7 +89,7 @@ struct Ladder : cursiv::GrammarSpec {
   struct Root : rule<create<ladder::Doc>(
                     many(append<&ladder::Tree::kids>(ref<Item>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct G : cursiv::GrammarSpec {
@@ -98,7 +98,7 @@ struct G : cursiv::GrammarSpec {
                      (kw<"deep"> + ref<Deep::S>) |
                      (kw<"ladder"> + ref<Ladder::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tdegraded

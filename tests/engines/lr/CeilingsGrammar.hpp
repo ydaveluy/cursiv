@@ -15,6 +15,6 @@ struct G : cursiv::GrammarSpec {
                      (kw<"open"> + ref<twhere::Open::Root>) |
                      (kw<"take"> + ref<twhere::Taken::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tceilings

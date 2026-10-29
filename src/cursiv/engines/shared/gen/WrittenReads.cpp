@@ -1,13 +1,26 @@
 #include "cursiv/engines/shared/gen/WrittenReads.hpp"
 
+#include <algorithm>
+
 namespace cursiv {
 
 WrittenReads::Slot& WrittenReads::slot(std::uint32_t rule) {
-  for (Slot& s : _slots)
-    if (s.rule == rule) return s;
-  _slots.push_back({rule});
-  ++_moved;
-  return _slots.back();
+  // Readying a rule may add rules to the image.
+  if (rule >= _slotOf.size())
+    _slotOf.resize(std::max<std::size_t>(rule + 1, _image.rules.size()),
+                   kNoSlot);
+  std::uint32_t& at = _slotOf[rule];
+  if (at == kNoSlot) {
+    at = static_cast<std::uint32_t>(_slots.size());
+    _slots.push_back({.rule = rule, .readers = {}});
+    _work.push_back(at);
+    ++_moved;
+  }
+  Slot& s = _slots[at];
+  if (_solving != kNoSlot &&
+      (s.readers.empty() || s.readers.back() != _solving))
+    s.readers.push_back(_solving);
+  return s;
 }
 
 // A call reads the rule it names, unless that is a token, an operator table
@@ -81,22 +94,29 @@ bool WrittenReads::run_of(ImageId id) {
   }
 }
 
-void WrittenReads::solve(std::size_t at) {
+bool WrittenReads::solve(std::uint32_t at) {
   const std::uint32_t rule = _slots[at].rule;
   const ImageId body = _image.ready(rule).face[1].body;
+  _solving = at;
   const bool nothing = nothing_of(body);
   const bool run = run_of(body);
+  _solving = kNoSlot;
   Slot& s = _slots[at];
-  if (s.nothing == nothing && s.run == run) return;
+  if (s.nothing == nothing && s.run == run) return false;
   s.nothing = nothing;
   s.run = run;
   ++_moved;
+  return true;
 }
 
+// Only what reads a slot that moved is solved again.
 void WrittenReads::settle() {
-  for (auto before = _moved;; before = _moved) {
-    for (std::size_t i = 0; i < _slots.size(); ++i) solve(i);
-    if (_moved == before) return;
+  while (!_work.empty()) {
+    const std::uint32_t at = _work.back();
+    _work.pop_back();
+    if (solve(at))
+      _work.insert(_work.end(), _slots[at].readers.begin(),
+                   _slots[at].readers.end());
   }
 }
 

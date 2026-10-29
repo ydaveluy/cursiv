@@ -33,6 +33,7 @@ class LrCactus {
     _roots = kLrNoNode;
     _begins.clear();
     _frozen.clear();
+    _stepped = 0;
   }
 
   // Where the laid pools stand, and back to it: what an attempt laid since is
@@ -52,7 +53,7 @@ class LrCactus {
       const std::uint32_t parent = _nodes[n].parent;
       std::uint32_t* link =
           parent == kLrNoNode ? &_roots : &_nodes[parent].child;
-      while (*link != n) link = &_nodes[*link].sibling;
+      for (; *link != n; ++_stepped) link = &_nodes[*link].sibling;
       *link = _nodes[n].sibling;
       _nodes.pop_back();
     }
@@ -87,12 +88,13 @@ class LrCactus {
   [[nodiscard]] std::uint32_t depth(std::uint32_t n) const {
     return _nodes[n].depth;
   }
-  // A node's children are few; the one met last goes first, as readings
-  // reduce into the same state again and again.
+  // A node's children are mostly few; the one met last goes first, as
+  // readings reduce into the same state again and again. Where they are many,
+  // the siblings stepped past are the search's to pay for.
   std::uint32_t intern(std::uint16_t state, std::uint32_t parent) {
     std::uint32_t& first = parent == kLrNoNode ? _roots : _nodes[parent].child;
     for (std::uint32_t prev = kLrNoNode, n = first; n != kLrNoNode;
-         prev = n, n = _nodes[n].sibling) {
+         prev = n, n = _nodes[n].sibling, ++_stepped) {
       if (_nodes[n].state != state) continue;
       if (prev != kLrNoNode) {
         _nodes[prev].sibling = _nodes[n].sibling;
@@ -107,6 +109,14 @@ class LrCactus {
     first = n;
     _nodes.push_back(Node{state, parent, d, kLrNoNode, next});
     return n;
+  }
+
+  // The units of work the siblings stepped past since the last payment come
+  // to, `per` to a unit; what falls short of one waits for the next.
+  std::uint64_t pay(std::uint64_t per) {
+    const std::uint64_t units = _stepped / per;
+    _stepped %= per;
+    return units;
   }
 
   std::uint32_t begin_push(std::int64_t at, std::uint32_t parent) {
@@ -136,6 +146,7 @@ class LrCactus {
   std::uint32_t _roots = kLrNoNode;
   std::vector<Begin> _begins;
   std::vector<Frozen> _frozen;
+  std::uint64_t _stepped = 0;
 };
 
 }  // namespace cursiv

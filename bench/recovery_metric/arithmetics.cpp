@@ -14,12 +14,14 @@
 #include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
+namespace metric = cursiv::recovery_metric;
+
 namespace {
 
 namespace g = arith::generated::Arith;
 const cursiv::fuzzer::CursivActions<arith::Arith> kActions{};
 
-const recovery_metric::Registered kLanguage{{
+const metric::Registered kLanguage{{
     .rank = 6,
     .name = "arithmetics",
     .parser = &g::create_parser,
@@ -28,14 +30,14 @@ const recovery_metric::Registered kLanguage{{
     .documents =
         [] {
           return std::vector<std::string>{
-              recovery_metric::source_file("examples/arithmetics/tests/recovery/valid.calc"),
-              recovery_metric::source_file("examples/arithmetics/example/demo.calc"),
-              recovery_metric::source_file("examples/arithmetics/example.calc"),
+              metric::source_file("examples/arithmetics/tests/recovery/valid.calc"),
+              metric::source_file("examples/arithmetics/example/demo.calc"),
+              metric::source_file("examples/arithmetics/example.calc"),
               bench::generateArithmeticsSource(2048)};
         },
-    .ceilings = &recovery_metric::ceilings<g::kTable, g::kDrive,
+    .ceilings = &metric::ceilings<g::kTable, g::kDrive,
                                           g::kGrammarMetaData, g::kAstActions>,
-    .searching = &recovery_metric::searching<g::kTable, g::kDrive,
+    .searching = &metric::searching<g::kTable, g::kDrive,
                                                 g::kGrammarMetaData,
                                                 g::kAstActions>,
 }};

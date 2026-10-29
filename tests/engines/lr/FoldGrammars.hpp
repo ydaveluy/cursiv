@@ -32,10 +32,8 @@ struct G : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {
   };
-  struct Or : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                    left(lit<"||">)> {};
-  struct Coalesce : infix<Primary, &ast::Bin::left, &ast::Bin::op,
-                          &ast::Bin::right, left(lit<"??">)> {};
+  struct Or : infix<Primary, ast::Bin, left(lit<"||">)> {};
+  struct Coalesce : infix<Primary, ast::Bin, left(lit<"??">)> {};
   struct Binary : rule<ref<Or> | ref<Coalesce>> {};
   struct Ternary
       : rule<create<ast::Cond>(assign<&ast::Cond::test>(ref<Binary>) +
@@ -45,7 +43,7 @@ struct G : cursiv::GrammarSpec {
                                assign<&ast::Cond::no>(ref<Ternary>))  //
              | ref<Binary>> {};
   using entry = Ternary;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tfold

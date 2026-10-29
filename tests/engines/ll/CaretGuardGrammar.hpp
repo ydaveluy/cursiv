@@ -47,7 +47,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root : rule<ref<Guarded> | ref<Direct> | ref<Narrowed> | ref<Keyed>> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Base {};

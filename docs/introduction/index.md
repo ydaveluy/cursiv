@@ -1,20 +1,15 @@
 # What is cursiv++?
 
-cursiv++ helps you turn a language definition into a command-line tool or an
-editor extension. You write the data types for your abstract syntax tree
-(AST), the grammar and the validation checks. Cursiv supplies parsing,
-reference resolution and editor services.
+cursiv++ turns a language definition into a command-line tool or an editor
+extension. You write the abstract syntax tree (AST) types, the grammar and
+the validation checks. Cursiv supplies parsing, reference resolution and
+editor services.
 
 A grammar is a `struct` deriving from `cursiv::GrammarSpec`. Its rules bind
-directly to members of your AST structs. The C++ compiler and generator check
-that those bindings are valid.
-
-## Build your language
-
-Edit your AST and grammar headers, then build with CMake. Parser generation
-is automatic. The generated files go under the build directory; do not edit
-them. See [CMake integration](../reference/cmake.md) when adding a language to
-an existing project.
+directly to members of your AST structs, and the C++ compiler and the
+generator check those bindings. CMake generates the parser when you build.
+To add a language to an existing project, see
+[CMake integration](../reference/cmake.md).
 
 ## Choose the components you need
 
@@ -26,7 +21,7 @@ an existing project.
 | MCP (Model Context Protocol) | Expose language tools to a model |
 
 The scaffold includes all four. A program that only reads and validates files
-can use the core services directly.
+needs only the core.
 
 ## Next
 

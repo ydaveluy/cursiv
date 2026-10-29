@@ -12,8 +12,8 @@ namespace sm {
 
 void StateMachineValidator::checkStateNameStartsWithCapital(
     const ast::State& state, cursiv::ValidationAcceptor& accept) const {
-  if (!state.name.empty() && state.name.front() >= 'a' &&
-      state.name.front() <= 'z')
+  if (!state.name.empty() && state.name.front() >= 'a'
+      && state.name.front() <= 'z')
     accept.warning(state, "State name should start with a capital letter.")
         .property<&ast::State::name>();
 }

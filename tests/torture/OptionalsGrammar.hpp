@@ -141,11 +141,11 @@ struct OptionalsG : cursiv::GrammarSpec {
                       (kw<"recycle"> + ref<VarsRule>) |
                       ref<tbnd::BoundaryG::Root> |
                       (lit<"newline:"> +
-                       skip(ignored<tnl::NlG::WS>, hide<>,
+                       skip(ignore<tnl::NlG::WS>, hide<>,
                             ref<tnl::NlG::Root> + eof))> {};
 
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace topt

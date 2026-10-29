@@ -14,7 +14,8 @@
 namespace trivia_cases {
 
 // Trivia in both engines: two ignored terminals reading one text are no tie,
-// and a terminal read as trivia is no bracket of the indentation.
+// a blank keeps the refusal at its head, and a terminal read as trivia is no
+// bracket of the indentation.
 
 namespace {
 
@@ -25,6 +26,34 @@ void two_ignored_terminals_may_read_one_text(const cursiv::Parser& parser,
   const auto* const root = r.value_as<ttrivia::ast::Node>();
   CHECK(r.accepted && r.diagnostics.empty() && root != nullptr);
   CHECK(root != nullptr && root->body.size() == 3);
+}
+
+// A blank that refuses two tabs at its head reads them inside it, and two
+// that would open it are refused, however the lexer crosses blanks.
+void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
+  const cursiv::ParseResult inside = parser.parse("refusing:a \t\t b\tc");
+  const auto* const root = inside.value_as<ttrivia::ast::Node>();
+  CHECK(inside.accepted && inside.diagnostics.empty() && root != nullptr);
+  CHECK(root != nullptr && root->body.size() == 3);
+  for (const std::string_view text : {"refusing:a\t\tb", "refusing:\t\ta"}) {
+    const cursiv::ParseResult opening = parser.parse(text);
+    CHECK(!opening.accepted || !opening.diagnostics.empty());
+  }
+}
+
+// The trivia in front of a region's first token is its caller's, which skips
+// none here; the region's own blanks stand between its tokens and before its
+// `eof`.
+void a_region_head_is_its_callers(const cursiv::Parser& parser) {
+  for (const std::string_view text :
+       {"tied: a", "tied: ", "ranked: a", "bracketed: a", "refusing: a"}) {
+    const cursiv::ParseResult r = parser.parse(text);
+    CHECK(!r.accepted || !r.diagnostics.empty());
+  }
+  for (const std::string_view text : {"tied:a", "tied:a b ", "tied:"}) {
+    const cursiv::ParseResult r = parser.parse(text);
+    CHECK(r.accepted && r.diagnostics.empty());
+  }
 }
 
 template <const auto& Table>
@@ -67,6 +96,10 @@ void run() {
       *ttrivia::generated::Ll::create_parser(), "ranked:");
   two_ignored_terminals_may_read_one_text(
       *ttrivia::generated::Lr::create_parser(), "ranked:");
+  a_blank_keeps_its_head_refusal(*ttrivia::generated::Ll::create_parser());
+  a_blank_keeps_its_head_refusal(*ttrivia::generated::Lr::create_parser());
+  a_region_head_is_its_callers(*ttrivia::generated::Ll::create_parser());
+  a_region_head_is_its_callers(*ttrivia::generated::Lr::create_parser());
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Ll::kTable>();
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Lr::kTable>();
 

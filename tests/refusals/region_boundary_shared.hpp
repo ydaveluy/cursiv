@@ -12,7 +12,7 @@ struct G : Base {
             tight(lit<"x"> + lit<"a"> + lit<"b">) |
             (lit<"x"> + lit<"a"> + lit<"c">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

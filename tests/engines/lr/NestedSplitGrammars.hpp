@@ -53,7 +53,7 @@ struct G : cursiv::GrammarSpec {
                          (assign<&Doc::outer>(ref<A4>) +
                           assign<&Doc::inner>(ref<Inner>) + lit<"o4">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnsplit
 
@@ -161,7 +161,7 @@ struct G : cursiv::GrammarSpec {
                          (assign<&Doc::outer>(ref<A15>) +
                           assign<&Doc::inner>(ref<Inner>) + lit<"o15">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnsplit1610
 
@@ -173,7 +173,7 @@ struct G : cursiv::GrammarSpec {
   struct Case : rule<(kw<"five"> + ref<tnsplit::G::Root>) |
                      (kw<"sixteen"> + ref<tnsplit1610::G::Root>)> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnests
 
@@ -356,6 +356,6 @@ struct G : cursiv::GrammarSpec {
                          (assign<&Doc::outer>(ref<A23>) +
                           assign<&Doc::inner>(ref<Inner>) + lit<"o23">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnsplit2424

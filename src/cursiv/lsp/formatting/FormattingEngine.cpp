@@ -133,42 +133,54 @@ class EditSink {
   bool _sorted = true;
 };
 
-// The indentation already written at the head of a line, measured in the unit
-// the options ask for: columns when spaces are inserted, indentation levels
-// when tabs are.
+// The first piece of a line's leading whitespace: one tab, or a whole run of
+// spaces. No bytes means the whitespace is over.
+struct MarginPiece {
+  std::uint32_t bytes = 0;
+  bool tab = false;
+};
+
+[[nodiscard]] MarginPiece first_margin_piece(std::string_view text) noexcept {
+  if (!text.empty() && text.front() == '\t') return {.bytes = 1, .tab = true};
+  return {.bytes = static_cast<std::uint32_t>(
+              std::min(text.find_first_not_of(' '), text.size()))};
+}
+
+// The indentation units a piece counts for. Units are columns when spaces are
+// inserted, so a tab counts `tabSize`. They are levels when tabs are, so a tab
+// counts one, as does each group of `tabSize` spaces in a run, and each space
+// the groups leave over counts one.
+[[nodiscard]] std::int64_t piece_units(
+    const MarginPiece& piece, const lsp::FormattingOptions& options) noexcept {
+  const auto tabSize = effective_tab_size(options);
+  if (piece.tab) return options.insertSpaces ? tabSize : 1;
+  if (options.insertSpaces) return piece.bytes;
+  return piece.bytes / tabSize + piece.bytes % tabSize;
+}
+
+// The spaces to drop from a run of `spaces` to take `units` off it, fewer
+// than the run counts for. When tabs are inserted, the spaces the groups leave
+// over go first, so the run keeps its whole groups.
+[[nodiscard]] std::uint32_t spaces_for_units(
+    std::uint32_t spaces, std::int64_t units,
+    const lsp::FormattingOptions& options) noexcept {
+  const auto count = static_cast<std::uint32_t>(units);
+  if (options.insertSpaces) return count;
+  const auto tabSize = effective_tab_size(options);
+  const std::uint32_t leftover = spaces % tabSize;
+  return count <= leftover ? count : leftover + (count - leftover) * tabSize;
+}
+
+// The indentation already written at the head of a line, in the unit the
+// options ask for.
 [[nodiscard]] std::int32_t existing_indentation_count(
     std::string_view text, const lsp::FormattingOptions& options) {
-  const auto tabSize = effective_tab_size(options);
-  if (options.insertSpaces) {
-    std::int64_t count = 0;
-    for (const char ch : text) {
-      if (ch == ' ')
-        ++count;
-      else if (ch == '\t')
-        count += static_cast<std::int32_t>(tabSize);
-      else
-        break;
-    }
-    return checked_count(count);
-  }
   std::int64_t count = 0;
-  std::uint32_t spaces = 0;
-  for (const char ch : text) {
-    if (ch == ' ') {
-      ++spaces;
-      continue;
-    }
-    count += spaces / tabSize;
-    count += spaces % tabSize;
-    spaces = 0;
-    if (ch == '\t') {
-      ++count;
-      continue;
-    }
-    break;
+  for (MarginPiece piece = first_margin_piece(text); piece.bytes > 0;
+       piece = first_margin_piece(text)) {
+    count += piece_units(piece, options);
+    text.remove_prefix(piece.bytes);
   }
-  count += spaces / tabSize;
-  count += spaces % tabSize;
   return checked_count(count);
 }
 
@@ -386,19 +398,36 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
           .newText = whitespace_text(increase, context.options)});
     } else {
       // The first line's whitespace lives before the record, in the margin;
-      // every later line's lives in the record's own text.
+      // every later line's lives in the record's own text. The units come off
+      // in the measure that counted them, not one byte each.
       const std::string_view own = lineIndex == 0 ? margin : line;
+      std::int64_t left = -static_cast<std::int64_t>(increase);
       std::uint32_t removable = 0;
-      while (removable < own.size() &&
-             static_cast<std::int64_t>(removable) <
-                 -static_cast<std::int64_t>(increase) &&
-             is_horizontal_whitespace(own[removable]))
-        ++removable;
+      std::string kept;
+      while (left > 0) {
+        const MarginPiece piece = first_margin_piece(own.substr(removable));
+        if (piece.bytes == 0) break;
+        const std::int64_t units = piece_units(piece, context.options);
+        if (units <= left) {
+          removable += piece.bytes;
+          left -= units;
+          continue;
+        }
+        // Part of the piece stays. A tab worth several columns cannot be cut,
+        // so the columns it keeps are written as spaces.
+        if (piece.tab) {
+          ++removable;
+          kept = whitespace_text(checked_count(units - left), context.options);
+        } else {
+          removable += spaces_for_units(piece.bytes, left, context.options);
+        }
+        break;
+      }
       if (removable > 0)
         sink.push(PendingEdit{
             .span =
                 line_head(at, lineOffset, lineOffset + removable, removable),
-            .newText = std::string()});
+            .newText = std::move(kept)});
     }
     if (!terminator.has_value()) break;
     ++lineIndex;

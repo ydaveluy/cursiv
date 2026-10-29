@@ -14,10 +14,9 @@
 
 namespace cursiv {
 
-std::vector<std::size_t> member_order(std::span<const detail::FieldDesc> fields,
-                                      std::span<const std::ptrdiff_t> offsets,
-                                      std::span<const std::uint64_t> derives,
-                                      std::size_t words) {
+std::vector<std::size_t> member_order(
+    std::span<const AstRegistry::Field> fields,
+    std::span<const std::uint64_t> derives, std::size_t words) {
   std::vector<std::size_t> depth(derives.size() / words, 0);
   for (std::size_t base = 0; base < depth.size(); ++base)
     for (std::size_t type = 0; type < depth.size(); ++type)
@@ -27,14 +26,15 @@ std::vector<std::size_t> member_order(std::span<const detail::FieldDesc> fields,
   std::vector<std::size_t> order(fields.size());
   std::iota(order.begin(), order.end(), std::size_t{0});
   std::ranges::stable_sort(order, {}, [&](std::size_t f) {
-    return std::tuple(depth[fields[f].owner], fields[f].owner, offsets[f]);
+    return std::tuple(depth[fields[f].owner], fields[f].owner,
+                      fields[f].offset);
   });
   return order;
 }
 
 std::string emit_ast_members(const std::vector<std::string>& types,
                              const std::vector<std::string>& tags,
-                             std::span<const detail::FieldDesc> fields,
+                             std::span<const AstRegistry::Field> fields,
                              std::span<const std::size_t> order,
                              std::span<const std::uint64_t> derives,
                              std::size_t words) {
@@ -76,24 +76,26 @@ std::string emit_ast_members(const std::vector<std::string>& types,
       "constexpr ::cursiv::detail::YieldFn kMemberVisitors[]", typeIds,
       [](std::size_t t) { return std::format("&Members{}::visit", t); },
       "nullptr");
-  out += emit_table("constexpr ::std::uint16_t kReferenceFields[]", refFields,
-                    number, "0u");
-  std::vector<std::size_t> typed;
-  for (const auto& row : references)
-    typed.insert(typed.end(), row.begin(), row.end());
-  out += emit_table("constexpr ::std::uint16_t kTypeReferenceFields[]", typed,
-                    number, "0u");
-  std::size_t at = 0;
-  out += emit_table(
-      "constexpr ::std::span<const ::std::uint16_t> kReferenceRows[]",
-      references,
-      [&at](const std::vector<std::size_t>& row) {
-        return std::format("{{kTypeReferenceFields + {}u, {}u}}",
-                           std::exchange(at, at + row.size()), row.size());
-      },
-      "{}");
-  out += std::format("constexpr ::std::size_t kReferenceFieldCount = {}u;\n",
-                     refFields.size());
+  // A grammar with no reference member keeps no reference rows.
+  if (!refFields.empty()) {
+    out += emit_table("constexpr ::std::uint16_t kReferenceFields[]",
+                      refFields, number);
+    std::vector<std::size_t> typed;
+    for (const auto& row : references)
+      typed.insert(typed.end(), row.begin(), row.end());
+    out += emit_table("constexpr ::std::uint16_t kTypeReferenceFields[]",
+                      typed, number);
+    std::size_t at = 0;
+    out += emit_table(
+        "constexpr ::std::span<const ::std::uint16_t> kReferenceRows[]",
+        references,
+        [&at](const std::vector<std::size_t>& row) {
+          return std::format("{{kTypeReferenceFields + {}u, {}u}}",
+                             std::exchange(at, at + row.size()), row.size());
+        });
+    out += std::format("constexpr ::std::size_t kReferenceFieldCount = {}u;\n",
+                       refFields.size());
+  }
   out += std::format("constexpr bool kAnyMultiReference = {};\n", multi);
   return out;
 }

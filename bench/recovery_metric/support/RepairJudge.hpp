@@ -29,7 +29,7 @@
 #include "recovery_metric/support/RepairVerdict.hpp"
 #include "recovery_metric/support/TextKept.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairJudge {
   // Null: the tree is not weighed.
@@ -61,8 +61,9 @@ struct RepairJudge {
     const Grammar* grammar = twinCst.grammar();
     const auto restores = [&](std::size_t token, ElementId owed) {
       if (grammar == nullptr || owed == kNoElement) return false;
-      const std::string_view text = grammar->terminalText(owed);
-      if (!text.empty()) return text == twin.spelling(token);
+      const auto spellings = grammar->terminalSpellings(owed);
+      if (spellings.size() == 1)
+        return spellings.front() == twin.spelling(token);
       return !twin.literal[token] &&
              grammar->terminalName(owed) ==
                  grammar->recordRule(twinCst[twin.tokens[token].id]);
@@ -92,4 +93,4 @@ struct RepairJudge {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

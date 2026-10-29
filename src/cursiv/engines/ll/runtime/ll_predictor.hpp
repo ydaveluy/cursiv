@@ -22,14 +22,12 @@ inline std::uint64_t& ll_staged_reads() {
 // pass are the plan the descent is answered from. A choice made with readings
 // left keeps them, to be read on for the next choice the descent asks of them.
 template <const auto& T>
-inline std::uint16_t ll_episode(LlContext& c, std::uint16_t decision,
-                                const LlTable::Decision& dec) {
+inline std::uint16_t ll_episode(LlContext& c, std::uint16_t decision) {
   LlEpisode<T>& episode = ll_episode_engine<T>();
   std::uint16_t arm = kLlUnplanned;
-  if (!episode.resume(c, decision, arm)) arm = episode.run(c, decision, dec);
+  if (!episode.resume(c, decision, arm)) arm = episode.run(c, decision);
   auto& cache = ll_episode_cache<T>();
   cache.work.tokens += episode.take_steps();
-  cache.work.readings += episode.take_readings();
   return arm;
 }
 
@@ -43,9 +41,12 @@ inline std::uint16_t ll_predict(LlContext& c, std::uint16_t decision) {
     return planned;
   if (dec.how == LlPredict::staged) {
     const std::uint16_t a = T.staged(c, decision);
-    if (a != kNoRow) return a;
+    if (a != kNoRow) {
+      ll_plan_went<T>(c, decision, a);
+      return a;
+    }
   }
-  return ll_episode<T>(c, decision, dec);
+  return ll_episode<T>(c, decision);
 }
 
 }  // namespace cursiv

@@ -61,15 +61,37 @@ inline void lr_split_loops(LrLowered& o) {
   for (const auto& [l, hs] : heads) {
     std::vector<Place> places;
     std::vector<std::uint16_t> loops;
-    const auto walk = [&](auto&& self, int at) -> void {
-      const auto arms = by_lhs.of(places[at].rule);
-      places[at].goes.assign(arms.size(), -1);
-      for (std::size_t i = 0; i < arms.size(); ++i) {
+    // One active place per rule on the DFS path. A sibling must see its own
+    // path again, so entries leave this index when their frame is popped.
+    std::vector<int> active(nN, -1);
+    struct Visit {
+      int place;
+      std::size_t arm = 0;
+    };
+    std::vector<Visit> walk;
+    const auto enter = [&](int at) {
+      active[places[at].rule] = at;
+      places[at].goes.assign(by_lhs.of(places[at].rule).size(), -1);
+      walk.push_back({at});
+    };
+    for (std::size_t k = 0; k < hs.size(); ++k) {
+      places.push_back({hs[k], -1, kNoRow, {}});
+      loops.push_back(static_cast<std::uint16_t>(next + k));
+      enter(static_cast<int>(places.size()) - 1);
+      while (!walk.empty()) {
+        const int at = walk.back().place;
+        const auto arms = by_lhs.of(places[at].rule);
+        if (walk.back().arm == arms.size()) {
+          active[places[at].rule] = -1;
+          walk.pop_back();
+          continue;
+        }
+        const std::size_t i = walk.back().arm++;
         const unsigned x = lead[arms[i]];
         if (x == nN) continue;
-        int to = at;
-        while (to >= 0 && places[to].rule != x) to = places[to].parent;
-        if (to < 0) {
+        int to = active[x];
+        const bool fresh = to < 0;
+        if (fresh) {
           if (places.size() >= kNtBase) {
             lower_refuse(c, LowerFail::tooManyRules);
             throw LowerRefused(LowerFail::tooManyRules);
@@ -77,15 +99,10 @@ inline void lr_split_loops(LrLowered& o) {
           to = static_cast<int>(places.size());
           places.push_back({static_cast<std::uint16_t>(x), at, kNoRow, {}});
           loops.push_back(loops[at]);
-          self(self, to);
         }
         places[at].goes[i] = to;
+        if (fresh) enter(to);
       }
-    };
-    for (std::size_t k = 0; k < hs.size(); ++k) {
-      places.push_back({hs[k], -1, kNoRow, {}});
-      loops.push_back(static_cast<std::uint16_t>(next + k));
-      walk(walk, static_cast<int>(places.size()) - 1);
     }
     if (places.size() == members[l].size()) continue;
     next = static_cast<std::uint16_t>(next + hs.size());

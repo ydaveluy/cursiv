@@ -78,7 +78,7 @@ struct Base : cursiv::GrammarSpec {
                                     ref<ElemRule> | ref<TextRule>)) +
                                 close_tag)> {};
   using entry = ElemRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 }  // namespace tghtml
@@ -112,7 +112,7 @@ struct Base : cursiv::GrammarSpec {
   struct ProgramRule
       : rule<some(append<&ast::Program::statements>(ref<ExprRule>))> {};
   using entry = ProgramRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 }  // namespace tgcall
@@ -129,7 +129,7 @@ struct Base : cursiv::GrammarSpec {
   struct Postfix : rule<ref<Basic> + many(lit<"."> + ref<ID>)> {};
   struct Entry : rule<create<Node>(ref<Postfix>)> {};
   using entry = Entry;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 }  // namespace tgchain
@@ -142,6 +142,6 @@ struct G : cursiv::GrammarSpec {
                      (kw<"call"> + ref<tgcall::Base::ProgramRule>) |
                      (kw<"chain"> + ref<tgchain::Base::Entry>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tgrowth

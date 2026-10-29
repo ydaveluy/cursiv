@@ -7,8 +7,8 @@
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "engines/lr/BuildBoundsGrammars.hpp"
 #include "engines/lr/EmptyEntryGrammar.hpp"
+#include "engines/lr/LongRunGrammar.hpp"
 
 namespace tpasses {
 struct Words : cursiv::GrammarSpec {
@@ -128,7 +128,7 @@ struct G : tpasses::Words {
                     lit<":"> + lit<";"> + lit<","> + lit<"."> + lit<"?"> +
                     lit<"@"> + assign<&ast::Row::tail>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace twidealt
@@ -306,6 +306,6 @@ struct G : Words {
              (kw<"longrun"> + ref<tbounds::longrun::G::S>) |
              ref<tempty::G::Root>> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tpasses

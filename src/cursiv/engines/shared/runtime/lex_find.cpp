@@ -12,7 +12,7 @@ namespace cursiv {
 // Isolate validation so its range checks do not reshape the search loops.
 CURSIV_NOINLINE static const char* lex_find_kmp(
     std::string_view text, std::string_view before, std::string_view mark,
-    std::string_view after) {
+    std::string_view after, function_ref<bool(const char*)> take) {
   const auto size = before.size() + mark.size() + after.size();
   if (size == 0) return text.data();
   const auto byte = [&](std::size_t i) {
@@ -30,17 +30,21 @@ CURSIV_NOINLINE static const char* lex_find_kmp(
   for (std::size_t i = 0, j = 0; i < text.size(); ++i) {
     while (j != 0 && text[i] != byte(j)) j = prefix[j - 1];
     if (text[i] == byte(j)) ++j;
-    if (j == size) return text.data() + i + 1 - size;
+    if (j == size) {
+      if (take(text.data() + i + 1 - size)) return text.data() + i + 1 - size;
+      j = prefix[j - 1];
+    }
   }
   return nullptr;
 }
 
 const char* lex_find_long(std::string_view text, std::string_view before,
-                          std::string_view mark, std::string_view after) {
+                          std::string_view mark, std::string_view after,
+                          function_ref<bool(const char*)> take) {
   if (before.size() > text.size() || mark.size() > text.size() - before.size() ||
       after.size() > text.size() - before.size() - mark.size())
     return nullptr;
-  return lex_find_kmp(text, before, mark, after);
+  return lex_find_kmp(text, before, mark, after, take);
 }
 
 }  // namespace cursiv

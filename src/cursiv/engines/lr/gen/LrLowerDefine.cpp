@@ -40,15 +40,22 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
       opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
   const LrShapeId laid = lay(cfg, op);
   std::vector<LrShapeId> kids{laid};
-  if (_p.e[laid].kind == LrShape::seq)
+  if (_p.e[laid].kind == LrShape::seq && _p.e[laid].made.empty())
     kids.assign(_p.kid.begin() + _p.e[laid].sym,
                 _p.kid.begin() + _p.e[laid].sym + _p.e[laid].count);
   std::vector<LrLowerSlot> before, after;
   std::uint16_t sym = kNoRow;
   bool plain = !buildsNode;
   for (const LrShapeId k : kids) {
-    const LrLowerNode n = _p.e[k];
-    if (n.kind != LrShape::sym && n.kind != LrShape::alt) {
+    LrLowerNode n = _p.e[k];
+    // An operator read in place stands as one symbol: its token, which the
+    // operator's own row converts, or a record over its tokens.
+    if (n.kind == LrShape::sym)
+      std::erase_if(n.made, [&](std::uint16_t r) {
+        return _p.rowKind[r] == WriteKind::convert;
+      });
+    if (n.kind != LrShape::sym && n.kind != LrShape::alt &&
+        (n.kind != LrShape::seq || n.made.empty())) {
       plain = false;
       continue;
     }

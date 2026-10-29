@@ -1,12 +1,11 @@
 # CMake API
 
-The [scaffolder](../learn/scaffold.md) creates a configured language project.
-Use this reference when adding Cursiv to an existing project or changing its
-build settings.
+The [scaffolder](../learn/scaffold.md) creates a configured project. Use this
+page to add Cursiv to an existing project or change its build settings.
 
 ## Consuming cursiv
 
-Add Cursiv with CMake FetchContent, then declare your language target.
+Add Cursiv with FetchContent, then declare your language target:
 
 ```cmake title="CMakeLists.txt"
 include(FetchContent)
@@ -20,9 +19,8 @@ endif()
 FetchContent_MakeAvailable(cursiv)
 ```
 
-In this configuration, `-DCURSIV_SOURCE_DIR=/path/to/cursiv` selects a local
-checkout instead of fetching the tag. The generated project uses the same
-convention.
+Configure with `-DCURSIV_SOURCE_DIR=/path/to/cursiv` to use a local checkout;
+generated projects follow the same convention.
 
 ## The targets you link
 
@@ -38,8 +36,9 @@ convention.
 
 ## `cursiv_generate_language`
 
-Runs the selected parser generator against your grammar header and defines a
-library containing the generated code.
+Generates the parser from your grammar header and defines the library
+`<ID>Generated`, plus `<ID>_generate`, which writes the sources without
+compiling them.
 
 ```cmake
 cursiv_generate_language(ID         mylang
@@ -51,40 +50,26 @@ cursiv_generate_language(ID         mylang
 
 | Argument | Required | Meaning |
 |---|---|---|
-| `ID` | yes | language id and target prefix; defines `<ID>Generated` |
+| `ID` | yes | language id and target prefix |
 | `GRAMMAR` | yes | the header, spelled as an include path |
 | `NAMESPACE` | yes | the grammar type, qualified: `ns::Type` |
 | `OUT` | yes | absolute output directory, or a path under the caller's build tree |
 | `EXTENSIONS` | no | file extensions associated with the language |
 | `FILE_NAMES` | no | exact file names it claims, for a language like `Makefile` |
 | `BASE` | no | id of a language declared earlier in CMake; adds its generated library and include roots as dependencies |
-| `ENGINE` | no | `LL` or `LR`, the engine this language is generated with |
+| `ENGINE` | no | `LL` or `LR`; defaults to `CURSIV_DEFAULT_ENGINE`, which is `LR`, the recommended engine |
 | `INCLUDE_DIRS` | no | extra include roots; relative paths start at the calling source directory |
-| `GENERATOR_ARGS` | no | additional arguments passed to the selected generator |
+| `GENERATOR_ARGS` | no | additional arguments passed to the generator |
 
-A language that names no `ENGINE` follows `CURSIV_DEFAULT_ENGINE`, which is
-`LR`.
+`NAMESPACE ns::Type` generates into `ns::generated::Type`, under
+`<OUT>/Type/`, so languages with different type names can share `OUT`. A
+relative `OUT` goes under `generated-src/` in the build tree: `OUT
+mylang/generated` in `src/CMakeLists.txt` writes to
+`build/src/generated-src/mylang/generated/`. The calling source directory
+stays an include root.
 
-`NAMESPACE ns::Type` generates into `ns::generated::Type`, with files under
-`<OUT>/Type/`. Two languages with different type names can share `OUT`.
-`BASE` supplies build dependencies; grammar inheritance itself is declared in
-C++ with `cursiv::extends<BaseGrammar>`.
-
-The calling source directory remains an include root with either form of
-`OUT`. Relative output paths are placed under `generated-src/` in the build
-tree: for example, `OUT mylang/generated` in `src/CMakeLists.txt` writes to
-`build/src/generated-src/mylang/generated/`. When linking into shared libraries,
-set `CMAKE_POSITION_INDEPENDENT_CODE`
-if you need to override the default chosen by `BUILD_SHARED_LIBS`.
-
-Defines two targets: the library `<ID>Generated`, and `<ID>_generate`, which
-writes the sources without compiling them.
-
-Your [language tests](../learn/testing.md) use the same grammar and generated
-module as your application.
-
-Cross builds automatically build the native parser generator too; see
-[WebAssembly](../recipes/wasm.md).
+`BASE` only adds build dependencies; declare grammar inheritance in C++ with
+`cursiv::extends<BaseGrammar>`.
 
 ## `cursiv_package_language`
 
@@ -92,11 +77,10 @@ Cross builds automatically build the native parser generator too; see
 cursiv_package_language(mylang)
 ```
 
-For a threaded WebAssembly cross build, adds a post-build step to `<ID>_lsp`
-that copies its module, `wasi-run.mjs` and license notices into
-`<project>/vscode/server/`. The notices cover Cursiv, lsp-framework and mimalloc.
-It requires that target and the project's `vscode/` directory. Native builds
-are unaffected.
+In a threaded WebAssembly build, copies the `<ID>_lsp` module, `wasi-run.mjs`
+and license notices into `<project>/vscode/server/` after each build. It does
+nothing in native builds, or without that target or the project's `vscode/`
+directory.
 
 ## `cursiv_add_benchmark`
 
@@ -104,9 +88,8 @@ are unaffected.
 cursiv_add_benchmark(mylang SOURCES mylang/bench/main.cpp)
 ```
 
-Creates `mylang_bench` and adds it to the aggregate `bench` target. Declare
-`mylangLsp` first: the benchmark links that language-server library and
-`cursiv::bench` so it can measure parsing, workspace and editor services.
+Creates `mylang_bench`, linked to `mylangLsp` and `cursiv::bench`, and adds
+it to the aggregate `bench` target. Declare `mylangLsp` first.
 
 ## Options
 
@@ -116,19 +99,10 @@ Creates `mylang_bench` and adds it to the aggregate `bench` target. Declare
 | `CURSIV_MIMALLOC` | `ON` | Enable the mimalloc allocator; use `OFF` to disable it. |
 | `CURSIV_SOURCE_DIR` | — | Select a local checkout in the FetchContent setup above. |
 | `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WASI target required by the language server. Use it only with the WASI toolchain. |
-| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes; memory grows on demand. |
+| `CURSIV_WASI_MAX_MEMORY` | `2147483648` (2 GiB) with WASI threads | Set the shared-memory limit in bytes. |
+| `CURSIV_WASI_STACK` | `1048576` (1 MiB) with the WASI toolchain | Set the main thread's stack size in bytes. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
 
-Global sanitizer flags disable mimalloc automatically. For sanitizers enabled
-per target, configure with `-DCURSIV_MIMALLOC=OFF`, or exclude only the
-instrumented target:
-
-```cmake
-set_property(TARGET my_app PROPERTY CURSIV_OWN_ALLOCATOR ON)
-```
-
-For example, configure a language project to use LL:
-
-```bash
-cmake -B build -DCURSIV_DEFAULT_ENGINE=LL
-```
+Global sanitizer flags disable mimalloc. With sanitizers on one target only,
+configure with `-DCURSIV_MIMALLOC=OFF`, or set the `CURSIV_OWN_ALLOCATOR`
+target property to `ON` on that target.

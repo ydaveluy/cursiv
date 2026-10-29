@@ -22,7 +22,7 @@ struct BoundaryG : cursiv::GrammarSpec {
       : rule<create<ast::Doc>(ref<HELLO> + assign<&ast::Doc::name>(ref<ID>))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tbnd

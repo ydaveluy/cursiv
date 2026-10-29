@@ -1,5 +1,5 @@
 // `Type -> K1 ... K8 Type "[]"`: eight optional clauses that each consume, in
-// front of the recursive call -- the gate reads the first as an item that may
+// front of the recursive call -- the gate reads the last as an item that may
 // match nothing.
 #pragma once
 
@@ -28,7 +28,7 @@ struct G : Base {
                  append<&ast::Type::body>(ref<Type>) + lit<"[]">) |
              create<ast::Type>(assign<&ast::Type::name>(ref<ID>))> {};
   using entry = Type;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

@@ -9,11 +9,11 @@ namespace refuse {
 struct G : Base {
   struct NL : terminal<some(lit<"\n">)> {};
   struct Root
-      : rule<create<ast::Node>(skip(ignored<WS, NL>, hide<>,
+      : rule<create<ast::Node>(skip(ignore<WS, NL>, hide<>,
                                     lit<"("> + ref<ID> + option(ref<ID>)) +
                                ref<NL>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

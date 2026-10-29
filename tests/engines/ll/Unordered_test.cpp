@@ -2,20 +2,25 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/engines/ll/gen/LlLowering.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
+#include "cursiv/engines/shared/gen/GrammarFault.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/UnorderedGrammar.hpp"
+#include "engines/ll/UnorderedOptionalGrammar.hpp"
 #include "engines/ll/UnorderedTurnsGrammar.hpp"
-#include "unorderedendsll/generated/EndsLl/Module.hpp"
 #include "unorderedll/generated/Ll/Module.hpp"
 #include "unorderedlr/generated/Lr/Module.hpp"
+#include "unorderedoptll/generated/Ll/Module.hpp"
+#include "unorderedoptlr/generated/Lr/Module.hpp"
 #include "unorderedturnsll/generated/Ll/Module.hpp"
 #include "unorderedturnslr/generated/Lr/Module.hpp"
 
@@ -59,11 +64,6 @@ void valid(const cursiv::Parser& parser, std::string_view text,
     CHECK(outer->op == (bangFirst ? "?" : "!"));
     CHECK(inner->op == (bangFirst ? "!" : "?"));
   }
-  if (text.starts_with("modifiers")) {
-    CHECK(node->first == "12");
-    CHECK(node->flag == (text.find("static") != std::string_view::npos));
-    CHECK(node->sealed == (text.find("final") != std::string_view::npos));
-  }
   if (text.starts_with("headblock")) {
     const auto* wrap = cursiv::ast_cast<tunordered::Wrap>(node->expression);
     CHECK(wrap != nullptr);
@@ -80,22 +80,24 @@ bool offers(const cursiv::Parser& parser, std::string_view prefix,
   std::vector<cursiv::NextFeature> features;
   parser.nextFeaturesAt(partial.cst(), prefix.size(), prefix.size(), features);
   return std::any_of(features.begin(), features.end(), [&](const auto& f) {
-    return parser.getGrammar().terminalText(f.feature) == word;
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    return std::ranges::find(spellings, word) != spellings.end();
   });
 }
 
 void exercise(const cursiv::Parser& parser) {
   for (const auto text :
-       {"pair a b;",      "pair b a;",           "pair b /*comment*/ a;",
-        "nested a b c;",  "nested b a c;",       "nested c a b;",
-        "nested c b a;",  "prefix x a x b;",     "prefix x b x a;",
-        "duplicate a a;", "child node 12 flag;", "child flag node 12;",
-        "twin 12 34 z;",  "twin 12 z 34;",       "twin z 12 34;",
-        "optional;",      "optional a b;",       "optional b a;",
-        "tight [ab];",    "tight [ba];",         "wrap 12!?;",
-        "wrap 12?!;",     "wrapwords 12(!)(?);", "wrapwords 12(?)(!);",
-        "edges ab ;",     "edges ba ;",          "headblock 12!x;",
-        "headblock x12!;"})
+       {"pair a b;",           "pair b a;",      "pair b /*comment*/ a;",
+        "nested a b c;",       "nested b a c;",  "nested c a b;",
+        "nested c b a;",       "group a b c;",   "group b a c;",
+        "group c a b;",        "group c b a;",   "prefix x a x b;",
+        "prefix x b x a;",     "duplicate a a;", "child node 12 flag;",
+        "child flag node 12;", "twin 12 34 z;",  "twin 12 z 34;",
+        "twin z 12 34;",       "optional;",      "optional a b;",
+        "optional b a;",       "tight [ab];",    "tight [ba];",
+        "wrap 12!?;",          "wrap 12?!;",     "wrapwords 12(!)(?);",
+        "wrapwords 12(?)(!);", "edges ab ;",     "edges ba ;",
+        "headblock 12!x;",     "headblock x12!;"})
     valid(parser, text);
 
   std::vector<std::string> fields{"flag", "name 12", "value 34"};
@@ -122,46 +124,24 @@ void exercise(const cursiv::Parser& parser) {
   for (const auto text : {"bounded a a b;", "bounded b a a;"})
     valid(parser, text, "aa");
   for (const auto& [text, values] :
-       {std::pair{"maybe;", ""}, {"maybe a;", "a"}, {"maybe b;", "b"},
-        {"maybe a b;", "ab"}, {"maybe b a;", "ba"},
-        {"maybe b /*comment*/ a;", "ba"}, {"gather;", ""},
-        {"gather a a;", "aa"}, {"gather b b;", "bb"},
+       {std::pair{"gather a b;", "ab"}, {"gather b a;", "ba"},
         {"gather a a b b;", "aabb"}, {"gather b b a a;", "bbaa"},
-        {"gather b a a;", "baa"}})
+        {"gather b /*comment*/ a a;", "baa"}})
     valid(parser, text, values);
-  for (const auto text :
-       {"modifiers 12;", "modifiers static 12;", "modifiers 12 final;",
-        "modifiers final static 12;", "modifiers static 12 final;",
-        "modifiers 12 static final;", "modifiers final 12 static;"})
-    valid(parser, text);
-  for (const auto& [text, name] :
-       {std::pair{"emptychild y;", ""}, {"emptychild 12 y;", "12"},
-        {"emptychild y 12;", "12"}}) {
-    valid(parser, text);
-    const auto result = parser.parse(text);
-    const auto* node = result.value_as<tunordered::Record>();
-    CHECK(node != nullptr && node->flag && node->child != nullptr);
-    if (node && node->child)
-      CHECK(node->child->name == name && node->child->parent == node);
-  }
 
   for (const auto text :
-       {"maybe a a;", "maybe a b a;", "maybe b b;", "maybe b a b;",
-        "gather a b a;", "gather b a b;", "gather a a b a;",
-        "modifiers;", "modifiers static;", "modifiers static final;",
-        "modifiers 12 12;", "modifiers static static 12;",
-        "modifiers 12 final final;", "emptychild;", "emptychild y y;",
-        "emptychild 12 34 y;",
-        "order;", "order 12;", "order 12 34;", "order y y;",
-        "order 12 34 56 y;", "order y 12 34 56;"}) {
+       {"gather;", "gather a a;", "gather b b;", "gather a b a;",
+        "gather b a b;", "gather a a b a;"}) {
     const auto result = parser.parse(text);
     CHECK(!result.accepted || !result.diagnostics.empty());
   }
   for (const auto text :
-       {"pair a;", "pair b;", "pair a a;", "pair a b a;", "four a b c;",
-        "four a a c d;", "blocks b;", "blocks a b a;", "bounded a b;",
-        "bounded a b a;", "bounded a a a b;", "nested a c b;", "prefix x a;",
-        "duplicate a;", "optional a;", "tight [a b];", "edges a b ;"}) {
+       {"pair a;",      "pair b;",        "pair a a;",        "pair a b a;",
+        "four a b c;",  "four a a c d;",  "blocks b;",        "blocks a b a;",
+        "bounded a b;", "bounded a b a;", "bounded a a a b;", "nested a c b;",
+        "prefix x a;",  "group a c b;",   "group b c a;",     "group a b;",
+        "group c;",     "duplicate a;",   "optional a;",      "tight [a b];",
+        "edges a b ;"}) {
     const auto result = parser.parse(text);
     CHECK(!result.accepted || !result.diagnostics.empty());
   }
@@ -169,72 +149,9 @@ void exercise(const cursiv::Parser& parser) {
   CHECK(offers(parser, "fields flag ", "name") &&
         offers(parser, "fields flag ", "value") &&
         !offers(parser, "fields flag ", "flag"));
-  CHECK(offers(parser, "modifiers ", "static") &&
-        offers(parser, "modifiers ", "final"));
-  CHECK(offers(parser, "modifiers static ", "final") &&
-        !offers(parser, "modifiers static ", "static"));
-  CHECK(offers(parser, "maybe a ", "b") && !offers(parser, "maybe a ", "a"));
-}
-
-// A text several orders read goes to the first by written positions, even where
-// a later one gives an optional item something to read.
-void order_ties(const cursiv::Parser& parser) {
-  struct Case {
-    std::string_view text, first, second;
-  };
-  for (const auto& c :
-       {Case{"order y;", "", ""}, {"order y 12;", "", "12"},
-        {"order 12 y;", "12", ""}, {"order 12 y 34;", "12", "34"},
-        {"order 12 34 y;", "12", "34"}, {"order y 12 34;", "12", "34"}}) {
-    const auto result = parser.parse(c.text);
-    CHECK(result.accepted && result.diagnostics.empty());
-    const auto* node = result.value_as<tunordered::Record>();
-    CHECK(node != nullptr);
-    if (node)
-      CHECK(node->flag && node->first == c.first && node->second == c.second);
-  }
-}
-
-void nullable_nests(const cursiv::Parser& parser) {
-  const auto root = [&](std::string_view text) {
-    auto result = parser.parse(text);
-    CHECK(result.accepted && result.diagnostics.empty());
-    return result;
-  };
-  const auto expression = [](const cursiv::ParseResult& result) {
-    const auto* node = result.value_as<tunordered::Record>();
-    CHECK(node != nullptr);
-    return node ? node->expression : nullptr;
-  };
-  const auto parsed = root("maybenests 12;");
-  const auto* bare = cursiv::ast_cast<tunordered::Name>(expression(parsed));
-  CHECK(bare != nullptr && bare->name == "12");
-  for (const std::string_view ops : {"!", "?"}) {
-    const std::string text = "maybenests 12" + std::string(ops) + ";";
-    const auto result = root(text);
-    const auto* wrap = cursiv::ast_cast<tunordered::Wrap>(expression(result));
-    CHECK(wrap != nullptr && wrap->op == ops);
-    if (!wrap) continue;
-    const auto* atom = cursiv::ast_cast<tunordered::Name>(wrap->inner);
-    CHECK(atom != nullptr && atom->name == "12");
-  }
-  for (const std::string_view ops : {"!?", "?!"}) {
-    const std::string text = "maybenests 12" + std::string(ops) + ";";
-    const auto result = root(text);
-    const auto* outer = cursiv::ast_cast<tunordered::Wrap>(expression(result));
-    CHECK(outer != nullptr && outer->op == ops.substr(1));
-    if (!outer) continue;
-    const auto* inner = cursiv::ast_cast<tunordered::Wrap>(outer->inner);
-    CHECK(inner != nullptr && inner->op == ops.substr(0, 1));
-    if (!inner) continue;
-    const auto* atom = cursiv::ast_cast<tunordered::Name>(inner->inner);
-    CHECK(atom != nullptr && atom->name == "12");
-  }
-  for (const auto text :
-       {"maybenests 12!!;", "maybenests 12!?!;", "maybenests 12??;"}) {
-    const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
-  }
+  CHECK(offers(parser, "gather a ", "a") && offers(parser, "gather a ", "b"));
+  CHECK(offers(parser, "gather a b ", "b") &&
+        !offers(parser, "gather a b ", "a"));
 }
 
 const tunordered::Wrap* wrap_of(const cursiv::ParseResult& result) {
@@ -325,6 +242,32 @@ void spelt() {
   CHECK(!cursiv::LlLowering<G>::table().cfg.lowerFail());
 }
 
+// ...and refuse an item that may read nothing in the same words, naming it.
+template <class G>
+void refused_empty(std::string_view part) {
+  const auto& lr = cursiv::LrLowering<G>::table();
+  const auto& ll = cursiv::LlLowering<G>::table();
+  CHECK(lr.fault.code == cursiv::GrammarFaultCode::nullableUnorderedItem);
+  CHECK(lr.fault == ll.fault && lr.fault.part == part);
+  CHECK(lr.cfg.nt_name(lr.fault.rule) == "Root" &&
+        ll.cfg.rule_name(ll.fault.rule) == "Root");
+  CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
+      "holds an unordered item that may match nothing, `" + std::string(part) +
+      "`: an unordered item must read input"));
+}
+
+// ...and refuse an optional item in a group that holds a nest, naming it.
+template <class G>
+void refused_nest(std::string_view part) {
+  const auto& lr = cursiv::LrLowering<G>::table();
+  const auto& ll = cursiv::LlLowering<G>::table();
+  CHECK(lr.fault.code == cursiv::GrammarFaultCode::nullableUnorderedItem);
+  CHECK(lr.fault == ll.fault && lr.fault.part == part && lr.fault.gated);
+  CHECK(cursiv::grammar_fault_text(lr.fault).starts_with(
+      "holds an optional unordered item, `" + std::string(part) +
+      "`, in a group whose items hold a `nest`"));
+}
+
 // Both engines read one text alike: the verdict, the tree and, where
 // `records`, the records under it.
 void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
@@ -354,20 +297,16 @@ void records_alike() {
   const auto lrAst = g::Lr::create_ast_reflection();
   for (const auto text :
        {"pair b /*comment*/ a;", "nested c b a;", "prefix x b x a;",
-        "child flag node 12;", "optional b a;", "tight [ba];",
+        "group c b a;", "group a c b;", "child flag node 12;",
+        "optional b a;", "tight [ba];",
         "wrapwords 12(?)(!);", "edges ba ;", "fields value 34 flag name 12;",
         "four d b c a ;", "blocks b a a;", "bounded b a a;",
-        "pair a a;", "nested a c b;", "maybe;",
-        "maybe b a;", "maybe a a;", "gather b b a a;",
-        "modifiers final 12 static;", "emptychild y;", "emptychild y 12;",
-        "order y 12;", "order 12 34 y;", "order y 12 34;", "order 12;",
-        "maybenests 12!;", "maybenests 12?!;"})
+        "pair a a;", "nested a c b;", "gather b b a a;", "gather a b a;"})
     alike(*ll, *lr, *llAst, *lrAst, text, true);
-  alike(*ll, *lr, *llAst, *lrAst, "maybenests 12;", false);
 }
 
 // A loop inside an operand is decided in the operand's own rule: `+1` after
-// `name` is a label, as it is where no `&` stands.
+// `name` is a label, as it is outside any unordered group.
 void loop_in_operand() {
   namespace g = tunorderedturns::generated;
   const auto ll = g::Ll::create_parser();
@@ -388,18 +327,158 @@ void loop_in_operand() {
   }
 }
 
-void items_reading_nothing(const cursiv::Parser& parser) {
+// The tree a text builds, spelled.
+std::string tree_of(const cursiv::Parser& parser,
+                    const cursiv::AstReflection& ast, std::string_view text) {
+  const auto result = parser.parse(text);
+  std::string out;
+  if (result.value) cursiv::test::ast_of(ast, *result.value, out);
+  return out;
+}
+
+const toptional::Record* accepted(const cursiv::ParseResult& result,
+                                  std::string_view text) {
+  const bool clean = result.accepted && result.diagnostics.empty();
+  if (!clean)
+    std::fprintf(stderr, "not accepted: %.*s\n", static_cast<int>(text.size()),
+                 text.data());
+  CHECK(clean);
+  const auto* node = result.value_as<toptional::Record>();
+  CHECK(node != nullptr);
+  return clean ? node : nullptr;
+}
+
+std::string values_of(const toptional::Record& node) {
+  std::string seen;
+  for (const auto value : node.values) seen += value;
+  return seen;
+}
+
+void refused(const cursiv::Parser& parser, std::string_view text) {
+  const auto result = parser.parse(text);
+  if (result.accepted && result.diagnostics.empty())
+    std::fprintf(stderr, "accepted: %.*s\n", static_cast<int>(text.size()),
+                 text.data());
+  CHECK(!result.accepted || !result.diagnostics.empty());
+}
+
+// Optional items: every order of the items present, with any of the optional
+// ones absent. An absent item writes nothing, so the tree is the one the same
+// items build in order around `option`.
+void optional_items(const cursiv::Parser& parser,
+                    const cursiv::AstReflection& ast) {
+  const std::vector<std::string> optional{"b 2", "c", "d d"};
+  for (unsigned present = 0; present < 8; ++present) {
+    std::vector<std::string> items{"a 1"};
+    std::string ordered = "ordered a 1";
+    for (unsigned i = 0; i < 3; ++i)
+      if ((present >> i & 1u) != 0) {
+        items.push_back(optional[i]);
+        ordered += " " + optional[i];
+      }
+    ordered += ";";
+    const std::string tree = tree_of(parser, ast, ordered);
+    std::sort(items.begin(), items.end());
+    do {
+      std::string text = "mix";
+      for (const auto& item : items) text += " " + item;
+      text += ";";
+      const auto result = parser.parse(text);
+      const auto* node = accepted(result, text);
+      if (!node) continue;
+      CHECK(node->first == "1");
+      CHECK(node->second == ((present & 1u) != 0 ? "2" : ""));
+      CHECK(node->flag == ((present & 2u) != 0));
+      CHECK(values_of(*node) == ((present & 4u) != 0 ? "dd" : ""));
+      CHECK(tree_of(parser, ast, text) == tree);
+    } while (std::next_permutation(items.begin(), items.end()));
+  }
+  // An item reads once, a repeated one as one run, and a required one always.
   for (const auto text :
-       {"endof a", "endrule a", "implied a", "implied a ;", "implied ; a",
-        "negated a", "negated a b", "empty", "empty a"}) {
+       {"mix a 1 a 2;", "mix a 1 b 2 b 3;", "mix c a 1 c;", "mix d a 1 d;",
+        "mix b 2 c d;", "mix c;", "mix;"})
+    refused(parser, text);
+
+  // A group of optional items only may match nothing.
+  for (const auto& [text, first, second] :
+       {std::tuple{"opt;", "", ""}, {"opt a;", "a", ""}, {"opt b;", "", "b"},
+        {"opt a b;", "a", "b"}, {"opt b a;", "a", "b"}}) {
     const auto result = parser.parse(text);
-    CHECK(result.accepted && result.diagnostics.empty());
+    const auto* node = accepted(result, text);
+    if (node) CHECK(node->first == first && node->second == second);
   }
-  for (const auto text : {"endof a b", "endof", "endrule a b", "implied",
-                          "negated b a", "empty a a"}) {
+  for (const auto text : {"opt a a;", "opt b b;", "opt a b a;"})
+    refused(parser, text);
+
+  for (const auto& [text, values] :
+       {std::pair{"count b;", ""}, {"count a b;", "a"}, {"count b a;", "a"},
+        {"count a a b;", "aa"}, {"count b a a;", "aa"}}) {
     const auto result = parser.parse(text);
-    CHECK(!result.accepted || !result.diagnostics.empty());
+    const auto* node = accepted(result, text);
+    if (node) CHECK(values_of(*node) == values);
   }
+  for (const auto text :
+       {"count a a a b;", "count a b a;", "count a;", "count;"})
+    refused(parser, text);
+
+  for (const auto& [text, first] :
+       {std::pair{"region <> b;", "<>"}, {"region b <>;", "<>"},
+        {"region b;", ""}}) {
+    const auto result = parser.parse(text);
+    const auto* node = accepted(result, text);
+    if (node) CHECK(node->first == first);
+  }
+  for (const auto text : {"region < > b;", "region <>;", "region b <> <>;"})
+    refused(parser, text);
+
+  // The node made over the group stands with every item absent.
+  for (const auto& [text, name] :
+       {std::pair{"child;", ""}, {"child x;", ""}, {"child 12;", "12"},
+        {"child x 12;", "12"}, {"child 12 x;", "12"}}) {
+    const auto result = parser.parse(text);
+    const auto* node = accepted(result, text);
+    if (!node) continue;
+    CHECK(node->child != nullptr);
+    if (node->child)
+      CHECK(node->child->name == name && node->child->parent == node);
+  }
+  for (const auto text : {"child x x;", "child 12 34;"}) refused(parser, text);
+
+  // Inside the group, the items still unread are offered, and what follows
+  // the group once only optional ones are left.
+  CHECK(offers(parser, "mix a 1 ", "b") && offers(parser, "mix a 1 ", "c") &&
+        offers(parser, "mix a 1 ", "d") && offers(parser, "mix a 1 ", ";") &&
+        !offers(parser, "mix a 1 ", "a"));
+  CHECK(offers(parser, "mix b 2 ", "a") && offers(parser, "mix b 2 ", "c") &&
+        offers(parser, "mix b 2 ", "d") && !offers(parser, "mix b 2 ", "b") &&
+        !offers(parser, "mix b 2 ", ";"));
+  CHECK(offers(parser, "mix a 1 d ", "d") && offers(parser, "mix a 1 d ", ";") &&
+        offers(parser, "mix a 1 d ", "b"));
+  CHECK(offers(parser, "opt ", "a") && offers(parser, "opt ", "b") &&
+        offers(parser, "opt ", ";"));
+  CHECK(offers(parser, "opt b ", "a") && offers(parser, "opt b ", ";") &&
+        !offers(parser, "opt b ", "b"));
+
+  // A required item missing is repaired, not a crash.
+  for (const auto text : {"mix b 2;", "mix c d b 2;", "count a;"}) {
+    const auto result = parser.parse(text);
+    CHECK(!result.diagnostics.empty());
+  }
+}
+
+void optional_alike() {
+  namespace g = toptional::generated;
+  const auto ll = g::Ll::create_parser();
+  const auto lr = g::Lr::create_parser();
+  const auto llAst = g::Ll::create_ast_reflection();
+  const auto lrAst = g::Lr::create_ast_reflection();
+  optional_items(*ll, *llAst);
+  optional_items(*lr, *lrAst);
+  for (const auto text :
+       {"mix d c a 1 b 2;", "mix a 1;", "mix c a 1;", "ordered a 1 d;",
+        "opt;", "opt b a;", "count b a a;", "region b;", "region b <>;",
+        "child;", "child x 12;", "mix b 2;", "opt a a;"})
+    alike(*ll, *lr, *llAst, *lrAst, text, true);
 }
 
 }  // namespace
@@ -413,14 +492,13 @@ int main() {
   exercise(*lr);
   lowering_paths(*ll);
   lowering_paths(*lr);
-  order_ties(*ll);
-  order_ties(*lr);
-  nullable_nests(*ll);
-  nullable_nests(*lr);
-  items_reading_nothing(*tunordered::generated::EndsLl::create_parser());
   spelt<tunordered::Eleven>();
-  spelt<tunordered::ElevenOptional>();
   spelt<tunordered::SixNests>();
+  spelt<tunordered::ElevenOptional>();
+  optional_alike();
+  refused_empty<toptional::NullableItem>("\"a\"? \"b\"?");
+  refused_empty<toptional::OptionalOption>("(\"a\"?)?");
+  refused_nest<toptional::OptionalNest>("({Wrap.inner=} (op='?'))?");
   refused_too_wide<tunordered::Twelve>();
   refused_too_wide<tunordered::SevenNests>();
   return cursiv::test::report("Unordered_test");

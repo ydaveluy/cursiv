@@ -1,13 +1,10 @@
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "LexicalBackendsAst.hpp"
 #include "RecursiveTerminalsGrammar.hpp"
 #include "CharactersGrammar.hpp"
 namespace tlexbackends {
-struct Document : cursiv::Extends<cursiv::AstNode> {
-  vector<string_view> items;
-};
 struct Hashes {};
 struct Delimiter {};
 struct First {};
@@ -62,15 +59,12 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"twin"> + append<&Document::items>(ref<Twin>))) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tlexbackends
 
 namespace tcaptures {
 
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
 struct A {};
 struct B {};
 struct Hashes {};
@@ -157,9 +151,6 @@ struct Base : cursiv::GrammarSpec {
 }  // namespace tcaptures
 
 namespace tthrough {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-};
 struct Label {};
 struct Equals {};
 struct Base : cursiv::GrammarSpec {
@@ -218,10 +209,6 @@ struct Base : cursiv::GrammarSpec {
 
 namespace trulethrough {
 
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
-  vector<string_view> parts;
-};
 struct Equals {};
 
 struct Base : cursiv::GrammarSpec {
@@ -248,7 +235,7 @@ struct Base : cursiv::GrammarSpec {
                       assign<&Node::text>(ref<ID>))) +
                     eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace trulethrough
@@ -256,10 +243,10 @@ struct Base : cursiv::GrammarSpec {
 namespace tlexbackends {
 // Literal modes, captures and rule tokens share a dispatch; trivia stays local.
 struct Suite : cursiv::GrammarSpec {
-  struct Entry : rule<skip(ignored<Base::WS>, hide<>, ref<Base::Root> + eof) |
+  struct Entry : rule<skip(ignore<Base::WS>, hide<>, ref<Base::Root> + eof) |
                       (lit<"capture:"> +
                        (ref<tcaptures::Base::Root> | ref<tthrough::Base::Root>)) |
-                      (lit<"rule:"> + skip(ignored<trulethrough::Base::WS>,
+                      (lit<"rule:"> + skip(ignore<trulethrough::Base::WS>,
                           hide<>, ref<trulethrough::Base::Root> + eof)) |
                       ref<trecursive::Suite::Entry>> {};
   using entry = Entry;

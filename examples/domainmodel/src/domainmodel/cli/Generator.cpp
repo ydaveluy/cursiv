@@ -166,8 +166,8 @@ void generate_abstract_elements(const std::filesystem::path& destination,
           fullPath / (std::string(entity->name) + ".java");
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {
-        throw std::runtime_error("Unable to open output file: " +
-                                 filePathValue.string());
+        throw std::runtime_error("Unable to open output file: "
+                                 + filePathValue.string());
       }
       out << generate_entity_file_content(*entity, packagePath);
     }

@@ -11,12 +11,14 @@ struct LrSizes {
   // A mode per mode where one takes terminals for the length of its token
   // alone, none where no mode does.
   unsigned modeLongers = 0;
+  // Zero unless a mode can read arbitrarily far past its last match.
+  unsigned modeBacktracks = 0;
   // The sets of terminals modes take off a position once no live stack takes
   // them, none where no mode does.
   unsigned modeFlagSets = 0;
   unsigned accBounds = 0;
   unsigned relays = 0;
-  unsigned closeSets = 0;
+  unsigned followSets = 0, closeSets = 0;
   // Zero where the grammar has no keyword read behind conditions.
   unsigned dfaRelayResSets = 0;
   // Zero where no terminal keeps a word-bounded reading beside an unbounded
@@ -26,6 +28,9 @@ struct LrSizes {
   unsigned accTiers = 0;
   // A mode per mode where the grammar embeds others, none where it does not.
   unsigned errModes = 0;
+  // The grammar lays an indentation token or brackets a line: its reader
+  // lexes every token afresh, so the table keeps no mode matrix.
+  bool indented = false;
   // The lists of the written order of insertions, and their terminals.
   unsigned insertLists = 0, insertWords = 0;
   unsigned electWords = 0, electWatches = 0, electChains = 0,
@@ -33,6 +38,9 @@ struct LrSizes {
   // The 64-bit words of the bits that say which cells the table orders as the
   // election does.
   unsigned orderWords = 0;
+  // False where no conflict or multiple candidate can split a reading: only
+  // the decision of a cell or a position reads a state's goto class.
+  bool gotoClasses = true;
 
   // A bit domain of zero bits has no word to live in.
   constexpr unsigned termBits() const { return terms ? terms : 1; }

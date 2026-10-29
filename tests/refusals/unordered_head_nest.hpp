@@ -9,10 +9,10 @@ struct Wrap : cursiv::Extends<ast::Node> {
 };
 
 struct G : Base {
-  struct Root
-      : rule<create<ast::Node>(lit<"a">) & nest<&Wrap::inner>(lit<"b">)> {};
+  struct Root : rule<unordered(create<ast::Node>(lit<"a">),
+                               nest<&Wrap::inner>(lit<"b">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

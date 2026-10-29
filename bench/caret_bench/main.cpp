@@ -91,11 +91,12 @@ int main(int argc, char** argv) {
       parser->nextFeaturesAt(parsed.cst(), at, at, next);
       std::printf("at %u:", static_cast<unsigned>(at));
       for (const cursiv::NextFeature& f : next) {
-        const std::string_view spelled =
-            parser->getGrammar().terminalText(f.feature);
+        const auto spellings =
+            parser->getGrammar().terminalSpellings(f.feature);
         const std::string_view shown =
-            spelled.empty() ? parser->getGrammar().terminalName(f.feature)
-                            : spelled;
+            spellings.size() == 1
+                ? spellings.front()
+                : parser->getGrammar().terminalName(f.feature);
         std::printf(" %.*s:%.*s", static_cast<int>(shown.size()), shown.data(),
                     static_cast<int>(f.property.size()), f.property.data());
       }

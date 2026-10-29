@@ -55,6 +55,13 @@ struct LrLowerNode {
   std::uint8_t lead = 0;
   // ...and closes it, so the boundary after it is the caller's too.
   std::uint8_t trail = 0;
+  // unordered: the items the text may leave out, one bit each. Each stands in
+  // its present form, and the group may end where only these are left.
+  std::uint32_t unorderedOptional = 0;
+
+  bool left_out(std::size_t item) const {
+    return item < 32 && (unorderedOptional >> item & 1u) != 0;
+  }
 };
 
 // What one element is to the right-hand side it stands in, and the actions
@@ -218,7 +225,8 @@ inline bool lr_shape_nullable(const LrLowerPool& p, LrShapeId at,
     case LrShape::seq:
     case LrShape::unordered:
       for (std::size_t i = 0; i < n.count; ++i)
-        if (!lr_shape_nullable(p, p.kid[n.sym + i], cfg, nullable))
+        if (!n.left_out(i) &&
+            !lr_shape_nullable(p, p.kid[n.sym + i], cfg, nullable))
           return false;
       return true;
   }

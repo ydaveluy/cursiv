@@ -17,7 +17,7 @@ struct Grammar : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Root : rule<create<Word>(assign<&Word::name>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Lr : Grammar {};

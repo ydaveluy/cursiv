@@ -38,7 +38,7 @@ struct G : cursiv::GrammarSpec {
                     some(append<&ast::Node::body>(ref<Less> | ref<More>)) +
                     ref<DEDENT>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : G {};
 struct Lr : G {};

@@ -3,10 +3,14 @@
 // chain propagation follows it and retains the order in which joins are made.
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <queue>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "cursiv/engines/ll/gen/LlLowCfg.hpp"
@@ -26,11 +30,11 @@ class LlRecordPlan {
                              (row < _nests.size() && _nests[row] != 0));
   }
 
-  // Only a structural singleton can absorb a group's chain before fusion.
+  // Only a structural singleton can absorb a group's chain before fusion: a
+  // sequence of one position. A repetition is an option or a loop, never a
+  // single turn.
   std::uint16_t single_position(std::uint16_t id) const {
     const LlNode& n = _cfg.nodes[id];
-    if (n.kind == LlShape::rep)
-      return n.min == 1 && n.max == 1 ? n.sym : kNoRow;
     if (n.kind != LlShape::seq) return kNoRow;
     std::uint16_t only = kNoRow;
     for (unsigned i = 0; i < n.count; ++i) {
@@ -46,22 +50,79 @@ class LlRecordPlan {
   }
 
   void settle_ownership() {
-    _hands.assign(_cfg.nrules, true);
-    _opens.assign(_cfg.nrules, false);
-    // A record is guaranteed only when every reading supplies it; opening a
-    // region needs one finite reading that does so. The two never read each
-    // other, so one walk settles both.
-    for (bool moved = true; moved;) {
-      moved = false;
-      for (std::uint16_t r = 1; r < _cfg.nrules; ++r) {
-        const Flags flags = rule_flags(r);
-        if (_hands[r] && !flags.hands) _hands[r] = false, moved = true;
-        if (!_opens[r] && flags.opens) _opens[r] = true, moved = true;
+    const auto count = _cfg.nnodes + _cfg.nrules;
+    std::vector<std::vector<std::uint32_t>> handsUsers(count),
+        opensUsers(count);
+    std::vector<bool> hands(count, true), opens(count, false);
+    std::vector<std::uint32_t> noHands, doesOpen;
+    const auto rule = [&](std::uint16_t r) { return _cfg.nnodes + r; };
+    const auto supplies = [&](std::uint32_t from, std::uint32_t to) {
+      handsUsers[from].push_back(to);
+    };
+    const auto opensInto = [&](std::uint32_t from, std::uint32_t to) {
+      opensUsers[from].push_back(to);
+    };
+    for (std::uint32_t id = 0; id < _cfg.nnodes; ++id) {
+      const LlNode& n = _cfg.nodes[id];
+      if (n.row == kNoRow && n.kind != LlShape::term &&
+          n.kind != LlShape::implied) {
+        if (n.kind == LlShape::call) {
+          supplies(rule(n.sym), id);
+        } else if (n.kind == LlShape::alt) {
+          for (const auto child : _cfg.children(n)) supplies(child, id);
+        } else if (const auto only = single_position(id); only != kNoRow) {
+          supplies(only, id);
+        } else {
+          hands[id] = false;
+          noHands.push_back(id);
+        }
+      }
+      if (opens_chain(n.row)) {
+        opens[id] = true;
+        doesOpen.push_back(id);
+      } else if (n.kind == LlShape::call) {
+        opensInto(rule(n.sym), id);
+      } else if (group(n)) {
+        for (const auto child : _cfg.children(n)) opensInto(child, id);
       }
     }
+    for (std::uint16_t r = 1; r < _cfg.nrules; ++r) {
+      const LlRuleInfo& u = _cfg.rules[r];
+      const auto id = rule(r);
+      if (u.climb != kNoRow) {
+        const auto primary = _cfg.climbs[u.climb].primary;
+        if (primary != kNoRow) supplies(rule(primary), id);
+        opens[id] = true;
+        doesOpen.push_back(id);
+      } else if (u.body != kNoRow) {
+        supplies(u.body, id);
+        opensInto(u.body, id);
+      } else {
+        hands[id] = false;
+        noHands.push_back(id);
+      }
+    }
+    // Guarantees start true and lose callers; openings start false and reach
+    // callers from a finite opening. Each flag crosses each dependency once.
+    const auto propagate = [](auto& values, const auto& users, auto& todo,
+                              bool value) {
+      for (std::size_t i = 0; i < todo.size(); ++i)
+        for (const auto user : users[todo[i]])
+          if (values[user] != value) {
+            values[user] = value;
+            todo.push_back(user);
+          }
+    };
+    propagate(hands, handsUsers, noHands, false);
+    propagate(opens, opensUsers, doesOpen, true);
+    _nodeHands.assign(hands.begin(), hands.begin() + _cfg.nnodes);
+    _hands.assign(hands.begin() + _cfg.nnodes, hands.end());
+    _opens.assign(opens.begin() + _cfg.nnodes, opens.end());
   }
 
-  bool hands(std::uint16_t node) const { return node_flags(node).hands; }
+  // Whether every reading of a position hands back a record. Moving a chain
+  // down to a group's only position keeps the guarantee of both.
+  bool hands(std::uint16_t node) const { return _nodeHands[node]; }
   bool rule_hands(std::uint16_t rule) const { return _hands[rule]; }
   bool rule_opens(std::uint16_t rule) const { return _opens[rule]; }
   const std::vector<std::uint16_t>& rule_rows(std::uint16_t rule) const {
@@ -101,14 +162,61 @@ class LlRecordPlan {
   template <class Join>
   void settle_rows(std::span<const std::uint8_t> nullable, Join&& join) {
     _nullable = nullable;
+    _last.assign(_cfg.nnodes, 0);
+    _required.assign(_cfg.nnodes, 0);
+    for (std::uint32_t id = 0; id < _cfg.nnodes; ++id) {
+      const LlNode& n = _cfg.nodes[id];
+      if (n.kind != LlShape::seq) continue;
+      for (unsigned i = 0; i < n.count; ++i)
+        if (!takes_none(_cfg.kids[n.sym + i])) {
+          _last[id] = static_cast<std::uint16_t>(i);
+          ++_required[id];
+        }
+    }
     _nodeRows.assign(_cfg.nnodes, {});
     _ruleRows.assign(_cfg.nrules, {});
-    for (bool moved = true; moved;) {
-      moved = false;
-      for (auto& row : _nodeRows) row.clear();
-      for (std::uint32_t id = 0; id < _cfg.nnodes; ++id) {
+    const auto count = _cfg.nnodes + _cfg.nrules;
+    std::vector<std::vector<std::uint32_t>> users(count);
+    const auto rule = [&](std::uint16_t r) { return _cfg.nnodes + r; };
+    for (std::uint32_t id = 0; id < _cfg.nnodes; ++id) {
+      const LlNode& n = _cfg.nodes[id];
+      if (n.owns && _cfg.nodeBuild[id].foldStep) continue;
+      if (n.kind == LlShape::call) {
+        users[rule(n.sym)].push_back(id);
+      } else if (group(n)) {
+        each_source(static_cast<std::uint16_t>(id),
+                    n.owns ? Source::sole : Source::last,
+                    [&](std::uint16_t child) { users[child].push_back(id); });
+      }
+    }
+    for (std::uint16_t r = 1; r < _cfg.nrules; ++r) {
+      const LlRuleInfo& u = _cfg.rules[r];
+      if (u.climb != kNoRow) {
+        const LlClimb& cl = _cfg.climbs[u.climb];
+        users[cl.primary != kNoRow ? rule(cl.primary) : cl.primaryNode]
+            .push_back(rule(r));
+      } else if (u.body != kNoRow) {
+        users[u.body].push_back(rule(r));
+      }
+    }
+    // Keep the former scan's rounds and position order: rule rows retain the
+    // order in which joins first reach them. Only changed dependencies ask a
+    // position to run again; aliases no longer rescan unrelated rules.
+    std::priority_queue<std::uint64_t, std::vector<std::uint64_t>,
+                        std::greater<>>
+        todo;
+    std::vector<bool> queued(count, true);
+    for (std::uint32_t id = 0; id < count; ++id)
+      if (id != _cfg.nnodes) todo.push(id);  // rule zero has no body
+    while (!todo.empty()) {
+      const auto step = todo.top();
+      todo.pop();
+      const auto id = static_cast<std::uint32_t>(step);
+      queued[id] = false;
+      bool moved = false;
+      if (id < _cfg.nnodes) {
         const LlNode& n = _cfg.nodes[id];
-        auto& out = _nodeRows[id];
+        std::vector<std::uint16_t> out;
         if (n.owns) {
           add(out, n.row);
           own_joins(static_cast<std::uint16_t>(id), join,
@@ -121,8 +229,10 @@ class LlRecordPlan {
         } else if (group(n)) {
           sources(static_cast<std::uint16_t>(id), Source::last, out);
         }
-      }
-      for (std::uint16_t r = 1; r < _cfg.nrules; ++r) {
+        moved = out != _nodeRows[id];
+        if (moved) _nodeRows[id] = std::move(out);
+      } else {
+        const auto r = static_cast<std::uint16_t>(id - _cfg.nnodes);
         const LlRuleInfo& u = _cfg.rules[r];
         auto& out = _ruleRows[r];
         const auto before = out.size();
@@ -134,15 +244,19 @@ class LlRecordPlan {
         } else if (u.body != kNoRow) {
           append(out, _nodeRows[u.body]);
         }
-        moved = moved || out.size() != before;
+        moved = out.size() != before;
+      }
+      if (!moved) continue;
+      for (const auto user : users[id]) {
+        if (queued[user]) continue;
+        queued[user] = true;
+        const auto round = (step >> 32) + (user <= id);
+        todo.push((round << 32) | user);
       }
     }
   }
 
  private:
-  struct Flags {
-    bool hands = false, opens = false;
-  };
   enum class Source { last, sole };
 
   static bool group(const LlNode& n) {
@@ -150,96 +264,66 @@ class LlRecordPlan {
            n.kind == LlShape::rep;
   }
 
-  Flags rule_flags(std::uint16_t rule) const {
-    const LlRuleInfo& u = _cfg.rules[rule];
-    if (u.climb != kNoRow) {
-      const auto primary = _cfg.climbs[u.climb].primary;
-      return {primary == kNoRow || _hands[primary], true};
-    }
-    return u.body == kNoRow ? Flags{} : node_flags(u.body);
-  }
-
-  Flags node_flags(std::uint16_t id) const {
-    struct Frame {
-      std::uint16_t id, only = kNoRow;
-      Flags flags;
-      std::span<const std::uint16_t> children;
-      std::size_t next = 0;
-      bool all = true;
-    };
-    const auto frame_for = [&](std::uint16_t current) {
-      const LlNode& n = _cfg.nodes[current];
-      Frame frame{.id = current,
-                  .flags = {n.row != kNoRow, opens_chain(n.row)},
-                  .children = {}};
-      if (frame.flags.hands && frame.flags.opens) return frame;
-      if (n.kind == LlShape::term || n.kind == LlShape::implied) {
-        frame.flags.hands = true;
-      } else if (n.kind == LlShape::call) {
-        frame.flags.hands = frame.flags.hands || _hands[n.sym];
-        frame.flags.opens = frame.flags.opens || _opens[n.sym];
-      } else if (group(n)) {
-        frame.only = single_position(current);
-        frame.children = _cfg.children(n);
-      }
-      return frame;
-    };
-    // Counted bounds can nest thousands of groups. Keep the walk on the heap
-    // rather than making one native call for each level of the lowered graph.
-    std::vector<Frame> stack{frame_for(id)};
-    for (;;) {
-      auto& frame = stack.back();
-      if (frame.next < frame.children.size()) {
-        const auto child = frame.children[frame.next++];
-        stack.push_back(frame_for(child));
-        continue;
-      }
-      Flags out = frame.flags;
-      if (_cfg.nodes[frame.id].kind == LlShape::alt)
-        out.hands = out.hands || frame.all;
-      const auto child = frame.id;
-      stack.pop_back();
-      if (stack.empty()) return out;
-      auto& parent = stack.back();
-      parent.all = parent.all && out.hands;
-      if (child == parent.only)
-        parent.flags.hands = parent.flags.hands || out.hands;
-      parent.flags.opens = parent.flags.opens || out.opens;
-    }
-  }
-
+  // Whether a reading of the position may lay no record: it matches nothing,
+  // is the end, or is a choice with such an arm.
   bool takes_none(std::uint16_t id) const {
-    return _nullable[id] != 0 || _cfg.nodes[id].kind == LlShape::endMark;
+    const auto none = [&](std::uint16_t k) {
+      return _nullable[k] != 0 || _cfg.nodes[k].kind == LlShape::endMark;
+    };
+    if (none(id)) return true;
+    const LlNode& n = _cfg.nodes[id];
+    return n.kind == LlShape::alt &&
+           std::ranges::any_of(_cfg.children(n), none);
   }
 
   // Last keeps a sequence's nullable suffix; sole keeps every other position
   // nullable too. A transparent nested group is reopened only for sole.
+  template <class Visit>
+  void each_source(std::uint16_t id, Source source, Visit&& visit) const {
+    if (source == Source::last) {
+      const LlNode& n = _cfg.nodes[id];
+      const auto children = _cfg.children(n);
+      const unsigned first = n.kind == LlShape::seq ? _last[id] : 0u;
+      for (unsigned i = first; i < children.size(); ++i) visit(children[i]);
+      return;
+    }
+    struct Frame {
+      std::uint16_t id;
+      unsigned next = 0;
+    };
+    std::vector<Frame> todo{{id}};
+    while (!todo.empty()) {
+      Frame& f = todo.back();
+      const LlNode& n = _cfg.nodes[f.id];
+      const auto children = _cfg.children(n);
+      if (f.next == children.size()) {
+        todo.pop_back();
+        continue;
+      }
+      const auto k = children[f.next++];
+      if (n.kind == LlShape::seq && _required[f.id] != 0 &&
+          (_required[f.id] != 1 || takes_none(k)))
+        continue;
+      const LlNode& child = _cfg.nodes[k];
+      if (child.owns || !group(child))
+        visit(k);
+      else
+        todo.push_back({k});
+    }
+  }
+
   void sources(std::uint16_t id, Source source,
                std::vector<std::uint16_t>& out) const {
-    const LlNode& n = _cfg.nodes[id];
-    const unsigned count = n.kind == LlShape::rep ? 1u : n.count;
-    for (unsigned i = 0; i < count; ++i) {
-      const auto k = n.kind == LlShape::rep ? n.sym : _cfg.kids[n.sym + i];
-      if (n.kind == LlShape::seq) {
-        bool eligible = true;
-        for (unsigned j = source == Source::last ? i + 1 : 0;
-             j < n.count && eligible; ++j)
-          if (j != i) eligible = takes_none(_cfg.kids[n.sym + j]);
-        if (!eligible) continue;
-      }
-      const LlNode& child = _cfg.nodes[k];
-      if (source == Source::last || child.owns || !group(child))
-        append(out, _nodeRows[k]);
-      else
-        sources(k, source, out);
-    }
+    each_source(id, source,
+                [&](std::uint16_t child) { append(out, _nodeRows[child]); });
   }
 
   const LlLowCfg& _cfg;
   const ChainPool& _writes;
   const std::vector<std::uint8_t>& _nests;
-  std::vector<bool> _hands, _opens;
+  std::vector<bool> _nodeHands, _hands, _opens;
   std::span<const std::uint8_t> _nullable;
+  std::vector<std::uint16_t> _last, _required;
   std::vector<std::vector<std::uint16_t>> _nodeRows, _ruleRows;
 };
 

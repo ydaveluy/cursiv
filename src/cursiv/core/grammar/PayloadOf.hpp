@@ -175,7 +175,8 @@ struct lit_pays<Ref<R>> : lit_joined<std::remove_cv_t<decltype(R::body)>> {};
 // The converter is taken from the resolved rule, and read as `rule_type` reads
 // the slot: an override that replaces only a body keeps the converter of the
 // rule it stood over, one that names a bare target replaces it with that
-// target's own conversion.
+// target's own conversion. A data rule that states none and passes a value
+// other than text reads the value of what it took.
 template <class R>
 struct converter_rule {
   static consteval auto pick() {
@@ -184,6 +185,9 @@ struct converter_rule {
     else if constexpr (is_overridden<R> && slot_empty<R>)
       return std::type_identity<
           typename converter_rule<inherited_of_t<R>>::type>{};
+    else if constexpr (is_data_rule<R> && slot_empty<R> &&
+                       !std::is_same_v<rule_type_t<R>, std::string_view>)
+      return std::type_identity<pass_conv<rule_type_t<R>>>{};
     else
       return std::type_identity<void>{};
   }

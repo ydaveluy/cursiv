@@ -18,7 +18,7 @@ struct G : Base {
   struct Root : rule<create<ast::Typed>(assign<&ast::Typed::name>(
                     option(ref<Qualifier>) + ref<Name>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

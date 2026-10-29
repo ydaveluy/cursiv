@@ -92,6 +92,8 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   // settle admits readers; every subsequent phase only advances documents, so
   // an override that resets one after calling the base frees what a reader
   // may already hold.
+  // It runs inside the attempt `build` or `update` began, and its failure is
+  // that attempt's.
   virtual void buildDocuments(std::span<Document* const>,
                               const CancellationToken&) const;
 
@@ -125,8 +127,10 @@ class DefaultDocumentBuilder : public DocumentBuilder {
 
   // What one reported change really touched. A URI naming a document held is
   // itself; one naming a directory is every document under it -- which is how a
-  // checkout, a bulk copy or a watcher that coalesced its events lands. A URI
-  // that is neither touches nothing.
+  // checkout, a bulk copy or a watcher that coalesced its events lands; one
+  // naming a file the store lacks is that file. A URI that
+  // `WorkspaceManager::isIncluded` refuses touches nothing, and a document
+  // already held is always itself.
   [[nodiscard]] virtual std::vector<std::string> findChangedUris(
       std::string_view changed) const;
 
@@ -168,6 +172,13 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   static void bindReferences(Document&, const CoreServices&);
   // A request some build started and none finished.
   [[nodiscard]] bool requestUnfinished(const Document&) const;
+  // What `update` does before the phases: the store and the derived halves
+  // brought in line with the change, the listeners told. Returns what is owed.
+  [[nodiscard]] std::vector<Document*> applyUpdate(
+      std::span<const std::string_view> changed,
+      std::span<const std::string_view> deleted,
+      const CancellationToken&) const;
+  void runAttempt(cursiv::function_ref<void()> body) const;
   [[nodiscard]] std::uint64_t beginAttempt() const;
   // A document's rung is heard by whoever waits on that document, not only at
   // the end of the phase.

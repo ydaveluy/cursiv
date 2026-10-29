@@ -965,34 +965,36 @@ void DefaultMcpService::registerExpectedAtTool(McpServer& server) const {
               for (const NextFeature& next :
                    features_at(document, *language.parser, offset, word)) {
                 throw_if_cancelled(token);
-                std::string line;
-                if (const std::string_view spelled =
-                        grammar.terminalText(next.feature);
-                    !spelled.empty()) {
-                  line += '\'';
-                  line += spelled;
-                  line += '\'';
-                } else if (const std::string_view name =
-                               grammar.terminalName(next.feature);
-                           !name.empty()) {
-                  line += name;
-                  line += " (token)";
-                } else {
-                  continue;
+                // A keyword by its text, a terminal that reads a choice of
+                // words by each of them, any other terminal by its name.
+                std::vector<std::string> heads;
+                for (const std::string_view spelled :
+                     grammar.terminalSpellings(next.feature))
+                  heads.push_back('\'' + std::string(spelled) + '\'');
+                if (heads.empty()) {
+                  const std::string_view name =
+                      grammar.terminalName(next.feature);
+                  if (name.empty()) continue;
+                  heads.push_back(std::string(name) + " (token)");
                 }
+                std::string tail;
                 if (!next.property.empty()) {
-                  line += "  fills '";
-                  line += next.property;
-                  line += '\'';
+                  tail += "  fills '";
+                  tail += next.property;
+                  tail += '\'';
                 }
                 if (const std::string_view doc =
                         grammar.terminalDoc(next.feature);
                     !doc.empty()) {
-                  line += "  -- ";
-                  line += doc;
+                  tail += "  -- ";
+                  tail += doc;
                 }
-                if (std::find(lines.begin(), lines.end(), line) == lines.end())
-                  lines.push_back(std::move(line));
+                for (std::string& line : heads) {
+                  line += tail;
+                  if (std::find(lines.begin(), lines.end(), line) ==
+                      lines.end())
+                    lines.push_back(std::move(line));
+                }
               }
               if (word && !lines.empty()) {
                 out += "in place of '";

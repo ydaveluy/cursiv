@@ -45,7 +45,7 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"outer"> + some(append<&Doc::defs>(ref<OuterDef>)))) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 

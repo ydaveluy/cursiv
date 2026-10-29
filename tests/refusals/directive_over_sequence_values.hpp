@@ -16,7 +16,7 @@ struct List : cursiv::Extends<cursiv::AstNode> {
 }  // namespace ast
 
 struct G : Base {
-  struct NUM : terminal<some(d), std::int64_t> {};
+  struct NUM : terminal<as<std::int64_t>(some(d))> {};
   struct NL : terminal<lit<"\n">> {};
   struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
   struct Root
@@ -27,7 +27,7 @@ struct G : Base {
                  lit<",">) +
             lit<"]">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

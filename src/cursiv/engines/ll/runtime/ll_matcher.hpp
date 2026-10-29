@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/shared/runtime/LexBoundary.hpp"
 #include "cursiv/engines/shared/runtime/LexTape.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
@@ -64,6 +65,22 @@ inline constexpr auto kLlRefusing = [] {
   return out;
 }();
 
+// A checked state's election, out of line. What it reads goes in by value and
+// comes back with the terminal, so a walk that asks keeps no local whose
+// address escapes.
+struct LlElected {
+  SymbolId term;
+  TextOffset far;
+};
+template <const auto& T, bool Skips>
+CURSIV_NOINLINE LlElected ll_elect(std::uint16_t s, const char* src,
+                                   TextOffset at, TextOffset len,
+                                   TextOffset far, const LlTermSkip<T>* skip) {
+  const SymbolId t = lex_elect<T>(
+      s, src, at, len, far, [&](SymbolId u) { return Skips && skip->test(u); });
+  return {t, far};
+}
+
 // The tape of the descent: a state's election runs over the rows of its
 // acceptances; `Skips`, with the terminals a refused word took off the
 // position.
@@ -71,11 +88,16 @@ template <const auto& T, bool Skips = false>
 struct LlLexTape : LexTape<T> {
   using Skip = LlTermSkip<T>;
   using Skipping = LlLexTape<T, true>;
+  // A state's election is `qualified`'s, skipping or not.
+  static constexpr bool kQualified = true;
   const Skip* skip = nullptr;
 
   bool bounded(std::uint16_t s) const { return T.lex_bounded(s); }
-  SymbolId qualified(std::uint16_t s, const char* src, TextOffset at,
-                     TextOffset len, TextOffset& far) const {
+  // Asked at every accepting state a walk crosses, so it stays in the walk;
+  // the election proper is `lex_elect`'s, out of line.
+  CURSIV_ALWAYS_INLINE SymbolId qualified(std::uint16_t s, const char* src,
+                                          TextOffset at, TextOffset len,
+                                          TextOffset& far) const {
     if (T.lexChecks == nullptr || T.lexChecks[s] == 0) {
       const auto t = static_cast<SymbolId>(T.dfaAccept[s] - 1u);
       const bool skipped = Skips && skip->test(t);
@@ -85,8 +107,9 @@ struct LlLexTape : LexTape<T> {
         if (!lex_boundary(T).at(T.dfaBound[s], src, at, len)) return t;
       }
     }
-    return lex_elect<T>(s, src, at, len, far,
-                        [&](SymbolId t) { return Skips && skip->test(t); });
+    const LlElected e = ll_elect<T, Skips>(s, src, at, len, far, skip);
+    far = e.far;
+    return e.term;
   }
   TextOffset bound_reach(std::uint16_t s, const char* src, TextOffset i,
                          TextOffset len) const {
@@ -112,10 +135,13 @@ inline Scan ll_match_text(const char* src, TextOffset len, std::uint16_t mode,
   return lex_match_halt(LlLexTape<T>{}, src, len, mode, from, halt);
 }
 
+// The token `mode` reads at `from`, by the table's generated walk.
 template <const auto& T>
 inline Scan ll_match_text(const char* src, TextOffset len, std::uint16_t mode,
                           TextOffset from) {
-  return lex_match(LlLexTape<T>{}, src, len, mode, from);
+  return lex_longest(
+      LlLexTape<T>{}, mode, T.walk(src, len, mode, from),
+      [&](std::uint16_t more) { return T.walk(src, len, more, from); });
 }
 
 }  // namespace cursiv

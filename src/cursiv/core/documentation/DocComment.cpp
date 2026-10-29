@@ -38,23 +38,23 @@ std::string_view trim(std::string_view text) {
   return text.substr(begin, end - begin);
 }
 
-// Splits `content` into lines on \n, dropping a trailing \r on each line.
+// Splits `content` into lines on \n, \r\n or a lone \r, as `TextDocument`
+// counts them.
 std::vector<std::string_view> get_lines(std::string_view content) {
   std::vector<std::string_view> lines;
   std::size_t begin = 0;
   while (true) {
-    const auto newline = content.find('\n', begin);
-    auto line = newline == std::string_view::npos
-                    ? content.substr(begin)
-                    : content.substr(begin, newline - begin);
-    if (!line.empty() && line.back() == '\r') {
-      line.remove_suffix(1);
-    }
-    lines.push_back(line);
+    const auto newline = content.find_first_of("\r\n", begin);
     if (newline == std::string_view::npos) {
+      lines.push_back(content.substr(begin));
       break;
     }
+    lines.push_back(content.substr(begin, newline - begin));
     begin = newline + 1;
+    if (content[newline] == '\r' && begin < content.size() &&
+        content[begin] == '\n') {
+      ++begin;
+    }
   }
   return lines;
 }

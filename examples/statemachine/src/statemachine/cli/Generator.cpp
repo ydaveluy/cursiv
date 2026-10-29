@@ -220,12 +220,12 @@ std::string generate_cpp(const ast::Statemachine& model,
                          std::optional<std::string_view> destination) {
   const auto outputDirectory = resolve_destination(destination);
   std::filesystem::create_directories(outputDirectory);
-  const auto outputPath = std::filesystem::path(outputDirectory) /
-                          (sanitize_file_stem(inputPath) + ".cpp");
+  const auto outputPath = std::filesystem::path(outputDirectory)
+                          / (sanitize_file_stem(inputPath) + ".cpp");
   std::ofstream out(outputPath, std::ios::binary);
   if (!out.is_open()) {
-    throw std::runtime_error("Unable to open output file: " +
-                             outputPath.string());
+    throw std::runtime_error("Unable to open output file: "
+                             + outputPath.string());
   }
   out << generate_cpp_content(model);
   return outputPath.string();

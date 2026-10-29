@@ -9,7 +9,7 @@ namespace refuse {
 struct G : Base {
   struct Root : rule<create<ast::Node>(repeat<2, 70000>(lit<"x">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

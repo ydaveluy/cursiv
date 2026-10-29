@@ -22,7 +22,7 @@ struct CommonArtifacts {
   const AstRegistry& registry;
   const AstEntryTable& entries;
   const std::vector<RecordGen>& records;
-  const std::vector<RecordTerminal>& terminals;
+  const std::vector<TerminalGen>& terminals;
   const LanguageIdentity& lang;
   // The engine's parser the module installs: its header and its class.
   std::string_view parserHeader;

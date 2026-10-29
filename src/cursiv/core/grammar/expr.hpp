@@ -28,9 +28,15 @@ namespace cursiv {
 struct GrammarNode {};
 
 // What the operators and combinators accept. A rule is referred to, not
-// combined, so it is not one of these.
+// combined, so it is not one of these. This is `std::derived_from` spelled
+// with the class traits: its `is_convertible_v` is a variable, and g++ gives
+// every variable it instantiates a symbol name -- one per operand an operator
+// meets, each spelling the whole expression built so far.
 template <class T>
-concept Expr = std::derived_from<std::remove_cvref_t<T>, GrammarNode>;
+concept Expr =
+    std::is_base_of<GrammarNode, std::remove_cvref_t<T>>::value &&
+    std::is_convertible<const volatile std::remove_cvref_t<T>*,
+                        const volatile GrammarNode*>::value;
 
 inline constexpr std::size_t kUnbounded =
     std::numeric_limits<std::size_t>::max();
@@ -204,17 +210,25 @@ struct Not : GrammarNode {};
 template <class E>
 struct And : GrammarNode {};
 
-// Each consuming operand once, in any order. A repetition stays one block.
+// Each consuming operand once, in any order. A repetition stays one block, and
+// so does a group nested as an operand.
 template <class... Es>
 struct Unordered : GrammarNode {
   static_assert(sizeof...(Es) >= 2,
-                "Unordered needs at least two operands: `a & b`");
+                "an unordered group needs at least two items: "
+                "`unordered(a, b)`");
 };
 
 // Names R as a template argument, so R may still be incomplete: a grammar can
 // be recursive, and a rule can reference itself from its own base-clause.
 template <class R>
 struct Ref : GrammarNode {};
+
+// `as<X>(e)`: what E matches converts with C. The annotation reads nothing of
+// its own: a rule's body turns it into a data rule over E, so E's tokens stay
+// what they are.
+template <class C, class E>
+struct As : GrammarNode {};
 
 template <auto Body, class... Opts>
 struct Rule;
@@ -345,13 +359,13 @@ inline constexpr bool is_nest<Nest<T, Ptr, E>> = true;
 // configuration holds through the rules E calls (dynamic scope), until an
 // inner skip() declares its own.
 template <class... Rs>
-struct IgnoredTag {};
+struct IgnoreTag {};
 template <class... Rs>
 struct HideTag {};
 template <class I, class H, class E>
 struct Skip : GrammarNode {};
 
-// Levels are declared tightest-binding first, separated by `>>`. `left`/
+// Levels are listed tightest-binding first in `levels(...)`. `left`/
 // `right` say which way a chain of equal precedence groups, and `nonassoc`
 // that it does not group: the chain is an error; the operator is
 // any lexable expression of statically known length, so a level may hold a
@@ -375,11 +389,33 @@ struct NonAssoc {
   using op_expr = Op;
   static constexpr Association kGroup = Association::non;
 };
+// A unary level: its operator stands before the operand (`prefix`) or after
+// it (`postfix`) and builds a `Node` of its own, writing the operator and the
+// operand into the two members named. Its operand is read at its own level, so
+// a prefix applies to everything that binds tighter than it.
+template <Association A, class Node, auto OpPtr, auto OperandPtr, class Op>
+struct UnaryLevel {
+  static_assert(
+      std::is_base_of_v<typename member_traits<decltype(OpPtr)>::class_type,
+                        Node> &&
+          std::is_base_of_v<
+              typename member_traits<decltype(OperandPtr)>::class_type, Node>,
+      "prefix/postfix: the operator and operand members must belong to the "
+      "level's class (or a base of it)");
+  using op_expr = Op;
+  using node_type = Node;
+  static constexpr Association kGroup = A;
+  static constexpr auto op_pointer = OpPtr;
+  static constexpr auto operand_pointer = OperandPtr;
+};
 template <class T>
 concept Assoc = requires {
   typename T::op_expr;
   T::kGroup;
 };
+template <class L>
+inline constexpr bool is_unary_level =
+    L::kGroup == Association::prefix || L::kGroup == Association::postfix;
 template <class... Ls>
 struct Levels {
   static constexpr std::size_t size = sizeof...(Ls);
@@ -387,12 +423,12 @@ struct Levels {
   using at = detail::pack_at_t<I, Ls...>;
 };
 
-// `left`/`right`/`nonassoc` yield a table of one, not a bare level, and `>>`
-// concatenates two tables. One level is then a legal table -- which is what
-// a cascade spelled one `infix<>` rule per precedence level needs, every
+// `left`/`right`/`nonassoc` yield a table of one, not a bare level, and
+// `levels(...)` lists several. One level is then a legal table -- which is
+// what a cascade spelled one `infix<>` rule per precedence level needs, every
 // storey of it carrying exactly one -- and nothing downstream has to
-// normalise a level into a table. `left(a) >> left(b)` is
-// `Levels<LeftAssoc<a>, LeftAssoc<b>>`. A level's operators are matched by
+// normalise a level into a table. `levels(left(a), right(b))` is
+// `Levels<LeftAssoc<a>, RightAssoc<b>>`. A level's operators are matched by
 // maximal munch, longest first.
 template <Expr Op>
 constexpr auto left(Op) {
@@ -406,10 +442,67 @@ template <Expr Op>
 constexpr auto nonassoc(Op) {
   return Levels<NonAssoc<std::remove_cvref_t<Op>>>{};
 }
-template <class... As, class... Bs>
-constexpr Levels<As..., Bs...> operator>>(Levels<As...>, Levels<Bs...>) {
-  return {};
+// `prefix<&U::op, &U::operand>(op)` builds the class declaring `op`;
+// `prefix<U>(op)` builds `U` through its members `op` and `operand`, even
+// where a base of `U` declares them. `postfix` names the operand first, as the
+// text reads.
+template <auto OpPtr, auto OperandPtr, Expr Op>
+constexpr auto prefix(Op) {
+  return Levels<UnaryLevel<Association::prefix,
+                           typename member_traits<decltype(OpPtr)>::class_type,
+                           OpPtr, OperandPtr, std::remove_cvref_t<Op>>>{};
 }
+template <class T, Expr Op>
+constexpr auto prefix(Op) {
+  return Levels<UnaryLevel<Association::prefix, T, &T::op, &T::operand,
+                           std::remove_cvref_t<Op>>>{};
+}
+template <auto OperandPtr, auto OpPtr, Expr Op>
+constexpr auto postfix(Op) {
+  return Levels<UnaryLevel<Association::postfix,
+                           typename member_traits<decltype(OpPtr)>::class_type,
+                           OpPtr, OperandPtr, std::remove_cvref_t<Op>>>{};
+}
+template <class T, Expr Op>
+constexpr auto postfix(Op) {
+  return Levels<UnaryLevel<Association::postfix, T, &T::op, &T::operand,
+                           std::remove_cvref_t<Op>>>{};
+}
+
+namespace detail {
+// The level a table of one holds, as a list; none for anything else.
+template <class T>
+struct sole_level {
+  using type = TypeList<>;
+};
+template <class L>
+struct sole_level<Levels<L>> {
+  using type = TypeList<L>;
+};
+template <class L>
+struct levels_of;
+template <class... Ls>
+struct levels_of<TypeList<Ls...>> {
+  using type = Levels<Ls...>;
+};
+}  // namespace detail
+
+// A function object, so the cursiv::GrammarSpec base can re-expose it.
+struct LevelsFn {
+  template <class... Ts>
+  constexpr auto operator()(Ts...) const {
+    using Ls = detail::tl_cat_t<typename detail::sole_level<Ts>::type...>;
+    static_assert(
+        sizeof...(Ts) > 0 && detail::tl_size<Ls>::value == sizeof...(Ts),
+        "levels(...) lists the levels of a table, tightest-binding "
+        "first, each one `left(op)`, `right(op)`, `nonassoc(op)`, "
+        "`prefix<...>(op)` or `postfix<...>(op)`");
+    // Past the refusal, the table of the levels that are levels: the line
+    // that states the mistake stays the only one.
+    return typename detail::levels_of<Ls>::type{};
+  }
+};
+inline constexpr LevelsFn levels{};
 
 // One declaration for the whole file; the specialisations are at the bottom,
 // after the algebra they fold through.
@@ -462,8 +555,6 @@ struct SeqCat<Create<N, Epsilon>, Seq<Bs...>> {
 };
 template <class A, class B>
 using ChoiceCat = FlatCat<Choice, A, B>;
-template <class A, class B>
-using UnorderedCat = FlatCat<Unordered, A, B>;
 
 // The creation algebra. A sequence normalizes to one head creation followed
 // by a chain of nests:
@@ -627,6 +718,14 @@ struct normalize_seq {
 template <class... Es>
 struct normalize_seq<Seq<Es...>>
     : fold_run<Pack<>, Pack<>, NoRegion, Pack<Es...>> {};
+// A run with no creation and no nest folds to itself, answered at once: `+`
+// asks this at every element it appends, and a fold step per element would
+// walk the whole run again each time.
+template <class... Es>
+  requires((step_kind<Es> == 0) && ...)
+struct normalize_seq<Seq<Es...>> {
+  using type = Seq<Es...>;
+};
 
 }  // namespace detail
 
@@ -664,7 +763,7 @@ constexpr auto operator|(A, B) {
                                     std::remove_cvref_t<B>>::type{};
 }
 
-// Unary: lookaheads. Binary &: unordered group.
+// The lookaheads, unary `!` and `&`.
 template <Expr E>
 constexpr auto operator!(E) {
   return Not<std::remove_cvref_t<E>>{};
@@ -672,11 +771,6 @@ constexpr auto operator!(E) {
 template <Expr E>
 constexpr auto operator&(E) {
   return And<std::remove_cvref_t<E>>{};
-}
-template <Expr A, Expr B>
-constexpr auto operator&(A, B) {
-  return typename detail::UnorderedCat<std::remove_cvref_t<A>,
-                                       std::remove_cvref_t<B>>::type{};
 }
 
 namespace detail {
@@ -1119,6 +1213,18 @@ struct OptionFn {
 };
 inline constexpr OptionFn option{};
 
+// The unordered group: each item once, in any order. An item is whole, so a
+// group given as an item stays one: `unordered(unordered(a, b), c)` reads `c`
+// before or after both of `a` and `b`, never between them. Every item reads
+// input; the generators refuse one that may match nothing.
+struct UnorderedFn {
+  template <Expr... Es>
+  constexpr auto operator()(Es...) const {
+    return Unordered<std::remove_cvref_t<Es>...>{};
+  }
+};
+inline constexpr UnorderedFn unordered{};
+
 template <std::size_t Min, std::size_t Max = Min>
 struct RepeatFn {
   template <Expr E>
@@ -1199,14 +1305,16 @@ struct FlagFn {
 template <auto Ptr>
 inline constexpr FlagFn<Ptr> flag{};
 
+// The tags of `skip()` are verbs, what the region does to each terminal; the
+// grammar's own settings, `ignored` and `hidden`, are participles.
 template <class... Rs>
-inline constexpr IgnoredTag<Rs...> ignored{};
+inline constexpr IgnoreTag<Rs...> ignore{};
 template <class... Rs>
 inline constexpr HideTag<Rs...> hide{};
 // The tags exist for the call site only; the node stores plain lists.
 struct SkipFn {
   template <class... Is, class... Hs, Expr E0, Expr... Es>
-  constexpr auto operator()(IgnoredTag<Is...>, HideTag<Hs...>, E0,
+  constexpr auto operator()(IgnoreTag<Is...>, HideTag<Hs...>, E0,
                             Es...) const {
     return Skip<TypeList<Is...>, TypeList<Hs...>, cat_seq_t<E0, Es...>>{};
   }
@@ -1215,7 +1323,7 @@ inline constexpr SkipFn skip{};
 struct TightFn {
   template <Expr E>
   constexpr auto operator()(E e) const {
-    return skip(ignored<>, hide<>, e);
+    return skip(ignore<>, hide<>, e);
   }
 };
 inline constexpr TightFn tight{};

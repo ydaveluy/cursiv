@@ -200,7 +200,11 @@ try {
             workspaceFolders: workspaceFolders.length ? workspaceFolders : null,
             capabilities: {
                 workspace: { workspaceFolders: true },
-                textDocument: { definition: { linkSupport: true } }
+                textDocument: {
+                    definition: { linkSupport: true },
+                    documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+                    hover: { contentFormat: ['markdown', 'plaintext'] }
+                }
             }
         }
     }, 'the initialize result');

@@ -25,7 +25,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Entry>)) +
                                  option(flag<&Doc::ruled>(ref<HR>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

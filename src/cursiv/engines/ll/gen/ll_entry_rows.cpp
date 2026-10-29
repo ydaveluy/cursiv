@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/engines/shared/gen/chain_run.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
@@ -39,16 +40,17 @@ void ll_entry_halves(const std::vector<std::vector<std::uint16_t>>& runs,
 
 }  // namespace
 
-AstEntryTable ll_entry_table(const LlBuiltProgram& a,
+AstEntryTable ll_entry_table(const LlFinalProgram& done,
                              std::span<const AstRowGen> rows,
                              std::vector<RecordGen>& records) {
+  const LlBuiltProgram& a = done.program();
   const auto makes = [&](const std::vector<std::uint16_t>& run) {
-    return std::ranges::any_of(run,
-                               [&](std::uint16_t r) { return rows[r].makes; });
+    return std::ranges::any_of(
+        run, [&](std::uint16_t r) { return rows[r].makes(); });
   };
   const auto opens = [&](const std::vector<std::uint16_t>& run) {
-    return std::ranges::any_of(run,
-                               [&](std::uint16_t r) { return rows[r].opens; });
+    return std::ranges::any_of(
+        run, [&](std::uint16_t r) { return rows[r].opens(); });
   };
   AstEntryTable t;
   t.turnsByState = true;

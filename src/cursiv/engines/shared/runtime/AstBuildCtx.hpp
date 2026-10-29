@@ -14,12 +14,16 @@
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 
 namespace cursiv {
 
 class AstArena;
 struct AstActions;
+namespace detail {
+struct TextValues;
+}
 
 struct AstBuildCtx {
   const Cst* cst = nullptr;
@@ -41,8 +45,26 @@ struct AstBuildCtx {
   // Nodes a member took. The list holds one more, the root, unless a node was
   // built and dropped.
   std::size_t attached = 0;
+  // Scoped to one text query; independent writes still run their converters.
+  detail::TextValues* textValues = nullptr;
+  // Nodes made and not yet on `nodes`, which takes them a run at a time: the
+  // list's own append is a call where this is a store.
+  static constexpr std::size_t kMadeRun = 256;
+  std::size_t madeCount = 0;
+  AstNode* made[kMadeRun]{};
 
   bool failed() const { return error != AstBuildError::none; }
+  // In creation order, which is the list's.
+  void list(AstNode* node) {
+    made[madeCount] = node;
+    if (++madeCount == kMadeRun) [[unlikely]]
+      list_made();
+  }
+  // Whoever reads `nodes` calls this first.
+  CURSIV_NOINLINE void list_made() {
+    nodes->insert(nodes->end(), made, made + madeCount);
+    madeCount = 0;
+  }
   // First failure wins: the later ones are its consequences.
   void fail(AstBuildError why, NodeId id) {
     if (!failed()) {

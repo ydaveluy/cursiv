@@ -251,7 +251,13 @@ void one_file_normalizes_to_one_string() {
   // Not a file URI: left alone, and still comparable.
   CHECK(cursiv::normalize_uri("http://x/a") == "http://x/a");
   CHECK(cursiv::equals_uri("http://x/a", "http://x/a"));
-  CHECK(cursiv::normalize_uri("MEM:///a.ws") == "MEM:///a.ws");
+  // ...but for its scheme, which has no case (RFC 3986): one spelling, the
+  // lower one, which is how a client's URI already arrives. The path keeps its
+  // case, and a colon after a `/` is no scheme.
+  CHECK(cursiv::normalize_uri("MEM:///A.ws") == "mem:///A.ws");
+  CHECK(cursiv::equals_uri("MEM:///A.ws", "mem:///A.ws"));
+  CHECK(!cursiv::equals_uri("mem:///A.ws", "mem:///a.ws"));
+  CHECK(cursiv::normalize_uri("dir/A:b.ws") == "dir/A:b.ws");
 }
 
 // Segment by segment: `/a/bc` does not live under `/a/b`.

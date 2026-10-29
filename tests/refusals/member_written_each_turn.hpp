@@ -16,7 +16,7 @@ struct G : Base {
       : rule<create<ast::Holder>(some(assign<&ast::Holder::first>(ref<ID>)))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

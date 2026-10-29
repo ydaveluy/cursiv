@@ -16,8 +16,9 @@
 
 namespace cursiv {
 
+// A type is told by its address alone; its tag, where it is a node class,
+// answers subtyping.
 struct AstTypeDesc {
-  std::string_view name;
   const AstTypeTag* tag = nullptr;
 };
 
@@ -26,7 +27,6 @@ struct AstTypeDesc {
 struct AstConvDesc {};
 
 struct AstFieldDesc {
-  std::string_view ptr;
   std::string_view name;
   std::ptrdiff_t (*offset)() = nullptr;
   detail::FieldNature nature = detail::FieldNature::value;
@@ -38,9 +38,8 @@ struct AstFieldDesc {
 
 struct AstRowDesc {
   AstRowGen gen{};
-  // The class a creation, a close or a nest names, and the one every row
-  // but a conversion is declared on.
-  const AstTypeDesc* type = nullptr;
+  // The class every row but a conversion is declared on: the one a creation,
+  // a close or a nest names.
   const AstTypeDesc* decl = nullptr;
   bool built = false;
   bool named = false;
@@ -50,6 +49,10 @@ struct AstRowDesc {
   const AstTypeDesc* narrow = nullptr;
   const AstTypeDesc* convType = nullptr;
   const AstTypeDesc* textType = nullptr;
+  const AstTypeDesc* valueType = nullptr;
+  // Whether an override fills the converter slot of `convType`, of `textType`.
+  bool convOverride = false;
+  bool textOverride = false;
 };
 
 AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,

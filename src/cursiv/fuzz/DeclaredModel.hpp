@@ -558,8 +558,8 @@ template <class G>
 struct positions_for {
   using stage = cursiv::Normalize<G>;
   using seeds =
-      dedupe_t<tl_cat_t<TypeList<typename stage::entry>, typename stage::ignore,
-                        typename stage::hidden>>;
+      dedupe_t<tl_cat_t<TypeList<typename stage::entry>,
+                        typename stage::ignored, typename stage::hidden>>;
   using rules = typename close_rules<stage, seeds, seeds>::type;
   using type = dedupe_t<typename positions_all<stage, rules>::type>;
 };

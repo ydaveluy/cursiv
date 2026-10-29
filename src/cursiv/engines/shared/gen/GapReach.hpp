@@ -49,8 +49,7 @@ class GapReach {
     return false;
   }
 
-  // Tight conditions read from the gap's start; unbounded phrases instead
-  // count whole tokens, whose widths the text determines.
+  // Unbounded phrases count whole tokens, whose widths the text determines.
   CondReach of(unsigned k) const {
     std::uint64_t look = 0, tail = 0;
     std::uint32_t tokens = 0;
@@ -69,8 +68,6 @@ class GapReach {
                                  : reach.overhang);
       }
     }
-    if constexpr (requires { _g.gapTight; })
-      if (k < _g.gapTight.size() && _g.gapTight[k] != 0) tail = look;
     return CondReach{static_cast<TextOffset>(look),
                      static_cast<TextOffset>(std::min(tail, look)), phrase,
                      static_cast<std::uint16_t>(tokens)};
@@ -103,7 +100,7 @@ class GapReach {
     const LexNode& e = _g.lex[node];
     switch (e.kind) {
       case LexKind::token:
-        return bounds(e.b);
+        return bounds(lex_token_body(_g, e));
       case LexKind::positive:
       case LexKind::negative: {
         const auto kid = bounds(e.a);

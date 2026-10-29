@@ -10,7 +10,7 @@ struct G : Base {
   struct NOTE : terminal<some(s)> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = NOTE;
 };
 

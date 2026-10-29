@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "cursiv/core/syntax-tree/CstNode.hpp"
@@ -8,8 +9,8 @@
 // What a grammar answers about the records of its own trees, with the
 // grammar erased. A `CstNode` carries a stamp only the engine that wrote it
 // decodes; this is what decodes it, reached through the document that owns
-// the node. One implementation, `DefaultGrammar`, one metadata per compiled
-// grammar.
+// the node. Its one implementation answers from a `GrammarMetaData`, one per
+// compiled grammar.
 
 namespace cursiv {
 
@@ -45,13 +46,14 @@ struct Grammar {
   // A continuation is a token the lexer could match, so it is named by its
   // terminal and not by a row above.
 
-  // The bytes an editor would insert: a literal is spelled by the grammar and
-  // can be handed over whole. Empty for a terminal whose text is matched and
-  // not written. The id is the terminal, as the engine that generated this
+  // The bytes an editor would insert, each spelling whole: a literal is
+  // spelled by the grammar, once, and a terminal that reads a choice of words
+  // by each of them. Empty for a terminal whose text is matched and not
+  // written. The id is the terminal, as the engine that generated this
   // numbers them -- not an element row.
-  constexpr virtual std::string_view terminalText(
+  constexpr virtual std::span<const std::string_view> terminalSpellings(
       std::uint16_t) const noexcept = 0;
-  // ...and what to call it where its text cannot be guessed.
+  // ...and what to call it where it has no one spelling.
   constexpr virtual std::string_view terminalName(
       std::uint16_t) const noexcept = 0;
   // The prose an author wrote over it, for a reader that offers it or hovers

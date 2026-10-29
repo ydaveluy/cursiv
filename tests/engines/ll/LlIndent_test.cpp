@@ -12,6 +12,7 @@
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/lr/IndentAst.hpp"
 #include "indent/generated/G/Module.hpp"
 #include "indentrepaired/generated/G/Module.hpp"
 #include "indentfolded/generated/Cases/Module.hpp"
@@ -39,6 +40,13 @@ void explicit_statement_newlines_win_over_their_trivia_twin() {
     return cursiv::kInvalidSymbol;
   }();
   static_assert(mode != cursiv::kInvalidSymbol);
+  // The trivia twin is no rival: no mode reads two terminals from one text,
+  // so a choice the newline settles is a table, not a prediction.
+  static_assert([] {
+    for (std::uint16_t m = 0; m < table.nmodes; ++m)
+      if (table.modeMulti[m] != 0) return false;
+    return true;
+  }());
   {
     cursiv::Cst tree("\n  b");
     cursiv::CstBuilder builder(tree);
@@ -149,6 +157,21 @@ void dropped_dedents_split_no_token() {
   }
 }
 
+// An indent a repair drops owns no byte, as a dedent does, and invents nothing:
+// the name it falls inside is written, as it is where the next line is at the
+// same level.
+void a_dropped_indent_leaves_the_name_it_splits(const cursiv::Parser& p) {
+  for (const std::string_view text : {"dotted a.\nb\n", "dotted a.\n  b\n"}) {
+    const auto result = p.parse(text);
+    const auto* root = result.value_as<tindent::ast::Node>();
+    CHECK(result.accepted && result.diagnostics.size() == 1 && root);
+    for (const auto& d : result.diagnostics)
+      CHECK(d.kind == cursiv::DiagnosticKind::deleted &&
+            text.substr(d.begin, d.end - d.begin) == "\n");
+    if (root != nullptr) CHECK(root->name == "a.b");
+  }
+}
+
 // The end of input under a level whose indent a repair dropped closes it as
 // the blank it stood for: no dedent is read there, and none is dropped.
 void muted_levels_lay_no_dedent_at_the_end() {
@@ -205,22 +228,30 @@ void repairs_agree_with_the_table_engine(
   }
 }
 
-// An indent no block asked for is one fault, and the lines behind it are read.
+// An indent no block asked for is one fault, and the lines behind it are read,
+// a last line with no newline too.
 void a_stray_indent_costs_one_fault() {
   repairs_agree_with_the_table_engine(
       {"a:\n  b\n    c\n  d\ne\n", "  a\nb\n", "a:\n  b\n c\n", "a\n  b\nc\n",
        "    a\n  b\nc\n", "a::\n  a\nb\n", "s0::\n  0\n", "s0:s1\n",
        "s0\n s1\n", "s0\n\ts1\n", "s0\n  s1\n", "0:\n  s0\n", "s0\ns1\n s\n",
-       "\ns0\n\ts1\n"});
+       "\ns0\n\ts1\n", "a:\n  b\n    c"});
 }
 
-// A form feed in a run is an indentation error, wherever the line goes on.
+// A form feed in a run is an indentation error, wherever the line goes on --
+// to the end of the input too. Past content it is plain trivia.
 void a_form_feed_in_a_run_is_an_error() {
   const auto ll = tllindent::generated::Ll::create_parser();
   for (const std::string_view text :
-       {"a:\n  b\n\f\nc\n", "a:\n  b:\n    c\n\fd\n", "a:\n  b\n \f c\n"}) {
+       {"a:\n  b\n\f\nc\n", "a:\n  b:\n    c\n\fd\n", "a:\n  b\n \f c\n",
+        "a\n\f", "a:\n  b\n\f", "a:\n  b\n  \f", "a:\n  b:\n    c\n\f",
+        "a:\n  b\nc\n\f"}) {
     const auto result = ll->parse(text);
     CHECK(result.accepted && !result.diagnostics.empty());
+  }
+  for (const std::string_view text : {"a:\n  b\f", "a:\n  b \f\n"}) {
+    const auto result = ll->parse(text);
+    CHECK(result.accepted && result.diagnostics.empty());
   }
 }
 
@@ -278,8 +309,10 @@ std::vector<std::string> offered(const cursiv::Parser& parser,
   for (const auto& f : next) {
     const auto name = parser.getGrammar().terminalName(f.feature);
     if (!laid && (name == "INDENT" || name == "DEDENT")) continue;
-    out.push_back(std::string(name) + " " +
-                  std::string(parser.getGrammar().terminalText(f.feature)));
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    if (spellings.empty()) out.push_back(std::string(name) + " ");
+    for (const std::string_view s : spellings)
+      out.push_back(std::string(name) + " " + std::string(s));
   }
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
@@ -377,6 +410,10 @@ int main() {
   explicit_statement_newlines_win_over_their_trivia_twin();
   dropped_dedents_split_no_token();
   muted_levels_lay_no_dedent_at_the_end();
+  a_dropped_indent_leaves_the_name_it_splits(
+      *tllindent::generated::Laid::create_parser());
+  a_dropped_indent_leaves_the_name_it_splits(
+      *tindent::laid::generated::Cases::create_parser());
   an_invented_indent_opens_a_level();
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
@@ -391,7 +428,8 @@ int main() {
           "a:\n\n  b\n\nc\n", "a:\n\tb\nc\n", "a:\n  b", "a [\n  b\n  c\n]\n",
           "a \\\n b\n", "a:\n  b\n c\n", "a:\n\tb\n c\n", "a\n\n", "a\n  ",
           "a\n#tail\n", "a:\n  b\n\n", "a:\n  b\n  #tail\n", "a:\n  b\n\f\nc\n",
-          "a:\n  b:\n    c\n\fd\n", "a:\n  b\n \f c\n", suites});
+          "a:\n  b:\n    c\n\fd\n", "a:\n  b\n \f c\n", "a:\n  b\n\f",
+          "a:\n  b:\n    c\n  \f", "a\n\f", suites});
   parity(*tllindent::generated::Folded::create_parser(),
          *tindent::folded::generated::Cases::create_parser(),
          *tllindent::generated::Folded::create_ast_reflection(),

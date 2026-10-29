@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "ConformanceTest.hpp"
 #include "conformancell/generated/Ll/Module.hpp"
@@ -12,6 +13,7 @@
 #include "cursiv/core/syntax-tree/AstBuildError.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/ConformanceGrammars.hpp"
 #include "engines/shared/SectionPredicateGrammar.hpp"
 #include "sectionpredicatell/generated/Ll/Module.hpp"
@@ -127,6 +129,12 @@ void run() {
   same(lastLl, inLastLl, words);
   same(lastLr, inLastLr, words);
   CHECK(alone(lastLl, words) == alone(lastLr, words));
+  // A predicate of the last word that reads to the caret is answered by what
+  // is typed there: behind `x ` the word is the last one on the document's
+  // text, and a word typed after it makes `x` an item before the last.
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()})
+    CHECK((caret_offers::offered(*parser, "x ", 2) ==
+           std::vector<std::string>{"ID"}));
 }
 
 }  // namespace section_predicate_cases

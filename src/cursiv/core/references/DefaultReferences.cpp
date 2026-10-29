@@ -192,14 +192,17 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
     const CoreServices* const language = language_of(*home, registry);
     const NameProvider* const names =
         language == nullptr ? nullptr : language->nameProvider.get();
-    if (const CstNodeView site = declaration_site(*member, *home, names))
-      rows.push_back({.sourceDocumentId = home->id,
-                      .sourceBegin = site.begin(),
-                      .sourceEnd = site.end(),
-                      .targetDocumentId = home->id,
-                      .targetSymbolId = member->cstNodeId,
-                      .local = true,
-                      .multiReference = false});
+    const CstNodeView site = declaration_site(*member, *home, names);
+    if (!site) continue;
+    const ReferenceDescription row{.sourceDocumentId = home->id,
+                                   .sourceBegin = site.begin(),
+                                   .sourceEnd = site.end(),
+                                   .targetDocumentId = home->id,
+                                   .targetSymbolId = member->cstNodeId,
+                                   .local = true,
+                                   .multiReference = false};
+    // Two members built on one CST record are declared by one site.
+    if (std::ranges::find(rows, row) == rows.end()) rows.push_back(row);
   }
   return rows;
 }

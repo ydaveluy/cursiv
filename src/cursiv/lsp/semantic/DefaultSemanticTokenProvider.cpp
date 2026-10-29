@@ -173,7 +173,7 @@ lsp::SemanticTokens DefaultSemanticTokenProvider::highlight(
     throw_if_cancelled(token);
     if (leaf.end <= leaf.begin) return;
     // `hidden` means comment: the grammar's `hidden` list is recorded, its
-    // `ignore` list is not, so whitespace never appears here to be mistaken
+    // `ignored` list is not, so whitespace never appears here to be mistaken
     // for one.
     if (leaf.hidden) {
       tokens.push_back(

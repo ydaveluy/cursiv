@@ -11,7 +11,7 @@ struct G : Base {
   struct PAIR : terminal<ref<ID> + lit<":"> + ref<Pair>> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<PAIR>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

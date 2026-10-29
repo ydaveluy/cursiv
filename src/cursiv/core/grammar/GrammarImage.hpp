@@ -72,7 +72,7 @@ enum class ImageRuleKind : std::uint8_t {
   infix,
   grammar
 };
-enum class ImageGroup : std::uint8_t { left, right, non };
+enum class ImageGroup : std::uint8_t { left, right, non, prefix, postfix };
 
 struct ImageRuleDesc;
 struct ImageStageDesc;
@@ -105,6 +105,9 @@ struct ImageDesc {
 struct ImageLevelDesc {
   ImageGroup group = ImageGroup::left;
   const ImageDesc* op = nullptr;
+  // A unary level's own class and members, operator then operand.
+  std::string_view node{};
+  std::string_view members[2]{};
 };
 
 struct ImageFaceDesc {
@@ -142,6 +145,8 @@ struct ImageStageDesc {
   const ImageDesc* body = nullptr;
   // The rule stands for a loop folded from its head.
   bool folded = false;
+  // The rule is never called: its body is read where it is named.
+  bool inPlace = false;
   const void* convertRow = nullptr;
   const void* closeRow = nullptr;
   const ImageRuleDesc* primary = nullptr;
@@ -196,6 +201,8 @@ struct ImageNode {
 struct ImageLevel {
   ImageGroup group = ImageGroup::left;
   ImageId op = kNoImage;
+  std::string_view node{};
+  std::string_view members[2]{};
 };
 
 struct ImageFace {
@@ -234,6 +241,9 @@ struct ImageClass {
   bool known = false;
 };
 
+// An image fills itself as it is read: `ready` lays a rule's faces on first
+// use, and a reader may intern or derive more. It belongs to one reader at a
+// time and is never shared between threads.
 struct GrammarImage {
   std::vector<ImageNode> nodes;
   std::vector<ImageId> kids;

@@ -45,7 +45,7 @@ class LexReifier {
                std::uint64_t m = 0, std::uint64_t n = 0,
                std::string_view text = {});
   ImageId make_not(ImageId kid);
-  ImageId make_class(const ImageClassDesc& cls, bool complement);
+  ImageId make_class(const ImageClassDesc& cls);
 
   std::uint16_t push(LexNode node);
   std::uint16_t push_kid(std::uint16_t kid);
@@ -84,10 +84,8 @@ class LexReifier {
   ImageId kid(const ImageNode& n, std::uint32_t i) const {
     return _im.kids[n.first + i];
   }
-  std::vector<ImageId> kids_of(const ImageNode& n) const;
   ImageId rebuilt(ImageId id, const std::vector<ImageId>& kids);
   ImageId lit_with(const ImageNode& lit, ImageId guard);
-  bool terminal_rule(std::uint32_t rule) const;
 
   ImageId resolve_in(unsigned cfg, ImageId id, Path& path);
   ImageId resolve_rule(unsigned cfg, std::uint32_t rule, Path& path);

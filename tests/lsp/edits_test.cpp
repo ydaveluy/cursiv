@@ -39,7 +39,6 @@
 #include "cursiv/test/ExpectFormatting.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "cursiv/test/ParseHelper.hpp"
-#include "workspace/core/WorkspaceGrammar.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
@@ -726,9 +725,10 @@ struct LeadingSpaceFormatter final : ws::WorkspaceFormatter {
 
 template <class W>
 [[nodiscard]] std::vector<lsp::TextEdit> format(
-    const W& world, const cursiv::Document& document) {
+    const W& world, const cursiv::Document& document,
+    const lsp::FormattingOptions& chosen = options()) {
   lsp::DocumentFormattingParams params;
-  params.options = options();
+  params.options = chosen;
   return world.formatter().formatDocument(document, params, cursiv::kNoCancel);
 }
 
@@ -834,19 +834,23 @@ void indentation_counts_do_not_wrap() {
   CHECK(rejected);
 }
 
-// A selection format may not move text the author did not select. The filter
-// is an overlap on lines, so the gap that closes the last selected line is
-// kept -- what no edit may do is begin past the selection.
-void a_range_format_stays_inside_its_range() {
+// A selection format keeps the edits whose lines overlap the selected lines.
+// The gap that closes the last selected line is kept whole, even where it
+// reaches the next line; what no edit may do is begin on a line past the
+// selection.
+void a_range_format_keeps_the_edits_on_its_lines() {
   World world;
   const cursiv::Document* const messy = world.built(std::string(kMessy));
   const lsp::Range head{{0, 0}, {0, 16}};
   const std::vector<lsp::TextEdit> ranged = formatRange(world, *messy, head);
   CHECK(!ranged.empty());
+  bool pastTheEnd = false;
   for (const lsp::TextEdit& edit : ranged) {
     CHECK(edit.range.start.line >= head.start.line);
     CHECK(edit.range.start.line <= head.end.line);
+    pastTheEnd = pastTheEnd || edit.range.end.line > head.end.line;
   }
+  CHECK(pastTheEnd);
   CHECK(ranged.size() < format(world, *messy).size());
 }
 
@@ -1011,6 +1015,74 @@ void comment_margins_follow_all_text_document_line_breaks() {
   }
 }
 
+// A comment's margin is measured in the unit the options ask for, and what is
+// taken off it is taken in that unit: at a tab size of two, "\t " is three
+// columns, and the one column too many is not the whole tab.
+void a_mixed_comment_margin_is_shaped_in_one_pass() {
+  World world;
+  constexpr std::string_view kCommented =
+      "entity A {\n"
+      "  /* one */\n"
+      "  name: String\n"
+      "}\n";
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity A {\n"
+                                        "\t /* one */\n"
+                                        "name:String\n"
+                                        "}\n",
+                              .after = std::string(kCommented),
+                              .options = options(),
+                              .disposeAfterCheck = true});
+
+  const cursiv::Document* const formatted =
+      world.built(std::string(kCommented));
+  CHECK(format(world, *formatted).empty());
+}
+
+// A block comment moves as a block over a mixed margin too: every later line
+// loses the columns the first one loses, so the inner `*` stays under the
+// opening one.
+void a_block_comment_keeps_its_alignment_over_a_mixed_margin() {
+  World world;
+  const cursiv::Document& document = *world.built(
+      "datatype String\n\t /* c\n\t  * d\n\t  */\nentity Person {}\n");
+  const auto& cst = document.parseResult.cst();
+  cursiv::FormattingActions actions(cst.size());
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
+    if (cst.childless(id) && cst.text(id) == "String") {
+      actions.collect(id, cursiv::FormattingMode::Append,
+                      cursiv::IndentActionBuilder{}());
+      break;
+    }
+  }
+  const auto edits = cursiv::run_formatting(
+      document, cst, options(), std::nullopt, actions,
+      [](cursiv::NodeId, std::int32_t, std::string_view) {}, cursiv::kNoCancel);
+  CHECK(applied(document, edits) ==
+        "datatype String\n  /* c\n   * d\n   */\nentity Person {}\n");
+}
+
+// The fixed point over margins mixing tabs and spaces, in both units: one pass
+// gives a comment its margin, and a second pass finds nothing to do.
+void mixed_comment_margins_reach_their_shape_in_one_pass() {
+  lsp::FormattingOptions tabs;
+  tabs.tabSize = 4;
+  tabs.insertSpaces = false;
+  World world;
+  for (const lsp::FormattingOptions& chosen : {options(), tabs})
+    for (const std::string_view comment : {"/* one */", "// one"})
+      for (const std::string_view margin :
+           {"\t ", "\t\t", "    \t", "        ", "     "}) {
+        const cursiv::Document* const source =
+            world.built("entity A {\n" + std::string(margin) +
+                        std::string(comment) + "\nname:String\n}\n");
+        CHECK(!source->parseRecovered());
+        const cursiv::Document* const once =
+            world.built(applied(*source, format(world, *source, chosen)));
+        CHECK(format(world, *once, chosen).empty());
+      }
+}
+
 // An `append` targets the next node, a whole construction when one follows,
 // and a level it carries stays in force until that construction's parent
 // closes: `{`.append(indent) lands the first feature and the closing brace
@@ -1049,24 +1121,39 @@ void a_property_index_clamps_to_the_last_occurrence() {
                               .disposeAfterCheck = true});
 }
 
-// A keystroke formats the caret's line up to the caret and nothing past it.
-// The base advertises no trigger character, so no client sends the request
-// until a language names one.
+// A keystroke formats the caret's line, whole. The range runs from the start
+// of the line to the caret, but edits are kept by line, as for a selection:
+// text past the caret is formatted too, and so is a gap that crosses into the
+// line. The base advertises no trigger character, so no client sends the
+// request until a language names one.
 void a_format_on_type_stays_on_the_carets_line() {
   World world;
   CHECK(!world.formatter().formatOnTypeOptions().has_value());
   const cursiv::Document* const messy = world.built(std::string(kMessy));
   lsp::DocumentOnTypeFormattingParams params;
   params.options = options();
-  params.position = {1, 14};
-  params.ch = "g";
+  params.position = {1, 2};
+  params.ch = "m";
   const std::vector<lsp::TextEdit> typed =
       world.formatter().formatDocumentOnType(*messy, params, cursiv::kNoCancel);
   CHECK(!typed.empty());
+  bool pastTheCaret = false;
+  bool intoTheLine = false;
   for (const lsp::TextEdit& edit : typed) {
     CHECK(edit.range.start.line <= 1);
     CHECK(edit.range.end.line >= 1);
+    pastTheCaret = pastTheCaret || (edit.range.start.line == 1 &&
+                                    edit.range.start.character > 2);
+    intoTheLine = intoTheLine || edit.range.start.line < 1;
   }
+  CHECK(pastTheCaret);
+  CHECK(intoTheLine);
+  // The columns of a range do not narrow it: the caret's range and the whole
+  // line answer the same edits.
+  const std::string whole =
+      applied(*messy, formatRange(world, *messy, {{1, 0}, {1, 14}}));
+  CHECK(applied(*messy, typed) == whole);
+  CHECK(applied(*messy, formatRange(world, *messy, {{1, 0}, {1, 2}})) == whole);
   CHECK(typed.size() < format(world, *messy).size());
 
   install<OnTypeFormatter>(world);
@@ -1164,7 +1251,7 @@ void run() {
   a_document_already_in_shape_answers_no_edit();
   a_rule_can_shape_the_gap_before_the_first_token();
   indentation_counts_do_not_wrap();
-  a_range_format_stays_inside_its_range();
+  a_range_format_keeps_the_edits_on_its_lines();
   a_format_on_type_stays_on_the_carets_line();
   a_document_with_a_parse_error_is_not_formatted();
   a_conversion_error_does_not_withhold_formatting();
@@ -1175,6 +1262,9 @@ void run() {
   an_append_shapes_the_margin_of_the_comment_after_it();
   a_hidden_callback_can_add_rules_after_a_deferred_append();
   comment_margins_follow_all_text_document_line_breaks();
+  a_mixed_comment_margin_is_shaped_in_one_pass();
+  a_block_comment_keeps_its_alignment_over_a_mixed_margin();
+  mixed_comment_margins_reach_their_shape_in_one_pass();
   an_append_level_stays_while_its_target_is_a_construction();
   a_property_index_clamps_to_the_last_occurrence();
   a_multiline_comment_is_reindented();

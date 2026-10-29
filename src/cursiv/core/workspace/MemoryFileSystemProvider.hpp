@@ -15,16 +15,18 @@
 // spelling of `std::filesystem`, and it goes through one manager, one scan and
 // one build like the disk does.
 //
-// The URIs are whatever the caller puts in, of any scheme, and `readDirectory`
-// treats the folder as a plain prefix -- the whole of what a hierarchy is here.
-// Not synchronized: one thread at a time touches a given instance.
+// The URIs are of any scheme, kept as `normalize_uri` spells them and looked up
+// the same way, and `readDirectory` treats the folder as a plain prefix -- the
+// whole of what a hierarchy is here. Not synchronized: one thread at a time
+// touches a given instance.
 
 namespace cursiv {
 
 class MemoryFileSystemProvider final : public FileSystemProvider {
  public:
-  // Adds or replaces one file. The URI is the key the store will use.
-  void addFile(std::string uri, std::string text);
+  // Adds or replaces one file, under `normalize_uri(uri)`: the spelling the
+  // workspace keys its documents by, whatever case the scheme came in.
+  void addFile(std::string_view uri, std::string text);
 
   [[nodiscard]] FileSystemNode stat(std::string_view uri) const override;
   [[nodiscard]] bool exists(std::string_view uri) const override;

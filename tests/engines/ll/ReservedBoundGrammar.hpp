@@ -4,32 +4,16 @@
 #pragma once
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/ReservedBoundAst.hpp"
 
 namespace tllbound {
-struct Item : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-};
-struct Flag : cursiv::Extends<cursiv::AstNode> {
-  bool value = false;
-};
-struct Mark : cursiv::Extends<cursiv::AstNode> {
-  string_view one;
-  string_view two;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Item*> items;
-  vector<Flag*> flags;
-  vector<Mark*> marks;
-};
-
 // The boolean's frontier is the word boundary, which holds a byte the name
 // never reads.
 struct Ascii : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   static constexpr auto Chars = cr<"a-zA-Z_"> + many(cr<"a-zA-Z0-9_">);
   struct NAME : terminal<!(kw<"true"> | kw<"false">) + Chars> {};
-  struct BOOL : terminal<kw<"true"> | kw<"false">, bool> {};
+  struct BOOL : terminal<as<bool>(kw<"true"> | kw<"false">)> {};
   struct Name
       : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
   struct Lit
@@ -37,7 +21,7 @@ struct Ascii : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
                                       append<&Doc::flags>(ref<Lit>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
 };
 
@@ -53,7 +37,7 @@ struct Wide : cursiv::GrammarSpec {
   static constexpr auto Chars =
       (uc::L | cr<"_">) + many(uc::L | uc::Nd | cr<"_">);
   struct NAME : terminal<!(kw<"true"> | kw<"false">) + Chars> {};
-  struct BOOL : terminal<kw<"true"> | kw<"false">, bool> {};
+  struct BOOL : terminal<as<bool>(kw<"true"> | kw<"false">)> {};
   struct Name
       : rule<create<Item>(assign<&Item::name>(ref<NAME>) + lit<";">)> {};
   struct Lit
@@ -61,7 +45,7 @@ struct Wide : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
                                       append<&Doc::flags>(ref<Lit>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto word_boundary = cr<R"(a-zA-Z0-9_\u{80}-\u{10FFFF})">;
 };
 
@@ -88,7 +72,7 @@ struct Frontier : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Name>) |
                                       append<&Doc::marks>(ref<Marked>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto word_boundary = cr<"a-zA-Z0-9_$">;
 };
 

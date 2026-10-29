@@ -27,7 +27,7 @@ struct G : Base {
                  append<&ast::Type::body>(ref<Type>) + lit<"[]">) |
              create<ast::Type>(assign<&ast::Type::name>(ref<ID>))> {};
   using entry = Type;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

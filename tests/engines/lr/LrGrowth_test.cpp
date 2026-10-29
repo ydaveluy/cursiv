@@ -159,7 +159,7 @@ namespace fasta = tgfasta::generated;
 
 void a_run_inside_a_run_never_forks() {
   const std::string text = ">h\n" + repeat("ACGT\n", 30000);
-  const Read r = read<fasta::Lr::kTable>(text, fasta::Lr::kDrivePtr);
+  const Read r = read<fasta::Lr::kTable>(text, &fasta::Lr::kDrive);
   CHECK(r.clean && r.stats.splits == 0);
 
   auto lr = fasta::Lr::create_parser();
@@ -178,16 +178,16 @@ void an_optional_close_after_content_costs_a_power() {
   const auto nested = [](unsigned n) {
     return repeat("<a>", n) + repeat("</a>", n);
   };
-  const Read a = read<html::G::kTable>("html " + nested(16), html::G::kDrivePtr);
-  const Read b = read<html::G::kTable>("html " + nested(32), html::G::kDrivePtr);
+  const Read a = read<html::G::kTable>("html " + nested(16), &html::G::kDrive);
+  const Read b = read<html::G::kTable>("html " + nested(32), &html::G::kDrive);
   grows_by_at_most(a, b, kCubic);
   is_decided_by_the_text(b);
 
   const auto voids = [](unsigned n) {
     return "<div>" + repeat("<p><br>X</p>", n) + "</div>";
   };
-  const Read c = read<html::G::kTable>("html " + voids(15), html::G::kDrivePtr);
-  const Read d = read<html::G::kTable>("html " + voids(30), html::G::kDrivePtr);
+  const Read c = read<html::G::kTable>("html " + voids(15), &html::G::kDrive);
+  const Read d = read<html::G::kTable>("html " + voids(30), &html::G::kDrive);
   grows_by_at_most(c, d, kCubic);
   is_decided_by_the_text(d);
 
@@ -213,9 +213,9 @@ namespace call = tgrowth::generated;
 
 void an_undelimited_argument_list_costs_a_power() {
   const auto names = [](unsigned n) { return "f " + repeat("a ", n) + "!"; };
-  const Read a = read<call::G::kTable>("call " + names(40), call::G::kDrivePtr);
-  const Read b = read<call::G::kTable>("call " + names(80), call::G::kDrivePtr);
-  const Read c = read<call::G::kTable>("call " + names(160), call::G::kDrivePtr);
+  const Read a = read<call::G::kTable>("call " + names(40), &call::G::kDrive);
+  const Read b = read<call::G::kTable>("call " + names(80), &call::G::kDrive);
+  const Read c = read<call::G::kTable>("call " + names(160), &call::G::kDrive);
   grows_by_at_most(a, b, kQuadratic);
   grows_by_at_most(b, c, kQuadratic);
   is_decided_by_the_text(c);
@@ -236,9 +236,9 @@ namespace chain = tgrowth::generated;
 
 void a_chain_written_twice_costs_its_length() {
   const auto dots = [](unsigned n) { return "a" + repeat(".b", n); };
-  const Read a = read<chain::G::kTable>("chain " + dots(256), chain::G::kDrivePtr);
-  const Read b = read<chain::G::kTable>("chain " + dots(512), chain::G::kDrivePtr);
-  const Read c = read<chain::G::kTable>("chain " + dots(1024), chain::G::kDrivePtr);
+  const Read a = read<chain::G::kTable>("chain " + dots(256), &chain::G::kDrive);
+  const Read b = read<chain::G::kTable>("chain " + dots(512), &chain::G::kDrive);
+  const Read c = read<chain::G::kTable>("chain " + dots(1024), &chain::G::kDrive);
   grows_by_at_most(a, b, kLinear);
   grows_by_at_most(b, c, kLinear);
   // Each suffix is the operand's or the loop's, and nothing in the words says
@@ -297,13 +297,13 @@ void an_alternative_costs_the_same_however_long_the_text() {
   const auto dots = [](unsigned n) { return "chain a" + repeat(".b", n); };
   const auto lines = [](unsigned n) { return ">h\n" + repeat("ACGT\n", n); };
   cost_stays_flat(
-      series<html::G::kTable>(counters, html::G::kDrivePtr, nested, 64));
+      series<html::G::kTable>(counters, &html::G::kDrive, nested, 64));
   cost_stays_flat(
-      series<call::G::kTable>(counters, call::G::kDrivePtr, names, 200));
+      series<call::G::kTable>(counters, &call::G::kDrive, names, 200));
   cost_stays_flat(
-      series<chain::G::kTable>(counters, chain::G::kDrivePtr, dots, 1024));
+      series<chain::G::kTable>(counters, &chain::G::kDrive, dots, 1024));
   cost_stays_flat(
-      series<fasta::Lr::kTable>(counters, fasta::Lr::kDrivePtr, lines, 1000));
+      series<fasta::Lr::kTable>(counters, &fasta::Lr::kDrive, lines, 1000));
 }
 
 int main() {

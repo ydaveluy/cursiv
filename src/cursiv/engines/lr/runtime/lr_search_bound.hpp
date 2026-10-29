@@ -159,13 +159,15 @@ const LexReading& lr_search_reading(const LrContext& c, LrSearch& s,
 }
 
 // The token at `from` under `mode`, its walks paid for; `cut` where the end
-// they were given cut them.
+// they were given cut them. Its tokens are shared by position, whatever
+// reading asks: they are read under the context's bracket depth.
 template <const auto& A>
 Token lr_search_scan(const LrContext& c, LrSearch& s, std::uint16_t mode,
                      TextOffset from, bool& cut, bool* refused = nullptr) {
   const TextOffset end = lr_search_walk_end(c, s, from);
   TextOffset reached = from;
-  const Token t = lr_scan_at<A, true>(c, mode, from, refused, end, &reached);
+  const Token t = lr_scan_at<A, true>(c, mode, from, c.indent.depth, refused,
+                                      end, &reached);
   cut = lr_search_walked(c, s, from, end, reached);
   return t;
 }
@@ -296,7 +298,7 @@ const std::vector<Typo>& lr_search_misread(const LrContext& c, LrSearch& s,
       auto want = A.derived.modeWant[m];
       if (want.none()) continue;
       typo_each(
-          LrTypoTape<A>{c.src, horizon, c.len, &want, &stops, &read, &cut},
+          LrTypoTape<A>{{c.src, horizon, c.len, &read, &cut}, &want, &stops},
           A.modeStart[m], at, plain, [&out](const Typo& t) {
             for (const Typo& o : out)
               if (o.term == t.term && o.end == t.end) return;
@@ -419,7 +421,7 @@ std::uint32_t lr_search_weigh(LrContext& c, LrSearch& s, const LrConfig& b,
       lr_search_reading<A>(c, s, mode, b.la.begin).term != kInvalidSymbol)
     return kLrOwedReread;
   std::uint32_t best = kLrNoBound;
-  if (b.phase <= 2) {
+  if (b.mayReplace()) {
     // Its first gesture is not weighed: it may leave any token acceptable. It
     // reads no text: the re-readings of the token in hand are weighed apart.
     const std::uint32_t gap = free ? 0 : kLrOwedGesture;
@@ -469,7 +471,7 @@ std::uint32_t lr_search_weigh(LrContext& c, LrSearch& s, const LrConfig& b,
   }
   // Read as another in its own state.
   const bool laid = b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].laid != 0;
-  if (b.phase <= 2 && !laid && best > kLrOwedReread) {
+  if (b.mayReplace() && !laid && best > kLrOwedReread) {
     for (const Typo& y : lr_search_typos<A>(c, s, state, b.la.begin))
       if (best > kLrOwedReread)
         best = std::min(

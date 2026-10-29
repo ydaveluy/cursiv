@@ -354,7 +354,7 @@ std::string RgramGrammar::header() const {
     out += "  struct Top : rule<create<ast::Doc>(ref<R0>)> {};\n"
            "  using entry = Top;\n";
   }
-  out += "  using ignore = WS;\n};\n}  // namespace " + ns + "\n";
+  out += "  using ignored = WS;\n};\n}  // namespace " + ns + "\n";
   return out;
 }
 

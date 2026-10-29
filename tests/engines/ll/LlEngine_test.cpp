@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,7 +64,7 @@ struct Node : cursiv::Extends<cursiv::AstNode> {
 };
 thread_local cursiv::CancellationTokenSource* stop = nullptr;
 thread_local unsigned conversions = 0;
-using Converter = cursiv::text_conv<[](std::string_view text) {
+using Converter = cursiv::detail::text_conv<[](std::string_view text) {
   ++conversions;
   if (stop != nullptr) stop->request_stop();
   return text;
@@ -206,11 +207,11 @@ void ast_with_spans(const cursiv::AstReflection& reflection,
 // Call(ID '(' ... ')') and Name(ID) deliberately share a scalar prefix.
 // Unlike an owning node prefix, this choice cannot become an optional Nest;
 // tests of the prediction cache therefore meet the decision before that ID.
-constexpr std::uint16_t name_or_call_decision() {
-  constexpr const auto& table = tpar::generated::Ll::kTable;
-  for (std::uint16_t i = 0; i < table.ndecisions; ++i)
-    if (table.rule_name(table.decisions[i].rule) == "Primary" &&
-        !table.decisions[i].repeat)
+std::uint16_t name_or_call_decision() {
+  const cursiv::LlLowCfg& cfg = cursiv::LlLowering<tpar::Ll>::table().cfg;
+  for (std::uint16_t i = 0; i < cfg.ndecisions; ++i)
+    if (cfg.rule_name(cfg.decisions[i].rule) == "Primary" &&
+        !cfg.repeats(cfg.decisions[i]))
       return i;
   return cursiv::kNoRow;
 }
@@ -232,8 +233,7 @@ struct PredictionAt {
     context.laValid = false;
     context.laMode = cursiv::kInvalidSymbol;
     cursiv::ll_peek<table>(context, table.decisions[decision].mode);
-    return cursiv::ll_episode<table>(context, decision,
-                                     table.decisions[decision]);
+    return cursiv::ll_episode<table>(context, decision);
   }
 
   std::string_view text;
@@ -248,8 +248,9 @@ struct PredictionAt {
 // a place of it.
 void predictions_keep_the_end_they_depended_on() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
-  constexpr auto decision = name_or_call_decision();
-  static_assert(decision != cursiv::kNoRow);
+  const auto decision = name_or_call_decision();
+  CHECK(decision != cursiv::kNoRow);
+  if (decision == cursiv::kNoRow) return;
   cursiv::LlPredictionSession<table> session;
   PredictionAt<table> at("name;name();name", decision);
   const auto name = at(0);
@@ -371,6 +372,400 @@ void a_pool_gives_back_what_a_walk_made() {
     CHECK(walk(round) == made);
     pool.end_scratch();
   }
+}
+
+// Alias calls may join a cell opened before their own caller. Creation order
+// must not make two different continuation sets indistinguishable.
+void call_cells_are_sealed_after_their_actual_dependencies() {
+  using namespace cursiv;
+
+  // Root = A | B; A = Z | R b | R c; B = Z | S d | S e;
+  // Z = Q a; R = Q; S = Q; Q = x. The shared Z continuation is state 5.
+  LlAtnState s[21]{};
+  for (auto& state : s) state.rule = 0;
+  s[8].kind = LlAtnKind::ruleStop;
+  s[10].rule = s[11].rule = 1;
+  s[11].kind = LlAtnKind::ruleStop;
+  s[12].rule = s[13].rule = 2;
+  s[13].kind = LlAtnKind::ruleStop;
+  s[19].rule = s[20].rule = 3;
+  s[20].kind = LlAtnKind::ruleStop;
+  const LlAtnEdge e[] = {
+      {.kind = LlEdgeKind::epsilon, .target = 1},
+      {.kind = LlEdgeKind::epsilon, .target = 14},
+      {.kind = LlEdgeKind::epsilon, .target = 2},
+      {.kind = LlEdgeKind::epsilon, .target = 3},
+      {.kind = LlEdgeKind::epsilon, .target = 4},
+      {.kind = LlEdgeKind::rule, .label = 1, .target = 10, .follow = 5},
+      {.kind = LlEdgeKind::rule, .label = 2, .target = 12, .follow = 6},
+      {.kind = LlEdgeKind::rule, .label = 2, .target = 12, .follow = 7},
+      {.kind = LlEdgeKind::atom, .label = 2, .target = 8},
+      {.kind = LlEdgeKind::atom, .label = 3, .target = 8},
+      {.kind = LlEdgeKind::atom, .label = 4, .target = 8},
+      {.kind = LlEdgeKind::atom, .label = 5, .target = 8},
+      {.kind = LlEdgeKind::atom, .label = 1, .target = 11},
+      {.kind = LlEdgeKind::rule, .label = 1, .target = 10, .follow = 13},
+      {.kind = LlEdgeKind::epsilon, .target = 2},
+      {.kind = LlEdgeKind::epsilon, .target = 15},
+      {.kind = LlEdgeKind::epsilon, .target = 16},
+      {.kind = LlEdgeKind::rule, .label = 3, .target = 19, .follow = 17},
+      {.kind = LlEdgeKind::rule, .label = 3, .target = 19, .follow = 18},
+      {.kind = LlEdgeKind::atom, .label = 6, .target = 8},
+      {.kind = LlEdgeKind::atom, .label = 7, .target = 8},
+      {.kind = LlEdgeKind::rule, .label = 1, .target = 10, .follow = 20}};
+  s[0].edge = 0;
+  s[0].nedges = 2;
+  s[0].decision = 0;
+  s[1].edge = 2;
+  s[1].nedges = 3;
+  s[1].decision = 1;
+  for (unsigned i = 2; i < 8; ++i) {
+    s[i].edge = i + 3;
+    s[i].nedges = 1;
+  }
+  s[9].edge = 11;
+  s[9].nedges = 1;
+  s[10].edge = 12;
+  s[10].nedges = 1;
+  s[12].edge = 13;
+  s[12].nedges = 1;
+  s[14].edge = 14;
+  s[14].nedges = 3;
+  s[14].decision = 2;
+  for (unsigned i = 15; i <= 19; ++i) {
+    s[i].edge = i + 2;
+    s[i].nedges = 1;
+  }
+  const unsigned starts[] = {0, 10, 12, 19}, callBase[] = {0, 0, 3, 5, 7},
+                 calls[] = {5, 13, 20, 6, 7, 17, 18};
+  unsigned classes[21];
+  for (unsigned i = 0; i < 21; ++i) classes[i] = i;
+  classes[13] |= kLlTailReturn;
+  classes[20] |= kLlTailReturn;
+  const LlAtnView atn{.states = s,
+                      .nstates = 21,
+                      .edges = e,
+                      .ruleStart = starts,
+                      .callerBase = callBase,
+                      .callerAt = calls,
+                      .returnClass = classes};
+  LlReturnPool pool;
+  pool.read_returns_by_class(classes);
+  LlEpisodeSim sim(atn, pool, false);
+  const std::uint8_t shared[] = {0, 1, 1, 1};
+  sim.share_calls(shared);
+  for (unsigned round = 0; round < 2; ++round) {
+    sim.reset();
+    std::vector<LlThread> threads;
+    sim.seed(0, kLlCtxNone, threads);
+    CHECK(threads.size() == 2);
+    if (threads.size() != 2) return;
+    CHECK(sim.stacks().canon(threads[0].stack) !=
+          sim.stacks().canon(threads[1].stack));
+    CHECK(!ll_stuck_apart(sim, threads));
+    for (const auto term : {std::uint16_t{1}, std::uint16_t{6}}) {
+      std::vector<LlThread> origins, next;
+      for (const auto& t : threads)
+        sim.advance(t, &term, 1, 0, LlEpisodeSim::kStart, origins);
+      sim.close(origins, next);
+      threads.swap(next);
+    }
+    CHECK(!threads.empty());
+    for (const auto& t : threads) {
+      CHECK(t.root == 1);
+    }
+  }
+}
+
+// Only two frontier threads remain over this deep shared graph. Asking for
+// its first path or common prefix must not use one native frame per cell.
+void deep_cell_paths_keep_their_order_and_stop_at_the_first_refusal() {
+  using namespace cursiv;
+  // R_i = R_(i+1) | (R_(i+1) 'c'); R_N = 'x'.
+  for (const unsigned n : {12u, 10000u}) {
+    std::vector<LlAtnState> states(5 * (n + 1));
+    std::vector<LlAtnEdge> edges;
+    std::vector<unsigned> starts(n + 1), classes(states.size());
+    for (unsigned i = 0; i < states.size(); ++i) classes[i] = i;
+    for (unsigned r = 0; r <= n; ++r) {
+      unsigned s = 5 * r;
+      starts[r] = s;
+      for (unsigned j = 0; j < 5; ++j)
+        states[s + j].rule = static_cast<std::uint16_t>(r);
+      states[s + 4].kind = LlAtnKind::ruleStop;
+      classes[s + 4] |= kLlTailReturn;
+      if (r == n) {
+        states[s].edge = edges.size();
+        states[s].nedges = 1;
+        edges.push_back(
+            {.kind = LlEdgeKind::atom, .label = 1, .target = s + 4});
+        continue;
+      }
+      states[s].edge = edges.size();
+      states[s].nedges = 2;
+      states[s].decision = static_cast<std::uint16_t>(r);
+      edges.push_back({.kind = LlEdgeKind::epsilon, .target = s + 1});
+      edges.push_back({.kind = LlEdgeKind::epsilon, .target = s + 2});
+      states[s + 1].edge = edges.size();
+      states[s + 1].nedges = 1;
+      edges.push_back({.kind = LlEdgeKind::rule,
+                       .label = static_cast<std::uint16_t>(r + 1),
+                       .target = s + 5,
+                       .follow = s + 4});
+      states[s + 2].edge = edges.size();
+      states[s + 2].nedges = 1;
+      edges.push_back({.kind = LlEdgeKind::rule,
+                       .label = static_cast<std::uint16_t>(r + 1),
+                       .target = s + 5,
+                       .follow = s + 3});
+      states[s + 3].edge = edges.size();
+      states[s + 3].nedges = 1;
+      edges.push_back({.kind = LlEdgeKind::atom, .label = 2, .target = s + 4});
+    }
+    const LlAtnView atn{.states = states.data(),
+                        .nstates = static_cast<std::uint32_t>(states.size()),
+                        .edges = edges.data(),
+                        .ruleStart = starts.data(),
+                        .returnClass = classes.data()};
+    LlReturnPool pool;
+    pool.read_returns_by_class(classes.data());
+    LlEpisodeSim sim(atn, pool, false);
+    std::vector<std::uint8_t> shared(n + 1, 1);
+    shared[0] = 0;
+    sim.share_calls(shared.data());
+    std::vector<LlThread> threads;
+    sim.seed(0, kLlCtxNone, threads);
+
+    CHECK(threads.size() == 2);
+    for (const auto& thread : threads) {
+      CHECK(sim.standing(thread.stack) == 2);
+      unsigned visited = 0;
+      LlHistory::Node first = LlHistory::kRoot;
+      const bool complete =
+          sim.each_arm(thread.stack, thread.arm, [&](auto arm) {
+            ++visited;
+            first = arm;
+            return false;
+          });
+      CHECK(!complete && visited == 1 && first == thread.arm);
+      if (n == 12) {
+        unsigned paths = 0;
+        CHECK(sim.each_arm(thread.stack, thread.arm, [&](auto) {
+          ++paths;
+          return true;
+        }));
+        CHECK(paths == (1u << (n - 1)));
+      }
+      LlHistory::Node common = LlHistory::kRoot;
+      bool met = false;
+      CHECK(sim.meet_arms(thread.stack, thread.arm, common, met, 0));
+      CHECK(met && sim.arms().depth(common) == 1);
+      if (sim.arms().depth(common) == 1)
+        CHECK(sim.arms().event(common, 0).word == thread.root);
+    }
+  }
+}
+
+struct CountedContextKey {
+  std::uint64_t value;
+  static inline std::uint64_t comparisons = 0;
+  bool operator==(const CountedContextKey& other) const {
+    ++comparisons;
+    return value == other.value;
+  }
+};
+struct CountedContextHash {
+  auto operator()(const CountedContextKey& key) const {
+    return cursiv::LlKeyHash{}(key.value);
+  }
+};
+
+void context_keys_keep_both_halves_on_every_platform() {
+  constexpr unsigned count = 8192;
+  cursiv::LlStamped<CountedContextKey, CountedContextHash> keys;
+  CountedContextKey::comparisons = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    bool fresh = false;
+    keys.at({(std::uint64_t{i} << 32) | 999999u}, fresh) = i + 1;
+    CHECK(fresh);
+  }
+  CHECK(CountedContextKey::comparisons < 8u * count);
+  for (unsigned i = 0; i < count; ++i) {
+    const auto* value = keys.find({(std::uint64_t{i} << 32) | 999999u});
+    CHECK(value != nullptr && *value == i + 1);
+  }
+  CHECK(CountedContextKey::comparisons < 16u * count);
+}
+
+void deep_context_joins_keep_their_canonical_stacks() {
+  cursiv::LlCtxPool pool;
+  auto a = pool.push(cursiv::kLlCtxNone, 1);
+  auto b = pool.push(cursiv::kLlCtxNone, 2);
+  constexpr unsigned depth = 20000;
+  for (unsigned i = 0; i < depth; ++i) {
+    a = pool.push(a, 3);
+    b = pool.push(b, 3);
+  }
+  const auto joined = pool.merge(a, b);
+  CHECK(joined != cursiv::kLlCtxApart && joined != cursiv::kLlCtxNone);
+  CHECK(pool.merge(b, a) == joined && pool.merge(joined, joined) == joined);
+  auto at = joined;
+  for (unsigned i = 0; i < depth; ++i) {
+    CHECK(pool.count(at) == 1 && pool.ret(at, 0) == 3);
+    at = pool.parent(at, 0);
+  }
+  CHECK(pool.count(at) == 2);
+  CHECK(pool.ret(at, 0) == 1 && pool.ret(at, 1) == 2);
+  CHECK(pool.parent(at, 0) == cursiv::kLlCtxNone &&
+        pool.parent(at, 1) == cursiv::kLlCtxNone);
+  CHECK(pool.merge(pool.push(a, 4, 1), pool.push(b, 4, 2)) ==
+        cursiv::kLlCtxApart);
+}
+
+struct LlAnalysisFixture {
+  cursiv::LlAtnView atn;
+  unsigned nrules;
+  const cursiv::TermInfo* terms = nullptr;
+};
+LlAnalysisFixture longOwedRun;
+
+void shared_head_calls_are_settled_in_dependency_order() {
+  constexpr unsigned count = 4096;
+  std::vector<cursiv::LlAtnState> states(2 * count);
+  std::vector<cursiv::LlAtnEdge> edges(count + 1);
+  std::vector<std::uint32_t> starts(count);
+  for (unsigned r = 0; r < count; ++r) {
+    starts[r] = 2 * r;
+    states[2 * r] = {
+        .rule = static_cast<std::uint16_t>(r), .edge = r + 1, .nedges = 1};
+    states[2 * r + 1] = {.kind = cursiv::LlAtnKind::ruleStop,
+                         .rule = static_cast<std::uint16_t>(r)};
+    edges[r + 1] =
+        r + 1 < count
+            ? cursiv::LlAtnEdge{.kind = cursiv::LlEdgeKind::rule,
+                                .label = static_cast<std::uint16_t>(r + 1),
+                                .target = 2 * (r + 1),
+                                .follow = 2 * r + 1}
+            : cursiv::LlAtnEdge{.kind = cursiv::LlEdgeKind::atom,
+                                .label = 1,
+                                .target = 2 * r + 1};
+  }
+  edges[0] = edges[1];
+  states[0].edge = 0;
+  states[0].nedges = 2;
+  const cursiv::LlAtnView atn{.states = states.data(),
+                              .nstates = 2 * count,
+                              .edges = edges.data(),
+                              .ruleStart = starts.data()};
+  const auto shared = cursiv::ll_shared_rules(atn, count);
+  CHECK(shared[0] == 0);
+  for (unsigned r = 1; r < count; ++r) CHECK(shared[r] == 1);
+}
+
+void head_sharing_stops_at_conditions_and_closes_cycles() {
+  using Kind = cursiv::LlEdgeKind;
+  static constexpr cursiv::LlAtnState states[] = {
+      {.rule = 0, .edge = 0, .nedges = 2},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.rule = 0, .edge = 2, .nedges = 1},
+      {.rule = 0, .edge = 3, .nedges = 1},
+      {.rule = 1, .edge = 4, .nedges = 1},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.rule = 2, .edge = 5, .nedges = 1},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 2},
+      {.rule = 3, .edge = 6, .nedges = 1},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 3}};
+  static constexpr cursiv::LlAtnEdge edges[] = {
+      {.kind = Kind::rule, .label = 2, .target = 6, .follow = 2},
+      {.kind = Kind::rule, .label = 2, .target = 6, .follow = 2},
+      {.kind = Kind::rule, .label = 1, .target = 4, .follow = 3},
+      {.kind = Kind::rule, .label = 3, .target = 8, .follow = 1},
+      {.kind = Kind::condition, .target = 5},
+      {.kind = Kind::epsilon, .target = 7},
+      {.kind = Kind::atom, .label = 1, .target = 9}};
+  static constexpr std::uint32_t starts[] = {0, 4, 6, 8};
+  static constexpr LlAnalysisFixture guarded{
+      {.states = states, .nstates = 10, .edges = edges, .ruleStart = starts},
+      4};
+  auto shared = cursiv::ll_shared_rules(guarded.atn, guarded.nrules);
+  CHECK(shared[0] == 0 && shared[1] == 1 && shared[2] == 0 && shared[3] == 0);
+
+  static constexpr cursiv::LlAtnState cycleStates[] = {
+      {.rule = 0, .edge = 0, .nedges = 2},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.rule = 1, .edge = 2, .nedges = 2},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.rule = 2, .edge = 4, .nedges = 2},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 2}};
+  static constexpr cursiv::LlAtnEdge cycleEdges[] = {
+      {.kind = Kind::rule, .label = 1, .target = 2, .follow = 1},
+      {.kind = Kind::rule, .label = 2, .target = 4, .follow = 1},
+      {.kind = Kind::rule, .label = 2, .target = 4, .follow = 3},
+      {.kind = Kind::atom, .label = 1, .target = 3},
+      {.kind = Kind::rule, .label = 1, .target = 2, .follow = 5},
+      {.kind = Kind::atom, .label = 2, .target = 5}};
+  static constexpr std::uint32_t cycleStarts[] = {0, 2, 4};
+  static constexpr LlAnalysisFixture cycle{{.states = cycleStates,
+                                            .nstates = 6,
+                                            .edges = cycleEdges,
+                                            .ruleStart = cycleStarts},
+                                           3};
+  shared = cursiv::ll_shared_rules(cycle.atn, cycle.nrules);
+  CHECK(shared[0] == 0 && shared[1] == 1 && shared[2] == 1);
+}
+
+void owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings() {
+  constexpr unsigned count = 20000;
+  std::vector<cursiv::LlAtnState> states(count + 2);
+  std::vector<cursiv::LlAtnEdge> edges(count + 1);
+  for (unsigned i = 0; i <= count; ++i) {
+    states[i] = {.rule = 0, .edge = i, .nedges = 1};
+    edges[i] = {.kind = i < count ? cursiv::LlEdgeKind::epsilon
+                                  : cursiv::LlEdgeKind::atom,
+                .label = 1,
+                .target = i + 1};
+  }
+  states.back() = {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0};
+  const std::uint32_t start = 0;
+  const cursiv::TermInfo terms[4]{};
+  longOwedRun = {{.states = states.data(),
+                  .nstates = count + 2,
+                  .edges = edges.data(),
+                  .ruleStart = &start},
+                 1,
+                 terms};
+  cursiv::LlOwed<longOwedRun> owed;
+  cursiv::LlSimulation sim(longOwedRun.atn);
+  sim.load(std::vector<cursiv::LlConfig>{{.state = 0}});
+  CHECK(owed.first(sim) == 1);
+
+  using Kind = cursiv::LlEdgeKind;
+  const cursiv::LlAtnState choices[] = {
+      {.rule = 0, .edge = 0, .nedges = 3},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 0},
+      {.rule = 0, .edge = 3, .nedges = 1},
+      {.rule = 1, .edge = 4, .nedges = 1},
+      {.kind = cursiv::LlAtnKind::ruleStop, .rule = 1},
+      {.rule = 0, .edge = 5, .nedges = 1}};
+  const cursiv::LlAtnEdge paths[] = {
+      {.kind = Kind::atom, .label = 1, .target = 1},
+      {.kind = Kind::rule, .label = 1, .target = 3, .follow = 2},
+      {.kind = Kind::atom, .label = 2, .target = 5},
+      {.kind = Kind::atom, .label = 3, .target = 1},
+      {.kind = Kind::condition, .target = 4},
+      {.kind = Kind::atom, .label = 2, .target = 1}};
+  const std::uint32_t starts[] = {0, 3};
+  longOwedRun = {
+      {.states = choices, .nstates = 6, .edges = paths, .ruleStart = starts},
+      2,
+      terms};
+  cursiv::LlOwed<longOwedRun> shortest;
+  cursiv::LlSimulation branch(longOwedRun.atn);
+  branch.load(std::vector<cursiv::LlConfig>{{.state = 0}});
+  std::vector<std::uint16_t> due;
+  shortest.due(branch, due, [](auto) { return true; });
+  CHECK((due == std::vector<std::uint16_t>{1, 3}));
+  CHECK(shortest.first(branch) == cursiv::kNoElement);
 }
 
 // The stack the descent stands on is one node of the pool, and an ask costs
@@ -570,8 +965,9 @@ void speculative_conditions_leave_the_real_filter_pending() {
 // not the next parse's.
 void a_plan_is_the_parses_own_and_goes_with_a_repair() {
   constexpr const auto& table = tpar::generated::Ll::kTable;
-  constexpr auto decision = name_or_call_decision();
-  static_assert(decision != cursiv::kNoRow);
+  const auto decision = name_or_call_decision();
+  CHECK(decision != cursiv::kNoRow);
+  if (decision == cursiv::kNoRow) return;
   const std::string text = "name;name();name";
   {
     cursiv::LlPredictionSession<table> session;
@@ -585,7 +981,7 @@ void a_plan_is_the_parses_own_and_goes_with_a_repair() {
     CHECK(cursiv::ll_planned<table>(at.context, decision) ==
           cursiv::kLlUnplanned);
     at.context.at = 0;
-    at.context.repaired = true;
+    at.context.repaired.mark();
     CHECK(cursiv::ll_planned<table>(at.context, decision) ==
           cursiv::kLlUnplanned);
     CHECK(session.work().tokens != 0);
@@ -900,7 +1296,8 @@ void a_repair_names_what_the_other_engine_names() {
     const cursiv::ParseDiagnostic& d = a.diagnostics[i];
     CHECK(d.kind == cursiv::DiagnosticKind::deleted && d.begin == 10 &&
           d.end == 11);
-    CHECK(ll->getGrammar().terminalText(d.element) == "+" && d.also.empty());
+    const auto spellings = ll->getGrammar().terminalSpellings(d.element);
+    CHECK(spellings.size() == 1 && spellings.front() == "+" && d.also.empty());
     CHECK(d.element == b.diagnostics[i].element);
   }
   const cursiv::ParseResult c = ll->parse("show x as 2;");
@@ -973,9 +1370,14 @@ void an_invented_token_is_the_one_written_first() {
     for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
       const cursiv::ParseResult r = parser->parse(k.text);
       CHECK(r.diagnostics.size() == 1);
-      for (const cursiv::ParseDiagnostic& d : r.diagnostics)
+      for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
+        const auto spellings =
+            parser->getGrammar().terminalSpellings(d.element);
         CHECK(parser->getGrammar().terminalName(d.element) == k.name &&
-              parser->getGrammar().terminalText(d.element) == k.spelled);
+              (k.spelled.empty()
+                   ? spellings.empty()
+                   : spellings.size() == 1 && spellings.front() == k.spelled));
+      }
     }
   }
 }
@@ -988,8 +1390,10 @@ void the_first_written_of_sixty_is_invented() {
   for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
     const cursiv::ParseResult r = parser->parse(";");
     CHECK(r.diagnostics.size() == 1);
-    for (const cursiv::ParseDiagnostic& d : r.diagnostics)
-      CHECK(parser->getGrammar().terminalText(d.element) == "a00");
+    for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
+      const auto spellings = parser->getGrammar().terminalSpellings(d.element);
+      CHECK(spellings.size() == 1 && spellings.front() == "a00");
+    }
   }
 }
 
@@ -1106,17 +1510,15 @@ void a_word_that_spells_no_keyword_is_skipped() {
   CHECK(r.cst().size() == whole.cst().size() + 1);
 }
 
-// `left("*" | "/") >> left("+" | "-")`, as the build holds it: four operators
-// in the order they were written, two precedences, none right-associative,
-// and one member for all four.
+// `levels(left("*" | "/"), left("+" | "-"))`, as the build holds it: four
+// operators in the order they were written, two precedences, none
+// right-associative, and one member for all four.
 void the_precedence_table_says_what_the_grammar_said() {
   const cursiv::LlTable& t = tpar::generated::Ll::kTable;
-  const auto& emitted = t.climbs[0];
-  CHECK(emitted.opCount == 4);
   const auto built =
       cursiv::ll_build_program(cursiv::LlLowering<tpar::Ll>::table(), {});
   const auto& c = built.cfg.climbs[0];
-  CHECK(c.opCount == emitted.opCount && c.atnEntry == emitted.atnEntry);
+  CHECK(c.opCount == 4);
   const cursiv::LlClimbOp* const op = built.cfg.climbOps.data() + c.opBase;
   CHECK(op[0].prec == op[1].prec && op[2].prec == op[3].prec);
   CHECK(op[0].prec > op[2].prec);
@@ -1131,19 +1533,24 @@ void the_precedence_table_says_what_the_grammar_said() {
     CHECK(built.cfg.nodes[leaf].row != cursiv::kNoRow);
     CHECK(t.nodes[leaf].mode == c.mode && !t.nodes[leaf].head &&
           t.nodes[leaf].covers == 0);
-    CHECK(built.nodeAfterMode[leaf] == c.mode);
     CHECK(built.nodeAfter[leaf] != 0xFFFFFFFFu);
   }
   CHECK(t.nafter == built.cfg.nnodes);
   // The runs a join's two operands owe, and the state a call of the operand
   // returns into: zero here is a field that was never written.
   CHECK(c.leftCount != 0 && c.rightCount != 0);
-  CHECK(c.selfLeft != cursiv::kNoRow);
   CHECK(c.atnEntry != 0);
+  // From the second turn on, the node the climb just laid is its left operand.
+  CHECK(std::ranges::any_of(
+      std::span(built.fuse).subspan(c.leftBase, c.leftCount),
+      [&](const cursiv::LlFuse& f) {
+        return f.from == c.node && f.to != cursiv::kNoRow;
+      }));
 }
 
 cursiv::ConversionResult<std::string> borrowed;
-using BorrowedConverter = cursiv::text_conv<[]() -> auto& { return borrowed; }>;
+using BorrowedConverter =
+    cursiv::detail::text_conv<[]() -> auto& { return borrowed; }>;
 
 // A converter answering a result it keeps hands out copies: a second
 // conversion reads the same value, and the same failure.
@@ -1171,7 +1578,9 @@ void borrowed_conversion_results_are_not_consumed() {
 }
 
 using StripFirstConverter =
-    cursiv::text_conv<[](std::string_view text) { return text.substr(1); }>;
+    cursiv::detail::text_conv<[](std::string_view text) {
+      return text.substr(1);
+    }>;
 
 // An invented child can sit below a clean data-rule close. The converter
 // must leave the field at its default instead of stripping an empty value.
@@ -1233,8 +1642,11 @@ std::vector<std::string> spelled_at(const cursiv::Parser& parser,
   std::vector<cursiv::NextFeature> next;
   parser.nextFeaturesAt(cst, at, at, next);
   std::vector<std::string> out;
-  for (const cursiv::NextFeature& f : next)
-    out.emplace_back(parser.getGrammar().terminalText(f.feature));
+  for (const cursiv::NextFeature& f : next) {
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    if (spellings.empty()) out.emplace_back();
+    for (const std::string_view s : spellings) out.emplace_back(s);
+  }
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
@@ -1339,8 +1751,9 @@ void drive(cursiv::LlContext& c) {
   auto& kept = cursiv::ll_episode_cache<table>();
   verify(kept.plan.empty());
   ++calls;
-  kept.plan.entries().push_back(
-      {.at = calls, .decision = 1, .arm = static_cast<std::uint16_t>(calls)});
+  std::vector<cursiv::LlPlanEntry> laid{
+      {.at = calls, .decision = 1, .arm = static_cast<std::uint16_t>(calls)}};
+  kept.plan.install(laid, nullptr, 0);
   if (explode) throw std::runtime_error("drive exception");
   c.last = c.tape.leaf(0, c.len, cursiv::StampLayout{}.make(0, 0));
   c.at = c.len;
@@ -1397,8 +1810,8 @@ void public_calls_are_fresh_and_restore_on_exit() {
                                          actions, drive);
   custom = &parser;
   auto* exact = &cursiv::ll_episode_cache<table>();
-  exact->plan.clear();
-  exact->plan.entries().push_back({.at = 0, .decision = 1, .arm = 987});
+  std::vector<cursiv::LlPlanEntry> laid{{.at = 0, .decision = 1, .arm = 987}};
+  exact->plan.install(laid, nullptr, 0);
   for (unsigned n = 0; n < 2; ++n) {
     const auto r = parser.parse("value");
     verify(r.value && r.diagnostics.empty());
@@ -1556,6 +1969,13 @@ int main() {
   deep_prediction_keeps_its_known_continuation();
   a_table_gives_back_the_room_a_larger_walk_left();
   a_pool_gives_back_what_a_walk_made();
+  call_cells_are_sealed_after_their_actual_dependencies();
+  deep_cell_paths_keep_their_order_and_stop_at_the_first_refusal();
+  context_keys_keep_both_halves_on_every_platform();
+  deep_context_joins_keep_their_canonical_stacks();
+  shared_head_calls_are_settled_in_dependency_order();
+  head_sharing_stops_at_conditions_and_closes_cycles();
+  owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings();
   a_return_stack_pushes_only_the_frames_that_changed();
   an_abandon_replays_equivalent_returns_without_collapsing_frames();
   a_search_reads_keywords_in_the_shared_alphabet();

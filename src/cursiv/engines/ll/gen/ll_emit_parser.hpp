@@ -1,17 +1,27 @@
 // The descent of one grammar, written as C++ source.
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/ll/gen/LlBuiltProgram.hpp"
-#include "cursiv/engines/ll/gen/LlStampPlan.hpp"
-
 namespace cursiv {
+
+class LlFinalProgram;
+struct LlLowCfg;
+
+// How many plain rules, called in place with no frame, a native call chain
+// stacks at most: past it, a rule goes through the machine, so the native
+// stack does not grow with the grammar.
+inline constexpr std::uint8_t kLlPlainDepth = 64;
+
+// How many plain rules stand on the native stack from each rule down; zero for
+// a rule with a frame.
+std::vector<std::uint8_t> ll_plain_depths(const LlLowCfg& cfg);
 
 std::string ll_emit_parser_decl(const std::string& ns);
 std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
-    const LlBuiltProgram& a, const LlStampPlan& plan, const std::string& ns);
+    const LlFinalProgram& done, const std::string& ns);
 
 }  // namespace cursiv

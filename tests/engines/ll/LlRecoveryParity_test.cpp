@@ -10,10 +10,15 @@
 #include <string_view>
 #include <utility>
 
+#include "conditionsll/generated/Ll/Module.hpp"
+#include "conditionslr/generated/Lr/Module.hpp"
 #include "cursiv/core/parser/Parser.hpp"
+#include "cursiv/core/syntax-tree/CstNode.hpp"
+#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/core/validation/RepairMessage.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/ParityGrammar.hpp"
+#include "engines/ll/ParityAst.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "paritylr/generated/Lr/Module.hpp"
 
@@ -101,6 +106,54 @@ void a_late_fault_does_not_commit_an_optional_postfix() {
   agree(*ll, *lr, *llr, *lrr, text);
 }
 
+// A plan owing more closers than a repair may invent unplanned writes them
+// all: the statement after the run stays in the tree.
+void a_planned_run_of_closers_is_written_whole() {
+  const auto ll = tpar::generated::Ll::create_parser();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto llr = tpar::generated::Ll::create_ast_reflection();
+  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  const std::string text = "let a = " + std::string(20, '(') + "1;\nlet b = 2;";
+  agree(*ll, *lr, *llr, *lrr, text);
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto parsed = parser->parse(text);
+    const auto* unit = parsed.value_as<tpar::ast::Unit>();
+    CHECK(unit && unit->lets.size() == 2);
+    if (unit != nullptr && unit->lets.size() == 2)
+      CHECK(unit->lets[1] && unit->lets[1]->name == "b");
+  }
+}
+
+// Whether a leaf the repair marked lies over the bytes in [begin, end).
+bool marks(const cursiv::ParseResult& r, cursiv::TextOffset begin,
+           cursiv::TextOffset end) {
+  const cursiv::Cst& cst = r.cst();
+  for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
+    const cursiv::CstNode& n = cst[i];
+    if (n.subtreeSize == 1 && n.recovered && n.begin < end && begin < n.end)
+      return true;
+  }
+  return false;
+}
+
+// Bytes no terminal reads stop where a token the lexer left open starts: that
+// token is repaired as it would be with nothing in front of it. A trivia the
+// lexer refused is laid as the author's text, unmarked.
+void unmatched_bytes_stop_at_an_open_token() {
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  const auto llr = tllconditions::generated::Ll::create_ast_reflection();
+  const auto lrr = tllconditions::generated::Lr::create_ast_reflection();
+  for (const std::string_view text :
+       {"one; @/* x", "one; /* x", "{ one; /* x", "one; @@/* x"})
+    agree(*ll, *lr, *llr, *lrr, text);
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto parsed = parser->parse("one; @/* x");
+    CHECK(marks(parsed, 5, 6) && !marks(parsed, 6, 10));
+    CHECK(!marks(parser->parse("{ one; /* x"), 7, 11));
+  }
+}
+
 // A token no construct takes at the head of a statement, or in front of what
 // closes one: the repair is one insertion or one replacement, and the text
 // behind it is read.
@@ -141,12 +194,49 @@ void a_misspelt_second_word_is_read_again() {
     CHECK(!parser->parse("decl:/* gap */pub struct a {}").diagnostics.empty());
 }
 
+// Between two operands, every operator is as cheap a repair as the one
+// elected, whatever level it binds at: both engines name the same ones, though
+// the readings each search merges are its own. An operator a tighter level
+// refuses is the next looser level's, and that level writes the planned one.
+void a_missing_operator_names_every_level() {
+  const auto ll = tpar::generated::Ll::create_parser();
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto llr = tpar::generated::Ll::create_ast_reflection();
+  const auto lrr = tpar::generated::Lr::create_ast_reflection();
+  for (const std::string_view text :
+       {"show 1 = 2 * 3;", "show f(1) = 2 + 3;", "let a = 1 = 2 * 3;",
+        "show 1 2 * 3;", "show (1 2 3);", "let a = (1 2 3); show a;"})
+    agree(*ll, *lr, *llr, *lrr, text);
+  const std::string_view text = "show 1 = 2 * 3;";
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto parsed = parser->parse(text);
+    CHECK(parsed.diagnostics.size() == 1);
+    if (parsed.diagnostics.size() != 1) continue;
+    const cursiv::ParseDiagnostic& d = parsed.diagnostics.front();
+    CHECK(cursiv::repair_message(parser->getGrammar(), d,
+                                 text.substr(d.begin, d.end - d.begin),
+                                 false) ==
+          "Expecting one of '*', ',', '/', '+' but found '='.");
+  }
+  // The second operator is planned with the first: it names nothing more.
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto parsed = parser->parse("show (1 2 3);");
+    CHECK(parsed.diagnostics.size() == 2);
+    if (parsed.diagnostics.size() == 2)
+      CHECK(!parsed.diagnostics[0].also.empty() &&
+            parsed.diagnostics[1].also.empty());
+  }
+}
+
 }  // namespace
 
 int main() {
+  a_missing_operator_names_every_level();
   a_stray_token_costs_one_repair();
   a_misspelt_second_word_is_read_again();
   a_repair_keeps_the_following_statement();
   a_late_fault_does_not_commit_an_optional_postfix();
+  a_planned_run_of_closers_is_written_whole();
+  unmatched_bytes_stop_at_an_open_token();
   return cursiv::test::report("LlRecoveryParity_test");
 }

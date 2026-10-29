@@ -4,8 +4,8 @@
 
 namespace cursiv {
 
-std::vector<FlagWarning> flag_warnings(GrammarImage& image) {
-  return walk_warnings<FlagWarning>(image, [](WarningFound& w, ImageId id) {
+std::vector<FlagWarning> flag_warnings(WarningFound& found) {
+  return walk_warnings<FlagWarning>(found, [](WarningFound& w, ImageId id) {
     const ImageNode& n = w.image().nodes[id];
     return n.kind == ImageKind::flag &&
            w.reads().nothing(w.image().kids[n.first]);

@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "cursiv/core/grammar/dump.hpp"
+#include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/LlStampPlan.hpp"
 #include "cursiv/engines/ll/gen/ll_ast_registry.hpp"
 #include "cursiv/engines/ll/gen/ll_build.hpp"
 #include "cursiv/engines/ll/gen/ll_emit_parser.hpp"
@@ -24,7 +24,6 @@
 #include "cursiv/engines/shared/gen/CommonArtifacts.hpp"
 #include "cursiv/engines/shared/gen/EmitRecords.hpp"
 #include "cursiv/engines/shared/gen/GenCode.hpp"
-#include "cursiv/engines/shared/gen/GrammarFault.hpp"
 #include "cursiv/engines/shared/gen/LanguageIdentity.hpp"
 #include "cursiv/engines/shared/gen/LexRecursion.hpp"
 #include "cursiv/engines/shared/gen/gen_report.hpp"
@@ -66,30 +65,10 @@ void report(const cursiv::LlBuiltProgram& a) {
       a.nadaptive, a.nopen, a.nmodes, a.ndfa, a.nstates);
 }
 
-// A count the tables address with sixteen bits, and the sentence names which
-// one and what it holds -- an author who hits this splits the grammar.
+// A count the tables address with sixteen bits, refused under this grammar's
+// name where it overruns them.
 bool fits(std::size_t n, const char* what) {
-  if (n <= 0xFFFFu) return true;
-  std::fprintf(stderr, "%s: refused, %zu %s overrun sixteen bits\n",
-               CURSIV_GEN_NAME, n, what);
-  return false;
-}
-
-// What a record's stamp holds: the chain it names, and the position that read
-// it -- a node of the program or an operator of a precedence table.
-bool refuse_unstamped(cursiv::LlBuiltProgram& a) {
-  const std::size_t positions = a.cfg.nnodes;
-  if (!fits(positions, "positions")) return true;
-  return cursiv::refuse_unstamped(CURSIV_GEN_NAME, a.stamp, a.writes.nchains,
-                                  static_cast<std::uint32_t>(positions) + 1u);
-}
-
-std::string_view empty_match_terminal(const cursiv::LlBuiltProgram& a) {
-  return cursiv::empty_match_terminal(a, [&](std::uint16_t state) {
-    for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
-      if (a.dfaAccSet[state].test(t)) return static_cast<cursiv::SymbolId>(t);
-    return cursiv::kInvalidSymbol;
-  });
+  return cursiv::ll_fits(CURSIV_GEN_NAME, n, what);
 }
 
 }  // namespace
@@ -112,8 +91,8 @@ int run(int argc, char** argv) try {
     return exit_status(GenCode::usage);
   }
 
-  if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME,
-                                       cursiv::grammar_image<View>()))
+  cursiv::GrammarImage image = cursiv::grammar_image<View>();
+  if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
 
   const cursiv::LlLowered& low = cursiv::LlLowering<G>::table();
@@ -130,50 +109,33 @@ int run(int argc, char** argv) try {
       !fits(low.cfg.climbs.size(), "precedence tables") ||
       !fits(low.cfg.climbOps.size(), "precedence operators"))
     return exit_status(GenCode::refused);
-  cursiv::LlBuiltProgram a = cursiv::ll_build_program(low, buildOpt);
-  // A shape the descent cannot hold is refused before anything is written:
-  // the sentence names the rule, and no table exists to name it in.
-  if (a.fault) {
-    const std::uint16_t r = a.fault.rule;
-    const std::string_view rule =
-        r < a.cfg.nrules ? a.cfg.rule_name(r) : std::string_view{};
-    std::vector<std::string_view> cycle;
-    for (const auto q : a.faultCycle)
-      cycle.push_back(a.cfg.rule_name(static_cast<std::uint16_t>(q)));
-    cursiv::refuse_fault(
-        CURSIV_GEN_NAME, a.fault,
-        cursiv::grammar_fault_message(
-            a.fault, rule,
-            cursiv::AsWritten<cursiv::LlLowering<G>::rules>::of(rule),
-            cursiv::grammar_fault_cycle(cycle)));
-    return exit_status(GenCode::refused);
-  }
-  if (cursiv::refuse_unbuilt(CURSIV_GEN_NAME, a,
-                             a.cfg.lowerRule < a.cfg.nrules
-                                 ? a.cfg.rule_name(a.cfg.lowerRule)
-                                 : std::string_view{}))
-    return exit_status(GenCode::refused);
-  if (refuse_unstamped(a)) return exit_status(GenCode::refused);
-  if (cursiv::refuse_empty_match(CURSIV_GEN_NAME, empty_match_terminal(a)))
-    return exit_status(GenCode::refused);
+  // What the emitters cannot write is refused before anything is written:
+  // the sentence names the rule, and no table exists to name it in. From here
+  // the program is read-only.
+  const auto done = cursiv::LlFinalProgram::make(
+      cursiv::ll_build_program(low, buildOpt), CURSIV_GEN_NAME,
+      cursiv::AsWritten<cursiv::LlLowering<G>::rules>::of);
+  if (!done) return exit_status(GenCode::refused);
+  const cursiv::LlBuiltProgram& a = done->program();
+  // The descent is spelled first: a rule whose calls its frame cannot name is
+  // refused before anything is written.
+  const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS);
 
   const std::string out(dir);
-  const cursiv::LlStampPlan plan(a);
   if (!cursiv::write_source(out + "/Table.hpp",
-                            cursiv::ll_emit_table(a, plan, CURSIV_GEN_NS)))
+                            cursiv::ll_emit_table(*done, CURSIV_GEN_NS)))
     return exit_status(GenCode::table);
   if (!cursiv::write_source(out + "/Parser.hpp",
                             cursiv::ll_emit_parser_decl(CURSIV_GEN_NS)))
     return exit_status(GenCode::parser);
-  for (const auto& [fname, text] :
-       cursiv::ll_emit_parser_files(a, plan, CURSIV_GEN_NS)) {
+  for (const auto& [fname, text] : steps) {
     if (!cursiv::write_source(out + "/" + fname, text))
       return exit_status(GenCode::parserFiles);
   }
 
   const auto registry = cursiv::ll_ast_registry<G>(CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
   std::vector<cursiv::RecordGen> records;
-  const auto entries = cursiv::ll_entry_table(a, registry.rows, records);
+  const auto entries = cursiv::ll_entry_table(*done, registry.rows, records);
   const auto terminals = cursiv::record_terminals(a.cfg);
   const auto dump = cursiv::dump_compiled_indexed<View>();
   const cursiv::LanguageIdentity lang{CURSIV_GEN_ID,
@@ -199,8 +161,8 @@ int run(int argc, char** argv) try {
       CURSIV_GEN_NAME, a.cfg, [&](std::uint16_t r) {
         return r < a.cfg.nrules ? a.cfg.rule_name(r) : std::string_view{};
       });
-  cursiv::report_grammar_warnings(CURSIV_GEN_NAME,
-                                  cursiv::grammar_image<View>());
+  cursiv::report_incomplete_lex_checks(CURSIV_GEN_NAME, a.cfg);
+  cursiv::report_grammar_warnings(CURSIV_GEN_NAME, image);
   return exit_status(GenCode::ok);
 } catch (const std::exception& error) {
   std::fprintf(stderr, "%s: refused: %s\n", CURSIV_GEN_NAME, error.what());

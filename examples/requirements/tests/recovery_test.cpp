@@ -2,8 +2,8 @@
 #include <memory>
 #include <string_view>
 
-#include "cursiv/test/RecoveryLane.hpp"
 #include "cursiv/test/MutationOracle.hpp"
+#include "cursiv/test/RecoveryLane.hpp"
 #include "requirements/core/CoreModule.hpp"
 
 namespace {
@@ -24,8 +24,8 @@ void run(Lane& lane) {
       const auto after = project(*engine, broken);
       CHECK(after.accepted && after.recovered);
       for (const std::string token : {"req", "applicable", "for"})
-        CHECK(std::count(after.tokens.begin(), after.tokens.end(), token) ==
-              std::count(before.tokens.begin(), before.tokens.end(), token));
+        CHECK(std::count(after.tokens.begin(), after.tokens.end(), token)
+              == std::count(before.tokens.begin(), before.tokens.end(), token));
     }
   }
   language(lane, *engine, "valid.req",

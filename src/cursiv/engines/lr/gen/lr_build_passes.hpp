@@ -28,7 +28,8 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
                    const std::vector<unsigned>& pick);
 
 // What makes two reductions one for the states that fuse: their fixed
-// grammar data, not their symbols.
+// grammar data, not their symbols, nor the configurations their positions
+// were read under, which no reduction reads again.
 void lr_reduce_key(const LrBuildCfg& g, unsigned p,
                    std::vector<std::uint32_t>& key);
 

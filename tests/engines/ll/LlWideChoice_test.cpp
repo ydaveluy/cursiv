@@ -13,11 +13,11 @@ namespace {
 
 static_assert([]<class... Keywords>(cursiv::Choice<Keywords...>) {
   return sizeof...(Keywords) > 100;
-}(twide::Base::Words));
-static_assert(twide::generated::Ll::kTable.nafter > 255);
+}(twidechoice::Base::Words));
+static_assert(twidechoice::generated::Ll::kTable.nafter > 255);
 
 std::string words(const cursiv::ParseResult& r) {
-  const auto* d = r.value_as<twide::Doc>();
+  const auto* d = r.value_as<twidechoice::Doc>();
   if (d == nullptr) return "<none>";
   std::string out;
   for (const auto w : d->words) out += std::string(w) + ' ';
@@ -27,13 +27,15 @@ std::string words(const cursiv::ParseResult& r) {
 }  // namespace
 
 int main() {
-  const auto ll = twide::generated::Ll::create_parser();
-  const auto& table = twide::generated::Ll::kTable;
+  const auto ll = twidechoice::generated::Ll::create_parser();
+  const auto& table = twidechoice::generated::Ll::kTable;
   for (std::uint16_t t = 0; t < table.nterms; ++t) {
     const auto name = ll->getGrammar().terminalName(t);
-    const auto text = ll->getGrammar().terminalText(t);
+    const auto spellings = ll->getGrammar().terminalSpellings(t);
+    const std::string_view text = table.term_text(t);
     CHECK(table.term_name(t) == (name.empty() ? text : name));
-    CHECK(table.term_text(t) == text);
+    CHECK(text.empty() ? spellings.empty()
+                       : spellings.size() == 1 && spellings.front() == text);
   }
   for (const auto& p : {ll.get()}) {
     const auto r =

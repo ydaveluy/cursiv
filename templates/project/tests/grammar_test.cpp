@@ -35,20 +35,14 @@ int main() {
       @CURSIV_NEW_ID@::install_core_module>();
 
   const cursiv::ParseResult result = language.language.parser->parse(text);
-  // `recovered()` is set when the parser had to repair the input to keep
-  // going: a clean document leaves it false.
-  if (result.cst().recovered()) return fail("the sample does not parse");
+  if (!result || !result.diagnostics.empty())
+    return fail("the sample does not parse cleanly");
 
-  // An AST node is identified by its tag, not by a dynamic_cast: the
-  // address of `ast_type_tag<T>` is unique in the process, and the cast
-  // follows the test.
-  const cursiv::AstNode* const root = result.value;
-  if (root == nullptr ||
-      root->type != &cursiv::ast_type_tag<@CURSIV_NEW_ID@::ast::Model>)
-    return fail("the parse built no model");
+  const auto* const root =
+      cursiv::ast_cast<@CURSIV_NEW_ID@::ast::Model>(result.value);
+  if (root == nullptr) return fail("the parse built no model");
 
-  const auto& model =
-      *static_cast<const @CURSIV_NEW_ID@::ast::Model*>(root);
+  const auto& model = *root;
   if (model.persons.size() != 2 || model.greetings.size() != 2)
     return fail("the model does not hold what the sample declares");
 

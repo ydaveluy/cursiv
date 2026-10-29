@@ -4,7 +4,7 @@
 #include <string_view>
 
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/PredicatesGrammar.hpp"
+#include "engines/ll/PredicatesAst.hpp"
 #include "predicatesll/generated/Ll/Module.hpp"
 
 namespace {

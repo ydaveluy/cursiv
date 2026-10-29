@@ -68,7 +68,6 @@
 #include "cursiv/core/workspace/WorkspaceFolder.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/test/Check.hpp"
-#include "workspace/core/WorkspaceGrammar.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
@@ -1451,6 +1450,88 @@ void a_failed_build_answers_its_waiters() {
         cursiv::WaitOutcome::BuildFailed);
 }
 
+// A call cut short before its phases fails like one cut inside them: an
+// update listener throwing is one. A wait begun before the call and one begun
+// after it both learn that the rung will not come. A listener that cancels is
+// no failure: the wait is for the build that supersedes it.
+void a_failed_update_listener_answers_the_waiters(bool update) {
+  using namespace std::chrono_literals;
+  const World world;
+  cursiv::DocumentBuilder& builder = *world.shared.documentBuilder;
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const set[] = {a};
+  const std::string_view changed[] = {"file:///a.ws"};
+  const auto run = [&] {
+    if (update)
+      builder.update(changed, {});
+    else
+      builder.build(set);
+  };
+  cursiv::CancellationTokenSource stop;
+  std::vector<std::future<cursiv::WaitOutcome>> waits;
+  const auto wait = [&] {
+    waits.push_back(std::async(std::launch::async, [&] {
+      return builder.waitUntil(cursiv::DocumentState::Validated,
+                               stop.get_token());
+    }));
+    waits.push_back(std::async(std::launch::async, [&] {
+      return builder.waitUntil(cursiv::DocumentState::Validated, a->id,
+                               stop.get_token());
+    }));
+  };
+  const auto answers = [&](cursiv::WaitOutcome expected) {
+    for (std::future<cursiv::WaitOutcome>& waiting : waits) {
+      const bool answered = waiting.wait_for(2s) == std::future_status::ready;
+      CHECK(answered);
+      if (!answered) stop.request_stop();
+      CHECK(waiting.get() == expected);
+    }
+    waits.clear();
+  };
+
+  wait();
+  for (const std::future<cursiv::WaitOutcome>& waiting : waits)
+    CHECK(waiting.wait_for(20ms) == std::future_status::timeout);
+  struct Throwing final : cursiv::DocumentUpdateListener {
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      throw std::logic_error("listener");
+    }
+  } throwing;
+  builder.addDocumentUpdateListener(throwing);
+  bool failed = false;
+  try {
+    run();
+  } catch (const std::logic_error&) {
+    failed = true;
+  }
+  builder.removeDocumentUpdateListener(throwing);
+  CHECK(failed);
+  wait();
+  answers(cursiv::WaitOutcome::BuildFailed);
+
+  struct Cancelling final : cursiv::DocumentUpdateListener {
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      throw cursiv::OperationCancelled();
+    }
+  } cancelling;
+  builder.addDocumentUpdateListener(cancelling);
+  bool cancelled = false;
+  try {
+    run();
+  } catch (const cursiv::OperationCancelled&) {
+    cancelled = true;
+  }
+  builder.removeDocumentUpdateListener(cancelling);
+  CHECK(cancelled);
+  wait();
+  for (const std::future<cursiv::WaitOutcome>& waiting : waits)
+    CHECK(waiting.wait_for(20ms) == std::future_status::timeout);
+  run();
+  answers(cursiv::WaitOutcome::Reached);
+}
+
 // The pattern `routeDocument` runs, against a build that never stops: wait
 // for the rung, be admitted beside the settled write, ask the rung again,
 // then touch the tree. Its value is under TSan: drop the second ask and the
@@ -2295,6 +2376,8 @@ void run() {
   a_wait_can_precede_the_first_build();
   a_document_knows_its_links_are_broken();
   a_failed_build_answers_its_waiters();
+  a_failed_update_listener_answers_the_waiters(false);
+  a_failed_update_listener_answers_the_waiters(true);
   a_request_reads_beside_a_running_build();
   a_request_reads_the_index_beside_a_running_build();
   a_build_cut_after_linking_relinks_next_time();
@@ -2722,6 +2805,28 @@ void one_file_is_one_id_however_it_is_spelled() {
   CHECK(store.all().size() == 1);
 }
 
+// A scheme has no case, whatever it names: the store's gates and
+// `contains_uri` agree that both spellings are one document.
+void one_scheme_is_one_id_whatever_its_case() {
+  cursiv::DefaultDocuments store{completeShared()};
+  const auto d = document("MEM:///w/a.t");
+  store.addDocument(d);
+
+  CHECK(cursiv::contains_uri("mem:///w", d->uri));
+  CHECK(store.getDocument("mem:///w/a.t") == d);
+  CHECK(store.getDocuments("mem:///w").size() == 1);
+  CHECK(store.getDocuments("MEM:///w").size() == 1);
+  CHECK(store.getOrCreateDocumentId("mem:///w/a.t") == d->id);
+  bool refused = false;
+  try {
+    store.addDocument(document("mem:///w/a.t"));
+  } catch (const cursiv::DocumentStoreError&) {
+    refused = true;
+  }
+  CHECK(refused);
+  CHECK(store.all().size() == 1);
+}
+
 // An id can exist before a document does, and still after it is gone: a
 // description that outlives its document must stay nameable.
 void an_id_outlives_its_document() {
@@ -2838,6 +2943,7 @@ void run() {
   get_or_create_returns_the_held_document();
   invalidating_an_unknown_uri_yields_nothing();
   one_file_is_one_id_however_it_is_spelled();
+  one_scheme_is_one_id_whatever_its_case();
   an_id_outlives_its_document();
   a_removed_document_stays_alive_for_its_holder();
   ids_are_never_reused();
@@ -4280,6 +4386,52 @@ void the_filter_keeps_what_a_language_claims() {
       {.isFile = false, .isDirectory = true, .uri = "file:///w/.git"}));
 }
 
+// The memory provider keys a file as `normalize_uri` spells it: added under
+// an upper-case scheme, it reads back under either case, and a workspace
+// opened on the same upper-case folder finds it.
+void an_upper_case_scheme_names_the_same_file() {
+  World world;
+  world.disk->addFile("MEM:///w/a.ws", "datatype A\n");
+  CHECK(world.disk->readFile("MEM:///w/a.ws") == "datatype A\n");
+  CHECK(world.disk->readFile("mem:///w/a.ws") == "datatype A\n");
+  const cursiv::WorkspaceFolder folders[] = {{"MEM:///w", "w"}};
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  const auto a = world.shared.documents->getDocument("MEM:///w/a.ws");
+  CHECK(a != nullptr && a->state.load() == cursiv::DocumentState::Validated);
+}
+
+// A root narrower than its workspace folder: an entry inside the folder but
+// outside the root is one the scan never reaches, so it is not included. Only
+// an entry no workspace folder holds is judged on its own.
+void an_entry_outside_the_root_of_its_folder_is_not_included() {
+  struct SourceRoot final : cursiv::DefaultWorkspaceManager {
+    using DefaultWorkspaceManager::DefaultWorkspaceManager;
+
+   protected:
+    std::string getRootFolder(
+        const cursiv::WorkspaceFolder& folder) const override {
+      return cursiv::normalize_uri(folder.uri) + "/src";
+    }
+  };
+  World world;
+  world.shared.workspaceManager = std::make_unique<SourceRoot>(world.shared);
+  world.disk->addFile("mem:///w/src/a.ws", "datatype A\n");
+  world.disk->addFile("mem:///w/docs/b.ws", "datatype B\n");
+  const cursiv::WorkspaceFolder folders[] = {{"mem:///w", "w"}};
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  CHECK(world.shared.documents->hasDocument("mem:///w/src/a.ws"));
+  CHECK(!world.shared.documents->hasDocument("mem:///w/docs/b.ws"));
+
+  const cursiv::WorkspaceManager& manager = *world.shared.workspaceManager;
+  const auto file = [](std::string uri) {
+    return cursiv::FileSystemNode{
+        .isFile = true, .isDirectory = false, .uri = std::move(uri)};
+  };
+  CHECK(manager.isIncluded(file("mem:///w/src/a.ws")));
+  CHECK(!manager.isIncluded(file("mem:///w/docs/b.ws")));
+  CHECK(manager.isIncluded(file("mem:///elsewhere/c.ws")));
+}
+
 // The hook's documents are in the store and built, workspace files beside
 // them, even when the folders hold nothing at all.
 void additional_documents_load_even_without_folders() {
@@ -4391,6 +4543,8 @@ void ready_resolves_when_the_scan_throws() {
 void run() {
   the_scan_builds_what_the_folders_hold();
   the_filter_keeps_what_a_language_claims();
+  an_upper_case_scheme_names_the_same_file();
+  an_entry_outside_the_root_of_its_folder_is_not_included();
   an_unclaimed_file_kept_by_a_custom_filter_is_skipped();
   additional_documents_load_even_without_folders();
   the_scan_relinks_an_open_document_built_before_startup();

@@ -935,7 +935,8 @@ struct CountingGrammar final : cursiv::Grammar {
       noexcept override {
     return {};
   }
-  std::string_view terminalText(std::uint16_t) const noexcept override {
+  std::span<const std::string_view> terminalSpellings(
+      std::uint16_t) const noexcept override {
     return {};
   }
   std::string_view terminalName(std::uint16_t) const noexcept override {
@@ -1139,9 +1140,7 @@ void an_unwound_token_matching_the_expectation_is_not_echoed_twice() {
   CHECK(!message.empty());
   CHECK(message != "Syntax error");
   CHECK(message.find("expecting '+'") == std::string::npos);
-#if !defined(CURSIV_ENGINE_LL)
   CHECK(message == "Expecting NUM.");
-#endif
 }
 
 // Past 24 bytes the quote is cut back to a lead byte, never through a

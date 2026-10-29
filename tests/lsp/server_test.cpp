@@ -24,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -40,12 +41,14 @@
 #include "cursiv/core/services/Diagnostic.hpp"
 #include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstBuilder.hpp"
 #include "cursiv/core/text/Position.hpp"
 #include "cursiv/core/text/Range.hpp"
 #include "cursiv/core/text/TextRange.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
+#include "cursiv/core/utils/FunctionRef.hpp"
 #include "cursiv/core/validation/ValidationAcceptor.hpp"
 #include "cursiv/core/validation/ValidationCategory.hpp"
 #include "cursiv/core/validation/ValidationRegistry.hpp"
@@ -58,7 +61,9 @@
 #include "cursiv/core/workspace/DocumentState.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
 #include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
+#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/core/workspace/MemoryFileSystemProvider.hpp"
+#include "cursiv/core/workspace/WorkspaceFolder.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/core/workspace/WorkspaceManager.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
@@ -66,6 +71,7 @@
 #include "cursiv/lsp/completion/CompletionProviderOptions.hpp"
 #include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/lsp/content/DefaultTextDocumentContentProvider.hpp"
+#include "cursiv/lsp/formatting/Formatter.hpp"
 #include "cursiv/lsp/runtime/DefaultLanguageServer.hpp"
 #include "cursiv/lsp/runtime/LanguageClient.hpp"
 #include "cursiv/lsp/runtime/LanguageServer.hpp"
@@ -407,6 +413,69 @@ void completion_edits_follow_insert_replace_support() {
   }
 }
 
+// Hover and completion prose go in the format the client prefers, the first
+// one it lists: markdown only when that is markdown, plain text otherwise,
+// and when it lists nothing. Each feature reads its own list. The fixture
+// grammar documents its keywords.
+void prose_follows_the_clients_preferred_format() {
+  using Formats = std::optional<lsp::Array<lsp::MarkupKindEnum>>;
+  using enum lsp::MarkupKind;
+  const lsp::MarkupKindEnum markdown(Markdown);
+  const lsp::MarkupKindEnum plain(PlainText);
+  const Formats none;
+  const Formats plainOnly{{plain}};
+  const Formats plainFirst{{plain, markdown}};
+  const Formats markdownFirst{{markdown, plain}};
+  const Formats markdownOnly{{markdown}};
+  struct Case {
+    Formats hover;
+    Formats completion;
+    lsp::MarkupKind hoverKind;
+    lsp::MarkupKind completionKind;
+  };
+  const Case cases[] = {{none, none, PlainText, PlainText},
+                        {plainOnly, plainOnly, PlainText, PlainText},
+                        {plainFirst, plainFirst, PlainText, PlainText},
+                        {markdownFirst, markdownFirst, Markdown, Markdown},
+                        {markdownOnly, none, Markdown, PlainText},
+                        {none, markdownOnly, PlainText, Markdown}};
+  for (const Case& each : cases) {
+    World world;
+    lsp::InitializeParams params;
+    auto& text = params.capabilities.textDocument.emplace();
+    text.hover.emplace().contentFormat = each.hover;
+    text.completion.emplace().completionItem.emplace().documentationFormat =
+        each.completion;
+    (void)world.handshake(params);
+    world.open("");
+
+    lsp::CompletionParams query;
+    query.textDocument.uri = lsp::Uri::parse(kUri);
+    query.position = {0, 0};
+    const lsp::CompletionList list = world.server().completion(query);
+    std::size_t documented = 0;
+    for (const lsp::CompletionItem& item : list.items) {
+      if (!item.documentation.has_value()) continue;
+      const auto* doc = std::get_if<lsp::MarkupContent>(&*item.documentation);
+      CHECK(doc != nullptr && doc->kind == each.completionKind &&
+            !doc->value.empty());
+      ++documented;
+    }
+    CHECK(documented != 0);
+
+    world.change(2, "entity E {}");
+    lsp::HoverParams hoverQuery;
+    hoverQuery.textDocument.uri = lsp::Uri::parse(kUri);
+    hoverQuery.position = {0, 1};
+    const std::optional<lsp::Hover> hover = world.server().hover(hoverQuery);
+    CHECK(hover.has_value());
+    if (!hover.has_value()) continue;
+    const auto* content = std::get_if<lsp::MarkupContent>(&hover->contents);
+    CHECK(content != nullptr && content->kind == each.hoverKind &&
+          content->value.starts_with("Declares an entity"));
+  }
+}
+
 void virtual_content_waits_for_the_workspace_scan(bool withFolders) {
   struct DeferredWorkspace final : cursiv::DefaultWorkspaceManager {
     std::shared_future<void> loaded;
@@ -443,6 +512,51 @@ void virtual_content_waits_for_the_workspace_scan(bool withFolders) {
   CHECK(answer.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
   const auto content = answer.get();
   CHECK(content.has_value() && content->text == "datatype Library");
+}
+
+// A library on a scheme the content provider serves has no file behind it:
+// its text lives in the store. Closing its tab keeps it there, and the
+// reference into it still resolves.
+void a_closed_virtual_document_stays() {
+  struct LibraryWorkspace final : cursiv::DefaultWorkspaceManager {
+    using DefaultWorkspaceManager::DefaultWorkspaceManager;
+
+   protected:
+    void loadAdditionalDocuments(
+        std::span<const cursiv::WorkspaceFolder>,
+        cursiv::function_ref<void(std::string_view, std::string)> add)
+        override {
+      add("builtin:/library.ws", "datatype Library\n");
+    }
+  };
+  constexpr std::string_view kLibrary = "builtin:/library.ws";
+  World world;
+  world.shared.workspaceManager =
+      std::make_unique<LibraryWorkspace>(world.shared);
+  world.shared.textDocumentContentProvider =
+      std::make_unique<cursiv::DefaultTextDocumentContentProvider>(
+          world.shared, std::vector<std::string>{"builtin"});
+  (void)world.handshake();
+  world.open("entity A { x : Library }\n");
+  lsp::DidOpenTextDocumentParams opened;
+  opened.textDocument.uri = lsp::Uri::parse(std::string(kLibrary));
+  opened.textDocument.languageId = std::string("workspace");
+  opened.textDocument.version = 1;
+  opened.textDocument.text = std::string("datatype Library\n");
+  world.server().didOpen(opened);
+
+  world.close(kLibrary);
+  const auto library = world.shared.documents->getDocument(kLibrary);
+  CHECK(library != nullptr && !library->isOpen);
+  lsp::DefinitionParams definition;
+  definition.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  definition.position = {0, 16};
+  const auto links = world.server().definition(definition, cursiv::kNoCancel);
+  CHECK(links.size() == 1 && links.front().targetUri.toString() == kLibrary);
+  lsp::TextDocumentContentParams content;
+  content.uri = lsp::Uri::parse(std::string(kLibrary));
+  const auto text = world.server().textDocumentContent(content);
+  CHECK(text.has_value() && text->text == "datatype Library\n");
 }
 
 // The handler's options are the announcement and the routing: the two arms it
@@ -832,6 +946,205 @@ void a_watched_file_joins_the_workspace() {
   CHECK(c != nullptr && !c->diagnostics.empty());
 }
 
+// An open on any URI, where `World::open` names the world's one document.
+void open_at(const World& world, std::string_view uri,
+             std::string_view languageId, std::string_view text) {
+  lsp::DidOpenTextDocumentParams params;
+  params.textDocument.uri = lsp::Uri::parse(std::string(uri));
+  params.textDocument.languageId = std::string(languageId);
+  params.textDocument.version = 1;
+  params.textDocument.text = std::string(text);
+  world.server().didOpen(params);
+}
+
+// The names a workspace query answers.
+std::vector<std::string> symbol_names(const World& world,
+                                      std::string_view query) {
+  lsp::WorkspaceSymbolParams params;
+  params.query = std::string(query);
+  std::vector<std::string> names;
+  for (const lsp::WorkspaceSymbol& symbol :
+       world.server().workspaceSymbol(params, cursiv::kNoCancel))
+    names.push_back(symbol.name);
+  return names;
+}
+
+// A watched event brings in only what the scan would: a file under a folder
+// the scan leaves out -- hidden, `node_modules`, `out`, at any depth below the
+// root -- stays out, and so does what a folder event on one would expand to.
+// The folders above a root are not asked: a workspace opened inside a hidden
+// folder still takes its files.
+void a_watched_file_in_an_excluded_folder_stays_out() {
+  const World world(true);
+  (void)world.handshake(world.folderParams());
+  const std::string_view evented[] = {
+      "file:///w/node_modules/v.ws", "file:///w/src/node_modules/pkg/v.ws",
+      "file:///w/out/o.ws", "file:///w/.cache/h.ws"};
+  constexpr std::string_view kUnderFolder = "file:///w/node_modules/lib/x.ws";
+  constexpr std::string_view kKept = "file:///w/src/k.ws";
+  lsp::DidChangeWatchedFilesParams params;
+  for (const std::string_view uri : evented) {
+    world.disk->addFile(std::string(uri), "datatype Vendor\n");
+    params.changes.push_back(
+        lsp::FileEvent{.uri = lsp::Uri::parse(std::string(uri)),
+                       .type = lsp::FileChangeType::Changed});
+  }
+  world.disk->addFile(std::string(kUnderFolder), "datatype Vendor\n");
+  params.changes.push_back(
+      lsp::FileEvent{.uri = lsp::Uri::parse("file:///w/node_modules"),
+                     .type = lsp::FileChangeType::Created});
+  world.disk->addFile(std::string(kKept), "datatype Kept\n");
+  params.changes.push_back(
+      lsp::FileEvent{.uri = lsp::Uri::parse(std::string(kKept)),
+                     .type = lsp::FileChangeType::Created});
+  world.server().didChangeWatchedFiles(params);
+
+  for (const std::string_view uri : evented)
+    CHECK(world.shared.documents->getDocument(uri) == nullptr);
+  CHECK(world.shared.documents->getDocument(kUnderFolder) == nullptr);
+  CHECK(world.shared.documents->getDocument(kKept) != nullptr);
+  CHECK(symbol_names(world, "Vendor").empty());
+
+  const World hidden(true);
+  lsp::InitializeParams folders;
+  folders.workspaceFolders =
+      lsp::Array<lsp::WorkspaceFolder>{lsp::WorkspaceFolder{
+          .uri = lsp::Uri::parse("file:///.config/w"), .name = "w"}};
+  (void)hidden.handshake(folders);
+  constexpr std::string_view kInside = "file:///.config/w/k.ws";
+  hidden.disk->addFile(std::string(kInside), "datatype Kept\n");
+  lsp::DidChangeWatchedFilesParams created;
+  created.changes.push_back(
+      lsp::FileEvent{.uri = lsp::Uri::parse(std::string(kInside)),
+                     .type = lsp::FileChangeType::Created});
+  hidden.server().didChangeWatchedFiles(created);
+  CHECK(hidden.shared.documents->getDocument(kInside) != nullptr);
+}
+
+// A file outside the workspace folders closes like one inside: its saved
+// content replaces the buffer, and the document stays indexed.
+void a_closed_file_outside_the_folders_keeps_its_saved_content() {
+  const World world(true);
+  constexpr std::string_view kOutside = "file:///elsewhere/b.ws";
+  world.disk->addFile(std::string(kUri), "datatype Main\n");
+  world.disk->addFile(std::string(kOutside), "datatype Saved\n");
+  (void)world.handshake(world.folderParams());
+  CHECK(world.shared.documents->getDocument(kOutside) == nullptr);
+
+  open_at(world, kOutside, "workspace", "datatype Buffered\n");
+  CHECK(symbol_names(world, "Buffered").size() == 1);
+  world.close(kOutside);
+
+  const std::shared_ptr<cursiv::Document> closed =
+      world.shared.documents->getDocument(kOutside);
+  CHECK(closed != nullptr && !closed->isOpen);
+  CHECK(closed != nullptr &&
+        closed->textDocument().getText() == "datatype Saved\n");
+  CHECK(symbol_names(world, "Saved").size() == 1);
+  CHECK(symbol_names(world, "Buffered").empty());
+}
+
+// A buffer the file system cannot name -- `untitled:` under the local
+// provider -- still closes, and with nothing saved behind it, it leaves: its
+// symbols go, and a reference to it breaks.
+void a_closed_untitled_buffer_leaves_the_workspace() {
+  World world;
+  world.shared.fileSystemProvider =
+      std::make_unique<cursiv::LocalFileSystemProvider>();
+  (void)world.handshake();
+  constexpr std::string_view kUntitled = "untitled:Unsaved-1";
+  open_at(world, kUntitled, "workspace", "datatype Ghost\n");
+  world.open("entity A { x : Ghost }\n");
+  lsp::DefinitionParams definition;
+  definition.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  definition.position = {0, 16};
+  const auto before = world.server().definition(definition, cursiv::kNoCancel);
+  CHECK(before.size() == 1 && before.front().targetUri.toString() == kUntitled);
+
+  bool closed = true;
+  try {
+    world.close(kUntitled);
+  } catch (const cursiv::FileSystemError&) {
+    closed = false;
+  }
+  CHECK(closed);
+  CHECK(world.shared.documents->getDocument(kUntitled) == nullptr);
+  CHECK(symbol_names(world, "Ghost").empty());
+  CHECK(world.server().definition(definition, cursiv::kNoCancel).empty());
+  const lsp::PublishDiagnosticsParams* gone =
+      lastSnapshotOf(*world.client, kUntitled);
+  CHECK(gone != nullptr && gone->diagnostics.empty());
+  const lsp::PublishDiagnosticsParams* broken =
+      lastSnapshotOf(*world.client, kUri);
+  CHECK(broken != nullptr && !broken->diagnostics.empty());
+}
+
+// Answers a keystroke with the character typed, under the one trigger it
+// names: what reaches it is readable from the edit.
+struct KeystrokeFormatter final : cursiv::Formatter {
+  std::string trigger;
+  explicit KeystrokeFormatter(std::string ch) : trigger(std::move(ch)) {}
+
+  [[nodiscard]] std::vector<lsp::TextEdit> formatDocument(
+      const cursiv::Document&, const lsp::DocumentFormattingParams&,
+      const cursiv::CancellationToken&) const override {
+    return {};
+  }
+  [[nodiscard]] std::vector<lsp::TextEdit> formatDocumentRange(
+      const cursiv::Document&, const lsp::DocumentRangeFormattingParams&,
+      const cursiv::CancellationToken&) const override {
+    return {};
+  }
+  [[nodiscard]] std::vector<lsp::TextEdit> formatDocumentOnType(
+      const cursiv::Document&,
+      const lsp::DocumentOnTypeFormattingParams& params,
+      const cursiv::CancellationToken&) const override {
+    return {lsp::TextEdit{.range = {}, .newText = params.ch}};
+  }
+  [[nodiscard]] std::optional<lsp::DocumentOnTypeFormattingOptions>
+  formatOnTypeOptions() const noexcept override {
+    return lsp::DocumentOnTypeFormattingOptions{.firstTriggerCharacter =
+                                                    trigger};
+  }
+};
+
+// The on-type characters are a union over the languages, like the completion
+// and signature ones, since the session announces one set. Each language
+// still answers only the characters it named.
+void the_on_type_triggers_are_a_union_over_the_languages() {
+  World world;
+  world.ws->formatter = std::make_unique<KeystrokeFormatter>("}");
+  auto second = std::make_unique<World::Language>(world.shared);
+  second->languageMetaData = {"second", {".second"}, {}};
+  second->parser = ws::generated::Workspace::create_parser();
+  second->astReflection = ws::generated::Workspace::create_ast_reflection();
+  second->nameProvider = std::make_unique<cursiv::DefaultNameProvider>(*second);
+  cursiv::install_default_core_services(*second);
+  cursiv::install_default_lsp_services(*second);
+  second->formatter = std::make_unique<KeystrokeFormatter>(";");
+  world.shared.serviceRegistry->registerServices(std::move(second));
+
+  const lsp::InitializeResult result = world.handshake();
+  const auto& announced = result.capabilities.documentOnTypeFormattingProvider;
+  CHECK(announced.has_value() && announced->firstTriggerCharacter == "}" &&
+        announced->moreTriggerCharacter ==
+            std::optional<lsp::Array<lsp::String>>{{";"}});
+
+  constexpr std::string_view kSecond = "file:///w/b.second";
+  world.open("entity A { }\n");
+  open_at(world, kSecond, "second", "entity B { }\n");
+  const auto typed = [&](std::string_view uri, std::string ch) {
+    lsp::DocumentOnTypeFormattingParams params;
+    params.textDocument.uri = lsp::Uri::parse(std::string(uri));
+    params.ch = std::move(ch);
+    return world.server().onTypeFormatting(params, cursiv::kNoCancel).size();
+  };
+  CHECK(typed(kUri, "}") == 1);
+  CHECK(typed(kUri, ";") == 0);
+  CHECK(typed(kSecond, ";") == 1);
+  CHECK(typed(kSecond, "}") == 0);
+}
+
 // Every write a notification makes is durable: what the client already
 // committed on its side is installed whatever arrives behind it.
 void every_notification_writes_durably() {
@@ -930,8 +1243,10 @@ void run() {
   the_handshake_promises_only_what_is_installed();
   the_completion_triggers_are_the_providers_own();
   completion_edits_follow_insert_replace_support();
+  prose_follows_the_clients_preferred_format();
   virtual_content_waits_for_the_workspace_scan(false);
   virtual_content_waits_for_the_workspace_scan(true);
+  a_closed_virtual_document_stays();
   the_file_operations_are_the_handlers_own();
   an_edit_republishes_what_it_repaired();
   opening_parses_once_and_unchanged_edits_keep_the_tree();
@@ -945,6 +1260,10 @@ void run() {
   a_scanned_document_publishes_without_a_tab();
   a_closed_tab_keeps_the_verdict_of_its_file();
   a_watched_file_joins_the_workspace();
+  a_watched_file_in_an_excluded_folder_stays_out();
+  a_closed_file_outside_the_folders_keeps_its_saved_content();
+  a_closed_untitled_buffer_leaves_the_workspace();
+  the_on_type_triggers_are_a_union_over_the_languages();
   every_notification_writes_durably();
   an_open_on_known_bytes_still_builds();
   a_command_may_write_to_the_workspace();
@@ -1030,7 +1349,44 @@ struct Server final : cursiv::DefaultLanguageServer {
       const lsp::DocumentSymbolParams&,
       const cursiv::CancellationToken&) const override {
     ++symbols;
-    return {};
+    return outline();
+  }
+  // `Outer` holds `Inner`, which holds `Deep`; `Next` stands beside `Outer`.
+  static std::vector<lsp::DocumentSymbol> outline() {
+    const auto symbol = [](std::string name, lsp::Range range) {
+      lsp::DocumentSymbol out;
+      out.name = std::move(name);
+      out.kind = lsp::SymbolKindEnum(lsp::SymbolKind::Class);
+      out.range = range;
+      out.selectionRange = {range.start, range.start};
+      return out;
+    };
+    lsp::DocumentSymbol inner = symbol("Inner", {{1, 2}, {2, 3}});
+    inner.children.emplace().push_back(symbol("Deep", {{2, 4}, {2, 8}}));
+    lsp::DocumentSymbol outer = symbol("Outer", {{0, 0}, {3, 1}});
+    outer.children.emplace().push_back(std::move(inner));
+    std::vector<lsp::DocumentSymbol> top;
+    top.push_back(std::move(outer));
+    top.push_back(symbol("Next", {{4, 0}, {4, 9}}));
+    return top;
+  }
+  // A quick fix with an edit, a bare command, and a disabled command. Asked
+  // on line 1, only the quick fix.
+  std::vector<lsp::CodeAction> codeAction(
+      const lsp::CodeActionParams& params,
+      const cursiv::CancellationToken&) const override {
+    lsp::CodeAction fix;
+    fix.title = "Fix";
+    fix.kind = lsp::CodeActionKindEnum(lsp::CodeActionKind::QuickFix);
+    fix.edit = lsp::WorkspaceEdit{};
+    if (params.range.start.line == 1) return {fix};
+    lsp::CodeAction run;
+    run.title = "Run";
+    run.command = lsp::Command{.title = "Run it", .command = "cursiv.run"};
+    lsp::CodeAction disabled = run;
+    disabled.title = "Not now";
+    disabled.disabled = lsp::CodeActionDisabled{.reason = "busy"};
+    return {fix, run, disabled};
   }
   static std::vector<lsp::LocationLink> navigation() {
     return {{.targetUri = lsp::Uri::parse("file:///target.ws"),
@@ -1156,6 +1512,95 @@ void shutdown_obeys_the_handshake() {
   }
 }
 
+// The outline and the code actions take the shapes the client declares it
+// reads: the tree and the action literals when it says so. Otherwise the flat
+// symbol list, each symbol naming its parent, and bare commands, where an
+// action with an edit or marked disabled has no place.
+void answers_take_the_shapes_the_client_reads() {
+  const std::string_view capabilities[] = {
+      "{}",
+      R"({"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":false},"codeAction":{"dynamicRegistration":true}}})",
+      R"({"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}})"};
+  for (unsigned mode = 0; mode != 3; ++mode) {
+    const bool rich = mode == 2;
+    Session s;
+    s.initialize(capabilities[mode]);
+
+    s.request(2, "textDocument/documentSymbol",
+              R"({"textDocument":{"uri":"file:///source.ws"}})");
+    const auto outline = s.answer().get();
+    CHECK(outline.result.has_value() && outline.result->isArray());
+    if (outline.result.has_value() && outline.result->isArray()) {
+      const auto& symbols = outline.result->array();
+      const auto name = [&](std::size_t i) {
+        return symbols[i].object().get("name").string();
+      };
+      if (rich) {
+        CHECK(symbols.size() == 2 && name(0) == "Outer" && name(1) == "Next");
+        CHECK(symbols.front().object().contains("children"));
+      } else {
+        CHECK(symbols.size() == 4);
+        const char* const names[] = {"Outer", "Inner", "Deep", "Next"};
+        const char* const containers[] = {nullptr, "Outer", "Inner", nullptr};
+        for (std::size_t i = 0; i != symbols.size() && i != 4; ++i) {
+          const auto& symbol = symbols[i].object();
+          CHECK(name(i) == names[i]);
+          CHECK(!symbol.contains("children"));
+          const auto* container = symbol.find("containerName");
+          CHECK((container != nullptr) == (containers[i] != nullptr));
+          if (container != nullptr && containers[i] != nullptr)
+            CHECK(container->string() == containers[i]);
+          const auto* location = symbol.find("location");
+          CHECK(location != nullptr);
+          if (location == nullptr || i != 2) continue;
+          CHECK(location->object().get("uri").string() == "file:///source.ws");
+          const auto& range = location->object().get("range").object();
+          CHECK(range.get("end").object().get("character").integer() == 8);
+        }
+      }
+    }
+
+    s.request(
+        3, "textDocument/codeAction",
+        R"({"textDocument":{"uri":"file:///source.ws"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}})");
+    const auto actions = s.answer().get();
+    CHECK(actions.result.has_value() && actions.result->isArray());
+    if (actions.result.has_value() && actions.result->isArray()) {
+      const auto& offered = actions.result->array();
+      if (rich) {
+        CHECK(offered.size() == 3 && offered.front().object().contains("edit"));
+        for (const auto& action : offered) {
+          const auto* command = action.object().find("command");
+          CHECK(command == nullptr || command->isObject());
+        }
+      } else {
+        CHECK(offered.size() == 1);
+        if (offered.size() == 1) {
+          CHECK(offered.front().object().get("title").string() == "Run it");
+          CHECK(offered.front().object().get("command").string() ==
+                "cursiv.run");
+        }
+      }
+    }
+
+    // Nothing a bare command can carry: the null of "nothing to offer".
+    s.request(
+        4, "textDocument/codeAction",
+        R"({"textDocument":{"uri":"file:///source.ws"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":0}},"context":{"diagnostics":[]}})");
+    const auto editsOnly = s.answer().get();
+    CHECK(editsOnly.result.has_value());
+    if (editsOnly.result.has_value())
+      CHECK(rich ? editsOnly.result->isArray() &&
+                       editsOnly.result->array().size() == 1
+                 : editsOnly.result->isNull());
+
+    s.request(5, "shutdown");
+    CHECK(!s.answer().get().error.has_value());
+    s.notify("exit");
+    CHECK(s.running.get() == 0);
+  }
+}
+
 void cancellation_does_not_wait_for_an_earlier_notification() {
   Session s;
   s.initialize();
@@ -1234,6 +1679,7 @@ void a_notification_does_not_cancel_its_own_write() {
 
 void run() {
   shutdown_obeys_the_handshake();
+  answers_take_the_shapes_the_client_reads();
   cancellation_does_not_wait_for_an_earlier_notification();
   exit_cancels_a_request_behind_a_dropped_notification();
   a_client_gone_mid_request_ends_the_session();
@@ -1534,7 +1980,7 @@ void a_tape_is_declined_and_not_answered_from_the_start_state() {
   // ...and the same door answers a tree the engine did write.
   namespace g = fdoc::generated::DocG;
   cursiv::Cst stream;
-  cursiv::lr_parser<g::kTable>.parse(text, stream, nullptr, g::kDrivePtr);
+  cursiv::lr_parser<g::kTable>.parse(text, stream, nullptr, &g::kDrive);
   CHECK(stream.engine_stamped());
   CHECK(stream.grammar() ==
         nullptr);  // the engine wrote it, no parser finished it
@@ -1600,10 +2046,32 @@ void a_language_with_no_provider_owes_no_slot() {
   CHECK(language.firstMissingService().empty());
 }
 
+// A grammar that declares no reference keeps no reference tables: every
+// member answers as no reference, and no lookup finds one.
+void a_grammar_without_references_answers_none() {
+  const std::unique_ptr<cursiv::AstReflection> reflection =
+      fdoc::generated::DocG::create_ast_reflection();
+  CHECK(!reflection->hasMultiReference());
+  std::uint16_t fields = 0;
+  for (; !reflection->fieldName(fields).empty(); ++fields) {
+    CHECK(!reflection->isMultiReference(fields));
+    CHECK(reflection->referenceNarrowTarget(fields, 0) == nullptr);
+    CHECK(reflection->referenceAccepts(fields).empty());
+  }
+  CHECK(fields != 0);
+  for (const cursiv::AstTypeTag* const type : reflection->getAllTypes()) {
+    CHECK(reflection->referenceIndexOf(type) == cursiv::kNoReference);
+    for (std::uint16_t f = 0; f < fields; ++f)
+      CHECK(reflection->referenceIndexOf(type, reflection->fieldName(f)) ==
+            cursiv::kNoReference);
+  }
+}
+
 }  // namespace
 
 void run() {
   a_language_with_no_provider_owes_no_slot();
+  a_grammar_without_references_answers_none();
   the_colours_are_the_same_colours();
   the_two_answers_never_cross();
   the_state_names_exactly_what_may_be_written();
@@ -1727,10 +2195,16 @@ struct CountingListener final : cursiv::ConfigurationSectionListener {
   return lsp::LSPAny(std::move(section));
 }
 
-lsp::InitializeParams supporting(bool configuration) {
+// A client that pulls `configuration` when told, and accepts the
+// `didChangeConfiguration` registration unless told otherwise.
+lsp::InitializeParams supporting(
+    bool configuration, std::optional<bool> dynamicRegistration = true) {
   lsp::InitializeParams params;
   lsp::WorkspaceClientCapabilities workspace;
   workspace.configuration = configuration;
+  if (dynamicRegistration.has_value())
+    workspace.didChangeConfiguration.emplace().dynamicRegistration =
+        *dynamicRegistration;
   params.capabilities.workspace = std::move(workspace);
   return params;
 }
@@ -1757,6 +2231,28 @@ void the_pull_subscribes_before_it_fetches() {
   const auto greeting = provider.getConfiguration("workspace", "greeting");
   CHECK(greeting.has_value() && greeting->isString() &&
         greeting->string() == "hello");
+}
+
+// The pull follows `configuration` and the registration follows its own
+// capability: a client that refuses dynamic registration, or never mentions
+// it, is still asked for its settings but is never sent the registration.
+void the_registration_follows_its_own_capability() {
+  for (const std::optional<bool> dynamicRegistration :
+       {std::optional<bool>{false}, std::optional<bool>{}}) {
+    World world;
+    cursiv::DefaultConfigurationProvider provider(world.shared);
+    provider.initialize(supporting(true, dynamicRegistration));
+    RecordingClient client;
+    provider.initialized(&client);
+    CHECK(client.calls == std::vector<std::string>{"fetch"});
+    CHECK(client.asked == std::vector<std::string>{"workspace"});
+    CHECK(!provider.isReady());
+    if (client.answer) client.answer({section_with("greeting", "hello")});
+    CHECK(provider.isReady());
+    const auto greeting = provider.getConfiguration("workspace", "greeting");
+    CHECK(greeting.has_value() && greeting->isString() &&
+          greeting->string() == "hello");
+  }
 }
 
 // Nothing to pull is ready at once: unsupported client, and absent client.
@@ -1980,6 +2476,7 @@ void validation_categories_reads_both_spellings() {
 
 void run() {
   the_pull_subscribes_before_it_fetches();
+  the_registration_follows_its_own_capability();
   nothing_to_pull_is_ready_at_once();
   a_short_answer_is_clamped();
   empty_changes_pull_fresh_configuration();

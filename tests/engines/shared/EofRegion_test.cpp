@@ -1,8 +1,7 @@
-#include "EofRegionGrammar.hpp"
+#include "engines/shared/EofRegionAst.hpp"
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/shared/EofRegionGrammar.hpp"
 #include "eofpurell/generated/PureLl/Module.hpp"
 #include "eofpurelr/generated/PureLr/Module.hpp"
 #include "eofregionaux/generated/Aux/Module.hpp"
@@ -12,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace eof_region_cases {
 
@@ -150,7 +150,9 @@ void run() {
   const auto lr = teofregion::generated::Lr::create_parser();
   struct Case {
     std::string_view source, prefix, suffix, value;
+    std::vector<std::string_view> args = {};
   };
+  // A `?` or `(` operand ends before `?>`, which implies the `;`.
   const Case cases[] = {
       {" \n// html<?php echo 1;?> \t ", " \n// html", " \t ", "1"},
       {"<?= 1 ?>", "", "", "1"},
@@ -159,6 +161,8 @@ void run() {
       {"<?php echo 1;?>\nhtml", "", "html", "1"},
       {"<?php echo 1; \t ", "", "", "1"},
       {"<?php echo 1;?>", "", "", "1"},
+      {"<?php echo a ? b : c ?> \t ", "", " \t ", "a", {"b", "c"}},
+      {"<?php echo a(b) ?> \t ", "", " \t ", "a", {"b"}},
   };
   for (const auto* parser : {ll.get(), lr.get()}) {
     for (const auto& test : cases) {
@@ -191,7 +195,13 @@ void run() {
       if (!echo || echo->args.size() != 1) continue;
       const auto* value = echo->args[0];
       CHECK(value && value->parent == echo && value->name == test.value);
-      CHECK(value && value->args.empty());
+      CHECK(value && value->args.size() == test.args.size());
+      if (!value || value->args.size() != test.args.size()) continue;
+      for (std::size_t i = 0; const std::string_view arg : test.args) {
+        const auto* operand = value->args[i++];
+        CHECK(operand && operand->parent == value && operand->name == arg &&
+              operand->args.empty());
+      }
     }
   }
 
@@ -208,10 +218,15 @@ namespace {
 
 const char* engine = "";
 
-std::string read(const cursiv::Parser& parser, std::string_view text) {
+std::string read(const cursiv::Parser& parser, std::string_view text,
+                 bool inside = false) {
   const std::string source = "bytecond:" + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
-  const auto* const doc = r.value_as<tbytecond::ast::Doc>();
+  const auto* doc = r.value_as<tbytecond::ast::Doc>();
+  if (inside) {
+    const auto* section = r.value_as<tbytecond::ast::Section>();
+    doc = section != nullptr ? section->doc : nullptr;
+  }
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr)
     return "<refused>";
   std::string out;
@@ -222,24 +237,9 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
   return out;
 }
 
-std::string inside(const cursiv::Parser& parser, std::string_view text) {
-  const std::string source = "bytecond:" + std::string(text);
-  const cursiv::ParseResult r = parser.parse(source);
-  const auto* const section = r.value_as<tbytecond::ast::Section>();
-  if (!r.accepted || !r.diagnostics.empty() || section == nullptr ||
-      section->doc == nullptr)
-    return "<refused>";
-  std::string out;
-  for (const tbytecond::ast::Item* const item : section->doc->items) {
-    if (!out.empty()) out += '|';
-    out += item->text;
-  }
-  return out;
-}
-
-template <class Read>
-void check(Read&& reads, std::string_view text, std::string_view expected) {
-  const std::string got = reads(text);
+void check(const cursiv::Parser& parser, std::string_view text,
+           std::string_view expected, bool inside) {
+  const std::string got = read(parser, text, inside);
   if (got != expected)
     std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
                 static_cast<int>(text.size()), text.data(), got.c_str(),
@@ -248,8 +248,9 @@ void check(Read&& reads, std::string_view text, std::string_view expected) {
 }
 
 void exercise(const cursiv::Parser& parser) {
-  const auto r = [&](std::string_view text, std::string_view expected) {
-    check([&](std::string_view t) { return read(parser, t); }, text, expected);
+  const auto r = [&](std::string_view text, std::string_view expected,
+                     bool inside = false) {
+    check(parser, text, expected, inside);
   };
   // `!byte` before a token longer than one byte; a token of one byte is the
   // one `byte` reads.
@@ -276,14 +277,11 @@ void exercise(const cursiv::Parser& parser) {
   r("teof:x", "x");
   r("teof:xy", "<refused>");
   // ...and in a section, where the section ends.
-  const auto h = [&](std::string_view text, std::string_view expected) {
-    check([&](std::string_view t) { return inside(parser, t); }, text, expected);
-  };
-  h("<ab>", "ab");
-  h("<a>", "a");
-  h("<>", "<refused>");
-  h("<ab", "<refused>");
-  h("<ab>>", "<refused>");
+  r("<ab>", "ab", true);
+  r("<a>", "a", true);
+  r("<>", "<refused>", true);
+  r("<ab", "<refused>", true);
+  r("<ab>>", "<refused>", true);
 }
 
 }  // namespace

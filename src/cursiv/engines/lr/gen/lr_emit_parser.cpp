@@ -22,7 +22,8 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/lr/gen/LrDfaEmitter.hpp"
+#include "cursiv/engines/lr/gen/LrFinalTable.hpp"
+#include "cursiv/engines/lr/gen/LrLexView.hpp"
 #include "cursiv/engines/lr/gen/LrPeek.hpp"
 #include "cursiv/engines/lr/gen/LrProgramLayout.hpp"
 #include "cursiv/engines/lr/gen/lr_term_run.hpp"
@@ -35,6 +36,8 @@
 #include "cursiv/engines/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/engines/shared/gen/GapEmitter.hpp"
 #include "cursiv/engines/shared/gen/GapReach.hpp"
+#include "cursiv/engines/shared/gen/LexFirstByte.hpp"
+#include "cursiv/engines/shared/gen/LexWalkEmitter.hpp"
 #include "cursiv/engines/shared/gen/LexicalPredicateEmitter.hpp"
 #include "cursiv/engines/shared/gen/NamedHead.hpp"
 #include "cursiv/engines/shared/gen/PredicateEmitter.hpp"
@@ -51,16 +54,15 @@ namespace cursiv {
 namespace {
 
 struct LrParserEmitter : EmitOutput {
-  LrParserEmitter(const LrBuildTable& table, const LrProgramLayout& layout)
-      : a(table),
-        gotos(table.gotoRows, table.cfg.nnts),
-        dfa(table.cls, {table.dfaNext.data(), table.dfaNext.size()}, table.ncls,
-            table.ndfa),
-        programs(layout) {}
+  explicit LrParserEmitter(const LrFinalTable& done)
+      : a(done.table()),
+        gotos(a.gotoRows, a.cfg.nnts),
+        dfa(a.cls, {a.dfaNext.data(), a.dfaNext.size()}, a.ncls, a.ndfa),
+        programs(done.programs()) {}
 
   const LrBuildTable& a;
   const LrGotoColumns gotos;
-  LrDfaEmitter dfa;
+  LexDfaEmitter dfa;
   // Whether a mode covers another: the token in hand then survives the
   // change, and a miss re-lexes.
   bool any_sub() const {
@@ -342,49 +344,28 @@ inline constexpr RowsTape kRowsTape{};
     line("inline constexpr ::cursiv::LrLexTape<kTable> kTape{};");
     if (a.nrelays != 0)
       raw(R"(using Relays = ::cursiv::LexRelayRun<::cursiv::LrLexTape<kTable>>;
-inline ::std::uint16_t walked_to(const char* src, ::std::uint16_t mode,
-                                 ::cursiv::TextOffset from,
-                                 ::cursiv::TextOffset at) {
-  ::std::uint16_t s = kTable.modeStart[mode];
-  for (::cursiv::TextOffset i = from; i < at && s != 0xFFFFu; ++i)
-    s = kTable.next_byte(s, static_cast<unsigned char>(src[i]));
-  return s;
-}
 inline bool relay_among(::cursiv::TextOffset e, ::std::uint16_t t,
                         unsigned as, ::cursiv::TextOffset end,
                         ::std::uint16_t term, unsigned was) {
   if (e != end) return e > end;
   return t != 0xFFFFu && kTape.prefers_relayed(t, as, term, was);
 }
+// `s` is the state the walk's own match `term` was read in.
 inline bool relay_better(const char* src, ::cursiv::TextOffset len,
-                         ::std::uint16_t mode, ::cursiv::TextOffset from,
-                         ::cursiv::TextOffset e, ::std::uint16_t t,
-                         unsigned as, ::cursiv::TextOffset end,
-                         ::std::uint16_t term, ::cursiv::TextOffset& far) {
+                         ::std::uint16_t s, ::cursiv::TextOffset e,
+                         ::std::uint16_t t, unsigned as,
+                         ::cursiv::TextOffset end, ::std::uint16_t term,
+                         ::cursiv::TextOffset& far) {
   if (e != end) return e > end;
   if (t == 0xFFFFu) return false;
   if (term == 0xFFFFu) return true;
-  const ::std::uint16_t s = walked_to(src, mode, from, end);
-  return kTape.prefers_relayed(
-      t, as, term,
-      s == 0xFFFFu ? 0u : kTape.tier(s, term, src, end, len, far));
+  return kTape.prefers_relayed(t, as, term,
+                               kTape.tier(s, term, src, end, len, far));
 }
-inline bool relay_takes(const char* src, ::std::uint16_t mode,
-                        ::cursiv::TextOffset from, ::cursiv::TextOffset at,
-                        ::std::uint16_t reader, unsigned as,
-                        ::std::uint16_t term) {
-  if (term == 0xFFFFu || as == 0) return false;
-  const ::std::uint16_t s = walked_to(src, mode, from, at);
-  return s != 0xFFFFu && kTape.takes(s, kTape.taking(reader, as), term);
-}
-)");
-    if (a.nrelays != 0 && reserving())
-      raw(R"(inline bool relay_reserved(const char* src, ::cursiv::TextOffset len,
-                           ::std::uint16_t mode, ::cursiv::TextOffset from,
-                           ::cursiv::TextOffset at, ::std::uint16_t t,
-                           ::cursiv::TextOffset& far) {
-  const ::std::uint16_t s = walked_to(src, mode, from, at);
-  return s != 0xFFFFu && kTape.reserves(s, t, src, from, at, len, far);
+inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
+                        unsigned as, ::std::uint16_t term) {
+  return term != 0xFFFFu && as != 0 &&
+         kTape.takes(s, kTape.taking(reader, as), term);
 }
 )");
     // Per terminal: trivia bit 0, recorded bit 1, a winner some mode flags bit
@@ -434,80 +415,14 @@ inline bool relay_takes(const char* src, ::std::uint16_t mode,
 )");
   }
 
-  // The widest byte `lt8` answers for: past it the subtraction borrows out
-  // of the lowest lane, the one `ctzll` reads.
-  static constexpr unsigned kSwarBelowMax = 0x80;
-
-  bool swarRuns = false, rangeRuns = false;
-  static constexpr std::string_view kSwarMark = "\x01SWAR\n";
-
-  void emit_swar() { raw(kSwarMark); }
-
-  // Replaces the marker once every run is written: the forms they read are
-  // not known before.
-  void settle_swar() {
-    std::string helpers =
-        R"(CURSIV_ALWAYS_INLINE inline bool in_set(const ::std::uint64_t* s, unsigned char b) {
-  return (s[b >> 6] >> (b & 63u)) & 1u;
-}
-
-)";
-    if (swarRuns || rangeRuns)
-      helpers +=
-          R"(inline constexpr ::std::uint64_t kRep = 0x0101010101010101ull;
-inline constexpr ::std::uint64_t kHi = 0x8080808080808080ull;
-[[maybe_unused]] inline ::std::uint64_t ld64(const char* p) {
-  ::std::uint64_t w;
-  ::std::memcpy(&w, p, 8);
-  if constexpr (::std::endian::native == ::std::endian::big) {
-    w = ((w & 0x00ff00ff00ff00ffull) << 8) |
-        ((w >> 8) & 0x00ff00ff00ff00ffull);
-    w = ((w & 0x0000ffff0000ffffull) << 16) |
-        ((w >> 16) & 0x0000ffff0000ffffull);
-    w = (w << 32) | (w >> 32);
-  }
-  return w;
-}
-
-)";
-    if (swarRuns)
-      helpers +=
-          R"(// `eq8` marks a byte equal to `b`, `lt8` a byte below it. ONLY THE LOWEST SET
-// LANE IS EXACT: the borrow out of it can flag higher lanes that answer
-// nothing, so a mask is read by `ctzll` alone -- a union of them keeps that,
-// a negation or an intersection does not.
-[[maybe_unused]] inline ::std::uint64_t eq8(::std::uint64_t w, unsigned char b) {
-  const ::std::uint64_t x = w ^ (kRep * b);
-  return (x - kRep) & ~x & kHi;
-}
-
-// ...and `lt8` answers no `b` above 0x80: `kRep * b` would set every lane's
-// high bit and the subtraction borrow out of the lowest one, which is the
-// lane read.
-[[maybe_unused]] inline ::std::uint64_t lt8(::std::uint64_t w, unsigned char b) {
-  return (w - kRep * b) & ~w & kHi;
-}
-
-)";
-    if (rangeRuns)
-      helpers +=
-          R"(// The high bit of every lane holding lo <= x <= hi, exact: the lanes are
-// seven bits wide, so neither sum carries into its neighbour.
-[[maybe_unused]] inline ::std::uint64_t rng8(::std::uint64_t w, unsigned lo,
-                                           unsigned hi, unsigned mask = 0x7f) {
-  const ::std::uint64_t x = w & (kRep * mask);
-  return (x + kRep * (0x80u - lo)) & ~(x + kRep * (0x7fu - hi)) & kHi;
-}
-
-)";
-    out.replace(out.find(kSwarMark), kSwarMark.size(), helpers);
-  }
-
   // The rows, read where a mode stops spelling states.
   void emit_rows_loop() {
     raw(R"(Wtab:
   {
 )");
+    if (!a.dfaBacktrack.empty())
+      line("    if (kTable.modeBacktrack[mode] != 0)\n"
+           "      return walk_table_cached(src, len, mode, start);");
     if (a.nrelays == 0) line("    bool relays = false;");
     raw(R"(    ::cursiv::lex_walk_rows(kRowsTape, src, len, start, st, i, far, match,
         relays, [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
@@ -519,6 +434,7 @@ inline constexpr ::std::uint64_t kHi = 0x8080808080808080ull;
     raw(R"(        });
   }
 )");
+    if (!a.dfaBacktrack.empty()) line("  goto Wdone;");
   }
 
   // `case` labels several a line: the compiler folds a run of them as a range.
@@ -718,13 +634,13 @@ inline constexpr ::std::uint64_t kHi = 0x8080808080808080ull;
         line("    {");
         ByteSet stay{};
         std::copy(words.begin(), words.end(), stay.w);
-        raw("      static constexpr ::std::uint64_t kStay[4] = ");
+        raw("      static constexpr ::std::array<::std::uint64_t, 4> kStay{");
         set64(stay);
-        line(";");
-        const auto shape = classify_run(stay);
+        line("};");
+        const auto shape = LexRunShape::of(stay);
         if (shape.swar || shape.ranges)
           line(
-              "      if (at >= len || !in_set(kStay, "
+              "      if (at >= len || !in_set<kStay>("
               "static_cast<unsigned char>(src[at]))) break;");
         emit_run_adv(stay, "at", "kStay");
         line("      break;");
@@ -959,204 +875,34 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 )");
   }
 
-  // The two eight-byte shapes of a run: everything from `lo` up but at most
-  // four bytes, or a union of a few ASCII ranges. Either step may stop early,
-  // never late: the byte loop after it decides the end.
-  struct RunShape {
-    bool swar = false;
-    unsigned char lo = 0;
-    unsigned char b[4]{};
-    unsigned n = 0;
-    bool ranges = false;
-    unsigned char from[4]{};
-    unsigned char to[4]{};
-    unsigned nr = 0;
-    bool high = false;  // every byte past 0x7F is a member
-
-    bool paired(unsigned k) const {
-      if ((from[k] >> 5) != (to[k] >> 5)) return false;
-      for (unsigned j = 0; j < nr; ++j)
-        if (from[j] == (from[k] ^ 0x20u) && to[j] == (to[k] ^ 0x20u))
-          return true;
-      return false;
-    }
-  };
-
-  static RunShape classify_run(const ByteSet& stay) {
-    RunShape r;
-    // Only a content-shaped run pays for the eight-byte step.
-    const unsigned count = stay.count();
-    if (count <= 4) return r;
-    // Below lo every byte must be absent; above it at most four are absent.
-    // Removing lo bytes from the complement gives its first possible bound.
-    const unsigned lo = count < 252 ? 252 - count : 0;
-    if (lo <= kSwarBelowMax) {
-      bool below = false;
-      for (unsigned x = 0; x < lo; ++x)
-        below = below || stay.has(static_cast<unsigned char>(x));
-      if (!below) {
-        r.swar = true;
-        r.lo = static_cast<unsigned char>(lo);
-        for (unsigned x = lo; x < 256; ++x)
-          if (!stay.has(static_cast<unsigned char>(x)))
-            r.b[r.n++] = static_cast<unsigned char>(x);
-        return r;
-      }
-    }
-    unsigned nr = 0;
-    for (unsigned x = 0; x < 0x80; ++x) {
-      if (!stay.has(static_cast<unsigned char>(x))) continue;
-      if (nr != 0 && r.to[nr - 1] + 1u == x) {
-        r.to[nr - 1] = static_cast<unsigned char>(x);
-        continue;
-      }
-      if (nr == 4) return r;
-      r.from[nr] = r.to[nr] = static_cast<unsigned char>(x);
-      ++nr;
-    }
-    if (nr == 0) return r;
-    // The ranges are read off the low seven bits, so the high half is a
-    // member whole or not at all.
-    unsigned high = 0;
-    for (unsigned x = 0x80; x < 256; ++x)
-      if (stay.has(static_cast<unsigned char>(x))) ++high;
-    if (high != 0 && high != 0x80) return r;
-    r.ranges = true;
-    r.nr = nr;
-    r.high = high != 0;
-    return r;
-  }
-
-  unsigned runId = 0;
+  LexRunEmitter runs;
 
   // Advance `var` over the run of `stay` bytes, eight at a time where the set
   // has a SWAR shape.
   void emit_run_adv(const ByteSet& stay, std::string_view var,
                     std::string_view setName, bool content = true) {
-    RunShape r = classify_run(stay);
-    if (!content) r.ranges = false;
-    if (!r.swar && !r.ranges) {
-      fmt("    while ({0} < len && in_set({1}, "
-          "static_cast<unsigned char>(src[{0}]))) ++{0};\n",
-          var, setName);
-      return;
-    }
-    (r.swar ? swarRuns : rangeRuns) = true;
-    const unsigned id = runId++;
-    fmt("    while (len - {0} >= 8) {{\n"
-        "      const ::std::uint64_t w = ld64(src + {0});\n",
-        var);
-    if (r.swar) {
-      assert(r.lo <= kSwarBelowMax && "lt8 answers no byte above it");
-      fmt("      const ::std::uint64_t bad = lt8(w, {})", r.lo);
-      for (unsigned k = 0; k < r.n; ++k) fmt(" | eq8(w, {})", r.b[k]);
-    } else {
-      raw("      const ::std::uint64_t bad = (~(");
-      std::string_view sep;
-      for (unsigned k = 0; k < r.nr; ++k) {
-        const bool folded = r.paired(k);
-        if (folded && (r.from[k] & 0x20u)) continue;
-        fmt("{}rng8(w, {}, {}{})", sep, r.from[k], r.to[k],
-            folded ? ", 0x5f" : "");
-        sep = " | ";
-      }
-      raw(r.high ? ") & kHi & ~w)" : ") & kHi) | (w & kHi)");
-    }
-    fmt(";\n"
-        "      if (bad) {{ {0} += static_cast<::cursiv::TextOffset>("
-        "::std::countr_zero(bad) >> 3); goto Lrun{1}; }}\n"
-        "      {0} += 8;\n"
-        "    }}\n"
-        "    while ({0} < len && in_set({2}, "
-        "static_cast<unsigned char>(src[{0}]))) \n++{0};\n"
-        "Lrun{1}:;\n",
-        var, id, setName);
-  }
-
-  void emit_relay_runs() {
-    if (a.nrelays == 0) return;
-    raw("::cursiv::TextOffset Table::relay_run(::std::uint16_t state, const "
-        "char* src,\n"
-        "    ::cursiv::TextOffset len, ::cursiv::TextOffset i) {\n"
-        "  (void)src;\n  (void)len;\n  switch (state) {\n");
-    std::vector<std::uint8_t> used(a.ndfa, 0);
-    for (unsigned k = 0; k < a.nrelays; ++k)
-      for (const unsigned st : dfa.states_from(a.relays[k].resume))
-        used[st] = 1;
-    for (unsigned st = 0; st < a.ndfa; ++st) {
-      if (!used[st] || !blind(st)) continue;
-      const ByteSet stay = dfa.stay(st);
-      if (!stay.any()) continue;
-      fmt("    case {}u: {{\n", st);
-      fmt("    static constexpr ::std::uint64_t kStay[] = "
-          "{{{}ull,{}ull,{}ull,{}ull}};\n",
-          stay.w[0], stay.w[1], stay.w[2], stay.w[3]);
-      emit_run_adv(stay, "i", "kStay");
-      raw("    return i;\n    }\n");
-    }
-    raw("    default: return i;\n  }\n}\n");
-  }
-
-  // Whether a state also accepts a terminal that stands only where no byte
-  // follows: its token is read there with the others, not alone.
-  bool ends_the_text(unsigned st) const {
-    for (unsigned t = 1; t < a.cfg.nterms; ++t) {
-      if (!a.dfa_acc_set(st).test(t)) continue;
-      const auto b = a.dfa_acc_bound(st, t);
-      if (lex_bound_ends(a.cfg, b)) return true;
-    }
-    return false;
+    runs.advance(*this, stay, var, setName, content);
   }
 
   // Only an unguarded one-byte literal with no continuation bypasses the lexer.
   bool byte_literal(unsigned m, unsigned t) const {
-    const std::string_view sp = a.cfg.term_text(t);
-    if (sp.size() != 1 || !a.cfg.terms[t].spelled ||
-        a.cfg.termBuild[t].folded || a.cfg.terms[t].refuses)
-      return false;
-    const auto st =
-        a.next_dfa(a.modeStart[m], a.cls[static_cast<unsigned char>(sp[0])]);
-    if (st == kDeadState || a.dfaAccept[st] != t + 1u ||
-        a.dfaRelay[st] != kNoRelay || a.dfaBound[st] != kNoSet ||
-        ends_the_text(st))
-      return false;
-    for (unsigned k = 0; k < a.ncls; ++k)
-      if (a.next_dfa(st, k) != kDeadState) return false;
-    return true;
+    return lex_byte_literal(LrLexView{a}, m, t);
   }
 
-  mutable std::unordered_map<unsigned, int> exclusiveTerm{};
-  mutable std::unordered_map<unsigned, std::vector<ByteSet>> exclusiveBytes{};
+  mutable std::unordered_map<unsigned, DynSet> reachedTerms{};
 
-  int exclusive_term(unsigned e) const {
-    const auto [at, fresh] = exclusiveTerm.try_emplace(e, -1);
+  // The terminals a walk entering DFA state `e` may answer.
+  const DynSet& reached_terms(unsigned e) const {
+    const auto [at, fresh] = reachedTerms.try_emplace(e);
     if (!fresh) return at->second;
-    DynSet out;
+    DynSet& out = at->second;
     for (const auto st : dfa.states_from(e)) {
       // A guard can hand the match to an acceptance the ranked one hid.
       out |= a.dfa_acc_set(st);
       for (auto r = a.dfaRelay[st]; r != kNoRelay; r = a.relays[r].next)
         out.set(a.relays[r].term);
-      if (out.more_than_one()) return -1;
     }
-    for (unsigned t = 0; t < a.cfg.nterms; ++t)
-      if (out.test(t)) return at->second = static_cast<int>(t);
-    return -1;
-  }
-
-  ByteSet exclusive_bytes(unsigned m, unsigned t) const {
-    const std::uint16_t start = a.modeStart[m];
-    const auto [at, fresh] = exclusiveBytes.try_emplace(start);
-    if (fresh) {
-      at->second.resize(a.cfg.nterms);
-      for (unsigned b = 0; b < 256; ++b) {
-        const auto e = a.next_dfa(start, a.cls[b]);
-        if (e == kDeadState || e == start) continue;
-        const int term = exclusive_term(e);
-        if (term >= 0) at->second[term].add(static_cast<unsigned char>(b));
-      }
-    }
-    return at->second[t];
+    return out;
   }
 
   bool walk_partial(unsigned m) const {
@@ -1170,45 +916,12 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   }
 
   bool plain_run(unsigned st) const {
-    if (a.dfaAccept[st] == 0 ||
-        a.dfaBound[st] != kNoSet || a.dfaRelay[st] != kNoRelay)
-      return false;
-    bool self = false;
-    for (unsigned k = 0; k < a.ncls; ++k) {
-      const auto to = a.next_dfa(st, k);
-      if (to != st && to != kDeadState) return false;
-      self = self || to == st;
-    }
-    return self;
+    return lex_plain_run(LrLexView{a}, static_cast<std::uint16_t>(st));
   }
 
   int continuation_of(unsigned st, const std::uint8_t* spelled) const {
-    if (a.dfaAccept[st] == 0 ||
-        a.dfaBound[st] != kNoSet || a.dfaRelay[st] != kNoRelay)
-      return -1;
-    std::vector<unsigned> tried;
-    for (unsigned k = 0; k < a.ncls; ++k) {
-      const auto to = a.next_dfa(st, k);
-      if (to == st || to == kDeadState || (spelled && !spelled[to]) ||
-          std::find(tried.begin(), tried.end(), to) != tried.end())
-        continue;
-      tried.push_back(to);
-      if (a.dfaAccept[to] != a.dfaAccept[st] || !plain_run(to)) continue;
-      unsigned common = 0, exceptions = 0;
-      bool same = true;
-      for (unsigned b = 0; b < 256; ++b) {
-        const auto edge = a.next_dfa(st, a.cls[b]);
-        const auto run = a.next_dfa(to, a.cls[b]);
-        if ((edge == kDeadState) != (run == kDeadState)) {
-          same = false;
-          break;
-        }
-        common += edge == to;
-        exceptions += edge != kDeadState && edge != to;
-      }
-      if (same && common > 1 && exceptions <= 4) return to;
-    }
-    return -1;
+    return lex_continuation_of(LrLexView{a}, static_cast<std::uint16_t>(st),
+                               spelled);
   }
 
   void emit_bound_exit(unsigned st, const std::uint8_t* spelled) {
@@ -1234,28 +947,12 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
         bound, to);
     line("  end = i;");
     fmt("  term = {};\n", a.dfaAccept[st] - 1u);
+    fmt("  match.state = {};\n", st);
     line("  goto Wdone;");
   }
 
   bool blind(unsigned st) const {
-    return lex_run_blind(a.dfaAccept[st] != 0, a.dfaBound[st] != kNoSet,
-                         a.dfaRelay[st] != kNoRelay);
-  }
-
-  void walk_head() {
-    raw(R"(  const ::cursiv::TextOffset start = i;
-  ::cursiv::TextOffset far = i;
-  ::cursiv::LexMatch match{i, 0xFFFFu};
-  auto& end = match.end;
-  auto& term = match.term;
-  unsigned char b;
-  (void)src;
-  (void)len;
-  (void)b;
-  (void)start;
-  (void)far;
-)");
-    if (a.nrelays != 0) line("  Relays relays;");
+    return lex_run_blind(LrLexView{a}, static_cast<std::uint16_t>(st));
   }
 
   // The relays launched at a state, to compete with the walk's own match.
@@ -1265,6 +962,19 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   }
 
   void walk_foot() {
+    if (!a.dfaBacktrack.empty()) {
+      line("Wbackup:");
+      if (a.nrelays != 0)
+        line("  if (relays.any()) goto Wdone;");
+      fmt("  if (term != ::cursiv::kInvalidSymbol{}) {{\n", sharing());
+      raw(R"(    const ::cursiv::TextOffset halt = i > far ? i : far;
+    if (halt > end && halt - end > 64u)
+      return ::cursiv::LexSuffixSession<::cursiv::LrLexTape<kTable>>::finish(
+          kTape, src, len, kTable.modeStart[mode], start, halt,
+          ::cursiv::Scan{end, term});
+  }
+)");
+    }
     line("Wdone:");
     if (a.nrelays != 0) {
       raw(R"(  if (relays.any()) {
@@ -1276,7 +986,8 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 )");
       if (reserving())
         raw(R"(                    if (e == end && term != 0xFFFFu &&
-                        relay_reserved(src, len, mode, start, end, t, far))
+                        kTape.reserves(match.state, t, src, start, end, len,
+                                       far))
                       return;
 )");
       raw(R"(                    if (e == relayEnd && t == relayTerm) {
@@ -1291,9 +1002,9 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 )");
       // A relayed token is asked the refusals of a walked one.
       const char* const wins =
-          "(relayEnd == end &&\n        relay_takes(src, mode, start, "
-          "end, relayTerm, relayAs, term)) ||\n       relay_better(src, len, "
-          "mode, start, relayEnd, relayTerm, relayAs, end, term, far)";
+          "(relayEnd == end &&\n        relay_takes(match.state, relayTerm, "
+          "relayAs, term)) ||\n       relay_better(src, len, match.state, "
+          "relayEnd, relayTerm, relayAs, end, term, far)";
       raw(refusing() ? std::format(R"(    if ({}) {{
       end = relayEnd;
       term = relayTerm;
@@ -1309,15 +1020,49 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     }
     line(refusing()
              ? "  return ::cursiv::lr_unrefused_hot<kTable>(src, len, "
-               "kTable.modeStart[mode], start, ::cursiv::Scan{end, term});"
+               "kTable.modeStart[mode], start, ::cursiv::Scan{end, term},\n"
+               "      match.state);"
              : "  return ::cursiv::Scan{end, term};");
     line("}");
     line("");
+  }
+
+  std::string_view done(unsigned st) const {
+    return !a.dfaBacktrack.empty() &&
+                   (a.dfaAccept[st] == 0 || a.dfaBound[st] != kNoSet)
+               ? "Wbackup"
+               : "Wdone";
+  }
+
+  void emit_suffix(unsigned st, bool self) {
+    if (a.dfaBacktrack.empty() || a.dfaBacktrack[st] == 0) return;
+    std::string check = "term != ::cursiv::kInvalidSymbol";
+    if (!self) check += " && (i & 63u) == 0";
+    if (a.nrelays != 0) {
+      check += " && !relays.any()";
+    }
+    check += " && ::cursiv::LexSuffixSession<"
+             "::cursiv::LrLexTape<kTable>>::has_backtracked()";
+    check += sharing();
+    fmt("  if ({}) [[unlikely]] {{\n", check);
+    fmt("    const auto suffix = ::cursiv::LexSuffixSession<"
+        "::cursiv::LrLexTape<kTable>>::continue_at(kTape, src, len, {}u, i);\n",
+        st);
+    raw(R"(    if (suffix.available)
+      return suffix.best.term == ::cursiv::kInvalidSymbol
+                 ? ::cursiv::Scan{end, term} : suffix.best;
+  }
+)");
   }
   bool refusing() const {
     for (unsigned t = 0; t < a.cfg.nterms; ++t)
       if (a.cfg.terms[t].refuses) return true;
     return false;
+  }
+  // A mode that reads a refusing terminal shares no suffixes: its walk ends
+  // where its refusal is answered.
+  std::string_view sharing() const {
+    return refusing() ? " && kTable.modeBacktrack[mode] != 0" : "";
   }
   bool reserving() const {
     for (unsigned s = 0; s < a.ndfa; ++s)
@@ -1325,38 +1070,23 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     return false;
   }
 
+  // Ahead of the walk: the table's own walk, cached, where a mode that may
+  // backtrack stops spelling states.
+  void walk_before(bool partial) {
+    if (partial && !a.dfaBacktrack.empty())
+      raw(R"(CURSIV_NOINLINE inline ::cursiv::Scan walk_table_cached(
+    const char* src, ::cursiv::TextOffset len, ::std::uint16_t mode,
+    ::cursiv::TextOffset start) {
+  return ::cursiv::lex_walk(kTape, src, len, mode, start);
+}
+
+)");
+  }
+  void walk_entry() {}
+
   void emit_walk() {
-    const std::span<const std::uint16_t> starts{a.modeStart.data(), a.nmodes};
-    std::vector<unsigned> order;
-    std::vector<std::uint8_t> spelled(a.ndfa, 0);
-    bool partial = false;
-    for (const auto start : starts) {
-      const auto& mine = dfa.ladder_from(start);
-      partial = partial || mine.size() != dfa.states_from(start).size();
-      for (const unsigned st : mine)
-        if (!spelled[st]) {
-          spelled[st] = 1;
-          order.push_back(st);
-        }
-    }
-    line(
-        "inline ::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset "
-        "len,");
-    line("         ::std::uint16_t mode, ::cursiv::TextOffset i) {");
-    walk_head();
-    if (partial) line("  ::std::uint16_t st = 0;");
-    raw("  static const void* const kWEntry[] = {");
-    for (unsigned m = 0; m < starts.size(); ++m) {
-      if (m) raw(",");
-      if (m % 8 == 0) raw("\n      ");
-      fmt("&&W{}", starts[m]);
-    }
-    line("};");
-    line("  goto *kWEntry[mode];");
-    for (const unsigned st : order)
-      dfa.state(*this, *this, st, partial ? spelled.data() : nullptr);
-    if (partial) emit_rows_loop();
-    walk_foot();
+    lex_emit_walk(*this, dfa, *this, {a.modeStart.data(), a.nmodes},
+                  a.nrelays != 0, "inline ");
   }
 
   // A clean start reaches only unconditional acceptances, so the sweep elects
@@ -1405,9 +1135,9 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 
   void emit_lexer(unsigned m) {
     if (ByteSet ws{}; mode_ws(m, ws) && wsLead[m] == m) {
-      fmt("inline constexpr ::std::uint64_t kWs_{}[4] = ", m);
+      fmt("inline constexpr ::std::array<::std::uint64_t, 4> kWs_{}{{", m);
       set64(ws);
-      line(";");
+      line("};");
     }
     if (tailLead[m] == m) emit_lex_tail(m);
     fmt("inline void lex_{}(::cursiv::LrContext& c) {{\n", m);
@@ -1502,7 +1232,7 @@ again:
     line("  }");
     if (ByteSet ws{}; mode_ws(m, ws)) {
       const std::string nm = std::format("kWs_{}", wsLead[m]);
-      fmt("  {{\n    if (in_set({}, "
+      fmt("  {{\n    if (in_set<{}>("
           "static_cast<unsigned char>(src[p]))) {{\n",
           nm);
       line("      ++p;");
@@ -1630,6 +1360,35 @@ again:
       }
       reduceOf[prod] = seen.try_emplace(std::move(key), prod).first->second;
     }
+    // The modes a reduction's token can be in hand under: the reducing
+    // state's, or one covering it that the state's entry kept.
+    heldModes.assign(a.cfg.nprods, {});
+    const auto held = [&](unsigned prod, unsigned s) {
+      auto& modes = heldModes[reduceOf[prod]];
+      if (std::ranges::find(modes, a.mode[s]) == modes.end())
+        modes.push_back(a.mode[s]);
+    };
+    for (unsigned s = 0; s < a.nstates; ++s)
+      for (const LrAction& x : a.action_row(s))
+        if (x.kind == LrActionKind::reduce) held(x.arg, s);
+  }
+  std::vector<std::vector<std::uint16_t>> heldModes{};
+
+  // Whether the token a reduction holds stands in the state it lands in, as
+  // that state's entry would decide: under its own mode, or under one that
+  // covers it with no winner to walk again. The landing then goes straight to
+  // its dispatch, which re-lexes a covered token it has no action for.
+  bool stands(unsigned prod, unsigned to) const {
+    const unsigned m = a.mode[to];
+    if (multiMode(m)) return false;
+    return std::ranges::all_of(heldModes[prod], [&](unsigned held) {
+      return held == m ||
+             (subs && a.mode_covers(held, m) && win_test(m).empty());
+    });
+  }
+  // The dispatch a landing in `to` reads: its own, or the one it shares.
+  unsigned dispatch_label(unsigned to) const {
+    return dispShared[to] != 0 ? dispLead[to] : to;
   }
 
   std::uint32_t goto_guard(unsigned from, unsigned lhs) const {
@@ -1725,7 +1484,8 @@ again:
     const auto land = [&](unsigned to) {
       fmt("      ::cursiv::lr_reduce_finish<kTable.stamp>(c, {}u, {}, {});\n",
           to, row, settles(p.lhs, p.node != kNoRow) && reads_a_token(to));
-      fmt("      {}\n", jump('G', to));
+      fmt("      {}\n", stands(prod, to) ? jump('D', dispatch_label(to))
+                                         : jump('G', to));
     };
     if (one >= 0) {
       land(static_cast<unsigned>(one));
@@ -1760,7 +1520,6 @@ again:
   // written once under a `T` label. Below this many lines a switch costs less
   // repeated than the jump costs on every reduction.
   static constexpr unsigned kLrTailLines = 32;
-  using TailKey = std::pair<std::string_view, LrReduceRow>;
   std::vector<Piece> tailPiece{};
   void render_tails(const std::string& used) {
     tailPiece.assign(a.cfg.nprods, {});
@@ -1859,8 +1618,10 @@ again:
       }
       if (j - i > 1) cellTerms[cellLead[i]].push_back(row[i].term);
     });
-    if (dedentTerm != 0 && acts_on(s, dedentTerm))
-      fmt("  if (c.la.sym == 0 && c.indent.head != ::cursiv::kNoIndent) {{ "
+    // The end of input is a dedent while a level no repair dropped is open.
+    if (dedentTerm != 0 && a.follow[s].test(dedentTerm))
+      fmt("  if (c.la.sym == 0 && "
+          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) {{ "
           "c.la = ::cursiv::Token{{c.la.begin, c.la.begin, {}}}; }}\n",
           dedentTerm);
     line("  switch (c.la.sym) {");
@@ -1902,8 +1663,9 @@ again:
             b.find('\n') == b.size() - 1;
         jumps.push_back(one ? b.substr(4, b.size() - 5) : std::string{});
       }
-      const LrProgramRows<std::uint32_t, std::uint64_t> matrix{
-          programs.actions.blocks, programs.actions.values, a.cfg.nterms, 0};
+      const LrProgramRows<std::uint32_t, std::uint32_t, std::uint64_t> matrix{
+          programs.actions.rows, programs.actions.blocks,
+          programs.actions.values, a.cfg.nterms, 0};
       const auto cell = matrix.get(s, x.term);
       fmt("      switch (c.resolveAt(c, c.stack.top().state, {}u, {}u)) {{\n",
           cell >> programs.countBits, run);
@@ -1935,14 +1697,14 @@ again:
     // An end of input refused while suites are open owes a dedent first.
     if (dedentTerm != 0)
       fmt("      if (c.la.sym == 0 && "
-          "c.indent.head != ::cursiv::kNoIndent) {{ "
+          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) {{ "
           "c.la = ::cursiv::Token{{c.la.begin, c.la.begin, {}}}; "
           "goto D{}; }}\n",
           dedentTerm, s);
     // A refused token is an implied one where the state answers it and its
     // condition holds, once per position.
     for (unsigned q = 0; q < impliedTerms.size(); ++q)
-      if (acts_on(s, impliedTerms[q]))
+      if (a.follow[s].test(impliedTerms[q]))
         fmt("      if (imply_{}(c)) goto D{};\n", q, s);
     // No token at all, in a tight mode, still answers the one reduce a
     // condition guards, where its goto lands; anywhere else it is an error.
@@ -1959,47 +1721,73 @@ again:
     fmt("      {}\n  }}\n}}\n", leave("pause"));
   }
 
-  // Lex and dispatch in one: a closed single byte needs no walk, and a
-  // terminal with exclusive entry bytes needs no dispatch after its walk.
+  // Lex and dispatch in one: a closed single byte needs no walk, and a byte
+  // whose walk can only answer terminals the state takes plainly needs no
+  // dispatch after it: a switch on what the walk read goes to the action.
   void emit_entry_probe(unsigned s) {
     const unsigned m = a.mode[s];
-    struct Probe {
-      LrAction action;
-      ByteSet bytes;
-      bool literal;
-    };
-    std::vector<Probe> probes;
+    const LrAction* const row = a.actions.data() + a.actionBase[s];
+    std::vector<LrAction> literals;
     ByteSet taken{};
     bool cut = false;
     for (unsigned i = 0; i < a.actionCount[s]; ++i) {
-      const auto& x = a.action(a.actionBase[s] + i);
+      const auto& x = row[i];
       if (conflicted(s, i) || x.kind == LrActionKind::guard ||
           (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap != 0) ||
           !byte_literal(m, x.term))
         continue;
-      if (probes.size() == kLrProbeLits) {
+      if (literals.size() == kLrProbeLits) {
         cut = true;
         break;
       }
-      ByteSet bytes{};
-      bytes.add(static_cast<unsigned char>(a.cfg.term_text(x.term)[0]));
-      taken |= bytes;
-      probes.push_back({x, bytes, true});
+      taken.add(static_cast<unsigned char>(a.cfg.term_text(x.term)[0]));
+      literals.push_back(x);
     }
-    const auto literals = probes.size();
-    for (unsigned i = 0; i < a.actionCount[s]; ++i) {
-      const auto& x = a.action(a.actionBase[s] + i);
-      if (x.kind != LrActionKind::shift || conflicted(s, i) ||
-          byte_literal(m, x.term))
-        continue;
-      const ByteSet bytes = exclusive_bytes(m, x.term).andnot(taken);
-      if (!bytes.any()) continue;
-      if (probes.size() - literals == kLrProbeNamed) {
-        cut = true;
-        break;
+    // The terminal's one action, where it is a shift or a reduce no gap
+    // decides; a flagged terminal's reduce is the lexer's to read again, since
+    // no stack may take it past the reduction.
+    const auto plain = [&](unsigned t) -> const LrAction* {
+      const auto& term = a.cfg.terms[t];
+      if (term.trivia || term.laid != 0) return nullptr;
+      const auto [lo, n] = lr_term_run(row, a.actionCount[s], t);
+      if (n != 1) return nullptr;
+      const LrAction& x = row[lo];
+      if (x.kind == LrActionKind::shift) return &x;
+      if (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap == 0 &&
+          !(flags(m) && a.modeFlag[m].test(t)))
+        return &x;
+      return nullptr;
+    };
+    // The bytes the walk answers alone. Rivals at one byte stay the lexer's
+    // to rank where the end of the text holds candidates.
+    ByteSet walked{};
+    DynSet named;
+    unsigned nnamed = 0;
+    for (unsigned b = 0; b < 256; ++b) {
+      if (taken.has(static_cast<unsigned char>(b))) continue;
+      const auto e = a.next_dfa(a.modeStart[m], a.cls[b]);
+      if (e == kDeadState || e == a.modeStart[m]) continue;
+      const DynSet& reach = reached_terms(e);
+      if (reach.none() || (reach.more_than_one() && eofMode(m))) continue;
+      DynSet more = named;
+      unsigned n = nnamed;
+      bool ok = true;
+      for (unsigned t = 0; t < a.cfg.nterms && ok; ++t) {
+        if (!reach.test(t)) continue;
+        ok = plain(t) != nullptr;
+        if (!more.test(t)) {
+          more.set(t);
+          ++n;
+        }
       }
-      taken |= bytes;
-      probes.push_back({x, bytes, false});
+      if (!ok) continue;
+      if (n > kLrProbeNamed) {
+        cut = true;
+        continue;
+      }
+      named = std::move(more);
+      nnamed = n;
+      walked.add(static_cast<unsigned char>(b));
     }
     if (cut) ++probeCuts;
     fmt("  if (c.laMode != ::cursiv::kNoMode) {{ if (c.laMode == {}) goto D{}",
@@ -2016,36 +1804,78 @@ again:
     fmt("    if (p >= len) {{ c.la = ::cursiv::Token{{p, p, 0, {0}}};"
         " c.laMode = {0}; goto D{1}; }}\n",
         m, s);
-    if (!probes.empty()) {
+    // A reduce takes the token in hand as the drive would have read it.
+    const auto reduce_arm = [&](const LrAction& x, std::string_view end,
+                                std::string_view term, std::string_view ind) {
+      fmt("{0}c.la = ::cursiv::Token{{p, {1}, {2}, {3}}};\n"
+          "{0}c.laMode = {3};\n",
+          ind, end, term, m);
+      emit_empty_landing(s, x.arg, ind);
+      fmt("{}{}\n", ind, jump('R', reduceOf[x.arg]));
+    };
+    if (!literals.empty() || walked.any()) {
       line("    switch (static_cast<unsigned char>(src[p])) {");
-      for (const auto& probe : probes) {
-        const auto& x = probe.action;
+      for (const LrAction& x : literals) {
         case_rows([&](auto&& put) {
-          for (unsigned b = 0; b < 256; ++b)
-            if (probe.bytes.has(static_cast<unsigned char>(b))) put(b);
+          put(static_cast<unsigned char>(a.cfg.term_text(x.term)[0]));
         });
         line("    {");
-        if (probe.literal) {
-          if (x.kind == LrActionKind::shift) {
-            emit_probe_hop(s, x, "p + 1", "      ");
-          } else {
-            assert(x.kind == LrActionKind::reduce);
-            fmt("      c.la = ::cursiv::Token{{p, p + 1, {}, {}}};\n"
-                "      c.laMode = {};\n",
-                x.term, m, m);
-            emit_empty_landing(s, x.arg, "      ");
-            fmt("      {}\n", jump('R', reduceOf[x.arg]));
-          }
+        if (x.kind == LrActionKind::shift) {
+          emit_probe_hop(s, x, "p + 1", "      ");
         } else {
-          fmt("      const ::cursiv::Scan sc = walk_all(src, len, {}, p);\n",
-              m);
-          fmt("      if (sc.term == {} && sc.end > p) [[likely]] {{\n", x.term);
-          emit_probe_hop(s, x, "sc.end", "        ");
-          line("      }");
-          fmt("      c.la = ::cursiv::Token{{p, p, 0xFFFFu, {}}};\n", m);
-          fmt("      c.laMode = {};\n", m);
-          fmt("      goto D{};\n", s);
+          assert(x.kind == LrActionKind::reduce);
+          reduce_arm(x, "p + 1", std::to_string(x.term), "      ");
         }
+        line("    }");
+      }
+      if (walked.any()) {
+        case_rows([&](auto&& put) {
+          for (unsigned b = 0; b < 256; ++b)
+            if (walked.has(static_cast<unsigned char>(b))) put(b);
+        });
+        line("    {");
+        fmt("      const ::cursiv::Scan sc = walk_all(src, len, {}, p);\n", m);
+        if (!named.more_than_one()) {
+          unsigned t = 0;
+          while (!named.test(t)) ++t;
+          const LrAction& x = *plain(t);
+          fmt("      if (sc.term == {} && sc.end > p) [[likely]] {{\n", t);
+          if (x.kind == LrActionKind::shift)
+            emit_probe_hop(s, x, "sc.end", "        ");
+          else
+            reduce_arm(x, "sc.end", std::to_string(t), "        ");
+          line("      }");
+        } else {
+          line("      if (sc.end > p) [[likely]] {");
+          line("        switch (sc.term) {");
+          // Terminals reducing alike share their arm.
+          std::vector<bool> done(a.cfg.nterms, false);
+          for (unsigned t = 0; t < a.cfg.nterms; ++t) {
+            if (!named.test(t) || done[t]) continue;
+            const LrAction& x = *plain(t);
+            case_rows([&](auto&& put) {
+              for (unsigned u = t; u < a.cfg.nterms; ++u) {
+                if (!named.test(u) || done[u]) continue;
+                const LrAction& y = *plain(u);
+                if (u != t && (x.kind != LrActionKind::reduce ||
+                               y.kind != x.kind || y.arg != x.arg))
+                  continue;
+                done[u] = true;
+                put(u);
+              }
+            });
+            line("        {");
+            if (x.kind == LrActionKind::shift)
+              emit_probe_hop(s, x, "sc.end", "          ");
+            else
+              reduce_arm(x, "sc.end", "sc.term", "          ");
+            line("        }");
+          }
+          line("        default: break;");
+          line("        }");
+          line("      }");
+        }
+        line("      break;");
         line("    }");
       }
       line("    default: break;");
@@ -2064,20 +1894,19 @@ again:
     assert(shifted(to));
     fmt("{}{}\n", ind, jump('H', to));
   }
+  // A token that moves the levels or the bracket depth calls the helper
+  // `indent_shift` picks for its kind: the drive and the replay move them
+  // alike.
   void emit_take(const LrAction& x, std::string_view ind) {
     if (implied(x.term)) fmt("{}c.virt.pending = 0;\n", ind);
     if (indentTerm != 0 && x.term == indentTerm)
-      fmt("{}c.indent.head = ::cursiv::indent_push(c.indentArena, "
-          "c.indent.head, c.la.begin, c.la.end - c.la.begin, false);\n",
+      fmt("{}::cursiv::indent_shift_indent(c.indentArena, c.indent, c.la);\n",
           ind);
-    if (dedentTerm != 0 && x.term == dedentTerm)
-      fmt("{}c.indent.head = ::cursiv::indent_pop(c.indentArena, "
-          "c.indent.head);\n",
-          ind);
-    if (indented() && a.cfg.terms[x.term].delim > 0)
-      fmt("{}++c.indent.depth;\n", ind);
-    if (indented() && a.cfg.terms[x.term].delim < 0)
-      fmt("{}if (c.indent.depth != 0) --c.indent.depth;\n", ind);
+    else if (dedentTerm != 0 && x.term == dedentTerm)
+      fmt("{}::cursiv::indent_shift_dedent(c.indentArena, c.indent);\n", ind);
+    else if (indented() && a.cfg.terms[x.term].delim != 0)
+      fmt("{}::cursiv::indent_shift_delim(c.indent, {});\n", ind,
+          int{a.cfg.terms[x.term].delim});
   }
   // An empty rule's reduce whose goto the gap decides and may leave nowhere:
   // there the token has no action in state `s`.
@@ -2131,14 +1960,12 @@ again:
       if (laid == kLaidIndent) indentTerm = t;
       if (laid == kLaidDedent) dedentTerm = t;
       if (laid == kLaidImplied) impliedTerms.push_back(t);
-      bracketed = bracketed || a.cfg.terms[t].delim != 0;
     }
-    subs = any_sub() && !indented();
+    indentedGrammar = a.indented();
+    subs = !indentedGrammar && any_sub();
   }
-  bool indented() const {
-    return indentTerm != 0 || dedentTerm != 0 || bracketed;
-  }
-  bool bracketed = false;
+  bool indented() const { return indentedGrammar; }
+  bool indentedGrammar = false;
   unsigned curState = 0;
   bool implied(unsigned term) const {
     return a.cfg.terms[term].laid == kLaidImplied;
@@ -2207,11 +2034,9 @@ again:
   }
   void emit_caret_seen() {
     if (!gapReach.skips_any()) return;
-    fmt("::cursiv::TextOffset caret_seen(::std::string_view text, unsigned k,\n"
+    raw("::cursiv::TextOffset caret_seen(::std::string_view text, unsigned k,\n"
         "                                ::cursiv::TextOffset from,\n"
-        "                                const ::cursiv::Token& {}) {{\n",
-        tight_conds().empty() ? "la" : "in");
-    emit_tight_token();
+        "                                const ::cursiv::Token& la) {\n");
     raw("  ::cursiv::TextOffset seen = 0;\n"
         "  const auto len = static_cast<::cursiv::TextOffset>(text.size());\n"
         "  (void)len;\n  switch (k) {\n");
@@ -2230,22 +2055,6 @@ again:
         k, [&](unsigned leaf) { return gap_leaf(leaf, partial); }, partial);
   }
 
-  // A condition read tight sees an empty gap: the token in hand is set aside
-  // for an empty one where the gap begins.
-  std::string tight_conds() const {
-    std::string e;
-    for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
-      if (k < a.cfg.gapTight.size() && a.cfg.gapTight[k] != 0)
-        e += std::format("{}k == {}u", e.empty() ? "" : " || ", k);
-    return e;
-  }
-  void emit_tight_token() {
-    const std::string t = tight_conds();
-    if (t.empty()) return;
-    fmt("  const ::cursiv::Token la = {} ? ::cursiv::Token{{from, from, 0xFFFFu}}"
-        " : in;\n",
-        t);
-  }
   void emit_predicate_data() {
     if (!conds()) return;
     raw(predicateEmitter.declarations());
@@ -2253,10 +2062,8 @@ again:
 
   void emit_drive_cond() {
     if (!conds()) return;
-    const std::string_view la = tight_conds().empty() ? "la" : "in";
     // The caret's reading answers false, unknown or true.
     const auto body = [&](bool caret) {
-      emit_tight_token();
       fmt("  const char* const g = {} + from;\n",
           caret ? "text.data()" : "c.src");
       raw("  const ::cursiv::TextOffset n = la.begin > from ? la.begin - from "
@@ -2270,10 +2077,9 @@ again:
           fmt("    case {}: return {};\n", k, gap_cond(k));
       raw("  }\n  return false;\n}\n\n");
     };
-    fmt("bool drive_cond(const ::cursiv::LrContext& c, unsigned k,\n"
-        "                ::cursiv::TextOffset from, const ::cursiv::Token& {}) "
-        "{{\n",
-        la);
+    raw("bool drive_cond(const ::cursiv::LrContext& c, unsigned k,\n"
+        "                ::cursiv::TextOffset from, const ::cursiv::Token& la) "
+        "{\n");
     body(false);
     if (std::ranges::any_of(std::span(a.cfg.prods.data(), a.cfg.nprods),
                             [](const auto& p) { return p.gap != 0; }))
@@ -2286,11 +2092,10 @@ again:
 
 )");
     emit_named_heads();
-    fmt("bool caret_cond(::std::string_view text, unsigned k,\n"
-        "                ::cursiv::TextOffset from, const ::cursiv::Token& {}, "
+    raw("bool caret_cond(::std::string_view text, unsigned k,\n"
+        "                ::cursiv::TextOffset from, const ::cursiv::Token& la, "
         "bool known,\n"
-        "                ::cursiv::LrGapMemo* gaps) {{\n",
-        la);
+        "                ::cursiv::LrGapMemo* gaps) {\n");
     body(true);
     emit_caret_seen();
   }
@@ -2305,11 +2110,6 @@ again:
           "  return true;\n"
           "}}\n\n",
           q, a.cfg.terms[impliedTerms[q]].cond, impliedTerms[q], 1u << q);
-  }
-  bool acts_on(unsigned s, unsigned term) const {
-    for (const LrAction& action : a.action_row(s))
-      if (action.term == term) return true;
-    return false;
   }
   // Whether a state may probe: a flagged mode collects its candidates in the
   // lexer, and an indented grammar reads its token first.
@@ -2416,6 +2216,7 @@ again:
 #else
 #pragma GCC diagnostic ignored "-Wunused-label"
 #endif
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -2445,6 +2246,7 @@ again:
     line("#include \"Table.hpp\"");
     line("#include \"cursiv/engines/shared/runtime/Scan.hpp\"");
     line("#include \"cursiv/engines/shared/runtime/LexBoundary.hpp\"");
+    line("#include \"cursiv/engines/shared/runtime/LexByteRun.hpp\"");
     if (anyPartialLadder())
       line("#include \"cursiv/engines/shared/runtime/LexMatch.hpp\"");
     if (a.multiCand)
@@ -2468,7 +2270,7 @@ again:
     fmt("namespace {} {{\n\n", ns);
     line("::cursiv::LrExit drive_state(::cursiv::LrContext&);");
     line("");
-    emit_swar();
+    lex_emit_byte_runs(*this);
     emit_data();
     emit_predicate_data();
     raw(lexical.source());
@@ -2476,19 +2278,13 @@ again:
       std::string done(a.nmodes, '\0');
       for (unsigned st = 0; st < a.nstates; ++st) done[a.mode[st]] = 1;
       emit_walk();
-      emit_relay_runs();
+      if (a.nrelays != 0)
+        lex_emit_relay_runs(*this, dfa, runs, LrLexView{a},
+                            std::span(a.relays.data(), a.nrelays),
+                            "Table::relay_run");
       if (conds()) {
         raw(gapEmitter.source());
-        raw(predicateEmitter.source(
-            "  if (seen) {\n"
-            "    ::cursiv::TextOffset halt = at;\n"
-            "    const auto reading = ::cursiv::lr_match_halt<kTable>(src, len, "
-            "mode, at, halt);\n"
-            "    *seen = ::std::max(*seen, halt < len ? halt + 1 : len);\n"
-            "    return reading;\n"
-            "  }\n"
-            "  return walk_all(src, len, mode, at);\n",
-            "::cursiv::LrLexTape<kTable>{}"));
+        raw(predicateEmitter.source("::cursiv::LrLexTape<kTable>{}"));
       }
       plan_lexers(done);
       if (a.longer_modes()) emit_lengthen();
@@ -2649,36 +2445,32 @@ again:
       enter(g, tailPiece[leads[i]]);
       tails[i] = resolved(tailPiece[leads[i]].text, g);
     };
-    const auto key = [&](std::size_t i) {
-      return TailKey{tails[i],
-                     a.reductions[leads[i]].row(a.cfg.prods[leads[i]].len)};
-    };
     const auto lone = [&](std::size_t i) {
       return lone_goto(a.cfg.prods[leads[i]].lhs) >= 0;
     };
-    std::map<TailKey, unsigned> uses;
+    std::map<std::string_view, unsigned> uses;
     for (std::size_t i = 0; i < leads.size(); ++i)
       if (!lone(i)) {
         settle(i);
-        ++uses[key(i)];
+        ++uses[tails[i]];
       }
-    std::map<TailKey, unsigned> sharedTails;
-    for (const auto& [k, n] : uses)
+    std::map<std::string_view, unsigned> sharedTails;
+    for (const auto& [tail, n] : uses)
       if (n > 1 &&
-          std::ranges::count(k.first, '\n') >= std::ptrdiff_t{kLrTailLines})
-        sharedTails.emplace(k, static_cast<unsigned>(sharedTails.size()));
+          std::ranges::count(tail, '\n') >= std::ptrdiff_t{kLrTailLines})
+        sharedTails.emplace(tail, static_cast<unsigned>(sharedTails.size()));
     for (std::size_t i = 0; i < leads.size(); ++i)
       if (lone(i)) settle(i);
     for (std::size_t i = 0; i < leads.size(); ++i) {
-      const auto it = sharedTails.find(key(i));
+      const auto it = sharedTails.find(tails[i]);
       emit_reduce(
           leads[i], tails[i],
           it != sharedTails.end() ? std::optional{it->second} : std::nullopt);
     }
-    for (const auto& [k, id] : sharedTails) {
+    for (const auto& [tail, id] : sharedTails) {
       fmt("T{}:\n", id);
       line("    {");
-      raw(k.first);
+      raw(tail);
       line("    }");
     }
     return std::ranges::any_of(leads, [&](unsigned prod) {
@@ -2805,7 +2597,6 @@ again:
 )");
     line("");
     fmt("}}  // namespace {}\n", ns);
-    settle_swar();
   }
 
   void emit_all(std::string_view ns) {
@@ -2875,33 +2666,24 @@ struct LrParserDecl : EmitOutput {
       if (gapReach.skips_any()) line("    .condSeen = &caret_seen,");
     }
     line("};");
-    raw(R"(inline constexpr const ::cursiv::LrDrive* kDrivePtr = &kDrive;
-)");
     fmt("}}  // namespace {}\n", ns);
   }
 };
 
 }  // namespace
 
-// Every unit of one grammar's generated parser, named.
-std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
-    const LrBuildTable& a, std::string_view ns, const LrProgramLayout& programs,
-    unsigned* probeCuts, unsigned groupLines) {
-  if (a.reductions.size() != a.cfg.nprods || a.readsToken.size() != a.nstates ||
-      a.skipSet.size() != std::size_t{a.nmodes} * 4)
-    throw std::logic_error("cursiv: derive LR tables before emitting the parser");
-  LrParserEmitter e{a, programs};
+std::string lr_emit_parser_states(const LrFinalTable& done, std::string_view ns,
+                                  unsigned* probeCuts, unsigned groupLines) {
+  LrParserEmitter e{done};
   e.groupLines = groupLines;
   e.out.reserve(1u << 20);
   e.emit_all(ns);
   if (probeCuts != nullptr) *probeCuts = e.probeCuts;
-  std::vector<std::pair<std::string, std::string>> files;
-  files.emplace_back("ParserStates.cpp", std::move(e.out));
-  return files;
+  return std::move(e.out);
 }
 
-std::string lr_emit_parser_decl(const LrBuildTable& a, std::string_view ns) {
-  LrParserDecl d{a};
+std::string lr_emit_parser_decl(const LrFinalTable& done, std::string_view ns) {
+  LrParserDecl d{done.table()};
   d.emit(ns);
   return d.out;
 }

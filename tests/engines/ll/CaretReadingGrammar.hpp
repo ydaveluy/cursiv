@@ -20,7 +20,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>((ref<DO> + (lit<"!"> | lit<"?">)) |
                                  (ref<ID> + lit<":">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Ll : Base {};

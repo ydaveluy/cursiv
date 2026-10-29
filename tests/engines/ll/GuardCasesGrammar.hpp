@@ -12,13 +12,13 @@ namespace tllguardcases {
 
 struct Ll : cursiv::GrammarSpec {
   struct Root
-      : rule<skip(ignored<tllrcond::Base::WS>, hide<tllrcond::Base::CMT>,
+      : rule<skip(ignore<tllrcond::Base::WS>, hide<tllrcond::Base::CMT>,
                   lit<"rules:"> + ref<tllrcond::Base::Root>) |
              (lit<"terms:"> + ref<tllterm::Base::Root>) |
              (lit<"several:"> + ref<tllrefusedglr::Base::Root>) |
              (lit<"peek:"> + ref<tllrefusedpeek::Base::Root>)> {};
   using entry = Root;
-  using ignore = tllterm::Base::WS;
+  using ignored = tllterm::Base::WS;
 };
 
 }  // namespace tllguardcases

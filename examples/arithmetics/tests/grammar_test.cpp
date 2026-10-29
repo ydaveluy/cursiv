@@ -14,10 +14,10 @@
 #include "cursiv/core/services/Diagnostic.hpp"
 #include "cursiv/core/services/JsonValue.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/test/Check.hpp"
 #include "cursiv/test/ExpectDiagnosticOptions.hpp"
 #include "cursiv/test/ValidationHelper.hpp"
 #include "cursiv/test/ValidationResult.hpp"
-#include "cursiv/test/Check.hpp"
 
 namespace {
 
@@ -144,7 +144,8 @@ void two_definitions_of_two_names_say_nothing() {
 void two_parameters_of_one_name_are_two_errors() {
   const World world;
   CHECK(count(world.validate("module m\ndef t(x, x): x + 1;\n"),
-              "Duplicate definition name: x") == 2);
+              "Duplicate definition name: x")
+        == 2);
 }
 
 void two_parameters_of_two_names_say_nothing() {
@@ -156,9 +157,11 @@ void a_call_of_the_wrong_arity_names_both_counts() {
   const World world;
   CHECK(
       count(world.validate("module m\ndef add(a, b): a + b;\nadd(1, 2, 3);\n"),
-            "Function add expects 2 parameters, but 3 were given.") == 1);
+            "Function add expects 2 parameters, but 3 were given.")
+      == 1);
   CHECK(count(world.validate("module m\ndef add(a, b): a + b;\nadd(1);\n"),
-              "Function add expects 2 parameters, but 1 were given.") == 1);
+              "Function add expects 2 parameters, but 1 were given.")
+        == 1);
 }
 
 void a_call_of_the_right_arity_says_nothing() {
@@ -197,12 +200,24 @@ void only_the_widest_foldable_span_is_offered() {
   // fold 7 % 2 to three and a half.
   const World remainder;
   CHECK(count(remainder.validate("module m\ndef t: 7 % 2;\n"),
-              "Expression could be normalized to constant 1") == 1);
+              "Expression could be normalized to constant 1")
+        == 1);
 }
 
 void a_body_that_is_already_a_number_says_nothing() {
   const World world;
   ct::expectNoIssues(world.validate("module m\ndef t: 5;\n"));
+}
+
+// A statement whose end is written as a colon: every operator could as
+// cheaply stand there, whatever level it binds at, and either engine names
+// the same ones, in the order the grammar declares them.
+void a_misplaced_colon_names_every_operator() {
+  const World world;
+  const std::string text = "module m\nf(x, y):\n    x^y;\n";
+  ct::expectError(world.validate(text),
+                  "Expecting one of ';', '%', '^', '*' but found ':'.",
+                  at(text.find(':'), 1));
 }
 
 }  // namespace
@@ -226,5 +241,6 @@ int main() {
   a_foldable_body_carries_its_constant();
   only_the_widest_foldable_span_is_offered();
   a_body_that_is_already_a_number_says_nothing();
+  a_misplaced_colon_names_every_operator();
   return cursiv::test::report("arithmetics_grammar_test");
 }

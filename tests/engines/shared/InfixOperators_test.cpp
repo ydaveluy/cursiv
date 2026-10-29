@@ -1,9 +1,3 @@
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
-#include "engines/shared/InfixOperatorsGrammar.hpp"
-#include "infixoperatorsll/generated/Ll/Module.hpp"
-#include "infixoperatorslr/generated/Lr/Module.hpp"
 #include <cstdio>
 #include <initializer_list>
 #include <iostream>
@@ -11,6 +5,19 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#include "cursiv/core/parser/Parser.hpp"
+#include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/fuzz/FuzzLane.hpp"
+#include "cursiv/test/Check.hpp"
+#include "engines/shared/CaretOffers.hpp"
+#include "engines/shared/InfixOperatorsGrammar.hpp"
+#include "engines/shared/UnaryLevelsGrammar.hpp"
+#include "infixoperatorsll/generated/Ll/Module.hpp"
+#include "infixoperatorslr/generated/Lr/Module.hpp"
+#include "unarylevelsll/generated/Ll/Module.hpp"
+#include "unarylevelslr/generated/Lr/Module.hpp"
 
 namespace infix_operators_cases {
 
@@ -147,6 +154,157 @@ void a_sequence_is_one_arm_of_a_choice(const cursiv::Parser& p) {
   check(p, "arm:", "a + b NOT EQUAL c + d", "(((a + b) NOTEQUAL c) + d)");
 }
 
+void as_names_the_constant_in_place(const cursiv::Parser& p) {
+  check(p, "valued:", "a == b", "(a equal b)");
+  check(p, "valued:", "a IS NOT b", "(a NOTEQUAL b)");
+  check(p, "valued:", "a IS\n  NOT b", "(a NOTEQUAL b)");
+  check(p, "valued:", "a == b IS NOT c", "((a equal b) NOTEQUAL c)");
+  check(p, "valued:", "a <> b ~= c", "((a NOTEQUAL b) NOTEQUAL c)");
+  check(p, "valued:", "a = b", "<refused>");
+  check(p, "valued:", "a IS b", "<refused>");
+}
+
+// The constant `as<V>` names reaches a member outside a climb too.
+void as_assigns_its_constant(const cursiv::Parser& p) {
+  for (const auto& [text, want] : {std::pair{"stated:SAME", Op::equal},
+                                   {"stated:NOT SAME", Op::NOTEQUAL},
+                                   {"stated:NOT\n  SAME", Op::NOTEQUAL}}) {
+    const cursiv::ParseResult r = p.parse(text);
+    const auto* const doc = r.value_as<ast::Doc>();
+    const auto* const coded =
+        doc == nullptr ? nullptr : cursiv::ast_cast<ast::Coded>(doc->value);
+    CHECK(r.accepted && r.diagnostics.empty() && coded != nullptr);
+    if (coded != nullptr) CHECK(coded->op == want);
+  }
+  const cursiv::ParseResult r = p.parse("stated:SAME SAME");
+  CHECK(!r.accepted || !r.diagnostics.empty());
+}
+
+// A called data rule stores the value of the alternative it took, as the
+// same alternative written in place does, and a rule that only calls it
+// passes that value on.
+void a_data_rule_passes_its_alternative_value(const cursiv::Parser& p) {
+  for (const auto& [text, want] :
+       {std::pair{"visible:called public a", Vis::Public},
+        {"visible:called protected a", Vis::Protected},
+        {"visible:called private a", Vis::Private},
+        {"visible:lone protected a", Vis::Protected},
+        {"visible:wordy is protected a", Vis::Protected},
+        {"visible:region protected a", Vis::Protected},
+        {"visible:regioned protected a", Vis::Protected},
+        {"visible:tightenedrepeated protected a", Vis::Protected},
+        {"visible:regionedtail protected a", Vis::Protected},
+        {"visible:inline public a", Vis::Public},
+        {"visible:inline protected a", Vis::Protected},
+        {"visible:inline private a", Vis::Private}}) {
+    const cursiv::ParseResult r = p.parse(text);
+    const auto* const decl = r.value_as<ast::Decl>();
+    CHECK(r.accepted && r.diagnostics.empty() && decl != nullptr);
+    if (decl != nullptr) CHECK(decl->vis == want && decl->name == "a");
+  }
+}
+
+// A token the repair drops in the region, after the value, stays in the tree:
+// the member still takes the value, and the deletion is the only diagnostic.
+void a_dropped_token_leaves_the_passed_value(const cursiv::Parser& p) {
+  for (const std::string_view text :
+       {"visible:region protected = a", "visible:regioned protected = a"}) {
+    const cursiv::ParseResult r = p.parse(text);
+    const auto* const decl = r.value_as<ast::Decl>();
+    CHECK(r.accepted && r.diagnostics.size() == 1 && decl != nullptr);
+    if (r.diagnostics.size() == 1) {
+      const auto& d = r.diagnostics.front();
+      CHECK(d.kind == cursiv::DiagnosticKind::deleted &&
+            text.substr(d.begin, d.end - d.begin) == "=");
+    }
+    if (decl != nullptr)
+      CHECK(decl->vis == Vis::Protected && decl->name == "a");
+  }
+}
+
+// A condition that ends a region, in a called rule or in place, reads past
+// the caller's trivia, as one after the region does, whether it writes or a
+// repetition holds it.
+void a_condition_ending_a_region_reads_past_the_callers_trivia(
+    const cursiv::Parser& p) {
+  const auto reads = [&](std::string_view head, const std::string& text) {
+    const cursiv::ParseResult r = p.parse(text);
+    const auto* const decl = r.value_as<ast::Decl>();
+    CHECK(r.accepted && r.diagnostics.empty() && decl != nullptr);
+    if (decl != nullptr)
+      CHECK(decl->vis == Vis::Protected && decl->name == "a" &&
+            decl->seen == head.starts_with("flagged"));
+  };
+  for (const std::string_view head :
+       {"tight", "tightened", "tightenedrepeated", "tightbefore", "flagged",
+        "repeated", "flaggedrepeated"}) {
+    const std::string start = "visible:" + std::string(head) + " protected";
+    for (const std::string_view gap : {" ", "  ", "\n", " \n "})
+      reads(head, start + std::string(gap) + "a");
+    const cursiv::ParseResult r = p.parse(start + "a");
+    CHECK(!r.accepted || !r.diagnostics.empty());
+  }
+  for (const std::string_view head :
+       {"region", "regioned", "tight", "tightened", "tightenedrepeated",
+        "tightbefore", "flagged", "repeated", "flaggedrepeated"})
+    for (const std::string_view gap : {"#", " # "})
+      reads(head, "noted:" + std::string(head) + " protected" +
+                      std::string(gap) + "a");
+}
+
+// A keyword a repair invents has no row, as a dropped token has none, but the
+// state that reads it: the value its alternative names was never written, and
+// the member keeps its default.
+void an_invented_keyword_leaves_the_member_unwritten(const cursiv::Parser& p) {
+  const cursiv::ParseResult r = p.parse("visible:wordy protected a");
+  const auto* const decl = r.value_as<ast::Decl>();
+  CHECK(r.accepted && r.diagnostics.size() == 1 && decl != nullptr);
+  if (r.diagnostics.size() == 1)
+    CHECK(r.diagnostics.front().kind == cursiv::DiagnosticKind::inserted);
+  if (decl != nullptr) CHECK(decl->vis == Vis::Private && decl->name == "a");
+}
+
+// Each level as it is listed, and every node of the climb a `Recoded`.
+void binary_builds_the_class_it_names(const cursiv::Parser& p) {
+  check(p, "derived:", "a != b", "(a NOTEQUAL b)");
+  check(p, "derived:", "a := b := c", "(a equal (b equal c))");
+  check(p, "derived:", "a != b := c != d",
+        "((a NOTEQUAL b) equal (c NOTEQUAL d))");
+  const cursiv::ParseResult r = p.parse("derived:a != b := c");
+  const auto* const doc = r.value_as<ast::Doc>();
+  const auto* const top =
+      doc == nullptr ? nullptr : cursiv::ast_cast<ast::Recoded>(doc->value);
+  CHECK(top != nullptr);
+  if (top != nullptr) CHECK(cursiv::ast_cast<ast::Recoded>(top->left));
+}
+
+void a_recursive_data_rule_spells_an_operator(const cursiv::Parser& p) {
+  check(p, "recursive:", "a + b", "(a + b)");
+  check(p, "recursive:", "a ! !+ b", "(a !!+ b)");
+  check(p, "recursive:", "a - b !+ c - d", "((a - (b !+ c)) - d)");
+  check(p, "recursive:", "a ! b", "<refused>");
+}
+
+void a_condition_in_an_operator_reads_the_lengthened_token(
+    const cursiv::Parser& p) {
+  check(p, "lengthened:", "a - b", "(a - b)");
+  check(p, "lengthened:", "a - >b", "(a - b)");
+  check(p, "lengthened:", "a -> b", "<refused>");
+  check(p, "lengthened:", "a * >b", "(a * b)");
+  check(p, "lengthened:", "a * > >b", "(a * b)");
+  check(p, "lengthened:", "a * >>b", "<refused>");
+  check(p, "lengthened:", "a + b - c * d", "(((a + b) - c) * d)");
+}
+
+void each_table_reads_its_own_level(const cursiv::Parser& p) {
+  check(p, "tables:", "sum: a + b * c + d", "((a + (b * c)) + d)");
+  check(p, "tables:", "type: a + b + c", "(a + (b + c))");
+  check(p, "tables:", "type: a | b + c", "(a | (b + c))");
+  check(p, "tables:", "type: [a | b] + c", "((a | b) + c)");
+  check(p, "tables:", "type: @a + b + c", "((a + b) + c)");
+  check(p, "tables:", "type: @a * b | c", "((a * b) | c)");
+}
+
 void every_engine(const cursiv::Parser& p) {
   a_sequence_hands_over_its_parts_joined(p);
   trivia_stands_inside_the_sequence(p);
@@ -159,6 +317,16 @@ void every_engine(const cursiv::Parser& p) {
   a_region_stays_with_its_sequence(p);
   sequences_sharing_a_first_token_are_told_apart(p);
   a_sequence_is_one_arm_of_a_choice(p);
+  as_names_the_constant_in_place(p);
+  as_assigns_its_constant(p);
+  a_data_rule_passes_its_alternative_value(p);
+  a_dropped_token_leaves_the_passed_value(p);
+  a_condition_ending_a_region_reads_past_the_callers_trivia(p);
+  an_invented_keyword_leaves_the_member_unwritten(p);
+  binary_builds_the_class_it_names(p);
+  a_recursive_data_rule_spells_an_operator(p);
+  a_condition_in_an_operator_reads_the_lengthened_token(p);
+  each_table_reads_its_own_level(p);
 }
 
 }  // namespace
@@ -242,11 +410,46 @@ void parentheses_group_the_chain(const cursiv::Parser& parser) {
   check(parser, "a <~ (b <~ c)", "(a<~(b<~c))");
 }
 
+using Offers = std::vector<std::string>;
+
+void offers(const cursiv::Parser& parser, std::string_view text,
+            std::size_t at, const Offers& expected) {
+  const std::string source = "nonassoc:" + std::string(text);
+  const Offers got = caret_offers::offered(
+      parser, source, static_cast<cursiv::TextOffset>(9 + at));
+  if (got != expected)
+    std::printf("  [%s] caret %zu of %.*s offered a wrong set\n", engine, at,
+                static_cast<int>(text.size()), text.data());
+  CHECK(got == expected);
+}
+
+// Behind an operand that ends a chain of the level, a caret is offered no
+// operator of the level: only a looser or a tighter one goes on.
+void a_caret_offers_no_chain(const cursiv::Parser& parser) {
+  const Offers apart{"&~", "*~", "+~"};
+  for (const std::string_view text :
+       {"a <~ b", "a <~ b *~ c", "a <~ (b)", "a &~ b <~ c"})
+    offers(parser, text, text.size(), apart);
+  offers(parser, "a &~ b", 6, {"&~", "*~", "+~", "<~", ">~"});
+  offers(parser, "(a <~ b", 7, {"&~", ")", "*~", "+~"});
+  offers(parser, "a <~ (b", 7, {"&~", ")", "*~", "+~", "<~", ">~"});
+}
+
+// Text a repair dropped behind a token it invented is stepped over: a caret
+// in it is offered what the caret before it is.
+void a_caret_in_dropped_text_reads_from_before_it(
+    const cursiv::Parser& parser) {
+  for (const std::size_t at : {0u, 5u, 6u})
+    offers(parser, "SAME(~", at, {"(", "ID"});
+}
+
 void every_engine(const cursiv::Parser& parser) {
   one_operator_of_the_level_reads(parser);
   a_chain_of_the_level_is_refused(parser);
   a_chain_behind_a_looser_operator_is_refused(parser);
   parentheses_group_the_chain(parser);
+  a_caret_offers_no_chain(parser);
+  a_caret_in_dropped_text_reads_from_before_it(parser);
 }
 
 }  // namespace
@@ -404,10 +607,181 @@ void run() {
 
 }  // namespace election_loop_cases
 
+namespace unary_level_cases {
+
+// Prefix and postfix levels in one table, in both engines: groupings, the
+// operands a looser prefix may not start, the class each level builds and the
+// value its operator writes.
+
+namespace {
+
+using namespace tunary;
+
+std::string_view step_name(Step step) {
+  return step == Step::inc ? "++" : step == Step::dec ? "--" : "!";
+}
+
+void spell(const ast::Expr& expr, std::string& out) {
+  if (const auto* const name = cursiv::ast_cast<ast::Name>(&expr)) {
+    out += name->name;
+  } else if (const auto* const unary = cursiv::ast_cast<ast::Unary>(&expr)) {
+    out += '(';
+    out += unary->op;
+    spell(*unary->operand, out);
+    out += ')';
+  } else if (const auto* const no = cursiv::ast_cast<ast::Not>(&expr)) {
+    out += '(';
+    out += no->word;
+    out += ' ';
+    spell(*no->body, out);
+    out += ')';
+  } else if (const auto* const post = cursiv::ast_cast<ast::Postfix>(&expr)) {
+    out += '(';
+    spell(*post->operand, out);
+    out += step_name(post->op);
+    out += ')';
+  } else if (const auto* const wrapped =
+                 cursiv::ast_cast<ast::Wrapped>(&expr)) {
+    out += '[';
+    spell(*wrapped->value, out);
+    out += "?]";
+  } else {
+    const auto& binary = static_cast<const ast::Binary&>(expr);
+    out += '(';
+    spell(*binary.left, out);
+    out += ' ';
+    out += binary.op;
+    out += ' ';
+    spell(*binary.right, out);
+    out += ')';
+  }
+}
+
+const ast::Expr* value(const cursiv::ParseResult& r) {
+  const auto* const doc = r.value_as<ast::Doc>();
+  if (!r.accepted || !r.diagnostics.empty() || doc == nullptr) return nullptr;
+  return doc->value;
+}
+
+const char* engine = "";
+
+void check(const cursiv::Parser& parser, std::string_view tag,
+           std::string_view text, std::string_view expected) {
+  const std::string source = std::string(tag) + std::string(text);
+  const cursiv::ParseResult r = parser.parse(source);
+  std::string got = "<refused>";
+  if (const ast::Expr* const v = value(r); v != nullptr) {
+    got.clear();
+    spell(*v, got);
+  }
+  if (got != expected)
+    std::printf("  [%s] %.*s\n    got      %s\n    expected %.*s\n", engine,
+                static_cast<int>(text.size()), text.data(), got.c_str(),
+                static_cast<int>(expected.size()), expected.data());
+  CHECK(got == expected);
+}
+
+void a_prefix_binds_what_is_tighter(const cursiv::Parser& p) {
+  check(p, "unary:", "-a * b", "((-a) * b)");
+  check(p, "unary:", "a * -b", "(a * (-b))");
+  check(p, "unary:", "- -a", "(-(-a))");
+  check(p, "unary:", "!-a", "(!(-a))");
+  check(p, "unary:", "a - -b", "(a - (-b))");
+  check(p, "unary:", "NOT a < b AND c", "((NOT (a < b)) AND c)");
+  check(p, "unary:", "NOT NOT a", "(NOT (NOT a))");
+  check(p, "unary:", "NOT a OR b", "((NOT a) OR b)");
+}
+
+void a_postfix_binds_what_is_tighter(const cursiv::Parser& p) {
+  check(p, "unary:", "-a++", "(-(a++))");
+  check(p, "unary:", "a++ * b", "((a++) * b)");
+  check(p, "unary:", "a * b--", "(a * (b--))");
+  check(p, "unary:", "a++ ++", "((a++)++)");
+  check(p, "members:", "a & b!", "((a & b)!)");
+  check(p, "members:", "~a!", "((~a)!)");
+  check(p, "members:", "a!!", "((a!)!)");
+}
+
+// An operand starts with no prefix looser than its level, and a tighter
+// binary operator takes no looser postfix's result.
+void a_looser_operator_is_refused_inside(const cursiv::Parser& p) {
+  check(p, "unary:", "a < NOT b", "<refused>");
+  check(p, "unary:", "a * NOT b", "<refused>");
+  check(p, "unary:", "a < (NOT b)", "(a < (NOT b))");
+  check(p, "unary:", "a < b < c", "<refused>");
+  check(p, "members:", "a! & b", "<refused>");
+  check(p, "members:", "(a!) & b", "((a!) & b)");
+}
+
+void a_level_builds_its_own_class(const cursiv::Parser& p) {
+  const std::string text = "unary:-a++ * b AND NOT c";
+  const cursiv::ParseResult r = p.parse(text);
+  const auto* const top = cursiv::ast_cast<ast::Binary>(value(r));
+  const auto* const times =
+      top == nullptr ? nullptr : cursiv::ast_cast<ast::Binary>(top->left);
+  CHECK(times != nullptr && times->op == "*");
+  if (times == nullptr) return;
+  // The class form builds the class it names, though a base declares the
+  // members; the member form the class declaring them.
+  const auto* const sign = cursiv::ast_cast<ast::Signed>(times->left);
+  CHECK(sign != nullptr && sign->op == "-");
+  const auto* const step =
+      sign == nullptr ? nullptr : cursiv::ast_cast<ast::Postfix>(sign->operand);
+  CHECK(step != nullptr && step->op == Step::inc);
+  const auto* const no = cursiv::ast_cast<ast::Not>(top->right);
+  CHECK(no != nullptr && no->word == "NOT");
+  const cursiv::ParseResult m = p.parse("members:~a!");
+  const auto* const bang = cursiv::ast_cast<ast::Postfix>(value(m));
+  CHECK(bang != nullptr && bang->op == Step::bang);
+  const auto* const tilde =
+      bang == nullptr ? nullptr : cursiv::ast_cast<ast::Unary>(bang->operand);
+  CHECK(tilde != nullptr && cursiv::ast_cast<ast::Signed>(tilde) == nullptr);
+  const cursiv::ParseResult d = p.parse("unary:a--");
+  const auto* const dec = cursiv::ast_cast<ast::Postfix>(value(d));
+  CHECK(dec != nullptr && dec->op == Step::dec);
+}
+
+// A table its primary reaches at its left edge reads the same groupings.
+void a_cyclic_table_reads_its_levels(const cursiv::Parser& p) {
+  check(p, "cyclic:", "-a * b", "((-a) * b)");
+  check(p, "cyclic:", "a * -b", "(a * (-b))");
+  check(p, "cyclic:", "-a++", "(-(a++))");
+  check(p, "cyclic:", "a++ * b", "((a++) * b)");
+  check(p, "cyclic:", "a?", "[a?]");
+}
+
+void every_engine(const cursiv::Parser& p) {
+  a_prefix_binds_what_is_tighter(p);
+  a_postfix_binds_what_is_tighter(p);
+  a_looser_operator_is_refused_inside(p);
+  a_level_builds_its_own_class(p);
+  a_cyclic_table_reads_its_levels(p);
+}
+
+}  // namespace
+
+void run() {
+  engine = "Ll";
+  every_engine(*tunary::generated::Ll::create_parser());
+  engine = "Lr";
+  every_engine(*tunary::generated::Lr::create_parser());
+  // The fuzz lane writes the binary chains of a table with unary levels, and
+  // each engine's tree agrees with the one the table states.
+  cursiv::fuzzer::lane<Fuzzed>(
+      "unary_levels_ll", *tunary::generated::Ll::create_parser(),
+      *tunary::generated::Ll::create_ast_reflection(), 200, 0x5a5a5a);
+  cursiv::fuzzer::lane<Fuzzed>(
+      "unary_levels_lr", *tunary::generated::Lr::create_parser(),
+      *tunary::generated::Lr::create_ast_reflection(), 200, 0x6b6b6b);
+}
+
+}  // namespace unary_level_cases
+
 int main() {
   cursiv::test::count_expectations();
   infix_operators_cases::run();
   nonassoc_cases::run();
   election_loop_cases::run();
+  unary_level_cases::run();
   return cursiv::test::report("InfixOperators_test");
 }

@@ -12,8 +12,8 @@ void fuzz_domainmodel() {
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
       g::create_ast_reflection();
-  cursiv::fuzzer::lane<dm::DomainModel>(
-      "domainmodel", *parser, *reflection, 400, 0x5eed06);
+  cursiv::fuzzer::lane<dm::DomainModel>("domainmodel", *parser, *reflection,
+                                        400, 0x5eed06);
 }
 }  // namespace
 

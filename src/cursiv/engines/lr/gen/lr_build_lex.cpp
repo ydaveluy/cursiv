@@ -14,10 +14,11 @@
 
 #include "cursiv/engines/lr/gen/LrBuckets.hpp"
 #include "cursiv/engines/lr/gen/LrBuildCfg.hpp"
+#include "cursiv/engines/lr/gen/LrLexView.hpp"
 #include "cursiv/engines/lr/gen/LrLowProd.hpp"
 #include "cursiv/engines/lr/gen/lr_intern_name.hpp"
 #include "cursiv/engines/lr/runtime/LrVirtualAt.hpp"
-#include "cursiv/engines/shared/gen/LexCodePoints.hpp"
+#include "cursiv/engines/shared/gen/LexBacktrack.hpp"
 #include "cursiv/engines/shared/gen/LexDfaBuild.hpp"
 #include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
@@ -32,8 +33,7 @@
 namespace cursiv {
 // A state reads under one configuration, the one every item's boundary is
 // read under. An item at its own start owes its boundary to the call, whose
-// item states it -- save an empty one where a region closes, which stands past
-// the region.
+// item states it -- save one that closes a region, which stands past it.
 std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
                                         const LrPoolRows<LrItem>& clos,
                                         const std::vector<unsigned>& pick,
@@ -186,7 +186,7 @@ LexModes lr_lex_mode_sets(LrBuildTable& A,
     }
   }
   A.errMode = r.error_mode(g);
-  predicate_modes(g, [&](const DynSet& want) { return r.intern(want); });
+  predicate_modes(g, r);
   if (sections) {
     const auto errOf = r.section_modes(g, lr_section_reads(g), A.errMode);
     A.sectionErr = errOf;
@@ -264,18 +264,7 @@ void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
   };
   const auto write = [&](std::uint16_t self, const LexDfaReading& r) {
     A.dfaAccept[self] = r.best < 0 ? 0 : static_cast<std::uint16_t>(r.best + 1);
-    auto group = r.relays;
-    for (const LexDfaReading::Gate& gate : r.gates) {
-      LexRelayGen row;
-      row.term = gate.term;
-      row.predicate = cut.gate(g, gate.stands);
-      row.resume = gate.resume;
-      row.gate = true;
-      group.push_back(lex_relay_push(push_relay, row));
-    }
-    A.dfaRelay[self] = relayChains.intern(group, A.relays, push_relay);
-    // The boundary is the match state's own, never the terminal's.
-    A.dfaBound[self] = r.best_bound();
+    A.dfaRelay[self] = relayChains.launched(g, cut, r, A.relays, push_relay);
     A.dfaAcc[self] = r.acc;
     A.accBoundBase[self] = static_cast<std::uint32_t>(A.accBound.size());
     std::size_t rank = 0;
@@ -317,30 +306,11 @@ void lr_lex_dfa(LrBuildTable& A, const LexAlphabet& alpha,
 std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
   auto& g = A.cfg;
   const unsigned nT = g.nterms;
-  std::vector<DynSet> deferred, pending;
-  if (A.nrelays != 0) {
-    const auto successors = [&](std::size_t s, auto&& each) {
-      for (unsigned c = 0; c < A.ncls; ++c)
-        if (const auto to = A.next_dfa(s, c); to != kDeadState) each(to);
-    };
-    const auto launched = [&](bool tiered) {
-      return [&A, tiered](std::size_t s, auto&& each) {
-        for (auto k = A.dfaRelay[s]; k != kNoRelay; k = A.relays[k].next)
-          if (!A.relays[k].gate && (A.relays[k].tier != 0) == tiered)
-            each(A.relays[k].term);
-      };
-    };
-    deferred = lex_relayed(A.ndfa, launched(false), successors);
-    pending = lex_relayed(A.ndfa, launched(true), successors);
-    for (std::size_t s = 0; s < deferred.size(); ++s)
-      deferred[s] |= A.dfa_acc_set(static_cast<std::uint16_t>(s));
-  }
-  const auto accepted = [&](std::size_t s) -> const DynSet& {
-    return deferred.empty() ? A.dfa_acc_set(static_cast<std::uint16_t>(s))
-                            : deferred[s];
-  };
   const LexReserved reserved = lex_reserve(
-      g, A.ndfa, accepted,
+      g, LrLexView{A}, A.ndfa, std::span(A.relays.data(), A.nrelays),
+      [&](std::size_t s) -> const DynSet& {
+        return A.dfa_acc_set(static_cast<std::uint16_t>(s));
+      },
       [&](std::size_t s, auto&& each) {
         const auto state = static_cast<std::uint16_t>(s);
         const DynSet& accS = A.dfa_acc_set(state);
@@ -352,14 +322,10 @@ std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
             each(t, stand, unsigned{kTierKeyword});
         });
       },
-      [&](std::size_t s, unsigned u) { A.dfaRes[s].set(u); });
-  if (!pending.empty())
-    lex_reserve_pending(
-        g, A.ndfa, reserved, pending, accepted,
-        [&](std::size_t s, unsigned u) { A.dfaRelayRes[s].set(u); });
+      [&](std::size_t s, unsigned u) { A.dfaRes[s].set(u); },
+      [&](std::size_t s, unsigned u) { A.dfaRelayRes[s].set(u); });
 
-  // The election moves too, and the boundary with it to the elected
-  // acceptance's own.
+  // The election moves too.
   for (unsigned s = 0; s < A.ndfa; ++s) {
     if (A.dfaAccept[s] == 0) continue;
     const DynSet& res = A.dfa_res_set(s);
@@ -373,10 +339,12 @@ std::vector<DynSet> lr_lex_reserve(LrBuildTable& A) {
                                    static_cast<unsigned>(best)))
         best = static_cast<int>(t);
     });
-    if (best < 0) continue;
-    A.dfaAccept[s] = static_cast<std::uint16_t>(best + 1);
-    A.dfaBound[s] = A.dfa_acc_bound(s, static_cast<unsigned>(best));
+    if (best >= 0) A.dfaAccept[s] = static_cast<std::uint16_t>(best + 1);
   }
+  // The boundary is the elected acceptance's own, never the terminal's.
+  for (unsigned s = 0; s < A.ndfa; ++s)
+    A.dfaBound[s] =
+        A.dfaAccept[s] == 0 ? kNoSet : A.dfa_acc_bound(s, A.dfaAccept[s] - 1u);
   return reserved.keywords;
 }
 
@@ -399,7 +367,6 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
   const unsigned nT = g.nterms;
   const std::vector<unsigned>& repByte = alpha.repByte;
   const unsigned ncls = alpha.ncls;
-  const ByteSet leads = lex_leads_of(g.wordRanges.data(), g.wordRanges.size());
   // The classes of the keywords a state accepts, and what a byte class is
   // to them: a word byte only if every one holds it; a lead byte of their
   // scalars is sent both answers.
@@ -449,13 +416,12 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
             t < nT ? A.dfa_acc_bound(static_cast<std::uint16_t>(s),
                                      static_cast<unsigned>(t))
                    : kNoSet;
-        if (own != kNoSet && lex_word_set(g, own, leads)) keys.push_back(own);
+        if (own != kNoSet && lex_word_set(g, own)) keys.push_back(own);
         const std::uint16_t stand =
             t < nT ? A.dfa_acc_stand(static_cast<std::uint16_t>(s),
                                      static_cast<unsigned>(t))
                    : kNoSet;
-        if (stand != kNoSet && lex_word_set(g, stand, leads))
-          keys.push_back(stand);
+        if (stand != kNoSet && lex_word_set(g, stand)) keys.push_back(stand);
       });
       for (unsigned c = 0; c < ncls; ++c) {
         const std::uint16_t r = nr[c];
@@ -692,7 +658,9 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
 std::vector<DynSet> lr_lex_automaton(LrBuildTable& A, const LexAlphabet& alpha,
                                      const LexModes& modes) {
   lr_lex_dfa(A, alpha, modes);
-  return lr_lex_reserve(A);
+  auto words = lr_lex_reserve(A);
+  A.modeBacktrack = lex_backtrack_modes(A, &A.dfaBacktrack);
+  return words;
 }
 
 // A mode whose rivals meet only where the text ends keeps the table's single
@@ -747,8 +715,7 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
   rows.lexElseRows.clear();
   rows.lexElseBase.reserve(a.ndfa + 1u);
   LexSuccessors successors(a.ndfa);
-  const ByteSet leads =
-      lex_leads_of(a.cfg.wordRanges.data(), a.cfg.wordRanges.size());
+  const ByteSet& leads = a.cfg.wordLeads;
   for (unsigned s = 0; s < a.ndfa; ++s) {
     const auto first = static_cast<std::uint32_t>(rows.lexElseRows.size());
     rows.lexElseBase.push_back(first);
@@ -769,9 +736,8 @@ void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
           for (const auto own :
                {a.dfa_acc_bound(s, static_cast<unsigned>(bit)),
                 a.dfa_acc_stand(s, static_cast<unsigned>(bit))})
-            reserved =
-                reserved || (own != kNoSet && lex_word_set(a.cfg, own, leads) &&
-                             !refuses(own));
+            reserved = reserved || (own != kNoSet && lex_word_set(a.cfg, own) &&
+                                    !refuses(own));
         });
         SymbolId best = kInvalidSymbol;
         each_bit(open.w.data(), open.w.size(), [&](std::size_t bit) {

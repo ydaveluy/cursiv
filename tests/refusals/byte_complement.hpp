@@ -8,6 +8,6 @@ struct G : Base {
   struct NAME : terminal<~byte> {};
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<NAME>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace refuse

@@ -33,9 +33,9 @@ void RequirementsValidator::checkRequirementNameContainsANumber(
     cursiv::ValidationAcceptor& accept) const {
   if (!has_digit(requirement.name))
     accept
-        .warning(requirement, "Requirement name " +
-                                  std::string(requirement.name) +
-                                  " should contain a number.")
+        .warning(requirement, "Requirement name "
+                                  + std::string(requirement.name)
+                                  + " should contain a number.")
         .property<&ast::Requirement::name>();
 }
 
@@ -68,8 +68,8 @@ void RequirementsValidator::checkRequirementIsCoveredByATest(
   });
 
   if (covered != nullptr && !covered->contains(&requirement))
-    accept.warning(requirement, "Requirement " + std::string(requirement.name) +
-                                    " not covered by a test.");
+    accept.warning(requirement, "Requirement " + std::string(requirement.name)
+                                    + " not covered by a test.");
 }
 
 }  // namespace req

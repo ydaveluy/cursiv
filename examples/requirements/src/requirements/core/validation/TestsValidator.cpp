@@ -21,8 +21,8 @@ void TestsValidator::checkTestNameContainsANumber(
     const ast::Test& test, cursiv::ValidationAcceptor& accept) const {
   if (!has_digit(test.name))
     accept
-        .warning(test, "Test name " + std::string(test.name) +
-                           " should contain a number.")
+        .warning(test, "Test name " + std::string(test.name)
+                           + " should contain a number.")
         .property<&ast::Test::name>();
 }
 

@@ -70,8 +70,8 @@ bool GrammarImage::DerivedKey::operator==(const DerivedKey& o) const {
          shape.text.data() == o.shape.text.data() &&
          shape.text.size() == o.shape.text.size() &&
          shape.text2.data() == o.shape.text2.data() &&
-         shape.row == o.shape.row && shape.tag == o.shape.tag &&
-         kids == o.kids;
+         shape.text2.size() == o.shape.text2.size() &&
+         shape.row == o.shape.row && shape.tag == o.shape.tag && kids == o.kids;
 }
 
 std::size_t GrammarImage::DerivedHash::operator()(const DerivedKey& k) const {
@@ -128,8 +128,10 @@ ImageFace GrammarImage::face(const ImageFaceDesc& d) {
   f.levelsAt = static_cast<std::uint32_t>(levels.size());
   f.levelCount = d.levelCount;
   for (std::uint32_t i = 0; i < d.levelCount; ++i) {
-    const ImageId op = node(*d.levels[i].op);
-    levels.push_back({d.levels[i].group, op});
+    const ImageLevelDesc& level = d.levels[i];
+    const ImageId op = node(*level.op);
+    levels.push_back(
+        {level.group, op, level.node, {level.members[0], level.members[1]}});
   }
   f.ignoreAt = list(d.ignore, d.ignoreCount);
   f.ignoreCount = d.ignoreCount;

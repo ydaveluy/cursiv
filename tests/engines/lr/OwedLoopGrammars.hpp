@@ -129,7 +129,7 @@ struct G : Words {
                      (lit<"201:"> + ref<seed201::G::R0>) |
                      (lit<"383:"> + ref<seed383::G::R0>)> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace towed

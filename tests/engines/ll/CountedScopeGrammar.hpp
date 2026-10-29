@@ -131,7 +131,7 @@ struct Base : cursiv::GrammarSpec {
               ref<Called> | ref<Tight> TSCOPE_PAIRS(TSCOPE_REF)) +
              eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

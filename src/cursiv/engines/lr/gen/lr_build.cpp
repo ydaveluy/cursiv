@@ -224,6 +224,7 @@ LrItemDomain lr_item_domain(const LrBuildCfg& g) {
 
 // What `. B` adds for every nonterminal B, and the items it sets as a mask.
 struct LrClosures {
+  // Each rule's entries, ascending by production.
   std::vector<LrClosEntry> entries;
   std::vector<std::uint32_t> base;
   std::vector<std::uint64_t> maskArena;
@@ -529,7 +530,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     if (id >= 0xffffu) {
       A.cap_hit(
           "the 16-bit index of an LR state, counted before minimisation "
-          "(n conditions read under one token make 2^n of them)");
+          "(optional items and counted repetitions multiply them; n "
+          "conditions read under one token make 2^n)");
       fresh = false;
       return 0;
     }
@@ -1562,35 +1564,7 @@ class LrWrittenOrder {
                  const LrGraph& gr, const LrClosures& cl,
                  const LrFirstSets& fs, const LrBuckets<std::uint16_t>& pn,
                  const LrBuildTable& A)
-      : _g(g), _dom(dom), _gr(gr), _cl(cl), _fs(fs), _pn(pn), _A(A)
-  {
-    _keys.emplace_back();
-    _rows.resize(gr.states());
-    _opens.resize(g.nnts);
-    _corner.resize(g.nnts);
-    _preds = gr.predecessors();
-    _seen.assign(gr.states(), 0);
-    _bucketOf.assign(dom.n, kNone);
-    _entryAt.assign(std::size_t{g.nnts} * g.nprods, nullptr);
-    for (unsigned b = 0; b < g.nnts; ++b)
-      for (const LrClosEntry& e : cl.of(b))
-        _entryAt[std::size_t{b} * g.nprods + e.prod] = &e;
-    _restEmpty.assign(dom.n, 1);
-    for (unsigned p = 0; p < g.nprods; ++p)
-      for (unsigned i = g.prods[p].len; i-- > 0;) {
-        const std::uint16_t y = g.sym_at(g.prods[p], i);
-        _restEmpty[_dom.base[p] + i] = !is_term(y) && fs.nullable[nt_index(y)] &&
-                                       _restEmpty[_dom.base[p] + i + 1];
-      }
-    _nexts.resize(gr.states());
-    _nextsMade.assign(gr.states(), 0);
-    for (unsigned s = 0; s < gr.states(); ++s)
-      for (const LrItem& k : kernel(s))
-        _maxDot = std::max<std::uint32_t>(_maxDot, k.dot);
-    _originOf.assign(std::size_t{gr.states()} * (_maxDot + 1u), kNone);
-    _reach.resize(_maxDot + 2u);
-    _climbOf.assign(std::size_t{g.nprods} * g.nterms, kNone);
-  }
+      : _g(g), _dom(dom), _gr(gr), _cl(cl), _fs(fs), _pn(pn), _A(A) {}
 
   // Lets go of the layouts and the forward walks held once they weigh too
   // much; a layout met again is built again, and what its meetings said
@@ -1626,21 +1600,49 @@ class LrWrittenOrder {
   };
   Decision operator()(unsigned s, const LrAction& a, const LrAction& b,
                       unsigned t) {
+    open();
     const Decision d = decide(s, reading(s, a, t), reading(s, b, t));
     return d;
   }
 
  private:
+  // The tables every comparison reads, laid at the first one: a graph with no
+  // cell to order lays none.
+  void open() {
+    if (!_keys.empty()) return;
+    _keys.emplace_back();
+    _rows.resize(_gr.states());
+    _opens.resize(_g.nnts);
+    _corner.resize(_g.nnts);
+    _preds = _gr.predecessors();
+    _seen.assign(_gr.states(), 0);
+    _bucketOf.assign(_dom.n, kNone);
+    _restEmpty.assign(_dom.n, 1);
+    for (unsigned p = 0; p < _g.nprods; ++p)
+      for (unsigned i = _g.prods[p].len; i-- > 0;) {
+        const std::uint16_t y = _g.sym_at(_g.prods[p], i);
+        _restEmpty[_dom.base[p] + i] = !is_term(y) &&
+                                       _fs.nullable[nt_index(y)] &&
+                                       _restEmpty[_dom.base[p] + i + 1];
+      }
+    _nexts.resize(_gr.states());
+    _nextsMade.assign(_gr.states(), 0);
+    for (unsigned s = 0; s < _gr.states(); ++s)
+      for (const LrItem& k : kernel(s))
+        _maxDot = std::max<std::uint32_t>(_maxDot, k.dot);
+    _reach.resize(_maxDot + 2u);
+    _climbOf.assign(std::size_t{_g.nprods} * _g.nterms, kNone);
+  }
+
   static constexpr std::size_t kMostHeld = std::size_t{1} << 26;
   static constexpr std::size_t kMostLinks = std::size_t{1} << 22;
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
 
-  // What a chain is but for where it stands: its items from the top down, the
-  // left-corner words between them, and the words the chain lays.
+  // What a chain is but for where it stands: its items from the top down, and
+  // the words the chain lays, laid when a say first reads them.
   struct Skeleton {
     std::array<LrItem, 3> at{};
-    std::array<std::uint32_t, 2> lead{};
-    std::uint32_t seq = 0;
+    std::uint32_t seq = kNone;
     std::uint8_t len = 0;
   };
   // A state of a chain of three.
@@ -1664,8 +1666,9 @@ class LrWrittenOrder {
     std::uint32_t mid = 0;
     LrItem top;
     // For a chain of three, the production under the top, and how far under the
-    // top the root stands.
-    std::uint16_t next = 0, rootOff = 0, root = 0;
+    // top the root stands: two dots, whose sum may pass sixteen bits.
+    std::uint16_t next = 0, root = 0;
+    std::uint32_t rootOff = 0;
     std::uint8_t len = 1;
   };
   // What a root climbs through: the nodes it may begin in and, for each, the
@@ -1915,8 +1918,12 @@ class LrWrittenOrder {
     return _back.emplace(k, std::move(here)).first->second;
   }
 
+  // Production `p`'s entry in the closure of rule `b`, if it has one: a rule's
+  // entries ascend by production.
   const LrClosEntry* entry(unsigned b, unsigned p) const {
-    return _entryAt[std::size_t{b} * _g.nprods + p];
+    const std::span<const LrClosEntry> of = _cl.of(b);
+    const auto it = std::ranges::lower_bound(of, p, {}, &LrClosEntry::prod);
+    return it != of.end() && it->prod == p ? &*it : nullptr;
   }
 
   // Whether kernel item `k` reads `t` past production `p` it opens: 2 where
@@ -1993,23 +2000,30 @@ class LrWrittenOrder {
   }
 
   // The parents a reading of `t` climbs through from a node, whose `row` of
-  // scores is `scores(p, t)`: for a reduced one, those that read `t` past it
-  // as their next token where one does.
+  // scores is `scores(p, t)`, null where `t` is kNone and nothing is scored:
+  // for a reduced one, those that read `t` past it as their next token where
+  // one does. True where some parent is dropped.
   template <class F>
-  void each_chosen(std::vector<std::int8_t>& row, unsigned o, unsigned p,
+  bool each_chosen(std::vector<std::int8_t>* row, unsigned o, unsigned p,
                    std::uint32_t t, F&& f) {
-    if (t == kNone) {
+    if (row == nullptr) {
       each_parent(o, p, [&](const LrItem& k, unsigned) { f(k); });
-      return;
+      return false;
     }
     int most = 0;
+    std::size_t all = 0;
     each_parent(o, p, [&](const LrItem& k, unsigned) {
-      most = std::max(most, score(row, k, p, t));
+      most = std::max(most, score(*row, k, p, t));
+      ++all;
     });
-    if (most == 0) return;
+    if (most == 0) return all != 0;
+    std::size_t kept = 0;
     each_parent(o, p, [&](const LrItem& k, unsigned) {
-      if (score(row, k, p, t) == most) f(k);
+      if (score(*row, k, p, t) != most) return;
+      f(k);
+      ++kept;
     });
+    return kept != all;
   }
 
   static std::uint64_t path_key(unsigned s, const LrAction& x, unsigned t) {
@@ -2020,15 +2034,23 @@ class LrWrittenOrder {
   unsigned item_ix(const LrItem& k) const { return _dom.base[k.prod] + k.dot; }
 
   // Appends the words of `n`, `off` frames under its chain's top, after the
-  // left-corner words `lead` unless it is the top.
+  // least words of the left corner from the item `over` it, where there is
+  // one.
   void lay_words(std::vector<Elem>& out, const LrItem& n, std::uint32_t off,
-                 std::uint32_t lead, bool top) {
-    if (!top)
-      for (const std::uint32_t w : _keys[lead]) out.push_back({w, false});
+                 const LrItem* over) {
     const LrLowProd& q = _g.prods[n.prod];
+    if (over != nullptr) {
+      const std::uint32_t lead = corner(
+          nt_index(_g.sym_at(_g.prods[over->prod], over->dot)), q.lhs);
+      for (const std::uint32_t w : _keys[lead]) out.push_back({w, false});
+    }
+    // A production's words ascend by the child they stand before.
+    const bool any = !_A.electAt.empty();
+    std::uint32_t w = any ? _A.electAt[n.prod] : 0;
+    const std::uint32_t end = any ? _A.electAt[n.prod + 1] : 0;
     for (unsigned i = 0; i <= n.dot; ++i) {
-      words_at(n.prod, static_cast<std::uint16_t>(i),
-               [&](std::uint32_t w) { out.push_back({w, false}); });
+      for (; w < end && _A.electPos[w] == i; ++w)
+        out.push_back({_A.electWord[w], false});
       if (i < n.dot && !is_term(_g.sym_at(q, i)))
         out.push_back({off + i, true});
     }
@@ -2048,21 +2070,22 @@ class LrWrittenOrder {
       const Skeleton under = _skeletons[below];
       sk.len = under.len + 1;
       for (unsigned i = 0; i < under.len; ++i) sk.at[i + 1] = under.at[i];
-      const LrLowProd& pr = _g.prods[item.prod];
-      sk.lead[0] = corner(nt_index(_g.sym_at(pr, item.dot)),
-                          _g.prods[under.at[0].prod].lhs);
-      if (under.len > 1) sk.lead[1] = under.lead[0];
     }
-    _fx.clear();
-    lay_words(_fx, sk.at[0], 0, 0, true);
-    std::uint32_t off = sk.at[0].dot;
-    for (unsigned i = 1; i < sk.len; ++i) {
-      lay_words(_fx, sk.at[i], off, sk.lead[i - 1], false);
-      off += sk.at[i].dot;
-    }
-    sk.seq = intern(_fx);
     _skeletons.push_back(sk);
     return id;
+  }
+
+  // The words skeleton `id` lays.
+  std::uint32_t seq_of(std::uint32_t id) {
+    Skeleton& sk = _skeletons[id];
+    if (sk.seq != kNone) return sk.seq;
+    _fx.clear();
+    std::uint32_t off = 0;
+    for (unsigned i = 0; i < sk.len; ++i) {
+      lay_words(_fx, sk.at[i], off, i == 0 ? nullptr : &sk.at[i - 1]);
+      off += sk.at[i].dot;
+    }
+    return sk.seq = intern(_fx);
   }
 
   std::uint32_t intern(const std::vector<Elem>& seq) {
@@ -2089,7 +2112,7 @@ class LrWrittenOrder {
       c.height += under.height;
       if (under.len > 1) {
         c.next = under.top.prod;
-        c.rootOff = static_cast<std::uint16_t>(top.dot + under.top.dot);
+        c.rootOff = std::uint32_t{top.dot} + under.top.dot;
         c.mid = parent;
       }
     }
@@ -2289,9 +2312,9 @@ class LrWrittenOrder {
     talls.reserve(total);
     for (std::size_t i = 0, j; i < _byKey.size(); i = j) {
       const Chain& head = sh.chains[_byKey[i]];
-      const std::uint64_t key = std::uint64_t{head.rootOff} << 48 |
-                                std::uint64_t{head.top.prod} << 32 |
-                                std::uint64_t{head.top.dot} << 16;
+      const std::uint64_t key = std::uint64_t{head.rootOff} << 32 |
+                                std::uint64_t{head.top.prod} << 16 |
+                                head.top.dot;
       const std::size_t begin = talls.size();
       for (j = i; j < _byKey.size(); ++j) {
         const Chain& ch = sh.chains[_byKey[j]];
@@ -2440,10 +2463,11 @@ class LrWrittenOrder {
     return known = at->second;
   }
 
-  // The id of the states `n` frames under `s`: equal states, equal id.
+  // The id of the states `n` frames under `s`: equal states, equal id. Only
+  // the pairs a comparison asks for are held.
   std::uint32_t origins_of(unsigned s, unsigned n) {
-    std::uint32_t& known = _originOf[std::size_t{s} * (_maxDot + 1u) + n];
-    if (known != kNone) return known;
+    auto [known, fresh] = _originOf.emplace(std::uint64_t{s} << 32 | n);
+    if (!fresh) return known;
     const std::vector<std::uint32_t>& v = back(s, n);
     std::uint64_t h = hash_mix(0x51ed270b, v.size());
     for (const std::uint32_t x : v) h = hash_mix(h, x);
@@ -2460,31 +2484,21 @@ class LrWrittenOrder {
   // token read; lists that climb alike share it.
   std::uint32_t rise_of(std::uint32_t origins, const LrItem& r,
                         std::uint32_t t) {
-    auto [made, fresh] = _riseOf.emplace(std::uint64_t{origins} << 40 |
-                                         std::uint64_t{r.dot} << 32 |
-                                         std::uint64_t{r.prod} << 16 |
-                                         (t == kNone ? 0xffffu : t));
+    const auto [at, fresh] =
+        _riseOf.try_emplace({origins, std::uint32_t{r.prod} << 16 | r.dot, t});
+    std::uint32_t& made = at->second;
     if (!fresh) return made;
     Rise rise;
     rise.origins = origins;
     rise.dot = r.dot;
-    const std::vector<std::uint32_t>& states = *_origins[origins];
-    std::vector<std::int8_t>& row = t == kNone ? _noScores : scores(r.prod, t);
-    for (const std::uint32_t o : states)
-      each_chosen(row, o, r.prod, t, [&](const LrItem& k) {
-        rise.flat.push_back(std::uint64_t{item_ix(k)} << 32 | o);
-      });
-    std::ranges::sort(rise.flat);
-    for (std::size_t i = 0; i < states.size() && t != kNone; ++i) {
-      std::size_t kept = 0, all = 0;
-      each_chosen(row, states[i], r.prod, t, [&](const LrItem&) { ++kept; });
-      each_parent(states[i], r.prod,
-                  [&](const LrItem&, unsigned) { ++all; });
-      if (kept != all) {
+    std::vector<std::int8_t>* const row =
+        t == kNone ? nullptr : &scores(r.prod, t);
+    for (const std::uint32_t o : *_origins[origins])
+      if (each_chosen(row, o, r.prod, t, [&](const LrItem& k) {
+            rise.flat.push_back(std::uint64_t{item_ix(k)} << 32 | o);
+          }))
         rise.narrowed = true;
-        break;
-      }
-    }
+    std::ranges::sort(rise.flat);
     std::uint64_t h = hash_mix(hash_mix(0x2545f491, origins), rise.dot);
     h = hash_mix(h, rise.narrowed);
     for (const std::uint64_t x : rise.flat) h = hash_mix(h, x);
@@ -2670,13 +2684,13 @@ class LrWrittenOrder {
     const std::vector<Run>& xs = A.runs[height];
     const std::vector<Run>& ys = B.runs[height];
     for (std::size_t i = 0, ie; i < xs.size(); i = ie) {
-      const std::uint64_t rx = xs[i].key >> 48;
+      const std::uint64_t rx = xs[i].key >> 32;
       ie = i;
-      while (ie < xs.size() && xs[ie].key >> 48 == rx) ++ie;
+      while (ie < xs.size() && xs[ie].key >> 32 == rx) ++ie;
       for (std::size_t j = 0, je; j < ys.size(); j = je) {
-        const std::uint64_t ry = ys[j].key >> 48;
+        const std::uint64_t ry = ys[j].key >> 32;
         je = j;
-        while (je < ys.size() && ys[je].key >> 48 == ry) ++je;
+        while (je < ys.size() && ys[je].key >> 32 == ry) ++je;
         if (join_class(A, B, A.talls[height], std::span(xs).subspan(i, ie - i),
                        B.talls[height], std::span(ys).subspan(j, je - j),
                        rx == ry))
@@ -2751,9 +2765,7 @@ class LrWrittenOrder {
   // symbols, when `a` is the state after `d1` of them.
   const std::vector<std::uint32_t>& link(unsigned p, unsigned d1, unsigned d2,
                                          std::uint32_t a) {
-    const std::uint64_t key = std::uint64_t{p} << 48 | std::uint64_t{d1} << 40 |
-                              std::uint64_t{d2} << 32 | a;
-    const auto [at, fresh] = _links.try_emplace(key);
+    const auto [at, fresh] = _links.try_emplace({p, d1 << 16 | d2, a});
     if (!fresh) return at->second;
     std::vector<std::uint32_t>& out = at->second;
     for (const std::uint32_t x : back(a, d1))
@@ -2867,11 +2879,14 @@ class LrWrittenOrder {
     return say;
   }
 
-  // What the chains `x` and `y` say where their tops are one node, `o` holding
-  // that node's origin, then the origins of the nodes under each top. Two nodes
-  // of one depth must share an origin and differ in production.
-  Say say_of(const Skeleton& x, const Skeleton& y,
+  // What the chains of skeletons `sx` and `sy` say where their tops are one
+  // node, `o` holding that node's origin, then the origins of the nodes under
+  // each top. Two nodes of one depth must share an origin and differ in
+  // production.
+  Say say_of(std::uint32_t sx, std::uint32_t sy,
              const std::array<std::uint32_t, 5>& o) {
+    const Skeleton& x = _skeletons[sx];
+    const Skeleton& y = _skeletons[sy];
     const unsigned lx = x.len, ly = y.len;
     const std::uint32_t dx0 = x.at[0].dot, dy0 = y.at[0].dot;
     const std::uint32_t xo1 = dx0, xo2 = dx0 + x.at[1].dot;
@@ -2896,7 +2911,7 @@ class LrWrittenOrder {
                 (hx1 && (alike(x.at[1].prod, x1, xo1, y.at[2].prod, y2, yo2) ||
                          apart(xo1, x1, yo2, y2)))))
       return {};
-    return sequence_say(x.seq, y.seq);
+    return sequence_say(seq_of(sx), seq_of(sy));
   }
 
   // What the chains `ca` over root `i` of `a` and `cb` over root `j` of `b`
@@ -2942,7 +2957,7 @@ class LrWrittenOrder {
   bool judge(std::uint32_t sx, std::uint32_t sy,
              const std::array<std::uint32_t, 5>& o, std::uint16_t xRoot,
              std::uint16_t yRoot, Meeting& at) {
-    const Say say = say_of(_skeletons[sx], _skeletons[sy], o);
+    const Say say = say_of(sx, sy, o);
     if (say.kind == 2) {
       const Tie tie{xRoot, yRoot, say.x, say.y};
       if (_tieSeen
@@ -3014,10 +3029,10 @@ class LrWrittenOrder {
   }
 
   static unsigned prod_of(const Run& r) {
-    return static_cast<unsigned>(r.key >> 32 & 0xffff);
+    return static_cast<unsigned>(r.key >> 16 & 0xffff);
   }
   static unsigned dot_of(const Run& r) {
-    return static_cast<unsigned>(r.key >> 16 & 0xffff);
+    return static_cast<unsigned>(r.key & 0xffff);
   }
 
   // `each_state` over the chains of three whose tops are of production `p` and
@@ -3367,12 +3382,12 @@ class LrWrittenOrder {
   std::unordered_multimap<std::uint64_t, std::uint32_t> _midIds;
   std::vector<Rise> _rises;
   std::vector<const std::vector<std::uint32_t>*> _origins;
-  std::vector<std::int8_t> _noScores;
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       _shapeOf, _layoutIds, _shapeIds;
-  std::vector<std::uint32_t> _originOf;
+  FlatMap<std::uint32_t> _originOf;
   std::unordered_multimap<std::uint64_t, std::uint32_t> _originIds, _riseIds;
-  FlatMap<std::uint32_t> _riseOf;
+  std::unordered_map<std::array<std::uint32_t, 3>, std::uint32_t, SegHash>
+      _riseOf;
   std::unordered_map<std::uint64_t, Pair> _pairs;
   std::vector<Meet>* _sink = nullptr;
   Live* _live = nullptr;
@@ -3384,7 +3399,6 @@ class LrWrittenOrder {
   std::unordered_map<std::vector<std::uint64_t>, std::uint32_t, VecHash> _seqOf;
   std::vector<std::uint64_t> _seqKey;
   std::unordered_set<std::array<std::uint32_t, 3>, SegHash> _tieSeen;
-  std::vector<const LrClosEntry*> _entryAt;
   std::vector<char> _restEmpty;
   std::vector<DynSet> _after;
   std::vector<char> _afterMade;
@@ -3405,7 +3419,9 @@ class LrWrittenOrder {
   FlatMap<std::uint32_t> _skeletonOf;
   FlatMap<std::uint8_t> _closedOf;
   std::vector<Skeleton> _skeletons;
-  std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> _links;
+  std::unordered_map<std::array<std::uint32_t, 3>, std::vector<std::uint32_t>,
+                     SegHash>
+      _links;
 };
 
 
@@ -4137,8 +4153,7 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
   if (opt.passes) lr_unit_elimination(A, modes, cfgs);
   lr_lex_candidates(A, alpha, modes, wordAt);
   if (A.overflow) return A;
-  // Before the states fuse: a reduction the graph elects by its words stays
-  // apart from one that reads the same.
+  // Only a table that forks merges readings, and only a merge elects.
   if (A.nconflicts != 0 || A.multiCand) {
     lr_elect_runs(A);
   } else {
@@ -4152,7 +4167,7 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
     // it stands.
     lr_peek_oracle(A);
   }
-  lr_subsume_modes(A, modes);
+  if (!A.indented()) lr_subsume_modes(A, modes);
   lr_share_action_rows(A);
   if (A.overflow) return A;
   // Count the widest cell and conflicts after the state rewrites.

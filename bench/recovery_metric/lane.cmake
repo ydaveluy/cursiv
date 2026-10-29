@@ -1,6 +1,14 @@
 # The recovery metric held to its classes: per grammar and class, faults
 # found, parasites, diagnostics and AST nodes kept may not move past one
 # document's worth from `lane.tsv`. `-DWRITE=1` writes the file from this run.
+# An engine whose repairs differ reads its own `lane-<engine>.tsv` beside it,
+# as the recovery lane reads `REFERENCE-<engine>.txt`.
+set(shared ${TSV})
+string(TOLOWER "${ENGINE}" engine)
+string(REGEX REPLACE "\\.tsv$" "-${engine}.tsv" own ${TSV})
+if(NOT engine STREQUAL "" AND EXISTS ${own})
+  set(TSV ${own})
+endif()
 execute_process(
     COMMAND ${EMULATOR} ${METRIC} --docs 32 --no-cost --json ${OUT}.json
     OUTPUT_VARIABLE text
@@ -29,7 +37,17 @@ endforeach()
 
 if(WRITE)
   list(JOIN rows "\n" out)
-  file(WRITE ${TSV} "${out}\n")
+  string(APPEND out "\n")
+  # The engine's own file stands only while it differs from the shared one.
+  if(NOT TSV STREQUAL shared)
+    file(READ ${shared} sharedText)
+    if(sharedText STREQUAL out)
+      file(REMOVE ${TSV})
+      message(STATUS "removed ${TSV}: ${shared} says the same")
+      return()
+    endif()
+  endif()
+  file(WRITE ${TSV} "${out}")
   message(STATUS "wrote ${TSV}")
   return()
 endif()

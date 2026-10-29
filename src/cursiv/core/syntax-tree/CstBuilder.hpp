@@ -7,6 +7,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,6 +19,7 @@
 #include "cursiv/core/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/core/utils/macros.hpp"
 
 namespace cursiv {
 
@@ -61,11 +64,14 @@ class CstBuilder {
     return id;
   }
 
-  NodeId leaf(TextOffset begin, TextOffset end, std::uint32_t engine) {
+  // Inlined like the run's own writers: an engine lays one per token.
+  CURSIV_ALWAYS_INLINE NodeId leaf(TextOffset begin, TextOffset end,
+                                   std::uint32_t engine) {
     _cst._stream.leaf(begin, end, engine);
     return lastVisibleNodeId = _cst.size() - 1;
   }
-  NodeId hidden(TextOffset begin, TextOffset end, std::uint32_t engine) {
+  CURSIV_ALWAYS_INLINE NodeId hidden(TextOffset begin, TextOffset end,
+                                     std::uint32_t engine) {
     _cst._stream.hidden(begin, end, engine);
     return _cst.size() - 1;
   }
@@ -106,6 +112,10 @@ class CstBuilder {
   void bind_accepted(bool accepted) noexcept { _cst.bind_accepted(accepted); }
   void bind_model(const Grammar& grammar, OwnedNodes owned) noexcept {
     _cst.bind_model(grammar, owned);
+  }
+  void bind_translation(std::string_view document,
+                        std::unique_ptr<const SourceTranslation> translation) {
+    _cst.bind_translation(document, std::move(translation));
   }
 
  private:

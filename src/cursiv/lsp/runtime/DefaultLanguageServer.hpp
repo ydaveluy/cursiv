@@ -252,6 +252,11 @@ class DefaultLanguageServer : public LanguageServer,
   // the version each edit was measured against, letting the client
   // refuse a fix clicked after a later keystroke. Asked at the handshake.
   bool _versionedEdits = false;
+  // Whether the client prefers markdown for hover contents and for completion
+  // documentation; otherwise that prose goes as plain text. Asked at the
+  // handshake.
+  bool _markdownHover = false;
+  bool _markdownCompletion = false;
   std::vector<std::function<void(const lsp::InitializeParams&)>> _onInitialize;
   DocumentBuilder* _hookedBuilder = nullptr;
   ConfigurationProvider* _hookedConfiguration = nullptr;

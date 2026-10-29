@@ -10,7 +10,7 @@
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/grammar/expr.hpp"
 #include "cursiv/core/utils/typelist.hpp"
-#include "cursiv/engines/shared/gen/StrongComponents.hpp"
+#include "cursiv/core/utils/StrongComponents.hpp"
 
 namespace cursiv::detail {
 
@@ -19,6 +19,10 @@ template <class E>
 struct lead_empty : std::false_type {};
 template <std::size_t N, std::size_t M, class E>
 struct lead_empty<Repeat<N, M, E>> : std::bool_constant<N == 0> {};
+// A trivia scope around such a repetition changes nothing about what starts
+// the next element.
+template <class I, class H, class E>
+struct lead_empty<Skip<I, H, E>> : lead_empty<E> {};
 
 template <class E, class Kids = typename ExprShape<E>::kids>
 struct lead_refs;

@@ -28,11 +28,13 @@ struct Base : cursiv::GrammarSpec {
                   ref<WS> + append<&Doc::labels>(ref<LABEL>) +
                   many(ref<WS> + append<&Doc::labels>(ref<LABEL>)) + lit<";">) |
                  (lit<"?"> +
-                  ((assign<&Doc::name>(ref<LABEL>) +
-                    many(option(ref<WS>) + append<&Doc::tails>(ref<AddTail>)) +
-                    ref<WS> + append<&Doc::labels>(ref<LABEL>) +
-                    many(ref<WS> + append<&Doc::labels>(ref<LABEL>))) &
-                   lit<";">))) +
+                  unordered(
+                      assign<&Doc::name>(ref<LABEL>) +
+                          many(option(ref<WS>) +
+                               append<&Doc::tails>(ref<AddTail>)) +
+                          ref<WS> + append<&Doc::labels>(ref<LABEL>) +
+                          many(ref<WS> + append<&Doc::labels>(ref<LABEL>)),
+                      lit<";">))) +
              eof> {};
   using entry = Root;
 };

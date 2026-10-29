@@ -281,10 +281,9 @@ class Dead {
 
 }  // namespace
 
-std::vector<DeadBranch> dead_branches(GrammarImage& image) {
-  WarningFound w(image);
-  Dead dead(w);
-  for (const std::uint32_t rule : w.rules()) dead.rule(rule);
+std::vector<DeadBranch> dead_branches(WarningFound& found) {
+  Dead dead(found);
+  for (const std::uint32_t rule : found.rules()) dead.rule(rule);
   return std::move(dead.found);
 }
 

@@ -22,7 +22,8 @@ template <class G>
 struct LrLowering
     : detail::LoweringShell<LrLowering<G>, G, LrRewrite, LrLowered> {
   static LrLowered lower() {
-    return lr_lower(grammar_image<LrView<G>>(), kLrLower<G>);
+    GrammarImage image = grammar_image<LrView<G>>();
+    return lr_lower(image, kLrLower<G>);
   }
 };
 

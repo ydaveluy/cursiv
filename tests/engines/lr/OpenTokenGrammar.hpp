@@ -22,7 +22,7 @@ struct G : cursiv::GrammarSpec {
   struct Doc : rule<create<ast::Doc>(
                    many(append<&ast::Doc::items>(ref<A> | ref<L>)))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace topen

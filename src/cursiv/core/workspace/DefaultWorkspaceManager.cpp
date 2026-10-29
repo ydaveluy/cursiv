@@ -1,6 +1,7 @@
 #include "cursiv/core/workspace/DefaultWorkspaceManager.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string>
@@ -41,6 +42,36 @@ bool DefaultWorkspaceManager::shouldIncludeEntry(
   // ...and a file is in exactly when the build could route it.
   if (!entry.isFile) return false;
   return shared.serviceRegistry->hasServices(entry.uri);
+}
+
+bool DefaultWorkspaceManager::isIncluded(const FileSystemNode& entry) const {
+  // The folder holding `uri`, by its last segment.
+  const auto parent = [](std::string_view uri) {
+    while (uri.ends_with('/')) uri.remove_suffix(1);
+    const std::size_t slash = uri.rfind('/');
+    return std::string(
+        uri.substr(0, slash == std::string_view::npos ? 0 : slash));
+  };
+  // Held by a workspace folder or by its root: an entry inside a folder but
+  // outside its root is one the scan never reaches.
+  bool held = false;
+  for (const WorkspaceFolder& folder : _folders) {
+    const std::string root = getRootFolder(folder);
+    const bool inRoot = contains_uri(root, entry.uri);
+    if (!inRoot && !contains_uri(normalize_uri(folder.uri), entry.uri))
+      continue;
+    held = true;
+    if (!inRoot) continue;
+    // Up to the root, not into it: the scan enters a root whatever its name.
+    bool reached = true;
+    FileSystemNode step = entry;
+    while (reached && !step.uri.empty() && !contains_uri(step.uri, root)) {
+      reached = shouldIncludeEntry(step);
+      step = {.isFile = false, .isDirectory = true, .uri = parent(step.uri)};
+    }
+    if (reached) return true;
+  }
+  return !held && shouldIncludeEntry(entry);
 }
 
 std::string DefaultWorkspaceManager::getRootFolder(

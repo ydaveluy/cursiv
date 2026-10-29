@@ -6,10 +6,16 @@
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 #include "backref/generated/G/Module.hpp"
 #include "backreflua/generated/G/Module.hpp"
@@ -21,8 +27,10 @@
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/runtime/LexAdapter.hpp"
 #include "cursiv/engines/shared/runtime/LexMarkRun.hpp"
 #include "cursiv/engines/shared/runtime/LexNestedSearch.hpp"
+#include "cursiv/engines/shared/runtime/LexRelay.hpp"
 #include "cursiv/engines/shared/runtime/lex_find.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/test/Check.hpp"
@@ -33,6 +41,45 @@
 #include "nested/generated/G/Table.hpp"
 
 namespace {
+
+// A table's adapters announce what they offer, and the walk refuses one that
+// lost it: a skipping adapter without `qualified`, or a relay without its run,
+// would otherwise compile and read the other branch.
+namespace announced {
+
+using Plain = cursiv::LrLexTape<tnestedlex::generated::G::kTable>;
+using Skipping = cursiv::LrLexTape<tnestedlex::generated::G::kTable, true>;
+
+struct LostQualified : Skipping {
+  cursiv::SymbolId qualified(std::uint16_t, const char*, cursiv::TextOffset,
+                             cursiv::TextOffset,
+                             cursiv::TextOffset&) const = delete;
+};
+struct LostRun : Plain {
+  cursiv::TextOffset run(std::uint16_t, const char*, cursiv::TextOffset,
+                         cursiv::TextOffset) const = delete;
+};
+struct LostRelay : Plain {
+  std::uint16_t relay(std::uint16_t) const = delete;
+};
+
+static_assert(Plain::kRelays && !Plain::kQualified && Skipping::kQualified);
+static_assert(cursiv::LexCursor<Plain> && cursiv::LexCursor<Skipping>);
+static_assert(cursiv::LexAcceptanceAnnounced<Plain> &&
+              cursiv::LexAcceptanceAnnounced<Skipping>);
+static_assert(cursiv::LexRelaysAnnounced<Plain> &&
+              cursiv::LexRelaysAnnounced<Skipping>);
+
+static_assert(LostQualified::kQualified &&
+              cursiv::LexBoundaryFallback<LostQualified> &&
+              !cursiv::LexQualifiedAcceptance<LostQualified>);
+static_assert(!cursiv::LexAcceptanceAnnounced<LostQualified>);
+static_assert(cursiv::LexOffersRelay<LostRun> &&
+              !cursiv::LexRelaysAnnounced<LostRun>);
+static_assert(LostRelay::kRelays && !cursiv::LexOffersRelay<LostRelay> &&
+              !cursiv::LexRelaysAnnounced<LostRelay>);
+
+}  // namespace announced
 
 using Items = std::vector<std::string>;
 
@@ -349,6 +396,27 @@ void nested_delimiter_choices_are_flattened_for_the_native_search() {
                                       text.data(), text.size(), 1) == 5);
   CHECK(cursiv::LexNestedSearch::once(relay, built.cfg.names.data(),
                                       text.data(), text.size(), 6) == 9);
+}
+
+// `any` tests a delimiter at the start of a character only: one starting with
+// a UTF-8 continuation byte, which may stand inside a character, is not
+// searched for byte by byte.
+void a_continuation_byte_delimiter_is_not_searched_natively() {
+  using Open = cursiv::Lit<"(">;
+  using Close = cursiv::Lit<"\xA9">;
+  const auto natively = [](const auto& built) {
+    for (std::size_t k = 0; k < built.nrelays; ++k)
+      if (built.relays[k].nested) return true;
+    return false;
+  };
+  const auto closing = cursiv::lr_build_automaton(
+      cursiv::LrLowering<Recursive<Open, Close>>::table());
+  CHECK(closing.cfg.lowerWhy == cursiv::LowerFail::none);
+  CHECK(!natively(closing));
+  const auto opening = cursiv::lr_build_automaton(
+      cursiv::LrLowering<Recursive<Close, Open>>::table());
+  CHECK(opening.cfg.lowerWhy == cursiv::LowerFail::none);
+  CHECK(!natively(opening));
 }
 
 // The items of a clean reading, one space apart; `<refused>` otherwise.
@@ -779,6 +847,63 @@ void a_mark_run_is_read_once() {
   std::printf("  a mark's run is read once\n");
 }
 
+// The room a padded closer needs past its run is counted beyond the 32 bits
+// of an offset: a mark run near the 4 GiB bound and the bytes after its echo
+// do not wrap into a small count that lets the echo compare run past the
+// text. The text ends against an unreadable page, so such a read faults.
+void a_closer_room_near_the_bound_does_not_wrap() {
+#if defined(__unix__) || defined(__APPLE__)
+  const long pageSize = sysconf(_SC_PAGESIZE);
+  CHECK(pageSize > 0);
+  if (pageSize <= 0) return;
+  const auto page = static_cast<std::size_t>(pageSize);
+  void* region = mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  CHECK(region != MAP_FAILED);
+  if (region == MAP_FAILED) return;
+  char* const end = static_cast<char*>(region) + page;
+  const bool protectedEnd = mprotect(end, page, PROT_NONE) == 0;
+  CHECK(protectedEnd);
+  if (protectedEnd) {
+    constexpr std::string_view kText = "xxxxxxxxxxxxxxxx";
+    std::memcpy(end - kText.size(), kText.data(), kText.size());
+    // `before` is "x", `after` sixteen bytes the text never holds.
+    constexpr char kNames[] = "xyyyyyyyyyyyyyyyy";
+    cursiv::LexRelay relay;
+    relay.closes = true;
+    relay.beforeOff = 0;
+    relay.beforeLen = 1;
+    relay.afterOff = 1;
+    relay.afterLen = 16;
+    cursiv::ByteSet pad;
+    pad.add(' ');
+    const cursiv::TextOffset run = 0xFFFFFFFFu - 8u;
+    const auto len = static_cast<cursiv::TextOffset>(kText.size());
+    CHECK(cursiv::lex_echo_padded(relay, pad, kNames, end - len, len, 0, 0,
+                                  run) == 0);
+  }
+  CHECK(munmap(region, 2 * page) == 0);
+#endif
+}
+
+// A `before` that the capture repeats stands at every byte of a long body:
+// the places the echo stands are read along the text once, not once each.
+void a_padded_closer_inside_a_repeated_capture_is_read_once() {
+  constexpr cursiv::TextOffset n = 1000000;
+  const std::string text = "<" + std::string(3 * n, 'a') + "b";
+  constexpr char kNames[] = "ab";
+  cursiv::LexRelay relay;
+  relay.closes = true;
+  relay.beforeLen = 1;
+  relay.afterOff = 1;
+  relay.afterLen = 1;
+  cursiv::ByteSet pad;
+  pad.add(' ');
+  const auto len = static_cast<cursiv::TextOffset>(text.size());
+  CHECK(cursiv::lex_echo_padded(relay, pad, kNames, text.data(), len, n + 1, 1,
+                                n) == len);
+}
+
 }  // namespace
 
 int main() {
@@ -794,6 +919,7 @@ int main() {
   a_closer_run_stops_where_the_echo_starts();
   a_recursive_terminal_accepts_composed_delimiters();
   nested_delimiter_choices_are_flattened_for_the_native_search();
+  a_continuation_byte_delimiter_is_not_searched_natively();
   a_nested_run_ends_at_depth_zero();
   a_nested_run_counts_every_opener_it_lists();
   delimiters_are_as_long_as_written();
@@ -802,5 +928,7 @@ int main() {
   a_nested_search_remembers_what_it_settled();
   a_listed_search_reads_as_the_model();
   a_mark_run_is_read_once();
+  a_closer_room_near_the_bound_does_not_wrap();
+  a_padded_closer_inside_a_repeated_capture_is_read_once();
   return cursiv::test::report("LexRelay_test");
 }

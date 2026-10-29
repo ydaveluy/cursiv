@@ -17,17 +17,18 @@ struct Bin : cursiv::Extends<cursiv::AstNode> {
 }  // namespace ast
 
 template <std::size_t... Is>
-constexpr auto levels(std::index_sequence<Is...>) {
-  return (((void)Is, cursiv::left(cursiv::lit<"+">)) >> ...);
+constexpr auto plus_levels(std::index_sequence<Is...>) {
+  return cursiv::levels(((void)Is, cursiv::left(cursiv::lit<"+">))...);
 }
 
 struct G : Base {
   struct NUM : terminal<some(d)> {};
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     levels(std::make_index_sequence<256>{})> {};
+  struct Sum
+      : infix<Primary, ast::Bin, plus_levels(std::make_index_sequence<256>{})> {
+  };
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

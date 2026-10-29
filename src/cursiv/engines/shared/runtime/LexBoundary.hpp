@@ -51,8 +51,8 @@ struct LexBoundary {
     return false;
   }
 
-  TextOffset reach(std::uint16_t set, const char* src, TextOffset i,
-                   TextOffset len) const {
+  CURSIV_ALWAYS_INLINE TextOffset reach(std::uint16_t set, const char* src,
+                                        TextOffset i, TextOffset len) const {
     if (nwordRanges != 0 || setScalars != nullptr) {
       const auto b = static_cast<unsigned char>(src[i]);
       const auto d = decode[set];

@@ -46,7 +46,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(assign<&Doc::item>(ref<R0>) + kw<"x">) + eof> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

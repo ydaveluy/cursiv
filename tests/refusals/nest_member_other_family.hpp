@@ -32,7 +32,7 @@ struct G : Base {
   struct Root
       : rule<create<ast::Root>(assign<&ast::Root::e>(ref<PairR>) + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

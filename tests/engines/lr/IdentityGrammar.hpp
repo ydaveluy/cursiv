@@ -34,7 +34,7 @@ struct G : cursiv::GrammarSpec {
                  (lit<"a"> + assign<&ast::Doc::kid>(ref<B>) + lit<"e">) |
                  (lit<"b"> + assign<&ast::Doc::kid>(ref<A>) + lit<"e">))> {};
   using entry = S;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tident

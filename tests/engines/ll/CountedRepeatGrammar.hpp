@@ -66,14 +66,14 @@ struct Base : cursiv::GrammarSpec {
                   lit<";">)) +
             eof)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 struct Long : Base {
   struct Past : rule<create<Range>(
-                    repeat<0, 600>(append<&Range::items>(ref<ItemRule>)))> {};
+                    repeat<0, 513>(append<&Range::items>(ref<ItemRule>)))> {};
   struct Floor : rule<create<Range>(
-                     repeat<3, 1000>(append<&Range::items>(ref<ItemRule>)))> {};
+                     repeat<3, 513>(append<&Range::items>(ref<ItemRule>)))> {};
   struct Top
       : rule<create<Document>(
             many((lit<"x"> + append<&Document::entries>(ref<Past>) + lit<";">) |

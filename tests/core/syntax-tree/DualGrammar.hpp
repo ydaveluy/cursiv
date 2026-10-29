@@ -64,19 +64,16 @@ struct G : cursiv::GrammarSpec {
   struct STR
       : terminal<lit<"'"> + many(cr<R"(^'\\\r\n\u2028)"> | (lit<"\\"> + any)) +
                  lit<"'">> {};
-  // A hidden record: kept in the tree, unlike `ignore`'s raw trivia, so a
+  // A hidden record: kept in the tree, unlike `ignored`'s raw trivia, so a
   // rule name can still find it.
   struct NOTE : terminal<lit<"#"> + many(cr<R"(^\n)">)> {};
   // One terminal per shape an override takes, all three spelled alike.
   static constexpr auto hex_conv = [](std::string_view t) {
     return t.size() * 1000;
   };
-  struct HEX : terminal<lit<"0x"> + some(cr<"0-9a-fA-F">),
-                        cursiv::text_conv<hex_conv>> {};
-  struct DEC : terminal<lit<"0x"> + some(cr<"0-9a-fA-F">),
-                        cursiv::text_conv<hex_conv>> {};
-  struct TEN : terminal<lit<"0x"> + some(cr<"0-9a-fA-F">),
-                        cursiv::text_conv<hex_conv>> {};
+  struct HEX : terminal<as<hex_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
+  struct DEC : terminal<as<hex_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
+  struct TEN : terminal<as<hex_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
 
   // One word read case-insensitively, one exactly, and a spelling holding a
   // NUL.
@@ -118,7 +115,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<ref<Documented> | ref<Reflected> | ref<Quoted> |
                      ref<Owner> | ref<Converted> | ref<Declared>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<NOTE>;
 };
 
@@ -134,8 +131,8 @@ struct D1 : cursiv::extends<G> {
   struct override;
   template <class T>
     requires std::same_as<T, G::TEN>
-  struct override<T> : terminal<lit<"0x"> + some(cr<"0-9a-fA-F">),
-                                cursiv::text_conv<tens_conv>> {};
+  struct override<T>
+      : terminal<as<tens_conv>(lit<"0x"> + some(cr<"0-9a-fA-F">))> {};
 };
 struct D2 : cursiv::extends<D1> {
   template <class>
@@ -145,7 +142,7 @@ struct D2 : cursiv::extends<D1> {
   struct override<T> : terminal<lit<"0X"> + some(cr<"0-9a-fA-F">)> {};
   template <class T>
     requires std::same_as<T, G::DEC>
-  struct override<T> : terminal<some(cr<"0-9">), std::uint64_t> {};
+  struct override<T> : terminal<as<std::uint64_t>(some(cr<"0-9">))> {};
   template <class T>
     requires std::same_as<T, G::TEN>
   struct override<T> : terminal<lit<"0Y"> + some(cr<"0-9a-fA-F">)> {};
@@ -157,8 +154,9 @@ struct Ll : D2 {
   struct Root
       : rule<ref<G::Root> |
              (lit<"$conv:"> +
-              skip(ignored<tconv::G::WS>, hide<tconv::G::CM>,
-                   ref<tconv::G::KeywordRoot> + eof))> {};
+              skip(ignore<tconv::G::WS>, hide<tconv::G::CM>,
+                   (ref<tconv::G::KeywordRoot> | ref<tconv::G::BlankRoot>) +
+                       eof))> {};
   using entry = Root;
 };
 

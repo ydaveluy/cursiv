@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -72,7 +71,7 @@ class LexRelayRun {
         if (to == kDeadState) {
           far = std::max(far, i);
           if (c.m.term != kInvalidSymbol)
-            report(take, c.m.term, c.m.end, c.tier);
+            take(c.m.term, c.m.end, unsigned{c.tier});
           break;
         }
         const bool self = c.state == to;
@@ -85,10 +84,8 @@ class LexRelayRun {
         }
       }
     }
-    // A search that found no echo read to the end looking for it.
-    far = std::max(_readAll ? len : far, _seen);
+    far = std::max(far, _seen);
     _seen = 0;
-    _readAll = false;
     _sought = false;
     _start = kIdle;
     _memo.reset();
@@ -112,24 +109,15 @@ class LexRelayRun {
   static LexMatch fresh(TextOffset i) {
     return LexMatch{i, kInvalidSymbol};
   }
-  // A reader that asks nothing of the branch that read takes two arguments.
-  template <class Take>
-  static void report(Take& take, SymbolId term, TextOffset end,
-                     std::uint8_t tier) {
-    if constexpr (std::is_invocable_v<Take&, SymbolId, TextOffset, unsigned>)
-      take(term, end, unsigned{tier});
-    else
-      take(term, end);
-  }
-
   // What one relay's earlier searches of the walk settled.
   struct Memo {
+    std::uint16_t relay;
     LexNestedSearch nested;
     LexMarkRun mark;
   };
 
   // The positions relay `k`, reached at `at`, resumes from; `found` hears each.
-  // A search with no closer sets `_readAll`.
+  // A search that finds no closer read to the end looking for one.
   template <class Found>
   CURSIV_ALWAYS_INLINE void resumes(const Ad& ad, std::uint16_t k,
                                     const char* src, TextOffset len,
@@ -143,7 +131,7 @@ class LexRelayRun {
     } else if (const TextOffset p = seek(ad, k, src, len, at)) {
       found(p);
     } else {
-      _readAll = true;
+      _seen = len;
     }
   }
 
@@ -155,14 +143,24 @@ class LexRelayRun {
     const LexRelay& r = ad.relay_of(k);
     if (!std::exchange(_sought, true))
       return lex_relay_seek(r, ad.sets(), ad.names(), src, len, _start, at);
-    if (_memo == nullptr) _memo = std::make_unique<std::vector<Memo>>();
-    if (_memo->size() <= k) _memo->resize(k + 1u);
-    Memo& m = (*_memo)[k];
+    Memo& m = memo_of(k);
     if (r.nested) return m.nested.seek(r, ad.names(), src, len, at - r.back);
     if (at < _start || at - _start < r.fence) return 0;
     return lex_echo_seek(
         r, ad.sets(), ad.names(), src, len, at,
         m.mark.begin(ad.sets()[r.markSet], src, _start, at - r.fence));
+  }
+
+  // The memo of relay `k`, made when first asked for: a walk reaches few of
+  // the grammar's relays, and only those hold one.
+  Memo& memo_of(std::uint16_t k) {
+    if (_memo == nullptr) _memo = std::make_unique<std::vector<Memo>>();
+    auto at = std::lower_bound(
+        _memo->begin(), _memo->end(), k,
+        [](const Memo& m, std::uint16_t relay) { return m.relay < relay; });
+    if (at == _memo->end() || at->relay != k)
+      at = _memo->insert(at, Memo{k, {}, {}});
+    return *at;
   }
 
   CURSIV_ALWAYS_INLINE void push(TextOffset at, std::uint16_t state,
@@ -229,7 +227,7 @@ class LexRelayRun {
         if (to == kDeadState) {
           far = std::max(far, i);
           if (at.m.term != kInvalidSymbol)
-            report(take, at.m.term, at.m.end, at.tier);
+            take(at.m.term, at.m.end, unsigned{at.tier});
           continue;
         }
         at.state = to;
@@ -251,7 +249,7 @@ class LexRelayRun {
   static std::size_t join(Cursors& at, const Cursor& c) {
     for (Cursor& o : at) {
       if (o.state != c.state || o.m.term != c.m.term) continue;
-      o.m.end = std::max(o.m.end, c.m.end);
+      if (c.m.end > o.m.end) o.m = c.m;
       o.tier = std::max(o.tier, c.tier);
       return static_cast<std::size_t>(&o - at.begin());
     }
@@ -264,9 +262,9 @@ class LexRelayRun {
 
   SmallRun<Root, 4> _roots;
   TextOffset _start = kIdle;
-  bool _readAll = false;
   bool _sought = false;
   TextOffset _seen = 0;
+  // Sorted by relay: one for each relay searched after the walk's first.
   std::unique_ptr<std::vector<Memo>> _memo;
 };
 

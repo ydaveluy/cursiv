@@ -16,7 +16,7 @@
   tight(option(TWIDE_WORD("x"))) +                            \
       tight(option(append<&ast::Doc::extra>(lit<"x"> | lit<"y">)))
 
-namespace twide {
+namespace twideoptional {
 
 namespace ast {
 struct Mark : cursiv::Extends<cursiv::AstNode> {};
@@ -85,12 +85,12 @@ struct Base : cursiv::GrammarSpec {
                      ref<Overlap> | ref<Mixed> | ref<Tailed> |
                      create<ast::Doc>(tight(TWIDE_HEAD("a") + TWIDE_WORD("b") + lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};
 
-}  // namespace twide
+}  // namespace twideoptional
 
 #undef TWIDE_OVERLAP
 #undef TWIDE_END

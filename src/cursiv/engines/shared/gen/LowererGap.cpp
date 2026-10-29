@@ -247,8 +247,7 @@ std::uint16_t Lowerer::skip_node(unsigned cfg) {
   std::vector<std::uint16_t> bodies;
   for (std::uint32_t i = _c.cfgTriviaAt[cfg]; i < _c.cfgTriviaAt[cfg + 1u];
        ++i)
-    bodies.push_back(_lex.push(LexNode{LexKind::token, _c.cfgTrivia[i],
-                                       _c.termBuild[_c.cfgTrivia[i]].lex}));
+    bodies.push_back(_lex.push(LexNode{LexKind::token, _c.cfgTrivia[i]}));
   return _pool.skipNode[cfg] = _lex.group(LexKind::skip, bodies);
 }
 
@@ -284,7 +283,7 @@ std::uint16_t Lowerer::phrase_private_token(unsigned cfg, ImageId e,
     const ImageNode b = at(body);
     if (b.kind == ImageKind::lit) spell_literal(t, b);
   }
-  return _lex.push(LexNode{LexKind::token, t, _c.termBuild[t].lex});
+  return _lex.push(LexNode{LexKind::token, t});
 }
 
 std::uint16_t Lowerer::phrase_token(unsigned cfg, ImageId e) {
@@ -292,7 +291,7 @@ std::uint16_t Lowerer::phrase_token(unsigned cfg, ImageId e) {
   if (n.kind != ImageKind::ref) return phrase_private_token(cfg, e, e);
   if (_termIdx.contains(n.a)) {
     const std::uint16_t t = sym_of(cfg, n.a);
-    return _lex.push(LexNode{LexKind::token, t, _c.termBuild[t].lex});
+    return _lex.push(LexNode{LexKind::token, t});
   }
   return phrase_private_token(cfg, e, body_in(cfg, n.a));
 }
@@ -400,8 +399,7 @@ std::uint16_t Lowerer::cut_node(unsigned cfg, ImageId token) {
   std::vector<std::uint16_t> kids;
   for (std::uint16_t t = 0; t < _nterms; ++t)
     if (terms.test(t))
-      kids.push_back(
-          _lex.push(LexNode{LexKind::token, t, _c.termBuild[t].lex}));
+      kids.push_back(_lex.push(LexNode{LexKind::token, t}));
   return kids.size() == 1 ? kids.front() : _lex.group(LexKind::alt, kids);
 }
 

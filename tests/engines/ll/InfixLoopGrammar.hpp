@@ -36,12 +36,12 @@ struct Sum : Common {
   struct P : rule<create<Ba>(lit<"a">) | create<Bb>(lit<"b">) |
                   (lit<"("> + ref<E> + lit<")">) |
                   create<Post>(assign<&Post::inner>(ref<E>) + lit<"!">)> {};
-  struct E : infix<P, &Bin::left, &Bin::op, &Bin::right, left(lit<"+">)> {};
+  struct E : infix<P, Bin, left(lit<"+">)> {};
   struct Root : rule<create<Doc>((lit<"e/"> + assign<&Doc::value>(ref<E>)) |
                                  (lit<"p/"> + assign<&Doc::value>(ref<P>))) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Two left levels, a prefix and a postfix.
@@ -51,13 +51,12 @@ struct Ladder : Common {
                   (lit<"("> + ref<E> + lit<")">) |
                   create<Neg>(lit<"-"> + assign<&Neg::inner>(ref<E>)) |
                   create<Post>(assign<&Post::inner>(ref<E>) + lit<"!">)> {};
-  struct E : infix<P, &Bin::left, &Bin::op, &Bin::right,
-                   (left(lit<"*">) >> left(lit<"+">))> {};
+  struct E : infix<P, Bin, levels(left(lit<"*">), left(lit<"+">))> {};
   struct Root : rule<create<Doc>((lit<"e/"> + assign<&Doc::value>(ref<E>)) |
                                  (lit<"p/"> + assign<&Doc::value>(ref<P>))) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The wrapper is reached through a rule of its own.
@@ -66,14 +65,13 @@ struct Via : Common {
   struct W : rule<create<Qst>(assign<&Qst::inner>(ref<E>) + lit<"?">)> {};
   struct P : rule<create<Ba>(lit<"a">) | create<Bb>(lit<"b">) |
                   (lit<"("> + ref<E> + lit<")">) | ref<W>> {};
-  struct E : infix<P, &Bin::left, &Bin::op, &Bin::right,
-                   (left(lit<"*">) >> left(lit<"+">))> {};
+  struct E : infix<P, Bin, levels(left(lit<"*">), left(lit<"+">))> {};
   struct Root : rule<create<Doc>((lit<"e/"> + assign<&Doc::value>(ref<E>)) |
                                  (lit<"p/"> + assign<&Doc::value>(ref<P>)) |
                                  (lit<"w/"> + assign<&Doc::value>(ref<W>))) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A right level below a left one.
@@ -83,13 +81,12 @@ struct Mixed : Common {
                   (lit<"("> + ref<E> + lit<")">) |
                   create<Neg>(lit<"-"> + assign<&Neg::inner>(ref<E>)) |
                   create<Post>(assign<&Post::inner>(ref<E>) + lit<"!">)> {};
-  struct E : infix<P, &Bin::left, &Bin::op, &Bin::right,
-                   (right(lit<"^">) >> left(lit<"+">))> {};
+  struct E : infix<P, Bin, levels(right(lit<"^">), left(lit<"+">))> {};
   struct Root : rule<create<Doc>((lit<"e/"> + assign<&Doc::value>(ref<E>)) |
                                  (lit<"p/"> + assign<&Doc::value>(ref<P>))) +
                      eof> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 // These tables use the same trivia and operator levels. Select their
 // entry rules in one generated language instead of generating each separately.
@@ -99,7 +96,7 @@ struct Combined : Common {
                      (lit<"via:"> + ref<Via::Root>) |
                      (lit<"mixed:"> + ref<Mixed::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Combined {};
 struct Lr : Combined {};

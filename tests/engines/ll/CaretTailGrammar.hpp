@@ -26,11 +26,9 @@ struct Base : cursiv::GrammarSpec {
   struct BLOCK : terminal<through(lit<"/*">, lit<"*/">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::id>(ref<ID>))> {};
-  struct Expression
-      : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-              left(lit<"*"> | lit<"/">)> {};
+  struct Expression : infix<Primary, ast::Bin, left(lit<"*"> | lit<"/">)> {};
   using entry = Expression;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<BLOCK>;
 };
 struct Ll : Base {};

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -24,6 +25,7 @@
 #include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
+#include "cursiv/core/utils/CaseFold.hpp"
 #include "cursiv/core/utils/FunctionRef.hpp"
 #include "cursiv/core/utils/UriUtils.hpp"
 #include "cursiv/core/workspace/Document.hpp"
@@ -103,6 +105,87 @@ namespace {
   return lsp::DiagnosticTag::Unnecessary;
 }
 
+// Whether a closed document has saved content to fall back to. A URI on a
+// scheme the content provider serves has: its text lives in the store, as for
+// a builtin library `loadAdditionalDocuments` put there. Otherwise a URI the
+// file system provider cannot answer for, such as an `untitled:` buffer under
+// the local provider, has none.
+[[nodiscard]] bool has_saved_content(const FileSystemProvider& files,
+                                     const TextDocumentContentProvider* content,
+                                     std::string_view uri) {
+  if (content != nullptr) {
+    const std::size_t colon = uri.find(':');
+    const std::string_view scheme =
+        uri.substr(0, colon == std::string_view::npos ? 0 : colon);
+    if (!scheme.empty() &&
+        std::ranges::any_of(content->schemes(), [&](const std::string& own) {
+          return folded_equal(own, scheme);
+        }))
+      return true;
+  }
+  try {
+    return files.exists(uri);
+  } catch (const FileSystemError&) {
+    return false;
+  }
+}
+
+// Whether `options` names `ch`, first or among the others.
+[[nodiscard]] bool names_trigger(
+    const lsp::DocumentOnTypeFormattingOptions& options, std::string_view ch) {
+  if (options.firstTriggerCharacter == ch) return true;
+  return options.moreTriggerCharacter.has_value() &&
+         std::ranges::find(*options.moreTriggerCharacter, ch) !=
+             options.moreTriggerCharacter->end();
+}
+
+// The session's on-type options: the first language's as they stand, then
+// each character another language names, appended once.
+void merge_on_type_options(
+    std::optional<lsp::DocumentOnTypeFormattingOptions>& into,
+    lsp::DocumentOnTypeFormattingOptions options) {
+  if (!into.has_value()) {
+    into = std::move(options);
+    return;
+  }
+  const auto add = [&into](std::string& ch) {
+    if (names_trigger(*into, ch)) return;
+    if (!into->moreTriggerCharacter.has_value())
+      into->moreTriggerCharacter.emplace();
+    into->moreTriggerCharacter->push_back(std::move(ch));
+  };
+  add(options.firstTriggerCharacter);
+  if (options.moreTriggerCharacter.has_value())
+    for (std::string& ch : *options.moreTriggerCharacter) add(ch);
+}
+
+// Whether `ch` is one of the characters `formatter` named for on-type
+// formatting.
+[[nodiscard]] bool formats_on(const Formatter& formatter, std::string_view ch) {
+  const std::optional<lsp::DocumentOnTypeFormattingOptions> options =
+      formatter.formatOnTypeOptions();
+  return options.has_value() && names_trigger(*options, ch);
+}
+
+// Whether the first known kind a client lists, its preferred one, is
+// markdown. A client that lists none never said it reads markdown.
+[[nodiscard]] bool prefers_markdown(
+    const std::optional<lsp::Array<lsp::MarkupKindEnum>>& formats) {
+  if (formats.has_value())
+    for (const lsp::MarkupKindEnum& kind : *formats) {
+      if (kind == lsp::MarkupKind::Markdown) return true;
+      if (kind == lsp::MarkupKind::PlainText) return false;
+    }
+  return false;
+}
+
+// The providers write their prose as markdown. For a client that prefers
+// plain text, the same prose goes as plain text, shown as written.
+void as_plain_text(lsp::MarkupContent& content) {
+  if (content.kind == lsp::MarkupKind::Markdown)
+    content.kind = lsp::MarkupKindEnum(lsp::MarkupKind::PlainText);
+}
+
 }  // namespace
 
 DefaultLanguageServer::~DefaultLanguageServer() noexcept {
@@ -169,6 +252,16 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
       params.capabilities.workspace->workspaceEdit.has_value() &&
       params.capabilities.workspace->workspaceEdit->documentChanges.value_or(
           false);
+  _markdownHover = false;
+  _markdownCompletion = false;
+  if (const auto& text = params.capabilities.textDocument) {
+    if (text->hover.has_value())
+      _markdownHover = prefers_markdown(text->hover->contentFormat);
+    if (text->completion.has_value() &&
+        text->completion->completionItem.has_value())
+      _markdownCompletion = prefers_markdown(
+          text->completion->completionItem->documentationFormat);
+  }
   if (ConfigurationProvider* configuration =
           _shared.configurationProvider.get())
     configuration->initialize(params);
@@ -288,15 +381,15 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
 
     // Document and range formatting travel together -- one formatter
     // answers both. On-type is separate and opt-in: it needs the
-    // language's trigger character.
+    // language's trigger character, and a union like the triggers above.
     if (const Formatter* formatter = services->formatter.get()) {
       result.capabilities.documentFormattingProvider = true;
       result.capabilities.documentRangeFormattingProvider = true;
-      if (!result.capabilities.documentOnTypeFormattingProvider.has_value())
-        if (std::optional<lsp::DocumentOnTypeFormattingOptions> onType =
-                formatter->formatOnTypeOptions())
-          result.capabilities.documentOnTypeFormattingProvider =
-              std::move(*onType);
+      if (std::optional<lsp::DocumentOnTypeFormattingOptions> onType =
+              formatter->formatOnTypeOptions())
+        merge_on_type_options(
+            result.capabilities.documentOnTypeFormattingProvider,
+            std::move(*onType));
     }
   }
   if (hasSignatureHelp) {
@@ -527,9 +620,10 @@ void DefaultLanguageServer::updateVersion(Document& document,
   if (it != _announced.end() && it->second.count != 0) publish(document);
 }
 
-// Closing a tab is not deleting a file: a readable file replaces the buffer
-// and the document stays, its verdict republished by the rebuild. Only an
-// unreadable URI leaves, and the client is told so.
+// Closing a tab is not deleting a file: wherever the file lives, its saved
+// content replaces the buffer and the document stays, its verdict republished
+// by the rebuild. Only a URI with nothing saved behind it leaves -- an
+// `untitled:` buffer among them -- and the client is told so.
 void DefaultLanguageServer::didClose(
     const lsp::DidCloseTextDocumentParams& params) {
   const std::string uri = params.textDocument.uri.toString();
@@ -540,7 +634,10 @@ void DefaultLanguageServer::didClose(
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
         const std::shared_ptr<Document> closing = documents.getDocument(uri);
-        const bool onDisk = closing != nullptr && files.exists(closing->uri);
+        const bool onDisk =
+            closing != nullptr &&
+            has_saved_content(files, _shared.textDocumentContentProvider.get(),
+                              closing->uri);
         if (closing != nullptr) closing->isOpen = false;
         if (closing == nullptr) {
           builder.update({}, {}, token);
@@ -1014,6 +1111,9 @@ std::optional<lsp::Hover> DefaultLanguageServer::hover(
                 [&](const HoverProvider& provider, const Document& d) {
                   hover = provider.getHoverContent(d, params.position, token);
                 });
+  if (hover.has_value() && !_markdownHover)
+    if (auto* const content = std::get_if<lsp::MarkupContent>(&hover->contents))
+      as_plain_text(*content);
   return hover;
 }
 
@@ -1026,6 +1126,12 @@ lsp::CompletionList DefaultLanguageServer::completion(
                 [&](const CompletionProvider& provider, const Document& d) {
                   list = provider.getCompletion(d, params.position, token);
                 });
+  if (!_markdownCompletion)
+    for (lsp::CompletionItem& item : list.items)
+      if (item.documentation.has_value())
+        if (auto* const content =
+                std::get_if<lsp::MarkupContent>(&*item.documentation))
+          as_plain_text(*content);
   return list;
 }
 
@@ -1110,6 +1216,8 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::rangeFormatting(
   return edits;
 }
 
+// The characters are announced for the whole session, so a request may carry
+// another language's: a formatter answers only the ones it named.
 std::vector<lsp::TextEdit> DefaultLanguageServer::onTypeFormatting(
     const lsp::DocumentOnTypeFormattingParams& params,
     const CancellationToken& token) const {
@@ -1117,7 +1225,8 @@ std::vector<lsp::TextEdit> DefaultLanguageServer::onTypeFormatting(
   routeDocument(params.textDocument.uri.toString(), DocumentState::Parsed,
                 &LspServices::formatter, token,
                 [&](const Formatter& formatter, const Document& d) {
-                  edits = formatter.formatDocumentOnType(d, params, token);
+                  if (formats_on(formatter, params.ch))
+                    edits = formatter.formatDocumentOnType(d, params, token);
                 });
   return edits;
 }

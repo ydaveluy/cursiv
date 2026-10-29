@@ -15,7 +15,7 @@
 
 #define SKIPCFG_TERM(N) struct T##N : terminal<lit<"#" #N>> {};
 #define SKIPCFG_REGION(N)                                    \
-  +skip(ignored<T##N>, hide<>,                               \
+  +skip(ignore<T##N>, hide<>,                               \
         append<&Doc::words>(lit<"x" #N>) +                   \
             append<&Doc::words>(lit<"y" #N>))
 
@@ -31,7 +31,7 @@ struct Wide : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(lit<"begin"> SKIPCFG_ROWS_80(SKIPCFG_REGION))> {
   };
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Wide {};
 struct Lr : Wide {};

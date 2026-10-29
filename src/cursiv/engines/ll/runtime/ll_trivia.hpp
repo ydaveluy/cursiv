@@ -7,21 +7,24 @@
 
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
+#include "cursiv/engines/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
 namespace cursiv {
 
 // Whether the token `mode` reads at `from` still ends at `to` with a word typed
-// right behind: a blank run does, and a line comment goes on over the word.
+// right behind, as `StampedGrammar::ends_before_word` asks it.
 template <const auto& T>
 inline bool ll_ends_before_word(std::string_view text, std::uint16_t mode,
                                 TextOffset from, TextOffset to, SymbolId term) {
-  std::string probe(text.substr(from, to - from));
-  probe.push_back('a');
-  const Scan s = ll_match_text<T>(
-      probe.data(), static_cast<TextOffset>(probe.size()), mode, 0);
-  return s.term == term && s.end == to - from;
+  std::string probe;
+  return StampedGrammar::ends_before_word(
+      probe, text.substr(from, to - from), term, {T.terms, T.nterms}, T.names,
+      [&](std::string_view s) {
+        return ll_match_text<T>(s.data(), static_cast<TextOffset>(s.size()),
+                                mode, 0);
+      });
 }
 
 // Whether `mode` reads the text from `from` to `to` as trivia and arrives at

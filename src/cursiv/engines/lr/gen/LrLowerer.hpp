@@ -50,6 +50,7 @@ class LrLowerer : private LrLowerState, public Lowerer {
   LrShapeId mark(unsigned cfg, LrShapeId at);
   LrShapeId capture_created(LrShapeId at);
   LrShapeId once_site(LrShapeId at) const;
+  bool is_condition(LrShapeId at) const;
   void ambient(LrShapeId at, bool open, std::uint8_t edge);
   std::uint16_t open_tail(std::uint16_t reading, std::uint8_t tail);
 

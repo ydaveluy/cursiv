@@ -33,6 +33,6 @@ struct Ll : cursiv::GrammarSpec {
                      (lit<"guard:"> + ref<tllcaretguard::Base::Root>) |
                      (lit<"loop:"> + ref<tindirectloop::Combined::Root>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tllsemantic

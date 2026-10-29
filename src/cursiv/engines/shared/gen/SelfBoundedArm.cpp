@@ -50,12 +50,6 @@ class Arms {
   }
 
  private:
-  static bool condition(ImageKind k) {
-    return k == ImageKind::andOf || k == ImageKind::notOf ||
-           k == ImageKind::gapHas || k == ImageKind::gapIs ||
-           k == ImageKind::eof;
-  }
-
   bool readers_call_at_edge(Edge edge,
                             const std::vector<ImageId>& readers) const {
     if (readers.empty()) return false;
@@ -68,7 +62,7 @@ class Arms {
     std::vector<ImageId> out;
     for (std::uint32_t i = 0; i < seq.count; ++i) {
       const ImageId k = _image.kids[seq.first + i];
-      if (!condition(_image.nodes[k].kind)) out.push_back(k);
+      if (!is_condition_node(_image, k)) out.push_back(k);
     }
     return out;
   }

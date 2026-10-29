@@ -10,6 +10,7 @@
 
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/utils/macros.hpp"
 
 // The postorder run a tree is made of: one `CstNode` per record, in the
@@ -24,20 +25,30 @@ namespace cursiv {
 class CstRun {
  public:
   CstRun() = default;
+  // A move carries the records, never a watch: the stop belongs to the
+  // parse writing the source.
   CstRun(CstRun&& other) noexcept
       : _r(std::exchange(other._r, nullptr)),
         _cap(std::exchange(other._cap, 0)),
+        _mark(_cap),
         _records(std::exchange(other._records, 0)),
         _reserveHint(std::exchange(other._reserveHint, 0)),
-        _mem(std::exchange(other._mem, nullptr)) {}
+        _mem(std::exchange(other._mem, nullptr)) {
+    other._mark = 0;
+    other._stop = nullptr;
+  }
   CstRun& operator=(CstRun&& other) noexcept {
     if (this == &other) return *this;
     if (_mem == nullptr) delete[] _r;
     _r = std::exchange(other._r, nullptr);
     _cap = std::exchange(other._cap, 0);
+    _mark = _cap;
+    _stop = nullptr;
     _records = std::exchange(other._records, 0);
     _reserveHint = std::exchange(other._reserveHint, 0);
     _mem = std::exchange(other._mem, nullptr);
+    other._mark = 0;
+    other._stop = nullptr;
     return *this;
   }
   ~CstRun() {
@@ -54,6 +65,8 @@ class CstRun {
     if (_mem == nullptr) delete[] _r;
     _r = nullptr;
     _cap = 0;
+    _mark = 0;
+    _stop = nullptr;
     _records = 0;
     _reserveHint = 0;
     _mem = mem;
@@ -77,6 +90,29 @@ class CstRun {
 
   // The records past zero are room again: the buffer stays.
   void clear() { _records = 0; }
+
+  // A parse's stop, read once per run of records by the write that reaches
+  // the watermark: the test that guards the room is the only per-record
+  // cost. Null, or a token that cannot stop, watches nothing.
+  void watch(const CancellationToken* stop) {
+    _stop = stop != nullptr && stop->stop_possible() ? stop : nullptr;
+    rearm();
+  }
+
+  // `watch` for the scope of the parse that writes the run.
+  class Watch {
+   public:
+    Watch(CstRun& run, const CancellationToken& stop) : _run(run) {
+      _run.watch(&stop);
+    }
+    ~Watch() { _run.watch(nullptr); }
+    Watch(const Watch&) = delete;
+    Watch& operator=(const Watch&) = delete;
+
+   private:
+    CstRun& _run;
+  };
+
   [[nodiscard]] NodeCount records() const { return _records; }
   [[nodiscard]] bool empty() const { return _records == 0; }
   [[nodiscard]] const CstNode* data() const { return _r; }
@@ -151,8 +187,21 @@ class CstRun {
   }
 
   CURSIV_ALWAYS_INLINE void reserve(std::size_t k) {
-    if (_records + k > _cap) [[unlikely]]
-      grow(_records + k);
+    if (_records + k > _mark) [[unlikely]]
+      make_room(_records + k);
+  }
+  // Where the watermark stops a write: a watched stop is read here, and the
+  // room grows only when the write reaches its end.
+  CURSIV_NOINLINE void make_room(std::size_t need) {
+    if (_stop != nullptr) throw_if_cancelled(*_stop);
+    if (need > _cap) grow(need);
+    rearm();
+  }
+  // The room's end, or sooner where a stop is watched.
+  void rearm() {
+    _mark = _stop != nullptr && _cap - _records > kWatchedRecords
+                ? _records + kWatchedRecords
+                : _cap;
   }
   // Off the per-record path, and the one id-space check: every writer grows
   // through here, doubling but never past what was asked.
@@ -178,6 +227,7 @@ class CstRun {
     if (_mem == nullptr) delete[] _r;
     _r = q;
     _cap = cap;
+    rearm();
   }
 
   // `kNoNode` is no record, and a count is stated as an id too.
@@ -186,9 +236,15 @@ class CstRun {
   static constexpr std::size_t kMaxRecords =
       kByBytes < kNoNode - 1 ? kByBytes : kNoNode - 1;
   static constexpr std::size_t kFirstRecords = 64 * 1024;
+  // About a millisecond of parsing between two reads of a watched stop.
+  static constexpr std::size_t kWatchedRecords = 64 * 1024;
 
   CstNode* _r = nullptr;
   std::size_t _cap = 0;
+  // Where a write leaves the per-record path: `_cap`, or the next read of
+  // the watched stop.
+  std::size_t _mark = 0;
+  const CancellationToken* _stop = nullptr;
   NodeCount _records = 0;
   std::uint32_t _reserveHint = 0;
   std::pmr::memory_resource* _mem = nullptr;

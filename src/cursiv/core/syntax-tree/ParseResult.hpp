@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <memory_resource>
+#include <string_view>
 #include <vector>
 
 #include "cursiv/core/syntax-tree/AstArena.hpp"
@@ -46,6 +47,11 @@ class ParseResult {
   // its grammar and its map, and no reader fetches either from a service.
   void bind_grammar(const Grammar& grammar) noexcept;
   void bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept;
+  // Said by a translating parser over the result of its text: the tree and
+  // the diagnostics move to the document's offsets, and the translator's own
+  // errors join them.
+  void bind_translation(std::string_view document,
+                        std::unique_ptr<const SourceTranslation> translation);
 
   AstArena arena;
   AstNode* value = nullptr;

@@ -1,17 +1,15 @@
 # Formatting
 
-A formatter defines spacing, line breaks and indentation around syntax
-elements. Cursiv turns those rules into editor text edits, for a whole document
-or a selected range.
+A formatter sets the spacing, line breaks and indentation around syntax
+elements. Cursiv turns it into editor edits for a whole document or a
+selected range.
 
 ## Format a recipe
 
-This example uses the AST from the [language tutorial](../learn/walkthrough.md).
-Each callback receives a `FormattingBuilder` and the node to format:
+This example uses the AST from the [tutorial](../learn/walkthrough.md). Each
+callback receives a `FormattingBuilder` and the node to format:
 
-`src/recipe/lsp/RecipeFormatter.hpp`:
-
-```cpp
+```cpp title="src/recipe/lsp/RecipeFormatter.hpp"
 #pragma once
 
 #include "cursiv/lsp/formatting/AbstractFormatter.hpp"
@@ -48,9 +46,10 @@ class RecipeFormatter final : public cursiv::AbstractFormatter {
 }  // namespace recipe
 ```
 
-`on<T>` registers a callback for that exact AST class. A node formatter selects
-**regions**: a keyword, a property, a node, or the content between delimiters.
-`prepend`, `append` and `surround` apply actions around a region:
+`on<T>` registers a callback for exactly the class `T`. A node formatter
+selects **regions**: a keyword, a property, a node, or the content between
+delimiters. `prepend`, `append` and `surround` place an action around a
+region:
 
 | Action | Effect |
 |---|---|
@@ -60,30 +59,28 @@ class RecipeFormatter final : public cursiv::AbstractFormatter {
 | `indent` | Insert a line break and increase indentation |
 | `keep` | Preserve the existing gap |
 
-`formatBlock` supplies the usual brace spacing, content indentation and closing
-line break. Options in `BlockFormatOptions` let a language change those defaults.
+`formatBlock` applies the usual block layout: a space before the brace,
+indented content and the closing brace on its own line. `BlockFormatOptions`
+changes those defaults.
 
 ## Install it
 
-Include `RecipeFormatter.hpp` in your LSP module and assign the formatter after
-installing the default services:
+Include `RecipeFormatter.hpp` in your LSP module and install the formatter
+after the default services:
 
-`src/recipe/lsp/LspModule.cpp`:
-
-```cpp
+```cpp title="src/recipe/lsp/LspModule.cpp"
 void install_lsp_module(RecipeServices& services) {
   cursiv::install_default_lsp_services(services);
   services.formatter = std::make_unique<RecipeFormatter>(services);
 }
 ```
 
-There is no default formatter. The server advertises formatting support once
-one is installed. Whole-document formatting produces no edits when parsing
-required syntax error recovery.
+There is no default formatter: the server offers formatting once you install
+one. A document with syntax errors is not formatted as a whole.
 
 ## Check it
 
-With your LSP services, test the expected text directly:
+Test the expected text directly:
 
 ```cpp
 (void)ct::expectFormatting(*services,
@@ -92,12 +89,11 @@ With your LSP services, test the expected text directly:
      .disposeAfterCheck = true});
 ```
 
-The helper uses four spaces per indentation level by default; the editor
-supplies its own formatting options. See
-[Test your language](../learn/testing.md) for the test setup.
+The helper indents with four spaces by default; an editor sends its own
+options. See [Test your language](../learn/testing.md) for the test setup.
 
 ## Advanced: comments
 
-For comment formatting, register `onHidden("SL_COMMENT", callback)`; the callback receives a
-`HiddenNodeFormatter`. The Domainmodel example shows both line and multiline
-comment callbacks in `DomainModelFormatter`.
+To format comments, register `onHidden("SL_COMMENT", callback)`; the callback
+receives a `HiddenNodeFormatter`. The Domainmodel example's
+`DomainModelFormatter` formats both line and block comments.

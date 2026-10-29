@@ -81,7 +81,8 @@ std::uint16_t DefaultAstReflection::referenceIndexOf(
 std::uint16_t DefaultAstReflection::referenceIndexOf(
     const AstTypeTag* container, std::string_view feature) const noexcept {
   const std::uint16_t owner = typeIndexOf(container);
-  if (owner == kNoType || feature.empty()) return kNoReference;
+  if (owner == kNoType || feature.empty() || _f.referenceBound == 0)
+    return kNoReference;
   // Inherited reference fields are already included, in declaration order.
   for (const auto f : _f.referenceRows[owner])
     if (_f.fields[f].name == feature) return f;
@@ -90,7 +91,7 @@ std::uint16_t DefaultAstReflection::referenceIndexOf(
 
 bool DefaultAstReflection::isMultiReference(
     std::uint16_t reference) const noexcept {
-  return reference < _f.fieldCount && _f.refOps[reference].multi;
+  return reference < _f.referenceBound && _f.refOps[reference].multi;
 }
 
 bool DefaultAstReflection::hasMultiReference() const noexcept {
@@ -106,7 +107,7 @@ std::span<const std::uint16_t> DefaultAstReflection::referenceTargets(
 
 const AstTypeTag* DefaultAstReflection::referenceNarrowTarget(
     std::uint16_t reference, std::uint8_t narrow) const noexcept {
-  if (reference >= _f.fieldCount) return nullptr;
+  if (reference >= _f.referenceBound) return nullptr;
   const RefOps& ops = _f.refOps[reference];
   return narrow < ops.narrow_count ? ops.narrow_tags[narrow] : nullptr;
 }
@@ -124,7 +125,7 @@ std::string_view DefaultAstReflection::referenceProperty(
 
 AcceptSet DefaultAstReflection::referenceAccepts(
     std::uint16_t reference) const noexcept {
-  return reference < _f.fieldCount
+  return reference < _f.referenceBound
              ? AcceptSet(_f.acceptBits + std::size_t{reference} * _f.typeWords,
                          _f.typeWords)
              : AcceptSet{};
@@ -132,7 +133,7 @@ AcceptSet DefaultAstReflection::referenceAccepts(
 
 ReferenceInfo DefaultAstReflection::referenceInfo(const RefHandle& handle,
                                                   std::string_view text) const {
-  if (handle.field >= _f.fieldCount || handle.owner == nullptr) return {};
+  if (handle.field >= _f.referenceBound || handle.owner == nullptr) return {};
   const RefOps& ops = _f.refOps[handle.field];
   return {.container = handle.owner,
           .referenceText = text,

@@ -113,6 +113,12 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
       lr_push_leaf<A.stamp>(c, to, row, c.committed, c.committed);
       c.pending.clear();
     } else if (held && !w.pinRep) {
+      // Before the first token, the comments in front of the text stand
+      // outside it: what the text owes goes after them.
+      if (c.shifts == 0) {
+        lr_write_trivia<A>(c);
+        if (c.tape.held() > c.committed) c.committed = c.tape.held();
+      }
       c.stack.push(
           LrFrame{state, row, c.tape.len(), c.committed, c.tape.len()});
       c.tape.repaired_leaf(c.committed, c.committed, A.stamp.make(row, state));
@@ -218,7 +224,8 @@ TextOffset lr_error_end(const LrContext& c, std::uint16_t mode, const Token& t,
   if (s.term != kInvalidSymbol && s.end > t.begin) return s.end;
   if (const LexReading r = open(err); r.term != kInvalidSymbol)
     return lex_cut(t.begin, r);
-  return lr_unmatched_end<A>(c.src, end, mode, t.begin, reached, c.reads);
+  return lr_unmatched_end<A>(c.src, end, mode, t.begin, reached, c.reads,
+                             [&c] { c.stop.poll(); });
 }
 
 template <const auto& A>
@@ -257,12 +264,43 @@ void lr_drop_levels(LrContext& c, LrVirtualAt& virt, IndentAt& indent,
                 kLaid<A.cfg, kLaidDedent>);
 }
 
+// A state that reads no token reduces one production on every token it
+// takes: the construct it holds is whole, and the token after a repair's
+// record closes it before it is shifted. Closed first, so the record stands
+// outside it, as the trivia before that token does. Not where the levels may
+// lay a token of no width in front of it.
+template <const auto& A>
+void lr_close_whole(LrContext& c, TextOffset resume) {
+  if constexpr (!kIndented<A.cfg>) {
+    for (;;) {
+      const std::uint32_t state = c.stack.top().state;
+      const std::uint16_t p = A.cold.soleReduce[state];
+      if (A.cold.readsToken[state] != 0 || p == kLrNoProd ||
+          A.cfg.prods[p].gap != 0 || A.cfg.prods[p].len == 0)
+        return;
+      const Token next =
+          lr_scan_at<A>(c, A.mode[state], resume, c.indent.depth);
+      if (next.sym == kInvalidSymbol) return;
+      std::uint32_t first = 0;
+      unsigned count = 0;
+      lr_action_run<A>(state, next.sym, first, count);
+      if (count != 1 ||
+          lr_shadow_action<A>(first).kind != LrActionKind::reduce ||
+          !lr_write_reduce<A>(c, p, [](unsigned) { return false; }))
+        return;
+    }
+  } else {
+    (void)c, (void)resume;
+  }
+}
+
 // Drop the token in hand, up to `end`: an error leaf over the author's bytes,
 // or, for a token the parse laid, the level it moved.
 template <const auto& A>
 void lr_write_delete(LrContext& c, TextOffset end) {
   const Token t = c.la;
   lr_drop_levels<A>(c, c.virt, c.indent, t);
+  lr_close_whole<A>(c, end > t.begin ? end : t.begin);
   lr_flush_trivia<A>(c);
   const TextOffset at = t.begin > c.committed ? t.begin : c.committed;
   c.tape.repaired_leaf(at, end > at ? end : at, A.stamp.make(kNoRow, 0));
@@ -276,6 +314,7 @@ void lr_write_delete(LrContext& c, TextOffset end) {
 template <const auto& A>
 void lr_write_skip(LrContext& c, SymbolId term, TextOffset end) {
   const TextOffset at = c.la.begin > c.committed ? c.la.begin : c.committed;
+  lr_close_whole<A>(c, end);
   lr_flush_trivia<A>(c);
   if constexpr (kLrAnyRecorded<A>)
     if (kLrTermMask<A, true>.test(term))

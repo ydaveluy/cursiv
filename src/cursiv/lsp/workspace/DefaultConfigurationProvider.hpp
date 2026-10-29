@@ -70,6 +70,8 @@ class DefaultConfigurationProvider : public ConfigurationProvider {
   std::uint64_t _revision = 0;
   std::uint64_t _pullGeneration = 0;
   bool _supported = false;
+  // Whether the client accepts a `didChangeConfiguration` registration.
+  bool _dynamicRegistration = false;
   std::atomic<bool> _ready = false;
 };
 

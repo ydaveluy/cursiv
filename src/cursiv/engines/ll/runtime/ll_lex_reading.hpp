@@ -7,8 +7,8 @@
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
+#include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/engines/ll/runtime/ll_section.hpp"
-#include "cursiv/engines/shared/runtime/LexFailedWalks.hpp"
 #include "cursiv/engines/shared/runtime/LexReading.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
@@ -18,52 +18,48 @@ template <const auto& T>
 inline LexReading ll_lex_reading(const char* src, TextOffset len,
                                  std::uint16_t mode, TextOffset p,
                                  TextOffset& reached) {
-  return lex_reading(
-      LlLexTape<T>{}, LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners},
-      [](const char* text, TextOffset size, std::uint16_t alphabet,
-         TextOffset from, TextOffset& halt) {
-        return ll_match_text<T>(text, size, alphabet, from, halt);
-      },
-      src, len, mode, p, reached);
+  return lex_reading(LlLexTape<T>{},
+                     LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners}, src, len,
+                     mode, p, reached);
 }
 
 // The lexer's refused reading of the token at `p`: the open token its body
-// owes, where there is one.
+// owes, where there is one. In a section the text ends at the token that
+// closes it, which changes the reading only where it starts within what the
+// reading read: the search for it stops there, and is paid with the reading.
 template <const auto& T>
 inline LexReading ll_open_reading(LlContext& c, TextOffset p) {
   if (c.reads.spent()) return LexReading{};
+  const auto mode = ll_err_mode<T>(c);
   TextOffset reached = p;
-  const LexReading r = ll_lex_reading<T>(
-      c.src, ll_text_end<T>(c, p, c.len), ll_err_mode<T>(c), p, reached);
+  LexReading r = ll_lex_reading<T>(c.src, c.len, mode, p, reached);
+  if (const TextOffset end = ll_text_end<T>(c, p, reached, reached);
+      end < c.len) {
+    TextOffset again = p;
+    r = ll_lex_reading<T>(c.src, end, mode, p, again);
+  }
   c.reads.pay(p, reached);
   return r;
 }
 
-// Where the bytes no terminal matches end: the first place a token reads.
+// The unmatched text at `p` (`lex_unmatched_end`), up to a blank of the mode
+// the fault is lexed with.
 template <const auto& T>
-inline TextOffset ll_unmatched_end(const LlContext& c, TextOffset from,
-                                    TextOffset len, TextOffset& reached) {
-  LexFailedWalks<LlLexTape<T>> failed;
+inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
+                                   TextOffset len, TextOffset& reached) {
   const auto mode = ll_err_mode<T>(c);
-  TextOffset end = from;
-  while (end < len) {
-    c.stop.poll();
-    ++end;
-    if (end >= len) break;
-    TextOffset halt = end;
-    Scan sc;
-    if (!failed.fails(LlLexTape<T>{}, c.src, len, mode, end, halt,
-                      [&] { c.stop.poll(); }))
-      sc = ll_match_text<T>(c.src, len, mode, end, halt);
-    reached = std::max(reached, halt);
-    if (sc.term != kInvalidSymbol && sc.end > end) break;
-  }
-  reached = std::max(reached, end);
-  return end;
+  return lex_unmatched_end(
+      LlLexTape<T>{}, LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners}, c.src, len,
+      mode, from,
+      [&]([[maybe_unused]] unsigned char b) {
+        if constexpr (T.skipSet != nullptr) return kLlBlanks<T>[mode][b];
+        return false;
+      },
+      reached, c.reads, [&c] { c.stop.poll(); });
 }
 
 template <const auto& T>
-inline TextOffset ll_unmatched_end(const LlContext& c, TextOffset from) {
+inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from) {
   TextOffset reached = from;
   return ll_unmatched_end<T>(c, from, c.len, reached);
 }

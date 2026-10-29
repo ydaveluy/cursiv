@@ -91,10 +91,8 @@ function(cursiv_batch_test_generators)
       endif()
       get_target_property(_definitions ${_target} COMPILE_DEFINITIONS)
       get_target_property(_options ${_target} COMPILE_OPTIONS)
-      # The shallow-template and forced optional-gate lanes check a compiler
-      # configuration of their own; they retain an independent compilation.
-      if(_options MATCHES "ftemplate-depth" OR
-         _definitions MATCHES "CURSIV_OPTIONAL_GATE")
+      # Shallow-template fixtures check a compiler configuration of their own.
+      if(_options MATCHES "ftemplate-depth")
         continue()
       endif()
       set(_ordinary TRUE)

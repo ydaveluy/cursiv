@@ -30,7 +30,7 @@ struct LexBase : cursiv::GrammarSpec {
                                       some(ref<HEX>) |
                                       some(ref<AT> + ref<ID>, lit<",">))> {};
   using entry = Doc;
-  using ignore = list<WS, ML>;
+  using ignored = list<WS, ML>;
 };
 
 // Infix: the precedence table, lowered to one nonterminal; after `~`, the same
@@ -51,15 +51,14 @@ struct InfixG : cursiv::GrammarSpec {
   struct Primary : rule<create<ast::Expr>(assign<&ast::Expr::value>(ref<NUM>)) |
                         (lit<"("> + ref<Expr> + lit<")">)> {};
   struct Expr
-      : infix<Primary, &ast::Expr::left, &ast::Expr::op, &ast::Expr::right,
-              (left(lit<"*"> | lit<"/">) >> left(lit<"+"> | lit<"-">))> {};
+      : infix<Primary, ast::Expr,
+              levels(left(lit<"*"> | lit<"/">), left(lit<"+"> | lit<"-">))> {};
   struct RightPrimary
       : rule<create<ast::Expr>(assign<&ast::Expr::value>(ref<NUM>))> {};
-  struct RightExpr : infix<RightPrimary, &ast::Expr::left, &ast::Expr::op,
-                           &ast::Expr::right, right(lit<"^">)> {};
+  struct RightExpr : infix<RightPrimary, ast::Expr, right(lit<"^">)> {};
   struct Root : rule<ref<Expr> | (lit<"~"> + ref<RightExpr>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Two single-byte terminals that overlap without being equal: `*` is both a
@@ -77,7 +76,7 @@ struct OverlapG : cursiv::GrammarSpec {
   struct App : rule<ref<ID> + ref<UN> + ref<NUM>> {};
   struct Doc : rule<create<ast::Node>(ref<Mul> | ref<App>)> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A refused word inside a token: C's `#` line that is not `#include`. The
@@ -92,7 +91,7 @@ struct WordGuardG : cursiv::GrammarSpec {
                  many(cr<R"(^\r\n)">) + !cr<R"(^\r\n)">> {};
   struct Doc : rule<create<ast::Node>(many(ref<ID>))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<DIRECTIVE>;
 };
 

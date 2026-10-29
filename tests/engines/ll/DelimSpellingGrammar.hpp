@@ -51,7 +51,7 @@ struct Base : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using indent_newline = NEWLINE;
   static constexpr auto indent_open =
       lit<"("> | lit<"["> | ref<LBRACE> | ref<LANGLE>;

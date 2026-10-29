@@ -41,6 +41,15 @@ struct LexTape {
     else
       return false;
   }();
+  static constexpr bool kBacktrack = [] {
+    if constexpr (requires { T.has_backtrack(); })
+      return T.has_backtrack();
+    else
+      return false;
+  }();
+  // The table echoes marks: the adapter offers `relay` and the rest of the
+  // relay protocol.
+  static constexpr bool kRelays = T.nrelays != 0;
 
   std::uint16_t start(std::uint16_t mode) const { return T.modeStart[mode]; }
   // The mode that lexes the terminals `mode` takes for the length of its token
@@ -51,6 +60,14 @@ struct LexTape {
     else
       return kNoMode;
   }
+  // Whether a walk of `mode` may read far past its token without a refusal
+  // to answer for (`LexBacktrack.hpp`).
+  bool backtracks(std::uint16_t mode) const {
+    if constexpr (kBacktrack)
+      return T.modeBacktrack[mode] != 0;
+    else
+      return false;
+  }
   std::uint16_t step(std::uint16_t s, unsigned char b) const {
     return T.next_byte(s, b);
   }
@@ -60,7 +77,7 @@ struct LexTape {
     return lex_boundary(cfg).at(T.dfaBound[s], src, i, len);
   }
   std::uint16_t relay(std::uint16_t s) const
-    requires(T.nrelays != 0)
+    requires(kRelays)
   {
     return T.dfaRelay[s];
   }
@@ -68,7 +85,7 @@ struct LexTape {
   std::size_t relay_count() const { return T.nrelays; }
   TextOffset run(std::uint16_t state, const char* src, TextOffset len,
                  TextOffset at) const
-    requires(T.nrelays != 0)
+    requires(kRelays)
   {
     return T.relay_run(state, src, len, at);
   }
@@ -225,13 +242,13 @@ unsigned lex_reading_tier(const Tape& tape, const char* src, TextOffset len,
   constexpr bool relays = requires { tape.relay(st); };
   [[maybe_unused]] std::conditional_t<relays, LexRelayRun<Tape>, bool> run{};
   for (;;) {
-    if (i == end) {
-      ended = st;
-      if constexpr (!relays) break;
-    }
     if constexpr (relays)
       for (auto k = tape.relay(st); k != kNoRelay; k = tape.relay_of(k).next)
         run.launch(tape, k, src, len, from, i);
+    if (i == end) {
+      ended = st;
+      break;
+    }
     if (i >= len) break;
     st = tape.step(st, static_cast<unsigned char>(src[i]));
     if (st == kDeadState) break;
@@ -275,13 +292,14 @@ CURSIV_NOINLINE SymbolId lex_elect(std::uint16_t s, const char* src,
 // A terminal refusing a word its token spells from `from` stands nowhere there:
 // the position is read again without it, as often as the reading it then
 // elects refuses one in turn. `Hot`, a caller reading no horizon first asks
-// the state the refused match ended in, which elects the reading of the same
-// extent where one stands.
+// `ended`, the state the refused match was read in, which elects the reading
+// of the same extent where one stands. `ended` is read only for a table
+// without relays, and only `Hot`; a caller that is not passes `kDeadState`.
 template <bool Hot, class Tape>
 CURSIV_NOINLINE Scan lex_unrefused_walk(const Tape& tape, const char* src,
                                         TextOffset len, std::uint16_t st,
                                         TextOffset from, Scan out,
-                                        TextOffset& far) {
+                                        TextOffset& far, std::uint16_t ended) {
   typename Tape::Skip skip{};
   skip.set(out.term);
   const typename Tape::Skipping skipping{.skip = &skip};
@@ -289,11 +307,8 @@ CURSIV_NOINLINE Scan lex_unrefused_walk(const Tape& tape, const char* src,
     return t != kInvalidSymbol && tape.refuses(t, src + from, len - from);
   };
   if constexpr (Hot && !requires { tape.relay(st); }) {
-    std::uint16_t s = st;
-    for (TextOffset i = from; i < out.end; ++i)
-      s = tape.step(s, static_cast<unsigned char>(src[i]));
     for (TextOffset seen = far;;) {
-      const SymbolId t = skipping.qualified(s, src, out.end, len, seen);
+      const SymbolId t = skipping.qualified(ended, src, out.end, len, seen);
       if (t == kInvalidSymbol) break;
       if (!refuses(t)) return Scan{out.end, t};
       skip.set(t);
@@ -316,7 +331,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_unrefused(const Tape& tape,
                                                TextOffset& far) {
   if (out.term != kInvalidSymbol &&
       tape.refuses(out.term, src + from, len - from))
-    return lex_unrefused_walk<false>(tape, src, len, st, from, out, far);
+    return lex_unrefused_walk<false>(tape, src, len, st, from, out, far,
+                                     kDeadState);
   return out;
 }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string_view>
+#include <utility>
 
 #include "cursiv/core/grammar/GrammarPrinter.hpp"
 #include "cursiv/core/utils/ctstring.hpp"
@@ -20,7 +21,7 @@ bool consumes(const LowerPools& c, std::uint16_t node) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return consumes(c, e.b);
+      return consumes(c, lex_token_body(c, e));
     case LexKind::chars:
       return true;
     case LexKind::seq:
@@ -35,21 +36,25 @@ bool consumes(const LowerPools& c, std::uint16_t node) {
   }
 }
 
-// The repetitions under `node` that read on without end. A whole terminal
-// ends its own run at its own length: a completion counts it as one token.
-void endless_runs(const LowerPools& c, std::uint16_t node,
-                  std::vector<std::uint16_t>& out) {
+// The repetitions under `node` that read on without end, and whether the
+// parse keeps their rounds: where `free`, no repetition of the phrase holds
+// `node`. A whole terminal ends its own run at its own length: a completion
+// counts it as one token.
+void endless_runs(const LowerPools& c, std::uint16_t node, bool free,
+                  std::vector<std::pair<std::uint16_t, bool>>& out) {
   const LexNode& e = c.lex[node];
   if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-    endless_runs(c, e.a, out);
+    endless_runs(c, e.a, true, out);
   } else if (e.kind == LexKind::rep) {
-    if (e.max == kEndless && consumes(c, e.a))
-      out.push_back(node);
-    else
-      endless_runs(c, e.a, out);
+    // A kept run's rounds read its item from each token: a run inside it is
+    // read to its end each time.
+    const bool endless = e.max == kEndless && consumes(c, e.a);
+    const bool kept = free && phrase_kept_run(c, node);
+    if (endless) out.emplace_back(node, kept);
+    if (!endless || kept) endless_runs(c, e.a, false, out);
   } else if (e.kind == LexKind::seq || e.kind == LexKind::alt) {
     for (unsigned i = 0; i < e.b; ++i)
-      endless_runs(c, c.lexKid[e.a + i], out);
+      endless_runs(c, c.lexKid[e.a + i], free, out);
   }
 }
 
@@ -74,7 +79,7 @@ std::string spell(const LowerPools& c, std::uint16_t node) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return spell(c, e.b);
+      return spell(c, lex_token_body(c, e));
     case LexKind::positive:
       return "&" + spell(c, e.a);
     case LexKind::negative:
@@ -120,16 +125,17 @@ std::string spell(const LowerPools& c, std::uint16_t node) {
 void find_unbounded_runs(const LowerPools& c, std::uint16_t cond,
                          std::uint16_t rule,
                          std::vector<UnboundedCondition>& found) {
-  std::vector<std::uint16_t> runs;
+  std::vector<std::pair<std::uint16_t, bool>> runs;
   for (const std::uint16_t v : GapReach<LowerPools>(c).leaves(cond)) {
     if (!c.gapLeaves[v].reads_tokens()) continue;
     runs.clear();
-    endless_runs(c, c.gapLeaves[v].node, runs);
-    for (const std::uint16_t run : runs) {
-      const UnboundedCondition u{rule, run};
+    endless_runs(c, c.gapLeaves[v].node, true, runs);
+    for (const auto [run, kept] : runs) {
+      const UnboundedCondition u{rule, run, kept};
       // Two copies of one spelling are one run to the author.
       if (std::ranges::none_of(found, [&](const UnboundedCondition& f) {
-            return f.rule == u.rule && spell(c, f.run) == spell(c, run);
+            return f.rule == u.rule && f.kept == u.kept &&
+                   spell(c, f.run) == spell(c, run);
           }))
         found.push_back(u);
     }
@@ -142,9 +148,14 @@ std::string unbounded_condition_text(const LowerPools& c,
   const std::string who = rule.empty() ? "a rule of this grammar "
                                        : "rule `" + std::string(rule) + "` ";
   return who + "asks a condition of the token in hand that reads `" +
-         spell(c, u.run) +
-         "` to any length: a completion then replays every token before the "
-         "caret, one by one -- bound the run (`repeat<0, N>`)";
+         spell(c, u.run) + "` to any length" +
+         (u.kept ? ": a completion then replays every token before the caret"
+                 : ": where it is tested at each token of a long run, each "
+                   "test reads on to the run's end, so the parse time grows "
+                   "with the square of the run's length and a completion "
+                   "replays every token before the caret") +
+         " -- give the run a maximum (`repeat<Min, Max>`) or read it as one "
+         "terminal";
 }
 
 }  // namespace cursiv

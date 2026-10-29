@@ -13,7 +13,7 @@
 #include "recovery_metric/support/FaultClass.hpp"
 #include "recovery_metric/support/RepairTally.hpp"
 
-namespace cursiv {
+namespace cursiv::recovery_metric {
 
 struct RepairReport {
   struct Row {
@@ -202,4 +202,4 @@ struct RepairReport {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::recovery_metric

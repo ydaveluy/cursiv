@@ -24,7 +24,7 @@ struct G : cursiv::GrammarSpec {
                      create<Doc>(assign<&Doc::item>(ref<Pick>) +
                                  assign<&Doc::block>(ref<Block>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tinsertorder

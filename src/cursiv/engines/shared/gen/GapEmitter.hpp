@@ -38,6 +38,10 @@ class GapEmitter : EmitOutput {
 
   std::string source() const { return out + _program.source(); }
 
+  // Whether the source names the boundary the emitter was given: a gap that
+  // reads only the sets, or has a constant answer, does not.
+  bool reads_boundary() const { return _program.reads_boundary(); }
+
   // Whether the `size` bytes at `text` hold gap `node`, or are it, `whole`.
   std::string expression(std::uint16_t node, bool whole,
                          std::string_view text = "g",

@@ -19,7 +19,7 @@ struct G : Base {
   struct Root
       : rule<option(flag<&ast::Decl::exported>(kw<"export">)) + ref<Body>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

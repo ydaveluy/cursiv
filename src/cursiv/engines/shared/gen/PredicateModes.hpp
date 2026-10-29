@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "cursiv/engines/shared/gen/GapReach.hpp"
+#include "cursiv/engines/shared/gen/LexModes.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
 #include "cursiv/engines/shared/table/LexNode.hpp"
@@ -162,14 +163,16 @@ DynSet longer_firsts(const Cfg& cfg, const DynSet& want, const DynSet& first) {
   return out;
 }
 
-// Lays in `cfg` the mode each predicate node that lexes reads its token in.
-template <class Cfg, class Intern>
-void predicate_modes(Cfg& cfg, Intern&& intern) {
+// Lays in `cfg` the mode each predicate node that lexes reads its token in:
+// what it wants, with no terminal lexed for length, so a condition reads the
+// walk's token alone.
+template <class Cfg>
+void predicate_modes(Cfg& cfg, LexModes& modes) {
   PredicateModes<Cfg> m(cfg);
   const auto reached = m.trace();
   for (std::uint16_t at = 0; at < cfg.nlex; ++at)
     if (reached[at] && m.lexes(cfg.lex[at].kind))
-      cfg.lexMode[at] = intern(m.want(at));
+      cfg.lexMode[at] = modes.intern(m.want(at));
 }
 
 }  // namespace cursiv

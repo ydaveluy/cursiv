@@ -1,3 +1,6 @@
+// A section closed by `END`, whose grammar reads `END` with a terminal that
+// calls itself: the closing token is a token of the grammar, but the check
+// does not follow a call, so the grammar is generated with a warning.
 #pragma once
 
 #include "refusals/head.hpp"

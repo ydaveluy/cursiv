@@ -54,13 +54,12 @@ struct G : cursiv::GrammarSpec {
   struct NUM : terminal<some(d)> {};
   // The operator is a rule whose head may match nothing: `*` is the token it
   // opens on in every document that does not spell `@`.
-  struct Pre : rule<option(lit<"@">), cursiv::AstNode::string_view> {};
-  struct Star : rule<ref<Pre> + lit<"*">, cursiv::AstNode::string_view> {};
+  struct Pre : rule<as<cursiv::AstNode::string_view>(option(lit<"@">))> {};
+  struct Star : rule<as<cursiv::AstNode::string_view>(ref<Pre> + lit<"*">)> {};
   struct Atom : rule<assign<&Bin::op>(ref<NUM>)> {};
-  struct Expr : infix<Atom, &Bin::left, &Bin::op, &Bin::right,
-                      (left(ref<Star>) >> left(lit<"+">))> {};
+  struct Expr : infix<Atom, Bin, levels(left(ref<Star>), left(lit<"+">))> {};
   using entry = Expr;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace
@@ -109,15 +108,15 @@ constexpr auto pct = [](std::string_view t) {
 };
 
 struct Bare : cursiv::GrammarSpec {
-  struct NUM : terminal<some(d), cursiv::text_conv<ten>> {};
-  struct PCT : terminal<some(d) + lit<"%">, cursiv::text_conv<pct>> {};
+  struct NUM : terminal<as<ten>(some(d))> {};
+  struct PCT : terminal<as<pct>(some(d) + lit<"%">)> {};
   struct Root : rule<create<Doc>(assign<&Doc::v>(ref<PCT> | ref<NUM>))> {};
   using entry = Root;
 };
 
 struct Regioned : cursiv::GrammarSpec {
-  struct NUM : terminal<some(d), cursiv::text_conv<ten>> {};
-  struct PCT : terminal<some(d) + lit<"%">, cursiv::text_conv<pct>> {};
+  struct NUM : terminal<as<ten>(some(d))> {};
+  struct PCT : terminal<as<pct>(some(d) + lit<"%">)> {};
   struct Root : rule<create<Doc>(assign<&Doc::v>(
       tight(ref<PCT> | ref<NUM>)))> {};
   using entry = Root;
@@ -175,7 +174,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(
       tight(lit<"["> + some(ref<ID>)) + lit<"#">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A region closing on something that may match nothing: the point after `c`
@@ -186,7 +185,7 @@ struct Inline : cursiv::GrammarSpec {
       lit<"x"> + tight(lit<"c"> + option(lit<"a">)) +
       lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Called : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -194,7 +193,7 @@ struct Called : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(
       lit<"x"> + tight(lit<"c"> + ref<R>) + lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Committed : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -202,7 +201,7 @@ struct Committed : cursiv::GrammarSpec {
       lit<"x"> + tight(lit<"c"> + option(commit(lit<"a">, lit<"b">))) +
       lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The same tail under trivia of its own, and nested regions that both close
@@ -213,32 +212,32 @@ struct Trivia : cursiv::GrammarSpec {
   struct NL : terminal<some(lit<"\n">)> {};
   struct Root : rule<create<Doc>(
                     lit<"x"> +
-                    skip(ignored<WS, NL>, hide<>, lit<"c"> + option(lit<"a">)) +
+                    skip(ignore<WS, NL>, hide<>, lit<"c"> + option(lit<"a">)) +
                     lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Nested : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct CM : terminal<lit<"//"> + many(cr<R"(^\n)">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
   static constexpr auto Inner =
-      skip(ignored<WS>, hide<>, ref<ID> + option(lit<"!">));
-  struct Item : rule<skip(ignored<WS, CM>, hide<>, Inner + option(lit<"?">))> {
+      skip(ignore<WS>, hide<>, ref<ID> + option(lit<"!">));
+  struct Item : rule<skip(ignore<WS, CM>, hide<>, Inner + option(lit<"?">))> {
   };
   struct Root : rule<create<Doc>(lit<"m"> + ref<Item> + option(lit<"end">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<CM>;
 };
 struct Same : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root
       : rule<create<Doc>(
-            lit<"x"> + skip(ignored<WS>, hide<>, lit<"c"> + option(lit<"a">)) +
+            lit<"x"> + skip(ignore<WS>, hide<>, lit<"c"> + option(lit<"a">)) +
             lit<"y">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 template <class H>
@@ -303,7 +302,7 @@ struct Inside : cursiv::GrammarSpec {
   struct Pair : rule<ref<ID> + ref<WS> + ref<ID>> {};
   struct Root : rule<create<Doc>(tight(lit<"["> + ref<Pair> + lit<"]">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace
@@ -330,21 +329,21 @@ struct Flat : cursiv::GrammarSpec {
   struct X : terminal<lit<"x">> {};
   struct Root : rule<create<Doc>(many(ref<X>) + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct ManySome : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct X : terminal<lit<"x">> {};
   struct Root : rule<create<Doc>(many(some(ref<X>)) + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct OptionSome : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct X : terminal<lit<"x">> {};
   struct Root : rule<create<Doc>(option(some(ref<X>)) + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Run : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -352,7 +351,7 @@ struct Run : cursiv::GrammarSpec {
   struct Xs : rule<some(ref<X>)> {};
   struct Root : rule<create<Doc>(many(ref<Xs>) + lit<";">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 template <class G>
@@ -389,7 +388,7 @@ struct Inner : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<create<Doc>(lit<"a"> + option(lit<">=">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // A grammar embedding itself: the inner section closes on a token the
@@ -399,7 +398,7 @@ struct Self : cursiv::GrammarSpec {
   struct Root
       : rule<create<Doc>(lit<"a">) | section<Self>(lit<"(">, lit<")">)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 template <cursiv::str Close>
@@ -407,7 +406,7 @@ struct Outer : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<section<Inner>(lit<"<">, lit<Close>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace
@@ -440,7 +439,7 @@ struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct X : terminal<lit<"x">> {};
   struct Y : terminal<lit<"y">> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // Two runs of one item side by side, or with only an option between them.
@@ -520,6 +519,14 @@ struct Bounded : Base {
   struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
   using entry = Root;
 };
+// A run inside another repetition is read to its end by each test; the run
+// holding it is read round by round.
+struct Nested : Base {
+  struct Item
+      : rule<!(some(some(lit<"-">) + lit<";">) + lit<">">)+ref<X>> {};
+  struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
+  using entry = Root;
+};
 
 template <class G>
 const cursiv::LrBuildCfg& cfg() {
@@ -532,10 +539,10 @@ std::vector<cursiv::LrAmbiguity> found() {
 }
 
 template <class G>
-std::string unbounded_text() {
+std::string unbounded_text(std::size_t i = 0) {
   const auto& c = cfg<G>();
-  return cursiv::unbounded_condition_text(c, c.nt_name(c.unbounded[0].rule),
-                                          c.unbounded[0]);
+  return cursiv::unbounded_condition_text(c, c.nt_name(c.unbounded[i].rule),
+                                          c.unbounded[i]);
 }
 
 template <class G>
@@ -560,7 +567,8 @@ int run() {
   CHECK(cfg<Endless>().unbounded.size() == 1 &&
         unbounded_text<Endless>().find(
             "rule `Item` asks a condition of the token in hand that "
-            "reads `[0-9]+` to any length") != std::string::npos);
+            "reads `[0-9]+` to any length: a completion then replays every "
+            "token before the caret") != std::string::npos);
   CHECK(cfg<EndlessDashes>().unbounded.size() == 1 &&
         unbounded_text<EndlessDashes>().find(
             "rule `Arrow` asks a condition of the token in hand "
@@ -572,6 +580,13 @@ int run() {
         unbounded_text<EndlessSeveral>().find(
             "reads `[0-9]{3,}` to any length") != std::string::npos);
   CHECK(cfg<Bounded>().unbounded.empty());
+  CHECK(cfg<Nested>().unbounded.size() == 2 &&
+        cfg<Nested>().unbounded[0].kept && !cfg<Nested>().unbounded[1].kept &&
+        unbounded_text<Nested>(1).find(
+            "reads `('-')+` to any length: where it is tested at each token "
+            "of a long run, each test reads on to the run's end, so the parse "
+            "time grows with the square of the run's length") !=
+            std::string::npos);
   CHECK(cfg<Tokens>().unbounded.empty());
   CHECK(cfg<EndlessTokens>().unbounded.size() == 1);
   return 0;
@@ -812,7 +827,8 @@ int run() {
                 text.data() + la.begin, rest};
             cursiv::test::GapReference::Span first;
             first.set(0);
-            v = known ? 2u * !reader.step(operand.b, first).empty() : 1u;
+            const auto body = cursiv::lex_token_body(g, operand);
+            v = known ? 2u * !reader.step(body, first).empty() : 1u;
             break;
           }
           case GapLeafKind::phrase:

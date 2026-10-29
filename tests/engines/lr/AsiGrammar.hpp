@@ -6,26 +6,9 @@
 // restricted production refuses a line break before what follows it.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/AsiAst.hpp"
 
 namespace tasi {
-
-namespace ast {
-struct Stmt : cursiv::Extends<cursiv::AstNode> {
-  string_view head;
-  vector<Stmt*> args;
-  vector<Stmt*> body;
-  bool ret = false;
-  bool empty = false;
-  bool inc = false;
-  bool go = false;
-  vector<Stmt*> divs;
-  bool obj = false;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Stmt*> body;
-};
-}  // namespace ast
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -69,7 +52,7 @@ struct G : cursiv::GrammarSpec {
                      ref<Empty>> {};
   struct Doc : rule<create<ast::Doc>(many(append<&ast::Doc::body>(ref<Stmt>)))> {};
   using entry = Doc;
-  using ignore = list<WS, COMMENT>;
+  using ignored = list<WS, COMMENT>;
 };
 
 // The lexicon the small grammars below share, so that one grammar can hold
@@ -84,19 +67,6 @@ struct Words : cursiv::GrammarSpec {
 // both sides or on neither is binary, spaced before only is prefix, spaced
 // after only is postfix.
 namespace ops {
-namespace ast {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  string_view op;
-  vector<Node*> kids;
-};
-struct Pre : cursiv::Extends<Node> {};
-struct Post : cursiv::Extends<Node> {};
-struct Bin : cursiv::Extends<Node> {};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Node*> items;
-};
-}  // namespace ast
 struct G : Words {
   struct OP : terminal<cr<"-+">> {};
   struct Atom : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
@@ -120,24 +90,13 @@ struct G : Words {
   struct Doc
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<Expr>)))> {};
   using entry = Doc;
-  using ignore = list<WS, COMMENT>;
+  using ignored = list<WS, COMMENT>;
 };
 }  // namespace ops
 
 // The same operators with the gap after them closing a choice: that
 // condition is asked when the alternative reduces, on the token after it.
 namespace tail {
-namespace ast {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  string_view op;
-  vector<Node*> kids;
-};
-struct Bin : cursiv::Extends<Node> {};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Node*> items;
-};
-}  // namespace ast
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
@@ -156,25 +115,13 @@ struct G : cursiv::GrammarSpec {
       : rule<create<ast::Doc>(
             many(append<&ast::Doc::items>(ref<Expr>) + lit<";">))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tail
 
 // A statement that opens on `{` is a block; the statements that could also
 // open there refuse the brace, and the one inside ends on an implied `;`.
 namespace block {
-namespace ast {
-struct Node : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  vector<Node*> body;
-};
-struct Block : cursiv::Extends<Node> {};
-struct Var : cursiv::Extends<Node> {};
-struct Obj : cursiv::Extends<Node> {};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Node*> items;
-};
-}  // namespace ast
 struct G : Words {
   static constexpr auto Eos = implied(lit<";">, gap::line | &lit<"}"> | eof);
   struct Name : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
@@ -202,18 +149,13 @@ struct G : Words {
   struct Doc
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<Stmt>)))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace block
 
 // A condition before an optional position: a line break refuses the
 // statement, and the empty option must not be read past it.
 namespace optgap {
-namespace ast {
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<string_view> names;
-};
-}  // namespace ast
 struct G : Words {
   struct Bang : rule<option(lit<"!">)> {};
   struct Doc
@@ -221,7 +163,7 @@ struct G : Words {
                                    append<&ast::Doc::names>(ref<ID>) +
                                    lit<";">))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The empty option before a literal: the gap decides where its goto lands,
@@ -233,7 +175,7 @@ struct G : Words {
       : rule<create<ast::Doc>(many(append<&ast::Doc::names>(ref<ID>) +
                                    !gap::line + ref<Bang> + lit<";">))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace close
 }  // namespace optgap
@@ -272,7 +214,7 @@ struct G : Words {
                      ref<Bang>> {};
   struct Doc : rule<create<ast::Doc>(many(ref<Stmt>))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace more
 
@@ -290,7 +232,7 @@ struct G : Words {
   struct Stmt : rule<ref<Block> | ref<Name>> {};
   struct Doc : rule<create<ast::Doc>(many(append<&ast::Doc::body>(ref<Stmt>)))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace brace
 
@@ -310,7 +252,7 @@ struct G : Words {
   struct Stmt : rule<ref<Simple> | ref<Item>> {};
   struct Doc : rule<create<ast::Doc>(many(append<&ast::Doc::body>(ref<Stmt>)))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
 };
 }  // namespace doc
@@ -318,31 +260,17 @@ struct G : Words {
 // A precedence table whose operators open on a condition: the step binds the
 // token past it, so the table still decides.
 namespace prec {
-namespace ast {
-struct Expr : cursiv::Extends<cursiv::AstNode> {};
-struct Bin : cursiv::Extends<Expr> {
-  Expr* left = nullptr;
-  string_view op;
-  Expr* right = nullptr;
-};
-struct Name : cursiv::Extends<Expr> {
-  string_view name;
-};
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<Expr*> items;
-};
-}  // namespace ast
 struct G : Words {
   struct Plus : rule<!gap::line + lit<"+">> {};
   struct Star : rule<!gap::line + lit<"*">> {};
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {
   };
-  struct Expr : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                      (left(ref<Star>) >> left(ref<Plus>))> {};
+  struct Expr
+      : infix<Primary, ast::Bin, levels(left(ref<Star>), left(ref<Plus>))> {};
   struct Doc
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<Expr>)))> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace prec
 
@@ -354,7 +282,7 @@ struct G : Words {
   struct Root : rule<create<ast::Doc>((!gap::line + ref<Prefix> + lit<"x">) |
                                       (gap::line + ref<Prefix> + lit<"y">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace held
 
@@ -372,7 +300,7 @@ struct G : Words {
                    lit<"<?"> + many(append<&ast::Doc::body>(ref<Stmt>)) +
                    lit<"?>">)> {};
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct WithLine : G {
   struct Close : terminal<lit<"?>"> + option(eol)> {};
@@ -406,7 +334,7 @@ struct G : Words {
             (lit<"j"> + gap::has(lit<"x", !cr<"α">>) + lit<";">) |
             (lit<"g"> + !(gap::line | &lit<";">)+lit<";">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tasi::gaps
 
@@ -430,7 +358,7 @@ struct G : Words {
              (kw<"tailops"> + ref<tail::G::Doc>) |
              (kw<"gaps"> + ref<gaps::G::Root>)> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
 };
 }  // namespace tasi::cases

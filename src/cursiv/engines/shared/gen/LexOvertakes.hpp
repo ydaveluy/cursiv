@@ -31,7 +31,7 @@ class LexOvertakes {
                const std::vector<int>& startOf,
                const std::vector<DynSet>& followers)
       : _nfa(nfa), _g(g), _startOf(startOf), _followers(followers),
-        _known(std::size_t{g.nterms} * g.nterms, 0), _next(g.nterms),
+        _asked(g.nterms), _past(g.nterms), _next(g.nterms),
         _nextKnown(g.nterms, false) {
     for (unsigned t = 1; t < g.nterms; ++t)
       if (g.terms[t].trivia) _trivia.set(t);
@@ -46,12 +46,8 @@ class LexOvertakes {
     DynSet out;
     each_bit(fresh.w.data(), fresh.w.size(), [&](std::size_t a) {
       if (a >= _g.nterms || _trivia.test(static_cast<unsigned>(a))) return;
-      bool over = false;
-      each_bit(beside.w.data(), beside.w.size(), [&](std::size_t b) {
-        over = over || (b < _g.nterms && runs_past(static_cast<unsigned>(b),
-                                                   static_cast<unsigned>(a)));
-      });
-      if (over) out.set(static_cast<unsigned>(a));
+      if (reads_over(static_cast<unsigned>(a), beside))
+        out.set(static_cast<unsigned>(a));
     });
     return out;
   }
@@ -61,8 +57,11 @@ class LexOvertakes {
   const Cfg& _g;
   const std::vector<int>& _startOf;
   const std::vector<DynSet>& _followers;
-  // Per pair `a * nterms + b`: 0 unasked, 1 no, 2 yes.
-  std::vector<std::uint8_t> _known;
+  // Per terminal `a`, the terminals asked whether `a` runs past them, and
+  // those it does.
+  std::vector<DynSet> _asked, _past;
+  // The terminals `reads_over` has still to ask, kept to reuse its words.
+  DynSet _ask;
   // Per terminal, where a token that may follow it starts, once asked.
   std::vector<std::vector<int>> _next;
   std::vector<bool> _nextKnown;
@@ -94,13 +93,27 @@ class LexOvertakes {
     return _next[b];
   }
 
+  // Whether `a` runs past one of `beside`: the answers known first, a word at
+  // a time, then the terminals not asked yet.
+  bool reads_over(unsigned a, const DynSet& beside) {
+    if (_past[a].intersects(beside)) return true;
+    _ask = beside;
+    _ask.andnot(_asked[a]);
+    bool over = false;
+    each_bit(_ask.w.data(), _ask.w.size(), [&](std::size_t b) {
+      over = over || (b < _g.nterms && runs_past(static_cast<unsigned>(b), a));
+    });
+    return over;
+  }
+
   // Whether `a` reads on past a text `b` ends on, into the start of a token
   // that may follow `b`: that token is lost to the match of `a`.
   bool runs_past(unsigned b, unsigned a) {
-    if (b == a || _startOf[a] < 0 || _startOf[b] < 0) return false;
-    std::uint8_t& known = _known[std::size_t{a} * _g.nterms + b];
-    if (known == 0) known = walk(b, a) ? 2 : 1;
-    return known == 2;
+    _asked[a].set(b);
+    if (b == a || _startOf[a] < 0 || _startOf[b] < 0 || !walk(b, a))
+      return false;
+    _past[a].set(b);
+    return true;
   }
 
   bool walk(unsigned b, unsigned a) {
@@ -118,16 +131,29 @@ class LexOvertakes {
     };
     std::set<Key> seen;
     std::vector<Key> work;
+    // Past `kMost` pairs, or more assertions at one position than the walk
+    // enters, `a` is taken to read over.
+    bool unsure = false;
     const auto push = [&](Key k) {
       if (seen.insert(k).second) work.push_back(std::move(k));
+    };
+    // Each pair the two walks may stand in, whether or not each assertion on
+    // the way holds.
+    const auto enter = [&](std::vector<int> ra, std::vector<int> rx, int phase,
+                           const ByteSet& allowed) {
+      const auto xs = lex_assertion_worlds(_nfa, std::move(rx), unsure);
+      for (const std::vector<int>& wa :
+           lex_assertion_worlds(_nfa, std::move(ra), unsure))
+        for (const std::vector<int>& wx : xs)
+          push({wa, wx, phase, words(allowed)});
     };
     std::vector<int> first = _nfa.eclose(_startOf[a]);
     std::vector<int> second = _nfa.eclose(_startOf[b]);
     std::ranges::sort(first);
     std::ranges::sort(second);
-    push({first, second, 0, words(ByteSet{})});
+    enter(std::move(first), std::move(second), 0, ByteSet{});
     for (std::size_t i = 0; i < work.size(); ++i) {
-      if (seen.size() > kMost) return true;
+      if (unsure || seen.size() > kMost) return true;
       const auto [ra, rx, phase, allowed] = work[i];
       if (phase == 0 && lex_accepts(_nfa, rx)) {
         // A recognizer reads on as far as its machine goes.
@@ -135,47 +161,69 @@ class LexOvertakes {
         // `b` ends where its own graph cannot read on.
         ByteSet ends = stands_before(rx);
         ends.andnot(lex_subset_reads(_nfa, sets, rx));
-        push({ra, next, 1, words(ends)});
+        enter(ra, next, 1, ends);
       }
-      const ByteSet shared =
+      ByteSet left =
           lex_subset_reads(_nfa, sets, ra) & lex_subset_reads(_nfa, sets, rx);
+      if (phase == 1)
+        left &= ByteSet{{allowed[0], allowed[1], allowed[2], allowed[3]}};
       for (unsigned c = 0; c < 256; ++c) {
         const auto byte = static_cast<unsigned char>(c);
-        if (!shared.has(byte) ||
-            (phase == 1 && ((allowed[byte >> 6] >> (byte & 63)) & 1) == 0))
-          continue;
+        if (!left.has(byte)) continue;
+        // Every edge of both subsets reads the bytes of `alike` as it reads
+        // `byte`: they step where it steps, and are taken with it.
+        ByteSet alike = left;
+        for (const std::vector<int>* sub : {&ra, &rx})
+          for (const int x : *sub) {
+            const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
+            if (st.set < 0) continue;
+            ByteSet on = sets[st.set];
+            if (st.minus >= 0) on.andnot(sets[st.minus]);
+            if (on.has(byte))
+              alike &= on;
+            else
+              alike.andnot(on);
+          }
+        left.andnot(alike);
         auto na = lex_nfa_step(_nfa, sets, ra, byte);
         auto nx = lex_nfa_step(_nfa, sets, rx, byte);
         if (na.empty() || nx.empty()) continue;
         if (phase == 0) {
-          push({std::move(na), std::move(nx), 0, words(ByteSet{})});
+          enter(std::move(na), std::move(nx), 0, ByteSet{});
           continue;
         }
-        // `a` ends in the next token's text, or the next token ends where `a`
-        // reads on past it.
-        bool tokenEnds = false, triviaEnds = false;
-        for (const int x : nx) {
-          const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
-          if (st.accept >= 0)
-            (_trivia.test(static_cast<unsigned>(st.accept)) ? triviaEnds
-                                                            : tokenEnds) = true;
-        }
-        if (lex_accepts(_nfa, na) || lex_recognizes(_nfa, na) ||
-            lex_recognizes(_nfa, nx) ||
-            (tokenEnds && lex_subset_reads(_nfa, sets, na)
-                              .andnot(lex_subset_reads(_nfa, sets, nx))
-                              .any()))
-          return true;
-        if (triviaEnds) {
-          std::vector<int> joined;
-          joined.reserve(nx.size() + next.size());
-          std::ranges::set_union(nx, next, std::back_inserter(joined));
-          nx = std::move(joined);
-        }
-        push({std::move(na), std::move(nx), 2, words(ByteSet{})});
+        const auto xs = lex_assertion_worlds(_nfa, std::move(nx), unsure);
+        for (const std::vector<int>& wa :
+             lex_assertion_worlds(_nfa, std::move(na), unsure))
+          for (const std::vector<int>& wx : xs) {
+            // `a` ends in the next token's text, or the next token ends where
+            // `a` reads on past it.
+            bool tokenEnds = false, triviaEnds = false;
+            for (const int x : wx) {
+              const LexNfaState& st = _nfa.s[static_cast<std::size_t>(x)];
+              if (st.accept >= 0)
+                (_trivia.test(static_cast<unsigned>(st.accept)) ? triviaEnds
+                                                                : tokenEnds) =
+                    true;
+            }
+            if (lex_accepts(_nfa, wa) || lex_recognizes(_nfa, wa) ||
+                lex_recognizes(_nfa, wx) ||
+                (tokenEnds && lex_subset_reads(_nfa, sets, wa)
+                                  .andnot(lex_subset_reads(_nfa, sets, wx))
+                                  .any()))
+              return true;
+            if (!triviaEnds) {
+              push({wa, wx, 2, words(ByteSet{})});
+              continue;
+            }
+            std::vector<int> joined;
+            joined.reserve(wx.size() + next.size());
+            std::ranges::set_union(wx, next, std::back_inserter(joined));
+            enter(wa, std::move(joined), 2, ByteSet{});
+          }
       }
     }
-    return false;
+    return unsure;
   }
 };
 

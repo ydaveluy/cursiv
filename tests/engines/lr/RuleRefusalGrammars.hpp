@@ -176,7 +176,7 @@ struct G : Words {
                      (kw<"lines"> + ref<tlines::G::Root>) |
                      ref<tcondref::G::Root> | ref<Doc>> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace head
 

@@ -26,6 +26,22 @@
 
 namespace cursiv {
 
+// Per mode and terminal, the sample words the lexer reads whole as the
+// terminal there, set when first asked and held with the top bit up. The cells
+// come with the first completion that asks, so a parser that never completes
+// holds none; of two completions racing for them, the second takes the
+// first's.
+class LrSampleReads {
+ public:
+  ~LrSampleReads() { delete[] _cells.load(std::memory_order_relaxed); }
+
+  // The cells, `count` of them, made zero by the first call.
+  std::atomic<std::uint32_t>* cells(std::size_t count) const;
+
+ private:
+  mutable std::atomic<std::atomic<std::uint32_t>*> _cells{nullptr};
+};
+
 struct LrCaretTable {
   // The lexer walks the frozen DFA, so it is bound rather than described.
   Scan (*lex)(const char* src, TextOffset len, std::uint16_t mode,
@@ -35,6 +51,13 @@ struct LrCaretTable {
   std::uint32_t (*scan)(const char* src, TextOffset len, std::uint16_t mode,
                         TextOffset from, Scan* out,
                         std::uint32_t cap) = nullptr;
+  // The terminals a mode takes off a position no stack takes them at, and
+  // the walk that reads the position without the ones taken off; null where
+  // no mode flags any.
+  bool (*flagged)(std::uint16_t mode, SymbolId sym) = nullptr;
+  Scan (*lexWithout)(const char* src, TextOffset len, std::uint16_t mode,
+                     TextOffset from, std::span<const SymbolId> skip,
+                     TextOffset& halt) = nullptr;
   bool (*cond)(std::string_view, unsigned, TextOffset, const Token&, bool,
                LrGapMemo*) = nullptr;
   std::span<const CondReach> condReach{};
@@ -81,11 +104,12 @@ struct LrCaretTable {
   std::span<const std::uint64_t> held;
 
   std::span<const TermInfo> terms;
+  // The terminals' names and spellings, as `TermInfo` places them.
+  const char* names = nullptr;
   std::span<const LrProduction> prods;
-  // Per mode and terminal, the sample words the lexer reads whole as the
-  // terminal there, set when first asked and held with the top bit up; null
-  // where the table asks no condition.
-  std::atomic<std::uint32_t>* sampleReads = nullptr;
+  // The sample words each terminal is read as, per mode; null where the table
+  // asks no condition.
+  const LrSampleReads* sampleReads = nullptr;
 
   // A token the indentation or the parse lays: no lexer reads it, and no
   // author types it.

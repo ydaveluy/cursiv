@@ -12,7 +12,8 @@ void fuzz_statemachine() {
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =
       g::create_ast_reflection();
-  cursiv::fuzzer::lane<sm::SM>("statemachine", *parser, *reflection, 400, 0x5eed07);
+  cursiv::fuzzer::lane<sm::SM>("statemachine", *parser, *reflection, 400,
+                               0x5eed07);
 }
 }  // namespace
 

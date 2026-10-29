@@ -46,6 +46,8 @@
 #include "domainmodel/generated/DomainModel/Table.hpp"
 #include "indent/generated/G/Parser.hpp"
 #include "indent/generated/G/Table.hpp"
+#include "indentbody/generated/G/Parser.hpp"
+#include "indentbody/generated/G/Table.hpp"
 #include "astfusedlr/generated/Lr/Parser.hpp"
 #include "astfusedlr/generated/Lr/Table.hpp"
 #include "nested/generated/G/Table.hpp"
@@ -134,6 +136,44 @@ void a_stop_at_recovery_discards_the_partial_tree() {
         !cst.has_entry() && cst.diagnostics().empty());
 }
 
+// A point in front of the bytes it refuses may do what the phase it stands in
+// allows, and a generator names the one reading it was made from and the one
+// meaning of its payload.
+void phases_and_generators_name_what_they_stand_for() {
+  using cursiv::LrRepairPhase;
+  using cursiv::LrWorkKind;
+  cursiv::LrConfig reading;
+  CHECK(!reading.generates() && reading.work == LrWorkKind::read);
+  struct Allowed {
+    LrRepairPhase phase;
+    bool abandon, replace, insert, insertBeforeGarbage;
+  };
+  for (const Allowed& a :
+       {Allowed{LrRepairPhase::beforeGesture, true, true, true, true},
+        Allowed{LrRepairPhase::afterAbandon, false, true, true, true},
+        Allowed{LrRepairPhase::inserting, false, true, true, false},
+        Allowed{LrRepairPhase::discardOnly, false, false, false, false}}) {
+    reading.phase = a.phase;
+    CHECK(reading.mayAbandon() == a.abandon);
+    CHECK(reading.mayReplace() == a.replace);
+    CHECK(reading.mayInsert(false) == a.insert);
+    CHECK(reading.mayInsert(true) == a.insertBeforeGarbage);
+  }
+
+  const auto inserts = cursiv::LrConfig::insertGenerator(reading, 3, 7);
+  CHECK(inserts.generates() && inserts.work == LrWorkKind::enumerateInsertions);
+  CHECK(inserts.source() == 3 && inserts.insertRank() == 7);
+  auto abandons = cursiv::LrConfig::abandonGenerator(reading, 2, 5, 11, 13, 4);
+  CHECK(abandons.generates() && abandons.work == LrWorkKind::enumerateAbandons);
+  CHECK(abandons.source() == 2 && abandons.abandonDepth() == 5 &&
+        abandons.abandonNode() == 11 && abandons.abandonBegin() == 13 &&
+        abandons.armNext == 4);
+  abandons.resumeAbandons(4, 9, 10, 6);
+  CHECK(abandons.source() == 2 && abandons.abandonDepth() == 4 &&
+        abandons.abandonNode() == 9 && abandons.abandonBegin() == 10 &&
+        abandons.armNext == 6);
+}
+
 // Equal stacks at the same pause can still owe different insertion costs:
 // their allowances were fixed before the reductions that brought them here.
 // Both stand at an equal key; at a worse key, only one holding more.
@@ -141,10 +181,10 @@ void insertion_allowance_is_part_of_the_future() {
   Stand<gdm::kTable> st("package p { package q {", gdm::kDrive);
   cursiv::LrContext& c = *st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
-  cursiv::LrSearch s(c.len, kUnbounded);
+  cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
   s.configs[0].fresh = false;
-  s.configs[0].phase = 2;
+  s.configs[0].phase = cursiv::LrRepairPhase::inserting;
   auto free = s.configs[0];
   free.freeInserts = 2;
   free.link = cursiv::lr_search_link(s, cursiv::LrGesture{.choice = 1});
@@ -183,12 +223,13 @@ void unread_bytes_take_one_insertion() {
   cursiv::LrContext& c = *st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
   CHECK(c.la.sym == cursiv::kInvalidSymbol);
-  cursiv::LrSearch s(c.len, kUnbounded);
+  cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
   cursiv::lr_search_expand<gdm::kTable>(c, s, 0);
   std::uint32_t one = cursiv::kLrNoConfig;
   for (std::uint32_t i = 1; i < s.configs.size(); ++i)
-    if (!s.configs[i].gen && s.configs[i].phase == 2 &&
+    if (!s.configs[i].generates() &&
+        s.configs[i].phase == cursiv::LrRepairPhase::inserting &&
         s.configs[i].la.begin == c.la.begin)
       one = i;
   CHECK(one != cursiv::kLrNoConfig);
@@ -210,7 +251,7 @@ void merged_path_keeps_its_source_rank() {
   Stand<gdm::kTable> st("package p {", gdm::kDrive);
   cursiv::LrContext& c = *st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
-  cursiv::LrSearch s(c.len, kUnbounded);
+  cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
   cursiv::lr_search_root(s, c, c.stack, c.tape.len(), 1, true);
   s.heap.clear();
@@ -315,7 +356,7 @@ std::vector<Key> keys_of(cursiv::LrContext& c, cursiv::LrSearch& s,
 template <const auto& A, class Lay>
 Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
               Lay lay, const Rank& rank) {
-  cursiv::LrSearch s(c.len, kUnbounded);
+  cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   if (!lay(s)) return kNoKey;
   std::vector<cursiv::LrSearch::Entry> todo(s.heap);
   s.heap.clear();
@@ -327,9 +368,9 @@ Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
     const cursiv::LrConfig& x = s.configs[e.at];
     if (x.gone || x.cost > most) continue;
     s.seen.clear();
-    if (x.gen && x.genInserts) {
+    if (x.work == cursiv::LrWorkKind::enumerateInsertions) {
       cursiv::lr_search_inserts<A>(c, s, e.at);
-    } else if (x.gen) {
+    } else if (x.work == cursiv::LrWorkKind::enumerateAbandons) {
       cursiv::lr_search_abandon<A>(c, s, e.at, ~std::uint32_t{0});
     } else if (cursiv::lr_search_goal(x)) {
       goals.push_back(e.at);
@@ -342,11 +383,12 @@ Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
   }
   std::vector<std::uint32_t> owner(s.links.size(), cursiv::kLrNoConfig);
   for (std::uint32_t i = 0; i < s.configs.size(); ++i)
-    if (!s.configs[i].gen && owner[s.configs[i].link] == cursiv::kLrNoConfig)
+    if (!s.configs[i].generates() &&
+        owner[s.configs[i].link] == cursiv::kLrNoConfig)
       owner[s.configs[i].link] = i;
   std::vector<std::uint64_t> below(s.configs.size(), ~std::uint64_t{0});
   for (const cursiv::LrConfig& g : s.configs) {
-    if (g.gen || g.gone || !cursiv::lr_search_goal(g)) continue;
+    if (g.generates() || g.gone || !cursiv::lr_search_goal(g)) continue;
     const std::uint64_t k = (std::uint64_t{g.cost} << 32) | g.lost;
     for (std::uint32_t l = g.link; l != cursiv::kNoGestureLink;
          l = s.links[l].parent)
@@ -387,7 +429,7 @@ void print_key(const Key& k) {
 template <const auto& A, class Lay>
 Key elect(cursiv::LrContext& c, Lay lay, const Rank& rank,
           std::uint32_t& cost) {
-  cursiv::LrSearch s(c.len, kUnbounded);
+  cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   s.boundAfter = 0;
   cost = ~0u;
   if (!lay(s)) return kNoKey;
@@ -488,7 +530,8 @@ struct Whole {
       const cursiv::Scan s = c.drive->walk(c.src, c.len, mode, p);
       if (s.term == cursiv::kInvalidSymbol || s.end == p)
         return cursiv::Token{p, p, cursiv::kInvalidSymbol};
-      if (!cursiv::lr_is_trivia<A>(s.term) && !cursiv::lr_joins<A>(c, s.term))
+      if (!cursiv::lr_is_trivia<A>(s.term) &&
+          !cursiv::lr_joins<A>(w.indent.depth, s.term))
         return cursiv::Token{p, s.end, s.term};
       if (A.cfg.terms[s.term].recorded)
         c.pending.push_back(cursiv::Token{p, s.end, s.term});
@@ -662,6 +705,28 @@ unsigned writes_through(const cursiv::LrDrive& drive, std::string_view text,
   return stats.splits;
 }
 
+// A document repaired twice, by the drive and by the interpreted writer: the
+// two pause at the same tokens, so their repairs say and spend the same.
+template <const auto& A>
+void repairs_through(const cursiv::LrDrive& drive, std::string_view text) {
+  Interpreted<A>::drive = drive;
+  Interpreted<A>::drive.enter = &Interpreted<A>::enter;
+  cursiv::Cst ran;
+  cursiv::Cst read;
+  cursiv::LrParseStats ranStats{};
+  cursiv::LrParseStats readStats{};
+  CHECK(cursiv::lr_parser<A>.parse(text, ran, &ranStats, &drive));
+  CHECK(cursiv::lr_parser<A>.parse(text, read, &readStats,
+                                   &Interpreted<A>::drive));
+  CHECK(ranStats.work == readStats.work);
+  CHECK(ran.diagnostics().size() == read.diagnostics().size());
+  CHECK(ran.size() == read.size());
+  for (cursiv::NodeId i = 0; i < ran.size() && i < read.size(); ++i)
+    CHECK(ran[i].begin == read[i].begin && ran[i].end == read[i].end &&
+          ran[i].subtreeSize == read[i].subtreeSize &&
+          ran[i].recovered == read[i].recovered);
+}
+
 template <const auto& A>
 std::vector<cursiv::ParseDiagnostic> repaired(
     std::string_view text, const cursiv::LrDrive& drive,
@@ -707,7 +772,7 @@ void a_missing_terminator_is_inserted_where_the_construct_closes() {
   const auto inserted = [](const std::string& text) {
     cursiv::Cst cst;
     const bool ok = cursiv::lr_parser<arith_g::kTable>.parse(
-        text, cst, nullptr, arith_g::kDrivePtr);
+        text, cst, nullptr, &arith_g::kDrive);
     CHECK(ok);
     unsigned n = 0;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -731,7 +796,7 @@ void a_stray_indent_is_said_once() {
        {"a\n  b\nc\n", "a:\n  b\n    c\nd\n", "a\n  b\n  c\n  d\ne\n"}) {
     cursiv::Cst cst;
     const bool ok = cursiv::lr_parser<indent_g::kTable>.parse(
-        text, cst, nullptr, indent_g::kDrivePtr);
+        text, cst, nullptr, &indent_g::kDrive);
     CHECK(ok);
     CHECK(cst.diagnostics().size() == 1);
   }
@@ -744,7 +809,7 @@ void a_refused_word_at_the_end_is_not_an_open_token() {
   for (const char* text : {"abcd", "abcde"}) {
     cursiv::Cst cst;
     const bool ok = cursiv::lr_parser<open_g::kTable>.parse(text, cst, nullptr,
-                                                            open_g::kDrivePtr);
+                                                            &open_g::kDrive);
     CHECK(ok);
     CHECK(cst.diagnostics().size() == 1);
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -761,7 +826,7 @@ void a_token_refused_in_its_middle_ends_at_its_closer() {
                        cursiv::TextOffset end) {
     cursiv::Cst cst;
     CHECK(cursiv::lr_parser<memconv_g::kTable>.parse(text, cst, nullptr,
-                                                     memconv_g::kDrivePtr));
+                                                     &memconv_g::kDrive));
     CHECK(cst.diagnostics().size() == 1);
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
       CHECK(d.kind == cursiv::DiagnosticKind::replaced && d.begin == begin &&
@@ -786,7 +851,7 @@ void an_open_comment_ends_where_the_code_resumes() {
         "module m\ndef f(x):\n  " + comment + "\n  x * 2;\nf(1);\n";
     cursiv::Cst cst;
     CHECK(cursiv::lr_parser<arith_g::kTable>.parse(text, cst, nullptr,
-                                                   arith_g::kDrivePtr));
+                                                   &arith_g::kDrive));
     CHECK(cst.diagnostics().size() == 1);
     const auto at = static_cast<cursiv::TextOffset>(text.find("/*"));
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -804,7 +869,8 @@ void a_deletion_names_the_token_it_resumes_on() {
   for (const cursiv::ParseDiagnostic& d : r.diagnostics) {
     CHECK(d.kind == cursiv::DiagnosticKind::deleted && d.begin == 13 &&
           d.end == 14);
-    CHECK(parser->getGrammar().terminalText(d.element) == ")");
+    const auto spellings = parser->getGrammar().terminalSpellings(d.element);
+    CHECK(spellings.size() == 1 && spellings.front() == ")");
     CHECK(d.also.empty());
   }
 }
@@ -860,7 +926,7 @@ void a_fault_per_member_is_said_once_each() {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   CHECK(cursiv::lr_parser<arith_g::kTable>.parse(text, cst, &stats,
-                                                 arith_g::kDrivePtr));
+                                                 &arith_g::kDrive));
   const auto& d = cst.diagnostics();
   const auto bounded = std::ranges::find(d, cursiv::DiagnosticKind::bounded,
                                          &cursiv::ParseDiagnostic::kind);
@@ -882,7 +948,7 @@ void readings_frozen_alike_do_not_fill_the_room() {
   text += "b";
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
-  cursiv::lr_parser<asi_g::kTable>.parse(text, cst, &stats, asi_g::kDrivePtr);
+  cursiv::lr_parser<asi_g::kTable>.parse(text, cst, &stats, &asi_g::kDrive);
   CHECK(stats.alternatives < 4096);
 }
 
@@ -893,7 +959,7 @@ void a_document_of_close_faults_reads_in_one_pass() {
   std::string text = "module m f(1";
   for (unsigned i = 1; i < kElements; ++i) text += ",,1";
   text += ");";
-  const Read r = read<arith_g::kTable>(text, arith_g::kDrivePtr);
+  const Read r = read<arith_g::kTable>(text, &arith_g::kDrive);
   CHECK(r.accepted);
   CHECK(r.diagnostics == kElements - 1);
 }
@@ -906,7 +972,7 @@ void a_run_of_closers_replays_in_one_pass() {
   std::string text;
   for (unsigned i = 0; i < 50000; ++i) text += "package p {";
   const auto start = std::chrono::steady_clock::now();
-  const Read r = read<dm_g::kTable>(text, dm_g::kDrivePtr);
+  const Read r = read<dm_g::kTable>(text, &dm_g::kDrive);
   CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
   CHECK(r.accepted);
   CHECK(r.diagnostics == 1);
@@ -956,7 +1022,7 @@ void a_document_of_stray_bytes_is_read_in_one_pass() {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   const std::string text = noise(4096);
-  cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr);
+  cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive);
   // What a quadratic repair breaks first is the clock, and the lane's own
   // timeout is what catches that. Each stray byte is said once, within the
   // budget.
@@ -995,7 +1061,7 @@ std::string faults(unsigned n) {
 void every_deleted_leaf_is_covered(unsigned n) {
   const std::string text = faults(n);
   cursiv::Cst cst;
-  cursiv::lr_parser<g::kTable>.parse(text, cst, nullptr, g::kDrivePtr);
+  cursiv::lr_parser<g::kTable>.parse(text, cst, nullptr, &g::kDrive);
   unsigned deleted = 0;
   unsigned uncovered = 0;
   for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
@@ -1044,7 +1110,7 @@ cursiv::LrParseStats parse(const std::string& text, bool& accepted,
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   accepted =
-      cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr);
+      cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive);
   repairs = cst.diagnostics().size();
   return stats;
 }
@@ -1053,7 +1119,7 @@ cursiv::LrParseStats parse_nl(const std::string& text, bool& accepted) {
   cursiv::Cst cst;
   cursiv::LrParseStats stats;
   accepted =
-      cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, g::kDrivePtr) &&
+      cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive) &&
       cst.diagnostics().empty();
   return stats;
 }
@@ -1222,7 +1288,7 @@ void a_repair_never_cuts_a_code_point() {
   for (const std::string_view text :
        {"entit\xc3\xa9 Foo {}", "entity\xc3\xa9 Foo {}", "ent\xe2\x82\xac" "ty Foo {}",
         "entity Foo\xf0\x9f\x98\x80 {}", "entit\xc3\xa9\xc3\xa9 Foo {}"}) {
-    const cursiv::ParseResult r = parser->parse(std::string(text));
+    const cursiv::ParseResult r = parser->parse(text);
     CHECK(!r.diagnostics.empty());
     for (const auto& d : r.diagnostics) {
       CHECK(on_a_boundary(text, d.begin));
@@ -1248,6 +1314,7 @@ int main() {
   movedStatus |= case_lrrepairtables::run();
   movedStatus |= case_lrtypoutf8::run();
   a_stop_at_recovery_discards_the_partial_tree();
+  phases_and_generators_name_what_they_stand_for();
   insertion_allowance_is_part_of_the_future();
   unread_bytes_take_one_insertion();
   merged_path_keeps_its_source_rank();
@@ -1304,6 +1371,17 @@ int main() {
     nest += "x";
     for (unsigned k = 0; k < 16; ++k) nest += " else e" + std::to_string(k);
     CHECK(writes_through<gd::kTable>(gd::kDrive, nest, "dangling") != 0);
+  }
+  // The end of the input under a level whose indent a repair dropped, with no
+  // last newline: the drive's dedents close the levels under the dropped
+  // ones, and a dropped level alone owes none.
+  {
+    namespace gb = ::tindent::body::generated::G;
+    for (const std::string_view text :
+         {"a:\n  b\n    c\n    d\n    e\n    f",
+          "a:\n  b:\n    c\n      d\n      e\n      f\n      g",
+          "a\n  b\n  c\n  d\n  e"})
+      repairs_through<gb::kTable>(gb::kDrive, text);
   }
   // A line break both trivia and token: the interpreted writer decides the
   // position of two candidates as the drive does, through `pick`.
@@ -1362,11 +1440,12 @@ int main() {
   }
   // A parse's budget grows with the document up to one ceiling.
   {
-    const cursiv::LrSearch small(1000, cursiv::RepairBudget{});
+    const std::vector<cursiv::IndentLevel> levels;
+    const cursiv::LrSearch small(1000, cursiv::RepairBudget{}, levels);
     CHECK(small.budget ==
           cursiv::kRepairFloor + 1000 * cursiv::kRepairPerByte);
     const cursiv::LrSearch large(cursiv::TextOffset{1} << 20,
-                                 cursiv::RepairBudget{});
+                                 cursiv::RepairBudget{}, levels);
     CHECK(large.budget == cursiv::kRepairPerParse);
   }
   // An indent dropped under a line that opened no suite: the line back at

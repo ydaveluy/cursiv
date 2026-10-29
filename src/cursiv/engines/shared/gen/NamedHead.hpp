@@ -27,7 +27,7 @@ class NamedHead {
   // A choice answers as the most its words answer, one by one.
   unsigned read(std::uint16_t root, unsigned t) const {
     const LexNode& e = _g.lex[root];
-    if (e.kind == LexKind::token) return read(e.b, t);
+    if (e.kind == LexKind::token) return read(lex_token_body(_g, e), t);
     if (e.kind == LexKind::alt) {
       unsigned most = 0;
       for (unsigned i = 0; i < e.b; ++i)
@@ -90,7 +90,10 @@ class NamedHead {
     const LexNode& f = _g.lex[y];
     if (e.kind != f.kind || e.min != f.min || e.max != f.max) return false;
     const auto same_set = [&](std::uint16_t p, std::uint16_t q) {
-      return _g.sets[p] == _g.sets[q] && decodes(p) == decodes(q);
+      return p == q ||
+             (_g.sets[p] == _g.sets[q] && decodes(p) == decodes(q) &&
+              (lex_set_scalars(_g, p) == lex_set_scalars(_g, q) ||
+               lex_set_cps(_g, p).ranges == lex_set_cps(_g, q).ranges));
     };
     switch (e.kind) {
       case LexKind::chars:

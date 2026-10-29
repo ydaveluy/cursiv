@@ -4,11 +4,9 @@
 // descent's stack.
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <utility>
 #include <vector>
 
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
@@ -16,7 +14,6 @@
 #include "cursiv/engines/ll/runtime/LlEpisodeSim.hpp"
 #include "cursiv/engines/ll/runtime/LlPlan.hpp"
 #include "cursiv/engines/ll/runtime/LlPredictionWork.hpp"
-#include "cursiv/engines/ll/runtime/LlThread.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/ll/table/LlTable.hpp"
 
@@ -80,141 +77,6 @@ inline LlReturnPool& ll_lent_pool() {
   return *lent;
 }
 
-// The rules that two ways out of one choice can call before a token is read:
-// a closure reaches them over two stacks, and the body of each is read again
-// unless the callers share it. A rule that can end unread is not shared: its
-// callers join only after it has left.
-template <const auto& T>
-inline const std::uint8_t* ll_shared_rules() {
-  static const std::vector<std::uint8_t> flags = [] {
-    const std::size_t words = (std::size_t{T.nrules} + 63u) / 64u;
-    std::vector<std::uint8_t> nullable(T.nrules, 0), shared(T.nrules, 0);
-    std::vector<std::uint64_t> region(std::size_t{T.nrules} * words, 0);
-    std::vector<std::uint32_t> seen(T.atn.nstates, 0), todo;
-    std::uint32_t round = 0;
-    const auto set = [&](std::uint64_t* bits, std::uint16_t rule) {
-      bits[rule >> 6] |= std::uint64_t{1} << (rule & 63u);
-    };
-    // The rules called from `from` before a token is read, into `bits`:
-    // whether the body of `rule` can end there.
-    const auto scan = [&](std::uint32_t from, std::uint16_t rule,
-                          std::uint64_t* bits) {
-      bool ends = false;
-      ++round;
-      todo.assign(1, from);
-      while (!todo.empty()) {
-        const std::uint32_t at = todo.back();
-        todo.pop_back();
-        if (seen[at] == round) continue;
-        seen[at] = round;
-        const LlAtnState& state = T.atn.state(at);
-        ends =
-            ends || (state.kind == LlAtnKind::ruleStop && state.rule == rule);
-        for (std::uint32_t i = 0; i < state.nedges; ++i) {
-          const LlAtnEdge& e = T.atn.edge(state.edge + i);
-          if (e.kind == LlEdgeKind::epsilon) {
-            todo.push_back(e.target);
-          } else if (e.kind == LlEdgeKind::rule) {
-            set(bits, e.label);
-            for (std::size_t w = 0; w < words; ++w)
-              bits[w] |= region[std::size_t{e.label} * words + w];
-            if (nullable[e.label] != 0) todo.push_back(e.follow);
-          }
-        }
-      }
-      return ends;
-    };
-    std::vector<std::uint64_t> bits(words);
-    for (bool grew = true; grew;) {
-      grew = false;
-      for (std::uint16_t rule = 0; rule < T.nrules; ++rule) {
-        std::ranges::fill(bits, 0);
-        const bool ends = scan(T.atn.ruleStart[rule], rule, bits.data());
-        if (ends && nullable[rule] == 0) {
-          nullable[rule] = 1;
-          grew = true;
-        }
-        for (std::size_t w = 0; w < words; ++w) {
-          std::uint64_t& kept = region[std::size_t{rule} * words + w];
-          if ((kept | bits[w]) != kept) {
-            kept |= bits[w];
-            grew = true;
-          }
-        }
-      }
-    }
-    std::vector<std::uint64_t> once(words), twice(words);
-    for (std::uint32_t at = 0; at < T.atn.nstates; ++at) {
-      const LlAtnState& state = T.atn.state(at);
-      if (state.nedges < 2) continue;
-      std::ranges::fill(once, 0);
-      std::ranges::fill(twice, 0);
-      for (std::uint32_t i = 0; i < state.nedges; ++i) {
-        const LlAtnEdge& e = T.atn.edge(state.edge + i);
-        std::ranges::fill(bits, 0);
-        if (e.kind == LlEdgeKind::epsilon) {
-          scan(e.target, state.rule, bits.data());
-        } else if (e.kind == LlEdgeKind::rule) {
-          set(bits.data(), e.label);
-          for (std::size_t w = 0; w < words; ++w)
-            bits[w] |= region[std::size_t{e.label} * words + w];
-          if (nullable[e.label] != 0) scan(e.follow, state.rule, bits.data());
-        }
-        for (std::size_t w = 0; w < words; ++w) {
-          twice[w] |= once[w] & bits[w];
-          once[w] |= bits[w];
-        }
-      }
-      for (std::uint16_t rule = 0; rule < T.nrules; ++rule)
-        if (((twice[rule >> 6] >> (rule & 63u)) & 1u) != 0 &&
-            nullable[rule] == 0)
-          shared[rule] = 1;
-    }
-    return shared;
-  }();
-  return flags.data();
-}
-
-// The repetitions that take another turn before they return to the caller
-// when both read the text: a token of the caller's, longer, does not override
-// a continuation of the body. Null where no repetition does.
-template <const auto& T>
-inline const std::uint8_t* ll_repeat_scopes() {
-  static const std::vector<std::uint8_t> flags = [] {
-    std::vector<std::uint8_t> out(T.ndecisions, 0);
-    LlReturnPool pool;
-    pool.read_returns_by_class(T.atn.returnClass);
-    LlEpisodeSim sim(T.atn, pool, false);
-    sim.share_calls(ll_shared_rules<T>());
-    std::vector<LlThread> seeded;
-    std::vector<std::pair<std::uint32_t, std::uint16_t>> visited;
-    for (std::uint16_t d = 0; d < T.ndecisions; ++d) {
-      const LlTable::Decision& dec = T.decisions[d];
-      if (!dec.repeat) continue;
-      sim.reset();
-      visited.clear();
-      sim.seed(dec.state, kLlCtxNone, seeded, &visited);
-      bool local = false, caller = false;
-      for (const auto& [at, root] : visited) {
-        if (root != 1) continue;
-        const auto& state = T.atn.state(at);
-        caller = caller ||
-                 (state.kind == LlAtnKind::ruleStop && state.rule == dec.rule);
-        for (std::uint32_t i = 0; i < state.nedges; ++i)
-          if (T.atn.edge(state.edge + i).kind == LlEdgeKind::atom) {
-            local = local || state.rule == dec.rule;
-            caller = caller || state.rule != dec.rule;
-          }
-      }
-      out[d] = !local || caller;
-    }
-    return out;
-  }();
-  static const bool any =
-      std::ranges::any_of(flags, [](std::uint8_t f) { return f != 0; });
-  return any ? flags.data() : nullptr;
-}
-
 // The sim of the parse's episodes, over the pool they read in.
 template <const auto& T>
 inline LlEpisodeSim& ll_episode_sim(bool tracked) {
@@ -222,8 +84,8 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
   auto& slot = tracked ? cache.tracked : cache.plain;
   if (!slot) {
     slot.emplace(T.atn, ll_lent_pool<T>(), tracked);
-    slot->rank_arms_over_lexes(ll_repeat_scopes<T>());
-    slot->share_calls(ll_shared_rules<T>());
+    slot->rank_arms_over_lexes(T.repeatScopes);
+    slot->share_calls(T.sharedRules);
   }
   slot->reset();
   return *slot;

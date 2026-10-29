@@ -7,6 +7,9 @@
 #include "cursiv/engines/shared/gen/FlagWarning.hpp"
 #include "cursiv/engines/shared/gen/NestedRunWarning.hpp"
 #include "cursiv/engines/shared/gen/SelfBoundedArm.hpp"
+#include "cursiv/engines/shared/gen/TwinBranch.hpp"
+#include "cursiv/engines/shared/gen/WarningFound.hpp"
+#include "cursiv/engines/shared/gen/WordLitWarning.hpp"
 
 namespace cursiv {
 
@@ -24,9 +27,12 @@ void warn_each(std::string_view grammar, const std::vector<T>& found,
 }  // namespace
 
 void report_grammar_warnings(std::string_view grammar, GrammarImage& image) {
-  warn_each(grammar, dead_branches(image), dead_branch_text);
-  warn_each(grammar, flag_warnings(image), flag_warning_text);
-  warn_each(grammar, nested_run_warnings(image), nested_run_warning_text);
+  WarningFound found(image);
+  warn_each(grammar, dead_branches(found), dead_branch_text);
+  warn_each(grammar, twin_branches(found), twin_branch_text);
+  warn_each(grammar, flag_warnings(found), flag_warning_text);
+  warn_each(grammar, nested_run_warnings(found), nested_run_warning_text);
+  warn_each(grammar, word_lit_warnings(found), word_lit_warning_text);
 }
 
 bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image) {

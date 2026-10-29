@@ -31,15 +31,14 @@ struct Base : ::cursiv::GrammarSpec {
   struct Doc
       : rule<create<ast::Doc>(many(append<&ast::Doc::items>(ref<ID>)))> {};
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"+">))> {};
+  struct Sum : infix<Primary, ast::Bin, (left(lit<"+">))> {};
   struct Region
       : rule<create<ast::Wrap>(
             tight(lit<"["> + assign<&ast::Wrap::value>(ref<Sum>) + lit<"]">))> {
   };
   struct Root : rule<ref<Doc> | ref<Region>> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Lr : Base {};
 struct Ll : Base {};

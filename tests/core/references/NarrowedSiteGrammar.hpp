@@ -35,7 +35,7 @@ struct NarrowedSite : cursiv::GrammarSpec {
   struct Root : rule<create<Doc> +
                      some(append<&Doc::items>(ref<K1> | ref<K2> | ref<U>))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tns

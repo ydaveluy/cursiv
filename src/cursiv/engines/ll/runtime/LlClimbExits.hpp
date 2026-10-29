@@ -1,78 +1,64 @@
 // Where a climb may end, at its exact call site: two calls made by the same
-// rule need not have the same followers. Contexts intern the actual descent,
-// so their continuations are computed once and retained across its tokens.
+// rule need not have the same followers. Each frame the descent stands in
+// names what its rule reads once the call returns, and whether that may be
+// nothing: the frames are read from the nearest down to the first that must
+// read something, so a deep descent costs only the frames that may be empty.
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
 #include "cursiv/engines/ll/runtime/ll_section.hpp"
-#include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/ll/table/LlTable.hpp"
 
 namespace cursiv {
 
-template <const auto& T>
-struct LlClimbExits {
-  struct Row {
-    // The closure outran its budget: no token is refused.
-    bool any;
-    LlMask<T.termWords> set;
-  };
-  LlSimulation sim{T.atn, 8192};
-  std::unordered_map<std::uint32_t, Row> rows;
-
-  const Row& row(const LlContext& c) {
-    // Most continuations read a delimiter immediately. Building a whole
-    // descent for that query is quadratic on a deeply nested document.
-    for (std::size_t frames = 1;; frames *= 2) {
-      const auto life = sim.contexts().life();
-      sim.resume();
-      if (sim.contexts().life() != life) rows.clear();
-      const bool whole = frames >= c.stack.size();
-      sim.truncated(!whole);
-      std::uint32_t ctx = kLlCtxNone;
-      if (whole && c.document) {
-        const LlAtnState& document = T.atn.state(T.atnStart);
-        ctx = sim.push_return(ctx, T.atn.edge(document.edge).follow);
-      }
-      for (std::size_t i = whole ? 0 : c.stack.size() - frames;
-           i < c.stack.size(); ++i)
-        ctx = sim.push_return(ctx, c.stack[i]);
-      if (const auto at = rows.find(ctx); at != rows.end()) return at->second;
-      Row answer{};
-      if (ctx == kLlCtxNone) {
-        answer.any = true;
-      } else {
-        const std::uint32_t ret = sim.contexts().ret(ctx, 0);
-        const std::uint32_t parent = sim.contexts().parent(ctx, 0);
-        sim.seed(ret, parent);
-        sim.possible_terms([&](std::uint16_t term) { answer.set.set(term); });
-        answer.any = sim.capped();
-        if (!whole && !answer.any && sim.unbound()) continue;
-      }
-      return rows.emplace(ctx, answer).first->second;
-    }
+// Each row the climb's end may return through, the nearest frame first, until
+// `read` answers true or a frame must read something. True where `read` did,
+// or where the frames ran out with no caller known: any token may follow.
+template <const auto& T, class Read>
+inline bool ll_climb_rows(const LlContext& c, Read&& read) {
+  static_assert(T.climbExitAt != nullptr);
+  // The document reads its end once the entry returns.
+  constexpr std::uint32_t document =
+      T.atn.edge(T.atn.state(T.atnStart).edge).follow;
+  for (std::size_t i = c.stack.size() + 1; i-- > 0;) {
+    if (i == 0 && !c.document) return true;
+    const std::uint32_t at = T.climbExitAt[i != 0 ? c.stack[i - 1] : document];
+    if (read(LlTermRow{T.climbExits + (at >> 1), T.termWords})) return true;
+    if ((at & 1u) == 0) return false;
   }
-};
+  return false;
+}
+
+// Whether another caller's longer follower covers this caller's closer: the
+// token in hand is read again under every follower the frames admit.
+template <const auto& T>
+CURSIV_NOINLINE inline bool ll_climb_reads_on(const LlContext& c) {
+  LlMask<T.termWords> viable;
+  ll_climb_rows<T>(c, [&](LlTermRow row) {
+    for (std::uint32_t k = 0; k < row.words; ++k)
+      for (std::uint64_t w = row.w[k]; w != 0; w &= w - 1)
+        viable.set(static_cast<std::uint16_t>(k * 64 + std::countr_zero(w)));
+    return false;
+  });
+  thread_local std::vector<std::uint16_t> read;
+  read.clear();
+  return ll_match_in<T>(c.src, c.len, c.la.begin, viable, read) > c.la.begin;
+}
 
 // Whether this caller can continue at the climb's end.
 template <const auto& T>
 inline bool ll_climb_exits(const LlContext& c, std::uint16_t sym) {
   if (ll_ends<T>(c, sym)) return true;
-  static thread_local LlClimbExits<T> exits;
-  const auto& row = exits.row(c);
-  if (row.any || (sym < T.nterms && row.set.test(sym))) return true;
-  if (!c.laValid || sym != c.la.sym) return false;
-  // Another caller's longer follower may cover this caller's closer.
-  LlMask<T.termWords> viable = row.set;
-  thread_local std::vector<std::uint16_t> read;
-  read.clear();
-  return ll_match_in<T>(c.src, c.len, c.la.begin, viable, read) > c.la.begin;
+  if (ll_climb_rows<T>(c, [&](LlTermRow row) { return row.test(sym); }))
+    return true;
+  return c.laValid && sym == c.la.sym && ll_climb_reads_on<T>(c);
 }
 
 }  // namespace cursiv

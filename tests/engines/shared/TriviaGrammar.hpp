@@ -24,7 +24,7 @@ struct Tied : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
   using entry = Root;
-  using ignore = list<SPACE, BLANK>;
+  using ignored = list<SPACE, BLANK>;
 };
 
 struct Bracketed : cursiv::GrammarSpec {
@@ -39,7 +39,7 @@ struct Bracketed : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = NOTE;
   static constexpr auto indent_open = lit<"(">;
   static constexpr auto indent_close = lit<")">;
@@ -53,10 +53,21 @@ struct Ranked : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = NOTE;
 };
 
+// An ignored blank that refuses two tabs at its head: two tabs inside a blank
+// are trivia, and two that would open one are no token at all.
+struct Refusing : cursiv::GrammarSpec {
+  struct WS : terminal<!lit<"\t\t"> + some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
 
 }  // namespace ttrivia
 
@@ -89,7 +100,7 @@ struct Spelled : cursiv::GrammarSpec {
             lit<"<?"> + many(append<&ast::Doc::body>(ref<Stmt>)) + lit<"?>">)> {
   };
   using entry = Doc;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Named : Spelled {
@@ -123,14 +134,16 @@ struct Suite : Spelled {
 namespace ttrivia {
 struct Suite : cursiv::GrammarSpec {
   struct Entry
-      : rule<(lit<"tied:"> + skip(ignored<Tied::SPACE, Tied::BLANK>, hide<>,
+      : rule<(lit<"tied:"> + skip(ignore<Tied::SPACE, Tied::BLANK>, hide<>,
                                   ref<Tied::Root> + eof)) |
-             (lit<"ranked:"> + skip(ignored<Ranked::WS>, hide<Ranked::NOTE>,
+             (lit<"ranked:"> + skip(ignore<Ranked::WS>, hide<Ranked::NOTE>,
                                     ref<Ranked::Root> + eof)) |
-             (lit<"bracketed:"> + skip(ignored<Bracketed::WS>,
+             (lit<"bracketed:"> + skip(ignore<Bracketed::WS>,
                                        hide<Bracketed::NOTE>,
                                        ref<Bracketed::Root> + eof)) |
-             (lit<"implied:"> + skip(ignored<timpliedtag::Spelled::WS>, hide<>,
+             (lit<"refusing:"> + skip(ignore<Refusing::WS>, hide<>,
+                                      ref<Refusing::Root> + eof)) |
+             (lit<"implied:"> + skip(ignore<timpliedtag::Spelled::WS>, hide<>,
                                      ref<timpliedtag::Suite::Root> + eof))> {};
   using entry = Entry;
   static constexpr auto indent_open = lit<"(">;
@@ -141,7 +154,7 @@ struct Ll : Suite {};
 struct Lr : Suite {
   struct Entry
       : rule<ref<Suite::Entry> |
-             skip(ignored<tbracketcaret::G::WS, tbracketcaret::G::NL>, hide<>,
+             skip(ignore<tbracketcaret::G::WS, tbracketcaret::G::NL>, hide<>,
                   lit<"bracket:"> + ref<tbracketcaret::G::Root> + eof)> {};
   using entry = Entry;
   using indent_newline = tbracketcaret::G::NEWLINE;

@@ -18,7 +18,7 @@ struct Words : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct NAME : terminal<cr<"a-zA-Z_"> + many(w)> {};
   struct DIGITS : terminal<some(d)> {};
-  struct INT : terminal<some(d), std::int64_t> {};
+  struct INT : terminal<as<std::int64_t>(some(d))> {};
 };
 }  // namespace tdoor
 
@@ -35,7 +35,6 @@ inline constexpr auto cmp_of = [](std::string_view t) {
   if (t == "isless") return Cmp::less;
   return Cmp::leq;
 };
-using CmpConv = cursiv::text_conv<cmp_of>;
 
 namespace ast {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};
@@ -50,18 +49,17 @@ struct Name : cursiv::Extends<Expr> {
 }  // namespace ast
 
 struct G : tdoor::Words {
-  struct CmpOp : rule<(kw<"is"> + kw<"less"> + option(kw<"or"> + kw<"equal">)) |
-                          kw<"is">,
-                      CmpConv> {};
+  struct CmpOp : rule<as<cmp_of>(
+                     (kw<"is"> + kw<"less"> + option(kw<"or"> + kw<"equal">)) |
+                     kw<"is">)> {};
   // One operator, two spellings, one constant: the text is never read.
-  struct NotEq
-      : rule<(kw<"is"> + kw<"not">) | lit<"!=">, cursiv::value<Cmp::is_not>> {};
-  struct AndOp : rule<kw<"and">, cursiv::text_conv<[] { return Cmp::both; }>> {
-  };
+  struct NotEq : rule<as<Cmp::is_not>((kw<"is"> + kw<"not">) | lit<"!=">)> {};
+  struct AndOp : rule<as<[] { return Cmp::both; }>(kw<"and">)> {};
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {
   };
-  struct Expr : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                      (left(ref<CmpOp> | ref<NotEq>) >> left(ref<AndOp>))> {};
+  struct Expr : infix<Primary, ast::Bin,
+                      levels(left(ref<CmpOp> | ref<NotEq>), left(ref<AndOp>))> {
+  };
 };
 
 }  // namespace tinfix
@@ -92,8 +90,7 @@ struct Model : cursiv::Extends<cursiv::AstNode> {
 struct G : tdoor::Words {
   struct Neg : rule<option(lit<"-">) + ref<DIGITS>> {};
   struct Ver : rule<ref<DIGITS> + lit<"."> + ref<DIGITS>> {};
-  struct PairR : rule<ref<DIGITS> + lit<":"> + ref<DIGITS>,
-                      cursiv::parts_conv<pair_parts>> {};
+  struct PairR : rule<as<pair_parts>(ref<DIGITS> + lit<":"> + ref<DIGITS>)> {};
   struct Decl
       : rule<create<ast::Decl>(
             kw<"let"> + assign<&ast::Decl::name>(ref<ID>) + lit<"="> +
@@ -155,8 +152,8 @@ struct G : tdoor::Words {
                       lit<")">) |
                   nest<ast::Member, &ast::Member::receiver>(
                       lit<"."> + assign<&ast::Member::member>(ref<ID>)))> {};
-  struct Sum : infix<Postfix, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"*">) >> left(lit<"+">))> {};
+  struct Sum
+      : infix<Postfix, ast::Bin, levels(left(lit<"*">), left(lit<"+">))> {};
   struct Expr : rule<ref<Sum>> {};
   struct StmtR : rule<assign<&ast::Stmt::expr>(ref<Expr>) + lit<";">> {};
   struct Model
@@ -234,7 +231,7 @@ struct G : tdoor::Words {
                                      assign<&ast::S::z>(ref<ID>) +
                                      assign<&ast::S::w>(ref<ID>))> {};
   using entry = SRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace tnamedconf
@@ -265,8 +262,8 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct G : tdoor::Words {
   struct Primary
       : rule<create<ast::Num>(assign<&ast::Num::text>(ref<DIGITS>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"*">) >> left(lit<"+">))> {};
+  struct Sum
+      : infix<Primary, ast::Bin, levels(left(lit<"*">), left(lit<"+">))> {};
 
   // The island reaches a rule, so the second reading is live here.
   struct Dotted : rule<ref<NAME> + many(lit<"."> + ref<NAME>)> {};
@@ -277,7 +274,7 @@ struct G : tdoor::Words {
   struct Root
       : rule<create<ast::Doc>(some(append<&ast::Doc::items>(ref<Line>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The island adopts the node its rule built and hands it up through `Line`,
@@ -295,7 +292,7 @@ struct G : tdoor::Words {
   struct Root
       : rule<create<ast::Doc>(some(append<&ast::Doc::items>(ref<Line>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace wri
@@ -338,8 +335,7 @@ struct Stmts : tdoor::Words {
   struct ParenExpr : rule<lit<"("> + ref<Expr> + lit<")">> {};
   struct Term : rule<ref<Identifier> | ref<IntegerLiteral> | ref<ParenExpr>> {};
   static constexpr auto OpAdd = lit<"+">;
-  struct Sum : infix<Term, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     left(OpAdd)> {};
+  struct Sum : infix<Term, ast::Bin, left(OpAdd)> {};
   struct Test : rule<ref<Sum> +
                      option(nest<ast::Bin, &ast::Bin::left>(
                          assign<&ast::Bin::op>(lit<"<">) +
@@ -374,8 +370,7 @@ struct G : tdoor::Words {
   struct Type_;
   struct Primary : rule<create<ast::Named>(assign<&ast::Named::name>(ref<ID>)) |
                         (lit<"("> + ref<Type_> + lit<")">)> {};
-  struct BinT : infix<Primary, &ast::Bin::left, &ast::Bin::op,
-                      &ast::Bin::right, left(lit<"|">)> {};
+  struct BinT : infix<Primary, ast::Bin, left(lit<"|">)> {};
   struct Type_ : rule<ref<BinT>> {};
   struct Root : rule<create<ast::Decl>(kw<"let"> + lit<":"> +
                                        assign<&ast::Decl::type>(ref<Type_>))> {};
@@ -469,7 +464,7 @@ struct G : Words {
                      (kw<"rep"> + ref<ttwin::RepBase::Root>) |
                      (kw<"sh"> + ref<ttwin::SharedBase::Root>)> {};
   using entry = Case;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT>;
 };
 }  // namespace tdoor

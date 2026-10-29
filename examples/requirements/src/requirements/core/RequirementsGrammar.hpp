@@ -10,7 +10,6 @@ namespace req {
 inline constexpr auto unquote = [](std::string_view t) {
   return t.substr(1, t.size() - 2);
 };
-using Unquoted = cursiv::text_conv<unquote>;
 
 struct Rules : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -22,70 +21,68 @@ struct Rules : cursiv::GrammarSpec {
 
   // terminal STRING:
   // ('"' (('\\' .) | (!'"' .))* '"') | ("'" (('\\' .) | (!"'" .))* "'");
-  struct STRING
-      : terminal<(lit<"\""> + many((lit<"\\"> + any) | cr<R"(^"\\\r\n)">) +
-                  lit<"\"">) |
-                     (lit<"'"> + many((lit<"\\"> + any) | cr<R"(^'\\\r\n)">) +
-                      lit<"'">),
-                 Unquoted> {};
+  struct STRING : terminal<as<unquote>(
+                      (lit<"\""> + many((lit<"\\"> + any) | cr<R"(^"\\\r\n)">)
+                       + lit<"\"">)
+                      | (lit<"'"> + many((lit<"\\"> + any) | cr<R"(^'\\\r\n)">)
+                         + lit<"'">))> {};
 
   // Contact returns Contact: 'contact'i ':' userName=STRING;
-  struct ContactRule : rule<ikw<"contact"> + lit<":"> +
-                            assign<&ast::Contact::userName>(ref<STRING>)> {};
+  struct Contact : rule<ikw<"contact"> + lit<":">
+                        + assign<&ast::Contact::userName>(ref<STRING>)> {};
 
   // Environment returns Environment:
   // 'environment'i name=ID ':' description=STRING;
-  struct EnvironmentRule
-      : rule<ikw<"environment"> + assign<&ast::Environment::name>(ref<ID>) +
-             lit<":"> + assign<&ast::Environment::description>(ref<STRING>)> {};
+  struct Environment
+      : rule<ikw<"environment"> + assign<&ast::Environment::name>(ref<ID>)
+             + lit<":"> + assign<&ast::Environment::description>(ref<STRING>)> {
+  };
 
   // Requirement returns Requirement:
   // 'req'i name=ID text=STRING
   // ('applicable'i 'for'i environments+=ID (',' environments+=ID)*)?;
-  struct RequirementRule
-      : rule<ikw<"req"> + assign<&ast::Requirement::name>(ref<ID>) +
-             assign<&ast::Requirement::text>(ref<STRING>) +
-             option(ikw<"applicable"> + ikw<"for"> +
-                    some(append<&ast::Requirement::environments>(ref<ID>),
-                         lit<",">))> {};
+  struct Requirement
+      : rule<ikw<"req"> + assign<&ast::Requirement::name>(ref<ID>)
+             + assign<&ast::Requirement::text>(ref<STRING>)
+             + option(ikw<"applicable"> + ikw<"for">
+                      + some(append<&ast::Requirement::environments>(ref<ID>),
+                             lit<",">))> {};
 
   // RequirementModel returns RequirementModel:
   // contact=Contact? environments+=Environment* requirements+=Requirement+;
-  struct RequirementModelRule
-      : rule<option(assign<&ast::RequirementModel::contact>(ref<ContactRule>)) +
-             many(append<&ast::RequirementModel::environments>(
-                 ref<EnvironmentRule>)) +
-             some(append<&ast::RequirementModel::requirements>(
-                 ref<RequirementRule>))> {};
+  struct RequirementModel
+      : rule<option(assign<&ast::RequirementModel::contact>(ref<Contact>))
+             + many(
+                 append<&ast::RequirementModel::environments>(ref<Environment>))
+             + some(append<&ast::RequirementModel::requirements>(
+                 ref<Requirement>))> {};
 
   // Test returns Test:
   // 'tst'i name=ID ('testfile'i '=' testFile=STRING)?
   // 'tests'i requirements+=ID (',' requirements+=ID)*
   // ('applicable'i 'for'i environments+=ID (',' environments+=ID)*)?;
-  struct TestRule
-      : rule<ikw<"tst"> + assign<&ast::Test::name>(ref<ID>) +
-             option(ikw<"testfile"> + lit<"="> +
-                    assign<&ast::Test::testFile>(ref<STRING>)) +
-             ikw<"tests"> +
-             some(append<&ast::Test::requirements>(ref<ID>), lit<",">) +
-             option(
-                 ikw<"applicable"> + ikw<"for"> +
-                 some(append<&ast::Test::environments>(ref<ID>), lit<",">))> {};
+  struct Test : rule<ikw<"tst"> + assign<&ast::Test::name>(ref<ID>)
+                     + option(ikw<"testfile"> + lit<"=">
+                              + assign<&ast::Test::testFile>(ref<STRING>))
+                     + ikw<"tests">
+                     + some(append<&ast::Test::requirements>(ref<ID>), lit<",">)
+                     + option(ikw<"applicable"> + ikw<"for">
+                              + some(append<&ast::Test::environments>(ref<ID>),
+                                     lit<",">))> {};
 
   // TestModel returns TestModel: contact=Contact? tests+=Test+;
-  struct TestModelRule
-      : rule<option(assign<&ast::TestModel::contact>(ref<ContactRule>)) +
-             some(append<&ast::TestModel::tests>(ref<TestRule>))> {};
+  struct TestModel : rule<option(assign<&ast::TestModel::contact>(ref<Contact>))
+                          + some(append<&ast::TestModel::tests>(ref<Test>))> {};
 
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<ML_COMMENT, SL_COMMENT>;
 };
 
 struct Requirements : Rules {
-  using entry = RequirementModelRule;
+  using entry = RequirementModel;
 };
 struct Tests : Rules {
-  using entry = TestModelRule;
+  using entry = TestModel;
 };
 
 }  // namespace req

@@ -13,6 +13,7 @@
 #include "cursiv/core/grammar/Association.hpp"
 #include "cursiv/core/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/core/utils/Tag.hpp"
+#include "cursiv/engines/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/engines/shared/gen/LexWordClass.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
@@ -36,6 +37,9 @@ struct TermBuild {
   bool predicateOnly = false;
   Association assoc = Association::left;
   bool charset = false;  // written as a character range
+  // The words a body that is a choice of them reads, in the grammar's own
+  // text: what an editor offers for a terminal that spells none alone.
+  std::vector<std::string_view> words;
 
   constexpr bool operator==(const TermBuild&) const = default;
 };
@@ -58,6 +62,8 @@ struct LowerPools : LowerVerdicts {
   Vec<std::uint32_t> setScalars{};
   Vec<unicode::Range> scalarRanges{};
   Vec<unicode::Range> wordRanges{};
+  // The lead bytes of the scalars `wordRanges` holds.
+  ByteSet wordLeads{};
   Vec<LexNode> lex{};
   Vec<std::uint16_t> lexKid{};
   // The mode a condition's node lexes its token in, by its node.
@@ -74,6 +80,8 @@ struct LowerPools : LowerVerdicts {
   // The conditions a completion cannot step over, one finding per rule and
   // spelled run.
   std::vector<UnboundedCondition> unbounded{};
+  // The lexical checks that stopped short of a proof, a warning each.
+  std::vector<LexCheckIncomplete> lexIncomplete{};
   // Configuration `k` skips `cfgTrivia[cfgTriviaAt[k], cfgTriviaAt[k + 1])`;
   // zero is the grammar's.
   Vec<std::uint16_t> cfgTrivia{};

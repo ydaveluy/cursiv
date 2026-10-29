@@ -19,10 +19,9 @@ struct G : Base {
   struct NUM : terminal<some(d)> {};
   // The climb builds `Bin`, never `Other`: no reading fills the two operands.
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"+">))> {};
+  struct Sum : infix<Primary, ast::Bin, (left(lit<"+">))> {};
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

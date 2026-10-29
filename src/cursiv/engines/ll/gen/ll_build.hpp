@@ -3,9 +3,11 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "cursiv/engines/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLowered.hpp"
+#include "cursiv/engines/ll/table/LlAtnView.hpp"
 
 namespace cursiv {
 
@@ -22,5 +24,12 @@ struct LlBuildOptions {
 };
 
 LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt = {});
+
+// The rules that two ways out of one choice can call before a token is read:
+// a closure reaches them over two stacks, and the body of each is read again
+// unless the callers share it. A rule that can end unread is not shared: its
+// callers join only after it has left.
+std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
+                                          std::uint16_t nrules);
 
 }  // namespace cursiv

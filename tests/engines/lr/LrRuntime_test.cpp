@@ -543,7 +543,9 @@ void a_broken_document_is_repaired_into_a_tree() {
 bool offers(const std::vector<cursiv::NextFeature>& out,
             std::string_view spelled) {
   for (const cursiv::NextFeature& f : out)
-    if (service().getGrammar().terminalText(f.feature) == spelled) return true;
+    for (const std::string_view s :
+         service().getGrammar().terminalSpellings(f.feature))
+      if (s == spelled) return true;
   return false;
 }
 
@@ -592,6 +594,11 @@ int run() {
   CHECK(cactus.intern(4, root) == c);
   CHECK(cactus.intern(9, cursiv::kLrNoNode) == d);
   CHECK(cactus.depth(a) == 2 && cactus.parent(b) == root);
+  // Each new child steps past every sibling before it, and the search pays.
+  cursiv::LrCactus wide;
+  const std::uint32_t top = wide.intern(0, cursiv::kLrNoNode);
+  for (std::uint16_t s = 1; s <= 64; ++s) wide.intern(s, top);
+  CHECK(wide.pay(32) == 63 && wide.pay(1) == 0);
   return 0;
 }
 

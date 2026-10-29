@@ -53,7 +53,15 @@ class LrStack {
   CURSIV_ALWAYS_INLINE void push(LrFrame frame) {
     if (_n == _cap) [[unlikely]]
       grow();
-    _f[_n++] = frame;
+    // Field by field: a whole-frame copy can be lowered to wide integer
+    // stores that keep no type, and a store of no type may hit any field of
+    // the context, which every later read must then load again.
+    LrFrame& f = _f[_n++];
+    f.state = frame.state;
+    f.row = frame.row;
+    f.open = frame.open;
+    f.begin = frame.begin;
+    f.word = frame.word;
   }
   void truncate(std::uint32_t n) { assert(n <= _n); _n = n; }
 

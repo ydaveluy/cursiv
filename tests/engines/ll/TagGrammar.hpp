@@ -47,7 +47,7 @@ struct Base : cursiv::GrammarSpec {
                         ref<Number<1, "i">> | ref<Number<1L, "l">> |
                         ref<Number<1U, "u">> | ref<Number<1UL, "z">>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Lr : Base {};

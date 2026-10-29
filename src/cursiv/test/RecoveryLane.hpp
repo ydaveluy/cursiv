@@ -100,8 +100,8 @@ inline constexpr std::string_view kKind[] = {"ins", "del", "rep", "eof",
 inline std::string_view owed_name(const cursiv::Grammar& grammar,
                                   cursiv::ElementId e) {
   if (e == cursiv::kNoElement) return "?";
-  const std::string_view t = grammar.terminalText(e);
-  if (!t.empty()) return t;
+  const auto spellings = grammar.terminalSpellings(e);
+  if (spellings.size() == 1) return spellings.front();
   const std::string_view n = grammar.terminalName(e);
   return n.empty() ? "?" : n;
 }
@@ -214,6 +214,13 @@ struct Lane {
     // own is one whose file already stands beside it.
     const std::string path = reference_path();
     if (write) {
+      // An engine's own file stands only while its repairs differ: once they
+      // read like the shared file again, the copy goes.
+      if (path != shared_reference_path() &&
+          cursiv::test::read_file(shared_reference_path()) == text) {
+        std::filesystem::remove(path);
+        return;
+      }
       std::FILE* const f = std::fopen(path.c_str(), "w");
       if (f == nullptr) {
         std::printf("cannot write %s\n", path.c_str());
@@ -222,12 +229,6 @@ struct Lane {
       }
       std::fwrite(text.data(), 1, text.size(), f);
       std::fclose(f);
-      // The second copy the shared file's own rule forbids: `reference_path`
-      // prefers an own file whenever it exists, so a stale one left here keeps
-      // the lane red against a reading no engine still has.
-      if (path == shared_reference_path() &&
-          own_reference_path() != shared_reference_path())
-        std::filesystem::remove(own_reference_path());
       return;
     }
     const std::string want = cursiv::test::read_file(path);

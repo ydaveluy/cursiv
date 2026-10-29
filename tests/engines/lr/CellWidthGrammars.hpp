@@ -151,7 +151,7 @@ struct G : cursiv::GrammarSpec {
                          (assign<&Doc::outer>(ref<A2>) +
                           assign<&Doc::inner>(ref<Item>) + lit<"endC">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tflood
 
@@ -247,7 +247,7 @@ struct G : cursiv::GrammarSpec {
                               (ref<T38> + many(lit<"a">) + lit<"end38">) |
                               (ref<T39> + many(lit<"a">) + lit<"end39">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace twideun
@@ -326,7 +326,7 @@ struct G : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>((ref<X0> + ref<Child> + lit<"b">) |
                                  (ref<X1> + ref<Child> + lit<"c">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 }  // namespace tnested
 

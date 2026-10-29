@@ -29,7 +29,7 @@ struct Base : cursiv::GrammarSpec {
                           (assign<&Item::name>(ref<NAME>) + lit<".">))> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Part>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 struct Ll : Base {};
 struct Lr : Base {};

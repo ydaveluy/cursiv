@@ -69,7 +69,7 @@ struct Holder : cursiv::Extends<cursiv::AstNode> {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
-  struct NUM : terminal<some(d), std::int64_t> {};
+  struct NUM : terminal<as<std::int64_t>(some(d))> {};
   struct WORD : terminal<some(cr<"A-Z">)> {};
   struct VarBase : rule<lit<"$"> + assign<&Var::name>(ref<ID>)> {};
   struct NumRule : rule<assign<&Num::value>(ref<NUM>)> {};
@@ -84,7 +84,7 @@ struct AtomChain : Base {
   struct VarChain : rule<ref<VarBase> + many(step)> {};
   struct Root : rule<create<Block>(
                     many(append<&Block::atoms>(ref<WORD> | ref<VarChain>)))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct FlankedItems : Base {
@@ -97,14 +97,14 @@ struct FlankedItems : Base {
                  lit<","> + many(ref<NL>)) +
             lit<"]">)> {};
   using entry = List;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct SharedPrefix : Base {
   struct Unary
       : rule<create<Neg>(lit<"-"> + assign<&Neg::operand>(ref<Unary>)) |
              (ref<Primary> + many(step))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct PayloadCreate : Base {
@@ -115,7 +115,7 @@ struct PayloadCreate : Base {
             many(lit<";"> + append<&Holder::kids>(
                                 create<Var>(assign<&Var::name>(ref<ID>)) +
                                 option(step))))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct FlagGroup : Base {
@@ -123,7 +123,7 @@ struct FlagGroup : Base {
                     option(flag<&Holder::flag>(lit<"!">) +
                            assign<&Holder::value>(ref<VarBase>)) +
                     many(lit<";"> + append<&Holder::kids>(ref<VarBase>)))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct OptionalNest : Base {
@@ -139,9 +139,8 @@ struct OptionalNest : Base {
       : rule<ref<Castable> +
              option(nest<Inst, &Inst::operand>(
                  kw<"instance"> + kw<"of"> + assign<&Inst::type>(ref<ID>)))> {};
-  struct Sum : infix<Instance, &Bin::left, &Bin::op, &Bin::right,
-                     (left(lit<"+"> | lit<"-">))> {};
-  using ignore = WS;
+  struct Sum : infix<Instance, Bin, (left(lit<"+"> | lit<"-">))> {};
+  using ignored = WS;
 };
 
 struct PassThrough : Base {
@@ -149,8 +148,7 @@ struct PassThrough : Base {
   struct Ident : rule<assign<&Var::name>(ref<ID>)> {};
   struct ParenExpr : rule<lit<"("> + ref<Expression> + lit<")">> {};
   struct Term : rule<ref<Ident> | ref<NumRule> | ref<ParenExpr>> {};
-  struct Sum : infix<Term, &Bin::left, &Bin::op, &Bin::right,
-                     (left(lit<"+"> | lit<"-">))> {};
+  struct Sum : infix<Term, Bin, (left(lit<"+"> | lit<"-">))> {};
   struct Test
       : rule<ref<Sum> +
              option(nest<Bin, &Bin::left>(assign<&Bin::op>(lit<"<">) +
@@ -159,13 +157,12 @@ struct PassThrough : Base {
       : rule<create<Assign>(assign<&Assign::target>(ref<Ident>) + lit<"="> +
                             assign<&Assign::value>(ref<Expression>)) |
              ref<Test>> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Relay : Base {
   struct Operand;
-  struct Sum
-      : infix<Operand, &Bin::left, &Bin::op, &Bin::right, left(lit<"+">)> {};
+  struct Sum : infix<Operand, Bin, left(lit<"+">)> {};
   struct Operand
       : rule<create<Neg>(lit<"!"> + assign<&Neg::operand>(ref<Operand>)) |
              (lit<"("> + ref<Sum> + lit<")">) |
@@ -173,14 +170,27 @@ struct Relay : Base {
                           assign<&Pair::second>(ref<Sum>) + lit<"]">) |
              ref<VarBase>> {};
   struct Root : rule<ref<Sum>> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct UnassignedTerminal : Base {
   struct NewTarget : rule<create<Target>(kw<"new"> + lit<"."> + ref<ID>)> {};
   struct Named : rule<create<Var>(kw<"fn"> + assign<&Var::name>(ref<ID>))> {};
   struct Root : rule<ref<NewTarget> | ref<Named> | ref<VarBase>> {};
-  using ignore = WS;
+  using ignored = WS;
+};
+
+// A rule that passes on the node of the rule it calls, behind a condition no
+// repair can make hold: a repair gives the call up, and the rule has no node
+// to pass on.
+struct GivenUp : Base {
+  struct Named : rule<create<Var>(lit<"n"> + assign<&Var::name>(ref<ID>) +
+                                  &lit<"!">)> {};
+  struct Passed : rule<ref<Named> + option(lit<"?">)> {};
+  struct Root : rule<create<Holder>(lit<"x"> +
+                                    assign<&Holder::value>(ref<Passed>) +
+                                    option(lit<"!">) + lit<";">)> {};
+  using ignored = WS;
 };
 
 
@@ -192,9 +202,11 @@ struct Suite : Base {
                      (lit<"optionalnest:"> + ref<OptionalNest::Sum>) |
                      (lit<"passthrough:"> + ref<PassThrough::Expression>) |
                      (lit<"relay:"> + ref<Relay::Root>) |
-                     (lit<"unassignedterminal:"> + ref<UnassignedTerminal::Root>)> {};
+                     (lit<"unassignedterminal:"> + ref<UnassignedTerminal::Root>) |
+                     (lit<"givenup:"> + ref<GivenUp::Root>) |
+                     (lit<"passed:"> + ref<GivenUp::Passed>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 // The derivation model cannot yet keep an outer node around a create inside
 // a directive's payload. Its seven original fuzz lanes exclude PayloadCreate;
@@ -260,7 +272,7 @@ struct Base : cursiv::GrammarSpec {
                      (kw<"some"> + ref<Some>) | (kw<"assign"> + ref<Assigned>) |
                      (kw<"semi"> + ref<Semi>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 
@@ -269,7 +281,7 @@ struct Base : cursiv::GrammarSpec {
 namespace tmaterialise {
 struct Combined : Suite {
   struct Entry : rule<ref<Suite::Root> |
-                      (lit<"flanked:"> + skip(ignored<FlankedItems::WS>, hide<>,
+                      (lit<"flanked:"> + skip(ignore<FlankedItems::WS>, hide<>,
                           ref<FlankedItems::List> + eof)) |
                       (lit<"adopt:"> + ref<tnestadopt::Base::Root>)> {};
   using entry = Entry;

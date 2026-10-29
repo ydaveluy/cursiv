@@ -66,11 +66,11 @@ void one_tree(const char* what, const Twin& t, std::string_view text) {
 }
 
 bool clean(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(text));
+  const cursiv::ParseResult r = p.parse(text);
   return r.accepted && r.diagnostics.empty() && r.value != nullptr;
 }
 bool repaired(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse(std::string(text));
+  const cursiv::ParseResult r = p.parse(text);
   return r.accepted && !r.diagnostics.empty();
 }
 
@@ -131,7 +131,9 @@ void a_refused_guard_leaves_the_caret_its_reading() {
     std::vector<cursiv::NextFeature> out;
     p->nextFeaturesAt(r.cst(), 9 + from, 9 + to, out);
     for (const cursiv::NextFeature& f : out)
-      if (p->getGrammar().terminalText(f.feature) == literal) return true;
+      for (const std::string_view s :
+           p->getGrammar().terminalSpellings(f.feature))
+        if (s == literal) return true;
     return false;
   };
   CHECK(offers("a_", 1, 2, "_"));
@@ -173,12 +175,13 @@ void a_caret_over_a_split_cell_owes_every_arm() {
     const auto at = static_cast<cursiv::TextOffset>(doc.size() - (complete ? 2 : 0));
     p->nextFeaturesAt(r.cst(), at, at, out);
     bool a = false, b = false, c = false;
-    for (const cursiv::NextFeature& f : out) {
-      const std::string_view spelled = p->getGrammar().terminalText(f.feature);
-      a = a || spelled == "a";
-      b = b || spelled == "b";
-      c = c || spelled == "c";
-    }
+    for (const cursiv::NextFeature& f : out)
+      for (const std::string_view spelled :
+           p->getGrammar().terminalSpellings(f.feature)) {
+        a = a || spelled == "a";
+        b = b || spelled == "b";
+        c = c || spelled == "c";
+      }
     // `b` closes one arm and `c` the other: an answer holding only one of
     // them is the cell decided by the caret instead of by the text.
     CHECK(a && b && c);
@@ -199,21 +202,46 @@ void a_position_no_look_ahead_settles_is_split() {
   }
 }
 
-// The same position eight times over: the look-ahead runs out once in each
-// state that reads it, and the later visits split at once.
+// The same position item after item, each past the look-ahead: the look-ahead
+// runs out once on each, and the graph each opens gives the text back after
+// its item, so a graph holds as much however many items follow.
 void a_position_given_up_on_is_not_read_again() {
-  std::string t = "split";
-  for (unsigned k = 0; k < 8; ++k) {
-    t += " x";
+  const auto read = [](unsigned items) {
+    std::string t = "split";
+    for (unsigned k = 0; k < items; ++k) {
+      t += " x";
+      for (unsigned i = 0; i < 40; ++i) t += " a";
+      t += k % 2 == 0 ? " b" : " c";
+    }
+    cursiv::Cst cst;
+    cursiv::LrParseStats stats;
+    CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
+        t, cst, &stats, &tedges::generated::G::kDrive));
+    CHECK(cst.diagnostics().empty());
+    CHECK(stats.lookStops <= items);
+    return stats;
+  };
+  CHECK(read(8).alternatives == read(16).alternatives);
+}
+
+// Items decided one token past their tie, after one item past the look-ahead:
+// an arm dies at every item, and still the graph gives the text back after the
+// long one, so it holds as much however many items follow.
+void short_items_after_a_long_one_leave_the_graph() {
+  const auto read = [](unsigned items) {
+    std::string t = "split x";
     for (unsigned i = 0; i < 40; ++i) t += " a";
-    t += k % 2 == 0 ? " b" : " c";
-  }
-  cursiv::Cst cst;
-  cursiv::LrParseStats stats;
-  CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
-      t, cst, &stats, tedges::generated::G::kDrivePtr));
-  CHECK(cst.diagnostics().empty());
-  CHECK(stats.lookStops <= 2);
+    t += " b";
+    for (unsigned k = 0; k < items; ++k) t += k % 2 == 0 ? " x c" : " x b";
+    cursiv::Cst cst;
+    cursiv::LrParseStats stats;
+    CHECK(cursiv::lr_parser<tedges::generated::G::kTable>.parse(
+        t, cst, &stats, &tedges::generated::G::kDrive));
+    CHECK(cst.diagnostics().empty());
+    CHECK(stats.splits == 1);
+    return stats.alternatives;
+  };
+  CHECK(read(8) == read(64));
 }
 
 // Forty alternatives, with a repetition between the arm's terminal and its
@@ -281,6 +309,7 @@ int run() {
   a_cell_no_look_ahead_settles_is_split();
   a_position_no_look_ahead_settles_is_split();
   a_position_given_up_on_is_not_read_again();
+  short_items_after_a_long_one_leave_the_graph();
   a_caret_over_a_split_cell_owes_every_arm();
   a_wide_cell_reads_as_far_as_a_narrow_one();
   a_cell_splits_as_wide_as_it_is();
@@ -579,8 +608,8 @@ void the_unmatched_text_ends_where_it_did() {
       cursiv::TextOffset want = p, got = p;
       const auto wend = unmatched_by_walks(text.data(), len, 0, p, want);
       cursiv::LexReadBudget budget(len - p);
-      const auto gend = cursiv::lr_unmatched_end<kTable>(text.data(), len, 0,
-                                                         p, got, budget);
+      const auto gend = cursiv::lr_unmatched_end<kTable>(text.data(), len, 0, p,
+                                                         got, budget, [] {});
       CHECK(gend == wend);
       CHECK(got == want);
     }
@@ -599,7 +628,7 @@ void unmatched_text_is_read_once() {
     cursiv::TextOffset reached = 0;
     cursiv::LexReadBudget budget(len);
     CHECK(cursiv::lr_unmatched_end<kTable>(text.data(), len, 0, 0, reached,
-                                           budget) == len);
+                                           budget, [] {}) == len);
     CHECK(reached == len);
   }
   static const auto parser = g::create_parser();

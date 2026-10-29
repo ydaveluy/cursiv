@@ -1,13 +1,81 @@
+#include <cstdint>
+#include <random>
+#include <set>
 #include <string>
 #include <string_view>
 
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
+#include "cursiv/engines/shared/runtime/PredicateState.hpp"
 #include "cursiv/test/Check.hpp"
-#include "engines/ll/LexicalPredicatesGrammar.hpp"
+#include "engines/ll/LexicalPredicatesAst.hpp"
 #include "lexicalpredicatesll/generated/Ll/Module.hpp"
 #include "lexicalpredicatesll/generated/Ll/Table.hpp"
 
 namespace {
+
+struct CountedCursor {
+  std::uint32_t at = 0;
+  static inline std::uint64_t copies = 0;
+  CountedCursor() = default;
+  explicit CountedCursor(std::uint32_t position) : at(position) {}
+  CountedCursor(const CountedCursor& other) : at(other.at) { ++copies; }
+  CountedCursor(CountedCursor&& other) noexcept : at(other.at) { ++copies; }
+  CountedCursor& operator=(const CountedCursor& other) {
+    at = other.at;
+    ++copies;
+    return *this;
+  }
+  CountedCursor& operator=(CountedCursor&& other) noexcept {
+    at = other.at;
+    ++copies;
+    return *this;
+  }
+  auto operator<=>(const CountedCursor&) const = default;
+};
+
+void interleaved_readings_merge_with_linear_copy_work() {
+  constexpr unsigned count = 16384;
+  cursiv::PredicateStates<CountedCursor> even, odd;
+  for (unsigned i = 0; i < count; i += 2) {
+    even.add(CountedCursor{i});
+    odd.add(CountedCursor{i + 1});
+  }
+  CountedCursor::copies = 0;
+  even.unite(odd);
+  CHECK(CountedCursor::copies < std::uint64_t{12} * count);
+  CHECK(even.size() == count);
+  for (unsigned i = 0; i < count; ++i) CHECK(even.has(CountedCursor{i}));
+  even.unite(even);
+  CHECK(even.size() == count);
+
+  // The inline first cursor may occur anywhere in the sorted union.
+  std::mt19937 random(79);
+  for (unsigned trial = 0; trial < 500; ++trial) {
+    cursiv::PredicateStates<CountedCursor> left, right;
+    std::set<unsigned> expected;
+    const unsigned leftCount = random() % 80;
+    for (unsigned i = 0; i < leftCount; ++i) {
+      const auto value = static_cast<unsigned>(random() % 50);
+      left.add(CountedCursor{value});
+      expected.insert(value);
+    }
+    const unsigned rightCount = random() % 80;
+    for (unsigned i = 0; i < rightCount; ++i) {
+      const auto value = static_cast<unsigned>(random() % 50);
+      right.add(CountedCursor{value});
+      expected.insert(value);
+    }
+    const auto first = left.empty() ? 0u : left[0].at;
+    const bool hadFirst = !left.empty();
+    left.unite(right);
+    CHECK(left.size() == expected.size());
+    if (hadFirst) CHECK(left[0].at == first);
+    for (const auto value : expected) CHECK(left.has(CountedCursor{value}));
+    const auto rest = left.without(right);
+    for (const auto value : expected)
+      CHECK(rest.has(CountedCursor{value}) == !right.has(CountedCursor{value}));
+  }
+}
 
 bool clean(const cursiv::Parser& parser, std::string_view text) {
   const auto result = parser.parse(text);
@@ -174,6 +242,7 @@ void first_position() {
 }  // namespace
 
 int main() {
+  interleaved_readings_merge_with_linear_copy_work();
   for (const auto& parser :
        {tlexicalpredicates::generated::Ll::create_parser()}) {
     exercise(*parser);

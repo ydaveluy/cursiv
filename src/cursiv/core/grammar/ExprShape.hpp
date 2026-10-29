@@ -58,6 +58,12 @@ struct ExprShape<Doc<E, T>> {
 };
 template <class R>
 struct ExprShape<Ref<R>> : ExprAtom<Ref<R>> {};
+template <class C, class E>
+struct ExprShape<As<C, E>> {
+  using kids = TypeList<E>;
+  template <class K>
+  using rebind = As<C, K>;
+};
 template <class D>
 struct ExprShape<SuperT<D>> : ExprAtom<SuperT<D>> {};
 

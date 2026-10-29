@@ -7,25 +7,27 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "cursiv/engines/ll/gen/LlStampPlan.hpp"
+#include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
+#include "cursiv/engines/ll/gen/LlLexView.hpp"
 #include "cursiv/engines/shared/gen/CLiteral.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
 #include "cursiv/engines/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/engines/shared/gen/GapEmitter.hpp"
 #include "cursiv/engines/shared/gen/GapReach.hpp"
 #include "cursiv/engines/shared/gen/HeadMatcher.hpp"
+#include "cursiv/engines/shared/gen/LexFirstByte.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LexicalPredicateEmitter.hpp"
 #include "cursiv/engines/shared/gen/NamedHead.hpp"
 #include "cursiv/engines/shared/gen/PredicateEmitter.hpp"
 #include "cursiv/engines/shared/gen/SetPool.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
-#include "cursiv/engines/shared/runtime/LexMatch.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/CondReach.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
@@ -38,6 +40,7 @@ using Built = LlBuiltProgram;
 std::string u(std::uint64_t v) { return std::format("{}u", v); }
 
 struct Out : EmitOutput {
+  // The arrays left out, empty or not wanted: a reference to one is null.
   std::vector<std::string_view> emptyArrays;
 
   // One array, wrapped: a line per twelve entries keeps the generated file
@@ -62,6 +65,8 @@ struct Out : EmitOutput {
   void array(std::string_view type, std::string_view name, const V& v) {
     array(type, name, v, u);
   }
+
+  void omit(std::string_view name) { emptyArrays.push_back(name); }
 
   std::string_view ref(std::string_view name) const {
     return std::ranges::find(emptyArrays, name) == emptyArrays.end()
@@ -89,6 +94,84 @@ struct TermRows {
   }
 };
 
+// Per state, what a walk can still accept from it on, itself included: what
+// it and every state it leads to accept or relay.
+std::vector<DynSet> lex_live(const Built& a) {
+  std::vector<DynSet> live(a.dfaAccSet.data(), a.dfaAccSet.data() + a.ndfa);
+  std::vector<std::vector<std::uint32_t>> into(a.ndfa);
+  for (std::uint32_t s = 0; s < a.ndfa; ++s) {
+    if (!a.relays.empty())
+      for (auto k = a.dfaRelay[s]; k != kNoRelay; k = a.relays[k].next)
+        live[s].set(a.relays[k].term);
+    for (unsigned c = 0; c < a.ncls; ++c) {
+      const auto to = a.dfaNext[std::size_t{s} * a.ncls + c];
+      if (to != kDeadState && to != s &&
+          (into[to].empty() || into[to].back() != s))
+        into[to].push_back(s);
+    }
+  }
+  std::vector<std::uint32_t> todo(a.ndfa);
+  for (std::uint32_t s = 0; s < a.ndfa; ++s) todo[s] = s;
+  while (!todo.empty()) {
+    const std::uint32_t s = todo.back();
+    todo.pop_back();
+    for (const std::uint32_t from : into[s])
+      if (live[from].add(live[s])) todo.push_back(from);
+  }
+  return live;
+}
+
+// Per state of the graph, what its rule reads from there on before it ends,
+// and whether it may end reading nothing: at a state a call returns into, what
+// the caller reads once a climb it called is done. A condition is crossed as
+// if it held, as a prediction speculates over it.
+struct ClimbExits {
+  std::vector<DynSet> reads;
+  std::vector<std::uint8_t> ends;
+
+  explicit ClimbExits(const Built& a) : reads(a.nstates), ends(a.nstates, 0) {
+    const auto out = [&](std::uint32_t s) {
+      return std::span(a.edges.data() + a.states[s].edge, a.states[s].nedges);
+    };
+    // A state is read again whenever one it goes on into grows.
+    std::vector<std::vector<std::uint32_t>> into(a.nstates);
+    for (std::uint32_t s = 0; s < a.nstates; ++s)
+      for (const LlAtnEdge& e : out(s)) {
+        if (e.kind == LlEdgeKind::atom) continue;
+        into[e.target].push_back(s);
+        if (e.kind == LlEdgeKind::rule) into[e.follow].push_back(s);
+      }
+    std::vector<std::uint32_t> todo(a.nstates);
+    for (std::uint32_t s = 0; s < a.nstates; ++s) todo[s] = s;
+    while (!todo.empty()) {
+      const std::uint32_t s = todo.back();
+      todo.pop_back();
+      bool grew = false;
+      bool end = a.states[s].kind == LlAtnKind::ruleStop;
+      for (const LlAtnEdge& e : out(s)) {
+        if (e.kind == LlEdgeKind::atom) {
+          grew = grew || !reads[s].test(e.label);
+          reads[s].set(e.label);
+          continue;
+        }
+        grew = reads[s].add(reads[e.target]) || grew;
+        bool on = ends[e.target] != 0;
+        // A call reads what follows it too where its callee may read nothing.
+        if (e.kind == LlEdgeKind::rule && on) {
+          grew = reads[s].add(reads[e.follow]) || grew;
+          on = ends[e.follow] != 0;
+        }
+        end = end || on;
+      }
+      if (end && ends[s] == 0) {
+        ends[s] = 1;
+        grew = true;
+      }
+      if (grew) todo.insert(todo.end(), into[s].begin(), into[s].end());
+    }
+  }
+};
+
 bool reserves(const Built& a) {
   return a.dfaResSet.size() >= a.ndfa &&
          std::any_of(a.dfaResSet.data(), a.dfaResSet.data() + a.ndfa,
@@ -99,6 +182,47 @@ bool longer_modes(const Built& a) {
   return std::any_of(a.modeLonger.begin(), a.modeLonger.end(),
                      [](std::uint16_t m) { return m != kNoMode; });
 }
+
+// Whether the modes' joined trivia differs from their plain trivia: with no
+// `joins` terminal both are one array.
+bool joined_trivia_apart(const Built& a) {
+  return a.modeJoinedTrivia != a.modeTrivia;
+}
+
+// Per mode, the one-byte literal each first byte reads whole: rows of 256,
+// one per distinct row, and per mode where its row starts. Empty where no
+// mode reads one.
+struct ByteTerms {
+  std::vector<std::uint16_t> rows;
+  std::vector<std::uint32_t> at;
+
+  explicit ByteTerms(const Built& a) {
+    std::vector<unsigned> spelled;
+    for (unsigned t = 1; t < a.cfg.nterms; ++t)
+      if (lex_byte_spelled(LlLexView{a}, t)) spelled.push_back(t);
+    if (spelled.empty()) return;
+    std::map<std::vector<std::uint16_t>, std::uint32_t> seen;
+    bool any = false;
+    for (unsigned m = 0; m < a.nmodes; ++m) {
+      std::vector<std::uint16_t> row(256, kInvalidSymbol);
+      for (const unsigned t : spelled)
+        if (ll_byte_term(a, m, t)) {
+          row[static_cast<unsigned char>(
+              a.cfg.term_text(static_cast<std::uint16_t>(t))[0])] =
+              static_cast<std::uint16_t>(t);
+          any = true;
+        }
+      const auto [it, fresh] =
+          seen.try_emplace(row, static_cast<std::uint32_t>(rows.size()));
+      if (fresh) rows.insert(rows.end(), row.begin(), row.end());
+      at.push_back(it->second);
+    }
+    if (!any) {
+      rows.clear();
+      at.clear();
+    }
+  }
+};
 
 bool relay_reserves(const Built& a) {
   return a.dfaRelayResSet.size() >= a.ndfa &&
@@ -191,10 +315,34 @@ std::string staged_source(const Built& a) {
   return o.out;
 }
 
+// Per position, the operator step it reads in a climb with a step that groups
+// nothing (`LlTable::nodeStep`); empty where no climb has one. An operator of
+// several tokens names none.
+std::vector<std::uint32_t> node_steps(const Built& a) {
+  const auto& g = a.cfg;
+  std::vector<std::uint32_t> steps;
+  for (std::uint16_t k = 0; k < g.nclimbs; ++k) {
+    const auto ops = std::span(g.climbOps.data() + g.climbs[k].opBase,
+                               g.climbs[k].opCount);
+    if (std::ranges::none_of(ops, [](const LlClimbOp& op) {
+          return op.assoc == Association::non;
+        }))
+      continue;
+    steps.resize(a.nodeAfter.size());
+    for (const LlClimbOp& op : ops)
+      if (const std::uint16_t n = g.atomic_operator(op.body); n != kNoRow)
+        steps[n] = (std::uint32_t(k + 1u) << 16) |
+                   (std::uint32_t{op.prec} << 1) |
+                   (op.assoc == Association::non ? 1u : 0u);
+  }
+  return steps;
+}
+
 }  // namespace
 
-std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
-                          const std::string& ns) {
+std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
+  const Built& a = done.program();
+  const LlStampPlan& plan = done.plan();
   Out o;
   const auto& g = a.cfg;
   const GapEmitter gaps(g, "kSets", "kGapBoundary", "inline");
@@ -208,6 +356,14 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   const bool staged = std::ranges::any_of(
       g.decisions.v,
       [](const LlDecision& d) { return d.how == LlPredict::staged; });
+  const bool reserving = reserves(a);
+  const std::vector<std::uint64_t> skipSet = lex_skip_set(LlLexView{a});
+  const ByteTerms byteTerms(a);
+  const bool classes = g.scalarRanges.size() != 0;
+  // A boundary reads `kSetDecode` only where the word class has ranges or a
+  // set has scalars of its own.
+  const bool decoding = g.wordRanges.size() != 0 || classes;
+  const LexNamePool pool(g, a.relays);
   const auto tabled = [](const auto& bases, bool rides) {
     for (std::size_t i = 1; i < bases.size(); ++i)
       if (ll_fuse_tabled(bases[i] - bases[i - 1], rides)) return true;
@@ -225,6 +381,7 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   o.line("#include <utility>");
   o.line("");
   o.line("#include \"cursiv/engines/ll/table/LlTable.hpp\"");
+  o.line("#include \"cursiv/engines/shared/runtime/Scan.hpp\"");
   if (fuseTable) o.line("#include \"cursiv/engines/ll/table/LlFuse.hpp\"");
   o.line("#include \"cursiv/core/utils/Utf8.hpp\"");
   o.line("#include \"cursiv/core/utils/macros.hpp\"");
@@ -254,84 +411,48 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
         "inline ::std::uint16_t ll_staged_predict(const ::cursiv::LlContext&, "
         "::std::uint16_t);");
   o.line(lexical.declarations());
-  if (!a.relays.empty()) {
-    o.line(
-        "inline ::cursiv::TextOffset lexical_run(::std::uint16_t state, "
-        "[[maybe_unused]] const char* src,");
-    o.line(
-        "    [[maybe_unused]] ::cursiv::TextOffset len, "
-        "::cursiv::TextOffset at) {");
-    o.line("  switch (state) {");
-    // The cases are the states a relay runs through blind, and no other.
-    for (unsigned st = 0; st < a.ndfa; ++st) {
-      if (!lex_run_blind(a.dfaAccept[st] != 0,
-                         a.dfaBound[st] != kNoSet || a.lexChecks[st] != 0,
-                         a.dfaRelay[st] != kNoRelay))
-        continue;
-      ByteSet stay;
-      for (unsigned x = 0; x < 256; ++x)
-        if (a.dfaNext[std::size_t{st} * a.ncls + a.cls[x]] == st)
-          stay.add(static_cast<unsigned char>(x));
-      if (!stay.any()) continue;
-      o.fmt("    case {}u: {{\n", st);
-      std::string test;
-      unsigned ranges = 0;
-      for (unsigned lo = 0; lo < 256; ++lo) {
-        if (!stay.has(static_cast<unsigned char>(lo))) continue;
-        unsigned hi = lo;
-        while (hi < 255 && stay.has(static_cast<unsigned char>(hi + 1))) ++hi;
-        if (!test.empty()) test += " || ";
-        test += std::format(
-            "(static_cast<unsigned>(static_cast<unsigned char>(src[at])) - {}u "
-            "<= {}u)",
-            lo, hi - lo);
-        ++ranges;
-        lo = hi;
-      }
-      if (ranges > 4) {
-        o.fmt(
-            "      constexpr ::cursiv::ByteSet "
-            "bytes{{{{{}ull,{}ull,{}ull,{}ull}}}};\n",
-            stay.w[0], stay.w[1], stay.w[2], stay.w[3]);
-        test = "bytes.has(static_cast<unsigned char>(src[at]))";
-      }
-      o.fmt("      while (at < len && ({})) ++at;\n", test);
-      o.line("      return at;\n    }");
-    }
-    o.line("    default: return at;\n  }\n}");
+  if (pool.bytes.empty()) {
+    o.omit("kNames");
+  } else {
+    o.line("inline constexpr char kNames[] =");
+    const std::string_view names(pool.bytes.data(), pool.bytes.size());
+    for (std::size_t at = 0; at < names.size(); at += 60)
+      o.fmt("    {}\n", c_literal(names.substr(at, 60)));
+    o.line(";");
   }
-
-  o.line("inline constexpr char kNames[] =");
-  const std::string_view names(g.names.data(), g.nameLen);
-  for (std::size_t at = 0; at < names.size(); at += 60)
-    o.fmt("    {}\n", c_literal(names.substr(at, 60)));
-  o.line(";");
 
   o.array("::cursiv::ByteSet", "kSets", std::span(g.sets.data(), g.nsets),
           [](const ByteSet& s) {
             return std::format("{{{{{}u,{}u,{}u,{}u}}}}", s.w[0], s.w[1],
                                s.w[2], s.w[3]);
           });
-  o.array("::std::uint16_t", "kSetDecode", g.setDecode.v);
+  if (decoding)
+    o.array("::std::uint16_t", "kSetDecode", g.setDecode.v);
+  else
+    o.omit("kSetDecode");
   o.array("::cursiv::TermInfo", "kTerms", std::span(g.terms.data(), g.nterms),
-          [](const TermInfo& x) {
+          [&](const TermInfo& x) {
             return std::format(
-                "{{{}u,{}u,{}u,{},{},{},{}u,{}u,{},{},{}u,{}u,{}}}", x.nameOff,
-                x.nameLen, x.element, x.trivia, x.recorded, x.spelled,
-                x.textOff, x.textLen, x.delim, x.joins, x.laid, x.cond,
-                x.refuses);
+                "{{{}u,{}u,{}u,{},{},{},{}u,{}u,{},{},{}u,{}u,{}}}",
+                pool(x.nameOff), x.nameLen, x.element, x.trivia, x.recorded,
+                x.spelled, pool(x.textOff), x.textLen, x.delim, x.joins, x.laid,
+                x.cond, x.refuses);
           });
-  o.array("::cursiv::LlTable::Rule", "kRules",
-          std::span(g.rules.data(), g.nrules), [](const LlRuleInfo& x) {
-            return std::format("{{{}u,{}u,{}u}}", x.nameOff, x.nameLen,
-                               x.climb);
-          });
+  // A climb reads its operator's token, and the gap behind it, under its own
+  // alphabet, and so does a caret that reads that token again.
+  std::vector<std::uint16_t> opMode(g.nnodes, kNoRow);
+  for (std::uint16_t k = 0; k < g.nclimbs; ++k)
+    for (std::uint16_t i = 0; i < g.climbs[k].opCount; ++i)
+      if (const auto leaf =
+              g.atomic_operator(g.climbOps[g.climbs[k].opBase + i].body);
+          leaf != kNoRow)
+        opMode[leaf] = g.climbs[k].mode;
   o.array("::cursiv::LlTable::Node", "kNodes",
           std::span(g.nodes.data(), g.nnodes), [&](const LlNode& x) {
             const auto id = static_cast<std::size_t>(&x - g.nodes.data());
             const auto mode =
-                x.kind == LlShape::term && a.nodeAfter[id] != 0xFFFFFFFFu
-                    ? a.nodeAfterMode[id]
+                opMode[id] != kNoRow && a.nodeAfter[id] != 0xFFFFFFFFu
+                    ? opMode[id]
                     : x.mode;
             return std::format(
                 "{{{}u,{}u,{}u,{},{}u}}", x.row, mode,
@@ -340,33 +461,40 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
                 a.nodeHead[id] != 0,
                 plan.covers(static_cast<std::uint16_t>(id)));
           });
-  o.array("::cursiv::LlTable::Decision", "kDecisions",
-          std::span(g.decisions.data(), g.ndecisions),
-          [&](const LlDecision& x) {
-            return std::format(
-                "{{{},::cursiv::LlPredict({}),{}u,{}u,{}u}}",
-                x.node != kNoRow && g.nodes[x.node].kind == LlShape::rep,
-                static_cast<unsigned>(x.how), x.mode, x.state, x.rule);
-          });
-  o.array("::cursiv::LlTable::Climb", "kClimbs",
-          std::span(g.climbs.data(), g.nclimbs), [&](const LlClimb& x) {
-            return std::format("{{{}u,{}u,{}u}}", x.atnEntry, x.opCount,
-                               x.selectNode == kNoRow
-                                   ? kNoRow
-                                   : g.nodes[x.selectNode].decision);
-          });
+  // A climb's choice of operator is the decision its select position makes.
+  const auto again = [&](const LlDecision& x) {
+    if (x.rule == kNoRow || g.rules[x.rule].climb == kNoRow) return false;
+    const std::uint16_t select = g.climbs[g.rules[x.rule].climb].selectNode;
+    return select != kNoRow &&
+           g.nodes[select].decision == &x - g.decisions.data();
+  };
+  o.array(
+      "::cursiv::LlTable::Decision", "kDecisions",
+      std::span(g.decisions.data(), g.ndecisions), [&](const LlDecision& x) {
+        return std::format("{{{},::cursiv::LlPredict({}),{}u,{}u}}", again(x),
+                           static_cast<unsigned>(x.how), x.mode, x.state);
+      });
   o.array("::std::uint8_t", "kCls", std::span(a.cls));
   {
     o.array("::std::uint16_t", "kModeStart",
             std::span(a.modeStart.data(), a.nmodes));
     o.array("::std::uint8_t", "kModeMulti",
             std::span(a.modeMulti.data(), a.nmodes));
+    if (!a.modeBacktrack.empty())
+      o.array("::std::uint8_t", "kModeBacktrack", a.modeBacktrack);
     if (longer_modes(a))
       o.array("::std::uint16_t", "kModeLonger", a.modeLonger);
     o.array("::std::uint16_t", "kModeTrivia", a.modeTrivia);
-    o.array("::std::uint16_t", "kModeJoinedTrivia", a.modeJoinedTrivia);
+    if (joined_trivia_apart(a))
+      o.array("::std::uint16_t", "kModeJoinedTrivia", a.modeJoinedTrivia);
     o.array("::std::uint64_t", "kModeTerms", a.modeTerms);
     o.array("::std::uint64_t", "kModeSub", a.modeSub);
+    if (std::ranges::any_of(skipSet, [](std::uint64_t w) { return w != 0; }))
+      o.array("::std::uint64_t", "kSkipSet", skipSet);
+    else
+      o.omit("kSkipSet");
+    o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
+    o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
   }
   {
     o.array("::std::uint16_t", "kLexNext",
@@ -393,18 +521,21 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
     if (!a.relays.empty()) {
       o.array("::std::uint16_t", "kLexRelay",
               std::span(a.dfaRelay.data(), a.ndfa));
-      o.array(
-          "::cursiv::LexRelay", "kRelays", a.relays, [](const LexRelayGen& x) {
-            return lex_relay_source(x, [](std::uint16_t off) { return off; });
-          });
+      o.array("::cursiv::LexRelay", "kRelays", a.relays,
+              [&](const LexRelayGen& x) { return lex_relay_source(x, pool); });
     }
     const std::uint32_t words = (g.nterms + 63u) / 64u;
     const TermRows acc(std::span(a.dfaAccSet.data(), a.ndfa), words);
-    const TermRows res(std::span(a.dfaResSet.data(), a.ndfa), words);
     o.array("::std::uint64_t", "kLexAcc", acc.pool);
     o.array("::std::uint32_t", "kLexAccAt", acc.at);
-    o.array("::std::uint64_t", "kLexRes", res.pool);
-    o.array("::std::uint32_t", "kLexResAt", res.at);
+    const TermRows live(lex_live(a), words);
+    o.array("::std::uint64_t", "kLexLive", live.pool);
+    o.array("::std::uint32_t", "kLexLiveAt", live.at);
+    if (reserving) {
+      const TermRows res(std::span(a.dfaResSet.data(), a.ndfa), words);
+      o.array("::std::uint64_t", "kLexRes", res.pool);
+      o.array("::std::uint32_t", "kLexResAt", res.at);
+    }
     if (relay_reserves(a)) {
       const TermRows held(std::span(a.dfaRelayResSet.data(), a.ndfa), words);
       o.array("::std::uint64_t", "kLexRelayRes", held.pool);
@@ -427,6 +558,20 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   o.array("::std::uint32_t", "kCallerBase", a.callerBase);
   o.array("::std::uint32_t", "kCallerAt", a.callerAt);
   o.array("::std::uint32_t", "kReturnClass", a.returnClass);
+  if (g.nclimbs != 0) {
+    // Only the states a call returns into: no frame names any other.
+    const ClimbExits exits(a);
+    std::vector<DynSet> rows(a.nstates);
+    for (const std::uint32_t r : a.callerAt) rows[r] = exits.reads[r];
+    const TermRows pool(rows, (g.nterms + 63u) / 64u);
+    std::vector<std::uint32_t> at(a.nstates);
+    for (std::uint32_t s = 0; s < a.nstates; ++s) at[s] = pool.at[s] << 1;
+    for (const std::uint32_t r : a.callerAt) at[r] |= exits.ends[r];
+    o.array("::std::uint64_t", "kClimbExits", pool.pool);
+    o.array("::std::uint32_t", "kClimbExitAt", at);
+  }
+  o.array("::std::uint8_t", "kSharedRules", a.sharedRules);
+  o.array("::std::uint8_t", "kRepeatScopes", a.repeatScopes);
   {
     const std::uint32_t words = (g.nterms + 63u) / 64u;
     std::vector<std::uint64_t> first(std::size_t{g.ndecisions} * words, 0);
@@ -437,16 +582,16 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
           first[std::size_t{d} * words + k] |= a.laSet[dec.set + i].word(k);
     }
     o.array("::std::uint64_t", "kDecFirst", first);
-    std::vector<std::uint64_t> follow(std::size_t{g.nrules} * words, 0);
-    for (std::uint16_t r = 0; r < g.nrules; ++r)
-      for (std::uint32_t k = 0; k < words; ++k)
-        follow[std::size_t{r} * words + k] = a.ruleFollow[r].word(k);
-    o.array("::std::uint64_t", "kRuleFollow", follow);
   }
   o.array("::std::uint32_t", "kNodeAfter", a.nodeAfter);
-  o.array("::std::uint16_t", "kNodeAfterMode", a.nodeAfterMode);
-  if (!a.afterGap.empty())
-    o.array("::std::uint16_t", "kNodeAfterGap", a.afterGap);
+  if (!a.afterGap.empty()) {
+    std::vector<std::uint16_t> gaps = a.afterGap;
+    for (std::size_t id = 0; id < gaps.size(); ++id)
+      if (opMode[id] != kNoRow) gaps[id] = kNoRow;
+    o.array("::std::uint16_t", "kNodeAfterGap", gaps);
+  }
+  const std::vector<std::uint32_t> steps = node_steps(a);
+  if (!steps.empty()) o.array("::std::uint32_t", "kNodeStep", steps);
   o.array("::std::uint16_t", "kEdgeNode", a.edgeNode);
   o.array("::std::uint16_t", "kReturnNode", a.returnNode);
   if (fuseTable)
@@ -465,7 +610,6 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
             return std::format("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
                                static_cast<std::uint32_t>(r.hi));
           });
-  const bool classes = g.scalarRanges.size() != 0;
   if (classes) {
     std::vector<std::uint32_t> scalars(g.nsets);
     for (std::uint16_t i = 0; i < g.nsets; ++i)
@@ -490,12 +634,13 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
                           g.gapLeaves[l].node));
   }
   if (g.ngapConds != 0) {
-    o.fmt(
-        "inline constexpr ::cursiv::LexBoundary kGapBoundary{{{}, {}, {{}}, "
-        "{}, {}u, {}, {}}};\n",
-        o.ref("kSets"), o.ref("kSetDecode"), o.ref("kWordRanges"),
-        g.wordRanges.size(), classes ? "kSetScalars" : "nullptr",
-        classes ? "kScalarRanges" : "nullptr");
+    if (gaps.reads_boundary())
+      o.fmt(
+          "inline constexpr ::cursiv::LexBoundary kGapBoundary{{{}, {}, {{}}, "
+          "{}, {}u, {}, {}}};\n",
+          o.ref("kSets"), o.ref("kSetDecode"), o.ref("kWordRanges"),
+          g.wordRanges.size(), classes ? "kSetScalars" : "nullptr",
+          classes ? "kScalarRanges" : "nullptr");
     o.line(gaps.source());
     const auto leaf = [&](unsigned l, bool partial) -> std::string {
       switch (g.gapLeaves[l].kind) {
@@ -545,7 +690,7 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   }
   const bool refusing = std::ranges::any_of(
       a.termHeads, [](const HeadMatcher& h) { return !h.words.empty(); });
-  if (refusing)
+  if (refusing) {
     o.line(lex_head_source(
         a.termHeads, a.modeHeads,
         "inline bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
@@ -553,17 +698,12 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
         "inline ::cursiv::TextOffset head_reach(unsigned m, const char* p,\n"
         "    ::cursiv::TextOffset rest)",
         {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
-         o.ref("kScalarRanges")},
-        HeadMatcher::Reach::prefixes));
-  const bool behind = std::ranges::any_of(
-      a.termHeads,
-      [](const HeadMatcher& h) { return !h.words.empty() && h.offset != 0; });
-  if (behind) {
+         o.ref("kScalarRanges")}));
     o.line("inline ::cursiv::TextOffset term_reach(::cursiv::SymbolId t,");
     o.line("    const char* p, ::cursiv::TextOffset rest) {");
     o.line("  ::cursiv::TextOffset seen = 0;\n  switch (t) {");
     for (std::size_t t = 0; t < a.termHeads.size(); ++t)
-      if (!a.termHeads[t].words.empty() && a.termHeads[t].offset != 0)
+      if (!a.termHeads[t].words.empty())
         o.fmt(
             "    case {0}u:\n      reaches_{0}(p, rest, rest, seen);\n"
             "      break;\n",
@@ -580,13 +720,20 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
         {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
          o.ref("kScalarRanges")}));
   o.line("");
+  o.line("// The generated walk of every mode, in the parser's own unit.");
+  o.line("::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset len,");
+  o.line(
+      "                        ::std::uint16_t mode, ::cursiv::TextOffset i);");
+  if (!a.relays.empty())
+    o.line(
+        "::cursiv::TextOffset relay_run(::std::uint16_t state, const char* "
+        "src,\n    ::cursiv::TextOffset len, ::cursiv::TextOffset i);");
+  o.line("");
   o.line("inline constexpr ::cursiv::LlTable kTable{");
   o.ptr("names", "kNames");
   o.ptr("terms", "kTerms");
   o.fmt("    .nterms = {}u,\n", g.nterms);
-  o.ptr("rules", "kRules");
   o.fmt("    .nrules = {}u,\n", g.nrules);
-  o.fmt("    .entryRule = {}u,\n", g.entryRule);
   o.ptr("nodes", "kNodes");
   o.ptr("decisions", "kDecisions");
   o.fmt("    .ndecisions = {}u,\n", g.ndecisions);
@@ -598,15 +745,13 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
           reach.phrase ? "true" : "false", reach.tokens);
   }
   o.ptr("decFirst", "kDecFirst");
-  o.ptr("ruleFollow", "kRuleFollow");
   o.ptr("nodeAfter", "kNodeAfter");
-  o.ptr("nodeAfterMode", "kNodeAfterMode");
   if (!a.afterGap.empty()) o.ptr("nodeAfterGap", "kNodeAfterGap");
+  if (!steps.empty()) o.ptr("nodeStep", "kNodeStep");
   o.fmt("    .nafter = {}u,\n", (unsigned)a.nodeAfter.size());
   o.ptr("edgeNode", "kEdgeNode");
   o.ptr("returnNode", "kReturnNode");
   o.fmt("    .atnStart = {}u,\n", a.atnEntry);
-  o.ptr("climbs", "kClimbs");
   o.ptr("sets", "kSets");
   o.ptr("setDecode", "kSetDecode");
   o.fmt("    .wordBytes = {{{{{}u,{}u,{}u,{}u}}}},\n", g.wordBytes.w[0],
@@ -618,8 +763,9 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
     o.ptr("scalarRanges", "kScalarRanges");
   }
   if (refusing)
-    o.line("    .head_refuses = &head_refuses,\n    .head_reach = &head_reach,");
-  if (behind) o.line("    .termReach = &term_reach,");
+    o.line(
+        "    .head_refuses = &head_refuses,\n    .head_reach = &head_reach,\n"
+        "    .termReach = &term_reach,");
   if (trailing) o.line("    .tailRefuses = &tail_refuses,");
   o.ptr("cls", "kCls");
   o.fmt("    .ncls = {}u,\n", a.ncls);
@@ -628,14 +774,20 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   if (!a.lookMode.empty()) o.ptr("lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
   o.ptr("modeMulti", "kModeMulti");
+  if (!a.modeBacktrack.empty()) o.ptr("modeBacktrack", "kModeBacktrack");
   if (longer_modes(a)) o.ptr("modeLonger", "kModeLonger");
   if (!a.modeTrivia.empty()) {
     o.ptr("modeTrivia", "kModeTrivia");
-    o.ptr("modeJoinedTrivia", "kModeJoinedTrivia");
+    o.ptr("modeJoinedTrivia",
+          joined_trivia_apart(a) ? "kModeJoinedTrivia" : "kModeTrivia");
   }
   o.ptr("modeTerms", "kModeTerms");
   o.ptr("modeSub", "kModeSub");
   o.fmt("    .subWords = {}u,\n", a.subWords);
+  o.ptr("skipSet", "kSkipSet");
+  o.ptr("byteTerms", "kByteTerms");
+  o.ptr("modeBytes", "kModeBytes");
+  o.line("    .walk = &walk_all,");
   o.ptr("lexNext", "kLexNext");
   o.ptr("typoSuccBase", "kTypoSuccBase");
   o.ptr("typoSucc", "kTypoSucc");
@@ -651,18 +803,22 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
     o.ptr("dfaRelay", "kLexRelay");
     o.ptr("relays", "kRelays");
     o.fmt("    .nrelays = {}u,\n", a.relays.size());
-    o.line("    .relay_run = &lexical_run,");
+    o.line("    .relay_run = &relay_run,");
   }
   o.ptr("lexAcc", "kLexAcc");
   o.ptr("lexAccAt", "kLexAccAt");
-  o.ptr("lexRes", "kLexRes");
-  o.ptr("lexResAt", "kLexResAt");
+  if (reserving) {
+    o.ptr("lexRes", "kLexRes");
+    o.ptr("lexResAt", "kLexResAt");
+  }
+  o.ptr("lexLive", "kLexLive");
+  o.ptr("lexLiveAt", "kLexLiveAt");
   if (relay_reserves(a)) {
     o.ptr("lexRelayRes", "kLexRelayRes");
     o.ptr("lexRelayResAt", "kLexRelayResAt");
   }
   o.ptr("wordBounds", "kWordBounds");
-  if (reserves(a)) o.line("    .reserves = true,");
+  if (reserving) o.line("    .reserves = true,");
   o.fmt("    .termWords = {}u,\n", (g.nterms + 63u) / 64u);
   o.fmt("    .atn = {{.states = {},\n", o.ref("kAtnStates"));
   o.fmt("            .nstates = {}u,\n", a.nstates);
@@ -671,7 +827,13 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   o.fmt("            .callerBase = {},\n", o.ref("kCallerBase"));
   o.fmt("            .callerAt = {},\n", o.ref("kCallerAt"));
   o.fmt("            .returnClass = {}}},\n", o.ref("kReturnClass"));
+  if (g.nclimbs != 0) {
+    o.ptr("climbExits", "kClimbExits");
+    o.ptr("climbExitAt", "kClimbExitAt");
+  }
   if (staged) o.line("    .staged = &ll_staged_predict,");
+  o.ptr("sharedRules", "kSharedRules");
+  o.ptr("repeatScopes", "kRepeatScopes");
   if (!a.sectionErr.empty()) {
     o.ptr("sectionErr", "kSectionErr");
     o.ptr("sectionEnd", "kSectionEnd");
@@ -684,16 +846,7 @@ std::string ll_emit_table(const Built& a, const LlStampPlan& plan,
   if (staged) o.line(staged_source(a));
   o.line(lexical.source());
   if (compiledPredicates)
-    o.line(predicates.source(
-        "  if (seen) {\n"
-        "    ::cursiv::TextOffset halt = at;\n"
-        "    const auto sc = ::cursiv::ll_match_text<kTable>(src, len, mode, "
-        "at, halt);\n"
-        "    *seen = ::std::max(*seen, halt < len ? halt + 1 : len);\n"
-        "    return sc;\n"
-        "  }\n"
-        "  return ::cursiv::ll_match_text<kTable>(src, len, mode, at);\n",
-        "::cursiv::LlLexTape<kTable>{}"));
+    o.line(predicates.source("::cursiv::LlLexTape<kTable>{}"));
   o.fmt("}}  // namespace {}\n", ns);
   return o.out;
 }

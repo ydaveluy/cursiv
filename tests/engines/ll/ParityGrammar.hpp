@@ -6,52 +6,9 @@
 // which is what lets one tree hold both generated modules.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/ll/ParityAst.hpp"
 
 namespace tpar {
-
-namespace ast {
-struct Expr : cursiv::Extends<cursiv::AstNode> {};
-struct Num : cursiv::Extends<Expr> {
-  double value{};
-};
-struct Name : cursiv::Extends<Expr> {
-  string_view id;
-};
-struct Call : cursiv::Extends<Expr> {
-  string_view name;
-  vector<Expr*> args;
-};
-struct Binary : cursiv::Extends<Expr> {
-  Expr* left{};
-  string_view op;
-  Expr* right{};
-};
-struct Neg : cursiv::Extends<Expr> {
-  Expr* operand{};
-};
-struct Fact : cursiv::Extends<Expr> {
-  Expr* operand{};
-};
-struct Let : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
-  Expr* guard{};
-  Expr* value{};
-  bool exported{};
-};
-struct Item : cursiv::Extends<cursiv::AstNode> {
-  Expr* value{};
-  string_view alias;
-};
-struct Show : cursiv::Extends<cursiv::AstNode> {
-  vector<Item*> items;
-  bool all{};
-};
-struct Unit : cursiv::Extends<cursiv::AstNode> {
-  vector<Let*> lets;
-  vector<Show*> shows;
-};
-}  // namespace ast
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -59,7 +16,7 @@ struct Base : cursiv::GrammarSpec {
   // A block comment the end of the text closes too.
   struct BLOCK : terminal<through(lit<"/*">, lit<"*/"> | eof)> {};
   struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
-  struct NUM : terminal<some(d) + option(lit<"."> + some(d)), double> {};
+  struct NUM : terminal<as<double>(some(d) + option(lit<"."> + some(d)))> {};
 
   struct Expression;
   struct Unary;
@@ -67,9 +24,8 @@ struct Base : cursiv::GrammarSpec {
   struct Primary;
 
   struct Expression
-      : infix<Unary, &ast::Binary::left, &ast::Binary::op,
-              &ast::Binary::right,
-              (left(lit<"*"> | lit<"/">) >> left(lit<"+"> | lit<"-">))> {};
+      : infix<Unary, ast::Binary,
+              levels(left(lit<"*"> | lit<"/">), left(lit<"+"> | lit<"-">))> {};
 
   // Two rules that write nothing of their own between the table and the arm
   // that parenthesises: the record the table states its member over is then
@@ -121,7 +77,7 @@ struct Base : cursiv::GrammarSpec {
                               append<&ast::Unit::shows>(ref<ShowRule>))> {};
 
   using entry = UnitRule;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = list<COMMENT, BLOCK>;
 };
 
@@ -142,14 +98,14 @@ struct Decls : cursiv::GrammarSpec {
                               append<&ast::Unit::lets>(ref<ClassRule>))> {};
 
   using entry = UnitRule;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // The declaration recovery cases use the same identifier and whitespace as
 // the expression language. Their own scope keeps comments out of declarations.
 struct Suite : Base {
   struct Root : rule<ref<Base::UnitRule> |
-                     skip(ignored<WS>, hide<>,
+                     skip(ignore<WS>, hide<>,
                           lit<"decl:"> + ref<Decls::UnitRule> + eof)> {};
   using entry = Root;
 };

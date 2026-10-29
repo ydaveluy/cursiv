@@ -45,19 +45,27 @@ class OperatorWords {
   }
 
   OperatorWords then(const OperatorWords& o) const {
+    if ((!_open && _words.empty()) || (!o._open && o._words.empty()))
+      return none();
     OperatorWords out;
-    out._open = _open || o._open;
-    out._opening = _opening;
-    // An unlisted prefix may spell nothing, and then what follows opens too.
-    if (_open) {
-      const std::vector<std::uint16_t> theirs = o.opening();
-      out._opening.insert(out._opening.end(), theirs.begin(), theirs.end());
-    }
-    if (o._open)
-      for (const auto& w : _words)
-        if (!w.empty()) out._opening.push_back(w.front());
+    const auto keep_openings = [&] {
+      out._open = true;
+      out._opening = opening();
+      // An unlisted prefix may spell nothing, as can a listed empty word.
+      if (_open || std::ranges::any_of(
+                       _words, [](const auto& w) { return w.empty(); })) {
+        const auto theirs = o.opening();
+        out._opening.insert(out._opening.end(), theirs.begin(), theirs.end());
+      }
+    };
+    if (_open || o._open) keep_openings();
     for (const auto& a : _words) {
-      if (out._words.size() > kLimit) break;
+      if (out._words.size() > kLimit) {
+        // The listing is partial, but every prefix still belongs to the
+        // product. Keep all their openings before discarding the listing.
+        keep_openings();
+        break;
+      }
       for (const auto& b : o._words) {
         auto w = a;
         w.insert(w.end(), b.begin(), b.end());
@@ -82,8 +90,8 @@ class OperatorWords {
       }
       return false;
     }
-    return std::ranges::any_of(
-               o._opening, [&](std::uint16_t t) { return opens_on(t); }) ||
+    return std::ranges::any_of(o._opening,
+                               [&](std::uint16_t t) { return opens_on(t); }) ||
            std::ranges::any_of(o._words, [&](const auto& w) {
              return !w.empty() && opens_on(w.front());
            });
@@ -94,9 +102,9 @@ class OperatorWords {
   // empty one first.
   bool opens_on(std::uint16_t t) const {
     return std::ranges::binary_search(_opening, t) ||
-           std::ranges::binary_search(
-               _words, int{t}, {},
-               [](const auto& w) { return w.empty() ? -1 : int{w.front()}; });
+           std::ranges::binary_search(_words, int{t}, {}, [](const auto& w) {
+             return w.empty() ? -1 : int{w.front()};
+           });
   }
   std::vector<std::uint16_t> opening() const {
     std::vector<std::uint16_t> out = _opening;

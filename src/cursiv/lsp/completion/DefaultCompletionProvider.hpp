@@ -74,7 +74,8 @@ class DefaultCompletionProvider : public CompletionProvider {
   // Not the caret: a caret mid-word is still typing that token, and asked
   // there the answer would be what follows it, not what may replace it.
   // `from`/`to` bound the word (past the caret when editing one), `prefix`
-  // is what has been typed of it.
+  // is what has been typed of it. A word that spans lines is kept whole here;
+  // the completion edit takes only its part on the caret's line.
   struct Anchor {
     TextOffset from = 0;
     TextOffset to = 0;

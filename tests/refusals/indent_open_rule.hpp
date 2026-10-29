@@ -11,7 +11,7 @@ struct G : Base {
   struct Root : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
                                        ref<Open>)> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   static constexpr auto indent_open = ref<Open>;
 };
 

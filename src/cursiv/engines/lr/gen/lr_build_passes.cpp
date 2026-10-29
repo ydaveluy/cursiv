@@ -45,26 +45,77 @@ auto lr_snap(const Arr& a, std::size_t n) {
 template <class Arr>
 void lr_carry(Arr& a, std::size_t to, std::size_t from) {
   auto v = a[from];
-  a[to] = v;
+  a[to] = std::move(v);
 }
 
-// A state appended with `row` for its actions and `root`'s alphabet.
-std::uint32_t lr_mint_state(LrBuildTable& A, std::span<const LrAction> row,
+// A column whose cells states that fuse merge rather than agree on.
+template <class Keep>
+constexpr bool lr_merges = std::is_same_v<Keep, LrStateMerge>;
+
+// What a pass composes for a state it mints: its rows, and its cell of each
+// column whose policy is `LrStateComposed`.
+struct LrComposedState {
+  std::span<const LrAction> row;
+  std::span<const LrGotoRows::Edge> gotos;
+  DynSet owed;
+};
+
+// A state appended from what its pass composed; every other column takes
+// `root`'s cell.
+std::uint32_t lr_mint_state(LrBuildTable& A, LrComposedState made,
                             std::uint32_t root) {
   const std::uint32_t id = A.nstates;
   A.actionBase[id] = A.nactions;
-  std::ranges::copy(row, A.actions.row(A.nactions, row.size()));
-  A.nactions += static_cast<std::uint32_t>(row.size());
-  A.actionCount[id] = static_cast<std::uint16_t>(row.size());
-  lr_carry(A.follow, id, root);
-  lr_carry(A.mode, id, root);
-  lr_carry(A.tagKnown, id, root);
-  lr_carry(A.tagTruth, id, root);
-  lr_carry(A.stateSym, id, root);
-  lr_carry(A.stateBelow, id, root);
-  lr_carry(A.insertOf, id, root);
+  std::ranges::copy(made.row, A.actions.row(A.nactions, made.row.size()));
+  A.nactions += static_cast<std::uint32_t>(made.row.size());
+  A.actionCount[id] = static_cast<std::uint16_t>(made.row.size());
+  A.gotoRows.push_row(made.gotos);
+  A.each_state_column([&](auto& column, auto keep) {
+    if constexpr (!std::is_same_v<decltype(keep), LrStateComposed>)
+      lr_carry(column, id, root);
+  });
+  A.closeRow[id] = std::move(made.owed);
   A.nstates = static_cast<std::uint16_t>(id + 1);
   return id;
+}
+
+// Per state, one word for each column states that fuse must agree on, `width`
+// of them: the cell, or its rank among the column's distinct sets.
+std::vector<std::uint32_t> lr_kept_cells(LrBuildTable& A, std::uint32_t n,
+                                         unsigned& width) {
+  width = 0;
+  A.each_state_column([&](auto&, auto keep) {
+    if constexpr (!lr_merges<decltype(keep)>) ++width;
+  });
+  std::vector<std::uint32_t> out(std::size_t{n} * width);
+  std::vector<std::uint16_t> rank(n);
+  unsigned c = 0;
+  A.each_state_column([&]<class T>(Vec<T>& column, auto keep) {
+    if constexpr (!lr_merges<decltype(keep)>) {
+      // A column no pass laid reads empty cells.
+      const T* const cell = column.row(0, n);
+      if constexpr (std::is_same_v<T, DynSet>) set_dedup(cell, n, rank.data());
+      for (std::uint32_t s = 0; s < n; ++s) {
+        if constexpr (std::is_same_v<T, DynSet>)
+          out[std::size_t{s} * width + c] = rank[s];
+        else
+          out[std::size_t{s} * width + c] = cell[s];
+      }
+      ++c;
+    }
+  });
+  return out;
+}
+
+// A guard's program as a key, each landing as `name` gives it.
+template <class F>
+void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
+  key.assign(p.conds.begin(), p.conds.end());
+  key.push_back(0xffffffffu);
+  for (const std::uint16_t to : p.to)
+    key.push_back(to == LrGuard::kNoState ? 0xffffffffu : name(to));
+  key.insert(key.end(), p.site.begin(), p.site.end());
+  key.insert(key.end(), p.outer.begin(), p.outer.end());
 }
 
 template <class F>
@@ -281,46 +332,30 @@ void lr_reduce_key(const LrBuildCfg& g, unsigned p,
   for (unsigned i = 0; i < pr.len; ++i) {
     const std::uint16_t sy = g.sym_at(pr, i);
     const auto row = g.row_at(pr, i);
-    key.push_back(
-        static_cast<std::uint32_t>(row) |
-        (static_cast<std::uint32_t>(g.cfg_at(static_cast<std::uint16_t>(p), i))
-         << 16));
+    key.push_back(row);
     key.push_back(row == kNoRow ? 0u
                   : is_term(sy) ? g.terms[sy].element
                                 : 0xffffffffu);
   }
 }
 
-// Two states with the same rows -- actions, gotos, owed tokens, mode, tag --
-// towards the same classes are one: partition refinement to the fixpoint,
-// then one representative per class, the unreachable ones swept.
+// Two states with the same rows -- actions, gotos, and every column the
+// states that fuse keep -- towards the same classes are one: partition
+// refinement to the fixpoint, then one representative per class, the
+// unreachable ones swept. A tag is kept as the runtime reads it, held unless
+// known false: no reader past this pass tells a known truth from no knowledge.
 void lr_minimize_states(LrBuildTable& A) {
+  for (std::size_t s = 0; s < A.tagKnown.size(); ++s) {
+    A.tagKnown[s].andnot(A.tagTruth[s]);
+    A.tagTruth[s] = {};
+  }
   const auto shiftTerm = lr_shift_terms(A);
   const auto& g = A.cfg;
   const std::uint32_t n = A.nstates;
   const std::uint32_t* const abase = A.actionBase.data();
   const std::uint16_t* const acount = A.actionCount.data();
-  const std::uint16_t* const amode = A.mode.data();
-  // A tag, ranked so a signature holds one word.
-  std::vector<std::uint32_t> tagRank(n, 0u);
-  {
-    std::unordered_map<std::vector<std::uint64_t>, std::uint32_t, VecHash>
-        ranks;
-    std::vector<std::uint64_t> key;
-    for (std::uint32_t s = 0; s < n; ++s) {
-      const auto& known = A.tagKnown[s].w;
-      const auto& truth = A.tagTruth[s].w;
-      // A length delimits the sets: every word value can occur in a tag.
-      key.assign(1, known.size());
-      key.insert(key.end(), known.begin(), known.end());
-      key.insert(key.end(), truth.begin(), truth.end());
-      tagRank[s] = ranks.try_emplace(key, static_cast<std::uint32_t>(ranks.size()))
-                       .first->second;
-    }
-  }
-  std::vector<std::uint16_t> closeRank(n);
-  set_dedup(A.closeRow.data(), n, closeRank.data());
-  const std::uint16_t* const aclose = closeRank.data();
+  unsigned width = 0;
+  const std::vector<std::uint32_t> held = lr_kept_cells(A, n, width);
   const LrAction* const acts = A.actions.data();
   const LrGotoRows& go = A.gotoRows;
   // A guard is read by the classes it lands in.
@@ -375,12 +410,7 @@ void lr_minimize_states(LrBuildTable& A) {
         guards, states;
     states.reserve(n);
     for (std::size_t q = 0; q < A.guards.size(); ++q) {
-      key.assign(A.guards[q].conds.begin(), A.guards[q].conds.end());
-      key.push_back(0xffffffffu);
-      for (const std::uint16_t to : A.guards[q].to)
-        key.push_back(to == LrGuard::kNoState ? 0xffffffffu : cls[to]);
-      key.insert(key.end(), A.guards[q].site.begin(), A.guards[q].site.end());
-      key.insert(key.end(), A.guards[q].outer.begin(), A.guards[q].outer.end());
+      lr_guard_key(A.guards[q], [&](std::uint16_t to) { return cls[to]; }, key);
       guardCls[q] =
           guards.try_emplace(key, static_cast<std::uint32_t>(guards.size()))
               .first->second;
@@ -392,9 +422,12 @@ void lr_minimize_states(LrBuildTable& A) {
         continue;
       }
       key.assign(1, cls[s]);
-      if (initial)
-        key.insert(key.end(), {amode[s], aclose[s], shiftTerm[s], tagRank[s],
-                               A.insertOf[s]});
+      if (initial) {
+        key.push_back(shiftTerm[s]);
+        const auto cells =
+            held.begin() + static_cast<std::ptrdiff_t>(s) * width;
+        key.insert(key.end(), cells, cells + width);
+      }
       for (unsigned i = 0, c = acount[s]; i < c; ++i) {
         const LrAction& x = acts[abase[s] + i];
         if (!initial && x.kind != LrActionKind::shift &&
@@ -454,17 +487,8 @@ void lr_minimize_states(LrBuildTable& A) {
     std::uint32_t nna = 0;
 
     const LrAction* const oact = A.actions.data();
-    auto* const wfo = A.follow.row(0, k);
-
-    std::uint16_t* const wmo = A.mode.row(0, k);
-    DynSet* const wcr = A.closeRow.row(0, k);
     std::uint32_t* const wab = A.actionBase.row(0, k);
     std::uint16_t* const wac = A.actionCount.row(0, k);
-    const auto* const ofo = A.follow.data();
-    for (LrGuard& p : A.guards)
-      for (std::uint16_t& to : p.to)
-        if (to != LrGuard::kNoState)
-          to = lv[to] ? remap(to) : LrGuard::kNoState;
     for (std::uint32_t d = 0; d < k; ++d) {
       const std::uint32_t r = rp[d];
       const std::uint32_t ab = nna;
@@ -474,34 +498,38 @@ void lr_minimize_states(LrBuildTable& A) {
         if (x.kind == LrActionKind::shift) x.arg = remap(x.arg);
         wact[nna++] = x;
       }
-      wfo[d] = ofo[r];
-      A.tagKnown[d] = A.tagKnown[r];
-      A.tagTruth[d] = A.tagTruth[r];
-      A.insertOf[d] = A.insertOf[r];
-      wmo[d] = amode[r];
-      if (d != r) wcr[d] = A.closeRow[r];
       wab[d] = ab;
       wac[d] = static_cast<std::uint16_t>(nna - ab);
     }
-
     A.nactions = nna;
-    for (Vec<std::uint16_t>* const of : {&A.stateSym, &A.stateBelow}) {
-      if (of->size() < n) continue;
-      std::vector<std::uint16_t> sym(k, kLrNoStateSym);
-      std::vector<std::uint8_t> seen(k, 0);
-      for (std::uint32_t s = 0; s < n; ++s) {
-        if (!lv[s]) continue;
-        const std::uint16_t d = remap(s);
-        if (!seen[d]) {
-          seen[d] = 1;
-          sym[d] = (*of)[s];
-        } else if (sym[d] != (*of)[s]) {
-          sym[d] = kLrNoStateSym;
+
+    A.each_state_column([&]<class T>(Vec<T>& column, auto keep) {
+      if constexpr (lr_merges<decltype(keep)>) {
+        // A column no pass laid stays unlaid.
+        if (column.size() < n) return;
+        std::vector<T> cell(k, keep.none);
+        std::vector<std::uint8_t> seen(k, 0);
+        for (std::uint32_t s = 0; s < n; ++s) {
+          if (!lv[s]) continue;
+          const std::uint16_t d = remap(s);
+          if (!seen[d]) {
+            seen[d] = 1;
+            cell[d] = column[s];
+          } else if (cell[d] != column[s]) {
+            cell[d] = keep.none;
+          }
         }
+        for (std::uint32_t d = 0; d < k; ++d) column[d] = cell[d];
+      } else {
+        // Each representative's cell is read once, before it is written over.
+        for (std::uint32_t d = 0; d < k; ++d)
+          if (rp[d] != d) column[d] = std::move(column[rp[d]]);
       }
-      for (std::uint32_t d = 0; d < k; ++d) (*of)[d] = sym[d];
-      of->truncate(k);
-    }
+      column.truncate(k);
+    });
+    A.each_state_ref([&](std::uint16_t& s, std::uint16_t none) {
+      if (s != none) s = lv[s] ? remap(s) : none;
+    });
     LrGotoRows kept;
     for (std::uint32_t d = 0; d < k; ++d) {
       for (LrGotoRows::Edge e : go[rp[d]]) {
@@ -510,20 +538,34 @@ void lr_minimize_states(LrBuildTable& A) {
       }
       kept.close_row();
     }
+    // The programs the survivors still name, each once, in their order.
+    std::vector<std::uint8_t> used(A.guards.size(), 0);
+    for (std::uint32_t i = 0; i < nna; ++i)
+      if (wact[i].kind == LrActionKind::guard) used[wact[i].arg] = 1;
+    for (const LrGotoRows::Edge& e : kept.edges)
+      if (e.guard != 0) used[e.guard - 1u] = 1;
+    std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> ids;
+    std::vector<std::uint32_t> program(A.guards.size());
+    std::vector<LrGuard> programs;
+    for (std::size_t q = 0; q < A.guards.size(); ++q) {
+      if (!used[q]) continue;
+      lr_guard_key(A.guards[q], [](std::uint16_t to) { return to; }, key);
+      const auto [at, fresh] =
+          ids.try_emplace(key, static_cast<std::uint32_t>(programs.size()));
+      if (fresh) programs.push_back(std::move(A.guards[q]));
+      program[q] = at->second;
+    }
+    for (std::uint32_t i = 0; i < nna; ++i)
+      if (wact[i].kind == LrActionKind::guard)
+        wact[i].arg = static_cast<std::uint16_t>(program[wact[i].arg]);
+    for (LrGotoRows::Edge& e : kept.edges)
+      if (e.guard != 0) e.guard = program[e.guard - 1u] + 1u;
+    A.guards = std::move(programs);
     A.set_gotos(std::move(kept));
     A.nstates = static_cast<std::uint16_t>(k);
     A.actionBase.truncate(A.nstates);
     A.actionCount.truncate(A.nstates);
-    A.mode.truncate(A.nstates);
-    A.follow.truncate(A.nstates);
-    A.tagKnown.truncate(A.nstates);
-    A.tagTruth.truncate(A.nstates);
-    A.closeRow.truncate(A.nstates);
-    A.insertOf.truncate(A.nstates);
     A.actions.truncate(A.nactions);
-    // The state the merge was named on, renumbered or given up.
-    if (A.nMergeInduced != 0)
-      A.mergeState = lv[A.mergeState] ? remap(A.mergeState) : 0xffffu;
   }
 }
 
@@ -837,10 +879,9 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
         unminted = true;
         return X;
       }
-      const std::uint32_t id = lr_mint_state(A, row, X);
-      A.closeRow[id] = std::move(owed);
+      const std::uint32_t id =
+          lr_mint_state(A, {row, gadd, std::move(owed)}, X);
       out.push_row(gadd);
-      A.gotoRows.push_row(gadd);
       mRow.push_back(std::move(row));
       mByHash[h].push_back(id - n0);
       work.push_back(id);

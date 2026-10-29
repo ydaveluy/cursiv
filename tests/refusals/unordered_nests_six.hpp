@@ -15,14 +15,15 @@ struct Wrap : cursiv::Extends<cursiv::AstNode> {
 struct G : Base {
   struct Root
       : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>)) +
-             (nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"!">)) &
-              nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"?">)) &
-              nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"~">)) &
-              nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"@">)) &
-              nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"#">)) &
-              nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"$">)))> {};
+             unordered(
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"!">)),
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"?">)),
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"~">)),
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"@">)),
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"#">)),
+                 nest<&ast::Wrap::inner>(assign<&ast::Wrap::op>(lit<"$">)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

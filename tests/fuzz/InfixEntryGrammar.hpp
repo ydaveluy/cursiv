@@ -29,10 +29,11 @@ struct InfixEntryG : cursiv::GrammarSpec {
   struct Sum;
   struct Primary : rule<create<ast::Num>(assign<&ast::Num::text>(ref<NUM>)) |
                         (lit<"("> + ref<Sum> + lit<")">)> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"+"> | lit<"-"> | (kw<"NOT"> + kw<"EQUAL">)))> {};
+  struct Sum : infix<Primary, ast::Bin,
+                     (left(lit<"+"> | lit<"-"> | (kw<"NOT"> + kw<"EQUAL">)))> {
+  };
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 // An operator of several keywords is a data rule: the member holds its parts
@@ -43,10 +44,11 @@ struct InfixSequenceG : cursiv::GrammarSpec {
   struct Sum;
   struct Primary : rule<create<ast::Num>(assign<&ast::Num::text>(ref<NUM>)) |
                         (lit<"("> + ref<Sum> + lit<")">)> {};
-  struct Sum : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-                     (left(lit<"+"> | (kw<"NOT"> + kw<"EQUAL">)))> {};
+  struct Sum
+      : infix<Primary, ast::Bin, (left(lit<"+"> | (kw<"NOT"> + kw<"EQUAL">)))> {
+  };
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace finfix

@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/core/grammar/GrammarImage.hpp"
-
 namespace cursiv {
+
+class WarningFound;
 
 struct NestedRunWarning {
   std::string rule;
@@ -18,7 +18,7 @@ struct NestedRunWarning {
 };
 
 // Each repetition once per rule, in the order the rules were reached.
-std::vector<NestedRunWarning> nested_run_warnings(GrammarImage& image);
+std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found);
 
 std::string nested_run_warning_text(const NestedRunWarning& w);
 

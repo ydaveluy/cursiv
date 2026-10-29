@@ -83,8 +83,8 @@ RefState ref_state_raw(const AstNode& o, std::uint32_t i) noexcept {
       .load(std::memory_order_acquire);
 }
 
-// `force` resolves through the reference's own protocol; `size` and `at` load
-// the state with acquire before reading the targets.
+// `force` resolves through the reference's own protocol; `size`, `at` and
+// `single` load the state with acquire before reading the targets.
 template <class F, class Ns>
 consteval RefOps ref_ops_of() {
   // One row shape for both natures: a linker holds a `RefHandle` and nothing
@@ -93,7 +93,7 @@ consteval RefOps ref_ops_of() {
     return RefOps{};  // a non-reference field: a null entry
   else {
     using L = typename held_targets<typename F::held>::type;
-    return RefOps{
+    RefOps ops{
         .multi = is_multi_ref_nature(F::nature),
         .branch = &ref_branch<L>::run,
         .narrows = narrow_table<L, Ns>::fns.data(),
@@ -147,6 +147,14 @@ consteval RefOps ref_ops_of() {
                   RefState::Unresolved, std::memory_order_release);
             },
     };
+    if constexpr (!is_multi_ref_nature(F::nature))
+      ops.single = [](const AstNode& o, std::uint32_t i) noexcept {
+        if (ref_state_raw<F>(o, i) != RefState::Resolved)
+          return SingleRefRead{};
+        const auto& r = ref_of<F>(o, i);
+        return SingleRefRead{r.refNodeId, r.target};
+      };
+    return ops;
   }
 }
 // One tag per `reference<Ts...>` the grammar declares. Null anywhere else,

@@ -19,7 +19,7 @@ struct Holder : cursiv::Extends<cursiv::AstNode> {
 struct G : Base {
   struct Root : rule<create<ast::Holder>(assign<&ast::Holder::flags>(kw<"big">))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

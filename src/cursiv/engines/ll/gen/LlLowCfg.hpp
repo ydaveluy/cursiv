@@ -37,9 +37,6 @@ struct LlLowCfg : LowerPools {
   // The class a keyword may not run into, as the grammar declares it.
   ByteSet wordBytes{};
 
-  // The optional positions a sequence spells out as subsets.
-  unsigned optionalGate = kOptionalGate;
-
   Vec<LlRuleInfo> rules{};
   Vec<LlNode> nodes{};
   Vec<std::uint16_t> kids{};
@@ -51,7 +48,6 @@ struct LlLowCfg : LowerPools {
 
   // What only the lowering reads, beside the cells and not in them: a table
   // is emitted without any of it.
-  Vec<LlRuleBuild> ruleBuild{};
   Vec<LlNodeBuild> nodeBuild{};
   Vec<LlDecisionBuild> decisionBuild{};
 
@@ -60,6 +56,11 @@ struct LlLowCfg : LowerPools {
     if (node.kind == LlShape::seq || node.kind == LlShape::alt)
       return {kids.data() + node.sym, node.count};
     return {};
+  }
+
+  // Whether a choice is a repetition's: another turn, or the way out.
+  bool repeats(const LlDecision& d) const {
+    return d.node != kNoRow && nodes[d.node].kind == LlShape::rep;
   }
 
   // A one-token operator may have one conjoined condition in front of it.

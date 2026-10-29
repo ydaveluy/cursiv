@@ -42,9 +42,9 @@ inline constexpr auto upper =
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
-  struct EQ : terminal<lit<"=">, value<Op::equal>> {};
-  struct NE : terminal<lit<"!=">, value<Op::NOTEQUAL>> {};
-  using ignore = WS;
+  struct EQ : terminal<as<Op::equal>(lit<"=">)> {};
+  struct NE : terminal<as<Op::NOTEQUAL>(lit<"!=">)> {};
+  using ignored = WS;
 };
 
 struct Dotted : Base {
@@ -73,7 +73,7 @@ struct Listed : Base {
 };
 
 struct Called : Base {
-  struct Shout : rule<lit<"!"> + ref<ID>, cursiv::text_conv<upper>> {};
+  struct Shout : rule<as<upper>(lit<"!"> + ref<ID>)> {};
   struct Root
       : rule<create<ast::Doc>(assign<&ast::Doc::text>(ref<ID> + ref<Shout>)) +
              eof> {};
@@ -109,7 +109,7 @@ struct Tight : Base {
 struct Skipped : Base {
   struct DASH : terminal<some(lit<"-">)> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::text>(
-                         skip(ignored<DASH>, hide<>, lit<"<"> + lit<"<">))) +
+                         skip(ignore<DASH>, hide<>, lit<"<"> + lit<"<">))) +
                      eof> {};
 };
 
@@ -177,7 +177,7 @@ struct Base : cursiv::GrammarSpec {
   struct ExprRule
       : rule<create<ast::Expr>(assign<&ast::Expr::text>(ref<NUM>))> {};
   struct DimRule : rule<create<ast::Dim>(assign<&ast::Dim::name>(ref<ID>))> {};
-  using ignore = WS;
+  using ignored = WS;
 };
 
 struct Init : Base {
@@ -189,6 +189,28 @@ struct Init : Base {
                  flag<&ast::Decl::isConst>(option(lit<";">)) +
                  flag<&ast::Decl::isStatic>(
                      option(commit(lit<"%">, lit<"1">)))) +
+             eof> {};
+};
+
+struct Counted : Base {
+  struct Root
+      : rule<create<ast::Decl>(
+                 assign<&ast::Decl::name>(ref<ID>) +
+                 flag<&ast::Decl::isStatic>(many(lit<"+">)) +
+                 flag<&ast::Decl::isConst>(repeat<0, 3>(lit<"-">)) +
+                 flag<&ast::Decl::isArray>(
+                     many(append<&ast::Decl::dims>(ref<DimRule>)))) +
+             eof> {};
+};
+
+struct Turned : Base {
+  struct Root
+      : rule<create<ast::Decl>(
+                 assign<&ast::Decl::name>(ref<ID>) +
+                 option(flag<&ast::Decl::hasInit>(many(lit<"*">)) +
+                        lit<"!">) +
+                 many(flag<&ast::Decl::raw>(many(lit<"~">)) +
+                      append<&ast::Decl::dims>(ref<DimRule>))) +
              eof> {};
 };
 
@@ -282,6 +304,8 @@ struct Created : Base {
 
 struct Suite : Base {
   struct Root : rule<(lit<"init:"> + ref<Init::Root>) |
+                     (lit<"counted:"> + ref<Counted::Root>) |
+                     (lit<"turned:"> + ref<Turned::Root>) |
                      (lit<"dims:"> + ref<Dims::Root>) |
                      (lit<"raw:"> + ref<Raw::Root>) |
                      (lit<"wrapped:"> + ref<Wrapped::Root>) |
@@ -338,32 +362,33 @@ struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
-  struct SMALL : terminal<some(d), std::int8_t> {};
+  struct SMALL : terminal<as<std::int8_t>(some(d))> {};
 
-  struct Qualified : rule<some(ref<ID>, lit<".">), cursiv::parts_conv<bars>> {};
+  struct Qualified : rule<as<bars>(some(ref<ID>, lit<".">))> {};
 
   struct Tail : rule<lit<"."> + ref<ID>> {};
-  struct Tailed : rule<ref<ID> + many(ref<Tail>), cursiv::parts_conv<bars>> {};
+  struct Tailed : rule<as<bars>(ref<ID> + many(ref<Tail>))> {};
 
-  struct Shout : rule<lit<"!"> + ref<ID>, cursiv::text_conv<upper>> {};
-  struct Loud : rule<ref<ID> + many(ref<Shout>), cursiv::parts_conv<bars>> {};
+  struct Shout : rule<as<upper>(lit<"!"> + ref<ID>)> {};
+  struct Loud : rule<as<bars>(ref<ID> + many(ref<Shout>))> {};
 
   struct Word : rule<ref<ID>> {};
   struct Dotted : rule<lit<"."> + ref<Word>> {};
-  struct Deep : rule<ref<Word> + many(ref<Dotted>), cursiv::parts_conv<bars>> {
-  };
+  struct Deep : rule<as<bars>(ref<Word> + many(ref<Dotted>))> {};
 
-  struct Pair
-      : rule<ref<SMALL> + lit<","> + ref<SMALL>, cursiv::parts_conv<bars>> {};
+  struct Pair : rule<as<bars>(ref<SMALL> + lit<","> + ref<SMALL>)> {};
 
   struct Joined : rule<ref<ID> + many(ref<Tail>)> {};
 
-  struct Word2 : rule<ref<ID>, cursiv::text_conv<upper>> {};
-  struct Words2
-      : rule<ref<Word2> + many(ref<Word2>), cursiv::parts_conv<bars>> {};
+  struct Word2 : rule<as<upper>(ref<ID>)> {};
+  struct Words2 : rule<as<bars>(ref<Word2> + many(ref<Word2>))> {};
   struct Opt : rule<option(ref<ID>)> {};
-  struct WithOpt
-      : rule<ref<ID> + ref<Opt> + ref<ID>, cursiv::parts_conv<bars>> {};
+  struct WithOpt : rule<as<bars>(ref<ID> + ref<Opt> + ref<ID>)> {};
+
+  // Calls whose record is their one token, which a repair may misspell.
+  struct Lit : rule<as<upper>(lit<"literal">)> {};
+  struct WithLit : rule<as<bars>(ref<ID> + ref<Lit> + ref<ID>)> {};
+  struct LitParts : rule<as<bars>(lit<"literal">)> {};
 
   struct Root : rule<create<ast::Name>(
                     (kw<"q"> + assign<&ast::Name::parts>(ref<Qualified>)) |
@@ -373,9 +398,13 @@ struct Base : cursiv::GrammarSpec {
                     (kw<"n"> + assign<&ast::Name::parts>(ref<Pair>)) |
                     (kw<"w"> + assign<&ast::Name::parts>(ref<Words2>)) |
                     (kw<"o"> + assign<&ast::Name::parts>(ref<WithOpt>)) |
+                    (kw<"l"> + assign<&ast::Name::parts>(ref<WithLit>)) |
+                    (kw<"p"> + assign<&ast::Name::parts>(ref<LitParts>) +
+                     lit<";">) |
+                    (kw<"k"> + assign<&ast::Name::text>(ref<Lit>) + lit<";">) |
                     (kw<"j"> + assign<&ast::Name::text>(ref<Joined>)))> {};
   using entry = Root;
-  using ignore = WS;
+  using ignored = WS;
   using hidden = COMMENT;
 };
 
@@ -385,7 +414,7 @@ struct Base : cursiv::GrammarSpec {
 namespace tdirseq {
 struct Combined : Suite {
   struct Entry : rule<ref<Suite::Root> | ref<tflagop::Suite::Root> |
-                      (lit<"data:"> + skip(ignored<tdataparts::Base::WS>,
+                      (lit<"data:"> + skip(ignore<tdataparts::Base::WS>,
                           hide<tdataparts::Base::COMMENT>,
                           ref<tdataparts::Base::Root> + eof))> {};
   using entry = Entry;

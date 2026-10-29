@@ -21,41 +21,16 @@ namespace cursiv {
 
 // One walk's table, as `typo_each` reads it.
 template <const auto& A>
-struct LrTypoTape {
+struct LrTypoTape : TypoBounds {
   using Set = std::remove_cvref_t<decltype(A.cold.follow[0])>;
 
-  const char* src;
-  // Where the search stops, and where the DOCUMENT stops: only at the second
-  // may a token end.
-  TextOffset extent;
-  TextOffset docLen;
   // The terminals this state can act on, shift or reduce: a state reached
   // right after a modifier shifts nothing.
   Set* want;
   std::uint32_t* stops;
-  // The bytes the walk stepped over, every path counted, and whether one
-  // path reached the horizon short of the document, or all of them together
-  // read `most`.
-  std::uint64_t* read;
-  bool* short_of = nullptr;
-  std::uint64_t most = ~std::uint64_t{0};
   // Where the token begins: a keyword's own refusal is asked of its head.
   TextOffset head = 0;
 
-  TextOffset len() const { return extent; }
-  // Asked where a path reaches `extent`.
-  bool cut() const {
-    if (extent < docLen && short_of != nullptr) *short_of = true;
-    return extent < docLen;
-  }
-  bool spent() const {
-    if (*read <= most) return false;
-    if (short_of != nullptr) *short_of = true;
-    return true;
-  }
-  unsigned char byte(TextOffset p) const {
-    return static_cast<unsigned char>(src[p]);
-  }
   std::span<const std::uint16_t> successors(std::uint16_t s) const {
     return typo_successors(A.derived.typoSuccBase.data(),
                            A.derived.typoSucc.data(), s);
@@ -112,8 +87,6 @@ struct LrTypoTape {
                          : !lex_boundary(A.cfg).at(set, src, p, docLen);
   }
   void refused() const { ++*stops; }
-  void transposes() const {}
-  void reads_unread() const {}
 };
 
 // Where the text a state reads ends: the document's end, or in a section the
@@ -185,8 +158,8 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
   const TextOffset horizon = typo_horizon(at, plain, len, reach);
   TypoCandidates found;
   const auto keep = [&](const Typo& candidate) { found.add(candidate); };
-  typo_each(LrTypoTape<A>{c.src, horizon, len, &want, &c.stats.searchStops,
-                          &read, &cut, most, at},
+  typo_each(LrTypoTape<A>{{c.src, horizon, len, &read, &cut, most}, &want,
+                          &c.stats.searchStops, at},
             A.modeStart[A.mode[state]], at, plain, keep);
   return found.ranked();
 }

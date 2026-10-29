@@ -17,10 +17,11 @@ struct G : Base {
   struct NUM : terminal<some(d)> {};
   struct Primary : rule<create<ast::Bin>(assign<&ast::Bin::op>(ref<NUM>))> {};
   struct Sum
-      : infix<Primary, &ast::Bin::left, &ast::Bin::op, &ast::Bin::right,
-              (left(kw<"not"> + kw<"in">) >> left(kw<"not"> + kw<"in">))> {};
+      : infix<Primary, ast::Bin,
+              levels(left(kw<"not"> + kw<"in">), left(kw<"not"> + kw<"in">))> {
+  };
   using entry = Sum;
-  using ignore = WS;
+  using ignored = WS;
 };
 
 }  // namespace refuse

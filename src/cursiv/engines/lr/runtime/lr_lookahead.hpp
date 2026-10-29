@@ -167,15 +167,8 @@ struct LrCellPool {
         shared = true;
         return seen[k].token;
       }
-    Token t;
-    if constexpr (kBracketed<A.cfg>) {
-      const std::uint32_t outer = c.indent.depth;
-      c.indent.depth = sh[i].indent.depth;
-      t = lr_scan_at<A>(c, mode, at);
-      c.indent.depth = outer;
-    } else {
-      t = lr_scan_at<A>(c, mode, at);
-    }
+    const Token t =
+        lr_scan_at<A>(c, mode, at, kBracketed<A.cfg> ? sh[i].indent.depth : 0);
     seen[nextSeen] = {mode, deep, at, t};
     nextSeen = (nextSeen + 1) % seen.size();
     if (nseen < seen.size()) ++nseen;
@@ -195,25 +188,24 @@ struct LrCellPool {
 };
 
 // Of the readings that shifted a token from one place, only those of the
-// longest stand: the lexer chose once for them all.
-inline void lr_longest_shift(std::vector<LrShadow>& sh, std::size_t n) {
-  const LrShadow* first = nullptr;
-  bool apart = false;
-  for (std::size_t i = 0; i < n; ++i) {
-    if (!sh[i].shifted || sh[i].dead) continue;
-    if (first == nullptr)
-      first = &sh[i];
-    else
-      apart = apart || sh[i].la.end != first->la.end ||
-              sh[i].la.begin != first->la.begin;
-  }
-  if (!apart) return;
+// token the lexer elects stand: it chose once for them all.
+template <const auto& A>
+inline void lr_elected_shift(const LrContext& c, std::vector<LrShadow>& sh,
+                             std::size_t n) {
+  // A tie reads its tokens again: each once, not once per rival.
+  for (std::size_t i = 0; i < n; ++i) sh[i].laWeight = LrShadow::kUnweighed;
+  const auto weight = [&](LrShadow& s) {
+    if (s.laWeight == LrShadow::kUnweighed)
+      s.laWeight = static_cast<std::uint8_t>(lr_token_weight<A>(c, s.la));
+    return s.laWeight;
+  };
   for (std::size_t i = 0; i < n; ++i) {
     if (!sh[i].shifted || sh[i].dead || sh[i].la.begin == sh[i].la.end)
       continue;
     for (std::size_t j = 0; j < n; ++j)
-      if (sh[j].shifted && !sh[j].dead && sh[j].la.begin == sh[i].la.begin &&
-          sh[j].la.end > sh[i].la.end) {
+      if (sh[j].shifted && !sh[j].dead &&
+          lr_token_beats(sh[j].la, sh[i].la,
+                         [&] { return weight(sh[j]) > weight(sh[i]); })) {
         sh[i].dead = true;
         break;
       }
@@ -230,6 +222,11 @@ unsigned lr_settle_arm(LrContext& c, std::size_t n, unsigned count) {
   static_assert(A.maxArms >= A.maxCands,
                 "cursiv: this grammar's table declares a position wider than "
                 "its widest cell");
+  // The hooks that reach here are installed only where a reading can split,
+  // which is where the goto classes are laid.
+  static_assert(A.cold.gotoClass.size() == A.nstates,
+                "cursiv: a table that decides cells or positions must lay "
+                "its goto classes");
   using Arms = LrBitSet<kArms>;
   std::vector<LrShadow>& sh = c.spec;
   // Taken once: nothing below grows the pool but a fork, which takes it again.
@@ -339,7 +336,7 @@ unsigned lr_settle_arm(LrContext& c, std::size_t n, unsigned count) {
              x.steps < stepBudget && x.lexes < kLrLexBudget)
         lr_read_step<A>(c, x, i);
     }
-    lr_longest_shift(sh, n);
+    lr_elected_shift<A>(c, sh, n);
     for (std::size_t i = 0; i < n;) {
       if (sh[i].dead)
         kill(i);
@@ -451,10 +448,10 @@ template <const auto& A>
 unsigned lr_resolve_cands(LrContext& c, std::uint32_t state, const Scan* arm,
                           unsigned count) {
   const TextOffset begin = c.la.begin;
-  const bool ranked = lr_rivals_ranked<A>(arm, count);
+  const bool ranked = lr_rivals_ranked(arm, count);
   return lr_resolve_seeded<A, LrSplit::position>(
       c, state, count, [&, begin](LrShadow& s, unsigned k) {
-        s.la = Token{begin, arm[k].end, arm[k].term};
+        s.la = Token{begin, arm[k].end, arm[k].term, c.laMode};
         if (ranked) s.lexRank = ~lex_weight(arm[k].tier);
         return true;
       });
