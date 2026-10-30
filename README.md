@@ -29,7 +29,10 @@ Define your grammar and abstract syntax tree (AST) as C++ types. Cursiv
 generates the parser and provides services for a command-line tool or an
 editor extension.
 
-![The Statemachine example in an editor: completion, an error and its fix, hover and rename](docs/assets/demo.gif)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-dark.gif">
+  <img alt="The Statemachine example in an editor: completion, an error and its fix, hover and rename" src="docs/assets/demo.gif">
+</picture>
 
 [Documentation](docs/index.md) ·
 [Try it online](https://ydaveluy.github.io/cursiv/demo/) ·

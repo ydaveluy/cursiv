@@ -6,7 +6,8 @@ with Language Server Protocol (LSP) support. Its goal is to be as fast as
 possible while staying simple to use: the standard language features work out
 of the box, and you can customize every service.
 
-![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo.gif)
+![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo.gif#only-light)
+![The Statemachine example in an editor: completion, an error and its fix, hover and rename](assets/demo-dark.gif#only-dark)
 
 [Try it online](demo/index.md): write documents in the example languages in
 your browser, with their language servers compiled to WebAssembly.
