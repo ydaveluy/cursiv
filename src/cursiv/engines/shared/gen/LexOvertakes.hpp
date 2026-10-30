@@ -32,21 +32,28 @@ class LexOvertakes {
                const std::vector<DynSet>& followers)
       : _nfa(nfa), _g(g), _startOf(startOf), _followers(followers),
         _asked(g.nterms), _past(g.nterms), _next(g.nterms),
-        _nextKnown(g.nterms, false) {
+        _nextKnown(g.nterms, false), _tied(g.nterms, 0) {
     for (unsigned t = 1; t < g.nterms; ++t)
       if (g.terms[t].trivia) _trivia.set(t);
   }
 
   // The terminals of `added` that, offered beside those of `kept` and the
-  // trivia, read over one of them.
-  DynSet overtaking(const DynSet& added, const DynSet& kept) {
+  // trivia, read over one of them. With `tied`, one also reads over a trivia
+  // whose text it matches, as the lexer elects the token: a reduction added
+  // for another caller asks it, and that caller then reads the text again as
+  // trivia. The flags leave it out: they would cost a check on every read of
+  // the terminal, and the reduction the merged row makes on it already lets
+  // the caller read the text again.
+  DynSet overtaking(const DynSet& added, const DynSet& kept,
+                    bool tied = false) {
     DynSet fresh = added;
     fresh.andnot(kept);
     const DynSet beside = kept | _trivia;
     DynSet out;
     each_bit(fresh.w.data(), fresh.w.size(), [&](std::size_t a) {
       if (a >= _g.nterms || _trivia.test(static_cast<unsigned>(a))) return;
-      if (reads_over(static_cast<unsigned>(a), beside))
+      if (reads_over(static_cast<unsigned>(a), beside) ||
+          (tied && takes_trivia(static_cast<unsigned>(a))))
         out.set(static_cast<unsigned>(a));
     });
     return out;
@@ -80,6 +87,9 @@ class LexOvertakes {
   std::vector<std::vector<int>> _next;
   std::vector<bool> _nextKnown;
   DynSet _trivia;
+  // Per terminal, whether it reads over a trivia, one of the same text
+  // included: 0 not asked yet, 1 no, 2 yes.
+  std::vector<std::uint8_t> _tied;
 
   // The bytes after which a match of the subset stands.
   ByteSet stands_before(const std::vector<int>& sub) const {
@@ -117,7 +127,22 @@ class LexOvertakes {
     return true;
   }
 
-  bool walk(unsigned b, unsigned a) {
+  bool takes_trivia(unsigned a) {
+    if (_tied[a] == 0) {
+      bool over = false;
+      if (_startOf[a] >= 0)
+        each_bit(_trivia.w.data(), _trivia.w.size(), [&](std::size_t b) {
+          over = over || (b < _g.nterms && _startOf[b] >= 0 &&
+                          walk(static_cast<unsigned>(b), a, true));
+        });
+      _tied[a] = over ? 2 : 1;
+    }
+    return _tied[a] == 2;
+  }
+
+  // With `tied`, `a` also reads over `b`, a trivia, where both end on one
+  // text.
+  bool walk(unsigned b, unsigned a, bool tied = false) {
     constexpr std::size_t kMost = 20000;
     const std::vector<int>& next = after(b);
     if (next.empty()) return false;
@@ -158,7 +183,8 @@ class LexOvertakes {
       const auto [ra, rx, phase, allowed] = work[i];
       if (phase == 0 && lex_accepts(_nfa, rx)) {
         // A recognizer reads on as far as its machine goes.
-        if (lex_recognizes(_nfa, ra)) return true;
+        if (lex_recognizes(_nfa, ra) || (tied && lex_accepts(_nfa, ra)))
+          return true;
         // `b` ends where its own graph cannot read on.
         ByteSet ends = stands_before(rx);
         ends.andnot(lex_subset_reads(_nfa, sets, rx));

@@ -317,11 +317,57 @@ void run() {
 
 }  // namespace leading_cases
 
+namespace lines_cases {
+
+// A block's last entry reads no newline: the one in front of `end` is trivia
+// to it, though a member on the next line reads it. The implied tags of this
+// suite build its LR table with the lookaheads of each caller apart.
+
+namespace {
+
+void a_block_ends_before_its_newline(const cursiv::Parser& parser,
+                                     const char* engine) {
+  const struct {
+    std::string_view text;
+    std::size_t statements;
+  } cases[] = {
+      {"when\nb -> a\nelse -> a\nend", 1},
+      {"when\nelse -> a = b\nend\nx", 2},
+      {"when\nelse -> a\n.b\nend", 1},
+  };
+  for (const auto& sample : cases) {
+    // The AST holds views into the text it was read from: keep it alive.
+    const std::string source = "lines:" + std::string(sample.text);
+    const cursiv::ParseResult r = parser.parse(source);
+    const auto* const lines = r.value_as<tunary::ast::Lines>();
+    const std::size_t read = lines != nullptr ? lines->items.size() : 0;
+    const bool ok = r.accepted && r.diagnostics.empty() &&
+                    !r.cst().recovered() && read == sample.statements;
+    if (!ok)
+      std::printf("  [%s] %.*s: %zu diagnostics, %zu statements\n", engine,
+                  static_cast<int>(sample.text.size()), sample.text.data(),
+                  r.diagnostics.size(), read);
+    CHECK(ok);
+  }
+}
+
+}  // namespace
+
+void run() {
+  a_block_ends_before_its_newline(*ttrivia::generated::Ll::create_parser(),
+                                  "Ll");
+  a_block_ends_before_its_newline(*ttrivia::generated::Lr::create_parser(),
+                                  "Lr");
+}
+
+}  // namespace lines_cases
+
 int main() {
   cursiv::test::count_expectations();
   trivia_cases::run();
   implied_tag_cases::run();
   region_cases::run();
   leading_cases::run();
+  lines_cases::run();
   return cursiv::test::report("Trivia_test");
 }

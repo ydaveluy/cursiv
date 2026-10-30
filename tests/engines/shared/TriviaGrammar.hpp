@@ -3,9 +3,10 @@
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 #include "engines/lr/BracketCaretGrammar.hpp"
+#include "engines/shared/UnaryLevelsGrammar.hpp"
 // What a terminal read as trivia is: two ignored terminals may read the same
-// text, a literal outranks a tied pattern, and one is no bracket of the
-// indentation.
+// text, a literal outranks a tied pattern, one is no bracket of the
+// indentation, and a newline token is trivia to a caller that reads none.
 
 namespace ttrivia {
 
@@ -276,7 +277,9 @@ struct Suite : cursiv::GrammarSpec {
              skip(ignore<tregion::Base::WS>, hide<>,
                   lit<"region:"> + ref<tregion::Base::Root> + eof) |
              skip(ignore<tleading::Base::WS>, hide<tleading::Base::COMMENT>,
-                  lit<"leading:"> + ref<tleading::Base::Document> + eof)> {};
+                  lit<"leading:"> + ref<tleading::Base::Document> + eof) |
+             (lit<"lines:"> + skip(ignore<tunary::Lines::WS, tunary::Lines::NL>,
+                                   hide<>, ref<tunary::Lines::Root> + eof))> {};
   using entry = Entry;
   static constexpr auto indent_open = lit<"(">;
   static constexpr auto indent_close = lit<")">;

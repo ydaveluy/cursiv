@@ -1293,10 +1293,86 @@ std::vector<DynSet> lr_group_flags(const LrGraph& gr, const LrActions& actions,
   return flagged;
 }
 
+// Per canonical state, the class of the states of its core, the conditions
+// its span knows and those that held being core.
+std::vector<unsigned> lr_core_classes(const LrGraph& gr) {
+  const unsigned ns = gr.states();
+  std::vector<unsigned> grp(ns, 0);
+  ChainIndex ix;
+  ix.init(ns);
+  std::vector<unsigned> repr;  // one canonical core per class
+  const LrItem* const kp = gr.kernPool.data();
+  for (unsigned s = 0; s < ns; ++s) {
+    std::uint64_t h = lr_kernel_hash(kp + gr.kernAt[s], gr.kernLen[s], nullptr);
+    for (const std::uint64_t x : gr.tagKnown[s].w) h = hash_mix(h, x);
+    for (const std::uint64_t x : gr.tagTruth[s].w) h = hash_mix(h, x);
+    auto found = static_cast<unsigned>(repr.size());
+    for (unsigned i = ix.first(h); i != ChainIndex::kNone; i = ix.after(i))
+      if (gr.tagKnown[repr[i]] == gr.tagKnown[s] &&
+          gr.tagTruth[repr[i]] == gr.tagTruth[s] &&
+          lr_same_core(kp + gr.kernAt[repr[i]], gr.kernLen[repr[i]],
+                       kp + gr.kernAt[s], gr.kernLen[s])) {
+        found = i;
+        break;
+      }
+    if (found == repr.size()) {
+      repr.push_back(s);
+      ix.add(h, found);
+    }
+    grp[s] = found;
+  }
+  return grp;
+}
+
+// A canonical state's reduction also answers a terminal its row reads where
+// another state of its core reduces on it, and the terminal reads over one
+// the reduction takes, a trivia of the same text included. The lexer hands
+// that terminal over in place of the text the reduction goes on with, and
+// the caller reads that text again in its own mode, as under the core's
+// merged state: a newline that ends a statement elsewhere ends the operand
+// before it, and is trivia to a caller that reads no newline.
+void lr_caller_lookaheads(LrGraph& gr, const LrActions& actions,
+                          const std::vector<unsigned>& core,
+                          LexOvertakes<LrBuildCfg>& overtakes) {
+  const LrBuildCfg& g = actions.g;
+  const auto ends = [&](std::uint32_t ci) {
+    const LrItem& it = gr.closPool[ci];
+    return it.dot == g.prods[it.prod].len;
+  };
+  const auto key = [&](unsigned s, std::uint32_t ci) {
+    return std::uint64_t{core[s]} << 16 | gr.closPool[ci].prod;
+  };
+  // Per class and production, what any state of the class reduces it on.
+  std::unordered_map<std::uint64_t, DynSet> any;
+  for (unsigned s = 0; s < gr.states(); ++s)
+    for (std::uint32_t ci = gr.closAt[s], ce = ci + gr.closLen[s]; ci < ce;
+         ++ci)
+      if (ends(ci)) any[key(s, ci)] |= gr.closLaPool[ci];
+  for (unsigned s = 0; s < gr.states(); ++s) {
+    DynSet row;
+    bool known = false;
+    for (std::uint32_t ci = gr.closAt[s], ce = ci + gr.closLen[s]; ci < ce;
+         ++ci) {
+      if (!ends(ci)) continue;
+      DynSet& la = gr.closLaPool[ci];
+      const DynSet& others = any.at(key(s, ci));
+      if (others == la) continue;
+      // What the lexer reads here: the row before its reductions grew.
+      if (!known) {
+        actions.each(s, [&](const LrAction& a) { row.set(a.term); });
+        known = true;
+      }
+      la |= overtakes.overtaking(row & others, la, true);
+    }
+  }
+}
+
 // The re-fusion: states of one core form a group, separated only where they
 // conflict or answer different implied tokens, more than one between them;
-// targets agree when they land in the same group, a fixpoint.
-std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions) {
+// targets agree when they land in the same group, a fixpoint. `grp` holds
+// the classes of each core on entry.
+std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
+                                std::vector<unsigned> grp) {
   const unsigned ns = gr.states();
   std::vector<LrAction> acts, tmp;
   std::vector<std::uint32_t> base(ns + 1), count(actions.g.nterms);
@@ -1317,34 +1393,6 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions) {
   const auto row = [&](unsigned s) -> std::span<const LrAction> {
     return {acts.data() + base[s], base[s + 1] - base[s]};
   };
-  std::vector<unsigned> grp(ns, 0);
-  {
-    ChainIndex ix;
-    ix.init(ns);
-    std::vector<unsigned> repr;  // one canonical core per group
-    const LrItem* const kp = gr.kernPool.data();
-    // A tag is core.
-    for (unsigned s = 0; s < ns; ++s) {
-      std::uint64_t h =
-          lr_kernel_hash(kp + gr.kernAt[s], gr.kernLen[s], nullptr);
-      for (const std::uint64_t x : gr.tagKnown[s].w) h = hash_mix(h, x);
-      for (const std::uint64_t x : gr.tagTruth[s].w) h = hash_mix(h, x);
-      auto found = static_cast<unsigned>(repr.size());
-      for (unsigned i = ix.first(h); i != ChainIndex::kNone; i = ix.after(i))
-        if (gr.tagKnown[repr[i]] == gr.tagKnown[s] &&
-            gr.tagTruth[repr[i]] == gr.tagTruth[s] &&
-            lr_same_core(kp + gr.kernAt[repr[i]], gr.kernLen[repr[i]],
-                         kp + gr.kernAt[s], gr.kernLen[s])) {
-          found = i;
-          break;
-        }
-      if (found == repr.size()) {
-        repr.push_back(s);
-        ix.add(h, found);
-      }
-      grp[s] = found;
-    }
-  }
   const auto same_landings = [&](std::uint16_t a, std::uint16_t b) {
     const LrGuard& x = gr.progs[a];
     const LrGuard& y = gr.progs[b];
@@ -4024,7 +4072,9 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
 
     // Under `core` no two states share a core: nothing to re-fuse.
     if (WithLa) {
-      newId = lr_refuse(gr, actions);
+      std::vector<unsigned> core = lr_core_classes(gr);
+      lr_caller_lookaheads(gr, actions, core, overtakes);
+      newId = lr_refuse(gr, actions, std::move(core));
       const auto number = lr_representatives<unsigned>(newId, pick);
       for (unsigned& id : newId) id = number[id];
     } else {

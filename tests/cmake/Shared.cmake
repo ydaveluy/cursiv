@@ -6,6 +6,8 @@ cursiv_grammar(characterslr engines/shared/CharactersGrammar.hpp tchars::Lr ENGI
 # read as trivia is no bracket.
 # The text an implied token's condition reads lexes whole where the token may
 # be implied, in both engines.
+# A newline token is trivia to a block entry that reads none, though the
+# implied tags build the LR table with each caller's lookaheads apart.
 
 cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia::Ll)
 
