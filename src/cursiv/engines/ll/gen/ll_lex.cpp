@@ -449,12 +449,19 @@ void ll_mode_cover(LlBuiltProgram& b, const LexModes& modes) {
 // which the rule itself does not read from the choice on, may read over
 // another of the alphabet -- `#(` over `#` -- where the caller in hand takes
 // none of it: per choice, those terminals, which the descent asks of the
-// frames it stands in before it takes one.
+// frames it stands in before it takes one. What those frames answer, what each
+// caller reads past the call, is kept with them.
 void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
                      const LexModes& modes) {
   const auto& g = b.cfg;
   b.decFlag.assign(g.ndecisions, DynSet{});
   const LlExitReads exits(b);
+  b.callerReads.assign(b.nstates, DynSet{});
+  b.callerEnds.assign(b.nstates, 0);
+  for (const std::uint32_t r : b.callerAt) {
+    b.callerReads[r] = exits.reads[r];
+    b.callerEnds[r] = exits.ends[r];
+  }
   std::vector<DynSet> followers(g.nterms);
   for (std::uint32_t id = 0; id < g.nnodes; ++id)
     if (g.nodes[id].kind == LlShape::term)

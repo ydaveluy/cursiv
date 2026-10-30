@@ -520,6 +520,11 @@ inline void lex_emit_byte_runs(EmitOutput& o) {
   o.line("");
 }
 
+// The signature of the walk of every mode.
+inline constexpr std::string_view kLexWalkSignature =
+    "::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset len,\n"
+    "         ::std::uint16_t mode, ::cursiv::TextOffset i)";
+
 // The walk of every mode as one function, `walk_all(src, len, mode, i)`: a
 // computed goto enters the mode's ladder, each state it spells is a rung, a
 // state past the ladder is read in the rows from `Wtab`, and the walk ends at
@@ -543,10 +548,7 @@ void lex_emit_walk(EmitOutput& o, const LexDfaEmitter& dfa, Policy& policy,
       }
   }
   policy.walk_before(partial);
-  o.fmt(
-      "{}::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset len,\n",
-      linkage);
-  o.line("         ::std::uint16_t mode, ::cursiv::TextOffset i) {");
+  o.fmt("{}{} {{\n", linkage, kLexWalkSignature);
   o.raw(R"(  const ::cursiv::TextOffset start = i;
   ::cursiv::TextOffset far = i;
   ::cursiv::LexMatch match{i, 0xFFFFu};

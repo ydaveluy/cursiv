@@ -133,18 +133,12 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
         return;
       }
     }
-  // Trivia, or a line joined inside brackets.
-  const auto blank = [&](SymbolId t) -> bool {
-    if constexpr (kIndented<T>)
-      return T.terms[t].trivia || (T.terms[t].joins && c.indent.depth != 0);
-    else
-      return T.terms[t].trivia;
-  };
   TextOffset p = std::max(c.at, c.triviaAt);
   if (c.laValid && c.la.sym != kInvalidSymbol && c.la.sym != kEofSymbol) {
     p = c.la.begin;
     sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p || !blank(sc.term)) {
+    if (sc.term == kInvalidSymbol || sc.end == p ||
+        !ll_blank<T>(sc.term, c.indent.depth)) {
       c.la = Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
       c.laMode = mode;
       return;
@@ -173,7 +167,9 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
       continue;
     }
     if (sc.end <= p) sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p || !blank(sc.term)) break;
+    if (sc.term == kInvalidSymbol || sc.end == p ||
+        !ll_blank<T>(sc.term, c.indent.depth))
+      break;
     if (T.terms[sc.term].recorded)
       c.pending.push_back(Token{p, sc.end, sc.term});
     p = sc.end;
@@ -341,10 +337,7 @@ CURSIV_NOINLINE inline void ll_refuse_flagged(LlContext& c, std::uint16_t mode,
     skip.set(c.la.sym);
     const Scan sc = lex_match(tape, c.src, c.len, mode, c.la.begin);
     if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
-    bool blank = T.terms[sc.term].trivia;
-    if constexpr (kIndented<T>)
-      blank = blank || (T.terms[sc.term].joins && c.indent.depth != 0);
-    if (blank) return;
+    if (ll_blank<T>(sc.term, c.indent.depth)) return;
     c.la = Token{c.la.begin, sc.end, sc.term, mode};
     c.laMode = mode;
   }
@@ -381,10 +374,8 @@ inline Token ll_ahead_peek(const LlContext& c,
     const Scan sc = ll_scan<T>(c, mode, p);
     if (sc.term == kInvalidSymbol || sc.end == p)
       return Token{p, p, kInvalidSymbol};
-    bool blank = T.terms[sc.term].trivia;
-    if constexpr (kIndented<T>)
-      blank = blank || (T.terms[sc.term].joins && a.at.depth != 0);
-    if (!blank) return Token{p, sc.end, sc.term, mode};
+    if (!ll_blank<T>(sc.term, a.at.depth))
+      return Token{p, sc.end, sc.term, mode};
     p = sc.end;
     head = false;
   }

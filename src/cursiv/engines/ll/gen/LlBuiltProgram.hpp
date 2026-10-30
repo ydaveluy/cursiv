@@ -179,6 +179,11 @@ struct LlBuiltProgram : ShapeOverflow {
   // over another terminal of that alphabet: the descent asks the frames it
   // stands in before it takes one. Empty where there are none.
   std::vector<DynSet> decFlag{};
+  // Per state a call returns into, what its caller reads from there on before
+  // it ends, and whether it may end reading nothing: what a frame answers when
+  // the descent asks it. Empty for every other state, which no frame names.
+  std::vector<DynSet> callerReads{};
+  std::vector<std::uint8_t> callerEnds{};
   std::vector<std::uint16_t> lookMode{};
   // What an episode reads besides the graph, per rule and per choice: see
   // `LlTable`. Empty where none is flagged.

@@ -33,6 +33,7 @@
 #include "cursiv/engines/lr/table/LrActionKind.hpp"
 #include "cursiv/engines/shared/gen/AstRegistry.hpp"
 #include "cursiv/engines/shared/gen/AstRowOf.hpp"
+#include "cursiv/engines/shared/gen/CommonArtifacts.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
 #include "deferrednested/generated/NestedFirst/Module.hpp"
@@ -716,7 +717,7 @@ void groups_spread_over_units() {
     return n;
   };
   const auto lone = cursiv::lr_emit_parser_files(done, "lone");
-  CHECK(lone.size() == 2 + cursiv::kLrGroupUnits);
+  CHECK(lone.size() == 2 + cursiv::kParserUnits);
   CHECK(lone[0].first == "ParserStates.cpp" &&
         lone[1].first == "ParserGroups.hpp");
   CHECK(count(lone[0].second, "static ::cursiv::LrExit states_0(") == 1);
@@ -732,7 +733,7 @@ void groups_spread_over_units() {
         1);
   CHECK(count(states, "::cursiv::LrExit states_") == 0);
   std::size_t defined = 0;
-  for (unsigned u = 0; u < cursiv::kLrGroupUnits; ++u) {
+  for (unsigned u = 0; u < cursiv::kParserUnits; ++u) {
     const auto& [name, text] = split[2 + u];
     CHECK(name == "ParserGroups" + std::to_string(u) + ".cpp");
     const std::size_t mine = count(text, "::std::uint32_t e) {");

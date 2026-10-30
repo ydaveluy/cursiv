@@ -14,7 +14,6 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/engines/ll/gen/LlExitReads.hpp"
 #include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLexView.hpp"
 #include "cursiv/engines/shared/gen/CLiteral.hpp"
@@ -477,14 +476,10 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kCallerAt", a.callerAt);
   o.array("::std::uint32_t", "kReturnClass", a.returnClass);
   if (callers) {
-    // Only the states a call returns into: no frame names any other.
-    const LlExitReads exits(a);
-    std::vector<DynSet> rows(a.nstates);
-    for (const std::uint32_t r : a.callerAt) rows[r] = exits.reads[r];
-    const TermRows pool(rows, words);
+    const TermRows pool(a.callerReads, words);
     std::vector<std::uint32_t> at(a.nstates);
-    for (std::uint32_t s = 0; s < a.nstates; ++s) at[s] = pool.at[s] << 1;
-    for (const std::uint32_t r : a.callerAt) at[r] |= exits.ends[r];
+    for (std::uint32_t s = 0; s < a.nstates; ++s)
+      at[s] = (pool.at[s] << 1) | a.callerEnds[s];
     o.array("::std::uint64_t", "kCallerReads", pool.pool);
     o.array("::std::uint32_t", "kCallerReadAt", at);
   }

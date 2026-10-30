@@ -142,6 +142,23 @@ inline std::uint32_t indent_pop(const std::vector<IndentLevel>& arena,
   return head == kNoIndent ? kNoIndent : arena[head].prev;
 }
 
+// The blanks of a line from `p`, short of `end`: `run` starts past the last
+// form feed among them, and `stop` is where they stop.
+struct IndentRun {
+  TextOffset run;
+  TextOffset stop;
+};
+inline IndentRun indent_run(const char* src, TextOffset p, TextOffset end) {
+  IndentRun r{p, p};
+  for (; r.stop < end; ++r.stop) {
+    if (src[r.stop] == '\f')
+      r.run = r.stop + 1;
+    else if (!indent_byte(static_cast<unsigned char>(src[r.stop])))
+      break;
+  }
+  return r;
+}
+
 // The token the run [run, q) of the line at `p` says against the reading's
 // top level: the run is the line's leading blanks, past any form feed. An
 // indent covers the run; a dedent is zero-width at the line start, and the
@@ -178,14 +195,7 @@ inline bool indent_virtual_at(const char* src, TextOffset len,
                               SymbolId dedentTerm, TextOffset p, Token& out,
                               Held&& held, TextOffset* reached = nullptr) {
   if (!indent_line_start(src, p, held)) return false;
-  TextOffset run = p;
-  TextOffset q = p;
-  for (; q < len; ++q) {
-    if (src[q] == '\f')
-      run = q + 1;
-    else if (!indent_byte(static_cast<unsigned char>(src[q])))
-      break;
-  }
+  const auto [run, q] = indent_run(src, p, len);
   if (reached != nullptr) *reached = q < len ? q + 1 : q;
   if (q != len && (src[q] == '\n' || src[q] == '\r')) return false;
   while (head != kNoIndent && arena[head].mute &&

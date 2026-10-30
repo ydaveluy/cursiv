@@ -326,8 +326,8 @@ Token ll_search_peek_ahead(
     }
     if (p >= c.len) return Token{p, p, kEofSymbol};
     if (cross && look != kNoRow) {
-      const bool joined = kIndented<T> && ahead.at.depth != 0;
-      const auto blanks = joined ? T.modeJoinedTrivia[look] : T.modeTrivia[look];
+      const auto blanks =
+          ll_skips_of<T>(look, kIndented<T> && ahead.at.depth != 0);
       const Scan blank = ll_search_scan<T>(c, s, ll_search_row<T>(s, p),
                                            blanks, p);
       if (ll_search_spent(s)) return Token{p, p, kInvalidSymbol};
@@ -350,10 +350,8 @@ Token ll_search_peek_ahead(
     const Scan sc = ll_search_scan<T>(c, s, ll_search_row<T>(s, p), mode, p);
     if (ll_search_spent(s) || sc.term == kInvalidSymbol || sc.end == p)
       return Token{p, p, kInvalidSymbol};
-    bool blank = cross && look == kNoRow && T.terms[sc.term].trivia;
-    if constexpr (kIndented<T>)
-      blank = blank || (cross && look == kNoRow && T.terms[sc.term].joins &&
-                        ahead.at.depth != 0);
+    const bool blank =
+        cross && look == kNoRow && ll_blank<T>(sc.term, ahead.at.depth);
     if (!blank) return Token{p, sc.end, sc.term, mode};
     p = sc.end;
     head = false;

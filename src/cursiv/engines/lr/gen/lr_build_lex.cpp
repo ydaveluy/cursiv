@@ -717,10 +717,8 @@ void lr_lex_condition_flags(LrBuildTable& A) {
   const auto shut = [&](std::uint16_t bound) -> const std::vector<char>& {
     auto [at, fresh] = shutBy.try_emplace(bound, A.ncls, 1);
     if (fresh) {
-      const ByteSet none{};
-      const ByteSet& refused = bound == kNoSet ? none : A.cfg.sets[bound];
-      const ByteSet decoded =
-          bound == kNoSet ? none : lex_decode_bytes(A.cfg, bound);
+      const ByteSet& refused = A.cfg.sets[bound];
+      const ByteSet decoded = lex_decode_bytes(A.cfg, bound);
       for (unsigned b = 0; b < 256; ++b)
         if (const auto byte = static_cast<unsigned char>(b);
             !refused.has(byte) || decoded.has(byte))
@@ -749,15 +747,21 @@ void lr_lex_condition_flags(LrBuildTable& A) {
       each_bit(acc.w.data(), acc.w.size(), [&](std::size_t bit) {
         const auto u = static_cast<unsigned>(bit);
         if (u >= nT) return;
-        // A match that reads on past `u`, where `u` may stand, takes its text.
-        const std::vector<char>& closed = shut(A.dfa_acc_bound(s, u));
+        // A match that reads on past `u`, where `u` may stand, takes its text:
+        // with no boundary, any the walk reads on to.
+        const std::uint16_t bound = A.dfa_acc_bound(s, u);
         DynSet taking;
-        for (unsigned c = 0; c < A.ncls; ++c)
-          if (const auto to = A.next_dfa(s, static_cast<std::uint8_t>(c));
-              to != kDeadState && !closed[c]) {
-            taking |= A.dfa_acc_set(to) & all;
-            taking |= past[to];
-          }
+        if (bound == kNoSet) {
+          taking = past[s];
+        } else {
+          const std::vector<char>& closed = shut(bound);
+          for (unsigned c = 0; c < A.ncls; ++c)
+            if (const auto to = A.next_dfa(s, static_cast<std::uint8_t>(c));
+                to != kDeadState && !closed[c]) {
+              taking |= A.dfa_acc_set(to) & all;
+              taking |= past[to];
+            }
+        }
         // So does one the walk elects over `u` on the same text, or that
         // reserves its spelling.
         each_bit(acc.w.data(), acc.w.size(), [&](std::size_t t) {
@@ -771,8 +775,7 @@ void lr_lex_condition_flags(LrBuildTable& A) {
       });
     }
     if (flags.none()) continue;
-    A.modeFlag.row(0, A.nmodes);
-    A.modeFlag[m] |= flags;
+    A.modeFlag.row(0, A.nmodes)[m] |= flags;
   }
 }
 

@@ -487,7 +487,7 @@ inline Scan ll_look_blank(const LlContext& c, TextOffset p, std::uint16_t look,
                           TextOffset& inspected, bool& ended,
                           const LlMask<T.termWords>* viable = nullptr,
                           std::uint16_t scanMode = T.errMode) {
-  const auto mode = joined ? T.modeJoinedTrivia[look] : T.modeTrivia[look];
+  const auto mode = ll_skips_of<T>(look, joined);
   TextOffset halt = p;
   const Scan result = ll_match_text<T>(c.src, c.len, mode, p, halt);
   inspected = std::max(inspected, halt < c.len ? halt + 1u : halt);
@@ -561,7 +561,7 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
     const Scan sc = ll_look_blank<T>(c, p, look, joined, out, inspected, ended,
                                      &viable, scanMode);
     if (sc.term == kInvalidSymbol || sc.end == p) break;
-    assert(T.terms[sc.term].trivia || (joined && T.terms[sc.term].joins));
+    assert(ll_blank<T>(sc.term, joined ? indent->at.depth : 0u));
     p = sc.end;
     head = false;
   }

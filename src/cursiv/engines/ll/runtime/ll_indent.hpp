@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/LlLookIndent.hpp"
 #include "cursiv/engines/ll/table/LlAtn.hpp"
@@ -50,6 +51,16 @@ inline bool ll_end_stands(Admits&& admits) {
 template <const auto& T>
 inline bool ll_mode_ends(std::uint16_t mode) {
   return ll_end_stands<T>([&](auto t) { return T.mode_admits(mode, t); });
+}
+
+// Whether a reading at bracket depth `depth` crosses `t` as a blank: a trivia,
+// or inside brackets a line it joins.
+template <const auto& T>
+CURSIV_ALWAYS_INLINE constexpr bool ll_blank(SymbolId t, std::uint32_t depth) {
+  if constexpr (kIndented<T>)
+    return T.terms[t].trivia || (T.terms[t].joins && depth != 0);
+  else
+    return T.terms[t].trivia;
 }
 
 // Whether one of the readings stands before an edge that reads `term`.

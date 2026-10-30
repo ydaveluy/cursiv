@@ -18,6 +18,11 @@
 
 namespace cursiv {
 
+// The units a parser's code spreads over, `ParserRules<k>.cpp` or
+// `ParserGroups<k>.cpp`. The build lists them before a generator runs, so
+// every grammar writes them all, the ones its parser does not fill empty.
+inline constexpr unsigned kParserUnits = 8;
+
 struct CommonArtifacts {
   // The engine's table, its parser's declaration, and the units the parser is
   // spelled in, each a file name and its text.

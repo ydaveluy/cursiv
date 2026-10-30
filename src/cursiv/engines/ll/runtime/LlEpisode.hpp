@@ -688,15 +688,18 @@ class LlEpisode {
     return _decided ? _answer : kNoRow;
   }
 
+  // Whether the episode stands inside brackets, where its blanks join lines.
+  bool joined() const { return kIndented<T> && _own.at.depth != 0; }
+
   // The skip configuration a reading's next token is crossed under here --
   // its joined blanks inside brackets only -- and a mode that has it: where
   // the grammar has regions, the first token it reads names it.
-  std::pair<std::uint32_t, std::uint16_t> look_of(const LlThread& t) const {
+  std::pair<std::uint16_t, std::uint16_t> look_of(const LlThread& t) const {
     std::uint16_t mode = T.look_mode(dec());
     if constexpr (T.lookMode != nullptr) {
       if (const std::uint16_t own = ll_read_mode<T>(t.state); own != kNoRow)
         mode = own;
-      return {ll_skips_of<T>(mode, kIndented<T> && _own.at.depth != 0), mode};
+      return {ll_skips_of<T>(mode, joined()), mode};
     } else {
       return {0, mode};
     }
@@ -750,8 +753,7 @@ class LlEpisode {
     TextOffset inspected = at;
     bool ended = false;
     const Scan blank =
-        ll_look_blank<T>(ctx(), at, look, kIndented<T> && _own.at.depth != 0,
-                         out, inspected, ended);
+        ll_look_blank<T>(ctx(), at, look, joined(), out, inspected, ended);
     touch({{}, inspected, ended});
     return blank.term != kInvalidSymbol && blank.end != at;
   }
@@ -764,7 +766,7 @@ class LlEpisode {
 
   // Whether trivia stands at `at` under the skip configuration of some reading.
   bool blank_for_any(const std::vector<LlThread>& threads, TextOffset at) {
-    std::vector<std::uint32_t> seen;
+    std::vector<std::uint16_t> seen;
     for (const LlThread& t : threads) {
       const auto look = look_of(t);
       if (std::find(seen.begin(), seen.end(), look.first) != seen.end())
@@ -795,7 +797,7 @@ class LlEpisode {
                     const std::vector<std::uint16_t>& read, const IndentAt& at,
                     TextOffset held) {
     const auto first = look_of(threads.front()).first;
-    std::vector<std::uint32_t> seen{first};
+    std::vector<std::uint16_t> seen{first};
     const IndentAt leadAt = _own.at;
     const TextOffset leadHeld = _own.held;
     std::vector<std::uint16_t> again;
@@ -921,7 +923,7 @@ class LlEpisode {
   bool held_back(std::uint32_t edge, TextOffset from, TextOffset gapFrom) {
     const std::uint16_t node = T.edgeNode[edge];
     if (node == kNoRow) return false;
-    const bool implied = implied_edge(edge);
+    const bool implied = T.nodes[node].term != kNoRow;
     LlAhead a = ll_ahead(ctx());
     a.p = from;
     a.head = false;
@@ -1063,7 +1065,7 @@ class LlEpisode {
   Verdict visit_tracked(Position& p, TextOffset gapFrom, std::uint32_t lull) {
     const TextOffset from = p.key[0];
     std::vector<LlThread>& threads = p.threads;
-    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> groupIndex;
+    std::map<std::pair<std::uint32_t, std::uint16_t>, std::uint32_t> groupIndex;
     _groupOf.assign(threads.size(), 0);
     _groupLook.clear();
     for (std::size_t k = 0; k < threads.size(); ++k) {

@@ -33,9 +33,11 @@ struct LlExitReads {
       }
     std::vector<std::uint32_t> todo(a.nstates);
     for (std::uint32_t s = 0; s < a.nstates; ++s) todo[s] = s;
+    std::vector<std::uint8_t> queued(a.nstates, 1);
     while (!todo.empty()) {
       const std::uint32_t s = todo.back();
       todo.pop_back();
+      queued[s] = 0;
       bool grew = false;
       bool end = a.states[s].kind == LlAtnKind::ruleStop;
       for (const LlAtnEdge& e : out(s)) {
@@ -57,7 +59,12 @@ struct LlExitReads {
         ends[s] = 1;
         grew = true;
       }
-      if (grew) todo.insert(todo.end(), into[s].begin(), into[s].end());
+      if (grew)
+        for (const std::uint32_t from : into[s])
+          if (queued[from] == 0) {
+            queued[from] = 1;
+            todo.push_back(from);
+          }
     }
   }
 };
