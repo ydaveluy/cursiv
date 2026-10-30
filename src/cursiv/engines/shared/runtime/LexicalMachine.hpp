@@ -1,5 +1,6 @@
-// The suspended steps of a recursive byte recognizer. Calls keep their
-// cursors on the heap and share completed readings within one recognition.
+// The runtime of the byte recognizers: their cursors, captures and words, and
+// the suspended steps of a recursive one. Calls keep their cursors on the
+// heap and share completed readings within one recognition.
 #pragma once
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "cursiv/engines/shared/runtime/PredicateState.hpp"
+#include "cursiv/engines/shared/table/TermInfo.hpp"
 
 namespace cursiv {
 
@@ -83,6 +85,109 @@ inline PredicateState lexical_endpoints(const LexicalState& state) {
   for (std::size_t i = 0; i < state.size(); ++i)
     out.add(PredicateCursor{state[i].at});
   return out;
+}
+
+// Many words read as data rather than code, as a character class over several
+// bytes lowers to: a choice of words, or a run of refusals of words. Each word
+// in `words` is its length, the class that rescues a refusal of it (none in a
+// choice), then its classes; `order` from `opens[b]` to `opens[b + 1]` lists
+// the words that can open on byte `b`, as their offsets in `words`, in order.
+struct LexicalWords {
+  const std::uint16_t* words;
+  std::size_t size;
+  const std::uint32_t* opens;
+  const std::uint32_t* order;
+};
+
+// Reads the word at `word` from `at`, which then ends past it.
+template <class Bound>
+bool lexical_word(const Bound& bound, const std::uint16_t* word,
+                  const char* src, TextOffset len, TextOffset& at,
+                  TextOffset& seen) {
+  for (unsigned j = 0; j < word[0]; ++j) {
+    seen = std::max(seen, at < len ? at + 1 : len);
+    if (at >= len || !bound.at(word[2 + j], src, at, len)) return false;
+    ++at;
+  }
+  return true;
+}
+
+// The first word of the choice that reads from `at`, which then ends past it.
+// A word that cannot open on the byte there would have read that byte alone.
+template <class Bound>
+bool lexical_first_word(const Bound& bound, const LexicalWords& w,
+                        const char* src, TextOffset len, TextOffset& at,
+                        TextOffset& seen) {
+  seen = std::max(seen, at < len ? at + 1 : len);
+  if (at >= len) return false;
+  const auto b = static_cast<unsigned char>(src[at]);
+  for (auto k = w.opens[b]; k < w.opens[b + 1]; ++k)
+    if (auto p = at;
+        lexical_word(bound, w.words + w.order[k], src, len, p, seen)) {
+      at = p;
+      return true;
+    }
+  return false;
+}
+
+// Every reading of the choice's words from the cursors of `in`, the words in
+// order; `Final` stops at the first word that reads.
+template <bool Final, class Bound>
+LexicalState lexical_words(const Bound& bound, const LexicalWords& w,
+                           const char* src, TextOffset len,
+                           const LexicalState& in, TextOffset& seen) {
+  LexicalState out;
+  if (in.size() == 1) {
+    const auto c = in[0];
+    seen = std::max(seen, c.at < len ? c.at + 1 : len);
+    if (c.at >= len) return out;
+    const auto b = static_cast<unsigned char>(src[c.at]);
+    for (auto k = w.opens[b]; k < w.opens[b + 1]; ++k)
+      if (auto p = c;
+          lexical_word(bound, w.words + w.order[k], src, len, p.at, seen)) {
+        out.add(p);
+        if constexpr (Final) return out;
+      }
+    return out;
+  }
+  for (std::size_t o = 0; o < w.size && !in.empty(); o += 2u + w.words[o]) {
+    for (std::size_t k = 0; k < in.size(); ++k)
+      if (auto c = in[k];
+          lexical_word(bound, w.words + o, src, len, c.at, seen))
+        out.add(c);
+    if constexpr (Final)
+      if (!out.empty()) return out;
+  }
+  return out;
+}
+
+// Whether no refusal of the run holds `at` back: none of its words is spelled
+// there, short of its rescue. Every word is one byte at least, so one that
+// cannot open on the byte at `at` refuses nothing.
+template <class Bound>
+bool lexical_refused(const Bound& bound, const LexicalWords& w,
+                     const char* src, TextOffset len, TextOffset at,
+                     TextOffset& seen) {
+  seen = std::max(seen, at < len ? at + 1 : len);
+  if (at >= len) return true;
+  const auto b = static_cast<unsigned char>(src[at]);
+  for (auto k = w.opens[b]; k < w.opens[b + 1]; ++k) {
+    const std::uint16_t* const word = w.words + w.order[k];
+    TextOffset probe = at;
+    bool spelled = true;
+    for (unsigned j = 0; j < word[0] && spelled; ++j) {
+      const auto set = word[2 + j];
+      seen =
+          std::max(seen, probe < len ? bound.reach(set, src, probe, len) : len);
+      spelled = probe < len && bound.at(set, src, probe, len);
+      ++probe;
+    }
+    if (!spelled) continue;
+    if (word[1] == kNoSet || probe >= len) return false;
+    seen = std::max(seen, bound.reach(word[1], src, probe, len));
+    if (!bound.at(word[1], src, probe, len)) return false;
+  }
+  return true;
 }
 
 class LexicalMachine {

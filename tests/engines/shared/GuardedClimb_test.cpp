@@ -62,6 +62,12 @@ int main() {
       }
       CHECK(ok);
     }
+  // A symbol of the class the arrow's guard refuses, two or three bytes long,
+  // leaves no arrow.
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()})
+    for (std::string_view text :
+         {"for (x <-\u2218 ys) yield x", "for (x <-\u00a9 ys) yield x"})
+      CHECK(!parser->parse(text).diagnostics.empty());
   // A blank line behind a word operator ends the expression; one break does
   // not.
   for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {

@@ -20,7 +20,9 @@
 #include "cursiv/test/Check.hpp"
 #include "engines/ll/CaretAgreementGrammar.hpp"
 #include "engines/ll/IndirectFoldGrammar.hpp"
+#include "engines/ll/LexicalPredicatesGrammar.hpp"
 #include "engines/ll/StagedGuardGrammar.hpp"
+#include "engines/shared/GuardedClimbGrammar.hpp"
 
 namespace {
 
@@ -656,6 +658,46 @@ void a_table_holds_only_the_data_its_readers_ask_for() {
   CHECK(source.functions.find("inline bool condition(") == std::string::npos);
 }
 
+// The functions of the byte recognizers a table's unit defines, each by its
+// body with its own name taken out.
+template <class G>
+std::vector<std::string> lexical_bodies(const char* ns) {
+  const auto done = cursiv::LlFinalProgram::make(
+      cursiv::ll_build_program(cursiv::LlLowering<G>::lower()), ns);
+  CHECK(done.has_value());
+  if (!done) return {};
+  const std::string text = cursiv::ll_emit_table(*done, ns).functions;
+  std::vector<std::string> bodies;
+  for (std::size_t at = text.find("inline "); at != std::string::npos;
+       at = text.find("inline ", at + 1)) {
+    const std::size_t name = text.find("lexical_", at);
+    const std::size_t open = text.find('(', at);
+    if (name == std::string::npos || open < name ||
+        (text.compare(name, 13, "lexical_fixed") != 0 &&
+         text.compare(name, 12, "lexical_node") != 0))
+      continue;
+    const std::size_t end = text.find("\n}\n", open);
+    bodies.push_back(text.substr(at, name - at) +
+                     text.substr(open, end - open));
+  }
+  return bodies;
+}
+
+// A recognizer is spelled once per shape, however often the grammar repeats
+// it, and a choice of more words than a mask holds, as a class of characters
+// over several bytes lowers to, is read as data.
+void byte_recognizers_spell_each_shape_once() {
+  auto bodies = lexical_bodies<tlexicalpredicates::Ll>("shape_test");
+  CHECK(!bodies.empty());
+  std::ranges::sort(bodies);
+  CHECK(std::ranges::adjacent_find(bodies) == bodies.end());
+  const auto words = lexical_bodies<tguardedclimb::Ll>("words_test");
+  CHECK(!words.empty() && words.size() < 32);
+  CHECK(std::ranges::any_of(words, [](const std::string& body) {
+    return body.find("::cursiv::lexical_words<") != std::string::npos;
+  }));
+}
+
 }  // namespace
 
 int main() {
@@ -678,5 +720,6 @@ int main() {
   plain_calls_stack_no_deeper_than_the_limit();
   return_states_preserve_named_and_synthetic_calls();
   a_table_holds_only_the_data_its_readers_ask_for();
+  byte_recognizers_spell_each_shape_once();
   return cursiv::test::report("LlGeneration_test");
 }
