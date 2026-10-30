@@ -1080,10 +1080,14 @@ class CaretStacks {
     if (p > at || frame.laid.indent.depth != 0 ||
         !indent_line_start(_text.data(), p, [held] { return held; }))
       return false;
+    TextOffset run = p;
     for (TextOffset i = p; i < at; ++i)
-      if (!indent_byte(static_cast<unsigned char>(_text[i]))) return false;
+      if (_text[i] == '\f')
+        run = i + 1;
+      else if (!indent_byte(static_cast<unsigned char>(_text[i])))
+        return false;
     return indent_token(_text.data(), _levels, frame.laid.indent.head, _indent,
-                        _dedent, p, at, out);
+                        _dedent, p, run, at, out);
   }
 
   bool moves(SymbolId t) const {

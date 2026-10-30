@@ -195,20 +195,60 @@ void muted_levels_lay_no_dedent_at_the_end() {
 }
 
 // Each way a line's indentation goes wrong -- too deep, back to no level,
-// another blank, a form feed -- is one repair that says so, in both engines.
+// another blank -- is one repair that says so, in both engines.
 void an_indentation_error_says_so() {
   const auto ll = tllindent::generated::Ll::create_parser();
   const auto lr = tindent::generated::G::create_parser();
+  const std::string_view mixed =
+      "Unexpected indentation: this line mixes tabs and spaces differently "
+      "from the lines above.";
   for (const cursiv::Parser* const p : {ll.get(), lr.get()})
-    for (const std::string_view text :
-         {"a\n  b\nc\n", "a:\n    b\n  c\n", "a:\n\tb\n    c\n",
-          "a:\n  b\n\f  c\n"}) {
+    for (const auto& [text, message] :
+         {std::pair<std::string_view, std::string_view>{
+              "a\n  b\nc\n", "Unexpected indentation."},
+          {"a:\n    b\n  c\n", "Unexpected indentation."},
+          {"a:\n\tb\n    c\n", mixed}}) {
       const auto result = p->parse(text);
       CHECK(result.diagnostics.size() == 1);
       for (const auto& d : result.diagnostics)
-        CHECK(cursiv::repair_message(p->getGrammar(), d, text) ==
-              "Unexpected indentation.");
+        CHECK(cursiv::repair_message(p->getGrammar(), d, text) == message);
     }
+}
+
+// A form feed starts a line's indentation again, as in Python: the blanks
+// after the last one are the line's indentation, in both engines. A line of
+// form feeds is blank, and past content a form feed is plain trivia.
+void a_form_feed_starts_the_indentation_again() {
+  const auto ll = tllindent::generated::Ll::create_parser();
+  const auto lr = tindent::generated::G::create_parser();
+  const auto rl = tllindent::generated::Ll::create_ast_reflection();
+  const auto rr = tindent::generated::G::create_ast_reflection();
+  for (const auto& [fed, plain] :
+       {std::pair<std::string_view, std::string_view>{"\fa\n", "a\n"},
+        {"a:\n\f  b\n", "a:\n  b\n"},
+        {"a:\n  b\n\f  c\n", "a:\n  b\n  c\n"},
+        {"a:\n  b\n  \f  c\n", "a:\n  b\n  c\n"},
+        {"a:\n  b\n\fc\n", "a:\n  b\nc\n"},
+        {"a:\n  b\n\f\nc\n", "a:\n  b\nc\n"},
+        {"a:\n  b:\n    c\n\fd\n", "a:\n  b:\n    c\nd\n"},
+        {"a:\n  b\n  \f", "a:\n  b\n"},
+        {"a\n\f", "a\n"},
+        {"a:\n  b\f", "a:\n  b"},
+        {"a:\n  b \f\n", "a:\n  b\n"}}) {
+    for (const auto& [p, r] : {std::pair{ll.get(), rl.get()},
+                                std::pair{lr.get(), rr.get()}}) {
+      const auto a = p->parse(fed);
+      const auto b = p->parse(plain);
+      CHECK(a.diagnostics.empty());
+      std::string x, y;
+      cursiv::test::ast_of(*r, *a.value, x);
+      cursiv::test::ast_of(*r, *b.value, y);
+      CHECK(x == y);
+    }
+  }
+  // The blanks after the form feed match no open level.
+  for (const cursiv::Parser* const p : {ll.get(), lr.get()})
+    CHECK(!p->parse("a:\n  b\n \f c\n").diagnostics.empty());
 }
 
 // An indent a repair invents opens a level the line back at the enclosing one
@@ -263,23 +303,6 @@ void a_stray_indent_costs_one_fault() {
        "    a\n  b\nc\n", "a::\n  a\nb\n", "s0::\n  0\n", "s0:s1\n",
        "s0\n s1\n", "s0\n\ts1\n", "s0\n  s1\n", "0:\n  s0\n", "s0\ns1\n s\n",
        "\ns0\n\ts1\n", "a:\n  b\n    c"});
-}
-
-// A form feed in a run is an indentation error, wherever the line goes on --
-// to the end of the input too. Past content it is plain trivia.
-void a_form_feed_in_a_run_is_an_error() {
-  const auto ll = tllindent::generated::Ll::create_parser();
-  for (const std::string_view text :
-       {"a:\n  b\n\f\nc\n", "a:\n  b:\n    c\n\fd\n", "a:\n  b\n \f c\n",
-        "a\n\f", "a:\n  b\n\f", "a:\n  b\n  \f", "a:\n  b:\n    c\n\f",
-        "a:\n  b\nc\n\f"}) {
-    const auto result = ll->parse(text);
-    CHECK(result.accepted && !result.diagnostics.empty());
-  }
-  for (const std::string_view text : {"a:\n  b\f", "a:\n  b \f\n"}) {
-    const auto result = ll->parse(text);
-    CHECK(result.accepted && result.diagnostics.empty());
-  }
 }
 
 // A bracket a repair invents in front of the text it cannot read is a level
@@ -521,10 +544,10 @@ int main() {
       *tindent::laid::generated::Cases::create_parser());
   an_invented_indent_opens_a_level();
   an_indentation_error_says_so();
+  a_form_feed_starts_the_indentation_again();
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
   an_invented_block_closed_at_once_ends();
-  a_form_feed_in_a_run_is_an_error();
   std::string suites;
   for (unsigned i = 0; i < 1024; ++i) suites += "a:\n  b\n";
   parity(*tllindent::generated::Ll::create_parser(),

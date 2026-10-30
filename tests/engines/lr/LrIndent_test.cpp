@@ -149,17 +149,18 @@ int main() {
   // than the enclosing one opens, and blank lines in between count for nothing.
   CHECK(parse("a:\n\tb:\n\t\tc\n\n\td\n\ne\n") == "a(b(c) d) e");
   CHECK(parse("a:\n        b\nc:\n  d\n") == "a(b) c(d)");
-  // A form feed in a run is an indentation error, wherever the line goes on.
-  CHECK(recovers("a:\n  b\n\f\nc\n"));
-  CHECK(recovers("a:\n  b:\n    c\n\fd\n"));
+  // A form feed starts the run again, as in Python: a line of form feeds is
+  // blank, the blanks after the last one are the line's run, and one past
+  // content is plain trivia.
+  CHECK(parse("a:\n  b\n\f\nc\n") == "a(b) c");
+  CHECK(parse("a:\n  b:\n    c\n\fd\n") == "a(b(c)) d");
   CHECK(recovers("a:\n  b\n \f c\n"));
-  // ...and so is one on the last line, where no line ending follows. Past
-  // content it is plain trivia.
-  CHECK(recovers("a\n\f"));
-  CHECK(recovers("a:\n  b\n\f"));
-  CHECK(recovers("a:\n  b\n  \f"));
-  CHECK(recovers("a:\n  b:\n    c\n\f"));
-  CHECK(recovers("a:\n  b\nc\n\f"));
+  // ...and on the last line, where no line ending follows.
+  CHECK(parse("a\n\f") == "a");
+  CHECK(parse("a:\n  b\n\f") == "a(b)");
+  CHECK(parse("a:\n  b\n  \f") == "a(b)");
+  CHECK(parse("a:\n  b:\n    c\n\f") == "a(b(c))");
+  CHECK(parse("a:\n  b\nc\n\f") == "a(b) c");
   CHECK(parse("a:\n  b\f") == "a(b)");
   CHECK(parse("a:\n  b \f\n") == "a(b)");
   // A line back to no level that was opened is no dedent the grammar takes.

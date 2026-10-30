@@ -69,15 +69,49 @@ std::string quote_found(std::string_view text) {
   return out;
 }
 
-// A deletion of a line's leading blanks, or one standing before them where a
-// dropped indent took no byte: the indentation was refused, not the token
-// after it.
-bool refuses_indentation(std::string_view text, const ParseDiagnostic& d) {
-  const bool lineStart =
-      d.begin == 0 || text[d.begin - 1] == '\n' || text[d.begin - 1] == '\r';
-  const std::size_t run =
-      std::min(text.find_first_not_of(kIndentBlanks, d.begin), text.size());
-  return lineStart && run > d.begin && d.end <= run;
+// Where the line `at` stands in starts.
+std::size_t line_start(std::string_view text, std::size_t at) {
+  while (at > 0 && text[at - 1] != '\n' && text[at - 1] != '\r') --at;
+  return at;
+}
+
+// The end of the leading blanks from `at`.
+std::size_t blanks_end(std::string_view text, std::size_t at) {
+  return std::min(text.find_first_not_of(kIndentBlanks, at), text.size());
+}
+
+// A deletion that starts in a line's leading blanks and takes some of them,
+// or one standing before them where a dropped indent took no byte: it
+// refuses the line's indentation, and with it any text it goes on over.
+bool starts_indentation(std::string_view text, const ParseDiagnostic& d) {
+  const std::size_t head = line_start(text, d.begin);
+  return blanks_end(text, head) >= d.begin &&
+         blanks_end(text, d.begin) > d.begin;
+}
+
+// Whether the line `at` stands in starts with a space where a line above
+// starts with a tab, or the reverse: indentation Python refuses too, and the
+// one cause a reader cannot see.
+bool mixes_tabs_and_spaces(std::string_view text, std::size_t at) {
+  const auto kinds = [&text](std::size_t from, std::size_t to) {
+    unsigned k = 0;
+    for (std::size_t i = from; i < to; ++i)
+      k |= text[i] == ' ' ? 1U : text[i] == '\t' ? 2U : 0U;
+    return k;
+  };
+  const std::size_t head = line_start(text, at);
+  const unsigned here = kinds(head, blanks_end(text, head));
+  unsigned above = 0;
+  for (std::size_t b = 0; b < head;) {
+    const std::size_t e = blanks_end(text, b);
+    // A blank line indents nothing.
+    if (e < head && text[e] != '\n' && text[e] != '\r') above |= kinds(b, e);
+    const std::size_t next = text.find_first_of("\n\r", e);
+    if (next == std::string_view::npos || next >= head) break;
+    b = next + 1;
+  }
+  return ((here & 1U) != 0 && (above & 2U) != 0) ||
+         ((here & 2U) != 0 && (above & 1U) != 0);
 }
 
 // `'a'`, `'a' or 'b'`, `one of 'a', 'b', 'c'`.
@@ -146,9 +180,16 @@ std::string repair_message(const Grammar& grammar, const ParseDiagnostic& d,
       // Text the parser had to skip to carry on: what was expected is what it
       // skipped towards, so it is named second here -- unless skipping it is
       // what was expected, which is said once, not twice. Skipped blanks
-      // quote to nothing, and at a line start they are its indentation.
-      if (sane && refuses_indentation(text, d))
-        return "Unexpected indentation.";
+      // quote to nothing, and at a line start they are its indentation. A
+      // line indented with tabs and spaces unlike the lines above says so,
+      // whatever else the deletion took.
+      if (sane && starts_indentation(text, d)) {
+        if (mixes_tabs_and_spaces(text, d.begin))
+          return "Unexpected indentation: this line mixes tabs and spaces "
+                 "differently from the lines above.";
+        if (d.end <= blanks_end(text, d.begin))
+          return "Unexpected indentation.";
+      }
       return opposed(/*foundFirst=*/true);
     case DiagnosticKind::incomplete:
       // A frame runs out of text it can place, and that is not always the end

@@ -119,5 +119,6 @@ task build:
   run test
 ```
 
-Here `run test` matches no enclosing level. See
+Here `run test` matches no enclosing level. When a line uses tabs where the
+lines above use spaces, or the reverse, the message says so. See
 [Indentation](../reference/grammar.md#indentation) for the complete rules.

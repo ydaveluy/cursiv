@@ -14,9 +14,10 @@ struct Plain : cursiv::GrammarSpec {
   // logical one.
   struct WS : terminal<some(cr<R"( \t\f)">) | (lit<"\\"> + eol)> {};
   // A blank line ends no statement: absorbed, so the next line's run is
-  // read at the next token. Declared before the trivia newline, so where a
-  // state reads both the same byte is the statement's end.
-  struct NEWLINE : terminal<eol + many(many(cr<R"( \t)">) + eol)> {};
+  // read at the next token; a line of form feeds is blank too. Declared
+  // before the trivia newline, so where a state reads both the same byte is
+  // the statement's end.
+  struct NEWLINE : terminal<eol + many(many(cr<R"( \t\f)">) + eol)> {};
   struct NL : terminal<eol> {};
   // A backslash ending a comment is the comment's: the next line is a line.
   struct COMMENT : terminal<lit<"#"> + many(cr<R"(^\r\n)">)> {};

@@ -142,20 +142,22 @@ inline std::uint32_t indent_pop(const std::vector<IndentLevel>& arena,
   return head == kNoIndent ? kNoIndent : arena[head].prev;
 }
 
-// The token the leading run [p, q) says against the reading's top level. An
-// indent covers its run; a dedent is zero-width, and the run stays for the
-// next token to cross. A run that agrees with no open level is a token no mode
-// reads: the parse says so instead of joining the line.
+// The token the run [run, q) of the line at `p` says against the reading's
+// top level: the run is the line's leading blanks, past any form feed. An
+// indent covers the run; a dedent is zero-width at the line start, and the
+// blanks stay for the next token to cross. A run that agrees with no open
+// level is a token no mode reads: the parse says so instead of joining the
+// line.
 inline bool indent_token(const char* src, const std::vector<IndentLevel>& arena,
                          std::uint32_t head, SymbolId indentTerm,
-                         SymbolId dedentTerm, TextOffset p, TextOffset q,
-                         Token& out) {
+                         SymbolId dedentTerm, TextOffset p, TextOffset run,
+                         TextOffset q, Token& out) {
   const IndentLevel* top = head == kNoIndent ? nullptr : &arena[head];
-  const auto cmp = indent_cmp(src, top, p, q - p);
+  const auto cmp = indent_cmp(src, top, run, q - run);
   if (cmp == 2)
-    out = Token{p, q, kInvalidSymbol};
+    out = Token{run, q, kInvalidSymbol};
   else if (cmp == 1 && indentTerm != 0)
-    out = Token{p, q, indentTerm};
+    out = Token{run, q, indentTerm};
   else if (cmp == -1 && dedentTerm != 0)
     out = Token{p, p, dedentTerm};
   else
@@ -164,11 +166,11 @@ inline bool indent_token(const char* src, const std::vector<IndentLevel>& arena,
 }
 
 // The token the indentation says at `p`, a line start. A blank line says
-// nothing. A form feed in the run is a run no mode reads. A line back past a
-// level whose indent a repair dropped closes it as the blank it stood for, and
-// so does the end of the input. Past a last line with no newline the input's
-// end is read first, and the drive hands the dedents over where that end is
-// refused.
+// nothing. A form feed starts the run again, as in Python: the levels measure
+// what follows the last one. A line back past a level whose indent a repair
+// dropped closes it as the blank it stood for, and so does the end of the
+// input. Past a last line with no newline the input's end is read first, and
+// the drive hands the dedents over where that end is refused.
 template <class Held>
 inline bool indent_virtual_at(const char* src, TextOffset len,
                               const std::vector<IndentLevel>& arena,
@@ -176,25 +178,21 @@ inline bool indent_virtual_at(const char* src, TextOffset len,
                               SymbolId dedentTerm, TextOffset p, Token& out,
                               Held&& held, TextOffset* reached = nullptr) {
   if (!indent_line_start(src, p, held)) return false;
+  TextOffset run = p;
   TextOffset q = p;
-  bool formFeed = false;
   for (; q < len; ++q) {
     if (src[q] == '\f')
-      formFeed = true;
+      run = q + 1;
     else if (!indent_byte(static_cast<unsigned char>(src[q])))
       break;
   }
   if (reached != nullptr) *reached = q < len ? q + 1 : q;
-  if (formFeed) {
-    out = Token{p, q, kInvalidSymbol};
-    return true;
-  }
   if (q != len && (src[q] == '\n' || src[q] == '\r')) return false;
   while (head != kNoIndent && arena[head].mute &&
-         (q == len || indent_cmp(src, &arena[head], p, q - p) == -1))
+         (q == len || indent_cmp(src, &arena[head], run, q - run) == -1))
     head = arena[head].prev;
-  if (q == len) return false;
-  return indent_token(src, arena, head, indentTerm, dedentTerm, p, q, out);
+  return q != len &&
+         indent_token(src, arena, head, indentTerm, dedentTerm, p, run, q, out);
 }
 
 // What shifting an indent does to a reading's levels: its run opens a level.

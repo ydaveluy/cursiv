@@ -33,7 +33,10 @@ int main() {
     const auto name = ll->getGrammar().terminalName(t);
     const auto spellings = ll->getGrammar().terminalSpellings(t);
     const std::string_view text = table.term_text(t);
-    CHECK(table.term_name(t) == (name.empty() ? text : name));
+    // The end of input is named in words; its table name is for dumps.
+    CHECK(t == cursiv::kEofSymbol
+              ? name == "end of input"
+              : table.term_name(t) == (name.empty() ? text : name));
     CHECK(text.empty() ? spellings.empty()
                        : spellings.size() == 1 && spellings.front() == text);
   }

@@ -614,11 +614,14 @@ text**: a tab is never expanded to spaces.
   current one opens a level.
 - An indentation equal to an outer level closes every level above it, with
   one `dedent` each.
-- Any other indentation, or a form feed in it, is an indentation error.
+- Any other indentation is an indentation error.
+- A form feed starts the count again, as in Python: only the spaces and tabs
+  after the last one count.
 - The end of input closes every level.
 
 `using indent_newline = NEWLINE;` names the terminal that ends a statement.
-Blank and comment-only lines do not change levels when `NEWLINE` reads them.
+Blank lines, form feeds included, and comment-only lines do not change levels
+when `NEWLINE` reads them.
 `indent_open` and `indent_close` name the brackets inside which indentation
 and `NEWLINE` are ignored: a spelling, a choice of spellings, or a terminal.
 A trivia terminal that reads a backslash followed by a line ending joins the

@@ -1163,11 +1163,33 @@ void quotes_trim_before_shortening_and_flatten_line_breaks() {
 // refused, never the token behind it. Blanks inside a line are no indentation.
 void a_refused_indentation_says_so() {
   CHECK(deleted_over("a:\n    b\n  c\n", 9, 9) == "Unexpected indentation.");
-  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10) == "Unexpected indentation.");
   CHECK(deleted_over("a:\n  b\n\f  c\n", 7, 8) == "Unexpected indentation.");
+  CHECK(deleted_over("a:\n  b\n\f   c\n", 8, 11) == "Unexpected indentation.");
   CHECK(deleted_over("  a\n", 0, 2) == "Unexpected indentation.");
   CHECK(deleted_over("a  b\n", 1, 3) == "Syntax error");
   CHECK(deleted_over("a\n  b\n", 2, 5) != "Unexpected indentation.");
+}
+
+// A line indented with spaces under one indented with a tab, or the reverse,
+// says so, whatever else the deletion took: the one cause a reader cannot see.
+void a_tab_and_space_mix_says_so() {
+  const std::string mixed =
+      "Unexpected indentation: this line mixes tabs and spaces differently "
+      "from the lines above.";
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 10) == mixed);
+  CHECK(deleted_over("a:\n\tb\n    c\n", 6, 11) == mixed);
+  CHECK(deleted_over("a:\n    b\n\t\tc\n", 9, 12) == mixed);
+  CHECK(deleted_over("a:\n\t\n  b\n   c\n", 9, 13) != mixed);
+}
+
+// The end of input is named in words, never by its table name.
+void the_end_of_input_is_named_in_words() {
+  const auto engine = tmsg::generated::MessageG::create_parser();
+  cursiv::ParseDiagnostic d;
+  d.kind = cursiv::DiagnosticKind::inserted;
+  d.element = 0;
+  CHECK(cursiv::repair_message(engine->getGrammar(), d, "1;") ==
+        "Expecting end of input.");
 }
 
 }  // namespace
@@ -1178,6 +1200,8 @@ void run() {
   a_long_deletion_does_not_split_a_multibyte_character();
   quotes_trim_before_shortening_and_flatten_line_breaks();
   a_refused_indentation_says_so();
+  a_tab_and_space_mix_says_so();
+  the_end_of_input_is_named_in_words();
 }
 
 }  // namespace repair_message
