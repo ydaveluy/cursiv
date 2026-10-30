@@ -107,10 +107,14 @@ CURSIV_ALWAYS_INLINE inline bool ll_blanks(const LlContext& c,
 }
 
 // The lookahead under one alphabet, where the token in hand does not answer
-// it. A token already read under another is read again: the two alphabets
-// may not agree on where it ends, and the point that asks is the one that
-// decides. The indentation's tokens stand under any alphabet, and so does
-// the end, a dedent where `mode` owes one. `sc`, where it ends past the
+// it. A token already read under another is read again where it begins: the
+// two alphabets may not agree on where it ends, and the point that asks is
+// the one that decides. The gap in front of it is not read again: the point
+// that crossed it read it under the configuration of the group that holds
+// it, so the trivia in front of a region's first token stays the caller's,
+// whatever the region skips. Where the lexer read nothing, the gap is read
+// again with it. The indentation's tokens stand under any alphabet, and so
+// does the end, a dedent where `mode` owes one. `sc`, where it ends past the
 // blanks, is the trivia the lexer read there already.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
@@ -126,6 +130,14 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
         return;
       }
     }
+  if (c.laValid && c.la.sym != kInvalidSymbol && c.la.sym != kEofSymbol) {
+    const TextOffset at = c.la.begin;
+    const Scan read = ll_scan<T>(c, mode, at);
+    c.la = Token{at, read.end, read.end == at ? kInvalidSymbol : read.term,
+                 mode};
+    c.laMode = mode;
+    return;
+  }
   TextOffset p = std::max(c.at, c.triviaAt);
   // THE SCAN THAT ENDED THE TRIVIA IS THE TOKEN'S OWN: reading it twice is a
   // second pass of the lexer over every token of the document.

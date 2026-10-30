@@ -626,7 +626,9 @@ CURSIV_NOINLINE inline std::uint16_t ll_climb_fix(LlContext& c,
 template <const auto& T>
 inline bool ll_tail(LlContext& c) {
   // The entry may end inside a region that reads whitespace as visible text:
-  // the token it held is read again under the document's own trivia.
+  // the gap behind it is the document's, so the token it held and the gap in
+  // front of it are read again under the document's own trivia.
+  c.laValid = false;
   c.laMode = kInvalidSymbol;
   ll_peek<T>(c, T.tailMode);
   if (c.la.sym == kEofSymbol) return true;

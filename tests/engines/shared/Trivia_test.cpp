@@ -173,9 +173,155 @@ void run() {
 
 }  // namespace implied_tag_cases
 
+namespace region_cases {
+
+// The gap in front of a region's first token and the gap behind its last are
+// the caller's, which skips newlines; the region skips spaces and tabs only,
+// so a newline between its tokens is refused.
+
+namespace {
+
+void spell(const tregion::ast::Item& item, std::string& out) {
+  if (const auto* const pair = cursiv::ast_cast<tregion::ast::Pair>(&item)) {
+    out += pair->key;
+    if (!pair->value.empty()) {
+      out += '=';
+      out += pair->value;
+    }
+    return;
+  }
+  const auto& group = static_cast<const tregion::ast::Group&>(item);
+  out += group.kind;
+  out += '(';
+  for (std::size_t i = 0; i < group.items.size(); ++i) {
+    if (i != 0) out += ',';
+    spell(*group.items[i], out);
+  }
+  out += ')';
+}
+
+const char* engine = "";
+
+void check(const cursiv::Parser& parser, std::string_view text,
+           std::string_view expected) {
+  // The AST holds views into the text it was read from: keep it alive.
+  const std::string source = "region:" + std::string(text);
+  const cursiv::ParseResult r = parser.parse(source);
+  const auto* const root = r.value_as<tregion::ast::Group>();
+  std::string got = "<refused>";
+  if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() &&
+      root != nullptr) {
+    got.clear();
+    spell(*root, got);
+  }
+  same_text(engine, text, got, expected);
+}
+
+void a_newline_stands_around_a_region(const cursiv::Parser& parser) {
+  // First in an arm of a choice that a loop repeats, on its first turn and on
+  // later ones, behind a region and behind a group.
+  check(parser, "{\na b\n{\nc 1\n}\n2 d\ne f\n}\n", "({(a=b,{(c=1),2=d,e=f))");
+  check(parser, "{ a b }", "({(a=b))");
+  // The whole turn of a loop.
+  check(parser, "[\nx = y\nz=w\n]", "([(x=y,z=w))");
+  // First in a sequence, at the head of the document, with a newline behind.
+  check(parser, "\na = b\n;\nc=d;", "(;(a=b),;(c=d))");
+  check(parser, "\t\n x \t= y \n ;\n", "(;(x=y))");
+  // An arm of a choice no loop repeats, last in the document.
+  check(parser, "?\na 1\n", "(?(a=1))");
+  check(parser, "?\n{\n1 2\n}", "(?({(1=2)))");
+  // A region that opens on a loop, with turns and without.
+  check(parser, "<\na b>\n", "(<(a,b))");
+  check(parser, "<\n>", "(<())");
+}
+
+void a_newline_is_refused_inside_a_region(const cursiv::Parser& parser) {
+  for (const std::string_view text :
+       {"{ a\nb }", "{\n1\n2\n}", "[ x\n= y ]", "[ x =\ny ]", "a\n= b ;",
+        "a = b\n;\nc\n= d;", "? a\n1", "<a\nb>", "<a\n>"})
+    check(parser, text, "<refused>");
+}
+
+}  // namespace
+
+void run() {
+  engine = "Ll";
+  a_newline_stands_around_a_region(*ttrivia::generated::Ll::create_parser());
+  a_newline_is_refused_inside_a_region(
+      *ttrivia::generated::Ll::create_parser());
+  engine = "Lr";
+  a_newline_stands_around_a_region(*ttrivia::generated::Lr::create_parser());
+  a_newline_is_refused_inside_a_region(
+      *ttrivia::generated::Lr::create_parser());
+}
+
+}  // namespace region_cases
+
+namespace leading_cases {
+
+// On the shape of a map file: a newline or a comment in front of a key, after
+// a brush, is the entity's trivia; between a key and its value only blanks
+// other than a newline stand.
+
+namespace {
+
+void read(const cursiv::Parser& parser, const char* engine) {
+  const struct {
+    const char* label;
+    std::string_view source;
+    bool clean;
+    std::size_t brushes;
+  } cases[] = {
+      {"same line", "{ \"a\" \"b\" }\n", true, 0},
+      {"newline before the key", "{\n\"a\" \"b\"\n}\n", true, 0},
+      {"comment before the key", "{\n// caller comment\n\"a\" \"b\"\n}\n",
+       true, 0},
+      {"newline after a brush", "{\n{\n}\n\"a\" \"b\"\n}\n", true, 1},
+      {"return between key and value", "{ \"a\"\r\"b\" }\n", true, 0},
+      {"newline between key and value", "{ \"a\"\n\"b\" }\n", false, 0},
+      {"comment between key and value",
+       "{ \"a\" // not allowed here\n\"b\" }\n", false, 0},
+  };
+  for (const auto& sample : cases) {
+    const std::string source = "leading:" + std::string(sample.source);
+    const cursiv::ParseResult r = parser.parse(source);
+    const bool clean =
+        r.accepted && !r.cst().recovered() && r.diagnostics.empty();
+    const auto* const doc = cursiv::ast_cast<tleading::ast::Document>(r.value);
+    const auto* const entity =
+        doc != nullptr && doc->entities.size() == 1 ? doc->entities[0] : nullptr;
+    bool shape = entity != nullptr && entity->parent == doc &&
+                 entity->keyvalues.size() == 1 &&
+                 entity->brushes.size() == sample.brushes &&
+                 r.cst().text() == source;
+    if (shape) {
+      const auto* const kv = entity->keyvalues[0];
+      shape = kv->parent == entity && kv->key == "a" && kv->value == "b";
+      for (const auto* const brush : entity->brushes)
+        shape = shape && brush->parent == entity;
+    }
+    const bool ok = clean == sample.clean && (!sample.clean || shape);
+    if (!ok)
+      std::printf("  [%s] %s: clean %d, shape %d\n", engine, sample.label,
+                  static_cast<int>(clean), static_cast<int>(shape));
+    CHECK(ok);
+  }
+}
+
+}  // namespace
+
+void run() {
+  read(*ttrivia::generated::Ll::create_parser(), "Ll");
+  read(*ttrivia::generated::Lr::create_parser(), "Lr");
+}
+
+}  // namespace leading_cases
+
 int main() {
   cursiv::test::count_expectations();
   trivia_cases::run();
   implied_tag_cases::run();
+  region_cases::run();
+  leading_cases::run();
   return cursiv::test::report("Trivia_test");
 }
