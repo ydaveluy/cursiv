@@ -1,13 +1,14 @@
 // The Unicode properties a class of code points may name, written by
-// tools/gen_unicode_ranges.py from Python's unicodedata: never edited.
+// tools/gen_unicode_ranges.py from Python's unicodedata and the Unicode
+// Character Database: never edited.
 #pragma once
 
 #include <string_view>
 
 namespace cursiv::unicode {
 
-// The general categories, their majors, and the identifier and space
-// properties: a class of code points is a set of these.
+// The general categories, their majors, and the identifier, space and
+// alphabetic properties: a class of code points is a set of these.
 enum class Property : unsigned {
   L,
   M,
@@ -47,6 +48,7 @@ enum class Property : unsigned {
   XID_Start,
   XID_Continue,
   White_Space,
+  Alphabetic,
   count
 };
 
@@ -90,6 +92,7 @@ inline constexpr std::string_view kNames[] = {
     "XID_Start",
     "XID_Continue",
     "White_Space",
+    "Alphabetic",
 };
 
 }  // namespace cursiv::unicode

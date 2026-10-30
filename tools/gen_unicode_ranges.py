@@ -2,10 +2,11 @@
 """Write src/cursiv/core/grammar/unicode/UnicodeRanges.hpp from Python's
 unicodedata: the code point ranges of every general category, their majors,
 the identifier properties `str.isidentifier` answers (XID_Start,
-XID_Continue), and White_Space, indexed by one enumeration; and UnicodeLower.hpp: what
-`str.lower` maps each scalar to, and the casing properties final sigma
-reads."""
-import os, sys, unicodedata
+XID_Continue), White_Space, and Alphabetic, read from the Unicode Character
+Database of the same version, indexed by one enumeration; and
+UnicodeLower.hpp: what `str.lower` maps each scalar to, and the casing
+properties final sigma reads."""
+import os, sys, unicodedata, urllib.request
 
 MAX = 0x10FFFF
 cats = {}
@@ -37,16 +38,30 @@ props['XID_Continue'] = ranges(cp for cp in range(MAX + 1)
 # str.isspace also holds the separators U+001C-U+001F, which White_Space does not.
 props['White_Space'] = ranges(cp for cp in range(MAX + 1)
                               if chr(cp).isspace() and not 0x1C <= cp <= 0x1F)
+# Alphabetic, which unicodedata lacks: the letters, letter numbers and the
+# signs that spell a letter's sound, from the Unicode version unicodedata has.
+version = unicodedata.unidata_version
+url = f'https://www.unicode.org/Public/{version}/ucd/DerivedCoreProperties.txt'
+derived = urllib.request.urlopen(url).read().decode('utf-8')
+assert derived.startswith(f'# DerivedCoreProperties-{version}.txt'), url
+alphabetic = []
+for line in derived.splitlines():
+    fields = [f.strip() for f in line.split('#')[0].split(';')]
+    if len(fields) == 2 and fields[1] == 'Alphabetic':
+        lo, _, hi = fields[0].partition('..')
+        alphabetic.extend(range(int(lo, 16), int(hi or lo, 16) + 1))
+props['Alphabetic'] = ranges(sorted(alphabetic))
 
 here = os.path.dirname(__file__)
 unicode_dir = os.path.join(here, '..', 'src', 'cursiv', 'core', 'grammar', 'unicode')
 out = [
     '// The Unicode properties a class of code points may name, written by',
-    '// tools/gen_unicode_ranges.py from Python\'s unicodedata: never edited.',
+    '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
+    '// Character Database: never edited.',
     '#pragma once', '', '#include <string_view>', '',
     'namespace cursiv::unicode {', '',
-    '// The general categories, their majors, and the identifier and space',
-    '// properties: a class of code points is a set of these.',
+    '// The general categories, their majors, and the identifier, space and',
+    '// alphabetic properties: a class of code points is a set of these.',
     'enum class Property : unsigned {',
 ]
 for name in props:
@@ -60,7 +75,8 @@ open(os.path.join(unicode_dir, 'UnicodeProperty.hpp'), 'w').write('\n'.join(out)
 
 out = [
     '// Code point ranges by Unicode property, written by',
-    '// tools/gen_unicode_ranges.py from Python\'s unicodedata: never edited.',
+    '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
+    '// Character Database: never edited.',
     '#pragma once', '', '#include <span>', '',
     '#include "cursiv/core/grammar/unicode/UnicodeProperty.hpp"',
     '#include "cursiv/core/grammar/unicode/UnicodeRange.hpp"', '',

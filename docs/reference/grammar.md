@@ -122,7 +122,7 @@ escapes and Unicode.
 | `cr<"a-zé_">` | one member of the class; `cr` stands for *character range* |
 | `cr<"^…">`, `~c` | one character outside the class |
 | `uc::L`, `uc::Lu`, `uc::Nd`, … | a Unicode general category or subcategory |
-| `uc::XID_Start`, `uc::XID_Continue`, `uc::White_Space` | a Unicode property |
+| `uc::XID_Start`, `uc::XID_Continue`, `uc::White_Space`, `uc::Alphabetic` | a Unicode property |
 | `s`, `w`, `d`; `S`, `W`, `D` | ASCII shorthands and their complements |
 | `any`; `byte` | one character; one raw byte |
 

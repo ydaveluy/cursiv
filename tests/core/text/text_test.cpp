@@ -166,6 +166,18 @@ static_assert(holds<R"(é\-)">(U'-') && holds<R"(é-)">(U'-'));
 static_assert(holds<R"(^é)">(U'a') && !holds<R"(^é)">(0xE9));
 static_assert(holds<R"(\é)">(0xE9));
 
+// A letter as the C library's `iswalpha` sees it: letters, letter numbers and
+// the signs that spell a sound, such as a Devanagari vowel sign, but no digit
+// and no virama.
+using Alphabetic = std::remove_cvref_t<decltype(uc::Alphabetic)>;
+static_assert(detail::word_class<Alphabetic>::has(U'a') &&
+              detail::word_class<Alphabetic>::has(0x2160) &&
+              detail::word_class<Alphabetic>::has(0x093E) &&
+              detail::word_class<Alphabetic>::has(0x24B6));
+static_assert(!detail::word_class<Alphabetic>::has(U'1') &&
+              !detail::word_class<Alphabetic>::has(U'_') &&
+              !detail::word_class<Alphabetic>::has(0x094D));
+
 using Space = std::remove_cvref_t<decltype(uc::White_Space)>;
 static_assert(detail::word_class<Space>::has(U'\t') &&
               detail::word_class<Space>::has(U'\r') &&

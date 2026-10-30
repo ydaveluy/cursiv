@@ -1053,7 +1053,7 @@ constexpr auto operator|(Byte, CpSet<M, N, S>) {
   return Byte{};
 }
 // The Unicode properties, which hold scalars only: a general category and its
-// majors, and the identifier and space properties.
+// majors, and the identifier, space and alphabetic properties.
 struct uc {
   template <unicode::Property P>
   using of = CpSet<detail::cp_bit(P), false, "">;
@@ -1095,6 +1095,7 @@ struct uc {
   static constexpr of<unicode::Property::XID_Start> XID_Start{};
   static constexpr of<unicode::Property::XID_Continue> XID_Continue{};
   static constexpr of<unicode::Property::White_Space> White_Space{};
+  static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
 };
 inline constexpr AnyChar any{};
 inline constexpr Byte byte{};
