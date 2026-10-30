@@ -10,6 +10,9 @@ extension. Choose one for the feature you want to add:
 | Packages, qualified names and formatting | [Domainmodel](https://github.com/ydaveluy/cursiv/tree/main/examples/domainmodel) |
 | Several languages with cross-file references | [Requirements](https://github.com/ydaveluy/cursiv/tree/main/examples/requirements) |
 
+You can try these examples in your browser on the
+[Try it online](../demo/index.md) page.
+
 ## More languages
 
 [cursiv-grammar](https://github.com/ydaveluy/cursiv-grammar) holds more than

@@ -10,7 +10,7 @@
 
 <div align="center">
 
-[![Build](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml)
+[![CI](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml)
 [![Documentation](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ydaveluy_pegium&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ydaveluy_pegium)
 [![Languages](https://github.com/ydaveluy/cursiv-grammar/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv-grammar/actions/workflows/ci.yml)
@@ -84,6 +84,8 @@ Each example includes a grammar, AST, services, tests, a CLI and an editor clien
 - [Statemachine](examples/statemachine): named declarations and cross references.
 - [Domainmodel](examples/domainmodel): packages, qualified names, custom scoping and formatting.
 - [Requirements](examples/requirements): two languages sharing a server and cross-document references.
+
+You can try these examples in your browser on the [Try it online](https://ydaveluy.github.io/cursiv/demo/) page.
 
 For more languages, see [cursiv-grammar](https://github.com/ydaveluy/cursiv-grammar):
 more than 300 languages implemented with Cursiv, mostly adapted from
