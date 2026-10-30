@@ -1,6 +1,7 @@
 // The descent as source: one step per rule, the program's shape spelled
 // straight out. A choice one token separates is a switch on that token; every
-// other one asks the prediction. A callee that can finish without a call of
+// other one asks the prediction. A choice of single terminals is a table, and
+// a large arm a function of its own. A callee that can finish without a call of
 // its own runs in place, its frame on the native stack; any other call goes to
 // the machine, which runs it and resumes the step at a label. A rule that
 // reaches no climb and no rule that calls itself never resumes: it is a plain
@@ -97,6 +98,12 @@ struct Emit : EmitOutput {
   unsigned nestedTurns = 0;
   bool exits = false;
   std::string frame{};
+  // The arms spelt as functions of their own, each its whole definition.
+  std::vector<std::string> arms{};
+  // Past this many bytes of source an arm that can stand alone is a function:
+  // a rule's step stays a size the compiler takes in stride, and the units
+  // share the arms of one large rule.
+  static constexpr std::size_t kArmBytes = 16384;
 
   void over_fold() {
     if (foldAt.live()) regionAt = foldAt;
@@ -194,6 +201,9 @@ struct Emit : EmitOutput {
   void leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row);
   void group(std::uint16_t id, std::uint16_t hand = kNoRow);
   void decision(std::uint16_t id);
+  void arm(std::uint16_t id, std::uint16_t hand);
+  void term_choice(std::uint16_t id,
+                   const std::vector<std::vector<std::uint16_t>>& byArm);
   void sequence(std::uint16_t id, std::uint16_t hand);
   void repetition(std::uint16_t id, std::uint16_t body = kNoRow);
   bool ladder_flat(std::uint16_t id) const;
@@ -578,6 +588,18 @@ void Emit::decision(std::uint16_t id) {
   const bool asks =
       (dec.how != LlPredict::single || ended) && shared && db.repairCost <= 1;
   const bool direct = !ended && (dec.how == LlPredict::single || !shared);
+  // Arms that each read one terminal and nothing else, each on a token of
+  // its own.
+  bool terms = direct;
+  for (std::uint16_t i = 0; i < db.nalts && terms; ++i) {
+    const LlNode& x = at(kid(n, i));
+    terms = x.kind == LlShape::term && !x.owns && byArm[i].size() == 1 &&
+            byArm[i][0] == x.sym;
+  }
+  if (terms) {
+    term_choice(id, byArm);
+    return;
+  }
   const std::string none = name("none");
   const std::string k = name("k");
   put("::cursiv::ll_peek<kTable, {}u>(c);", dec.mode);
@@ -648,7 +670,7 @@ void Emit::decision(std::uint16_t id) {
     // and it knows only that it holds one.
     const std::uint16_t hand =
         direct ? (byArm[i].size() == 1 ? byArm[i][0] : kAnyToken) : kAnyToken;
-    group(kid(n, i), hand);
+    arm(kid(n, i), hand);
     line("break;");
     close("}");
   }
@@ -705,6 +727,77 @@ void Emit::decision(std::uint16_t id) {
     close();
   }
   close("}");
+}
+
+// An arm that reads nothing of the code around it -- no call that may
+// suspend, no record a turn or a fold reaches back to -- moves to a function
+// of its own once its code outgrows `kArmBytes`; the choice calls it. Its
+// inner arms have moved first, so only what they leave counts.
+void Emit::arm(std::uint16_t id, std::uint16_t hand) {
+  const std::size_t from = out.size();
+  group(id, hand);
+  if (out.size() - from < kArmBytes || may_suspend(id) || regionAt.live() ||
+      foldAt.live())
+    return;
+  const std::string fn = std::format("s{}_{}", inRule, arms.size());
+  std::string body =
+      std::format("CURSIV_NOINLINE void {}(::cursiv::LlContext& c) {{\n", fn);
+  body.append(out, from);
+  body += "}\n\n";
+  out.resize(from);
+  put("{}(c);", fn);
+  arms.push_back(std::move(body));
+}
+
+// A choice whose arms each read one terminal on a token of their own, as
+// data: the token, or the repair where no arm takes it, names an entry of the
+// arms' table, and one reading takes it as the arm spelt in place would. The
+// arms of a large choice of keywords cost the descent a line each.
+void Emit::term_choice(std::uint16_t id,
+                       const std::vector<std::vector<std::uint16_t>>& byArm) {
+  const LlNode& n = at(id);
+  const LlDecision& dec = a.cfg.decisions[n.decision];
+  const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
+  const std::string k = name("k");
+  put("::cursiv::ll_peek<kTable, {}u>(c);", dec.mode);
+  if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
+  put("static constexpr ::cursiv::LlTermArm {}a[] = {{", k);
+  for (std::uint16_t i = 0; i < db.nalts; ++i) {
+    const std::uint16_t x = kid(n, i);
+    put("    {{{}u, {}u, {}u, {}u}},", at(x).sym, at(x).mode, at(x).row, x + 1);
+  }
+  line("};");
+  put("::std::uint16_t {};", k);
+  put("{} = 0xFFFFu;", k);
+  // A token no arm takes: the repair names the arm it enters with the token
+  // it owes invented, or repairs the text until an arm takes it.
+  put("if (!kTable.holds(kTable.dec_first({}u), c.la.sym)) {{", n.decision);
+  open();
+  put("{} = ::cursiv::ll_choice_fix<kTable>(c, {}u, {}u);", k, dec.mode,
+      n.decision);
+  put("if ({} >= {}u) {} = 0xFFFFu;", k, db.nalts, k);
+  close("}");
+  open(std::format("if ({} == 0xFFFFu) {{", k));
+  open("switch (c.la.sym) {");
+  for (std::uint16_t i = 0; i < db.nalts; ++i)
+    put("case {}u: {} = {}u; break;", byArm[i][0], k, i);
+  // A choice no arm answers, even after the skip, as `decision` repairs it.
+  if (db.repairCost <= 1) {
+    put("default: if (c.invented < ::cursiv::kLlInventRun) {} = {}u; break;", k,
+        dec.repair);
+  } else if (db.repairCost != kLlRepairCostless) {
+    open("default:");
+    line("if (::cursiv::ll_ends<kTable>(c, c.la.sym) &&");
+    put("    c.invented < ::cursiv::kLlInventRun) {} = {}u;", k, dec.repair);
+    line("else ::cursiv::ll_drop<kTable>(c);");
+    line("break;");
+    close();
+  } else {
+    line("default: ::cursiv::ll_drop<kTable>(c); break;");
+  }
+  close("}");
+  close("}");
+  put("if ({0} != 0xFFFFu) ::cursiv::ll_take_arm<kTable>(c, {0}a[{0}]);", k);
 }
 
 // One turn of a loop, or with `body` the turn of a flat chain: the choice to
@@ -1311,6 +1404,12 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
         declarations += std::format("void s{}(::cursiv::LlContext&);\n", r);
       bytes += e.out.size();
       bodies.push_back(std::move(e.out));
+      for (std::size_t k = 0; k < e.arms.size(); ++k) {
+        declarations +=
+            std::format("void s{}_{}(::cursiv::LlContext&);\n", r, k);
+        bytes += e.arms[k].size();
+        bodies.push_back(std::move(e.arms[k]));
+      }
     }
   declarations += std::format("}}  // namespace {}\n", ns);
   std::string steps, sizes;

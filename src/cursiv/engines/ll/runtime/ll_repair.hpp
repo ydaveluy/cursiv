@@ -473,6 +473,29 @@ CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t row,
   ll_expect<T>(c, Mode, Term, row, pos);
 }
 
+// An arm of a choice that reads one terminal and nothing else, as data: a
+// choice of such arms selects one, and `ll_take_arm` reads it as the arm
+// spelt in place would.
+struct LlTermArm {
+  std::uint16_t term, mode, row, pos;
+};
+
+// The arm's terminal where a repair chose the arm: matched or repaired. The
+// choice has read the token in hand, so the in-place read has nothing to add.
+template <const auto& T>
+CURSIV_NOINLINE inline void ll_expect_arm(LlContext& c, const LlTermArm& a) {
+  ll_expect<T>(c, a.mode, a.term, a.row, a.pos);
+}
+
+// The arm a choice selected, taken where the token in hand is its terminal.
+template <const auto& T>
+CURSIV_ALWAYS_INLINE inline void ll_take_arm(LlContext& c, const LlTermArm& a) {
+  if (c.la.sym == a.term) [[likely]]
+    ll_consume<T>(c, a.row, a.pos);
+  else
+    ll_expect_arm<T>(c, a);
+}
+
 // How the climb of `decision` stands before `sym`: 1 where an operator takes
 // it, 2 where the climb ends on it for a caller that goes on from it, 0 where
 // neither does.

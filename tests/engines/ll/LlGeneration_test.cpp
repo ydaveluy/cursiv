@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
@@ -419,23 +420,87 @@ struct KeywordChoices : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-template <unsigned N>
-std::size_t emitted_size() {
+// The parser files of a grammar, by name.
+template <class G>
+std::vector<std::pair<std::string, std::string>> emitted_files() {
   const auto done = cursiv::LlFinalProgram::make(
-      cursiv::ll_build_program(cursiv::LlLowering<KeywordChoices<N>>::lower()),
-      "keyword_choices_test");
+      cursiv::ll_build_program(cursiv::LlLowering<G>::lower()), "emit_test");
   CHECK(done.has_value());
-  if (!done) return 0;
+  if (!done) return {};
+  return cursiv::ll_emit_parser_files(*done, "emit_test");
+}
+
+// The bytes of a grammar's parser files, or of its rule units alone.
+template <class G>
+std::size_t emitted_size(bool rulesOnly = false) {
   std::size_t size = 0;
-  for (const auto& [name, text] :
-       cursiv::ll_emit_parser_files(*done, "keyword_choices_test"))
-    size += text.size();
+  for (const auto& [name, text] : emitted_files<G>())
+    if (!rulesOnly ||
+        (name.starts_with("ParserRules") && name.ends_with(".cpp")))
+      size += text.size();
   return size;
 }
 
 void nested_choices_spell_each_arm_once() {
-  const std::size_t four = emitted_size<4>(), twelve = emitted_size<12>();
+  const std::size_t four = emitted_size<KeywordChoices<4>>(),
+                    twelve = emitted_size<KeywordChoices<12>>();
   CHECK(four != 0 && twelve < 4 * four);
+}
+
+// A choice of keywords alone is a table: a keyword more costs the source a
+// table entry and a case, not a reading of its own.
+constexpr auto kFourWords =
+    cursiv::kw<"a"> | cursiv::kw<"b"> | cursiv::kw<"c"> | cursiv::kw<"d">;
+constexpr auto kSixteenWords =
+    kFourWords | cursiv::kw<"e"> | cursiv::kw<"f"> | cursiv::kw<"g"> |
+    cursiv::kw<"h"> | cursiv::kw<"i"> | cursiv::kw<"j"> | cursiv::kw<"k"> |
+    cursiv::kw<"l"> | cursiv::kw<"m"> | cursiv::kw<"n"> | cursiv::kw<"o"> |
+    cursiv::kw<"p">;
+template <bool Wide>
+struct WordChoices : cursiv::GrammarSpec {
+  static constexpr auto Words = [] {
+    if constexpr (Wide)
+      return kSixteenWords;
+    else
+      return kFourWords;
+  }();
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<create<Node>(many(lit<"("> + Words + lit<")">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+void keyword_choices_are_tables() {
+  const std::size_t four = emitted_size<WordChoices<false>>(true),
+                    sixteen = emitted_size<WordChoices<true>>(true);
+  CHECK(four != 0 && sixteen < four + 12 * 128);
+}
+
+// A choice whose arms each spell a long run of choices: each arm is a
+// function of its own.
+template <unsigned N>
+constexpr auto word_run() {
+  if constexpr (N == 1)
+    return kSixteenWords;
+  else
+    return kSixteenWords + word_run<N - 1>();
+}
+struct LongArms : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<create<Node>(many((lit<"x"> + word_run<12>()) |
+                                       (lit<"y"> + word_run<12>())))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+void long_arms_are_functions() {
+  unsigned arms = 0;
+  for (const auto& [name, text] : emitted_files<LongArms>())
+    if (name == "ParserRules.hpp")
+      for (const char* fn : {"void s1_0(::cursiv::LlContext&);",
+                             "void s1_1(::cursiv::LlContext&);"})
+        arms += text.find(fn) != std::string::npos;
+  CHECK(arms == 2);
 }
 
 // A chain of rules, each calling the next before a token, as long as node rows
@@ -538,6 +603,8 @@ int main() {
   classification_stops_before_a_guard_can_choose_an_arm();
   parser_files_have_a_stable_partition_contract();
   nested_choices_spell_each_arm_once();
+  keyword_choices_are_tables();
+  long_arms_are_functions();
   plain_calls_stack_no_deeper_than_the_limit();
   return_states_preserve_named_and_synthetic_calls();
   a_table_holds_only_the_data_its_readers_ask_for();
