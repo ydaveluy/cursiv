@@ -187,6 +187,34 @@ int main() {
   tree<ast::Arms>(arms, "abc;", [](const ast::Arms& n) {
     return n.low == "abc" && n.name.empty();
   });
+  // Each clause: conjunction, modifier, field, operator, value.
+  const Pair fields{"fields:"};
+  using Row = std::array<std::string_view, 5>;
+  const auto query = [&](std::string_view text, std::vector<Row> rows,
+                         std::source_location at =
+                             std::source_location::current()) {
+    tree<ast::Query>(
+        fields, text,
+        [&](const ast::Query& n) {
+          if (n.clauses.size() != rows.size()) return false;
+          for (std::size_t k = 0; k < rows.size(); ++k) {
+            const ast::Clause& c = *n.clauses[k];
+            if (Row{c.conjunction, c.modifier, c.field, c.op, c.value} !=
+                rows[k])
+              return false;
+          }
+          return true;
+        },
+        at);
+  };
+  query("foo*", {{"", "", "", "", "foo*"}});
+  query("foo:bar", {{"", "", "foo", ":", "bar"}});
+  query("age<18", {{"", "", "age", "<", "18"}});
+  query("a OR b AND c", {{"", "", "", "", "a"},
+                         {"OR", "", "", "", "b"},
+                         {"AND", "", "", "", "c"}});
+  query("+foo -bar", {{"", "+", "", "", "foo"}, {"", "-", "", "", "bar"}});
+  expect(fields, "18:x", false);
 
   // A branch, or an optional item, that reads what an earlier one reads is
   // dropped: each case reads as the rule written without it.

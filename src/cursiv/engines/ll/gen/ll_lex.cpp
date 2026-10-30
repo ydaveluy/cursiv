@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -205,6 +206,12 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   return modes;
 }
 
+// Whether a relay's rest begins where the walk launched it: an assertion
+// alone, rather than a search for an echo, a closer or a recognized run.
+static bool in_step(const LexRelayGen& r) {
+  return r.predicate != kNoLexNode && r.recognition == kNoLexNode;
+}
+
 void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
                 const LexModes& modes, std::vector<DynSet>& modeTie) {
   const auto& g = built.cfg;
@@ -320,19 +327,79 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
   // again. A statement's newline and a blank of the same spelling are one
   // token.
   modeTie.assign(built.nmodes, DynSet{});
+  // The terminals read at one length, `endOnly` those of them that stand only
+  // where the text ends: true once the mode has a choice everywhere.
+  const auto tie = [&](std::uint16_t m, const DynSet& row,
+                       const DynSet& endOnly) {
+    DynSet mine = row & modeSet[m];
+    mine.andnot(modes.trivia);
+    if (!mine.more_than_one()) return false;
+    DynSet strict = mine;
+    strict.andnot(endOnly);
+    if (strict.more_than_one()) {
+      built.modeMulti[m] = 1;
+      return true;
+    }
+    built.modeMulti[m] = 2;
+    modeTie[m] |= mine;
+    return false;
+  };
+  // Two cursors in step, at one length: a terminal stands only where the text
+  // ends when neither reads it anywhere else.
+  const auto tie_in_step = [&](std::uint16_t m, std::uint16_t a,
+                               std::uint16_t b) {
+    for (const DynSet* ra : {&reads[a], &unreserved[a]})
+      for (const DynSet* rb : {&reads[b], &unreserved[b]}) {
+        DynSet anywhere = *ra;
+        anywhere.andnot(ends[a]);
+        DynSet fromB = *rb;
+        fromB.andnot(ends[b]);
+        anywhere |= fromB;
+        DynSet endOnly = *ra | *rb;
+        endOnly.andnot(anywhere);
+        if (tie(m, *ra | *rb, endOnly)) return true;
+      }
+    return false;
+  };
   // Only the states a mode's walk reaches: another mode's state may accept
   // two of its terminals at a spelling this mode's own reads otherwise.
   std::vector<std::uint16_t> reach;
   std::vector<std::uint8_t> seen;
+  // A relay that asserts where the walk stands reads the rest of its token
+  // in step with the walk it leaves, from one position: what the two accept
+  // after the same bytes ties as a state's own terminals do. The pairs are
+  // the walk with each rest it launches, and two rests of one walk.
+  std::vector<std::pair<std::uint16_t, std::uint16_t>> pairs;
+  std::unordered_set<std::uint32_t> paired;
   for (std::uint16_t m = 0; m < built.nmodes; ++m) {
     built.modeMulti[m] = 0;
     seen.assign(built.ndfa, 0);
     reach.assign(1, built.modeStart[m]);
     seen[built.modeStart[m]] = 1;
+    pairs.clear();
+    paired.clear();
     const auto enter = [&](std::uint16_t to) {
       if (to == kDeadState || seen[to] != 0) return;
       seen[to] = 1;
       reach.push_back(to);
+    };
+    const auto pair = [&](std::uint16_t a, std::uint16_t b) {
+      if (a == b || a == kDeadState || b == kDeadState) return;
+      if (a > b) std::swap(a, b);
+      if (paired.insert(std::uint32_t{a} << 16 | b).second)
+        pairs.emplace_back(a, b);
+    };
+    // The rests `s` launches, each paired with `with` and every rest after it.
+    const auto launch = [&](std::uint16_t s, std::uint16_t with) {
+      for (auto r = built.dfaRelay[s]; r != kNoRelay;
+           r = built.relays[r].next) {
+        if (built.relays[r].gate || !in_step(built.relays[r])) continue;
+        pair(with, built.relays[r].resume);
+        for (auto q = built.relays[r].next; q != kNoRelay;
+             q = built.relays[q].next)
+          if (!built.relays[q].gate && in_step(built.relays[q]))
+            pair(built.relays[r].resume, built.relays[q].resume);
+      }
     };
     for (std::size_t i = 0; i < reach.size() && built.modeMulti[m] != 1; ++i) {
       const std::uint16_t s = reach[i];
@@ -340,19 +407,18 @@ void ll_lex_dfa(LlBuiltProgram& built, LexAlphabet& alpha,
         enter(built.dfaNext[std::size_t{s} * alpha.ncls + k]);
       for (auto r = built.dfaRelay[s]; r != kNoRelay; r = built.relays[r].next)
         enter(built.relays[r].resume);
-      for (const DynSet* row : {&reads[s], &unreserved[s]}) {
-        DynSet mine = *row & modeSet[m];
-        mine.andnot(modes.trivia);
-        if (!mine.more_than_one()) continue;
-        DynSet strict = mine;
-        strict.andnot(ends[s]);
-        if (strict.more_than_one()) {
-          built.modeMulti[m] = 1;
-          break;
-        }
-        built.modeMulti[m] = 2;
-        modeTie[m] |= mine;
-      }
+      for (const DynSet* row : {&reads[s], &unreserved[s]})
+        if (tie(m, *row, ends[s])) break;
+      launch(s, s);
+    }
+    for (std::size_t i = 0; i < pairs.size() && built.modeMulti[m] != 1; ++i) {
+      const auto [a, b] = pairs[i];
+      if (tie_in_step(m, a, b)) break;
+      launch(a, b);
+      launch(b, a);
+      for (unsigned k = 0; k < alpha.ncls; ++k)
+        pair(built.dfaNext[std::size_t{a} * alpha.ncls + k],
+             built.dfaNext[std::size_t{b} * alpha.ncls + k]);
     }
     if (built.modeMulti[m] != 2) modeTie[m] = DynSet{};
   }

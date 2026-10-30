@@ -69,6 +69,16 @@ struct Turn : cursiv::Extends<cursiv::AstNode> {
 struct Turns : cursiv::Extends<cursiv::AstNode> {
   vector<Turn*> turns;
 };
+struct Clause : cursiv::Extends<cursiv::AstNode> {
+  string_view conjunction;
+  string_view modifier;
+  string_view field;
+  string_view op;
+  string_view value;
+};
+struct Query : cursiv::Extends<cursiv::AstNode> {
+  vector<Clause*> clauses;
+};
 }  // namespace ast
 
 struct Keyword : cursiv::GrammarSpec {
@@ -85,6 +95,30 @@ struct Arms : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Arms>(
                     (assign<&ast::Arms::low>(ref<LOW>) + lit<";">) |
                     (assign<&ast::Arms::name>(ref<NAME>) + lit<":">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// The tie of `Arms` where one terminal is read behind a condition the lexer
+// checks apart from its other terminals: a field is never a number. A word
+// stands where no field prefix can complete.
+struct Fields : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  static constexpr auto Char = w | lit<"*">;
+  struct FIELD : terminal<!(some(d) + !Char) + some(Char)> {};
+  struct WORD : terminal<some(Char)> {};
+  struct Clause
+      : rule<create<ast::Clause>(
+            option(assign<&ast::Clause::conjunction>(kw<"AND"> | kw<"OR">)) +
+            option(assign<&ast::Clause::modifier>(lit<"+"> | lit<"-">)) +
+            ((assign<&ast::Clause::field>(ref<FIELD>) +
+              assign<&ast::Clause::op>(lit<"<">) +
+              assign<&ast::Clause::value>(ref<WORD>)) |
+             (option(assign<&ast::Clause::field>(ref<FIELD>) +
+                     assign<&ast::Clause::op>(lit<":">)) +
+              assign<&ast::Clause::value>(ref<WORD>))))> {};
+  struct Root : rule<create<ast::Query>(
+                    many(append<&ast::Query::clauses>(ref<Clause>)))> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -626,6 +660,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"turn:"> + ref<Turn::Root>) |
              (lit<"turnshortfirst:"> + ref<TurnShortFirst::Root>) |
              (lit<"arms:"> + ref<Arms::Root>) |
+             (lit<"fields:"> + ref<Fields::Root>) |
              (lit<"twins:"> + ref<Twins::Root>) |
              (lit<"separated:"> + ref<Separated::Root>) |
              (lit<"trailing:"> + ref<Trailing::Root>) |
