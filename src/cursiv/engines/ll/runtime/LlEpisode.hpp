@@ -688,15 +688,15 @@ class LlEpisode {
     return _decided ? _answer : kNoRow;
   }
 
-  // The skip configuration a reading's next token is crossed under, and a
-  // mode that has it: where the grammar has regions, the first token it reads
-  // names it.
+  // The skip configuration a reading's next token is crossed under here --
+  // its joined blanks inside brackets only -- and a mode that has it: where
+  // the grammar has regions, the first token it reads names it.
   std::pair<std::uint32_t, std::uint16_t> look_of(const LlThread& t) const {
     std::uint16_t mode = T.look_mode(dec());
     if constexpr (T.lookMode != nullptr) {
       if (const std::uint16_t own = ll_read_mode<T>(t.state); own != kNoRow)
         mode = own;
-      return {ll_skips_of<T>(mode), mode};
+      return {ll_skips_of<T>(mode, kIndented<T> && _own.at.depth != 0), mode};
     } else {
       return {0, mode};
     }
@@ -908,24 +908,29 @@ class LlEpisode {
                     : visit_plain(p, deferred, gapFrom, from, lull);
   }
 
-  // Whether `edge` inserts an implied token out of reach at the token that
-  // stands after the gap: nothing its condition names or its normal
-  // continuation reads begins there, and the condition does not hold on no
-  // token at all. What follows an insertion then joins no election. The
-  // condition may read past what the episode lexes there; those bytes count
-  // among the episode's, so the memo answers only text that reads the same.
+  // Whether what follows the condition of `edge` reads nothing at the token
+  // that stands after the gap, as the descent standing at the condition reads
+  // that token: what follows then joins no election. An implied token is out
+  // of reach where nothing its condition names or its normal continuation
+  // reads begins there, and the condition does not hold on no token at all.
+  // Any other condition refuses the token: a literal behind a gap that refuses
+  // it would otherwise reserve its spelling from a pattern another reading
+  // takes there. The condition may read past what the episode lexes there;
+  // those bytes count among the episode's, so the memo answers only text that
+  // reads the same.
   bool held_back(std::uint32_t edge, TextOffset from, TextOffset gapFrom) {
-    if (!implied_edge(edge)) return false;
+    const std::uint16_t node = T.edgeNode[edge];
+    if (node == kNoRow) return false;
+    const bool implied = implied_edge(edge);
     LlAhead a = ll_ahead(ctx());
     a.p = from;
     a.head = false;
-    const Token t = ll_ahead_peek<T>(ctx(), ctx().indentArena, a,
-                                     T.nodes[T.edgeNode[edge]].mode);
-    if (t.sym != kInvalidSymbol) return false;
+    Token t = ll_ahead_peek<T>(ctx(), ctx().indentArena, a, T.nodes[node].mode);
+    if ((t.sym == kInvalidSymbol) != implied) return false;
+    if (implied) t = Token{t.begin, t.begin, kInvalidSymbol};
     LlLookRead sink;
-    const bool holds = ll_predict_condition<T>(
-        ctx(), T.atn.edge(edge).label, Token{t.begin, t.begin, kInvalidSymbol},
-        gapFrom, sink);
+    const bool holds = ll_predict_condition<T>(ctx(), T.atn.edge(edge).label,
+                                               t, gapFrom, sink);
     touch(sink);
     return !holds;
   }
@@ -947,13 +952,14 @@ class LlEpisode {
     return false;
   }
 
+  // Whether some reading waits on an implied token out of reach here.
   bool apart_pending(const std::vector<LlThread>& threads, TextOffset from,
                      TextOffset gapFrom) {
     for (const LlThread& t : threads) {
       const LlAtnState& s = T.atn.state(t.state);
       for (std::uint32_t i = 0; i < s.nedges; ++i)
         if (T.atn.edge(s.edge + i).kind == LlEdgeKind::condition &&
-            held_back(s.edge + i, from, gapFrom))
+            implied_edge(s.edge + i) && held_back(s.edge + i, from, gapFrom))
           return true;
     }
     return false;
@@ -971,9 +977,10 @@ class LlEpisode {
   }
 
   // What the pending guards of `threads` let a gap read, added to `into`: the
-  // terminals they reach, else the mode's -- the surrounding choice's mode may
-  // contain unrelated keywords, which must not reserve their identifier
-  // spelling here. `any`: a terminal is already read.
+  // terminals they reach where the token there does not hold them back, else
+  // the mode's -- the surrounding choice's mode may contain unrelated
+  // keywords, which must not reserve their identifier spelling here. `any`: a
+  // terminal is already read.
   void guard_terms(const std::vector<LlThread>& threads,
                    LlMask<T.termWords>& into, bool any, TextOffset from,
                    TextOffset gapFrom) {

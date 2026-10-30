@@ -12,16 +12,19 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/engines/ll/gen/LlExitReads.hpp"
 #include "cursiv/engines/ll/gen/LlLexView.hpp"
 #include "cursiv/engines/ll/gen/LlStanding.hpp"
 #include "cursiv/engines/shared/gen/LexAlphabet.hpp"
 #include "cursiv/engines/shared/gen/LexBacktrack.hpp"
 #include "cursiv/engines/shared/gen/LexDfaBuild.hpp"
 #include "cursiv/engines/shared/gen/LexModes.hpp"
+#include "cursiv/engines/shared/gen/LexOvertakes.hpp"
 #include "cursiv/engines/shared/gen/LexOwedRows.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LexSuccessors.hpp"
 #include "cursiv/engines/shared/gen/PredicateModes.hpp"
+#include "cursiv/engines/shared/gen/bit_words.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/gen/lex_reserve.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
@@ -441,6 +444,43 @@ void ll_mode_cover(LlBuiltProgram& b, const LexModes& modes) {
   });
 }
 
+// A choice reads its token under the alphabet of all its arms, and an arm that
+// may end the rule admits whatever any caller reads after it. Such a terminal,
+// which the rule itself does not read from the choice on, may read over
+// another of the alphabet -- `#(` over `#` -- where the caller in hand takes
+// none of it: per choice, those terminals, which the descent asks of the
+// frames it stands in before it takes one.
+void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
+                     const LexModes& modes) {
+  const auto& g = b.cfg;
+  b.decFlag.assign(g.ndecisions, DynSet{});
+  const LlExitReads exits(b);
+  std::vector<DynSet> followers(g.nterms);
+  for (std::uint32_t id = 0; id < g.nnodes; ++id)
+    if (g.nodes[id].kind == LlShape::term)
+      followers[g.nodes[id].sym] |= b.after[id];
+  LexOvertakes overtakes(alpha.nfa, g, alpha.startOf, followers);
+  for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
+    const LlDecision& dec = g.decisions[d];
+    if (!b.liveRules[dec.rule] || exits.ends[dec.state] == 0) continue;
+    DynSet caller;
+    for (unsigned a = 0; a < g.decisionBuild[d].nalts; ++a)
+      caller |= b.laSet[dec.set + a];
+    caller.andnot(exits.reads[dec.state]);
+    caller.andnot(modes.trivia);
+    // What the token is read beside: the tokens of the alphabet, that of each
+    // turn of a loop.
+    DynSet beside = modes.set[dec.mode];
+    if (g.nodes[dec.node].kind == LlShape::rep)
+      beside |= modes.set[b.headMode[d]];
+    beside.andnot(modes.trivia);
+    each_bit(caller.w.data(), caller.w.size(), [&](std::size_t t) {
+      if (overtakes.reads_over(static_cast<unsigned>(t), beside))
+        b.decFlag[d].set(static_cast<unsigned>(t));
+    });
+  }
+}
+
 void ll_build_lexer(LlBuiltProgram& b) {
   LexAlphabet alpha;
   alpha.terminals(b, [](LlLowCfg& g, std::string_view text) {
@@ -474,6 +514,7 @@ void ll_build_lexer(LlBuiltProgram& b) {
     decision.how = LlPredict::adaptive;
     ++b.nadaptive;
   }
+  ll_flag_choices(b, alpha, modes);
 }
 
 }  // namespace detail

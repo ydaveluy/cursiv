@@ -457,6 +457,46 @@ struct Adjacent : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A call is glued to its name, and `ARGS` spells `()` too; both names read
+// one word. Where a blank parts the name from `()`, the gap refuses the call,
+// and its `()` takes no part in the reading of the arguments.
+struct GluedCall : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct NAME : terminal<some(cr<"a-z0-9">)> {};
+  struct ARGS : terminal<lit<"("> + many(cr<"^;">)> {};
+  struct Root
+      : rule<create<ast::Won>(
+            ((ref<NAME> + gap::none + assign<&ast::Won::token>(lit<"()">)) |
+             (ref<ID> + assign<&ast::Won::name>(ref<ARGS>))) +
+            lit<";">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// The call and the arguments read the same name: one state holds both after
+// it, and the refused `()` still reserves nothing from `ARGS`.
+struct GluedCallShared : GluedCall {
+  struct Root
+      : rule<create<ast::Won>(
+            ((ref<ID> + gap::none + assign<&ast::Won::token>(lit<"()">)) |
+             (ref<ID> + assign<&ast::Won::name>(ref<ARGS>))) +
+            lit<";">)> {};
+  using entry = Root;
+};
+
+// The same name read by a rule: the token after it is read before the rule
+// closes, and read again where the gap refuses the call.
+struct GluedCallCalled : GluedCall {
+  struct Callee : rule<some(ref<ID>)> {};
+  struct Root
+      : rule<create<ast::Won>(
+            ((ref<Callee> + gap::none + assign<&ast::Won::token>(lit<"()">)) |
+             (ref<Callee> + assign<&ast::Won::name>(ref<ARGS>))) +
+            lit<";">)> {};
+  using entry = Root;
+};
+
 struct Closers : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct TAG : terminal<through(lit<"<">, lit<">">) + lit<"x">> {};
@@ -482,6 +522,28 @@ struct Split : cursiv::GrammarSpec {
   struct Root
       : rule<create<ast::Doc>((lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">))> {
   };
+  using entry = Root;
+  using ignored = WS;
+};
+
+// `#(` opens an operand, which a caller reads after a whole expression, and
+// reads over the `#` a call goes on with: the call takes `#` where the caller
+// in hand reads no operand after it.
+struct CallerLonger : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Expression;
+  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
+                        (lit<"#("> + ref<Expression> + lit<")">)> {};
+  struct Expression
+      : rule<ref<Primary> +
+             many(nest<&ast::Call::callee>(
+                 option(lit<"#">) + lit<"("> +
+                 assign<&ast::Call::argument>(ref<Expression>) + lit<")">))> {};
+  struct Root : rule<create<ast::Program>(
+                    option(lit<"?"> +
+                           append<&ast::Program::statements>(ref<Expression>)) +
+                    append<&ast::Program::statements>(ref<Expression>))> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -668,9 +730,13 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"repeated:"> + ref<Repeated::Root>) |
              (lit<"tight:"> + ref<Tight::Root>) |
              (lit<"adjacent:"> + ref<Adjacent::Root>) |
+             (lit<"gluedcall:"> + ref<GluedCall::Root>) |
+             (lit<"gluedcallshared:"> + ref<GluedCallShared::Root>) |
+             (lit<"gluedcallcalled:"> + ref<GluedCallCalled::Root>) |
              (lit<"closers:"> + ref<Closers::Root>) |
              (lit<"longstring:"> + ref<LongString::Root>) |
              (lit<"split:"> + ref<Split::Root>) |
+             (lit<"callerlonger:"> + ref<CallerLonger::Root>) |
              (lit<"callermany:"> + ref<CallerMany::Root>) |
              (lit<"ladder:"> + ref<Ladder::Root>) |
              (lit<"atendhost:"> + ref<Hosted<AtEnd>::Root>) |

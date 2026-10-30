@@ -1345,11 +1345,6 @@ again:
     return dispShared[to] != 0 ? dispLead[to] : to;
   }
 
-  std::uint32_t goto_guard(unsigned from, unsigned lhs) const {
-    for (const auto e : a.gotoRows[from])
-      if (e.nt == lhs) return e.guard;
-    return 0;
-  }
   std::string guard_target(std::uint32_t guard,
                            std::string_view first = "") const {
     return std::format(
@@ -1662,9 +1657,10 @@ again:
         a.modeTight[a.mode[s]] != 0)
       fmt("      if (c.la.sym == 0xFFFFu && {}{}) {}\n",
           reduce_allowed(sole),
-          may_land_nowhere(s, sole)
-              ? std::format(" && {} != ::cursiv::kInvalidSymbol",
-                            guard_target(goto_guard(s, a.cfg.prods[sole].lhs)))
+          a.may_land_nowhere(s, sole)
+              ? std::format(
+                    " && {} != ::cursiv::kInvalidSymbol",
+                    guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)))
               : std::string{},
           jump('R', reduceOf[sole]));
     fmt("      {}\n  }}\n}}\n", leave("pause"));
@@ -1858,19 +1854,10 @@ again:
       fmt("{}::cursiv::indent_shift_delim(c.indent, {});\n", ind,
           int{a.cfg.terms[x.term].delim});
   }
-  // An empty rule's reduce whose goto the gap decides and may leave nowhere:
-  // there the token has no action in state `s`.
-  bool may_land_nowhere(unsigned s, unsigned prod) const {
-    const auto& q = a.cfg.prods[prod];
-    if (q.len != 0) return false;
-    const std::uint32_t k = goto_guard(s, q.lhs);
-    return k != 0 &&
-           std::ranges::count(a.guards[k - 1u].to, LrGuard::kNoState) != 0;
-  }
   void emit_empty_landing(unsigned s, unsigned prod, std::string_view ind) {
-    if (!may_land_nowhere(s, prod)) return;
+    if (!a.may_land_nowhere(s, prod)) return;
     fmt("{}if ({} == ::cursiv::kInvalidSymbol) goto X{};\n", ind,
-        guard_target(goto_guard(s, a.cfg.prods[prod].lhs)), s);
+        guard_target(a.goto_guard(s, a.cfg.prods[prod].lhs)), s);
   }
   void emit_arm(const LrAction& x) {
     if (lr_takes_token(x.kind)) {
@@ -1924,7 +1911,7 @@ again:
     return std::ranges::any_of(a.action_row(s), [&](const LrAction& x) {
       return x.kind == LrActionKind::guard ||
              (x.kind == LrActionKind::reduce &&
-              (a.cfg.prods[x.arg].gap != 0 || may_land_nowhere(s, x.arg)));
+              (a.cfg.prods[x.arg].gap != 0 || a.may_land_nowhere(s, x.arg)));
     });
   }
   bool conds() const { return a.cfg.ngapConds != 0; }

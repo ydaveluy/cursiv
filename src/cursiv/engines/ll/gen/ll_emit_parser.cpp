@@ -201,6 +201,7 @@ struct Emit : EmitOutput {
   void leaf(std::uint16_t id, std::uint16_t hand, std::uint16_t row);
   void group(std::uint16_t id, std::uint16_t hand = kNoRow);
   void decision(std::uint16_t id);
+  void peek_choice(std::uint16_t d, std::string_view mode, bool constant);
   void arm(std::uint16_t id, std::uint16_t hand);
   void term_choice(std::uint16_t id,
                    const std::vector<std::vector<std::uint16_t>>& byArm);
@@ -551,6 +552,22 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   if (scoped) close("}");
 }
 
+// The token choice `d` reads under `mode`, a constant or an expression: one
+// its alphabet admits for a caller alone and reads over another of its own is
+// asked of the frames first, then the token is held where conditions stand
+// before it.
+void Emit::peek_choice(std::uint16_t d, std::string_view mode, bool constant) {
+  if (constant)
+    put("::cursiv::ll_peek<kTable, {}>(c);", mode);
+  else
+    put("::cursiv::ll_peek<kTable>(c, {});", mode);
+  if (d < a.decFlag.size() && a.decFlag[d].any())
+    put("if (kTable.holds(kTable.dec_flag({}u), c.la.sym)) [[unlikely]] "
+        "::cursiv::ll_refuse_flagged<kTable>(c, {}, {}u);",
+        d, mode, d);
+  if (a.decStands[d] != 0) put("::cursiv::ll_hold<kTable>(c);");
+}
+
 // The arms of a choice, and the token that picks one. What one token settles
 // is a case; what it does not is asked of the prediction -- and only for the
 // tokens that leave more than one arm standing.
@@ -602,8 +619,7 @@ void Emit::decision(std::uint16_t id) {
   }
   const std::string none = name("none");
   const std::string k = name("k");
-  put("::cursiv::ll_peek<kTable, {}u>(c);", dec.mode);
-  if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
+  peek_choice(n.decision, std::format("{}u", dec.mode), true);
   if (asks) {
     put("bool {};", none);
     put("{} = false;", none);
@@ -759,8 +775,7 @@ void Emit::term_choice(std::uint16_t id,
   const LlDecision& dec = a.cfg.decisions[n.decision];
   const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
   const std::string k = name("k");
-  put("::cursiv::ll_peek<kTable, {}u>(c);", dec.mode);
-  if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
+  peek_choice(n.decision, std::format("{}u", dec.mode), true);
   put("static constexpr ::cursiv::LlTermArm {}a[] = {{", k);
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     const std::uint16_t x = kid(n, i);
@@ -844,11 +859,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   const bool guarded = n.min != 0;
   if (guarded) put("if ({} >= {}u) {{", i, n.min);
   if (guarded) open();
-  if (split)
-    put("::cursiv::ll_peek<kTable>(c, {});", mode);
-  else
-    put("::cursiv::ll_peek<kTable, {}>(c);", mode);
-  if (a.decStands[n.decision] != 0) put("::cursiv::ll_hold<kTable>(c);");
+  peek_choice(n.decision, mode, !split);
   // A token neither turn nor exit admits ends the loop where it stands, and
   // everything after it is text nobody reads again -- one misspelt keyword
   // at the head of a document would cost every construct below it. The skip
@@ -1115,9 +1126,10 @@ void Emit::climb(std::uint16_t r) {
   const std::uint16_t selectDec =
       cl.selectNode != kNoRow ? a.cfg.nodes[cl.selectNode].decision : kNoRow;
   line("f.before = c.at;");
-  put("::cursiv::ll_peek<kTable, {}u>(c);", cl.mode);
-  if (selectDec != kNoRow && a.decStands[selectDec] != 0)
-    put("::cursiv::ll_hold<kTable>(c);");
+  if (selectDec != kNoRow)
+    peek_choice(selectDec, std::format("{}u", cl.mode), true);
+  else
+    put("::cursiv::ll_peek<kTable, {}u>(c);", cl.mode);
   // Prediction can keep the first unfinished arm at the end of a document.
   // An infix has no operator there: consuming that zero-width EOF would
   // reset the repair budget and recursively invent another operand forever.

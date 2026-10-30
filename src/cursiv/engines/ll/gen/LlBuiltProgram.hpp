@@ -175,6 +175,10 @@ struct LlBuiltProgram : ShapeOverflow {
   // Per choice, whether conditions stand before its token: it is held for
   // every arm as the lexer chose it.
   std::vector<std::uint8_t> decStands{};
+  // Per choice, the terminals its alphabet admits for a caller alone that read
+  // over another terminal of that alphabet: the descent asks the frames it
+  // stands in before it takes one. Empty where there are none.
+  std::vector<DynSet> decFlag{};
   std::vector<std::uint16_t> lookMode{};
   // What an episode reads besides the graph, per rule and per choice: see
   // `LlTable`. Empty where none is flagged.

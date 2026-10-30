@@ -459,10 +459,10 @@ inline std::uint16_t ll_read_mode(std::uint32_t state) {
   return kNoRow;
 }
 
-// What a mode skips: the blanks it crosses and those it crosses joined.
+// What a mode skips: its blanks, and inside brackets the lines it joins.
 template <const auto& T>
-constexpr std::uint32_t ll_skips_of(std::uint16_t mode) {
-  return (std::uint32_t{T.modeTrivia[mode]} << 16) | T.modeJoinedTrivia[mode];
+constexpr std::uint16_t ll_skips_of(std::uint16_t mode, bool joined) {
+  return joined ? T.modeJoinedTrivia[mode] : T.modeTrivia[mode];
 }
 
 template <const auto& T>

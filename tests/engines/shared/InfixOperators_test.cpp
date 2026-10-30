@@ -676,8 +676,8 @@ void run() {
 namespace unary_level_cases {
 
 // Prefix and postfix levels in one table, in both engines: groupings, the
-// operands a looser prefix may not start, the class each level builds and the
-// value its operator writes.
+// operands a looser prefix may not start, the class each level builds, the
+// value its operator writes, and where a line break ends an operand.
 
 namespace {
 
@@ -812,12 +812,44 @@ void a_cyclic_table_reads_its_levels(const cursiv::Parser& p) {
   check(p, "cyclic:", "a?", "[a?]");
 }
 
+// A newline ends a statement where a reading takes it as a token, and is
+// trivia to a reading its operand ended before it.
+void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text;
+    std::size_t statements;
+  } cases[] = {
+      {"x\n[y]", 2},
+      {"[]\n[y]\nz", 3},
+      {"x[y]", 1},
+      {"x\n.y", 1},
+      {"x\n?: y", 1},
+      {"when\nb -> a\nelse -> a\nend", 1},
+      {"when\nelse -> a = b\nend\nx", 2},
+  };
+  for (const auto& sample : cases) {
+    // The AST holds views into the text it was read from: keep it alive.
+    const std::string source = "lines:" + std::string(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const auto* const lines = r.value_as<ast::Lines>();
+    const std::size_t read = lines != nullptr ? lines->items.size() : 0;
+    const bool ok = r.accepted && r.diagnostics.empty() &&
+                    !r.cst().recovered() && read == sample.statements;
+    if (!ok)
+      std::printf("  [%s] %.*s: %zu diagnostics, %zu statements\n", engine,
+                  static_cast<int>(sample.text.size()), sample.text.data(),
+                  r.diagnostics.size(), read);
+    CHECK(ok);
+  }
+}
+
 void every_engine(const cursiv::Parser& p) {
   a_prefix_binds_what_is_tighter(p);
   a_postfix_binds_what_is_tighter(p);
   a_looser_operator_is_refused_inside(p);
   a_level_builds_its_own_class(p);
   a_cyclic_table_reads_its_levels(p);
+  a_newline_ends_what_reads_it(p);
 }
 
 }  // namespace

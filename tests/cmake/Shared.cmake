@@ -12,7 +12,8 @@ cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia:
 # An operator written in place as a sequence reads as an unnamed data rule, in
 # both engines.
 cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp toperators::Lr toperators::Ll)
-# Prefix and postfix levels in a precedence table, in both engines.
+# Prefix and postfix levels in a precedence table, and where a line break ends
+# an operand, in both engines.
 cursiv_grammar_pair(unarylevels engines/shared/UnaryLevelsGrammar.hpp tunary::Lr tunary::Ll)
 
 # A class's members are visited in its declaration order, whichever order the

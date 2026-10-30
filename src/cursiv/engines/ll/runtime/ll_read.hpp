@@ -13,6 +13,7 @@
 #include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/LlAhead.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
+#include "cursiv/engines/ll/runtime/ll_callers.hpp"
 #include "cursiv/engines/ll/runtime/ll_indent.hpp"
 #include "cursiv/engines/ll/runtime/ll_matcher.hpp"
 #include "cursiv/engines/ll/runtime/ll_section.hpp"
@@ -112,10 +113,12 @@ CURSIV_ALWAYS_INLINE inline bool ll_blanks(const LlContext& c,
 // the one that decides. The gap in front of it is not read again: the point
 // that crossed it read it under the configuration of the group that holds
 // it, so the trivia in front of a region's first token stays the caller's,
-// whatever the region skips. Where the lexer read nothing, the gap is read
-// again with it. The indentation's tokens stand under any alphabet, and so
-// does the end, a dedent where `mode` owes one. `sc`, where it ends past the
-// blanks, is the trivia the lexer read there already.
+// whatever the region skips. A token in hand this alphabet reads as a blank,
+// a newline a wider one took for a token, joins that gap, and the read goes
+// on past it. Where the lexer read nothing, the gap is read again with it.
+// The indentation's tokens stand under any alphabet, and so does the end, a
+// dedent where `mode` owes one. `sc`, where it ends past the blanks, is the
+// trivia the lexer read there already.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
                                          Scan sc = {}) {
@@ -130,18 +133,27 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
         return;
       }
     }
-  if (c.laValid && c.la.sym != kInvalidSymbol && c.la.sym != kEofSymbol) {
-    const TextOffset at = c.la.begin;
-    const Scan read = ll_scan<T>(c, mode, at);
-    c.la = Token{at, read.end, read.end == at ? kInvalidSymbol : read.term,
-                 mode};
-    c.laMode = mode;
-    return;
-  }
+  // Trivia, or a line joined inside brackets.
+  const auto blank = [&](SymbolId t) -> bool {
+    if constexpr (kIndented<T>)
+      return T.terms[t].trivia || (T.terms[t].joins && c.indent.depth != 0);
+    else
+      return T.terms[t].trivia;
+  };
   TextOffset p = std::max(c.at, c.triviaAt);
-  // THE SCAN THAT ENDED THE TRIVIA IS THE TOKEN'S OWN: reading it twice is a
-  // second pass of the lexer over every token of the document.
-  c.pending.clear();
+  if (c.laValid && c.la.sym != kInvalidSymbol && c.la.sym != kEofSymbol) {
+    p = c.la.begin;
+    sc = ll_scan<T>(c, mode, p);
+    if (sc.term == kInvalidSymbol || sc.end == p || !blank(sc.term)) {
+      c.la = Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
+      c.laMode = mode;
+      return;
+    }
+  } else {
+    // THE SCAN THAT ENDED THE TRIVIA IS THE TOKEN'S OWN: reading it twice is
+    // a second pass of the lexer over every token of the document.
+    c.pending.clear();
+  }
   bool head = p == c.at;
   for (;;) {
     if constexpr (kIndented<T>) {
@@ -161,13 +173,9 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
       continue;
     }
     if (sc.end <= p) sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p) break;
-    const auto& term = T.terms[sc.term];
-    bool blank = term.trivia;
-    if constexpr (kIndented<T>)
-      blank = blank || (term.joins && c.indent.depth != 0);
-    if (!blank) break;
-    if (term.recorded) c.pending.push_back(Token{p, sc.end, sc.term});
+    if (sc.term == kInvalidSymbol || sc.end == p || !blank(sc.term)) break;
+    if (T.terms[sc.term].recorded)
+      c.pending.push_back(Token{p, sc.end, sc.term});
     p = sc.end;
     head = false;
   }
@@ -315,6 +323,31 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c) {
   if (!c.laValid && ll_probe<T>(c, Mode)) [[likely]]
     return;
   ll_peek<T>(c, Mode);
+}
+
+// The token in hand at a choice whose alphabet admits, for a caller alone, a
+// terminal that reads over another of its own: where no frame the descent
+// stands in goes on from it, no reading of the choice takes that longer
+// match, and the position is read again without it, as often as the reading
+// it then elects is another such. The trivia before it stays read; where no
+// token but trivia reads there, the match stands.
+template <const auto& T>
+CURSIV_NOINLINE inline void ll_refuse_flagged(LlContext& c, std::uint16_t mode,
+                                              std::uint16_t decision) {
+  typename LlLexTape<T>::Skip skip{};
+  const typename LlLexTape<T>::Skipping tape{.skip = &skip};
+  while (T.holds(T.dec_flag(decision), c.la.sym) &&
+         !ll_callers_take<T>(c, c.la.sym)) {
+    skip.set(c.la.sym);
+    const Scan sc = lex_match(tape, c.src, c.len, mode, c.la.begin);
+    if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
+    bool blank = T.terms[sc.term].trivia;
+    if constexpr (kIndented<T>)
+      blank = blank || (T.terms[sc.term].joins && c.indent.depth != 0);
+    if (blank) return;
+    c.la = Token{c.la.begin, sc.end, sc.term, mode};
+    c.laMode = mode;
+  }
 }
 
 // A read ahead of the descent, from the token in hand: the trivia before it

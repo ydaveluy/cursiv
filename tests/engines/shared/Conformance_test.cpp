@@ -299,6 +299,18 @@ int main() {
   const Pair adjacent{"adjacent:"};
   expect(adjacent, ">>", true);
   expect(adjacent, "> >", false);
+  const Pair gluedCall{"gluedcall:"};
+  won(gluedCall, "f();", "()", "");
+  won(gluedCall, "f ();", "", "()");
+  won(gluedCall, " f ();", "", "()");
+  const Pair gluedCallShared{"gluedcallshared:"};
+  won(gluedCallShared, "f();", "()", "");
+  won(gluedCallShared, "f ();", "", "()");
+  won(gluedCallShared, " f ();", "", "()");
+  const Pair gluedCallCalled{"gluedcallcalled:"};
+  won(gluedCallCalled, "f();", "()", "");
+  won(gluedCallCalled, "f ();", "", "()");
+  won(gluedCallCalled, " f ();", "", "()");
 
   const Pair closers{"closers:"};
   expect(closers, "<a>x", true);
@@ -313,6 +325,32 @@ int main() {
   expect(split, "ab", false);
   expect(split, "a b", true);
   expect(split, "ab c", true);
+
+  // `#(` ends the call loop only where the caller in hand reads it.
+  const Pair longer{"callerlonger:"};
+  const auto named = [](const ast::Expression* e, std::string_view name) {
+    return e != nullptr && e->type == &cursiv::ast_type_tag<ast::Name> &&
+           static_cast<const ast::Name*>(e)->name == name;
+  };
+  const auto called = [&](const ast::Expression* e, std::string_view callee,
+                          std::string_view argument) {
+    if (e == nullptr || e->type != &cursiv::ast_type_tag<ast::Call>)
+      return false;
+    const auto* call = static_cast<const ast::Call*>(e);
+    return named(call->callee, callee) && named(call->argument, argument);
+  };
+  for (const std::string_view text : {"a#(b)", "a #(b)", "a# (b)"})
+    tree<ast::Program>(longer, text, [&](const ast::Program& n) {
+      return n.statements.size() == 1 && called(n.statements[0], "a", "b");
+    });
+  tree<ast::Program>(longer, "?a b#(c)", [&](const ast::Program& n) {
+    return n.statements.size() == 2 && named(n.statements[0], "a") &&
+           called(n.statements[1], "b", "c");
+  });
+  tree<ast::Program>(longer, "?a #(b)", [&](const ast::Program& n) {
+    return n.statements.size() == 2 && named(n.statements[0], "a") &&
+           named(n.statements[1], "b");
+  });
 
   const Pair many{"callermany:"};
   const Pair ladder{"ladder:"};

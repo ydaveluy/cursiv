@@ -257,6 +257,31 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     f(e.to);
     if (e.guard != 0) guards[e.guard - 1u].each_landing(f);
   }
+  // Whether guard `k` has an outcome that lands nowhere.
+  bool lands_nowhere(std::uint32_t k) const {
+    return std::ranges::count(guards[k].to, LrGuard::kNoState) != 0;
+  }
+  // The guard the goto of `lhs` from state `from` lands by, plus one; 0 for a
+  // plain goto.
+  std::uint32_t goto_guard(unsigned from, unsigned lhs) const {
+    for (const auto& e : gotoRows[from])
+      if (e.nt == lhs) return e.guard;
+    return 0;
+  }
+  // An empty rule's reduce whose goto the gap decides and may leave nowhere:
+  // there the token has no action in state `s`.
+  bool may_land_nowhere(unsigned s, unsigned prod) const {
+    if (cfg.prods[prod].len != 0) return false;
+    const std::uint32_t k = goto_guard(s, cfg.prods[prod].lhs);
+    return k != 0 && lands_nowhere(k - 1u);
+  }
+  // Whether a condition may refuse the token action `x` of state `s` takes:
+  // a guard that may land nowhere, or a reduce the gap decides.
+  bool may_refuse(unsigned s, const LrAction& x) const {
+    if (x.kind == LrActionKind::guard) return lands_nowhere(x.arg);
+    return x.kind == LrActionKind::reduce &&
+           (cfg.prods[x.arg].gap != 0 || may_land_nowhere(s, x.arg));
+  }
 
   std::uint16_t next_dfa(std::uint16_t s, std::uint8_t c) const {
     return dfaNext[std::size_t{s} * ncls + c];

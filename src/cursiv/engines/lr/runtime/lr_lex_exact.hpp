@@ -1,7 +1,8 @@
-// A flagged terminal wins a longest match only because a merged state offers
-// it for another caller. Asked of the stack before the lexer commits, it is
-// taken off the position when no reduction path of the stack ends in shifting
-// it, and the position is read again without it.
+// A flagged terminal wins a match only because a merged state offers it for
+// another caller, or because a condition the gap may refuse offers it. Asked
+// of the stack and its conditions before the lexer commits, it is taken off
+// the position when no reduction path of the stack ends in shifting it, and
+// the position is read again without it.
 #pragma once
 
 #include <cstdint>

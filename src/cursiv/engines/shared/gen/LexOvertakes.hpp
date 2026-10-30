@@ -52,6 +52,20 @@ class LexOvertakes {
     return out;
   }
 
+  // Whether `a` runs past one of `beside`, `a` itself aside: the answers known
+  // first, a word at a time, then the terminals not asked yet. Trivia count
+  // where `beside` names them.
+  bool reads_over(unsigned a, const DynSet& beside) {
+    if (_past[a].intersects(beside)) return true;
+    _ask = beside;
+    _ask.andnot(_asked[a]);
+    bool over = false;
+    each_bit(_ask.w.data(), _ask.w.size(), [&](std::size_t b) {
+      over = over || (b < _g.nterms && runs_past(static_cast<unsigned>(b), a));
+    });
+    return over;
+  }
+
  private:
   const LexNfaPool& _nfa;
   const Cfg& _g;
@@ -91,19 +105,6 @@ class LexOvertakes {
       std::ranges::sort(_next[b]);
     }
     return _next[b];
-  }
-
-  // Whether `a` runs past one of `beside`: the answers known first, a word at
-  // a time, then the terminals not asked yet.
-  bool reads_over(unsigned a, const DynSet& beside) {
-    if (_past[a].intersects(beside)) return true;
-    _ask = beside;
-    _ask.andnot(_asked[a]);
-    bool over = false;
-    each_bit(_ask.w.data(), _ask.w.size(), [&](std::size_t b) {
-      over = over || (b < _g.nterms && runs_past(static_cast<unsigned>(b), a));
-    });
-    return over;
   }
 
   // Whether `a` reads on past a text `b` ends on, into the start of a token

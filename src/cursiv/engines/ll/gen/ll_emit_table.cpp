@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/engines/ll/gen/LlExitReads.hpp"
 #include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/engines/ll/gen/LlLexView.hpp"
 #include "cursiv/engines/shared/gen/CLiteral.hpp"
@@ -127,57 +128,6 @@ std::vector<DynSet> lex_live(const Built& a) {
   }
   return live;
 }
-
-// Per state of the graph, what its rule reads from there on before it ends,
-// and whether it may end reading nothing: at a state a call returns into, what
-// the caller reads once a climb it called is done. A condition is crossed as
-// if it held, as a prediction speculates over it.
-struct ClimbExits {
-  std::vector<DynSet> reads;
-  std::vector<std::uint8_t> ends;
-
-  explicit ClimbExits(const Built& a) : reads(a.nstates), ends(a.nstates, 0) {
-    const auto out = [&](std::uint32_t s) {
-      return std::span(a.edges.data() + a.states[s].edge, a.states[s].nedges);
-    };
-    // A state is read again whenever one it goes on into grows.
-    std::vector<std::vector<std::uint32_t>> into(a.nstates);
-    for (std::uint32_t s = 0; s < a.nstates; ++s)
-      for (const LlAtnEdge& e : out(s)) {
-        if (e.kind == LlEdgeKind::atom) continue;
-        into[e.target].push_back(s);
-        if (e.kind == LlEdgeKind::rule) into[e.follow].push_back(s);
-      }
-    std::vector<std::uint32_t> todo(a.nstates);
-    for (std::uint32_t s = 0; s < a.nstates; ++s) todo[s] = s;
-    while (!todo.empty()) {
-      const std::uint32_t s = todo.back();
-      todo.pop_back();
-      bool grew = false;
-      bool end = a.states[s].kind == LlAtnKind::ruleStop;
-      for (const LlAtnEdge& e : out(s)) {
-        if (e.kind == LlEdgeKind::atom) {
-          grew = grew || !reads[s].test(e.label);
-          reads[s].set(e.label);
-          continue;
-        }
-        grew = reads[s].add(reads[e.target]) || grew;
-        bool on = ends[e.target] != 0;
-        // A call reads what follows it too where its callee may read nothing.
-        if (e.kind == LlEdgeKind::rule && on) {
-          grew = reads[s].add(reads[e.follow]) || grew;
-          on = ends[e.follow] != 0;
-        }
-        end = end || on;
-      }
-      if (end && ends[s] == 0) {
-        ends[s] = 1;
-        grew = true;
-      }
-      if (grew) todo.insert(todo.end(), into[s].begin(), into[s].end());
-    }
-  }
-};
 
 // Whether a state of the automaton has a terminal in `sets`.
 bool any_set(const Built& a, const Vec<DynSet>& sets) {
@@ -324,6 +274,11 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const bool staged = std::ranges::any_of(
       g.decisions.v,
       [](const LlDecision& d) { return d.how == LlPredict::staged; });
+  const bool flagging = std::ranges::any_of(
+      a.decFlag, [](const DynSet& set) { return set.any(); });
+  // A climb asks where it ends, and a flagged choice whether a caller takes
+  // its token: both read the frames the descent stands in.
+  const bool callers = g.nclimbs != 0 || flagging;
   const bool reserving = any_set(a, a.dfaResSet);
   const bool relayReserving = any_set(a, a.dfaRelayResSet);
   // With no `joins` terminal the modes' joined trivia is their plain trivia.
@@ -517,17 +472,22 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kCallerBase", a.callerBase);
   o.array("::std::uint32_t", "kCallerAt", a.callerAt);
   o.array("::std::uint32_t", "kReturnClass", a.returnClass);
-  if (g.nclimbs != 0) {
+  if (callers) {
     // Only the states a call returns into: no frame names any other.
-    const ClimbExits exits(a);
+    const LlExitReads exits(a);
     std::vector<DynSet> rows(a.nstates);
     for (const std::uint32_t r : a.callerAt) rows[r] = exits.reads[r];
     const TermRows pool(rows, words);
     std::vector<std::uint32_t> at(a.nstates);
     for (std::uint32_t s = 0; s < a.nstates; ++s) at[s] = pool.at[s] << 1;
     for (const std::uint32_t r : a.callerAt) at[r] |= exits.ends[r];
-    o.array("::std::uint64_t", "kClimbExits", pool.pool);
-    o.array("::std::uint32_t", "kClimbExitAt", at);
+    o.array("::std::uint64_t", "kCallerReads", pool.pool);
+    o.array("::std::uint32_t", "kCallerReadAt", at);
+  }
+  if (flagging) {
+    const TermRows flags(a.decFlag, words);
+    o.array("::std::uint64_t", "kDecFlag", flags.pool);
+    o.array("::std::uint32_t", "kDecFlagAt", flags.at);
   }
   o.array("::std::uint8_t", "kSharedRules", a.sharedRules);
   o.array("::std::uint8_t", "kRepeatScopes", a.repeatScopes);
@@ -786,9 +746,13 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.fmt("            .callerBase = {},\n", o.ref("kCallerBase"));
   o.fmt("            .callerAt = {},\n", o.ref("kCallerAt"));
   o.fmt("            .returnClass = {}}},\n", o.ref("kReturnClass"));
-  if (g.nclimbs != 0) {
-    o.ptr("climbExits", "kClimbExits");
-    o.ptr("climbExitAt", "kClimbExitAt");
+  if (callers) {
+    o.ptr("callerReads", "kCallerReads");
+    o.ptr("callerReadAt", "kCallerReadAt");
+  }
+  if (flagging) {
+    o.ptr("decFlag", "kDecFlag");
+    o.ptr("decFlagAt", "kDecFlagAt");
   }
   if (staged) o.line("    .staged = &ll_staged_predict,");
   o.ptr("sharedRules", "kSharedRules");

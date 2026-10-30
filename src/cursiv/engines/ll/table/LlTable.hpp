@@ -204,12 +204,19 @@ struct LlTable {
 
   // The graph a prediction walks, and the automata the construction closed.
   LlAtnView atn{};
-  // What a caller reads once a climb it called is done, per state a call
-  // returns into: the terminals its rule reads from there on, the row at word
-  // `climbExitAt[s] >> 1` of `climbExits`, and in the low bit whether the
-  // rule may end reading none. Null where the grammar climbs nowhere.
-  const std::uint64_t* climbExits = nullptr;
-  const std::uint32_t* climbExitAt = nullptr;
+  // What a caller reads once a call it made is done, per state a call returns
+  // into: the terminals its rule reads from there on, the row at word
+  // `callerReadAt[s] >> 1` of `callerReads`, and in the low bit whether the
+  // rule may end reading none. Null where nothing asks it: the grammar climbs
+  // nowhere and flags no choice.
+  const std::uint64_t* callerReads = nullptr;
+  const std::uint32_t* callerReadAt = nullptr;
+  // Per choice, the terminals its alphabet admits for a caller alone that read
+  // over another terminal of that alphabet, the row at word `decFlagAt[d]` of
+  // `decFlag`: the descent takes one only where a caller does. Null where no
+  // choice has any.
+  const std::uint64_t* decFlag = nullptr;
+  const std::uint32_t* decFlagAt = nullptr;
   std::uint16_t (*staged)(const LlContext&, std::uint16_t) = nullptr;
   // What an episode reads besides the graph: per rule, whether the callers
   // two ways out of one choice reach it from share its body; per choice,
@@ -282,6 +289,9 @@ struct LlTable {
   }
   constexpr const std::uint64_t* dec_first(std::uint16_t d) const {
     return decFirst + std::size_t{d} * termWords;
+  }
+  constexpr const std::uint64_t* dec_flag(std::uint16_t d) const {
+    return decFlag + decFlagAt[d];
   }
   // Bounded, and it must be: a byte no terminal matches leaves the lookahead
   // naming no symbol at all, and that name is wider than any row.

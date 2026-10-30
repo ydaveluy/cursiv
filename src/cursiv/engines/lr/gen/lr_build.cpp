@@ -4082,6 +4082,7 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
   if (opt.passes) lr_unit_elimination(A, modes, cfgs);
   lr_lex_candidates(A, alpha, modes, wordAt);
   if (A.overflow) return A;
+  lr_lex_condition_flags(A);
   // Only a table that forks merges readings, and only a merge elects.
   if (A.nconflicts != 0 || A.multiCand) {
     lr_elect_runs(A);

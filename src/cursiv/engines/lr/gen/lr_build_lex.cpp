@@ -17,6 +17,7 @@
 #include "cursiv/engines/lr/gen/LrLexView.hpp"
 #include "cursiv/engines/lr/gen/LrLowProd.hpp"
 #include "cursiv/engines/lr/gen/lr_intern_name.hpp"
+#include "cursiv/engines/lr/gen/lr_term_run.hpp"
 #include "cursiv/engines/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/engines/shared/gen/LexBacktrack.hpp"
 #include "cursiv/engines/shared/gen/LexDfaBuild.hpp"
@@ -671,6 +672,108 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
       lr_multi_pass(A, alpha, modes, wordAt, plain, false);
   for (unsigned m = 0; m < A.nmodes; ++m)
     if (multi[m] && !strict[m]) A.modeMulti[m] = 2;
+}
+
+void lr_lex_condition_flags(LrBuildTable& A) {
+  const unsigned nT = A.cfg.nterms;
+  // Per mode, the terminals a condition may refuse in a state reading in it:
+  // the one action of their cell. A cell of several arms takes its token
+  // whatever its conditions answer. A state a reduce lands in under another
+  // mode reads the token again in its own once a guard refuses it there.
+  std::vector<DynSet> asked(A.nmodes);
+  DynSet all;
+  for (unsigned s = 0; s < A.nstates; ++s) {
+    const auto row = A.action_row(s);
+    lr_each_run(row.data(), row.size(), [&](std::size_t i, std::size_t j) {
+      const LrAction& x = row[i];
+      if (j - i != 1 || x.term >= nT || A.cfg.terms[x.term].laid != 0 ||
+          !A.may_refuse(s, x))
+        return;
+      asked[A.mode[s]].set(x.term);
+      all.set(x.term);
+    });
+  }
+  if (all.none()) return;
+  // Per DFA state, the terminals of `all` a walk accepts past it.
+  std::vector<std::vector<std::uint16_t>> into(A.ndfa);
+  for (std::uint16_t s = 0; s < A.ndfa; ++s)
+    for (unsigned c = 0; c < A.ncls; ++c)
+      if (const auto to = A.next_dfa(s, static_cast<std::uint8_t>(c));
+          to != kDeadState && (into[to].empty() || into[to].back() != s))
+        into[to].push_back(s);
+  std::vector<DynSet> past(A.ndfa);
+  std::vector<std::uint16_t> todo;
+  for (std::uint16_t s = 0; s < A.ndfa; ++s)
+    if (A.dfa_acc_set(s).intersects(all)) todo.push_back(s);
+  while (!todo.empty()) {
+    const std::uint16_t s = todo.back();
+    todo.pop_back();
+    const DynSet ahead = (A.dfa_acc_set(s) & all) | past[s];
+    for (const std::uint16_t from : into[s])
+      if (past[from].add(ahead)) todo.push_back(from);
+  }
+  // Per boundary, the classes it refuses whatever scalar their bytes start.
+  std::map<std::uint16_t, std::vector<char>> shutBy;
+  const auto shut = [&](std::uint16_t bound) -> const std::vector<char>& {
+    auto [at, fresh] = shutBy.try_emplace(bound, A.ncls, 1);
+    if (fresh) {
+      const ByteSet none{};
+      const ByteSet& refused = bound == kNoSet ? none : A.cfg.sets[bound];
+      const ByteSet decoded =
+          bound == kNoSet ? none : lex_decode_bytes(A.cfg, bound);
+      for (unsigned b = 0; b < 256; ++b)
+        if (const auto byte = static_cast<unsigned char>(b);
+            !refused.has(byte) || decoded.has(byte))
+          at->second[A.cls[b]] = 0;
+    }
+    return at->second;
+  };
+  std::vector<char> seen(A.ndfa);
+  std::vector<std::uint16_t> states;
+  for (unsigned m = 0; m < A.nmodes; ++m) {
+    if (asked[m].none()) continue;
+    std::ranges::fill(seen, 0);
+    states.assign(1, A.modeStart[m]);
+    seen[A.modeStart[m]] = 1;
+    DynSet flags;
+    for (std::size_t i = 0; i < states.size(); ++i) {
+      const std::uint16_t s = states[i];
+      for (unsigned c = 0; c < A.ncls; ++c)
+        if (const auto to = A.next_dfa(s, static_cast<std::uint8_t>(c));
+            to != kDeadState && !seen[to]) {
+          seen[to] = 1;
+          states.push_back(to);
+        }
+      const DynSet& acc = A.dfa_acc_set(s);
+      const DynSet& res = A.dfa_res_set(s);
+      each_bit(acc.w.data(), acc.w.size(), [&](std::size_t bit) {
+        const auto u = static_cast<unsigned>(bit);
+        if (u >= nT) return;
+        // A match that reads on past `u`, where `u` may stand, takes its text.
+        const std::vector<char>& closed = shut(A.dfa_acc_bound(s, u));
+        DynSet taking;
+        for (unsigned c = 0; c < A.ncls; ++c)
+          if (const auto to = A.next_dfa(s, static_cast<std::uint8_t>(c));
+              to != kDeadState && !closed[c]) {
+            taking |= A.dfa_acc_set(to) & all;
+            taking |= past[to];
+          }
+        // So does one the walk elects over `u` on the same text, or that
+        // reserves its spelling.
+        each_bit(acc.w.data(), acc.w.size(), [&](std::size_t t) {
+          if (t < nT &&
+              (res.test(u) || A.dfa_before(s, static_cast<unsigned>(t), u)))
+            taking.set(static_cast<unsigned>(t));
+        });
+        taking &= asked[m];
+        taking.reset(u);
+        flags |= taking;
+      });
+    }
+    if (flags.none()) continue;
+    A.modeFlag.row(0, A.nmodes);
+    A.modeFlag[m] |= flags;
+  }
 }
 
 void lr_derive_lexical(const LrBuildTable& a, LrDerivedRows& rows) {
