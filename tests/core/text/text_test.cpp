@@ -121,6 +121,27 @@ static_assert(difference_is(R"(\u{0}-\u{10ffff})", R"(\u{0})",
                             {{1, 0x10ffff}}));
 static_assert(difference_is(R"(\u{0}\u{10ffff})", R"(\u{0}-\u{10ffff})", {}));
 
+constexpr bool union_is(std::string_view a, std::string_view b,
+                        std::initializer_list<unicode::Range> want) {
+  const auto actual = ClassRanges::of(a).united(ClassRanges::of(b));
+  return std::equal(actual.r.begin(), actual.r.end(), want.begin(), want.end());
+}
+
+static_assert(union_is("", "", {}));
+static_assert(union_is("a-c", "", {{U'a', U'c'}}));
+static_assert(union_is("", "a-c", {{U'a', U'c'}}));
+static_assert(union_is("a-c", "d-f", {{U'a', U'f'}}));
+static_assert(union_is("m", "a-z", {{U'a', U'z'}}));
+static_assert(union_is("a-cx-z", "b-dm",
+                       {{U'a', U'd'}, {U'm', U'm'}, {U'x', U'z'}}));
+// A spelling read out of order, or with ranges that meet, still gives its
+// ranges ascending and joined.
+static_assert(union_is("ba", "", {{U'a', U'b'}}));
+static_assert(union_is("zab-c", "", {{U'a', U'c'}, {U'z', U'z'}}));
+static_assert(union_is("x-zc-fa-d", "", {{U'a', U'f'}, {U'x', U'z'}}));
+static_assert(union_is(R"(\u{10ffff}\u{0}\x01)", "",
+                       {{0, 1}, {0x10ffff, 0x10ffff}}));
+
 template <str S>
 consteval bool holds(char32_t cp) {
   return detail::word_class<CR<S>>::has(cp);

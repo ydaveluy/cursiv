@@ -38,59 +38,70 @@ struct ClassItem {
   ClassFault fault = ClassFault::none;
 };
 
+// The value of a hexadecimal digit, or -1 for any other character.
+constexpr int class_hex_digit(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+constexpr bool class_letter(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+// The character `v`, spelled in `width` bytes, where `v` is a scalar.
+constexpr ClassAtom class_scalar(char32_t v, std::size_t width) {
+  if (v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF))
+    return {0, width, 0, ClassFault::not_scalar};
+  return {v, width};
+}
+
+// The character written as is at `p`, `lead` bytes into its atom.
+constexpr ClassAtom class_raw_at(std::string_view s, std::size_t p,
+                                 std::size_t lead) {
+  if (const auto b = static_cast<unsigned char>(s[p]); b < 0x80)
+    return {b, lead + 1};
+  std::size_t len = 0;
+  const char32_t cp = scalar_at(s.data() + p, s.size() - p, len);
+  if (cp == kNoScalar) return {0, lead + 1, 0, ClassFault::malformed};
+  return {cp, lead + len};
+}
+
+// Plain branches and loops, no closures: a constant evaluation counts every
+// step, and a large class reads thousands of atoms.
 constexpr ClassAtom class_atom_at(std::string_view s, std::size_t i) {
-  const auto raw = [&](std::size_t p) -> ClassAtom {
-    const std::size_t lead = p - i;
-    if (const auto b = static_cast<unsigned char>(s[p]); b < 0x80)
-      return {b, lead + 1};
-    std::size_t len = 0;
-    const char32_t cp = scalar_at(s.data() + p, s.size() - p, len);
-    if (cp == kNoScalar) return {0, lead + 1, 0, ClassFault::malformed};
-    return {cp, lead + len};
-  };
-  if (s[i] != '\\') return raw(i);
-  if (i + 1 == s.size()) return {0, 1, 0, ClassFault::lone_backslash};
-  const auto at = [&](std::size_t k) { return k < s.size() ? s[k] : '\0'; };
-  const auto digit_of = [](char c) {
-    return c >= '0' && c <= '9'   ? c - '0'
-           : c >= 'a' && c <= 'f' ? c - 'a' + 10
-           : c >= 'A' && c <= 'F' ? c - 'A' + 10
-                                  : -1;
-  };
-  const auto scalar = [&](char32_t v, std::size_t width) -> ClassAtom {
-    if (v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF))
-      return {0, width, 0, ClassFault::not_scalar};
-    return {v, width};
-  };
-  const auto hex = [&](std::size_t n) -> ClassAtom {
-    char32_t v = 0;
-    for (std::size_t k = 0; k < n; ++k) {
-      const int d = digit_of(at(i + 2 + k));
-      if (d < 0) return {0, 2, 0, ClassFault::unknown_escape};
-      v = v * 16 + static_cast<char32_t>(d);
-    }
-    return n == 4 ? scalar(v, 2 + n) : ClassAtom{v, 2 + n};
-  };
-  const auto braced = [&]() -> ClassAtom {
-    char32_t v = 0;
-    std::size_t k = 0;
-    for (; digit_of(at(i + 3 + k)) >= 0; ++k)
-      if (v <= 0x10FFFF)
-        v = v * 16 + static_cast<char32_t>(digit_of(at(i + 3 + k)));
-    if (k == 0 || at(i + 3 + k) != '}')
-      return {0, 2, 0, ClassFault::unknown_escape};
-    return scalar(v, 4 + k);
-  };
+  if (s[i] != '\\') return class_raw_at(s, i, 0);
+  const std::size_t size = s.size();
+  if (i + 1 == size) return {0, 1, 0, ClassFault::lone_backslash};
   const char e = s[i + 1];
-  const auto digit = [](char c) { return c >= '0' && c <= '9'; };
-  const auto letter = [](char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-  };
+  const char next = i + 2 < size ? s[i + 2] : '\0';
   switch (e) {
-    case 'x':
-      return hex(2);
     case 'u':
-      return at(i + 2) == '{' ? braced() : hex(4);
+      if (next == '{') {
+        const std::size_t from = i + 3;
+        std::size_t k = from;
+        char32_t v = 0;
+        for (; k < size; ++k) {
+          const int d = class_hex_digit(s[k]);
+          if (d < 0) break;
+          if (v <= 0x10FFFF) v = v * 16 + static_cast<char32_t>(d);
+        }
+        if (k == from || k == size || s[k] != '}')
+          return {0, 2, 0, ClassFault::unknown_escape};
+        return class_scalar(v, k + 1 - i);
+      }
+      [[fallthrough]];
+    case 'x': {
+      const std::size_t n = e == 'x' ? 2 : 4;
+      char32_t v = 0;
+      for (std::size_t k = i + 2; k < i + 2 + n; ++k) {
+        const int d = k < size ? class_hex_digit(s[k]) : -1;
+        if (d < 0) return {0, 2, 0, ClassFault::unknown_escape};
+        v = v * 16 + static_cast<char32_t>(d);
+      }
+      return n == 4 ? class_scalar(v, 6) : ClassAtom{v, 4};
+    }
     case 'n':
       return {U'\n', 2};
     case 'r':
@@ -104,11 +115,12 @@ constexpr ClassAtom class_atom_at(std::string_view s, std::size_t i) {
     case 'b':
       return {U'\b', 2};
     case '0':
-      if (digit(at(i + 2))) return {0, 2, 0, ClassFault::unknown_escape};
+      if (next >= '0' && next <= '9')
+        return {0, 2, 0, ClassFault::unknown_escape};
       return {0, 2};
     case 'c':
-      if (!letter(at(i + 2))) return {0, 2, 0, ClassFault::unknown_escape};
-      return {static_cast<char32_t>(at(i + 2) % 32), 3};
+      if (!class_letter(next)) return {0, 2, 0, ClassFault::unknown_escape};
+      return {static_cast<char32_t>(next % 32), 3};
     case 'd':
     case 'D':
     case 's':
@@ -119,8 +131,9 @@ constexpr ClassAtom class_atom_at(std::string_view s, std::size_t i) {
     default:
       break;
   }
-  if (digit(e) || letter(e)) return {0, 2, 0, ClassFault::unknown_escape};
-  return raw(i + 1);
+  if ((e >= '0' && e <= '9') || class_letter(e))
+    return {0, 2, 0, ClassFault::unknown_escape};
+  return class_raw_at(s, i + 1, 1);
 }
 
 // A `-` is a range operator between two atoms and itself anywhere else.

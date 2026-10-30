@@ -21,6 +21,7 @@ struct ClassRanges {
 
   static constexpr ClassRanges of(std::string_view spec) {
     ClassRanges out;
+    out.r.reserve(spec.size() / 4 + 1);
     for (std::size_t i = 0; i < spec.size();) {
       const ClassItem it = class_item_at(spec, i);
       if (it.fault != ClassFault::none) break;
@@ -38,27 +39,61 @@ struct ClassRanges {
     return out;
   }
 
+  // The ranges ascending and joined. They are read in order as a rule, so the
+  // sort only runs when the joining pass meets one out of order.
   constexpr void merge() {
-    const auto before = [](const unicode::Range& a, const unicode::Range& b) {
-      return a.lo < b.lo;
-    };
-    if (!std::ranges::is_sorted(r, before)) std::ranges::sort(r, before);
-    std::vector<unicode::Range> out;
-    out.reserve(r.size());
-    for (const unicode::Range& x : r) {
-      if (!out.empty() && x.lo <= out.back().hi + 1)
-        out.back().hi = std::max(out.back().hi, x.hi);
-      else
-        out.push_back(x);
-    }
-    r = std::move(out);
+    if (joined()) return;
+    std::ranges::sort(r, {}, &unicode::Range::lo);
+    joined();
   }
 
+  // Joins the ranges in place while each starts at or after the last one
+  // kept. At one that starts before, it stops and returns false: the ranges
+  // then still hold the same scalars, some of them twice.
+  constexpr bool joined() {
+    unicode::Range* const first = r.data();
+    unicode::Range* w = first;
+    for (const unicode::Range* x = first; x != first + r.size(); ++x) {
+      if (w != first && x->lo < w[-1].lo) return false;
+      w = join(first, w, *x);
+    }
+    r.resize(static_cast<std::size_t>(w - first));
+    return true;
+  }
+
+  // Both sides are ascending: one pass takes the lower range next, with no
+  // sort. It walks pointers rather than calling the vector, since a constant
+  // evaluation counts every call: a union of large classes stays far below
+  // the compiler's limit.
   constexpr ClassRanges united(const ClassRanges& o) const {
-    ClassRanges out = *this;
-    out.r.insert(out.r.end(), o.r.begin(), o.r.end());
-    out.merge();
+    ClassRanges out;
+    out.strays = strays;
+    out.r.resize(r.size() + o.r.size());
+    unicode::Range* const first = out.r.data();
+    unicode::Range* w = first;
+    const unicode::Range* a = r.data();
+    const unicode::Range* const aEnd = a + r.size();
+    const unicode::Range* b = o.r.data();
+    const unicode::Range* const bEnd = b + o.r.size();
+    while (a != aEnd && b != bEnd)
+      w = join(first, w, a->lo < b->lo ? *a++ : *b++);
+    while (a != aEnd) w = join(first, w, *a++);
+    while (b != bEnd) w = join(first, w, *b++);
+    out.r.resize(static_cast<std::size_t>(w - first));
     return out;
+  }
+
+  // Writes `x`, which starts at or after the range before `w`, at `w`, or
+  // widens that range where the two touch: the slot after the last range.
+  static constexpr unicode::Range* join(unicode::Range* first,
+                                        unicode::Range* w,
+                                        const unicode::Range& x) {
+    if (w == first || x.lo > w[-1].hi + 1) {
+      *w = x;
+      return w + 1;
+    }
+    w[-1].hi = std::max(w[-1].hi, x.hi);
+    return w;
   }
 
   constexpr ClassRanges complemented() const {
@@ -104,21 +139,20 @@ struct ClassRanges {
   template <class Sink>
   constexpr void spell(Sink sink) const {
     const auto put = [&sink](char32_t c) {
-      constexpr char kHex[] = "0123456789abcdef";
       if (c >= 0x20 && c < 0x7f && c != '-' && c != '^' && c != '\\') {
         sink(static_cast<char>(c));
         return;
       }
+      const unsigned digits = c < 0x100      ? 2
+                              : c < 0x10000  ? 4
+                              : c < 0x100000 ? 5
+                                             : 6;
       sink('\\');
-      const std::size_t digits = c < 0x100 ? 2 : c < 0x10000 ? 4 : 0;
       sink(c < 0x100 ? 'x' : 'u');
-      if (digits == 0) sink('{');
-      std::size_t shift = 0;
-      for (char32_t v = c; v != 0; v >>= 4) shift += 4;
-      if (shift == 0) shift = 4;
-      if (digits != 0 && shift < digits * 4) shift = digits * 4;
-      for (; shift != 0; shift -= 4) sink(kHex[(c >> (shift - 4)) & 0xF]);
-      if (digits == 0) sink('}');
+      if (digits > 4) sink('{');
+      for (unsigned shift = digits * 4; shift != 0; shift -= 4)
+        sink("0123456789abcdef"[(c >> (shift - 4)) & 0xF]);
+      if (digits > 4) sink('}');
     };
     for (const unicode::Range& x : r) {
       put(x.lo);
