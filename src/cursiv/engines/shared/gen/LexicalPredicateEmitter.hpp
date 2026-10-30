@@ -25,10 +25,9 @@ class LexicalPredicateEmitter {
  public:
   template <class Relays>
   LexicalPredicateEmitter(const Cfg& g, const Relays& relays,
-                          std::string_view boundary, bool header = false)
+                          std::string_view boundary)
       : _g(g),
         _boundary(boundary),
-        _header(header),
         _used(g.nlex),
         _width(g.nlex, kVariableWidth),
         _first(g.nlex),
@@ -60,15 +59,15 @@ class LexicalPredicateEmitter {
     std::string out;
     for (const auto root : _roots)
       out += std::format(
-          "{}bool lexical_predicate_{}(const char*, ::cursiv::TextOffset,\n"
+          "bool lexical_predicate_{}(const char*, ::cursiv::TextOffset,\n"
           "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n",
-          _header ? "inline " : "", root);
+          root);
     for (const auto root : _recognizers)
       out += std::format(
-          "{}::cursiv::PredicateState lexical_recognizer_{}(const char*, "
+          "::cursiv::PredicateState lexical_recognizer_{}(const char*, "
           "::cursiv::TextOffset,\n"
           "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n",
-          _header ? "inline " : "", root);
+          root);
     return out;
   }
 
@@ -100,10 +99,10 @@ class LexicalPredicateEmitter {
     };
     for (const auto root : _roots) {
       out += std::format(
-          "{}bool lexical_predicate_{}(const char* src, ::cursiv::TextOffset "
+          "bool lexical_predicate_{}(const char* src, ::cursiv::TextOffset "
           "len,\n"
           "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {{\n",
-          _header ? "inline " : "", root);
+          root);
       if (fixed(root))
         out += std::format("  return lexical_fixed_{}(src, len, at, seen);\n",
                            root);
@@ -115,10 +114,10 @@ class LexicalPredicateEmitter {
     }
     for (const auto root : _recognizers) {
       out += std::format(
-          "{}::cursiv::PredicateState lexical_recognizer_{}(const char* src, "
+          "::cursiv::PredicateState lexical_recognizer_{}(const char* src, "
           "::cursiv::TextOffset len,\n"
           "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {{\n",
-          _header ? "inline " : "", root);
+          root);
       out += "  ::cursiv::LexicalCaptures captures;\n";
       out += "  return ::cursiv::lexical_endpoints(" + started(root, "false") +
              ");\n";
@@ -130,7 +129,6 @@ class LexicalPredicateEmitter {
  private:
   const Cfg& _g;
   std::string _boundary;
-  bool _header;
   static constexpr std::uint8_t kVisited = 1, kDirect = 2, kNode = 4,
                                 kFinal = 8;
   std::vector<std::uint8_t> _used;

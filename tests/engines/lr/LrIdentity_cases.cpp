@@ -687,15 +687,59 @@ std::unique_ptr<cursiv::LrBuildTable> built() {
 }
 
 template <class G>
-void probe_cuts(unsigned expected) {
+cursiv::LrFinalTable finished() {
   auto a = built<G>();
   CHECK(!a->overflow);
   const std::vector<cursiv::ElementId> sites(a->writes.nchains + a->nfused,
                                              cursiv::kNoElement);
-  const auto done = cursiv::LrFinalTable::make(std::move(a), sites);
+  return cursiv::LrFinalTable::make(std::move(a), sites);
+}
+
+template <class G>
+void probe_cuts(unsigned expected) {
+  const auto done = finished<G>();
   unsigned cuts = 0;
-  CHECK(!cursiv::lr_emit_parser_states(done, "probes", &cuts).empty());
+  CHECK(!cursiv::lr_emit_parser_files(done, "probes", &cuts).empty());
   CHECK(cuts == expected);
+}
+
+// A lone group stays with its helpers in `ParserStates.cpp`, the units left
+// empty. Groups spread over the units, each defined in one of them and
+// declared to all in their header, and `ParserStates.cpp` enters them.
+void groups_spread_over_units() {
+  const auto done = finished<tbounds::probes::G>();
+  const auto count = [](std::string_view text, std::string_view what) {
+    std::size_t n = 0;
+    for (auto at = text.find(what); at != std::string_view::npos;
+         at = text.find(what, at + what.size()))
+      ++n;
+    return n;
+  };
+  const auto lone = cursiv::lr_emit_parser_files(done, "lone");
+  CHECK(lone.size() == 2 + cursiv::kLrGroupUnits);
+  CHECK(lone[0].first == "ParserStates.cpp" &&
+        lone[1].first == "ParserGroups.hpp");
+  CHECK(count(lone[0].second, "static ::cursiv::LrExit states_0(") == 1);
+  for (std::size_t f = 1; f < lone.size(); ++f)
+    CHECK(count(lone[f].second, "states_") == 0);
+  const auto split = cursiv::lr_emit_parser_files(done, "split", nullptr, 8);
+  CHECK(split.size() == lone.size());
+  const std::string_view states = split[0].second;
+  const std::string_view header = split[1].second;
+  const std::size_t groups = count(header, "::cursiv::LrExit states_");
+  CHECK(groups > 1);
+  CHECK(count(states, "::cursiv::LrExit drive_state(::cursiv::LrContext& c) {") ==
+        1);
+  CHECK(count(states, "::cursiv::LrExit states_") == 0);
+  std::size_t defined = 0;
+  for (unsigned u = 0; u < cursiv::kLrGroupUnits; ++u) {
+    const auto& [name, text] = split[2 + u];
+    CHECK(name == "ParserGroups" + std::to_string(u) + ".cpp");
+    const std::size_t mine = count(text, "::std::uint32_t e) {");
+    CHECK(count(text, "#include \"ParserGroups.hpp\"") == (mine != 0 ? 1 : 0));
+    defined += mine;
+  }
+  CHECK(defined == groups);
 }
 
 }  // namespace
@@ -721,6 +765,7 @@ void run() {
   probe_cuts<tbounds::probes::G>(0);
   probe_cuts<tbounds::byteprobes::G<64>>(0);
   probe_cuts<tbounds::byteprobes::G<70>>(1);
+  groups_spread_over_units();
   // One nonterminal entered from more states than its 16-bit goto count holds.
   {
     auto a = std::make_unique<cursiv::LrBuildTable>();

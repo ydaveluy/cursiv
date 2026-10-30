@@ -106,9 +106,10 @@ int run(int argc, char** argv) try {
       cursiv::AsWritten<cursiv::LlLowering<G>::rules>::of);
   if (!done) return exit_status(GenCode::refused);
   const cursiv::LlBuiltProgram& a = done->program();
-  // The descent is spelled first: a rule whose calls its frame cannot name is
-  // refused before anything is written.
-  const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS);
+  // A rule whose calls its frame cannot name is refused before anything is
+  // written.
+  const auto table = cursiv::ll_emit_table(*done, CURSIV_GEN_NS);
+  const auto steps = cursiv::ll_emit_parser_files(*done, CURSIV_GEN_NS, table);
 
   const auto registry = cursiv::ast_registry<G, cursiv::LlLowering<G>>(
       CURSIV_GEN_STRINGIFY(CURSIV_GEN_GRAMMAR));
@@ -116,7 +117,7 @@ int run(int argc, char** argv) try {
   const auto entries = cursiv::ll_entry_table(*done, registry.rows, records);
   if (const auto wrote = cursiv::write_common_artifacts(
           dir,
-          {.table = cursiv::ll_emit_table(*done, CURSIV_GEN_NS),
+          {.table = table.header,
            .parser = cursiv::ll_emit_parser_decl(CURSIV_GEN_NS),
            .parserUnits = steps,
            .ns = CURSIV_GEN_NS,

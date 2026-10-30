@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -277,7 +279,9 @@ void a_guard_only_disables_the_static_decisions_that_can_reach_it() {
   CHECK(choice("Head") == cursiv::LlPredict::adaptive);
   // A nullable callee reaches the caller's guard before reading a token.
   CHECK(choice("Empty") == cursiv::LlPredict::adaptive);
-  const auto files = cursiv::ll_emit_parser_files(*done, "local_guard_test");
+  const auto files = cursiv::ll_emit_parser_files(
+      *done, "local_guard_test",
+      cursiv::ll_emit_table(*done, "local_guard_test"));
   std::string emitted;
   for (const auto& [name, text] : files) emitted += text;
   for (std::uint16_t i = 0; i < built.cfg.ndecisions; ++i) {
@@ -308,9 +312,22 @@ void classification_stops_before_a_guard_can_choose_an_arm() {
   CHECK(choice("Head") == cursiv::LlPredict::adaptive);
   CHECK(choice("Empty") == cursiv::LlPredict::adaptive);
   const auto table = cursiv::ll_emit_table(*done, "staged_generation_test");
-  CHECK(table.find(".staged = &ll_staged_predict") != std::string::npos);
-  CHECK(table.find(" kLook[]") == std::string::npos);
-  CHECK(table.find(" kLookEdge[]") == std::string::npos);
+  CHECK(table.header.find(".staged = &ll_staged_predict") != std::string::npos);
+  CHECK(table.header.find(" kLook[]") == std::string::npos);
+  CHECK(table.header.find(" kLookEdge[]") == std::string::npos);
+  // The functions the table points at are declared there and compiled once,
+  // in the parser's own unit.
+  const auto staged = std::string_view("::std::uint16_t ll_staged_predict(");
+  CHECK(table.header.find(staged) != std::string::npos);
+  CHECK(table.header.find("inline ::std::uint16_t ll_staged_predict(") ==
+        std::string::npos);
+  CHECK(table.header.find("switch (decision)") == std::string::npos);
+  CHECK(table.functions.find("switch (decision)") != std::string::npos);
+  const auto files =
+      cursiv::ll_emit_parser_files(*done, "staged_generation_test", table);
+  for (const auto& [name, text] : files)
+    CHECK((text.find("switch (decision)") != std::string::npos) ==
+          (name == "ParserStates.cpp"));
   auto lowered = cursiv::LlLowering<tllstaged::Base>::lower();
   const auto off = cursiv::ll_build_program(lowered, {.staticPredict = false});
   CHECK(off.nadaptive == off.cfg.ndecisions && off.dfa.empty());
@@ -380,10 +397,14 @@ void parser_files_have_a_stable_partition_contract() {
       "generation_test");
   CHECK(done.has_value());
   if (!done) return;
-  const auto files = cursiv::ll_emit_parser_files(*done, "generation_test");
+  const auto files = cursiv::ll_emit_parser_files(
+      *done, "generation_test",
+      cursiv::ll_emit_table(*done, "generation_test"));
   CHECK(files.size() == 10);
   unsigned declarations = 0, entries = 0, units = 0;
   for (const auto& [name, text] : files) {
+    // One unit of rules keeps its cold paths: none is shared.
+    CHECK(text.find("COLD_PATHS") == std::string::npos);
     if (name == "ParserRules.hpp") {
       ++declarations;
       // The one rule calls none: a plain function, with no frame.
@@ -393,7 +414,10 @@ void parser_files_have_a_stable_partition_contract() {
       ++entries;
       CHECK(text.find("parse_entry") != std::string::npos);
       CHECK(text.find("LlMachine") != std::string::npos);
-      CHECK(text.find("ll_predictor.hpp") == std::string::npos);
+      // The prediction runtime only where the unit defines the table's
+      // staged predictor.
+      CHECK((text.find("ll_predictor.hpp") != std::string::npos) ==
+            (text.find("ll_staged_predict(") != std::string::npos));
     } else if (name.starts_with("ParserRules") && name.ends_with(".cpp")) {
       ++units;
       CHECK(text.find("void r") == std::string::npos);
@@ -427,7 +451,8 @@ std::vector<std::pair<std::string, std::string>> emitted_files() {
       cursiv::ll_build_program(cursiv::LlLowering<G>::lower()), "emit_test");
   CHECK(done.has_value());
   if (!done) return {};
-  return cursiv::ll_emit_parser_files(*done, "emit_test");
+  return cursiv::ll_emit_parser_files(
+      *done, "emit_test", cursiv::ll_emit_table(*done, "emit_test"));
 }
 
 // The bytes of a grammar's parser files, or of its rule units alone.
@@ -503,6 +528,44 @@ void long_arms_are_functions() {
   CHECK(arms == 2);
 }
 
+// ...and where the arms call a rule that calls itself, each arm is a step of
+// its own, with its frame, which the machine runs as it runs a rule.
+struct LongSuspendingArms : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Nest : rule<lit<"("> + option(ref<Nest>) + lit<")">> {};
+  struct Root
+      : rule<create<Node>(many((lit<"x"> + word_run<12>() + ref<Nest>) |
+                               (lit<"y"> + word_run<12>() + ref<Nest>)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+void long_suspending_arms_are_steps() {
+  std::string declarations, states;
+  for (const auto& [name, text] : emitted_files<LongSuspendingArms>())
+    if (name == "ParserRules.hpp")
+      declarations = text;
+    else if (name == "ParserStates.cpp")
+      states = text;
+  // The rules span several units, which share their cold paths: declared for
+  // each, compiled in the parser's own unit.
+  CHECK(
+      declarations.find("CURSIV_LL_COLD_PATHS(extern, ::emit_test::kTable);") !=
+      std::string::npos);
+  CHECK(states.find("CURSIV_LL_COLD_PATHS(, ::emit_test::kTable);") !=
+        std::string::npos);
+  for (const char* tag : {"1_0", "1_1"}) {
+    CHECK(declarations.find(std::format("struct F{} {{", tag)) !=
+          std::string::npos);
+    CHECK(declarations.find(std::format(
+              "::std::uint16_t s{}(::cursiv::LlContext&, void*);", tag)) !=
+          std::string::npos);
+    CHECK(states.find(std::format("return s{}(c, f);", tag)) !=
+          std::string::npos);
+    CHECK(states.find(std::format("sizeof(F{})", tag)) != std::string::npos);
+  }
+}
+
 // A chain of rules, each calling the next before a token, as long as node rows
 // allow: only its deepest links run as plain functions, as many as the limit
 // allows. A rule that calls itself has a frame, and so does its caller.
@@ -555,7 +618,7 @@ void check_return_nodes() {
     }
   }
   CHECK(built.returnNode == expected);
-  const auto table = cursiv::ll_emit_table(*done, "return_nodes_test");
+  const auto table = cursiv::ll_emit_table(*done, "return_nodes_test").header;
   CHECK(table.find(" kReturnNode[]") != std::string::npos);
   CHECK(table.find(".returnNode = kReturnNode") != std::string::npos);
 }
@@ -573,7 +636,8 @@ void a_table_holds_only_the_data_its_readers_ask_for() {
   CHECK(done.has_value());
   if (!done) return;
   CHECK(done->program().cfg.ngapConds != 0);
-  const auto table = cursiv::ll_emit_table(*done, "table_data_test");
+  const auto source = cursiv::ll_emit_table(*done, "table_data_test");
+  const std::string& table = source.header;
   // The names are the terminals', not the rules'.
   CHECK(table.find("WS") != std::string::npos);
   CHECK(table.find("AfterSplit") == std::string::npos);
@@ -584,7 +648,12 @@ void a_table_holds_only_the_data_its_readers_ask_for() {
   CHECK(table.find(".reserves") == std::string::npos);
   CHECK(table.find("kGapBoundary") == std::string::npos);
   CHECK(table.find(" kLexAcc[]") != std::string::npos);
-  CHECK(table.find("inline bool condition(") != std::string::npos);
+  // The condition is declared beside the data and defined in the parser's own
+  // unit.
+  CHECK(table.find("\nbool condition(") != std::string::npos);
+  CHECK(table.find("switch (k)") == std::string::npos);
+  CHECK(source.functions.find("bool condition(") != std::string::npos);
+  CHECK(source.functions.find("inline bool condition(") == std::string::npos);
 }
 
 }  // namespace
@@ -605,6 +674,7 @@ int main() {
   nested_choices_spell_each_arm_once();
   keyword_choices_are_tables();
   long_arms_are_functions();
+  long_suspending_arms_are_steps();
   plain_calls_stack_no_deeper_than_the_limit();
   return_states_preserve_named_and_synthetic_calls();
   a_table_holds_only_the_data_its_readers_ask_for();

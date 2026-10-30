@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
 #include "cursiv/engines/ll/runtime/ll_repair.hpp"
 #include "cursiv/engines/ll/runtime/ll_section.hpp"
@@ -10,8 +11,9 @@
 namespace cursiv {
 
 template <const auto& T>
-inline void ll_condition_node(LlContext& c, std::uint16_t mode,
-                              std::uint16_t condition, std::uint16_t node) {
+CURSIV_NOINLINE inline void ll_condition_node(LlContext& c, std::uint16_t mode,
+                                              std::uint16_t condition,
+                                              std::uint16_t node) {
   if (c.give) return;
   for (;;) {
     ll_peek<T>(c, mode);

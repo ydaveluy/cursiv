@@ -824,7 +824,7 @@ void a_final_table_is_the_built_one_read_only() {
   CHECK(done.table().cfg.ngapConds == 1 && done.table().cfg.ngapLeaves == 1);
   CHECK(!lr_emit_table(done, "final").empty());
   CHECK(!lr_emit_parser_decl(done, "final").empty());
-  CHECK(!lr_emit_parser_states(done, "final").empty());
+  CHECK(!lr_emit_parser_files(done, "final").empty());
 }
 
 struct OversizedLexicalDfa : GrammarSpec {

@@ -278,10 +278,8 @@ int run(int argc, char** argv) try {
   const Built& a = done.table();
 
   unsigned probeCuts = 0;
-  const std::pair<std::string, std::string> states[] = {
-      {"ParserStates.cpp",
-       cursiv::lr_emit_parser_states(done, CURSIV_GEN_NS, &probeCuts,
-                                     args.groupLines)}};
+  const auto states = cursiv::lr_emit_parser_files(done, CURSIV_GEN_NS,
+                                                   &probeCuts, args.groupLines);
   if (const GenCode wrote = cursiv::write_common_artifacts(
           dir,
           {.table = cursiv::lr_emit_table(done, CURSIV_GEN_NS),

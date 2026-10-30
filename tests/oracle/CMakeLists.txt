@@ -39,7 +39,9 @@ function(cursiv_rgram seed)
   # The generated code and checker share one unit, empty of parser code when
   # the grammar was refused. Recompile it after every generator run.
   set(source "")
-  foreach(unit ParserStates AstReflection Grammar Module)
+  foreach(unit ParserStates ParserGroups0 ParserGroups1 ParserGroups2
+          ParserGroups3 ParserGroups4 ParserGroups5 ParserGroups6
+          ParserGroups7 AstReflection Grammar Module)
     set(inc "${id}/generated/G/${unit}.cpp")
     string(APPEND source
         "#if __has_include(\"${inc}\")\n#include \"${inc}\"\n#endif\n")

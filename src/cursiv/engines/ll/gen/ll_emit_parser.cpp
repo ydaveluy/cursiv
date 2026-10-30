@@ -1,11 +1,12 @@
 // The descent as source: one step per rule, the program's shape spelled
 // straight out. A choice one token separates is a switch on that token; every
 // other one asks the prediction. A choice of single terminals is a table, and
-// a large arm a function of its own. A callee that can finish without a call of
-// its own runs in place, its frame on the native stack; any other call goes to
-// the machine, which runs it and resumes the step at a label. A rule that
-// reaches no climb and no rule that calls itself never resumes: it is a plain
-// function with no frame, unless too many of them would stand on one another.
+// a large arm a function of its own -- or a step of its own where it may
+// suspend. A callee that can finish without a call of its own runs in place,
+// its frame on the native stack; any other call goes to the machine, which
+// runs it and resumes the step at a label. A rule that reaches no climb and no
+// rule that calls itself never resumes: it is a plain function with no frame,
+// unless too many of them would stand on one another.
 #include "cursiv/engines/ll/gen/ll_emit_parser.hpp"
 
 #include <algorithm>
@@ -13,10 +14,12 @@
 #include <format>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "cursiv/engines/ll/gen/LlFinalProgram.hpp"
+#include "cursiv/engines/ll/gen/ll_emit_table.hpp"
 #include "cursiv/engines/ll/gen/ll_emit_walk.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
@@ -61,6 +64,11 @@ struct Memos {
   std::vector<std::int8_t> clean{};
   std::vector<std::uint32_t> visited{};
   std::uint32_t round = 0;
+  // The machine's number for the next arm that is a step: the rules hold the
+  // numbers below the first.
+  std::uint32_t steps = 0;
+  // Whether a step asks the prediction: its cold paths are compiled then.
+  bool predicts = false;
 };
 
 struct Emit : EmitOutput {
@@ -91,6 +99,11 @@ struct Emit : EmitOutput {
   // take it again: positions that are never live at once share frame bytes.
   std::vector<std::size_t> inUse{}, spare{};
   unsigned resumes = 0;
+  // Each field as it is taken and each label the step resumes at, in the
+  // order the code names them: an arm that becomes a step of its own takes
+  // the ones named while it was spelt into its own frame.
+  std::vector<std::size_t> taken{};
+  std::vector<unsigned> labels{};
   // A counted tail of nest turns is spelt one turn inside the other, a block
   // deeper each: past this many the source outgrows the nesting a compiler
   // must take, and the walk that writes it its stack.
@@ -98,12 +111,19 @@ struct Emit : EmitOutput {
   unsigned nestedTurns = 0;
   bool exits = false;
   std::string frame{};
-  // The arms spelt as functions of their own, each its whole definition.
-  std::vector<std::string> arms{};
-  // Past this many bytes of source an arm that can stand alone is a function:
-  // a rule's step stays a size the compiler takes in stride, and the units
-  // share the arms of one large rule.
+  // An arm spelt on its own, `s<tag>`: a function, or where it may suspend a
+  // step with its frame `F<tag>` and its number on the machine.
+  struct Arm {
+    std::string tag{}, frame{}, body{};
+    std::uint32_t step = kNoRow;
+  };
+  std::vector<Arm> arms{};
+  // Past this many bytes of source an arm that can stand alone is a function
+  // or a step: a rule's step stays a size the compiler takes in stride, and
+  // the units share the arms of one large rule.
   static constexpr std::size_t kArmBytes = 16384;
+  // The machine numbers its steps below its `kLlDone`.
+  static constexpr std::uint32_t kLastStep = 0xFFFFu;
 
   void over_fold() {
     if (foldAt.live()) regionAt = foldAt;
@@ -115,11 +135,30 @@ struct Emit : EmitOutput {
       if (fields[spare[k]].first == type) {
         inUse.push_back(spare[k]);
         spare.erase(spare.begin() + static_cast<std::ptrdiff_t>(k));
+        taken.push_back(inUse.back());
         return "f." + fields[inUse.back()].second;
       }
     inUse.push_back(fields.size());
-    fields.emplace_back(std::string(type), name(stem));
-    return "f." + fields.back().second;
+    return "f." + frame_field(type, name(stem));
+  }
+  // A field of its own, for good.
+  const std::string& frame_field(std::string_view type, std::string name) {
+    taken.push_back(fields.size());
+    return fields.emplace_back(std::string(type), std::move(name)).second;
+  }
+  // The frame `F<tag>` of the fields taken from `from` on, and the switch
+  // that jumps to the labels named from `resumed` on.
+  std::string frame_of(std::string_view tag, std::size_t from) const;
+  std::string resume_switch(std::size_t resumed) const;
+  // The label the next call resumes at. The frame names it in sixteen bits:
+  // a rule whose labels outrun them is refused.
+  unsigned next_label() {
+    if (resumes == 0xFFFFu)
+      refuse_lowering(
+          std::format("rule `{}` {}", a.cfg.rule_name(inRule),
+                      lower_fail_text(LowerFail::tooManyPositions)));
+    labels.push_back(++resumes);
+    return resumes;
   }
   // A field where the scope may suspend, a local otherwise.
   std::string local(bool held, std::string_view type, std::string_view stem) {
@@ -368,18 +407,14 @@ bool Emit::finishes(std::uint16_t r) {
 // machine, its frame saying where it resumes: the machine runs the call, then
 // comes back to the label. A local declared before the label and read after it
 // is a field of the frame: a jump to the label skips every initialisation in
-// front of it. A plain callee is a plain call. The frame names the
-// label in sixteen bits: a rule whose labels outrun them is refused.
+// front of it. A plain callee is a plain call.
 void Emit::invoke(std::uint16_t callee, std::string_view arg) {
   if (plain(callee)) {
     put("s{}(c);", callee);
     return;
   }
-  if (resumes == 0xFFFFu)
-    refuse_lowering(std::format("rule `{}` {}", a.cfg.rule_name(inRule),
-                                lower_fail_text(LowerFail::tooManyPositions)));
+  const unsigned k = next_label();
   if (a.cfg.rules[callee].climb != kNoRow) put("c.arg = {};", arg);
-  const unsigned k = ++resumes;
   put("f.pc = {}u;", k);
   if (finishes(callee)) {
     put("if (const ::std::uint16_t next = "
@@ -655,6 +690,7 @@ void Emit::decision(std::uint16_t id) {
   if (direct) {
     open("switch (c.la.sym) {");
   } else {
+    memo.predicts = true;
     open(ended ? "switch (c.la.end == c.len ? 0xFFFFu : c.la.sym) {"
                : "switch (c.la.sym) {");
     for (std::uint16_t i = 0; i < db.nalts; ++i)
@@ -745,24 +781,48 @@ void Emit::decision(std::uint16_t id) {
   close("}");
 }
 
-// An arm that reads nothing of the code around it -- no call that may
-// suspend, no record a turn or a fold reaches back to -- moves to a function
-// of its own once its code outgrows `kArmBytes`; the choice calls it. Its
-// inner arms have moved first, so only what they leave counts.
+// An arm that reads no record of the code around it -- none a turn or a fold
+// reaches back to -- moves out of the rule's step once its code outgrows
+// `kArmBytes`. With no call that may suspend it is a function the choice
+// calls. Otherwise it is a step of its own, which the machine runs as it runs
+// a rule's: its frame holds the fields its code took and its switch the
+// labels its calls resume at, and the rule's step resumes once it is done.
+// Its inner arms have moved first, so only what they leave counts.
 void Emit::arm(std::uint16_t id, std::uint16_t hand) {
-  const std::size_t from = out.size();
+  const std::size_t from = out.size(), took = taken.size(),
+                    resumed = labels.size();
   group(id, hand);
-  if (out.size() - from < kArmBytes || may_suspend(id) || regionAt.live() ||
-      foldAt.live())
+  const bool step = may_suspend(id);
+  if (out.size() - from < kArmBytes || regionAt.live() || foldAt.live() ||
+      (step && memo.steps >= kLastStep))
     return;
-  const std::string fn = std::format("s{}_{}", inRule, arms.size());
-  std::string body =
-      std::format("CURSIV_NOINLINE void {}(::cursiv::LlContext& c) {{\n", fn);
-  body.append(out, from);
-  body += "}\n\n";
+  Arm moved{.tag = std::format("{}_{}", inRule, arms.size())};
+  if (!step) {
+    moved.body = std::format(
+        "CURSIV_NOINLINE void s{}(::cursiv::LlContext& c) {{\n", moved.tag);
+    moved.body.append(out, from);
+    moved.body += "}\n\n";
+    out.resize(from);
+    put("s{}(c);", moved.tag);
+    arms.push_back(std::move(moved));
+    return;
+  }
+  moved.step = memo.steps++;
+  moved.frame = frame_of(moved.tag, took);
+  moved.body = std::format(
+      "::std::uint16_t s{0}(::cursiv::LlContext& c, void* frame) {{\n"
+      "  auto& f = *::std::launder(static_cast<F{0}*>(frame));\n{1}",
+      moved.tag, resume_switch(resumed));
+  moved.body.append(out, from);
+  moved.body += "  return ::cursiv::kLlDone;\n}\n\n";
   out.resize(from);
-  put("{}(c);", fn);
-  arms.push_back(std::move(body));
+  taken.resize(took);
+  labels.resize(resumed);
+  const unsigned k = next_label();
+  put("f.pc = {}u;", k);
+  put("return {}u;", moved.step);
+  put("L{}:;", k);
+  arms.push_back(std::move(moved));
 }
 
 // A choice whose arms each read one terminal on a token of their own, as
@@ -889,6 +949,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     line("if (!go) break;");
   };
   const auto byPrediction = [&] {
+    memo.predicts = true;
     const std::string k = name("k");
     put("::std::uint16_t {};", k);
     put("{} = ::cursiv::ll_predict<kTable>(c, {}u);", k, n.decision);
@@ -1083,12 +1144,12 @@ void Emit::climb(std::uint16_t r) {
                                 {"::cursiv::NodeId", "w0"},
                                 {"::cursiv::TextOffset", "before"},
                                 {"unsigned", "prec"}})
-    fields.emplace_back(type, n);
-  if (anyRight) fields.emplace_back("bool", "right");
-  fields.emplace_back("::cursiv::NodeId", "w1");
+    frame_field(type, n);
+  if (anyRight) frame_field("bool", "right");
+  frame_field("::cursiv::NodeId", "w1");
   if (anyNon) {
-    fields.emplace_back("unsigned", "limit");
-    fields.emplace_back("bool", "non");
+    frame_field("unsigned", "limit");
+    frame_field("bool", "non");
   }
   // The statements, each led by a space, that state how an operator's step
   // groups.
@@ -1182,6 +1243,7 @@ void Emit::climb(std::uint16_t r) {
     }
     open("switch (c.la.sym) {");
   } else {
+    memo.predicts = true;
     line("::std::uint16_t op;");
     line("bool bad;");
     put("bad = !kTable.holds(kTable.dec_first({}u), c.la.sym);", selectDec);
@@ -1281,6 +1343,24 @@ void Emit::climb(std::uint16_t r) {
   close("}");
 }
 
+std::string Emit::frame_of(std::string_view tag, std::size_t from) const {
+  std::vector<std::size_t> own(
+      taken.begin() + static_cast<std::ptrdiff_t>(from), taken.end());
+  std::ranges::sort(own);
+  own.erase(std::ranges::unique(own).begin(), own.end());
+  std::string s = std::format("struct F{} {{\n  ::std::uint16_t pc;\n", tag);
+  for (const std::size_t k : own)
+    s += std::format("  {} {};\n", fields[k].first, fields[k].second);
+  return s + "};\n";
+}
+
+std::string Emit::resume_switch(std::size_t resumed) const {
+  std::string s = "  switch (f.pc) {\n";
+  for (std::size_t i = resumed; i < labels.size(); ++i)
+    s += std::format("    case {0}u: goto L{0};\n", labels[i]);
+  return s + "    default: break;\n  }\n";
+}
+
 // One rule, as a step: its frame holds what outlives a call, and the step
 // jumps back to the label a call resumes at. A plain rule is a function with
 // no frame. A rule entered after the rule in hand gave up opens
@@ -1305,18 +1385,12 @@ void Emit::rule(std::uint16_t r) {
     out += "}\n\n";
     return;
   }
-  frame = std::format("struct F{} {{\n  ::std::uint16_t pc;\n", r);
-  for (const auto& [type, n] : fields)
-    frame += std::format("  {} {};\n", type, n);
-  frame += "};\n";
+  frame = frame_of(std::to_string(r), 0);
   out += std::format(
       "::std::uint16_t s{}(::cursiv::LlContext& c, void* frame) {{\n", r);
   out += std::format("  auto& f = *::std::launder(static_cast<F{}*>(frame));\n",
                    r);
-  out += "  switch (f.pc) {\n";
-  for (unsigned k = 1; k <= resumes; ++k)
-    out += std::format("    case {}u: goto L{};\n", k, k);
-  out += "    default: break;\n  }\n";
+  out += resume_switch(0);
   out += "  if (c.give) {\n    c.repaired.mark();\n"
        "    return ::cursiv::kLlDone;\n  }\n";
   out += body;
@@ -1374,7 +1448,8 @@ std::string ll_emit_parser_decl(const std::string& ns) {
 }
 
 std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
-    const LlFinalProgram& done, const std::string& ns) {
+    const LlFinalProgram& done, const std::string& ns,
+    const LlTableSource& table) {
   const Built& a = done.program();
   const LlStampPlan& plan = done.plan();
   // A bounded set of translation units keeps the optimizer from repeatedly
@@ -1387,21 +1462,15 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
     levels = levels || a.cfg.terms[t].laid == kLaidIndent ||
              a.cfg.terms[t].laid == kLaidDedent;
-  Memos memo{.plain = ll_plain_depths(a.cfg)};
-  std::string declarations(banner);
-  declarations +=
-      "#pragma once\n\n#include <cstdint>\n\n#include \"Parser.hpp\"\n"
-      "#include \"cursiv/core/syntax-tree/CstBuilder.hpp\"\n"
-      "#include \"cursiv/engines/ll/runtime/LlSection.hpp\"\n";
-  if (levels)
-    declarations +=
-        "#include \"cursiv/engines/shared/runtime/IndentLevel.hpp\"\n";
-  declarations += std::format("\nnamespace {} {{\n", ns);
+  Memos memo{.plain = ll_plain_depths(a.cfg), .steps = a.cfg.nrules};
+  std::string declarations = std::format("\nnamespace {} {{\n", ns);
   std::vector<std::string> bodies;
   std::size_t bytes = 0;
   // The machine steps the rules that resume, and the entry whatever it is:
-  // a plain rule is only ever called in place.
+  // a plain rule is only ever called in place. The arms that are steps follow
+  // the rules, in the order of their numbers.
   std::vector<bool> stepped(a.cfg.nrules, false);
+  std::string armSteps, armSizes;
   for (std::uint16_t r = 1; r < a.cfg.nrules; ++r)
     if (a.liveRules[r]) {
       Emit e{{}, a, plan, memo};
@@ -1416,11 +1485,20 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
         declarations += std::format("void s{}(::cursiv::LlContext&);\n", r);
       bytes += e.out.size();
       bodies.push_back(std::move(e.out));
-      for (std::size_t k = 0; k < e.arms.size(); ++k) {
-        declarations +=
-            std::format("void s{}_{}(::cursiv::LlContext&);\n", r, k);
-        bytes += e.arms[k].size();
-        bodies.push_back(std::move(e.arms[k]));
+      for (Emit::Arm& arm : e.arms) {
+        if (arm.frame.empty()) {
+          declarations +=
+              std::format("void s{}(::cursiv::LlContext&);\n", arm.tag);
+        } else {
+          declarations += std::format(
+              "{}::std::uint16_t s{}(::cursiv::LlContext&, void*);\n",
+              arm.frame, arm.tag);
+          armSteps += std::format("    case {}u: return s{}(c, f);\n", arm.step,
+                                  arm.tag);
+          armSizes += std::format("sizeof(F{}), ", arm.tag);
+        }
+        bytes += arm.body.size();
+        bodies.push_back(std::move(arm.body));
       }
     }
   declarations += std::format("}}  // namespace {}\n", ns);
@@ -1436,18 +1514,71 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
     sizes += stepped[r]  ? std::format("sizeof(F{}), ", r)
              : r == entry ? "sizeof(::std::uint16_t), "
                           : "0u, ";
+  steps += armSteps;
+  sizes += armSizes;
   const std::size_t budget =
       std::max<std::size_t>(32768, (bytes + units - 1) / units);
+  // Empty units are deliberately emitted too: the CMake outputs are fixed
+  // before a generator runs and must survive grammars that grow or shrink.
+  std::vector<std::string> sources(units, std::string(banner));
+  std::size_t next = 0;
+  unsigned filled = 0;
+  for (unsigned u = 0; u < units && next < bodies.size(); ++u, ++filled) {
+    std::string& source = sources[u];
+    source +=
+        "#include <cstdint>\n#include <new>\n\n#include \"ParserRules.hpp\"\n"
+        "#include \"Table.hpp\"\n"
+        "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n"
+        "#include \"cursiv/engines/ll/runtime/ll_predictor.hpp\"\n"
+        "#include \"cursiv/engines/ll/runtime/ll_repair.hpp\"\n";
+    if (a.cfg.ngapConds != 0)
+      source += "#include \"cursiv/engines/ll/runtime/ll_conditions.hpp\"\n";
+    source += std::format("\nnamespace {} {{\n\n", ns);
+    std::size_t used = 0;
+    do {
+      used += bodies[next].size();
+      source += bodies[next++];
+    } while (next < bodies.size() && (used < budget || u + 1 == units));
+    source += std::format("}}  // namespace {}\n", ns);
+  }
+  // Rules spread over several units share their cold paths: every unit
+  // declares them, and the parser's own unit compiles them, once. The rules of
+  // a single unit keep them, where the optimizer of the descent sees them.
+  const bool shared = filled > 1;
+  const auto cold = [&](std::string_view how) {
+    std::string s = "\n";
+    for (const auto& [paths, wanted] :
+         {std::pair{"", true}, std::pair{"PREDICT_", memo.predicts},
+          std::pair{"CONDITION_", a.cfg.ngapConds != 0},
+          std::pair{"CLIMB_", a.cfg.nclimbs != 0}})
+      if (wanted)
+        s += std::format("CURSIV_LL_{}COLD_PATHS({}, ::{}::kTable);\n", paths,
+                         how, ns);
+    return s;
+  };
+  std::string header = std::format(
+      "{}#pragma once\n\n#include <cstdint>\n\n#include \"Parser.hpp\"\n"
+      "#include \"cursiv/core/syntax-tree/CstBuilder.hpp\"\n"
+      "#include \"cursiv/engines/ll/runtime/LlSection.hpp\"\n",
+      banner);
+  if (levels)
+    header += "#include \"cursiv/engines/shared/runtime/IndentLevel.hpp\"\n";
+  if (shared)
+    header +=
+        "#include \"Table.hpp\"\n"
+        "#include \"cursiv/engines/ll/runtime/ll_cold.hpp\"\n";
+  header += declarations;
+  if (shared) header += cold("extern");
   std::vector<std::pair<std::string, std::string>> files;
-  files.emplace_back("ParserRules.hpp", std::move(declarations));
+  files.emplace_back("ParserRules.hpp", std::move(header));
   files.emplace_back(
       "ParserStates.cpp",
       std::format(
           "{}#include <cstdint>\n\n#include \"ParserRules.hpp\"\n"
           "#include \"cursiv/engines/ll/runtime/LlContext.hpp\"\n"
           "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n"
-          "{}\n"
-          "namespace {} {{\n\n{}"
+          "{}{}\n"
+          "namespace {} {{\n\n{}{}"
           "\nnamespace {{\n"
           "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
           "[[maybe_unused]] void* f) {{\n  switch (r) {{\n{}"
@@ -1459,33 +1590,13 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
           "  ::cursiv::LlMachine machine;\n"
           "  machine.run<&step>(c, {}u, kFrameBytes);\n"
           "  c.document = false;\n}}\n"
-          "}}  // namespace {}\n",
-          banner, ll_emit_walk_includes(a), ns, ll_emit_walk(a), steps, sizes,
-          "  c.stack.reserve(64);\n", entry, ns));
-  std::size_t next = 0;
-  for (unsigned u = 0; u < units; ++u) {
-    std::string source(banner);
-    // Empty units are deliberately emitted too: the CMake outputs are fixed
-    // before a generator runs and must survive grammars that grow or shrink.
-    if (next < bodies.size()) {
-      source +=
-          "#include <cstdint>\n#include <new>\n\n#include \"ParserRules.hpp\"\n"
-          "#include \"Table.hpp\"\n"
-          "#include \"cursiv/engines/ll/runtime/LlMachine.hpp\"\n"
-          "#include \"cursiv/engines/ll/runtime/ll_predictor.hpp\"\n"
-          "#include \"cursiv/engines/ll/runtime/ll_repair.hpp\"\n";
-      if (a.cfg.ngapConds != 0)
-        source += "#include \"cursiv/engines/ll/runtime/ll_conditions.hpp\"\n";
-      source += std::format("\nnamespace {} {{\n\n", ns);
-      std::size_t used = 0;
-      do {
-        used += bodies[next].size();
-        source += bodies[next++];
-      } while (next < bodies.size() && (used < budget || u + 1 == units));
-      source += std::format("}}  // namespace {}\n", ns);
-    }
-    files.emplace_back(std::format("ParserRules{}.cpp", u), std::move(source));
-  }
+          "}}  // namespace {}\n{}",
+          banner, ll_emit_walk_includes(a), table.includes, ns, table.functions,
+          ll_emit_walk(a), steps, sizes, "  c.stack.reserve(64);\n", entry, ns,
+          shared ? cold("") : std::string{}));
+  for (unsigned u = 0; u < units; ++u)
+    files.emplace_back(std::format("ParserRules{}.cpp", u),
+                       std::move(sources[u]));
   return files;
 }
 

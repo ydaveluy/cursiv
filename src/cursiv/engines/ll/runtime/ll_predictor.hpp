@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
 #include "cursiv/engines/ll/runtime/LlEpisode.hpp"
 #include "cursiv/engines/ll/table/LlTable.hpp"
@@ -22,7 +23,8 @@ inline std::uint64_t& ll_staged_reads() {
 // pass are the plan the descent is answered from. A choice made with readings
 // left keeps them, to be read on for the next choice the descent asks of them.
 template <const auto& T>
-inline std::uint16_t ll_episode(LlContext& c, std::uint16_t decision) {
+CURSIV_NOINLINE inline std::uint16_t ll_episode(LlContext& c,
+                                                std::uint16_t decision) {
   LlEpisode<T>& episode = ll_episode_engine<T>();
   std::uint16_t arm = kLlUnplanned;
   if (!episode.resume(c, decision, arm)) arm = episode.run(c, decision);

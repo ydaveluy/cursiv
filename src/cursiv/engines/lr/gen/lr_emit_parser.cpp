@@ -132,6 +132,27 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   // group is a tail call into the group it lands in, and an exit returns.
   unsigned groupLines = kLrGroupLines;
   unsigned ngroups = 1;
+  // Groups live in units of their own, which read what the states inline
+  // from one header; a lone group keeps it all in `ParserStates.cpp`.
+  bool split() const { return ngroups > 1; }
+  std::string head{};
+  // What `f` writes for the states to inline: into the header when they are
+  // split, in place otherwise.
+  template <class F>
+  void shared(F&& f) {
+    if (split())
+      head += capture(std::forward<F>(f));
+    else
+      f();
+  }
+  // A helper the states call out of line: defined once, declared to every
+  // unit when they are split.
+  std::string_view linkage(std::string_view lone) const {
+    return split() ? "" : lone;
+  }
+  void declare(std::string_view declaration) {
+    if (split()) head += declaration;
+  }
   std::vector<unsigned> groupOf{};  // per state, then per reduce lead
   std::vector<unsigned> localOf{};  // a state's index among its group's entries
   std::vector<std::vector<std::string>> entries{};  // per group, `G` first
@@ -368,16 +389,18 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
     // 2, joins bit 3.
     DynSet flagged;
     for (unsigned m = 0; m < a.nmodes; ++m) flagged |= a.modeWin[m];
-    array("inline constexpr ::std::uint8_t kTermFlags[]", a.cfg.nterms,
-          [&](std::size_t t) {
-            num((a.cfg.terms[t].trivia ? 1u : 0u) |
-                (a.cfg.terms[t].recorded ? 2u : 0u) |
-                (flagged.test(static_cast<unsigned>(t)) ? 4u : 0u) |
-                (a.cfg.terms[t].joins ? 8u : 0u));
-          });
-    if (any_recorded())
-      array("inline constexpr ::std::uint16_t kTermElem[]", a.cfg.nterms,
-            [&](std::size_t t) { num(a.cfg.terms[t].element); });
+    shared([&] {
+      array("inline constexpr ::std::uint8_t kTermFlags[]", a.cfg.nterms,
+            [&](std::size_t t) {
+              num((a.cfg.terms[t].trivia ? 1u : 0u) |
+                  (a.cfg.terms[t].recorded ? 2u : 0u) |
+                  (flagged.test(static_cast<unsigned>(t)) ? 4u : 0u) |
+                  (a.cfg.terms[t].joins ? 8u : 0u));
+            });
+      if (any_recorded())
+        array("inline constexpr ::std::uint16_t kTermElem[]", a.cfg.nterms,
+              [&](std::size_t t) { num(a.cfg.terms[t].element); });
+    });
   }
 
   bool marked(unsigned set) const {
@@ -569,13 +592,15 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
 
   void emit_data() {
     emit_lex_tables();
-    emit_mode_sub();
-    emit_moves();
-    emit_folds();
+    shared([&] {
+      emit_mode_sub();
+      emit_moves();
+      emit_folds();
+    });
     if (a.multiCand) {
       emit_multi_data();
       emit_cands_at();
-      emit_pick_cand();
+      shared([&] { emit_pick_cand(); });
     }
   }
 
@@ -702,10 +727,13 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
 )");
   }
 
+  // The states a clean sweep may start past, and the first states whose
+  // candidates `match_after` reads without a sweep.
   bool knownCandidates = false;
   std::vector<std::uint8_t> candidateClean{};
-  bool emit_known_candidates() {
-    if (refusing() || a.nrelays != 0) return false;
+  std::vector<unsigned> knownEnds{};
+  void plan_known_candidates() {
+    if (!a.multiCand || refusing() || a.nrelays != 0) return;
     std::vector<std::vector<unsigned>> before(a.ndfa);
     std::vector<unsigned> work;
     candidateClean.assign(a.ndfa, 1);
@@ -730,7 +758,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
           work.push_back(from);
         }
     }
-    std::vector<unsigned> ends;
+    std::vector<unsigned>& ends = knownEnds;
     std::vector<std::uint8_t> seen(a.ndfa, 0);
     for (unsigned m = 0; m < a.nmodes; ++m) {
       if (!multiMode(m) || a.modeWin[m].none()) continue;
@@ -746,7 +774,10 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
         ends.push_back(to);
       }
     }
-    if (ends.empty()) return false;
+    knownCandidates = !ends.empty();
+  }
+  void emit_known_candidates() {
+    if (!knownCandidates) return;
     raw(R"(inline void match_after(const char* src, ::cursiv::TextOffset len,
                         ::cursiv::TextOffset from, ::cursiv::Scan best,
                         ::cursiv::Scan* v, ::std::uint32_t& n,
@@ -756,7 +787,7 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
     switch (st) {
 )");
     case_rows([&](auto&& put) {
-      for (const auto st : ends) put(st);
+      for (const auto st : knownEnds) put(st);
     });
     raw(std::format(
         R"(      for (unsigned k = kCandBase[st]; k < kCandBase[st + 1u]; ++k) {{
@@ -774,14 +805,15 @@ full:
 
 )",
         a.tiered() ? ", kTable.cold.accTier[k]" : ""));
-    return true;
   }
 
   void emit_multi_data() {
-    fmt("// Terminals one position of this grammar can match at once, as the\n"
-        "// table counted them: the room every reading of a position fills.\n"
-        "inline constexpr ::std::uint32_t kMaxCands = {}u;\n",
-        a.maxCands != 0 ? a.maxCands : 1);
+    shared([&] {
+      fmt("// Terminals one position of this grammar can match at once, as "
+          "the\n// table counted them: the room every reading of a position "
+          "fills.\ninline constexpr ::std::uint32_t kMaxCands = {}u;\n",
+          a.maxCands != 0 ? a.maxCands : 1);
+    });
     line("// The candidate walk's own data: what each DFA state of a flagged");
     line("// mode accepts and reserves, and the word class.");
     line("inline constexpr const auto& kCandBase = kTable.cold.accBoundBase;");
@@ -797,7 +829,7 @@ full:
         "inline constexpr ::std::uint16_t kCandPool[]", cands.size(),
         [&](std::size_t k) { num(cands[k]); }, "0", true);
     emit_candidate_walk();
-    knownCandidates = emit_known_candidates();
+    emit_known_candidates();
   }
 
   // One entry over the modes that read several candidates.
@@ -1042,7 +1074,10 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
 
   void emit_walk() {
     lex_emit_walk(*this, dfa, *this, {a.modeStart.data(), a.nmodes},
-                  a.nrelays != 0, "inline ");
+                  a.nrelays != 0, linkage("inline "));
+    declare(
+        "::cursiv::Scan walk_all(const char*, ::cursiv::TextOffset, "
+        "::std::uint16_t,\n                        ::cursiv::TextOffset);\n");
   }
 
   // A clean start reaches only unconditional acceptances, so the sweep elects
@@ -1067,7 +1102,11 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   // Modes alike in blanks, candidate collection and the winners swept behind
   // share one tail, which takes the mode as an argument.
   std::vector<unsigned> tailLead{};
-  void plan_lexers(const std::string& used) {
+  // The modes some state lexes in, each with its lexer.
+  std::string lexed{};
+  void plan_lexers() {
+    lexed.assign(a.nmodes, '\0');
+    for (unsigned st = 0; st < a.nstates; ++st) lexed[a.mode[st]] = 1;
     wsLead.resize(a.nmodes);
     tailLead.resize(a.nmodes);
     std::map<std::array<std::uint64_t, 4>, unsigned> first;
@@ -1075,7 +1114,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     for (unsigned m = 0; m < a.nmodes; ++m) {
       wsLead[m] = m;
       tailLead[m] = m;
-      if (!used[m]) continue;
+      if (!lexed[m]) continue;
       ByteSet ws{};
       mode_ws(m, ws);
       wsLead[m] =
@@ -1090,12 +1129,16 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   }
 
   void emit_lexer(unsigned m) {
-    if (ByteSet ws{}; mode_ws(m, ws) && wsLead[m] == m) {
-      fmt("inline constexpr ::std::array<::std::uint64_t, 4> kWs_{}{{", m);
-      set64(ws);
-      line("};");
-    }
+    if (ByteSet ws{}; mode_ws(m, ws) && wsLead[m] == m)
+      shared([&] {
+        fmt("inline constexpr ::std::array<::std::uint64_t, 4> kWs_{}{{", m);
+        set64(ws);
+        line("};");
+      });
     if (tailLead[m] == m) emit_lex_tail(m);
+    shared([&] { emit_lex_entry(m); });
+  }
+  void emit_lex_entry(unsigned m) {
     fmt("inline void lex_{}(::cursiv::LrContext& c) {{\n", m);
     if (!impliedTerms.empty())
       fmt("  if (c.virt.pending != 0) {{ c.la = c.virt.in_hand(); "
@@ -1168,9 +1211,12 @@ inline void lengthen(::cursiv::LrContext& c) {
   // Never inlined: a copy per lexing state makes the file compile twice as
   // slowly.
   void emit_lex_tail(unsigned m) {
-    fmt("CURSIV_NOINLINE static void lex_tail_{}(::cursiv::LrContext& c, "
+    fmt("CURSIV_NOINLINE {}void lex_tail_{}(::cursiv::LrContext& c, "
         "::cursiv::TextOffset p, ::std::uint16_t mode) {{",
-        m);
+        linkage("static "), m);
+    declare(std::format("void lex_tail_{}(::cursiv::LrContext&, "
+                        "::cursiv::TextOffset, ::std::uint16_t);\n",
+                        m));
     constexpr std::string_view mode = "mode",
                                start = "kTable.modeStart[mode]";
     raw(R"(
@@ -1347,12 +1393,27 @@ again:
 
   std::string guard_target(std::uint32_t guard,
                            std::string_view first = "") const {
-    return std::format(
-        "::cursiv::lr_guard_land<kTable>({}u, [&](unsigned k) {{ "
-        "return {}; }})",
-        guard - 1u,
-        first.empty() ? "drive_cond(c, k, c.virt.from, c.la)"
-                      : std::format("::cursiv::lr_held<kTable>({}, k)", first));
+    return first.empty() ? std::format("guard_land(c, {}u)", guard - 1u)
+                         : std::format("guard_held({}, {}u)", first, guard - 1u);
+  }
+  // Where a guard lands, by the gap where the span opened or by the tag of
+  // the state it opened in: one helper each, which every site inlines.
+  void emit_guard_lands() {
+    if (a.guards.empty()) return;
+    if (conds())
+      raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
+    const ::cursiv::LrContext& c, ::std::uint32_t k) {
+  return ::cursiv::lr_guard_land<kTable>(
+      k, [&](unsigned j) { return drive_cond(c, j, c.virt.from, c.la); });
+}
+)");
+    raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_held(
+    ::std::uint32_t first, ::std::uint32_t k) {
+  return ::cursiv::lr_guard_land<kTable>(
+      k, [&](unsigned j) { return ::cursiv::lr_held<kTable>(first, j); });
+}
+
+)");
   }
 
   std::string reduce_allowed(unsigned prod) const {
@@ -2016,9 +2077,13 @@ again:
         "                ::cursiv::TextOffset from, const ::cursiv::Token& la) "
         "{\n");
     body(false);
+    declare(
+        "bool drive_cond(const ::cursiv::LrContext&, unsigned, "
+        "::cursiv::TextOffset,\n                const ::cursiv::Token&);\n");
     if (std::ranges::any_of(std::span(a.cfg.prods.data(), a.cfg.nprods),
                             [](const auto& p) { return p.gap != 0; }))
-      raw(R"(CURSIV_ALWAYS_INLINE static inline bool reduce_allowed(
+      shared([&] {
+        raw(R"(CURSIV_ALWAYS_INLINE static inline bool reduce_allowed(
     const ::cursiv::LrContext& c, ::std::uint16_t prod) {
   return ::cursiv::lr_reduce_allowed<kTable>(prod, [&](unsigned k) {
     return drive_cond(c, k, c.virt.from, c.la);
@@ -2026,6 +2091,7 @@ again:
 }
 
 )");
+      });
     emit_named_heads();
     raw("bool caret_cond(::std::string_view text, unsigned k,\n"
         "                ::cursiv::TextOffset from, const ::cursiv::Token& la, "
@@ -2036,15 +2102,18 @@ again:
   }
   // One helper per implied token, out of line: the refused path.
   void emit_imply() {
-    for (unsigned q = 0; q < impliedTerms.size(); ++q)
-      fmt("CURSIV_NOINLINE static bool imply_{0}(::cursiv::LrContext& c) {{\n"
+    for (unsigned q = 0; q < impliedTerms.size(); ++q) {
+      fmt("CURSIV_NOINLINE {4}bool imply_{0}(::cursiv::LrContext& c) {{\n"
           "  if (c.virt.pending != 0 || (c.virt.laid_at(c.la) & {3}u) != 0 ||\n"
           "      !drive_cond(c, {1}u, c.virt.from, c.la))\n"
           "    return false;\n"
           "  c.virt.lay(c.la, {0}u, {2});\n"
           "  return true;\n"
           "}}\n\n",
-          q, a.cfg.terms[impliedTerms[q]].cond, impliedTerms[q], 1u << q);
+          q, a.cfg.terms[impliedTerms[q]].cond, impliedTerms[q], 1u << q,
+          linkage("static "));
+      declare(std::format("bool imply_{}(::cursiv::LrContext&);\n", q));
+    }
   }
   // Whether a state may probe: a flagged mode collects its candidates in the
   // lexer, and an indented grammar reads its token first.
@@ -2142,6 +2211,36 @@ again:
     const LexicalPredicateEmitter lexical(
         a.cfg, ::std::span(a.relays.data(), a.nrelays),
         "::cursiv::lex_boundary(kTable.cfg)");
+    emit_banner();
+    shared([&] {
+      emit_includes(lexical);
+      if (split()) fmt("namespace {} {{\n\n", ns);
+    });
+    if (split()) fmt("#include \"{}\"\n\n", kGroupHeader);
+    fmt("namespace {} {{\n\n", ns);
+    line("::cursiv::LrExit drive_state(::cursiv::LrContext&);");
+    line("");
+    shared([&] { lex_emit_byte_runs(*this); });
+    emit_data();
+    emit_predicate_data();
+    raw(lexical.source());
+    emit_walk();
+    if (a.nrelays != 0)
+      lex_emit_relay_runs(*this, dfa, runs, view,
+                          std::span(a.relays.data(), a.nrelays),
+                          "Table::relay_run");
+    if (conds()) {
+      raw(gapEmitter.source());
+      raw(predicateEmitter.source("::cursiv::LrLexTape<kTable>{}"));
+    }
+    if (a.longer_modes()) shared([&] { emit_lengthen(); });
+    for (unsigned m = 0; m < a.nmodes; ++m)
+      if (lexed[m]) emit_lexer(m);
+    line("");
+  }
+
+  static constexpr std::string_view kGroupHeader = "ParserGroups.hpp";
+  void emit_banner() {
     raw(R"(// GENERATED by the native parser emitter -- do not edit.
 // Every state keeps its labels, reached or not: the file maps the table.
 // Labels: G/S/L entry, C lexed, D/DS dispatch, X refused, H/P hop, AC arm,
@@ -2151,7 +2250,11 @@ again:
 #else
 #pragma GCC diagnostic ignored "-Wunused-label"
 #endif
-#include <array>
+)");
+  }
+
+  void emit_includes(const auto& lexical) {
+    raw(R"(#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -2201,31 +2304,6 @@ again:
 #include "cursiv/engines/shared/table/Token.hpp"
 
 )");
-    fmt("namespace {} {{\n\n", ns);
-    line("::cursiv::LrExit drive_state(::cursiv::LrContext&);");
-    line("");
-    lex_emit_byte_runs(*this);
-    emit_data();
-    emit_predicate_data();
-    raw(lexical.source());
-    {
-      std::string done(a.nmodes, '\0');
-      for (unsigned st = 0; st < a.nstates; ++st) done[a.mode[st]] = 1;
-      emit_walk();
-      if (a.nrelays != 0)
-        lex_emit_relay_runs(*this, dfa, runs, view,
-                            std::span(a.relays.data(), a.nrelays),
-                            "Table::relay_run");
-      if (conds()) {
-        raw(gapEmitter.source());
-        raw(predicateEmitter.source("::cursiv::LrLexTape<kTable>{}"));
-      }
-      plan_lexers(done);
-      if (a.longer_modes()) emit_lengthen();
-      for (unsigned m = 0; m < a.nmodes; ++m)
-        if (done[m]) emit_lexer(m);
-    }
-    line("");
   }
 
   // Groups grown by affinity over the states and reduces that link.
@@ -2407,86 +2485,86 @@ again:
     });
   }
 
-  // Every state of the automaton, in groups.
-  void emit_states_cpp(std::string_view ns) {
-    emit_drive_cond();
-    emit_imply();
+  // The states and their groups, planned ahead of any text: whether the
+  // groups split decides where each helper goes.
+  std::string usedProds{};
+  void plan_states() {
     plan_hops();
-    std::string used(a.cfg.nprods, '\0');
+    usedProds.assign(a.cfg.nprods, '\0');
     for (unsigned st = 0; st < a.nstates; ++st)
       for (const LrAction& x : a.action_row(st)) {
-        if (x.kind == LrActionKind::reduce) used[x.arg] = 1;
+        if (x.kind == LrActionKind::reduce) usedProds[x.arg] = 1;
       }
-    plan_reduces(used);
+    plan_reduces(usedProds);
     plan_lone_gotos();
     plan_dispatches();
     statePiece.assign(a.nstates, {});
     probesOf.assign(a.nstates, {});
     for (unsigned s = 0; s < a.nstates; ++s)
       statePiece[s] = piece([&] { emit_state(s); });
-    render_tails(used);
-    plan_groups(used);
+    render_tails(usedProds);
+    plan_groups(usedProds);
     for (unsigned s = 0; s < a.nstates; ++s) enter(groupOf[s], dispPiece[s]);
+  }
+
+  // Every state of the automaton, in groups: a lone group here, or the
+  // groups spread over the units, several to a unit past `kLrGroupUnits`.
+  std::vector<std::string> units{};
+  void emit_states(std::string_view ns) {
     std::vector<std::string> bodies(ngroups);
     std::vector<bool> holdsRec(ngroups, false);
     for (unsigned g = 0; g < ngroups; ++g)
-      bodies[g] = capture([&] { holdsRec[g] = emit_group_body(g, used); });
+      bodies[g] =
+          capture([&] { holdsRec[g] = emit_group_body(g, usedProds); });
     // Saving nothing makes a jump between groups a bare jump; a lone group
     // has no such jump, and its code grows under it.
-    const auto head = [&](unsigned g) {
-      fmt("CURSIV_NOINLINE {}static ::cursiv::LrExit "
-          "states_{}(::cursiv::LrContext& c, ::std::uint32_t e)",
-          ngroups > 1 ? "CURSIV_PRESERVE_NONE " : "", g);
+    const auto signature = [&](unsigned g) {
+      return std::format("CURSIV_NOINLINE {}::cursiv::LrExit states_{}(",
+                         split() ? "CURSIV_PRESERVE_NONE " : "static ", g);
     };
-    // Under ASan every local is addressable, and GCC suspects each one at a
-    // tail call although no helper keeps the address it is handed.
-    if (ngroups > 1) {
-      raw(R"(#ifndef CURSIV_MUSTTAIL
+    std::vector<std::string> held(kLrGroupUnits);
+    for (unsigned g = 0; g < ngroups; ++g) {
+      std::string text = capture(
+          [&] { emit_group(g, signature(g), holdsRec[g], bodies[g]); });
+      if (split())
+        held[g * kLrGroupUnits / ngroups] += text;
+      else
+        raw(text);
+    }
+    units.assign(kLrGroupUnits, std::string(kGenerated));
+    if (split()) {
+      head += R"(
+#ifndef CURSIV_MUSTTAIL
 #error "cursiv: states in groups need a tail call the compiler guarantees"
 #endif
-#if defined(__SANITIZE_ADDRESS__) && !defined(__clang__)
+
+)";
+      for (unsigned g = 0; g < ngroups; ++g)
+        head += signature(g) + "::cursiv::LrContext&, ::std::uint32_t);\n";
+      head += std::format("\n}}  // namespace {}\n", ns);
+      for (unsigned u = 0; u < kLrGroupUnits; ++u)
+        if (!held[u].empty())
+          units[u] = capture([&] {
+            emit_banner();
+            // Under ASan every local is addressable, and GCC suspects each
+            // one at a tail call although no helper keeps the address it is
+            // handed.
+            raw(R"(#if defined(__SANITIZE_ADDRESS__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-musttail-local-addr"
 #endif
 )");
-      for (unsigned g = 0; g < ngroups; ++g) {
-        head(g);
-        line(";");
-      }
-      line("");
-    }
-    for (unsigned g = 0; g < ngroups; ++g) {
-      head(g);
-      raw(R"( {
-  const char* const src = c.src;
-  const ::cursiv::TextOffset len = c.len;
-  ::cursiv::TextOffset hb = 0, he = 0;
-  (void)src;
-  (void)len;
-  (void)hb;
-  (void)he;
-)");
-      if (holdsRec[g])
-        raw("  ::cursiv::ElementId rec = ::cursiv::kNoElement;\n"
-            "  (void)rec;\n");
-      raw("  static const void* const kIn[] = {");
-      for (std::size_t k = 0; k < entries[g].size(); ++k) {
-        if (k) out += ',';
-        if (k % 12 == 0) out += '\n';
-        raw("&&");
-        raw(entries[g][k]);
-      }
-      line("};");
-      line("  goto* kIn[e];");
-      raw(bodies[g]);
-      raw("}\n\n");
+            fmt("#include \"{}\"\n\nnamespace {} {{\n\n", kGroupHeader, ns);
+            raw(held[u]);
+            fmt("}}  // namespace {}\n", ns);
+          });
     }
     // A lone group's entries are the states in order.
-    if (ngroups > 1)
+    if (split())
       array("inline constexpr ::std::uint32_t kEnter[]", a.nstates,
             [&](std::size_t s) { num((groupOf[s] << 16) | localOf[s]); }, "",
             true);
     line("::cursiv::LrExit drive_state(::cursiv::LrContext& c) {");
-    if (ngroups == 1) {
+    if (!split()) {
       line("  return states_0(c, c.stack.top().state);");
     } else {
       line("  const ::std::uint32_t e = kEnter[c.stack.top().state];");
@@ -2527,10 +2605,59 @@ again:
     fmt("}}  // namespace {}\n", ns);
   }
 
-  void emit_all(std::string_view ns) {
+  // One group's function: its entry table, then its body.
+  void emit_group(unsigned g, std::string_view signature, bool holdsRec,
+                  std::string_view body) {
+    raw(signature);
+    raw(R"(::cursiv::LrContext& c, ::std::uint32_t e) {
+  const char* const src = c.src;
+  const ::cursiv::TextOffset len = c.len;
+  ::cursiv::TextOffset hb = 0, he = 0;
+  (void)src;
+  (void)len;
+  (void)hb;
+  (void)he;
+)");
+    if (holdsRec)
+      raw("  ::cursiv::ElementId rec = ::cursiv::kNoElement;\n"
+          "  (void)rec;\n");
+    raw("  static const void* const kIn[] = {");
+    for (std::size_t k = 0; k < entries[g].size(); ++k) {
+      if (k) out += ',';
+      if (k % 12 == 0) out += '\n';
+      raw("&&");
+      raw(entries[g][k]);
+    }
+    line("};");
+    line("  goto* kIn[e];");
+    raw(body);
+    raw("}\n\n");
+  }
+
+  static constexpr std::string_view kGenerated =
+      "// GENERATED by the native parser emitter -- do not edit.\n";
+
+  // The files: `ParserStates.cpp`, the groups' header, then their units.
+  std::vector<std::pair<std::string, std::string>> emit_all(
+      std::string_view ns) {
     plan_laid();
+    plan_known_candidates();
+    plan_lexers();
+    plan_states();
     emit_helpers(ns);
-    emit_states_cpp(ns);
+    emit_drive_cond();
+    shared([&] { emit_guard_lands(); });
+    emit_imply();
+    emit_states(ns);
+    std::vector<std::pair<std::string, std::string>> files;
+    files.emplace_back("ParserStates.cpp", std::move(out));
+    files.emplace_back(kGroupHeader, std::string(kGenerated) +
+                                         "#pragma once\n" +
+                                         (head.empty() ? "" : "\n") + head);
+    for (unsigned u = 0; u < kLrGroupUnits; ++u)
+      files.emplace_back(std::format("ParserGroups{}.cpp", u),
+                         std::move(units[u]));
+    return files;
   }
 };
 
@@ -2600,14 +2727,15 @@ struct LrParserDecl : EmitOutput {
 
 }  // namespace
 
-std::string lr_emit_parser_states(const LrFinalTable& done, std::string_view ns,
-                                  unsigned* probeCuts, unsigned groupLines) {
+std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
+    const LrFinalTable& done, std::string_view ns, unsigned* probeCuts,
+    unsigned groupLines) {
   LrParserEmitter e{done};
   e.groupLines = groupLines;
   e.out.reserve(1u << 20);
-  e.emit_all(ns);
+  auto files = e.emit_all(ns);
   if (probeCuts != nullptr) *probeCuts = e.probeCuts;
-  return std::move(e.out);
+  return files;
 }
 
 std::string lr_emit_parser_decl(const LrFinalTable& done, std::string_view ns) {

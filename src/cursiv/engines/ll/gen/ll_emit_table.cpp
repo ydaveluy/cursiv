@@ -1,7 +1,8 @@
 // The table as source: every array the runtime reads, and the one view that
 // names them. Nothing here is computed twice -- what the construction settled
 // is printed, and what a reader derives is printed too, so no module folds a
-// question out of the table at load time.
+// question out of the table at load time. The functions the view points at are
+// declared beside it and defined once, in the parser's own unit.
 #include "cursiv/engines/ll/gen/ll_emit_table.hpp"
 
 #include <algorithm>
@@ -199,8 +200,7 @@ std::string staged_source(const Built& a) {
   for (std::size_t at = 0; at < live.size(); ++at)
     ahead = ahead || (live[at] && reads[at] && a.dfa[at].alt == kNoRow);
   const std::string_view unused = ahead ? "" : "[[maybe_unused]] ";
-  o.line(
-      "inline ::std::uint16_t ll_staged_predict(const ::cursiv::LlContext& c,");
+  o.line("::std::uint16_t ll_staged_predict(const ::cursiv::LlContext& c,");
   o.line("    ::std::uint16_t decision) {");
   o.fmt("  {}auto& indent = ::cursiv::ll_look_indent<kTable>(c);\n", unused);
   o.line(
@@ -258,15 +258,16 @@ std::string staged_source(const Built& a) {
 
 }  // namespace
 
-std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
+LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const Built& a = done.program();
   const LlStampPlan& plan = done.plan();
-  Out o;
+  // The header, and the functions it declares.
+  Out o, fn;
   const auto& g = a.cfg;
   const GapEmitter gaps(g, "kSets", "kGapBoundary", "inline");
   const PredicateEmitter predicates(g, gaps, a.sectionErr);
   const LexicalPredicateEmitter lexical(g, a.relays,
-                                        "::cursiv::lex_boundary(kTable)", true);
+                                        "::cursiv::lex_boundary(kTable)");
   const bool compiledPredicates = std::ranges::any_of(
       g.gapLeaves.v, [](const GapLeaf& leaf) { return leaf.reads_tokens(); });
   const bool lexChecks = std::ranges::any_of(
@@ -320,24 +321,27 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.line("#include \"cursiv/engines/ll/runtime/ll_matcher.hpp\"");
     o.line("#include \"cursiv/engines/shared/runtime/LexSuffixSession.hpp\"");
   }
-  if (staged) o.line("#include \"cursiv/engines/ll/runtime/ll_predictor.hpp\"");
   if (compiledPredicates || lexical.any() || g.ngapConds != 0)
     o.line("#include \"cursiv/engines/shared/runtime/LexBoundary.hpp\"");
   if (compiledPredicates || lexical.any())
     o.line("#include \"cursiv/engines/shared/runtime/PredicateState.hpp\"");
-  if (lexical.any()) {
-    o.line("#include <exception>");
-    o.line("#include \"cursiv/engines/shared/runtime/LexicalMachine.hpp\"");
-  }
-  if (lexical.searches())
-    o.line("#include \"cursiv/engines/shared/runtime/lex_find.hpp\"");
   if (g.ngapConds != 0 || lexical.any())
     o.line("#include \"cursiv/engines/shared/runtime/GapPositions.hpp\"");
+  // What only the functions defined in the parser's own unit read.
+  std::string includes;
+  if (staged)
+    includes += "#include \"cursiv/engines/ll/runtime/ll_predictor.hpp\"\n";
+  if (lexical.any())
+    includes +=
+        "#include <exception>\n"
+        "#include \"cursiv/engines/shared/runtime/LexicalMachine.hpp\"\n";
+  if (lexical.searches())
+    includes += "#include \"cursiv/engines/shared/runtime/lex_find.hpp\"\n";
   o.fmt("namespace {} {{\n", ns);
   o.line("");
   if (staged)
     o.line(
-        "inline ::std::uint16_t ll_staged_predict(const ::cursiv::LlContext&, "
+        "::std::uint16_t ll_staged_predict(const ::cursiv::LlContext&, "
         "::std::uint16_t);");
   o.line(lexical.declarations());
   if (pool.bytes.empty()) {
@@ -545,6 +549,31 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.array("::cursiv::unicode::Range", "kScalarRanges", g.scalarRanges.v,
             range);
   }
+  // The functions the view points at, as the header declares them: their
+  // definitions, and the large bodies only they call, go to the parser's own
+  // unit. A unit that reads the view compiles every function it points at;
+  // an inline function no one in the unit calls costs it nothing but its
+  // text, so the predicates the conditions read stay in the header.
+  const std::string_view conditionFn =
+      "bool condition(const char* src, ::cursiv::TextOffset len, unsigned k,\n"
+      "    const ::cursiv::Token& token, ::cursiv::TextOffset gapFrom, "
+      "bool atEnd,\n    ::cursiv::TextOffset* seen)";
+  const std::string_view namedFn =
+      "unsigned condition_named(const char* src, ::cursiv::TextOffset len,\n"
+      "    unsigned k, const ::cursiv::Token& token, "
+      "::cursiv::TextOffset gapFrom)";
+  const std::string_view headRefusesFn =
+      "bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
+      "    ::cursiv::TextOffset rest)";
+  const std::string_view headReachFn =
+      "::cursiv::TextOffset head_reach(unsigned m, const char* p,\n"
+      "    ::cursiv::TextOffset rest)";
+  const std::string_view termReachFn =
+      "::cursiv::TextOffset term_reach(::cursiv::SymbolId t, const char* p,\n"
+      "    ::cursiv::TextOffset rest)";
+  const std::string_view tailRefusesFn =
+      "bool tail_refuses(::cursiv::SymbolId t, const char* p,\n"
+      "    ::cursiv::TextOffset rest)";
   o.line(predicates.declarations());
   // A head leaf a terminal's body decides answers a caret with no bytes.
   std::vector<bool> named(g.ngapLeaves);
@@ -553,10 +582,11 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     named[l] = g.gapLeaves[l].kind == GapLeafKind::head &&
                reads.any(g.gapLeaves[l].node);
     if (named[l])
-      o.line(reads.source("inline", std::format("named_{}", l),
-                          g.gapLeaves[l].node));
+      fn.line(reads.source("inline", std::format("named_{}", l),
+                           g.gapLeaves[l].node));
   }
   if (g.ngapConds != 0) {
+    o.fmt("{};\n{};\n", conditionFn, namedFn);
     if (gaps.reads_boundary())
       o.fmt(
           "inline constexpr ::cursiv::LexBoundary kGapBoundary{{{}, {}, {{}}, "
@@ -588,60 +618,48 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       return "false";
     };
     for (const bool partial : {false, true}) {
-      o.line(partial ? "inline unsigned condition_named(const char* src, "
-                       "::cursiv::TextOffset len, unsigned k,"
-                     : "inline bool condition(const char* src, "
-                       "::cursiv::TextOffset len, unsigned k,");
-      o.line(partial ? "    const ::cursiv::Token& token, ::cursiv::TextOffset "
-                       "gapFrom) {"
-                     : "    const ::cursiv::Token& token, ::cursiv::TextOffset "
-                       "gapFrom, bool atEnd,"
-                       "    ::cursiv::TextOffset* seen) {");
-      o.line(
+      fn.fmt("{} {{\n", partial ? namedFn : conditionFn);
+      fn.line(
           "  const auto end = ::std::min(token.begin, len);\n"
           "  const auto begin = ::std::min(gapFrom, end);\n"
           "  const char* const g = src + begin;\n"
           "  const auto n = end - begin;\n  (void)g; (void)n;");
-      if (!partial) o.line("  (void)atEnd; (void)seen;");
-      o.line("  switch (k) {");
+      if (!partial) fn.line("  (void)atEnd; (void)seen;");
+      fn.line("  switch (k) {");
       for (unsigned k = 0; k < g.ngapConds; ++k)
-        o.fmt("    case {}u: return {};\n", k,
-              GapConditionEmitter(g).source(
-                  k, [&](unsigned l) { return leaf(l, partial); }, partial));
-      o.line("    default: return 0;\n  }\n}");
+        fn.fmt("    case {}u: return {};\n", k,
+               GapConditionEmitter(g).source(
+                   k, [&](unsigned l) { return leaf(l, partial); }, partial));
+      fn.line("    default: return 0;\n  }\n}");
     }
   }
   const bool refusing = std::ranges::any_of(
       a.termHeads, [](const HeadMatcher& h) { return !h.words.empty(); });
   if (refusing) {
-    o.line(lex_head_source(
-        a.termHeads, a.modeHeads,
-        "inline bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
-        "    ::cursiv::TextOffset rest)",
-        "inline ::cursiv::TextOffset head_reach(unsigned m, const char* p,\n"
-        "    ::cursiv::TextOffset rest)",
+    o.fmt("{};\n{};\n{};\n", headRefusesFn, headReachFn, termReachFn);
+    fn.line(lex_head_source(
+        a.termHeads, a.modeHeads, headRefusesFn, headReachFn,
         {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
          o.ref("kScalarRanges")}));
-    o.line("inline ::cursiv::TextOffset term_reach(::cursiv::SymbolId t,");
-    o.line("    const char* p, ::cursiv::TextOffset rest) {");
-    o.line("  ::cursiv::TextOffset seen = 0;\n  switch (t) {");
+    fn.fmt("{} {{\n", termReachFn);
+    fn.line("  ::cursiv::TextOffset seen = 0;\n  switch (t) {");
     for (std::size_t t = 0; t < a.termHeads.size(); ++t)
       if (!a.termHeads[t].words.empty())
-        o.fmt(
+        fn.fmt(
             "    case {0}u:\n      reaches_{0}(p, rest, rest, seen);\n"
             "      break;\n",
             t);
-    o.line("    default:\n      break;\n  }\n  return seen;\n}");
+    fn.line("    default:\n      break;\n  }\n  return seen;\n}");
   }
   const bool trailing = std::ranges::any_of(
       a.termTails, [](const HeadMatcher& h) { return !h.words.empty(); });
-  if (trailing)
-    o.line(lex_tail_source(
-        a.termTails,
-        "inline bool tail_refuses(::cursiv::SymbolId t, const char* p,\n"
-        "    ::cursiv::TextOffset rest)",
+  if (trailing) {
+    o.fmt("{};\n", tailRefusesFn);
+    fn.line(lex_tail_source(
+        a.termTails, tailRefusesFn,
         {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
          o.ref("kScalarRanges")}));
+  }
   o.line("");
   o.line("// The generated walk of every mode, in the parser's own unit.");
   o.line("::cursiv::Scan walk_all(const char* src, ::cursiv::TextOffset len,");
@@ -766,12 +784,13 @@ std::string ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.fmt("    .stamp = {{.rowBits = {}u}},\n", a.stamp.rowBits);
   o.line("};");
   o.line("");
-  if (staged) o.line(staged_source(a));
-  o.line(lexical.source());
   if (compiledPredicates)
     o.line(predicates.source("::cursiv::LlLexTape<kTable>{}"));
+  o.line("");
+  if (staged) fn.out += staged_source(a);
+  fn.out += lexical.source();
   o.fmt("}}  // namespace {}\n", ns);
-  return o.out;
+  return {std::move(o.out), std::move(includes), std::move(fn.out)};
 }
 
 }  // namespace cursiv

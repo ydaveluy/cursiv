@@ -236,7 +236,7 @@ inline void ll_skip(LlContext& c, std::uint16_t term, TextOffset end) {
 // is dropped as one byte -- a skip that advanced by nothing would never end.
 // Whether it moved anything: a byte, or a level a zero-width dedent closes.
 template <const auto& T>
-inline bool ll_drop(LlContext& c) {
+CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   c.stop.poll();
   ll_flush_trivia<T>(c);
   TextOffset end = c.la.end;
