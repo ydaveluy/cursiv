@@ -208,11 +208,17 @@ class LexicalMachine {
     return std::move(_returned);
   }
 
+  // The frame a step works on. It lives in a vector: `enter` grows it, and
+  // every reference to a frame is dead after it.
   Frame& frame() { return _frames.back(); }
   LexicalState& returned() { return _returned; }
 
-  void enter(std::uint16_t node, LexicalState in) {
-    _frames.push_back(Frame{node, std::move(in), {}, {}, 0, 0, 0});
+  // Opens a call on top of the frames. The caller's frame reference dangles
+  // from here on, so `enter` is the last use of it: the argument is built
+  // before the call and the step returns right after. The new frame is
+  // handed back for a caller that needs it.
+  Frame& enter(std::uint16_t node, LexicalState in) {
+    return _frames.emplace_back(Frame{node, std::move(in), {}, {}, 0, 0, 0});
   }
   void finish(LexicalState out) {
     _frames.pop_back();

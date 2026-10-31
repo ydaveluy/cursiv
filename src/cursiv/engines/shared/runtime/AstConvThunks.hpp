@@ -123,7 +123,8 @@ struct TextValues {
 template <class Visit>
 bool each_part_below(AstBuildCtx& ctx, NodeId id, Visit&& visit) {
   const Cst& cst = *ctx.cst;
-  std::vector<NodeId> pending;
+  // A part's children are few; a wider tree spills to the heap.
+  SmallRun<NodeId, 16> pending;
   const auto open = [&](NodeId at) {
     for (const NodeId c : cst.reverse_children(at)) pending.push_back(c);
   };

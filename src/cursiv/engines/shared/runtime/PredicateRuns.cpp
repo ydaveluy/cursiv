@@ -3,7 +3,8 @@
 
 #include <algorithm>
 #include <utility>
-#include <vector>
+
+#include "cursiv/engines/shared/runtime/SmallRun.hpp"
 
 namespace cursiv {
 
@@ -21,7 +22,7 @@ bool predicate_run(PredicateRuns* runs, std::uint32_t run,
     // No reading held and no gap behind: the round reads as its position.
     bool kept;
   };
-  std::vector<Lone> lone;
+  SmallRun<Lone, 8> lone;
   // What the rounds after the lone ones answered, together as one set.
   PredicateRunAnswer tail;
   TextOffset* const tailSeen = runs != nullptr ? &tail.reach : seen;
@@ -40,7 +41,7 @@ bool predicate_run(PredicateRuns* runs, std::uint32_t run,
           break;
         }
       lone.push_back({c.at, 0, false, kept});
-      reach = &lone.back().reach;
+      reach = &lone.back().reach;  // Read through before the next push.
     }
     PredicateState read, active;
     for (std::size_t i = 0; i < cur.size(); ++i) {
@@ -55,10 +56,11 @@ bool predicate_run(PredicateRuns* runs, std::uint32_t run,
   }
   if (!later.empty())
     tail.holds = rest(src, len, std::move(later), tailSeen) || tail.holds;
-  for (auto it = lone.rbegin(); it != lone.rend(); ++it) {
-    tail.holds = tail.holds || it->holds;
-    tail.reach = std::max(tail.reach, it->reach);
-    if (it->kept) runs->keep(PredicateRuns::key(run, it->at), tail);
+  for (std::size_t k = lone.size(); k-- > 0;) {
+    const Lone& it = lone[k];
+    tail.holds = tail.holds || it.holds;
+    tail.reach = std::max(tail.reach, it.reach);
+    if (it.kept) runs->keep(PredicateRuns::key(run, it.at), tail);
   }
   if (runs != nullptr && seen != nullptr) *seen = std::max(*seen, tail.reach);
   return tail.holds;

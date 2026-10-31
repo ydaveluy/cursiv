@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
@@ -98,16 +99,18 @@ class LexSuffixSession {
     return out;
   }
 
+  // The caller has found the walk read more than `kBacktrackTail` bytes past
+  // its match (`out`, a real match, `halt` beyond its end): the suffix is
+  // worth sharing from here on.
   CURSIV_NOINLINE static Scan finish(
       Tape tape, const char* src, TextOffset len, std::uint16_t state,
-      TextOffset from, TextOffset halt, Scan out) {
-    if (halt > out.end && halt - out.end > kBacktrack)
-      remember(tape, src, len, state, from);
+      TextOffset from, [[maybe_unused]] TextOffset halt, Scan out) {
+    assert(halt > out.end && halt - out.end > kBacktrackTail);
+    remember(tape, src, len, state, from);
     return out;
   }
 
  private:
-  static constexpr TextOffset kBacktrack = 64;
   CURSIV_NOINLINE static void remember(Tape tape, const char* src,
                                        TextOffset len, std::uint16_t state,
                                        TextOffset from) {

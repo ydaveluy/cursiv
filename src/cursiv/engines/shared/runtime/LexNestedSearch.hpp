@@ -6,10 +6,12 @@
 
 #include <cstddef>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 #include "cursiv/core/text/TextOffset.hpp"
 #include "cursiv/core/utils/macros.hpp"
+#include "cursiv/engines/shared/runtime/SmallRun.hpp"
 #include "cursiv/engines/shared/table/FlatMap.hpp"
 #include "cursiv/engines/shared/table/LexRelay.hpp"
 
@@ -78,7 +80,8 @@ class LexNestedSearch {
       return static_cast<TextOffset>(stop - q) >= n &&
              std::memcmp(q, lit, n) == 0;
     };
-    [[maybe_unused]] std::vector<Lit> lits;
+    // A relay names a few literals a side; more spill to the heap.
+    [[maybe_unused]] std::conditional_t<Many, SmallRun<Lit, 8>, char> lits;
     if constexpr (Many) {
       const auto list = [&](TextOffset off, TextOffset size, bool isAfter) {
         for (TextOffset i = 0; i < size;
@@ -181,17 +184,15 @@ class LexNestedSearch {
   }
 
   // Past the closer of the group opened at `key`; zero where it has none.
-  const TextOffset* find(TextOffset key) {
-    return key == kFree ? nullptr : _ends.find(key);
-  }
-  void put(TextOffset key, TextOffset end) {
-    if (key != kFree) _ends.emplace(key).first = end;
-  }
+  // Keys are positions in the text, below the 2^32 the offsets span, and
+  // never the key `FlatMap` keeps for its empty slots.
+  const TextOffset* find(TextOffset key) { return _ends.find(key); }
+  void put(TextOffset key, TextOffset end) { _ends.emplace(key).first = end; }
 
   FlatMap<TextOffset> _ends;
   // The groups the search in hand has opened and not closed, by boundary.
   std::vector<TextOffset> _open;
-  TextOffset _dry = kFree;
+  TextOffset _dry = kFree;  // No closerless position yet.
 };
 
 }  // namespace cursiv

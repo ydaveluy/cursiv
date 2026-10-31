@@ -27,26 +27,30 @@ struct PredicateCursor {
 
 // Deterministic recognition stays in the inline cursor; only competing
 // readings allocate, and duplicate cursors never multiply the next step.
+// The size is told by the tail and whether the inline cursor is taken, so a
+// moved-from set (its tail emptied, its inline cursor copied) still holds
+// what it says: never an index past its storage.
 template <class Cursor>
 class PredicateStates {
  public:
   PredicateStates() = default;
-  explicit PredicateStates(Cursor cursor) : _one(cursor), _size(1) {}
+  explicit PredicateStates(Cursor cursor) : _one(cursor), _taken(true) {}
 
-  bool empty() const { return _size == 0; }
-  std::size_t size() const { return _size; }
+  bool empty() const { return !_taken; }
+  std::size_t size() const { return (_taken ? 1u : 0u) + _more.size(); }
   Cursor operator[](std::size_t i) const {
     return i == 0 ? _one : _more[i - 1];
   }
   bool has(Cursor cursor) const {
-    if (_size == 0) return false;
+    if (!_taken) return false;
     if (_one == cursor) return true;
     return !_more.empty() && !(_more.back() < cursor) &&
            std::binary_search(_more.begin(), _more.end(), cursor);
   }
   void add(Cursor cursor) {
-    if (_size == 0) {
+    if (!_taken) {
       _one = cursor;
+      _taken = true;
     } else {
       if (_one == cursor) return;
       if (_more.empty() || _more.back() < cursor) {
@@ -57,7 +61,6 @@ class PredicateStates {
         _more.insert(at, cursor);
       }
     }
-    ++_size;
   }
   void unite(const PredicateStates& other) {
     if (this == &other || other.empty()) return;
@@ -80,24 +83,23 @@ class PredicateStates {
     _more.erase(std::unique(_more.begin() + from, _more.end()), _more.end());
     const auto own = std::lower_bound(_more.begin() + from, _more.end(), _one);
     if (own != _more.end() && *own == _one) _more.erase(own);
-    _size = _more.size() + 1u;
   }
   PredicateStates without(const PredicateStates& other) const {
     PredicateStates out;
-    for (std::size_t i = 0; i < _size; ++i)
+    for (std::size_t i = 0, n = size(); i < n; ++i)
       if (!other.has((*this)[i])) out.add((*this)[i]);
     return out;
   }
   bool operator==(const PredicateStates& other) const {
-    if (_size != other._size) return false;
-    for (std::size_t i = 0; i < _size; ++i)
+    if (size() != other.size()) return false;
+    for (std::size_t i = 0, n = size(); i < n; ++i)
       if (!other.has((*this)[i])) return false;
     return true;
   }
 
  private:
   Cursor _one{};
-  std::size_t _size = 0;
+  bool _taken = false;
   std::vector<Cursor> _more;
 };
 

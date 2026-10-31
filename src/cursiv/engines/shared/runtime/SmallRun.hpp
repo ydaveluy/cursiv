@@ -1,5 +1,6 @@
 // A few elements in place, contiguous on the heap past `N`: a walk's usual
-// run is one or two, and a frame holding them costs no allocation.
+// run is one or two, and a frame holding them costs no allocation. A pointer
+// into it holds until the next `push_back`, which may spill it to the heap.
 #pragma once
 
 #include <cstddef>
@@ -14,6 +15,8 @@ class SmallRun {
   const T* begin() const { return _heap ? _more.data() : _own; }
   T* end() { return begin() + _n; }
   const T* end() const { return begin() + _n; }
+  T& back() { return end()[-1]; }
+  const T& back() const { return end()[-1]; }
   T& operator[](std::size_t i) { return begin()[i]; }
   const T& operator[](std::size_t i) const { return begin()[i]; }
   std::size_t size() const { return _n; }

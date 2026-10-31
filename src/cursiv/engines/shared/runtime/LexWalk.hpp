@@ -174,7 +174,7 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_from(Ad ad, const char* src,
       // token's remaining scan on its ordinary path.
       if (!queried && m.term != kInvalidSymbol &&
           (ad.accept(state) == 0 || ad.bounded(state)) &&
-          (self || (at > m.end && at - m.end > 64u))) {
+          (self || (at > m.end && at - m.end > kBacktrackTail))) {
         if constexpr (relays) {
           if (run.any()) {
             if (self) skip(state, at);
@@ -206,7 +206,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_from(Ad ad, const char* src,
   }
   Scan out = lex_walk_settle(ad, src, len, st, from, i, far, m, run, halt);
   if constexpr (checkpoints)
-    if (out.term != kInvalidSymbol && halt > out.end && halt - out.end > 64u)
+    if (out.term != kInvalidSymbol && halt > out.end &&
+        halt - out.end > kBacktrackTail)
       out = LexSuffixSession<Ad>::finish(ad, src, len, st, from, halt, out);
   return out;
 }
@@ -222,7 +223,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk(Ad ad, const char* src,
                                        halt);
       auto out =
           lex_walk_from<Ad, false>(ad, src, len, ad.start(mode), from, halt);
-      if (out.term != kInvalidSymbol && halt > out.end && halt - out.end > 64u)
+      if (out.term != kInvalidSymbol && halt > out.end &&
+          halt - out.end > kBacktrackTail)
         out = LexSuffixSession<Ad>::finish(ad, src, len, ad.start(mode), from,
                                            halt, out);
       return out;
@@ -260,7 +262,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_end(const Ad& ad, const char* src,
   Scan out =
       lex_walk_settle(ad, src, len, ad.start(mode), from, i, far, m, run, halt);
   if constexpr (kLexBacktrack<Ad>)
-    if (out.term != kInvalidSymbol && halt > out.end && halt - out.end > 64u &&
+    if (out.term != kInvalidSymbol && halt > out.end &&
+        halt - out.end > kBacktrackTail &&
         LexSuffixSession<Ad>::shares(ad, mode))
       out = LexSuffixSession<Ad>::finish(ad, src, len, ad.start(mode), from,
                                          halt, out);

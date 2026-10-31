@@ -20,12 +20,20 @@ inline constexpr std::uint16_t kDeadState = 0xFFFFu;
 // The mode a held lookahead was read in, where none is held.
 inline constexpr std::uint16_t kNoMode = 0xFFFFu;
 
+// How far past its best match a walk must have read before the lexer treats
+// the token as one that backtracked: the tail it then shares as a suffix. The
+// walks, the suffix session and the generated walks all test this one value.
+inline constexpr TextOffset kBacktrackTail = 64;
+
 struct Token {
   TextOffset begin = 0;
   TextOffset end = 0;
   SymbolId sym = kInvalidSymbol;
   // The alphabet a lexer read it with, `kNoMode` for a token it did not.
   std::uint16_t mode = kNoMode;
+  // The same token is the same span of the same symbol, however it was read:
+  // `mode` is deliberately left out (the LL reader compares a held lookahead
+  // with a fresh read, `ll_read.hpp`, and the modes may differ).
   constexpr bool operator==(const Token& o) const {
     return begin == o.begin && end == o.end && sym == o.sym;
   }

@@ -130,3 +130,4 @@ cursiv_test(LexGuards_test engines/shared/LexGuards_test.cpp
     lexguardsllGenerated lexguardslrGenerated
     lexovertakellGenerated lexovertakelrGenerated
     lexblankheadllGenerated lexblankheadlrGenerated)
+cursiv_test(PredicateState_test engines/shared/PredicateState_test.cpp)

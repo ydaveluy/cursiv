@@ -963,7 +963,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
         line("  if (relays.any()) goto Wdone;");
       fmt("  if (term != ::cursiv::kInvalidSymbol{}) {{\n", sharing());
       raw(R"(    const ::cursiv::TextOffset halt = i > far ? i : far;
-    if (halt > end && halt - end > 64u)
+    if (halt > end && halt - end > ::cursiv::kBacktrackTail)
       return ::cursiv::LexSuffixSession<::cursiv::LrLexTape<kTable>>::finish(
           kTape, src, len, kTable.modeStart[mode], start, halt,
           ::cursiv::Scan{end, term});
