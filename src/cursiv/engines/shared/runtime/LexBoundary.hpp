@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #include "cursiv/core/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
@@ -28,6 +29,11 @@ struct LexBoundary {
     if (wordBytes->has(b)) return true;
     return nwordRanges != 0 && b >= 0xC2 &&
            lex_scalar_in(wordRanges, nwordRanges, src + i, len - i);
+  }
+  // Whether a terminal's spelling `text` begins as a word does.
+  bool word_spelled(std::string_view text) const {
+    return !text.empty() &&
+           word_at(text.data(), 0, static_cast<TextOffset>(text.size()));
   }
 
   CURSIV_ALWAYS_INLINE bool at(std::uint16_t set, const char* src, TextOffset i,

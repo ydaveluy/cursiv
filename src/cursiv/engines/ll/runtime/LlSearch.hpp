@@ -106,6 +106,8 @@ struct LlSearch : LlSearchSim, RepairSearch<LlGesture> {
   std::unordered_map<std::uint64_t, RepairEnds> ends;
   std::unordered_multimap<std::uint64_t, TypoMemo> typos;
   std::vector<Typo> cutTypos;
+  // The points the misspelling walks keep, lent to each in turn.
+  TypoScratch typoScratch;
   std::unordered_map<std::uint64_t, TextOffset> drops;
   // What the positions of the reading in hand offer.
   LlFacts facts;

@@ -26,16 +26,17 @@ inline constexpr TextOffset kRepairReachAll = 0xFFFFFFFFu;
 // A reading queued at `f`, with the rest of its key and the order it was
 // queued in.
 struct RepairEntry {
-  std::uint32_t f, lost, faults, invented, seq, at;
+  std::uint32_t f, lost, gestures, faults, invented, seq, at;
 };
 
-// Two readings by key: cost, then the author's tokens lost, the faults, the
-// tokens invented.
+// Two readings by key: cost, then the author's tokens lost, the gestures made
+// -- an owed run of insertions is one -- the faults, the tokens invented.
 template <class R>
 std::strong_ordering repair_key_cmp(const R& a, const R& b) {
   const std::uint64_t ka = (std::uint64_t{a.cost} << 32) | a.lost;
   const std::uint64_t kb = (std::uint64_t{b.cost} << 32) | b.lost;
   if (ka != kb) return ka <=> kb;
+  if (a.gestures != b.gestures) return a.gestures <=> b.gestures;
   return ((std::uint64_t{a.faults} << 32) | a.invented) <=>
          ((std::uint64_t{b.faults} << 32) | b.invented);
 }
@@ -46,6 +47,7 @@ inline constexpr auto repair_entry_after = [](const RepairEntry& a,
   const std::uint64_t ka = (std::uint64_t{a.f} << 32) | a.lost;
   const std::uint64_t kb = (std::uint64_t{b.f} << 32) | b.lost;
   if (ka != kb) return ka > kb;
+  if (a.gestures != b.gestures) return a.gestures > b.gestures;
   const std::uint64_t la = (std::uint64_t{a.faults} << 32) | a.invented;
   const std::uint64_t lb = (std::uint64_t{b.faults} << 32) | b.invented;
   if (la != lb) return la > lb;
@@ -98,8 +100,9 @@ struct RepairSearch {
   template <class R>
   void queue(std::vector<R>& rs, std::uint32_t f, const R& r, std::uint32_t at,
              std::uint32_t lost, bool opens) {
-    heap.push_back(RepairEntry{f, r.lost + lost, r.faults + (opens ? 1u : 0u),
-                               r.invented, seq++, at});
+    heap.push_back(RepairEntry{f, r.lost + lost, r.gestures,
+                               r.faults + (opens ? 1u : 0u), r.invented, seq++,
+                               at});
     std::push_heap(heap.begin(), heap.end(), repair_entry_after);
     rs[at].queued = true;
   }

@@ -163,6 +163,9 @@ void phases_and_generators_name_what_they_stand_for() {
   const auto inserts = cursiv::LrConfig::insertGenerator(reading, 3, 7);
   CHECK(inserts.generates() && inserts.work == LrWorkKind::enumerateInsertions);
   CHECK(inserts.source() == 3 && inserts.insertRank() == 7);
+  const auto replaces = cursiv::LrConfig::replaceGenerator(reading, 4, 9);
+  CHECK(replaces.generates() && replaces.work == LrWorkKind::forcedReplacement);
+  CHECK(replaces.source() == 4 && replaces.insertRank() == 9);
   auto abandons = cursiv::LrConfig::abandonGenerator(reading, 2, 5, 11, 13, 4);
   CHECK(abandons.generates() && abandons.work == LrWorkKind::enumerateAbandons);
   CHECK(abandons.source() == 2 && abandons.abandonDepth() == 5 &&
@@ -277,15 +280,16 @@ void merged_path_keeps_its_source_rank() {
 }
 
 // The order a search elects in: cost, how far the goal reads on -- further
-// first -- then the author's tokens lost, faults, tokens invented, and the
-// order of the frozen reading it set out from.
-using Key = std::tuple<std::uint32_t, std::uint32_t, std::uint32_t,
-                       std::uint32_t, std::uint32_t, std::uint64_t>;
-constexpr Key kNoKey{~0u, ~0u, ~0u, ~0u, ~0u, ~std::uint64_t{0}};
+// first -- then the author's tokens lost, gestures, faults, tokens invented,
+// and the order of the frozen reading it set out from.
+using Key =
+    std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
+               std::uint32_t, std::uint32_t, std::uint64_t>;
+constexpr Key kNoKey{~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~std::uint64_t{0}};
 
 Key key_of(const cursiv::LrConfig& x, cursiv::TextOffset reach,
            std::uint64_t order) {
-  return {x.cost, ~reach, x.lost, x.faults, x.invented, order};
+  return {x.cost, ~reach, x.lost, x.gestures, x.faults, x.invented, order};
 }
 
 // The order of the frozen reading a path set out from.
@@ -370,6 +374,8 @@ Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
     s.seen.clear();
     if (x.work == cursiv::LrWorkKind::enumerateInsertions) {
       cursiv::lr_search_inserts<A>(c, s, e.at);
+    } else if (x.work == cursiv::LrWorkKind::forcedReplacement) {
+      cursiv::lr_search_replace<A>(c, s, e.at);
     } else if (x.work == cursiv::LrWorkKind::enumerateAbandons) {
       cursiv::lr_search_abandon<A>(c, s, e.at, ~std::uint32_t{0});
     } else if (cursiv::lr_search_goal(x)) {
@@ -418,10 +424,12 @@ Key enumerate(cursiv::LrContext& c, std::uint32_t most, std::string_view text,
 }
 
 void print_key(const Key& k) {
-  const auto [cost, far, lost, faults, invented, order] = k;
+  const auto [cost, far, lost, gestures, faults, invented, order] = k;
   std::printf(
-      "(cost %u, reach %u, lost %u, faults %u, invented %u, order %llu)", cost,
-      ~far, lost, faults, invented, static_cast<unsigned long long>(order));
+      "(cost %u, reach %u, lost %u, gestures %u, faults %u, invented %u, "
+      "order %llu)",
+      cost, ~far, lost, gestures, faults, invented,
+      static_cast<unsigned long long>(order));
 }
 
 // The search's election from the roots `lay` sets out, keyed as the

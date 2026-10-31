@@ -1,5 +1,9 @@
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "cursiv/test/MutationOracle.hpp"
 #include "cursiv/test/RecoveryLane.hpp"
@@ -28,28 +32,46 @@ void run(Lane& lane) {
       const auto* model = result.value_as<sm::ast::Statemachine>();
       CHECK(result.accepted && model);
       if (!model || !expected) continue;
-      // A word before the head is read as the machine's name; an events
-      // section opens before the name, which reads it and the section's own
-      // keyword as events. At equal cost, the reading that drops no token of
-      // the author's wins.
-      const std::size_t shift = replace ? 0 : 2;
-      CHECK(model->events.size() == expected->events.size() + shift);
+      // A letter written before the head, or in place of one of its
+      // letters, misspells the keyword: it is read over the word, and the
+      // machine keeps its name and its events.
+      CHECK(model->name == expected->name);
+      CHECK(model->events.size() == expected->events.size());
       CHECK(model->states.size() == expected->states.size());
-      if (model->events.size() == expected->events.size() + shift)
+      if (model->events.size() == expected->events.size())
         for (std::size_t i = 0; i < expected->events.size(); ++i)
-          CHECK(model->events[i + shift]->name == expected->events[i]->name);
-      if (!replace && model->events.size() >= 2) {
-        CHECK(model->events[0]->name == expected->name);
-        CHECK(model->events[1]->name == "events");
-      }
+          CHECK(model->events[i]->name == expected->events[i]->name);
       if (model->states.size() == expected->states.size())
         for (std::size_t i = 0; i < model->states.size(); ++i) {
           CHECK(model->states[i]->name == expected->states[i]->name);
           CHECK(model->states[i]->transitions.size()
                 == expected->states[i]->transitions.size());
         }
-      if (replace) CHECK(model->name == expected->name);
     }
+  }
+  // A word two letters off the keyword it stands for is read as that keyword,
+  // and the name after it stays a name. A word unlike the keyword is the
+  // next item: the keyword is inserted before it. A word unlike the keyword
+  // and followed by a name, where only that keyword may stand, is replaced by
+  // it -- one gesture where the alternatives take two.
+  for (const auto& [text, want] :
+       {std::pair<std::string_view, std::vector<std::string>>{
+            "statemacne Lamp\n\nevents toggle",
+            {"rep:statemachine@0<Expecting 'statemachine' but found "
+             "'statemacne'.>",
+             "ins:initialState@30<Expecting 'initialState'.>"}},
+        {"Lamp\n\nevents toggle",
+         {"ins:statemachine@0<Expecting 'statemachine'.>",
+          "ins:initialState@19<Expecting 'initialState'.>"}},
+        {"xyzzy Lamp\n\nevents toggle",
+         {"rep:statemachine@0<Expecting 'statemachine' but found 'xyzzy'.>",
+          "ins:initialState@25<Expecting 'initialState'.>"}}}) {
+    const Proj p = project(*engine, std::string(text));
+    CHECK(p.accepted && p.value);
+    CHECK(p.diags == want);
+    if (p.diags != want)
+      for (const std::string& d : p.diags)
+        std::printf("  said %s\n", d.c_str());
   }
   language(lane, *engine, "valid.statemachine",
            {"01_typo1.statemachine", "02_typo2.statemachine",

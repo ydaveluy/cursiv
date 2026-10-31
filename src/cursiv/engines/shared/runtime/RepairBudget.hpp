@@ -1,5 +1,6 @@
-// What a repair search prices and what it may spend: a gesture's cost, the
-// tokens that validate a repair, and the work a parse's repair is allowed -- in
+// What a repair search prices and what it may spend: a gesture's cost, a
+// misspelling's, the tokens that validate a repair, and the work a parse's
+// repair is allowed -- in
 // reads, a floor and a share per byte for the whole parse, up to a ceiling
 // whatever its length, and the most one search takes of what is left.
 #pragma once
@@ -16,11 +17,41 @@ namespace cursiv {
 inline constexpr std::uint32_t kRepairValidateShifts = 3;
 
 // What a gesture costs: a re-reading keeps the author's bytes where any other
-// invents or drops, so it is the least a gesture still owed can cost.
-inline constexpr std::uint32_t kRepairGesture = 2;
-inline constexpr std::uint32_t kRepairReread = 1;
+// invents or drops, so it is the least a gesture still owed can cost. The unit
+// is fine enough to price a misspelling by how much of its word it changes.
+inline constexpr std::uint32_t kRepairUnit = 4;
+inline constexpr std::uint32_t kRepairGesture = 2 * kRepairUnit;
+inline constexpr std::uint32_t kRepairReread = kRepairUnit;
 static_assert(kRepairReread <= kRepairGesture,
               "a re-reading is the least a gesture can cost");
+// A word read as a terminal it does not resemble: its deletion and the
+// terminal's insertion, made as one gesture.
+inline constexpr std::uint32_t kRepairReplace = 2 * kRepairGesture;
+// The bytes of a word each fault past its first takes: a word of fewer bytes
+// than that is a different word.
+inline constexpr std::uint32_t kRepairFaultBytes = 5;
+
+// What reading a word of `length` bytes as a terminal costs, with `faults`
+// faults between them: a re-reading for the first fault, and each further
+// fault its share of the word, up to `kRepairReplace` where the word is too
+// short for them -- one fault up to 4 bytes, two from 5, three from 10.
+constexpr std::uint32_t repair_typo_cost(std::uint32_t faults,
+                                         std::uint32_t length) {
+  const std::uint64_t extra =
+      std::uint64_t{faults > 1 ? faults - 1 : 0} * kRepairFaultBytes;
+  const std::uint64_t share = std::uint64_t{length} + 1;
+  if (extra >= share) return kRepairReplace;
+  return kRepairReread + static_cast<std::uint32_t>(
+                             (kRepairReplace - kRepairReread) * extra / share);
+}
+static_assert(repair_typo_cost(1, 3) == kRepairReread);
+static_assert(repair_typo_cost(2, 4) == kRepairReplace);
+static_assert(repair_typo_cost(2, 5) < kRepairReplace);
+static_assert(repair_typo_cost(3, 9) == kRepairReplace);
+static_assert(repair_typo_cost(3, 10) < kRepairReplace);
+static_assert(repair_typo_cost(2, 12) < 2 * kRepairGesture,
+              "a word of 12 bytes two faults off is read as the terminal "
+              "before it is replaced by one");
 
 // The bytes of a lexical walk one unit of work pays for.
 inline constexpr TextOffset kRepairLexBytes = 32;

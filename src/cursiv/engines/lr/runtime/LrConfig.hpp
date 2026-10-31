@@ -26,6 +26,9 @@ enum class LrWorkKind : std::uint8_t {
   enumerateAbandons,
   // The insertions of a refused reading that no owed run reaches.
   enumerateInsertions,
+  // The replacement of the word in hand by the keyword its state is forced
+  // to, at the price of its deletion and the keyword's insertion.
+  forcedReplacement,
 };
 
 // Where a point stands in the fault it is repairing, `[abandon] (ins)* (rep |
@@ -56,6 +59,7 @@ struct LrConfig : LrPin {
   // The key; the rank is read through `link`.
   std::uint32_t cost = 0;
   std::uint32_t lost = 0;
+  std::uint32_t gestures = 0;
   std::uint32_t faults = 0;
   std::uint32_t invented = 0;
   std::uint32_t link = kNoGestureLink;
@@ -104,6 +108,15 @@ struct LrConfig : LrPin {
     return g;
   }
 
+  // The generator for the replacement of the word in hand of the reading
+  // `base`, which stands at `source`; `rank` is the rank it is laid at.
+  static LrConfig replaceGenerator(const LrConfig& base, std::uint32_t source,
+                                   std::uint32_t rank) {
+    LrConfig g = insertGenerator(base, source, rank);
+    g.work = LrWorkKind::forcedReplacement;
+    return g;
+  }
+
   // The generator for the abandons of the reading `base`, which stands at
   // `source`: from `depth` frames down, whose top is cactus node `node` with
   // begin node `begin`; `arm` is the choice of the first.
@@ -122,9 +135,11 @@ struct LrConfig : LrPin {
     assert(generates());
     return _source;
   }
-  // Of insertions: the rank base of the non-owed terminals left to try.
+  // Of insertions: the rank base of the non-owed terminals left to try; of a
+  // replacement, its rank.
   std::uint32_t insertRank() const {
-    assert(work == LrWorkKind::enumerateInsertions);
+    assert(work == LrWorkKind::enumerateInsertions ||
+           work == LrWorkKind::forcedReplacement);
     return _keep;
   }
   // Of abandons: the frames the next one gives up, the cactus node at the top
@@ -178,8 +193,9 @@ struct LrConfig : LrPin {
   }
 
  private:
-  // A generator's payload; `_keep` is a rank base for insertions and a depth
-  // for abandons, read through the accessors of its own kind.
+  // A generator's payload; `_keep` is a rank base for insertions, a rank for
+  // a replacement and a depth for abandons, read through the accessors of its
+  // own kind.
   std::uint32_t _source = 0;
   std::uint32_t _keep = 0;
   std::uint32_t _node = 0;

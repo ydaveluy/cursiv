@@ -258,7 +258,7 @@ const std::vector<Typo>& lr_search_typos(LrContext& c, LrSearch& s,
   const TextOffset reach = lr_search_reach(s);
   std::vector<Typo> found = lr_rescan_candidates<A>(
       c, state, at, reach, read, cut,
-      s.bounding ? ~std::uint64_t{0} : std::uint64_t{reach});
+      s.bounding ? ~std::uint64_t{0} : std::uint64_t{reach}, &s.typoScratch);
   lr_search_charge(s, read, cut);
   if (cut) {
     s.cutTypos = std::move(found);
@@ -294,13 +294,18 @@ const std::vector<Typo>& lr_search_misread(const LrContext& c, LrSearch& s,
     for (unsigned m = 0; m < A.modeStart.size() && !cut; ++m) {
       auto want = A.derived.modeWant[m];
       if (want.none()) continue;
-      typo_each(
-          LrTypoTape<A>{{c.src, horizon, c.len, &read, &cut}, &want, &stops},
-          A.modeStart[m], at, plain, [&out](const Typo& t) {
-            for (const Typo& o : out)
-              if (o.term == t.term && o.end == t.end) return;
-            out.push_back(t);
-          });
+      const TypoBounds bounds{.src = c.src,
+                              .extent = horizon,
+                              .docLen = c.len,
+                              .read = &read,
+                              .shortOf = &cut,
+                              .scratch = &s.typoScratch};
+      typo_each(LrTypoTape<A>{bounds, &want, &stops}, A.modeStart[m], at, plain,
+                [&out](const Typo& t) {
+                  for (const Typo& o : out)
+                    if (o.term == t.term && o.end == t.end) return;
+                  out.push_back(t);
+                });
     }
   }
   lr_search_charge(s, read, cut);

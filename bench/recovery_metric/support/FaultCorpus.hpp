@@ -365,6 +365,51 @@ struct FaultCorpus {
         junk += ' ';
         return {RepairFault{twin.tokens[at].end, 0, junk}};
       }
+      case FaultClass::typo: {
+        // A keyword of letters only, misspelt by as many letter edits -- a
+        // letter replaced, dropped, doubled or swapped with the next -- as it
+        // has three letters, from one to three.
+        const auto letter = [](char ch) {
+          return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+        };
+        std::vector<std::size_t> words;
+        for (std::size_t i = 0; i < n; ++i) {
+          const std::string_view s = twin.spelling(i);
+          if (twin.literal[i] && s.size() >= 3 &&
+              std::all_of(s.begin(), s.end(), letter))
+            words.push_back(i);
+        }
+        if (words.empty()) {
+          offered = false;
+          return {};
+        }
+        const CstLeaf& t = twin.tokens[words[pick(words.size())]];
+        std::string word(
+            std::string_view(twin.text).substr(t.begin, t.end - t.begin));
+        const std::string was = word;
+        const std::size_t edits =
+            1 + pick(std::min<std::size_t>(3, word.size() / 3));
+        for (std::size_t e = 0; e < edits && word.size() > 1; ++e) {
+          const std::size_t at = pick(word.size());
+          const char other = static_cast<char>('a' + pick(26));
+          switch (pick(4)) {
+            case 0:
+              word[at] = other;
+              break;
+            case 1:
+              word.erase(at, 1);
+              break;
+            case 2:
+              word.insert(at, 1, other);
+              break;
+            default:
+              if (at + 1 < word.size()) std::swap(word[at], word[at + 1]);
+              break;
+          }
+        }
+        if (word == was) return {};
+        return {RepairFault{t.begin, t.end - t.begin, word}};
+      }
     }
     return {};
   }

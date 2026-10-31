@@ -1,7 +1,7 @@
 requirements	byte	29	29	13	0	13	671	671
-requirements	multi:1	32	96	83	3	86	667	670
-requirements	multi:3	32	96	91	10	101	645	647
-requirements	multi:10	32	96	91	8	99	627	632
+requirements	multi:1	32	96	81	2	83	667	670
+requirements	multi:3	32	96	91	9	100	645	647
+requirements	multi:10	32	96	91	6	97	627	632
 requirements	sep-series	32	99	99	0	99	747	747
 requirements	eof:1	0	0	0	0	0	0	0
 requirements	eof:2-3	0	0	0	0	0	0	0
@@ -11,10 +11,11 @@ requirements	lex:quote	32	32	32	0	32	688	688
 requirements	lex:esc	0	0	0	0	0	0	0
 requirements	lex:comment	32	32	32	0	32	224	224
 requirements	hole	32	32	32	8	40	693	694
+requirements	typo	32	32	32	4	36	687	688
 statemachine	byte	26	26	16	5	21	1241	1241
-statemachine	multi:1	32	96	52	14	66	1261	1272
+statemachine	multi:1	32	96	51	12	63	1261	1272
 statemachine	multi:3	32	96	55	37	92	1222	1256
-statemachine	multi:10	32	96	69	29	98	1197	1226
+statemachine	multi:10	32	96	69	26	95	1197	1226
 statemachine	sep-series	0	0	0	0	0	0	0
 statemachine	eof:1	32	32	32	0	32	906	906
 statemachine	eof:2-3	0	0	0	0	0	0	0
@@ -24,6 +25,7 @@ statemachine	lex:quote	0	0	0	0	0	0	0
 statemachine	lex:esc	0	0	0	0	0	0	0
 statemachine	lex:comment	32	32	32	0	32	352	352
 statemachine	hole	32	32	32	3	35	1303	1303
+statemachine	typo	32	32	26	25	51	1281	1312
 domainmodel	byte	26	26	21	5	26	1338	1341
 domainmodel	multi:1	32	96	72	8	80	1421	1444
 domainmodel	multi:3	32	96	82	19	101	1313	1424
@@ -37,6 +39,7 @@ domainmodel	lex:quote	0	0	0	0	0	0	0
 domainmodel	lex:esc	0	0	0	0	0	0	0
 domainmodel	lex:comment	32	32	32	0	32	689	689
 domainmodel	hole	32	32	32	24	56	1314	1478
+domainmodel	typo	32	32	32	7	39	1482	1482
 arithmetics	byte	22	22	16	3	19	2865	2894
 arithmetics	multi:1	32	96	79	13	92	3739	3842
 arithmetics	multi:3	32	96	80	10	90	3745	3848
@@ -50,6 +53,7 @@ arithmetics	lex:quote	0	0	0	0	0	0	0
 arithmetics	lex:esc	0	0	0	0	0	0	0
 arithmetics	lex:comment	32	32	32	0	32	832	832
 arithmetics	hole	32	32	32	43	75	3844	3923
+arithmetics	typo	32	32	32	27	59	3767	3973
 indent	byte	25	25	18	5	23	1449	1493
 indent	multi:1	32	96	46	32	78	1456	1734
 indent	multi:3	32	96	64	35	99	1469	1715
@@ -63,6 +67,7 @@ indent	lex:quote	0	0	0	0	0	0	0
 indent	lex:esc	0	0	0	0	0	0	0
 indent	lex:comment	0	0	0	0	0	0	0
 indent	hole	32	32	32	35	67	1687	1783
+indent	typo	0	0	0	0	0	0	0
 asi	byte	29	29	24	6	30	933	964
 asi	multi:1	32	96	59	7	66	923	1008
 asi	multi:3	32	96	67	14	81	913	1002
@@ -76,3 +81,4 @@ asi	lex:quote	0	0	0	0	0	0	0
 asi	lex:esc	0	0	0	0	0	0	0
 asi	lex:comment	0	0	0	0	0	0	0
 asi	hole	31	31	31	35	66	1016	1059
+asi	typo	32	32	32	0	32	1162	1200

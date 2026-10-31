@@ -655,11 +655,12 @@ inline std::uint32_t ll_search_child(LlSearch& s, std::uint32_t from,
                             .at = e.gapFrom,
                             .begin = begin});
   e.faults += e.fresh ? 1u : 0u;
+  e.gestures += 1;
   e.fresh = false;
   // An insertion or an abandon leaves the token in hand where it stood.
   e.inHand = e.inHand && (kind == LlGesture::ins || kind == LlGesture::abandon);
   e.shifts = 0;
-  e.gone = e.queued = e.gen = e.genAbandon = false;
+  e.gone = e.queued = e.gen = e.genAbandon = e.genReplace = false;
   ++s.work;
   return static_cast<std::uint32_t>(s.nodes.size()) - 1;
 }
@@ -706,7 +707,9 @@ void ll_search_insert(LlContext& c, LlSearch& s, std::uint32_t bi,
       ll_search_child(s, bi, LlGesture::ins, term, 0, choice, begin);
   LlReading& r = s.nodes[e];
   ll_search_keep<T>(s, r);
-  r.cost += owed && b.owing ? 0 : kRepairGesture;
+  const bool free = owed && b.owing;
+  r.cost += free ? 0 : kRepairGesture;
+  r.gestures -= free ? 1u : 0u;
   r.owing = owed;
   r.invented += 1;
   r.phase = 2;
@@ -762,18 +765,19 @@ const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p) {
   return s.readings.emplace(p, r).first->second;
 }
 
-// The token in hand read as `term` up to `end`: `rep` where its bytes are
-// re-read as a terminal the positions step by, `skip` where they are a trivia
-// the lexer refused. Its readings go to `s.out`.
+// The token in hand read as `term` up to `end` at `cost`: `rep` where its
+// bytes are re-read as a terminal the positions step by, `skip` where they are
+// a trivia the lexer refused. Its readings go to `s.out`.
 template <const auto& T>
 void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
                       LlGesture::Kind kind, SymbolId term, TextOffset end,
-                      std::uint32_t choice, const Token& tok) {
+                      std::uint32_t choice, const Token& tok,
+                      std::uint32_t cost) {
   s.out.clear();
   const std::uint32_t e =
       ll_search_child(s, bi, kind, term, end, choice, tok.begin);
   LlReading& r = s.nodes[e];
-  r.cost += kRepairReread;
+  r.cost += cost;
   r.owing = false;
   const Token read{tok.begin, end, term};
   if (kind == LlGesture::skip) {
@@ -817,7 +821,7 @@ void ll_search_lexical(LlContext& c, LlSearch& s, std::uint32_t bi,
   const auto one = [&](TextOffset end) {
     const LlSearchLaid pools(s);
     ll_search_reread<T>(c, s, bi, trivia ? LlGesture::skip : LlGesture::rep,
-                        r.term, end, choice++, tok);
+                        r.term, end, choice++, tok, kRepairReread);
     bool holds = false;
     for (const std::uint32_t q : s.out) {
       holds = holds || ll_search_goal(s.nodes[q]);
@@ -872,7 +876,7 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
   for (std::size_t m = 0; m < f.modes.size() && !cut; ++m)
     ll_rescan_within<T>(c, f.modes[m], f.bits.data() + m * T.termWords,
                         tok.begin, tok.end, len, horizon, read, found, most,
-                        cut);
+                        cut, &s.typoScratch);
   s.work += 1 + read / kRepairLexBytes;
   if (cut) {
     ll_search_cut(s);
@@ -1043,12 +1047,64 @@ void ll_search_abandons(const LlContext& c, LlSearch& s, std::uint32_t bi,
       g.genChoice = choice++;
       g.cost += lost * kRepairGesture;
       g.lost += lost;
+      g.gestures += 1;
       g.faults += b.fresh ? 1u : 0u;
       s.nodes.push_back(g);
       ll_search_queue(s, g.cost, g,
                       static_cast<std::uint32_t>(s.nodes.size()) - 1);
     }
   }
+}
+
+// The keyword the positions of reading `bi` read alone, where they read no
+// other terminal: a word in its place stands for it, whatever the word
+// resembles. None where they admit more, since the word may be the next of
+// them.
+template <const auto& T>
+SymbolId ll_search_forced(const LlContext& c, LlSearch& s, std::uint32_t bi) {
+  const LlFacts& f = ll_search_facts<T>(c, s, bi);
+  if (f.viable.size() != 1) return kInvalidSymbol;
+  const std::uint16_t t = f.viable.front();
+  if (!T.terms[t].spelled || !lex_boundary(T).word_spelled(T.term_text(t)) ||
+      !ll_search_insertable<T>(c, t, false))
+    return kInvalidSymbol;
+  return t;
+}
+
+// The word in hand read as the keyword its positions are forced to, over the
+// span its deletion takes, laid as the entry that stood for it is asked for:
+// one gesture at the price of the deletion and the insertion. Where the
+// misspelling walk reads the keyword over that span, it is read there at a
+// lower price.
+template <const auto& T>
+void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
+  const std::uint32_t from = s.nodes[gi].genFrom;
+  const Token tok = ll_search_peek<T>(c, s, s.nodes[from]);
+  if (ll_search_spent(s)) return;
+  const SymbolId term = ll_search_forced<T>(c, s, from);
+  if (term == kInvalidSymbol) return;
+  const TextOffset end = ll_search_drop_end<T>(c, s, tok);
+  for (const Typo& t : ll_search_typos<T>(c, s, from, tok))
+    if (t.end == end && t.term == term) return;
+  // The alphabet the keyword is read under, as the walk reads it.
+  const LlFacts& f = ll_search_facts<T>(c, s, from);
+  std::uint16_t start = kDeadState;
+  for (std::size_t m = 0; m < f.modes.size() && start == kDeadState; ++m)
+    if (((f.bits[m * T.termWords + (term >> 6)] >> (term & 63u)) & 1u) != 0)
+      start = T.modeStart[f.modes[m]];
+  std::uint64_t read = 0;
+  const LlTypoTape<T> tape{
+      {.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
+      nullptr,
+      tok.begin};
+  if (start == kDeadState || ll_search_spent(s) ||
+      !tape.replaces(start, term, end))
+    return;
+  const LlSearchLaid pools(s);
+  ll_search_reread<T>(c, s, from, LlGesture::rep, term, end,
+                      s.nodes[gi].genKeep, tok, kRepairReplace);
+  for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
+  ll_search_trim(s, pools);
 }
 
 // The gestures the canonical form admits, in rank order: re-readings, owed
@@ -1068,11 +1124,29 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
       if (t.term == ll_search_closer<T>(c)) continue;
       const LlSearchLaid pools(s);
       ll_search_reread<T>(c, s, bi, LlGesture::rep, t.term, t.end, choice++,
-                          tok);
+                          tok, t.cost);
       for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
       ll_search_trim(s, pools);
     }
   }
+  // A word in place of the keyword its positions are forced to, unlike it,
+  // waits behind one entry, at the price of its deletion and the keyword's
+  // insertion.
+  if (b.phase <= 2 && !atEnd && !laid && tok.sym != kInvalidSymbol &&
+      lex_boundary(T).word_at(c.src, tok.begin, c.len) &&
+      ll_search_forced<T>(c, s, bi) != kInvalidSymbol) {
+    LlReading g = b;
+    g.gen = g.genReplace = true;
+    g.genFrom = bi;
+    g.genKeep = choice;
+    g.cost += kRepairReplace;
+    g.gestures += 1;
+    g.faults += b.fresh ? 1u : 0u;
+    s.nodes.push_back(g);
+    ll_search_queue(s, g.cost, g,
+                    static_cast<std::uint32_t>(s.nodes.size()) - 1);
+  }
+  ++choice;
   // Bytes no alphabet reads refuse every reading alike: insertions in front of
   // them are told apart only past them, so one is made there, never a run.
   const bool garbage = !atEnd && !laid && tok.sym == kInvalidSymbol;
@@ -1101,6 +1175,7 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
       g.genFrom = bi;
       g.genKeep = insertRank + T.nterms;
       g.cost += kRepairGesture;
+      g.gestures += 1;
       g.faults += b.fresh ? 1u : 0u;
       g.invented += 1;
       s.nodes.push_back(g);
@@ -1287,6 +1362,8 @@ std::uint32_t ll_search_run(LlContext& c, LlSearch& s, bool& exhausted,
     if (s.nodes[e.at].gen) {
       if (s.nodes[e.at].genAbandon)
         ll_search_abandon<T>(c, s, e.at, e.f);
+      else if (s.nodes[e.at].genReplace)
+        ll_search_replace<T>(c, s, e.at);
       else
         ll_search_inserts<T>(c, s, e.at);
       continue;

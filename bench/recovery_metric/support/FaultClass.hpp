@@ -22,15 +22,16 @@ enum class FaultClass : std::uint8_t {
   escape,      // a string's closing quote escaped
   comment,     // a block comment's closer gone, none after it
   hole,        // a run of stray tokens: one fault
+  typo,        // a keyword misspelt by one to three letter edits
 };
 
-inline constexpr std::size_t kFaultClasses = 13;
+inline constexpr std::size_t kFaultClasses = 14;
 
 [[nodiscard]] constexpr std::string_view fault_class_name(FaultClass k) {
   constexpr std::string_view kName[kFaultClasses] = {
       "byte",   "multi:1", "multi:3",   "multi:10",  "sep-series",
       "eof:1",  "eof:2-3", "eof:4-7",   "eof:8-20",  "lex:quote",
-      "lex:esc", "lex:comment", "hole"};
+      "lex:esc", "lex:comment", "hole",    "typo"};
   return kName[static_cast<std::size_t>(k)];
 }
 

@@ -1,7 +1,7 @@
-// A misspelling is repaired by re-reading, never by rewriting: a cold walk over
-// the mode's DFA -- k faults, no edit distance -- says how far each terminal
-// the point admits would have reached, and the author's own span becomes its
-// leaf.
+// A misspelling is repaired by re-reading, never by rewriting: a cold search
+// over the mode's DFA -- a bounded edit distance -- says how far each terminal
+// the point admits would have reached, at what price, and the author's own
+// span becomes its leaf.
 #pragma once
 
 #include <array>
@@ -97,20 +97,36 @@ struct LlTypoTape : TypoBounds {
   }
   // The typo walk's refusal hook has no statistics sink here.
   void refused() const {}
+  // Whether the word up to `p` may be read as spelled terminal `t`: its
+  // spelling, read from `start`, accepts it, and closes where the lexer
+  // would let it.
+  bool replaces(std::uint16_t start, SymbolId t, TextOffset p) const {
+    std::uint16_t s = start;
+    for (const char ch : T.term_text(t)) {
+      s = T.next_byte(s, static_cast<unsigned char>(ch));
+      if (s == kDeadState) return false;
+    }
+    if (T.dfaAccept[s] == 0 || !T.dfa_acc_set(s).test(t)) return false;
+    if constexpr (LexTape<T>::kRefuses)
+      if (T.terms[t].refuses && T.head_refuses(t, src + head, docLen - head))
+        return false;
+    return closed(s, t, p) && !trails(t, p);
+  }
 };
 
 // The re-readings of a misspelling from `at`, over the terminals `want` names
 // under `mode`, added to `found`; `read` counts the bytes the walks read. The
 // caller already read the ordinary token, which ends at `plain`, and bounded
 // the section. All paths and alphabets share `most`; hitting a horizon
-// reports an incomplete set of candidates through `cut`.
+// reports an incomplete set of candidates through `cut`. `scratch` keeps the
+// walk's points, or null.
 template <const auto& T>
 inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
                              const std::uint64_t* want, TextOffset at,
                              TextOffset plain, TextOffset len,
                              TextOffset horizon, std::uint64_t& read,
                              TypoCandidates& found, std::uint64_t most,
-                             bool& cut) {
+                             bool& cut, TypoScratch* scratch = nullptr) {
   std::array<std::uint64_t, T.termWords> allowed;
   for (std::uint32_t k = 0; k < T.termWords; ++k) allowed[k] = want[k];
   if constexpr (LexTape<T>::kRefuses)
@@ -118,8 +134,8 @@ inline void ll_rescan_within(const LlContext& c, std::uint16_t mode,
       if (((allowed[t >> 6] >> (t & 63u)) & 1u) != 0 &&
           T.head_refuses(t, c.src + at, c.len - at))
         allowed[t >> 6] &= ~(std::uint64_t{1} << (t & 63u));
-  typo_each(LlTypoTape<T>{{c.src, horizon, len, &read, &cut, most},
-                          allowed.data(), at, &c.stop},
+  const TypoBounds bounds{c.src, horizon, len, &read, &cut, most, scratch};
+  typo_each(LlTypoTape<T>{bounds, allowed.data(), at, &c.stop},
             T.modeStart[mode], at, plain,
             [&](const Typo& candidate) { found.add(candidate); });
 }

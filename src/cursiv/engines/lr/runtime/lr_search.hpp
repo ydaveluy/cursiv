@@ -255,6 +255,7 @@ inline std::uint32_t lr_search_child(LrSearch& s, std::uint32_t from,
                             .low = e.run.low(),
                             .cost = e.cost});
   e.faults += e.fresh ? 1u : 0u;
+  e.gestures += 1;
   e.fresh = false;
   e.shifts = 0;
   e.dead = e.gone = e.weighed = e.queued = e.pinDue = false;
@@ -400,6 +401,7 @@ std::uint32_t lr_search_insert(LrContext& c, LrSearch& s, std::uint32_t bi,
     LrConfig& x = s.configs[q];
     const bool cont = x.pinDue && free != 0;
     x.cost += cont ? 0 : kRepairGesture;
+    x.gestures -= cont ? 1u : 0u;
     if (!x.fresh) {
       x.freeInserts =
           x.pinDue ? (cont ? free - 1 : (most > 0 ? most - 1 : 0)) : 0;
@@ -519,6 +521,56 @@ bool lr_search_rereads(LrContext& c, LrSearch& s, const LrConfig& b) {
          lr_search_spent(s);
 }
 
+// The keyword a state acts on alone, where it acts on no other terminal: a
+// word in its place stands for it, whatever the word resembles. None where
+// the state admits more, since the word may be the next of them.
+template <const auto& A>
+SymbolId lr_search_forced(std::uint32_t state) {
+  auto acts = A.cold.follow[state];
+  const unsigned t = acts.take();
+  if (t >= A.cfg.nterms || acts.any() || !A.cfg.terms[t].spelled ||
+      !lex_boundary(A.cfg).word_spelled(
+          A.cfg.term_text(static_cast<std::uint16_t>(t))) ||
+      !lr_search_insertable<A>(state, static_cast<SymbolId>(t), false))
+    return kInvalidSymbol;
+  return static_cast<SymbolId>(t);
+}
+
+// The word in hand read as the keyword its state is forced to, over the span
+// its deletion takes, laid as the entry that stood for it is asked for: one
+// gesture at the price of the deletion and the insertion. Where the
+// misspelling walk reads the keyword over that span, it is read there at a
+// lower price.
+template <const auto& A>
+void lr_search_replace(LrContext& c, LrSearch& s, std::uint32_t gi) {
+  const std::uint32_t from = s.configs[gi].source();
+  const std::uint32_t state = s.configs[from].run.back();
+  const std::uint16_t mode = A.mode[state];
+  const SymbolId term = lr_search_forced<A>(state);
+  const Token la = s.configs[from].la;
+  const Token written = lr_search_written<A>(c, s, la, mode);
+  const TextOffset end = lr_search_error_end<A>(c, s, mode, la);
+  for (const Typo& t : lr_search_typos<A>(c, s, state, la.begin))
+    if (t.end == end && t.term == term) return;
+  std::uint64_t read = 0;
+  const LrTypoTape<A> tape{
+      {.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
+      nullptr,
+      nullptr,
+      la.begin};
+  if (lr_search_spent(s) || !tape.replaces(A.modeStart[mode], term, end))
+    return;
+  const LrSearchLaid pools(s);
+  const std::uint32_t e = lr_search_child(s, from, LrGesture::rep, term, end,
+                                          s.configs[gi].insertRank());
+  LrConfig& r = s.configs[e];
+  lr_pin(r, term, true, end, written, mode);
+  r.cost += kRepairReplace;
+  r.freeInserts = 0;
+  lr_search_read<A>(c, s, e);
+  lr_search_admit_out(s, pools);
+}
+
 // The gestures the canonical form admits, in rank order: re-readings, owed
 // insertions, the others, the drop, and the abandons one depth at a time.
 template <const auto& A>
@@ -529,10 +581,11 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
   const bool atEnd = b.la.begin >= c.len;
   const bool laid = b.la.sym < A.cfg.nterms && A.cfg.terms[b.la.sym].laid != 0;
   std::uint32_t choice = 0;
-  // The generator pays the fault it opens here: queued, it is not counted
-  // again.
-  const auto defer = [&](LrConfig g) {
-    g.cost += kRepairGesture;
+  // The generator pays the fault it opens here, and the least its gestures
+  // cost: queued, it is not counted again.
+  const auto defer = [&](LrConfig g, std::uint32_t price) {
+    g.cost += price;
+    g.gestures += 1;
     g.faults += b.fresh ? 1u : 0u;
     s.configs.push_back(g);
     lr_search_queue(s, g.cost, g,
@@ -550,12 +603,21 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
           lr_search_child(s, bi, LrGesture::rep, t.term, t.end, choice++);
       LrConfig& r = s.configs[e];
       lr_pin(r, t.term, true, t.end, written, mode);
-      r.cost += kRepairReread;
+      r.cost += t.cost;
       r.freeInserts = 0;
       lr_search_read<A>(c, s, e);
       lr_search_admit_out(s, pools);
     }
   }
+  // A word in place of the keyword its state is forced to, unlike it, waits
+  // behind one entry, at the price of its deletion and the keyword's
+  // insertion.
+  if (b.mayReplace() && !atEnd && !laid && written.sym != kInvalidSymbol &&
+      written.sym != lr_text_close<A>(state) &&
+      lex_boundary(A.cfg).word_at(c.src, b.la.begin, c.len) &&
+      lr_search_forced<A>(state) != kInvalidSymbol)
+    defer(LrConfig::replaceGenerator(b, bi, choice), kRepairReplace);
+  ++choice;
   // Bytes no mode reads refuse every reading alike: insertions in front of
   // them are told apart only past them, so one is made there, never a run.
   const bool garbage =
@@ -589,7 +651,7 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     if (deferred) {
       LrConfig g = LrConfig::insertGenerator(b, bi, insertRank + A.cfg.nterms);
       g.invented += 1;
-      defer(g);
+      defer(g, kRepairGesture);
     }
   }
   if (!atEnd && written.sym != lr_text_close<A>(state)) {
@@ -614,7 +676,7 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     LrConfig g = LrConfig::abandonGenerator(
         b, bi, b.run.size() - 1, b.run.top(), b.run.begin_node(), choice);
     g.lost += 1;
-    defer(g);
+    defer(g, kRepairGesture);
   }
 }
 
@@ -896,6 +958,9 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
         break;
       case LrWorkKind::enumerateInsertions:
         lr_search_inserts<A>(c, s, e.at);
+        continue;
+      case LrWorkKind::forcedReplacement:
+        lr_search_replace<A>(c, s, e.at);
         continue;
       case LrWorkKind::enumerateAbandons:
         lr_search_abandon<A>(c, s, e.at, e.f);

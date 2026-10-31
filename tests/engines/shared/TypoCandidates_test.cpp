@@ -11,7 +11,7 @@
 
 namespace typo_candidates_cases {
 
-// The re-readings a walk emits are kept once each at their fewest faults and
+// The re-readings a walk emits are kept once each at their least cost and
 // ranked as an ordered insertion ranks them, and a token that ends at every
 // byte of a long line costs its number of candidates.
 
@@ -23,18 +23,18 @@ using cursiv::Typo;
 std::vector<Typo> by_insertion(const std::vector<Typo>& emitted) {
   std::vector<Typo> out;
   const auto before = [](const Typo& a, const Typo& b) {
-    return a.faults != b.faults ? a.faults < b.faults : a.end > b.end;
+    return a.cost != b.cost ? a.cost < b.cost : a.end > b.end;
   };
   for (const Typo& candidate : emitted) {
     const auto same = std::find_if(out.begin(), out.end(), [&](const Typo& o) {
       return o.term == candidate.term && o.end == candidate.end;
     });
     if (same != out.end()) {
-      if (same->faults <= candidate.faults) continue;
+      if (same->cost <= candidate.cost) continue;
       out.erase(same);
     }
     auto last = std::lower_bound(out.begin(), out.end(), candidate, before);
-    while (last != out.end() && last->faults == candidate.faults &&
+    while (last != out.end() && last->cost == candidate.cost &&
            last->end == candidate.end)
       ++last;
     out.insert(last, candidate);
@@ -42,11 +42,11 @@ std::vector<Typo> by_insertion(const std::vector<Typo>& emitted) {
   return out;
 }
 
-Typo typo(std::uint32_t end, std::uint16_t term, std::uint8_t faults) {
+Typo typo(std::uint32_t end, std::uint16_t term, std::uint32_t cost) {
   Typo t;
   t.end = end;
   t.term = term;
-  t.faults = faults;
+  t.cost = cost;
   return t;
 }
 
@@ -56,8 +56,8 @@ void ranks_as_an_insertion_does() {
     std::vector<Typo> emitted;
     const unsigned n = 1 + rng() % (round % 4 == 0 ? 400 : 40);
     for (unsigned i = 0; i < n; ++i)
-      emitted.push_back(typo(rng() % 30, static_cast<std::uint16_t>(rng() % 4),
-                             static_cast<std::uint8_t>(rng() % 4)));
+      emitted.push_back(
+          typo(rng() % 30, static_cast<std::uint16_t>(rng() % 4), rng() % 4));
     cursiv::TypoCandidates c;
     for (const Typo& t : emitted) c.add(t);
     const std::vector<Typo> got = c.ranked();
@@ -65,7 +65,7 @@ void ranks_as_an_insertion_does() {
     CHECK(got.size() == want.size());
     for (std::size_t k = 0; k < got.size() && k < want.size(); ++k)
       CHECK(got[k].end == want[k].end && got[k].term == want[k].term &&
-            got[k].faults == want[k].faults);
+            got[k].cost == want[k].cost);
   }
 }
 

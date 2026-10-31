@@ -1,6 +1,6 @@
 // The re-readings of a misspelling as the walk emits them: a (terminal, end)
-// once, at its fewest faults, laid in rank order when they are asked for --
-// fewer faults first, then the longer span, then the walk's own order.
+// once, at its least cost, laid in rank order when they are asked for -- the
+// cheaper first, then the longer span, then the walk's own order.
 #pragma once
 
 #include <algorithm>
@@ -39,7 +39,7 @@ class TypoCandidates {
       _emitted.push_back(_clock++);
       return;
     }
-    if (_found[at].faults <= candidate.faults) return;
+    if (_found[at].cost <= candidate.cost) return;
     _found[at] = candidate;
     _emitted[at] = _clock++;
   }
@@ -50,7 +50,7 @@ class TypoCandidates {
     std::ranges::sort(order, [&](std::size_t x, std::size_t y) {
       const Typo& a = _found[x];
       const Typo& b = _found[y];
-      if (a.faults != b.faults) return a.faults < b.faults;
+      if (a.cost != b.cost) return a.cost < b.cost;
       if (a.end != b.end) return a.end > b.end;
       return _emitted[x] < _emitted[y];
     });

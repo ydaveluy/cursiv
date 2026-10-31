@@ -59,6 +59,7 @@ struct LlReading {
   // The key; the rank is read through `link`.
   std::uint32_t cost = 0;
   std::uint32_t lost = 0;
+  std::uint32_t gestures = 0;
   std::uint32_t faults = 0;
   std::uint32_t invented = 0;
   std::uint32_t link = kNoGestureLink;
@@ -75,8 +76,11 @@ struct LlReading {
   bool owing = false;
 
   // Stands for the insertions of `genFrom` that are not owed, not yet laid;
-  // `genKeep` is the rank base of the terminals left to try.
+  // `genKeep` is the rank base of the terminals left to try. With
+  // `genReplace`, for the replacement of its word in hand by the keyword its
+  // positions are forced to, laid at rank `genKeep`.
   bool gen = false;
+  bool genReplace = false;
   std::uint32_t genFrom = 0;
   std::uint32_t genKeep = 0;
   // A deferred abandon: the call branch, its rank and exact continuation.

@@ -1,6 +1,6 @@
-// A misspelling is repaired by re-reading, never by rewriting: a cold walk
-// over the mode's DFA, k faults and no edit distance, says how far a terminal
-// the state can shift would have reached.
+// A misspelling is repaired by re-reading, never by rewriting: a cold search
+// over the mode's DFA, a bounded edit distance, says how far a terminal the
+// state can shift would have reached, and at what price.
 #pragma once
 
 #include <algorithm>
@@ -87,6 +87,22 @@ struct LrTypoTape : TypoBounds {
                          : !lex_boundary(A.cfg).at(set, src, p, docLen);
   }
   void refused() const { ++*stops; }
+  // Whether the word up to `p` may be read as spelled terminal `t`: its
+  // spelling, read from `start`, accepts it, and closes where the lexer
+  // would let it.
+  bool replaces(std::uint16_t start, unsigned t, TextOffset p) const {
+    std::uint16_t s = start;
+    for (const char ch : A.cfg.term_text(static_cast<std::uint16_t>(t))) {
+      s = A.next_byte(s, static_cast<unsigned char>(ch));
+      if (s == kDeadState) return false;
+    }
+    if (A.dfaAccept[s] == 0 || !A.dfa_acc_set(s).test(t)) return false;
+    if constexpr (LexTape<A>::kRefuses)
+      if (A.cfg.terms[t].refuses &&
+          A.head_refuses(static_cast<SymbolId>(t), src + head, docLen - head))
+        return false;
+    return closed(s, t, p) && !trails(t, p);
+  }
 };
 
 // Where the text a state reads ends: the document's end, or in a section the
@@ -122,16 +138,17 @@ TextOffset lr_text_end(const LrContext& c, std::uint32_t state, TextOffset at,
 }
 
 // The re-readings of a misspelling from `at`, over the terminals `state` can
-// act on, each (terminal, end) once at its fewest faults, in rank order:
-// fewer faults first, then the longer span, then the walk's declaration
+// act on, each (terminal, end) once at its least cost, in rank order: the
+// cheaper first, then the longer span, then the walk's declaration
 // order. The walk bounds how many there are; `reach` bounds how far past the
 // token it reads, `most` what all its paths read together, and `read` counts
-// what it read.
+// what it read. `scratch` keeps its points, or null.
 template <const auto& A>
 std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
                                        TextOffset at, TextOffset reach,
                                        std::uint64_t& read, bool& cut,
-                                       std::uint64_t most = ~std::uint64_t{0}) {
+                                       std::uint64_t most = ~std::uint64_t{0},
+                                       TypoScratch* scratch = nullptr) {
   auto want = A.cold.follow[state];
   // A word the source as written spells behind a terminal's head refuses
   // that terminal to every reading from there.
@@ -158,8 +175,8 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
   const TextOffset horizon = typo_horizon(at, plain, len, reach);
   TypoCandidates found;
   const auto keep = [&](const Typo& candidate) { found.add(candidate); };
-  typo_each(LrTypoTape<A>{{c.src, horizon, len, &read, &cut, most}, &want,
-                          &c.stats.searchStops, at},
+  const TypoBounds bounds{c.src, horizon, len, &read, &cut, most, scratch};
+  typo_each(LrTypoTape<A>{bounds, &want, &c.stats.searchStops, at},
             A.modeStart[A.mode[state]], at, plain, keep);
   return found.ranked();
 }

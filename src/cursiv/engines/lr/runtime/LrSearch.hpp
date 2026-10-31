@@ -134,6 +134,8 @@ struct LrSearch : RepairSearch<LrGesture> {
   std::unordered_map<std::uint64_t, RepairEnds> ends;
   std::unordered_map<std::uint64_t, std::vector<Typo>> typos;
   std::vector<Typo> cutTypos;
+  // The points the misspelling walks keep, lent to each in turn.
+  TypoScratch typoScratch;
   std::unordered_map<TextOffset, Token> written;
   // What the bound reads of the text, never past `horizon`: every mode's
   // tokens at a position and the bytes a mode reading none drops there, every
