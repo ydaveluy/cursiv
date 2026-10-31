@@ -30,6 +30,7 @@
 #include "cursiv/engines/shared/table/Token.hpp"
 
 namespace cursiv::detail {
+namespace {
 
 // What each section's grammar reads, by the section's own configuration: the
 // terminals of its positions and operators.
@@ -210,7 +211,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
 
 // Whether a relay's rest begins where the walk launched it: an assertion
 // alone, rather than a search for an echo, a closer or a recognized run.
-static bool in_step(const LexRelayGen& r) {
+bool in_step(const LexRelayGen& r) {
   return r.predicate != kNoLexNode && r.recognition == kNoLexNode;
 }
 
@@ -486,6 +487,8 @@ void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
     });
   }
 }
+
+}  // namespace
 
 void ll_build_lexer(LlBuiltProgram& b) {
   LexAlphabet alpha;

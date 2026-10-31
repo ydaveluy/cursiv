@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <span>
 #include <stdexcept>
@@ -89,6 +90,13 @@ void settle_nullable(const Cfg& c, std::vector<std::uint8_t>& nullable,
   });
 }
 
+// Whether `t` was new to `set`.
+bool put(DynSet& set, unsigned t) {
+  if (set.test(t)) return false;
+  set.set(t);
+  return true;
+}
+
 // What may stand at the head of this position.
 bool node_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
                 std::vector<DynSet>& first,
@@ -97,16 +105,11 @@ bool node_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
   const LlNode& n = c.nodes[id];
   DynSet& out = first[id];
   switch (n.kind) {
-    case LlShape::term: {
-      DynSet one;
-      one.set(n.sym);
-      return out.add(one);
-    }
+    case LlShape::term:
+      return put(out, n.sym);
     case LlShape::endMark: {
-      DynSet one;
-      one.set(kEofSymbol);
-      one.set(n.sym);
-      return out.add(one);
+      const bool eof = put(out, kEofSymbol);
+      return put(out, n.sym) || eof;
     }
     case LlShape::empty:
     case LlShape::condition:
@@ -166,18 +169,31 @@ void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
 }
 
 // The rules this position may call before anything is consumed. A cycle over
-// this relation is a descent that calls itself for ever.
+// this relation is a descent that calls itself for ever. Walked without
+// recursion: a counted repetition nests as deep as its bound.
 void left_calls(const Built& b, const std::vector<std::uint8_t>& empty,
-                std::uint16_t id, std::vector<bool>& seen,
+                std::uint16_t root, std::vector<bool>& seen,
                 std::vector<std::uint16_t>& out) {
-  const LlNode& n = b.cfg.nodes[id];
-  if (n.kind == LlShape::call && !seen[n.sym]) {
-    seen[n.sym] = true;
-    out.push_back(n.sym);
-  }
-  for (const auto k : b.cfg.children(n)) {
-    left_calls(b, empty, k, seen, out);
-    if (n.kind == LlShape::seq && !empty[k]) break;
+  std::vector<std::uint16_t> todo{root};
+  while (!todo.empty()) {
+    const LlNode& n = b.cfg.nodes[todo.back()];
+    todo.pop_back();
+    if (n.kind == LlShape::call && !seen[n.sym]) {
+      seen[n.sym] = true;
+      out.push_back(n.sym);
+    }
+    // A sequence reaches its members up to the first that consumes. The
+    // members go on the stack last first, so they come off in text order.
+    const auto kids = b.cfg.children(n);
+    std::size_t reach = kids.size();
+    if (n.kind == LlShape::seq)
+      for (std::size_t i = 0; i < kids.size(); ++i)
+        if (!empty[kids[i]]) {
+          reach = i + 1;
+          break;
+        }
+    todo.insert(todo.end(), std::make_reverse_iterator(kids.begin() + reach),
+                std::make_reverse_iterator(kids.begin()));
   }
 }
 
@@ -406,42 +422,85 @@ std::vector<std::uint16_t> opening_of(const Built& b, const DynSet& set) {
 }
 
 // Conditions and marks spell nothing: they never tell two operators apart.
-OperatorWords words_of(const Built& b, std::uint16_t id,
+// Walked without recursion: a counted repetition nests as deep as its bound.
+// A frame holds a position, how many of its members were entered, and what
+// they spelt so far; a member answers through `spelt`.
+OperatorWords words_of(const Built& b, std::uint16_t root,
                        std::vector<std::uint16_t>& calling) {
-  const LlNode& n = b.cfg.nodes[id];
-  switch (n.kind) {
-    case LlShape::term:
-      return OperatorWords::token(n.sym);
-    case LlShape::seq: {
-      OperatorWords out = OperatorWords::nothing();
-      for (const auto k : b.cfg.children(n))
-        out = out.then(words_of(b, k, calling));
-      return out;
+  struct Frame {
+    std::uint16_t id;
+    std::uint32_t entered;
+    OperatorWords words;
+  };
+  std::vector<Frame> todo;
+  OperatorWords spelt;
+  // Whether `id` is a frame to fill; if not, `spelt` is its answer.
+  const auto enter = [&](std::uint16_t id) {
+    const LlNode& n = b.cfg.nodes[id];
+    switch (n.kind) {
+      case LlShape::term:
+        spelt = OperatorWords::token(n.sym);
+        return false;
+      case LlShape::seq:
+        todo.push_back({id, 0, OperatorWords::nothing()});
+        return true;
+      case LlShape::alt:
+        todo.push_back({id, 0, OperatorWords::none()});
+        return true;
+      case LlShape::rep:
+        if (n.max == kEndless) {
+          spelt = n.min == 0 ? OperatorWords::nothing() : OperatorWords::none();
+          spelt.unite(OperatorWords::unlisted(opening_of(b, b.first[n.sym])));
+          return false;
+        }
+        todo.push_back(
+            {id, 0,
+             n.min == 0 ? OperatorWords::nothing() : OperatorWords::none()});
+        return true;
+      case LlShape::call:
+        if (b.cfg.rules[n.sym].body == kNoRow ||
+            std::ranges::count(calling, n.sym) != 0) {
+          spelt = OperatorWords::unlisted(opening_of(b, b.ruleFirst[n.sym]));
+          return false;
+        }
+        calling.push_back(n.sym);
+        todo.push_back({id, 0, OperatorWords::none()});
+        return true;
+      default:
+        spelt = OperatorWords::nothing();
+        return false;
     }
-    case LlShape::alt: {
-      OperatorWords out = OperatorWords::none();
-      for (const auto k : b.cfg.children(n)) out.unite(words_of(b, k, calling));
-      return out;
+  };
+  if (!enter(root)) return spelt;
+  for (;;) {
+    Frame& f = todo.back();
+    const LlNode& n = b.cfg.nodes[f.id];
+    if (f.entered > 0) {
+      switch (n.kind) {
+        case LlShape::seq:
+          f.words = f.words.then(spelt);
+          break;
+        case LlShape::call:
+          f.words = std::move(spelt);
+          break;
+        default:
+          f.words.unite(spelt);
+          break;
+      }
     }
-    case LlShape::rep: {
-      OperatorWords out =
-          n.min == 0 ? OperatorWords::nothing() : OperatorWords::none();
-      out.unite(n.max == kEndless
-                    ? OperatorWords::unlisted(opening_of(b, b.first[n.sym]))
-                    : words_of(b, n.sym, calling));
-      return out;
+    const auto kids = b.cfg.children(n);
+    const std::size_t members = n.kind == LlShape::call ? 1 : kids.size();
+    if (f.entered == members) {
+      spelt = std::move(f.words);
+      if (n.kind == LlShape::call) calling.pop_back();
+      todo.pop_back();
+      if (todo.empty()) return spelt;
+      continue;
     }
-    case LlShape::call: {
-      const LlRuleInfo& u = b.cfg.rules[n.sym];
-      if (u.body == kNoRow || std::ranges::count(calling, n.sym) != 0)
-        return OperatorWords::unlisted(opening_of(b, b.ruleFirst[n.sym]));
-      calling.push_back(n.sym);
-      OperatorWords out = words_of(b, u.body, calling);
-      calling.pop_back();
-      return out;
-    }
-    default:
-      return OperatorWords::nothing();
+    const std::uint16_t next =
+        n.kind == LlShape::call ? b.cfg.rules[n.sym].body : kids[f.entered];
+    ++f.entered;
+    enter(next);
   }
 }
 
@@ -822,9 +881,14 @@ void refuse_section_lookahead(Built& b) {
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
     const LlNode& n = b.cfg.nodes[id];
     if (n.kind != LlShape::seq) continue;
-    for (unsigned i = 1; i < n.count; ++i)
-      if (b.cfg.nodeBuild[b.cfg.kids[n.sym + i]].section != 0)
-        opens.set(b.cfg.nodes[b.cfg.kids[n.sym + i - 1]].sym);
+    for (unsigned i = 1; i < n.count; ++i) {
+      if (b.cfg.nodeBuild[b.cfg.kids[n.sym + i]].section == 0) continue;
+      // `sym` names a terminal only on a terminal. Any other opener ends on a
+      // token of its own: the last it reads, of which FIRST is no stand-in,
+      // and no last set is built. Only a terminal opener is checked.
+      const LlNode& open = b.cfg.nodes[b.cfg.kids[n.sym + i - 1]];
+      if (open.kind == LlShape::term) opens.set(open.sym);
+    }
   }
   if (opens.none()) return;
   for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
@@ -1933,6 +1997,10 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   refuse_skipped_terminal(b);
   settle_nullable(b.cfg, b.nullable);
   const auto empty = refuse_non_consuming(b);
+  // A refused grammar owes the walks below nothing: a counted repetition of
+  // a body that reads nothing nests as deep as its bound, and the refusal
+  // must be told before anything follows that depth.
+  if (b.fault) return b;
   settle_first(b.cfg, b.nullable, b.first, b.ruleFirst);
   const bool leftCyclic = refuse_left_recursion(b, empty);
   refuse_unproductive(b);

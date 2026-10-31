@@ -169,8 +169,8 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint16_t> afterCfg{};
   std::vector<std::uint16_t> afterGap{};
   // A loop's first turn reads under its own alphabet where its configuration
-  // is not the other turns'. A lookahead crosses trivia with its choice's
-  // error mode; empty where every choice's is the grammar's.
+  // is not the other turns'. Per choice, the mode that first turn is read
+  // under, zero for a choice that is no loop; always sized `ndecisions`.
   std::vector<std::uint16_t> headMode{};
   // Per choice, whether conditions stand before its token: it is held for
   // every arm as the lexer chose it.
@@ -184,6 +184,8 @@ struct LlBuiltProgram : ShapeOverflow {
   // the descent asks it. Empty for every other state, which no frame names.
   std::vector<DynSet> callerReads{};
   std::vector<std::uint8_t> callerEnds{};
+  // A lookahead crosses trivia with its choice's error mode, per choice; empty
+  // where every choice's is the grammar's.
   std::vector<std::uint16_t> lookMode{};
   // What an episode reads besides the graph, per rule and per choice: see
   // `LlTable`. Empty where none is flagged.
