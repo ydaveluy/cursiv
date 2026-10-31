@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 #include "cursiv/engines/lr/gen/LrBuckets.hpp"
@@ -174,45 +175,79 @@ inline void lr_no_rule_without_production(LrLowered& o) {
 inline void lr_drop_twins(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> gone(c.nprods, false);
-  // Twins share a left-hand side.
+  // What twins agree on: everything but the writes and the source rank.
+  const auto alike = [&](std::uint16_t a, std::uint16_t b) {
+    const LrLowProd& x = c.prods[a];
+    const LrLowProd& y = c.prods[b];
+    const LrProdBuild& bx = c.prodBuild[a];
+    const LrProdBuild& by = c.prodBuild[b];
+    if (x.lhs != y.lhs || x.len != y.len || x.gap != y.gap ||
+        bx.endOnly != by.endOnly || bx.prec != by.prec ||
+        bx.tailCfg != by.tailCfg || bx.closesRegion != by.closesRegion ||
+        bx.turn != by.turn || bx.stop != by.stop)
+      return false;
+    for (unsigned i = 0; i < x.len; ++i)
+      if (c.sym_at(x, i) != c.sym_at(y, i) || c.cfg_at(a, i) != c.cfg_at(b, i))
+        return false;
+    return true;
+  };
+  // The hash only selects the candidates `alike` then confirms.
+  const auto hash_of = [&](std::uint16_t a) {
+    const LrLowProd& x = c.prods[a];
+    const LrProdBuild& bx = c.prodBuild[a];
+    std::uint64_t h = 0x9e3779b97f4a7c15ull;
+    const auto mix = [&](std::uint64_t v) {
+      h = (h ^ v) * 0xff51afd7ed558ccdull;
+      h ^= h >> 32;
+    };
+    mix(x.lhs);
+    mix(x.len);
+    mix(x.gap);
+    mix(std::uint64_t{bx.endOnly} | std::uint64_t{bx.closesRegion} << 1 |
+        std::uint64_t{bx.turn} << 2 | std::uint64_t{bx.prec} << 8 |
+        std::uint64_t{bx.tailCfg} << 16 | std::uint64_t{bx.stop} << 24);
+    for (unsigned i = 0; i < x.len; ++i)
+      mix(std::uint64_t{c.sym_at(x, i)} << 8 | c.cfg_at(a, i));
+    return h;
+  };
+  // Twins share a left-hand side and, in the order the rule lists them, each
+  // meets the one standing of its kind: it either drops, or drops that one
+  // and stands in its place, so one pass keeps the first-ranked.
   const auto ix = lr_by_lhs(c);
+  std::unordered_multimap<std::uint64_t, std::uint16_t> kindOf;
+  std::vector<std::uint16_t> standing;
   for (std::uint16_t g = 0; g < c.nnts; ++g) {
-    const std::span<const std::uint16_t> group = ix.of(g);
-    for (std::size_t ia = 0; ia < group.size(); ++ia) {
-      const std::uint16_t a = group[ia];
-      if (gone[a]) continue;
-      for (std::size_t ib = ia + 1; ib < group.size(); ++ib) {
-        const std::uint16_t b = group[ib];
-        if (gone[b]) continue;
-        const LrLowProd& x = c.prods[a];
-        const LrLowProd& y = c.prods[b];
-        const LrProdBuild& bx = c.prodBuild[a];
-        const LrProdBuild& by = c.prodBuild[b];
-        if (x.len != y.len || x.gap != y.gap || bx.endOnly != by.endOnly ||
-            bx.prec != by.prec || bx.tailCfg != by.tailCfg ||
-            bx.closesRegion != by.closesRegion || bx.turn != by.turn ||
-            bx.stop != by.stop)
-          continue;
-        bool same = true;
-        for (unsigned i = 0; i < x.len; ++i)
-          if (c.sym_at(x, i) != c.sym_at(y, i) ||
-              c.cfg_at(a, i) != c.cfg_at(b, i))
-            same = false;
-        if (!same) continue;
-        bool writes = x.node != y.node;
-        for (unsigned i = 0; i < x.len; ++i)
-          writes = writes || c.row_at(x, i) != c.row_at(y, i);
-        if (writes && bx.permuted && by.permuted) {
-          gone[b] = true;
-          continue;
+    for (const std::uint16_t b : ix.of(g)) {
+      const std::uint64_t h = hash_of(b);
+      std::uint16_t* held = nullptr;
+      for (auto [it, end] = kindOf.equal_range(h); it != end; ++it)
+        if (alike(standing[it->second], b)) {
+          held = &standing[it->second];
+          break;
         }
-        // Source priority decides which duplicate stays.
-        const bool preferB = by.priorityAlt < bx.priorityAlt ||
-                             (by.priorityAlt == bx.priorityAlt &&
-                              by.prioritySubset > bx.prioritySubset);
-        gone[preferB ? a : b] = true;
-        if (preferB) break;
+      if (!held) {
+        kindOf.emplace(h, static_cast<std::uint16_t>(standing.size()));
+        standing.push_back(b);
+        continue;
       }
+      const std::uint16_t a = *held;
+      const LrLowProd& x = c.prods[a];
+      const LrLowProd& y = c.prods[b];
+      const LrProdBuild& bx = c.prodBuild[a];
+      const LrProdBuild& by = c.prodBuild[b];
+      bool writes = x.node != y.node;
+      for (unsigned i = 0; i < x.len; ++i)
+        writes = writes || c.row_at(x, i) != c.row_at(y, i);
+      if (writes && bx.permuted && by.permuted) {
+        gone[b] = true;
+        continue;
+      }
+      // Source priority decides which duplicate stays.
+      const bool preferB = by.priorityAlt < bx.priorityAlt ||
+                           (by.priorityAlt == bx.priorityAlt &&
+                            by.prioritySubset > bx.prioritySubset);
+      gone[preferB ? a : b] = true;
+      if (preferB) *held = b;
     }
   }
   lr_compact_prods(c, [&](std::uint16_t k) { return gone[k]; });
@@ -460,36 +495,84 @@ struct LrWordsWalk {
   std::vector<std::optional<OperatorWords>> known;
 };
 
-// The strings of tokens a symbol can spell, read off its productions.
+// The strings of tokens a symbol can spell, read off its productions. The
+// walk keeps its own stack of rules, so the depth of the grammar's calls does
+// not reach the native one.
 inline OperatorWords lr_operator_words(const LrBuildCfg& c,
                                        const LrFirstSets& fl,
                                        const LrBuckets<std::uint16_t>& ix,
                                        std::uint16_t sym, LrWordsWalk& walk) {
-  if (is_term(sym)) return OperatorWords::token(sym);
-  const std::uint16_t nt = nt_index(sym);
-  if (walk.walking[nt]) {
-    std::vector<std::uint16_t> opening;
-    for (std::uint16_t t = 0; t < c.nterms; ++t)
-      if (fl.first[nt].test(t)) opening.push_back(t);
-    return OperatorWords::unlisted(opening);
+  // A rule being read: where it stands in its productions and symbols, what
+  // they spell so far.
+  struct Frame {
+    std::uint16_t nt;
+    std::uint32_t part;
+    bool settled;
+    std::span<const std::uint16_t> prods;
+    std::size_t at;
+    unsigned pos;
+    OperatorWords out;
+    OperatorWords spelt;
+  };
+  std::vector<Frame> stack;
+  // What a symbol spells where it needs no walk; otherwise its rule opens a
+  // frame and nothing is answered yet.
+  const auto enter = [&](std::uint16_t y) -> std::optional<OperatorWords> {
+    if (is_term(y)) return OperatorWords::token(y);
+    const std::uint16_t nt = nt_index(y);
+    if (walk.walking[nt]) {
+      std::vector<std::uint16_t> opening;
+      for (std::uint16_t t = 0; t < c.nterms; ++t)
+        if (fl.first[nt].test(t)) opening.push_back(t);
+      return OperatorWords::unlisted(opening);
+    }
+    const std::uint32_t part = walk.scc.component[nt];
+    const bool settled = walk.onPath[part] == 0;
+    if (settled && walk.known[nt]) return *walk.known[nt];
+    walk.walking[nt] = true;
+    ++walk.onPath[part];
+    stack.push_back({nt, part, settled, ix.of(nt), 0, 0, OperatorWords::none(),
+                     OperatorWords::nothing()});
+    return std::nullopt;
+  };
+  std::optional<OperatorWords> back = enter(sym);
+  if (back) return *back;
+  while (!stack.empty()) {
+    if (back) {
+      Frame& f = stack.back();
+      f.spelt = f.spelt.then(*back);
+      ++f.pos;
+      back.reset();
+    }
+    for (;;) {
+      Frame& f = stack.back();
+      if (f.at == f.prods.size()) {
+        walk.walking[f.nt] = false;
+        --walk.onPath[f.part];
+        if (f.settled) walk.known[f.nt] = f.out;
+        back = std::move(f.out);
+        stack.pop_back();
+        break;
+      }
+      const LrLowProd& pr = c.prods[f.prods[f.at]];
+      if (f.pos == pr.len) {
+        f.out.unite(f.spelt);
+        f.spelt = OperatorWords::nothing();
+        ++f.at;
+        f.pos = 0;
+        continue;
+      }
+      // A frame opened here is read before this one goes on.
+      if (const std::optional<OperatorWords> now =
+              enter(c.sym_at(pr, f.pos))) {
+        f.spelt = f.spelt.then(*now);
+        ++f.pos;
+        continue;
+      }
+      break;
+    }
   }
-  const std::uint32_t part = walk.scc.component[nt];
-  const bool settled = walk.onPath[part] == 0;
-  if (settled && walk.known[nt]) return *walk.known[nt];
-  walk.walking[nt] = true;
-  ++walk.onPath[part];
-  OperatorWords out = OperatorWords::none();
-  for (const std::uint16_t k : ix.of(nt)) {
-    OperatorWords spelt = OperatorWords::nothing();
-    for (unsigned i = 0; i < c.prods[k].len; ++i)
-      spelt = spelt.then(
-          lr_operator_words(c, fl, ix, c.sym_at(c.prods[k], i), walk));
-    out.unite(spelt);
-  }
-  walk.walking[nt] = false;
-  --walk.onPath[part];
-  if (settled) walk.known[nt] = out;
-  return out;
+  return *back;
 }
 
 // A terminal that lexes as `t` does, standing for it where an operator needs

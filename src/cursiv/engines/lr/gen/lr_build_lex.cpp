@@ -1,5 +1,7 @@
-// One NFA per terminal, the byte classes its edges are written in, and the
-// subsets that make a DFA of each mode -- a state's alphabet.
+// The lexer of a table: the configuration each state reads under and the
+// conditions' flags, one NFA per terminal, the byte classes its edges are
+// written in, and the subsets that make a DFA of each mode -- a state's
+// alphabet.
 #include "cursiv/engines/lr/gen/lr_build_lex.hpp"
 
 #include <algorithm>

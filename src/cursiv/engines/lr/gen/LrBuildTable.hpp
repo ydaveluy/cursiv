@@ -73,7 +73,8 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   // refuses.
   std::uint32_t nImpliedMixed = 0;
 
-  // The copies a pass gave up because the state index was full.
+  // The copies a pass gave up because the state index was full, each counted
+  // once however many edges asked for it.
   std::uint32_t nunminted = 0;
 
   // The first pair that forced a candidate walk, where, and the shortest text

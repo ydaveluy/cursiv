@@ -151,11 +151,18 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
   rows.reductions.clear();
   rows.reduceNames.clear();
   rows.reductions.reserve(a.cfg.nprods);
+  // The fused pairs by their halves, indexed once: both halves are 16 bits,
+  // so the key is exact and the first pair of a key is the one named.
+  std::unordered_map<std::uint32_t, std::uint16_t> fusedAt;
+  fusedAt.reserve(a.nfused);
+  for (unsigned i = 0; i < a.nfused; ++i)
+    fusedAt.emplace(lr_fused_key(a.fused[i].node, a.fused[i].site),
+                    static_cast<std::uint16_t>(i));
   const auto named_row = [&](ElementId held, ElementId site) {
     if (held == kNoElement) return site;
-    for (unsigned i = 0; i < a.nfused; ++i)
-      if (a.fused[i].node == held && a.fused[i].site == site)
-        return static_cast<ElementId>(a.writes.nchains + i);
+    if (const auto it = fusedAt.find(lr_fused_key(held, site));
+        it != fusedAt.end())
+      return static_cast<ElementId>(a.writes.nchains + it->second);
     return site;
   };
   std::vector<bool> opens(a.cfg.nnts, false);

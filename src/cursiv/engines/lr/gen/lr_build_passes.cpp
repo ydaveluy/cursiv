@@ -733,13 +733,11 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
     struct Memo {
       std::vector<std::pair<std::uint16_t, std::uint32_t>> reads;
       std::uint32_t id = 0;
-      bool unminted = false;
     };
     std::vector<std::vector<Memo>> memo(n0);
     std::vector<std::pair<std::uint16_t, std::uint32_t>> reads;
     std::vector<std::uint32_t> readAt(nN, 0);
     std::uint32_t readGen = 0;
-    bool unminted = false;
 
     // The copy of `X` whose substituted cells answer through the gotos of `F`.
     const auto compose = [&](std::uint32_t F, std::uint32_t X) {
@@ -845,10 +843,10 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
             A.closeRow[id] == owed)
           return id;
       }
-      // A copy the state index cannot name is not minted.
+      // A copy the state index cannot name is not minted; the memo answers
+      // later edges that ask for it, without counting it again.
       if (A.nstates >= 0xFFFFu || row.size() >= 0xffffu) {
         ++A.nunminted;
-        unminted = true;
         return X;
       }
       const std::uint32_t id =
@@ -891,14 +889,12 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
               return gotoSnap(F, r.first) == r.second;
             }))
           continue;
-        A.nunminted += m.unminted;
         return m.id;
       }
       reads.clear();
       ++readGen;
-      unminted = false;
       const std::uint32_t id = compose(F, X);
-      memo[X].emplace_back(reads, id, unminted);
+      memo[X].emplace_back(reads, id);
       return id;
     };
 

@@ -1,5 +1,6 @@
-// LR construction: items, closure, goto, re-fusion by partition refinement,
-// lex modes and their DFAs. The transition alphabet is the terminal.
+// LR construction: items, closure, goto and re-fusion by partition
+// refinement. The transition alphabet is the terminal; the lex modes and their
+// DFAs are built in lr_build_lex.cpp.
 #include "cursiv/engines/lr/gen/lr_build.hpp"
 
 #include <algorithm>
@@ -1195,12 +1196,17 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
       continue;
     const std::uint16_t pd = lb.prod[q];
     const std::uint16_t dot = prods[pd].len;
-    for (std::uint32_t ci = clos.at[lbState[q]], ce = ci + clos.len[lbState[q]];
-         ci < ce; ++ci)
-      if (clos.items[ci].prod == pd && clos.items[ci].dot == dot) {
-        closLa[ci] |= in;
-        break;
-      }
+    // A closure is emitted by increasing item index, hence sorted by
+    // (production, dot): the completed item is found by bisection.
+    const LrItem* const first = clos.items + clos.at[lbState[q]];
+    const LrItem* const last = first + clos.len[lbState[q]];
+    const LrItem key{pd, dot};
+    const LrItem* const hit = std::lower_bound(
+        first, last, key, [](const LrItem& a, const LrItem& b) {
+          return a.prod != b.prod ? a.prod < b.prod : a.dot < b.dot;
+        });
+    if (hit != last && *hit == key)
+      closLa[hit - clos.items] |= in;
   }
   lb.follow = std::move(follow);
   lb.read = std::move(read);
@@ -1668,7 +1674,7 @@ class LrWrittenOrder {
       for (const LrItem& k : _gr.kernel(s))
         _maxDot = std::max<std::uint32_t>(_maxDot, k.dot);
     _reach.resize(_maxDot + 2u);
-    _climbOf.assign(std::size_t{_g.nprods} * _g.nterms, kNone);
+    _climbOf.reset();
   }
 
   static constexpr std::size_t kMostHeld = std::size_t{1} << 26;
@@ -2479,18 +2485,19 @@ class LrWrittenOrder {
   }
 
   // The class of a token among those that climb through a production alike:
-  // the parents it admits, item by item.
+  // the parents it admits, item by item. Only the pairs a comparison asks for
+  // are held.
   std::uint32_t climb_class(unsigned p, std::uint32_t t) {
     if (t == kNone) return kNone;
-    std::uint32_t& known = _climbOf[std::size_t{p} * _g.nterms + t];
-    if (known != kNone) return known;
+    const std::uint64_t pair = std::uint64_t{p} << 16 | t;
+    if (const std::uint32_t* const known = _climbOf.find(pair)) return *known;
     std::vector<std::uint32_t> id{p};
     std::vector<std::int8_t>& row = scores(p, t);
     for (const LrItem& k : parent_items(p))
       id.push_back(static_cast<std::uint32_t>(score(row, k, p, t)));
     const auto [at, fresh] = _climbs.try_emplace(
         std::move(id), static_cast<std::uint32_t>(_climbs.size()));
-    return known = at->second;
+    return _climbOf.emplace(pair).first = at->second;
   }
 
   // The id of the states `n` frames under `s`: equal states, equal id. Only
@@ -3382,7 +3389,7 @@ class LrWrittenOrder {
   std::vector<std::vector<std::uint32_t>> _corner;
   std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> _back;
   std::unordered_map<std::uint64_t, std::vector<std::int8_t>> _scoreRows;
-  std::vector<std::uint32_t> _climbOf;
+  FlatMap<std::uint32_t> _climbOf;
   std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
       _climbs;
   std::vector<Row> _rows;
