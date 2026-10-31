@@ -7,6 +7,7 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -491,6 +492,11 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   }
   ChainIndex kernIx;
   kernIx.init(nP + 1);
+  // The programs laid so far, by what they decide. A state asks its tokens'
+  // conditions one program each, and most states ask the same of the same
+  // landings: the cap on programs counts those that differ, not those asked.
+  std::map<std::vector<std::uint32_t>, std::uint32_t> progIds;
+  std::vector<std::uint32_t> progKey;
 
   {
     DynSet la0;
@@ -843,7 +849,16 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
           edgeRow.push_back(LrEdge{sym, static_cast<std::uint16_t>(t), site,
                                    outer, progId + 1u});
       }
-      progs.push_back(std::move(prog));
+      lr_guard_key(prog, [](std::uint16_t to) { return std::uint32_t{to}; },
+                   progKey);
+      if (const auto [at, fresh] = progIds.try_emplace(progKey, progId);
+          fresh) {
+        progs.push_back(std::move(prog));
+      } else {
+        // An earlier program decides the same: this symbol's edges share it.
+        for (std::size_t e = rowAt; e < edgeRow.size(); ++e)
+          if (edgeRow[e].prog == progId + 1u) edgeRow[e].prog = at->second + 1u;
+      }
       if (terminal && !openers.empty())
         entered([](std::uint32_t) { return true; });
     };
