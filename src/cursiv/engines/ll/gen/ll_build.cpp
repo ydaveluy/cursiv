@@ -442,10 +442,10 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
         spelt = OperatorWords::token(n.sym);
         return false;
       case LlShape::seq:
-        todo.push_back({id, 0, OperatorWords::nothing()});
+        todo.emplace_back(id, 0, OperatorWords::nothing());
         return true;
       case LlShape::alt:
-        todo.push_back({id, 0, OperatorWords::none()});
+        todo.emplace_back(id, 0, OperatorWords::none());
         return true;
       case LlShape::rep:
         if (n.max == kEndless) {
@@ -453,9 +453,9 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
           spelt.unite(OperatorWords::unlisted(opening_of(b, b.first[n.sym])));
           return false;
         }
-        todo.push_back(
-            {id, 0,
-             n.min == 0 ? OperatorWords::nothing() : OperatorWords::none()});
+        todo.emplace_back(
+            id, 0,
+            n.min == 0 ? OperatorWords::nothing() : OperatorWords::none());
         return true;
       case LlShape::call:
         if (b.cfg.rules[n.sym].body == kNoRow ||
@@ -464,7 +464,7 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
           return false;
         }
         calling.push_back(n.sym);
-        todo.push_back({id, 0, OperatorWords::none()});
+        todo.emplace_back(id, 0, OperatorWords::none());
         return true;
       default:
         spelt = OperatorWords::nothing();

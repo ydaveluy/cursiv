@@ -423,7 +423,8 @@ class LrGssGraph {
   std::vector<Id> _staged;
   std::vector<Id> _unranked;
   LrTakesScratch<Id> _takes;
-  std::vector<Id> _standing, _rejected;
+  std::vector<Id> _standing;
+  std::vector<Id> _rejected;
   std::vector<std::pair<Id, Id>> _partedLeft, _partedRight;
   Id _root = none;
   std::uint32_t _seedDepth = 0;

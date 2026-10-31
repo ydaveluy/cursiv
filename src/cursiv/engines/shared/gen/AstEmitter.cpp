@@ -244,9 +244,9 @@ unsigned AstEmitter::fill_run(Body& b, std::uint16_t cr,
              b.param(checked ? "true" : "false"), ">(", b.param(u(f)),
              ", " + slots[k++] + ", " + made + ");"});
     }
-  for (std::size_t k = 0; k < held.size(); ++k) {
-    const std::uint16_t r = held[k];
-    if (early[k]) continue;
+  for (std::size_t j = 0; j < held.size(); ++j) {
+    const std::uint16_t r = held[j];
+    if (early[j]) continue;
     if (reg.rows[r].kind == WriteKind::flag &&
         derives(reg.rows[r].declType, reg.rows[cr].declType))
       b.say({"b.flag(id, ", b.param(u(reg.rows[r].fieldSlot)),
@@ -545,10 +545,10 @@ AstEmitter::ConvPlan AstEmitter::plan_conversions(std::uint32_t e) const {
   p.text = plan_text(chain.back()->dataRule ? all.first(all.size() - 1) : all,
                      p.data);
   p.call = plan_text(all, p.data);
-  const auto holder = std::ranges::find_if(
-      chain.rbegin(), chain.rend(),
-      [](const AstRowGen* g) { return !g->passes; });
-  if (holder != chain.rend() && (*holder)->valued) p.value = *holder;
+  const auto last =
+      std::ranges::find_if(chain.rbegin(), chain.rend(),
+                           [](const AstRowGen* g) { return !g->passes; });
+  if (last != chain.rend() && (*last)->valued) p.value = *last;
   return p;
 }
 

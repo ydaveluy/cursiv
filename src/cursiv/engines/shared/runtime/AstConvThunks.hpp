@@ -200,7 +200,7 @@ inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
     const Frame done = current;
     const auto value = done.fn(ctx, done.id);
     if (!value) return std::nullopt;
-    values.calls.try_emplace(done.id, TextValues::Value{done.fn, *value});
+    values.calls.try_emplace(done.id, done.fn, *value);
     frames.pop_back();
     dependencies.resize(done.begin);
     if (frames.empty()) return value;

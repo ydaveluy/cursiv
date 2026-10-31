@@ -708,15 +708,15 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         if (const ElementId near =
                 row != kNoElement || p.len != 1 ? row : ElementId{p.node};
             near != kNoElement) {
-          bool seen = std::exchange(nearSeen[Bx], gen) == gen;
-          lr_agree(writes, nearSite[Bx], seen, near);
+          bool known = std::exchange(nearSeen[Bx], gen) == gen;
+          lr_agree(writes, nearSite[Bx], known, near);
         }
         if (row == kNoElement) continue;
         for (std::uint32_t ei = cl.base[Bx], ee = cl.base[Bx + 1]; ei < ee;
              ++ei) {
           const unsigned y = prods[closFlat[ei].prod].lhs;
-          bool seen = std::exchange(entrySeen[y], gen) == gen;
-          lr_agree(writes, entrySite[y], seen, row);
+          bool known = std::exchange(entrySeen[y], gen) == gen;
+          lr_agree(writes, entrySite[y], known, row);
         }
       }
     };
@@ -2497,7 +2497,8 @@ class LrWrittenOrder {
       id.push_back(static_cast<std::uint32_t>(score(row, k, p, t)));
     const auto [at, fresh] = _climbs.try_emplace(
         std::move(id), static_cast<std::uint32_t>(_climbs.size()));
-    return _climbOf.emplace(pair).first = at->second;
+    _climbOf.emplace(pair).first = at->second;
+    return at->second;
   }
 
   // The id of the states `n` frames under `s`: equal states, equal id. Only
@@ -3329,18 +3330,17 @@ class LrWrittenOrder {
                stands_root(cs, c, height, k.prod, k.dot, a, s)))
             return;
           const bool reached = height < other.stand.size();
-          const std::vector<std::uint64_t>& theirs =
+          const std::vector<std::uint64_t>& others =
               reached ? shorts_at(other, height) : none;
           const std::vector<std::uint64_t>& taller =
               reached ? talls_at(other, height) : none;
-          if (stands_in(theirs, k.prod, k.dot, a) ||
+          if (stands_in(others, k.prod, k.dot, a) ||
               stands_in(taller, k.prod, k.dot, a) ||
-              (roots &&
-               stands_root(os, other, height, k.prod, k.dot, a, s)))
+              (roots && stands_root(os, other, height, k.prod, k.dot, a, s)))
             return;
           for (const std::uint32_t x : back(a, k.dot)) {
             if (!has_parent(x, k.prod)) continue;
-            if (holds(mine, k.prod, x) || holds(theirs, k.prod, x) ||
+            if (holds(mine, k.prod, x) || holds(others, k.prod, x) ||
                 holds(taller, k.prod, x) ||
                 (roots && (holds_root(cs, c, height, k.prod, x, s) ||
                            holds_root(os, other, height, k.prod, x, s))))

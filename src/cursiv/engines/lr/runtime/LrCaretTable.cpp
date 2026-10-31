@@ -2159,9 +2159,9 @@ void lr_next_features_at(const LrCaretTable& table,
                   std::size_t{mode} * table.terms.size() + term
             : nullptr;
     if (kept != nullptr)
-      if (const std::uint32_t held = kept->load(std::memory_order_relaxed);
-          held != 0)
-        return held & ~kKnown;
+      if (const std::uint32_t cached = kept->load(std::memory_order_relaxed);
+          cached != 0)
+        return cached & ~kKnown;
     std::uint32_t found = 0;
     for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i) {
       splice.assign(StampedGrammar::samples[i]);
@@ -2251,13 +2251,14 @@ void lr_next_features_at(const LrCaretTable& table,
               emitted.push_back(shift);
               const auto items = table.expectItems.begin();
               const auto end = items + table.expectBase[st + 1u];
-              for (auto at = std::lower_bound(
+              for (auto slot = std::lower_bound(
                        items + table.expectBase[st], end, term,
                        [&](std::uint16_t item, SymbolId t) {
                          return table.expectPool[item].feature < t;
                        });
-                   at != end && table.expectPool[*at].feature == term; ++at) {
-                const auto& e = table.expectPool[*at];
+                   slot != end && table.expectPool[*slot].feature == term;
+                   ++slot) {
+                const auto& e = table.expectPool[*slot];
                 if (e.landing != kNoElement && e.landing != landing) continue;
                 const NextFeature feature{e.feature, grammar.rowFeature(e.site),
                                           grammar.rowNarrow(e.site),

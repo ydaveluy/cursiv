@@ -88,17 +88,17 @@ struct LexNfaPool {
     return push({.set = set, .t1 = next, .stray = word, .strayTerm = term});
   }
   int split(int a, int b) { return push({.t1 = a, .t2 = b}); }
-  int match(int term, bool lit = false) {
-    return push({.accept = term, .lit = lit});
+  int match(int accepts, bool lit = false) {
+    return push({.accept = accepts, .lit = lit});
   }
   int relay(int k) { return push({.relay = k}); }
   // One sink per terminal and class: two literals of one terminal ending on
   // the same boundary land in one DFA state, as they do on a plain match.
-  int match_bounded(int term, int bound, bool lit = false) {
-    return sink({.accept = term, .bound = bound, .lit = lit});
+  int match_bounded(int accepts, int bound, bool lit = false) {
+    return sink({.accept = accepts, .bound = bound, .lit = lit});
   }
-  int match_strayed(int term, int bound, int plain, bool lit = false) {
-    return sink({.accept = term,
+  int match_strayed(int accepts, int bound, int plain, bool lit = false) {
+    return sink({.accept = accepts,
                  .bound = bound,
                  .plainBound = plain,
                  .strayBound = true,

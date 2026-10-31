@@ -174,8 +174,7 @@ void DefaultDocumentValidator::attachRepairActions(
   if (rows.empty()) return;
 
   JsonValue::Object payload;
-  payload.try_emplace(std::string(kDefaultCodeActionsKey),
-                      JsonValue(std::move(rows)));
+  payload.try_emplace(std::string(kDefaultCodeActionsKey), std::move(rows));
   diagnostic.data = JsonValue(std::move(payload));
 }
 
@@ -298,8 +297,7 @@ void DefaultDocumentValidator::processLinkingErrors(
         d.source = source;
         d.code = DiagnosticCode{std::string(kLinkingError)};
         JsonValue::Object payload;
-        payload.try_emplace(std::string(kLinkingRefText),
-                            JsonValue(std::string(text)));
+        payload.try_emplace(std::string(kLinkingRefText), std::string(text));
         // The class that declares the member and the member's name: what a
         // code action needs to know which reference broke without parsing the
         // message back out.
@@ -308,12 +306,12 @@ void DefaultDocumentValidator::processLinkingErrors(
                   reflection->referenceOwner(site.reference);
               owner != nullptr)
             payload.try_emplace(std::string(kLinkingContainerType),
-                                JsonValue(std::string(owner->name)));
+                                std::string(owner->name));
           if (const std::string_view property =
                   reflection->referenceProperty(site.reference);
               !property.empty())
             payload.try_emplace(std::string(kLinkingProperty),
-                                JsonValue(std::string(property)));
+                                std::string(property));
         }
         d.data = JsonValue(std::move(payload));
         diagnostics.push_back(std::move(d));

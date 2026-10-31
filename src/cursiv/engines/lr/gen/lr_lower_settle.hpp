@@ -195,9 +195,9 @@ inline void lr_drop_twins(LrLowered& o) {
   const auto hash_of = [&](std::uint16_t a) {
     const LrLowProd& x = c.prods[a];
     const LrProdBuild& bx = c.prodBuild[a];
-    std::uint64_t h = 0x9e3779b97f4a7c15ull;
+    std::uint64_t h = 0x9e3779b97f4a7c15ULL;
     const auto mix = [&](std::uint64_t v) {
-      h = (h ^ v) * 0xff51afd7ed558ccdull;
+      h = (h ^ v) * 0xff51afd7ed558ccdULL;
       h ^= h >> 32;
     };
     mix(x.lhs);
@@ -531,8 +531,8 @@ inline OperatorWords lr_operator_words(const LrBuildCfg& c,
     if (settled && walk.known[nt]) return *walk.known[nt];
     walk.walking[nt] = true;
     ++walk.onPath[part];
-    stack.push_back({nt, part, settled, ix.of(nt), 0, 0, OperatorWords::none(),
-                     OperatorWords::nothing()});
+    stack.emplace_back(nt, part, settled, ix.of(nt), 0, 0,
+                       OperatorWords::none(), OperatorWords::nothing());
     return std::nullopt;
   };
   std::optional<OperatorWords> back = enter(sym);

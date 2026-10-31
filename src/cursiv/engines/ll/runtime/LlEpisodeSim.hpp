@@ -37,7 +37,8 @@ struct LlThreadKeyHash {
 // has under it, and a frame further down it, chosen so that the frame at any
 // depth is reached in a logarithmic number of steps and not one per frame.
 struct LlLentRung {
-  std::uint32_t depth = 0, jump = kLlCtxNone;
+  std::uint32_t depth = 0;
+  std::uint32_t jump = kLlCtxNone;
 
   // The rung of a frame lent over `parent`. Its jump goes as far as the
   // parent's jump goes on from the one it reaches, where the two spans are
@@ -50,7 +51,8 @@ struct LlLentRung {
     const auto jump = [&](std::uint32_t n) {
       return n == kLlCtxNone ? kLlCtxNone : rungs[n].jump;
     };
-    const std::uint32_t near = jump(parent), far = jump(near);
+    const std::uint32_t near = jump(parent);
+    const std::uint32_t far = jump(near);
     LlLentRung r{depth(parent) + 1, parent};
     if (depth(parent) - depth(near) == depth(near) - depth(far)) r.jump = far;
     return r;
@@ -1105,14 +1107,17 @@ class LlEpisodeSim {
   std::vector<LlThread> _origins;
   // What filter and possible_terms read past the conditions: the readings and
   // the ones a crossing grows, kept between calls for their room.
-  std::vector<LlThread> _everyone, _crossOrigins, _crossGrown;
+  std::vector<LlThread> _everyone;
+  std::vector<LlThread> _crossOrigins;
+  std::vector<LlThread> _crossGrown;
   LlStamped<LlThreadKey, LlThreadKeyHash> _seen, _held, _crossed, _calls;
   LlStamped<LlThreadKey, LlThreadKeyHash> _at;
   LlStamped<std::uint64_t, LlKeyHash> _below;
   LlStamped<std::uint64_t, LlKeyHash> _relatedProcessed, _relatedFlags;
   // The frames lent that the chains of a cell's members end on, listed per
   // cell: how many, and each by its place in the list.
-  LlStamped<std::uint64_t, LlKeyHash> _relatedBaseCount, _relatedBases;
+  LlStamped<std::uint64_t, LlKeyHash> _relatedBaseCount;
+  LlStamped<std::uint64_t, LlKeyHash> _relatedBases;
   std::vector<std::uint32_t> _chain, _frames;
   LlStamped<std::uint64_t, LlKeyHash> _flat;
   std::vector<std::uint32_t> _shared;
