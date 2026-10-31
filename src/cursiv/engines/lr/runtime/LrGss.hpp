@@ -49,7 +49,8 @@ bool lr_gss_takes(LrGssGraph& graph, LrGssGraph::Id vertex, SymbolId term,
                   Holds&& holds) {
   using Id = LrGssGraph::Id;
   return lr_graph_takes(
-      vertex, [&](Id v) { return graph.reading(v).run.state; },
+      graph.takes_scratch(), vertex,
+      [&](Id v) { return graph.reading(v).run.state; },
       [&](Id v, auto&& f) { graph.each_below(v, f); },
       [&](std::uint32_t top, std::uint32_t& prod, std::uint32_t& len) {
         const int act = lr_climb_act<A>(top, term, holds, prod);
@@ -201,7 +202,11 @@ class LrGss {
     install(sources[elected == kLrNoConfig
                         ? 0
                         : repair_root_of(s.links, s.configs[elected].link)]);
-    return lr_search_take<A>(_c, s, elected, exhausted, raced, false);
+    const LrExit exit =
+        lr_search_take<A>(_c, s, elected, exhausted, raced, false);
+    // The sources point at `frames`, which dies here.
+    s.sources.clear();
+    return exit;
   }
 
   // The frames under `s`: the context's own up to where the graph took over,
@@ -393,14 +398,18 @@ class LrGss {
         return lr_token_beats(o.token, s.token,
                               [&] { return weight(o) > weight(s); });
       });
-    std::vector<Id> rejected;
-    for (const Shift& s : _shifts) {
-      if (s.token.begin >= before || !s.beaten) continue;
-      if (std::ranges::none_of(_shifts, [&](const Shift& o) {
-            return o.vertex == s.vertex && !o.beaten;
-          }))
+    // A vertex goes only where none of its shifts stands.
+    std::vector<Id>& standing = _g.standing();
+    standing.clear();
+    for (const Shift& s : _shifts)
+      if (!s.beaten) standing.push_back(s.vertex);
+    std::ranges::sort(standing);
+    std::vector<Id>& rejected = _g.rejected();
+    rejected.clear();
+    for (const Shift& s : _shifts)
+      if (s.token.begin < before && s.beaten &&
+          !std::ranges::binary_search(standing, s.vertex))
         rejected.push_back(s.vertex);
-    }
     _g.retire(rejected);
     std::erase_if(_shifts,
                   [&](const Shift& s) { return s.token.begin < before; });

@@ -18,6 +18,7 @@
 #include "cursiv/engines/lr/runtime/LrGssPool.hpp"
 #include "cursiv/engines/lr/runtime/LrStack.hpp"
 #include "cursiv/engines/lr/runtime/LrVirtualAt.hpp"
+#include "cursiv/engines/lr/runtime/lr_refusal.hpp"
 #include "cursiv/engines/lr/table/LrProduction.hpp"
 #include "cursiv/engines/shared/runtime/IndentLevel.hpp"
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
@@ -213,6 +214,11 @@ class LrGssGraph {
     std::uint8_t weight = kUnweighed;
   };
   std::vector<Shift>& shifts() { return _shifts; }
+  // Room the episode's readers borrow, kept from one episode to the next: what
+  // `lr_graph_takes` works in, and the vertices that `elected_stand` weighs.
+  LrTakesScratch<Id>& takes_scratch() { return _takes; }
+  std::vector<Id>& standing() { return _standing; }
+  std::vector<Id>& rejected() { return _rejected; }
 
   // Vertices before `before` gain no edge any more; neither do their forests.
   // `last`: no more text follows, so no pop reads what a prune would drop.
@@ -416,6 +422,8 @@ class LrGssGraph {
   std::vector<Id> _walk;
   std::vector<Id> _staged;
   std::vector<Id> _unranked;
+  LrTakesScratch<Id> _takes;
+  std::vector<Id> _standing, _rejected;
   std::vector<std::pair<Id, Id>> _partedLeft, _partedRight;
   Id _root = none;
   std::uint32_t _seedDepth = 0;

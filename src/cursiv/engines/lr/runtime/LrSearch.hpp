@@ -149,6 +149,40 @@ struct LrSearch : RepairSearch<LrGesture> {
   std::unordered_map<TextOffset, Ahead> ahead;
   std::unordered_map<TextOffset, std::vector<Typo>> misread;
   FlatMap<std::uint32_t> owes;
+  // The calls of the walk over what a reading owes, in flight: it keeps them
+  // here, not on the native stack, whose depth the text would set. Each
+  // resumes at its `phase`.
+  enum class OwePhase : std::uint8_t {
+    outer,
+    outerRet,
+    more,
+    inner,
+    innerRet,
+    drop,
+    dropRet,
+    droppedFirst,
+    droppedTypo,
+    droppedTypoRet,
+  };
+  struct Owe {
+    OwePhase phase = OwePhase::outer;
+    SymbolId prev = 0;
+    std::uint32_t run = 0;
+    std::uint32_t best = 0;
+    // The gesture paid on the way to the call in flight.
+    std::uint32_t cost = 0;
+    // The token ahead being taken or dropped, the tokens at its start, and
+    // the re-readings of the token a drop stands on.
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    TextOffset p = 0;
+    std::uint64_t key = 0;
+    Token t{};
+    const Ahead* ahead = nullptr;
+    const Ahead* more = nullptr;
+    const std::vector<Typo>* typos = nullptr;
+  };
+  std::vector<Owe> oweStack;
   TextOffset horizon = 0;
   std::uint64_t boundAfter = kLrBoundAfter;
   // A bound in flight, and whether one of its walks could not read a token

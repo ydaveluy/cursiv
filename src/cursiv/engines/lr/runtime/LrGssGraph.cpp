@@ -131,8 +131,11 @@ void LrGssGraph::seed(const LrStack& stack, const Reading& start,
     }
     previous = v;
   }
-  _vertices[previous].reading = start;
-  _index.intern(hash(start), previous, [](Id) { return false; });
+  // Seen as `vertex` sees a reading: one key, one reading.
+  Reading first = start;
+  first.virt = first.virt.seen_from(first.at);
+  _vertices[previous].reading = first;
+  _index.intern(hash(first), previous, [](Id) { return false; });
   queue(previous);
   _root = _forest.node();
 }
@@ -397,7 +400,9 @@ void LrGssGraph::chain(Id v) {
   _walk.clear();
   for (Id at = v; _vertices[at].chainEnd == none;) {
     Vertex& x = _vertices[at];
-    assert(x.reading.at < _settled);
+    // `hand_back` prunes the vertex it is asked about at the position just
+    // settled, and an empty reduction stacks it on one at that same position.
+    assert(x.reading.at <= _settled);
     if (x.edges == none || x.edges != x.lastEdge) {
       x.chainEnd = at;
       break;

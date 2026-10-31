@@ -61,3 +61,10 @@ cursiv_grammar(shorterlr engines/lr/RefusedShorterGrammar.hpp trefusedshorter::L
 
 # The LR failed-walk oracle uses the shared lexical-predicate fixture.
 cursiv_grammar(lexicalpredicateslr engines/ll/LexicalPredicatesGrammar.hpp tlexicalpredicates::Lr ENGINE LR)
+
+if(cursiv_IS_TOP_LEVEL AND CURSIV_DEFAULT_ENGINE STREQUAL "LR")
+  # The bound's walk over what a reading owes keeps its depth off the native
+  # stack, and spends what the recursion did.
+  cursiv_test(LrBoundDepth_test engines/lr/LrBoundDepth_test.cpp
+      arithmeticsGenerated)
+endif()

@@ -316,10 +316,6 @@ const std::vector<Typo>& lr_search_misread(const LrContext& c, LrSearch& s,
   return s.misread.emplace(at, std::move(out)).first->second;
 }
 
-template <const auto& A>
-std::uint32_t lr_search_owes(const LrContext& c, LrSearch& s, TextOffset p,
-                             SymbolId prev, std::uint32_t run);
-
 // Every token some mode reads at `p`, to `take`, with, where its mode skipped
 // trivia to it, what every mode reads from its own start, taken `again`; then
 // every token there, read or not, to `drop`.
@@ -338,59 +334,226 @@ CURSIV_ALWAYS_INLINE inline void lr_search_each(const LrContext& c, LrSearch& s,
   for (const Token& t : ahead.dropped) drop(t);
 }
 
-// The least a reading pays that drops the token `t` it stands on, or reads
-// its bytes as another, the last token it took being `prev`.
-template <const auto& A>
-std::uint32_t lr_search_dropped(const LrContext& c, LrSearch& s, const Token& t,
-                                SymbolId prev) {
-  if (t.begin >= c.len) return kLrNoBound;
-  const TextOffset end =
-      t.sym == kInvalidSymbol ? t.end : (t.end > t.begin ? t.end : t.begin + 1);
-  // A refused token re-read as the lexer's superset owes a re-reading, and
-  // where it ends is the text's to say.
-  if (lr_search_ahead<A>(c, s, t.begin).refused) return kLrOwedReread;
-  std::uint32_t best =
-      kLrOwedGesture + kLrLost + lr_search_owes<A>(c, s, end, prev, 0);
-  for (const Typo& y : lr_search_misread<A>(c, s, t.begin))
-    if (best > kLrOwedReread)
-      best = std::min(best,
-                      kLrOwedReread + lr_search_owes<A>(c, s, y.end, y.term, 0));
-  return best;
-}
-
 // The least a reading pays from `p` to three tokens held: the last token it
 // took is `prev` (`kInvalidSymbol` for any) and `run` real tokens were taken
 // since its last gesture. A token follows `prev` for free where the table
 // lets it, and otherwise after a gesture that reads no text, never a
 // re-reading; a token dropped or read as another costs its gesture. Past the
-// search's horizon nothing is known, so nothing is owed.
+// search's horizon nothing is known, so nothing is owed. What it pays that
+// drops the token it stands on is the same walk's other call.
+//
+// The two call one another once per token ahead, as far as the horizon
+// reaches, so they run on a stack of their own: the text does not set the
+// native stack's depth. Each call is a frame that resumes at its phase with
+// the value of the call it made; the calls, their order and the work they
+// spend are those a recursion would make.
+template <const auto& A>
+class LrSearchOwes {
+ public:
+  using Frame = LrSearch::Owe;
+  using Phase = LrSearch::OwePhase;
+
+  LrSearchOwes(const LrContext& c, LrSearch& s)
+      : _c(c), _s(s), _st(s.oweStack), _base(s.oweStack.size()) {}
+
+  std::uint32_t owes(TextOffset p, SymbolId prev, std::uint32_t run) {
+    enter_owes(p, prev, run);
+    return run_all();
+  }
+
+  std::uint32_t dropped(const Token& t, SymbolId prev) {
+    enter_dropped(t, prev);
+    return run_all();
+  }
+
+ private:
+  const LrContext& _c;
+  LrSearch& _s;
+  std::vector<Frame>& _st;
+  const std::size_t _base;
+  std::uint32_t _ret = 0;
+
+  std::uint32_t run_all() {
+    while (_st.size() > _base) step();
+    return _ret;
+  }
+
+  // The call's value, where its frame was entered or ended.
+  void leave(std::uint32_t value) {
+    _ret = value;
+    _st.pop_back();
+  }
+
+  // The frame for `owes(p, prev, run)`, or the value it has at once.
+  void enter_owes(TextOffset p, SymbolId prev, std::uint32_t run) {
+    if (p >= _s.horizon || lr_search_spent(_s)) {
+      _ret = 0;
+      return;
+    }
+    const std::uint64_t key =
+        (std::uint64_t{p} << 20) | (std::uint64_t{prev} << 2) | run;
+    if (const std::uint32_t* hit = _s.owes.find(key)) {
+      _ret = *hit;
+      return;
+    }
+    Frame f;
+    f.phase = Phase::outer;
+    f.p = p;
+    f.prev = prev;
+    f.key = key;
+    f.best = kLrNoBound;
+    f.run = run;
+    f.ahead = &lr_search_ahead<A>(_c, _s, p);
+    _st.push_back(f);
+  }
+
+  // The frame for `dropped(t, prev)`, or the value it has at once.
+  void enter_dropped(const Token& t, SymbolId prev) {
+    if (t.begin >= _c.len) {
+      _ret = kLrNoBound;
+      return;
+    }
+    // A refused token re-read as the lexer's superset owes a re-reading, and
+    // where it ends is the text's to say.
+    if (lr_search_ahead<A>(_c, _s, t.begin).refused) {
+      _ret = kLrOwedReread;
+      return;
+    }
+    const TextOffset end = t.sym == kInvalidSymbol
+                               ? t.end
+                               : (t.end > t.begin ? t.end : t.begin + 1);
+    Frame f;
+    f.phase = Phase::droppedFirst;
+    f.t = t;
+    f.prev = prev;
+    _st.push_back(f);
+    enter_owes(end, prev, 0);
+  }
+
+  // The frame on top takes `t` as its next token: the call it makes, if any,
+  // resumes at `ret`; where it makes none, at `next`.
+  void take(const Token& t, bool again, Phase next, Phase ret) {
+    Frame& f = _st.back();
+    // A token read again after a gesture never follows for free.
+    const bool follows =
+        f.prev == kInvalidSymbol ||
+        (!again && A.derived.after[f.prev].test(t.sym));
+    const std::uint32_t cost = follows ? 0 : kLrOwedGesture;
+    f.phase = next;
+    if (cost >= f.best) return;
+    const std::uint32_t held = follows ? f.run + 1 : 1;
+    if (t.sym == kEofSymbol || held >= kRepairValidateShifts) {
+      f.best = cost;
+      return;
+    }
+    f.cost = cost;
+    f.phase = ret;
+    enter_owes(t.end, t.sym, held);
+  }
+
+  void step() {
+    Frame& f = _st.back();
+    switch (f.phase) {
+      case Phase::outer:
+        if (f.i == f.ahead->tokens.size()) {
+          f.i = 0;
+          f.phase = Phase::drop;
+          return;
+        }
+        take(f.ahead->tokens[f.i], false, Phase::more, Phase::outerRet);
+        return;
+      case Phase::outerRet:
+        f.best = std::min(f.best, f.cost + _ret);
+        f.phase = Phase::more;
+        return;
+      // Where its mode skipped trivia to the token, what every mode reads
+      // from its own start, taken again.
+      case Phase::more:
+        if (f.ahead->tokens[f.i].begin != f.p) {
+          f.more = &lr_search_ahead<A>(_c, _s, f.ahead->tokens[f.i].begin);
+          f.j = 0;
+          f.phase = Phase::inner;
+        } else {
+          ++f.i;
+          f.phase = Phase::outer;
+        }
+        return;
+      case Phase::inner:
+        if (f.j == f.more->tokens.size()) {
+          ++f.i;
+          f.phase = Phase::outer;
+          return;
+        }
+        take(f.more->tokens[f.j++], true, Phase::inner, Phase::innerRet);
+        return;
+      case Phase::innerRet:
+        f.best = std::min(f.best, f.cost + _ret);
+        f.phase = Phase::inner;
+        return;
+      // Every token there, read or not, dropped.
+      case Phase::drop: {
+        const std::size_t read = f.ahead->tokens.size();
+        if (f.i == read + f.ahead->dropped.size()) {
+          finish(f);
+          return;
+        }
+        const Token t = f.i < read ? f.ahead->tokens[f.i]
+                                   : f.ahead->dropped[f.i - read];
+        ++f.i;
+        if (f.best <= kLrOwedReread) return;
+        f.phase = Phase::dropRet;
+        enter_dropped(t, f.prev);
+        return;
+      }
+      case Phase::dropRet:
+        f.best = std::min(f.best, _ret);
+        f.phase = Phase::drop;
+        return;
+      case Phase::droppedFirst:
+        f.best = kLrOwedGesture + kLrLost + _ret;
+        f.typos = &lr_search_misread<A>(_c, _s, f.t.begin);
+        f.j = 0;
+        f.phase = Phase::droppedTypo;
+        return;
+      case Phase::droppedTypo: {
+        if (f.j == f.typos->size()) {
+          leave(f.best);
+          return;
+        }
+        const Typo& y = (*f.typos)[f.j++];
+        if (f.best <= kLrOwedReread) return;
+        f.phase = Phase::droppedTypoRet;
+        enter_owes(y.end, y.term, 0);
+        return;
+      }
+      case Phase::droppedTypoRet:
+        f.best = std::min(f.best, kLrOwedReread + _ret);
+        f.phase = Phase::droppedTypo;
+        return;
+    }
+  }
+
+  // The frame's least is known: kept, unless a walk could not read whole.
+  void finish(const Frame& f) {
+    const std::uint32_t best = f.best;
+    if (!_s.boundShort) _s.owes.emplace(f.key).first = best;
+    leave(best);
+  }
+};
+
+// The least a reading pays that drops the token `t` it stands on, or reads
+// its bytes as another, the last token it took being `prev`.
+template <const auto& A>
+std::uint32_t lr_search_dropped(const LrContext& c, LrSearch& s, const Token& t,
+                                SymbolId prev) {
+  return LrSearchOwes<A>(c, s).dropped(t, prev);
+}
+
+// The least a reading pays from `p` to three tokens held.
 template <const auto& A>
 std::uint32_t lr_search_owes(const LrContext& c, LrSearch& s, TextOffset p,
                              SymbolId prev, std::uint32_t run) {
-  if (p >= s.horizon || lr_search_spent(s)) return 0;
-  const std::uint64_t key =
-      (std::uint64_t{p} << 20) | (std::uint64_t{prev} << 2) | run;
-  if (const std::uint32_t* hit = s.owes.find(key)) return *hit;
-  std::uint32_t best = kLrNoBound;
-  // A token read again after a gesture never follows for free.
-  const auto next = [&](const Token& t, bool again) {
-    const bool follows =
-        prev == kInvalidSymbol || (!again && A.derived.after[prev].test(t.sym));
-    const std::uint32_t cost = follows ? 0 : kLrOwedGesture;
-    if (cost >= best) return;
-    const std::uint32_t held = follows ? run + 1 : 1;
-    if (t.sym == kEofSymbol || held >= kRepairValidateShifts) {
-      best = cost;
-      return;
-    }
-    best = std::min(best, cost + lr_search_owes<A>(c, s, t.end, t.sym, held));
-  };
-  lr_search_each<A>(c, s, p, next, [&](const Token& t) {
-    if (best > kLrOwedReread)
-      best = std::min(best, lr_search_dropped<A>(c, s, t, prev));
-  });
-  if (!s.boundShort) s.owes.emplace(key).first = best;
-  return best;
+  return LrSearchOwes<A>(c, s).owes(p, prev, run);
 }
 
 // From `t` or a rival its mode reads there that `state` acts on, the least

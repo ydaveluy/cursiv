@@ -792,7 +792,7 @@ class CaretStacks {
     // Only a new edge of an old node can change reductions already read.
     if (_closing && &stage == &_closure) [[likely]] {
       if (parent != kNoParent && parent >= _closureBase && parent != to)
-        _inner.emplace_back(parent, to);
+        link_inner(parent, to);
       if (!fresh) grown(to, parent);
     }
   }
@@ -813,6 +813,20 @@ class CaretStacks {
     if (id >= _marks.size()) _marks.resize(_frames.size(), 0);
     _marks[id] = (_serial << 2) | state;
   }
+  // The closure's node `above` rests on `below`: the edge goes last in the
+  // list of the edges that rest on it.
+  void link_inner(Id below, Id above) {
+    const auto e = static_cast<std::uint32_t>(_inner.size());
+    _inner.push_back(InnerEdge{above, kNoLink});
+    const std::size_t k = below - _closureBase;
+    if (k >= _innerOf.size()) _innerOf.resize(k + 1);
+    InnerEnds& ends = _innerOf[k];
+    if (ends.head == kNoLink)
+      ends.head = e;
+    else
+      _inner[ends.tail].next = e;
+    ends.tail = e;
+  }
   // `id` gained predecessor `via`: it reads its reductions again by that edge
   // alone, and whatever the closure built on it reads through it in whole. A
   // node not yet read will see the predecessor when it is.
@@ -825,8 +839,12 @@ class CaretStacks {
     while (!_todo.empty()) {
       const Id at = _todo.back();
       _todo.pop_back();
-      for (const auto& [below, above] : _inner) {
-        if (below != at || marked(above) != kDone) continue;
+      // Only the edges that rest on `at`, in the order they were laid.
+      if (at < _closureBase || at - _closureBase >= _innerOf.size()) continue;
+      for (std::uint32_t e = _innerOf[at - _closureBase].head; e != kNoLink;
+           e = _inner[e].next) {
+        const Id above = _inner[e].above;
+        if (marked(above) != kDone) continue;
         mark(above, kDone | kQueued);
         _queue.push_back(Reread{above, kNoParent});
         _todo.push_back(above);
@@ -923,6 +941,7 @@ class CaretStacks {
     _closureBase = _frames.size();
     _queue.clear();
     _inner.clear();
+    _innerOf.clear();
     _closing = true;
     const auto read = [&](Id head, Id via) {
       const auto state = _frames[head].state;
@@ -966,9 +985,9 @@ class CaretStacks {
               via);
           return landed;
         };
-        for (std::uint32_t at = cell.first; at < cell.first + cell.count;
-             ++at) {
-          const LrAction action = _table.action(at);
+        for (std::uint32_t slot = cell.first; slot < cell.first + cell.count;
+             ++slot) {
+          const LrAction action = _table.action(slot);
           // Read again for one predecessor, only what goes through it is new:
           // the reductions.
           if (via != kNoParent && action.kind != LrActionKind::reduce) continue;
@@ -1407,7 +1426,7 @@ class CaretStacks {
   // table lays for it. What the gap decides counts as taken.
   bool takes(Id head, const Token& token) {
     return lr_graph_takes(
-        head, [&](Id v) { return std::uint32_t{_frames[v].state}; },
+        _takes, head, [&](Id v) { return std::uint32_t{_frames[v].state}; },
         [&](Id v, auto&& f) { each_parent(_frames[v], f); },
         [&](std::uint32_t top, std::uint32_t& prod, std::uint32_t& len) {
           const auto cell =
@@ -1654,9 +1673,22 @@ class CaretStacks {
   };
   std::vector<Reread> _queue;
   std::vector<Id> _todo;
+  LrTakesScratch<Id> _takes;
   // Predecessor and successor, both nodes of the closure: what reads through
-  // the one reads the predecessors it gains.
-  std::vector<std::pair<Id, Id>> _inner;
+  // the one reads the predecessors it gains. The successors of a predecessor
+  // are a list through `_inner`, kept by the predecessor's place in the
+  // closure.
+  static constexpr std::uint32_t kNoLink = 0xFFFFFFFFu;
+  struct InnerEdge {
+    Id above;
+    std::uint32_t next;
+  };
+  struct InnerEnds {
+    std::uint32_t head = kNoLink;
+    std::uint32_t tail = kNoLink;
+  };
+  std::vector<InnerEdge> _inner;
+  std::vector<InnerEnds> _innerOf;
   // The tokens one mode reads at one place, in the arena, and the one the
   // lexer elects of them.
   struct Scanned {
