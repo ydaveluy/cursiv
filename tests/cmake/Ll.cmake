@@ -67,6 +67,7 @@ cursiv_test(LlEngine_test engines/ll/LlEngine_test.cpp
 cursiv_test(LlGeneration_test engines/ll/LlGeneration_test.cpp
     cursivLlGen cursivLrGen)
 cursiv_test(LlHistory_test engines/ll/LlHistory_test.cpp)
+cursiv_test(LlLentStands_test engines/ll/LlLentStands_test.cpp)
 cursiv_test(LlIndent_test engines/ll/LlIndent_test.cpp
     indentGenerated indentrepairedGenerated indentfoldedGenerated indentimpliedGenerated llindentGenerated llindentbareGenerated llindentfoldedGenerated llindentlaidGenerated
     dedentrunflatllGenerated dedentrunllGenerated delimllGenerated cursivLlGen cursivLrGen)

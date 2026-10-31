@@ -120,7 +120,7 @@ bool ll_search_same_future(const LlSearch& s, const LlReading& a,
       a.tokens != b.tokens || a.ahead.head != b.ahead.head ||
       a.shifts != b.shifts || a.phase != b.phase || a.fresh != b.fresh ||
       a.done != b.done || (a.faults != 0) != (b.faults != 0) ||
-      a.settled != b.settled)
+      a.settled != b.settled || a.inHand != b.inHand)
     return false;
   // The places in order, each run of one place read as one.
   const auto place = [&](std::uint32_t k) {

@@ -173,6 +173,9 @@ class LlCtxPool {
     _scratching = false;
   }
 
+  // Whether a walk holds the pool, its nodes since `begin_scratch` its own.
+  bool scratching() const { return _scratching; }
+
   // Whether `c` was made before the walk that holds the pool began: false for
   // every node while no walk holds it.
   bool before_walk(std::uint32_t c) const { return _scratching && c < _mark; }

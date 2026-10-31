@@ -33,6 +33,30 @@ struct LlThreadKeyHash {
   }
 };
 
+// Where a frame lent from the descent stands in its stack: how many frames it
+// has under it, and a frame further down it, chosen so that the frame at any
+// depth is reached in a logarithmic number of steps and not one per frame.
+struct LlLentRung {
+  std::uint32_t depth = 0, jump = kLlCtxNone;
+
+  // The rung of a frame lent over `parent`. Its jump goes as far as the
+  // parent's jump goes on from the one it reaches, where the two spans are
+  // equal, and to the parent otherwise.
+  static LlLentRung over(const std::vector<LlLentRung>& rungs,
+                         std::uint32_t parent) {
+    const auto depth = [&](std::uint32_t n) {
+      return n == kLlCtxNone ? 0u : rungs[n].depth;
+    };
+    const auto jump = [&](std::uint32_t n) {
+      return n == kLlCtxNone ? kLlCtxNone : rungs[n].jump;
+    };
+    const std::uint32_t near = jump(parent), far = jump(near);
+    LlLentRung r{depth(parent) + 1, parent};
+    if (depth(parent) - depth(near) == depth(near) - depth(far)) r.jump = far;
+    return r;
+  }
+};
+
 // The word of a return that goes to a caller the episode only guesses, which no
 // decision names: its decision is the one that names none.
 inline constexpr std::uint32_t kLlBlindWord = 0xFFFF0000u;
@@ -47,6 +71,9 @@ struct LlChoiceArms {
 };
 
 class LlEpisodeSim {
+  // The test of the walks over the frames lent asks them directly.
+  friend struct LlLentStandsProbe;
+
  public:
   // `pool` holds the stacks of the descent and the ones the episode makes. A
   // tracked episode keeps the rules each reading completed, and the readings
@@ -60,6 +87,12 @@ class LlEpisodeSim {
 
   // The rules, flagged by rule, whose callers share its body. Unset, none.
   void share_calls(const std::uint8_t* shared) { _shares = shared; }
+
+  // The depths of the frames lent, which the cache of the parse keeps. Unset,
+  // the walks go down a lent stack as they go down the episode's own.
+  void read_lent_rungs(const std::vector<LlLentRung>* rungs) {
+    _rungs = rungs;
+  }
 
   const LlHistory& arms() const { return _arms; }
   LlHistory& lexes() { return _lexes; }
@@ -83,7 +116,8 @@ class LlEpisodeSim {
   // Between two episodes.
   void reset() {
     ll_clear(_arms, _lexes, _reduces, _stacks, _below, _relatedProcessed,
-             _relatedFlags, _heads, _stack, _words, _side, _shared, _joins);
+             _relatedFlags, _relatedBaseCount, _relatedBases, _heads, _stack,
+             _words, _side, _shared, _joins);
     _reduceUp.assign(1, 0);
     _reduceState.assign(1, 0);
     _log = nullptr;
@@ -94,7 +128,8 @@ class LlEpisodeSim {
   void trim() {
     const auto each = [](auto&... x) { (x.trim(), ...); };
     each(_arms, _lexes, _reduces, _seen, _at, _held, _crossed, _calls, _flat,
-         _below, _relatedProcessed, _relatedFlags);
+         _below, _relatedProcessed, _relatedFlags, _relatedBaseCount,
+         _relatedBases);
   }
 
   // Whether one reading precedes another: the lexical choices first, then the
@@ -142,8 +177,8 @@ class LlEpisodeSim {
   // edges, so the order of the readings needs no comparing. Only a reading
   // that returns past a cell leaves it, and those wait their turn.
   void close(const std::vector<LlThread>& origins, std::vector<LlThread>& out) {
-    ll_clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags, _stack,
-             _words, _side);
+    ll_clear(out, _seen, _at, _calls, _relatedProcessed, _relatedFlags,
+             _relatedBaseCount, _relatedBases, _stack, _words, _side);
     _base = _stacks.size();
     std::size_t next = 0;
     for (;;) {
@@ -559,10 +594,10 @@ class LlEpisodeSim {
   // read with what stood there; the readings still waiting are not kept.
   template <class F>
   bool filter(std::vector<LlThread>& threads, F&& accepts) {
-    std::vector<LlThread> everyone = threads;
-    expand(everyone, accepts);
+    _everyone = threads;
+    expand(_everyone, accepts);
     threads.clear();
-    for (const LlThread& t : everyone)
+    for (const LlThread& t : _everyone)
       if (ready_to_read(t)) threads.push_back(t);
     std::stable_sort(
         threads.begin(), threads.end(),
@@ -589,9 +624,10 @@ class LlEpisodeSim {
   template <class F, class S = NoStay>
   void possible_terms(const std::vector<LlThread>& threads, F&& read,
                       S&& stays = {}) {
-    std::vector<LlThread> everyone = threads;
-    expand(everyone, [](std::uint16_t, std::uint32_t) { return true; }, stays);
-    for (const LlThread& t : everyone)
+    _everyone = threads;
+    expand(_everyone, [](std::uint16_t, std::uint32_t) { return true; },
+           stays);
+    for (const LlThread& t : _everyone)
       for (const LlAtnEdge& e : _atn.outgoing(t.state))
         if (e.kind == LlEdgeKind::atom) read(e.label);
   }
@@ -660,7 +696,8 @@ class LlEpisodeSim {
   // kept for the best to be chosen.
   template <class F, class S = NoStay>
   void expand(std::vector<LlThread>& everyone, F&& accepts, S&& stays = {}) {
-    std::vector<LlThread> origins, grown;
+    std::vector<LlThread>& origins = _crossOrigins;
+    std::vector<LlThread>& grown = _crossGrown;
     _crossed.clear();
     for (std::size_t at = 0; at < everyone.size();) {
       origins.clear();
@@ -768,6 +805,31 @@ class LlEpisodeSim {
     return _pool.contexts().before_walk(stack);
   }
 
+  // The rung of a lent frame, or null for any other: with it, what a walk
+  // asks of a stack that has reached the descent's frames is answered there.
+  const LlLentRung* rung(std::uint32_t stack) const {
+    if (_rungs == nullptr || stack >= _rungs->size() ||
+        (*_rungs)[stack].depth == 0 || !lent(stack))
+      return nullptr;
+    return &(*_rungs)[stack];
+  }
+
+  // Whether the lent frame `a`, which has the rung `r`, is `b` with frames
+  // over it. The unknown caller is under every lent stack; a frame not lent is
+  // under none, since the frames lent stand on frames lent alone.
+  bool lent_stands_on(std::uint32_t a, const LlLentRung& r, std::uint32_t b) {
+    if (a == b || b == kLlCtxNone) return true;
+    const LlLentRung* under = rung(b);
+    if (under == nullptr || under->depth >= r.depth) return false;
+    const auto& rungs = *_rungs;
+    while (rungs[a].depth > under->depth) {
+      const std::uint32_t jump = rungs[a].jump;
+      const bool far = jump != kLlCtxNone && rungs[jump].depth >= under->depth;
+      a = far ? jump : _pool.contexts().parent(a, 0);
+    }
+    return a == b;
+  }
+
   // A stack without the cells that hold a single stack: the frames over such
   // a cell stand over that stack, so that a rule entered again and again
   // leaves no chain of them behind.
@@ -836,11 +898,13 @@ class LlEpisodeSim {
     return bottom;
   }
 
-  // Whether `a` is `b` with frames over it.
+  // Whether `a` is `b` with frames over it. The walk stops at the first frame
+  // lent, which knows its depth: it costs the frames the episode made.
   bool stands_on(std::uint32_t a, std::uint32_t b) {
     for (;;) {
       if (a == b) return true;
       if (a == kLlCtxNone || LlStackSet::is_cell(a)) return false;
+      if (const LlLentRung* r = rung(a)) return lent_stands_on(a, *r, b);
       a = _pool.contexts().parent(a, 0);
     }
   }
@@ -849,6 +913,10 @@ class LlEpisodeSim {
     return stands_on(a, b) || stands_on(b, a);
   }
 
+  // Whether `stack` stands on a member of the cell, or a member on it. The
+  // chains of the members are indexed once, a flag per frame; a chain stops at
+  // the first frame lent, which is listed as a base of the cell instead, so
+  // that the descent's depth is not walked once per cell.
   bool member_related(std::uint32_t cell, std::uint32_t stack) {
     static constexpr std::uint32_t root = 1u, ancestor = 2u;
     const auto key = [cell](std::uint32_t context) {
@@ -857,8 +925,8 @@ class LlEpisodeSim {
     const auto& members = _stacks.members(cell);
     const auto* known = _relatedProcessed.find(cell);
     const std::size_t processed = known == nullptr ? 0 : *known;
+    bool fresh = false;
     for (std::size_t i = processed; i < members.size(); ++i) {
-      bool fresh = false;
       _relatedFlags.at(key(members[i].stack), fresh) |= root;
       std::uint32_t at = members[i].stack;
       for (;;) {
@@ -871,22 +939,48 @@ class LlEpisodeSim {
         // The rest of a marked chain is already indexed. Its terminal
         // cell or unknown caller belongs to that chain too.
         if (marked || at == kLlCtxNone || LlStackSet::is_cell(at)) break;
+        if (rung(at) != nullptr) {
+          std::uint32_t& count = _relatedBaseCount.at(cell, fresh);
+          _relatedBases.at(key(count++), fresh) = at;
+          break;
+        }
         at = _pool.contexts().parent(at, 0);
       }
     }
-    bool fresh = false;
     _relatedProcessed.at(cell, fresh) =
         static_cast<std::uint32_t>(members.size());
+    const std::uint32_t* bases = _relatedBaseCount.find(cell);
+    const std::uint32_t nbases = bases == nullptr ? 0 : *bases;
+    const auto base = [&](std::uint32_t k) {
+      return *_relatedBases.find(key(k));
+    };
     if (const auto* flags = _relatedFlags.find(key(stack));
         flags != nullptr && (*flags & ancestor) != 0)
       return true;
+    // A member on the frames lent: the bases that stand on `stack`.
+    if (stack == kLlCtxNone || rung(stack) != nullptr)
+      for (std::uint32_t k = 0; k < nbases; ++k)
+        if (stands_on(base(k), stack)) return true;
     for (;;) {
       if (const auto* flags = _relatedFlags.find(key(stack));
           flags != nullptr && (*flags & root) != 0)
         return true;
       if (stack == kLlCtxNone || LlStackSet::is_cell(stack)) return false;
+      if (rung(stack) != nullptr) break;
       stack = _pool.contexts().parent(stack, 0);
     }
+    // Where the stack reaches the frames lent, a member among them is a base
+    // that it stands on; the unknown caller, a member too, ends every chain.
+    if (const auto* flags = _relatedFlags.find(key(kLlCtxNone));
+        flags != nullptr && (*flags & root) != 0)
+      return true;
+    for (std::uint32_t k = 0; k < nbases; ++k) {
+      const auto* flags = _relatedFlags.find(key(base(k)));
+      if (flags != nullptr && (*flags & root) != 0 &&
+          stands_on(stack, base(k)))
+        return true;
+    }
+    return false;
   }
 
   // Unrelated stacks at one state share the reading ahead even where their
@@ -1009,10 +1103,16 @@ class LlEpisodeSim {
   std::vector<std::uint32_t> _words;
   std::vector<Pending> _side;
   std::vector<LlThread> _origins;
+  // What filter and possible_terms read past the conditions: the readings and
+  // the ones a crossing grows, kept between calls for their room.
+  std::vector<LlThread> _everyone, _crossOrigins, _crossGrown;
   LlStamped<LlThreadKey, LlThreadKeyHash> _seen, _held, _crossed, _calls;
   LlStamped<LlThreadKey, LlThreadKeyHash> _at;
   LlStamped<std::uint64_t, LlKeyHash> _below;
   LlStamped<std::uint64_t, LlKeyHash> _relatedProcessed, _relatedFlags;
+  // The frames lent that the chains of a cell's members end on, listed per
+  // cell: how many, and each by its place in the list.
+  LlStamped<std::uint64_t, LlKeyHash> _relatedBaseCount, _relatedBases;
   std::vector<std::uint32_t> _chain, _frames;
   LlStamped<std::uint64_t, LlKeyHash> _flat;
   std::vector<std::uint32_t> _shared;
@@ -1026,6 +1126,7 @@ class LlEpisodeSim {
   std::uint32_t _lull = 0;
   const std::uint8_t* _scoped = nullptr;
   const std::uint8_t* _shares = nullptr;
+  const std::vector<LlLentRung>* _rungs = nullptr;
 };
 
 }  // namespace cursiv

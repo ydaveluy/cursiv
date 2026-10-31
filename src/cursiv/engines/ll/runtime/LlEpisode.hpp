@@ -286,6 +286,25 @@ class LlEpisode {
     std::uint8_t tier = 0;
   };
 
+  // What visit_tracked keeps of a group before its readings are made, a
+  // reading made apart, and where the choices of a place stand; and a thread
+  // by its group.
+  struct Place {
+    LlMask<T.termWords> atoms, own;
+    LlLookRead next;
+    TextOffset begin = 0;
+    bool found = false, open = false;
+  };
+  struct Tail {
+    TextOffset begin, end;
+    unsigned rank;
+    std::uint32_t choice;
+  };
+  struct Aged {
+    std::uint32_t group, order;
+    LlThread thread;
+  };
+
   // The token every reading of one history crosses, and where it stands.
   struct Crossing {
     TextOffset begin, end, gapFrom;
@@ -1065,6 +1084,7 @@ class LlEpisode {
   Verdict visit_tracked(Position& p, TextOffset gapFrom, std::uint32_t lull) {
     const TextOffset from = p.key[0];
     std::vector<LlThread>& threads = p.threads;
+    // Ordered, since the groups are visited in the order of their keys.
     std::map<std::pair<std::uint32_t, std::uint16_t>, std::uint32_t> groupIndex;
     _groupOf.assign(threads.size(), 0);
     _groupLook.clear();
@@ -1076,21 +1096,19 @@ class LlEpisode {
       if (fresh) _groupLook.push_back(look.second);
       _groupOf[k] = at->second;
     }
-    _members.assign(groupIndex.size(), {});
+    _members.resize(groupIndex.size());
+    for (auto& group : _members) group.clear();
     for (std::size_t k = 0; k < threads.size(); ++k)
       _members[_groupOf[k]].push_back(threads[k]);
     _readingsOf.clear();
     // Groups that cross one gap with one alphabet read the text once.
-    std::vector<std::tuple<LlMask<T.termWords>, TextOffset, std::size_t>> seen;
+    auto& seen = _alphabets;
+    seen.clear();
     std::vector<std::uint16_t>& read = ll_scratch<T.termWords>().read;
-    std::vector<LlLexReading> lengths;
-    struct Place {
-      LlMask<T.termWords> atoms, own;
-      LlLookRead next;
-      TextOffset begin = 0;
-      bool found = false, open = false;
-    };
-    std::vector<Place> places(groupIndex.size());
+    auto& lengths = _lengths;
+    auto& places = _places;
+    places.clear();
+    places.resize(groupIndex.size());
     for (const auto& indexed : groupIndex) {
       const std::uint32_t g = indexed.second;
       Place& place = places[g];
@@ -1120,7 +1138,8 @@ class LlEpisode {
                                        T.terms[place.next.token.sym].laid != 0);
     }
     // What the open places at one offset can read next, whichever group.
-    std::vector<std::pair<TextOffset, LlMask<T.termWords>>> heard;
+    auto& heard = _heard;
+    heard.clear();
     const auto hear = [&](const Place& x) {
       if (!x.open) return;
       auto at = std::find_if(heard.begin(), heard.end(),
@@ -1130,7 +1149,8 @@ class LlEpisode {
       at->second.add(x.atoms);
     };
     for (const Place& other : places) hear(other);
-    std::vector<std::uint32_t> order;
+    auto& order = _visitOrder;
+    order.clear();
     for (const auto& indexed : groupIndex) order.push_back(indexed.second);
     for (std::size_t turn = 0; turn < order.size(); ++turn) {
       const std::uint32_t g = order[turn];
@@ -1243,19 +1263,26 @@ class LlEpisode {
             return shiftKey(a.term) < shiftKey(b.term);
           return a.term < b.term;
         });
-    std::map<std::pair<std::uint32_t, std::uint32_t>, std::vector<LlThread>>
-        histories;
+    // The readings by group and history, each history in the order the
+    // readings had. Kept as a copy: a step may grow the positions, `threads`
+    // among them.
+    auto& histories = _histories;
+    histories.clear();
     for (std::size_t k = 0; k < threads.size(); ++k)
-      histories[{_groupOf[k], threads[k].lex}].push_back(threads[k]);
+      histories.push_back(
+          {_groupOf[k], static_cast<std::uint32_t>(k), threads[k]});
+    std::sort(histories.begin(), histories.end(),
+              [](const Aged& a, const Aged& b) {
+                if (a.group != b.group) return a.group < b.group;
+                if (a.thread.lex != b.thread.lex)
+                  return a.thread.lex < b.thread.lex;
+                return a.order < b.order;
+              });
     // The sort leaves the readings of one choice, an end and a rank, side by
     // side at their place: the choices of a place are numbered as the walk
     // meets them, and two places are not ranked against each other.
-    struct Tail {
-      TextOffset begin, end;
-      unsigned rank;
-      std::uint32_t choice;
-    };
-    std::vector<Tail> tails;
+    auto& tails = _tails;
+    tails.clear();
     const auto choose = [&](const Reading& r) {
       const auto at =
           std::find_if(tails.begin(), tails.end(),
@@ -1274,7 +1301,7 @@ class LlEpisode {
     bool forked = false;
     for (const Reading& r : _readingsOf) forked = choose(r) != 0 || forked;
     tails.clear();
-    std::vector<std::uint16_t> original;
+    auto& original = _original;
     for (std::size_t i = 0; i < _readingsOf.size();) {
       const std::uint32_t choice = choose(_readingsOf[i]);
       const TextOffset begin = _readingsOf[i].begin;
@@ -1290,12 +1317,17 @@ class LlEpisode {
                _readingsOf[i].group == group &&
                shiftKey(_readingsOf[i].term) == effect);
       const Crossing x{begin, end, gapFrom, lull, _own.at, _own.held};
-      for (auto history = histories.lower_bound({group, 0});
-           history != histories.end() && history->first.first == group;
-           ++history) {
-        const std::uint32_t parentOrder = history->first.second;
+      auto history = std::lower_bound(
+          histories.begin(), histories.end(), group,
+          [](const Aged& a, std::uint32_t g) { return a.group < g; });
+      while (history != histories.end() && history->group == group) {
+        const std::uint32_t parentOrder = history->thread.lex;
+        _lent.clear();
+        for (; history != histories.end() && history->group == group &&
+               history->thread.lex == parentOrder;
+             ++history)
+          _lent.push_back(history->thread);
         read.assign(original.begin(), original.end());
-        _lent = history->second;
         step(_lent, x, read,
              forked ? _sim->lexes().append(parentOrder, choice) : parentOrder);
       }
@@ -1467,6 +1499,17 @@ class LlEpisode {
   std::vector<std::uint16_t> _groupLook;
   std::vector<std::vector<LlThread>> _members;
   std::vector<Reading> _readingsOf;
+  // The rest of what a reading step of tracked groups makes, kept between
+  // steps for its room and cleared where it is made.
+  std::vector<std::tuple<LlMask<T.termWords>, TextOffset, std::size_t>>
+      _alphabets;
+  std::vector<LlLexReading> _lengths;
+  std::vector<Place> _places;
+  std::vector<std::pair<TextOffset, LlMask<T.termWords>>> _heard;
+  std::vector<std::uint32_t> _visitOrder;
+  std::vector<Aged> _histories;
+  std::vector<Tail> _tails;
+  std::vector<std::uint16_t> _original;
   // The kernel a step made for each reduce tag, valid in the round it was
   // made; tags start at one, and slot zero is the thread with none.
   struct Action {

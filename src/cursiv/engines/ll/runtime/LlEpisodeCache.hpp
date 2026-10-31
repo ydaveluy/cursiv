@@ -4,6 +4,7 @@
 // descent's stack.
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -29,6 +30,8 @@ struct LlEpisodeCache {
   std::optional<LlReturnPool> lent;
   // Where each node of `exact` stands in `lent`.
   std::vector<std::uint32_t> lentOf;
+  // How deep each lent frame stands, by its node in `lent`.
+  std::vector<LlLentRung> lentRung;
   std::optional<LlEpisodeSim> plain, tracked;
   LlPlan plan;
   LlPredictionWork work;
@@ -78,6 +81,7 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
     slot.emplace(T.atn, ll_pool<T>(false), tracked);
     slot->rank_arms_over_lexes(T.repeatScopes);
     slot->share_calls(T.sharedRules);
+    slot->read_lent_rungs(&cache.lentRung);
   }
   slot->reset();
   return *slot;
@@ -99,10 +103,16 @@ inline std::uint32_t ll_document_context(
   return cache.document;
 }
 
-// The stack of the descent, in the pool the episodes read in.
+// The stack of the descent, in the pool the episodes read in. Each frame lent
+// keeps how deep it stands, so that a walk which meets one over the episode's
+// frames answers what it stands on without climbing the descent's depth.
 inline std::uint32_t ll_lend_stack(LlEpisodeCache& cache, std::uint32_t stack) {
   LlCtxPool& from = cache.exact->contexts();
   LlCtxPool& to = cache.lent->contexts();
+  // `lentOf` and `lentRung` are never cleared: they hold only because the
+  // frames lent are made outside a walk, which would take them back with its
+  // own.
+  assert(!to.scratching());
   std::vector<std::uint32_t> chain;
   std::uint32_t at = stack, base = kLlCtxNone;
   for (; at != kLlCtxNone; at = from.parent(at, 0)) {
@@ -113,10 +123,14 @@ inline std::uint32_t ll_lend_stack(LlEpisodeCache& cache, std::uint32_t stack) {
     chain.push_back(at);
   }
   for (std::size_t i = chain.size(); i-- > 0;) {
-    base = to.push(base, from.ret(chain[i], 0));
+    const std::uint32_t parent = base;
+    base = to.push(parent, from.ret(chain[i], 0));
     if (cache.lentOf.size() <= chain[i])
       cache.lentOf.resize(chain[i] + 1, kLlCtxNone);
     cache.lentOf[chain[i]] = base;
+    if (cache.lentRung.size() <= base) cache.lentRung.resize(base + 1);
+    if (cache.lentRung[base].depth == 0)
+      cache.lentRung[base] = LlLentRung::over(cache.lentRung, parent);
   }
   return base;
 }
