@@ -20,6 +20,7 @@
 #include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
+#include "cursiv/engines/shared/table/LexNode.hpp"
 #include "cursiv/engines/shared/table/TermInfo.hpp"
 
 namespace cursiv {
@@ -685,7 +686,7 @@ class PredicateEmitter {
           "  (void)src; (void)len; (void)seen;\n",
           at);
       helper += rounds(at, e.b, e.min == 0 ? 0 : e.min - 1,
-                       e.max == 0xffffffffu ? e.max : e.max - 1,
+                       e.max == kEndless ? e.max : e.max - 1,
                        call(e.a, "::std::move(active)"));
       if (e.min == 0)
         return helper + out +

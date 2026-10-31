@@ -23,7 +23,7 @@ class GapReach {
   // says.
   bool skips(unsigned leaf) const {
     return _g.gapLeaves[leaf].reads_tokens() &&
-           bounds(_g.gapLeaves[leaf].node).looked >= 0xffffffffu;
+           bounds(_g.gapLeaves[leaf].node).looked >= kEndless;
   }
 
   // The leaves condition `k` reads.
@@ -58,7 +58,7 @@ class GapReach {
       const GapLeaf& leaf = _g.gapLeaves[v];
       if (!leaf.reads_tokens()) continue;
       const auto reach = bounds(leaf.node);
-      if (reach.looked >= 0xffffffffu) {
+      if (reach.looked >= kEndless) {
         phrase = true;
         tokens = std::max(tokens, count(leaf.node));
       } else {
@@ -95,7 +95,7 @@ class GapReach {
   // Maximum consumption, inspection and look past the consumed bytes,
   // computed in one walk of the expression.
   Bounds bounds(std::uint16_t node) const {
-    static constexpr std::uint64_t kAll = 0xffffffffu;
+    static constexpr std::uint64_t kAll = kEndless;
     const auto sat = [](std::uint64_t v) { return std::min(v, kAll); };
     const LexNode& e = _g.lex[node];
     switch (e.kind) {
@@ -143,7 +143,7 @@ class GapReach {
         }
         if (e.max == 0) return {0, 0, kid.overhang};
         if (kid.consumed == 0) return {0, kid.looked, kid.overhang};
-        if (e.max == 0xffffffffu) return {kAll, kAll, kid.overhang};
+        if (e.max == kEndless) return {kAll, kAll, kid.overhang};
         return {sat(kid.consumed * e.max),
                 sat(kid.consumed * (e.max - 1u) + kid.looked), kid.overhang};
       }
@@ -188,7 +188,7 @@ class GapReach {
         std::uint64_t kid = count(e.a);
         if (e.b != kNoLexNode) kid += count(e.b);
         if (e.max == 0 || kid == 0) return 0;
-        return e.max == 0xffffffffu ? kAll : sat(kid * e.max);
+        return e.max == kEndless ? kAll : sat(kid * e.max);
       }
       default:
         return kAll;

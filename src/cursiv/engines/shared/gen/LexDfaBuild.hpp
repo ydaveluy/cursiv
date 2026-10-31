@@ -355,6 +355,15 @@ struct LexDfaBuild {
 
  private:
   static constexpr std::uint32_t kNoLocal = 0xffffffffu;
+  // The subsets one build may number before it refuses. The reduction in
+  // `fill` merges subsets that read alike under every class, and the DFA it
+  // leaves must fit `kDeadState` states; the subsets a regular language needs
+  // are seldom more than a small multiple of its minimal DFA, which the
+  // NFA's own redundancy (duplicated branches, shared tails) accounts for.
+  // Refusing at eight times the limit keeps that slack, and bounds `rows` and
+  // the splitting arrays by it, where a terminal such as `(a|b)* a (a|b){24}`
+  // would have them hold millions of subsets before the first refusal.
+  static constexpr std::size_t kMaxSubsets = std::size_t{8} * kDeadState;
 
   // The coarsest refinement of `cls` every byte class respects, by Hopcroft's
   // splitting: a split queues its smaller half, so no state moves more than
@@ -578,7 +587,7 @@ struct LexDfaBuild {
     }
     auto& id = _localOf[gid];
     if (id == kNoLocal) {
-      if (_order.size() >= kNoLocal)
+      if (_order.size() >= kMaxSubsets)
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
       id = static_cast<std::uint32_t>(_order.size());
       _order.push_back(gid);

@@ -784,7 +784,7 @@ std::uint16_t LexReifier::reify_through_lit(ImageId open,
           static_cast<unsigned char>(b));
     }
     for (const ByteSet& bs : to)
-      push_kid(bs.any() ? intern(bs) : static_cast<std::uint16_t>(0xffff));
+      push_kid(bs.any() ? intern(bs) : kNoSet);
   }
   if (end != kNoLexNode) push_kid(end);
   return push(LexNode{LexKind::through_lit, openNode, base,
@@ -886,13 +886,13 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
           "a commit is allowed in a rule, not in a terminal or a gap condition "
           "-- use the plain repetition forms there");
     case ImageKind::repeat: {
-      if (n.m >= 0xffffffffu || (n.n != kUnbounded && n.n >= 0xffffffffu))
+      if (n.m >= kEndless || (n.n != kUnbounded && n.n >= kEndless))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
       const std::uint16_t kidNode = reify(kid(n, 0), false);
       return push(LexNode{LexKind::rep, kidNode, kNoLexNode,
                           static_cast<std::uint32_t>(n.m),
                           n.n == kUnbounded
-                              ? 0xffffffffu
+                              ? kEndless
                               : static_cast<std::uint32_t>(n.n)});
     }
     case ImageKind::embed:

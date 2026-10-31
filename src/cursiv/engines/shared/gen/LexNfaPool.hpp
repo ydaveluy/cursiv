@@ -16,6 +16,7 @@
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/table/LexNode.hpp"
+#include "cursiv/engines/shared/table/TermInfo.hpp"
 
 namespace cursiv {
 
@@ -120,7 +121,7 @@ struct LexNfaPool {
   template <class Body>
   int repeat(const LexNode& e, int out, Body&& body) {
     int tail = out;
-    if (e.max == 0xffffffffu) {
+    if (e.max == kEndless) {
       tail = split(-1, out);
       const int head = body(tail);
       s[static_cast<std::size_t>(tail)].t1 = head;
@@ -178,7 +179,7 @@ struct LexNfaPool {
       int chain = end;
       for (unsigned d = 0; d <= len; ++d) {
         const std::uint16_t set = g.lexKid[e.b + i * (len + 1) + d];
-        if (set == 0xffff) continue;
+        if (set == kNoSet) continue;
         const int step = chars(static_cast<int>(set), q[d]);
         chain = chain < 0 ? step : split(step, chain);
       }

@@ -319,13 +319,27 @@ struct LexNfaBuild {
     return answer;
   }
 
-  bool guards_read_outer_marks(std::uint16_t node) const {
+  // A node is visited in the walk whose number it holds. The walks below run
+  // once per node of a terminal and never nest, so they share the array, and a
+  // new number empties it whole.
+  std::vector<std::uint32_t> _seen = std::vector<std::uint32_t>(g.nlex);
+  std::uint32_t _walk = 0;
+
+  std::uint32_t next_walk() {
+    if (++_walk == 0) {
+      std::ranges::fill(_seen, 0);
+      _walk = 1;
+    }
+    return _walk;
+  }
+
+  bool guards_read_outer_marks(std::uint16_t node) {
     std::vector<std::uint32_t> marks;
     std::vector<std::uint16_t> guards;
-    std::vector<bool> visited(g.nlex);
+    auto walk = next_walk();
     const auto collect = [&](auto&& self, std::uint16_t at) {
-      if (at == kNoLexNode || visited[at]) return;
-      visited[at] = true;
+      if (at == kNoLexNode || _seen[at] == walk) return;
+      _seen[at] = walk;
       const LexNode& e = g.lex[at];
       if (e.kind == LexKind::mark) marks.push_back(e.min);
       if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
@@ -336,10 +350,10 @@ struct LexNfaBuild {
     };
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
-    visited.assign(visited.size(), false);
+    walk = next_walk();
     const auto reads = [&](auto&& self, std::uint16_t at) {
-      if (at == kNoLexNode || visited[at]) return false;
-      visited[at] = true;
+      if (at == kNoLexNode || _seen[at] == walk) return false;
+      _seen[at] = walk;
       if (const LexNode& e = g.lex[at];
           (e.kind == LexKind::same &&
            std::ranges::find(marks, e.min) != marks.end()) ||
@@ -403,14 +417,14 @@ struct LexNfaBuild {
   // An arm the graph cannot spell is recognized apart from the others, at its
   // own tier.
   int arms(std::uint16_t node, int out) {
-    if (const LexNode& e = g.lex[node];
-        e.kind == LexKind::alt && recognized(node)) {
+    const bool apart = recognized(node);
+    if (const LexNode& e = g.lex[node]; e.kind == LexKind::alt && apart) {
       int s = arms(g.lexKid[e.a], out);
       for (unsigned i = 1; i < e.b; ++i)
         s = n.split(arms(g.lexKid[e.a + i], out), s);
       return s;
     }
-    if (recognized(node))
+    if (apart)
       return in_tier(tiers_of(node), [&] { return recognition(node, out); });
     return branch(node, out);
   }
@@ -426,9 +440,9 @@ struct LexNfaBuild {
   // none. An echo is bound where a mark<> of its tag was set on every path to
   // it, so a mark in one arm or in a loop that may not turn binds nothing
   // after.
-  bool echoes_marked(std::uint16_t node) const {
+  bool echoes_marked(std::uint16_t node) {
     using Tags = std::vector<std::uint32_t>;
-    std::vector<bool> callsChecked(g.nlex);
+    const auto walked = next_walk();
     const auto scope = [&](auto&& self, std::uint16_t root) {
       std::vector<std::uint16_t> callsHere;
       bool bound = true;
@@ -496,13 +510,13 @@ struct LexNfaBuild {
       walk(walk, root, marks);
       if (!bound) return false;
       for (const auto call : callsHere)
-        if (!callsChecked[call]) {
-          callsChecked[call] = true;
+        if (_seen[call] != walked) {
+          _seen[call] = walked;
           if (!self(self, call)) return false;
         }
       return true;
     };
-    callsChecked[node] = true;
+    _seen[node] = walked;
     return scope(scope, node);
   }
 

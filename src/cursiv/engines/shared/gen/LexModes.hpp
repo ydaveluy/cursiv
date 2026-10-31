@@ -7,8 +7,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "cursiv/engines/shared/gen/ChainIndex.hpp"
 #include "cursiv/engines/shared/gen/LexRecursion.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/set_dedup.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
@@ -28,6 +30,9 @@ struct LexModes {
   // blank inside brackets, so every mode lexes it.
   DynSet joins;
   std::vector<DynSet> skips;
+  // The modes by what they lex, tag and longer set: it selects the candidates
+  // `intern` compares, and the comparison stays exact.
+  ChainIndex index;
 
   // A program laid by hand names only the grammar's trivia.
   template <class Cfg>
@@ -52,7 +57,11 @@ struct LexModes {
 
   std::uint16_t intern(const DynSet& want, std::uint32_t at = 0,
                        const DynSet& beyond = DynSet{}) {
-    for (std::size_t i = 0; i < set.size(); ++i)
+    if (index.head.empty()) index.init(64);
+    const std::uint64_t h =
+        hash_mix(hash_mix(set_hash(want), at), set_hash(beyond));
+    for (unsigned i = index.first(h); i != ChainIndex::kNone;
+         i = index.after(i))
       if (tag[i] == at && set[i] == want && longer[i] == beyond)
         return static_cast<std::uint16_t>(i);
     if (set.size() >= UINT16_MAX)
@@ -64,6 +73,7 @@ struct LexModes {
     longer.push_back(beyond);
     longerMode.push_back(reach);
     tag.push_back(at);
+    index.add(h, static_cast<unsigned>(set.size() - 1));
     return static_cast<std::uint16_t>(set.size() - 1);
   }
 

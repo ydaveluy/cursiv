@@ -300,7 +300,7 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
       return _lex.group(LexKind::alt, kids);
     }
     case ImageKind::repeat: {
-      if (n.m >= 0xffffffffu || (n.n != kUnbounded && n.n >= 0xffffffffu))
+      if (n.m >= kEndless || (n.n != kUnbounded && n.n >= kEndless))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
       const auto one = phrase(cfg, kid(n, 0), skip, path);
       if (n.m == 1 && n.n == 1) return one;
@@ -310,7 +310,7 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
       return _lex.push(LexNode{LexKind::rep, one, between,
                                static_cast<std::uint32_t>(n.m),
                                n.n == kUnbounded
-                                   ? 0xffffffffu
+                                   ? kEndless
                                    : static_cast<std::uint32_t>(n.n)});
     }
     case ImageKind::trigger: {
