@@ -136,7 +136,7 @@ class GapProgramEmitter {
 };
 
 template <class Cfg>
-class GapEmitter : EmitOutput {
+class GapEmitter : private EmitOutput {
  public:
   GapEmitter(const Cfg& cfg, std::string sets, std::string boundary,
              std::string_view linkage = "static")

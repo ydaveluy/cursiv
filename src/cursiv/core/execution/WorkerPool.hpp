@@ -94,7 +94,7 @@ class WorkerPool {
 
   // Coarse slices while the range is long, then one at a time at the tail.
   void drain(Job& job) const noexcept;
-  void runTask(Task& task) noexcept;
+  void runTask(Task& task) const noexcept;
   // Null when nothing was found. `self` is the worker index, or the worker
   // count for a caller that is not one.
   [[nodiscard]] Task* steal(std::size_t victim) noexcept;

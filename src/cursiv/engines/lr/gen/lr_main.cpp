@@ -154,7 +154,7 @@ void report(const Built& a, unsigned probeCuts) {
   if (probeCuts != 0 || a.nunminted != 0)
     std::printf("%s: gave way: probeCuts=%u unminted=%u\n", CURSIV_GEN_NAME,
                 probeCuts, a.nunminted);
-  if (a.modeFlagPool.sets.size() != 0)
+  if (!a.modeFlagPool.sets.empty())
     std::printf("%s: flagged modes: %zu sets\n", CURSIV_GEN_NAME,
                 a.modeFlagPool.sets.size());
   if (a.nconflicts == 0 && a.nOwed == 0 && !a.multiCand) return;

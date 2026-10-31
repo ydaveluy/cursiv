@@ -338,7 +338,7 @@ std::string lower_fail_sentence(const Cfg& c, std::string_view rule = {}) {
     word += '`';
   }
   std::string text(lower_fail_text(c.lowerWhy));
-  const auto fill = [&](std::string_view mark, const std::string& with) {
+  const auto fill = [&](std::string_view mark, std::string_view with) {
     for (auto at = text.find(mark); at != std::string::npos;
          at = text.find(mark, at + with.size()))
       text.replace(at, mark.size(), with);

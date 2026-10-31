@@ -12,7 +12,7 @@
 
 [![CI](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/ci.yml)
 [![Documentation](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml/badge.svg)](https://github.com/ydaveluy/cursiv/actions/workflows/docs.yml)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ydaveluy_pegium&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ydaveluy_pegium)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ydaveluy_cursiv&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ydaveluy_cursiv)
 [![Languages](https://github.com/ydaveluy/cursiv-grammar/actions/workflows/ci.yml/badge.svg)](https://github.com/ydaveluy/cursiv-grammar/actions/workflows/ci.yml)
 
 </div>

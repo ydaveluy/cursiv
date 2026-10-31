@@ -73,9 +73,7 @@ struct DynSet {
     a &= b;
     return a;
   }
-  friend bool operator==(const DynSet& a, const DynSet& b) {
-    return a.w == b.w;
-  }
+  friend bool operator==(const DynSet&, const DynSet&) = default;
 
   bool intersects(const DynSet& o) const {
     const std::size_t m = std::min(w.size(), o.w.size());

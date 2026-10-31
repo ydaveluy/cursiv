@@ -158,11 +158,10 @@ lsp::SemanticTokens DefaultSemanticTokenProvider::highlight(
       if (to > from && touches(from, to))
         tokens.push_back(Token{from, to, SemanticTokenType::Variable, true});
     };
-    refs->visitResolved(cst, [&](TextOffset begin, TextOffset end,
-                                 const AstNode&, bool) { colour(begin, end); });
-    refs->visitUnresolved(cst,
-                          [&](RefState, TextOffset begin, TextOffset end,
-                              const ReferenceInfo&) { colour(begin, end); });
+    refs->visitResolved(cst, [&](TextOffset lo, TextOffset hi, const AstNode&,
+                                 bool) { colour(lo, hi); });
+    refs->visitUnresolved(cst, [&](RefState, TextOffset lo, TextOffset hi,
+                                   const ReferenceInfo&) { colour(lo, hi); });
   }
 
   // 3. Every leaf of the whole tree, not just the entry's range: a comment

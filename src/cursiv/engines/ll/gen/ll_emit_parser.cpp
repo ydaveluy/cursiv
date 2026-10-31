@@ -115,7 +115,9 @@ struct Emit : EmitOutput {
   // An arm spelt on its own, `s<tag>`: a function, or where it may suspend a
   // step with its frame `F<tag>` and its number on the machine.
   struct Arm {
-    std::string tag{}, frame{}, body{};
+    std::string tag{};
+    std::string frame{};
+    std::string body{};
     std::uint32_t step = kNoRow;
   };
   std::vector<Arm> arms{};
@@ -714,10 +716,10 @@ void Emit::decision(std::uint16_t id) {
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     if (direct) {
       if (byArm[i].empty()) continue;
-      std::string labels;
-      for (std::uint16_t t : byArm[i]) labels += std::format("case {}u: ", t);
-      if (!entry[i].empty()) labels += entry[i] + ": ";
-      open(labels + "{");
+      std::string cases;
+      for (std::uint16_t t : byArm[i]) cases += std::format("case {}u: ", t);
+      if (!entry[i].empty()) cases += entry[i] + ": ";
+      open(cases + "{");
     } else {
       entry[i] = name("R");
       open(std::format("case {}u: {}: {{", i, entry[i]));
@@ -793,8 +795,9 @@ void Emit::decision(std::uint16_t id) {
 // labels its calls resume at, and the rule's step resumes once it is done.
 // Its inner arms have moved first, so only what they leave counts.
 void Emit::arm(std::uint16_t id, std::uint16_t hand) {
-  const std::size_t from = out.size(), took = taken.size(),
-                    resumed = labels.size();
+  const std::size_t from = out.size();
+  const std::size_t took = taken.size();
+  const std::size_t resumed = labels.size();
   group(id, hand);
   const bool step = may_suspend(id);
   if (out.size() - from < kArmBytes || regionAt.live() || foldAt.live() ||
@@ -940,10 +943,10 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     line("bool go;");
     line("go = false;");
     open("switch (c.la.sym) {");
-    std::string labels;
+    std::string cases;
     for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
-      if (a.laSet[dec.set].test(t)) labels += std::format("case {}u: ", t);
-    if (!labels.empty()) put("{}go = true; break;", labels);
+      if (a.laSet[dec.set].test(t)) cases += std::format("case {}u: ", t);
+    if (!cases.empty()) put("{}go = true; break;", cases);
     line("default: break;");
     close("}");
     line("if (!go && mend) go = true;");
@@ -1042,20 +1045,21 @@ void Emit::ladder(std::uint16_t id) {
     if (!more) break;
     id = kid(at(next), 1);
   }
-  const std::string taken = local(held, "bool", "t");
+  const std::string armed = local(held, "bool", "t");
   const Anchored regionHere(regionAt);
   if (!held) open("{");
-  put("{}{} = false;", held ? "" : "bool ", taken);
+  put("{}{} = false;", held ? "" : "bool ", armed);
   open("for (;;) {");
   for (std::size_t k = 0; k < turns.size(); ++k) {
     if (k == 1) regionAt = {};
     repetition(turns[k].first, turns[k].second);
     line("if (c.abandonDepth != ~::std::size_t{0}) break;");
-    if (k == 0) put("{} = true;", taken);
+    if (k == 0) put("{} = true;", armed);
   }
   line("break;");
   close("}");
-  put("if ({0} && c.abandonDepth == ~::std::size_t{{0}}) c.give = false;", taken);
+  put("if ({0} && c.abandonDepth == ~::std::size_t{{0}}) c.give = false;",
+      armed);
   if (!held) close("}");
 }
 
@@ -1267,12 +1271,12 @@ void Emit::climb(std::uint16_t r) {
     if (leaf == kNoRow) {
       const LlDecision& choice =
           a.cfg.decisions[a.cfg.nodes[cl.selectNode].decision];
-      std::string labels;
+      std::string cases;
       for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
         if (a.laSet[choice.set + k].test(t))
-          labels += std::format("case {}u: ", t);
-      put("{}f.prec = {}u;{} body = {}u; break;", labels, op.prec,
-          grouping(op), k);
+          cases += std::format("case {}u: ", t);
+      put("{}f.prec = {}u;{} body = {}u; break;", cases, op.prec, grouping(op),
+          k);
       continue;
     }
     // A guarded operator leaves its choice to a closure, never to one token.
@@ -1467,7 +1471,8 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   // a plain rule is only ever called in place. The arms that are steps follow
   // the rules, in the order of their numbers.
   std::vector<bool> stepped(a.cfg.nrules, false);
-  std::string armSteps, armSizes;
+  std::string armSteps;
+  std::string armSizes;
   // Each rule and arm is declared as a function, or as a step with its frame;
   // a step also takes the machine's case for its number and its frame's size.
   const auto declare = [&](std::string_view tag, const std::string& frame) {

@@ -167,15 +167,15 @@ class Dead {
     if (_eof.size() <= id) _eof.resize(_im.nodes.size(), 0);
     if (_eof[id] != 0) return _eof[id] == 2;
     const ImageNode& n = node(id);
-    bool found = n.kind == ImageKind::eof;
-    if (!found && n.kind != ImageKind::notOf && n.kind != ImageKind::andOf)
+    bool holds = n.kind == ImageKind::eof;
+    if (!holds && n.kind != ImageKind::notOf && n.kind != ImageKind::andOf)
       for (const ImageId k : _im.shape_kids(id))
         if (eof_in(k)) {
-          found = true;
+          holds = true;
           break;
         }
-    _eof[id] = found ? 2 : 1;
-    return found;
+    _eof[id] = holds ? 2 : 1;
+    return holds;
   }
 
   std::vector<Arm> arms_of(const ImageNode& choice) const {

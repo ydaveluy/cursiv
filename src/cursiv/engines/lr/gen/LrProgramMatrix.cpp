@@ -22,7 +22,8 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
       if (values.size() / 8 > std::numeric_limits<std::uint32_t>::max())
         throw LowerRefused(LowerFail::tableTooLarge);
       found =
-          _pool.emplace(block, static_cast<std::uint32_t>(values.size() / 8))
+          _pool
+              .try_emplace(block, static_cast<std::uint32_t>(values.size() / 8))
               .first;
       values.insert(values.end(), block.begin(), block.end());
     }

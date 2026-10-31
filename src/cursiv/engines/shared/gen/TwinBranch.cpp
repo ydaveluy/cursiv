@@ -215,7 +215,7 @@ const std::vector<TwinReader::Item>* TwinReader::called(std::uint32_t rule) {
     flatten(body, items);
     if (items.size() > kCallItems) items.clear();
   }
-  const auto& at = _calls.emplace(rule, std::move(items)).first->second;
+  const auto& at = _calls.try_emplace(rule, std::move(items)).first->second;
   return at.empty() ? nullptr : &at;
 }
 

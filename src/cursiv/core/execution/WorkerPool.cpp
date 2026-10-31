@@ -124,7 +124,7 @@ void WorkerPool::drain(Job& job) const noexcept {
 // The cell is read before the work, and that ordering is the whole safety: the
 // publisher's stack dies the moment the count reaches zero, so the job must not
 // be touched after the decrement -- while the cell, owned by the pool, may.
-void WorkerPool::runTask(Task& task) noexcept {
+void WorkerPool::runTask(Task& task) const noexcept {
   Job& job = *task.job;
   Cell& cell = *job.cell;
   drain(job);

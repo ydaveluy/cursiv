@@ -372,9 +372,7 @@ class ReverseNodeRange {
       ++*this;
       return copy;
     }
-    bool operator==(const iterator& other) const {
-      return _cst == other._cst && _cursor == other._cursor;
-    }
+    bool operator==(const iterator&) const = default;
 
    private:
     friend class ReverseNodeRange;

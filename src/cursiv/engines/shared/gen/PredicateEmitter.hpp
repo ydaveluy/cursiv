@@ -73,8 +73,9 @@ class PredicateEmitter {
       } else if (e.kind == LexKind::rep) {
         if (e.max != 0) _called[e.a] = true;
         if (e.max > 1 && e.b != kNoLexNode) _called[e.b] = true;
-      } else if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
-        if (!_holds.contains(e.a)) _called[e.a] = true;
+      } else if ((e.kind == LexKind::positive || e.kind == LexKind::negative) &&
+                 !_holds.contains(e.a)) {
+        _called[e.a] = true;
       }
     }
   }
@@ -365,7 +366,7 @@ class PredicateEmitter {
   void keep_runs(std::uint16_t root) {
     if (_holds.contains(root) || !phrase_keeps_runs(_g, root)) return;
     const std::string name = std::format("predicate_holds_{}", root);
-    _holds.emplace(root, name);
+    _holds.try_emplace(root, name);
     std::vector<std::uint16_t> parts;
     phrase_parts(_g, root, parts);
     rest_of(name, parts, 0, "::cursiv::predicate_some");

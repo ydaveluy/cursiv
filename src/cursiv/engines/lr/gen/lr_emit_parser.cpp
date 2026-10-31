@@ -645,19 +645,19 @@ inline bool relay_takes(::std::uint16_t s, ::std::uint16_t reader,
     std::vector<std::uint8_t> used(a.ndfa, 0);
     for (const unsigned start : starts)
       for (const unsigned st : dfa.states_from(start)) used[st] = 1;
-    std::map<std::array<std::uint64_t, 4>, std::vector<unsigned>> runs;
+    std::map<std::array<std::uint64_t, 4>, std::vector<unsigned>> byStay;
     for (unsigned st = 0; st < a.ndfa; ++st) {
       if (!used[st] || !candidate_blind(st)) continue;
       const ByteSet stay = dfa.stay(st);
       if (stay.any())
-        runs[{stay.w[0], stay.w[1], stay.w[2], stay.w[3]}].push_back(st);
+        byStay[{stay.w[0], stay.w[1], stay.w[2], stay.w[3]}].push_back(st);
     }
     raw(R"(  ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match, relays,
       [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
 )");
-    if (!runs.empty()) {
+    if (!byStay.empty()) {
       line("    switch (state) {");
-      for (const auto& [words, states] : runs) {
+      for (const auto& [words, states] : byStay) {
         for (const unsigned st : states) fmt("    case {}:\n", st);
         line("    {");
         ByteSet stay{};
@@ -912,14 +912,14 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   const DynSet& reached_terms(unsigned e) const {
     const auto [at, fresh] = reachedTerms.try_emplace(e);
     if (!fresh) return at->second;
-    DynSet& out = at->second;
+    DynSet& terms = at->second;
     for (const auto st : dfa.states_from(e)) {
       // A guard can hand the match to an acceptance the ranked one hid.
-      out |= a.dfa_acc_set(static_cast<std::uint16_t>(st));
+      terms |= a.dfa_acc_set(static_cast<std::uint16_t>(st));
       for (auto r = a.dfaRelay[st]; r != kNoRelay; r = a.relays[r].next)
-        out.set(a.relays[r].term);
+        terms.set(a.relays[r].term);
     }
-    return out;
+    return terms;
   }
 
   bool walk_partial(unsigned m) const {
@@ -1194,20 +1194,21 @@ inline void lengthen(::cursiv::LrContext& c) {
   // Whether the token in hand is a winner the mode flags as hiding a rival,
   // spelled per mode; empty where it flags none.
   std::string win_test(unsigned m, std::string_view term = "s.term") const {
-    std::string out;
+    std::string test;
     const DynSet& win = a.modeWin[m];
     for (unsigned w = 0; w * 64u < a.cfg.nterms; ++w) {
       const std::uint64_t mask = win.word(w);
       if (mask == 0) continue;
-      if (!out.empty()) out += " || ";
+      if (!test.empty()) test += " || ";
       if (std::has_single_bit(mask))
-        out += std::format("{} == {}u", term, w * 64u + std::countr_zero(mask));
+        test +=
+            std::format("{} == {}u", term, w * 64u + std::countr_zero(mask));
       else
-        out += std::format(
+        test += std::format(
             "(({0} >> 6) == {1}u && (0x{2:x}ull >> ({0} & 63u)) & 1u)", term, w,
             mask);
     }
-    return out;
+    return test;
   }
 
   // Never inlined: a copy per lexing state makes the file compile twice as
@@ -2126,8 +2127,8 @@ again:
     replace_all(d.text, "goto X" + n + ";", "goto @X;");
     return d;
   }
-  static void replace_all(std::string& d, const std::string& from,
-                          const std::string& to) {
+  static void replace_all(std::string& d, std::string_view from,
+                          std::string_view to) {
     for (std::size_t k = d.find(from); k != std::string::npos;
          k = d.find(from, k + to.size()))
       d.replace(k, from.size(), to);
@@ -2286,7 +2287,7 @@ again:
     if (a.multiCand)
       line("#include \"cursiv/engines/lr/runtime/LrLexCandidates.hpp\"");
     line("#include \"cursiv/engines/lr/runtime/lr_matcher.hpp\"");
-    if (a.modeFlagPool.sets.size() != 0)
+    if (!a.modeFlagPool.sets.empty())
       line("#include \"cursiv/engines/lr/runtime/lr_lex_exact.hpp\"");
     if (a.nrelays != 0)
       line("#include \"cursiv/engines/shared/runtime/LexRelayRun.hpp\"");
@@ -2414,7 +2415,7 @@ again:
       const unsigned g = groupOf[s];
       localOf[s] = static_cast<unsigned>(entries[g].size());
       auto label = std::format("G{}", s);
-      entryAt[g].emplace(label, localOf[s]);
+      entryAt[g].try_emplace(label, localOf[s]);
       entries[g].push_back(std::move(label));
     }
   }
@@ -2461,7 +2462,8 @@ again:
     for (const auto& [tail, n] : uses)
       if (n > 1 &&
           std::ranges::count(tail, '\n') >= std::ptrdiff_t{kLrTailLines})
-        sharedTails.emplace(tail, static_cast<unsigned>(sharedTails.size()));
+        sharedTails.try_emplace(tail,
+                                static_cast<unsigned>(sharedTails.size()));
     for (std::size_t i = 0; i < leads.size(); ++i)
       if (lone(i)) settle(i);
     for (std::size_t i = 0; i < leads.size(); ++i) {

@@ -85,7 +85,7 @@ struct ClassRanges {
 
   // Writes `x`, which starts at or after the range before `w`, at `w`, or
   // widens that range where the two touch: the slot after the last range.
-  static constexpr unicode::Range* join(unicode::Range* first,
+  static constexpr unicode::Range* join(const unicode::Range* first,
                                         unicode::Range* w,
                                         const unicode::Range& x) {
     if (w == first || x.lo > w[-1].hi + 1) {

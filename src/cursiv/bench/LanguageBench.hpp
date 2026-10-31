@@ -155,7 +155,7 @@ struct Row {
 // different amount of text.
 enum class Shape : std::size_t { ManySmall, Medium, FewLarge, Mixed, Count };
 
-inline constexpr const char* shape_name(Shape shape) {
+constexpr const char* shape_name(Shape shape) {
   switch (shape) {
     case Shape::ManySmall:
       return "many-small";
@@ -176,7 +176,7 @@ inline constexpr const char* shape_name(Shape shape) {
 // scopes is still work -- but a curve averaging them would describe neither.
 enum class Refs : std::uint8_t { Intra, Cross };
 
-inline constexpr const char* refs_name(Refs r) {
+constexpr const char* refs_name(Refs r) {
   return r == Refs::Cross ? "cross" : "intra";
 }
 

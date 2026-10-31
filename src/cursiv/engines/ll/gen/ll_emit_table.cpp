@@ -261,7 +261,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const Built& a = done.program();
   const LlStampPlan& plan = done.plan();
   // The header, and the functions it declares.
-  Out o, fn;
+  Out o;
+  Out fn;
   const auto& g = a.cfg;
   const GapEmitter gaps(g, "kSets", "kGapBoundary", "inline");
   const PredicateEmitter predicates(g, gaps, a.sectionErr);
@@ -476,11 +477,11 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kCallerAt", a.callerAt);
   o.array("::std::uint32_t", "kReturnClass", a.returnClass);
   if (callers) {
-    const TermRows pool(a.callerReads, words);
+    const TermRows reads(a.callerReads, words);
     std::vector<std::uint32_t> at(a.nstates);
     for (std::uint32_t s = 0; s < a.nstates; ++s)
-      at[s] = (pool.at[s] << 1) | a.callerEnds[s];
-    o.array("::std::uint64_t", "kCallerReads", pool.pool);
+      at[s] = (reads.at[s] << 1) | a.callerEnds[s];
+    o.array("::std::uint64_t", "kCallerReads", reads.pool);
     o.array("::std::uint32_t", "kCallerReadAt", at);
   }
   if (flagging) {

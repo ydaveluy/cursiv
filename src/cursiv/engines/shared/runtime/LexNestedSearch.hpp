@@ -80,12 +80,12 @@ class LexNestedSearch {
     };
     [[maybe_unused]] std::vector<Lit> lits;
     if constexpr (Many) {
-      const auto list = [&](TextOffset off, TextOffset size, bool close) {
+      const auto list = [&](TextOffset off, TextOffset size, bool isAfter) {
         for (TextOffset i = 0; i < size;
              i += 1u + static_cast<unsigned char>(names[off + i]))
           lits.push_back(Lit{names + off + i + 1,
-                             static_cast<unsigned char>(names[off + i]), close,
-                             nullptr});
+                             static_cast<unsigned char>(names[off + i]),
+                             isAfter, nullptr});
       };
       list(r.beforeOff, r.beforeLen, false);
       list(r.afterOff, r.afterLen, true);

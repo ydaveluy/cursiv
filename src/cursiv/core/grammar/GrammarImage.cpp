@@ -98,7 +98,7 @@ ImageId GrammarImage::derive(const ImageNode& shape,
   kids.insert(kids.end(), kidList.begin(), kidList.end());
   nodes.push_back(n);
   const auto id = static_cast<ImageId>(nodes.size() - 1);
-  _derived.emplace(std::move(key), id);
+  _derived.try_emplace(std::move(key), id);
   return id;
 }
 

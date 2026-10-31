@@ -36,6 +36,6 @@ inline constexpr LowerDesc kLlLower = detail::lower_desc<LlView<G>>();
 
 template <class G>
 using LlLowering =
-    detail::LoweringShell<LlView<G>, LlLowered, ll_lower, kLlLower<G>>;
+    detail::LoweringShell<LlView<G>, LlLowered, &ll_lower, kLlLower<G>>;
 
 }  // namespace cursiv

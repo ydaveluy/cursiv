@@ -188,9 +188,9 @@ struct LrLowerPool : LowerPool {
     }
     const LrShapeId fresh = push(std::move(n));
     if (const auto it = unorderedHead.find(at); it != unorderedHead.end())
-      unorderedHead.emplace(fresh, it->second);
+      unorderedHead.try_emplace(fresh, it->second);
     if (const auto it = unorderedTail.find(at); it != unorderedTail.end())
-      unorderedTail.emplace(fresh, it->second);
+      unorderedTail.try_emplace(fresh, it->second);
     return fresh;
   }
 };

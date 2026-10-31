@@ -548,9 +548,9 @@ int LrGssGraph::forked(Id top, Id c, const std::array<Climb, 2>& stacks) {
       const Rope& forks = _digest.forks();
       const auto cut = forks.first_where(
           rope, [at](const LrGssForkAgg& a) { return a.at >= at; });
-      Rope::Cursor c;
-      for (c.seek(forks, rope, cut); !c.done(); c.next())
-        ends.emplace_back(_steps[c.value()].vertex, c.value());
+      Rope::Cursor cur;
+      for (cur.seek(forks, rope, cut); !cur.done(); cur.next())
+        ends.emplace_back(_steps[cur.value()].vertex, cur.value());
     };
     take(_edges[stacks[side].edge].forest);
     Id w = stacks[side].from;

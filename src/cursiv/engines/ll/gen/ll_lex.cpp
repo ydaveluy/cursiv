@@ -29,8 +29,7 @@
 #include "cursiv/engines/shared/gen/lex_reserve.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 
-namespace cursiv {
-namespace detail {
+namespace cursiv::detail {
 
 // What each section's grammar reads, by the section's own configuration: the
 // terminals of its positions and operators.
@@ -524,5 +523,4 @@ void ll_build_lexer(LlBuiltProgram& b) {
   ll_flag_choices(b, alpha, modes);
 }
 
-}  // namespace detail
-}  // namespace cursiv
+}  // namespace cursiv::detail

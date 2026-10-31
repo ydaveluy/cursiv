@@ -40,7 +40,7 @@ DocumentId DefaultDocuments::getOrCreateDocumentId(std::string_view uri) {
   const auto id = static_cast<DocumentId>(_rows.size());
   _rows.emplace_back(canonical, nullptr);
   _byFolder.insert(canonical, id);
-  _byUri.emplace(std::move(canonical), id);
+  _byUri.try_emplace(std::move(canonical), id);
   return id;
 }
 

@@ -865,7 +865,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   if (!WithLa) closLaPool.resize(closPool.size());
   // Terminal rows are already sorted. Gotos are ordered by (state, symbol):
   // their pool indices are also the lookback transition identities.
-  auto unordered = std::move(gotos.pool);
+  auto unordered = std::exchange(gotos.pool, {});
   gotos.pool.reserve(unordered.size());
   for (unsigned s = 0; s < ns; ++s) {
     LrEdge* const row = unordered.data() + gotos.at[s];
@@ -1932,7 +1932,7 @@ class LrWrittenOrder {
     if (const auto it = _back.find(k); it != _back.end()) return it->second;
     auto here = lr_back(_preds, _seen, _seenGen, s, n);
     std::ranges::sort(here);
-    return _back.emplace(k, std::move(here)).first->second;
+    return _back.try_emplace(k, std::move(here)).first->second;
   }
 
   // Production `p`'s entry in the closure of rule `b`, if it has one: a rule's
@@ -2571,7 +2571,7 @@ class LrWrittenOrder {
                     [&](std::uint32_t i) { return cls[i]; }};
       sh.rootSk.assign(l.roots.size(), kNone);
     }
-    _shapeOf.emplace(std::move(id), at->second);
+    _shapeOf.try_emplace(std::move(id), at->second);
     return r.shape[list] = at->second;
   }
 
