@@ -41,12 +41,14 @@
 #include "cursiv/engines/lr/table/LrProgramRows.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/gen/set_dedup.hpp"
 #include "cursiv/engines/shared/gen/stamp_split.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
 #include "cursiv/engines/shared/table/StampLayout.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/lr/SectionTailGrammar.hpp"
 
 namespace lr_construction_cases {
 
@@ -1253,7 +1255,6 @@ void alias_decisions_keep_their_order_around_the_callee() {
 void lexical_pools_cannot_wrap() {
   for (unsigned which = 0; which < 3; ++which) {
     LrBuildCfg cfg;
-    detail::SetIndex ix;
     CHECK(refused(
         [&] {
           if (which == 0) {
@@ -1263,8 +1264,10 @@ void lexical_pools_cannot_wrap() {
             cfg.nlexKid = 65535;
             cfg.push_lex_kid(0);
           } else {
+            cfg.sets[65534] = {};
+            cfg.setDecode[65534] = 0;
             cfg.nsets = 65535;
-            detail::intern_set(cfg, ix, {});
+            lex_intern_set(cfg, {});
           }
         },
         LowerFail::tokenGraphTooLarge));
@@ -1278,7 +1281,31 @@ void lexical_pools_cannot_wrap() {
   low.cfg.nsets = 65535;
   CHECK(refused([&] { (void)lr_build_automaton(low); },
                 LowerFail::tokenGraphTooLarge));
+}
 
+// A class is interned once, whether the lowering or a build's guard product
+// asks for it: a section's word class is declared before the lowering reifies
+// the grammar's own, and the two meet in one pool.
+void sets_are_interned_once() {
+  const auto once = [](const LrBuildTable& a) {
+    std::vector<detail::SetKey> seen;
+    for (std::uint16_t s = 0; s < a.cfg.nsets; ++s) {
+      const detail::SetKey key{a.cfg.sets[s], a.cfg.setDecode[s],
+                               lex_set_scalars(a.cfg, s)};
+      CHECK(std::ranges::find(seen, key) == seen.end());
+      CHECK(lex_intern_set(const_cast<LrBuildCfg&>(a.cfg), key.bytes,
+                           key.decode, key.scalars) == s);
+      seen.push_back(key);
+    }
+    CHECK(seen.size() == a.cfg.nsets);
+  };
+  const auto sectioned = lr_build_automaton(LrLowering<tsection::Lr>::table());
+  CHECK(!sectioned.cfg.lowerFail());
+  once(sectioned);
+  // A guard product interns after the lowering, whatever its verdict.
+  using Guard =
+      WordPastMatch<some(cr<"#">) + !lit<"abc"> + !cr<"b"> + cr<"a-d">>;
+  once(lr_build_automaton(LrLowering<Guard>::table()));
 }
 }  // namespace
 
@@ -1304,6 +1331,7 @@ void run() {
   wordless_aliases_need_no_election_paths();
   alias_decisions_keep_their_order_around_the_callee();
   lexical_pools_cannot_wrap();
+  sets_are_interned_once();
   malformed_unicode_classes_are_refused();
 }
 

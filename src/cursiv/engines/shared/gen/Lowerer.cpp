@@ -48,7 +48,7 @@ Lowerer::Lowerer(GrammarImage& image, const LowerDesc& desc,
       _writes(writes),
       _fault(fault),
       _pool(pool),
-      _lex(*this, wordBytes, _pool.setIndex) {}
+      _lex(*this, wordBytes) {}
 
 std::vector<ImageId> Lowerer::kids_of(const ImageNode& n) const {
   return {_im.kids.begin() + n.first, _im.kids.begin() + n.first + n.count};

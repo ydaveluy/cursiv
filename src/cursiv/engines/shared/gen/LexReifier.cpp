@@ -8,7 +8,6 @@
 #include "cursiv/core/grammar/word_final_in.hpp"
 #include "cursiv/core/text/scalar_at.hpp"
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
-#include "cursiv/engines/shared/gen/SetIndex.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/engines/shared/gen/Lowerer.hpp"
@@ -57,13 +56,14 @@ bool one_character(std::string_view s) {
 
 }  // namespace
 
-LexReifier::LexReifier(Lowerer& lowerer, ByteSet& wordBytes,
-                       detail::SetIndex& sets)
-    : _lowerer(lowerer), _im(lowerer._im), _c(lowerer._c),
-      _wordBytes(wordBytes), _x(sets) {}
+LexReifier::LexReifier(Lowerer& lowerer, ByteSet& wordBytes)
+    : _lowerer(lowerer),
+      _im(lowerer._im),
+      _c(lowerer._c),
+      _wordBytes(wordBytes) {}
 
 std::uint16_t LexReifier::intern(const ByteSet& set, std::uint16_t decode) {
-  return detail::intern_set(_c, _x, set, decode);
+  return lex_intern_set(_c, set, decode);
 }
 
 std::uint16_t LexReifier::group(LexKind kind,

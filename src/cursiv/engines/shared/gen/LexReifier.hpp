@@ -19,15 +19,11 @@
 
 namespace cursiv {
 
-namespace detail {
-struct SetIndex;
-}
-
 class Lowerer;
 
 class LexReifier {
  public:
-  LexReifier(Lowerer& lowerer, ByteSet& wordBytes, detail::SetIndex& sets);
+  LexReifier(Lowerer& lowerer, ByteSet& wordBytes);
 
   ImageId resolve(unsigned cfg, ImageId node,
                   std::span<const std::uint32_t> path = {});
@@ -141,7 +137,6 @@ class LexReifier {
   GrammarImage& _im;
   LowerPools& _c;
   ByteSet& _wordBytes;
-  detail::SetIndex& _x;
   std::map<std::tuple<ImageKind, std::uint8_t, std::uint32_t, std::uint64_t,
                       std::uint64_t, std::string, std::string, const void*,
                       std::vector<ImageId>>,

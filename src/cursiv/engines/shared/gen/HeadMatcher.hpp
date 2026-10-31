@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "cursiv/engines/shared/gen/LexNfaPool.hpp"
-#include "cursiv/engines/shared/gen/SetIndex.hpp"
 #include "cursiv/engines/shared/gen/lex_intern_set.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/DynSet.hpp"

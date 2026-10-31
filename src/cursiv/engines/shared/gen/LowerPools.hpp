@@ -16,6 +16,7 @@
 #include "cursiv/engines/shared/gen/LexCheckIncomplete.hpp"
 #include "cursiv/engines/shared/gen/LexWordClass.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/SetIndex.hpp"
 #include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
 #include "cursiv/engines/shared/gen/Vec.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
@@ -57,6 +58,8 @@ struct LowerPools : LowerVerdicts {
   Vec<char> names{};
   Vec<ByteSet> sets{};
   Vec<std::uint16_t> setDecode{};
+  // Where each set was interned, for `lex_intern_set` to find it again.
+  detail::SetIndex setIndex{};
   // Per decoded set, where `scalarRanges` lists the scalars it tests, as
   // `lex_set_scalars` reads it.
   Vec<std::uint32_t> setScalars{};

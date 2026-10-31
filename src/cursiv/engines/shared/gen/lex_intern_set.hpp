@@ -1,6 +1,6 @@
-// The sets a lexer construction invents. Resolving a refusal spells classes the
-// grammar never named; they join the lowering's pool, which has no index here
-// -- a build interns a handful where the lowering interned hundreds.
+// The sets of the pools, interned once each: the lowering's classes and those
+// a lexer construction invents when resolving a refusal spells classes the
+// grammar never named.
 #pragma once
 
 #include <algorithm>
@@ -11,6 +11,7 @@
 #include "cursiv/core/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/SetIndex.hpp"
 #include "cursiv/engines/shared/table/ByteSet.hpp"
 #include "cursiv/engines/shared/table/TermInfo.hpp"
 
@@ -29,23 +30,23 @@ std::uint32_t lex_set_scalars(const Cfg& g, std::uint16_t s) {
   return s < g.setScalars.size() ? g.setScalars[s] : 0;
 }
 
+// The set with these bytes, decoding and scalars, interned once: the pool's
+// index answers, kept in step with the pool, which a trial may have cut back.
 template <class Cfg>
 std::uint16_t lex_intern_set(Cfg& c, const ByteSet& s,
                              std::uint16_t decode = kNoSet,
                              std::uint32_t scalars = 0) {
-  const std::uint16_t n = c.nsets;
-  const ByteSet* const sets = c.sets.data();
-  const std::uint16_t* const decodes = c.setDecode.data();
-  for (std::uint16_t i = 0; i < n; ++i)
-    if (sets[i].w[0] == s.w[0] && decodes[i] == decode && sets[i] == s &&
-        lex_set_scalars(c, i) == scalars)
-      return i;
+  detail::SetIndex& x = c.setIndex;
+  x.sync(c);
+  const detail::SetKey key{s, decode, scalars};
+  if (const std::uint16_t* const at = x.find(key)) return *at;
   // Never pass the sentinel on as an NFA edge's set index.
   if (c.nsets == kNoSet) throw LowerRefused(LowerFail::tokenGraphTooLarge);
   c.sets[c.nsets] = s;
   c.setDecode[c.nsets] = decode;
   if (scalars != 0 || c.nsets < c.setScalars.size())
     c.setScalars[c.nsets] = scalars;
+  x.add(key);
   return c.nsets++;
 }
 
