@@ -172,7 +172,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
     }
 
-    const outputChannel = vscode.window.createOutputChannel(`cursiv ${LABEL}`);
+    const outputChannel = vscode.window.createOutputChannel(`cursiv ${LABEL}`, {
+        log: true
+    });
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine(found && found.args.length > 0
         ? `server: wasm ${found.args[found.args.length - 1]}`

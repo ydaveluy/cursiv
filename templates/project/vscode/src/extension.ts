@@ -107,7 +107,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
     }
 
-    const outputChannel = vscode.window.createOutputChannel(ID);
+    const outputChannel = vscode.window.createOutputChannel(ID, { log: true });
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine(`server: ${server.command} ${server.args.join(' ')}`);
 

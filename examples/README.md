@@ -29,7 +29,7 @@ See [Command line](../docs/reference/cli.md).
 ## Try an editor session
 
 Install Node.js, npm and the recommended VS Code extensions, including CMake
-Tools and clangd. Native servers support VS Code 1.86 or later; WASI servers
+Tools and clangd. Native servers support VS Code 1.91 or later; WASI servers
 require 1.101 or later. Open the repository root, configure a CMake preset,
 choose **Run Statemachine Extension** in Run and Debug, then press **F5**.
 

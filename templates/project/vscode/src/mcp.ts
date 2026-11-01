@@ -10,7 +10,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 const MCP_METHOD = 'cursiv/mcp';
 
 // The MCP registration API of VS Code 1.101 and later, declared here so the
-// extension still builds and runs on VS Code 1.86.
+// extension still builds and runs on VS Code 1.91.
 interface McpRegistry {
     lm?: {
         registerMcpServerDefinitionProvider?(

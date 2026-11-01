@@ -1,6 +1,6 @@
 # Ship an editor extension
 
-The scaffold includes a VS Code client. It needs VS Code 1.86 or later with a
+The scaffold includes a VS Code client. It needs VS Code 1.91 or later with a
 native server, and 1.101 or later with a WebAssembly (WASI) server. You also
 need Node.js with npm, Ninja for the supplied CMake presets, and the
 recommended CMake Tools and clangd extensions.
@@ -86,7 +86,7 @@ executable to `vscode/bin/`. A build directory outside `vscode/` is not
 packaged. Check the contents with `npx vsce ls --no-dependencies`.
 
 For a WebAssembly-only extension, set `engines.vscode` to `^1.101.0` in
-`vscode/package.json`. The scaffold's `^1.86.0` allows native servers.
+`vscode/package.json`. The scaffold's `^1.91.0` allows native servers.
 
 ## MCP integration
 

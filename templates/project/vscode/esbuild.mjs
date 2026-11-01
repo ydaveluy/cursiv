@@ -15,7 +15,7 @@ const context = await esbuild.context({
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18', // The Node.js version of VS Code 1.86.
+  target: 'node20', // The Node.js version of VS Code 1.91.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,

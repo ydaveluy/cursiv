@@ -305,7 +305,7 @@ to replace the sample with a complete language.
 ## Open the editor
 
 Install Node.js, npm and the recommended VS Code extensions, including CMake
-Tools and clangd. Native servers support VS Code 1.86 or later; WASI servers
+Tools and clangd. Native servers support VS Code 1.91 or later; WASI servers
 require 1.101 or later. Open this project folder in VS Code, configure the
 CMake build and press **F5**. The launch task builds the server and client,
 then opens `example/` in a development window.
@@ -819,7 +819,7 @@ const context = await esbuild.context({
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18', // The Node.js version of VS Code 1.86.
+  target: 'node20', // The Node.js version of VS Code 1.91.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,
@@ -862,7 +862,7 @@ _cursiv_new_emit([==[vscode/package.json]==] [==[{
   "private": true,
   "license": "MIT",
   "engines": {
-    "vscode": "^1.86.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages"
@@ -924,11 +924,11 @@ _cursiv_new_emit([==[vscode/package.json]==] [==[{
     "syntaxes"
   ],
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "@types/vscode": "~1.86.0",
+    "@types/vscode": "~1.91.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "@vscode/vsce": "^3.9.2"
@@ -1052,7 +1052,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
     }
 
-    const outputChannel = vscode.window.createOutputChannel(ID);
+    const outputChannel = vscode.window.createOutputChannel(ID, { log: true });
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine(`server: ${server.command} ${server.args.join(' ')}`);
 
@@ -1093,7 +1093,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 const MCP_METHOD = 'cursiv/mcp';
 
 // The MCP registration API of VS Code 1.101 and later, declared here so the
-// extension still builds and runs on VS Code 1.86.
+// extension still builds and runs on VS Code 1.91.
 interface McpRegistry {
     lm?: {
         registerMcpServerDefinitionProvider?(

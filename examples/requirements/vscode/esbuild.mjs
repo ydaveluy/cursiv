@@ -16,7 +16,7 @@ const context = await esbuild.context({
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node18', // VS Code 1.86 supports native servers; WASI needs 1.101.
+  target: 'node20', // VS Code 1.91 supports native servers; WASI needs 1.101.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,

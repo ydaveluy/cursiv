@@ -59,7 +59,7 @@ to replace the sample with a complete language.
 ## Open the editor
 
 Install Node.js, npm and the recommended VS Code extensions, including CMake
-Tools and clangd. Native servers support VS Code 1.86 or later; WASI servers
+Tools and clangd. Native servers support VS Code 1.91 or later; WASI servers
 require 1.101 or later. Open this project folder in VS Code, configure the
 CMake build and press **F5**. The launch task builds the server and client,
 then opens `example/` in a development window.
