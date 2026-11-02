@@ -27,7 +27,7 @@ endif()
 
 enable_language(C)
 include(FetchContent)
-set(_mimalloc_revision b18ab4eef383f655e760881b02eff8af02800879) # v3.6.0
+set(_mimalloc_revision 56dc5eb80145f9a3ba7ca23d47c6a248b9d8586c) # v3.6.1
 FetchContent_Declare(cursiv_mimalloc
     GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
     GIT_TAG ${_mimalloc_revision}
