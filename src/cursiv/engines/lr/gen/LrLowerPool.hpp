@@ -142,13 +142,34 @@ struct LrLowerPool : LowerPool {
       return rowKind[r] == WriteKind::create || rowKind[r] == WriteKind::climb;
     });
   }
+  // Flags run after their operand in the same construction context. Unlike
+  // assign/append, they do not give that operand a separate current node.
+  bool only_flags(const LrActs& rows) const {
+    return std::ranges::all_of(rows, [&](std::uint16_t r) {
+      return rowKind[r] == WriteKind::flag;
+    });
+  }
   // A position whose first reading is a nest turn.
   bool head_turns(LrShapeId at) const {
     const LrLowerNode& n = e[at];
     if (turns(n.made)) return true;
-    if (!n.made.empty() || !n.row.empty()) return false;
+    if (!n.made.empty() || !only_flags(n.row)) return false;
     if (n.kind == LrShape::rep) return head_turns(n.sym);
-    if (n.kind == LrShape::seq) return n.count != 0 && head_turns(kid[n.sym]);
+    if (n.kind == LrShape::seq) {
+      for (std::size_t i = 0; i < n.count; ++i) {
+        const LrShapeId at = kid[n.sym + i];
+        if (head_turns(at)) return true;
+        const auto& before = e[at];
+        // Conditions and flags do not replace a receiver. A creation or a
+        // value write does; a token means this is no longer the head.
+        if (!before.made.empty() || !only_flags(before.row) ||
+            (before.kind != LrShape::none && before.kind != LrShape::end &&
+             !(before.kind == LrShape::sym &&
+               is_gap(static_cast<std::uint16_t>(before.sym)))))
+          return false;
+      }
+      return false;
+    }
     if (n.kind == LrShape::alt || n.kind == LrShape::unordered)
       for (std::size_t i = 0; i < n.count; ++i)
         if (head_turns(kid[n.sym + i])) return true;

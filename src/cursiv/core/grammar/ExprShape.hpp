@@ -262,4 +262,42 @@ struct operand_rule<E, true> {
 template <class E>
 struct operand_of : operand_rule<E, apart<E>> {};
 
+// The section values a directive can reach without crossing a construction
+// context. Ordinary operands keep their original shape.
+template <class E>
+inline constexpr bool section_operand = false;
+template <class G, class E>
+inline constexpr bool section_operand<Embed<G, E>> = true;
+template <class... Es>
+inline constexpr bool section_operand<Choice<Es...>> =
+    (section_operand<Es> || ...);
+template <class I, class H, class E>
+inline constexpr bool section_operand<Skip<I, H, E>> = section_operand<E>;
+
+// Choices and trivia scopes keep their operand's value. A section pays its
+// entry's value, so its directive belongs on that call, inside the delimiters.
+// Stop at every other shape: a sequence or a data rule still denotes its own
+// text, including any section delimiters it reads.
+template <template <auto, class> class Directive, auto S, class E>
+struct directive_operand {
+  using type = Directive<S, typename operand_of<E>::type>;
+};
+template <template <auto, class> class Directive, auto S, class... Es>
+  requires section_operand<Choice<Es...>>
+struct directive_operand<Directive, S, Choice<Es...>> {
+  using type = Choice<typename directive_operand<Directive, S, Es>::type...>;
+};
+template <template <auto, class> class Directive, auto S, class I, class H,
+          class E>
+  requires section_operand<E>
+struct directive_operand<Directive, S, Skip<I, H, E>> {
+  using type = Skip<I, H, typename directive_operand<Directive, S, E>::type>;
+};
+template <template <auto, class> class Directive, auto S, class G, class O,
+          class M, class C>
+struct directive_operand<Directive, S, Embed<G, Seq<O, M, C>>> {
+  using type =
+      Embed<G, Seq<O, typename directive_operand<Directive, S, M>::type, C>>;
+};
+
 }  // namespace cursiv::detail

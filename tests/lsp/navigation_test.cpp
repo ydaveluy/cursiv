@@ -41,6 +41,7 @@
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 
 namespace {
 
@@ -409,26 +410,14 @@ namespace ct = cursiv::test;
 
 // The fixture for the reach of an edit: its members hold a cross reference
 // that crosses documents, and its identifiers exclude the reserved words.
-template <std::unique_ptr<cursiv::Parser> (*MakeParser)(),
-          std::unique_ptr<cursiv::AstReflection> (*MakeReflection)()>
-struct World : support::World<cursiv::SharedLspServices> {
-  cursiv::LspServices* language;
-
-  World(std::string id, std::string extension)
-      : language(&support::add_language<cursiv::LspServices>(
-            shared, {std::move(id), {std::move(extension)}, {}}, MakeParser(),
-            MakeReflection())) {}
-
+struct World : support::LspWorkspace {
   [[nodiscard]] std::optional<lsp::WorkspaceEdit> rename(
       const cursiv::Document& document, lsp::Uint line, lsp::Uint character,
       std::string_view newName) const {
-    return language->renameProvider->rename(
+    return ws->renameProvider->rename(
         document, lsp::Position{line, character}, newName, cursiv::kNoCancel);
   }
 };
-
-using Workspace = World<&ws::generated::Workspace::create_parser,
-                        &ws::generated::Workspace::create_ast_reflection>;
 
 // The fixture's own arm on top of the default: a package's members answer to
 // qualified names, so renaming the package rewrites their sites too.
@@ -458,13 +447,13 @@ constexpr std::string_view kUse = "entity E { f : String }\n";
 // A keyword denotes nothing, so there is no span to put the edit box over --
 // and `nullopt` is what tells the client not to open one.
 void a_keyword_is_not_renamable() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectRename(*world.language, {.text = "dat<|>atype String\n",
+  const World world;
+  (void)ct::expectRename(*world.ws, {.text = "dat<|>atype String\n",
                                            .newName = "Text",
                                            .nothingUnderCaret = true,
                                            .disposeAfterCheck = true});
   // ...where the name beside it is.
-  (void)ct::expectRename(*world.language, {.text = "datatype <|S<|>tring|>\n",
+  (void)ct::expectRename(*world.ws, {.text = "datatype <|S<|>tring|>\n",
                                            .newName = "Text",
                                            .disposeAfterCheck = true});
 }
@@ -473,7 +462,7 @@ void a_keyword_is_not_renamable() {
 // live: a rename that stopped at the asking document would leave the workspace
 // pointing at a name nothing declares.
 void a_rename_crosses_the_documents_that_name_it() {
-  const Workspace world("workspace", ".ws");
+  const World world;
   const std::vector<cursiv::Document*> documents =
       world.built({{"file:///w/a.ws", std::string(kLib)},
                    {"file:///w/b.ws", std::string(kUse)}});
@@ -509,8 +498,8 @@ void a_rename_crosses_the_documents_that_name_it() {
 // what the edit box was opened to fix: the one site is rewritten, in the
 // document that asked, and nowhere else.
 void an_unresolved_reference_renames_its_own_site() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectRename(*world.language,
+  const World world;
+  (void)ct::expectRename(*world.ws,
                          {.text = "entity E { f : <|M<|>issing|> }\n",
                           .newName = "String",
                           .disposeAfterCheck = true});
@@ -520,9 +509,9 @@ void an_unresolved_reference_renames_its_own_site() {
 // it and reading the document back refuses a name that lexes as two words, or
 // the empty string.
 void a_new_name_the_language_would_not_read_back_is_refused() {
-  const Workspace world("workspace", ".ws");
+  const World world;
   for (const std::string_view refused : {"Two Words", ""})
-    (void)ct::expectRename(*world.language,
+    (void)ct::expectRename(*world.ws,
                            {.text = "datatype <|>String\n"
                                     "entity E { f : String }\n",
                             .newName = std::string(refused),
@@ -535,15 +524,15 @@ void a_new_name_the_language_would_not_read_back_is_refused() {
 // brace or a comment there at no extra cost. None is read as the name it
 // replaces, so all are refused; a name still goes through.
 void a_repaired_document_refuses_what_is_not_read_as_the_name() {
-  const Workspace world("workspace", ".ws");
+  const World world;
   for (const std::string_view refused : {"1", "{", ":", "/* c */"})
-    (void)ct::expectRename(*world.language,
+    (void)ct::expectRename(*world.ws,
                            {.text = "datatype <|>String :\n"
                                     "entity E { f : String }\n",
                             .newName = std::string(refused),
                             .nameRefused = true,
                             .disposeAfterCheck = true});
-  (void)ct::expectRename(*world.language,
+  (void)ct::expectRename(*world.ws,
                          {.text = "datatype <|<|>String|> :\n"
                                   "entity E { f : <|String|> }\n",
                           .newName = "Text",
@@ -551,18 +540,18 @@ void a_repaired_document_refuses_what_is_not_read_as_the_name() {
   // The same at a reference, judged where it stands. `a.` reads as a
   // qualified name only once the repair inserts its last segment.
   for (const std::string_view refused : {"1", "{", "a."})
-    (void)ct::expectRename(*world.language,
+    (void)ct::expectRename(*world.ws,
                            {.text = "entity E { f : <|>Missing :\n",
                             .newName = std::string(refused),
                             .nameRefused = true,
                             .disposeAfterCheck = true});
-  (void)ct::expectRename(*world.language,
+  (void)ct::expectRename(*world.ws,
                          {.text = "entity E { f : <|<|>Missing|> :\n",
                           .newName = "a.b",
                           .disposeAfterCheck = true});
   // The old name may be the one the repair completed: renaming it to a whole
   // name is how the author fixes it.
-  (void)ct::expectRename(*world.language, {.text = "package <|<|>a.|> { }\n",
+  (void)ct::expectRename(*world.ws, {.text = "package <|<|>a.|> { }\n",
                                            .newName = "a.b",
                                            .disposeAfterCheck = true});
 }
@@ -570,7 +559,7 @@ void a_repaired_document_refuses_what_is_not_read_as_the_name() {
 // Every document the edits touch is read back with its own substitutions, a
 // repaired one too: its reference still reads as the name it renames.
 void a_rename_reads_back_every_document_it_edits() {
-  const Workspace world("workspace", ".ws");
+  const World world;
   const std::vector<cursiv::Document*> documents =
       world.built({{"file:///w/a.ws", std::string(kLib)},
                    {"file:///w/b.ws", "entity E { f : String :\n"}});
@@ -585,7 +574,7 @@ void a_rename_reads_back_every_document_it_edits() {
 }
 
 void name_validation_observes_the_requests_cancellation() {
-  Workspace world("workspace", ".ws");
+  World world;
   const auto documents = world.built({{"file:///w/a.ws", std::string(kLib)}});
   cursiv::CancellationTokenSource cancel;
   struct CancellingParser final : cursiv::Parser {
@@ -607,12 +596,12 @@ void name_validation_observes_the_requests_cancellation() {
     }
   };
   auto parser = std::make_unique<CancellingParser>(
-      std::move(world.language->parser), cancel);
+      std::move(world.ws->parser), cancel);
   const auto* observer = parser.get();
-  world.language->parser = std::move(parser);
+  world.ws->parser = std::move(parser);
   bool cancelled = false;
   try {
-    (void)world.language->renameProvider->rename(
+    (void)world.ws->renameProvider->rename(
         *documents[0], {0, 9}, "Text", cancel.get_token());
   } catch (const cursiv::OperationCancelled&) {
     cancelled = true;
@@ -623,8 +612,8 @@ void name_validation_observes_the_requests_cancellation() {
 
 // ...and the accepted one reaches both the reference and the declaration.
 void an_accepted_rename_rewrites_every_site() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectRename(*world.language,
+  const World world;
+  (void)ct::expectRename(*world.ws,
                          {.text = "datatype <|<|>String|>\n"
                                   "entity E { f : <|String|> }\n",
                           .newName = "Text",
@@ -731,26 +720,14 @@ namespace ct = cursiv::test;
 
 // The fixture answers for both: its keywords carry `.doc<>()` and its members
 // hold a cross reference.
-template <std::unique_ptr<cursiv::Parser> (*MakeParser)(),
-          std::unique_ptr<cursiv::AstReflection> (*MakeReflection)()>
-struct World : support::World<cursiv::SharedLspServices> {
-  cursiv::LspServices* language;
-
-  World(std::string id, std::string extension)
-      : language(&support::add_language<cursiv::LspServices>(
-            shared, {std::move(id), {std::move(extension)}, {}}, MakeParser(),
-            MakeReflection())) {}
-
+struct World : support::LspWorkspace {
   [[nodiscard]] std::optional<lsp::Hover> at(const cursiv::Document& document,
                                              lsp::Uint line,
                                              lsp::Uint character) const {
-    return language->hoverProvider->getHoverContent(
+    return ws->hoverProvider->getHoverContent(
         document, lsp::Position{line, character}, cursiv::kNoCancel);
   }
 };
-
-using Workspace = World<&ws::generated::Workspace::create_parser,
-                        &ws::generated::Workspace::create_ast_reflection>;
 
 constexpr std::string_view kKeywordModel =
     "datatype String\n"
@@ -759,8 +736,8 @@ constexpr std::string_view kKeywordModel =
 // The grammar's own prose, on the word that carries it -- and the range is
 // that word alone, not the declaration it opens.
 void a_documented_keyword_answers_the_grammars_prose() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectHover(*world.language,
+  const World world;
+  (void)ct::expectHover(*world.ws,
                         {.text = "datatype String\n"
                                  "e<|>ntity E { f : String }\n",
                          .hover = "Declares an entity, closed by `}`.",
@@ -779,8 +756,8 @@ void a_documented_keyword_answers_the_grammars_prose() {
 // A CST span is half-open, so a caret at the very end of a word is one past
 // it: the one retry is what makes a double-click land on the word it selected.
 void a_caret_one_byte_past_the_word_is_still_on_it() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectHover(*world.language,
+  const World world;
+  (void)ct::expectHover(*world.ws,
                         {.text = "datatype String\n"
                                  "entity<|> E { f : String }\n",
                          .hover = "Declares an entity, closed by `}`.",
@@ -797,8 +774,8 @@ constexpr std::string_view kModel =
 // A name that denotes a declaration shows that declaration's documentation,
 // and the range is the name as written here rather than the target's.
 void a_resolved_reference_answers_its_declarations_documentation() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectHover(*world.language,
+  const World world;
+  (void)ct::expectHover(*world.ws,
                         {.text = "/** The string. */\n"
                                  "datatype String\n"
                                  "entity E { f : S<|>tring }\n",
@@ -817,12 +794,12 @@ void a_resolved_reference_answers_its_declarations_documentation() {
 // Nothing under the caret is `nullopt` and not an empty popup: an editor draws
 // a frame around whatever it is handed.
 void a_caret_on_nothing_answers_nothing() {
-  const Workspace world("workspace", ".ws");
-  (void)ct::expectHover(*world.language, {.text = "<|>\n\ndatatype String\n",
+  const World world;
+  (void)ct::expectHover(*world.ws, {.text = "<|>\n\ndatatype String\n",
                                           .disposeAfterCheck = true});
 
   // ...and so does a name nobody documented.
-  (void)ct::expectHover(*world.language, {.text = "datatype St<|>ring\n",
+  (void)ct::expectHover(*world.ws, {.text = "datatype St<|>ring\n",
                                           .disposeAfterCheck = true});
 }
 

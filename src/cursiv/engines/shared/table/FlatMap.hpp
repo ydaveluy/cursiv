@@ -16,15 +16,11 @@ class FlatMap {
   // The value at `key` and whether it was just made, as `V{}`.
   std::pair<V&, bool> emplace(std::uint64_t key) {
     if (_size * 2 >= _keys.size()) grow();
-    const std::size_t mask = _keys.size() - 1;
-    for (std::size_t i = mix(key) & mask;; i = (i + 1) & mask) {
-      if (_keys[i] == key) return {_vals[i], false};
-      if (_keys[i] == kFree) {
-        _keys[i] = key;
-        ++_size;
-        return {_vals[i], true};
-      }
-    }
+    const std::size_t i = slot(key);
+    if (_keys[i] == key) return {_vals[i], false};
+    _keys[i] = key;
+    ++_size;
+    return {_vals[i], true};
   }
 
   void reset() {
@@ -37,11 +33,8 @@ class FlatMap {
   // The value at `key`, or null.
   V* find(std::uint64_t key) {
     if (_size == 0) return nullptr;
-    const std::size_t mask = _keys.size() - 1;
-    for (std::size_t i = mix(key) & mask;; i = (i + 1) & mask) {
-      if (_keys[i] == key) return &_vals[i];
-      if (_keys[i] == kFree) return nullptr;
-    }
+    const std::size_t i = slot(key);
+    return _keys[i] == key ? &_vals[i] : nullptr;
   }
 
  private:
@@ -51,6 +44,13 @@ class FlatMap {
     std::uint64_t h = 0x9e3779b97f4a7c15ull ^ (key + 0x9e3779b97f4a7c15ull);
     h *= 0xff51afd7ed558ccdull;
     return h ^ (h >> 33);
+  }
+
+  std::size_t slot(std::uint64_t key) const {
+    const std::size_t mask = _keys.size() - 1;
+    std::size_t i = mix(key) & mask;
+    while (_keys[i] != key && _keys[i] != kFree) i = (i + 1) & mask;
+    return i;
   }
 
   void grow() {

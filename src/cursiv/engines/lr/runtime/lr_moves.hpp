@@ -42,8 +42,9 @@ CURSIV_ALWAYS_INLINE inline void lr_flush(LrContext& c,
   if (c.pendEnd > c.committed) c.committed = c.pendEnd;
 }
 
-// The leaf onto the tape and its frame onto the stack.
-template <StampLayout L = StampLayout{}>
+// The leaf onto the tape and its frame onto the stack. Generated shifts enter
+// a fresh lexer directly, so they need no lookahead invalidation.
+template <StampLayout L = StampLayout{}, bool ResetLookahead = true>
 CURSIV_ALWAYS_INLINE inline void lr_push_leaf(LrContext& c,
                                               std::uint32_t target,
                                               ElementId leaf, TextOffset begin,
@@ -55,7 +56,7 @@ CURSIV_ALWAYS_INLINE inline void lr_push_leaf(LrContext& c,
   // The state after the shift is what a caret replays the tape from.
   c.tape.leaf<L>(begin, end, leaf, static_cast<std::uint16_t>(target));
   c.committed = end;
-  c.laMode = kNoMode;
+  if constexpr (ResetLookahead) c.laMode = kNoMode;
   ++c.shifts;  // what proves a repair, and what validates the next
 }
 

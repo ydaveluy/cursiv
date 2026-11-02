@@ -306,7 +306,8 @@ void lr_reduce_key(const LrBuildCfg& g, unsigned p,
          pb.owner,
          static_cast<std::uint32_t>(pb.tailCfg) |
              (static_cast<std::uint32_t>(pr.gap) << 8),
-         static_cast<std::uint32_t>(pb.endOnly)};
+         static_cast<std::uint32_t>(pb.endOnly) |
+             (static_cast<std::uint32_t>(pb.regionExit) << 1)};
   for (unsigned i = 0; i < pr.len; ++i) {
     const std::uint16_t sy = g.sym_at(pr, i);
     const auto row = g.row_at(pr, i);

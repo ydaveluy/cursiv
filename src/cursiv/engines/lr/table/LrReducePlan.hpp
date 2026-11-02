@@ -22,6 +22,9 @@ struct LrReducePlan {
   // A nest turn's row where its record reaches back over the record the frame
   // below laid; its own node where that frame laid nothing.
   std::uint16_t turnRow = 0xFFFFu;
+  // A completed region hands an untouched gap to its caller, even where its
+  // last optional item was absent. No token is needed to take that exit.
+  bool regionExit = false;
 
   constexpr bool carries() const {
     return form == LrReduceForm::carry || form == LrReduceForm::foldClose;

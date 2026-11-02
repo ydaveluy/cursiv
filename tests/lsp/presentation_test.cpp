@@ -44,6 +44,7 @@
 #include "cursiv/lsp/symbols/DocumentSymbolProvider.hpp"
 #include "cursiv/lsp/symbols/WorkspaceSymbolProvider.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "cursiv/test/DecodedSemanticTokens.hpp"
 #include "lsp/uri.h"
 #include "support/Editor.hpp"
@@ -800,8 +801,15 @@ void the_built_in_fix_answers_a_request_that_accepts_quick_fixes() {
   const cursiv::DefaultCodeActionProvider provider;
 
   lsp::CodeActionParams params = over(*document);
-  CHECK(has_kind(provider.getCodeActions(*document, params, cursiv::kNoCancel),
-                 lsp::CodeActionKind::QuickFix));
+  const auto actions =
+      provider.getCodeActions(*document, params, cursiv::kNoCancel);
+  CHECK(has_kind(actions, lsp::CodeActionKind::QuickFix));
+  CHECK(!actions.empty());
+  if (!actions.empty()) {
+    const lsp::CodeAction& action = actions.front();
+    CHECK(action.kind == lsp::CodeActionKind::QuickFix);
+    CHECK(action.edit.has_value() && action.edit->changes.has_value());
+  }
 
   params.context.only = lsp::Array<lsp::CodeActionKindEnum>{
       lsp::CodeActionKindEnum(lsp::CodeActionKind::QuickFix)};
@@ -967,13 +975,9 @@ void cancellation_precedes_a_filter_that_excludes_quick_fixes() {
       lsp::CodeActionKindEnum(lsp::CodeActionKind::Source)};
   cursiv::CancellationTokenSource source;
   source.request_stop();
-  bool cancelled = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)provider.getCodeActions(document, params, source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
-  }
-  CHECK(cancelled);
+  }));
   CHECK(!provider.called);
   CHECK(provider.getCodeActions(document, params).empty());
   CHECK(provider.called);

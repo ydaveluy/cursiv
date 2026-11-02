@@ -39,7 +39,9 @@ inline TextOffset lex_echo_padded(const LexRelay& r, const ByteSet& pad,
         auto q = e;
         while (q > from && pad.has(static_cast<unsigned char>(src[q - 1]))) --q;
         for (; q <= e; ++q)
-          if (std::memcmp(src + q - r.beforeLen, before, r.beforeLen) == 0)
+          if (std::memcmp(src + q - r.beforeLen, before, r.beforeLen) == 0 &&
+              lex_character_boundary({src + at, len - at},
+                                     src + q - r.beforeLen))
             return true;
         return false;
       });
@@ -65,7 +67,9 @@ CURSIV_ALWAYS_INLINE inline TextOffset lex_echo_seek(
   const char* const hit = lex_find_closer(
       {src + at, len - at}, {names + r.beforeOff, r.beforeLen},
       {src + markBegin, n}, {names + r.afterOff, r.afterLen},
-      [](const char*) { return true; });
+      [&](const char* p) {
+        return lex_character_boundary({src + at, len - at}, p);
+      });
   if (hit == nullptr) return 0;
   return static_cast<TextOffset>(hit - src) + r.beforeLen + n + r.afterLen;
 }

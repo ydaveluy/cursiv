@@ -9,9 +9,20 @@
 #include <string_view>
 
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/core/text/scalar_at.hpp"
 #include "cursiv/core/utils/FunctionRef.hpp"
 
 namespace cursiv {
+
+// A search over bytes may find a continuation inside a scalar. Delimited
+// text advances by characters, starting at text.data(), while stray bytes
+// remain characters of their own. ASCII delimiters need no lookbehind.
+inline bool lex_character_boundary(std::string_view text, const char* at) {
+  return at == text.data() + text.size() ||
+         (static_cast<unsigned char>(*at) & 0xC0u) != 0x80u ||
+         !inside_scalar(text.data(), static_cast<std::size_t>(at - text.data()),
+                        text.size());
+}
 
 // The first occurrence of `before + mark + after` in `text` that `take`
 // accepts, or null.

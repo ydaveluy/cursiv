@@ -11,6 +11,15 @@ cursiv_grammar(characterslr engines/shared/CharactersGrammar.hpp tchars::Lr ENGI
 
 cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia::Ll)
 
+cursiv_grammar_pair(regionboundary engines/shared/RegionBoundaryGrammar.hpp tregionboundary::Lr tregionboundary::Ll)
+cursiv_test(RegionBoundary_test engines/shared/RegionBoundary_test.cpp
+    regionboundaryllGenerated regionboundarylrGenerated)
+cursiv_test(RegionBoundaryAnalysis_test engines/shared/RegionBoundaryAnalysis_test.cpp
+    cursivLlGen cursivLrGen)
+
+cursiv_test(RegionConsumption_test engines/shared/RegionConsumption_test.cpp
+    regionboundaryllGenerated regionboundarylrGenerated)
+
 # An operator written in place as a sequence reads as an unnamed data rule, in
 # both engines.
 cursiv_grammar_pair(infixoperators engines/shared/InfixOperatorsGrammar.hpp toperators::Lr toperators::Ll)

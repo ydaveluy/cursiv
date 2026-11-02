@@ -27,7 +27,7 @@ endif()
 
 enable_language(C)
 include(FetchContent)
-set(_mimalloc_revision b18ab4eef383f655e760881b02eff8af02800879) # v3.6.0
+set(_mimalloc_revision 56dc5eb80145f9a3ba7ca23d47c6a248b9d8586c) # v3.6.1
 FetchContent_Declare(cursiv_mimalloc
     GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
     GIT_TAG ${_mimalloc_revision}
@@ -60,9 +60,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
         COMMAND_ERROR_IS_FATAL ANY)
   endif()
   target_compile_definitions(cursivAllocator PRIVATE
-      MI_FREE_USE_PAGEMAP=1
-      # The compact byte-offset map cannot represent large interior alignments.
-      MI_PAGE_MAP_FLAT=0
       # WASI cannot protect guard pages; keep debug builds on the same backend.
       MI_STATS=0 MI_PROFILE=0 MI_GUARDED=0
       # Even very large blocks need recyclable arenas: WASM cannot release an

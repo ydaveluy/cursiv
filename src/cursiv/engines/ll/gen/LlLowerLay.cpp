@@ -27,12 +27,14 @@ std::uint16_t LlLowerer::lay_create(unsigned cfg, ImageId e) {
 
 std::uint16_t LlLowerer::lay_nest(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
-  std::uint16_t at_ = lay(cfg, kid(n, 0));
-  if (!_p.e[at_].row.empty() ||
-      (_p.e[at_].kind == Shape::sym && is_term(_p.e[at_].sym)))
-    at_ = wrap(cfg, at_);
-  _p.e[at_].made.push_back(row_id(n.row));
-  return at_;
+  const std::uint16_t body = lay(cfg, kid(n, 0));
+  if (_p.e[body].kind == Shape::none || _p.e[body].kind == Shape::end)
+    _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
+  // A nest changes the current node before its payload. Keep that boundary
+  // on the tape even when the payload holds another, conditional nest.
+  const std::uint16_t checkpoint = gather(cfg, Shape::seq, {});
+  _p.e[checkpoint].made.push_back(row_id(n.row));
+  return gather(cfg, Shape::seq, {checkpoint, body});
 }
 
 std::uint16_t LlLowerer::lay_closed(unsigned cfg, ImageId e) {

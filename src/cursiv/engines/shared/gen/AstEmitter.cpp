@@ -93,10 +93,11 @@ void AstEmitter::plan_held() {
   // next number, and none may reach it.
   auto next = static_cast<std::uint16_t>(reg.convCount);
   for (std::uint32_t e = 0; e < a.count; ++e) {
-    const auto* const value = plans.emplace_back(plan_conversions(e)).value;
-    if (value == nullptr) continue;
     Run held, over;
     a.rows(e, held, over);
+    const auto* const value =
+        plans.emplace_back(plan_conversions(held, over)).value;
+    if (value == nullptr) continue;
     for (const Run* run : {&held, &over})
       for (const std::uint16_t r : *run) {
         const AstRowGen& g = reg.rows[r];
@@ -457,20 +458,20 @@ void AstEmitter::emit_writers() {
     const bool plain = plainOf[f] != 0;
     const std::string& tag = tags[f];
     const std::string args = u(f) + ", p, m);";
+    const auto write = [&](std::uint16_t slot) {
+      return "b.write<" + tag + ", " + conv_addr(slot) + ", " +
+             variant_flag(f) + ">(" + args;
+    };
     line("CURSIV_ALWAYS_INLINE inline void w" + std::to_string(f) +
          "(::cursiv::AstReducer& b, const ::cursiv::Pending& p, "
          "const ::cursiv::Made& m) {");
     if (convs.size() + (plain ? 1 : 0) == 1) {
-      line("  b.write<" + tag + ", " +
-           conv_addr(plain ? detail::kNoIndex : convs[0]) + ", " +
-           variant_flag(f) + ">(" + args);
+      line("  " + write(plain ? detail::kNoIndex : convs[0]));
     } else {
       line("  switch (p.conv) {");
       for (const std::uint16_t c : convs)
-        line("    case " + u(c) + ": b.write<" + tag + ", &kConvs[" + u(c) +
-             "], " + variant_flag(f) + ">(" + args + " return;");
-      line("    default: b.write<" + tag + ", nullptr, " + variant_flag(f) +
-           ">(" + args + " return;");
+        line("    case " + u(c) + ": " + write(c) + " return;");
+      line("    default: " + write(detail::kNoIndex) + " return;");
       line("  }");
     }
     line("}");
@@ -527,9 +528,8 @@ void AstEmitter::emit_convs() {
   out += emit_table("constexpr ::cursiv::detail::ConvSlot kConvs[]", slots);
 }
 
-AstEmitter::ConvPlan AstEmitter::plan_conversions(std::uint32_t e) const {
-  Run held, over;
-  a.rows(e, held, over);
+AstEmitter::ConvPlan AstEmitter::plan_conversions(const Run& held,
+                                               const Run& over) const {
   // The conversions a record carries, in the order its rules apply them: the
   // rows it is held by, then the one it is written over.
   std::vector<const AstRowGen*> chain;
@@ -563,8 +563,7 @@ AstEmitter::TextPlan AstEmitter::plan_text(
   if (t.steps.empty()) return t;
   // Only the first step reads the record, the others the text before them;
   // a converter that is handed nothing reads no child, whatever the record.
-  t.input = t.steps.front()->textInput;
-  t.children = data && t.input != TextInput::none;
+  t.children = data && t.steps.front()->textInput != TextInput::none;
   return t;
 }
 

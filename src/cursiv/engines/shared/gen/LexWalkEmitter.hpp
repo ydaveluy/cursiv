@@ -552,8 +552,8 @@ void lex_emit_walk(EmitOutput& o, const LexDfaEmitter& dfa, Policy& policy,
   o.raw(R"(  const ::cursiv::TextOffset start = i;
   ::cursiv::TextOffset far = i;
   ::cursiv::LexMatch match{i, 0xFFFFu};
-  auto& end = match.end;
-  auto& term = match.term;
+  [[maybe_unused]] auto& end = match.end;
+  [[maybe_unused]] auto& term = match.term;
   unsigned char b;
   (void)src;
   (void)len;

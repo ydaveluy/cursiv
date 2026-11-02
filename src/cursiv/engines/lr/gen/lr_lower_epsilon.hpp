@@ -190,17 +190,35 @@ inline LrLowerSlot lr_receiver(LrLowered& o, LrLowerPool& p,
 }
 
 inline std::vector<LrLowerSlot> lr_slots_for_sequence(
-    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> kids, bool turn) {
+    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> kids, bool turn,
+    std::uint8_t cfg) {
   const bool turning = p.turning;
   std::vector<LrLowerSlot> slots;
+  std::vector<LrShapeId> pending(kids.rbegin(), kids.rend());
   bool held = false;
   slots.reserve(kids.size());
-  for (std::size_t i = 0; i < kids.size(); ++i) {
-    const LrShapeId k = kids[i];
+  std::size_t i = 0;
+  while (!pending.empty()) {
+    const LrShapeId k = pending.back();
+    pending.pop_back();
+    const auto& node = p.e[k];
+    // Keep the pool in tree form. Flatten a plain sequence only when this
+    // RHS is emitted, rather than recopying growing suffixes while laying
+    // deeply nested nest payloads. Directives/region edges keep their group.
+    if (node.kind == LrShape::seq && node.cfg == cfg &&
+        node.made.empty() && node.row.empty() && !node.lead && !node.trail) {
+      for (std::size_t child = node.count; child-- > 0;)
+        pending.push_back(p.kid[node.sym + child]);
+      continue;
+    }
     bool reaches =
         i == 0 ? turning && !turn : !p.inTurn && !held && p.head_turns(k);
-    for (const LrLowerSlot& s : slots)
-      reaches = reaches && (i == 0 || lr_holds_position(s));
+    if (reaches && i != 0)
+      for (const LrLowerSlot& s : slots)
+        if (!lr_holds_position(s)) {
+          reaches = false;
+          break;
+        }
     if (reaches && i != 0) {
       LrLowerSlot receiver = lr_receiver(o, p, std::move(slots));
       slots.clear();
@@ -208,7 +226,11 @@ inline std::vector<LrLowerSlot> lr_slots_for_sequence(
     }
     p.turning = reaches;
     slots.push_back(lr_slot_for(o, p, k, p.e[k].made, p.e[k].row));
-    held = held || p.turns(p.e[k].made);
+    // A checkpoint has already closed the preceding receiver. It does not
+    // keep a region open over the later payload or its next checkpoint.
+    held = held || (p.turns(p.e[k].made) &&
+                    !(p.e[k].kind == LrShape::seq && p.e[k].count == 0));
+    ++i;
   }
   return slots;
 }
@@ -235,7 +257,7 @@ inline void lr_emit_sequence(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
     slots.push_back(LrLowerSlot{
         .sym = nt_sym(inner), .cfg = e.cfg, .lead = e.lead, .trail = e.trail});
   } else {
-    slots = lr_slots_for_sequence(o, p, kids, turn);
+    slots = lr_slots_for_sequence(o, p, kids, turn, e.cfg);
   }
   p.turning = turning;
   p.inTurn = inTurn;

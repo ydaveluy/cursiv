@@ -32,16 +32,15 @@
 #include "cursiv/core/execution/TaskScheduler.hpp"
 #include "cursiv/core/observability/ObservabilitySink.hpp"
 #include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
 #include "cursiv/core/references/DefaultScopeComputation.hpp"
 #include "cursiv/core/references/DefaultScopeProvider.hpp"
 #include "cursiv/core/references/Linker.hpp"
 #include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/DefaultServiceRegistry.hpp"
 #include "cursiv/core/services/ServiceRegistry.hpp"
 #include "cursiv/core/services/SharedCoreServices.hpp"
 #include "cursiv/core/syntax-tree/AstReflection.hpp"
 #include "cursiv/core/syntax-tree/DefaultAstReflection.hpp"
+#include "cursiv/core/syntax-tree/DefaultDocumentReferences.hpp"
 #include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/core/utils/FunctionRef.hpp"
 #include "cursiv/core/utils/UriUtils.hpp"
@@ -69,7 +68,9 @@
 #include "cursiv/core/workspace/WorkspaceFolder.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/core/references/WorkspaceScopeProvider.hpp"
 
@@ -157,13 +158,9 @@ void an_unheld_node_refuses_to_have_a_path() {
   ws::ast::DataType orphan;
   orphan.parent = document->parseResult.value;  // claims a container...
   // ...which holds it nowhere.
-  bool refused = false;
-  try {
+  CHECK(support::throws<std::invalid_argument>([&] {
     (void)world.locator->getAstNodePath(orphan);
-  } catch (const std::invalid_argument&) {
-    refused = true;
-  }
-  CHECK(refused);
+  }));
 }
 
 }  // namespace
@@ -1171,7 +1168,7 @@ void the_scopes_are_barred_before_the_first_link() {
 
 // A tree with no disk under it: one folder holding two sources. Enough for
 // `findChangedUris` to see a directory and for the walk to enumerate it.
-class FakeFiles final : public cursiv::FileSystemProvider {
+class FakeFiles : public cursiv::FileSystemProvider {
  public:
   [[nodiscard]] cursiv::FileSystemNode stat(
       std::string_view uri) const override {
@@ -2112,30 +2109,12 @@ void a_new_file_waits_unparsed_for_the_parse_phase() {
 
 // The folder of `FakeFiles`, whose second file is found and then refuses to
 // be read: what a file deleted or locked between the event and the build is.
-class HalfReadableFiles final : public cursiv::FileSystemProvider {
+class HalfReadableFiles final : public FakeFiles {
  public:
-  [[nodiscard]] cursiv::FileSystemNode stat(
-      std::string_view uri) const override {
-    return _found.stat(uri);
-  }
-  [[nodiscard]] bool exists(std::string_view uri) const override {
-    return _found.exists(uri);
-  }
-  [[nodiscard]] std::vector<cursiv::FileSystemNode> readDirectory(
-      std::string_view uri) const override {
-    return _found.readDirectory(uri);
-  }
   [[nodiscard]] std::string readFile(std::string_view uri) const override {
     if (uri == FakeFiles::kB) throw cursiv::FileSystemError("gone");
-    return _found.readFile(uri);
+    return FakeFiles::readFile(uri);
   }
-  [[nodiscard]] std::vector<std::uint8_t> readBinary(
-      std::string_view uri) const override {
-    return _found.readBinary(uri);
-  }
-
- private:
-  FakeFiles _found;
 };
 
 // A new file that can no longer be read when the update reaches it is left
@@ -2333,25 +2312,10 @@ namespace {
 const std::string kSource = "datatype String\nentity A { x : String }\n";
 
 // A workspace with one language and a disk under it.
-struct World {
-  cursiv::SharedCoreServices shared;
+struct World : support::CoreWorkspace {
   cursiv::DefaultDocumentFactory factory{shared};
 
   explicit World(bool withDisk) {
-    // The registration gate refuses an incomplete shared container, so the
-    // defaults come first; the hand-made pieces below replace them.
-    cursiv::install_default_shared_core_services(shared);
-    shared.documents = std::make_unique<cursiv::DefaultDocuments>(shared);
-    auto registry = std::make_unique<cursiv::DefaultServiceRegistry>(shared);
-    auto language = std::make_unique<cursiv::CoreServices>(shared);
-    language->languageMetaData = {"workspace", {".ws"}, {}};
-    language->parser = ws::generated::Workspace::create_parser();
-    language->nameProvider =
-        std::make_unique<cursiv::DefaultNameProvider>(*language);
-    language->astReflection = ws::generated::Workspace::create_ast_reflection();
-    cursiv::install_default_core_services(*language);
-    registry->registerServices(std::move(language));
-    shared.serviceRegistry = (std::move(registry));
     if (withDisk)
       shared.fileSystemProvider =
           std::make_unique<cursiv::LocalFileSystemProvider>();
@@ -2361,8 +2325,7 @@ struct World {
   }
 };
 
-template <class F>
-bool throws(F&& f) {
+bool throws(cursiv::function_ref<void()> f) {
   try {
     f();
   } catch (...) {
@@ -2520,14 +2483,10 @@ void a_cancelled_token_makes_no_document() {
   cursiv::CancellationTokenSource source;
   source.request_stop();
   // Typed: the abort is a cancellation, not some other failure in disguise.
-  bool cancelled = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)world.factory.fromString(kSource, "file:///w/a.ws",
                                    source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
-  }
-  CHECK(cancelled);
+  }));
 }
 
 // A text the client already versioned comes in whole, version kept.
@@ -2747,13 +2706,9 @@ void one_scheme_is_one_id_whatever_its_case() {
   CHECK(store.getDocuments("mem:///w").size() == 1);
   CHECK(store.getDocuments("MEM:///w").size() == 1);
   CHECK(store.getOrCreateDocumentId("mem:///w/a.t") == d->id);
-  bool refused = false;
-  try {
+  CHECK(support::throws<cursiv::DocumentStoreError>([&] {
     store.addDocument(document("mem:///w/a.t"));
-  } catch (const cursiv::DocumentStoreError&) {
-    refused = true;
-  }
-  CHECK(refused);
+  }));
   CHECK(store.all().size() == 1);
 }
 
@@ -2810,13 +2765,9 @@ void ids_are_never_reused() {
 void one_uri_is_added_once() {
   cursiv::DefaultDocuments store{completeShared()};
   store.addDocument(document("file:///a/b.t"));
-  bool refused = false;
-  try {
+  CHECK(support::throws<cursiv::DocumentStoreError>([&] {
     store.addDocument(document("file:///a/b.t"));
-  } catch (const cursiv::DocumentStoreError&) {
-    refused = true;
-  }
-  CHECK(refused);
+  }));
   // ...and the one already held is still the one held.
   CHECK(store.getDocument("file:///a/b.t") != nullptr);
 }
@@ -2879,21 +2830,6 @@ void run() {
 
 }  // namespace documents
 
-namespace {
-
-// Whether `f` throws the error a file system refuses with.
-template <class F>
-bool throws(F&& f) {
-  try {
-    f();
-  } catch (const cursiv::FileSystemError&) {
-    return true;
-  }
-  return false;
-}
-
-}  // namespace
-
 // Pins how a workspace reads what it did not open: a `file:` URI names a path
 // or the read fails, and nothing is ever guessed from a URI it cannot resolve.
 namespace file_system_provider {
@@ -2905,18 +2841,30 @@ namespace {
 void an_empty_workspace_has_no_disk() {
   const cursiv::EmptyFileSystemProvider fs;
   CHECK(!fs.exists("file:///a/b.txt"));
-  CHECK(throws([&] { (void)fs.readFile("file:///a/b.txt"); }));
-  CHECK(throws([&] { (void)fs.readBinary("file:///a/b.txt"); }));
-  CHECK(throws([&] { (void)fs.stat("file:///a/b.txt"); }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.readFile("file:///a/b.txt");
+  }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.readBinary("file:///a/b.txt");
+  }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.stat("file:///a/b.txt");
+  }));
   // Not an error: an empty workspace has directories with nothing in them.
   CHECK(fs.readDirectory("file:///a").empty());
 }
 
 void a_uri_that_names_no_path_is_a_failed_read() {
   const cursiv::LocalFileSystemProvider fs;
-  CHECK(throws([&] { (void)fs.readFile("http://example.com/a.txt"); }));
-  CHECK(throws([&] { (void)fs.exists("http://example.com/a.txt"); }));
-  CHECK(throws([&] { (void)fs.stat("untitled:one"); }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.readFile("http://example.com/a.txt");
+  }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.exists("http://example.com/a.txt");
+  }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.stat("untitled:one");
+  }));
 }
 
 void what_is_on_disk_reads_back() {
@@ -2949,17 +2897,13 @@ void what_is_on_disk_reads_back() {
 
   // Absent is false, not an error.
   CHECK(!fs.exists(cursiv::path_to_file_uri((dir / "nope.txt").string())));
-  CHECK(throws([&] {
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
     (void)fs.readFile(cursiv::path_to_file_uri((dir / "nope.txt").string()));
   }));
   // A folder is not readable as a file, and says so as this interface does.
-  bool typed = false;
-  try {
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
     (void)fs.readFile(dirUri);
-  } catch (const cursiv::FileSystemError&) {
-    typed = true;
-  }
-  CHECK(typed);
+  }));
 
   const std::vector<cursiv::FileSystemNode> entries = fs.readDirectory(dirUri);
   CHECK(entries.size() == 2);
@@ -2996,7 +2940,7 @@ void an_escaped_nul_names_no_file() {
       cursiv::path_to_file_uri((dir / "secret").string()) + "%00.ws";
   CHECK(!cursiv::file_uri_to_path(uri).has_value());
   const cursiv::LocalFileSystemProvider fs;
-  CHECK(throws([&] { (void)fs.readFile(uri); }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] { (void)fs.readFile(uri); }));
   std::filesystem::remove_all(dir);
 }
 
@@ -3012,7 +2956,9 @@ void size_is_a_hint_and_read_errors_are_reported() {
   }
   // Reading the unmapped zero page fails with EIO, after open succeeds.
   if (std::filesystem::exists("/proc/self/mem"))
-    CHECK(throws([&] { (void)fs.readBinary("file:///proc/self/mem"); }));
+    CHECK(support::throws<cursiv::FileSystemError>([&] {
+      (void)fs.readBinary("file:///proc/self/mem");
+    }));
 }
 #endif
 
@@ -3467,6 +3413,93 @@ void only_the_resolved_are_described() {
   CHECK(rows.front().isResolved());
 }
 
+// Providers may report distinct nodes on one declaration record, repeat a
+// target non-adjacently, or mix single and plural sites on one source span.
+// Index rows retain the first occurrence of each complete description.
+void large_reference_groups_keep_their_order_and_identity() {
+  struct Edges final : cursiv::DefaultDocumentReferences {
+    using DefaultDocumentReferences::DefaultDocumentReferences;
+    struct Edge {
+      cursiv::TextOffset begin, end;
+      const cursiv::AstNode* target;
+      bool multi;
+    };
+    std::vector<Edge> edges;
+    std::stop_source* cancel = nullptr;
+
+    void visitResolved(const cursiv::Cst&,
+                       cursiv::ResolvedReferenceVisitor visitor) const override {
+      for (std::size_t i = 0; i < edges.size(); ++i) {
+        if (cancel != nullptr && i == 40) cancel->request_stop();
+        const Edge& e = edges[i];
+        visitor(e.begin, e.end, *e.target, e.multi);
+      }
+    }
+  };
+
+  const World world;
+  cursiv::Document document(cursiv::TextDocument::create(
+      "file:///groups.ws", "workspace", 0, "reference references"));
+  cursiv::Document other(cursiv::TextDocument::create(
+      "file:///other.ws", "workspace", 0, "declaration"));
+  document.id = static_cast<cursiv::DocumentId>(7);
+  other.id = static_cast<cursiv::DocumentId>(8);
+  std::vector<cursiv::AstNode> targets(66);
+  for (std::size_t i = 0; i < targets.size(); ++i) {
+    targets[i].parent = &document;
+    targets[i].cstNodeId = static_cast<cursiv::NodeId>((i * 17) % 64);
+  }
+  targets[64].cstNodeId = targets[0].cstNodeId;
+  targets[65].cstNodeId = targets[0].cstNodeId;
+  targets[65].parent = &other;
+  auto edges = std::make_unique<Edges>(
+      static_cast<const cursiv::DefaultAstReflection&>(*world.ws->astReflection)
+          .metaData());
+  for (std::size_t i = 0; i < 64; ++i) {
+    edges->edges.push_back({0, 9, &targets[i], true});
+    if (i != 0) edges->edges.push_back({0, 9, &targets[0], true});
+  }
+  edges->edges.push_back({0, 9, &targets[64], true});  // same record, one row
+  edges->edges.push_back({0, 9, &targets[65], true});  // another document
+  edges->edges.push_back({0, 9, &targets[0], false});  // another site nature
+  edges->edges.push_back({0, 9, &targets[0], false});
+  edges->edges.push_back({10, 20, &targets[0], false});
+  edges->edges.push_back({10, 20, &targets[0], false});
+  // A source span revisited after another run starts a fresh group, even
+  // when it is large again and visits the same targets in another order.
+  for (std::size_t i = 64; i-- > 0;) {
+    edges->edges.push_back({0, 9, &targets[i], true});
+    if (i != 63) edges->edges.push_back({0, 9, &targets[63], true});
+  }
+  Edges* const emitted = edges.get();
+  document.parseResult.references = std::move(edges);
+
+  const auto rows =
+      world.ws->referenceDescriptionProvider->createDescriptions(document);
+  CHECK(rows.size() == 131);
+  if (rows.size() != 131) return;
+  for (std::size_t i = 0; i < 64; ++i) {
+    CHECK(rows[i].targetSymbolId == targets[i].cstNodeId);
+    CHECK(rows[i].targetDocumentId == document.id);
+    CHECK(rows[i].local && rows[i].multiReference);
+  }
+  CHECK(rows[64].targetDocumentId == other.id && !rows[64].local);
+  CHECK(!rows[65].multiReference && rows[65].sourceBegin == 0);
+  CHECK(rows[66].sourceBegin == 10 && rows[66].sourceEnd == 20);
+  for (std::size_t i = 0; i < 64; ++i) {
+    CHECK(rows[67 + i].targetSymbolId == targets[63 - i].cstNodeId);
+    CHECK(rows[67 + i].local && rows[67 + i].multiReference);
+  }
+  CHECK(rows.back() == rows[0]);
+
+  std::stop_source stop;
+  emitted->cancel = &stop;
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
+    (void)world.ws->referenceDescriptionProvider->createDescriptions(
+        document, stop.get_token());
+  }));
+}
+
 }  // namespace
 
 void run() {
@@ -3483,6 +3516,7 @@ void run() {
   one_table_answers_both_policies();
   two_languages_share_the_index();
   only_the_resolved_are_described();
+  large_reference_groups_keep_their_order_and_identity();
 }
 
 }  // namespace index_manager
@@ -3674,7 +3708,9 @@ void stat_and_exists_tell_files_from_folders() {
   CHECK(fs.exists("mem:///w/a.txt"));
   CHECK(fs.exists("mem:///w/sub"));
   CHECK(!fs.exists("mem:///w/nope"));
-  CHECK(throws([&] { (void)fs.stat("mem:///w/nope"); }));
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
+    (void)fs.stat("mem:///w/nope");
+  }));
 }
 
 // A key that is itself a file also answers as the root of the deeper keys
@@ -3878,13 +3914,9 @@ void overlapping_edits_are_refused() {
       {{{0, 0}, {0, 3}}, "X"},
       {{{0, 2}, {0, 5}}, "Y"},
   };
-  bool thrown = false;
-  try {
+  CHECK(support::throws<std::invalid_argument>([&] {
     (void)cursiv::TextDocument::applyEdits(d, edits);
-  } catch (const std::invalid_argument&) {
-    thrown = true;
-  }
-  CHECK(thrown);
+  }));
   // Touching is legal: one edit may end where the next starts.
   const std::vector<cursiv::TextEdit> touching = {
       {{{0, 0}, {0, 2}}, "X"},
@@ -4538,13 +4570,9 @@ void ready_resolves_when_the_scan_throws() {
   };
   World world;
   world.shared.workspaceManager = std::make_unique<Failing>(world.shared);
-  bool thrown = false;
-  try {
+  CHECK(support::throws<std::runtime_error>([&] {
     world.shared.workspaceManager->initializeWorkspace({});
-  } catch (const std::runtime_error&) {
-    thrown = true;
-  }
-  CHECK(thrown);
+  }));
   CHECK(world.shared.workspaceManager->ready().wait_for(
             std::chrono::seconds(0)) == std::future_status::ready);
 }

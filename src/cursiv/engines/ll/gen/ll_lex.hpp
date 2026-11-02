@@ -4,10 +4,14 @@
 
 #include "cursiv/engines/ll/gen/LlBuiltProgram.hpp"
 
+namespace cursiv {
+struct LexAlphabet;
+}
+
 namespace cursiv::detail {
 
-// The whole of the lexer, in the order the three passes owe each other: the
-// token graphs, then what each point admits, then the automaton over both.
-void ll_build_lexer(LlBuiltProgram& b);
+// The automaton over the token graphs and what each point admits. The token
+// graphs also serve the earlier trivia-boundary checks.
+void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha);
 
 }  // namespace cursiv::detail

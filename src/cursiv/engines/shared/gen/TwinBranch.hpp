@@ -70,7 +70,7 @@ class TwinReader {
   std::vector<std::uint32_t> branch_keys(ImageId choice);
   ImageId expanded(std::uint32_t rule);
   const std::vector<Item>* called(std::uint32_t rule);
-  bool calls_itself(std::uint32_t rule);
+  void analyse_calls(std::uint32_t rule);
   void flatten(ImageId id, std::vector<Item>& out);
   bool reads(const std::vector<Item>& items) const;
   std::vector<Reading> readings(const std::vector<Item>& items);
@@ -90,7 +90,12 @@ class TwinReader {
   std::map<std::string_view, std::uint32_t> _texts;
   // Each node's key plus one, zero until read.
   std::vector<std::uint32_t> _keys;
-  std::unordered_map<std::uint32_t, bool> _selfCalls;
+  struct DataRule {
+    ImageId body = kNoImage;
+    bool cyclic = false;
+  };
+  std::unordered_map<std::uint32_t, DataRule> _dataRules;
+  std::vector<bool> _analysedNodes;
   std::unordered_map<std::uint32_t, std::vector<Item>> _calls;
   std::unordered_map<ImageId, bool> _folds;
   std::unordered_map<ImageId, ImageId> _dropped;

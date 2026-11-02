@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -40,6 +39,7 @@
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/lr/LrStand.hpp"
 #include "election/generated/Election/Parser.hpp"
 #include "election/generated/Election/Table.hpp"
 #include "domainmodel/generated/DomainModel/Parser.hpp"
@@ -74,32 +74,9 @@ namespace gi = ::tindent::generated::G;
 namespace gt = ::tambtail::generated::G;
 namespace gd = ::telect::generated::Election;
 
-// A context standing where a parse of `text` stands before a byte is read.
-template <const auto& A>
-struct Stand {
-  cursiv::Cst cst;
-  std::optional<cursiv::CstBuilder> builder;
-  std::optional<cursiv::LrContext> c;
-  std::vector<cursiv::Scan> room;
+using checks::Stand;
 
-  Stand(std::string_view text, const cursiv::LrDrive& drive) {
-    cst.reset(text);
-    builder.emplace(cst);
-    builder->reserve_stream(cst.text().size());
-    c.emplace(cst.text(), *builder);
-    room.resize(A.maxCands != 0 ? A.maxCands : 1);
-    c->cand = room.data();
-    c->drive = &drive;
-    cursiv::LrParser<A>::install_hooks(*c);
-    c->stack.push(
-        cursiv::LrFrame{0, cursiv::kNoElement, 0, 0, cursiv::kLrNoWord});
-  }
-};
-
-constexpr cursiv::RepairBudget kUnbounded{.floor = ~std::uint64_t{0},
-                                          .perByte = 0,
-                                          .perSearch = ~std::uint64_t{0},
-                                          .perParse = ~std::uint64_t{0}};
+using checks::kUnbounded;
 
 cursiv::CancellationTokenSource* stopAfterPause = nullptr;
 cursiv::NodeCount recordsBeforeStop = 0;
@@ -182,7 +159,7 @@ void phases_and_generators_name_what_they_stand_for() {
 // Both stand at an equal key; at a worse key, only one holding more.
 void insertion_allowance_is_part_of_the_future() {
   Stand<gdm::kTable> st("package p { package q {", gdm::kDrive);
-  cursiv::LrContext& c = *st.c;
+  cursiv::LrContext& c = st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
   cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
@@ -223,7 +200,7 @@ void insertion_allowance_is_part_of_the_future() {
 // reading refuses them alike.
 void unread_bytes_take_one_insertion() {
   Stand<gdm::kTable> st("entity E { \xc3\xa9 : T }", gdm::kDrive);
-  cursiv::LrContext& c = *st.c;
+  cursiv::LrContext& c = st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
   CHECK(c.la.sym == cursiv::kInvalidSymbol);
   cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
@@ -252,7 +229,7 @@ void unread_bytes_take_one_insertion() {
 // the surviving goal may still outrank it.
 void merged_path_keeps_its_source_rank() {
   Stand<gdm::kTable> st("package p {", gdm::kDrive);
-  cursiv::LrContext& c = *st.c;
+  cursiv::LrContext& c = st.c;
   CHECK(gdm::kDrive.enter(c) == cursiv::LrExit::pause);
   cursiv::LrSearch s(c.len, kUnbounded, c.indentArena);
   cursiv::lr_search_start(c, s);
@@ -476,7 +453,7 @@ void agree(cursiv::LrContext& c, std::string_view text, Lay lay,
 template <const auto& A>
 void exact(const cursiv::LrDrive& drive, std::string_view text) {
   Stand<A> st(text, drive);
-  cursiv::LrContext& c = *st.c;
+  cursiv::LrContext& c = st.c;
   if (drive.enter(c) != cursiv::LrExit::pause) {
     std::printf("FAIL: `%.*s` does not pause\n", static_cast<int>(text.size()),
                 text.data());
@@ -552,6 +529,28 @@ struct Whole {
   void stepped() {}
 };
 
+// Every field of every interpreted record agrees with the generated drive.
+void same_records(const cursiv::Cst& ran, const cursiv::Cst& read,
+                  const char* name) {
+  if (ran.size() != read.size()) {
+    std::printf("FAIL: %s: %u records written, the drive's %u\n", name,
+                read.size(), ran.size());
+    ++failures;
+    return;
+  }
+  for (cursiv::NodeCount i = 0; i < ran.size(); ++i) {
+    const auto& x = ran[i];
+    const auto& y = read[i];
+    if (x.begin == y.begin && x.end == y.end &&
+        x.subtreeSize == y.subtreeSize && x.engine == y.engine &&
+        x.hidden == y.hidden && x.recovered == y.recovered)
+      continue;
+    std::printf("FAIL: %s: record %u differs from the drive's\n", name, i);
+    ++failures;
+    return;
+  }
+}
+
 // A valid document read whole by the interpreted writer lays the records the
 // drive lays. False where a cell split rather than answered: the drive's
 // branches are not the writer's to follow.
@@ -559,9 +558,9 @@ template <const auto& A>
 bool writes_as_drive(const cursiv::LrDrive& drive, std::string_view text,
                      const char* name) {
   Stand<A> ran(text, drive);
-  if (drive.enter(*ran.c) != cursiv::LrExit::accept) return false;
+  if (drive.enter(ran.c) != cursiv::LrExit::accept) return false;
   Stand<A> read(text, drive);
-  cursiv::LrContext& c = *read.c;
+  cursiv::LrContext& c = read.c;
   cursiv::LrWriteReading w;
   w.run.s = &c.stack;
   Whole<A> x{c, w};
@@ -577,25 +576,7 @@ bool writes_as_drive(const cursiv::LrDrive& drive, std::string_view text,
     }
   }
   cursiv::lr_flush_trivia<A>(c);
-  const cursiv::CstRun& a = ran.builder->stream();
-  const cursiv::CstRun& b = read.builder->stream();
-  if (a.records() != b.records()) {
-    std::printf("FAIL: %s: %u records written, the drive's %u\n", name,
-                b.records(), a.records());
-    ++failures;
-    return true;
-  }
-  for (cursiv::NodeCount i = 0; i < a.records(); ++i) {
-    const cursiv::CstNode& x0 = a.at(i);
-    const cursiv::CstNode& y0 = b.at(i);
-    if (x0.begin == y0.begin && x0.end == y0.end &&
-        x0.subtreeSize == y0.subtreeSize && x0.engine == y0.engine &&
-        x0.hidden == y0.hidden && x0.recovered == y0.recovered)
-      continue;
-    std::printf("FAIL: %s: record %u differs from the drive's\n", name, i);
-    ++failures;
-    return true;
-  }
+  same_records(ran.cst, read.cst, name);
   return true;
 }
 
@@ -693,23 +674,7 @@ unsigned writes_through(const cursiv::LrDrive& drive, std::string_view text,
     ++failures;
     return stats.splits;
   }
-  if (ran.size() != read.size()) {
-    std::printf("FAIL: %s: %u records interpreted, the drive's %u\n", name,
-                read.size(), ran.size());
-    ++failures;
-    return stats.splits;
-  }
-  for (cursiv::NodeCount i = 0; i < ran.size(); ++i) {
-    const cursiv::CstNode& x0 = ran[i];
-    const cursiv::CstNode& y0 = read[i];
-    if (x0.begin == y0.begin && x0.end == y0.end &&
-        x0.subtreeSize == y0.subtreeSize && x0.engine == y0.engine &&
-        x0.hidden == y0.hidden && x0.recovered == y0.recovered)
-      continue;
-    std::printf("FAIL: %s: record %u differs from the drive's\n", name, i);
-    ++failures;
-    return stats.splits;
-  }
+  same_records(ran, read, name);
   return stats.splits;
 }
 

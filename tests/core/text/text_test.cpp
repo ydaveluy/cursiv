@@ -15,6 +15,7 @@
 #include "cursiv/core/utils/ctstring.hpp"
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 
 using namespace cursiv;
 
@@ -311,13 +312,9 @@ int main() {
        {0x3000, 0x3000}}));
   for (const char* refused_spec :
        {R"(é\d-z)", R"(\u{D800})", R"(\u{110000})"}) {
-    bool refused = false;
-    try {
+    CHECK(support::throws<std::invalid_argument>([&] {
       (void)LexCodePoints::of(0, false, refused_spec);
-    } catch (const std::invalid_argument&) {
-      refused = true;
-    }
-    CHECK(refused);
+    }));
   }
   a_text_lowers_as_a_client_lowers_it();
   return test::report("text_test");

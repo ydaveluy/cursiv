@@ -101,6 +101,8 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     }
   }
   b.headMode.assign(g.ndecisions, 0);
+  b.readHeadMode.assign(g.ndecisions, 0);
+  b.readMode.assign(g.ndecisions, 0);
   b.decStands.assign(g.ndecisions, 0);
   for (std::uint16_t d = 0; d < g.ndecisions; ++d) {
     LlDecision& dec = g.decisions[d];
@@ -111,8 +113,16 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     b.decStands[d] = stands.any() ? 1 : 0;
     const DynSet beyond = standing_firsts(stands);
     dec.mode = intern(want | skip(b.gapCfg, dec.node), beyond);
-    if (g.nodes[dec.node].kind == LlShape::rep)
+    if (g.nodes[dec.node].kind == LlShape::rep) {
       b.headMode[d] = intern(want | skip(b.headCfg, dec.node), beyond);
+      if (b.callerPeek[dec.node]) {
+        b.readHeadMode[d] =
+            intern(want | skip(b.readHeadCfg, dec.node), beyond);
+        b.readMode[d] =
+            intern(want | skips[g.nodeBuild[dec.node].cfg] | modes.joins,
+                   beyond);
+      }
+    }
   }
   for (std::uint16_t c = 0; c < g.nclimbs; ++c) {
     LlClimb& cl = g.climbs[c];
@@ -490,12 +500,7 @@ void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
 
 }  // namespace
 
-void ll_build_lexer(LlBuiltProgram& b) {
-  LexAlphabet alpha;
-  alpha.terminals(b, [](LlLowCfg& g, std::string_view text) {
-    return g.intern_name(text);
-  });
-  if (b.cfg.lowerFail()) return;
+void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha) {
   alpha.section_ends(b.cfg, ll_section_reads);
   const LexModes modes = ll_lex_modes_of(b);
   // For a mode `modeMulti` marks 2, the terminals that meet at the text's end.

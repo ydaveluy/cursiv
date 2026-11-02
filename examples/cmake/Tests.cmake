@@ -9,6 +9,7 @@ function(cursiv_example_tests name)
     endif()
     target_link_libraries(${_target} PRIVATE ${name}Core)
     if(_kind STREQUAL "recovery")
+      target_link_libraries(${_target} PRIVATE cursiv::test)
       target_compile_definitions(${_target} PRIVATE
           CURSIV_RECOVERY_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/recovery")
     else()

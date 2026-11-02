@@ -15,13 +15,17 @@ namespace {
 // join added over it.
 void ll_entry_runs(const LlBuiltProgram& a, std::uint16_t i,
                    std::vector<std::vector<std::uint16_t>>& runs) {
-  const auto from = a.origin[i];
-  if (from.from == kNoRow) {
-    runs.assign(1, chain_run(a, i));
-    return;
+  runs.clear();
+  for (;;) {
+    const auto from = a.origin[i];
+    if (from.from == kNoRow) {
+      runs.push_back(chain_run(a, i));
+      break;
+    }
+    runs.push_back(chain_run(a, from.to));
+    i = from.from;
   }
-  ll_entry_runs(a, from.from, runs);
-  runs.push_back(chain_run(a, from.to));
+  std::reverse(runs.begin(), runs.end());
 }
 
 // What fills the node a record built, and what writes that node into the

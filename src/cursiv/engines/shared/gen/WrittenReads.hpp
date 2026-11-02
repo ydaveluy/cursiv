@@ -91,7 +91,6 @@ class WrittenReads {
   std::vector<std::uint32_t> _slotOf, _work;
   // The slot whose body is being read, if any.
   std::uint32_t _solving = kNoSlot;
-  std::size_t _moved = 0;
 };
 
 }  // namespace cursiv

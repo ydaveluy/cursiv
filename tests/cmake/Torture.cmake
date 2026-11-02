@@ -15,6 +15,7 @@ file(GLOB CURSIV_TORTURE_SOURCES CONFIGURE_DEPENDS torture/*.cpp)
 
 cursiv_test(torture_test "${CURSIV_TORTURE_SOURCES}" cursiv::lsp tortureGenerated
     electionGenerated optionalsGenerated)
+set_target_properties(torture_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 3)
 target_compile_definitions(torture_test PRIVATE
     CURSIV_TORTURE_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/torture/corpus"
     CURSIV_RECOVERY_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/torture/corpus")

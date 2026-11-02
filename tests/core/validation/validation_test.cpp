@@ -45,9 +45,9 @@
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
 #include "cursiv/core/workspace/TextDocument.hpp"
-#include "cursiv/lsp/actions/DefaultCodeActionProvider.hpp"
 #include "cursiv/test/Check.hpp"
 #include "repairmsg/generated/MessageG/Module.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 
@@ -218,17 +218,13 @@ void an_unknown_check_target_is_refused() {
   World world;
   const cursiv::ValidationCategory category{"foreign"};
   for (bool exact : {false, true}) {
-    bool refused = false;
-    try {
+    CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
       world.registry->registerCheck(
           {&cursiv::ast_type_tag<Foreign>, exact,
            [](const cursiv::AstNode&, cursiv::ValidationAcceptor&,
               const cursiv::CancellationToken&) {}},
           &category);
-    } catch (const cursiv::ValidationRegistrationError&) {
-      refused = true;
-    }
-    CHECK(refused);
+    }));
     CHECK(world.registry->checkCount() == 0);
     for (const auto* registered : world.registry->categories())
       CHECK(registered != &category);
@@ -334,14 +330,10 @@ void node_options_are_interruptible() {
   const auto* document = world.build(
       "file:///a.ws", std::string(kSource), cursiv::BuildOptions{false, {}});
   std::vector<cursiv::Diagnostic> diagnostics;
-  bool cancelled = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     world.language->documentValidator->validateDocument(
         *document, diagnostics, cancellation.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
-  }
-  CHECK(cancelled);
+  }));
   CHECK(measured->optionsAsked == 1);
   CHECK(world.validator.everyNode == 0);
 }
@@ -367,27 +359,19 @@ void nested_pruning_preserves_checks_on_siblings() {
 // refused loudly, for checks and hooks alike.
 void built_in_is_refused_at_registration() {
   World world;
-  bool refusedCheck = false;
-  try {
+  CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
     world.registry->registerCheck(
         Registry::makeValidationCheck<&TestValidator::onEntity>(
             world.validator),
         &cursiv::built_in);
-  } catch (const cursiv::ValidationRegistrationError&) {
-    refusedCheck = true;
-  }
-  CHECK(refusedCheck);
+  }));
 
-  bool refusedHook = false;
-  try {
+  CHECK(support::throws<cursiv::ValidationRegistrationError>([&] {
     world.registry->registerBeforeDocument(
         [](const cursiv::Document&, cursiv::ValidationAcceptor&,
            const cursiv::CancellationToken&) {},
         &cursiv::built_in);
-  } catch (const cursiv::ValidationRegistrationError&) {
-    refusedHook = true;
-  }
-  CHECK(refusedHook);
+  }));
 }
 
 // The hooks bracket the walk, and a hook has a category like a check: the
@@ -804,9 +788,8 @@ void a_deletion_offers_no_quick_fix() {
   CHECK(!repaired->data.has_value());
 }
 
-// End to end: the build publishes a repair with its edit rows, the code-action
-// provider turns them into a quick fix, and applying the edit really fixes
-// the document.
+// The build publishes a repair with its edit rows, and applying the edit
+// really fixes the document. The LSP provider's projection is in presentation.
 void a_repairs_quick_fix_really_fixes() {
   World world;
   const std::string text = "datatype String\nentity A { x  String }\n";
@@ -833,18 +816,6 @@ void a_repairs_quick_fix_really_fixes() {
                 static_cast<std::size_t>(end - begin), newText.string());
   const cursiv::ParseResult reparsed = world.language->parser->parse(fixed);
   CHECK(static_cast<bool>(reparsed) && reparsed.diagnostics.empty());
-
-  // And the provider offers it as a quick fix over the published block.
-  const cursiv::DefaultCodeActionProvider provider;
-  lsp::CodeActionParams params;
-  params.textDocument.uri = lsp::Uri::parse(std::string(document->uri));
-  params.range = {{0, 0}, {2, 0}};
-  const std::vector<lsp::CodeAction> actions =
-      provider.getCodeActions(*document, params, {});
-  CHECK(!actions.empty());
-  const lsp::CodeAction& action = actions.front();
-  CHECK(action.kind == lsp::CodeActionKind::QuickFix);
-  CHECK(action.edit.has_value() && action.edit->changes.has_value());
 }
 
 // Document order on the way out, and stable within one position. The pass

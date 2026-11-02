@@ -88,7 +88,6 @@ struct Emit : EmitOutput {
   Anchor regionAt{};
   std::uint16_t ownRegion = kNoRow;
   Anchor ownAt{};
-  bool inTurn = false;
   // The body of a fold step: past its first reading, a nest wraps what the
   // fold has read.
   bool inStep = false;
@@ -256,9 +255,8 @@ struct Emit : EmitOutput {
   void call_site(std::uint16_t id);
   bool may_suspend(std::uint16_t id);
   bool turns(std::uint16_t id) const { return plan.turns(id); }
-  bool head_turns(std::uint16_t id) const { return plan.head_turns(id); }
   bool reaches_back(std::uint16_t id) const {
-    return !inTurn && plan.reaches_back(id);
+    return plan.reaches_back(id);
   }
   // A rule that opens no frame and never resumes.
   bool plain(std::uint16_t r) const { return memo.plain[r] != 0; }
@@ -298,7 +296,10 @@ std::uint16_t Emit::first_mode(std::uint16_t id) const {
     case LlShape::alt:
       return a.cfg.decisions[n.decision].mode;
     case LlShape::rep:
-      return a.headMode[n.decision];
+      // Opening a record must not commit the caller trivia a nullable
+      // repetition only inspects while deciding whether to take an item.
+      return a.callerPeek[id] ? a.readHeadMode[n.decision]
+                              : a.headMode[n.decision];
     case LlShape::seq: {
       for (unsigned i = 0; i < n.count; ++i) {
         const std::uint16_t m = first_mode(kid(n, i));
@@ -325,6 +326,9 @@ void Emit::call_site(std::uint16_t id) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
   if (n.mode != kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", n.mode);
+  // A nullable callee may inspect its exit under another trivia setting.
+  // Commit only the actual entry gap before handing that decision over.
+  if (a.callerPeek[id]) line("::cursiv::ll_flush_trivia<kTable>(c);");
   const std::uint32_t base = a.fuseBase[id];
   const std::uint32_t count = a.fuseBase[id + 1] - base;
   // A section reads its grammar alone, and what its entry left is dropped
@@ -445,6 +449,7 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
     return;
   }
   const bool held = may_suspend(id);
+  const bool checkpoint = n.kind == LlShape::seq && n.count == 0 && turns(id);
   const std::uint32_t ob = a.ownBase[id];
   const std::uint32_t oc = a.ownBase[id + 1] - ob;
   const bool step = a.cfg.nodeBuild[id].foldStep;
@@ -467,8 +472,10 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   const std::string f = local(held && counted, "::cursiv::NodeCount", "f");
   const std::string l =
       !turn ? std::string("0") : local(held, "::std::uint16_t", "l");
-  if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
-  line("::cursiv::ll_flush_trivia<kTable>(c);");
+  if (!checkpoint) {
+    if (hand == kNoRow) put("::cursiv::ll_peek<kTable, {}u>(c);", mode_of(id));
+    line("::cursiv::ll_flush_trivia<kTable>(c);");
+  }
   // Its locals end with it: a label further on in the block may not cross
   // their initialisation.
   if (!held) open("{");
@@ -481,8 +488,9 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
     if (counted)
       put("{}{} = {} != 0 ? {} : c.tape.stream().records();",
           held ? "" : "const ::cursiv::NodeCount ", f, l, regionAt.count);
-    put("{}{} = {} != 0 ? {} : c.la.begin;",
-        held ? "" : "const ::cursiv::TextOffset ", b, l, regionAt.begin);
+    put("{}{} = {} != 0 ? {} : {};",
+        held ? "" : "const ::cursiv::TextOffset ", b, l, regionAt.begin,
+        checkpoint ? "::std::max(c.at, c.triviaAt)" : "c.la.begin");
   } else {
     put("{}{} = {};", held ? "" : "const auto ", o,
         step ? foldAt.open : "c.tape.enter()");
@@ -491,25 +499,23 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
       put("{}{} = c.tape.stream().records();",
           held ? "" : "[[maybe_unused]] const ::cursiv::NodeCount ", f);
     put("{}{} = {};", held ? "" : "const ::cursiv::TextOffset ", b,
-        step ? foldAt.begin : "c.la.begin");
+        step ? foldAt.begin
+             : checkpoint ? "::std::max(c.at, c.triviaAt)" : "c.la.begin");
   }
   const Anchor here{o, b, f};
   const Anchored foldHere = folds ? Anchored(foldAt, here) : Anchored(foldAt);
-  // A record stands between its turns and any region outside it, and a turn
-  // holds the turns its absorbed tail reads, which close inside it: those
-  // begin where their own text does.
-  const bool outerTurn = inTurn;
+  // A creation isolates its prefix; an adopting close keeps the current
+  // construction available to any later checkpoint in the same context.
   if (region) {
     ownRegion = id;
     ownAt = here;
   }
-  inTurn = inTurn || turns(id);
-  const Anchored regionHere(regionAt, {});
+  const Anchored regionHere(
+      regionAt, a.writes.chainBuild[n.row].creates ? Anchor{} : regionAt);
   const bool outerStep = inStep;
   inStep = step;
   node(id, hand);
   inStep = outerStep;
-  inTurn = outerTurn;
   // The hand-over ends with the group, whose fields go back to the pool.
   if (region) {
     ownRegion = kNoRow;
@@ -539,10 +545,8 @@ void Emit::group(std::uint16_t id, std::uint16_t hand) {
   if (!held) close("}");
 }
 
-// Only the first position stands where the token was read. A head reaches
-// back to where its caller's region opened, a later position that turns to
-// where the sequence did -- or to the caller's, where the head may have
-// reached back over it -- short of a nest, which holds what follows it.
+// Every transparent position shares its construction prefix. A creation
+// opens a new one; a nest checkpoints it without hiding it from later nests.
 void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
@@ -555,7 +559,7 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   const Anchor& reach = over ? foldAt : outer;
   Anchor start;
   bool scoped = false;
-  if (region && reach.live() && head_turns(kid(n, 0))) {
+  if (region && reach.live()) {
     start = reach;
   } else if (region && ownRegion == id) {
     start = ownAt;
@@ -580,14 +584,10 @@ void Emit::sequence(std::uint16_t id, std::uint16_t hand) {
   }
   const Anchored foldHere = folds ? Anchored(foldAt, start) : Anchored(foldAt);
   const Anchored regionHere(regionAt);
-  bool held = false;
   for (unsigned k = 0; k < n.count; ++k) {
     const std::uint16_t x = kid(n, k);
-    const bool from = k == 0 || (region && !held && head_turns(x));
-    regionAt = k == 0 ? outer : from ? start : Anchor{};
-    if (!from && inStep) over_fold();
+    regionAt = start.live() ? start : reach;
     group(x, k == 0 ? hand : kNoRow);
-    held = held || turns(x);
   }
   if (scoped) close("}");
 }
@@ -911,9 +911,14 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   // gap between two turns.
   const std::uint16_t head = a.headMode[n.decision];
   const bool split = !flat && n.min == 0 && head != dec.mode;
+  const bool reread = a.callerPeek[id] != 0;
+  const std::uint16_t readHead = a.readHeadMode[n.decision];
+  const std::uint16_t readNext = a.readMode[n.decision];
+  const bool readSplit = reread && readHead != readNext && n.max > 1;
+  const bool trackFirst = split || (!flat && !counts && readSplit);
   const std::string first =
-      !split ? std::string{} : local(held, "bool", "first");
-  if (split) put("{}{} = true;", held ? "" : "bool ", first);
+      !trackFirst ? std::string{} : local(held, "bool", "first");
+  if (trackFirst) put("{}{} = true;", held ? "" : "bool ", first);
   const std::string mode =
       flat    ? std::format("{}u", head)
       : split ? std::format("({} ? {}u : {}u)", first, head, dec.mode)
@@ -988,13 +993,22 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     byToken();
   }
   if (guarded) close("}");
+  if (reread) {
+    const std::string readMode =
+        flat || !readSplit
+            ? std::format("{}u", readHead)
+            : std::format("({} ? {}u : {}u)",
+                          counts ? std::format("{} == 0", i) : first,
+                          readHead, readNext);
+    put("::cursiv::ll_repeat_read<kTable>(c, {});", readMode);
+  }
   if (flat) {
     if (inStep) over_fold();
     group(body, kAnyToken);
     close("}");
     return;
   }
-  if (split) put("{} = false;", first);
+  if (trackFirst) put("{} = false;", first);
   const std::string at = local(held, "::cursiv::TextOffset", "at");
   put("{}{} = c.at;", held ? "" : "const ::cursiv::TextOffset ", at);
   const std::string level =
@@ -1051,7 +1065,6 @@ void Emit::ladder(std::uint16_t id) {
   put("{}{} = false;", held ? "" : "bool ", armed);
   open("for (;;) {");
   for (std::size_t k = 0; k < turns.size(); ++k) {
-    if (k == 1) regionAt = {};
     repetition(turns[k].first, turns[k].second);
     line("if (c.abandonDepth != ~::std::size_t{0}) break;");
     if (k == 0) put("{} = true;", armed);

@@ -151,12 +151,10 @@ struct LexKeywordCut {
   struct Spelling {
     Keyword word;
     std::vector<int> read;
-    // Its steps, the first past its last byte, and the count at its first
-    // relay.
+    // Its edges, the last byte's edge and the first assertion's edge.
     std::vector<std::pair<int, int>> edges;
     std::size_t tail = 0;
     std::size_t asserted = SIZE_MAX;
-    int end = -1;
     std::size_t steps = 0;
   };
 
@@ -207,7 +205,7 @@ struct LexKeywordCut {
           return;
         walk.word.sets.push_back(static_cast<std::uint16_t>(st.set));
         walk.read.push_back(x);
-        next = walk.end = st.t1;
+        next = st.t1;
         walk.tail = walk.edges.size();
       } else {
         if (st.t2 >= 0) {
@@ -252,7 +250,7 @@ struct LexKeywordCut {
       for (std::size_t d = 0; d < w.read.size(); ++d)
         reads[static_cast<std::size_t>(w.read[d])].push_back(
             tag | static_cast<std::uint32_t>(d));
-      reads[static_cast<std::size_t>(w.end)].push_back(
+      reads[static_cast<std::size_t>(w.edges[w.tail].second)].push_back(
           tag | static_cast<std::uint32_t>(w.read.size()));
       keywords.push_back(w.word);
     }

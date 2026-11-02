@@ -92,6 +92,9 @@ inline std::uint16_t lr_push_prod(LrLowered& o, const LrLowerPool& p,
   b.tailCfg = slots.empty()        ? 0u
               : slots.back().trail ? slots.back().trail - 1u
                                    : slots.back().cfg;
+  b.regionExit = !endOnly && !slots.empty() && slots.back().trail &&
+                 slots.back().cfg != b.tailCfg &&
+                 c.home_at(slots.back().cfg) == c.home_at(b.tailCfg);
   return self;
 }
 // The options production `k` decided, `position << 16 | arm` each.
@@ -110,6 +113,9 @@ inline void lr_close_region(LrBuildCfg& c, std::uint16_t k,
   if (trail == 0 || k == kNoRow) return;
   c.prodBuild[k].closesRegion = true;
   c.prodBuild[k].tailCfg = static_cast<std::uint8_t>(trail - 1u);
+  c.prodBuild[k].regionExit =
+      !c.prodBuild[k].endOnly &&
+      c.home_at(c.prodBuild[k].home) == c.home_at(trail - 1u);
 }
 
 inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
@@ -117,6 +123,9 @@ inline void lr_emit_alts(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
 inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                               LrShapeId at, const LrActs& made,
                               const LrActs& row);
+inline void lr_emit_subsets(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
+                            std::vector<LrLowerSlot> slots, const LrActs& node,
+                            std::uint16_t priority);
 
 // `made` and `row` are handed in by the caller, which may have taken them
 // for itself: read off the node, one directive would apply twice.
@@ -263,7 +272,22 @@ inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
     return LrLowerSlot{.sym = in.sym, .cfg = in.cfg};
   }
   const std::uint16_t aux = lr_new_aux(o.cfg);
-  if (e.max != kEndless)
+  if (e.max == kEndless && e.min != 0 && in.trail != 0) {
+    // An unbounded run closing a region has a required final item. Keep its
+    // earlier items in an internal prefix: no state both shifts another
+    // internal item and reduces the region under the caller's trivia.
+    const std::uint16_t prefix = lr_new_aux(o.cfg);
+    LrLowerSlot repeated = in;
+    repeated.trail = 0;
+    lr_emit_left_recursion(o, p, prefix, repeated,
+                           e.min > 1 ? e.min - 1u : 1u);
+    LrLowerSlot last = in;
+    last.lead = 0;
+    std::vector<LrLowerSlot> slots{
+        {.sym = nt_sym(prefix), .optional = e.min == 1,
+         .cfg = in.cfg, .lead = in.lead}, last};
+    lr_emit_subsets(o, p, aux, std::move(slots), {}, kNoRow);
+  } else if (e.max != kEndless)
     lr_emit_chained_repeat(o, p, aux, in, e);
   else
     lr_emit_left_recursion(o, p, aux, in, e.min);

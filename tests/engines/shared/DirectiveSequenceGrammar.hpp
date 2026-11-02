@@ -208,8 +208,9 @@ struct Turned : Base {
                  assign<&ast::Decl::name>(ref<ID>) +
                  option(flag<&ast::Decl::hasInit>(many(lit<"*">)) +
                         lit<"!">) +
-                 many(flag<&ast::Decl::raw>(many(lit<"~">)) +
-                      append<&ast::Decl::dims>(ref<DimRule>))) +
+                 option(flag<&ast::Decl::raw>(
+                     some(many(lit<"~">) +
+                          append<&ast::Decl::dims>(ref<DimRule>))))) +
              eof> {};
 };
 
@@ -266,10 +267,11 @@ struct Outside : Base {
 
 struct Nested : Base {
   struct Item
-      : rule<create<ast::Expr>(assign<&ast::Expr::text>(ref<NUM>)) |
-             flag<&ast::Expr::parenthesized>(lit<"("> + ref<Item> + lit<")">)> {
-  };
-  struct Root : rule<ref<Item> + eof> {};
+      : rule<ref<ExprRule> | (lit<"("> + ref<Item> + lit<")">)> {};
+  struct Root
+      : rule<(ref<ExprRule> |
+              flag<&ast::Expr::parenthesized>(lit<"("> + ref<Item> + lit<")">)) +
+             eof> {};
 };
 
 struct Doubled : Base {

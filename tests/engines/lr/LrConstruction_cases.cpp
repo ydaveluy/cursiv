@@ -1287,25 +1287,25 @@ void lexical_pools_cannot_wrap() {
 // asks for it: a section's word class is declared before the lowering reifies
 // the grammar's own, and the two meet in one pool.
 void sets_are_interned_once() {
-  const auto once = [](const LrBuildTable& a) {
+  const auto once = [](LrBuildTable& a) {
     std::vector<detail::SetKey> seen;
     for (std::uint16_t s = 0; s < a.cfg.nsets; ++s) {
       const detail::SetKey key{a.cfg.sets[s], a.cfg.setDecode[s],
                                lex_set_scalars(a.cfg, s)};
       CHECK(std::ranges::find(seen, key) == seen.end());
-      CHECK(lex_intern_set(const_cast<LrBuildCfg&>(a.cfg), key.bytes,
-                           key.decode, key.scalars) == s);
+      CHECK(lex_intern_set(a.cfg, key.bytes, key.decode, key.scalars) == s);
       seen.push_back(key);
     }
     CHECK(seen.size() == a.cfg.nsets);
   };
-  const auto sectioned = lr_build_automaton(LrLowering<tsection::Lr>::table());
+  auto sectioned = lr_build_automaton(LrLowering<tsection::Lr>::table());
   CHECK(!sectioned.cfg.lowerFail());
   once(sectioned);
   // A guard product interns after the lowering, whatever its verdict.
   using Guard =
       WordPastMatch<some(cr<"#">) + !lit<"abc"> + !cr<"b"> + cr<"a-d">>;
-  once(lr_build_automaton(LrLowering<Guard>::table()));
+  auto guarded = lr_build_automaton(LrLowering<Guard>::table());
+  once(guarded);
 }
 }  // namespace
 
@@ -1471,7 +1471,105 @@ void substituted_reductions_keep_the_returned_row() {
 }
 }  // namespace fold_contract
 
+namespace record_propagation {
+
+void returned_records_follow_unit_calls() {
+  using namespace cursiv;
+  LrLowered low;
+  auto& g = low.cfg;
+  g.nterms = 2;
+  g.nnts = 10;
+  const auto bare = low.writes.bare_chain();
+  const std::uint16_t action = 0;
+  const auto created = low.writes.intern_chain(&action, 1);
+  low.writes.chainBuild[created].creates = true;
+
+  lay(g, 0, {nt_sym(1)});
+  lay(g, 1, {nt_sym(2)});
+  lay(g, 2, {});
+  lay(g, 3, {nt_sym(4)});
+  g.prods[3].node = bare;  // This production returns its own record.
+  lay(g, 4, {});
+  lay(g, 5, {nt_sym(6)});
+  lay(g, 6, {1});
+  g.slots[g.prods[6].at].row = created;
+  lay(g, 7, {});
+  g.prods[7].node = created;
+  lay(g, 8, {});
+  g.prods[8].node = bare;
+  lay(g, 8, {nt_sym(2)});  // Every alternative must return a record.
+  lay(g, 9, {1, 1});
+  // A directive over part of a longer body does not open its whole record.
+  g.slots[g.prods[10].at].row = created;
+
+  const auto users = lr_record_users(g);
+  CHECK(lr_hands_a_record(g, users) ==
+        (std::vector<bool>{false, false, false, true, false,
+                           true, true, true, false, false}));
+  CHECK(lr_opens_a_record(low, users) ==
+        (std::vector<bool>{false, false, false, false, false,
+                           true, true, true, false, false}));
+}
+
+void a_bare_record_demand_stops_at_an_owned_record() {
+  using namespace cursiv;
+  LrLowered low;
+  auto& g = low.cfg;
+  g.nnts = 6;
+  const auto bare = low.writes.bare_chain();
+  lay(g, 0, {nt_sym(1), nt_sym(4)});
+  g.slots[0].row = g.slots[1].row = bare;
+  lay(g, 1, {nt_sym(2)});
+  lay(g, 2, {nt_sym(3)});
+  lay(g, 3, {});
+  lay(g, 4, {nt_sym(5)});
+  g.prods[4].node = bare;
+  lay(g, 5, {});
+
+  lr_lay_bare_records(low);
+  CHECK(g.prods[3].node == bare);
+  CHECK(g.prods[5].node == kNoRow);
+  CHECK(g.prods[0].node == kNoRow);
+  CHECK(g.prods[1].node == kNoRow && g.prods[2].node == kNoRow);
+}
+
+// Rule order must not determine the cost or the result of propagation. Each
+// direction faces its unfavourable order on the same long chain.
+void long_chains_propagate_in_both_directions() {
+  using namespace cursiv;
+  constexpr std::uint16_t count = 8000;
+  LrLowered low;
+  auto& g = low.cfg;
+  g.nnts = count;
+  const auto bare = low.writes.bare_chain();
+  for (std::uint16_t nt = 0; nt + 1u < count; ++nt)
+    lay(g, nt, {nt_sym(nt + 1u)});
+  lay(g, count - 1, {});
+  auto users = lr_record_users(g);
+  CHECK(lr_hands_a_record(g, users) == std::vector<bool>(count, false));
+
+  g.slots[0].row = bare;
+  std::ranges::reverse(g.prods.v);
+  lr_lay_bare_records(low);
+  users = lr_record_users(g);
+  CHECK(lr_hands_a_record(g, users) == std::vector<bool>(count, true));
+  CHECK(lr_opens_a_record(low, users) == std::vector<bool>(count, false));
+
+  const std::uint16_t action = 0;
+  const auto created = low.writes.intern_chain(&action, 1);
+  low.writes.chainBuild[created].creates = true;
+  g.prods[0].node = created;
+  std::ranges::reverse(g.prods.v);
+  users = lr_record_users(g);
+  CHECK(lr_opens_a_record(low, users) == std::vector<bool>(count, true));
+}
+
+}  // namespace record_propagation
+
 void run() {
+  record_propagation::returned_records_follow_unit_calls();
+  record_propagation::a_bare_record_demand_stops_at_an_owned_record();
+  record_propagation::long_chains_propagate_in_both_directions();
   fold_contract::precomposition_keeps_bare_records_through_renames();
   fold_contract::substituted_reductions_keep_the_returned_row();
   lexical_derived::owed_terminals_stop_at_the_first_acceptance();

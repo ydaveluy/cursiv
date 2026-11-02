@@ -50,16 +50,12 @@ constexpr bool dedupe_ok() {
       decltype(scrambled(std::make_index_sequence<lap>{}))>;
 }
 
-template <std::size_t... Zs>
-constexpr bool sweep(std::index_sequence<Zs...>) {
-  return ((cat_ok<Zs * 149>() && dedupe_ok<Zs * 149>()) && ...);
-}
-
-static_assert(sweep(std::make_index_sequence<8>{}));
-static_assert(cat_ok<1>() && cat_ok<2>() && cat_ok<16>() && cat_ok<17>() &&
-              cat_ok<257>() && cat_ok<4097>());
-static_assert(dedupe_ok<1>() && dedupe_ok<63>() && dedupe_ok<64>() &&
-              dedupe_ok<65>() && dedupe_ok<129>() && dedupe_ok<2049>());
+// Empty packs, chunk boundaries and one interior remainder, then a deep pack.
+static_assert(cat_ok<0>() && cat_ok<1>() && cat_ok<2>() && cat_ok<16>() &&
+              cat_ok<17>() && cat_ok<149>() && cat_ok<257>() && cat_ok<4097>());
+static_assert(dedupe_ok<0>() && dedupe_ok<1>() && dedupe_ok<63>() &&
+              dedupe_ok<64>() && dedupe_ok<65>() && dedupe_ok<129>() &&
+              dedupe_ok<149>() && dedupe_ok<2049>());
 static_assert(
     std::is_same_v<dedupe_t<TypeList<N<2>, N<1>, N<2>, N<3>, N<1>, N<0>>>,
                    TypeList<N<2>, N<1>, N<3>, N<0>>>);

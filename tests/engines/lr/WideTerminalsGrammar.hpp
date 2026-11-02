@@ -4,15 +4,9 @@
 // construction's sets grow with the grammar.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "engines/lr/WideTerminalsAst.hpp"
 
 namespace twide {
-
-namespace ast {
-struct Doc : cursiv::Extends<cursiv::AstNode> {
-  vector<string_view> words;
-};
-}  // namespace ast
 
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};

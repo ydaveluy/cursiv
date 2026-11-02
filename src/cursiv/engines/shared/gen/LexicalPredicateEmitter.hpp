@@ -61,7 +61,7 @@ class LexicalPredicateEmitter {
   bool any() const { return !_roots.empty() || !_recognizers.empty(); }
   bool searches() const {
     return std::ranges::any_of(_order, [&](auto id) {
-      return _g.lex[id].kind == LexKind::through_same && _g.lex[id].min == 2;
+      return _g.lex[id].kind == LexKind::through_same;
     });
   }
 
@@ -881,7 +881,10 @@ class LexicalPredicateEmitter {
               "          {{src + p.at, len - p.at}},\n"
               "          {{{}, {}u}}, {{src + capture->begin, capture->end - "
               "capture->begin}},\n"
-              "          {{{}, {}u}}, [](const char*) {{ return true; }});\n"
+              "          {{{}, {}u}}, [&](const char* q) {{\n"
+              "            return ::cursiv::lex_character_boundary(\n"
+              "                {{src + p.at, len - p.at}}, q);\n"
+              "          }});\n"
               "      if (hit == nullptr) {{ seen = ::std::max(seen, len); "
               "continue; }}\n"
               "      p.at = static_cast<::cursiv::TextOffset>(hit - src) + "
@@ -915,8 +918,12 @@ class LexicalPredicateEmitter {
                  call(_g.lexKid[e.b + 1], "::std::move(echoed)") + ";\n";
         out +=
             "        if (!echoed.empty()) { out.unite(echoed); break; }\n"
-            "        seen = ::std::max(seen, p.at + 1);\n        ++p.at;\n     "
-            " }\n    }\n";
+            "        ::std::size_t width = 0;\n"
+            "        (void)::cursiv::scalar_at(src + p.at, len - p.at, width);\n"
+            "        p.at += static_cast<::cursiv::TextOffset>(\n"
+            "            width != 0 ? width : 1);\n"
+            "        seen = ::std::max(seen, p.at);\n"
+            "      }\n    }\n";
         break;
       case LexKind::through_lit:
         out +=

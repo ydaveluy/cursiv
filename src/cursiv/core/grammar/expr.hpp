@@ -233,8 +233,8 @@ struct As : GrammarNode {};
 template <auto Body, class... Opts>
 struct Rule;
 namespace detail {
-template <class E>
-struct operand_of;
+template <template <auto, class> class Directive, auto S, class E>
+struct directive_operand;
 }
 
 // `E` is `Seq<open, Ref<G>, close>`: `G`'s entry between two tokens of the
@@ -1271,13 +1271,9 @@ inline constexpr Create<T, Epsilon> create{};
 template <auto S>
 struct AssignFn {
   template <Expr E>
-  constexpr Assign<S, typename detail::operand_of<std::remove_cvref_t<E>>::type>
+  constexpr typename detail::directive_operand<Assign, S,
+                                               std::remove_cvref_t<E>>::type
   operator()(E) const {
-    return {};
-  }
-  template <class G, class O, class M, class C>
-  constexpr Embed<G, Seq<O, Assign<S, M>, C>> operator()(
-      Embed<G, Seq<O, M, C>>) const {
     return {};
   }
 };
@@ -1287,13 +1283,9 @@ inline constexpr AssignFn<S> assign{};
 template <auto S>
 struct AppendFn {
   template <Expr E>
-  constexpr Append<S, typename detail::operand_of<std::remove_cvref_t<E>>::type>
+  constexpr typename detail::directive_operand<Append, S,
+                                               std::remove_cvref_t<E>>::type
   operator()(E) const {
-    return {};
-  }
-  template <class G, class O, class M, class C>
-  constexpr Embed<G, Seq<O, Append<S, M>, C>> operator()(
-      Embed<G, Seq<O, M, C>>) const {
     return {};
   }
 };

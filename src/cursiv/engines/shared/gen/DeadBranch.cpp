@@ -53,8 +53,9 @@ class Dead {
         bool any = false;
         for (std::uint32_t i = 0; i < n.count; ++i) {
           const ImageId k = kid(n, i);
-          if (!is_cond(k) && !is_eof(k)) return false;
-          any = any || is_cond(k);
+          const bool condition = is_cond(k);
+          if (!condition && !is_eof(k)) return false;
+          any = any || condition;
         }
         return any;
       }

@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "cursiv/engines/lr/gen/LrLowerPool.hpp"
@@ -58,6 +59,8 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
                const LrActs& node, std::uint8_t prec, Association group);
   LrLowerSlot infix_side(unsigned cfg, const void* row,
                          std::uint16_t sym) const;
+
+  std::unordered_map<ImageId, ImageId> _ended;
 };
 
 }  // namespace cursiv

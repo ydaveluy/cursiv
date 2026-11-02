@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "support/World.hpp"
-#include "workspace/generated/Workspace/Module.hpp"
+#include "support/WorkspaceModule.hpp"
 
 namespace support {
 
@@ -15,8 +15,7 @@ Services& add_workspace(Shared& shared,
                         const std::function<void(Services&)>& tweak = {}) {
   return add_language<Services>(
       shared, {"workspace", {".ws"}, {}},
-      ws::generated::Workspace::create_parser(),
-      ws::generated::Workspace::create_ast_reflection(), tweak);
+      create_workspace_parser(), create_workspace_reflection(), tweak);
 }
 
 // That language alone in a workspace of its own.

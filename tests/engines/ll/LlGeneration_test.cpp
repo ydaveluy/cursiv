@@ -218,6 +218,78 @@ struct Simple : cursiv::GrammarSpec {
   using entry = Root;
 };
 
+template <bool Nullable>
+struct AnalysisAliases : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  static constexpr auto body = [] {
+    if constexpr (Nullable)
+      return option(lit<"a">);
+    else
+      return lit<"a">;
+  }();
+  struct Tail : rule<body> {};
+  struct Root : rule<create<Node>(tight(lit<"["> + ref<Tail>) + lit<"]">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+template <bool Nullable>
+cursiv::LlBuildWork analyse_aliases(unsigned count) {
+  auto low = cursiv::LlLowering<AnalysisAliases<Nullable>>::lower();
+  auto& cfg = low.cfg;
+  std::uint16_t tail = 0;
+  for (std::uint16_t r = 1; r < cfg.nrules; ++r)
+    if (cfg.rule_name(r) == "Tail") tail = r;
+  CHECK(tail != 0);
+  if (tail == 0) return {};
+  const auto leaf = cfg.rules[tail].body;
+  const auto base = cfg.nrules;
+  for (unsigned i = 0; i < count; ++i) {
+    const auto caller =
+        i == 0 ? tail : static_cast<std::uint16_t>(base + i - 1);
+    const auto callee = static_cast<std::uint16_t>(base + i);
+    const auto node = cfg.nnodes++;
+    cfg.nodes[node] = {.kind = cursiv::LlShape::call, .sym = callee};
+    cfg.nodeBuild[node] = {.cfg = cfg.ruleCfg[tail]};
+    cfg.rules[caller].body = static_cast<std::uint16_t>(node);
+    cfg.ruleCfg[callee] = cfg.ruleCfg[tail];
+    cfg.rules[callee] = {};
+  }
+  cfg.nrules = static_cast<std::uint16_t>(base + count);
+  cfg.rules[cfg.nrules - 1].body = leaf;
+  cursiv::LlBuildWork work;
+  const auto built =
+      cursiv::ll_build_program(low, {.staticPredict = false, .work = &work});
+  CHECK(!built.fault && !built.cfg.lowerFail() && !built.overflow);
+  for (unsigned r = base; r < cfg.nrules; ++r) {
+    CHECK(built.nullable[cfg.rules[r].body] == Nullable);
+    CHECK(built.ruleFirst[r] == built.ruleFirst[tail]);
+    CHECK(built.ruleFollow[r] == built.ruleFollow[tail]);
+  }
+  return work;
+}
+
+void alias_analysis_visits_only_changed_dependencies() {
+  const auto check = [](bool nullable) {
+    const auto small =
+        nullable ? analyse_aliases<true>(1000) : analyse_aliases<false>(1000);
+    const auto large =
+        nullable ? analyse_aliases<true>(4000) : analyse_aliases<false>(4000);
+    // A fourfold alias chain costs fourfold work, including nullable calls
+    // and both the local and caller-facing trivia configurations.
+    for (const auto member :
+         {&cursiv::LlBuildWork::nullable, &cursiv::LlBuildWork::first,
+          &cursiv::LlBuildWork::productive, &cursiv::LlBuildWork::repair,
+          &cursiv::LlBuildWork::gapShape, &cursiv::LlBuildWork::gapSets}) {
+      CHECK(small.*member != 0);
+      CHECK(large.*member <= 5 * (small.*member));
+      CHECK(large.*member < 20 * 4000);
+    }
+  };
+  check(false);
+  check(true);
+}
+
 struct UnsupportedGap : cursiv::GrammarSpec {
   struct Root
       : rule<create<Node>(gap::has(&(lit<"a"> + lit<"b">)) + lit<"ok">)> {};
@@ -701,6 +773,7 @@ void byte_recognizers_spell_each_shape_once() {
 }  // namespace
 
 int main() {
+  alias_analysis_visits_only_changed_dependencies();
   record_sources_keep_nullable_suffixes_and_only_required_children();
   record_aliases_propagate_changes_without_rejoining_every_rule();
   record_rows_keep_the_order_of_first_arrival_through_aliases();

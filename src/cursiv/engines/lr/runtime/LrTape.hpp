@@ -2,6 +2,7 @@
 // stream, in the order the elected derivation writes it.
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 
 #include "cursiv/core/grammar/ElementId.hpp"
@@ -90,7 +91,13 @@ class LrTape {
   CURSIV_ALWAYS_INLINE void settle(std::uint16_t state) {
     if (_pend == kLrNoPending) [[unlikely]]
       return;
-    L.set_state(_trunk.at(_pend), state);
+    // Only exit_anchored leaves a pending close, always visible and unrepaired.
+    // Write the whole stamp so a preceding row rename needs no wider reload.
+    CstNode& node = _trunk.at(_pend);
+    assert(!node.hidden && !node.recovered);
+    L.set_state(node, state);
+    node.hidden = false;
+    node.recovered = false;
     _pend = kLrNoPending;
   }
 

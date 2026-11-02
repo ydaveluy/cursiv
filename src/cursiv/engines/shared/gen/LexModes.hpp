@@ -64,8 +64,6 @@ struct LexModes {
          i = index.after(i))
       if (tag[i] == at && set[i] == want && longer[i] == beyond)
         return static_cast<std::uint16_t>(i);
-    if (set.size() >= UINT16_MAX)
-      throw LowerRefused(LowerFail::tokenGraphTooLarge);
     const std::uint16_t reach = beyond.any() ? intern(beyond) : kNoMode;
     if (set.size() >= UINT16_MAX)
       throw LowerRefused(LowerFail::tokenGraphTooLarge);

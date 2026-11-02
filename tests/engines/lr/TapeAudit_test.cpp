@@ -56,17 +56,19 @@ void audit(const std::string& lang, const std::string& text,
 
 const std::string kAlpha = " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";
 
-std::string mutate(const std::string& seed, std::mt19937& rng, int faults) {
+std::string mutate(const std::string& seed, std::mt19937& rng, int faults,
+                   std::string_view alphabet = kAlpha) {
   std::string d = seed;
   for (int k = 0; k < faults && !d.empty(); ++k) {
     const int op = static_cast<int>(rng() % 3);
     const std::size_t p = rng() % (d.size() + (op == 0 ? 1 : 0));
     if (op == 0)
-      d.insert(d.begin() + static_cast<long>(p), kAlpha[rng() % kAlpha.size()]);
+      d.insert(d.begin() + static_cast<long>(p),
+               alphabet[rng() % alphabet.size()]);
     else if (op == 1 && p < d.size())
       d.erase(d.begin() + static_cast<long>(p));
     else if (p < d.size())
-      d[p] = kAlpha[rng() % kAlpha.size()];
+      d[p] = alphabet[rng() % alphabet.size()];
   }
   return d;
 }
@@ -346,18 +348,7 @@ void run() {
   for (const std::string& s : seeds)
     for (int faults = 1; faults <= 6; ++faults)
       for (int t = 0; t < 16; ++t) {
-        std::string d = s;
-        for (int f = 0; f < faults && !d.empty(); ++f) {
-          const int op = static_cast<int>(rng() % 3);
-          const std::size_t p = rng() % (d.size() + (op == 0 ? 1 : 0));
-          if (op == 0)
-            d.insert(d.begin() + static_cast<long>(p),
-                     alpha[rng() % alpha.size()]);
-          else if (op == 1 && p < d.size())
-            d.erase(d.begin() + static_cast<long>(p));
-          else if (p < d.size())
-            d[p] = alpha[rng() % alpha.size()];
-        }
+        const std::string d = mutate(s, rng, faults, alpha);
         say("mut", d);
         // One reading of this grammar, read twice: a forest is a defect
         // wherever it comes from, and only one carrying a value reaches the

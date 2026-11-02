@@ -3,13 +3,7 @@
 #pragma once
 
 #include <cstdio>
-#include <fstream>
-#include <ios>
-#include <sstream>
 #include <string>
-#include <string_view>
-
-#include "cursiv/test/ExpectFunction.hpp"
 
 // `failures` is one inline variable for the whole program, so a lane split
 // over several translation units counts into the same one.
@@ -43,30 +37,11 @@ inline int report(const char* suite) {
 // The test module's verdicts, counted like a check. `cursiv::test` throws on
 // a mismatch unless a hook says otherwise, and a lane that counts must reach
 // its end: installed first thing in `main`, this one reports and keeps going.
-inline void count_expectations() {
-  cursiv::test::setExpectFunction([](std::string_view actual,
-                                     std::string_view expected,
-                                     std::string_view message) {
-    if (actual == expected) return;
-    if (!message.empty())
-      std::printf("FAIL %.*s\n", static_cast<int>(message.size()),
-                  message.data());
-    std::printf("FAIL expected '%.*s' but received '%.*s'\n",
-                static_cast<int>(expected.size()), expected.data(),
-                static_cast<int>(actual.size()), actual.data());
-    ++failures;
-  });
-}
+void count_expectations();
 
 // A whole file, or the empty string when it cannot be read -- what a missing
 // corpus must look like to the check that reads it.
-inline std::string read_file(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) return {};
-  std::ostringstream buf;
-  buf << in.rdbuf();
-  return buf.str();
-}
+std::string read_file(const std::string& path);
 
 }  // namespace cursiv::test
 

@@ -30,6 +30,7 @@
 #include "cursiv/test/ExpectFormatting.hpp"
 #include "cursiv/test/ExpectedCompletion.hpp"
 #include "cursiv/test/ParseHelper.hpp"
+#include "support/Throws.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
@@ -471,14 +472,10 @@ void a_cancelled_request_gives_up() {
   std::stop_source source;
   source.request_stop();
 
-  bool cancelled = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)world.ws->completionProvider->getCompletion(
         *document, lsp::Position{}, source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
-  }
-  CHECK(cancelled);
+  }));
 }
 
 }  // namespace

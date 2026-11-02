@@ -340,16 +340,21 @@ class LrGssGraph {
     }
   };
   bool alike(Id a, Id b) const;
-  int written(Id a, Id b);
-  int written_lone(Id a, Id b);
-  int forked(Id top, Id shared, const std::array<Climb, 2>& stacks);
+  // The ordering and whether it came from the table's arms.
+  struct Order {
+    int value = 0;
+    bool byTable = false;
+  };
+  Order written(Id a, Id b);
+  Order written_lone(Id a, Id b);
+  Order forked(Id top, Id shared, const std::array<Climb, 2>& stacks);
   void load(std::size_t side, const Climb& stack, Id shared);
-  int fork_scan(TextOffset at);
+  Order fork_scan(TextOffset at);
   void note_cut(Id v);
   void set_best(Id v, Id edge);
-  int parted_order(Id top);
+  Order parted_order(Id top);
   LrGssDigest::Facts facts(Id step) const;
-  int fork_order(const Step& x, const Step& y, bool& table) const;
+  Order fork_order(const Step& x, const Step& y) const;
   void chain(Id v);
   bool linear(Id v) const;
   std::uint32_t validated(Id v);
@@ -401,7 +406,6 @@ class LrGssGraph {
   std::uint32_t _round = 0;
   std::uint32_t _cut = 0;
   std::uint32_t _tabled = 0;
-  bool _byTable = false;
   // A comparison that drops a stack: the order of a cell only counts where it
   // is exact.
   bool _strict = false;

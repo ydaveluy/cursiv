@@ -25,7 +25,6 @@ struct LlTail {
     Token token;
     TextOffset gapFrom = 0;
     std::uint16_t node = kNoRow;
-    SymbolId inserted = kInvalidSymbol;
     std::vector<std::pair<std::uint16_t, bool>> asked;
   };
 

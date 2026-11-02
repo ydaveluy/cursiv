@@ -140,6 +140,7 @@ struct LrTableEmitter : EmitOutput {
       static_cast<std::uint8_t>(d.form), "::cursiv::LrReduceForm(", ")");
     f("flushes", p.flushes, d.flushes);
     f("turnRow", p.turnRow, d.turnRow);
+    f("regionExit", p.regionExit, d.regionExit);
     cell(f);
   }
   void cell(const LrReduceName& n) {

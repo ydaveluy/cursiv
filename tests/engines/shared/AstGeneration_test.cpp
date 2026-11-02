@@ -27,10 +27,154 @@
 #include "cursiv/engines/shared/gen/NamedHead.hpp"
 #include "cursiv/engines/shared/gen/OperatorWords.hpp"
 #include "cursiv/engines/shared/gen/TypeSpelling.hpp"
+#include "cursiv/engines/shared/gen/TwinBranch.hpp"
 #include "cursiv/engines/shared/gen/write_source.hpp"
 #include "cursiv/test/Check.hpp"
 
 namespace astgen {
+
+struct FlagNode : cursiv::Extends<cursiv::AstNode> {
+  bool on = false;
+  FlagNode* inner = nullptr;
+};
+
+struct FlagTurns : cursiv::GrammarSpec {
+  struct Root
+      : rule<flag<&FlagNode::on>(lit<"!">) +
+             some(flag<&FlagNode::on>(nest<&FlagNode::inner>(lit<"?">)))> {};
+  using entry = Root;
+};
+
+void a_flag_after_a_nest_writes_the_new_node() {
+  // The initial node and every wrapper have their own flag. In particular,
+  // the flag surrounding a nest must be checked after its operand.
+  const auto ll =
+      cursiv::ast_registry<FlagTurns, cursiv::LlLowering<FlagTurns>>();
+  const auto lr =
+      cursiv::ast_registry<FlagTurns, cursiv::LrLowering<FlagTurns>>();
+  CHECK(ll.fields.size() == 2 && lr.fields.size() == 2);
+}
+
+struct WriteNode : cursiv::Extends<cursiv::AstNode> {
+  string_view text;
+  WriteNode* inner = nullptr;
+  WriteNode* child = nullptr;
+  vector<WriteNode*> children;
+  WriteNode* left = nullptr;
+  string_view op;
+  WriteNode* right = nullptr;
+};
+
+struct WriteStage {
+  template <class R>
+  using rule = R;
+  template <class R>
+  using body = std::remove_cvref_t<decltype(R::body)>;
+};
+
+template <auto E>
+using WriteFault = typename cursiv::detail::writes_once<
+    WriteStage, std::remove_cvref_t<decltype(E)>, cursiv::TypeList<>>::fault;
+
+struct ReturnedWrites : cursiv::GrammarSpec {
+  struct Part : rule<assign<&WriteNode::text>(lit<"a">) +
+                     nest<&WriteNode::inner>(lit<"!">)> {};
+  struct Root : rule<ref<Part> + assign<&WriteNode::text>(lit<"b">)> {};
+  using entry = Root;
+};
+
+struct RecursiveWrites : cursiv::GrammarSpec {
+  struct Part : rule<assign<&WriteNode::text>(lit<"a">) |
+                     (lit<"("> + ref<Part> + lit<")">)> {};
+  struct Wrapped : rule<ref<Part> + nest<&WriteNode::inner>(lit<"!">)> {};
+  struct Primary : rule<assign<&WriteNode::text>(lit<"n">) |
+                        (lit<"("> + ref<Part> + lit<")">)> {};
+  struct Expr : infix<Primary, WriteNode, left(lit<"+">)> {};
+};
+
+void writes_follow_the_current_node_across_nests_and_turns() {
+  using namespace cursiv;
+  using namespace cursiv::detail;
+  using Twice = WriteEachTurn<field_tag<&WriteNode::text>>;
+  constexpr auto write = assign<&WriteNode::text>(lit<"a">);
+  constexpr auto wrap = nest<&WriteNode::inner>(lit<"!">);
+  CHECK((std::is_same_v<WriteFault<some(write + option(wrap))>, Twice>));
+  CHECK((std::is_same_v<WriteFault<some(write + (wrap | lit<"?">))>, Twice>));
+  CHECK((std::is_same_v<WriteFault<some(write + wrap + write)>, Twice>));
+  CHECK((std::is_same_v<
+         WriteFault<some(assign<&WriteNode::child>(create<WriteNode>(
+             write + wrap)))>, WriteEachTurn<field_tag<&WriteNode::child>>>));
+
+  // These nests always replace the current node. A child payload's nest,
+  // however, leaves the parent's context alone.
+  CHECK((std::is_same_v<WriteFault<write + some(wrap + write)>, NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<write + (wrap | nest<&WriteNode::inner>(
+                  lit<"?">)) + write>, NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<some(append<&WriteNode::children>(
+             create<WriteNode>(write + wrap)))>, NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<write + option(wrap) + write>,
+                        WriteAgain<field_tag<&WriteNode::text>>>));
+  CHECK((std::is_same_v<WriteFault<write + repeat<1>(wrap) + write>,
+                        NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<write + unordered(wrap,
+             nest<&WriteNode::inner>(lit<"?">)) + write>, NoWriteFault>));
+  CHECK((std::is_same_v<WriteFault<many(unordered(wrap, write))>, Twice>));
+
+  // A called rule's buried node is not the node it returns. The finite
+  // closure also handles recursive adoption and an infix's lone primary.
+  using Returned = typename rule_writes<WriteStage, ReturnedWrites::Part>::type;
+  using Wrapped = typename rule_writes<WriteStage, RecursiveWrites::Wrapped>::type;
+  using Expr = typename call_writes<WriteStage, RecursiveWrites::Expr>::type;
+  CHECK((!tl_has<wrote<&WriteNode::text>, Returned>::value));
+  CHECK((tl_has<wrote<&WriteNode::inner>, Returned>::value));
+  CHECK((!tl_has<wrote<&WriteNode::text>, Wrapped>::value));
+  CHECK((tl_has<wrote<&WriteNode::text>, Expr>::value));
+  CHECK((tl_has<wrote<&WriteNode::op>, Expr>::value));
+  CHECK((std::is_same_v<WriteFault<ref<RecursiveWrites::Expr> + write>,
+                        WriteOverAdopted<field_tag<&WriteNode::text>>>));
+
+  const auto ll = ast_registry<ReturnedWrites, LlLowering<ReturnedWrites>>();
+  const auto lr = ast_registry<ReturnedWrites, LrLowering<ReturnedWrites>>();
+  CHECK(ll.fields.size() == 2 && lr.fields.size() == 2);
+}
+
+void twin_cycles_read_each_lazy_rule_body_once() {
+  for (const unsigned count : {100u, 800u}) {
+    for (const bool cycle : {false, true}) {
+      cursiv::GrammarImage image;
+      image.nodes = {{.kind = cursiv::ImageKind::ref, .a = 0},
+                     {.kind = cursiv::ImageKind::lit, .text = "x"},
+                     {.kind = cursiv::ImageKind::choice, .count = 2}};
+      image.kids = {0, 1};
+      std::vector<unsigned> queries(count + 2);
+      cursiv::TwinReader reader(image, [&](unsigned rule) {
+        ++queries[rule];
+        // Reading a body grows the image, as the real lazy pipeline does.
+        if (rule == count && !cycle) return cursiv::ImageId{1};
+        const unsigned next = rule < count ? rule + 1 : 0;
+        const auto id = static_cast<cursiv::ImageId>(image.nodes.size());
+        image.nodes.push_back({.kind = cursiv::ImageKind::ref, .a = next});
+        return id;
+      });
+      const auto got = reader.drop(2);
+      CHECK(got == (cycle ? 2u : 0u));
+      CHECK(std::ranges::all_of(queries.begin(), queries.begin() + count + 1,
+                                [](unsigned n) { return n == 1; }));
+
+      // A later rule enters an already settled closure. It cannot be part
+      // of that closure's cycles, and no earlier body needs reading again.
+      const auto ref = static_cast<cursiv::ImageId>(image.nodes.size());
+      image.nodes.push_back({.kind = cursiv::ImageKind::ref, .a = count + 1});
+      const auto choice = static_cast<cursiv::ImageId>(image.nodes.size());
+      const auto first = static_cast<cursiv::ImageId>(image.kids.size());
+      image.kids.insert(image.kids.end(), {ref, 0});
+      image.nodes.push_back(
+          {.kind = cursiv::ImageKind::choice, .first = first, .count = 2});
+      CHECK(reader.drop(choice) == ref);
+      CHECK(std::ranges::all_of(queries, [](unsigned n) { return n == 1; }));
+    }
+  }
+}
 
 template <auto Expression>
 struct Operator {};
@@ -469,6 +613,9 @@ void a_longer_mode_cannot_consume_the_last_slot_twice() {
 }  // namespace astgen
 
 void ast_generation_cases_run() {
+  astgen::a_flag_after_a_nest_writes_the_new_node();
+  astgen::writes_follow_the_current_node_across_nests_and_turns();
+  astgen::twin_cycles_read_each_lazy_rule_body_once();
   astgen::nested_template_arguments_remain_qualified();
   astgen::reflection_only_types_need_no_factory(
       cursiv::ast_registry<astgen::G, cursiv::LrLowering<astgen::G>>());

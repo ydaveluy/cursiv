@@ -25,6 +25,7 @@
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/shared/runtime/AstReducer.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "support/World.hpp"
 #include "translatell/generated/Ll/Module.hpp"
 #include "translatelr/generated/Lr/Module.hpp"
@@ -166,13 +167,9 @@ void a_broken_text_still_answers() {
 void a_cancelled_token_stops_the_parse() {
   cursiv::CancellationTokenSource source;
   source.request_stop();
-  bool threw = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)service().parse("datatype String\n", source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 }
 
 // Ordinary reads keep their hot loop free of cancellation polling.
@@ -189,13 +186,9 @@ void a_long_reading_runs_whole_and_the_door_answers() {
 
   cursiv::CancellationTokenSource source;
   source.request_stop();
-  bool threw = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)service().parse(src, source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 }
 
 cursiv::AstEntryFn stoppedEntry = nullptr;
@@ -206,14 +199,10 @@ void a_cancelled_token_stops_the_ast_before_work() {
   CHECK(direct_parse("datatype String\n", cst));
   cursiv::CancellationTokenSource source;
   source.request_stop();
-  bool threw = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)cursiv::AstReducer::build<dmg::kTable.stamp>(
         dmg::kAstActions, std::move(cst), source.get_token());
-  } catch (const cursiv::OperationCancelled&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 }
 
 void stop_after_an_ast_entry(cursiv::AstReducer& builder, cursiv::NodeId id) {

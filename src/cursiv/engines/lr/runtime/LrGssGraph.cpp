@@ -315,10 +315,11 @@ void LrGssGraph::prune(Id u) {
     for (std::size_t best = i, k = i + 1; k < j; ++k) {
       if (!alike(_group[best].edge, _group[k].edge)) continue;
       _strict = true;
-      const int first = written_lone(_group[best].edge, _group[k].edge);
+      const auto [first, byTable] =
+          written_lone(_group[best].edge, _group[k].edge);
       _strict = false;
       if (first == 0 || first == kUnknown) continue;
-      if (_byTable) ++_tabled;
+      if (byTable) ++_tabled;
       dropped = true;
       _group[first < 0 ? k : best].dead = true;
       if (first > 0) best = k;
@@ -364,7 +365,7 @@ bool LrGssGraph::alike(Id a, Id b) const {
 // `written` for two edges whose stacks are lone chains down to one vertex. The
 // chains are ranked for this comparison alone, that vertex their floor, so
 // that nothing under it is compared.
-int LrGssGraph::written_lone(Id a, Id b) {
+LrGssGraph::Order LrGssGraph::written_lone(Id a, Id b) {
   const Id x = _edges[a].previous, y = _edges[b].previous;
   const Id floor = _vertices[x].chainEnd;
   Vertex& end = _vertices[floor];
@@ -382,7 +383,7 @@ int LrGssGraph::written_lone(Id a, Id b) {
     for (std::size_t i = _staged.size(); i-- > from;)
       set_best(_staged[i], _vertices[_staged[i]].edges);
   }
-  const int first = written(a, b);
+  const Order first = written(a, b);
   for (const Id v : _staged) {
     Vertex& w = _vertices[v];
     w.best = none;
@@ -443,7 +444,7 @@ Id LrGssGraph::best(Id v) {
     _unranked.pop_back();
     Id b = _vertices[x].edges;
     for (Id e = _edges[b].next; e != none; e = _edges[e].next)
-      if (written(e, b) < 0) b = e;
+      if (written(e, b).value < 0) b = e;
     set_best(x, b);
   }
   return _vertices[v].best;
@@ -516,8 +517,7 @@ LrGssGraph::Id LrGssGraph::shared(Id x, Id y) const {
 // written, 1 where the second does, 0 where neither. What was read compares
 // in text order; where that leaves them open, the cell the two parted at
 // first forks them in the order the table lays, the grammar's written order.
-int LrGssGraph::written(Id a, Id b) {
-  _byTable = false;
+LrGssGraph::Order LrGssGraph::written(Id a, Id b) {
   const Id x = _edges[a].previous, y = _edges[b].previous;
   const Id c = shared(x, y);
   const std::uint32_t base = frames_under(c);
@@ -531,7 +531,7 @@ int LrGssGraph::written(Id a, Id b) {
       (void)_forest.elect(left);
       (void)_forest.elect(right);
       const int v = _forest.ordered_frame(left, right);
-      if (v == -1 || v == 1) return v;
+      if (v == -1 || v == 1) return {v, false};
       if (v != 0) break;
     }
   }
@@ -541,7 +541,8 @@ int LrGssGraph::written(Id a, Id b) {
 // The forks the two stacks took, where the comparison in text order leaves
 // them open. Before `top`'s position they are the same or are read earliest
 // first; the steps they end on are left to `parted_order`.
-int LrGssGraph::forked(Id top, Id c, const std::array<Climb, 2>& stacks) {
+LrGssGraph::Order LrGssGraph::forked(
+    Id top, Id c, const std::array<Climb, 2>& stacks) {
   const TextOffset at = _vertices[top].reading.at;
   const auto of = [this](Id step) { return facts(step); };
   for (int side = 0; side != 2; ++side) {
@@ -566,7 +567,7 @@ int LrGssGraph::forked(Id top, Id c, const std::array<Climb, 2>& stacks) {
   }
   load(0, stacks[0], c);
   load(1, stacks[1], c);
-  if (const int first = fork_scan(at); first != 0) return first;
+  if (const Order first = fork_scan(at); first.value != 0) return first;
   std::ranges::sort(_partedLeft);
   std::ranges::sort(_partedRight);
   return parted_order(top);
@@ -595,7 +596,7 @@ void LrGssGraph::load(std::size_t side, const Climb& stack, Id shared) {
 // positions: the first vertex both took a step at, and took a different one,
 // parts them. What both took alike is not read: the scan starts at the first
 // step the streams do not share.
-int LrGssGraph::fork_scan(TextOffset at) {
+LrGssGraph::Order LrGssGraph::fork_scan(TextOffset at) {
   const Rope& forks = _digest.forks();
   const std::array<Rope::Length, 2> left{_streams[0].total - _streams[0].skip,
                                          _streams[1].total - _streams[1].skip};
@@ -613,7 +614,7 @@ int LrGssGraph::fork_scan(TextOffset at) {
     s.cursor.seek(forks, s.frames[s.frame], index);
     before = before || s.cursor.agg().at < at;
   }
-  if (!before) return 0;
+  if (!before) return {};
   std::array<Id, 2> held{none, none};
   std::array<TextOffset, 2> heldAt{};
   std::array<bool, 2> over{};
@@ -662,9 +663,9 @@ int LrGssGraph::fork_scan(TextOffset at) {
     _stamps[side][vertex] = {_round, step};
     const Stamp& other = _stamps[1 - side][vertex];
     if (other.round != _round || other.step == step) continue;
-    bool table = false;
-    const int first = fork_order(_steps[side == 0 ? step : other.step],
-                                 _steps[side == 0 ? other.step : step], table);
+    const auto [first, table] =
+        fork_order(_steps[side == 0 ? step : other.step],
+                    _steps[side == 0 ? other.step : step]);
     if (first != 0 && (part == none || vertex < part)) {
       verdict = first;
       byTable = table;
@@ -672,13 +673,12 @@ int LrGssGraph::fork_scan(TextOffset at) {
       partAt = when;
     }
   }
-  _byTable = byTable;
-  return verdict;
+  return {verdict, byTable};
 }
 
 // `written` past the comparison in text order, over `_partedLeft` and
 // `_partedRight`.
-int LrGssGraph::parted_order(Id top) {
+LrGssGraph::Order LrGssGraph::parted_order(Id top) {
   int verdict = 0;
   bool byTable = false;
   TextOffset first = 0;
@@ -687,8 +687,7 @@ int LrGssGraph::parted_order(Id top) {
     while (from != _partedRight.end() && from->first < v) ++from;
     for (auto at = from; at != _partedRight.end() && at->first == v; ++at) {
       if (at->second == sa) continue;
-      bool table = false;
-      const int w = fork_order(_steps[sa], _steps[at->second], table);
+      const auto [w, table] = fork_order(_steps[sa], _steps[at->second]);
       const TextOffset where = _vertices[v].reading.at;
       if (w != 0 && (verdict == 0 || where < first)) {
         verdict = w;
@@ -697,10 +696,8 @@ int LrGssGraph::parted_order(Id top) {
       }
     }
   }
-  _byTable = byTable;
   if (verdict != 0 || top == none || _vertices[top].steps == none)
-    return verdict;
-  _byTable = true;
+    return {verdict, byTable};
   // One stack was made at the top by an arm the other has yet to take: it
   // stands first where that arm is the cell's first.
   const auto made = [&](const std::vector<std::pair<Id, Id>>& p) {
@@ -708,33 +705,30 @@ int LrGssGraph::parted_order(Id top) {
     return at != p.end() && at->first == top ? at->second : none;
   };
   const Id ml = made(_partedLeft), mr = made(_partedRight);
-  if ((ml == none) == (mr == none)) return 0;
+  if ((ml == none) == (mr == none)) return {0, true};
   const Id taken = ml != none ? ml : mr;
   const Step& m = _steps[taken];
   bool firstArm = true;
   for (Id st = _vertices[top].steps;
        st < _steps.size() && _steps[st].vertex == top; ++st) {
     if (st == taken || _steps[st].reading.la.sym != m.reading.la.sym) continue;
-    bool table;
-    const int o = fork_order(_steps[st], m, table);
-    if (o == kUnknown) return kUnknown;
+    const int o = fork_order(_steps[st], m).value;
+    if (o == kUnknown) return {kUnknown, true};
     if (o < 0) firstArm = false;
   }
-  return (ml != none) == firstArm ? -1 : 1;
+  return {(ml != none) == firstArm ? -1 : 1, true};
 }
 
 // Two steps taken at one vertex: the candidate the lexer ranks first, then
 // the arm the table lays first. Candidates of one rank are the grammar's to
 // order, which only their derivations' words do.
-int LrGssGraph::fork_order(const Step& x, const Step& y, bool& table) const {
-  table = false;
+LrGssGraph::Order LrGssGraph::fork_order(const Step& x, const Step& y) const {
   if (x.reading.la.sym != y.reading.la.sym)
-    return x.lexRank == y.lexRank ? 0 : x.lexRank < y.lexRank ? -1 : 1;
-  table = true;
-  if (_strict && !(x.exact && y.exact)) return kUnknown;
-  if (x.lone != y.lone) return x.lone < y.lone ? -1 : 1;
-  if (x.action != y.action) return x.action < y.action ? -1 : 1;
-  return 0;
+    return {x.lexRank == y.lexRank ? 0 : x.lexRank < y.lexRank ? -1 : 1, false};
+  if (_strict && !(x.exact && y.exact)) return {kUnknown, true};
+  if (x.lone != y.lone) return {x.lone < y.lone ? -1 : 1, true};
+  if (x.action != y.action) return {x.action < y.action ? -1 : 1, true};
+  return {0, true};
 }
 
 bool LrGssGraph::linear(Id v) const {
@@ -954,7 +948,7 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
         s.total = r.steps.back() - r.steps[k];
         s.skip = 0;
       }
-      v = fork_scan(std::numeric_limits<TextOffset>::max());
+      v = fork_scan(std::numeric_limits<TextOffset>::max()).value;
     }
     if (v != 0) return v < 0;
     return std::lexicographical_compare(a.forests.rbegin(), a.forests.rend(),

@@ -81,12 +81,75 @@ void same(const Reader& one, const Reader& host, std::string_view text) {
   CHECK(a == b);
 }
 
+void section_values(const cursiv::Parser& parser) {
+  std::string input;
+  const auto read = [&](std::string_view text) {
+    input = "values:" + std::string(text);
+    return parser.parse(input);
+  };
+  for (const auto& [source, expected] : {std::pair{"direct:[ 123 ]", 123},
+                                         {"tight:[ 123 ]", 123},
+                                         {"scope:[ 123 ]", 123},
+                                         {"choice:[ 123 ]", 123},
+                                         {"choice:!", 7},
+                                         {"nested:[ 123 ]", 123},
+                                         {"nested:!", 7},
+                                         {"measure:[ 12 ]", 4}}) {
+    const auto r = read(source);
+    const auto* values = r.value_as<ast::Values>();
+    const bool good =
+        conformance_test::clean(r) && values && values->number == expected;
+    if (!good)
+      std::printf("section value [%s]: expected %d\n", source, expected);
+    CHECK(good);
+  }
+  {
+    const auto r = read("append:[1] ! [ 3 ]");
+    const auto* values = r.value_as<ast::Values>();
+    CHECK(conformance_test::clean(r) && values && values->numbers.size() == 3);
+    if (values && values->numbers.size() == 3)
+      CHECK(values->numbers[0] == 1 && values->numbers[1] == 7 &&
+            values->numbers[2] == 3);
+  }
+  {
+    const auto r = read("append:[999999999999999999999999999999] [2]");
+    const auto* values = r.value_as<ast::Values>();
+    CHECK(r.accepted && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::conversion_error &&
+          values && values->numbers.size() == 1 && values->numbers[0] == 2);
+  }
+  for (const auto& [source, expected] :
+       {std::pair{"node:( alpha )", "alpha"}, {"node:!", ""}}) {
+    const auto r = read(source);
+    const auto* values = r.value_as<ast::Values>();
+    CHECK(conformance_test::clean(r) && values && values->node &&
+          values->node->text == expected && values->node->parent == values);
+  }
+  {
+    const auto r = read("nodes:(alpha) ! ( beta )");
+    const auto* values = r.value_as<ast::Values>();
+    CHECK(conformance_test::clean(r) && values && values->nodes.size() == 3);
+    if (values && values->nodes.size() == 3) {
+      CHECK(values->nodes[0]->text == "alpha" &&
+            values->nodes[1]->text.empty() && values->nodes[2]->text == "beta");
+      for (const auto* node : values->nodes) CHECK(node->parent == values);
+    }
+  }
+  {
+    const auto r = read("text:[ 12 ]");
+    const auto* values = r.value_as<ast::Values>();
+    CHECK(conformance_test::clean(r) && values && values->text == "[12]");
+  }
+}
+
 }  // namespace
 
 void run() {
   namespace gen = tsecpred::generated;
   const auto ll = gen::Ll::create_parser();
   const auto lr = gen::Lr::create_parser();
+  section_values(*ll);
+  section_values(*lr);
   const Reader lastLl{*ll, ""};
   const Reader lastLr{*lr, ""};
   const Reader inLastLl{*ll, "inlast:"};

@@ -195,11 +195,14 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
     else if (p.folds)
       plan.form = LrReduceForm::carry;
     plan.flushes =
-        (p.len == 0 && opens[p.lhs]) ||
+        (p.len == 0 && opens[p.lhs] &&
+         a.cfg.prodBuild[i].turnNode == kNoRow) ||
         (a.cfg.prodBuild[i].endOnly && a.cfg.prodBuild[i].tailCfg != 0);
     if (plan.flushes && plan.form == LrReduceForm::through)
       plan.form = LrReduceForm::carry;
     plan.turnRow = a.cfg.prodBuild[i].turnNode;
+    plan.regionExit = a.cfg.prodBuild[i].regionExit &&
+                      !a.cfg.prodBuild[i].endOnly;
     rows.reductions.push_back(plan);
   }
   // The automaton may substitute any production with the same reduction key.

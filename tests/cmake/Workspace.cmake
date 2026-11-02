@@ -52,7 +52,11 @@ cursiv_test(LrGssRope_test engines/lr/LrGssRope_test.cpp)
 cursiv_test(LrGssGraph_test engines/lr/LrGssGraph_test.cpp)
 target_compile_definitions(LrRuntime_test PRIVATE
     CURSIV_NARROW_ROW_BITS=${CURSIV_NARROW_ROW_BITS})
-cursiv_test(edits_narrow_test lsp/edits_test.cpp cursiv::lsp wsnarrowLsp)
+# Both lanes use the same service interfaces; only their linked parsers differ.
+add_library(editsObjects OBJECT lsp/edits_test.cpp)
+target_link_libraries(editsObjects PRIVATE cursiv::test wsLspObjects)
+target_include_directories(editsObjects PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+cursiv_test(edits_narrow_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsnarrowLsp)
 
 # The erased door: a service holds a `Parser&`, not a grammar. And a text
 # translated before its tokens are read, on both engines.

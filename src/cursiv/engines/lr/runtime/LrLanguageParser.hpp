@@ -137,6 +137,7 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .terms = A.cfg.terms,
     .names = A.cfg.names.data(),
     .prods = A.cfg.prods,
+    .reductions = A.derived.reductions,
 };
 
 }  // namespace cursiv

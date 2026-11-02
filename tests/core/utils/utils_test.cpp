@@ -27,6 +27,7 @@
 #include "cursiv/core/workspace/DocumentFactory.hpp"
 #include "cursiv/core/workspace/Documents.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 
 #if !defined(__wasi__) || defined(_REENTRANT)
@@ -252,13 +253,9 @@ void a_host_is_lower_case() {
 }
 
 void an_empty_path_names_no_file() {
-  bool threw = false;
-  try {
+  CHECK(support::throws<std::invalid_argument>([&] {
     (void)cursiv::path_to_file_uri("");
-  } catch (const std::invalid_argument&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 }
 
 void uri_suffixes_are_not_file_names() {
@@ -527,13 +524,9 @@ void an_evicted_provider_does_not_replace_the_new_generation() {
 
 void a_failed_provider_can_be_retried() {
   cursiv::SimpleCache<int, int> cache;
-  bool threw = false;
-  try {
+  CHECK(support::throws<std::runtime_error>([&] {
     (void)cache.get(1, []() -> int { throw std::runtime_error("provider"); });
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
   CHECK(cache.get(1, [] { return 42; }) == 42);
 }
 
@@ -564,22 +557,14 @@ void a_failed_subscription_leaves_no_listener() {
   auto builder = std::make_unique<ThrowingBuilder>(shared);
   const auto* const tracked = builder.get();
   shared.documentBuilder = std::move(builder);
-  bool workspaceThrew = false;
-  try {
+  CHECK(support::throws<std::runtime_error>([&] {
     cursiv::WorkspaceCache<int, int> cache(shared);
-  } catch (const std::runtime_error&) {
-    workspaceThrew = true;
-  }
-  CHECK(workspaceThrew);
+  }));
   CHECK(tracked->buildListeners == 0);
 
-  bool documentThrew = false;
-  try {
+  CHECK(support::throws<std::runtime_error>([&] {
     cursiv::DocumentCache<int, int> cache(shared, cursiv::DocumentState::Linked);
-  } catch (const std::runtime_error&) {
-    documentThrew = true;
-  }
-  CHECK(documentThrew);
+  }));
   CHECK(tracked->documentListeners == 0);
 }
 
@@ -641,14 +626,10 @@ void a_document_cache_evicts_per_document() {
   CHECK(cache.get(a->id, 1, provider) == 3);  // a's entry died with a
   CHECK(cache.get(b->id, 1, provider) == 2);  // b's survived
 
-  bool refused = false;
-  try {
+  CHECK(support::throws<std::invalid_argument>([&] {
     cursiv::DocumentCache<int, int> bad(world.shared,
                                         cursiv::DocumentState::Validated);
-  } catch (const std::invalid_argument&) {
-    refused = true;
-  }
-  CHECK(refused);
+  }));
 }
 
 }  // namespace

@@ -37,8 +37,9 @@ struct DynSet {
   // bit order.
   std::uint32_t rank(unsigned i) const {
     std::uint32_t r = 0;
-    for (std::size_t k = 0; k < i / 64; ++k)
-      r += static_cast<std::uint32_t>(std::popcount(word(k)));
+    const std::size_t n = std::min<std::size_t>(w.size(), i / 64);
+    for (std::size_t k = 0; k < n; ++k)
+      r += static_cast<std::uint32_t>(std::popcount(w[k]));
     return r + static_cast<std::uint32_t>(std::popcount(
                    word(i / 64) & ((std::uint64_t{1} << (i % 64)) - 1)));
   }

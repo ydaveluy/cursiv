@@ -177,6 +177,34 @@ struct Base : cursiv::GrammarSpec {
       : terminal<through(mark<Label>(many(cr<"#">)) + lit<":">, same<Label>)> {
   };
 
+  static constexpr auto ScalarOpen =
+      lit<"<"> + mark<Equals>(some(lit<"=">)) + lit<">">;
+  static constexpr auto ScalarClose = lit<"\xA9"> + same<Equals>;
+  static constexpr auto ScalarPadClose =
+      lit<"\xA9"> + many(cr<" ">) + same<Equals>;
+  struct ScalarFast : terminal<through(ScalarOpen, ScalarClose)> {};
+  struct ScalarExplicit
+      : terminal<ScalarOpen + many(!ScalarClose + any) + ScalarClose> {};
+  // A mark at the start of a token uses the general recognizer rather than
+  // recovering its run from the opener's fence.
+  struct ScalarRecognized
+      : terminal<through(mark<Equals>(some(lit<"=">)) + lit<">">,
+                         ScalarClose)> {};
+  struct ScalarPadded : terminal<through(ScalarOpen, ScalarPadClose)> {};
+  struct ScalarPaddedExplicit
+      : terminal<ScalarOpen + many(!ScalarPadClose + any) + ScalarPadClose> {};
+  struct ScalarPaddedRecognized
+      : terminal<through(ScalarOpen,
+                         lit<"\xA9"> + many(cr<" =">) + same<Equals>)> {};
+  struct ScalarMark
+      : terminal<through(lit<"<"> + mark<Label>(some(lit<"\xA9">)) + lit<">">,
+                         same<Label> + lit<"!">)> {};
+  // The scan begins after the opener, even when an exact byte literal ends
+  // with a UTF-8 lead byte. Its following stray byte starts a character.
+  struct ScalarSplit
+      : terminal<through(lit<"<"> + mark<Equals>(some(lit<"=">)) + lit<"\xC3">,
+                         ScalarClose)> {};
+
   static constexpr auto WritingOpen = mark<Label>(some(cr<"#">)) + lit<"[">;
   static constexpr auto WritingClose =
       (lit<"]"> + mark<Label>(some(cr<"=">)) + lit<":">) |
@@ -198,6 +226,14 @@ struct Base : cursiv::GrammarSpec {
             (lit<"padding:"> + Read<Padding>) |
             (lit<"same:"> + Read<SameOnly>) |
             (lit<"empty:"> + Read<EmptySame>) |
+            (lit<"char-fast:"> + Read<ScalarFast>) |
+            (lit<"char-explicit:"> + Read<ScalarExplicit>) |
+            (lit<"char-rec:"> + Read<ScalarRecognized>) |
+            (lit<"char-pad:"> + Read<ScalarPadded>) |
+            (lit<"char-pad-explicit:"> + Read<ScalarPaddedExplicit>) |
+            (lit<"char-pad-rec:"> + Read<ScalarPaddedRecognized>) |
+            (lit<"char-mark:"> + Read<ScalarMark>) |
+            (lit<"char-split:"> + Read<ScalarSplit>) |
             (lit<"writing:"> + Read<Writing>) |
             (lit<"first:"> + Read<Choices> + lit<"tail">))> {};
   using entry = Root;

@@ -11,6 +11,12 @@
 
 namespace cursiv {
 
+// Optional construction counters: each visit evaluates one position or rule.
+struct LlBuildWork {
+  std::uint64_t nullable = 0, first = 0, productive = 0, repair = 0;
+  std::uint64_t gapShape = 0, gapSets = 0;
+};
+
 // Every optimisation the construction makes, switchable: an attribution runs
 // the generator twice and diffs the two directories.
 struct LlBuildOptions {
@@ -21,6 +27,7 @@ struct LlBuildOptions {
   // Separate what one token already separates. Off, every choice is adaptive,
   // which is what an attribution of the prediction measures against.
   bool staticPredict = true;
+  LlBuildWork* work = nullptr;
 };
 
 LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt = {});

@@ -501,6 +501,47 @@ constexpr cursiv::AstActions textActions{.texts = conversions,
                                          .entryCount = 4,
                                          .textInputs = inputs};
 
+void an_independent_query_keeps_its_own_cache_until_it_returns() {
+  static constexpr auto child =
+      +[](cursiv::AstBuildCtx&, cursiv::NodeId)
+          -> std::optional<std::string_view> {
+    ++constantCalls;
+    return "fresh";
+  };
+  static constexpr auto root =
+      +[](cursiv::AstBuildCtx& ctx, cursiv::NodeId id) {
+    return cursiv::detail::evaluate_text(ctx, id, child, false);
+  };
+  const auto throwing = +[](cursiv::AstBuildCtx& ctx, cursiv::NodeId id)
+      -> std::optional<std::string_view> {
+    (void)root(ctx, id);
+    throw 17;
+  };
+  cursiv::Cst tree("a");
+  cursiv::CstBuilder builder(tree);
+  const auto id = builder.leaf(0, 1, kStamp.make(0, 0));
+  cursiv::detail::TextValues parent;
+  parent.calls.try_emplace(id, child, "stale");
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.actions = &textActions;
+  ctx.textValues = &parent;
+  constantCalls = 0;
+  for (bool throws : {false, true}) {
+    try {
+      const auto value = cursiv::detail::evaluate_text(
+          ctx, id, throws ? throwing : root, true);
+      CHECK(!throws && value && *value == "fresh");
+    } catch (int e) {
+      CHECK(throws && e == 17);
+    }
+    CHECK(ctx.textValues == &parent && parent.calls.size() == 1);
+    CHECK(parent.calls.at(id).fn == child &&
+          parent.calls.at(id).text == "stale");
+  }
+  CHECK(constantCalls == 2);
+}
+
 void deep_conversions_keep_order_and_stop_at_constants() {
   constexpr unsigned depth = 16384;
   cursiv::Cst tree("a");
@@ -624,6 +665,7 @@ void invented_text_never_runs_its_converter() {
 }
 
 void run() {
+  an_independent_query_keeps_its_own_cache_until_it_returns();
   deep_conversions_keep_order_and_stop_at_constants();
   a_failed_conversion_stops_before_later_siblings();
   raw_nested_text_is_joined_once_and_parts_keep_their_groups();

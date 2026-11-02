@@ -60,8 +60,8 @@ void lr_intern_aux(Cfg& c) {
       const LrLowProd& x = c.prods[k];
       const LrProdBuild& b = c.prodBuild[k];
       key.insert(key.end(), {x.len, x.node, x.gap, b.prec, b.endOnly, b.tailCfg,
-                             b.closesRegion, b.priorityAlt, b.prioritySubset,
-                             b.turn, b.decideLen, b.stop});
+                             b.closesRegion, b.regionExit, b.priorityAlt,
+                             b.prioritySubset, b.turn, b.decideLen, b.stop});
       key.insert(key.end(), c.decisions.v.begin() + b.decideAt,
                  c.decisions.v.begin() + b.decideAt + b.decideLen);
       for (unsigned i = 0; i < x.len; ++i) {
@@ -184,6 +184,7 @@ inline void lr_drop_twins(LrLowered& o) {
     if (x.lhs != y.lhs || x.len != y.len || x.gap != y.gap ||
         bx.endOnly != by.endOnly || bx.prec != by.prec ||
         bx.tailCfg != by.tailCfg || bx.closesRegion != by.closesRegion ||
+        bx.regionExit != by.regionExit ||
         bx.turn != by.turn || bx.stop != by.stop)
       return false;
     for (unsigned i = 0; i < x.len; ++i)
@@ -204,7 +205,8 @@ inline void lr_drop_twins(LrLowered& o) {
     mix(x.len);
     mix(x.gap);
     mix(std::uint64_t{bx.endOnly} | std::uint64_t{bx.closesRegion} << 1 |
-        std::uint64_t{bx.turn} << 2 | std::uint64_t{bx.prec} << 8 |
+        std::uint64_t{bx.turn} << 2 | std::uint64_t{bx.regionExit} << 3 |
+        std::uint64_t{bx.prec} << 8 |
         std::uint64_t{bx.tailCfg} << 16 | std::uint64_t{bx.stop} << 24);
     for (unsigned i = 0; i < x.len; ++i)
       mix(std::uint64_t{c.sym_at(x, i)} << 8 | c.cfg_at(a, i));
@@ -215,19 +217,17 @@ inline void lr_drop_twins(LrLowered& o) {
   // and stands in its place, so one pass keeps the first-ranked.
   const auto ix = lr_by_lhs(c);
   std::unordered_multimap<std::uint64_t, std::uint16_t> kindOf;
-  std::vector<std::uint16_t> standing;
   for (std::uint16_t g = 0; g < c.nnts; ++g) {
     for (const std::uint16_t b : ix.of(g)) {
       const std::uint64_t h = hash_of(b);
       std::uint16_t* held = nullptr;
       for (auto [it, end] = kindOf.equal_range(h); it != end; ++it)
-        if (alike(standing[it->second], b)) {
-          held = &standing[it->second];
+        if (alike(it->second, b)) {
+          held = &it->second;
           break;
         }
       if (!held) {
-        kindOf.emplace(h, static_cast<std::uint16_t>(standing.size()));
-        standing.push_back(b);
+        kindOf.emplace(h, b);
         continue;
       }
       const std::uint16_t a = *held;
@@ -257,12 +257,14 @@ inline void lr_drop_twins(LrLowered& o) {
 inline void lr_drop_unread_stops(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> read(c.nnts, false);
-  for (std::uint16_t k = 0; k < c.nprods; ++k)
+  std::vector<unsigned> counts(c.nnts, 0);
+  for (std::uint16_t k = 0; k < c.nprods; ++k) {
+    ++counts[c.prods[k].lhs];
     c.each_nt(c.prods[k], [&](unsigned, std::uint16_t nt) { read[nt] = true; });
-  const auto ix = lr_by_lhs(c);
+  }
   lr_compact_prods(c, [&](std::uint16_t k) {
     const std::uint16_t lhs = c.prods[k].lhs;
-    return c.prodBuild[k].stop != 0 && !read[lhs] && ix.of(lhs).size() == 1;
+    return c.prodBuild[k].stop != 0 && !read[lhs] && counts[lhs] == 1;
   });
 }
 
@@ -352,20 +354,27 @@ inline void lr_no_hidden_left_recursion(
 inline void lr_lay_bare_records(LrLowered& o) {
   LrBuildCfg& c = o.cfg;
   std::vector<bool> called(c.nnts, false);
+  std::vector<std::uint16_t> work;
+  const auto call = [&](std::uint16_t nt) {
+    if (!called[nt]) {
+      called[nt] = true;
+      work.push_back(nt);
+    }
+  };
   for (std::uint16_t k = 0; k < c.nprods; ++k)
     c.each_nt(c.prods[k], [&](unsigned i, std::uint16_t nt) {
-      if (c.row_at(c.prods[k], i) != kNoRow) called[nt] = true;
+      if (c.row_at(c.prods[k], i) != kNoRow) call(nt);
     });
   // A pass-through hands the demand down to its symbol.
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint16_t k = 0; k < c.nprods; ++k) {
+  const auto byLhs = lr_by_lhs(c);
+  while (!work.empty()) {
+    const std::uint16_t nt = work.back();
+    work.pop_back();
+    for (const std::uint16_t k : byLhs.of(nt)) {
       const LrLowProd& q = c.prods[k];
-      if (!called[q.lhs] || q.node != kNoRow || q.len != 1) continue;
+      if (q.node != kNoRow || q.len != 1) continue;
       const std::uint16_t sym = c.sym_at(q, 0);
-      if (is_term(sym)) continue;
-      if (const std::uint16_t nt = nt_index(sym); !called[nt])
-        called[nt] = moved = true;
+      if (!is_term(sym)) call(nt_index(sym));
     }
   }
   for (std::uint16_t k = 0; k < c.nprods; ++k) {
@@ -375,24 +384,41 @@ inline void lr_lay_bare_records(LrLowered& o) {
   }
 }
 
+// Unit productions by their callee: only these propagate returned records.
+// Other productions occupy the final, unused bucket.
+inline LrBuckets<std::uint16_t> lr_record_users(const LrBuildCfg& c) {
+  return {c.nnts + 1u, c.nprods, [&](std::uint32_t k) {
+            const LrLowProd& q = c.prods[k];
+            if (q.len == 1) {
+              const std::uint16_t sym = c.sym_at(q, 0);
+              if (!is_term(sym)) return nt_index(sym);
+            }
+            return c.nnts;
+          }};
+}
+
 // Which nonterminals hand a record back: a greatest fixpoint, since one does
 // only if every production of it does.
-inline std::vector<bool> lr_hands_a_record(const LrBuildCfg& c) {
+inline std::vector<bool> lr_hands_a_record(
+    const LrBuildCfg& c, const LrBuckets<std::uint16_t>& users) {
   std::vector<bool> cov(c.nnts, true);
-  const auto hands = [&](const LrLowProd& q) {
-    if (q.node != kNoRow) return true;
-    if (q.len != 1) return false;
-    const std::uint16_t sym = c.sym_at(q, 0);
-    return is_term(sym) || cov[nt_index(sym)];
+  std::vector<std::uint16_t> work;
+  const auto drop = [&](std::uint16_t nt) {
+    if (cov[nt]) {
+      cov[nt] = false;
+      work.push_back(nt);
+    }
   };
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint16_t k = 0; k < c.nprods; ++k) {
+  for (std::uint16_t k = 0; k < c.nprods; ++k) {
+    const LrLowProd& q = c.prods[k];
+    if (q.node == kNoRow && q.len != 1) drop(q.lhs);
+  }
+  while (!work.empty()) {
+    const std::uint16_t nt = work.back();
+    work.pop_back();
+    for (const std::uint16_t k : users.of(nt)) {
       const LrLowProd& q = c.prods[k];
-      if (cov[q.lhs] && !hands(q)) {
-        cov[q.lhs] = false;
-        moved = true;
-      }
+      if (q.node == kNoRow) drop(q.lhs);
     }
   }
   return cov;
@@ -400,24 +426,27 @@ inline std::vector<bool> lr_hands_a_record(const LrBuildCfg& c) {
 
 // ...and which come back with a record already open: a chain that opens one
 // may not ride down onto another. Least fixpoint.
-inline std::vector<bool> lr_opens_a_record(const LrLowered& o) {
+inline std::vector<bool> lr_opens_a_record(
+    const LrLowered& o, const LrBuckets<std::uint16_t>& users) {
   const LrBuildCfg& c = o.cfg;
   std::vector<bool> opens(c.nnts, false);
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint16_t k = 0; k < c.nprods; ++k) {
-      const LrLowProd& q = c.prods[k];
-      bool op = lr_chain_creates(o, q.node);
-      if (!op && q.len == 1) {
-        const std::uint16_t sym = c.sym_at(q, 0);
-        op = lr_chain_creates(o, c.row_at(q, 0)) ||
-             (!is_term(sym) && opens[nt_index(sym)]);
-      }
-      if (op && !opens[q.lhs]) {
-        opens[q.lhs] = true;
-        moved = true;
-      }
+  std::vector<std::uint16_t> work;
+  const auto open = [&](std::uint16_t nt) {
+    if (!opens[nt]) {
+      opens[nt] = true;
+      work.push_back(nt);
     }
+  };
+  for (std::uint16_t k = 0; k < c.nprods; ++k) {
+    const LrLowProd& q = c.prods[k];
+    if (lr_chain_creates(o, q.node) ||
+        (q.len == 1 && lr_chain_creates(o, c.row_at(q, 0))))
+      open(q.lhs);
+  }
+  while (!work.empty()) {
+    const std::uint16_t nt = work.back();
+    work.pop_back();
+    for (const std::uint16_t k : users.of(nt)) open(c.prods[k].lhs);
   }
   return opens;
 }
@@ -457,8 +486,9 @@ inline void lr_settle(LrLowered& o) {
   lr_no_unit_cycle(o, empty);
   lr_no_hidden_left_recursion(o, empty);
   lr_lay_bare_records(o);
-  const std::vector<bool> hands = lr_hands_a_record(o.cfg);
-  const std::vector<bool> opens = lr_opens_a_record(o);
+  const auto users = lr_record_users(o.cfg);
+  const std::vector<bool> hands = lr_hands_a_record(o.cfg, users);
+  const std::vector<bool> opens = lr_opens_a_record(o, users);
   lr_ride_chains_down(o, hands, opens);
   if (!o.fault && !o.cfg.lowerFail()) lr_split_loops(o);
 }

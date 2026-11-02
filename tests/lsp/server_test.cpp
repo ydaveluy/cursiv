@@ -91,6 +91,7 @@
 #include "lsp/uri.h"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 
 // The LSP storey with no wire under it: the containers installed, the
 // handshake's promises, the notifications that publish, and the routes that

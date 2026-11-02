@@ -33,14 +33,12 @@ void check_tree(const cursiv::ParseResult& r, const std::string& text,
 // The coverage identity, and it is a gate: every span the elected reading
 // threw away lies inside some diagnostic's span. A skipped token with nothing
 // said about it is the one outcome an editor cannot work with.
-void check_coverage(const cursiv::Parser& engine, const std::string& text,
+void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
                     const std::string& name) {
-  const cursiv::ParseResult result = engine.parse(text);
-  const cursiv::Cst& cst = result.cst();
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
     if (n.subtreeSize != 1 ||
-        !cursiv::test::skipped_leaf(engine.getGrammar(), n) || n.hidden)
+        !cursiv::test::skipped_leaf(grammar, n) || n.hidden)
       continue;
     bool covered = false;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -60,10 +58,7 @@ void check_coverage(const cursiv::Parser& engine, const std::string& text,
 // that claims text (deleted, replaced, incomplete) covers only text the
 // elected reading gave up -- an error leaf, or a region wrapped under a
 // repaired reduce. A live leaf inside such a span is a diagnostic that lies.
-void check_claims(const cursiv::Parser& engine, const std::string& text,
-                  const std::string& name) {
-  const cursiv::ParseResult result = engine.parse(text);
-  const cursiv::Cst& cst = result.cst();
+void check_claims(const cursiv::Cst& cst, const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
     if (n.subtreeSize != 1 || n.hidden || n.recovered) continue;
@@ -95,17 +90,19 @@ void check_value(const cursiv::ParseResult& result, const std::string& name) {
 
 void row(const cursiv::Parser& engine, const std::string& text,
          const std::string& name, const cursiv::test::Proj* baseline) {
-  const cursiv::test::Proj p = cursiv::test::project(engine, text);
+  const cursiv::ParseResult result = engine.parse(text);
+  cursiv::test::Proj p =
+      cursiv::test::project(engine.getGrammar(), result.cst(), text);
+  p.value = result.value != nullptr;
   const int inv =
       baseline ? cursiv::test::invented(p.tokens, baseline->tokens) : 0;
   const std::size_t validTokens =
       baseline ? baseline->tokens.size() : p.tokens.size();
   std::printf("%-38s %s\n", name.c_str(),
               cursiv::test::signature(p, validTokens, inv).c_str());
-  const cursiv::ParseResult result = engine.parse(text);
   check_tree(result, text, name);
-  check_coverage(engine, text, name);
-  check_claims(engine, text, name);
+  check_coverage(engine.getGrammar(), result.cst(), name);
+  check_claims(result.cst(), name);
   check_value(result, name);
 }
 
@@ -170,34 +167,22 @@ void recycled_neighbour() {
   const std::unique_ptr<cursiv::Parser> parser =
       topt::generated::OptionalsG::create_parser();
   const cursiv::Parser& engine = *parser;
-  const std::string text = "recycle var X = ; var Y = 2;";
-  const cursiv::test::Proj p = cursiv::test::project(engine, text);
-  std::printf("%-38s %s\n", "recycled_neighbour",
-              cursiv::test::signature(p, p.tokens.size(), 0).c_str());
-  check_tree(engine.parse(text), text, "recycled_neighbour");
-  check_coverage(engine, text, "recycled_neighbour");
-  bool ySurvives = false;
-  for (const std::string& t : p.tokens)
-    if (t == "Y") ySurvives = true;
-  if (!ySurvives) {
-    std::printf(
-        "  FAIL recycled_neighbour: Y was fed to the previous repair\n");
-    ++failures;
-  }
-  // The twin break with no anchor after Y: the freeze keeps its rivals, so
-  // the reading that saves Y wins the cost race there too.
-  const std::string twin = "recycle var X = ; var Y = ;";
-  const cursiv::test::Proj q = cursiv::test::project(engine, twin);
-  std::printf("%-38s %s\n", "recycled_neighbour_twin",
-              cursiv::test::signature(q, q.tokens.size(), 0).c_str());
-  check_coverage(engine, twin, "recycled_neighbour_twin");
-  bool yTwin = false;
-  for (const std::string& t : q.tokens)
-    if (t == "Y") yTwin = true;
-  if (!yTwin) {
-    std::printf("  FAIL recycled_neighbour_twin: Y did not survive\n");
-    ++failures;
-  }
+  const auto one = [&](const std::string& text, const std::string& name) {
+    const cursiv::ParseResult result = engine.parse(text);
+    auto p = cursiv::test::project(engine.getGrammar(), result.cst(), text);
+    p.value = result.value != nullptr;
+    std::printf("%-38s %s\n", name.c_str(),
+                cursiv::test::signature(p, p.tokens.size(), 0).c_str());
+    check_tree(result, text, name);
+    check_coverage(engine.getGrammar(), result.cst(), name);
+    if (std::ranges::find(p.tokens, "Y") == p.tokens.end()) {
+      std::printf("  FAIL %s: Y was fed to the previous repair\n", name.c_str());
+      ++failures;
+    }
+  };
+  one("recycle var X = ; var Y = 2;", "recycled_neighbour");
+  // With no anchor after Y, the freeze keeps the reading that saves it too.
+  one("recycle var X = ; var Y = ;", "recycled_neighbour_twin");
 }
 
 void a_stray_quote_does_not_invent_a_declaration(

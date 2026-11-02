@@ -163,6 +163,11 @@ struct LlBuiltProgram : ShapeOverflow {
   // operator.
   std::vector<std::uint8_t> gapCfg{};
   std::vector<std::uint8_t> headCfg{};
+  // A repetition may inspect its distinct exit across the caller's trivia.
+  // Its elected body reads its own gap; a nullable call commits its actual
+  // entry gap before delegating that decision to its callee.
+  std::vector<std::uint8_t> callerPeek{};
+  std::vector<std::uint8_t> readHeadCfg{};
   std::vector<std::uint8_t> climbCfg{};
   // The configuration the gap after a term is read under, where every reading
   // that may follow agrees, and the alphabet that reads it.
@@ -172,6 +177,7 @@ struct LlBuiltProgram : ShapeOverflow {
   // is not the other turns'. Per choice, the mode that first turn is read
   // under, zero for a choice that is no loop; always sized `ndecisions`.
   std::vector<std::uint16_t> headMode{};
+  std::vector<std::uint16_t> readHeadMode{}, readMode{};
   // Per choice, whether conditions stand before its token: it is held for
   // every arm as the lexer chose it.
   std::vector<std::uint8_t> decStands{};

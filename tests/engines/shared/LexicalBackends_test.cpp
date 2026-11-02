@@ -238,6 +238,32 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "empty:", ":");
   check(parser, "empty:", "#:body#");
   check(parser, "empty:", ":body", false);
+  for (const auto prefix : {"char-fast:", "char-explicit:"}) {
+    check(parser, prefix, "<=>\xA9=");
+    for (const std::string scalar : {"\xC3\xA9", "\xE0\xAA\xA9",
+                                     "\xF0\x90\x80\xA9"}) {
+      check(parser, prefix, "<=>" + scalar + "=", false);
+      check(parser, prefix, "<=>" + scalar + "=\xA9=");
+    }
+    for (const auto invalid : {"<=>\xC0\xA9=", "<=>\xED\xA0\xA9="})
+      check(parser, prefix, invalid);
+    const std::string mark(129, '=');
+    check(parser, prefix, "<" + mark + ">\xC3\xA9" + mark, false);
+    check(parser, prefix, "<" + mark + ">\xC3\xA9" + mark + "\xA9" + mark);
+  }
+  check(parser, "char-rec:", "=>\xA9=");
+  check(parser, "char-rec:", "=>\xC3\xA9=", false);
+  check(parser, "char-rec:", "=>\xC3\xA9=\xA9=");
+  for (const auto prefix : {"char-pad:", "char-pad-explicit:",
+                            "char-pad-rec:"}) {
+    check(parser, prefix, "<=>\xA9 =");
+    check(parser, prefix, "<=>\xC3\xA9 =", false);
+    check(parser, prefix, "<=>\xC3\xA9 =\xA9 =");
+  }
+  check(parser, "char-mark:", "<\xA9>\xA9!");
+  check(parser, "char-mark:", "<\xA9>\xC3\xA9!", false);
+  check(parser, "char-mark:", "<\xA9>\xC3\xA9!\xA9!");
+  check(parser, "char-split:", "<=\xC3\xA9=");
   check(parser, "writing:", "#[body]==:==");
   // A failed closing probe must not publish its new capture. The other
   // alternative still needs the original # mark, which survives afterwards.

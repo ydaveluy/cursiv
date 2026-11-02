@@ -41,7 +41,9 @@
 #include "cursiv/core/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/core/workspace/WorkspaceManager.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
 #ifndef __wasi__
@@ -464,13 +466,9 @@ void a_uri_routes_by_extension() {
   // with a null; `getServices` throws, because its caller asked for a language.
   CHECK(registry.findServices("file:///a/b.txt") == nullptr);
   CHECK(!registry.hasServices("file:///a/b.txt"));
-  bool threw = false;
-  try {
+  CHECK(support::throws<cursiv::ServiceRegistryError>([&] {
     (void)registry.getServices("file:///a/b.txt");
-  } catch (const cursiv::ServiceRegistryError&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 }
 
 // The registration spelling and the URI spelling must land in the same row.

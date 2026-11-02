@@ -30,7 +30,6 @@
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/core/utils/ctstring.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
 #include "cursiv/engines/shared/gen/LexCodePoints.hpp"
 #include "cursiv/test/Check.hpp"
 #include "derivebase/generated/Base/Module.hpp"
@@ -508,9 +507,21 @@ static_assert(std::is_same_v<decltype(assign<&ast::Node::child>(ref<R1>)),
                              Assign<&ast::Node::child, Ref<R1>>>);
 static_assert(std::is_same_v<decltype(append<&ast::Node::child>(ref<R1>)),
                              Append<&ast::Node::child, Ref<R1>>>);
-static_assert(std::is_same_v<decltype(flag<&ast::Node::many>(kw<"many">)),
-                             Flag<&ast::Node::many,
-                                      Lit<"many", false, detail::WordBound>>>);
+// A directive leaves hover prose on its token and preserves ordinary
+// choices and trivia scopes; only a section operand needs distribution.
+static_assert(
+    std::is_same_v<decltype(assign<&ast::Node::many>(lit<"true">.doc<"on">())),
+                   Assign<&ast::Node::many, Doc<Lit<"true">, "on">>>);
+static_assert(std::is_same_v<
+              decltype(assign<&ast::Node::many>(lit<"true"> | lit<"false">)),
+              Assign<&ast::Node::many, Choice<Lit<"true">, Lit<"false">>>>);
+static_assert(
+    std::is_same_v<
+        decltype(assign<&ast::Node::many>(tight(lit<"true">))),
+        Assign<&ast::Node::many, Skip<TypeList<>, TypeList<>, Lit<"true">>>>);
+static_assert(std::is_same_v<
+              decltype(flag<&ast::Node::many>(kw<"many">)),
+              Flag<&ast::Node::many, Lit<"many", false, detail::WordBound>>>);
 static_assert(
     std::is_same_v<decltype(nest<ast::Node, &ast::Node::child>(lit<"x">)),
                    Nest<ast::Node, &ast::Node::child, Lit<"x">>>);

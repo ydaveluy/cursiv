@@ -27,6 +27,7 @@ class SmallRun {
       return;
     }
     if (!_heap) {
+      _more.reserve(2 * N);
       _more.assign(_own, _own + _n);
       _heap = true;
     }

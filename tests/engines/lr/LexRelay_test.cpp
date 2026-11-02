@@ -577,28 +577,19 @@ void a_refusal_before_a_relay_leaves_its_first_byte_to_the_search() {
   CHECK(nested("a {- x", "<refused>"));
   CHECK(nested("a {-", "<refused>"));
   CHECK(nested("a {-# x", "a {-# x"));
-  namespace g = tnestedlex::generated::G;
   std::mt19937 rng(20260929);
-  constexpr std::string_view alphabet = "{-}#a ";
-  for (unsigned trial = 0; trial < 20000; ++trial) {
-    std::string text = "{-";
-    for (unsigned n = rng() % 12; n != 0; --n)
-      text += alphabet[rng() % alphabet.size()];
-    const auto s = cursiv::lr_match_text<g::kTable>(
-        text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
-    if (s.end != pragma_model(text)) std::printf("  %s\n", text.c_str());
-    CHECK(s.end == pragma_model(text));
-  }
-  namespace two = tnestedlex::generated::G;
-  constexpr std::string_view more = "{-}#$a ";
-  for (unsigned trial = 0; trial < 20000; ++trial) {
-    std::string text = "{-";
-    for (unsigned n = rng() % 12; n != 0; --n)
-      text += more[rng() % more.size()];
-    const auto s = cursiv::lr_match_text<two::kTable>(
-        text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
-    if (s.end != pragma_model(text, true)) std::printf("  %s\n", text.c_str());
-    CHECK(s.end == pragma_model(text, true));
+  for (const bool dollar : {false, true}) {
+    const std::string_view alphabet = dollar ? "{-}#$a " : "{-}#a ";
+    for (unsigned trial = 0; trial < 20000; ++trial) {
+      std::string text = "{-";
+      for (unsigned n = rng() % 12; n != 0; --n)
+        text += alphabet[rng() % alphabet.size()];
+      const auto s = cursiv::lr_match_text<tnestedlex::generated::G::kTable>(
+          text.data(), static_cast<cursiv::TextOffset>(text.size()), 0, 0);
+      if (s.end != pragma_model(text, dollar))
+        std::printf("  %s\n", text.c_str());
+      CHECK(s.end == pragma_model(text, dollar));
+    }
   }
   std::printf("  the refusal leaves the first byte to the relay\n");
 }
@@ -899,6 +890,33 @@ void a_padded_closer_inside_a_repeated_capture_is_read_once() {
                                 n) == len);
 }
 
+void closer_candidates_stand_on_character_boundaries() {
+  std::mt19937 rng(20261101);
+  constexpr unsigned char bytes[] = {0, 'a', '=', 0x80, 0xA9, 0xC0, 0xC3,
+                                     0xE0, 0xED, 0xF0, 0xF4, 0xFF};
+  for (unsigned trial = 0; trial < 500; ++trial) {
+    std::string input;
+    for (unsigned n = rng() % 24; n != 0; --n)
+      input += static_cast<char>(bytes[rng() % std::size(bytes)]);
+    // An opener may end anywhere among exact bytes. Boundaries are relative
+    // to its end, and malformed UTF-8 advances one byte at a time.
+    for (std::size_t from = 0; from <= input.size(); ++from) {
+      const std::string_view text{input.data() + from, input.size() - from};
+      std::vector<bool> boundaries(text.size() + 1);
+      for (std::size_t at = 0;;) {
+        boundaries[at] = true;
+        if (at == text.size()) break;
+        std::size_t width = 0;
+        (void)cursiv::scalar_at(text.data() + at, text.size() - at, width);
+        at += width != 0 ? width : 1;
+      }
+      for (std::size_t at = 0; at <= text.size(); ++at)
+        CHECK(cursiv::lex_character_boundary(text, text.data() + at) ==
+              boundaries[at]);
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -924,5 +942,6 @@ int main() {
   a_mark_run_is_read_once();
   a_closer_room_near_the_bound_does_not_wrap();
   a_padded_closer_inside_a_repeated_capture_is_read_once();
+  closer_candidates_stand_on_character_boundaries();
   return cursiv::test::report("LexRelay_test");
 }

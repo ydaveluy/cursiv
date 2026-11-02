@@ -30,6 +30,7 @@
 #include "cursiv/core/workspace/DefaultWorkspaceLock.hpp"
 #include "cursiv/core/workspace/WorkspaceLock.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 
 // Pins the contract of the parallel-for, which is what a change of pool has to
 // keep: every index runs exactly once, the call returns after the last body,
@@ -152,15 +153,11 @@ void the_first_exception_is_rethrown() {
   cursiv::TaskScheduler tasks{kWorkers};
   const auto range = indices(1'000);
 
-  bool thrown = false;
-  try {
+  CHECK(support::throws<std::runtime_error>([&] {
     tasks.parallelFor(cursiv::kNoCancel, range, [](std::size_t i) {
       if (i == 500) throw std::runtime_error("boom");
     });
-  } catch (const std::runtime_error&) {
-    thrown = true;
-  }
-  CHECK(thrown);
+  }));
 }
 
 // Cancellation is cooperative: the remaining items short-circuit rather than
@@ -171,15 +168,11 @@ void cancellation_short_circuits_the_rest() {
   std::stop_source source;
   std::atomic<int> calls{0};
 
-  bool cancelled = false;
-  try {
+  CHECK(support::throws<cursiv::OperationCancelled>([&] {
     tasks.parallelFor(source.get_token(), range, [&](std::size_t) {
       if (calls.fetch_add(1) == 100) source.request_stop();
     });
-  } catch (const cursiv::OperationCancelled&) {
-    cancelled = true;
-  }
-  CHECK(cancelled);
+  }));
 }
 
 void inline_runs_report_cancellation_from_the_last_body() {
@@ -188,15 +181,11 @@ void inline_runs_report_cancellation_from_the_last_body() {
     cursiv::TaskScheduler tasks{workers};
     cursiv::CancellationTokenSource source;
     std::size_t calls = 0;
-    bool cancelled = false;
-    try {
+    CHECK(support::throws<cursiv::OperationCancelled>([&] {
       tasks.parallelFor(source.get_token(), range, [&](std::size_t) {
         if (++calls == range.size()) source.request_stop();
       }, minParallelCount);
-    } catch (const cursiv::OperationCancelled&) {
-      cancelled = true;
-    }
-    CHECK(cancelled);
+    }));
     CHECK(calls == range.size());
   };
 

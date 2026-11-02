@@ -65,6 +65,12 @@ struct Holder : cursiv::Extends<cursiv::AstNode> {
   vector<Expr*> kids;
   boolean flag;
 };
+struct Flags : cursiv::Extends<cursiv::AstNode> {
+  boolean on = false;
+};
+struct Box : cursiv::Extends<Flags> {
+  Flags* in = nullptr;
+};
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -78,6 +84,17 @@ struct Base : cursiv::GrammarSpec {
       nest<Prop, &Prop::object>(lit<"."> + assign<&Prop::name>(ref<ID>)) |
       nest<Index, &Index::object>(
           lit<"["> + assign<&Index::index>(ref<NumRule>) + lit<"]">);
+};
+
+template <unsigned N>
+inline constexpr auto stacked_flags = cursiv::nest<Box, &Box::in>(
+    stacked_flags<N - 1>);
+template <>
+inline constexpr auto stacked_flags<0> = cursiv::kw<"x">;
+
+struct StackedFlags : Base {
+  struct Root : rule<create<Flags>(
+                         ref<ID> + flag<&Flags::on>(stacked_flags<20>))> {};
 };
 
 struct AtomChain : Base {
@@ -203,7 +220,8 @@ struct Suite : Base {
                      (lit<"relay:"> + ref<Relay::Root>) |
                      (lit<"unassignedterminal:"> + ref<UnassignedTerminal::Root>) |
                      (lit<"givenup:"> + ref<GivenUp::Root>) |
-                     (lit<"passed:"> + ref<GivenUp::Passed>)> {};
+                     (lit<"passed:"> + ref<GivenUp::Passed>) |
+                     (lit<"stacked:"> + ref<StackedFlags::Root>)> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -234,6 +252,17 @@ struct Expr : cursiv::Extends<cursiv::AstNode> {};
 struct Ident : cursiv::Extends<Expr> {
   string_view name;
 };
+struct Number : cursiv::Extends<Expr> {
+  string_view text;
+};
+struct Call : cursiv::Extends<Expr> {
+  Expr* target = nullptr;
+  vector<Expr*> args;
+};
+struct Selector : cursiv::Extends<Expr> {
+  Expr* object = nullptr;
+  string_view field;
+};
 struct Index : cursiv::Extends<Expr> {
   Expr* array = nullptr;
   Expr* index = nullptr;
@@ -250,8 +279,11 @@ struct Stmt : cursiv::Extends<cursiv::AstNode> {
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<some(cr<"a-z">)> {};
+  struct NUM : terminal<some(d)> {};
 
   struct Name : rule<assign<&ast::Ident::name>(ref<ID>)> {};
+  struct Number : rule<assign<&ast::Number::text>(ref<NUM>)> {};
+  struct Primary : rule<ref<Name> | ref<Number>> {};
 
   static constexpr auto Step = nest<ast::Index, &ast::Index::array>(
       lit<"["> + assign<&ast::Index::index>(ref<Name>) + lit<"]">);
@@ -267,9 +299,75 @@ struct Base : cursiv::GrammarSpec {
   struct Semi : rule<ref<Name> + nest<ast::Stmt, &ast::Stmt::value>(lit<";">)> {
   };
 
-  struct Root : rule<(kw<"one"> + ref<One>) |
-                     (kw<"some"> + ref<Some>) | (kw<"assign"> + ref<Assigned>) |
-                     (kw<"semi"> + ref<Semi>)> {};
+  static constexpr auto short_call =
+      nest<&ast::Call::target>(lit<"("> + lit<")">);
+  static constexpr auto selector = nest<&ast::Selector::object>(
+      lit<"."> + assign<&ast::Selector::field>(ref<ID>));
+
+  struct NullableCall
+      : rule<ref<Name> +
+             nest<&ast::Call::target>(option(lit<"("> + lit<")">))> {};
+  struct EmptyHeadCall : rule<create<ast::Ident> + short_call> {};
+  struct GuardedEmptyHeadCall
+      : rule<create<ast::Ident> + &lit<"("> + short_call> {};
+  struct NestedPayload
+      : rule<ref<Name> + nest<&ast::Selector::object>(
+                             lit<"."> +
+                             assign<&ast::Selector::field>(ref<ID>) +
+                             short_call)> {};
+
+  struct ShortAdopted : rule<ref<Name> + option(short_call) +
+                             many(selector + option(short_call))> {};
+  struct ShortCreated
+      : rule<create<ast::Ident>(assign<&ast::Ident::name>(ref<ID>)) +
+             option(short_call) + many(selector + option(short_call))> {};
+  struct ShortHead : rule<ref<Name> + option(short_call)> {};
+  struct ShortRecursive
+      : rule<(ref<ShortRecursive> + selector + option(short_call)) |
+             ref<ShortHead>> {};
+
+  // The pure-adoption arm is part of the indirect cycle, not an optional
+  // suffix factored out of it. Both call and selector wrappers keep a prefix.
+  struct ShortExpression;
+  struct ShortSelected : rule<(ref<ShortExpression> + selector) | ref<Name>> {};
+  struct ShortExpression
+      : rule<(ref<ShortSelected> + short_call) | ref<ShortSelected>> {};
+
+  static constexpr auto index_body =
+      lit<"["> + assign<&ast::Index::index>(ref<Primary>) + lit<"]">;
+  static constexpr auto call_body =
+      lit<"("> + option(append<&ast::Call::args>(ref<Primary>)) + lit<")">;
+  static constexpr auto index_tail = nest<&ast::Index::array>(index_body);
+  static constexpr auto call_tail = nest<&ast::Call::target>(call_body);
+  struct IndexDirect : rule<ref<Primary> + many(index_tail)> {};
+  struct TailChoice : rule<ref<Primary> + many(call_tail | index_tail)> {};
+  struct TailOuterGuard
+      : rule<ref<Primary> + many(gap::none + (call_tail | index_tail))> {};
+  struct TailInnerGuard
+      : rule<ref<Primary> +
+             many(nest<&ast::Call::target>(gap::none + call_body) |
+                  nest<&ast::Index::array>(gap::none + index_body))> {};
+
+  struct Root
+      : rule<
+            (kw<"one"> + ref<One>) | (kw<"some"> + ref<Some>) |
+            (kw<"assign"> + ref<Assigned>) | (kw<"semi"> + ref<Semi>) |
+            (kw<"nullablenest"> + assign<&ast::Stmt::value>(ref<NullableCall>)) |
+            (kw<"emptyhead"> + assign<&ast::Stmt::value>(ref<EmptyHeadCall>)) |
+            (kw<"guardedempty"> +
+             assign<&ast::Stmt::value>(ref<GuardedEmptyHeadCall>)) |
+            (kw<"nestedpayload"> +
+             assign<&ast::Stmt::value>(ref<NestedPayload>)) |
+            (kw<"shortadopt"> + assign<&ast::Stmt::value>(ref<ShortAdopted>)) |
+            (kw<"shortcreate"> + assign<&ast::Stmt::value>(ref<ShortCreated>)) |
+            (kw<"shortleft"> + assign<&ast::Stmt::value>(ref<ShortRecursive>)) |
+            (kw<"shortcycle"> +
+             assign<&ast::Stmt::value>(ref<ShortExpression>)) |
+            (kw<"indexdirect"> + assign<&ast::Stmt::value>(ref<IndexDirect>)) |
+            (kw<"tailchoice"> + assign<&ast::Stmt::value>(ref<TailChoice>)) |
+            (kw<"tailouter"> + assign<&ast::Stmt::value>(ref<TailOuterGuard>)) |
+            (kw<"tailinner"> +
+             assign<&ast::Stmt::value>(ref<TailInnerGuard>))> {};
   using entry = Root;
   using ignored = WS;
 };

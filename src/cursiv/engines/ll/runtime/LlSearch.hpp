@@ -87,8 +87,6 @@ struct LlSearch : LlSearchSim, RepairSearch<LlGesture> {
   // readings open. A reading keeps its top alone.
   LlLookIndent indent;
   std::unordered_multimap<Future, std::uint32_t, FutureHash> seen;
-  // The readings one read is still carrying forward.
-  std::vector<std::uint32_t> out;
   // Scratch for the terminals a step reads and the ones a position offers.
   std::vector<std::uint16_t> terms;
   std::unordered_map<std::uint32_t, std::uint32_t> depths;

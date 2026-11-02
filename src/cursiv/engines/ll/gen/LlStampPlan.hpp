@@ -86,14 +86,21 @@ class LlStampPlan {
   bool heads_over(std::uint16_t id) const {
     if (turns(id)) return true;
     const LlNode& n = node(id);
-    if (n.owns) return false;
+    // A creation starts another construction context. An adopting close
+    // leaves the current node in place, including at a folded rule's head.
+    if (n.owns && _a.writes.chainBuild[n.row].creates) return false;
     if (n.kind == LlShape::rep) {
       assert(n.sym < id);
       return _heads[n.sym] != 0;
     }
     if (n.kind == LlShape::seq) {
-      assert(n.count == 0 || kid(n, 0) < id);
-      return n.count != 0 && _heads[kid(n, 0)] != 0;
+      for (unsigned i = 0; i < n.count; ++i) {
+        const auto child = kid(n, i);
+        assert(child < id);
+        if (_heads[child] != 0) return true;
+        if (!_a.nullable[child]) return false;
+      }
+      return false;
     }
     if (n.kind == LlShape::alt)
       for (unsigned i = 0; i < n.count; ++i) {

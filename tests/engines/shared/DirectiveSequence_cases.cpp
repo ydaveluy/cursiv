@@ -442,7 +442,7 @@ void a_flag_over_a_call_on_an_empty_path_adopts_the_node(const Parsers& p) {
   check<ast::Expr>(*p.parser, "outside:1", show_node_expr, "<refused>");
 }
 
-void an_adopting_flag_in_a_cycle_marks_the_node_it_returns(const Parsers& p) {
+void a_flag_over_a_recursive_operand_marks_the_node_it_returns(const Parsers& p) {
   check<ast::Expr>(*p.parser, "nested:1", show_node_expr, "1");
   check<ast::Expr>(*p.parser, "nested:(1)", show_node_expr, "1 parenthesized");
   check<ast::Expr>(*p.parser, "nested:((1))", show_node_expr, "1 parenthesized");
@@ -477,7 +477,7 @@ void every_engine(const Parsers& p) {
   a_flag_over_a_nest_sets_its_member_on_the_wrapper(p);
   flags_in_sequence_each_read_their_own_tokens(p);
   a_flag_over_a_call_on_an_empty_path_adopts_the_node(p);
-  an_adopting_flag_in_a_cycle_marks_the_node_it_returns(p);
+  a_flag_over_a_recursive_operand_marks_the_node_it_returns(p);
   a_flag_over_a_bare_write_marks_the_node_it_writes(p);
   a_flag_inside_a_flag_sets_its_own_member(p);
   a_create_inside_a_flag_heads_the_node_the_flag_marks(p);

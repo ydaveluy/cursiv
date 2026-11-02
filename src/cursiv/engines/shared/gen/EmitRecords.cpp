@@ -17,7 +17,7 @@ RecordGen record_gen(std::span<const AstRowGen> rows,
                      const std::vector<std::uint16_t>& held,
                      const std::vector<std::uint16_t>& over) {
   RecordGen rec;
-  bool named = false, converted = false;
+  bool named = false;
   const auto read = [&](const auto& run, auto& features, bool own) {
     for (const std::uint16_t r : run) {
       const auto& row = rows[r];
@@ -31,10 +31,8 @@ RecordGen record_gen(std::span<const AstRowGen> rows,
         }
       }
       rec.made |= own && row.makes();
-      if (!converted && row.converts() && !row.rule.empty()) {
+      if (rec.rule.empty() && row.converts() && !row.rule.empty())
         rec.rule = row.rule;
-        converted = true;
-      }
     }
   };
   read(held, rec.held, true);

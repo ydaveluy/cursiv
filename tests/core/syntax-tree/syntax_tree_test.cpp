@@ -450,6 +450,7 @@ namespace wiring {
 
 using namespace tab::wiring;
 
+// Collapsing a rule must keep the creation its parent appends.
 void builds_doc() {
   cursiv::ParseResult r = engine().parse("doc item a item b");
   CHECK(r.accepted && static_cast<bool>(r));
@@ -560,20 +561,6 @@ void a_hand_built_entry_is_answered_not_trusted() {
     CHECK(!r && r.error == cursiv::AstBuildError::malformed_cst);
     CHECK(r.value == nullptr);
   }
-}
-
-// Collapse may not erase a creation. A rule that carries its creation keeps
-// its record (`collapsed_ref`) and a fuse never overwrites a record carrying
-// an action (`carries_action`); otherwise nothing builds the `Named` the
-// append expects.
-void the_collapse_keeps_the_creation() {
-  cursiv::ParseResult r = engine().parse("doc item a item b");
-  CHECK(r.accepted && static_cast<bool>(r));
-  auto* doc = r.value_as<Doc>();
-  CHECK(doc != nullptr && doc->items.size() == 2);
-  CHECK(doc->items[0]->name == "a" && doc->items[1]->name == "b");
-  CHECK(doc->items[0]->parent == doc && doc->items[1]->parent == doc);
-  CHECK(r.diagnostics.empty() && r.error == cursiv::AstBuildError::none);
 }
 
 }  // namespace wiring
@@ -986,9 +973,9 @@ static_assert(
         cursiv::detail::erased_src_t<cursiv::detail::pay_text<DerivedHex>>,
         cursiv::detail::pay_text<DerivedHex>>);
 
-template <auto Create>
-void an_override_runs_the_converter_it_inherited(const char* engine) {
-  cursiv::ParseResult r = parser_of<Create>().parse("0X1f");
+void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser,
+                                                 const char* engine) {
+  cursiv::ParseResult r = parser.parse("0X1f");
   CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
   const N* n = r.value_as<N>();
   if (n == nullptr || n->n != 4000) {
@@ -1005,9 +992,9 @@ using DecimalHex =
 static_assert(std::is_same_v<cursiv::rule_type_t<DecimalHex>, std::uint64_t>);
 static_assert(std::is_void_v<cursiv::detail::converter_rule_t<DecimalHex>>);
 
-template <auto Create>
-void an_override_naming_a_target_converts_to_it(const char* engine) {
-  cursiv::ParseResult r = parser_of<Create>().parse("dec 10");
+void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser,
+                                               const char* engine) {
+  cursiv::ParseResult r = parser.parse("dec 10");
   CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
   const N* n = r.value_as<N>();
   if (n == nullptr || n->n != 10) {
@@ -1025,9 +1012,9 @@ static_assert(std::is_same_v<cursiv::rule_type_t<ChainHex>, std::uint32_t>);
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
                              cursiv::detail::text_conv<tdual::D1::tens_conv>>);
 
-template <auto Create>
-void an_override_keeps_the_converter_it_stood_over(const char* engine) {
-  cursiv::ParseResult r = parser_of<Create>().parse("ten 0Y1f");
+void an_override_keeps_the_converter_it_stood_over(const cursiv::Parser& parser,
+                                                  const char* engine) {
+  cursiv::ParseResult r = parser.parse("ten 0Y1f");
   CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
   const N* n = r.value_as<N>();
   if (n == nullptr || n->n != 40) {
@@ -1043,9 +1030,9 @@ void an_override_keeps_the_converter_it_stood_over(const char* engine) {
 // holds them.
 namespace precreate {
 
-template <auto Create>
-void a_create_keeps_the_writes_before_it(const char* engine) {
-  cursiv::ParseResult r = parser_of<Create>().parse("fn run ()");
+void a_create_keeps_the_writes_before_it(const cursiv::Parser& parser,
+                                        const char* engine) {
+  cursiv::ParseResult r = parser.parse("fn run ()");
   CHECK(r.error == cursiv::AstBuildError::none && r.diagnostics.empty());
   const auto* f = r.value_as<tdual::Function>();
   if (f == nullptr || f->name != "run") {
@@ -1612,7 +1599,6 @@ void run() {
   narrow::a_narrowed_site_stamps_and_filters();
   wiring::structural_errors();
   wiring::a_hand_built_entry_is_answered_not_trusted();
-  wiring::the_collapse_keeps_the_creation();
   vocab::whole_vocabulary();
   vocab::minimal_document();
   vocab::other_variant_branch();
@@ -1622,22 +1608,14 @@ void run() {
   exact::each_payload_lands_in_its_own_slot();
   annot::annotated_terminal_lands_in_its_annotated_slot();
   annot2::the_validated_alternative_is_the_written_one();
-  over::an_override_runs_the_converter_it_inherited<
-      &tdual::generated::Lr::create_parser>("LR");
-  over::an_override_runs_the_converter_it_inherited<
-      &tdual::generated::Ll::create_parser>("LL");
-  over::an_override_naming_a_target_converts_to_it<
-      &tdual::generated::Lr::create_parser>("LR");
-  over::an_override_naming_a_target_converts_to_it<
-      &tdual::generated::Ll::create_parser>("LL");
-  over::an_override_keeps_the_converter_it_stood_over<
-      &tdual::generated::Lr::create_parser>("LR");
-  over::an_override_keeps_the_converter_it_stood_over<
-      &tdual::generated::Ll::create_parser>("LL");
-  precreate::a_create_keeps_the_writes_before_it<
-      &tdual::generated::Lr::create_parser>("LR");
-  precreate::a_create_keeps_the_writes_before_it<
-      &tdual::generated::Ll::create_parser>("LL");
+  for (const auto& [name, parser] : {
+           std::pair{"LR", &parser_of<&tdual::generated::Lr::create_parser>()},
+           std::pair{"LL", &parser_of<&tdual::generated::Ll::create_parser>()}}) {
+    over::an_override_runs_the_converter_it_inherited(*parser, name);
+    over::an_override_naming_a_target_converts_to_it(*parser, name);
+    over::an_override_keeps_the_converter_it_stood_over(*parser, name);
+    precreate::a_create_keeps_the_writes_before_it(*parser, name);
+  }
   nodealt::both_node_alternatives_build();
   nodealt::the_variant_child_is_visited();
   region::adopts_and_wraps();
@@ -1816,6 +1794,42 @@ void arena_lifetimes() {
   (void)a.make<D>();
   CHECK(pool.blocks == first + 1);
 }
+
+void arena_extensions_use_the_carves_padding() {
+  for (const std::size_t alignment : {8u, 16u, 32u}) {
+    counting_resource pool;
+    cursiv::AstArena arena(&pool);
+    auto* const p =
+        static_cast<unsigned char*>(arena.carve_bytes(1, alignment));
+    CHECK(reinterpret_cast<std::uintptr_t>(p) % alignment == 0);
+    CHECK(arena.try_extend(p, 1, 2));
+    CHECK(!arena.try_extend(p, 2, 1));
+    CHECK(arena.try_extend(p, 2, 8));
+    CHECK(arena.try_extend(p, 8, 9));
+    p[8] = 7;
+    (void)arena.carve_bytes(1, alignment);
+    CHECK(!arena.try_extend(p, 9, 17));
+    CHECK(p[8] == 7 && pool.blocks == 1);
+  }
+
+  counting_resource pool;
+  cursiv::AstArena arena(&pool);
+  constexpr std::size_t chunk = 64u * 1024u;
+  auto* const head =
+      static_cast<unsigned char*>(arena.carve_bytes(chunk - 8, 1));
+  auto* const tail = static_cast<unsigned char*>(arena.carve_bytes(2, 1));
+  CHECK(tail == head + chunk - 8 && pool.blocks == 1);
+  // Rounding the last carve reached the chunk's end, but its padding is free.
+  CHECK(!arena.try_extend(tail, 2, 9));
+  CHECK(arena.try_extend(tail, 2, 4));
+  CHECK(arena.try_extend(tail, 4, 8));
+  std::fill_n(tail, 8, 47);
+  CHECK(!arena.try_extend(tail, 8, 9));
+  (void)arena.carve_bytes(1, 1);
+  CHECK(pool.blocks == 2);
+  CHECK(std::all_of(tail, tail + 8, [](unsigned char v) { return v == 47; }));
+}
+
 struct A2 : cursiv::Extends<cursiv::AstNode> {};
 struct B2 : cursiv::Extends<cursiv::AstNode> {};
 struct C2 : cursiv::Extends<A2> {};
@@ -1893,6 +1907,13 @@ void a_vector_grows_and_relocates() {
   v.push_back(arena, 100);
   CHECK(v[100] == 100 && v[0] == 0);
   CHECK(w[0] == -1);
+
+  cursiv::vector<std::uint8_t> bytes;
+  bytes.push_back(arena, 0);
+  const auto* const first = bytes.data();
+  for (std::uint8_t i = 1; i < 32; ++i) bytes.push_back(arena, i);
+  CHECK(bytes.data() == first);
+  for (std::uint8_t i = 0; i < 32; ++i) CHECK(bytes[i] == i);
 }
 
 }  // namespace
@@ -1903,6 +1924,7 @@ void run() {
   the_branch_of_a_candidate_is_its_first_rank();
   reference_defaults();
   arena_lifetimes();
+  arena_extensions_use_the_carves_padding();
   the_closure_is_transitive();
   ast_cast_accepts_the_family_and_refuses_the_rest();
   a_two_candidate_reference_answers_by_branch();
@@ -2175,7 +2197,7 @@ void char_like_excluded() {
 
 // An enum's default conversion is its enumerator names, read through
 // reflection -- no converter needed to write one from plain text.
-enum class Vis { pub, priv };
+using Vis = tab::enm::Vis;
 
 void enum_defaults() {
   auto p = cursiv::default_convert<Vis>("priv");
@@ -2324,7 +2346,6 @@ void data_value_is_the_language() { data_value_at("tables"); }
 // parts, so the join is associative -- `adjacent()` is asked of those atoms,
 // not of whatever depth the tape happened to render. Read at O0 and at O2,
 // since the two render different records for the same span.
-template <class = void>
 void parts_are_atoms_at(const char* lvl) {
   const cursiv::ParseResult r =
       engine().parse("a.b ; c.d ; e . f / g . h ; i.j");

@@ -27,6 +27,9 @@ struct LrProdBuild {
   // Empty, or conditions alone, where a region closes: it stands on the
   // boundary past the region, not on the caller's in front of it.
   bool closesRegion = false;
+  // This reduction returns a gap to its caller. Kept before a leading
+  // caller edge can hide the region's own configuration in slotCfg.
+  bool regionExit = false;
   // The empty production that stops a commit's loop on a token no cut names:
   // its cut plus one, zero for any other.
   std::uint16_t stop = 0;

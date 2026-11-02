@@ -4121,7 +4121,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
 
   const LrPoolRows<LrItem> clos = gr.clos();
   lr_close_rows(A, clos, pick);
-  auto cfgs = lr_state_cfgs(A, clos, pick, fs.first);
+  auto cfgs = lr_state_cfgs(A, clos, pick, fs.first, alpha);
   const std::vector<DynSet> conditions = condition_firsts(A.cfg);
   auto modes = lr_lex_mode_sets(
       A, cfgs, lr_state_guard_firsts(A, clos, pick, conditions), conditions,

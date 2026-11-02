@@ -65,112 +65,97 @@ struct Base : cursiv::GrammarSpec {
   struct ID : terminal<some(cr<"a-z">)> {};
   struct EQ : terminal<as<Op::equal>(lit<"=">)> {};
   using ignored = WS;
+
+  template <class Expression>
+  using NameOrParen = rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
+                           (lit<"("> + ref<Expression> + lit<")">)>;
+  template <class Expression>
+  using Document =
+      rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<Expression>)) + eof>;
 };
 
 struct Joined : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text, (left(kw<"NOT"> + kw<"EQUAL">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Enumerated : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Coded, (left(kw<"NOT"> + kw<"EQUAL">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Terminal : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Coded, (left(ref<EQ>))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Guarded : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Coded, (left(ref<EQ> + &lit<"(">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Adjacent : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E
       : infix<Primary, ast::Text, (left(lit<">"> + gap::none + lit<">">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Tight : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text, (left(tight(lit<">"> + lit<">">)))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Shared : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text,
                    levels(left(kw<"IS"> + kw<"EQUAL">),
                           left(kw<"IS"> + kw<"LIKE">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Arm : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text,
                    (left(lit<"+"> | (kw<"NOT"> + kw<"EQUAL">)))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Grouped : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text,
                    levels(left(kw<"A"> + kw<"B">), right(kw<"C"> + kw<"D">),
                           nonassoc(kw<"E"> + kw<"F">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Between : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Text,
                    (left(kw<"NOT"> + !gap::line + kw<"EQUAL">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 struct Lead : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Coded, (left(!gap::line + ref<EQ>))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 // `as<V>` names in place the constant an operator denotes: one token is a
@@ -178,15 +163,13 @@ struct Lead : Base {
 struct Valued : Base {
   struct E;
   struct NE : terminal<lit<"<>">> {};
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Coded,
                    left(as<Op::equal>(lit<"==">) |
                         as<Op::NOTEQUAL>(kw<"IS"> + kw<"NOT">) |
                         as<Op::NOTEQUAL>(ref<NE>) |
                         as<Op::NOTEQUAL>(ref<terminal<lit<"~=">>>))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 // `as<V>` as the payload of an assignment: the member takes the constant,
@@ -259,25 +242,21 @@ struct Visible : Base {
 // `infix<>` builds the class it names, though a base declares the members.
 struct Derived : Base {
   struct E;
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Recoded,
                    levels(left(as<Op::NOTEQUAL>(lit<"!=">)),
                           right(as<Op::equal>(lit<":=">)))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 // An operator a recursive data rule spells: any number of `!`, then `+`.
 struct Recursive : Base {
   struct E;
   struct Bang : rule<lit<"+"> | (lit<"!"> + ref<Bang>)> {};
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E
       : infix<Primary, ast::Text, levels(left(ref<Bang>), left(lit<"-">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 // A condition in an operator reads the token its first terminals lengthen,
@@ -291,8 +270,7 @@ struct Lengthened : Base {
   struct E : infix<Primary, ast::Text,
                    levels(left(lit<"+">), left(!lit<"->"> + lit<"-">),
                           left(lit<"*"> + !lit<">>">))> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
-  };
+  struct Root : Document<E> {};
 };
 
 // An operator a data rule spells takes the constant of the alternative it
@@ -317,8 +295,7 @@ struct Marking : Base {
   struct Order : rule<as<Mark::less>(kw<"IS"> + kw<"LESS">) |
                       as<Mark::more>(kw<"IS"> + kw<"MORE">)> {};
   struct POWER : terminal<as<Mark::power>(lit<"^"> | lit<"**">)> {};
-  struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
-                        (lit<"("> + ref<E> + lit<")">)> {};
+  struct Primary : NameOrParen<E> {};
   struct E : infix<Primary, ast::Marked,
                    levels(postfix<&ast::MarkedPostfix::operand,
                                   &ast::MarkedPostfix::op>(ref<BANG>),

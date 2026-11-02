@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <deque>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -19,6 +21,8 @@
 #include "cursiv/engines/ll/runtime/LlEpisodeSim.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/engines/shared/gen/LexRecursion.hpp"
+#include "cursiv/engines/shared/gen/LexSeparation.hpp"
 #include "cursiv/engines/shared/gen/OperatorWords.hpp"
 #include "cursiv/engines/shared/gen/PredicateModes.hpp"
 #include "cursiv/core/utils/StrongComponents.hpp"
@@ -31,6 +35,64 @@ namespace {
 
 using Built = LlBuiltProgram;
 using Cfg = LlLowCfg;
+
+// An element is queued at most once until its next visit. Growing facts only
+// wake their direct readers, instead of starting another whole-grammar pass.
+struct Pending {
+  std::deque<std::uint32_t> todo;
+  std::vector<std::uint8_t> queued;
+
+  explicit Pending(std::size_t size) : queued(size, 0) {}
+  void push(std::uint32_t id) {
+    if (queued[id]) return;
+    queued[id] = 1;
+    todo.push_back(id);
+  }
+  bool empty() const { return todo.empty(); }
+  std::uint32_t pop() {
+    const auto id = todo.front();
+    todo.pop_front();
+    queued[id] = 0;
+    return id;
+  }
+};
+
+// Positions precede their containing groups. Rules occupy the same worklist
+// after the positions; a call reads its callee, and a rule reads its body.
+template <class Update>
+void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
+  const std::uint32_t size = c.nnodes + c.nrules;
+  std::vector<std::vector<std::uint32_t>> users(size);
+  Pending pending(size);
+  for (std::uint32_t id = 0; id < c.nnodes; ++id) {
+    const LlNode& n = c.nodes[id];
+    if (n.kind == LlShape::call)
+      users[c.nnodes + n.sym].push_back(id);
+    else
+      for (const auto child : c.children(n)) users[child].push_back(id);
+    pending.push(id);
+  }
+  for (std::uint16_t r = 1; r < c.nrules; ++r) {
+    const LlRuleInfo& u = c.rules[r];
+    const auto id = c.nnodes + r;
+    if (u.climb != kNoRow) {
+      const LlClimb& cl = c.climbs[u.climb];
+      if (cl.primary != kNoRow)
+        users[c.nnodes + cl.primary].push_back(id);
+      else if (cl.primaryNode != kNoRow)
+        users[cl.primaryNode].push_back(id);
+    } else if (u.body != kNoRow) {
+      users[u.body].push_back(id);
+    }
+    pending.push(id);
+  }
+  while (!pending.empty()) {
+    const auto id = pending.pop();
+    if (work) ++*work;
+    if (update(id))
+      for (const auto user : users[id]) pending.push(user);
+  }
+}
 
 // Nothing at all is a reading of this position. A repetition that admits zero
 // turns is, and so is a group every member of which is.
@@ -63,18 +125,20 @@ bool node_nullable(const Cfg& c, std::uint16_t id,
   return false;
 }
 
-void settle_nullable(const Cfg& c, std::vector<std::uint8_t>& nullable,
-                     bool endMarkNullable = false) {
+std::vector<std::uint8_t> settle_nullable(
+    const Cfg& c, std::vector<std::uint8_t>& nullable,
+    bool endMarkNullable = false, std::uint64_t* work = nullptr) {
   nullable.assign(c.nnodes, 0);
   std::vector<std::uint8_t> ruleNullable(c.nrules, 0);
-  detail::settle_empty([&](auto mark) {
-    for (std::uint32_t id = 0; id < c.nnodes; ++id) {
-      const std::uint8_t v =
-          node_nullable(c, static_cast<std::uint16_t>(id), nullable,
-                        ruleNullable, endMarkNullable);
-      mark(nullable[id], v);
-    }
-    for (std::uint16_t r = 1; r < c.nrules; ++r) {
+  settle_shapes(c, work, [&](std::uint32_t id) {
+    bool empty;
+    std::uint8_t* value;
+    if (id < c.nnodes) {
+      empty = node_nullable(c, static_cast<std::uint16_t>(id), nullable,
+                            ruleNullable, endMarkNullable);
+      value = &nullable[id];
+    } else {
+      const auto r = static_cast<std::uint16_t>(id - c.nnodes);
       const LlRuleInfo& u = c.rules[r];
       // A climb with no operator in the text is its operand alone, and an
       // operand that is no rule is a terminal.
@@ -85,9 +149,14 @@ void settle_nullable(const Cfg& c, std::vector<std::uint8_t>& nullable,
       } else if (u.body != kNoRow) {
         v = nullable[u.body];
       }
-      mark(ruleNullable[r], v);
+      empty = v != 0;
+      value = &ruleNullable[r];
     }
+    if (!empty || *value) return false;
+    *value = 1;
+    return true;
   });
+  return ruleNullable;
 }
 
 // Whether `t` was new to `set`.
@@ -134,7 +203,8 @@ bool node_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
 }
 
 void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
-                  std::vector<DynSet>& first, std::vector<DynSet>& ruleFirst) {
+                  std::vector<DynSet>& first, std::vector<DynSet>& ruleFirst,
+                  std::uint64_t* work = nullptr) {
   first.assign(c.nnodes, DynSet{});
   ruleFirst.assign(c.nrules, DynSet{});
   // What can start an implied token's condition: the tokens it is laid on.
@@ -148,24 +218,22 @@ void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
       else
         impliedHeads[k].set(t);
     }
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint32_t id = 0; id < c.nnodes; ++id)
-      moved = node_first(c, nullable, first, ruleFirst, impliedHeads,
-                         static_cast<std::uint16_t>(id)) ||
-              moved;
-    for (std::uint16_t r = 1; r < c.nrules; ++r) {
-      const LlRuleInfo& u = c.rules[r];
-      if (u.climb != kNoRow) {
-        const LlClimb& cl = c.climbs[u.climb];
-        if (cl.primary != kNoRow)
-          moved = ruleFirst[r].add(ruleFirst[cl.primary]) || moved;
-        else
-          moved = ruleFirst[r].add(first[cl.primaryNode]) || moved;
-      } else if (u.body != kNoRow)
-        moved = ruleFirst[r].add(first[u.body]) || moved;
-    }
-  }
+  settle_shapes(c, work, [&](std::uint32_t id) {
+    if (id < c.nnodes)
+      return node_first(c, nullable, first, ruleFirst, impliedHeads,
+                        static_cast<std::uint16_t>(id));
+    const auto r = static_cast<std::uint16_t>(id - c.nnodes);
+    const LlRuleInfo& u = c.rules[r];
+    if (u.climb != kNoRow) {
+      const LlClimb& cl = c.climbs[u.climb];
+      if (cl.primary != kNoRow)
+        return ruleFirst[r].add(ruleFirst[cl.primary]);
+      else
+        return ruleFirst[r].add(first[cl.primaryNode]);
+    } else if (u.body != kNoRow)
+      return ruleFirst[r].add(first[u.body]);
+    return false;
+  });
 }
 
 // The rules this position may call before anything is consumed. A cycle over
@@ -336,7 +404,7 @@ void refuse_skipped_terminal(Built& b) {
 // A reading that asserts the end of input and reads a token after it is
 // impossible; a rule every reading of which is, or waits on one that is,
 // derives no finite text.
-void refuse_unproductive(Built& b) {
+void refuse_unproductive(Built& b, std::uint64_t* work) {
   const Cfg& c = b.cfg;
   std::vector<std::uint8_t> node(c.nnodes, 0), rule(c.nrules, 0);
   const auto productive = [&](const LlNode& n) {
@@ -364,21 +432,27 @@ void refuse_unproductive(Built& b) {
         return true;
     }
   };
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint32_t id = 0; id < c.nnodes; ++id)
-      if (!node[id] && productive(c.nodes[id])) node[id] = 1, moved = true;
-    for (std::uint16_t r = 1; r < c.nrules; ++r) {
+  settle_shapes(c, work, [&](std::uint32_t id) {
+    bool p;
+    std::uint8_t* value;
+    if (id < c.nnodes) {
+      p = productive(c.nodes[id]);
+      value = &node[id];
+    } else {
+      const auto r = static_cast<std::uint16_t>(id - c.nnodes);
       const LlRuleInfo& u = c.rules[r];
-      bool p = u.body != kNoRow && node[u.body];
+      p = u.body != kNoRow && node[u.body];
       if (u.climb != kNoRow) {
         const LlClimb& cl = c.climbs[u.climb];
         p = cl.primary != kNoRow ? rule[cl.primary] != 0
                                  : node[cl.primaryNode] != 0;
       }
-      if (p && !rule[r]) rule[r] = 1, moved = true;
+      value = &rule[r];
     }
-  }
+    if (!p || *value) return false;
+    *value = 1;
+    return true;
+  });
   // The rule to name is the one the others wait on.
   const auto waits_on = [&](std::uint16_t r) {
     const LlRuleInfo& u = c.rules[r];
@@ -540,6 +614,9 @@ struct Gaps {
   const Built& b;
   std::vector<std::uint8_t> silent{}, consumes{}, freshOut{};
   std::vector<std::uint8_t> ruleSilent{}, ruleConsumes{}, ruleFreshOut{};
+  // Whether some empty derivation reads a condition. A nullable call can
+  // delegate an optional exit only when no empty path owes such a read.
+  std::vector<std::uint8_t> emptyReads{}, ruleEmptyReads{};
   // Per position: the gaps before its first token from a token that nothing
   // peeked after, the gaps across it where it reads nothing, and the gaps
   // after its last token.
@@ -569,15 +646,33 @@ struct Gaps {
   // Whether a position may pass without peeking, may consume, and may end
   // on a token with no peek after it: least fixpoints, a rule reaching itself
   // before it consumes being refused.
-  bool settle_shape() {
-    bool moved = false;
-    const auto raise = [&](std::vector<std::uint8_t>& v, std::size_t i,
-                           bool x) {
-      if (x && !v[i]) v[i] = 1, moved = true;
-    };
-    for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
+  void settle_shape(std::uint64_t* work) {
+    settle_shapes(b.cfg, work, [&](std::uint32_t id) {
+      bool moved = false;
+      const auto raise = [&](std::vector<std::uint8_t>& v, std::size_t i,
+                             bool x) {
+        if (x && !v[i]) v[i] = 1, moved = true;
+      };
+      if (id >= b.cfg.nnodes) {
+        const auto r = static_cast<std::uint16_t>(id - b.cfg.nnodes);
+        const LlRuleInfo& u = b.cfg.rules[r];
+        if (u.climb != kNoRow) {
+          raise(ruleConsumes, r, true);
+          const LlClimb& cl = b.cfg.climbs[u.climb];
+          if (cl.primary != kNoRow)
+            raise(ruleEmptyReads, r, ruleEmptyReads[cl.primary]);
+          else if (cl.primaryNode != kNoRow)
+            raise(ruleEmptyReads, r, emptyReads[cl.primaryNode]);
+        } else if (u.body != kNoRow) {
+          raise(ruleSilent, r, silent[u.body]);
+          raise(ruleConsumes, r, consumes[u.body]);
+          raise(ruleFreshOut, r, freshOut[u.body]);
+          raise(ruleEmptyReads, r, emptyReads[u.body]);
+        }
+        return moved;
+      }
       const LlNode& n = node(static_cast<std::uint16_t>(id));
-      bool si = false, co = false, fr = false;
+      bool si = false, co = false, fr = false, er = false;
       switch (n.kind) {
         case LlShape::term:
           co = fr = true;
@@ -591,11 +686,13 @@ struct Gaps {
           break;
         case LlShape::condition:
         case LlShape::implied:
+          er = true;
           break;
         case LlShape::call:
           si = ruleSilent[n.sym];
           co = ruleConsumes[n.sym];
           fr = ruleFreshOut[n.sym];
+          er = ruleEmptyReads[n.sym];
           break;
         case LlShape::seq: {
           si = true;
@@ -604,6 +701,7 @@ struct Gaps {
             const std::uint16_t k = kid(n, i);
             si = si && silent[k];
             co = co || consumes[k];
+            if (b.nullable[id]) er = er || emptyReads[k];
             if (!silent[k]) last = k;
           }
           fr = last != kNoRow && freshOut[last];
@@ -613,29 +711,22 @@ struct Gaps {
           for (unsigned i = 0; i < n.count; ++i) {
             co = co || consumes[kid(n, i)];
             fr = fr || freshOut[kid(n, i)];
+            if (b.nullable[kid(n, i)]) er = er || emptyReads[kid(n, i)];
           }
           break;
         case LlShape::rep:
           si = n.min != 0 && silent[n.sym];
           co = consumes[n.sym];
           fr = n.max != kEndless && freshOut[n.sym];
+          er = n.max != 0 && b.nullable[n.sym] && emptyReads[n.sym];
           break;
       }
       raise(silent, id, si);
       raise(consumes, id, co);
       raise(freshOut, id, fr);
-    }
-    for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
-      const LlRuleInfo& u = b.cfg.rules[r];
-      if (u.climb != kNoRow) {
-        raise(ruleConsumes, r, true);
-      } else if (u.body != kNoRow) {
-        raise(ruleSilent, r, silent[u.body]);
-        raise(ruleConsumes, r, consumes[u.body]);
-        raise(ruleFreshOut, r, freshOut[u.body]);
-      }
-    }
-    return moved;
+      raise(emptyReads, id, er);
+      return moved;
+    });
   }
 
   void note_later() {
@@ -652,67 +743,72 @@ struct Gaps {
     }
   }
 
-  bool settle_sets() {
-    bool moved = false;
-    const auto add = [&](DynSet& to, const DynSet& x) {
-      if (to.add(x)) moved = true;
+  void settle_sets(std::uint64_t* work) {
+    Pending pending(b.cfg.nnodes + b.cfg.nrules);
+    const auto rule = [&](std::uint16_t r) { return b.cfg.nnodes + r; };
+    const auto add = [&](DynSet& to, const DynSet& x, std::uint32_t target) {
+      if (to.add(x)) pending.push(target);
     };
-    for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
-      const LlRuleInfo& u = b.cfg.rules[r];
-      if (u.climb != kNoRow) {
-        // An operand stands after the operator it follows, and before the
-        // operator or the end of the climb.
-        const LlClimb& cl = b.cfg.climbs[u.climb];
-        const DynSet own = bit(rule_cfg(r));
-        const DynSet in = rulePre[r] | own;
-        const DynSet out = ruleAfter[r] | own;
-        if (cl.primary != kNoRow) {
-          add(rulePre[cl.primary], in);
-          add(ruleAfter[cl.primary], out);
-        } else {
-          add(pre[cl.primaryNode], in);
-          add(after[cl.primaryNode], out);
+    for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) pending.push(rule(r));
+    for (std::uint32_t at = b.cfg.nnodes; at-- > 0;) pending.push(at);
+    while (!pending.empty()) {
+      const auto at = pending.pop();
+      if (work) ++*work;
+      if (at >= b.cfg.nnodes) {
+        const auto r = static_cast<std::uint16_t>(at - b.cfg.nnodes);
+        const LlRuleInfo& u = b.cfg.rules[r];
+        if (u.climb != kNoRow) {
+          // An operand stands after the operator it follows, and before the
+          // operator or the end of the climb.
+          const LlClimb& cl = b.cfg.climbs[u.climb];
+          const DynSet own = bit(rule_cfg(r));
+          const DynSet in = rulePre[r] | own;
+          const DynSet out = ruleAfter[r] | own;
+          if (cl.primary != kNoRow) {
+            add(rulePre[cl.primary], in, rule(cl.primary));
+            add(ruleAfter[cl.primary], out, rule(cl.primary));
+          } else {
+            add(pre[cl.primaryNode], in, cl.primaryNode);
+            add(after[cl.primaryNode], out, cl.primaryNode);
+          }
+          if (cl.selectNode != kNoRow) {
+            add(pre[cl.selectNode], out, cl.selectNode);
+            add(span[cl.selectNode], own, cl.selectNode);
+            add(after[cl.selectNode], own, cl.selectNode);
+          }
+        } else if (u.body != kNoRow) {
+          add(pre[u.body], rulePre[r], u.body);
+          add(span[u.body], ruleSpan[r], u.body);
+          add(after[u.body], ruleAfter[r], u.body);
         }
-        if (cl.selectNode != kNoRow) {
-          add(pre[cl.selectNode], out);
-          add(span[cl.selectNode], own);
-          add(after[cl.selectNode], own);
-        }
-      } else if (u.body != kNoRow) {
-        add(pre[u.body], rulePre[r]);
-        add(span[u.body], ruleSpan[r]);
-        add(after[u.body], ruleAfter[r]);
+        continue;
       }
-    }
-    // A group is laid after its members: the ids walked down read parents
-    // first.
-    for (std::uint32_t at = b.cfg.nnodes; at-- > 0;) {
       const auto id = static_cast<std::uint16_t>(at);
       const LlNode& n = node(id);
       switch (n.kind) {
         case LlShape::call:
           if (entries) {
-            add(rulePre[n.sym], pre[id]);
-            add(ruleSpan[n.sym], span[id]);
+            add(rulePre[n.sym], pre[id], rule(n.sym));
+            add(ruleSpan[n.sym], span[id], rule(n.sym));
           }
-          add(ruleAfter[n.sym], after[id]);
+          add(ruleAfter[n.sym], after[id], rule(n.sym));
           break;
         case LlShape::alt:
           // The gap in front of an arm's first token is the choice's.
           for (unsigned i = 0; i < n.count; ++i) {
-            add(pre[kid(n, i)], pre[id]);
-            add(span[kid(n, i)], span[id]);
-            add(after[kid(n, i)], after[id]);
+            add(pre[kid(n, i)], pre[id], kid(n, i));
+            add(span[kid(n, i)], span[id], kid(n, i));
+            add(after[kid(n, i)], after[id], kid(n, i));
           }
           break;
         case LlShape::rep: {
           const DynSet own = bit(cfg(id));
           const std::uint16_t k = n.sym;
           if (n.min >= 1) {
-            add(pre[k], pre[id]);
-            add(span[k], span[id]);
+            add(pre[k], pre[id], k);
+            add(span[k], span[id], k);
           }
-          add(after[k], (n.max > 1 ? own : DynSet{}) | after[id]);
+          add(after[k], (n.max > 1 ? own : DynSet{}) | after[id], k);
           break;
         }
         case LlShape::seq: {
@@ -731,17 +827,17 @@ struct Gaps {
             const std::uint16_t k = kid(n, i);
             const bool in = consumeEnd[id] > i + 1, out = passEnd[id] <= i + 1;
             if (fresh) {
-              add(pre[k], gap(i));
-              add(span[k], (in ? gap(i) : DynSet{}) |
-                               (out ? after[id] : DynSet{}));
+              add(pre[k], gap(i), k);
+              add(span[k],
+                  (in ? gap(i) : DynSet{}) | (out ? after[id] : DynSet{}), k);
             }
             if (above) {
-              add(pre[k], pre[id]);
-              add(span[k], (in ? pre[id] : DynSet{}) |
-                               (out ? span[id] : DynSet{}));
+              add(pre[k], pre[id], k);
+              add(span[k],
+                  (in ? pre[id] : DynSet{}) | (out ? span[id] : DynSet{}), k);
             }
-            add(after[k], (in ? gap(i + 1) : DynSet{}) |
-                              (out ? after[id] : DynSet{}));
+            add(after[k],
+                (in ? gap(i + 1) : DynSet{}) | (out ? after[id] : DynSet{}), k);
             if (!silent[k]) {
               fresh = freshOut[k] != 0;
               above = false;
@@ -753,18 +849,19 @@ struct Gaps {
           break;
       }
     }
-    return moved;
   }
 };
 
-void settle_gaps(Built& b) {
+void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
   const std::uint32_t nn = b.cfg.nnodes;
   const std::uint16_t nr = b.cfg.nrules;
   b.gapCfg.assign(nn, 0);
   b.headCfg.assign(nn, 0);
+  b.callerPeek.assign(nn, 0);
+  b.readHeadCfg.assign(nn, 0);
   b.climbCfg.assign(b.cfg.nclimbs, 0);
   for (std::uint32_t id = 0; id < nn; ++id)
-    b.gapCfg[id] = b.headCfg[id] = b.cfg.nodeBuild[id].cfg;
+    b.gapCfg[id] = b.headCfg[id] = b.readHeadCfg[id] = b.cfg.nodeBuild[id].cfg;
   for (std::uint16_t r = 1; r < nr; ++r)
     if (b.cfg.rules[r].climb != kNoRow)
       b.climbCfg[b.cfg.rules[r].climb] = b.cfg.ruleCfg[r];
@@ -773,9 +870,9 @@ void settle_gaps(Built& b) {
   g.silent = g.consumes = g.freshOut = std::vector<std::uint8_t>(nn, 0);
   g.ruleSilent = g.ruleConsumes = g.ruleFreshOut =
       std::vector<std::uint8_t>(nr, 0);
-  while (g.settle_shape()) {
-    // the call does the work; repeat until it changes nothing
-  }
+  g.emptyReads.assign(nn, 0);
+  g.ruleEmptyReads.assign(nr, 0);
+  g.settle_shape(work ? &work->gapShape : nullptr);
   // The document opens and ends under the grammar's own configuration.
   const auto settle = [&](Gaps& x) {
     x.pre.assign(nn, DynSet{});
@@ -787,9 +884,7 @@ void settle_gaps(Built& b) {
     x.rulePre[b.cfg.entryRule] = x.ruleSpan[b.cfg.entryRule] =
         x.ruleAfter[b.cfg.entryRule] = Gaps::bit(0);
     x.note_later();
-    while (x.settle_sets()) {
-      // the call does the work; repeat until it changes nothing
-    }
+    x.settle_sets(work ? &work->gapSets : nullptr);
   };
   settle(g);
   // A call site peeks its callee's first token: callers that cross the gap
@@ -829,14 +924,62 @@ void settle_gaps(Built& b) {
   const auto peeked = [&](const Gaps& x, std::uint16_t id) {
     return x.pre[id] | (b.nullable[id] ? x.span[id] : DynSet{});
   };
+  LexSeparation separated(b.cfg, alphabet);
+  const auto separated_after = [&](std::uint16_t id, const DynSet& first) {
+    if (b.after[id].none() || b.after[id].test(kEofSymbol)) return false;
+    const auto home = [&](unsigned k) {
+      return k < b.cfg.cfgHome.size() ? b.cfg.cfgHome[k] : 0;
+    };
+    const DynSet& configs = g.after[id];
+    for (std::size_t word = 0; word < configs.w.size(); ++word)
+      for (std::uint64_t bits = configs.w[word]; bits; bits &= bits - 1u) {
+        const auto k = static_cast<unsigned>(word * 64u + std::countr_zero(bits));
+        if (k + 1u >= b.cfg.cfgTriviaAt.size() || home(k) != home(g.cfg(id)))
+          return false;
+      }
+    if (first.none() || !separated.disjoint(first, b.after[id])) return false;
+    // Inspecting the exit must not hide an item as caller-only trivia. A
+    // longer trivia token could otherwise swallow a whole valid item before
+    // the consumer gets the opportunity to re-read its stricter gap.
+    DynSet ownTrivia, callerOnly;
+    const auto own = g.cfg(id);
+    for (auto i = b.cfg.cfgTriviaAt[own]; i < b.cfg.cfgTriviaAt[own + 1]; ++i)
+      ownTrivia.set(b.cfg.cfgTrivia[i]);
+    for (std::size_t word = 0; word < configs.w.size(); ++word)
+      for (std::uint64_t bits = configs.w[word]; bits; bits &= bits - 1u) {
+        const auto k = static_cast<unsigned>(word * 64u + std::countr_zero(bits));
+        DynSet callerTrivia;
+        for (auto i = b.cfg.cfgTriviaAt[k]; i < b.cfg.cfgTriviaAt[k + 1]; ++i)
+          callerTrivia.set(b.cfg.cfgTrivia[i]);
+        // One caller peek must also cross every inside blank. Otherwise it
+        // could miss a valid item behind trivia only the region skips.
+        if (!callerTrivia.covers(ownTrivia)) return false;
+        DynSet extra = callerTrivia;
+        callerOnly |= extra.andnot(ownTrivia);
+      }
+    return separated.disjoint(first, callerOnly, true);
+  };
   for (std::uint32_t at = 0; at < nn; ++at) {
     const auto id = static_cast<std::uint16_t>(at);
     const LlNode& n = b.cfg.nodes[id];
     switch (n.kind) {
       case LlShape::term:
-      case LlShape::call:
       case LlShape::alt:
         one(peeked(g, id), peeked(local, id), b.gapCfg[id]);
+        break;
+      case LlShape::call:
+        // The call opens at its consuming entry. A nullable callee decides
+        // for itself whether it enters that body or leaves through caller
+        // trivia; mixing the two gaps here would reject that safe boundary.
+        // Every empty exit must be free of conditions: a fresh alternative
+        // does not discharge a guarded empty arm's own read of the gap.
+        if (b.nullable[id] && !g.emptyReads[id] && g.freshOut[id] &&
+            separated_after(id, b.first[id])) {
+          one(g.pre[id], local.pre[id], b.gapCfg[id]);
+          b.callerPeek[id] = 1;
+        } else {
+          one(peeked(g, id), peeked(local, id), b.gapCfg[id]);
+        }
         break;
       case LlShape::endMark:
         break;
@@ -844,12 +987,36 @@ void settle_gaps(Built& b) {
       case LlShape::implied:
         one(g.span[id], local.span[id], b.gapCfg[id]);
         break;
-      case LlShape::rep:
-        one(peeked(g, id), peeked(local, id), b.headCfg[id]);
-        if (n.max > 1 && g.freshOut[n.sym])
-          one(Gaps::bit(g.cfg(id)) | g.after[id],
-              Gaps::bit(g.cfg(id)) | local.after[id], b.gapCfg[id]);
+      case LlShape::rep: {
+        // A nullable body's first token and the token after its empty arm
+        // need not cross the same trivia. Keep the consuming entry apart
+        // from the decision, which may inspect the caller's closing token.
+        one(g.pre[id], local.pre[id], b.readHeadCfg[id]);
+        const bool separate =
+            ((b.nullable[id] && peeked(g, id).more_than_one()) ||
+             (n.max > 1 && g.freshOut[n.sym] &&
+              (Gaps::bit(g.cfg(id)) | local.after[id]).more_than_one())) &&
+            separated_after(id, b.first[n.sym]);
+        if (b.nullable[id] && separate) {
+          one(g.after[id], local.after[id], b.headCfg[id]);
+          b.callerPeek[id] = 1;
+        } else {
+          one(peeked(g, id), peeked(local, id), b.headCfg[id]);
+        }
+        if (n.max > 1 && g.freshOut[n.sym]) {
+          // A loop may inspect its distinct closing token across the
+          // caller's trivia. Its next item still consumes under the region's
+          // own mode, so trivia between two items is never silently skipped.
+          if (separate) {
+            one(g.after[id], local.after[id], b.gapCfg[id]);
+            b.callerPeek[id] = 1;
+          } else {
+            one(Gaps::bit(g.cfg(id)) | g.after[id],
+                Gaps::bit(g.cfg(id)) | local.after[id], b.gapCfg[id]);
+          }
+        }
         break;
+      }
       default:
         break;
     }
@@ -1493,19 +1660,45 @@ LlEntry entry_cost(const Built& b, std::uint16_t id,
   return {kLlCostless, false};
 }
 
-void settle_repair(Built& b) {
+void settle_repair(Built& b, std::uint64_t* work) {
   std::vector rule(b.cfg.nrules, kLlCostless);
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
-      const LlRuleInfo& u = b.cfg.rules[r];
-      const std::uint32_t k =
-          u.climb != kNoRow  ? (b.cfg.climbs[u.climb].primary != kNoRow
-                                    ? rule[b.cfg.climbs[u.climb].primary]
-                                    : 1u)
-          : u.body != kNoRow ? entry_cost(b, u.body, rule, false, true).cost
-                             : kLlCostless;
-      if (k < rule[r]) rule[r] = k, moved = true;
+  std::vector<std::vector<std::uint16_t>> users(b.cfg.nrules);
+  Pending pending(b.cfg.nrules);
+  std::vector<std::uint16_t> nodes;
+  for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
+    pending.push(r);
+    const LlRuleInfo& u = b.cfg.rules[r];
+    if (u.climb != kNoRow) {
+      const LlClimb& cl = b.cfg.climbs[u.climb];
+      if (cl.primary != kNoRow) users[cl.primary].push_back(r);
+    } else if (u.body != kNoRow) {
+      nodes.assign(1, u.body);
+      while (!nodes.empty()) {
+        const auto id = nodes.back();
+        nodes.pop_back();
+        const LlNode& n = b.cfg.nodes[id];
+        if (n.kind == LlShape::call)
+          users[n.sym].push_back(r);
+        else {
+          const auto children = b.cfg.children(n);
+          nodes.insert(nodes.end(), children.begin(), children.end());
+        }
+      }
+    }
+  }
+  while (!pending.empty()) {
+    const auto r = static_cast<std::uint16_t>(pending.pop());
+    if (work) ++*work;
+    const LlRuleInfo& u = b.cfg.rules[r];
+    const std::uint32_t k =
+        u.climb != kNoRow  ? (b.cfg.climbs[u.climb].primary != kNoRow
+                                  ? rule[b.cfg.climbs[u.climb].primary]
+                                  : 1u)
+        : u.body != kNoRow ? entry_cost(b, u.body, rule, false, true).cost
+                           : kLlCostless;
+    if (k < rule[r]) {
+      rule[r] = k;
+      for (const auto user : users[r]) pending.push(user);
     }
   }
   for (std::uint16_t d = 0; d < b.cfg.ndecisions; ++d) {
@@ -1518,9 +1711,9 @@ void settle_repair(Built& b) {
           entry_cost(b, b.cfg.kids[n.sym + i], rule, false).cost;
       if (k < best) best = k, dec.repair = i;
     }
-    b.cfg.decisionBuild[d].repairCost =
-        best > kLlRepairCostless ? kLlRepairCostless
-                                 : static_cast<std::uint16_t>(best);
+    b.cfg.decisionBuild[d].repairCost = best > kLlRepairCostless
+                                            ? kLlRepairCostless
+                                            : static_cast<std::uint16_t>(best);
   }
 }
 
@@ -1548,9 +1741,8 @@ void settle_after_states(Built& b) {
 
 // The positions an invocation of a rule can read first, before it has read
 // anything: only there does the rule's caller state what the token fills.
-void settle_head_nodes(Built& b) {
+void settle_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
   b.nodeHead.assign(b.cfg.nnodes, 0);
-  std::vector<std::uint8_t> nullable(b.cfg.nrules, 0);
   std::vector<std::uint32_t> stamp(b.nstates, 0);
   std::vector<std::uint32_t> todo;
   std::uint32_t round = 0;
@@ -1577,17 +1769,6 @@ void settle_head_nodes(Built& b) {
       }
     }
   };
-  for (bool moved = true; moved;) {
-    moved = false;
-    for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
-      if (nullable[r]) continue;
-      walk(r, [&](std::uint32_t at) {
-        const LlAtnState& q = b.states[at];
-        if (q.kind == LlAtnKind::ruleStop && q.rule == r && !nullable[r])
-          nullable[r] = moved = true;
-      });
-    }
-  }
   for (std::uint16_t r = 1; r < b.cfg.nrules; ++r)
     walk(r, [&](std::uint32_t at) {
       const LlAtnState& q = b.states[at];
@@ -1995,15 +2176,17 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   b.fault = low.fault;
   b.liveRules = reached_from(b.cfg, b.cfg.entryRule);
   refuse_skipped_terminal(b);
-  settle_nullable(b.cfg, b.nullable);
+  const auto ruleNullable = settle_nullable(
+      b.cfg, b.nullable, false, opt.work ? &opt.work->nullable : nullptr);
   const auto empty = refuse_non_consuming(b);
   // A refused grammar owes the walks below nothing: a counted repetition of
   // a body that reads nothing nests as deep as its bound, and the refusal
   // must be told before anything follows that depth.
   if (b.fault) return b;
-  settle_first(b.cfg, b.nullable, b.first, b.ruleFirst);
+  settle_first(b.cfg, b.nullable, b.first, b.ruleFirst,
+               opt.work ? &opt.work->first : nullptr);
   const bool leftCyclic = refuse_left_recursion(b, empty);
-  refuse_unproductive(b);
+  refuse_unproductive(b, opt.work ? &opt.work->productive : nullptr);
   refuse_precedence_clash(b);
   // A left-cyclic rule has no fixpoint for the walks below: the follow pass
   // would descend it for ever.
@@ -2011,16 +2194,21 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   settle_after(b.cfg, b.nullable, b.first, b.ruleFirst, b.after, b.ruleFollow);
   settle_cuts(b);
   build_atn(b);
-  settle_gaps(b);
+  LexAlphabet alphabet;
+  alphabet.terminals(b, [](LlLowCfg& g, std::string_view text) {
+    return g.intern_name(text);
+  });
+  if (b.cfg.lowerFail()) return b;
+  settle_gaps(b, alphabet, opt.work);
   settle_decisions(b, opt);
   refuse_section_lookahead(b);
-  settle_repair(b);
+  settle_repair(b, opt.work ? &opt.work->repair : nullptr);
   settle_fusion(b);
   if (b.writes.capped) b.cap_hit(kTooManyChains);
-  detail::ll_build_lexer(b);
+  detail::ll_build_lexer(b, alphabet);
   if (b.cfg.lowerFail()) return b;
   settle_after_states(b);
-  settle_head_nodes(b);
+  settle_head_nodes(b, ruleNullable);
   settle_episode_flags(b);
   return b;
 }

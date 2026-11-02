@@ -19,6 +19,13 @@
 
 namespace cursiv {
 
+template <const auto& A>
+inline constexpr bool kLrPrefixFrames = [] {
+  for (const auto& plan : A.derived.reductions)
+    if (plan.turnRow != kNoElement) return true;
+  return false;
+}();
+
 // A turn's receiver, the records `[from, to)` hold: none where they hold
 // trivia alone, one record over them where they hold several.
 template <StampLayout L>
@@ -71,10 +78,27 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
   const ElementId held = last ? c.stack[base].row : kNoElement;
   // A turn's record reaches back over what the frame below it laid. Grouping
   // that slips a record in, so it waits for the renames above.
-  const bool reach =
-      plan.turnRow != kNoElement && p.len != 0 &&
-      lr_receiver<A.stamp>(c, c.stack[base - 1].open, c.stack[base].open,
-                           c.stack[base - 1].begin);
+  bool reach = false;
+  std::uint32_t receiver = base - 1;
+  if (plan.turnRow != kNoElement) {
+    const NodeCount end = p.len == 0 ? c.tape.len() : c.stack[base].open;
+    // Cross only transparent, zero-width guard frames. A row/word, a CST
+    // record, or any text is a construction boundary, even if no receiver was
+    // found there. Never search into an outer context past such a boundary.
+    for (;;) {
+      if (lr_receiver<A.stamp>(c, c.stack[receiver].open, end,
+                               c.stack[receiver].begin)) {
+        reach = true;
+        break;
+      }
+      const auto& frame = c.stack[receiver];
+      if (p.len != 0 || receiver == 0 || frame.open != end ||
+          frame.begin != c.committed || frame.row != kNoElement ||
+          frame.word != kLrNoWord)
+        break;
+      --receiver;
+    }
+  }
   ElementId pendRow = plan.form == LrReduceForm::carry ? held : kNoElement;
   ElementId pendNode = reach           ? plan.turnRow
                        : plan.closes() ? p.node
@@ -90,17 +114,31 @@ CURSIV_ALWAYS_INLINE inline ElementId lr_reduce_frame(LrContext& c, Prod prod,
     }
   }
   if (pendNode != kNoElement) pendRow = pendNode;
+  std::uint32_t prefix = base;
+  if constexpr (kLrPrefixFrames<A>) {
+    // A checkpoint after an epsilon prefix may have reached farther back
+    // than slot zero. Preserve that start through the enclosing reduction.
+    // Only frames popped now are visited: total work is linear in stack
+    // events, and grammars without nest pay none of it.
+    for (std::uint32_t i = base + 1; i < c.stack.size(); ++i)
+      if (c.stack[i].open < c.stack[prefix].open) prefix = i;
+  }
+  const bool widened = prefix != base;
+  const NodeCount prefixOpen = widened ? c.stack[prefix].open : 0;
+  const TextOffset prefixBegin = widened ? c.stack[prefix].begin : 0;
   c.stack.reduce(p.len);
-  // The result takes the slot of the first symbol it pops, whose span is
-  // already its own: only an empty production, or a turn reaching the frame
-  // below, opens elsewhere.
+  // Equal opens keep slot zero's original begin. In particular, empty
+  // constructs/trivia sharing one tape position do not move its anchor.
   LrFrame& top = c.stack.top();
-  if (p.len == 0) {
+  if (reach) {
+    top.open = c.stack[receiver].open;
+    top.begin = c.stack[receiver].begin;
+  } else if (p.len == 0) {
     top.open = c.tape.len();
     top.begin = c.committed;
-  } else if (reach) {
-    top.open = c.stack[base - 1].open;
-    top.begin = c.stack[base - 1].begin;
+  } else if (widened) {
+    top.open = prefixOpen;
+    top.begin = prefixBegin;
   }
   top.row = pendRow;
   top.word = last ? pendWord : kLrNoWord;

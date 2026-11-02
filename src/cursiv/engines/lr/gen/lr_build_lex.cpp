@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -24,6 +25,8 @@
 #include "cursiv/engines/shared/gen/LexBacktrack.hpp"
 #include "cursiv/engines/shared/gen/LexDfaBuild.hpp"
 #include "cursiv/engines/shared/gen/LexKeywordCut.hpp"
+#include "cursiv/engines/shared/gen/LexRecursion.hpp"
+#include "cursiv/engines/shared/gen/LexSeparation.hpp"
 #include "cursiv/engines/shared/gen/LexRelayGen.hpp"
 #include "cursiv/engines/shared/gen/LexSuccessors.hpp"
 #include "cursiv/engines/shared/gen/PredicateModes.hpp"
@@ -34,22 +37,77 @@
 #include "cursiv/engines/shared/table/Token.hpp"
 
 namespace cursiv {
-// A state reads under one configuration, the one every item's boundary is
-// read under. An item at its own start owes its boundary to the call, whose
-// item states it -- save one that closes a region, which stands past it.
+// A state reads under the configuration of its unfinished items. An ordinary
+// completed production only reduces: its goto rechecks the token under the
+// destination's mode, from the same committed position. Its boundary is a
+// fallback for a state of reductions alone, not a competing token reading.
+// A distinct optional exit can reduce on a refused tight gap before its goto
+// reads the caller's token. Guards and EOF assertions still read here.
 std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
                                         const LrPoolRows<LrItem>& clos,
                                         const std::vector<unsigned>& pick,
-                                        const std::vector<DynSet>& first) {
+                                        const std::vector<DynSet>& first,
+                                        const LexAlphabet& alphabet) {
   std::vector<std::uint8_t> cfg(A.nstates, 0);
   std::vector<std::uint32_t> calledAt(A.cfg.nnts, 0);
+  LexSeparation separated(A.cfg, alphabet);
+  const auto separate_exit = [&](unsigned state, std::uint8_t in,
+                                 std::uint8_t out) {
+    DynSet inside, after;
+    for (const LrAction& action : A.action_row(state)) {
+      if (action.kind == LrActionKind::reduce) {
+        const auto& p = A.cfg.prods[action.arg];
+        if (A.cfg.prodBuild[action.arg].regionExit && p.gap == 0) {
+          after.set(action.term);
+        } else if (p.gap != 0) {
+          inside.set(action.term);
+        }
+      } else if (lr_takes_token(action.kind)) {
+        inside.set(action.term);
+      }
+    }
+    if (inside.none() || after.none() || !separated.disjoint(inside, after))
+      return false;
+    if (in + 1u >= A.cfg.cfgTriviaAt.size() ||
+        out + 1u >= A.cfg.cfgTriviaAt.size())
+      return false;
+    // A shared LL/LR decision peeks under the caller's one skip mode, then
+    // rechecks an elected item under its own. That mode must be able to cross
+    // every gap the item accepts; caller-only trivia must not hide an item.
+    DynSet own, caller;
+    for (auto i = A.cfg.cfgTriviaAt[in]; i < A.cfg.cfgTriviaAt[in + 1]; ++i)
+      own.set(A.cfg.cfgTrivia[i]);
+    DynSet skippedAfter;
+    for (auto i = A.cfg.cfgTriviaAt[out]; i < A.cfg.cfgTriviaAt[out + 1]; ++i) {
+      const auto t = A.cfg.cfgTrivia[i];
+      caller.set(t);
+      if (!own.test(t)) skippedAfter.set(t);
+    }
+    return caller.covers(own) && separated.disjoint(inside, skippedAfter, true);
+  };
   std::uint32_t gen = 0;
   for (unsigned f = 0; f < A.nstates; ++f) {
     ++gen;
     for (const LrItem& it : clos[pick[f]])
       if (const auto b = A.cfg.nt_after(it.prod, it.dot); b != kNoRow)
         calledAt[b] = gen;
-    bool seen = false;
+    struct Reading {
+      std::uint8_t cfg = 0;
+      bool seen = false;
+      bool mixed = false;
+      bool differentHomes = false;
+    };
+    Reading active, exiting, completed;
+    const auto note = [&](Reading& reading, std::uint8_t c) {
+      if (!reading.seen) {
+        reading.cfg = c;
+        reading.seen = true;
+      } else if (reading.cfg != c) {
+        reading.mixed = true;
+        reading.differentHomes |=
+            A.cfg.home_at(reading.cfg) != A.cfg.home_at(c);
+      }
+    };
     for (const LrItem& it : clos[pick[f]]) {
       const auto& p = A.cfg.prods[it.prod];
       const auto& build = A.cfg.prodBuild[it.prod];
@@ -61,13 +119,38 @@ std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
           !(p.len == 0 && build.endOnly))
         continue;
       const std::uint8_t c = A.cfg.cfg_at(it.prod, it.dot);
-      if (seen && c != cfg[f])
-        lower_refuse(A.cfg, A.cfg.home_at(c) != A.cfg.home_at(cfg[f])
-                                ? LowerFail::sectionPointShared
-                                : LowerFail::regionBoundaryShared);
-      cfg[f] = c;
-      seen = true;
+      if (it.dot == p.len && !build.endOnly && p.gap == 0 &&
+          (p.len != 0 || build.regionExit)) {
+        // A completed enclosing region can share this state with a list's
+        // completed internal turn. Read ahead outside the region; reducing
+        // the internal turn re-enters its own mode before any next shift.
+        note(build.regionExit ? exiting : completed, c);
+      } else {
+        note(active, c);
+      }
     }
+    const Reading& reading = active.seen ? active
+                              : exiting.seen ? exiting : completed;
+    if (reading.mixed)
+      lower_refuse(A.cfg, reading.differentHomes
+                              ? LowerFail::sectionPointShared
+                              : LowerFail::regionBoundaryShared);
+    // A reduction may hand trivia back to its caller, but may not lend a
+    // section's token reading to a state outside that section.
+    if (active.seen && exiting.seen &&
+        (exiting.mixed || active.cfg != exiting.cfg)) {
+      if (exiting.differentHomes ||
+          A.cfg.home_at(active.cfg) != A.cfg.home_at(exiting.cfg))
+        lower_refuse(A.cfg, LowerFail::sectionPointShared);
+      else if (active.mixed || exiting.mixed ||
+               !separate_exit(f, active.cfg, exiting.cfg))
+        lower_refuse(A.cfg, LowerFail::regionBoundaryShared);
+    }
+    if ((active.seen || exiting.seen) && completed.seen &&
+        (completed.differentHomes ||
+         A.cfg.home_at(reading.cfg) != A.cfg.home_at(completed.cfg)))
+      lower_refuse(A.cfg, LowerFail::sectionPointShared);
+    cfg[f] = reading.cfg;
   }
   return cfg;
 }

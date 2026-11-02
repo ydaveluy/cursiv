@@ -49,7 +49,8 @@ void lr_lex_condition_flags(LrBuildTable& A);
 std::vector<std::uint8_t> lr_state_cfgs(LrBuildTable& A,
                                         const LrPoolRows<LrItem>& clos,
                                         const std::vector<unsigned>& pick,
-                                        const std::vector<DynSet>& first);
+                                        const std::vector<DynSet>& first,
+                                        const LexAlphabet& alphabet);
 
 // The fallback election at a refused boundary, and the distinct successors
 // a typo can try.

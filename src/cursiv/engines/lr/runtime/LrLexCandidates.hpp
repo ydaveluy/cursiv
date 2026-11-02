@@ -4,7 +4,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <bit>
 #include <cstdint>
+#include <memory>
+#include <type_traits>
 
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
 
@@ -15,8 +18,8 @@ template <const auto& A, const auto& Base, const auto& Terms,
 class LrLexCandidates {
  public:
   LrLexCandidates(Scan* out, std::uint32_t& count, std::uint32_t cap,
-                  TextOffset start = 0)
-      : _out(out), _count(count), _cap(cap), _start(start) {}
+                  TextOffset start = 0, std::uint64_t* work = nullptr)
+      : _out(out), _count(count), _cap(cap), _start(start), _work(work) {}
 
   template <class Ad>
   CURSIV_ALWAYS_INLINE void take(const Ad&, std::uint16_t st, const char* src,
@@ -93,11 +96,61 @@ class LrLexCandidates {
   std::uint32_t& _count;
   std::uint32_t _cap;
   TextOffset _start;
+  std::uint64_t* _work;
+
+  // A handful of candidates need no index. Wider readings keep arrival order
+  // in `out` and index its slots instead. Only the active hash table is
+  // initialised; its size follows the candidates, not the grammar's Max.
+  static constexpr unsigned kSmall = 8;
+  static constexpr unsigned kOwn = std::min(std::bit_ceil(2u * Max), 128u);
+  struct Index {
+    SymbolId own[kOwn];
+    std::unique_ptr<SymbolId[]> more;
+    unsigned room = kOwn;
+    unsigned size = 0;
+  };
+  struct Unindexed {};
+  [[no_unique_address]] std::conditional_t<(Max > kSmall), Index, Unindexed>
+      _index;
+
+  static unsigned hash(SymbolId term) {
+    std::uint32_t h = term;
+    h = (h ^ (h >> 8)) * 0x9E3779B9u;
+    return h ^ (h >> 16);
+  }
+
+  SymbolId* index() { return _index.more ? _index.more.get() : _index.own; }
+
+  unsigned place(SymbolId term) {
+    SymbolId* const slots = index();
+    const unsigned mask = _index.size - 1u;
+    unsigned at = hash(term) & mask;
+    for (;;) {
+      if (_work) ++*_work;
+      if (slots[at] == kInvalidSymbol || _out[slots[at]].term == term)
+        return at;
+      at = (at + 1u) & mask;
+    }
+  }
+
+  void reindex(unsigned size) {
+    if (size > _index.room) {
+      _index.more = std::make_unique_for_overwrite<SymbolId[]>(size);
+      _index.room = size;
+    }
+    _index.size = size;
+    std::fill_n(index(), size, kInvalidSymbol);
+    for (std::uint32_t k = 0; k < _count; ++k)
+      index()[place(_out[k].term)] = static_cast<SymbolId>(k);
+  }
 
   template <class Gone>
   void drop_if(Gone gone) {
+    const auto before = _count;
     _count = static_cast<std::uint32_t>(
         std::remove_if(_out, _out + _count, gone) - _out);
+    if constexpr (Max > kSmall)
+      if (_count != before) _index.size = 0;
   }
 
   // The tier of the reading candidate `k` is: its own, or the keyword's kept
@@ -115,20 +168,55 @@ class LrLexCandidates {
     return tier;
   }
 
-  CURSIV_ALWAYS_INLINE void add(SymbolId term, TextOffset end,
-                                std::uint8_t tier) {
-    for (std::uint32_t k = 0; k < _count; ++k)
+  CURSIV_ALWAYS_INLINE void keep(std::uint32_t at, TextOffset end,
+                                 std::uint8_t tier) {
+    Scan& held = _out[at];
+    if (held.end < end) {
+      held.end = end;
+      held.tier = tier;
+    } else if (held.end == end && tier > held.tier) {
+      held.tier = tier;
+    }
+  }
+
+  CURSIV_ALWAYS_INLINE void add_small(SymbolId term, TextOffset end,
+                                      std::uint8_t tier) {
+    for (std::uint32_t k = 0; k < _count; ++k) {
+      if (_work) ++*_work;
       if (_out[k].term == term) {
-        if (_out[k].end < end) {
-          _out[k].end = end;
-          _out[k].tier = tier;
-        } else if (_out[k].end == end && tier > _out[k].tier) {
-          _out[k].tier = tier;
-        }
+        keep(k, end, tier);
         return;
       }
+    }
     assert(_count < _cap && "a position filled the room its table sized");
     if (_count < _cap) _out[_count++] = Scan{end, term, tier};
+  }
+
+  CURSIV_ALWAYS_INLINE void add(SymbolId term, TextOffset end,
+                                std::uint8_t tier) {
+    if constexpr (Max <= kSmall) {
+      add_small(term, end, tier);
+    } else {
+      if (_count < kSmall && _index.size == 0) {
+        add_small(term, end, tier);
+        return;
+      }
+      if (_index.size == 0) reindex(std::bit_ceil(2u * _count));
+      unsigned at = place(term);
+      if (index()[at] != kInvalidSymbol) {
+        keep(index()[at], end, tier);
+        return;
+      }
+      if (2u * (_count + 1u) > _index.size) {
+        reindex(2u * _index.size);
+        at = place(term);
+      }
+      assert(_count < _cap && "a position filled the room its table sized");
+      if (_count < _cap) {
+        index()[at] = static_cast<SymbolId>(_count);
+        _out[_count++] = Scan{end, term, tier};
+      }
+    }
   }
 
   static std::uint16_t walk_to(std::uint16_t st, const char* src,

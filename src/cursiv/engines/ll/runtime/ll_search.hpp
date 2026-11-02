@@ -620,25 +620,23 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
   return LlRead::refused;
 }
 
-// Reading `i` reads until it is refused, holds or ends: that reading is
-// `s.out`, where the work its share pays for allows.
+// Reading `i` reads until it is refused, holds or ends: true where the work
+// its share pays for leaves it standing.
 template <const auto& T>
-void ll_search_read(LlContext& c, LlSearch& s, std::uint32_t i) {
-  s.out.clear();
+bool ll_search_read(LlContext& c, LlSearch& s, std::uint32_t i) {
   for (;;) {
-    if (s.nodes[i].gone) return;
+    if (s.nodes[i].gone) return false;
     if (ll_search_goal(s.nodes[i])) break;
     const LlRead read = ll_search_step<T>(c, s, i);
-    if (read == LlRead::spent) return;
+    if (read == LlRead::spent) return false;
     if (read != LlRead::shifted) break;
   }
-  s.out.push_back(i);
+  return true;
 }
 
 template <const auto& T>
 void ll_search_lay(LlContext& c, LlSearch& s, std::uint32_t e) {
-  ll_search_read<T>(c, s, e);
-  for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
+  if (ll_search_read<T>(c, s, e)) ll_search_admit<T>(s, e);
 }
 
 inline std::uint32_t ll_search_child(LlSearch& s, std::uint32_t from,
@@ -767,13 +765,12 @@ const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p) {
 
 // The token in hand read as `term` up to `end` at `cost`: `rep` where its
 // bytes are re-read as a terminal the positions step by, `skip` where they are
-// a trivia the lexer refused. Its readings go to `s.out`.
+// a trivia the lexer refused. The resulting reading, or `kLlNoNode`.
 template <const auto& T>
-void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
-                      LlGesture::Kind kind, SymbolId term, TextOffset end,
-                      std::uint32_t choice, const Token& tok,
-                      std::uint32_t cost) {
-  s.out.clear();
+std::uint32_t ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
+                              LlGesture::Kind kind, SymbolId term,
+                              TextOffset end, std::uint32_t choice,
+                              const Token& tok, std::uint32_t cost) {
   const std::uint32_t e =
       ll_search_child(s, bi, kind, term, end, choice, tok.begin);
   LlReading& r = s.nodes[e];
@@ -787,9 +784,9 @@ void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
   } else {
     ll_search_load(s, r);
     if constexpr (T.ngapConds != 0)
-      if (!ll_search_filter<T>(c, s, read, r.gapFrom)) return;
+      if (!ll_search_filter<T>(c, s, read, r.gapFrom)) return kLlNoNode;
     s.sim.at_token(r.tokens + 1);
-    if (!s.sim.step(term)) return;
+    if (!s.sim.step(term)) return kLlNoNode;
     ++r.tokens;
     ll_search_keep<T>(s, r);
     r.gapFrom = end;
@@ -797,7 +794,7 @@ void ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
     r.fresh = true;
     r.phase = 0;
   }
-  ll_search_read<T>(c, s, e);
+  return ll_search_read<T>(c, s, e) ? e : kLlNoNode;
 }
 
 // The token in hand as the lexer's refused reading of it. Closed, one
@@ -820,11 +817,12 @@ void ll_search_lexical(LlContext& c, LlSearch& s, std::uint32_t bi,
   }
   const auto one = [&](TextOffset end) {
     const LlSearchLaid pools(s);
-    ll_search_reread<T>(c, s, bi, trivia ? LlGesture::skip : LlGesture::rep,
-                        r.term, end, choice++, tok, kRepairReread);
+    const std::uint32_t q = ll_search_reread<T>(
+        c, s, bi, trivia ? LlGesture::skip : LlGesture::rep, r.term, end,
+        choice++, tok, kRepairReread);
     bool holds = false;
-    for (const std::uint32_t q : s.out) {
-      holds = holds || ll_search_goal(s.nodes[q]);
+    if (q != kLlNoNode) {
+      holds = ll_search_goal(s.nodes[q]);
       ll_search_admit<T>(s, q);
     }
     ll_search_trim(s, pools);
@@ -1101,9 +1099,11 @@ void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
       !tape.replaces(start, term, end))
     return;
   const LlSearchLaid pools(s);
-  ll_search_reread<T>(c, s, from, LlGesture::rep, term, end,
-                      s.nodes[gi].genKeep, tok, kRepairReplace);
-  for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
+  if (const auto q = ll_search_reread<T>(c, s, from, LlGesture::rep, term, end,
+                                        s.nodes[gi].genKeep, tok,
+                                        kRepairReplace);
+      q != kLlNoNode)
+    ll_search_admit<T>(s, q);
   ll_search_trim(s, pools);
 }
 
@@ -1123,9 +1123,10 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
       if (ll_search_spent(s)) break;
       if (t.term == ll_search_closer<T>(c)) continue;
       const LlSearchLaid pools(s);
-      ll_search_reread<T>(c, s, bi, LlGesture::rep, t.term, t.end, choice++,
-                          tok, t.cost);
-      for (const std::uint32_t q : s.out) ll_search_admit<T>(s, q);
+      if (const auto q = ll_search_reread<T>(c, s, bi, LlGesture::rep, t.term,
+                                            t.end, choice++, tok, t.cost);
+          q != kLlNoNode)
+        ll_search_admit<T>(s, q);
       ll_search_trim(s, pools);
     }
   }

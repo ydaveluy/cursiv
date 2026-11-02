@@ -202,9 +202,9 @@ struct Committed : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
-// The same tail under trivia of its own, and nested regions that both close
-// on a nullable tail: refused alike. A region naming the grammar's own trivia
-// is no boundary at all.
+// A caller narrower than the region, and nested regions that both close on
+// nullable tails, retain conservative analysis refusals. A region naming the
+// grammar's own trivia is no boundary at all.
 struct Trivia : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
   struct NL : terminal<some(lit<"\n">)> {};
@@ -246,6 +246,14 @@ bool refused_at_the_region_edge() {
          a.cfg.lowerWhy == cursiv::LowerFail::regionBoundaryShared;
 }
 
+template <class H>
+bool builds_at_the_region_edge() {
+  const auto low = cursiv::LrLowering<H>::table();
+  if (low.fault || low.cfg.lowerFail()) return false;
+  const auto built = cursiv::lr_build_automaton(low);
+  return !built.cfg.lowerFail() && !built.overflow;
+}
+
 }  // namespace
 
 void run() {
@@ -273,8 +281,10 @@ void run() {
               seen, tight);
   CHECK(seen >= 2);
   CHECK(tight == 0 || tight == seen);
-  CHECK(refused_at_the_region_edge<Inline>());
-  CHECK(refused_at_the_region_edge<Called>());
+  // The equivalent direct/called optional tails are also parsed by the
+  // shared RegionBoundary tests, including both sides of their trivia gap.
+  CHECK(builds_at_the_region_edge<Inline>());
+  CHECK(builds_at_the_region_edge<Called>());
   CHECK(refused_at_the_region_edge<Committed>());
   CHECK(refused_at_the_region_edge<Trivia>());
   CHECK(refused_at_the_region_edge<Nested>());

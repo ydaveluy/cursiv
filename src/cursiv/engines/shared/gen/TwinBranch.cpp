@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <span>
-#include <unordered_set>
 #include <utility>
 
 #include "cursiv/core/grammar/GrammarPrinter.hpp"
+#include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/gen/WarningFound.hpp"
 #include "cursiv/engines/shared/gen/WrittenReads.hpp"
 #include "cursiv/engines/shared/gen/optional_shape.hpp"
@@ -143,34 +143,61 @@ std::vector<std::uint32_t> TwinReader::branch_keys(ImageId choice) {
 }
 
 ImageId TwinReader::expanded(std::uint32_t rule) {
-  const ImageId body = _dataBody(rule);
-  return body == kNoImage || calls_itself(rule) ? kNoImage : body;
+  if (!_dataRules.contains(rule)) analyse_calls(rule);
+  const DataRule& data = _dataRules.at(rule);
+  return data.cyclic ? kNoImage : data.body;
 }
 
-// Whether the body of `rule`, read through the data rules it calls, calls it
-// again: such a call is compared as itself, so reading in place stops.
-bool TwinReader::calls_itself(std::uint32_t rule) {
-  if (const auto it = _selfCalls.find(rule); it != _selfCalls.end())
-    return it->second;
-  std::vector todo{_dataBody(rule)};
-  std::unordered_set<ImageId> seen;
-  std::unordered_set<std::uint32_t> called;
-  bool self = false;
-  while (!todo.empty() && !self) {
-    const ImageId id = todo.back();
-    todo.pop_back();
-    if (!seen.insert(id).second) continue;
-    const ImageNode n = _im.nodes[id];
-    const std::vector<ImageId> parts = kids(id);
-    todo.insert(todo.end(), parts.begin(), parts.end());
-    if (n.kind != ImageKind::ref && n.kind != ImageKind::closed) continue;
-    self = n.a == rule;
-    if (!self && called.insert(n.a).second)
-      if (const ImageId body = _dataBody(n.a); body != kNoImage)
-        todo.push_back(body);
+// Discover each reachable rule and expression once, then settle their cycles
+// together. Bodies are lazy and may grow the image. A previous batch already
+// explored its whole closure, so an edge into it cannot return to this batch.
+// Expressions have vertices too: shared bodies are never scanned per caller.
+void TwinReader::analyse_calls(std::uint32_t rule) {
+  struct Vertex {
+    std::uint64_t key;
+    ImageId body = kNoImage;
+  };
+  const std::uint64_t root = std::uint64_t{rule} << 1 | 1u;
+  std::unordered_map<std::uint64_t, std::uint32_t> ids{{root, 0}};
+  std::vector<Vertex> vertices{{root}};
+  std::vector<std::uint32_t> starts{0}, edges;
+  const auto enter = [&](std::uint32_t id, bool isRule) {
+    if (isRule ? _dataRules.contains(id)
+               : id < _analysedNodes.size() && _analysedNodes[id])
+      return;
+    const std::uint64_t key = std::uint64_t{id} << 1 | (isRule ? 1u : 0u);
+    const auto [at, fresh] =
+        ids.try_emplace(key, static_cast<std::uint32_t>(vertices.size()));
+    if (fresh) vertices.push_back({key});
+    edges.push_back(at->second);
+  };
+  for (std::size_t i = 0; i < vertices.size(); ++i) {
+    const std::uint64_t key = vertices[i].key;
+    const auto id = static_cast<std::uint32_t>(key >> 1);
+    if ((key & 1u) != 0) {
+      const ImageId body = _dataBody(id);
+      vertices[i].body = body;
+      // Keep answers only after the whole batch is discovered: another rule
+      // in this batch may lead back to this vertex.
+      if (body != kNoImage) enter(body, false);
+    } else {
+      const ImageNode n = _im.nodes[id];
+      for (std::uint32_t k = 0; k < n.count; ++k)
+        enter(_im.kids[n.first + k], false);
+      if (n.kind == ImageKind::ref || n.kind == ImageKind::closed)
+        enter(n.a, true);
+    }
+    starts.push_back(static_cast<std::uint32_t>(edges.size()));
   }
-  _selfCalls.emplace(rule, self);
-  return self;
+  const auto components = StrongComponents<>::build(starts, edges);
+  _analysedNodes.resize(_im.nodes.size());
+  for (std::size_t i = 0; i < vertices.size(); ++i) {
+    const auto id = static_cast<std::uint32_t>(vertices[i].key >> 1);
+    if ((vertices[i].key & 1u) != 0)
+      _dataRules.emplace(id, DataRule{vertices[i].body, components.cyclic[i]});
+    else
+      _analysedNodes[id] = true;
+  }
 }
 
 // The positions `id` reads in a row: writes and prose drop away, sequences

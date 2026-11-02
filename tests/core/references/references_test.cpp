@@ -56,10 +56,12 @@
 #include "multiref/generated/MultiG/Module.hpp"
 #include "narrowedsite/generated/NarrowedSite/Module.hpp"
 #include "sharedrecord/generated/SharedRecord/Module.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/core/references/WorkspaceScopeProvider.hpp"
 #include "workspace/generated/Workspace/AstReflection.hpp"
+#include "workspace/generated/Workspace/Module.hpp"
 
 // Pins what a name points at. Reading a reference resolves it -- the lazy
 // `ref` -- and the linker is what the read reaches.
@@ -110,13 +112,9 @@ void linking_results_distinguish_null_from_an_error() {
   CHECK(!refused.has_value());
   CHECK(refused.error().message == "missing");
   CHECK(refused.error().info.referenceText == "Absent");
-  bool checked = false;
-  try {
+  CHECK(support::throws<std::bad_variant_access>([&] {
     (void)*refused;
-  } catch (const std::bad_variant_access&) {
-    checked = true;
-  }
-  CHECK(checked);
+  }));
 
   cursiv::AstNodeDescriptionsOrError plural =
       std::vector<const cursiv::AstNodeDescription*>{nullptr};
@@ -180,6 +178,38 @@ void an_unknown_name_resolves_to_nothing() {
       world.scoped("datatype String\nentity Person { age : Absent }\n");
   world.ws->linker->link(*document);
   CHECK(World::feature(*document).type.get() == nullptr);
+}
+
+// A scope provider may ask the public linker while resolving another site:
+// that nested lookup still returns the whole error, not only a failure state.
+void a_nested_public_lookup_keeps_its_message() {
+  World world;
+  struct Nested final : cursiv::DefaultScopeProvider {
+    using DefaultScopeProvider::DefaultScopeProvider;
+    mutable std::string message;
+
+    const cursiv::AstNodeDescription* getScopeEntry(
+        const cursiv::ReferenceInfo& context,
+        std::string_view name) const override {
+      if (name == "String") {
+        auto missing = context;
+        missing.referenceText = "Absent";
+        const auto answer = services.linker->getCandidate(missing);
+        CHECK(!answer.has_value());
+        if (!answer.has_value()) message = answer.error().message;
+      }
+      return DefaultScopeProvider::getScopeEntry(context, name);
+    }
+  };
+  const auto document =
+      world.scoped("datatype String\nentity Person { age : String }\n");
+  auto provider = std::make_unique<Nested>(*world.ws);
+  const Nested* const nested = provider.get();
+  world.ws->scopeProvider = std::move(provider);
+  world.ws->linker->link(*document);
+  CHECK(World::feature(*document).type.get() != nullptr);
+  CHECK(nested->message ==
+        "Could not resolve reference to Type named 'Absent'.");
 }
 
 // `unlink` clears every answer, and it is the one place that loop is written.
@@ -734,6 +764,81 @@ void the_diagnostic_names_the_site_s_class() {
   CHECK(has(diagnostics, "not that kind: 'b'"));
 }
 
+// Both resolution doors honour a derived linker's methods and its error
+// hook, even though the reference itself keeps only the failure state.
+void a_derived_linker_keeps_its_lookup_and_error_hooks() {
+  NsWorld world;
+  struct Hooked final : cursiv::DefaultLinker {
+    using DefaultLinker::DefaultLinker;
+    mutable unsigned single = 0, plural = 0, errors = 0;
+
+    cursiv::AstNodeDescriptionOrError getCandidate(
+        const cursiv::ReferenceInfo& site) const override {
+      ++single;
+      return DefaultLinker::getCandidate(site);
+    }
+    cursiv::AstNodeDescriptionsOrError getCandidates(
+        const cursiv::ReferenceInfo& site) const override {
+      ++plural;
+      return DefaultLinker::getCandidates(site);
+    }
+
+   protected:
+    cursiv::LinkingError createLinkingError(
+        const cursiv::ReferenceInfo& site,
+        const cursiv::AstNodeDescription* description) const override {
+      ++errors;
+      auto error = DefaultLinker::createLinkingError(site, description);
+      error.message = "custom: " + error.message;
+      return error;
+    }
+  };
+  auto service = std::make_unique<Hooked>(*world.lang);
+  const Hooked* const hooked = service.get();
+  world.lang->linker = std::move(service);
+  const auto document = world.scoped("two b use b all b");
+  world.lang->linker->link(*document);
+  Use& use = NsWorld::use(*document);
+  CHECK(use.what.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(use.all.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(hooked->single == 1 && hooked->plural == 1 && hooked->errors == 2);
+
+  cursiv::ReferenceInfo site{
+      .container = &use,
+      .document = document.get(),
+      .referenceText = "b",
+      .property = "what",
+      .index = std::nullopt,
+      .reference = world.lang->astReflection->referenceIndexOf(use.type, "what"),
+      .narrow = use.what.narrow};
+  const auto single = world.lang->linker->getCandidate(site);
+  CHECK(!single.has_value());
+  if (!single.has_value())
+    CHECK(single.error().message == "custom: Expecting Kind1 named 'b'.");
+  site.reference = world.lang->astReflection->referenceIndexOf(use.type, "all");
+  site.property = "all";
+  site.narrow = use.all.narrow;
+  const auto plural = world.lang->linker->getCandidates(site);
+  CHECK(!plural.has_value());
+  if (!plural.has_value())
+    CHECK(plural.error().message == "custom: Expecting Kind1 named 'b'.");
+}
+
+// A premature default link still reports both failed doors at the sink.
+void early_single_and_multi_failures_are_said() {
+  NsWorld world;
+  const auto& sunk = support::capture_observations(world.shared);
+  const auto document = world.shared.documentFactory->fromString(
+      "one a use a all missing", "file:///w/a.ns");
+  world.shared.documents->addDocument(document);
+  CHECK(document->parseResult.references->handles.size() == 2);
+  world.lang->linker->link(*document);
+  CHECK(sunk.seen.size() == 2);
+  for (const auto& observation : sunk.seen)
+    CHECK(observation.code ==
+          cursiv::ObservationCode::ScopeReadBeforeComputed);
+}
+
 }  // namespace ns
 
 }  // namespace
@@ -743,6 +848,7 @@ void run() {
   a_name_points_at_what_it_declares();
   reading_a_reference_resolves_it();
   an_unknown_name_resolves_to_nothing();
+  a_nested_public_lookup_keeps_its_message();
   unlink_forgets_every_answer();
   the_candidate_is_the_scope_s_first_fit();
   plural_candidates_keep_first_identity_in_scope_order();
@@ -764,6 +870,8 @@ void run() {
   ns::a_failed_narrowing_draws_no_edge();
   ns::a_multi_site_looks_up_its_class_only();
   ns::the_diagnostic_names_the_site_s_class();
+  ns::a_derived_linker_keeps_its_lookup_and_error_hooks();
+  ns::early_single_and_multi_failures_are_said();
   any_unresolved_means_failed_not_pending();
   cancellation_aborts_the_whole_link();
 }

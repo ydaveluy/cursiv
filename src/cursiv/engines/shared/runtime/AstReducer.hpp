@@ -43,13 +43,12 @@ inline NodeId payload_node(const Cst& c, NodeId id) {
   assert(c[id].subtreeSize != 0 && c[id].subtreeSize <= id + 1u);
   if (c.childless(id)) return id;
   NodeId only = kNoNode;
-  std::size_t seen = 0;
   for (const NodeId child : c.reverse_children(id)) {
     if (c[child].hidden) continue;
+    if (only != kNoNode) return id;
     only = child;
-    if (++seen == 2) return id;
   }
-  return seen == 1 ? only : id;
+  return only != kNoNode ? only : id;
 }
 
 // Nodes the root no longer reaches leave the list; their references stay as
@@ -203,7 +202,11 @@ class AstReducer {
   template <detail::MakeFn Mk, AstApplyFn Ap, bool Nest>
   Made create(std::uint16_t type, NodeId id) {
     const std::size_t first = suffix_begin(id);
-    return consume<Ap, Nest>(Made{Mk(_ctx, id), type}, first, id, id);
+    const Made made = consume<Ap, Nest>(Made{Mk(_ctx, id), type}, first, id, id);
+    // The factory anchors the new node; only a nest can return another one.
+    if constexpr (Nest)
+      if (made.value != nullptr) anchor(made.value, id);
+    return made;
   }
 
   // Take the node the body built, never fabricate one: a missing node is a
@@ -223,22 +226,17 @@ class AstReducer {
       broken(id);
       return Made{};
     }
-    // The closing record is the node's: the compaction may fuse a creation
-    // onto a narrower record, and the node spans what the rule closes over.
+    // Keep the adopted node's prefix until the effects have been applied:
+    // a later nest may make it a child, whose span ends before that nest.
     const NodeId origin = owner.value->cstNodeId;
-    anchor(owner.value, id);
     const Made made = consume<nullptr, Nest>(Made{owner.value, owner.type},
                                              first, origin, id);
     if (wrapped && !_m.derives(type, made.type)) [[unlikely]] {
       broken(id);
       return Made{};
     }
-    // A nest wrapped it: the outer node takes the closing record, the
-    // wrapped one keeps its own.
-    if (made.value != owner.value && made.value != nullptr) {
-      owner.value->cstNodeId = origin;
-      anchor(made.value, id);
-    }
+    // Only the final result spans the whole construction.
+    if (made.value != nullptr) anchor(made.value, id);
     return made;
   }
 
@@ -594,8 +592,14 @@ class AstReducer {
     });
   }
 
-  // Where a turn's own text begins: past its first child, the receiver, when
-  // its record says it reached back to one.
+  bool reaches_receiver(NodeId root) const {
+    const Cst& c = *_ctx.cst;
+    return _f.turnsByState ? (_ctx.stamp.state(c[root]) & 1u) != 0
+                           : _f.turn(_ctx.stamp.row(c[root]));
+  }
+
+  // Where a turn's effects begin: past its first child, the receiver, when
+  // its checkpoint says it reached back to one.
   NodeId turn_begin(NodeId root) {
     const Cst& c = *_ctx.cst;
     if (root >= c.size() || c[root].subtreeSize == 0 ||
@@ -604,8 +608,7 @@ class AstReducer {
       return kNoNode;
     }
     const NodeId begin = c.subtree_begin(root);
-    const bool turned = _f.turnsByState ? (_ctx.stamp.state(c[root]) & 1u) != 0
-                                        : _f.turn(_ctx.stamp.row(c[root]));
+    const bool turned = reaches_receiver(root);
     if (!turned) return begin;
     NodeId first = root - 1;
     for (NodeId x = root; x > begin;) {
@@ -751,7 +754,7 @@ class AstReducer {
           ++w;
           if (_ctx.repaired && stranded(wrapAt, origin, id)) [[unlikely]]
             continue;
-          current = wrap(n, current);
+          current = wrap(n, current, wrapAt.begin);
           if (_ctx.failed()) break;
         }
         if (_ctx.failed()) break;
@@ -766,7 +769,7 @@ class AstReducer {
                                 : _f.applies[current.type](*this, p, current);
         if (!landed && !under_repair(p.root)) broken(p.root);
       }
-      if (_ctx.failed()) break;
+      if (_ctx.failed()) [[unlikely]] break;
     }
     assert(_stack == stack && _depth == last &&
            "an effect pushed a pending: the reduction stack moved under "
@@ -778,7 +781,7 @@ class AstReducer {
 
   // `nest<T, &T::f>`: a T is created, the node built so far moves into T::f,
   // and T is what the rest of the region is. Two nests chain outwards.
-  Made wrap(const Pending& p, const Made& current) {
+  Made wrap(const Pending& p, const Made& current, NodeId begin) {
     assert(p.type != detail::kNoIndex && _f.makes[p.type] != nullptr &&
            p.field != kNoField &&
            "a nest row names a buildable type and a node member of it");
@@ -795,6 +798,17 @@ class AstReducer {
       // is one the repair dropped.
       if (!under_repair(p.root)) broken(p.root);
       return current;
+    }
+    // The checkpoint closes before the nest's payload. Its receiver is the
+    // complete prefix of the node becoming a child, including writes since
+    // that node's previous close. No CST records are changed here.
+    if (reaches_receiver(p.root)) {
+      // collect_wraps already computed the beginning on this immutable CST.
+      if (begin != 0 && begin != kNoNode) anchor(current.value, begin - 1);
+    } else {
+      // A creation before any text still supplies a current node. Its
+      // prefix is the empty checkpoint itself.
+      anchor(current.value, p.root);
     }
     const Made wrapper{_f.makes[p.type](_ctx, p.root), p.type};
     const Pending in =

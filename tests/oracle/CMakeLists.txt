@@ -26,7 +26,7 @@ function(cursiv_rgram seed)
       DEPENDS rgram_write
       COMMENT "${id}: drawing its grammar")
   add_custom_target(${id}_grammar DEPENDS ${own}/Grammar.hpp)
-  cursiv_grammar_generator(${id} "${id}/Grammar.hpp" ${id}::G
+  cursiv_grammar_generator(${id} "${own}/Grammar.hpp" ${id}::G
                             ${id}::generated::G "" "" "" "${root}" LR)
   add_dependencies(${id}_gen ${id}_grammar)
   add_custom_command(OUTPUT ${own}/generated.stamp
@@ -51,6 +51,8 @@ function(cursiv_rgram seed)
   set_source_files_properties(${own}/check.cpp PROPERTIES
       OBJECT_DEPENDS ${own}/generated.stamp)
   add_executable(${id}_check ${own}/check.cpp)
+  # Match the other generated test parsers; keep the shared oracle optimized.
+  target_compile_options(${id}_check PRIVATE $<$<CONFIG:Release>:-O0>)
   target_include_directories(${id}_check PRIVATE ${root})
   target_compile_definitions(${id}_check PRIVATE
       RGRAM_SEED=${seed} RGRAM_NS=${id}
@@ -66,6 +68,16 @@ foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
   add_test(NAME rgram_${seed} COMMAND rgram${seed}_check)
   set_tests_properties(rgram_${seed} PROPERTIES LABELS rgram TIMEOUT 120)
+endforeach()
+
+# Headers drawn during the build need the same shared generator compilation.
+# Keep optional long-run grammars outside these fixed batches.
+foreach(index RANGE 0 1)
+  math(EXPR first "${index} * 4")
+  list(SUBLIST _rgram_fixed ${first} 4 batch)
+  list(TRANSFORM batch PREPEND rgram)
+  list(TRANSFORM batch APPEND _gen)
+  _cursiv_generator_batch(lr rgram${index} ${batch})
 endforeach()
 
 # The long run, asked for at configure (`-DCURSIV_RGRAM_COUNT=<n>

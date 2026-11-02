@@ -74,10 +74,9 @@ class AstArena {
   // between, and the caller then copies once.
   bool try_extend(void* p, std::size_t oldBytes, std::size_t newBytes) {
     const auto* const q = static_cast<const char*>(p);
-    if (q + oldBytes != _cur) return false;
-    if (const std::size_t more = newBytes - oldBytes;
-        std::cmp_greater(more, _end - _cur))
-      return false;
+    // The carve already reserved its padding, even at the end of the chunk.
+    if (align_up(q + oldBytes, kBumpAlign) != _cur) return false;
+    if (newBytes < oldBytes || std::cmp_greater(newBytes, _end - q)) return false;
     _cur = align_up(q + newBytes, kBumpAlign);
     if (_cur > _end) _cur = _end;
     return true;

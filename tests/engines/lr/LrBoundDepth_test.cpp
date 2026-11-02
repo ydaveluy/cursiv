@@ -2,7 +2,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +24,7 @@
 #include "cursiv/engines/shared/runtime/RepairBudget.hpp"
 #include "cursiv/engines/shared/table/Token.hpp"
 #include "cursiv/test/Check.hpp"
+#include "engines/lr/LrStand.hpp"
 
 // What a reading still owes is walked over the text ahead of it, as far as the
 // bound reaches: a text of one-byte or unreadable tokens makes the walk as
@@ -37,32 +37,9 @@ namespace {
 
 namespace ga = ::arith::generated::Arith;
 
-constexpr cursiv::RepairBudget kUnbounded{.floor = ~std::uint64_t{0},
-                                          .perByte = 0,
-                                          .perSearch = ~std::uint64_t{0},
-                                          .perParse = ~std::uint64_t{0}};
+using checks::kUnbounded;
 
-// A context standing where a parse of `text` stands before a byte is read.
-template <const auto& A>
-struct Stand {
-  cursiv::Cst cst;
-  std::optional<cursiv::CstBuilder> builder;
-  std::optional<cursiv::LrContext> c;
-  std::vector<cursiv::Scan> room;
-
-  Stand(std::string_view text, const cursiv::LrDrive& drive) {
-    cst.reset(text);
-    builder.emplace(cst);
-    builder->reserve_stream(cst.text().size());
-    c.emplace(cst.text(), *builder);
-    room.resize(A.maxCands != 0 ? A.maxCands : 1);
-    c->cand = room.data();
-    c->drive = &drive;
-    cursiv::LrParser<A>::install_hooks(*c);
-    c->stack.push(
-        cursiv::LrFrame{0, cursiv::kNoElement, 0, 0, cursiv::kLrNoWord});
-  }
-};
+using checks::Stand;
 
 // The two calls as they were written: each a native frame.
 namespace ref {
@@ -132,9 +109,9 @@ struct Bound {
   cursiv::LrSearch s;
 
   Bound(std::string_view text, std::uint64_t share)
-      : st(text, ga::kDrive), s(text.size(), kUnbounded, st.c->indentArena) {
-    CHECK(ga::kDrive.enter(*st.c) == cursiv::LrExit::pause);
-    cursiv::lr_search_start(*st.c, s);
+      : st(text, ga::kDrive), s(text.size(), kUnbounded, st.c.indentArena) {
+    CHECK(ga::kDrive.enter(st.c) == cursiv::LrExit::pause);
+    cursiv::lr_search_start(st.c, s);
     s.bounding = true;
     s.boundShort = false;
     if (share != ~std::uint64_t{0}) s.limit = s.work + share;
@@ -151,7 +128,7 @@ void agree(std::string_view text, std::uint64_t share) {
   using namespace cursiv;
   Bound<A> now(text, share);
   Bound<A> was(text, share);
-  const TextOffset at = now.st.c->la.begin;
+  const TextOffset at = now.st.c.la.begin;
   std::vector<SymbolId> prevs{kInvalidSymbol};
   for (SymbolId q = 1; q < A.cfg.nterms && q < 6; ++q) prevs.push_back(q);
   const std::size_t span = text.size() - at;
@@ -162,8 +139,8 @@ void agree(std::string_view text, std::uint64_t share) {
     for (const SymbolId prev : prevs)
       for (std::uint32_t run = 0; run < 3; ++run) {
         const std::uint32_t a =
-            lr_search_owes<A>(*now.st.c, now.s, p, prev, run);
-        const std::uint32_t b = ref::owes<A>(*was.st.c, was.s, p, prev, run);
+            lr_search_owes<A>(now.st.c, now.s, p, prev, run);
+        const std::uint32_t b = ref::owes<A>(was.st.c, was.s, p, prev, run);
         CHECK(a == b);
         CHECK(now.s.work == was.s.work);
         CHECK(now.s.boundShort == was.s.boundShort);
@@ -175,11 +152,11 @@ void agree(std::string_view text, std::uint64_t share) {
         }
       }
   // The token the refusal stands on, dropped.
-  const Token t = now.st.c->la;
+  const Token t = now.st.c.la;
   for (const SymbolId prev : prevs) {
     const std::uint32_t a =
-        lr_search_dropped<A>(*now.st.c, now.s, t, prev);
-    const std::uint32_t b = ref::dropped<A>(*was.st.c, was.s, t, prev);
+        lr_search_dropped<A>(now.st.c, now.s, t, prev);
+    const std::uint32_t b = ref::dropped<A>(was.st.c, was.s, t, prev);
     CHECK(a == b);
     CHECK(now.s.work == was.s.work);
   }
@@ -205,7 +182,7 @@ void* cramped(void* arg) {
   auto* job = static_cast<Cramped*>(arg);
   Bound<ga::kTable> b(job->text, kAll);
   job->owed = cursiv::lr_search_owes<ga::kTable>(
-      *b.st.c, b.s, b.st.c->la.begin, cursiv::kInvalidSymbol, 0);
+      b.st.c, b.s, b.st.c.la.begin, cursiv::kInvalidSymbol, 0);
   return nullptr;
 }
 
@@ -223,7 +200,7 @@ void a_small_stack_holds_the_walk(std::string_view text) {
   pthread_attr_destroy(&attr);
   Bound<ga::kTable> b(text, kAll);
   CHECK(job.owed == cursiv::lr_search_owes<ga::kTable>(
-                        *b.st.c, b.s, b.st.c->la.begin, cursiv::kInvalidSymbol,
+                        b.st.c, b.s, b.st.c.la.begin, cursiv::kInvalidSymbol,
                         0));
 }
 #endif

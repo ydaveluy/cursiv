@@ -170,20 +170,33 @@ inline bool lr_shadow_apply(LrContext& c, R& s, std::uint32_t at) {
   return lr_shadow_reduce<A>(c, s, x.arg);
 }
 
-// No token at all -- a blank a tight mode reads nothing of -- still answers
-// the one reduce a condition guards, as the drive's default arm does: the
-// production, or `kLrNoProd`.
+template <const auto& A>
+inline constexpr bool kLrRegionExits = [] {
+  if constexpr (requires { A.derived.reductions; })
+    for (const auto& plan : A.derived.reductions)
+      if (plan.regionExit) return true;
+  return false;
+}();
+
+// A blank a tight mode refuses still permits the sole guarded reduction or
+// region exit. A region exit consumes nothing; its goto re-reads the gap
+// under the caller's mode. Valid-token actions have already taken priority.
 template <const auto& A, class R>
-inline std::uint16_t lr_shadow_lone_guard(const LrContext& c,
+inline std::uint16_t lr_shadow_lone_reduce(const LrContext& c,
                                           std::uint32_t state, const R& s) {
-  if constexpr (kLrAnyGap<A>) {
+  if constexpr (kLrAnyGap<A> || kLrRegionExits<A>) {
     if (s.la.sym != kInvalidSymbol || A.modeTight[A.mode[state]] == 0)
       return kLrNoProd;
     const auto p = A.cold.soleReduce[state];
-    if (p == kLrNoProd || A.cfg.prods[p].gap == 0 ||
-        !c.drive->cond(c, A.cfg.prods[p].gap - 1u, s.virt.from, s.la))
-      return kLrNoProd;
-    return p;
+    if (p == kLrNoProd) return kLrNoProd;
+    if (A.cfg.prods[p].gap == 0) {
+      if constexpr (kLrRegionExits<A>) {
+        if (!A.derived.reductions[p].regionExit) return kLrNoProd;
+      } else {
+        return kLrNoProd;
+      }
+    }
+    return lr_reduce_allowed<A>(p, lr_shadow_holds(c, s)) ? p : kLrNoProd;
   } else {
     (void)c, (void)state, (void)s;
     return kLrNoProd;
@@ -281,7 +294,7 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
     }
   }
   return {f, k,
-          k == 0 ? lr_shadow_lone_guard<A>(c, state, reading()) : kLrNoProd};
+          k == 0 ? lr_shadow_lone_reduce<A>(c, state, reading()) : kLrNoProd};
 }
 
 // The token a reading holds, a flagged winner of `mode`, read again while its

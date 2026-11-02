@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "cursiv/core/validation/ValidationRegistry.hpp"
+#include "support/WorkspaceModule.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/references/WorkspaceScopeComputation.hpp"
 #include "workspace/core/references/WorkspaceScopeProvider.hpp"
@@ -34,3 +35,15 @@ void install_core_module(WorkspaceCoreServices& services) {
 }
 
 }  // namespace ws
+
+namespace support {
+
+std::unique_ptr<cursiv::Parser> create_workspace_parser() {
+  return ws::generated::Workspace::create_parser();
+}
+
+std::unique_ptr<cursiv::AstReflection> create_workspace_reflection() {
+  return ws::generated::Workspace::create_ast_reflection();
+}
+
+}  // namespace support

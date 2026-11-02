@@ -17,6 +17,7 @@
 #include "cursiv/engines/lr/table/LrAction.hpp"
 #include "cursiv/engines/lr/table/LrExpectTable.hpp"
 #include "cursiv/engines/lr/table/LrProduction.hpp"
+#include "cursiv/engines/lr/table/LrReducePlan.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
 #include "cursiv/engines/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/engines/shared/table/CondReach.hpp"
@@ -107,6 +108,7 @@ struct LrCaretTable {
   // The terminals' names and spellings, as `TermInfo` places them.
   const char* names = nullptr;
   std::span<const LrProduction> prods;
+  std::span<const LrReducePlan> reductions;
   // The sample words each terminal is read as, per mode; null where the table
   // asks no condition.
   const LrSampleReads* sampleReads = nullptr;

@@ -9,8 +9,7 @@ cursiv_test(text_test core/text/text_test.cpp)
 cursiv_test(grammar_test core/grammar/grammar_test.cpp duallrGenerated dualllGenerated spellplainGenerated
     spelldashedGenerated sentblobGenerated sentwordGenerated sentfreeGenerated derivebaseGenerated
     derivedialectGenerated deriveruleGenerated
-    derivetextdialectGenerated derivetextdialectllGenerated docswideGenerated docswidellGenerated
-    cursivLrGen)
+    derivetextdialectGenerated derivetextdialectllGenerated docswideGenerated docswidellGenerated)
 cursiv_grammar(docswide engines/lr/WideDocsGrammar.hpp tdocs::G ENGINE LR)
 cursiv_grammar(docswidell engines/lr/WideDocsGrammar.hpp tdocs::Ll ENGINE LL)
 cursiv_grammar(derivebase core/grammar/DerivedGrammar.hpp tderive::Base)

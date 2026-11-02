@@ -176,19 +176,21 @@ inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
   struct Frame {
     NodeId id;
     TextFn fn;
-    std::size_t begin, next, end;
+    std::size_t begin, next;
   };
   std::vector<Frame> frames;
   std::vector<NodeId> dependencies;
   const auto enter = [&](NodeId node, TextFn call, bool reads) {
     const auto begin = dependencies.size();
     if (reads) text_dependencies(ctx, node, dependencies);
-    frames.push_back({node, call, begin, begin, dependencies.size()});
+    frames.push_back({node, call, begin, begin});
   };
-  enter(id, fn, true);
-  while (!frames.empty()) {
+  text_dependencies(ctx, id, dependencies);
+  if (dependencies.empty()) return fn(ctx, id);
+  frames.push_back({id, fn, 0, 0});
+  for (;;) {
     Frame& current = frames.back();
-    if (current.next != current.end) {
+    if (current.next != dependencies.size()) {
       const auto child = dependencies[current.next++];
       const auto row = ctx.stamp.row((*ctx.cst)[child]);
       const auto call = ctx.actions->call_at(row);
@@ -200,12 +202,11 @@ inline std::optional<std::string_view> evaluate_text(AstBuildCtx& ctx,
     const Frame done = current;
     const auto value = done.fn(ctx, done.id);
     if (!value) return std::nullopt;
-    values.calls.try_emplace(done.id, done.fn, *value);
     frames.pop_back();
     dependencies.resize(done.begin);
     if (frames.empty()) return value;
+    values.calls.try_emplace(done.id, done.fn, *value);
   }
-  return std::nullopt;
 }
 
 // A call below a record as one part, converted where the record's text

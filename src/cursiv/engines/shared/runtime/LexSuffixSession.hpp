@@ -106,24 +106,18 @@ class LexSuffixSession {
       Tape tape, const char* src, TextOffset len, std::uint16_t state,
       TextOffset from, [[maybe_unused]] TextOffset halt, Scan out) {
     assert(halt > out.end && halt - out.end > kBacktrackTail);
-    remember(tape, src, len, state, from);
+    LexSuffixSession* const session = active();
+    if (session == nullptr || src != session->_src || len != session->_len)
+      return out;
+    if (!session->_cache) session->_cache.emplace();
+    Scan best{from, kInvalidSymbol};
+    TextOffset reached = from;
+    if (session->_cache->match(tape, src, len, state, from, best, reached))
+      session->_backtracking = true;
     return out;
   }
 
  private:
-  CURSIV_NOINLINE static void remember(Tape tape, const char* src,
-                                       TextOffset len, std::uint16_t state,
-                                       TextOffset from) {
-    LexSuffixSession* const session = active();
-    if (session == nullptr || src != session->_src || len != session->_len)
-      return;
-    if (!session->_cache) session->_cache.emplace();
-    Scan out{from, kInvalidSymbol};
-    TextOffset halt = from;
-    if (session->_cache->match(tape, src, len, state, from, out, halt))
-      session->_backtracking = true;
-  }
-
   struct Answer {
     // An invalid match has no endpoint: it must not replace the caller's
     // earlier acceptance or change the start of a wholly failed walk.

@@ -2,6 +2,9 @@
 // closes with `>`: the text a predicate sees ends where the section does.
 #pragma once
 
+#include <cstdint>
+#include <string_view>
+
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
 
@@ -20,6 +23,13 @@ struct Block : cursiv::Extends<cursiv::AstNode> {
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Block*> blocks;
+};
+struct Values : cursiv::Extends<cursiv::AstNode> {
+  int64 number = -1;
+  vector<int64> numbers;
+  Item* node = nullptr;
+  vector<Item*> nodes;
+  string_view text;
 };
 }  // namespace ast
 
@@ -71,11 +81,63 @@ struct Host : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+struct Number : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct INTEGER : terminal<as<std::int64_t>(some(d))> {};
+  struct Root : rule<ref<INTEGER>> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+struct Name : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Root : rule<assign<&ast::Item::text>(ref<ID>)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Section operands pay their entry's value through choices and scopes. Data
+// rules still read their whole text, including the section's delimiters.
+struct SectionValues : Last {
+  static constexpr auto number = section<Number>(lit<"[">, lit<"]">);
+  static constexpr auto node = section<Name>(lit<"(">, lit<")">);
+  static constexpr auto seven = as<std::int64_t{7}>(lit<"!">);
+  static constexpr auto length = [](std::string_view text) {
+    return static_cast<std::int64_t>(text.size());
+  };
+  struct Direct : rule<assign<&ast::Values::number>(number)> {};
+  struct Tight : rule<assign<&ast::Values::number>(tight(number))> {};
+  struct Scoped
+      : rule<assign<&ast::Values::number>(skip(ignore<WS>, hide<>, number))> {};
+  struct Chosen : rule<assign<&ast::Values::number>(number | seven)> {};
+  struct Nested : rule<assign<&ast::Values::number>(
+                      tight(skip(ignore<WS>, hide<>, number | seven)))> {};
+  struct Appended
+      : rule<many(append<&ast::Values::numbers>(tight(number) | seven))> {};
+  struct Node : rule<assign<&ast::Values::node>(
+                    tight(node | create<ast::Item>(lit<"!">)))> {};
+  struct Nodes
+      : rule<many(append<&ast::Values::nodes>(
+            skip(ignore<WS>, hide<>, node | create<ast::Item>(lit<"!">))))> {};
+  struct Text : rule<number> {};
+  struct Measure : rule<as<length>(number)> {};
+  struct Root
+      : rule<(lit<"direct:"> + ref<Direct>) | (lit<"tight:"> + ref<Tight>) |
+             (lit<"scope:"> + ref<Scoped>) | (lit<"choice:"> + ref<Chosen>) |
+             (lit<"nested:"> + ref<Nested>) | (lit<"append:"> + ref<Appended>) |
+             (lit<"node:"> + ref<Node>) | (lit<"nodes:"> + ref<Nodes>) |
+             (lit<"text:"> + assign<&ast::Values::text>(ref<Text>)) |
+             (lit<"measure:"> + assign<&ast::Values::number>(ref<Measure>))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 struct Suite : Last {
-  struct Root : rule<ref<Last::Root> |
-                     (lit<"reach:"> + ref<Reach::Root>) |
+  struct Root : rule<ref<Last::Root> | (lit<"reach:"> + ref<Reach::Root>) |
                      (lit<"inlast:"> + ref<Host<Last>::Root>) |
-                     (lit<"inreach:"> + ref<Host<Reach>::Root>)> {};
+                     (lit<"inreach:"> + ref<Host<Reach>::Root>) |
+                     (lit<"values:"> + ref<SectionValues::Root>)> {};
   using entry = Root;
 };
 struct Ll : Suite {};

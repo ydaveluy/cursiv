@@ -262,6 +262,7 @@ inline bool ll_held_takes(const LlContext& c, SymbolId term) {
 // unless it is a condition's own token, which lengthens what it guards.
 template <const auto& T>
 inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
+  if (c.la.sym == kInvalidSymbol) return;
   if (T.mode_admits(mode, c.la.sym)) return;
   const Scan sc = ll_match_text<T>(c.src, c.len, mode, c.la.begin);
   if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
@@ -319,6 +320,28 @@ CURSIV_ALWAYS_INLINE inline void ll_peek(LlContext& c) {
   if (!c.laValid && ll_probe<T>(c, Mode)) [[likely]]
     return;
   ll_peek<T>(c, Mode);
+}
+
+// A repetition may inspect its distinct closing token across its caller's
+// trivia. Once it elects another item, that gap belongs to the item's own
+// configuration. Only an uncommitted gap is read again: tokens in place keep
+// their lexical election, and repairs keep the token they invented.
+template <const auto& T>
+inline void ll_repeat_read(LlContext& c, std::uint16_t mode) {
+  if (!c.laValid || c.la.mode == kNoMode ||
+      c.la.begin <= std::max(c.at, c.triviaAt))
+    return;
+  const bool held = c.laMode == kLaHeld;
+  c.laValid = false;
+  c.laMode = kInvalidSymbol;
+  c.pending.clear();
+  ll_peek<T>(c, mode);
+  // A forbidden gap must reach the body's repair, even if that body's first
+  // position also serves a caller with more permissive trivia.
+  if (c.la.sym == kInvalidSymbol)
+    c.laMode = kLaHeld;
+  else if (held)
+    ll_hold<T>(c);
 }
 
 // The token in hand at a choice whose alphabet admits, for a caller alone, a

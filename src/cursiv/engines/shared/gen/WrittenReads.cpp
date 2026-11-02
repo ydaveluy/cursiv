@@ -14,7 +14,6 @@ WrittenReads::Slot& WrittenReads::slot(std::uint32_t rule) {
     at = static_cast<std::uint32_t>(_slots.size());
     _slots.push_back({.rule = rule, .readers = {}});
     _work.push_back(at);
-    ++_moved;
   }
   Slot& s = _slots[at];
   if (_solving != kNoSlot &&
@@ -105,7 +104,6 @@ bool WrittenReads::solve(std::uint32_t at) {
   if (s.nothing == nothing && s.run == run) return false;
   s.nothing = nothing;
   s.run = run;
-  ++_moved;
   return true;
 }
 
@@ -123,9 +121,8 @@ void WrittenReads::settle() {
 template <class Ask>
 bool WrittenReads::answer(Ask ask) {
   for (;;) {
-    const auto before = _moved;
     const bool r = ask();
-    if (_moved == before) return r;
+    if (_work.empty()) return r;
     settle();
   }
 }

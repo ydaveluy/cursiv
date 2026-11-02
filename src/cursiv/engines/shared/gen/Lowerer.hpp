@@ -252,7 +252,6 @@ class Lowerer {
   std::unordered_map<const void*, std::uint16_t> _rowIdx;
   std::vector<WriteKind> _rowKind;
   std::vector<Config> _cfgs;
-  std::unordered_map<ImageId, ImageId> _ended;
   std::unordered_map<std::uint64_t, ImageId> _bodies;
 
  private:

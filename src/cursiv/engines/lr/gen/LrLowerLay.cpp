@@ -52,8 +52,10 @@ std::uint16_t LrLowerer::open_tail(std::uint16_t reading, std::uint8_t tail) {
 bool LrLowerer::is_condition(LrShapeId at) const {
   while (_p.e[at].kind == LrShape::rep || _p.e[at].kind == LrShape::scope)
     at = _p.e[at].sym;
-  return _p.e[at].kind == LrShape::sym &&
-         _p.is_gap(static_cast<std::uint16_t>(_p.e[at].sym));
+  const auto& node = _p.e[at];
+  return (node.kind == LrShape::seq && node.count == 0) ||
+         (node.kind == LrShape::sym &&
+          _p.is_gap(static_cast<std::uint16_t>(node.sym)));
 }
 
 void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
@@ -115,6 +117,17 @@ LrShapeId LrLowerer::lay_skip(unsigned cfg, ImageId e) {
 LrShapeId LrLowerer::lay_made(unsigned cfg, ImageId e) {
   const ImageNode n = at(e);
   const LrShapeId node = lay(cfg, kid(n, 0));
+  if (n.kind == ImageKind::nest) {
+    if (_p.e[node].kind == LrShape::none || _p.e[node].kind == LrShape::end) {
+      _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
+      return node;
+    }
+    // The receiver is complete before the payload starts. In particular an
+    // optional following nest must not become part of this receiver's CST.
+    const auto marker = mark(cfg, _p.push(LrLowerNode{
+        .kind = LrShape::seq, .made = {row_id(n.row)}}));
+    return gather(cfg, LrShape::seq, {marker, node});
+  }
   _p.e[node].made.push_back(row_id(n.row));
   return node;
 }

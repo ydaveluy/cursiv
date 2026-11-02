@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -6,9 +7,9 @@
 #include <cstring>
 #include <memory>
 #include <random>
-#include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -24,9 +25,9 @@
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/engines/ll/runtime/ll_matcher.hpp"
 #include "cursiv/engines/lr/gen/LrLowering.hpp"
 #include "cursiv/engines/lr/runtime/LrDrive.hpp"
+#include "cursiv/engines/lr/runtime/LrLexCandidates.hpp"
 #include "cursiv/engines/lr/runtime/LrParser.hpp"
 #include "cursiv/engines/lr/runtime/lr_lex_reading.hpp"
 #include "cursiv/engines/lr/runtime/lr_lookahead.hpp"
@@ -50,7 +51,7 @@
 #include "engines/lr/RefusedShorterGrammar.hpp"
 #include "engines/lr/ReservedChoiceGrammar.hpp"
 #include "engines/lr/TypoAlternativesGrammar.hpp"
-#include "engines/lr/WideTerminalsGrammar.hpp"
+#include "engines/lr/WideTerminalsAst.hpp"
 #include "guard/generated/G/Module.hpp"
 #include "guard/generated/G/Parser.hpp"
 #include "guard/generated/G/Table.hpp"
@@ -71,6 +72,7 @@
 #include "shorterlr/generated/Lr/Parser.hpp"
 #include "shorterlr/generated/Lr/Table.hpp"
 #include "wideterms/generated/G/Module.hpp"
+#include "wideterms/generated/G/Table.hpp"
 
 #ifdef CURSIV_LR_LEXER_CONTRACT
 #include "arithmetics/generated/Arith/Parser.hpp"
@@ -1538,10 +1540,15 @@ constexpr std::string_view kOthers =
     "zonule zorro zucchini zwieback zygote zoology zoning zipper zestful "
     "zealous zooid zymase zibeline zanzibar zymurgy zirconia ";
 
+// The two fixture lists below contain words separated by spaces.
 std::vector<std::string> split(std::string_view text) {
   std::vector<std::string> out;
-  std::istringstream in{std::string(text)};
-  for (std::string w; in >> w;) out.push_back(w);
+  while (!text.empty()) {
+    const auto end = text.find(' ');
+    if (end != 0) out.emplace_back(text.substr(0, end));
+    if (end == std::string_view::npos) break;
+    text.remove_prefix(end + 1);
+  }
   return out;
 }
 
@@ -1950,7 +1957,123 @@ void run() {
 }
 }  // namespace case_lrlineend
 
+namespace candidate_collection {
+namespace {
+using namespace cursiv;
+
+// Borrow the wide grammar's token storage and boundary protocol; the rows
+// below independently vary arrival order, extent and lexical tier.
+struct Table : std::remove_cvref_t<decltype(twide::generated::G::kTable)> {
+  struct Cold {
+    std::array<std::uint8_t, 576> accTier{};
+    std::array<std::uint16_t, 0> accStand{};
+  };
+};
+
+template <unsigned N>
+struct Rows {
+  static constexpr auto base =
+      std::array{0u, N, N + N / 2u, 2u * N + N / 2u,
+                 3u * N + N / 2u, 4u * N + N / 2u};
+  static constexpr unsigned count = base.back();
+  static constexpr SymbolId terminal(unsigned i) {
+    return static_cast<SymbolId>((73u * i) % N + 1u);
+  }
+  static constexpr auto terms = [] {
+    std::array<SymbolId, count> out{};
+    for (unsigned i = 0; i < N; ++i) {
+      out[i] = out[base[2] + i] = out[base[4] + i] = terminal(i);
+      out[base[3] + i] = terminal(N - 1u - i);
+    }
+    for (unsigned i = 0; i < N / 2u; ++i)
+      out[base[1] + i] = terminal(N - 2u - 2u * i);
+    return out;
+  }();
+  static constexpr auto bounds = [] {
+    std::array<std::uint16_t, count> out{};
+    out.fill(kNoSet);
+    return out;
+  }();
+};
+
+// The fixture's tiers are attached to acceptance occurrences, as in a real
+// table: a longer, lower-tier occurrence replaces an earlier one; an equal
+// extent keeps the higher tier.
+template <unsigned N>
+struct RankedTable : Table {
+  static constexpr auto cold = [] {
+    Cold out;
+    for (unsigned row = 0; row < 5; ++row)
+      for (unsigned k = Rows<N>::base[row]; k < Rows<N>::base[row + 1]; ++k)
+        out.accTier[k] = row == 1 ? kTierLiteral
+                        : row == 2 ? 0u : kTierKeyword;
+    return out;
+  }();
+};
+template <unsigned N>
+inline constexpr RankedTable<N> kTable{{twide::generated::G::kTable}};
+
+struct NoRelays {};
+
+template <unsigned N>
+std::uint64_t collect() {
+  using R = Rows<N>;
+  ScanRoom<N> room;
+  std::uint32_t count = 0;
+  std::uint64_t work = 0;
+  LrLexCandidates<kTable<N>, R::base, R::terms, R::bounds, N> collector(
+      room.data(), count, N, 0, &work);
+  TextOffset far = 0;
+  collector.take(0, 0, "abcdefghij", 3, 10, far);
+  const auto firstWork = work;
+  CHECK(count == N);
+  CHECK(firstWork <= 8u * N);
+  for (unsigned i = 0; i < N; ++i) {
+    CHECK(room[i].term == R::terminal(i));
+    CHECK(room[i].end == 3 && room[i].tier == kTierKeyword);
+  }
+  collector.take(0, 1, "abcdefghij", 5, 10, far);
+  for (unsigned i = 0; i < N; ++i) {
+    CHECK(room[i].end == (i % 2 == 0 ? 5u : 3u));
+    CHECK(room[i].tier == (i % 2 == 0 ? kTierLiteral : kTierKeyword));
+  }
+  NoRelays relays;
+  collector.finish("abcdefghij", 10, 0, 0, relays);
+  CHECK(count == N / 2u);
+  // Compaction moves the surviving slots. Subsequent arrivals must rebuild
+  // the index, retain those survivors and append the removed terminals anew.
+  collector.take(0, 2, "abcdefghij", 5, 10, far);
+  CHECK(count == N);
+  for (unsigned i = 0; i < N; ++i) {
+    const unsigned original = i < N / 2u ? 2u * i : 2u * (i - N / 2u) + 1u;
+    CHECK(room[i].term == R::terminal(original));
+    CHECK(room[i].end == 5);
+    CHECK(room[i].tier == (i < N / 2u ? kTierLiteral : 0u));
+  }
+  collector.take(0, 3, "abcdefghij", 5, 10, far);
+  collector.take(0, 4, "abcdefghij", 4, 10, far);
+  for (unsigned i = 0; i < N; ++i)
+    CHECK(room[i].end == 5 && room[i].tier == kTierKeyword);
+  CHECK(work <= 24u * N);
+  return firstWork;
+}
+}  // namespace
+
+void run() {
+  collect<4>();
+  const auto a = collect<32>();
+  const auto b = collect<64>();
+  const auto c = collect<128>();
+  CHECK(b <= 3u * a && c <= 3u * b);
+  std::printf("  candidate collection probes: %llu, %llu, %llu\n",
+              static_cast<unsigned long long>(a),
+              static_cast<unsigned long long>(b),
+              static_cast<unsigned long long>(c));
+}
+}  // namespace candidate_collection
+
 int main() {
+  candidate_collection::run();
 #ifdef CURSIV_LR_LEXER_CONTRACT
   case_lexercontract::run();
 #endif

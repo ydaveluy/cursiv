@@ -53,8 +53,9 @@ struct LexMatch {
   CURSIV_ALWAYS_INLINE void take(const Ad& ad, std::uint16_t st,
                                  const char* src, TextOffset i, TextOffset len,
                                  TextOffset& far) {
-    if (ad.accept(st) == 0) return;
-    auto t = static_cast<SymbolId>(ad.accept(st) - 1u);
+    const auto accepted = ad.accept(st);
+    if (accepted == 0) return;
+    auto t = static_cast<SymbolId>(accepted - 1u);
     // The state's own election refused: the terminals it outranked answer
     // for themselves, and the one that stands takes the match.
     if constexpr (requires { ad.qualified(st, src, i, len, far); }) {

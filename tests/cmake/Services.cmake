@@ -8,7 +8,7 @@ cursiv_grammar(block lsp/completion/BlockGrammar.hpp tblock::Block EXTENSIONS .b
 cursiv_grammar_pair(words lsp/completion/WordsGrammar.hpp twords::Lr twords::Ll)
 
 cursiv_grammar(repairmsg core/validation/RepairMessageGrammar.hpp tmsg::MessageG)
-cursiv_test(validation_test core/validation/validation_test.cpp cursiv::lsp wsCore repairmsgGenerated)
+cursiv_test(validation_test core/validation/validation_test.cpp wsCore repairmsgGenerated)
 
 cursiv_test(mcp_test mcp/mcp_test.cpp cursiv::lsp cursiv::mcp wsLsp
     wordslrGenerated)
@@ -60,8 +60,9 @@ set_tests_properties(server_test PROPERTIES TIMEOUT 30)
 
 cursiv_test(completion_test "lsp/completion/completion_test.cpp;lsp/completion/CaretLane.cpp" cursiv::lsp wsCore
     caretGenerated blockGenerated wordsllGenerated wordslrGenerated)
+set_target_properties(completion_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 
-cursiv_test(edits_test lsp/edits_test.cpp cursiv::lsp wsLsp)
+cursiv_test(edits_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsLsp)
 
 # The public test module: what a language author writes checks with, exercised
 # through the one shipped language that fills every slot.

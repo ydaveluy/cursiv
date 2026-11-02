@@ -487,7 +487,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
         if (term == kNoRow) return LlReplay::broken;
         if (!tail.steps.empty())
           tail.steps.push_back(
-              {Token{leaf.begin, leaf.begin, term}, gapFrom, kNoRow, term, {}});
+              {Token{leaf.begin, leaf.begin, term}, gapFrom, kNoRow, {}});
         sim.filter([](std::uint16_t) { return true; });
         if (bound && !exact && sim.at_unbound_return())
           return LlReplay::shallow;
@@ -525,8 +525,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
         tail.before = held;
       if (kept || (reaches && T.condReach.phrase))
         tail.steps.push_back({token, gapFrom,
-                              static_cast<std::uint16_t>(pos - 1),
-                              kInvalidSymbol, asked});
+                              static_cast<std::uint16_t>(pos - 1), asked});
     }
     if (!crossed && !sim.step_edges(reads)) return LlReplay::broken;
     if (bound && !exact && sim.at_unbound_return()) return LlReplay::shallow;
@@ -676,23 +675,21 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   struct Comment {
     std::uint16_t key = 0;
     bool crossed = true;
-    bool present = false;
-    std::uint16_t mode = 0;
     TextOffset begin = 0;
-    Scan scan{};
+    SymbolId term = kInvalidSymbol;
   };
   std::vector<Comment> comments;
   const auto comment_in = [&](std::uint16_t candidate) -> const Comment& {
     for (const Comment& seen : comments)
       if (seen.key == candidate) return seen;
-    Comment found{candidate, true, false, leaf ? leafMode : candidate};
+    Comment found{candidate};
+    const std::uint16_t mode = leaf ? leafMode : candidate;
     if (prior.hidden && !prior.recovered && prior.end == at) {
       const Scan s =
-          ll_match_text<T>(text.data(), prior.end, found.mode, prior.begin);
+          ll_match_text<T>(text.data(), prior.end, mode, prior.begin);
       if (s.term != kInvalidSymbol && s.end == prior.end) {
-        found.present = true;
         found.begin = prior.begin;
-        found.scan = s;
+        found.term = s.term;
       }
     } else if constexpr (!kIndented<T>) {
       TextOffset begin = 0;
@@ -700,14 +697,13 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       const TextOffset from = prior ? prior.end : 0;
       found.crossed = ll_trivia_to<T>(text, candidate, from, at, begin, last);
       if (!prior.recovered &&
-          (found.mode == candidate
+          (mode == candidate
                ? found.crossed
-               : ll_trivia_to<T>(text, found.mode, from, at, begin, last)) &&
+               : ll_trivia_to<T>(text, mode, from, at, begin, last)) &&
           last.term != kInvalidSymbol && last.end == at && last.end > begin &&
-          !ll_ends_before_word<T>(text, found.mode, begin, at, last.term)) {
-        found.present = true;
+          !ll_ends_before_word<T>(text, mode, begin, at, last.term)) {
         found.begin = begin;
-        found.scan = last;
+        found.term = last.term;
       }
     }
     return comments.emplace_back(found);
@@ -724,8 +720,9 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   };
   const auto comment_ends = [&](const Comment& comment,
                                 std::string_view spelling) {
-    const Scan s = spliced(comment.begin, spelling, comment.mode);
-    return s.term == comment.scan.term && s.end == at - comment.begin;
+    const Scan s =
+        spliced(comment.begin, spelling, leaf ? leafMode : comment.key);
+    return s.term == comment.term && s.end == at - comment.begin;
   };
   // A candidate with no spelling is typed as some word its terminal reads:
   // the comment lets it through where the word ends it, and where no sample
@@ -733,7 +730,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   const auto comment_lets = [&](std::string_view spelling, SymbolId label,
                                 std::uint16_t mode, std::uint16_t gap) {
     const Comment& comment = comment_in(gap);
-    if (!comment.present) return true;
+    if (comment.term == kInvalidSymbol) return true;
     if (!spelling.empty()) return comment_ends(comment, spelling);
     return ll_sample_takes<T>(label, mode, [&](std::string_view word) {
       return comment_ends(comment, word);
@@ -962,7 +959,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
         if (step.node == kNoRow) {
           sim.filter([](std::uint16_t) { return true; });
           beyond = beyond || (widens && sim.at_unbound_return());
-          if (!ll_step_token<T>(sim, step.inserted)) return false;
+          if (!ll_step_token<T>(sim, step.token.sym)) return false;
           continue;
         }
         const auto reads = [&](std::uint32_t edge) {

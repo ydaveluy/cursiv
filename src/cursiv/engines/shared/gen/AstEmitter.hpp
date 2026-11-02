@@ -160,8 +160,6 @@ struct AstEmitter : EmitOutput {
     // The first step is the record's own rule, which reads the record itself.
     // A later first step is handed the record's text.
     bool lead = false;
-    // What the first step is handed.
-    TextInput input = TextInput::none;
     // The record's children convert before the first step: it reads a data
     // rule's record, whose parts they are. The scheduler's table holds it.
     bool children = false;
@@ -183,7 +181,7 @@ struct AstEmitter : EmitOutput {
     // to a value other than text.
     const AstRowGen* value = nullptr;
   };
-  ConvPlan plan_conversions(std::uint32_t e) const;
+  ConvPlan plan_conversions(const Run& held, const Run& over) const;
   // Each entry's plan, made once by `plan_held`.
   std::vector<ConvPlan> plans;
   static TextPlan plan_text(std::span<const AstRowGen* const> chain,

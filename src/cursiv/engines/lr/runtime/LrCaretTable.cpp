@@ -291,7 +291,7 @@ class CaretStacks {
   bool unchanged(SymbolId term, TextOffset at, TextOffset to,
                  std::string_view word) {
     condition_text(at, to, word);
-    typed_as(term, at, word);
+    typed_as(term, word);
     const bool known = std::exchange(_known, !word.empty());
     const bool alike = std::ranges::all_of(_answers, [&](const Answer& a) {
       return spliced(a.gap, a.from, a.token) == a.holds;
@@ -555,7 +555,7 @@ class CaretStacks {
     _known = !word.empty();
     if (_table.cond != nullptr) {
       condition_text(at, to, word);
-      typed_as(term, at, word);
+      typed_as(term, word);
       judge(at);
     }
     close(
@@ -567,11 +567,22 @@ class CaretStacks {
             return {&held, 1};
           const auto mode = _table.mode[frame.state];
           if (_table.cond != nullptr) typed_in(mode);
-          // Trivia belongs to the current mode, including after a reduction.
-          // A region must not jump a blank that only its caller ignored.
-          if (!trivia_to(mode, frame.at, at, frame.laid.indent.depth) ||
-              !glues(frame.laid.reading, frame.laid.mode, frame.laid.passes))
+          if (!glues(frame.laid.reading, frame.laid.mode, frame.laid.passes))
             return {};
+          // The candidate cannot jump a gap this mode refuses. A sole region
+          // exit can instead reduce on the real invalid byte, as the drive
+          // does, and let the caller re-read that gap before the candidate.
+          if (!trivia_to(mode, frame.at, at, frame.laid.indent.depth)) {
+            const auto sole = _table.soleReduce[frame.state];
+            if (sole == kLrNoProd || sole >= _table.reductions.size() ||
+                !_table.reductions[sole].regionExit)
+              return {};
+            const auto gap = reading(head, held);
+            return gap.size() == 1 && gap.front().sym == kInvalidSymbol &&
+                           gap.front().begin < at
+                       ? gap
+                       : std::span<const Token>{};
+          }
           // What the mode reads where the candidate is typed: the drive
           // holds it, and may lay an implied token before it if refused.
           auto kept = std::ranges::find(_allowed, mode, &Allowed::mode);
@@ -1017,13 +1028,16 @@ class CaretStacks {
           if (action.kind == LrActionKind::shift)
             shift(head, action, token, laid.assumes);
         }
-        // No token at all, in a mode that crosses no trivia, still answers
-        // the one reduce a condition guards, as the drive does.
+        // As in the drive, a tight mode's refused gap can still take its
+        // sole guarded reduction or region exit before reading it again.
         if (!Repair && !viable && token.sym == kInvalidSymbol &&
             _table.modeTight[_table.mode[state]] != 0 && via == kNoParent) {
           const auto sole = _table.soleReduce[state];
           auto assumes = laid.assumes;
-          if (sole != kLrNoProd && _table.prods[sole].gap != 0 &&
+          if (sole != kLrNoProd &&
+              (_table.prods[sole].gap != 0 ||
+               (sole < _table.reductions.size() &&
+                _table.reductions[sole].regionExit)) &&
               take(_table.prods[sole].gap, token, assumes) &&
               reduce_by(sole, assumes))
             viable = true;
@@ -1142,10 +1156,10 @@ class CaretStacks {
   void condition_text(TextOffset at, TextOffset to, std::string_view word) {
     const TextOffset from = std::min(_gapFrom, _assumedFrom);
     const TextOffset gap = at - from;
-    if (!_conditionKept || _conditionFrom != from || _conditionAt != at) {
-      _conditionKept = true;
+    // The initial [0, 0) gap is already the empty cached string.
+    if (_conditionFrom != from || _typedAt != at) {
       _conditionFrom = from;
-      _conditionAt = at;
+      _typedAt = at;
       _conditionText.assign(_text.substr(from, gap));
       _conditionGaps.clear();
     }
@@ -1176,10 +1190,9 @@ class CaretStacks {
   // The candidate typed as `word` is the token the lexer reads over the word
   // and the text behind it, which can run on past the word: in the mode of the
   // reading that takes it, the one that admits everything until one does.
-  void typed_as(SymbolId term, TextOffset at, std::string_view word) {
+  void typed_as(SymbolId term, std::string_view word) {
     _typedTerm = term;
-    _typedAt = at;
-    _typedWord = static_cast<TextOffset>(at + word.size());
+    _typedWord = static_cast<TextOffset>(_typedAt + word.size());
     _typedEnd = _typedWord;
     _typedMode = _table.errMode;
     _typedCut = false;
@@ -1606,15 +1619,14 @@ class CaretStacks {
   mutable TextOffset _tailEnd = 0;
   mutable std::size_t _tailKept = 0;
   SymbolId _typedTerm = kInvalidSymbol;
+  // The caret position shared by the kept gap and its typed candidate.
   TextOffset _typedAt = 0;
   TextOffset _typedWord = 0;
   mutable TextOffset _typedEnd = 0;
   std::uint16_t _typedMode = 0;
   // Whether the lexer read the candidate's token to the end of the text kept.
   mutable bool _typedCut = false;
-  bool _conditionKept = false;
   TextOffset _conditionFrom = 0;
-  TextOffset _conditionAt = 0;
   mutable LrGapMemo _conditionGaps;
   std::vector<Scan> _room;
   std::vector<Frame> _frames;
@@ -1724,7 +1736,6 @@ class CaretReplay {
       : _table(table),
         _cst(cst),
         _stacks(stacks),
-        _carries(stacks.indented()),
         _horizon(horizon) {
     if (!cst.recovered()) return;
     for (NodeId i = 0; i < cst.size(); ++i)
@@ -1817,7 +1828,7 @@ class CaretReplay {
           --l;
         if (_stacks.jump(Token{t.begin, t.end, term}, lhs, n.end,
                          _cst[l].end)) {
-          if (_carries) carry(f, job.id);
+          if (_stacks.indented()) carry(f, job.id);
           return true;
         }
       }
@@ -1850,7 +1861,6 @@ class CaretReplay {
   const LrCaretTable& _table;
   const Cst& _cst;
   CaretStacks& _stacks;
-  bool _carries;
   TextOffset _horizon;
   std::vector<NodeId> _repairs;
   std::vector<Job> _jobs;

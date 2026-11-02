@@ -24,6 +24,7 @@
 #include "cursiv/lsp/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/lsp/services/SharedLspServices.hpp"
 #include "cursiv/test/Check.hpp"
+#include "support/Throws.hpp"
 #include "cursiv/test/CodeActionResult.hpp"
 #include "cursiv/test/DecodedSemanticTokens.hpp"
 #include "cursiv/test/Disposable.hpp"
@@ -62,14 +63,8 @@ struct World {
 
 // A check runs to the end, or it throws: both are answers, and the lane names
 // which it wanted.
-template <class F>
-[[nodiscard]] bool passes(F&& check) {
-  try {
-    check();
-  } catch (const ct::ExpectationError&) {
-    return false;
-  }
-  return true;
+[[nodiscard]] bool passes(cursiv::function_ref<void()> check) {
+  return !support::throws<ct::ExpectationError>(check);
 }
 
 //  0         1
@@ -480,13 +475,9 @@ void the_virtual_file_system_answers_like_a_disk() {
 
   CHECK(files.stat("file:///w/a.ws").isFile);
   CHECK(files.stat("file:///w/sub").isDirectory);
-  bool threw = false;
-  try {
+  CHECK(support::throws<cursiv::FileSystemError>([&] {
     (void)files.stat("file:///w/missing.ws");
-  } catch (const cursiv::FileSystemError&) {
-    threw = true;
-  }
-  CHECK(threw);
+  }));
 
   const std::vector<cursiv::FileSystemNode> under =
       files.readDirectory("file:///w");

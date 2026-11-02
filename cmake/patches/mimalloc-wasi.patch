@@ -11,14 +11,11 @@
  #endif
 --- a/include/mimalloc/types.h
 +++ b/include/mimalloc/types.h
-@@ -528,7 +528,15 @@
+@@ -551,7 +551,12 @@
  #define MI_PAGE_MIN_START_BLOCK_ALIGN     MI_MAX_ALIGN_SIZE         // minimal block alignment for the first block in a page (16b)
  #define MI_PAGE_MAX_START_BLOCK_ALIGN2    (4*MI_KiB)                // maximal block alignment for "power of 2"-sized blocks (such that we guarantee natural alignment)
  #define MI_PAGE_OSPAGE_BLOCK_ALIGN2       (4*MI_KiB)                // also aligns any multiple of this size to avoid TLB misses.
 +#if defined(__wasi__)
-+#if MI_PAGE_MAP_FLAT
-+#error "WASI arena-aligned allocations require the two-level page map"
-+#endif
 +// WASM cannot release OS pages. Keep large aligned blocks in recyclable arenas.
 +#define MI_PAGE_MAX_OVERALLOC_ALIGN       (MI_ZU(1) << (MI_SIZE_BITS - 1))
 +#else
@@ -66,7 +63,7 @@
 +  return 0;
  }
 
- 
+
 @@ -278,6 +276,44 @@
  // Thread init/done
  //----------------------------------------------------------------
@@ -123,7 +120,7 @@
  }
 --- a/src/heap/page-map.c
 +++ b/src/heap/page-map.c
-@@ -463,7 +463,9 @@
+@@ -273,7 +273,9 @@
  static size_t mi_page_map_get_idx(mi_page_t* page, size_t* sub_idx, size_t* slice_count) {
    size_t page_size;
    uint8_t* page_start = mi_page_area(page, &page_size);
@@ -133,3 +130,22 @@
    *slice_count = _mi_slice_count_of_size(page_size) + ((page_start - mi_page_slice_start(page))/MI_ARENA_SLICE_SIZE); // add for large aligned blocks
    return mi_page_map_index(page_start, sub_idx);
  }
+--- a/src/prim/os.c
++++ b/src/prim/os.c
+@@ -120,13 +120,16 @@
+ void _mi_os_init(void) {
+   mi_os_mem_config_t config = mi_os_mem_config_default;
+   _mi_prim_mem_init(&config);
+   mi_assert(config.page_size != 0);
+   _mi_process.os_mem_config = config;  // publish at once
++  // WASI arenas are fully committed; unguarded slices need no OS protection.
++  #if !defined(__wasi__) || MI_SECURE || MI_GUARDED
+   if (_mi_os_page_size() > MI_ARENA_SLICE_SIZE) {
+     _mi_error_message(ENOTSUP, "the OS page size (%zu KiB) is larger than the arena slice size (%zu KiB); increase MI_ARENA_SLICE_SHIFT\n", _mi_os_page_size()/MI_KiB, (size_t)(MI_ARENA_SLICE_SIZE/MI_KiB));
+   }
++  #endif
+ }
+
+
+ /* -----------------------------------------------------------
+   Util

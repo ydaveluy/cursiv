@@ -256,8 +256,9 @@ struct Alternatives : cursiv::Extends<Element> {
 
 struct Grammar : cursiv::GrammarSpec {
   struct Expression;
+  struct ParentContent;
   struct LeafRule : rule<assign<&Leaf::value>(lit<"a">)> {};
-  struct Parent : rule<lit<"("> + ref<Expression> +
+  struct Parent : rule<lit<"("> + ref<ParentContent> +
                        flag<&Element::parenthesized>(lit<")">)> {};
   struct Primary : rule<ref<LeafRule> | ref<Parent>> {};
   struct Token
@@ -272,6 +273,18 @@ struct Grammar : cursiv::GrammarSpec {
                                some(lit<"|"> + append<&Alternatives::elements>(
                                                    ref<Sequence>))) |
                            ref<Sequence>> {};
+  // Redundant parentheses adopt the same node. Read them without another
+  // flag; Parent marks that node once after all its contents have returned.
+  // The explicit Counted construction keeps a child's flags on that child.
+  struct ParentContent
+      : rule<create<Alternatives>(
+                 append<&Alternatives::elements>(ref<Sequence>) +
+                 some(lit<"|"> + append<&Alternatives::elements>(ref<Sequence>))) |
+             create<Group>(append<&Group::elements>(ref<Token>) +
+                           some(append<&Group::elements>(ref<Token>))) |
+             create<Counted>(assign<&Counted::element>(ref<Primary>) +
+                             assign<&Counted::cardinality>(lit<"+">)) |
+             ref<LeafRule> | (lit<"("> + ref<ParentContent> + lit<")">)> {};
   using entry = Expression;
 };
 
