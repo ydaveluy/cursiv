@@ -366,7 +366,8 @@ void Emit::call_site(std::uint16_t id) {
   if (word) {
     const LlNode& body = at(a.cfg.rules[n.sym].body);
     const std::string pos = name("p");
-    put("::std::uint16_t {} = 0u;", pos);
+    put("::std::uint16_t {};", pos);
+    put("{} = 0u;", pos);
     open("if (!c.give) {");
     peek_choice(body.decision,
                 std::format("{}u", a.cfg.decisions[body.decision].mode), true);
@@ -794,10 +795,7 @@ void Emit::decision(std::uint16_t id) {
   if (db.repairCost <= 1) {
     open("default: {");
     reread();
-    open("if (c.invented < ::cursiv::kLlInventRun) {");
     invent();
-    close("}");
-    line("break;");
     close("}");
   } else {
     // ...and a choice too dear to invent still owes the caller a step.
@@ -808,8 +806,7 @@ void Emit::decision(std::uint16_t id) {
     open("default:");
     reread();
     if (db.repairCost != kLlRepairCostless) {
-      open("if (::cursiv::ll_ends<kTable>(c, c.la.sym) && "
-           "c.invented < ::cursiv::kLlInventRun) {");
+      open("if (::cursiv::ll_ends<kTable>(c, c.la.sym)) {");
       invent();
       close();
       open("} else {");
@@ -899,8 +896,7 @@ void Emit::term_choice(std::uint16_t id,
     put("case {}u: {} = {}u; break;", byArm[i][0], k, i);
   // A choice no arm answers, even after the skip, as `decision` repairs it:
   // an arm of one terminal costs one invented token.
-  put("default: if (c.invented < ::cursiv::kLlInventRun) {} = {}u; break;", k,
-      dec.repair);
+  put("default: {} = {}u; break;", k, dec.repair);
   close("}");
   close("}");
   put("if ({0} != 0xFFFFu) ::cursiv::ll_take_arm<kTable>(c, {0}a[{0}]);", k);
@@ -1356,7 +1352,7 @@ void Emit::climb(std::uint16_t r) {
                 : "default: ::cursiv::ll_consume<kTable>(c, row, pos); break;");
     close("}");
   }
-  line("if (c.give || c.at == f.before) break;");
+  line("if (c.give) break;");
   if (lays) put("{}:;", invented);
   line("f.w1 = c.last;");
   invoke(r, anyRight ? "f.right ? f.prec : f.prec + 1" : "f.prec + 1");

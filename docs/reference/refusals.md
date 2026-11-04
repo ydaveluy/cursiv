@@ -259,7 +259,7 @@ Write `many(commit(a, b))`, not `commit(a, b) + c`.
 
 Use the plain repetition forms inside terminals.
 
-### An implied token that is not a plain literal
+### A token that cannot be implied
 
 > in `implied(tok, cond)`, `tok` must be a literal with no guard, or a
 > terminal whose body is one
@@ -267,6 +267,11 @@ Use the plain repetition forms inside terminals.
 `implied(kw<"end">, eof)` and `implied(ref<NEWLINE>, eof)`, where `NEWLINE`
 reads more than a literal, are refused: a keyword is a guarded literal. Imply
 a plain `lit<>`, or write `ref<NEWLINE> | eof` where the token may be absent.
+
+> in `implied(tok, cond)`, `tok` cannot be a bracket named by `indent_open` or
+> `indent_close`
+
+A bracket changes how the lines after it are read, so the text must spell it.
 
 ### A condition over a rule that builds a node
 

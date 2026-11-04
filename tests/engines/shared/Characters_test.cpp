@@ -338,6 +338,17 @@ void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
       false);
   holds("isn a b", true);
   holds("isn a  b", false);
+  // A pattern that holds a character is read from that character, whatever a
+  // shorter one spells inside it.
+  holds(
+      "hinner a\xC3\xA9"
+      "b",
+      true);
+  holds(
+      "hinner a\xA9"
+      "b",
+      true);
+  holds("hinner a b", false);
   holds("hbyte a b", true);
   holds("hbyte ab", false);
   holds(

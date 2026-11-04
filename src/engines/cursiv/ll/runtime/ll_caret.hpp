@@ -560,9 +560,15 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
     if (pos == 0 || pos > T.nafter || T.nodeAfter[pos - 1] == 0xFFFFFFFFu)
       return LlReplay::broken;
     // A condition asked of the first token or before it is not asked again: a
-    // wider replay answers where one reads the text a candidate replaces.
+    // wider replay answers where one reads the text a candidate replaces, or
+    // where its skip reads over the first token.
     if constexpr (T.ngapConds != 0)
-      if (bound && tail.covers(T.condReach, first, tail.onward + read))
+      if (bound && (tail.covers(T.condReach, first, tail.onward + read) ||
+                    (T.condReach.phrase &&
+                     ll_match_text<T>(cst.text().data(), cst.text().size(),
+                                      ll_skips_of<T>(T.nodes[pos - 1].mode, false),
+                                      first.begin)
+                             .end > first.begin)))
         return LlReplay::shallow;
     const std::uint32_t state = T.nodeAfter[pos - 1];
     std::uint32_t stack = kLlCtxNone;
@@ -628,9 +634,11 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
           TextOffset seen = 0;
           const bool holds = ll_condition_text<T>(text, condition, token,
                                                   gapFrom, false, &seen);
-          reaches = reaches || tail.reaches(seen, text.size());
+          const bool defers = tail.reaches(seen, text.size());
+          reaches = reaches || defers;
+          tail.deferred = tail.deferred || defers;
           asked.emplace_back(condition, holds);
-          return holds;
+          return holds || defers;
         }) && ll_step_leaf<T>(sim, known, leaf, pos);
         if (!crossed) sim.load(held);
       }
@@ -976,6 +984,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     bool beyond = false;
     if (replayed == LlReplay::broken) {
       tail.steps.clear();
+      tail.deferred = false;
       replayed =
           ll_replay<T>(sim, cst, stamp, spine, before, 0, false, exact, tail);
       widens = false;
@@ -1009,10 +1018,6 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       if (read != nullptr) *read = seen;
       return holds;
     };
-    // A condition of the last token that reads the text a candidate replaces
-    // is the candidate's to answer: on the document every reading stands, and
-    // each candidate reads the token again on its own text.
-    bool deferred = false;
     // The last token read again from `start`, once as each terminal it can
     // be, its conditions asked of `buffer`, which begins at `base`. `alt` names
     // the reading a configuration follows: 0 the one the descent settled on,
@@ -1037,7 +1042,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
               const bool defers =
                   kept != nullptr && tail.reaches(seen, text.size());
               if (kept != nullptr) kept->asked.emplace_back(condition, holds);
-              deferred = deferred || defers;
+              tail.deferred = tail.deferred || defers;
               return holds || defers;
             });
             beyond = beyond || (widens && sim.at_unbound_return());
@@ -1115,7 +1120,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     // candidate replaces are asked again on the text with it spliced in.
     const bool redoable =
         T.ngapConds != 0 &&
-        (!tail.steps.empty() || deferred ||
+        (!tail.steps.empty() || tail.deferred ||
          (stood && leaf && tail.covers(T.condReach, leaf, 1u)));
     const TextOffset reread =
         !tail.steps.empty() ? tail.steps.front().gapFrom : lead;
@@ -1213,7 +1218,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
                                 : static_cast<TextOffset>(gap + sample.size()),
                             term};
           const bool retry =
-              redoable && (deferred || !unchanged(conditioned, base));
+              redoable && (tail.deferred || !unchanged(conditioned, base));
           const bool redone = retry && redo(conditioned, base);
           if (retry && !redone) return false;
           return admits(redone, [&](std::uint16_t condition) {

@@ -58,7 +58,7 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
   }
   std::vector<LrLowerSlot> slots{left};
   slots.insert(slots.end(), before.begin(), before.end());
-  const auto slot = static_cast<std::uint8_t>(slots.size());
+  const auto slot = static_cast<std::uint16_t>(slots.size());
   slots.push_back(infix_side(cfg, opRow, sym));
   slots.back().doc = doc;
   slots.insert(slots.end(), after.begin(), after.end());

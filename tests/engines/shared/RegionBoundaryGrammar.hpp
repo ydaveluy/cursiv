@@ -87,12 +87,28 @@ struct Base : cursiv::GrammarSpec {
       lit<"commit-note:"> +
       skip(ignore<WS>, hide<>, lit<"["> + many(commit(lit<",">, item))) +
       lit<";">)> {};
+  // A condition skips the note its caller reads here as a token, however many
+  // stand before the name it looks for.
+  struct SkipHas : rule<create<Document>(
+      lit<"skip-has:"> +
+      ((&lit<"x"> + many(lit<"~">) + (item | lit<"z">)) |
+       (many(lit<"~">) + lit<"y">)) +
+      lit<".">)> {};
+  // ...and as far past the end of the record that asks it.
+  struct SkipInner : rule<create<Document>(lit<"a"> + !lit<"x">)> {};
+  struct SkipRecord : rule<create<Document>(
+      lit<"skip-rec:"> + assign<&Document::in>(ref<SkipInner>) +
+      many(lit<"~">) + option(item) + lit<".">)> {};
+  struct SkipNot : rule<create<Document>(
+      lit<"skip-not:"> + !lit<"x"> + many(lit<"~">) + option(item) +
+      lit<".">)> {};
   struct Root : rule<ref<Required> | ref<Nonempty> | ref<AtLeastTwo> |
                      ref<Optional> | ref<Fixed> | ref<ClosingInside> |
                      ref<Called> | ref<CalledOptional> | ref<CalledEntry> |
                      ref<Same> | ref<SameHead> | ref<PatternHead> |
                      ref<ShortItem> | ref<LongItem> | ref<NestHead> |
-                     ref<CommitTail> | ref<CommitNote>> {};
+                     ref<CommitTail> | ref<CommitNote> | ref<SkipHas> |
+                     ref<SkipNot> | ref<SkipRecord>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = NOTE;

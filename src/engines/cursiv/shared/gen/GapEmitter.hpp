@@ -264,6 +264,8 @@ class GapEmitter : private EmitOutput {
     }
     if (!whole) {
       // A search for CR already includes CRLF, wherever it occurs in the gap.
+      // The search only tries the start of a character, so a pattern that may
+      // begin on a continuation byte, 0x80 to 0xBF, covers nothing past a start.
       const auto covers = [&](std::uint16_t pe, std::uint16_t qe) {
         return _cfg.sets[qe].covers(_cfg.sets[pe]);
       };
@@ -272,8 +274,10 @@ class GapEmitter : private EmitOutput {
         const auto& p = patterns[i];
         for (std::size_t j = 0; j < patterns.size() && !covered; ++j) {
           const auto& q = patterns[j];
+          const auto at = std::ranges::search(p, q, covers);
           covered = (q.size() < p.size() || (q.size() == p.size() && j < i)) &&
-                    !std::ranges::search(p, q, covers).empty();
+                    !at.empty() &&
+                    (at.begin() == p.begin() || _cfg.sets[q[0]].w[2] == 0);
         }
         if (covered) patterns.erase(patterns.begin() + i);
       }

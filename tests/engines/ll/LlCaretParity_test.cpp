@@ -167,6 +167,20 @@ void a_closer_needs_its_opener_and_a_mark_its_member() {
   CHECK(!offers(args, ";"));
 }
 
+// An operator left out of the text still has its right operand read.
+void an_implied_operator_reads_its_right_operand() {
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  for (const auto* const parser : {lr.get(), ll.get()})
+    for (const std::string_view text :
+         {"times:2", "times:2 * 3", "times:2 3", "times:2 3 4", "times:2 3 * 4"}) {
+      const auto parsed = parser->parse(text);
+      const bool clean = parsed.accepted && parsed.diagnostics.empty();
+      CHECK(clean);
+      if (!clean) std::printf("  %s\n", std::string(text).c_str());
+    }
+}
+
 void statements_ended_by_a_gap_or_a_semicolon() {
   const auto lr = tllconditions::generated::Lr::create_parser();
   const auto ll = tllconditions::generated::Ll::create_parser();
@@ -420,6 +434,11 @@ void each_member_a_token_fills_is_named_as_the_descent_names_it() {
   CHECK(end(*lr, "member:turns { bx ") ==
         (Names{"ID:text/Hold", "bx:marks/Hold/entered", "in:text/Hold", "mk",
                "nk:text/Hold", "zz"}));
+  // A word read in place, ahead of a call the descent comes back from.
+  for (const auto* const parser : {lr.get(), ll.get()}) {
+    const auto parsed = parser->parse("member:picked pa [[]] ; picked pb [] ;");
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+  }
   // A rule entered by itself alone fills nothing at a caret.
   const auto start = end(*lr, "");
   CHECK(std::ranges::count(start, std::string("s0")) == 1);
@@ -450,6 +469,7 @@ int main() {
   an_expression_with_parentheses_calls_and_a_postfix_mark();
   a_closer_needs_its_opener_and_a_mark_its_member();
   statements_ended_by_a_gap_or_a_semicolon();
+  an_implied_operator_reads_its_right_operand();
   a_word_read_as_two_terminals_goes_on_as_either();
   a_literal_takes_its_spelling_from_the_name();
   the_twin_of_the_operator_is_not_offered_behind_it();

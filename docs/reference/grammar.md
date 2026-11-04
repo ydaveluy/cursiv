@@ -602,9 +602,9 @@ parse in any other way, as in
 blocks the insertion**, even one that fails later: with a statement-ending
 `implied(lit<";">, gap::line | eof)`, `a \n (b)` stays a call.
 
-`tok` is an unguarded literal, or a terminal whose body is one. An inserted
-token has zero width. `cond` combines gap conditions, `&e`, `!e` and `eof`
-with `|` and `+`.
+`tok` is an unguarded literal, or a terminal whose body is one, and not a
+bracket named by `indent_open` or `indent_close`. An inserted token has zero
+width. `cond` combines gap conditions, `&e`, `!e` and `eof` with `|` and `+`.
 
 ### Trivia scopes
 

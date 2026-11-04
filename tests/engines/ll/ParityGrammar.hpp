@@ -246,9 +246,19 @@ struct Members : cursiv::GrammarSpec {
                      option(some(append<&ast::Hold::turns>(ref<Turn>), lit<",">) +
                             option(lit<",">)) +
                      lit<"}">)> {};
+  // A word read in place, then a call the descent comes back from: the jump back
+  // crosses what the word read.
+  struct Pick : rule<kw<"pa"> | kw<"pb">> {};
+  struct Deep;
+  struct Deep : rule<create<ast::Hold>(lit<"["> +
+                                       option(append<&ast::Hold::turns>(ref<Deep>)) +
+                                       lit<"]">)> {};
+  struct Picked : rule<create<ast::Hold>(
+                      kw<"picked"> + ref<Pick> +
+                      append<&ast::Hold::turns>(ref<Deep>) + lit<";">)> {};
   struct Stmt : rule<ref<Twice> | ref<Through> | ref<Lone> | ref<Both> |
                      ref<Ticked> | ref<Bare> | ref<Named> | ref<Plain> |
-                     ref<Marks> | ref<Turns>> {};
+                     ref<Marks> | ref<Turns> | ref<Picked>> {};
   struct UnitRule : rule<create<ast::Holds>(
                         many(append<&ast::Holds::holds>(ref<Stmt>)))> {};
 };

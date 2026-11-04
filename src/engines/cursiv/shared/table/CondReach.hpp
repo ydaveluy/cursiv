@@ -14,8 +14,8 @@ struct CondReach {
   // Past the end of a token with a width, whose bytes bound what a run
   // consumes.
   TextOffset tail = 0;
-  // A phrase reads on past its token, over trivia of any length: how far it
-  // reads is asked of the text, and `look` and `tail` count the rest.
+  // It reads over trivia of any length, before its first token or past it: how
+  // far it reads is asked of the text, and `look` and `tail` count the rest.
   bool phrase = false;
   // The whole terminals such a phrase reads, the token in hand among them:
   // the tokens it can reach lie that many tokens on, whatever the bytes

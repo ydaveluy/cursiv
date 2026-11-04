@@ -20,7 +20,7 @@ struct InfixOp {
   std::uint16_t owner = 0;  // the table, whose operators alone may clash
   std::uint8_t prec = 0;
   Association group = Association::left;
-  std::uint8_t slot = 1;  // where the operator stands in `prod`
+  std::uint16_t slot = 1;  // where the operator stands in `prod`
 };
 
 // The rule an operator names, `void` for a bare literal. Conditions around one

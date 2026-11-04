@@ -249,6 +249,19 @@ void a_caret_crosses_the_gap_under_each_candidates_alphabet(
   check("commit-note:[,x~<|>;", {";"});
   check("commit-tail:,x~<|>;", {";"});
   check("commit-tail:,x <|>;", {";"});
+  // A condition asked of the first `~` skips the rest of them: the candidate
+  // changes what it answers, however far from it the caret stands.
+  accepts(reading, "skip-has:~~x.", 1);
+  rejects(reading, "skip-not:~~x.");
+  check("skip-has:~~<|>y.", {"x", "y", "~"});
+  check("skip-has:~~~~~~~~~~~~~~~~<|>y.", {"x", "y", "~"});
+  check("skip-not:~~<|>", {".", "~"});
+  check("skip-not:~~<|>.", {".", "~"});
+  check("skip-not:~~~~~~~~~~~~~~~~<|>.", {".", "~"});
+  check("skip-not:<|>~~~~~~~~~~~~~~~~x.", {"."});
+  check("skip-rec:a~<|>", {".", "~"});
+  check("skip-rec:a~~~~~~~~<|>", {".", "~"});
+  check("skip-rec:a~~~~~~~~<|>.", {".", "~"});
 }
 
 }  // namespace

@@ -578,6 +578,24 @@ struct ExNamed : GrammarSpec {
 
 using XN = LrLowering<ExNamed>;
 
+// An operator behind as many conditions as a table can name, each kept apart
+// by a scope of its own, so that it stands past position 255 of its production.
+struct ExFar : GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct NUM : terminal<as<double>(some(d))> {};
+  static constexpr auto g1 = tight(gap::none);
+  static constexpr auto g5 = g1 + g1 + g1 + g1 + g1;
+  static constexpr auto g50 = g5 + g5 + g5 + g5 + g5 + g5 + g5 + g5 + g5 + g5;
+  static constexpr auto g255 = g50 + g50 + g50 + g50 + g50 + g5;
+  struct Atom : rule<create<ast::Num> + assign<&ast::Num::value>(ref<NUM>)> {};
+  struct Expr
+      : infix<Atom, ast::Bin, levels(left(g255 + lit<"*">), left(lit<"+">))> {};
+  using entry = Expr;
+  using ignored = WS;
+};
+
+using XF = LrLowering<ExFar>;
+
 void a_precedence_table() {
   const auto& c = X::cfg();
   const auto prod = [&](unsigned k) { return c.prods[k]; };
@@ -600,6 +618,14 @@ void a_precedence_table() {
   CHECK(c.termBuild[xsym(0, 1)].prec == 2);
   CHECK(c.termBuild[xsym(0, 1)].assoc == cursiv::Association::left);
   CHECK(!X::table().fault);
+
+  // An operator stays the one on its step wherever it stands in its production.
+  const auto& far = XF::cfg();
+  CHECK(!XF::table().fault);
+  CHECK(far.prods[1].len == 258 && far.prodBuild[1].prec == 2);
+  const std::uint16_t star = far.sym_at(far.prods[1], 256);
+  CHECK(is_term(star) && far.termBuild[star].prec == 2);
+  CHECK(far.termBuild[far.sym_at(far.prods[4], 0)].prec == 0);
 
   // An action says what is done, never where: the three operators share one
   // creation and three writes, whichever of them the reduce was.

@@ -124,6 +124,8 @@ struct Gaps : cursiv::GrammarSpec {
              ((lit<"hn"> + lit<"a"> + gap::has(cr<"^é">) + lit<"b">) |
               (lit<"isn"> + lit<"a"> + gap::is(cr<"^é">) + lit<"b">) |
               (lit<"hbyte"> + lit<"a"> + gap::has(byte) + lit<"b">) |
+              (lit<"hinner"> + lit<"a"> + gap::has(lit<"\xA9"> | lit<"é">) +
+               lit<"b">) |
               (lit<"isbb"> + lit<"a"> + gap::is(byte + byte) + lit<"b">) |
               (lit<"isaa"> + lit<"a"> + gap::is(any + any) + lit<"b">)) +
              eof> {};

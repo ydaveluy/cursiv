@@ -383,7 +383,7 @@ class LrGss {
     return lr_lex_refused<A>(
         _c, mode, r.indent.depth, r.la,
         [&](const Token& t) {
-          return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
+          return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r, t));
         },
         [](TextOffset, const Token*) {}, room.data(), tied);
   }

@@ -19,11 +19,11 @@ class GapReach {
  public:
   explicit GapReach(const Cfg& g) : _g(g) {}
 
-  // A phrase whose skipper reads trivia: how far it reads, only the text
-  // says.
+  // A leaf that reads tokens over trivia: how far it reads, only the text says.
   bool skips(unsigned leaf) const {
-    return _g.gapLeaves[leaf].reads_tokens() &&
-           bounds(_g.gapLeaves[leaf].node).looked >= kEndless;
+    const GapLeaf& l = _g.gapLeaves[leaf];
+    return l.reads_tokens() &&
+           (l.skip != kNoLexNode || bounds(l.node).looked >= kEndless);
   }
 
   // The leaves condition `k` reads.
@@ -58,10 +58,11 @@ class GapReach {
       const GapLeaf& leaf = _g.gapLeaves[v];
       if (!leaf.reads_tokens()) continue;
       const auto reach = bounds(leaf.node);
-      if (reach.looked >= kEndless) {
+      if (skips(v)) {
         phrase = true;
         tokens = std::max(tokens, count(leaf.node));
-      } else {
+      }
+      if (reach.looked < kEndless) {
         look = std::max(look, reach.looked);
         tail = std::max(tail, leaf.kind == GapLeafKind::phrase
                                  ? reach.looked

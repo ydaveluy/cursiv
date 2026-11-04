@@ -503,6 +503,7 @@ void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
         "a terminal whose body is one: the parser inserts it with zero width "
         "when it is missing -- imply a plain `lit<>`, or write `tok | eof` "
         "where the token may be absent");
+  _impliedToks.insert(_lex.canon(e));
 }
 
 std::uint16_t Lowerer::implied_term(ImageId e, std::uint16_t k) {

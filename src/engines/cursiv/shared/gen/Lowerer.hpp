@@ -273,6 +273,7 @@ class Lowerer {
   void declare_config(unsigned cfg);
   void delimit(ImageId spelled, std::int8_t d);
   void delimit_spelled(ImageId spelled, std::int8_t d);
+  std::unordered_set<ImageId> _impliedToks;
 
   friend class LexReifier;
   std::unordered_map<ImageId, std::uint8_t> _lexicalMemo;

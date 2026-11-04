@@ -101,11 +101,15 @@ struct Base : cursiv::GrammarSpec {
   struct NestPostfix : rule<(ref<NestPrimary> + lit<"!">) | ref<NestPrimary>> {};
   struct NestSum : rule<ref<NestPostfix> + many(lit<"+"> + ref<NestPostfix>)> {};
   struct NestPrimary : rule<ref<NUMBER> | (lit<"("> + ref<NestSum> + lit<")">)> {};
+  // An operator the text may leave out: the right operand is read all the same.
+  struct Times : infix<Atom, Binary, left(implied(lit<"*">, &ref<NUMBER>))> {};
+  struct Timed : rule<create<StatementNode>(assign<&StatementNode::value>(ref<Times>))> {};
   struct Root
       : rule<create<Document>(
             (many(append<&Document::items>(ref<Block> | ref<Statement>)) +
              eof) |
             (lit<"nest:"> + ref<NestSum> + eof) |
+            (lit<"times:"> + append<&Document::items>(ref<Timed>) + eof) |
             (lit<"arrow:"> +
              many(append<&Document::items>(ref<LineEnded> | ref<Tight> |
                                            ref<Arrow> | ref<Fork>)) +

@@ -424,6 +424,10 @@ void Lowerer::declare_config(unsigned k) {
 
 void Lowerer::delimit_spelled(ImageId spelled, std::int8_t d) {
   const ImageId want = _lex.canon(spelled);
+  if (_impliedToks.contains(want))
+    refuse_lowering(
+        "in `implied(tok, cond)`, `tok` cannot be a bracket named by "
+        "`indent_open` or `indent_close` -- write the bracket in the text");
   for (const std::uint32_t rule : _termRule)
     if (_lex.canon(body_in(0, rule)) == want &&
         !_c.terms[sym_of(0, rule)].trivia)

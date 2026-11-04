@@ -50,10 +50,10 @@ inline bool lr_order_exact(std::uint32_t at) {
 
 // A held token answers conditions for the one it stands in for.
 template <class R>
-inline const Token& lr_cond_token(const R& s) {
+inline const Token& lr_cond_token(const R& s, const Token& t) {
   if constexpr (kLrPins<R>)
-    if (s.pin && s.la == s.pinTok) return s.condTok;
-  return s.la;
+    if (s.pin && t == s.pinTok) return s.condTok;
+  return t;
 }
 
 // A token no lexer read put in hand in `mode`: invented before the one in
@@ -74,10 +74,14 @@ inline void lr_pin(R& r, SymbolId term, bool reread, TextOffset end,
 
 // What one reading's conditions answer, on the gap before its token.
 template <class R>
-inline auto lr_shadow_holds(const LrContext& c, const R& s) {
-  return [&c, &s](unsigned k) {
-    return c.drive->cond(c, k, s.virt.from, lr_cond_token(s));
+inline auto lr_shadow_holds(const LrContext& c, const R& s, const Token& t) {
+  return [&c, &s, &t](unsigned k) {
+    return c.drive->cond(c, k, s.virt.from, lr_cond_token(s, t));
   };
+}
+template <class R>
+inline auto lr_shadow_holds(const LrContext& c, const R& s) {
+  return lr_shadow_holds(c, s, s.la);
 }
 
 // A lone action the gap refuses -- a reduce whose condition fails, a guard
@@ -285,7 +289,7 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
         unsigned k2 = 0;
         lr_action_run<A>(state, term, f2, k2);
         if (k2 == 0 || !c.drive->cond(c, A.cfg.terms[term].cond, v.from,
-                                      lr_cond_token(reading())))
+                                      lr_cond_token(reading(), reading().la)))
           continue;
         v.lay(reading().la, q, term);
         f = f2;
@@ -302,7 +306,7 @@ template <const auto& A, class R>
 bool lr_read_takes(const LrContext& c, R& s, const Token& t) {
   return lr_climb_takes<A>(
       LrOverlayClimb<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
-      lr_shadow_holds(c, s), c.walkMemo);
+      lr_shadow_holds(c, s, t), c.walkMemo);
 }
 
 // The token a reading holds, a flagged winner of `mode`, read again while its

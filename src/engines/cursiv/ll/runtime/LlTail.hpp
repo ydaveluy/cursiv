@@ -38,6 +38,10 @@ struct LlTail {
   // between the replay's last and the caret.
   TextOffset edge = 0;
   unsigned onward = 0;
+  // A condition read the text a candidate replaces, so it is the candidate's to
+  // answer: on the document every reading stands, and each candidate reads the
+  // token again on its own text.
+  bool deferred = false;
 
   // Whether a condition that read the text up to `seen` read the text the
   // candidate replaces: a phrase that read to the end goes on with it.
