@@ -255,6 +255,14 @@ inline bool ll_held_takes(const LlContext& c, SymbolId term) {
           tape.tier(state, term, c.src, c.la.end, c.len, far) == 0);
 }
 
+// Whether `mode` lexes `sym` for the length of its token alone: no position
+// reading in it takes `sym`, a condition standing there names it.
+template <const auto& T>
+constexpr bool ll_lengthens(std::uint16_t mode, std::uint16_t sym) {
+  return T.has_longer() && mode < T.nmodes && T.longer_mode(mode) != kNoMode &&
+         T.mode_admits(T.longer_mode(mode), sym);
+}
+
 // A token held answers a point that reads under another alphabet with the
 // terminal the lexer reads there, unless the held one takes it away. The
 // alphabet that does not admit it is the narrower one: where it reads another
@@ -267,7 +275,7 @@ inline void ll_peek_held(LlContext& c, std::uint16_t mode) {
   const Scan sc = ll_match_text<T>(c.src, c.len, mode, c.la.begin);
   if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
   if (sc.end != c.la.end) {
-    if (T.terms[c.la.sym].element != kNoElement)
+    if (!ll_lengthens<T>(c.la.mode, c.la.sym))
       c.la = Token{c.la.begin, sc.end, sc.term, mode};
     return;
   }
@@ -344,25 +352,41 @@ inline void ll_repeat_read(LlContext& c, std::uint16_t mode) {
     ll_hold<T>(c);
 }
 
+// The terminals a position is read without.
+template <const auto& T>
+using LlSkipped = typename LlLexTape<T>::Skip;
+
+// The token in hand read again under `mode`, its terminal added to `skip`.
+// False, the token left as it stands, where it is no terminal's or where
+// nothing but trivia reads there. The trivia before it stays read.
+template <const auto& T>
+inline bool ll_read_without(LlContext& c, std::uint16_t mode,
+                            LlSkipped<T>& skip) {
+  if (c.la.sym == kEofSymbol || c.la.sym >= T.nterms ||
+      T.terms[c.la.sym].laid != 0)
+    return false;
+  skip.set(c.la.sym);
+  const typename LlLexTape<T>::Skipping tape{.skip = &skip};
+  const Scan sc = lex_match(tape, c.src, c.len, mode, c.la.begin);
+  if (sc.term == kInvalidSymbol || sc.end == c.la.begin ||
+      ll_blank<T>(sc.term, c.indent.depth))
+    return false;
+  c.la = Token{c.la.begin, sc.end, sc.term, mode};
+  c.laMode = mode;
+  return true;
+}
+
 // The token in hand at a choice whose alphabet admits, for a caller alone, a
 // terminal that reads over another of its own: where no frame the descent
 // stands in goes on from it, no reading of the choice takes that longer
 // match, and the position is read again without it, as often as the reading
-// it then elects is another such. The trivia before it stays read; where no
-// token but trivia reads there, the match stands.
+// it then elects is another such.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_refuse_flagged(LlContext& c, std::uint16_t mode,
                                               std::uint16_t decision) {
-  typename LlLexTape<T>::Skip skip{};
-  const typename LlLexTape<T>::Skipping tape{.skip = &skip};
+  LlSkipped<T> skip{};
   while (T.holds(T.dec_flag(decision), c.la.sym) &&
-         !ll_callers_take<T>(c, c.la.sym)) {
-    skip.set(c.la.sym);
-    const Scan sc = lex_match(tape, c.src, c.len, mode, c.la.begin);
-    if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return;
-    if (ll_blank<T>(sc.term, c.indent.depth)) return;
-    c.la = Token{c.la.begin, sc.end, sc.term, mode};
-    c.laMode = mode;
+         !ll_callers_take<T>(c, c.la.sym) && ll_read_without<T>(c, mode, skip)) {
   }
 }
 
@@ -403,6 +427,7 @@ inline Token ll_ahead_peek(const LlContext& c,
     head = false;
   }
 }
+
 
 // ...and past `t`, taken or dropped as a repair drops it.
 template <const auto& T>
@@ -501,7 +526,8 @@ inline bool ll_states_nothing(const CstRun& run, NodeCount at) {
 // meets the row an elected abandon erased: it would put the group's creation
 // back, where ll_close lays the group's record with none. A local give-up
 // marks the ride as ll_close marks its record. Trivia, and repairs that
-// state nothing, may follow the subtree: they owe the group nothing.
+// state nothing, may stand on either side of the subtree: they owe the group
+// nothing.
 template <const auto& T>
 inline bool ll_ride(LlContext& c, NodeCount from, const LlFuse* f, unsigned n) {
   if (n == 0 || c.last == kNoNode) return false;
@@ -514,7 +540,12 @@ inline bool ll_ride(LlContext& c, NodeCount from, const LlFuse* f, unsigned n) {
   }
   if (now == from) return false;
   CstNode& r = run.at(c.last);
-  if (now - from != r.subtreeSize) return false;
+  if (now - from != r.subtreeSize) [[unlikely]] {
+    if (!c.repaired || now - from < r.subtreeSize) return false;
+    for (NodeCount k = now - r.subtreeSize; k > from;
+         k -= run.at(k - 1).subtreeSize)
+      if (!ll_states_nothing<T>(run, k - 1)) return false;
+  }
   const ElementId h = T.stamp.row(r);
   for (unsigned i = 0; i < n; ++i)
     if (f[i].from == h) {

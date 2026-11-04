@@ -1,14 +1,17 @@
+#include <chrono>
 #include <cstdio>
 #include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/core/utils/Cancellation.hpp"
 #include "cursiv/fuzz/FuzzLane.hpp"
 #include "cursiv/test/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
@@ -816,20 +819,30 @@ void a_cyclic_table_reads_its_levels(const cursiv::Parser& p) {
 // trivia to a reading its operand ended before it.
 void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
   const struct {
-    std::string_view text;
+    std::string_view section, text;
     std::size_t statements;
   } cases[] = {
-      {"x\n[y]", 2},
-      {"[]\n[y]\nz", 3},
-      {"x[y]", 1},
-      {"x\n.y", 1},
-      {"x\n?: y", 1},
-      {"when\nb -> a\nelse -> a\nend", 1},
-      {"when\nelse -> a = b\nend\nx", 2},
+      {"lines:", "x\n[y]", 2},
+      {"lines:", "[]\n[y]\nz", 3},
+      {"lines:", "x[y]", 1},
+      {"lines:", "x\n.y", 1},
+      {"lines:", "x\n?: y", 1},
+      {"lines:", "when\nb -> a\nelse -> a\nend", 1},
+      {"lines:", "when\nelse -> a = b\nend\nx", 2},
+      // A blank in front of the newline changes nothing.
+      {"lines:", "x \n[y]", 2},
+      {"lines:", "x \n.y", 1},
+      {"lines:", "when\nb -> a\nelse -> a \nend", 1},
+      {"lines:", "when\nb \n-> a\nend", 1},
+      {"heads:", "h\n", 1},
+      {"heads:", "h []-\n", 1},
+      {"heads:", "h\n[]-\n", 2},
+      {"heads:", "h \n[]-\n", 2},
   };
   for (const auto& sample : cases) {
     // The AST holds views into the text it was read from: keep it alive.
-    const std::string source = "lines:" + std::string(sample.text);
+    const std::string source =
+        std::string(sample.section) + std::string(sample.text);
     const cursiv::ParseResult r = p.parse(source);
     const auto* const lines = r.value_as<ast::Lines>();
     const std::size_t read = lines != nullptr ? lines->items.size() : 0;
@@ -843,6 +856,38 @@ void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
   }
 }
 
+// Blocks nested as deep as a program nests its own cost what they read: sixteen
+// levels at twice the readings per level would last minutes.
+void a_nested_choice_costs_its_depth(const cursiv::Parser& p) {
+  std::string block = "z\n";
+  for (unsigned level = 0; level < 16; ++level)
+    block = "h:\n{" + block + "}!\n";
+  const std::string source = "blocks:" + block;
+  const auto begin = std::chrono::steady_clock::now();
+  const cursiv::ParseResult r = p.parse(source);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+  CHECK(r.accepted && r.diagnostics.empty() && !r.cst().recovered());
+}
+
+// A closure over rules that may read nothing lasts seconds: a stop reaches it.
+void a_stop_reaches_a_long_closure(const cursiv::Parser& p) {
+  cursiv::CancellationTokenSource source;
+  std::thread stopper([&source] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    source.request_stop();
+  });
+  const auto begin = std::chrono::steady_clock::now();
+  bool stopped = false;
+  try {
+    (void)p.parse("empties:a;", source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    stopped = true;
+  }
+  stopper.join();
+  CHECK(stopped);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+}
+
 void every_engine(const cursiv::Parser& p) {
   a_prefix_binds_what_is_tighter(p);
   a_postfix_binds_what_is_tighter(p);
@@ -850,6 +895,7 @@ void every_engine(const cursiv::Parser& p) {
   a_level_builds_its_own_class(p);
   a_cyclic_table_reads_its_levels(p);
   a_newline_ends_what_reads_it(p);
+  a_nested_choice_costs_its_depth(p);
 }
 
 }  // namespace
@@ -857,6 +903,7 @@ void every_engine(const cursiv::Parser& p) {
 void run() {
   engine = "Ll";
   every_engine(*tunary::generated::Ll::create_parser());
+  a_stop_reaches_a_long_closure(*tunary::generated::Ll::create_parser());
   engine = "Lr";
   every_engine(*tunary::generated::Lr::create_parser());
   // The fuzz lane writes the binary chains of a table with unary levels, and

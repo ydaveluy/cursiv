@@ -43,8 +43,8 @@ struct LlReading {
   // The end of the text it has taken: what a condition on a gap reads from.
   TextOffset gapFrom = 0;
   bool done = false;
-  // A decision can be replayed only once its surviving readings name one
-  // root arm. Terminal roots have that property from their first position.
+  // Its surviving readings name one root arm, the one a plan replay enters.
+  // Terminal roots have that property from their first position.
   bool settled = true;
   // Dominated: never read again.
   bool gone = false;
@@ -64,7 +64,8 @@ struct LlReading {
   std::uint32_t invented = 0;
   std::uint32_t link = kNoGestureLink;
   // Author tokens read on this path, including re-readings. Unlike shifts,
-  // this never resets: call starts use it to price an abandon exactly.
+  // this never resets: call starts use it to price an abandon exactly. A race
+  // prices nothing and holds the place in the text here (`ll_search_race`).
   std::uint32_t tokens = 0;
 
   // Real tokens since the last gesture, up to `kLlArmReach`.

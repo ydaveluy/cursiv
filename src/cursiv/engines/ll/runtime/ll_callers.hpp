@@ -16,8 +16,7 @@
 namespace cursiv {
 
 // Each row the rule's end may return through, the nearest frame first, until
-// `read` answers true or a frame must read something. True where `read` did,
-// or where the frames ran out with no caller known: any token may follow.
+// `read` answers true or a frame must read something. True where `read` did.
 template <const auto& T, class Read>
 inline bool ll_caller_rows(const LlContext& c, Read&& read) {
   static_assert(T.callerReadAt != nullptr);
@@ -25,7 +24,6 @@ inline bool ll_caller_rows(const LlContext& c, Read&& read) {
   constexpr std::uint32_t document =
       T.atn.edge(T.atn.state(T.atnStart).edge).follow;
   for (std::size_t i = c.stack.size() + 1; i-- > 0;) {
-    if (i == 0 && !c.document) return true;
     const std::uint32_t at = T.callerReadAt[i != 0 ? c.stack[i - 1] : document];
     if (read(LlTermRow{T.callerReads + (at >> 1), T.termWords})) return true;
     if ((at & 1u) == 0) return false;

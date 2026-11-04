@@ -60,8 +60,7 @@ inline void no_write_off_position(LlLowered& o, const Node& k,
     o.fault.raise(GrammarFaultCode::directiveOnNoPosition, owner);
 }
 
-// An option over a zero-width item says nothing its absence does not, and a
-// repetition over an item that may hold no position repeats nothing.
+// An option over a zero-width item says nothing its absence does not.
 inline void refuse_item(LlLowered& o, const Pool& p, const Node& e,
                         std::uint16_t owner) {
   const Node& in = p.e[e.sym];
@@ -72,16 +71,10 @@ inline void refuse_item(LlLowered& o, const Pool& p, const Node& e,
       ends += p.e[p.kid[in.sym + i]].kind == Shape::end ? 1u : 0u;
   const bool end =
       in.kind == Shape::end || (in.kind == Shape::alt && ends == in.count);
-  if (e.max == 1) {
-    if (e.min == 0 && end)
-      o.fault.raise(GrammarFaultCode::optionalEndMark, owner);
-    if (e.min == 0 && in.kind == Shape::condition)
-      o.fault.raise(GrammarFaultCode::optionalCondition, owner);
-    return;
-  }
-  if (end || ends != 0 || in.kind == Shape::none ||
-      (in.kind == Shape::rep && in.min == 0))
-    o.fault.raise(GrammarFaultCode::nullableRepetition, owner);
+  if (e.max != 1 || e.min != 0) return;
+  if (end) o.fault.raise(GrammarFaultCode::optionalEndMark, owner);
+  if (in.kind == Shape::condition)
+    o.fault.raise(GrammarFaultCode::optionalCondition, owner);
 }
 
 inline std::uint16_t refuse_node(LlLowered& o, LowerFail why,
@@ -166,7 +159,7 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
   for (std::uint32_t mask = 1; mask < (1u << e.count); ++mask) {
     const auto bits = static_cast<unsigned>(std::popcount(mask));
     spelt += bits > 1 ? 3 * bits + 1 : 1;
-    if (ends(mask)) spelt += bits > 1 ? 1 : 2;
+    if (ends(mask)) ++spelt;
   }
   if (spelt > kNoRow) return tooWide();
   const std::uint32_t subsets = 1u << e.count;
@@ -198,13 +191,19 @@ inline std::uint16_t emit_unordered(LlLowered& o, const Pool& p, const Node& e,
         arms.push_back(group(LlShape::seq, {item, suffix}, aux));
       }
     }
-    // The end comes last, as an option's absence does: an item still read is
-    // the preferred reading.
-    if (ends(mask))
-      arms.push_back(put_node(o, LlNode{.kind = LlShape::empty},
-                              LlNodeBuild{.cfg = e.cfg}));
-    o.cfg.rules[aux].body =
+    std::uint16_t body =
         arms.size() == 1 ? arms.front() : group(LlShape::alt, arms, aux);
+    // What is left where the group may end is an option like any other: an
+    // item still read is the preferred reading, and its absence is the
+    // caller's to read past.
+    if (ends(mask))
+      body = with_decision(
+          o,
+          put_node(
+              o, LlNode{.kind = LlShape::rep, .sym = body, .min = 0, .max = 1},
+              LlNodeBuild{.cfg = e.cfg}),
+          2, aux);
+    o.cfg.rules[aux].body = body;
   }
   return put_node(
       o,
@@ -247,11 +246,7 @@ std::uint16_t emit(LlLowered& o, const Pool& p, std::uint16_t at,
       return emit_unordered(o, p, e, made, row, owner);
     case Shape::rep: {
       refuse_item(o, p, e, owner);
-      const auto body = [&] {
-        const auto copy = emit_item(o, p, e.sym, owner);
-        if (e.max > 1) o.cfg.nodeBuild[copy].repeatOwner = owner;
-        return copy;
-      };
+      const auto body = [&] { return emit_item(o, p, e.sym, owner); };
       if ((e.max != kEndless && (e.max > 1 || e.min == e.max)) ||
           e.min > 1) {
         // Each counted occurrence is a different call site. Expanding only

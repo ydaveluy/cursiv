@@ -16,7 +16,6 @@
 
 namespace cursiv {
 
-struct AstRegistry;
 
 // What one entry answers: the members its run writes on either side of the
 // node it makes, the site it is named by, and the rule a conversion names.
@@ -63,8 +62,7 @@ std::vector<TerminalGen> record_terminals(const Cfg& c) {
 
 std::string emit_records(std::string_view ns,
                          const std::vector<TerminalGen>& terminals,
-                         const std::vector<RecordGen>& records,
-                         const AstRegistry& registry);
+                         const std::vector<RecordGen>& records);
 
 std::string emit_records_decl(std::string_view ns);
 

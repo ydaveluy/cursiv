@@ -2,8 +2,9 @@
 
 // Guards that decide where a token ends, on both engines: a keyword under a
 // complemented word boundary, a refusal rescued past a terminal's head,
-// assertions that decide whether a longer token reads over a shorter one, and
-// one that starts a token on a blank.
+// assertions that decide whether a longer token reads over a shorter one, one
+// that starts a token on a blank, and assertions over more words than a
+// recognizer tests one by one.
 
 #include "cursiv/core/grammar/GrammarSpec.hpp"
 #include "cursiv/core/syntax-tree/AstNode.hpp"
@@ -35,8 +36,33 @@ struct Main : cursiv::GrammarSpec {
   struct WORD : terminal<lit<"x"> + !lit<"if", !cr<"a-z">> + cr<"a-z"> +
                          cr<"a-z"> + option(cr<"a-z"> + !cr<"λ">)> {};
   struct TAIL : terminal<cr<"a-z"> + cr<"λ">> {};
+  // More scalars of one width than a recognizer tests one by one, none next to
+  // another: `u` stands before one of them, `v` before `q` where none follows.
+  static constexpr auto Scalars =
+      cr<"αγεηιμοςυχωБГЕЗЙЛНПСУХЧЩЫЭЯбгезйлнпсух">;
+  struct CHOSEN : terminal<lit<"u"> + &Scalars + some(cr<"^ ;">)> {};
+  struct UNCHOSEN
+      : terminal<lit<"v"> + &(lit<"q"> + !Scalars) + some(cr<"^ ;">)> {};
+  // As many words, each one rescued by a letter behind it.
+  template <cursiv::str W>
+  static constexpr auto Rescued = lit<W, !cr<"a-z">>;
+  struct UNWORDED
+      : terminal<
+            lit<"w"> +
+            &(lit<"q"> +
+              !(Rescued<"a0"> | Rescued<"a1"> | Rescued<"a2"> | Rescued<"a3"> |
+                Rescued<"a4"> | Rescued<"a5"> | Rescued<"a6"> | Rescued<"a7"> |
+                Rescued<"a8"> | Rescued<"a9"> | Rescued<"b0"> | Rescued<"b1"> |
+                Rescued<"b2"> | Rescued<"b3"> | Rescued<"b4"> | Rescued<"b5"> |
+                Rescued<"b6"> | Rescued<"b7"> | Rescued<"b8"> | Rescued<"b9"> |
+                Rescued<"c0"> | Rescued<"c1"> | Rescued<"c2"> | Rescued<"c3"> |
+                Rescued<"c4"> | Rescued<"c5"> | Rescued<"c6"> | Rescued<"c7"> |
+                Rescued<"c8"> | Rescued<"c9"> | Rescued<"d0"> | Rescued<"d1"> |
+                Rescued<"d2">)) +
+            some(cr<"^ ;">)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
-                    ref<Ended> | ref<Running> | ref<WORD> | ref<TAIL>)))> {};
+                    ref<Ended> | ref<Running> | ref<WORD> | ref<TAIL> |
+                    ref<CHOSEN> | ref<UNCHOSEN> | ref<UNWORDED>)))> {};
   using entry = Root;
   using ignored = WS;
 };

@@ -47,6 +47,12 @@ consteval bool NodeClass() {
       "this rule builds a class that does not derive from cursiv::AstNode "
       "-- derive it from cursiv::AstNode, which holds the `parent` link and "
       "the type tag");
+  static_assert(
+      !std::is_base_of_v<cursiv::AstNode, Node> ||
+          std::is_convertible_v<Node*, cursiv::AstNode*>,
+      "this rule builds a class that reaches cursiv::AstNode through two "
+      "bases, so it holds two `parent` links and no one node to point at -- "
+      "derive it through one base only");
   return true;
 }
 
@@ -109,6 +115,17 @@ consteval bool BoolLiteral() {
       "bool member, and only `true` and `false` convert to a bool, so every "
       "match would report a conversion error -- to set a bool when the text "
       "matches, write `flag<&C::f>(...)` instead of `assign`");
+  return false;
+}
+
+template <auto Member, cursiv::str Literal>
+consteval bool NumberLiteral() {
+  static_assert(
+      cursiv::detail::dependent_false<decltype(Member)>,
+      "this literal can never convert: it is the whole value written into a "
+      "number member, and its text is no number, so every match would report "
+      "a conversion error -- write a number, or give the value a converter "
+      "that returns the member's type");
   return false;
 }
 

@@ -1,7 +1,7 @@
 // The conditions that stand at one token: those at the head of a position,
-// through the rules it calls and past what reads nothing, and those that stand
-// before the token a position reads when what stands in front of it reads
-// nothing. Conditions that stand at one token share its lexical choice.
+// through the rules it calls and past what reads nothing, and the conditions
+// right in front of it. Conditions that stand at one token share its lexical
+// choice.
 #pragma once
 
 #include <algorithm>
@@ -33,13 +33,17 @@ struct LlStanding {
         case LlShape::condition:
           if (b.cut[n.sym].none()) out.set(n.sym);
           break;
-        case LlShape::call:
-          if (const LlRuleInfo& r = g.rules[n.sym];
-              r.climb == kNoRow && r.body != kNoRow) {
-            self(self, r.body);
-            out = lead[r.body];
+        case LlShape::call: {
+          // A climb reads its operand first.
+          std::uint16_t callee = n.sym;
+          while (g.rules[callee].climb != kNoRow)
+            callee = g.climbs[g.rules[callee].climb].primary;
+          if (const std::uint16_t body = g.rules[callee].body; body != kNoRow) {
+            self(self, body);
+            out = lead[body];
           }
           break;
+        }
         case LlShape::seq:
         case LlShape::alt:
         case LlShape::rep:
@@ -70,7 +74,8 @@ struct LlStanding {
         const LlNode& n = g.nodes[visit.id];
         switch (n.kind) {
           case LlShape::seq: {
-            // Behind a kid that reads something a new token begins.
+            // Behind a kid that may read something a new token begins: where
+            // it read nothing, it read the token, under what stands there.
             std::vector<DynSet> from(n.count + 1u);
             for (unsigned i = n.count; i-- > 0;) {
               const auto kid = g.kids[n.sym + i];
@@ -81,7 +86,7 @@ struct LlStanding {
             for (unsigned i = 0; i < n.count; ++i) {
               const auto kid = g.kids[n.sym + i];
               pending.emplace_back(kid, run == 0 ? point[visit.id] : from[run]);
-              if (!b.nullable[kid]) run = i + 1;
+              if (!b.nullable[kid] || b.first[kid].any()) run = i + 1;
             }
             std::reverse(pending.begin() + begin, pending.end());
             break;
@@ -103,7 +108,7 @@ struct LlStanding {
       if (g.rules[r].climb == kNoRow && g.rules[r].body != kNoRow)
         spread(g.rules[r].body);
     for (std::uint16_t k = 0; k < g.nclimbs; ++k)
-      if (g.climbs[k].selectNode != kNoRow) spread(g.climbs[k].selectNode);
+      spread(g.climbs[k].selectNode);
   }
 };
 

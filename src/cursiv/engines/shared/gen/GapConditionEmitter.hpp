@@ -54,9 +54,6 @@ class GapConditionEmitter {
       if (op == kGapNot) {
         expression = (partial ? "(2u - (" : "!(") + stack.back() +
                      (partial ? "))" : ")");
-      } else if (count == 0) {
-        expression = op == kGapAnd ? (partial ? "2u" : "true")
-                                   : (partial ? "0u" : "false");
       } else {
         expression =
             partial ? (op == kGapOr ? "::std::max({" : "::std::min({") : "(";

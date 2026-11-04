@@ -394,9 +394,6 @@ class AstReducer {
   // one use is live at a time.
   std::vector<WrapAt> _wraps;
   std::vector<WrapAbove> _wrapAncestors;
-  mutable std::vector<NodeId> _kids;
-  mutable NodeId _kidsOf = kNoNode;
-  mutable bool _kidsSound = true;
   // Nest pendings on the stack: a region with none above it collects nothing.
   std::size_t _nests = 0;
   // Polled by the cold walks only, never by the record scan.
@@ -427,7 +424,7 @@ class AstReducer {
     TextOffset widest = 0;
     for (std::size_t i = 0; i < _depth; ++i) {
       const Pending& p = _stack[i];
-      if (p.value == nullptr || p.root >= c.size()) continue;
+      if (p.value == nullptr) continue;
       const TextOffset span = c[p.root].end - c[p.root].begin;
       if (best != nullptr && span <= widest) continue;
       best = p.value;
@@ -446,7 +443,6 @@ class AstReducer {
     const Cst& c = *_ctx.cst;
     if (!_repairedBy.empty()) return;
     const NodeId root = c.entry_root();
-    if (root >= c.size()) return;
     _repairedBy.assign(root + 1u, kNoNode);
     std::vector<NodeId> open;
     for (NodeId r = root + 1u; r-- > 0;) {
@@ -501,7 +497,6 @@ class AstReducer {
 
   CURSIV_COLD bool under_repair(NodeId id) const {
     index_repairs();
-    if (id >= _repairedBy.size()) return false;
     const Cst& c = *_ctx.cst;
     return _repairedBy[id] != kNoNode ||
            (c[id].recovered && c.subtree_begin(id) <= id);
@@ -602,9 +597,8 @@ class AstReducer {
   // its checkpoint says it reached back to one.
   NodeId turn_begin(NodeId root) {
     const Cst& c = *_ctx.cst;
-    if (root >= c.size() || c[root].subtreeSize == 0 ||
-        c[root].subtreeSize > root + 1u) {
-      broken(root < c.size() ? root : kNoNode);
+    if (c[root].subtreeSize == 0 || c[root].subtreeSize > root + 1u) {
+      broken(root);
       return kNoNode;
     }
     const NodeId begin = c.subtree_begin(root);
@@ -682,34 +676,6 @@ class AstReducer {
     }
   }
 
-  // The child of `owner` that holds `nest` in its subtree, or `kNoNode`: the
-  // owner's children are listed once, and a region's nests each search them.
-  CURSIV_COLD NodeId holding(NodeId owner, NodeId nest) const {
-    const Cst& c = *_ctx.cst;
-    if (_kidsOf != owner) {
-      _kids.clear();
-      _kidsOf = owner;
-      _kidsSound = true;
-      const NodeId first = c.subtree_begin(owner);
-      for (NodeId k = owner; k > first;) {
-        _stop.poll();
-        --k;
-        const NodeId b = c.subtree_begin(k);
-        if (b > k || b < first) {  // an extent naming no room
-          _kidsSound = false;
-          break;
-        }
-        _kids.push_back(k);
-        k = b;
-      }
-      std::ranges::reverse(_kids);
-    }
-    if (!_kidsSound) return kNoNode;
-    const auto at = std::ranges::lower_bound(_kids, nest);
-    if (at == _kids.end() || *at == nest) return kNoNode;
-    return c.subtree_begin(*at) <= nest ? *at : kNoNode;
-  }
-
   // Whether a repair gave up on the rule a nest belongs to: a recovered record
   // stands between the nest and the consumer, and the node in hand -- the
   // owner, or the wrapper of a nest holding this one -- was not built before
@@ -717,15 +683,11 @@ class AstReducer {
   // the wraps into application order.
   CURSIV_COLD bool stranded(const WrapAt& wrap, NodeId origin,
                            NodeId owner) const {
-    const Cst& c = *_ctx.cst;
-    if (wrap.repair == kNoNode ||
-        holding(owner, _stack[wrap.at].root) == kNoNode)
-      return false;
-    if (origin >= c.subtree_begin(wrap.repair)) return true;
-    const auto at = std::ranges::lower_bound(_wrapAncestors, wrap.repair, {},
-                                             &WrapAbove::root);
-    return at != _wrapAncestors.end() && at->root == wrap.repair &&
-           at->above < owner;
+    if (wrap.repair == kNoNode) return false;
+    if (origin >= _ctx.cst->subtree_begin(wrap.repair)) return true;
+    return std::ranges::lower_bound(_wrapAncestors, wrap.repair, {},
+                                    &WrapAbove::root)
+               ->above < owner;
   }
 
   // Applies and drops every effect of the region, in source order. `Ap` is

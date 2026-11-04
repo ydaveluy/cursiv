@@ -299,23 +299,19 @@ CURSIV_COLD
   return std::span<const std::string_view>{out, run.size()};
 }
 
-// A terminal's one raw part: its Parts converter must not call that same
+// A terminal has one raw part: its Parts converter must not call that same
 // terminal's TextFn.
-inline std::span<const std::string_view> terminal_parts(AstBuildCtx& ctx,
-                                                        NodeId id) {
-  auto* const part = static_cast<std::string_view*>(
-      ctx.mem->allocate(sizeof(std::string_view), alignof(std::string_view)));
-  *part = ctx.cst->text(id);
-  return {part, 1};
-}
-
 template <bool Data, bool Text = true, bool Base = false>
 std::optional<std::span<const std::string_view>> payload_parts(AstBuildCtx& ctx,
                                                                NodeId id) {
-  if constexpr (Data)
+  if constexpr (Data) {
     return parts_of<Text, Base>(ctx, id);
-  else
-    return terminal_parts(ctx, id);
+  } else {
+    auto* const part = static_cast<std::string_view*>(
+        ctx.mem->allocate(sizeof(std::string_view), alignof(std::string_view)));
+    *part = ctx.cst->text(id);
+    return std::span<const std::string_view>{part, 1};
+  }
 }
 
 // Skips and insertions contribute no text. Rescans keep the author's span,
@@ -363,22 +359,16 @@ CURSIV_COLD bool never_written(const AstBuildCtx& ctx, NodeId id) {
   return false;
 }
 
-// Whether a conversion failed, its diagnostic then said.
-template <class Res>
-CURSIV_ALWAYS_INLINE inline bool conversion_failed(AstBuildCtx& ctx, NodeId id,
-                                                   Res&& result) {
-  if (result) return false;
-  ctx.diags->push_back(ctx.place(std::forward<Res>(result).error, id));
-  return true;
-}
-
 // What a converter answered, settled: a positioned result that failed has said
 // so in a diagnostic, any other answer is the value. `sink` takes the value.
 template <class Res, class Sink>
 CURSIV_ALWAYS_INLINE inline bool conversion_settled(AstBuildCtx& ctx, NodeId id,
                                                     Res&& result, Sink&& sink) {
   if constexpr (is_conversion_result<std::remove_cvref_t<Res>>) {
-    if (conversion_failed(ctx, id, std::forward<Res>(result))) return false;
+    if (!result) {
+      ctx.diags->push_back(ctx.place(std::forward<Res>(result).error, id));
+      return false;
+    }
     sink(*std::forward<Res>(result).value);
   } else {
     sink(std::forward<Res>(result));

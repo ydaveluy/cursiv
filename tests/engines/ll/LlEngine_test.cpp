@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -37,6 +38,7 @@
 #include "cursiv/engines/ll/runtime/ll_caret.hpp"
 #include "cursiv/engines/ll/runtime/ll_predictor.hpp"
 #include "cursiv/engines/ll/runtime/ll_read.hpp"
+#include "cursiv/engines/ll/runtime/LlMachine.hpp"
 #include "cursiv/engines/ll/runtime/ll_repair.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
 #include "cursiv/engines/shared/runtime/AstConvThunks.hpp"
@@ -57,6 +59,33 @@
 #include "taglr/generated/Lr/Module.hpp"
 
 namespace {
+
+// A call's place on the machine's stack is 32 bits: a stack past them is
+// refused, never wrapped round to a frame the parse does not stand on.
+std::uint16_t g_machine_calls = 0;
+std::uint16_t machine_step(std::uint16_t, cursiv::LlContext&, void*) {
+  return ++g_machine_calls < 3 ? std::uint16_t{0} : cursiv::kLlDone;
+}
+
+void a_stack_past_its_offsets_is_refused() {
+  if constexpr (sizeof(std::size_t) >= 8) {
+    static constexpr std::uint32_t kBytes[] = {0xFFFFFFF0u};
+    cursiv::Cst tree("");
+    cursiv::CstBuilder builder(tree);
+    cursiv::LlContext c("", builder);
+    cursiv::LlMachine machine;
+    bool refused = false;
+    try {
+      machine.run<machine_step>(c, 0, kBytes);
+    } catch (const std::length_error&) {
+      refused = true;
+    } catch (const std::bad_alloc&) {
+      // No room here for the stack the case is about.
+      refused = true;
+    }
+    CHECK(refused);
+  }
+}
 
 namespace ast_cancellation {
 
@@ -217,6 +246,32 @@ std::uint16_t name_or_call_decision() {
   return cursiv::kNoRow;
 }
 
+// The frames a descent stands on where a `show` reads a primary: at each rule
+// on the way up, the call that ends its caller where there is one.
+template <const auto& table>
+void stand_in_a_show(cursiv::LlReturnStack& stack, std::uint16_t decision) {
+  const cursiv::LlLowCfg& cfg = cursiv::LlLowering<tpar::Ll>::table().cfg;
+  const cursiv::LlAtnView& atn = table.atn;
+  std::uint16_t rule = atn.state(table.decisions[decision].state).rule;
+  std::vector<std::uint32_t> frames;
+  for (const std::string_view caller :
+       {"Postfix", "Unary", "Expression", "ItemRule", "ShowRule", "UnitRule",
+        "Root"}) {
+    std::uint32_t frame = 0;
+    for (auto i = atn.callerBase[rule]; i < atn.callerBase[rule + 1]; ++i) {
+      const std::uint32_t at = atn.callerAt[i];
+      if (cfg.rule_name(atn.state(at).rule) != caller) continue;
+      if (frame == 0 || (atn.returnClass[at] & cursiv::kLlTailReturn) != 0)
+        frame = at;
+    }
+    CHECK(frame != 0);
+    frames.push_back(frame);
+    rule = atn.state(frame).rule;
+  }
+  for (auto at = frames.rbegin(); at != frames.rend(); ++at)
+    stack.push_back(*at);
+}
+
 // The choice of a document, asked at a place of it: a context that stands
 // there with nothing consumed, whose plan is the parse's.
 template <const auto& table>
@@ -226,7 +281,9 @@ struct PredictionAt {
         tree(text),
         builder(tree),
         context((builder.bind_stream(), text), builder),
-        decision(choice) {}
+        decision(choice) {
+    stand_in_a_show<table>(context.stack, decision);
+  }
 
   std::uint16_t operator()(cursiv::TextOffset at) {
     context.at = at;
@@ -794,9 +851,6 @@ void a_return_stack_pushes_only_the_frames_that_changed() {
   other.push_back(4);
   other.push_back(5);
   CHECK(other.context(sim) == three);
-  sim.contexts().clear();
-  stack.pop_back();
-  CHECK(stack.context(sim) != cursiv::kLlCtxNone && sim.contexts().size() == 2);
 }
 
 void an_abandon_replays_equivalent_returns_without_collapsing_frames() {
@@ -845,7 +899,7 @@ void a_search_reads_keywords_in_the_shared_alphabet() {
   cursiv::LlContext c("export", builder);
   cursiv::LlSearch search(table.atn, c.len);
   search.limit = 10000;
-  const cursiv::Token token{0, 6, keyword};
+  cursiv::Token token{0, 6, keyword};
   std::vector<std::uint16_t> terms;
   cursiv::ll_search_terms<table>(c, search, cfg.data(), 2, token, terms);
   CHECK(terms == std::vector<std::uint16_t>{keyword});
@@ -1777,9 +1831,6 @@ void public_calls_are_fresh_and_restore_on_exit() {
   cursiv::LlLanguageParser<table> parser(tpar::generated::Ll::kGrammarMetaData,
                                          actions, drive);
   custom = &parser;
-  auto* exact = &cursiv::ll_episode_cache<table>();
-  std::vector<cursiv::LlPlanEntry> laid{{.at = 0, .decision = 1, .arm = 987}};
-  exact->plan.install(laid, nullptr, 0);
   for (unsigned n = 0; n < 2; ++n) {
     const auto r = parser.parse("value");
     verify(r.value && r.diagnostics.empty());
@@ -1787,8 +1838,6 @@ void public_calls_are_fresh_and_restore_on_exit() {
   }
   verify(calls == 2);
   verify(cursiv::ll_episode_session_slot<table>() == nullptr);
-  verify(&cursiv::ll_episode_cache<table>() == exact &&
-         exact->plan.entries()[0].arm == 987);
   nested = true;
   const auto parent = parser.parse("parent");
   nested = false;
@@ -1914,9 +1963,6 @@ void generated_public_ast_is_unchanged() {
     }
   CHECK(cursiv::ll_episode_session_slot<tpar::generated::Ll::kTable>() ==
         nullptr);
-  // Generated rule translation units must use the same active session as
-  // their module. A mixed build would leak learned entries into this fallback.
-  CHECK(cursiv::ll_episode_cache<tpar::generated::Ll::kTable>().plan.empty());
 }
 }  // namespace
 void check_prediction_sessions() {
@@ -1928,6 +1974,7 @@ void check_prediction_sessions() {
 }
 
 int main() {
+  a_stack_past_its_offsets_is_refused();
   prediction_session::check_prediction_sessions();
   boolean_directives_name_their_written_features();
   ast_conversion_observes_cancellation_before_return();

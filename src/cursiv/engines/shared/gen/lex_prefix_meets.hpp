@@ -209,10 +209,13 @@ enum class LexOverlap : std::uint8_t { none, found, incomplete };
 // together: a walk over pairs, each once, whether or not each assertion on
 // the way holds, and through the runs of nested relays it may follow. A pair
 // reached past an assertion entered proves nothing: the walk does not read
-// whether it holds, nor whether the others assumed with it hold too.
+// whether it holds, nor whether the others assumed with it hold too. A walk
+// past the budget stops unsure: it runs before the DFA, so the grammars the DFA
+// would refuse must not exhaust the memory here.
 template <class Done>
 LexOverlap lex_pair_search(const LexNfaPool& n, const ByteSet* sets, int a,
                            int b, Done&& done) {
+  constexpr std::size_t kMostPairs = 20000;
   if (a < 0 || b < 0) return LexOverlap::none;
   // The two sides, and whether an assertion was entered on the way.
   using Pair = std::tuple<LexWalkSide, LexWalkSide, bool>;
@@ -238,6 +241,7 @@ LexOverlap lex_pair_search(const LexNfaPool& n, const ByteSet* sets, int a,
     return side.first.empty() && side.second.empty();
   };
   for (std::size_t i = 0; i < work.size(); ++i) {
+    if (seen.size() > kMostPairs) return LexOverlap::incomplete;
     const auto [p, q, assumed] = work[i];
     // An assumed pair can only leave the walk unsure.
     if (assumed && unsure) continue;

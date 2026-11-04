@@ -17,9 +17,7 @@ struct LlLexView : LexTableView<LlBuiltProgram> {
   bool bounded(std::uint16_t s) const {
     return a.dfaBound[s] != kNoSet || a.lexChecks[s] != 0;
   }
-  std::uint16_t relay(std::uint16_t s) const {
-    return a.relays.empty() ? kNoRelay : a.dfaRelay[s];
-  }
+  std::uint16_t relay(std::uint16_t s) const { return a.dfaRelay[s]; }
   unsigned tier(std::uint16_t s, unsigned t) const {
     unsigned out = 0;
     for (const LlLexAccept& x : a.choices(s))
@@ -32,8 +30,7 @@ struct LlLexView : LexTableView<LlBuiltProgram> {
 // byte rows say. A mode that lexes for length alone reads every token through
 // its walk.
 inline bool ll_byte_term(const LlBuiltProgram& a, unsigned m, unsigned t) {
-  return m < a.nmodes && (a.modeLonger.empty() || a.modeLonger[m] == kNoMode) &&
-         lex_byte_literal(LlLexView{a}, m, t);
+  return a.modeLonger[m] == kNoMode && lex_byte_literal(LlLexView{a}, m, t);
 }
 
 }  // namespace cursiv

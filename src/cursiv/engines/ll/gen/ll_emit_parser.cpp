@@ -273,9 +273,7 @@ std::uint16_t Emit::rule_mode(std::uint16_t r) const {
   memo.visited[r] = memo.round;
   const LlRuleInfo& u = a.cfg.rules[r];
   if (u.climb != kNoRow) {
-    const LlClimb& cl = a.cfg.climbs[u.climb];
-    return cl.primary != kNoRow ? rule_mode(cl.primary)
-                                : a.cfg.nodes[cl.primaryNode].mode;
+    return rule_mode(a.cfg.climbs[u.climb].primary);
   }
   return u.body == kNoRow ? kNoRow : first_mode(u.body);
 }
@@ -404,10 +402,7 @@ bool Emit::clean(std::uint16_t id) {
 // rule that would hand its frame over. A climb calls its primary first.
 bool Emit::finishes(std::uint16_t r) {
   const LlRuleInfo& u = a.cfg.rules[r];
-  if (u.climb != kNoRow) {
-    const std::uint16_t primary = a.cfg.climbs[u.climb].primary;
-    return primary == kNoRow || plain(primary);
-  }
+  if (u.climb != kNoRow) return plain(a.cfg.climbs[u.climb].primary);
   return u.body == kNoRow || clean(u.body);
 }
 
@@ -748,12 +743,7 @@ void Emit::decision(std::uint16_t id) {
     close("}");
   };
   // The arm invented is entered where the switch spells it, if it does.
-  const auto invent = [&] {
-    if (!entry[dec.repair].empty())
-      put("goto {};", entry[dec.repair]);
-    else
-      group(kid(n, dec.repair), kNoRow);
-  };
+  const auto invent = [&] { put("goto {};", entry[dec.repair]); };
   if (db.repairCost <= 1) {
     open("default: {");
     reread();
@@ -860,20 +850,10 @@ void Emit::term_choice(std::uint16_t id,
   open("switch (c.la.sym) {");
   for (std::uint16_t i = 0; i < db.nalts; ++i)
     put("case {}u: {} = {}u; break;", byArm[i][0], k, i);
-  // A choice no arm answers, even after the skip, as `decision` repairs it.
-  if (db.repairCost <= 1) {
-    put("default: if (c.invented < ::cursiv::kLlInventRun) {} = {}u; break;", k,
-        dec.repair);
-  } else if (db.repairCost != kLlRepairCostless) {
-    open("default:");
-    line("if (::cursiv::ll_ends<kTable>(c, c.la.sym) &&");
-    put("    c.invented < ::cursiv::kLlInventRun) {} = {}u;", k, dec.repair);
-    line("else ::cursiv::ll_drop<kTable>(c);");
-    line("break;");
-    close();
-  } else {
-    line("default: ::cursiv::ll_drop<kTable>(c); break;");
-  }
+  // A choice no arm answers, even after the skip, as `decision` repairs it:
+  // an arm of one terminal costs one invented token.
+  put("default: if (c.invented < ::cursiv::kLlInventRun) {} = {}u; break;", k,
+      dec.repair);
   close("}");
   close("}");
   put("if ({0} != 0xFFFFu) ::cursiv::ll_take_arm<kTable>(c, {0}a[{0}]);", k);
@@ -1136,12 +1116,9 @@ void Emit::node(std::uint16_t id, std::uint16_t hand) {
 // step tighter, called through the machine like any rule.
 void Emit::climb(std::uint16_t r) {
   const LlClimb& cl = a.cfg.climbs[a.cfg.rules[r].climb];
-  const bool select =
-      cl.selectNode != kNoRow &&
-      (a.cfg.decisions[a.cfg.nodes[cl.selectNode].decision].how !=
-           LlPredict::single ||
-       a.modeMulti[cl.mode] == 1 ||
-       a.decEnded[a.cfg.nodes[cl.selectNode].decision] != 0);
+  const std::uint16_t selectDec = a.cfg.nodes[cl.selectNode].decision;
+  const bool select = a.cfg.decisions[selectDec].how != LlPredict::single ||
+                      a.decEnded[selectDec] != 0;
   // A step that groups nothing leaves the next operator of the chain to the
   // caller, and the caller does not take what the step refused either: after a
   // turn only an operator on a looser step goes on. Without a right-grouping
@@ -1182,28 +1159,18 @@ void Emit::climb(std::uint16_t r) {
   line("f.least = c.arg;");
   if (anyNon) line("f.limit = 255u;");
   new_search();
-  const std::uint16_t m = cl.primary != kNoRow
-                              ? rule_mode(cl.primary)
-                              : a.cfg.nodes[cl.primaryNode].mode;
+  const std::uint16_t m = rule_mode(cl.primary);
   put("::cursiv::ll_peek<kTable, {}u>(c);", m == kNoRow ? a.errMode : m);
   line("::cursiv::ll_flush_trivia<kTable>(c);");
   line("f.o = c.tape.enter();");
   line("f.b = c.la.begin;");
   line("f.w0 = c.last;");
-  if (cl.primary == kNoRow) {
-    const LlNode& q = a.cfg.nodes[cl.primaryNode];
-    put("::cursiv::ll_expect<kTable, {}u, {}u>(c, {}u, {}u);", q.mode, q.sym,
-        q.row, cl.primaryNode + 1);
-  } else {
-    put("c.stack.push_back({}u, c.tape.stream().records());", cl.atnEntry);
-    invoke(cl.primary, "1u");
-    line("::cursiv::ll_return(c);");
-  }
+  put("c.stack.push_back({}u, c.tape.stream().records());", cl.atnEntry);
+  invoke(cl.primary, "1u");
+  line("::cursiv::ll_return(c);");
   exits = true;
   line("if (c.give) goto done;");
   open("for (;;) {");
-  const std::uint16_t selectDec =
-      cl.selectNode != kNoRow ? a.cfg.nodes[cl.selectNode].decision : kNoRow;
   line("f.before = c.at;");
   peek_choice(selectDec, std::format("{}u", cl.mode), true);
   // Prediction can keep the first unfinished arm at the end of a document.
@@ -1213,7 +1180,6 @@ void Emit::climb(std::uint16_t r) {
   line("f.prec = 0;");
   if (anyRight) line("f.right = false;");
   if (anyNon) line("f.non = false;");
-  lays = lays && selectDec != kNoRow;
   const std::string invented = name("M");
   // The operator a repair invents: a terminal is laid where the text stops
   // and the right operand is read on from there; a rule's body invents its
@@ -1282,8 +1248,7 @@ void Emit::climb(std::uint16_t r) {
     }
     const auto leaf = a.cfg.atomic_operator(op.body);
     if (leaf == kNoRow) {
-      const LlDecision& choice =
-          a.cfg.decisions[a.cfg.nodes[cl.selectNode].decision];
+      const LlDecision& choice = a.cfg.decisions[selectDec];
       std::string cases;
       for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
         if (a.laSet[choice.set + k].test(t))
@@ -1300,7 +1265,7 @@ void Emit::climb(std::uint16_t r) {
     put("f.prec = {}u;{} row = {}u; pos = {}u; break;", op.prec, grouping(op),
         token.row, leaf + 1);
   }
-  if (select || selectDec == kNoRow) {
+  if (select) {
     line("default: break;");
   } else {
     // A token neither an operator nor one a caller goes on from: the climb
@@ -1604,10 +1569,9 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
           "constexpr ::std::uint32_t kFrameBytes[] = {{{}}};\n"
           "}}  // namespace\n"
           "void parse_entry(::cursiv::LlContext& c) {{\n{}"
-          "  c.document = true;\n"
           "  ::cursiv::LlMachine machine;\n"
           "  machine.run<&step>(c, {}u, kFrameBytes);\n"
-          "  c.document = false;\n}}\n"
+          "}}\n"
           "}}  // namespace {}\n{}",
           banner, ll_emit_walk_includes(a), table.includes, ns, table.functions,
           ll_emit_walk(a), steps, sizes, "  c.stack.reserve(64);\n", entry, ns,

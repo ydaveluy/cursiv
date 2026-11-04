@@ -12,7 +12,6 @@
 #include <map>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -25,6 +24,7 @@
 #include "cursiv/engines/shared/gen/LexSeparation.hpp"
 #include "cursiv/engines/shared/gen/OperatorWords.hpp"
 #include "cursiv/engines/shared/gen/PredicateModes.hpp"
+#include "cursiv/engines/shared/gen/bit_words.hpp"
 #include "cursiv/core/utils/StrongComponents.hpp"
 #include "cursiv/engines/shared/table/GapLeaf.hpp"
 #include "cursiv/engines/shared/table/LexNode.hpp"
@@ -76,11 +76,7 @@ void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
     const LlRuleInfo& u = c.rules[r];
     const auto id = c.nnodes + r;
     if (u.climb != kNoRow) {
-      const LlClimb& cl = c.climbs[u.climb];
-      if (cl.primary != kNoRow)
-        users[c.nnodes + cl.primary].push_back(id);
-      else if (cl.primaryNode != kNoRow)
-        users[cl.primaryNode].push_back(id);
+      users[c.nnodes + c.climbs[u.climb].primary].push_back(id);
     } else if (u.body != kNoRow) {
       users[u.body].push_back(id);
     }
@@ -140,12 +136,10 @@ std::vector<std::uint8_t> settle_nullable(
     } else {
       const auto r = static_cast<std::uint16_t>(id - c.nnodes);
       const LlRuleInfo& u = c.rules[r];
-      // A climb with no operator in the text is its operand alone, and an
-      // operand that is no rule is a terminal.
+      // A climb with no operator in the text is its operand alone.
       std::uint8_t v = 0;
       if (u.climb != kNoRow) {
-        if (const auto primary = c.climbs[u.climb].primary; primary != kNoRow)
-          v = ruleNullable[primary];
+        v = ruleNullable[c.climbs[u.climb].primary];
       } else if (u.body != kNoRow) {
         v = nullable[u.body];
       }
@@ -224,14 +218,9 @@ void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
                         static_cast<std::uint16_t>(id));
     const auto r = static_cast<std::uint16_t>(id - c.nnodes);
     const LlRuleInfo& u = c.rules[r];
-    if (u.climb != kNoRow) {
-      const LlClimb& cl = c.climbs[u.climb];
-      if (cl.primary != kNoRow)
-        return ruleFirst[r].add(ruleFirst[cl.primary]);
-      else
-        return ruleFirst[r].add(first[cl.primaryNode]);
-    } else if (u.body != kNoRow)
-      return ruleFirst[r].add(first[u.body]);
+    if (u.climb != kNoRow)
+      return ruleFirst[r].add(ruleFirst[c.climbs[u.climb].primary]);
+    if (u.body != kNoRow) return ruleFirst[r].add(first[u.body]);
     return false;
   });
 }
@@ -296,13 +285,12 @@ bool repeated_lead(const Built& b, const std::vector<std::uint8_t>& empty,
   return false;
 }
 
-bool refuse_left_recursion(Built& b, const std::vector<std::uint8_t>& empty) {
+void refuse_left_recursion(Built& b, const std::vector<std::uint8_t>& empty) {
   const std::uint16_t n = b.cfg.nrules;
   std::vector<std::vector<std::uint16_t>> edge(n);
   std::vector<bool> seen(n, false);
   for (std::uint16_t r = 1; r < n; ++r) {
-    if (const LlRuleInfo& u = b.cfg.rules[r];
-        u.climb != kNoRow && b.cfg.climbs[u.climb].primary != kNoRow)
+    if (const LlRuleInfo& u = b.cfg.rules[r]; u.climb != kNoRow)
       edge[r].push_back(b.cfg.climbs[u.climb].primary);
     else if (u.body != kNoRow)
       left_calls(b, empty, u.body, seen, edge[r]);
@@ -312,31 +300,14 @@ bool refuse_left_recursion(Built& b, const std::vector<std::uint8_t>& empty) {
   const auto calls = [&](std::uint32_t q, auto&& to) {
     for (const auto x : edge[q]) to(x);
   };
-  bool cyclic = false;
   for (std::uint16_t r = 1; r < n; ++r) {
     if (!scc.cyclic[r]) continue;
-    if (!b.fault) {
-      b.faultCycle = scc.walk(r, r, calls);
-      const bool repeated = repeated_lead(b, empty, r, scc.component);
-      b.fault.raise(GrammarFaultCode::leftRecursion, r, repeated,
-                    repeated ? std::uint16_t{kOptionalGate} : std::uint16_t{0});
-    }
-    cyclic = true;
+    b.faultCycle = scc.walk(r, r, calls);
+    const bool repeated = repeated_lead(b, empty, r, scc.component);
+    b.fault.raise(GrammarFaultCode::leftRecursion, r, repeated,
+                  repeated ? std::uint16_t{kOptionalGate} : std::uint16_t{0});
+    return;
   }
-  return cyclic;
-}
-
-std::vector<std::uint8_t> refuse_non_consuming(Built& b) {
-  std::vector<std::uint8_t> empty;
-  // EOF constrains FIRST but still makes no progress through the input.
-  settle_nullable(b.cfg, empty, true);
-  for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
-    if (!empty[id]) continue;
-    const LlNodeBuild& n = b.cfg.nodeBuild[id];
-    if (n.repeatOwner != kNoRow)
-      b.fault.raise(GrammarFaultCode::nullableRepetition, n.repeatOwner);
-  }
-  return empty;
 }
 
 std::vector<bool> reached_from(const Cfg& c, std::uint16_t from) {
@@ -354,7 +325,6 @@ std::vector<bool> reached_from(const Cfg& c, std::uint16_t from) {
     if (u.climb != kNoRow) {
       const LlClimb& cl = c.climbs[u.climb];
       rule(cl.primary);
-      if (cl.primaryNode != kNoRow) nodes.push_back(cl.primaryNode);
       if (cl.selectNode != kNoRow) nodes.push_back(cl.selectNode);
     }
     while (!nodes.empty()) {
@@ -392,8 +362,6 @@ void refuse_skipped_terminal(Built& b) {
     bool named = u.body != kNoRow && names_skipped(c, u.body);
     if (u.climb != kNoRow) {
       const LlClimb& cl = c.climbs[u.climb];
-      named = named ||
-              (cl.primaryNode != kNoRow && names_skipped(c, cl.primaryNode));
       named =
           named || (cl.selectNode != kNoRow && names_skipped(c, cl.selectNode));
     }
@@ -442,11 +410,7 @@ void refuse_unproductive(Built& b, std::uint64_t* work) {
       const auto r = static_cast<std::uint16_t>(id - c.nnodes);
       const LlRuleInfo& u = c.rules[r];
       p = u.body != kNoRow && node[u.body];
-      if (u.climb != kNoRow) {
-        const LlClimb& cl = c.climbs[u.climb];
-        p = cl.primary != kNoRow ? rule[cl.primary] != 0
-                                 : node[cl.primaryNode] != 0;
-      }
+      if (u.climb != kNoRow) p = rule[c.climbs[u.climb].primary] != 0;
       value = &rule[r];
     }
     if (!p || *value) return false;
@@ -458,12 +422,10 @@ void refuse_unproductive(Built& b, std::uint64_t* work) {
     const LlRuleInfo& u = c.rules[r];
     std::vector<std::uint16_t> nodes;
     if (u.climb != kNoRow) {
-      const LlClimb& cl = c.climbs[u.climb];
-      if (cl.primary != kNoRow) return rule[cl.primary] ? kNoRow : cl.primary;
-      nodes.push_back(cl.primaryNode);
-    } else if (u.body != kNoRow) {
-      nodes.push_back(u.body);
+      const std::uint16_t primary = c.climbs[u.climb].primary;
+      return rule[primary] ? kNoRow : primary;
     }
+    if (u.body != kNoRow) nodes.push_back(u.body);
     while (!nodes.empty()) {
       const LlNode& n = c.nodes[nodes.back()];
       nodes.pop_back();
@@ -495,16 +457,32 @@ std::vector<std::uint16_t> opening_of(const Built& b, const DynSet& set) {
   return out;
 }
 
+OperatorWordsWalk words_walk(const Cfg& c) {
+  std::vector<std::vector<std::uint16_t>> calls(c.nrules);
+  std::vector<std::uint16_t> nodes;
+  for (std::uint16_t r = 1; r < c.nrules; ++r) {
+    if (c.rules[r].body != kNoRow) nodes.push_back(c.rules[r].body);
+    while (!nodes.empty()) {
+      const LlNode& n = c.nodes[nodes.back()];
+      nodes.pop_back();
+      if (n.kind == LlShape::call) calls[r].push_back(n.sym);
+      for (const auto k : c.children(n)) nodes.push_back(k);
+    }
+  }
+  return OperatorWordsWalk(calls);
+}
+
 // Conditions and marks spell nothing: they never tell two operators apart.
 // Walked without recursion: a counted repetition nests as deep as its bound.
 // A frame holds a position, how many of its members were entered, and what
 // they spelt so far; a member answers through `spelt`.
 OperatorWords words_of(const Built& b, std::uint16_t root,
-                       std::vector<std::uint16_t>& calling) {
+                       OperatorWordsWalk& walk) {
   struct Frame {
     std::uint16_t id;
     std::uint32_t entered;
     OperatorWords words;
+    bool settled = false;
   };
   std::vector<Frame> todo;
   OperatorWords spelt;
@@ -532,14 +510,19 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
             n.min == 0 ? OperatorWords::nothing() : OperatorWords::none());
         return true;
       case LlShape::call:
-        if (b.cfg.rules[n.sym].body == kNoRow ||
-            std::ranges::count(calling, n.sym) != 0) {
+        if (b.cfg.rules[n.sym].body == kNoRow || walk.walking[n.sym]) {
           spelt = OperatorWords::unlisted(opening_of(b, b.ruleFirst[n.sym]));
           return false;
         }
-        calling.push_back(n.sym);
-        todo.emplace_back(id, 0, OperatorWords::none());
-        return true;
+        if (const bool settled = walk.onPath[walk.scc.component[n.sym]] == 0;
+            !settled || !walk.known[n.sym]) {
+          walk.walking[n.sym] = true;
+          ++walk.onPath[walk.scc.component[n.sym]];
+          todo.emplace_back(id, 0, OperatorWords::none(), settled);
+          return true;
+        }
+        spelt = *walk.known[n.sym];
+        return false;
       default:
         spelt = OperatorWords::nothing();
         return false;
@@ -566,7 +549,11 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
     const std::size_t members = n.kind == LlShape::call ? 1 : kids.size();
     if (f.entered == members) {
       spelt = std::move(f.words);
-      if (n.kind == LlShape::call) calling.pop_back();
+      if (n.kind == LlShape::call) {
+        walk.walking[n.sym] = false;
+        --walk.onPath[walk.scc.component[n.sym]];
+        if (f.settled) walk.known[n.sym] = spelt;
+      }
       todo.pop_back();
       if (todo.empty()) return spelt;
       continue;
@@ -588,14 +575,14 @@ void refuse_precedence_clash(Built& b) {
     Association group;
   };
   std::vector<Spelt> spelt;
-  std::vector<std::uint16_t> calling;
+  OperatorWordsWalk walk = words_walk(b.cfg);
   for (std::uint16_t r = 1; r < b.cfg.nrules; ++r) {
     if (b.cfg.rules[r].climb == kNoRow) continue;
     const LlClimb& cl = b.cfg.climbs[b.cfg.rules[r].climb];
     spelt.clear();
     for (std::uint16_t i = 0; i < cl.opCount; ++i) {
       const LlClimbOp& op = b.cfg.climbOps[cl.opBase + i];
-      OperatorWords words = words_of(b, op.body, calling);
+      OperatorWords words = words_of(b, op.body, walk);
       for (const Spelt& s : spelt)
         if ((s.prec != op.prec || s.group != op.assoc) && s.words.meets(words))
           b.fault.raise(GrammarFaultCode::precedenceClash, r);
@@ -658,11 +645,8 @@ struct Gaps {
         const LlRuleInfo& u = b.cfg.rules[r];
         if (u.climb != kNoRow) {
           raise(ruleConsumes, r, true);
-          const LlClimb& cl = b.cfg.climbs[u.climb];
-          if (cl.primary != kNoRow)
-            raise(ruleEmptyReads, r, ruleEmptyReads[cl.primary]);
-          else if (cl.primaryNode != kNoRow)
-            raise(ruleEmptyReads, r, emptyReads[cl.primaryNode]);
+          raise(ruleEmptyReads, r,
+                ruleEmptyReads[b.cfg.climbs[u.climb].primary]);
         } else if (u.body != kNoRow) {
           raise(ruleSilent, r, silent[u.body]);
           raise(ruleConsumes, r, consumes[u.body]);
@@ -764,18 +748,11 @@ struct Gaps {
           const DynSet own = bit(rule_cfg(r));
           const DynSet in = rulePre[r] | own;
           const DynSet out = ruleAfter[r] | own;
-          if (cl.primary != kNoRow) {
-            add(rulePre[cl.primary], in, rule(cl.primary));
-            add(ruleAfter[cl.primary], out, rule(cl.primary));
-          } else {
-            add(pre[cl.primaryNode], in, cl.primaryNode);
-            add(after[cl.primaryNode], out, cl.primaryNode);
-          }
-          if (cl.selectNode != kNoRow) {
-            add(pre[cl.selectNode], out, cl.selectNode);
-            add(span[cl.selectNode], own, cl.selectNode);
-            add(after[cl.selectNode], own, cl.selectNode);
-          }
+          add(rulePre[cl.primary], in, rule(cl.primary));
+          add(ruleAfter[cl.primary], out, rule(cl.primary));
+          add(pre[cl.selectNode], out, cl.selectNode);
+          add(span[cl.selectNode], own, cl.selectNode);
+          add(after[cl.selectNode], own, cl.selectNode);
         } else if (u.body != kNoRow) {
           add(pre[u.body], rulePre[r], u.body);
           add(span[u.body], ruleSpan[r], u.body);
@@ -903,13 +880,10 @@ void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
     if (set.none()) return;
     const DynSet* at = &set;
     if (set.more_than_one()) {
-      const auto home = [&](unsigned k) {
-        return k < b.cfg.cfgHome.size() ? b.cfg.cfgHome[k] : 0;
-      };
       DynSet rest = set;
       rest.reset(lowest(set));
       for (; rest.any(); rest.reset(lowest(rest)))
-        if (home(lowest(set)) != home(lowest(rest))) {
+        if (b.cfg.home_at(lowest(set)) != b.cfg.home_at(lowest(rest))) {
           lower_refuse(b.cfg, LowerFail::sectionPointShared);
           return;
         }
@@ -927,37 +901,19 @@ void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
   LexSeparation separated(b.cfg, alphabet);
   const auto separated_after = [&](std::uint16_t id, const DynSet& first) {
     if (b.after[id].none() || b.after[id].test(kEofSymbol)) return false;
-    const auto home = [&](unsigned k) {
-      return k < b.cfg.cfgHome.size() ? b.cfg.cfgHome[k] : 0;
-    };
-    const DynSet& configs = g.after[id];
-    for (std::size_t word = 0; word < configs.w.size(); ++word)
-      for (std::uint64_t bits = configs.w[word]; bits; bits &= bits - 1u) {
-        const auto k = static_cast<unsigned>(word * 64u + std::countr_zero(bits));
-        if (k + 1u >= b.cfg.cfgTriviaAt.size() || home(k) != home(g.cfg(id)))
-          return false;
-      }
-    if (first.none() || !separated.disjoint(first, b.after[id])) return false;
-    // Inspecting the exit must not hide an item as caller-only trivia. A
-    // longer trivia token could otherwise swallow a whole valid item before
-    // the consumer gets the opportunity to re-read its stricter gap.
-    DynSet ownTrivia, callerOnly;
     const auto own = g.cfg(id);
-    for (auto i = b.cfg.cfgTriviaAt[own]; i < b.cfg.cfgTriviaAt[own + 1]; ++i)
-      ownTrivia.set(b.cfg.cfgTrivia[i]);
-    for (std::size_t word = 0; word < configs.w.size(); ++word)
-      for (std::uint64_t bits = configs.w[word]; bits; bits &= bits - 1u) {
-        const auto k = static_cast<unsigned>(word * 64u + std::countr_zero(bits));
-        DynSet callerTrivia;
-        for (auto i = b.cfg.cfgTriviaAt[k]; i < b.cfg.cfgTriviaAt[k + 1]; ++i)
-          callerTrivia.set(b.cfg.cfgTrivia[i]);
-        // One caller peek must also cross every inside blank. Otherwise it
-        // could miss a valid item behind trivia only the region skips.
-        if (!callerTrivia.covers(ownTrivia)) return false;
-        DynSet extra = callerTrivia;
-        callerOnly |= extra.andnot(ownTrivia);
-      }
-    return separated.disjoint(first, callerOnly, true);
+    const DynSet& configs = g.after[id];
+    bool same = true;
+    each_bit(configs.w.data(), configs.w.size(), [&](std::size_t k) {
+      same = same && k + 1u < b.cfg.cfgTriviaAt.size() &&
+             b.cfg.home_at(static_cast<unsigned>(k)) == b.cfg.home_at(own);
+    });
+    if (!same || first.none() || !separated.disjoint(first, b.after[id]))
+      return false;
+    each_bit(configs.w.data(), configs.w.size(), [&](std::size_t k) {
+      same = same && separated.peek_safe(first, own, static_cast<unsigned>(k));
+    });
+    return same;
   };
   for (std::uint32_t at = 0; at < nn; ++at) {
     const auto id = static_cast<std::uint16_t>(at);
@@ -1025,9 +981,7 @@ void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
     const LlRuleInfo& u = b.cfg.rules[r];
     if (u.climb == kNoRow) continue;
     const LlClimb& cl = b.cfg.climbs[u.climb];
-    const bool fresh =
-        cl.primary != kNoRow ? g.ruleFreshOut[cl.primary] != 0 : true;
-    if (fresh)
+    if (g.ruleFreshOut[cl.primary] != 0)
       one(Gaps::bit(g.rule_cfg(r)) | g.ruleAfter[r],
           Gaps::bit(g.rule_cfg(r)) | local.ruleAfter[r], b.climbCfg[u.climb]);
   }
@@ -1143,19 +1097,12 @@ void settle_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
         DynSet ops = ruleFollow[r];
         for (unsigned i = 0; i < cl.opCount; ++i)
           ops |= first[c.climbOps[cl.opBase + i].body];
-        if (cl.primary != kNoRow)
-          f.moved = ruleFollow[cl.primary].add(ops) || f.moved;
-        else
-          f.walk(cl.primaryNode, ops);
-        if (cl.selectNode != kNoRow) {
-          after[cl.selectNode].add(ruleFollow[r]);
-          const auto& select = c.nodes[cl.selectNode];
-          const DynSet operand = cl.primary != kNoRow ? ruleFirst[cl.primary]
-                                                      : first[cl.primaryNode];
-          for (unsigned i = 0; i < cl.opCount; ++i)
-            f.walk(c.kids[select.sym + i], operand);
-          f.walk(c.kids[select.sym + cl.opCount], ruleFollow[r]);
-        }
+        f.moved = ruleFollow[cl.primary].add(ops) || f.moved;
+        after[cl.selectNode].add(ruleFollow[r]);
+        const auto& select = c.nodes[cl.selectNode];
+        for (unsigned i = 0; i < cl.opCount; ++i)
+          f.walk(c.kids[select.sym + i], ruleFirst[cl.primary]);
+        f.walk(c.kids[select.sym + cl.opCount], ruleFollow[r]);
       } else if (u.body != kNoRow) {
         f.walk(u.body, ruleFollow[r]);
       }
@@ -1335,27 +1282,17 @@ void AtnGen::build(std::uint16_t id, std::uint32_t from, std::uint32_t to,
 void build_climb(AtnGen& g, std::uint16_t rule, LlClimb& cl, std::uint32_t from,
                  std::uint32_t to) {
   Built& b = g.b;
-  if (cl.opCount != 0 && cl.selectNode == kNoRow)
-    throw std::logic_error(
-        "cursiv: an LL climb's operators have no select node");
-  const auto decision =
-      cl.selectNode == kNoRow ? kNoRow : b.cfg.nodes[cl.selectNode].decision;
-  const std::uint32_t entry = g.add(LlAtnKind::basic, rule, decision);
+  const std::uint32_t entry =
+      g.add(LlAtnKind::basic, rule, b.cfg.nodes[cl.selectNode].decision);
   cl.atnEntry = entry;
-  const auto operand = [&](std::uint32_t from2) {
-    if (cl.primary != kNoRow)
-      g.call(from2, cl.primary, entry);
-    else
-      g.atom(from2, b.cfg.nodes[cl.primaryNode].sym, entry, cl.primaryNode);
-  };
-  operand(from);
+  g.call(from, cl.primary, entry);
   for (unsigned i = 0; i < cl.opCount; ++i) {
     const std::uint32_t afterOp = g.add(LlAtnKind::basic, rule);
     const std::uint32_t before = g.add(LlAtnKind::basic, rule);
     g.eps(entry, before);
     const auto& select = b.cfg.nodes[cl.selectNode];
     g.build(b.cfg.kids[select.sym + i], before, afterOp, rule);
-    operand(afterOp);
+    g.call(afterOp, cl.primary, entry);
   }
   g.eps(entry, to);
 }
@@ -1635,7 +1572,10 @@ LlEntry entry_cost(const Built& b, std::uint16_t id,
         const LlEntry k =
             entry_cost(b, b.cfg.kids[n.sym + i], rule, opened, whole);
         if (k.cost == kLlCostless) return {kLlCostless, false};
-        sum += k.cost;
+        // A rule that calls others twice over doubles what it costs: past the
+        // highest finite cost it stays there, dearer than any arm that fits.
+        sum = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            std::uint64_t{sum} + k.cost, kLlCostless - 1u));
         if (k.stop) return {sum, true};
         if (k.cost != 0) opened = true;
       }
@@ -1669,8 +1609,7 @@ void settle_repair(Built& b, std::uint64_t* work) {
     pending.push(r);
     const LlRuleInfo& u = b.cfg.rules[r];
     if (u.climb != kNoRow) {
-      const LlClimb& cl = b.cfg.climbs[u.climb];
-      if (cl.primary != kNoRow) users[cl.primary].push_back(r);
+      users[b.cfg.climbs[u.climb].primary].push_back(r);
     } else if (u.body != kNoRow) {
       nodes.assign(1, u.body);
       while (!nodes.empty()) {
@@ -1691,9 +1630,7 @@ void settle_repair(Built& b, std::uint64_t* work) {
     if (work) ++*work;
     const LlRuleInfo& u = b.cfg.rules[r];
     const std::uint32_t k =
-        u.climb != kNoRow  ? (b.cfg.climbs[u.climb].primary != kNoRow
-                                  ? rule[b.cfg.climbs[u.climb].primary]
-                                  : 1u)
+        u.climb != kNoRow  ? rule[b.cfg.climbs[u.climb].primary]
         : u.body != kNoRow ? entry_cost(b, u.body, rule, false, true).cost
                            : kLlCostless;
     if (k < rule[r]) {
@@ -1910,8 +1847,7 @@ std::uint16_t join_chain(Built& b, std::uint16_t held, std::uint16_t over) {
   // an empty build row, which a later join would read as one that makes
   // nothing.
   b.writes.chainBuild[r] = {left.makes || right.makes,
-                            left.creates || right.creates,
-                            left.lead != kNoRow ? left.lead : right.lead};
+                            left.creates || right.creates};
   if (r >= b.nestChains.size()) b.nestChains.resize(b.writes.nchains, 0);
   const bool leftNest = held < b.nestChains.size() && b.nestChains[held] != 0;
   const bool rightNest = over < b.nestChains.size() && b.nestChains[over] != 0;
@@ -1980,10 +1916,7 @@ void settle_fusion(Built& b) {
   // turn on -- the node the climb itself just laid.
   for (std::uint16_t k = 0; k < b.cfg.nclimbs; ++k) {
     LlClimb& cl = b.cfg.climbs[k];
-    std::vector<std::uint16_t> hands =
-        cl.primary != kNoRow
-            ? records.rule_rows(cl.primary)
-            : std::vector<std::uint16_t>{b.cfg.nodes[cl.primaryNode].row};
+    std::vector<std::uint16_t> hands = records.rule_rows(cl.primary);
     LlRecordPlan::add(hands, cl.node);
     cl.leftBase = static_cast<std::uint32_t>(b.fuse.size());
     for (std::uint16_t h : hands)
@@ -2178,19 +2111,21 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   refuse_skipped_terminal(b);
   const auto ruleNullable = settle_nullable(
       b.cfg, b.nullable, false, opt.work ? &opt.work->nullable : nullptr);
-  const auto empty = refuse_non_consuming(b);
+  // EOF constrains FIRST but still makes no progress through the input.
+  std::vector<std::uint8_t> empty;
+  settle_nullable(b.cfg, empty, true);
   // A refused grammar owes the walks below nothing: a counted repetition of
   // a body that reads nothing nests as deep as its bound, and the refusal
   // must be told before anything follows that depth.
   if (b.fault) return b;
   settle_first(b.cfg, b.nullable, b.first, b.ruleFirst,
                opt.work ? &opt.work->first : nullptr);
-  const bool leftCyclic = refuse_left_recursion(b, empty);
+  refuse_left_recursion(b, empty);
   refuse_unproductive(b, opt.work ? &opt.work->productive : nullptr);
   refuse_precedence_clash(b);
-  // A left-cyclic rule has no fixpoint for the walks below: the follow pass
-  // would descend it for ever.
-  if (leftCyclic) return b;
+  // Nor does one refused here: a left-cyclic rule has no fixpoint for the walks
+  // below, and the follow pass would descend it for ever.
+  if (b.fault) return b;
   settle_after(b.cfg, b.nullable, b.first, b.ruleFirst, b.after, b.ruleFollow);
   settle_cuts(b);
   build_atn(b);

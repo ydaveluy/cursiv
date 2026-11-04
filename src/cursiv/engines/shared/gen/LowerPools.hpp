@@ -163,6 +163,11 @@ struct LowerPools : LowerVerdicts {
       sectionWords[sectionWords.size()] = std::move(w);
   }
 
+  // The section configuration `k` stands in, zero outside any.
+  std::uint8_t home_at(unsigned k) const {
+    return k < cfgHome.size() ? cfgHome[k] : std::uint8_t{0};
+  }
+
   bool sections() const {
     return std::ranges::any_of(cfgHome.v,
                                [](std::uint8_t h) { return h != 0; });

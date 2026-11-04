@@ -185,7 +185,7 @@ category, and any other terminal, such as `some(d)`, is a pattern.
 
 | Rule | Example |
 |---|---|
-| Only the terminals that a viable parse can accept at this point are tried, plus trivia. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
+| Only the terminals that a viable parse can accept at this point are tried, plus trivia and what the [conditions](#conditions) there name. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
 | The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word. | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
 | Other ties keep every match: each parse continues with the token it can accept. | With `LOW : terminal<some(cr<"a-z">)>` and `NAME : terminal<some(cr<"a-zA-Z">)>`, `(ref<LOW> + lit<";">) | (ref<NAME> + lit<":">)` accepts `abc:`. |
 | Once read, a token is never split again, even if the parse then fails. | `(lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">)` rejects `ab`. |
@@ -536,6 +536,17 @@ start: `!lit<"<"> + lit<"<<">` reads `<<`. The generator
 condition; bound it, as in `repeat<1, 8>(lit<"-">)`, when the language
 allows. See [Where expressions are allowed](#where-expressions-are-allowed) for what a
 condition may contain.
+
+A condition in a rule also settles which token stands where it stands, by one
+rule on both engines. The token is the longest match among the terminals a
+viable parse can read there and the spellings the conditions there name. A
+terminal that only a refused condition would let the parse read is not viable,
+so the text is read again without it:
+`(gap::none + lit<"->"> + ref<ID>) | (lit<"-"> + lit<">"> + ref<ID>)` reads
+` -> b` as `-`, `>` and `b`. A spelling that only a condition names stays one
+token, which no terminal reads, so it is an error and is never read in pieces:
+with `(!lit<"->"> + ref<ID>) | (lit<"-"> + lit<">">)` and no `->` terminal
+there, `->` is an error and `- >` is read.
 
 ### Committed items
 

@@ -154,6 +154,70 @@ struct Lines : cursiv::GrammarSpec {
             option(some(append<&ast::Lines::items>(ref<When> | ref<E>),
                         some(ref<NEWLINE>)) +
                    NLs))> {};
+  // One rule reads the name for every arm, so the readings that completed it
+  // share the newline, whichever call of it they made: a bracket on the next
+  // line starts a statement of its own.
+  struct Head : rule<create<ast::Name>(assign<&ast::Name::name>(ref<Base::ID>))> {
+  };
+  struct Box : rule<create<ast::Block>(lit<"["> +
+                                       many(append<&ast::Block::items>(ref<E>)) +
+                                       lit<"]">)> {};
+  struct Minus : rule<create<ast::Binary>(assign<&ast::Binary::left>(ref<Head>) +
+                                          assign<&ast::Binary::right>(ref<Box>) +
+                                          assign<&ast::Binary::op>(lit<"-">) +
+                                          ref<NEWLINE>)> {};
+  struct Bare : rule<ref<Head> + ref<NEWLINE>> {};
+  struct Plus : rule<create<ast::Binary>(assign<&ast::Binary::left>(ref<Head>) +
+                                         assign<&ast::Binary::right>(ref<Box>) +
+                                         assign<&ast::Binary::op>(lit<"+">) +
+                                         ref<NEWLINE>)> {};
+  struct Loose : rule<create<ast::Binary>(assign<&ast::Binary::right>(ref<Box>) +
+                                          assign<&ast::Binary::op>(lit<"-">) +
+                                          ref<NEWLINE>)> {};
+  struct Heads : rule<create<ast::Lines>(many(append<&ast::Lines::items>(
+                     ref<Minus> | ref<Bare> | ref<Plus> | ref<Loose>)))> {};
+  // Blocks that only their ends tell apart, nested, under heads that rules of
+  // their own read: what a level costs does not grow with the levels over it.
+  struct Nested;
+  static constexpr auto body =
+      lit<":"> + ref<NEWLINE> + lit<"{"> +
+      some(append<&ast::Block::items>(ref<Nested>)) + lit<"}">;
+  struct HeadOf : rule<create<ast::Name>(assign<&ast::Name::name>(ref<Base::ID>))> {
+  };
+  struct Nested
+      : rule<create<ast::Block>(
+            (append<&ast::Block::items>(ref<Head>) + body + lit<"!"> +
+             ref<NEWLINE>) |
+            (append<&ast::Block::items>(ref<HeadOf>) + body + lit<"?"> +
+             ref<NEWLINE>) |
+            (append<&ast::Block::items>(ref<Name>) + ref<NEWLINE>))> {};
+  struct Blocks : rule<create<ast::Lines>(many(append<&ast::Lines::items>(
+                      ref<Nested>)))> {};
+};
+
+// Rules that may read nothing, nested two by two, which only what follows them
+// tells apart: one closure walks every way through them.
+struct Empties : Base {
+  static constexpr auto item = [](auto of) {
+    return append<&ast::Block::items>(of);
+  };
+  struct Empty0 : rule<create<ast::Block>(option(kw<"a">))> {};
+#define TUNARY_TWICE(k, j)                                    \
+  struct Empty##k : rule<create<ast::Block>(item(ref<Empty##j>) + \
+                                            item(ref<Empty##j>))> {};
+  TUNARY_TWICE(1, 0) TUNARY_TWICE(2, 1) TUNARY_TWICE(3, 2) TUNARY_TWICE(4, 3)
+  TUNARY_TWICE(5, 4) TUNARY_TWICE(6, 5) TUNARY_TWICE(7, 6) TUNARY_TWICE(8, 7)
+  TUNARY_TWICE(9, 8) TUNARY_TWICE(10, 9) TUNARY_TWICE(11, 10)
+  TUNARY_TWICE(12, 11) TUNARY_TWICE(13, 12) TUNARY_TWICE(14, 13)
+  TUNARY_TWICE(15, 14) TUNARY_TWICE(16, 15)
+#undef TUNARY_TWICE
+  struct Nest : rule<create<ast::Block>(lit<"("> + many(item(ref<Nest>)) +
+                                        lit<")">)> {};
+  struct Semi : rule<create<ast::Block>(item(ref<Empty16>) +
+                                        option(item(ref<Nest>)) + lit<";">)> {};
+  struct Bang : rule<create<ast::Block>(item(ref<Empty16>) +
+                                        option(item(ref<Nest>)) + lit<"!">)> {};
+  struct Root : rule<ref<Semi> | ref<Bang>> {};
 };
 
 struct Suite : Base {
@@ -161,7 +225,12 @@ struct Suite : Base {
                      (lit<"members:"> + ref<Members::Root>) |
                      (lit<"cyclic:"> + ref<Cyclic::Root>) |
                      (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
-                                           ref<Lines::Root> + eof))> {};
+                                           ref<Lines::Root> + eof)) |
+                     (lit<"heads:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                                           ref<Lines::Heads> + eof)) |
+                     (lit<"empties:"> + ref<Empties::Root> + eof) |
+                     (lit<"blocks:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                                            ref<Lines::Blocks> + eof))> {};
   using entry = Root;
   using indent_newline = Lines::NEWLINE;
   static constexpr auto indent_open = lit<"[">;

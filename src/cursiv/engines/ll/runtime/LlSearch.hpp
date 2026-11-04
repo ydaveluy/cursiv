@@ -29,6 +29,10 @@ inline constexpr std::uint64_t kLlVisitsPerWork = 4;
 // The scan of an alphabet at a position not yet made.
 inline constexpr TextOffset kLlUnscanned = 0xFFFFFFFFu;
 
+// How many frames of the descent's stack a search stands on at first: deeper
+// ones are read only while a reading returns out of the ones it knows.
+inline constexpr std::size_t kLlSearchFrames = 256;
+
 // What the searches of a thread have spent.
 struct LlSearchWork {
   std::uint64_t work = 0;
@@ -47,17 +51,16 @@ struct LlRoot {
   bool operator==(const LlRoot&) const = default;
 };
 
-// First in a search, so that its simulation stands at the search's address.
-struct LlSearchSim {
-  LlSimulation sim;
-};
-
-struct LlSearch : LlSearchSim, RepairSearch<LlGesture> {
+struct LlSearch : RepairSearch<LlGesture> {
   LlSearch(const LlAtnView& atn, TextOffset len, const RepairBudget& b = {})
-      : LlSearchSim{LlSimulation(atn)}, RepairSearch(len, b) {}
+      : RepairSearch(len, b), sim(atn) {}
 
+  LlSimulation sim;
   // The visits of the simulation already paid into `work`.
   std::uint64_t visited = 0;
+  // The frames of the descent's stack the last search stood on: what is asked
+  // of its path is asked over the same ones.
+  std::size_t frames = kLlSearchFrames;
 
   // What a reading's future depends on, its owed run aside: two readings with
   // the same one gain the same increments of key, the one holding the owed
@@ -91,13 +94,14 @@ struct LlSearch : LlSearchSim, RepairSearch<LlGesture> {
   std::vector<std::uint16_t> terms;
   std::unordered_map<std::uint32_t, std::uint32_t> depths;
   std::vector<std::uint32_t> chain;
-  // Prefix tokens in actual calls, counted lazily backward from the pause.
+  // Prefix tokens in the calls the search stands on, the deepest last, counted
+  // lazily backward from the pause.
   std::vector<std::uint32_t> sourceTokens;
   std::uint32_t sourceScanned = 0, sourceCount = 0;
   // Memos, of walks their share did not cut: the token at a position, what
-  // each alphabet reads there, the lexer's refused reading there, the ends its
-  // re-readings may stop at, the words a position may misspell, and where a
-  // deletion there ends.
+  // each alphabet reads there, the lexer's refused reading there under an
+  // alphabet, the ends its re-readings may stop at, the words a position may
+  // misspell, and where a deletion there ends.
   std::unordered_map<std::uint64_t, Token> lexed;
   std::unordered_map<TextOffset, std::vector<Scan>> scans;
   std::unordered_map<std::uint64_t, LexReading> readings;

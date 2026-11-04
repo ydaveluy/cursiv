@@ -6,8 +6,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
+
+#include "cursiv/core/utils/StrongComponents.hpp"
 
 namespace cursiv {
 
@@ -127,6 +130,26 @@ class OperatorWords {
   std::vector<std::vector<std::uint16_t>> _words{};
   std::vector<std::uint16_t> _opening{};
   bool _open = false;
+};
+
+// The walk over the rules an operator spells: the rules on its path, how many
+// of each component of the call graph stand there, and what a rule spells.
+// Entered where no rule of its component stands on the path, a rule reaches
+// none of the rules there, so it spells the same wherever the walk meets it
+// and is read once.
+struct OperatorWordsWalk {
+  // `calls` holds the rules each rule calls.
+  explicit OperatorWordsWalk(
+      const std::vector<std::vector<std::uint16_t>>& calls)
+      : scc(StrongComponents<>::of(calls)),
+        walking(calls.size(), false),
+        onPath(calls.size(), 0),
+        known(calls.size()) {}
+
+  StrongComponents<> scc;
+  std::vector<bool> walking;
+  std::vector<std::uint16_t> onPath;
+  std::vector<std::optional<OperatorWords>> known;
 };
 
 }  // namespace cursiv

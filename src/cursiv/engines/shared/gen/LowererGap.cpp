@@ -315,7 +315,7 @@ std::uint16_t Lowerer::phrase(unsigned cfg, ImageId e, std::uint16_t skip,
     }
     case ImageKind::trigger: {
       const auto body = phrase(cfg, kid(n, 0), skip, path);
-      if (lex_may_be_empty(_c, body))
+      if (lex_empty_nodes(_c)[body] != 0)
         lower_refuse_rule(_c, LowerFail::commitPrefixEmpty, _pool.owner);
       return body;
     }
@@ -507,8 +507,9 @@ void Lowerer::check_implied_token(unsigned cfg, ImageId e) {
 
 std::uint16_t Lowerer::implied_term(ImageId e, std::uint16_t k) {
   const std::uint16_t before = _nterms;
+  // One terminal per condition: a phrase's differs with the trivia around it.
   const std::uint16_t t =
-      intern_spelled(key(Key::implied, 0, e), "implied", false, false, [&] {
+      intern_spelled(key(Key::implied, k, e), "implied", false, false, [&] {
         return _lex.push(LexNode{LexKind::implied, 0, 0, 0, 0});
       });
   if (t == before) {

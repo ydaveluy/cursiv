@@ -169,14 +169,6 @@ void AstEmitter::check_base_chains() const {
   for (std::size_t e = 0; e < a.count; ++e) {
     const std::uint32_t i = a.chains(static_cast<std::uint32_t>(e)).front();
     const Run& held = a.runs[i];
-    unsigned opens = 0;
-    for (const std::uint16_t r : held) {
-      if (!reg.rows[r].opens()) continue;
-      ++opens;
-      if (opens > 1)
-        throw std::logic_error("AST chain " + std::to_string(i) +
-                               ": more than one creation in a base run");
-    }
     const int cr = made_row(held);
     if (cr < 0) continue;
     for (const std::uint16_t r : held) {
@@ -274,14 +266,7 @@ void AstEmitter::run_held(Body& b, const Run& held, const Run& over, int cr,
     m = fill_run(b, static_cast<std::uint16_t>(cr), held);
   }
   b.guard();
-  const Run rest = spare(static_cast<std::uint16_t>(cr), held);
-  if (const int restMade = made_row(rest); restMade >= 0) {
-    // Two creations are two nodes over one record.
-    b.say("b.push_made(id, m" + std::to_string(m) + ");");
-    run_held(b, rest, over, restMade);
-    return;
-  }
-  Run all = rest;
+  Run all = spare(static_cast<std::uint16_t>(cr), held);
   all.insert(all.end(), over.begin(), over.end());
   if (std::ranges::none_of(
           all, [&](std::uint16_t r) { return reg.rows[r].writes(); }))

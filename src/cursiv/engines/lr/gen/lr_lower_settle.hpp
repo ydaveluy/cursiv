@@ -1,6 +1,5 @@
-// The passes over the lowered CFG -- auxiliaries interned, twins dropped,
-// cycles refused, records ridden down -- then the infix tables, the walk that
-// drives it all, and the sentence a refusal is told in.
+// The passes over the lowered CFG: auxiliaries interned, twins dropped, cycles
+// refused, records ridden down, then the infix tables.
 #pragma once
 
 #include <algorithm>
@@ -471,16 +470,6 @@ inline void lr_ride_chains_down(LrLowered& o, const std::vector<bool>& hands,
   }
 }
 
-inline void lr_no_non_consuming(LrLowered& o, const LrLowerPool& p) {
-  if (p.repeatedOperands.empty()) return;
-  const std::vector<std::uint8_t> empty = lr_nullable(o.cfg, false, true);
-  for (const auto& [at, owner] : p.repeatedOperands)
-    if (lr_shape_nullable(p, at, o.cfg, empty)) {
-      o.fault.raise(GrammarFaultCode::nullableRepetition, owner);
-      return;
-    }
-}
-
 inline void lr_settle(LrLowered& o) {
   const std::vector<std::uint8_t> empty = lr_nullable(o.cfg, false);
   lr_no_unit_cycle(o, empty);
@@ -495,35 +484,20 @@ inline void lr_settle(LrLowered& o) {
 
 // One step and one associativity per token an operator opens on.
 inline void lr_bind_step(LrLowered& o, std::uint16_t term, std::uint8_t prec,
-                         Association group, std::uint16_t owner) {
+                         Association group) {
   TermBuild& t = o.cfg.termBuild[term];
-  if (t.prec != 0 && (t.prec != prec || t.assoc != group))
-    o.fault.raise(GrammarFaultCode::precedenceClash, owner);
   t.prec = prec;
   t.assoc = group;
 }
 
-// The walk over the rules an operator spells: the rules on its path, how many
-// of each component of the call graph stand there, and what a rule spells.
-// Entered where no rule of its component stands on the path, a rule reaches
-// none of the rules there, so it spells the same wherever the walk meets it
-// and is read once.
-struct LrWordsWalk {
-  explicit LrWordsWalk(const LrBuildCfg& c)
-      : walking(c.nnts, false), onPath(c.nnts, 0), known(c.nnts) {
-    std::vector<std::vector<std::uint16_t>> calls(c.nnts);
-    for (std::uint16_t k = 0; k < c.nprods; ++k)
-      for (unsigned i = 0; i < c.prods[k].len; ++i)
-        if (const std::uint16_t s = c.sym_at(c.prods[k], i); !is_term(s))
-          calls[c.prods[k].lhs].push_back(nt_index(s));
-    scc = StrongComponents<>::of(calls);
-  }
-
-  StrongComponents<> scc;
-  std::vector<bool> walking;
-  std::vector<std::uint16_t> onPath;
-  std::vector<std::optional<OperatorWords>> known;
-};
+inline OperatorWordsWalk lr_words_walk(const LrBuildCfg& c) {
+  std::vector<std::vector<std::uint16_t>> calls(c.nnts);
+  for (std::uint16_t k = 0; k < c.nprods; ++k)
+    for (unsigned i = 0; i < c.prods[k].len; ++i)
+      if (const std::uint16_t s = c.sym_at(c.prods[k], i); !is_term(s))
+        calls[c.prods[k].lhs].push_back(nt_index(s));
+  return OperatorWordsWalk(calls);
+}
 
 // The strings of tokens a symbol can spell, read off its productions. The
 // walk keeps its own stack of rules, so the depth of the grammar's calls does
@@ -531,7 +505,8 @@ struct LrWordsWalk {
 inline OperatorWords lr_operator_words(const LrBuildCfg& c,
                                        const LrFirstSets& fl,
                                        const LrBuckets<std::uint16_t>& ix,
-                                       std::uint16_t sym, LrWordsWalk& walk) {
+                                       std::uint16_t sym,
+                                       OperatorWordsWalk& walk) {
   // A rule being read: where it stands in its productions and symbols, what
   // they spell so far.
   struct Frame {
@@ -672,7 +647,7 @@ inline void lr_settle_infix_ops(LrLowered& o) {
   };
   const std::size_t n = o.infixOps.size();
   std::vector<OperatorWords> words;
-  LrWordsWalk walk(c);
+  OperatorWordsWalk walk = lr_words_walk(c);
   for (std::size_t i = 0; i < n; ++i) {
     const InfixOp& op = o.infixOps[i];
     words.push_back(lr_operator_words(c, fl, ix, spells(op), walk));
@@ -732,12 +707,12 @@ inline void lr_settle_infix_ops(LrLowered& o) {
   for (const InfixOp& op : o.infixOps) {
     const std::uint16_t sym = spells(op);
     if (is_term(sym)) {
-      lr_bind_step(o, sym, op.prec, op.group, op.owner);
+      lr_bind_step(o, sym, op.prec, op.group);
       continue;
     }
     for (std::uint16_t t = 0; t < c.nterms; ++t)
       if (bound.first[nt_index(sym)].test(t))
-        lr_bind_step(o, t, op.prec, op.group, op.owner);
+        lr_bind_step(o, t, op.prec, op.group);
   }
 }
 

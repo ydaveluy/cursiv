@@ -104,6 +104,10 @@ it to the aggregate `bench` target. Declare `mylangLsp` first.
 | `CURSIV_WASI_STACK` | `1048576` (1 MiB) with the WASI toolchain | Set the main thread's stack size in bytes. |
 | `WASI_SDK` | Environment or conventional install location | Select the wasi-sdk directory; see [WebAssembly](../recipes/wasm.md). |
 
+Generated parser sources use `-O1` in WASI Debug builds to stay within
+WebAssembly engine limits on function local counts. Debug symbols remain
+enabled; handwritten sources retain the selected build's compilation flags.
+
 Sanitizer flags set for the whole build turn mimalloc off. If only one target
 uses a sanitizer, configure with `-DCURSIV_MIMALLOC=OFF`, or set the
 `CURSIV_OWN_ALLOCATOR` property of that target to `ON`.

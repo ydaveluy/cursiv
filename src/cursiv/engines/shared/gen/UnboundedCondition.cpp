@@ -22,7 +22,13 @@ bool consumes(const LowerPools& c, std::uint16_t node) {
   switch (e.kind) {
     case LexKind::token:
       return consumes(c, lex_token_body(c, e));
+    case LexKind::mark:
+      return consumes(c, e.a);
     case LexKind::chars:
+    case LexKind::same:
+    case LexKind::through_lit:
+    case LexKind::through_same:
+    case LexKind::through_nested:
       return true;
     case LexKind::seq:
     case LexKind::alt:

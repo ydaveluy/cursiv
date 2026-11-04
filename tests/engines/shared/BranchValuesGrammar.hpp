@@ -87,6 +87,20 @@ struct Suite : cursiv::GrammarSpec {
                                         as<std::int32_t>(ref<NUM>))) |
              (lit<"%"> + assign<&ast::Item::count>(ref<Measure>))) +
             lit<";">)> {};
+  // A choice of values behind a condition lays a record of its own where a
+  // repair leaves a token beside the value, and passes on the value it read.
+  struct SWITCH : terminal<as<true>(ikw<"ON">) | as<false>(ikw<"OFF">)> {};
+  struct Gated : rule<!lit<"%"> + (ref<BOOL> | ref<SWITCH>)> {};
+  struct GatedItem
+      : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) + lit<"="> +
+                               assign<&ast::Item::flag>(ref<Gated>) +
+                               lit<";">)> {};
+  struct NEG : terminal<lit<"-"> + some(d)> {};
+  struct GatedInlineItem
+      : rule<create<ast::Item>(
+            assign<&ast::Item::name>(ref<ID>) + lit<"="> +
+            assign<&ast::Item::count>(!lit<"%"> + (ref<NUM> | ref<NEG>)) +
+            lit<";">)> {};
   struct SizeItem : rule<create<ast::Item>(
                         assign<&ast::Item::name>(ref<ID>) + lit<":"> +
                         assign<&ast::Item::size>(ref<SIZE>) + lit<";">)> {};
@@ -98,6 +112,10 @@ struct Suite : cursiv::GrammarSpec {
              many(append<&ast::Items::items>(ref<InlineItem>))) |
             (lit<"size:"> + many(append<&ast::Items::items>(ref<SizeItem>))) |
             (lit<"flag:"> + many(append<&ast::Items::items>(ref<FlagItem>))) |
+            (lit<"gated:"> +
+             many(append<&ast::Items::items>(ref<GatedItem>))) |
+            (lit<"gatedinline:"> +
+             many(append<&ast::Items::items>(ref<GatedInlineItem>))) |
             (lit<"count:"> +
              many(append<&ast::Items::items>(ref<CountItem>))))> {};
   using entry = Root;

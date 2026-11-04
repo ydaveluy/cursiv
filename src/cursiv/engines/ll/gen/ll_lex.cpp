@@ -1,7 +1,7 @@
 // The lexer of one program: a token graph per terminal, the byte classes its
-// edges are written in, and one automaton per point the parse reads at. What
-// a point may read is the whole of a mode -- a position expecting one
-// terminal lexes that one, a choice lexes what its arms admit.
+// edges are written in, and one automaton with a start per mode. What a point
+// the parse reads at may read is the whole of a mode -- a position expecting
+// one terminal lexes that one, a choice lexes what its arms admit.
 #include "cursiv/engines/ll/gen/ll_lex.hpp"
 
 #include <algorithm>
@@ -126,18 +126,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   }
   for (std::uint16_t c = 0; c < g.nclimbs; ++c) {
     LlClimb& cl = g.climbs[c];
-    if (cl.selectNode != kNoRow) {
-      cl.mode = g.decisions[g.nodes[cl.selectNode].decision].mode;
-      continue;
-    }
-    DynSet want;
-    // An outer operator can extend one of this climb's spellings ("->"
-    // versus "-"). Keep the whole follow alphabet in the lexical election
-    // so the inner climb leaves that longer token to its caller.
-    for (std::uint16_t r = 1; r < g.nrules; ++r)
-      if (g.rules[r].climb == c) want |= b.ruleFollow[r];
-    want |= skip(b.climbCfg, c);
-    cl.mode = intern(want);
+    cl.mode = g.decisions[g.nodes[cl.selectNode].decision].mode;
   }
   b.errMode = modes.error_mode(g);
   DynSet tail = skips[0];

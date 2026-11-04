@@ -125,6 +125,25 @@ void a_planned_run_of_closers_is_written_whole() {
   }
 }
 
+// The first token of a required callee is owed once the descent has read
+// anything: it is inserted, and the keyword of the next statement stays one.
+void a_missing_operand_does_not_take_the_next_keyword() {
+  const auto e = parity();
+  agree(e, "rep:sums 1 + sums 2;");
+}
+
+// A search that had to read deeper than its first frames elected over those
+// frames: the arm its path enters is named over them too.
+void a_choice_past_the_first_frames_enters_the_elected_arm() {
+  const auto e = parity();
+  for (const unsigned depth : {100u, 300u}) {
+    std::string text = "rep:plain ";
+    for (unsigned i = 0; i < depth; ++i) text += "1,";
+    text += "1 ? ! ;";
+    agree(e, text);
+  }
+}
+
 // Whether a leaf the repair marked lies over the bytes in [begin, end).
 bool marks(const cursiv::ParseResult& r, cursiv::TextOffset begin,
            cursiv::TextOffset end) {
@@ -153,6 +172,25 @@ void unmatched_bytes_stop_at_an_open_token() {
     CHECK(marks(parsed, 5, 6) && !marks(parsed, 6, 10));
     CHECK(!marks(parser->parse("{ one; /* x"), 7, 11));
   }
+}
+
+// A token the elected path deletes is asked no condition of a gap: the arm that
+// path enters is named by what follows the deletion.
+void a_deleted_token_answers_no_condition() {
+  namespace c = tllconditions::generated;
+  const Engines e{c::Ll::create_parser(), c::Lr::create_parser(),
+                  c::Ll::create_ast_reflection(),
+                  c::Lr::create_ast_reflection()};
+  const std::string_view text = "arms:a q\n over ;";
+  const auto a = e.ll->parse(text);
+  const auto b = e.lr->parse(text);
+  CHECK(a.diagnostics.size() == 1 && b.diagnostics.size() == 1);
+  if (a.diagnostics.size() != 1 || b.diagnostics.size() != 1) return;
+  const auto& x = a.diagnostics.front();
+  const auto& y = b.diagnostics.front();
+  CHECK(x.kind == y.kind && x.begin == y.begin && x.end == y.end);
+  CHECK(cursiv::repair_message(e.ll->getGrammar(), x, text) ==
+        cursiv::repair_message(e.lr->getGrammar(), y, text));
 }
 
 // A token no construct takes at the head of a statement, or in front of what
@@ -228,5 +266,8 @@ int main() {
   a_late_fault_does_not_commit_an_optional_postfix();
   a_planned_run_of_closers_is_written_whole();
   unmatched_bytes_stop_at_an_open_token();
+  a_missing_operand_does_not_take_the_next_keyword();
+  a_deleted_token_answers_no_condition();
+  a_choice_past_the_first_frames_enters_the_elected_arm();
   return cursiv::test::report("LlRecoveryParity_test");
 }

@@ -126,11 +126,6 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     out.rows.push_back(g);
   }
 
-  if (typeKeys.empty())
-    throw std::runtime_error(
-        "the grammar uses no AST type: no rule builds a node, no member "
-        "points at one and no directive writes one -- make the entry rule "
-        "build a node with `create<T>`");
   if (fields.keys().size() > 0xFFFEu)
     throw std::runtime_error(
         "the grammar writes more than 65 534 distinct members -- split the "

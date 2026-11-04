@@ -45,9 +45,6 @@ struct LlNodeBuild {
   // A turn of a counted repetition's optional tail, and the sequence that
   // joins it to the next: the tail is one chain, written out flat.
   bool ladder = false;
-  // The rule whose repetition of more than one turn repeats this item: the
-  // item may not match nothing.
-  std::uint16_t repeatOwner = kNoRow;
 
   constexpr bool operator==(const LlNodeBuild&) const = default;
 };

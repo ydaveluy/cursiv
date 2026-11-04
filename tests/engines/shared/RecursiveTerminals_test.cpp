@@ -64,6 +64,9 @@ void exercise(const cursiv::Parser& parser) {
                           "emptyopen:a;",
                           "emptyopen:;a;",
                           "marked:<==>{{}}==;",
+                          "markclass:<=>=;",
+                          "markclass:<->-;",
+                          "marklit:<#>#;",
                           "unicode:λω!",
                           "unicode:λλωω!",
                           "echo:<-->body]--;",
@@ -110,6 +113,9 @@ void exercise(const cursiv::Parser& parser) {
                           "emptyopen:",
                           "emptyopen:x",
                           "marked:<==>{{}}=;",
+                          "markclass:<=>-;",
+                          "markclass:<==>==;",
+                          "marklit:<#>=;",
                           "unicode:x!",
                           "unicode:δω!",
                           "echo:<-->body]-;",
@@ -336,6 +342,7 @@ struct Graph {
     lex[nlex] = value;
     return nlex++;
   }
+  std::uint16_t push_lex(LexNode value) { return node(value); }
   std::uint16_t character(char c) {
     cursiv::ByteSet set;
     set.add(static_cast<unsigned char>(c));

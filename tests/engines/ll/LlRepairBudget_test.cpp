@@ -101,6 +101,62 @@ void a_saturated_budget_still_respects_the_parse_ceiling() {
   }
 }
 
+// Two repairs of one fault meet at the next token, one having read a token more
+// than the other: from there they read as one, so the text behind the fault
+// costs the search nothing, however long it is.
+void a_repair_does_not_pay_for_the_text_behind_it() {
+  std::string text = "show 1 + , 2;\n";
+  for (unsigned i = 0; i < 40000; ++i) text += "show 3;\n";
+  for (const bool predictive : {false, true}) {
+    const auto engine = parser(predictive, cursiv::RepairBudget{});
+    cursiv::LlSearchWork::current() = {};
+    const auto result = engine->parse(text);
+    CHECK(result.accepted && result.value && !bounded(result));
+    CHECK(result.diagnostics.size() == 1);
+    if (predictive) CHECK(cursiv::LlSearchWork::current().work < 4096);
+  }
+}
+
+// A work count, one diagnostic and no bound: what a fault in front of `tail`
+// must come to, however long the stretch it has to read past.
+void one_cheap_repair(const std::string& text, std::uint64_t most) {
+  for (const bool predictive : {false, true}) {
+    const auto engine = parser(predictive, cursiv::RepairBudget{});
+    cursiv::LlSearchWork::current() = {};
+    const auto result = engine->parse(text);
+    CHECK(result.accepted && result.value && !bounded(result));
+    CHECK(result.diagnostics.size() == 1);
+    if (predictive) CHECK(cursiv::LlSearchWork::current().work < most);
+  }
+}
+
+std::string long_sum() {
+  std::string sum = "(2";
+  for (unsigned i = 0; i < 20000; ++i) sum += " + 2";
+  return sum + ")";
+}
+
+// Arms that part only behind the sum: a repair in front of it holds once a plan
+// replay could read no further, and need not read on to tell them apart.
+void arms_that_part_late_do_not_cost_the_stretch() {
+  one_cheap_repair("rep:either , " + long_sum() + ";\n", 4096);
+}
+
+// Two repairs that stand in different stacks cannot meet before the bracket
+// closes: the race between them stops well short of its end.
+void a_race_does_not_cost_the_bracket() {
+  one_cheap_repair("rep:sums 1 + , " + long_sum() + ";\n", 32768);
+}
+
+// A fault behind a long right-recursive list: every call of the list ends where
+// the last one does, so a reading stands on all of them at once, and the search
+// pays for each once.
+void a_fault_behind_a_long_list_does_not_cost_its_square() {
+  std::string text = "rep:plain ";
+  for (unsigned i = 0; i < 4000; ++i) text += "1,";
+  one_cheap_repair(text + "1 ? ! ;\n", 262144);
+}
+
 void a_starved_parser_still_observes_cancellation() {
   cursiv::CancellationTokenSource source;
   source.request_stop();
@@ -122,6 +178,10 @@ int main() {
   a_starved_budget_keeps_clean_text_clean();
   a_bounded_search_still_reads_the_document();
   a_saturated_budget_still_respects_the_parse_ceiling();
+  a_repair_does_not_pay_for_the_text_behind_it();
+  arms_that_part_late_do_not_cost_the_stretch();
+  a_race_does_not_cost_the_bracket();
+  a_fault_behind_a_long_list_does_not_cost_its_square();
   a_starved_parser_still_observes_cancellation();
   return cursiv::test::report("LlRepairBudget_test");
 }

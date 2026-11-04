@@ -30,24 +30,7 @@ bool refuse_build_fault(std::string_view grammar, const LlBuiltProgram& a,
   return true;
 }
 
-// The first terminal whose match is empty, empty where there is none.
-std::string_view ll_empty_match_terminal(const LlBuiltProgram& a) {
-  return empty_match_terminal(a, [&](std::uint16_t state) {
-    for (std::uint16_t t = 1; t < a.cfg.nterms; ++t)
-      if (a.dfaAccSet[state].test(t)) return static_cast<SymbolId>(t);
-    return kInvalidSymbol;
-  });
-}
-
 }  // namespace
-
-bool ll_fits(std::string_view grammar, std::size_t n, const char* what) {
-  if (n <= 0xFFFFu) return true;
-  refuse_too_large(grammar,
-                   "it has " + std::to_string(n) + ' ' + what +
-                       ", more than 65 535");
-  return false;
-}
 
 std::optional<LlFinalProgram> LlFinalProgram::make(LlBuiltProgram built,
                                                    std::string_view grammar,
@@ -55,10 +38,10 @@ std::optional<LlFinalProgram> LlFinalProgram::make(LlBuiltProgram built,
   if (refuse_build_fault(grammar, built, asWritten) ||
       refuse_unbuilt(grammar, built,
                      built.cfg.rule_name(built.cfg.lowerRule)) ||
-      // A stamp's position is a node or an operator of a precedence table.
+      // A stamp's position is a node, one past its index.
       refuse_unstamped(grammar, built.stamp, built.writes.nchains,
                        built.cfg.nnodes + 1u) ||
-      refuse_empty_match(grammar, ll_empty_match_terminal(built)))
+      refuse_empty_match(grammar, empty_match_terminal(built)))
     return std::nullopt;
   return LlFinalProgram(
       std::make_unique<const LlBuiltProgram>(std::move(built)));

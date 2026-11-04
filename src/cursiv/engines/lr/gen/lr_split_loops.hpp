@@ -85,10 +85,8 @@ inline void lr_split_loops(LrLowered& o) {
         int to = active[x];
         const bool fresh = to < 0;
         if (fresh) {
-          if (places.size() >= kNtBase) {
-            lower_refuse(c, LowerFail::tooManyRules);
+          if (places.size() >= kNtBase)
             throw LowerRefused(LowerFail::tooManyRules);
-          }
           to = static_cast<int>(places.size());
           places.push_back({static_cast<std::uint16_t>(x), at, kNoRow, {}});
           loops.push_back(loops[at]);

@@ -108,9 +108,8 @@ std::vector<DynSet> lex_live(const Built& a) {
   std::vector<DynSet> live(a.dfaAccSet.data(), a.dfaAccSet.data() + a.ndfa);
   std::vector<std::vector<std::uint32_t>> into(a.ndfa);
   for (std::uint32_t s = 0; s < a.ndfa; ++s) {
-    if (!a.relays.empty())
-      for (auto k = a.dfaRelay[s]; k != kNoRelay; k = a.relays[k].next)
-        live[s].set(a.relays[k].term);
+    for (auto k = a.dfaRelay[s]; k != kNoRelay; k = a.relays[k].next)
+      live[s].set(a.relays[k].term);
     for (unsigned c = 0; c < a.ncls; ++c) {
       const auto to = a.dfaNext[std::size_t{s} * a.ncls + c];
       if (to != kDeadState && to != s &&
@@ -395,8 +394,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const auto again = [&](const LlDecision& x) {
     if (x.rule == kNoRow || g.rules[x.rule].climb == kNoRow) return false;
     const std::uint16_t select = g.climbs[g.rules[x.rule].climb].selectNode;
-    return select != kNoRow &&
-           g.nodes[select].decision == &x - g.decisions.data();
+    return g.nodes[select].decision == &x - g.decisions.data();
   };
   o.array(
       "::cursiv::LlTable::Decision", "kDecisions",

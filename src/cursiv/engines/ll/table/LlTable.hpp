@@ -202,7 +202,7 @@ struct LlTable {
   static constexpr bool standsWithoutWordClass = false;
   std::uint32_t termWords = 0;
 
-  // The graph a prediction walks, and the automata the construction closed.
+  // The graph a prediction walks.
   LlAtnView atn{};
   // What a caller reads once a call it made is done, per state a call returns
   // into: the terminals its rule reads from there on, the row at word

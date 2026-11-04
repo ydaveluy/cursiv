@@ -217,6 +217,13 @@ void run() {
         "g ? YAS;",
         "a=true b=false c=true d=false e=true f=false g=true ", flag_of);
 
+  // A dropped token beside the value takes nothing from what the rule passes.
+  built("gated: a = TRUE; b = OFF;", "clean a=true b=false ", flag_of);
+  built("gated: a = @ TRUE; b = @ OFF; c = @ FALSE; d = @ ON;",
+        "a=true b=false c=false d=true ", flag_of);
+  // So do bytes no alphabet reads, in front of a value that takes no rule.
+  built("gatedinline: a = ^ 3; b = ^ -4;", "a=3 b=-4 ", count_of);
+
   // One record a word, naming the rule written there, if any.
   records("token: a = TRUE;", "[a|ID|name][TRUE|BOOL|flag][a = TRUE;||items]");
   records("rule: a = TRUE;", "[a|ID|name][TRUE|Bool|flag][a = TRUE;||items]");

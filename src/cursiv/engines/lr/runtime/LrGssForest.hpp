@@ -179,21 +179,11 @@ class LrGssForest {
     return out;
   }
 
-  // Whether the stack `left` orders before `right` under one future.
-  bool precedes(std::span<const Id> left, std::span<const Id> right) {
-    return order(left, right) < 0;
-  }
-  // Two stacks under one future, frame by frame, each frame's rank: negative
-  // where `left` orders first, positive where `right` does, zero where they
-  // read alike, `kOpen` where one side ends a part the other goes on with, as
-  // the future's words there are not in either.
+  // Two stacks under one future, their nodes elected, frame by frame, each
+  // frame's rank: negative where `left` orders first, positive where `right`
+  // does, zero where they read alike, `kOpen` where one side ends a part the
+  // other goes on with, as the future's words there are not in either.
   static constexpr int kOpen = 3;
-  int order(std::span<const Id> left, std::span<const Id> right) {
-    for (const Id n : left) (void)elect(n);
-    for (const Id n : right) (void)elect(n);
-    return ordered(left, right);
-  }
-  // The same over stacks whose nodes are elected already.
   int ordered(std::span<const Id> left, std::span<const Id> right) {
     if (left.size() != right.size()) return kOpen;
     for (std::size_t k = 0; k != left.size(); ++k)
@@ -213,22 +203,6 @@ class LrGssForest {
     if (length(rank_piece(right)) != 0) _layRight.push_back(rank_piece(right));
     const int v = compare(_layLeft, _layRight);
     return v == -2 || v == 2 ? kOpen : v;
-  }
-
-  std::vector<std::uint32_t> rank(Id root) {
-    (void)elect(root);
-    ranked(root);
-    std::vector<std::uint32_t> out;
-    const Node& n = _nodes[root];
-    if (n.flatLen != 0) {
-      const auto words = _flats.span(n.flatAt, n.flatLen);
-      out.assign(words.begin(), words.end());
-      return out;
-    }
-    Spell::Cursor c;
-    for (c.seek(_spell, n.rank, 0); !c.done(); c.next())
-      out.push_back(c.value());
-    return out;
   }
 
   [[nodiscard]] std::size_t size() const { return _nodes.size(); }
@@ -396,8 +370,8 @@ class LrGssForest {
 
   // Flat ranks are dropped for ropes, which a rank takes when next asked for.
   // A parent that already has a rope must revisit its children too: opening
-  // its derivation still reads their ranks, including in the spine index. No
-  // node reads `_flats` past this point, so its words are freed.
+  // its derivation still reads their ranks. No node reads `_flats` past this
+  // point, so its words are freed.
   void flatten_no_more() {
     for (std::size_t i = 0; i != _nodes.size(); ++i) {
       Node& n = _nodes[i];

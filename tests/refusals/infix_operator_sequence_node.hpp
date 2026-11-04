@@ -1,6 +1,6 @@
 // A rule that builds a node inside an operator written as a sequence: the
 // sequence is a data rule, and an operator hands over text.
-// expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator a rule that builds a node
+// expect LR LL: refused .infixOperatorNotText..*rule .Sum. names as an operator something other than one token or a rule that gives a value
 #pragma once
 
 #include "refusals/head.hpp"

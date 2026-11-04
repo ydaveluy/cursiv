@@ -690,24 +690,13 @@ class LexicalPredicateEmitter {
                  "      }\n      m.finish(::std::move(f.out)); return;\n";
           break;
         }
-        case LexKind::mark:
         case LexKind::positive:
         case LexKind::negative:
           out += "      if (f.stage) {\n";
-          if (e.kind == LexKind::mark)
-            out += std::format(
-                "        const auto begin = f.in[f.at].at;\n"
-                "        for (::std::size_t j = 0; j < m.returned().size(); "
-                "++j) {{\n          auto c = m.returned()[j];\n"
-                "          c.captures = captures.bind(c.captures, {}u, begin, "
-                "c.at);\n"
-                "          f.out.add(c);\n        }}\n",
-                e.min);
-          else
-            out += std::format(
-                "        if (m.returned().empty() == {}) "
-                "f.out.add(f.in[f.at]);\n",
-                e.kind == LexKind::negative ? "true" : "false");
+          out += std::format(
+              "        if (m.returned().empty() == {}) "
+              "f.out.add(f.in[f.at]);\n",
+              e.kind == LexKind::negative ? "true" : "false");
           out +=
               "        ++f.at;\n      }\n"
               "      if (f.at == f.in.size()) {\n"

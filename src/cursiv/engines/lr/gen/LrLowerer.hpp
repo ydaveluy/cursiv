@@ -41,7 +41,9 @@ class LrLowerer : public LowerWalk<LrLowerer, LrLowered, LrLowerPool> {
   LrShapeId lay_write(unsigned cfg, ImageId e);
   LrShapeId lay_flag(unsigned cfg, ImageId e);
   LrShapeId lay_condition(unsigned cfg, ImageId e);
+  std::uint16_t stop_rule(DynSet terms, std::uint8_t trail);
   LrShapeId lay_stop(unsigned cfg, ImageId e, const Cut& cut);
+  std::uint16_t closing_stop(std::uint16_t cut, std::uint8_t trail);
   LrShapeId lay_implied(unsigned cfg, ImageId e);
   LrShapeId capture_created(LrShapeId at);
   LrShapeId once_site(LrShapeId at) const;

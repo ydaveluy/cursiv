@@ -52,6 +52,10 @@ struct S : cursiv::Extends<cursiv::AstNode> {
 struct Leaf : cursiv::Extends<cursiv::AstNode> {
   string_view text;
 };
+struct Stated : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  vector<Stated*> body;
+};
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Expression> {
   string_view name;
@@ -696,6 +700,27 @@ struct Twins : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A state shifts `module` or closes the head; behind `b` the closed head goes on
+// to a name, whose alphabet has no `module`. The lexer elects one token for both
+// readings, the keyword, wherever the statement stands in the text.
+struct ClosedHead : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Head : rule<create<ast::Stated>(kw<"t"> +
+                                         option(kw<"module"> + kw<"z">))> {};
+  struct Keyed : rule<create<ast::Stated>(kw<"a"> +
+                                          append<&ast::Stated::body>(ref<Head>) +
+                                          kw<"module"> + kw<"y"> + lit<";">)> {};
+  struct Named : rule<create<ast::Stated>(kw<"b"> +
+                                          append<&ast::Stated::body>(ref<Head>) +
+                                          assign<&ast::Stated::name>(ref<ID>) +
+                                          lit<";">)> {};
+  struct Root : rule<create<ast::Stated>(
+                    many(append<&ast::Stated::body>(ref<Keyed> | ref<Named>)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // One document selects a conformance scenario before its original rule.
 // Hidden-terminal policies are scoped to their own tagged cases.
 struct Suite : cursiv::GrammarSpec {
@@ -748,6 +773,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"barehost:"> + ref<Hosted<Bare>::Root>) |
              (lit<"absentclosehost:"> + ref<Hosted<AbsentClose>::Root>) |
              (lit<"followedhost:"> + ref<Followed<Bare>::Root>) |
+             (lit<"closedhead:"> + ref<ClosedHead::Root>) |
              (lit<"keywordtrivia:"> + skip(ignore<KeywordTrivia::WS>,
                                            hide<KeywordTrivia::NOTE>,
                                            ref<KeywordTrivia::Root> + eof)) |

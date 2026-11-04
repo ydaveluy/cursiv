@@ -51,14 +51,6 @@ class Reach {
       _out.push_back({_image.ruleLists[at + i], false});
   }
 
-  void call(std::uint32_t rule) {
-    if (_image.rules[rule].grammar)
-      throw std::runtime_error(
-          "`ref<G>` names a grammar: read it with `section<G>(open, close)`, "
-          "which puts G's text between two tokens of the caller");
-    _out.push_back({rule, false});
-  }
-
   void collect(std::uint32_t rule) {
     const ImageFace f = _image.ready(rule).face[1];
     if (f.kind == ImageRuleKind::infix) {
@@ -74,7 +66,7 @@ class Reach {
   void plain(ImageId id) {
     switch (const ImageNode n = _image.nodes[id]; n.kind) {
       case ImageKind::ref:
-        call(n.a);
+        _out.push_back({n.a, false});
         return;
       case ImageKind::embed:
         if (_image.nodes[_image.kids[n.first]].kind == ImageKind::seq &&
@@ -123,10 +115,9 @@ class Reach {
         conditional(_image.shape_kids(id)[i]);
     } else if (n.kind == ImageKind::ref) {
       const ImageRuleKind kind = _image.ready(n.a).face[0].kind;
-      if (_image.rules[n.a].inlineTerminal || kind == ImageRuleKind::data)
-        _out.push_back({n.a, true});
-      else
-        call(n.a);
+      const bool text =
+          _image.rules[n.a].inlineTerminal || kind == ImageRuleKind::data;
+      _out.push_back({n.a, text});
     } else {
       plain(id);
     }

@@ -30,16 +30,6 @@
 namespace cursiv {
 namespace {
 
-// The machine as it was, for a pass that mints while it chases; a row the
-// array never reached reads zero.
-template <class Arr>
-auto lr_snap(const Arr& a, std::size_t n) {
-  std::vector<std::remove_cvref_t<decltype(a.data()[0])>> out(n);
-  const std::size_t k = a.size() < n ? a.size() : n;
-  for (std::size_t i = 0; i < k; ++i) out[i] = a.data()[i];
-  return out;
-}
-
 // A cell carried within one growing array, by value: the growth moves the
 // array under a reference.
 template <class Arr>
@@ -186,10 +176,7 @@ struct LrPeekWalk {
 
   void open(std::uint32_t nactions) {
     if (seen.size() < nactions) seen.resize(nactions, 0);
-    if (++gen == 0) {
-      std::ranges::fill(seen, 0u);
-      gen = 1;
-    }
+    ++gen;
     wl.clear();
   }
   void push(std::uint32_t i) {
@@ -213,7 +200,6 @@ bool lr_peek_arm(const LrBuildTable& A, const LrGotoColumns& go,
     const LrAction& x = A.actions[at];
     if (x.kind == LrActionKind::shift) {
       const std::uint32_t w = x.arg;
-      if (w >= A.nstates) return false;
       const std::uint16_t wm = A.mode[w];
       if (A.modeMulti[wm] != 0) return false;
       if (A.flags_mode(wm)) return false;
@@ -360,7 +346,6 @@ void lr_minimize_states(LrBuildTable& A) {
   std::vector<std::uint32_t> cls(n, 0), next(n);
   std::uint32_t nclasses = 1;
   std::vector<std::uint32_t> key;
-  std::vector<std::uint64_t> gotos;
   for (;;) {
     const bool initial = nclasses == 1;
     std::vector<unsigned> size(nclasses);
@@ -419,19 +404,10 @@ void lr_minimize_states(LrBuildTable& A) {
           key.push_back(x.exact ? 1u : 0u);
         }
       }
-      gotos.clear();
-      for (const LrGotoRows::Edge& e : go[s])
-        gotos.push_back(
-            (static_cast<std::uint64_t>(e.nt) << 33) |
-            (e.guard == 0
-                 ? static_cast<std::uint64_t>(cls[e.to]) << 1
-                 : (static_cast<std::uint64_t>(guardCls[e.guard - 1u]) << 1) |
-                       1u));
-      std::ranges::sort(gotos);
-      const auto unique = std::ranges::unique(gotos);
-      for (auto it = gotos.begin(); it != unique.begin(); ++it) {
-        key.push_back(0xC0000000u | static_cast<std::uint32_t>(*it >> 32));
-        key.push_back(static_cast<std::uint32_t>(*it));
+      for (const LrGotoRows::Edge& e : go[s]) {
+        key.push_back(0xC0000000u | e.nt);
+        key.push_back(e.guard == 0 ? cls[e.to] << 1
+                                   : guardCls[e.guard - 1u] << 1 | 1u);
       }
       const auto [at, fresh] = states.try_emplace(key, cls[s]);
       if (fresh && std::exchange(represented[cls[s]], 1)) at->second = count++;
@@ -681,9 +657,9 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   std::vector<std::uint8_t> elig(nP, 0);
   for (unsigned p = 0; p < nP; ++p) elig[p] = lr_unit_passes(g, p);
   // Every composition reads the machine as built.
-  const std::vector<LrAction> sAct = lr_snap(A.actions, A.nactions);
-  const std::vector<std::uint32_t> sAb = lr_snap(A.actionBase, n0);
-  const std::vector<std::uint16_t> sAc = lr_snap(A.actionCount, n0);
+  const std::vector<LrAction> sAct = A.actions.v;
+  const std::vector<std::uint32_t> sAb = A.actionBase.v;
+  const std::vector<std::uint16_t> sAc = A.actionCount.v;
   const LrAction* const sa = sAct.data();
   const std::uint32_t* const ab = sAb.data();
   const std::uint16_t* const ac = sAc.data();
@@ -709,8 +685,6 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
     // ascend by nonterminal/source: targetOf's mint order numbers states.
     const LrGotoColumns columns(out, nN);
     using UpeEdge = LrGotoRows::Edge;
-    std::vector<std::vector<LrAction>> mRow;  // as composed, before rewrites
-    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> mByHash;
     std::vector<std::uint32_t> work;
     std::vector<std::uint32_t> gStamp(nN, 0), gPos(nN, 0);
     std::uint32_t gGen = 0;
@@ -827,23 +801,6 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
       });
       if (subs == 0) return X;
 
-      std::uint64_t h = hash_mix(1469598103934665603ull, X);
-      for (const LrAction& x : row) {
-        h = hash_mix(h, static_cast<std::uint64_t>(x.term) |
-                            (static_cast<std::uint64_t>(x.arg) << 16) |
-                            (static_cast<std::uint64_t>(x.kind) << 32));
-        h = hash_mix(h, static_cast<std::uint64_t>(x.site) |
-                            (static_cast<std::uint64_t>(x.outer) << 16));
-      }
-      for (const UpeEdge& e : gadd)
-        h = hash_mix(h, static_cast<std::uint64_t>(e.nt) |
-                            (static_cast<std::uint64_t>(e.to) << 16));
-      for (const std::uint32_t m : mByHash[h]) {
-        const std::uint32_t id = n0 + m;
-        if (row == mRow[m] && std::ranges::equal(out[id], gadd) &&
-            A.closeRow[id] == owed)
-          return id;
-      }
       // A copy the state index cannot name is not minted; the memo answers
       // later edges that ask for it, without counting it again.
       if (A.nstates >= 0xFFFFu || row.size() >= 0xffffu) {
@@ -853,8 +810,6 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
       const std::uint32_t id =
           lr_mint_state(A, {row, gadd, std::move(owed)}, X);
       out.push_row(gadd);
-      mRow.push_back(std::move(row));
-      mByHash[h].push_back(id - n0);
       work.push_back(id);
       return id;
     };

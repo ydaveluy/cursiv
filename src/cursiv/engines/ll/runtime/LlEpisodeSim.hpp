@@ -15,6 +15,7 @@
 #include "cursiv/engines/ll/runtime/LlThread.hpp"
 #include "cursiv/engines/ll/table/LlAtnView.hpp"
 #include "cursiv/engines/ll/table/LlSimulation.hpp"
+#include "cursiv/engines/shared/runtime/CancellationPoll.hpp"
 
 namespace cursiv {
 
@@ -59,10 +60,6 @@ struct LlLentRung {
   }
 };
 
-// The word of a return that goes to a caller the episode only guesses, which no
-// decision names: its decision is the one that names none.
-inline constexpr std::uint32_t kLlBlindWord = 0xFFFF0000u;
-
 // A choice readings went by, and the arms they took there, one bit per arm:
 // none where two ways to it took different arms, or where readings also part
 // there with no choice of their own.
@@ -96,6 +93,10 @@ class LlEpisodeSim {
     _rungs = rungs;
   }
 
+  // The stop of the parse: rules that may read nothing, nested, keep one closure
+  // busy for long. Unset, none is read.
+  void watch(const CancellationPoll& stop) { _stop = stop; }
+
   const LlHistory& arms() const { return _arms; }
   LlHistory& lexes() { return _lexes; }
   const LlStackSet& stacks() const { return _stacks; }
@@ -105,6 +106,11 @@ class LlEpisodeSim {
     for (; tag != 0 && tag != kLlNoReduce; tag = _reduceUp[tag])
       if (tag == of) return true;
     return false;
+  }
+
+  // The run `tag` went on from.
+  std::uint32_t reduced_before(std::uint32_t tag) const {
+    return _reduceUp[tag];
   }
 
   // Where the text stands for the readings closed next, which is where the
@@ -119,11 +125,9 @@ class LlEpisodeSim {
   void reset() {
     ll_clear(_arms, _lexes, _reduces, _stacks, _below, _relatedProcessed,
              _relatedFlags, _relatedBaseCount, _relatedBases, _heads, _stack,
-             _words, _side, _shared, _joins);
+             _words, _side, _shared, _joins, _flat);
     _reduceUp.assign(1, 0);
-    _reduceState.assign(1, 0);
     _log = nullptr;
-    _stopped = false;
   }
 
   // ...and an episode that grew large gives its room back.
@@ -183,6 +187,11 @@ class LlEpisodeSim {
              _relatedBaseCount, _relatedBases, _stack, _words, _side);
     _base = _stacks.size();
     std::size_t next = 0;
+    // The reading that waits first parted from one that goes before it: all
+    // that one grows, on the stack from `after` up, goes before it too.
+    static constexpr std::size_t kNone = ~std::size_t{0};
+    std::size_t after = kNone;
+    std::uint32_t waiting = 0;
     for (;;) {
       const LlThread* from = nullptr;
       std::uint32_t word = kNoWord;
@@ -194,7 +203,8 @@ class LlEpisodeSim {
       } else if (next < origins.size()) {
         from = &origins[next];
       }
-      if (!_side.empty()) {
+      if (!_side.empty() &&
+          (_side.front().seq != waiting || _stack.size() <= after)) {
         LlThread seen = from != nullptr ? *from : LlThread{};
         if (from != nullptr && word != kNoWord)
           seen.arm = _arms.append(seen.arm, word, _pos, _lull);
@@ -206,6 +216,11 @@ class LlEpisodeSim {
           visit(t, kNoWord, out);
           continue;
         }
+        std::uint32_t wordA = 0, wordB = 0;
+        after = _arms.parts(_side.front().thread.arm, seen.arm, wordA, wordB)
+                    ? _stack.size() - (onStack ? 1u : 0u)
+                    : kNone;
+        waiting = _side.front().seq;
       }
       if (from == nullptr) break;
       LlThread t = *from;
@@ -217,7 +232,6 @@ class LlEpisodeSim {
       }
       visit(t, word, out);
     }
-    _flat.clear();
     for (LlThread& t : out) t.stack = flat(t.stack);
     for (std::size_t k = _base; k < _stacks.size(); ++k) {
       const auto cell = LlStackSet::kCellBit | static_cast<std::uint32_t>(k);
@@ -271,10 +285,6 @@ class LlEpisodeSim {
       return visit(made(path)) ? ArmVisit::skip : ArmVisit::stop;
     });
   }
-
-  // Whether a reading left a rule with no caller under it: the entry, or a
-  // rule whose caller is not known.
-  bool stopped() const { return _stopped; }
 
   // The choices the readings of `threads` went by, sorted by place, each with
   // the arms taken there. A reading over a cell took what each member of the
@@ -580,11 +590,6 @@ class LlEpisodeSim {
   }
 
  public:
-  // The edges a crossing keeps back: none.
-  struct NoStay {
-    bool operator()(std::uint32_t) const { return false; }
-  };
-
   // Whether a reading waits on a condition.
   bool needs_filter(const std::vector<LlThread>& threads) const {
     for (const LlThread& t : threads)
@@ -623,12 +628,12 @@ class LlEpisodeSim {
 
   // The terminals the readings may read once the conditions they wait on are
   // crossed.
-  template <class F, class S = NoStay>
+  template <class F, class S>
   void possible_terms(const std::vector<LlThread>& threads, F&& read,
-                      S&& stays = {}) {
+                      S&& stays) {
     _everyone = threads;
-    expand(_everyone, [](std::uint16_t, std::uint32_t) { return true; },
-           stays);
+    expand(_everyone,
+           [&](std::uint16_t, std::uint32_t edge) { return !stays(edge); });
     for (const LlThread& t : _everyone)
       for (const LlAtnEdge& e : _atn.outgoing(t.state))
         if (e.kind == LlEdgeKind::atom) read(e.label);
@@ -680,7 +685,7 @@ class LlEpisodeSim {
     std::uint32_t wordA = 0, wordB = 0;
     if (_scoped == nullptr || !_arms.parts(a, b, wordA, wordB)) return false;
     const std::uint32_t x = wordA >> 16;
-    return x == wordB >> 16 && x < kNoRow && _scoped[x] != 0;
+    return x == wordB >> 16 && _scoped[x] != 0;
   }
 
   static LlThreadKey key(const LlThread& t) {
@@ -696,8 +701,8 @@ class LlEpisodeSim {
   // The readings past the conditions `accepts` takes, after those that were
   // there: each reading is crossed from once, and every way to a reading is
   // kept for the best to be chosen.
-  template <class F, class S = NoStay>
-  void expand(std::vector<LlThread>& everyone, F&& accepts, S&& stays = {}) {
+  template <class F>
+  void expand(std::vector<LlThread>& everyone, F&& accepts) {
     std::vector<LlThread>& origins = _crossOrigins;
     std::vector<LlThread>& grown = _crossGrown;
     _crossed.clear();
@@ -711,8 +716,7 @@ class LlEpisodeSim {
         const LlAtnState& s = _atn.state(t.state);
         for (std::uint32_t i = 0; i < s.nedges; ++i) {
           const LlAtnEdge& e = _atn.edge(s.edge + i);
-          if (e.kind == LlEdgeKind::condition &&
-              accepts(e.label, s.edge + i) && !stays(s.edge + i))
+          if (e.kind == LlEdgeKind::condition && accepts(e.label, s.edge + i))
             origins.push_back(LlThread{.state = e.target,
                                        .stack = t.stack,
                                        .arm = t.arm,
@@ -834,7 +838,8 @@ class LlEpisodeSim {
 
   // A stack without the cells that hold a single stack: the frames over such
   // a cell stand over that stack, so that a rule entered again and again
-  // leaves no chain of them behind.
+  // leaves no chain of them behind. Each frame is walked once per episode: only
+  // the cells of the closure in hand gain members, and this runs after its walk.
   std::uint32_t flat(std::uint32_t stack) {
     _frames.clear();
     std::uint32_t at = stack, base = kLlCtxNone;
@@ -863,9 +868,9 @@ class LlEpisodeSim {
       at = _pool.contexts().parent(at, 0);
     }
     if (!changed) {
-      if (!_frames.empty()) {
+      for (const std::uint32_t frame : _frames) {
         bool fresh = false;
-        _flat.at(stack, fresh) = stack;
+        _flat.at(frame, fresh) = frame;
       }
       return stack;
     }
@@ -1038,36 +1043,23 @@ class LlEpisodeSim {
     if (fresh) {
       tag = static_cast<std::uint32_t>(_reduceUp.size());
       _reduceUp.push_back(run);
-      _reduceState.push_back(state);
     }
     return tag;
   }
 
-  // Whether the run of completions behind `tag` already ends the rule `state`
-  // stops: a caller that is not known sends the reading round a cycle of
-  // returns, and every lap would be a run of its own.
-  bool completed(std::uint32_t tag, std::uint32_t state) const {
-    for (; tag != 0 && tag != kLlNoReduce; tag = _reduceUp[tag])
-      if (_reduceState[tag] == state) return true;
-    return false;
-  }
-
   // A reading at the end of a rule returns into the callers it has.
   void leave(const LlThread& p, const LlAtnState& s) {
-    if (_tracked && p.stack == kLlCtxNone && completed(p.tag, p.state)) return;
+    _stop.poll();
     std::uint32_t reduce = kLlNoReduce;
     if (_tracked) reduce = reduced(p.tag == kLlNoReduce ? 0u : p.tag, p.state);
     LlThread q = p;
     q.tag = reduce;
     if (p.stack == kLlCtxNone) {
-      _stopped = true;
-      const std::uint32_t from = _atn.callerBase[s.rule];
-      const std::uint32_t to = _atn.callerBase[s.rule + 1];
-      for (std::uint32_t i = to; i-- > from;) {
+      // The caller is not known to the construction's walk; a parse stands on
+      // the document, whose end has no callers.
+      for (std::uint32_t i = _atn.callerBase[s.rule + 1];
+           i-- > _atn.callerBase[s.rule];) {
         q.state = _atn.callerAt[i];
-        q.arm = to - from > 1 ? _arms.append(p.arm, kLlBlindWord | (i - from),
-                                             _pos, _lull)
-                              : p.arm;
         push(q);
       }
     } else if (LlStackSet::is_cell(p.stack)) {
@@ -1099,7 +1091,6 @@ class LlEpisodeSim {
   LlHistory _arms, _lexes;
   LlStamped<std::uint64_t, LlKeyHash> _reduces;
   std::vector<std::uint32_t> _reduceUp{0};
-  std::vector<std::uint32_t> _reduceState{0};
   LlStackSet _stacks;
   std::vector<LlThread> _stack;
   std::vector<std::uint32_t> _words;
@@ -1125,13 +1116,13 @@ class LlEpisodeSim {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> _joins;
   std::vector<std::pair<std::uint32_t, std::uint16_t>>* _log = nullptr;
   std::size_t _base = 0;
-  bool _stopped = false;
   std::uint32_t _seq = 0;
   std::uint32_t _pos = 0;
   std::uint32_t _lull = 0;
   const std::uint8_t* _scoped = nullptr;
   const std::uint8_t* _shares = nullptr;
   const std::vector<LlLentRung>* _rungs = nullptr;
+  CancellationPoll _stop;
 };
 
 }  // namespace cursiv

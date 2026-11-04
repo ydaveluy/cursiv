@@ -271,9 +271,9 @@ template <Last LastSite, bool Direct = false>
 void completion_sites_agree() {
   using G = Sites<LastSite, Direct>;
   const auto& low = cursiv::LrLowering<G>::table();
-  // Keep Prefix's reduction: its expectation has no local shift site and
+  // Prefix's reduction stays: its expectation has no local shift site and
   // must use the proved agreement of AT's own sites or Name's callers.
-  auto a = cursiv::lr_build_automaton(low, {.passes = false});
+  auto a = cursiv::lr_build_automaton(low);
   CHECK(!a.overflow);
   const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>();
   const auto facts =
@@ -767,18 +767,6 @@ void run() {
   probe_cuts<tbounds::byteprobes::G<64>>(0);
   probe_cuts<tbounds::byteprobes::G<70>>(1);
   groups_spread_over_units();
-  // One nonterminal entered from more states than its 16-bit goto count holds.
-  {
-    auto a = std::make_unique<cursiv::LrBuildTable>();
-    a->cfg.nnts = 2;
-    cursiv::LrGotoRows rows;
-    const std::vector<cursiv::LrGotoRows::Edge> e{{1, 0, 0}};
-    for (std::uint32_t s = 0; s <= 0xffffu; ++s) rows.push_row(e);
-    a->set_gotos(std::move(rows));
-    CHECK(a->overflow && std::string_view(a->overflowCap) ==
-                             "one rule is reached from more than 65 535 "
-                             "parser states");
-  }
   // What a state owes runs past a byte's reach, in the frozen table as in the
   // construction.
   // The shared entry adds its tag to the 256-token completion.

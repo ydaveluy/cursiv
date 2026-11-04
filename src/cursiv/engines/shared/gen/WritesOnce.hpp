@@ -99,8 +99,6 @@ struct effect_sequence<E, Es...> {
 };
 template <class... Es>
 struct node_effects<Seq<Es...>, TypeList<Es...>> : effect_sequence<Es...> {};
-template <class P, class B>
-struct node_effects<Commit<P, B>, TypeList<P, B>> : effect_sequence<P, B> {};
 template <class... Es>
 struct node_effects<Choice<Es...>, TypeList<Es...>> {
   using writes = dedupe_t<tl_cat_t<typename node_effects<Es>::writes...>>;

@@ -1,7 +1,6 @@
 // The graph a prediction walks, borrowed: the construction presents its own
-// rows through this, a generated module the ones it froze. One simulation
-// reads both, so a decision the build could not settle is answered at parse
-// time by the same closure that failed to settle it.
+// rows through this, a generated module the ones it froze. A decision the build
+// could not settle is answered at parse time over the graph that left it open.
 #pragma once
 
 #include <cstdint>

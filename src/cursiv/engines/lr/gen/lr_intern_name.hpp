@@ -13,10 +13,8 @@ namespace cursiv {
 
 inline std::uint16_t lr_intern_name(LrBuildCfg& c, std::string_view text) {
   if (text.empty()) return c.nameLen;
-  if (text.size() > 0xffffu - c.nameLen) {
-    lower_refuse(c, LowerFail::namePool);
+  if (text.size() > 0xffffu - c.nameLen)
     throw LowerRefused(LowerFail::namePool);
-  }
   const std::uint16_t off = c.nameLen;
   std::ranges::copy(text, c.names.row(off, text.size()));
   c.nameLen = static_cast<std::uint16_t>(off + text.size());

@@ -121,14 +121,6 @@ bool refuse_ungated(const cursiv::LrLowered& low) {
   return true;
 }
 
-std::string_view empty_match_terminal(const Built& a) {
-  return cursiv::empty_match_terminal(a, [&](std::uint16_t state) {
-    return a.dfaAccept[state] != 0
-               ? static_cast<cursiv::SymbolId>(a.dfaAccept[state] - 1)
-               : cursiv::kInvalidSymbol;
-  });
-}
-
 // Whether the graph is refused before anything is derived from it. The stamp
 // row width a lane forces is applied to it here, while it can still change.
 bool refuse_graph(Built& a, unsigned stampRowBits) {
@@ -136,7 +128,8 @@ bool refuse_graph(Built& a, unsigned stampRowBits) {
                                 a.cfg.lowerRule < a.cfg.nnts
                                     ? a.cfg.nt_name(a.cfg.lowerRule)
                                     : std::string_view{}) ||
-         cursiv::refuse_empty_match(CURSIV_GEN_NAME, empty_match_terminal(a)) ||
+         cursiv::refuse_empty_match(CURSIV_GEN_NAME,
+                                    cursiv::empty_match_terminal(a)) ||
          cursiv::refuse_unstamped(CURSIV_GEN_NAME, a.stamp,
                                   a.writes.nchains + a.nfused, a.nstates,
                                   stampRowBits);
@@ -242,7 +235,9 @@ void report_each_conflict(const Built& a) {
               std::printf("      reduce  %s\n",
                           a.cfg.prod_text(a.cfg.prods[row[k].arg]).c_str());
             else
-              std::printf("      shift   -> state %u\n", row[k].arg);
+              a.each_landing(row[k], [](std::uint16_t to) {
+                std::printf("      shift   -> state %u\n", to);
+              });
         });
   }
 }

@@ -149,8 +149,9 @@ const LexReading& lr_search_reading(const LrContext& c, LrSearch& s,
     return it->second;
   const TextOffset end = lr_search_walk_end(c, s, p);
   TextOffset reached = p;
-  const LexReading r = lr_lex_reading<A>(c.src, end, mode, p, reached);
-  ++s.work;
+  std::uint64_t read = 0;
+  const LexReading r = lr_open_reading<A>(c, mode, mode, p, end, reached, read);
+  s.work += 1 + read / kRepairLexBytes;
   if (lr_search_walked(c, s, p, end, reached)) return kNone;
   return s.readings.emplace(key, r).first->second;
 }
@@ -183,7 +184,7 @@ Token lr_search_written(const LrContext& c, LrSearch& s, const Token& t,
   if (const auto it = s.written.find(t.begin); it != s.written.end())
     return it->second;
   ++s.work;
-  return s.written.emplace(t.begin, lr_written<A>(c, t)).first->second;
+  return s.written.emplace(t.begin, lr_written<A>(c, t, mode)).first->second;
 }
 
 // Every token some mode reads from `p`, its rivals included, and where a
@@ -300,8 +301,8 @@ const std::vector<Typo>& lr_search_misread(const LrContext& c, LrSearch& s,
                               .read = &read,
                               .shortOf = &cut,
                               .scratch = &s.typoScratch};
-      typo_each(LrTypoTape<A>{bounds, &want, &stops}, A.modeStart[m], at, plain,
-                [&out](const Typo& t) {
+      typo_each(LrTypoTape<A>{{bounds, at}, &want, &stops}, A.modeStart[m], at,
+                plain, [&out](const Typo& t) {
                   for (const Typo& o : out)
                     if (o.term == t.term && o.end == t.end) return;
                   out.push_back(t);

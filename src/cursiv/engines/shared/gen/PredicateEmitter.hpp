@@ -770,14 +770,7 @@ class PredicateEmitter {
         out += "    out.add(p);\n";
         break;
       case LexKind::alt:
-        out += std::format(
-            "    if (p.held == ::cursiv::kUnread) {{\n"
-            "      const auto sc = predicate_lex(src, len, p.at, {0}u, seen);\n"
-            "      p.held = sc.term;\n"
-            "      p.end = sc.end;\n"
-            "      p.mode = {0}u;\n"
-            "    }}\n",
-            _g.lexMode[at]);
+        out += prelex(at, "    ");
         // A mode covering the whole choice covers each token: all would skip.
         if (std::ranges::all_of(std::span(_g.lexKid.data() + e.a, e.b),
                                 [&](std::uint16_t k) {

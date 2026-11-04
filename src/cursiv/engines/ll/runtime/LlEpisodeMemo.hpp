@@ -116,14 +116,20 @@ class LlEpisodeMemo {
   static std::uint64_t end_hash(std::uint64_t hash, TextOffset length) {
     return (hash ^ length) * 1099511628211ull;
   }
+  // A place that goes on differently each time is asked after its last few
+  // readings alone: the older ones cost an episode, not a walk per episode.
   template <class Agrees>
   const LlRemembered* find_at(std::uint64_t hash, Agrees&& agrees) const {
     const auto found = _head.find(hash);
     if (found == _head.end()) return nullptr;
-    for (auto at = found->second; at != ~std::uint32_t{0}; at = _rows[at].next)
+    auto at = found->second;
+    for (unsigned asked = 0; asked != kAsked && at != ~std::uint32_t{0};
+         ++asked, at = _rows[at].next)
       if (agrees(_rows[at])) return &_rows[at];
     return nullptr;
   }
+
+  static constexpr unsigned kAsked = 16;
 
   std::vector<LlRemembered> _rows;
   std::unordered_map<std::uint64_t, std::uint32_t> _head;

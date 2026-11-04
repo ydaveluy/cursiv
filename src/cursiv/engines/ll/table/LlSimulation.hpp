@@ -1,10 +1,10 @@
-// The one simulation both storeys run: the construction walks it with a
-// ceiling to settle a choice once and for all, a parse walks it with the
-// stack it actually stands on. Nothing here knows a grammar.
+// The walk over sets of configurations: the construction runs it with a
+// ceiling to settle a choice once and for all, and a repair search and a caret
+// run it over the stack the descent stands on. A prediction has a closure of
+// its own, `LlEpisodeSim`. Nothing here knows a grammar.
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <bit>
 #include <cstdint>
 #include <functional>
@@ -144,10 +144,9 @@ struct LlKeyHash {
 // expressions cascade -- C's -- multiplies them at every level.
 class LlCtxPool {
  public:
-  // The nodes made so far, and which life of the pool they belong to: a node
-  // is only meaningful against the pool that made it, until it is cleared.
+  // The nodes made so far: a node is only meaningful against the pool that
+  // made it, until it is cleared.
   std::size_t size() const { return _n.size(); }
-  std::uint64_t life() const { return _life; }
 
   // The nodes made between these two are a walk's own, and go all at once
   // when it ends; the ones before stay. False where a walk already holds the
@@ -223,7 +222,6 @@ class LlCtxPool {
     _memo.clear();
     std::vector<Join>{}.swap(_joins);
     _scratching = false;
-    _life = ++lives();
   }
 
  private:
@@ -231,11 +229,14 @@ class LlCtxPool {
   // readings apart instead, which costs configurations and never precision.
   static constexpr unsigned kLlCtxWidth = 16;
 
+  // `pairs` and `starts` are written up to `n` and read no further: a join asked
+  // for at every reading does not wipe them first.
   struct Join {
+    Join(std::uint32_t x, std::uint32_t y) : a(x), b(y) {}
     std::uint32_t a, b;
     unsigned i = 0, j = 0, n = 0;
-    std::uint32_t pairs[2 * kLlCtxWidth]{};
-    std::int64_t starts[kLlCtxWidth]{};
+    std::uint32_t pairs[2 * kLlCtxWidth];
+    std::int64_t starts[kLlCtxWidth];
   };
 
   static std::uint64_t merge_key(std::uint32_t a, std::uint32_t b) {
@@ -246,7 +247,7 @@ class LlCtxPool {
   // A child is memoised before its parent resumes at that same pair.
   std::uint32_t join(std::uint32_t a, std::uint32_t b) {
     _joins.clear();
-    _joins.push_back({a, b});
+    _joins.emplace_back(a, b);
     for (;;) {
       Join& q = _joins.back();
       bool pending = false, apart = false;
@@ -277,7 +278,7 @@ class LlCtxPool {
                 break;
               }
             } else {
-              _joins.push_back({p, other});
+              _joins.emplace_back(p, other);
               pending = true;
               break;
             }
@@ -372,13 +373,8 @@ class LlCtxPool {
   LlStamped<std::uint64_t, LlKeyHash> _scratchIndex;
   LlStamped<std::uint64_t, LlKeyHash> _memo;
   std::vector<Join> _joins;
-  static std::atomic<std::uint64_t>& lives() {
-    static std::atomic<std::uint64_t> count{0};
-    return count;
-  }
   std::size_t _mark = 0;
   bool _scratching = false;
-  std::uint64_t _life = ++lives();
 };
 
 // Where the walk stands, which arm it came from, and what it will return into.
@@ -511,10 +507,9 @@ class LlSimulation : public LlReturnPool {
 
   // Replay a call abandon over every stack the reading still carries.
   bool leave(std::uint32_t depth, std::uint32_t ret) {
-    std::vector<LlConfig> from = _cur;
     _next.clear();
     forget_visits();
-    for (const LlConfig& c : from) {
+    for (const LlConfig& c : _cur) {
       std::vector<std::uint32_t> level{c.ctx}, next;
       for (std::uint32_t d = 1; d <= depth; ++d) {
         next.clear();
@@ -957,7 +952,8 @@ class LlSimulation : public LlReturnPool {
           (static_cast<std::uint64_t>(cur.state) << 16) | cur.alt;
       seat = &_at.at(key, first);
       if (!first) {
-        for (std::uint32_t at = *seat; at != kNoFollow;
+        unsigned tried = 0;
+        for (std::uint32_t at = *seat; at != kNoFollow && tried++ < kSeatsTried;
              at = _shareEpsilon ? _seatNext[at] : kNoFollow) {
           const std::uint32_t m = _ctx.merge(out[at].ctx, cur.ctx);
           if (m == kLlCtxApart) {
@@ -1043,6 +1039,11 @@ class LlSimulation : public LlReturnPool {
   }
 
   static constexpr std::size_t kLinearLabels = 8;
+  // The seats of a position a new stack tries to join, the latest first. Stacks
+  // whose calls began apart join none of them however many stand there, and
+  // trying them all costs a long right-recursive list its square: one that
+  // joins none of these takes a seat of its own.
+  static constexpr unsigned kSeatsTried = 8;
   static constexpr std::size_t kPoolCap = std::size_t{1} << 16;
   static constexpr std::size_t kKeptCap = std::size_t{1} << 20;
   // The one-at-a-time walk may spend this many visits per visit of the first,

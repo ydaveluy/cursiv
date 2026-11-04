@@ -485,6 +485,7 @@ class LrGss {
     _c.la = r.la;
     _c.laMode = r.laMode;
     _c.virt = r.virt;
+    _c.indent = r.indent;
     if (step.lone != kLrNoProd) {
       if (!lr_write_reduce<A>(_c, step.lone, lr_shadow_holds(_c, r)))
         throw std::logic_error("cursiv: GSS replay refused reduction");
@@ -498,48 +499,52 @@ class LrGss {
     _c.laMode = w.laMode;
   }
 
-  // The trivia from the cursor to `r`'s token, pending as the drive leaves it.
-  // `Apart`: the token's stack refused a flagged terminal that beats trivia on
-  // the way, which the walk skips as it meets it.
-  template <bool Apart = false>
-  void lay_pending(const Reading& r) {
-    _c.pending.clear();
-    TextOffset at = _c.committed;
-    const auto mode = A.mode[r.run.state];
-    [[maybe_unused]] LrSkipped<A> skip{};
-    [[maybe_unused]] const typename LrLexTape<A>::Skipping tape{.skip = &skip};
-    while (at < r.la.begin) {
-      if (lr_skips<A>(mode, static_cast<unsigned char>(_c.src[at]))) {
-        ++at;
-        continue;
-      }
-      Scan t;
-      if constexpr (Apart)
-        t = lex_match(tape, _c.src, _c.len, mode, at);
-      else
-        t = _c.drive->walk(_c.src, _c.len, mode, at);
-      const bool trivia =
-          t.end > at && (lr_is_trivia<A>(t.term) ||
-                         lr_joins<A>(r.indent.depth, t.term));
-      if (!trivia) {
-        if constexpr (Apart) {
-          if (t.end > at && A.flagged(mode, t.term)) {
-            skip.set(t.term);
-            continue;
-          }
-        } else if constexpr (A.has_flags()) {
-          return lay_pending_apart(r);
-        }
-        throw std::logic_error("cursiv: GSS replay trivia mismatch");
-      }
-      if (A.cfg.terms[t.term].recorded)
-        _c.pending.push_back(Token{at, t.end, t.term});
-      at = t.end;
-    }
+  // The trivia from `from` to `r`'s token laid pending, `walk(p)` reading each
+  // position; the token the crossing stopped at.
+  template <class Walk>
+  Token lay_trivia(const Reading& r, TextOffset from, Walk&& walk) {
+    return lr_cross_trivia<A>(
+        _c, A.mode[r.run.state], from, r.la.begin, r.indent.depth, walk,
+        [&](TextOffset, const Token* trivia) {
+          if (trivia != nullptr && A.cfg.terms[trivia->sym].recorded)
+            _c.pending.push_back(*trivia);
+        });
   }
 
+  // The trivia from the cursor to `r`'s token, pending as the drive leaves it.
+  // An indent stands behind its own run, form feeds included, and no trivia:
+  // nothing is pending.
+  void lay_pending(const Reading& r) {
+    _c.pending.clear();
+    if constexpr (kLaid<A.cfg, kLaidIndent> != 0)
+      if (r.la.sym == kLaid<A.cfg, kLaidIndent>) return;
+    const auto mode = A.mode[r.run.state];
+    const Token stop = lay_trivia(r, _c.committed, [&](TextOffset p) {
+      return _c.drive->walk(_c.src, _c.len, mode, p);
+    });
+    if (stop.begin < r.la.begin) lay_pending_apart(r);
+  }
+
+  // The token's stack refused a flagged terminal that beats trivia on the way:
+  // the walk skips it as it meets it.
   CURSIV_NOINLINE void lay_pending_apart(const Reading& r) {
-    lay_pending<true>(r);
+    if constexpr (A.has_flags()) {
+      _c.pending.clear();
+      const auto mode = A.mode[r.run.state];
+      LrSkipped<A> skip{};
+      const typename LrLexTape<A>::Skipping tape{.skip = &skip};
+      TextOffset at = _c.committed;
+      for (;;) {
+        const Token stop = lay_trivia(r, at, [&](TextOffset p) {
+          return lex_match(tape, _c.src, _c.len, mode, p);
+        });
+        if (stop.begin >= r.la.begin) return;
+        if (stop.sym >= A.cfg.nterms || !A.flagged(mode, stop.sym)) break;
+        skip.set(stop.sym);
+        at = stop.begin;
+      }
+    }
+    throw std::logic_error("cursiv: GSS replay trivia mismatch");
   }
 
   LrContext& _c;

@@ -313,6 +313,38 @@ void an_invented_bracket_moves_the_levels_of_the_lines_behind() {
                                        "a  b\n c\n]\nd"});
 }
 
+// A block left unfinished at the end of the input, by the arm a replay of the
+// repair names as the search read it: the end of the input is the pending
+// dedent there too, and no block is invented inside another.
+void an_unfinished_block_at_the_end_is_not_filled_with_blocks() {
+  const auto ll = tllindent::generated::Laid::create_parser();
+  const auto lr = tindent::laid::generated::Cases::create_parser();
+  const std::string_view text = "heads z:";
+  const auto a = ll->parse(text);
+  const auto b = lr->parse(text);
+  CHECK(a.accepted && b.accepted);
+  CHECK(a.cst().size() < 2 * b.cst().size());
+}
+
+// A dropped token holds its bytes as a read one does, a backslash in front of
+// its own line's end included: the line after it says an indentation.
+void a_dropped_token_holds_the_backslash_it_ends_on() {
+  const auto ll = tllindent::generated::Laid::create_parser();
+  const auto lr = tindent::laid::generated::Cases::create_parser();
+  for (const std::string_view text :
+       {"heads a %c\\\n%d\\\ne\n", "heads a %c\\\n%d\\\n  e\n"}) {
+    const auto x = ll->parse(text);
+    const auto y = lr->parse(text);
+    CHECK(x.diagnostics.size() == y.diagnostics.size());
+    CHECK(x.cst().size() == y.cst().size());
+    for (std::size_t i = 0;
+         i < x.diagnostics.size() && i < y.diagnostics.size(); ++i)
+      CHECK(x.diagnostics[i].kind == y.diagnostics[i].kind &&
+            x.diagnostics[i].begin == y.diagnostics[i].begin &&
+            x.diagnostics[i].end == y.diagnostics[i].end);
+  }
+}
+
 // A dropped dedent moves no byte: the invention it undoes is not progress.
 void an_invented_block_closed_at_once_ends() {
   const auto ll = tllindent::generated::Ll::create_parser();
@@ -384,24 +416,29 @@ std::string joined(const std::vector<std::string>& names) {
   return out;
 }
 
-// A caret stands where the other engine's does, in or behind every token of a
-// valid document: past an indent, a dedent and the closing of a suite alike.
+// A caret stands where the other engine's does, at every place of a valid
+// document and where a cut of one stops on a blank: past an indent, a dedent
+// and the closing of a suite alike, on a line's blanks, which say what the
+// line's level is, and offering no token the indentation lays. A cut that stops
+// on a word is left out: the repairs the two engines make for it are their own.
 void a_caret_agrees_with_the_table_engine_past_the_levels(
     const cursiv::Parser& ll, const cursiv::Parser& lr,
     const std::vector<std::string>& corpus) {
+  const auto agree = [&](const std::string& text, cursiv::TextOffset at) {
+    const auto a = offered(ll, text, at, at, true);
+    const auto b = offered(lr, text, at, at, true);
+    CHECK(a == b);
+    if (a != b)
+      std::printf("caret %u in [%s]: LL %s | LR %s\n", at, text.c_str(),
+                  joined(a).c_str(), joined(b).c_str());
+  };
   for (const auto& text : corpus) {
     CHECK(ll.parse(text).accepted && ll.parse(text).diagnostics.empty());
-    for (cursiv::TextOffset at = 1; at <= text.size(); ++at) {
-      if (std::string_view(" \t\r\n").find(text[at - 1]) !=
-          std::string_view::npos)
-        continue;
-      const auto a = offered(ll, text, at, at);
-      const auto b = offered(lr, text, at, at);
-      CHECK(a == b);
-      if (a != b)
-        std::printf("caret %u in [%s]: LL %s | LR %s\n", at,
-                    std::string(text).c_str(), joined(a).c_str(),
-                    joined(b).c_str());
+    for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
+      agree(text, at);
+      if (at != 0 &&
+          std::string_view(" \n").find(text[at - 1]) != std::string_view::npos)
+        agree(text.substr(0, at), at);
     }
   }
 }
@@ -529,7 +566,8 @@ int main() {
       *tindent::laid::generated::Cases::create_parser(),
       {"suites top a:\n  pass\n", "suites top a:\n  pass\n  pass\n",
        "suites top a:\n  pass\ntop b:\n  pass\n",
-       "suites top a:\n  pass\n  pass\ntop b:\n  pass\n  pass\n"});
+       "suites top a:\n  pass\n  pass\ntop b:\n  pass\n  pass\n",
+       "fork a b\nc\n", "fork a b\n  c\nd\n", "fork a\n  b\n    c\n"});
   a_caret_agrees_with_the_table_engine_past_the_levels(
       *tllindent::generated::Ll::create_parser(),
       *tindent::generated::G::create_parser(),
@@ -548,6 +586,8 @@ int main() {
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
   an_invented_block_closed_at_once_ends();
+  an_unfinished_block_at_the_end_is_not_filled_with_blocks();
+  a_dropped_token_holds_the_backslash_it_ends_on();
   std::string suites;
   for (unsigned i = 0; i < 1024; ++i) suites += "a:\n  b\n";
   parity(*tllindent::generated::Ll::create_parser(),

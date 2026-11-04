@@ -61,8 +61,8 @@ void a_clipped_token_is_not_memoized() {
   s.work = 0;
   s.limit = 1;
   std::vector<std::uint16_t> terms;
-  cursiv::ll_search_terms<kPlain>(
-      c, s, &cfg, 1, cursiv::Token{0, whole.end, whole.term}, terms);
+  cursiv::Token token{0, whole.end, whole.term};
+  cursiv::ll_search_terms<kPlain>(c, s, &cfg, 1, token, terms);
   CHECK(terms.empty() && cursiv::ll_search_spent(s) && s.work <= 3);
 }
 
@@ -112,8 +112,9 @@ void an_artificial_end_is_no_dedent_or_section_end() {
     c.section = 1;
     cursiv::LlSearch s(table.atn, c.len, kTiny);
     s.limit = 1;
-    CHECK(cursiv::ll_search_reading<table>(c, s, 1).term ==
-          cursiv::kInvalidSymbol);
+    CHECK(cursiv::ll_search_reading<table>(c, s, 1,
+                                           cursiv::ll_err_mode<table>(c))
+              .term == cursiv::kInvalidSymbol);
     CHECK(s.readings.empty() && cursiv::ll_search_spent(s) && s.work <= 3);
   }
 }

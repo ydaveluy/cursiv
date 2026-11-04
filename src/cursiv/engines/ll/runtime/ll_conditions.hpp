@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
 
 #include "cursiv/core/utils/macros.hpp"
@@ -17,7 +16,24 @@ CURSIV_NOINLINE inline void ll_condition_node(LlContext& c, std::uint16_t mode,
   if (c.give) return;
   for (;;) {
     ll_peek<T>(c, mode);
-    if (ll_condition<T>(c, condition, c.la, c.at)) {
+    bool holds = ll_condition<T>(c, condition, c.la, c.at);
+    // A terminal it refuses comes off the position, which is read again; a
+    // token only a condition names stands, and nothing here reads it. Where no
+    // reading holds, the token first read is the one that is repaired.
+    if (!holds) {
+      const Token first = c.la;
+      const std::uint16_t firstMode = c.laMode;
+      LlSkipped<T> skip{};
+      while (!holds && !ll_lengthens<T>(mode, c.la.sym) &&
+             ll_read_without<T>(c, mode, skip))
+        holds = !ll_lengthens<T>(mode, c.la.sym) &&
+                ll_condition<T>(c, condition, c.la, c.at);
+      if (!holds) {
+        c.la = first;
+        c.laMode = firstMode;
+      }
+    }
+    if (holds) {
       ll_hold<T>(c);
       return;
     }
@@ -43,20 +59,10 @@ inline void ll_implied(LlContext& c, std::uint16_t mode, std::uint16_t term,
                        std::uint16_t pos = 0) {
   if (c.give) return;
   if (!c.laValid) ll_peek<T>(c, mode);
-  if (c.la.sym == term) {
+  if (c.la.sym == term)
     ll_consume<T>(c, row, pos);
-  } else if (ll_condition<T>(c, condition, ll_normal_token<T>(c, c.la, mode),
-                             c.at)) {
-    // It stands before the gap, as an explicit separator would. A parent
-    // may already have flushed hidden trivia, so keep the tape monotone.
-    const CstRun& run = c.tape.stream();
-    const TextOffset floor =
-        run.records() != 0 ? run.at(run.records() - 1u).end : 0;
-    const TextOffset at = std::max(c.at, floor);
-    c.last = c.tape.leaf(at, at, T.stamp.make(row, pos));
-  } else {
-    ll_expect<T>(c, mode, term, row, pos);
-  }
+  else if (!ll_implied_holds<T>(c, mode, condition, row, pos))
+    ll_expect<T>(c, mode, term, row, pos, condition);
 }
 
 }  // namespace cursiv

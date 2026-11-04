@@ -107,15 +107,14 @@ inline bool refuse_unstamped(std::string_view grammar, StampLayout& stamp,
 }
 
 // The first terminal whose match is empty: one a mode's start accepts, or a
-// relay the start launches ends where its automaton cannot see. `accepted`
-// answers the terminal a state accepts, `kInvalidSymbol` where none.
-template <class Built, class Accepted>
-std::string_view empty_match_terminal(const Built& a, Accepted accepted) {
+// relay the start launches ends where its automaton cannot see.
+template <class Built>
+std::string_view empty_match_terminal(const Built& a) {
   const auto empty = lex_empty_nodes(a.cfg);
   for (std::uint32_t m = 0; m < a.nmodes; ++m) {
     const std::uint16_t start = a.modeStart[m];
-    if (const SymbolId t = accepted(start); t != kInvalidSymbol)
-      return a.cfg.term_name(t);
+    if (a.dfaAccept[start] != 0)
+      return a.cfg.term_name(a.dfaAccept[start] - 1u);
     for (auto r = a.dfaRelay[start]; r != kNoRelay; r = a.relays[r].next)
       if (empty[a.cfg.termBuild[a.relays[r].term].lex])
         return a.cfg.term_name(a.relays[r].term);

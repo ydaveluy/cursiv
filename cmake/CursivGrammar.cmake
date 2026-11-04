@@ -269,9 +269,12 @@ function(_cursiv_generate_language test_only)
         $<$<CONFIG:Release>:${_parserOptimization}>
         $<$<PLATFORM_ID:WASI>:-O1>)
   endif()
+  # Keep generated WASI Debug functions within engine limits on local counts.
+  # Debug symbols remain enabled; handwritten application code keeps its flags.
   # WASI needs tail calls between parser groups, but not for by-value C++ calls.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
       $<$<CONFIG:Release>:${_parserOptimization}>
+      $<$<AND:$<PLATFORM_ID:WASI>,$<CONFIG:Debug>>:-O1>
       $<$<PLATFORM_ID:WASI>:-mtail-call>
       $<$<PLATFORM_ID:WASI>:-fno-optimize-sibling-calls>)
   target_include_directories(${_name}Generated PUBLIC ${_roots})

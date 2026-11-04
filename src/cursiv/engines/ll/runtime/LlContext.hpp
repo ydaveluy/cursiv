@@ -89,9 +89,6 @@ struct LlContext {
   LlMachine* machine = nullptr;
   bool nested = false;
 
-  // The generated entry is running: its outermost caller is the document,
-  // rather than the unknown caller of a raw prediction helper.
-  bool document = false;
   // What a call hands its callee: the precedence a climb stands under.
   unsigned arg = 0;
 

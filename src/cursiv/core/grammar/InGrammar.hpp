@@ -146,8 +146,9 @@ template <class G, class X, class Eff = in_force_t<G, X>,
 struct in_grammar_rule {
   using kind = Kind;
   using slot = typename slot_holder<Eff>::type::slot;
-  static constexpr auto body =
-      scoped_t<G, std::remove_cv_t<decltype(Eff::body)>>{};
+  // The unnamed rules resolved first, so each is scoped like a named one.
+  static constexpr auto body = scoped_t<
+      G, unnamed_data_operands_t<std::remove_cv_t<decltype(Eff::body)>>>{};
 };
 template <class G, class X, class Eff>
 struct in_grammar_rule<G, X, Eff, infix_kind> {

@@ -70,8 +70,8 @@ struct LlBuiltProgram : ShapeOverflow {
   // ...and the automata the exploration closed, all of them in one pool.
   std::vector<LlDfaState> dfa{};
   std::vector<LlDfaEdge> dfaEdge{};
-  // Where the document is entered, and where it ends: the entry rule has a
-  // caller like every other, or a closure could not read past its own end.
+  // Where the document is entered: the entry rule has a caller like every
+  // other, or a closure could not read past its own end.
   std::uint32_t atnEntry = 0;
 
   // The lexer: the byte classes every edge is written in, one automaton for
@@ -152,9 +152,7 @@ struct LlBuiltProgram : ShapeOverflow {
   std::vector<std::uint16_t> edgeNode{};
   // The call position returning into each state, absent for synthetic calls.
   std::vector<std::uint16_t> returnNode{};
-  // The state the graph stands in once each position is read. A climb's
-  // operator is a position too, though the program holds no node for it: its
-  // own run follows the nodes'.
+  // The state the graph stands in once each position is read.
   std::vector<std::uint32_t> nodeAfter{};
   // Whether a position can be the first its rule's invocation reads.
   std::vector<std::uint8_t> nodeHead{};

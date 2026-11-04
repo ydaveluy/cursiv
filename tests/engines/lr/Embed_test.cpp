@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "cursiv/engines/ll/runtime/LlSearch.hpp"
 #include "cursiv/test/Check.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
@@ -124,6 +125,18 @@ void a_missing_close_is_owed_at_the_end(const Parser& p) {
   CHECK(y.accepted && ast(first_block(y, false)) == "[1,]" && owes(p, y, ">"));
 }
 
+// A fault at the head of a long section: looking for the section's closer costs
+// the bytes it reads, not a share of the search per token.
+void a_long_section_does_not_cost_a_fault_its_share(const Parser& ll) {
+  std::string text = "json '''[@ 1";
+  for (unsigned i = 0; i < 100000; ++i) text += ", 1";
+  text += "]'''\n";
+  cursiv::LlSearchWork::current() = {};
+  const ParseResult r = ll.parse(text);
+  CHECK(r.accepted && r.diagnostics.size() == 1);
+  CHECK(cursiv::LlSearchWork::current().work < 65536);
+}
+
 // A grammar that skips nothing, where the document's region skips nothing
 // either: its section lexes a fault with its own terminals, never with the
 // document's comment, which would run past the closing brace.
@@ -176,6 +189,13 @@ void the_tree_holds_the_section(const Parser& p) {
   const auto* doc = r.value_as<tembed::ast::Doc>();
   CHECK(doc != nullptr && doc->blocks.size() == 2 &&
         ast(doc->blocks.begin()[1]->json) == "on");
+}
+
+// A section's rule may write a member from a sequence no rule names.
+void a_section_writes_a_sequence(const Parser& p) {
+  const ParseResult r = p.parse("dotted <a.b c.d>\n");
+  CHECK(r.accepted && r.diagnostics.empty());
+  CHECK(ast(first_block(r, true)) == "(a.b=0;c.d=0;)");
 }
 
 // A directive over a section writes the entry's value; one over a delimiter
@@ -264,6 +284,7 @@ void each(const char* name, const Parser& p, std::string_view dump) {
   an_override_stays_outside(p);
   the_document_cuts_its_blanks_around(p);
   the_tree_holds_the_section(p);
+  a_section_writes_a_sequence(p);
   a_directive_stands_over_the_section_or_a_delimiter(p);
   the_caret_and_the_repair_read_the_section(p);
   a_missing_close_is_owed_at_the_end(p);
@@ -296,5 +317,6 @@ int main() {
   each("LR", *lr, tembed::generated::DocLr::kGrammarText);
   each("LL", *ll, tembed::generated::DocLl::kGrammarText);
   the_end_of_a_section_is_the_end_of_the_text(*lr);
+  a_long_section_does_not_cost_a_fault_its_share(*ll);
   return cursiv::test::report("Embed_test");
 }

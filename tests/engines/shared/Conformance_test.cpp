@@ -409,9 +409,20 @@ int main() {
   for (const std::string_view text :
        {"tie: if", "atendhost: [  a ]", "trailing: \n", "turn: ", "calls: ",
         "callermany: ", "keywordtrivia: bc   ", "keywordtrivia:shared\n",
-        "%% trailing:", "calls: a) ", "calls: a a }",
+        "%% trailing:", "calls: a) ", "calls: a a }", "calls: a a\nb",
         "conditionedtrivia: a) ", "conditionedtrivia: ) a"})
     one_tree(all, text);
+
+  // The lexer elects the keyword at each occurrence of a statement, whatever
+  // the statements before it read.
+  const Pair closedHead{"closedhead:"};
+  const std::string once = closedHead.source("b t module;");
+  const std::string thrice =
+      closedHead.source("b t module; b t module; b t module;");
+  for (const auto& parser : closedHead) {
+    CHECK(parser->parse(once).diagnostics.size() == 1);
+    CHECK(parser->parse(thrice).diagnostics.size() == 3);
+  }
 
   condition_contract_cases::run();
   template_tail_cases::run();

@@ -247,15 +247,56 @@ void a_condition_reads_the_tokens_behind_the_caret_its_own_way() {
 
 // Behind a repair the replay is still the descent's: a run of invented tokens,
 // a misspelt word and dropped text each leave the stack the table engine
-// names.
+// names. Inside a comment no end closes, what is typed is the comment's.
 void carets_behind_a_repair_are_the_table_engines() {
   sweep_language("tpar repaired", *tpar::generated::Lr::create_parser(),
                  *tpar::generated::Ll::create_parser(),
                  {"sow a;", "shw all x, y;"}, false);
-  sweep_language("conditions repaired",
+  sweep_language(
+      "conditions repaired", *tllconditions::generated::Lr::create_parser(),
+      *tllconditions::generated::Ll::create_parser(),
+      {"a.(b;\n1 + 2 + 3\nreturn", "{ return y\n a.}b.c\n}", "/* c", "1 + /*"},
+      false);
+}
+
+// Alternatives alike past their first token are all open behind the tokens
+// they share, whichever the descent settled on for the text past the caret.
+void alternatives_alike_past_their_first_token_all_go_on() {
+  sweep_language(
+      "tpar forks", *tpar::generated::Lr::create_parser(),
+      *tpar::generated::Ll::create_parser(),
+      {"fork:fi a;", "fork:fi a()", "fork:x a a b", "fork:x a a c",
+       "fork:up in a;", "fork:up in a()", "fork:ty a;", "fork:ty a()",
+       "fork:tw tg tg;", "fork:tw tg tg:", "fork:fi a; ty b; x a b up in c()"});
+  sweep_language("conditions forks",
                  *tllconditions::generated::Lr::create_parser(),
                  *tllconditions::generated::Ll::create_parser(),
-                 {"a.(b;\n1 + 2 + 3\nreturn", "{ return y\n a.}b.c\n}"}, false);
+                 {"arrow:fk a", "arrow:fk a;", "arrow:fk a ()", "arrow:fk a x;",
+                  "arrow:fk a; fk b x; fk c()"},
+                 false);
+}
+
+// `->` reads over the `-` a statement goes on with where the gap leaves it to
+// that `-`: the stacks before the `-` are asked as the drive asked them, on the
+// document's text, and a gap that refuses `->` leaves `-` and `>` to be read.
+void a_gap_takes_a_token_off_the_position_as_the_drive_does() {
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  const auto end = [](const cursiv::Parser& parser, const std::string& text) {
+    return spellings(features_at(parser, text,
+                                 static_cast<cursiv::TextOffset>(text.size())));
+  };
+  using Words = std::vector<std::string>;
+  const std::string inLine = "arrow:sv a -";
+  const std::string nextLine = "arrow:sv a\n-";
+  const std::string refused = "arrow:sz a -";
+  CHECK(end(*lr, inLine) == Words{">"});
+  CHECK(end(*lr, nextLine).empty());
+  CHECK(end(*lr, refused) == Words{">"});
+  for (const std::string text : {"arrow:sz a -> b;", "arrow:sz a -> "}) {
+    CHECK(!end(*lr, text).empty());
+    CHECK(end(*lr, text) == end(*ll, text));
+  }
 }
 
 // A word a repair read as the keyword it misspells is the author's: a word
@@ -284,6 +325,8 @@ int main() {
   a_token_the_choice_read_glues_as_the_choice_reads_it();
   a_condition_reads_the_tokens_behind_the_caret_its_own_way();
   carets_behind_a_repair_are_the_table_engines();
+  alternatives_alike_past_their_first_token_all_go_on();
+  a_gap_takes_a_token_off_the_position_as_the_drive_does();
   a_misspelt_word_glues_what_is_typed_behind_it();
   return cursiv::test::report("LlCaretParity_test");
 }

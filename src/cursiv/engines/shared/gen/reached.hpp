@@ -58,31 +58,6 @@ struct refs<Lit<S, CI, Gd>, TypeList<>> : guard_refs<Gd> {};
 // Conditions traverse their private rules to find lexical dependencies.
 template <class R>
 struct ConditionRule {};
-template <class E, class Kids = typename ExprShape<E>::kids>
-struct cond_refs : refs<E> {};
-template <class E, class K, class... Ks>
-struct cond_refs<E, TypeList<K, Ks...>>
-    : tl_cat<typename cond_refs<K>::type, typename cond_refs<Ks>::type...> {};
-// A section in a condition is refused by name when the image is walked.
-template <class G, class E>
-struct cond_refs<Embed<G, E>, TypeList<E>> {
-  using type = TypeList<>;
-};
-template <class R>
-  requires is_inline_terminal<R> || (!is_terminal_rule<R> && is_data_rule<R>)
-struct cond_refs<Ref<R>, TypeList<>> {
-  using type = TypeList<ConditionRule<R>>;
-};
-template <class E>
-struct refs<Not<E>, TypeList<E>> : cond_refs<E> {};
-template <class E>
-struct refs<And<E>, TypeList<E>> : cond_refs<E> {};
-
-// A rule is keyed by the name an author wrote: a body spells `Ref<Declared>`,
-// and the stage is what turns that name into the rule in force here.
-template <class S, class R>
-using body_of = typename S::template body<declared_of_t<R>>;
-
 template <class R>
 struct as_condition {
   using type = ConditionRule<R>;
@@ -97,6 +72,37 @@ template <class... Rs>
 struct as_conditions<TypeList<Rs...>> {
   using type = TypeList<typename as_condition<Rs>::type...>;
 };
+
+template <class E, class Kids = typename ExprShape<E>::kids>
+struct cond_refs : refs<E> {};
+template <class E, class K, class... Ks>
+struct cond_refs<E, TypeList<K, Ks...>>
+    : tl_cat<typename cond_refs<K>::type, typename cond_refs<Ks>::type...> {};
+// A section in a condition is refused by name when the image is walked.
+template <class G, class E>
+struct cond_refs<Embed<G, E>, TypeList<E>> {
+  using type = TypeList<>;
+};
+// A region's trivia are read by the condition, even where nothing else names
+// them.
+template <class I, class H, class E>
+struct cond_refs<Skip<I, H, E>, TypeList<E>>
+    : tl_cat<typename as_conditions<I>::type, typename as_conditions<H>::type,
+             typename cond_refs<E>::type> {};
+template <class R>
+  requires is_inline_terminal<R> || (!is_terminal_rule<R> && is_data_rule<R>)
+struct cond_refs<Ref<R>, TypeList<>> {
+  using type = TypeList<ConditionRule<R>>;
+};
+template <class E>
+struct refs<Not<E>, TypeList<E>> : cond_refs<E> {};
+template <class E>
+struct refs<And<E>, TypeList<E>> : cond_refs<E> {};
+
+// A rule is keyed by the name an author wrote: a body spells `Ref<Declared>`,
+// and the stage is what turns that name into the rule in force here.
+template <class S, class R>
+using body_of = typename S::template body<declared_of_t<R>>;
 
 template <class S, class R>
 struct reached_refs : refs<body_of<S, R>> {};

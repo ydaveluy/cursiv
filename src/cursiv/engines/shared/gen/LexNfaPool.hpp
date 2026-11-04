@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <map>
 #include <span>
 #include <string>
@@ -72,13 +71,17 @@ struct LexNfaGuard {
 };
 
 struct LexNfaPool {
+  // Far past what a table of 65 535 states is built from, and short of the
+  // memory a counted repetition takes before any other limit answers.
+  static constexpr std::size_t kMostStates = std::size_t{1} << 24;
+
   std::vector<LexNfaState> s;
   std::vector<LexNfaGuard> guards;
   std::vector<LexRelayBuild> relays;
   std::uint16_t term = 0;  // the terminal being built, for its refusals
 
   int push(const LexNfaState& st) {
-    if (s.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    if (s.size() >= kMostStates)
       throw LowerRefused(LowerFail::tokenGraphTooLarge);
     s.push_back(st);
     return static_cast<int>(s.size()) - 1;

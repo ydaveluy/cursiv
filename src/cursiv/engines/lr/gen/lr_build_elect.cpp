@@ -47,11 +47,7 @@ void lr_state_symbols(LrBuildTable& A) {
         A.each_landing(action, [&](unsigned to) { f(s, to, action.term); });
       for (const auto& e : A.gotoRows[s]) {
         const auto x = static_cast<std::uint16_t>(g.nterms + e.nt);
-        const auto land = [&](unsigned to) { f(s, to, x); };
-        if (e.guard == 0)
-          land(e.to);
-        else
-          A.guards[e.guard - 1u].each_landing(land);
+        A.each_goto_landing(e, [&](unsigned to) { f(s, to, x); });
       }
     }
   };
@@ -201,15 +197,13 @@ void lr_elect_runs(LrBuildTable& A) {
   A.electChainAt.assign(1, 0);
   A.electChainWord.clear();
   A.electChainPos.clear();
-  const bool symbolsFit = std::size_t{g.nterms} + nN <= 0xFFFFu;
-  std::vector<std::vector<unsigned>> below(symbolsFit ? nN : 0);
+  std::vector<std::vector<unsigned>> below(nN);
   bool unitWords = false;
-  if (symbolsFit)
-    for (const unsigned p : order)
-      if (lr_unit_passes(g, p)) {
-        below[g.prods[p].lhs].push_back(p);
-        unitWords = unitWords || A.electAt[p] != A.electAt[p + 1u];
-      }
+  for (const unsigned p : order)
+    if (lr_unit_passes(g, p)) {
+      below[g.prods[p].lhs].push_back(p);
+      unitWords = unitWords || A.electAt[p] != A.electAt[p + 1u];
+    }
   // A path names only the productions that spell decisions. Plain aliases
   // share that link unchanged, instead of copying an ever longer prefix.
   constexpr std::size_t noPath = ~std::size_t{0};
@@ -269,52 +263,50 @@ void lr_elect_runs(LrBuildTable& A) {
   A.electTwin.clear();
   A.electRhsAt.assign(nP + 1u, 0);
   A.electRhs.clear();
-  if (symbolsFit) {
-    std::map<std::vector<std::uint32_t>, std::uint32_t> classOf;
-    std::vector<std::uint32_t> key, cls(nP);
-    std::vector<std::vector<unsigned>> members;
-    for (unsigned p = 0; p < nP; ++p) {
-      lr_reduce_key(g, p, key);
-      const auto [at, fresh] =
-          classOf.try_emplace(key, static_cast<std::uint32_t>(members.size()));
-      if (fresh) members.emplace_back();
-      cls[p] = at->second;
-      members[at->second].push_back(p);
-    }
-    // Two productions an election cannot tell apart need not be found again.
-    const auto read = [&](unsigned p) {
-      std::vector<std::uint32_t> out;
-      for (std::uint32_t k = A.electAt[p]; k < A.electAt[p + 1]; ++k)
-        out.insert(out.end(), {A.electWord[k], A.electPos[k]});
-      out.push_back(kNoWord);
-      if (!A.electWatchAt.empty())
-        out.insert(out.end(), A.electWatch.begin() + A.electWatchAt[p],
-                   A.electWatch.begin() + A.electWatchAt[p + 1]);
-      return out;
-    };
-    std::vector<std::uint8_t> uniform(members.size());
-    for (std::size_t c = 0; c < members.size(); ++c) {
-      const auto first = read(members[c].front());
-      uniform[c] = std::ranges::all_of(
-          members[c], [&](unsigned q) { return read(q) == first; });
-    }
-    for (unsigned p = 0; p < nP; ++p) {
-      A.electTwinAt[p] = static_cast<std::uint32_t>(A.electTwin.size());
-      A.electRhsAt[p] = static_cast<std::uint32_t>(A.electRhs.size());
-      if (uniform[cls[p]]) continue;
-      const auto& group = members[cls[p]];
-      for (const unsigned q : group)
-        A.electTwin.push_back(static_cast<std::uint16_t>(q));
-      const LrLowProd& q = g.prods[p];
-      for (unsigned i = 0; i < q.len; ++i) {
-        const std::uint16_t s = g.sym_at(q, i);
-        A.electRhs.push_back(static_cast<std::uint16_t>(
-            is_term(s) ? s : g.nterms + nt_index(s)));
-      }
-    }
-    A.electTwinAt[nP] = static_cast<std::uint32_t>(A.electTwin.size());
-    A.electRhsAt[nP] = static_cast<std::uint32_t>(A.electRhs.size());
+  std::map<std::vector<std::uint32_t>, std::uint32_t> classOf;
+  std::vector<std::uint32_t> key, cls(nP);
+  std::vector<std::vector<unsigned>> members;
+  for (unsigned p = 0; p < nP; ++p) {
+    lr_reduce_key(g, p, key);
+    const auto [at, fresh] =
+        classOf.try_emplace(key, static_cast<std::uint32_t>(members.size()));
+    if (fresh) members.emplace_back();
+    cls[p] = at->second;
+    members[at->second].push_back(p);
   }
+  // Two productions an election cannot tell apart need not be found again.
+  const auto read = [&](unsigned p) {
+    std::vector<std::uint32_t> out;
+    for (std::uint32_t k = A.electAt[p]; k < A.electAt[p + 1]; ++k)
+      out.insert(out.end(), {A.electWord[k], A.electPos[k]});
+    out.push_back(kNoWord);
+    if (!A.electWatchAt.empty())
+      out.insert(out.end(), A.electWatch.begin() + A.electWatchAt[p],
+                 A.electWatch.begin() + A.electWatchAt[p + 1]);
+    return out;
+  };
+  std::vector<std::uint8_t> uniform(members.size());
+  for (std::size_t c = 0; c < members.size(); ++c) {
+    const auto first = read(members[c].front());
+    uniform[c] = std::ranges::all_of(
+        members[c], [&](unsigned q) { return read(q) == first; });
+  }
+  for (unsigned p = 0; p < nP; ++p) {
+    A.electTwinAt[p] = static_cast<std::uint32_t>(A.electTwin.size());
+    A.electRhsAt[p] = static_cast<std::uint32_t>(A.electRhs.size());
+    if (uniform[cls[p]]) continue;
+    const auto& group = members[cls[p]];
+    for (const unsigned q : group)
+      A.electTwin.push_back(static_cast<std::uint16_t>(q));
+    const LrLowProd& q = g.prods[p];
+    for (unsigned i = 0; i < q.len; ++i) {
+      const std::uint16_t s = g.sym_at(q, i);
+      A.electRhs.push_back(static_cast<std::uint16_t>(
+          is_term(s) ? s : g.nterms + nt_index(s)));
+    }
+  }
+  A.electTwinAt[nP] = static_cast<std::uint32_t>(A.electTwin.size());
+  A.electRhsAt[nP] = static_cast<std::uint32_t>(A.electRhs.size());
   if (A.electTwin.empty()) {
     A.electTwinAt.clear();
     A.electRhsAt.clear();

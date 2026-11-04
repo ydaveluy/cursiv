@@ -20,13 +20,10 @@ namespace cursiv {
 // Which chains a nonterminal hands back, on a record: a directive over a call
 // renames it, so each pair (what the record states, what the site adds) gets
 // an id before the parse begins.
-bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
+bool lr_fold_chains(LrBuildTable& A) {
   auto& g = A.cfg;
   const unsigned nN = g.nnts;
   const unsigned nP = g.nprods;
-  // A cycle of unit productions makes the unit step diverge: a faulted
-  // lowering skips it.
-  const bool sound = !low.fault;
   LrLowProd* const wprods = g.prods.row(0, nP);
 
   A.soleRow.assign(nN, kNoRow);
@@ -86,10 +83,7 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
           each(nt_index(sym), [&](ElementId r) { fold(r, site); });
       }
       // A chain of its own also stands alone where no position returns one.
-      if (pr.node != kNoRow) {
-        if (mark(pr.lhs, pr.node)) grew = true;
-        if (!sound) continue;
-      }
+      if (pr.node != kNoRow && mark(pr.lhs, pr.node)) grew = true;
       if (pr.len != 1) continue;
       const std::uint16_t site = g.row_at(pr, 0);
       const std::uint16_t sym = g.sym_at(pr, 0);
@@ -140,10 +134,9 @@ bool lr_fold_chains(LrBuildTable& A, const LrLowered& low) {
                                 (is_term(sym) ? g.terms[sym].element != kNoRow
                                               : rec[nt_index(sym)].any())));
   }
-  if (sound)
-    for (unsigned B = 0; B < nN; ++B)
-      if (!unsafe[B] && !rec[B].more_than_one())
-        each(B, [&](ElementId r) { A.soleRow[B] = r; });
+  for (unsigned B = 0; B < nN; ++B)
+    if (!unsafe[B] && !rec[B].more_than_one())
+      each(B, [&](ElementId r) { A.soleRow[B] = r; });
   return true;
 }
 
@@ -160,10 +153,8 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
                     static_cast<std::uint16_t>(i));
   const auto named_row = [&](ElementId held, ElementId site) {
     if (held == kNoElement) return site;
-    if (const auto it = fusedAt.find(lr_fused_key(held, site));
-        it != fusedAt.end())
-      return static_cast<ElementId>(a.writes.nchains + it->second);
-    return site;
+    return static_cast<ElementId>(a.writes.nchains +
+                                  fusedAt.at(lr_fused_key(held, site)));
   };
   std::vector<bool> opens(a.cfg.nnts, false);
   for (unsigned i = 0; i < a.cfg.nprods; ++i)
@@ -181,7 +172,7 @@ void lr_derive_reductions(const LrBuildTable& a, LrDerivedRows& rows) {
       ElementId held = kNoRow;
       if (is_term(sym))
         held = a.cfg.terms[sym].element;
-      else if (nt_index(sym) < a.soleRow.size())
+      else
         held = a.soleRow[nt_index(sym)];
       const bool fold = !is_term(sym) && held == kNoRow;
       const auto row = fold ? site : named_row(held, site);

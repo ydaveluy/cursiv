@@ -6,6 +6,7 @@
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/CstNode.hpp"
 #include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/engines/shared/table/CondReach.hpp"
 
 namespace cursiv {
 
@@ -24,10 +25,17 @@ inline TextOffset token_end_from(const Cst& cst, NodeId first, unsigned n,
   return none;
 }
 
-// The same, the end of the text where fewer follow.
-inline TextOffset token_end_from(const Cst& cst, NodeId first, unsigned n) {
-  return token_end_from(cst, first, n,
-                        static_cast<TextOffset>(cst.text().size()));
+// How far the phrase of a condition asked at a caret reads: to the end of the
+// `tokens` tokens from `resume` on, or of the text where they are unbounded or
+// fewer follow.
+inline TextOffset phrase_end(const Cst& cst, TextOffset resume,
+                             unsigned tokens) {
+  const auto end = static_cast<TextOffset>(cst.text().size());
+  if (tokens >= kUnboundedTokens) return end;
+  const NodeCount onward = cst.leaves_before(resume);
+  return token_end_from(
+      cst, onward < cst.leaf_count() ? cst.leaf(onward).id : cst.size(), tokens,
+      end);
 }
 
 }  // namespace cursiv

@@ -168,6 +168,27 @@ void the_scalar_and_the_byte(const cursiv::Parser& p) {
   check(p, "nl:a", "<refused>");
 }
 
+// A keyword's boundary refuses a word scalar the terminal goes on to read.
+void keyword_boundary_before_a_scalar(const cursiv::Parser& p) {
+  for (const auto& [text, want] : {
+           std::pair<std::string_view, std::string_view>{"kwe:if€", "if€"},
+           {"kwe:ifé", "<refused>"},
+           {"kwr:rem", "rem"},
+           {"kwr:rem x", "rem x"},
+           {"kwr:rem€x", "rem€x"},
+           {"kwr:rem\xC3", "rem\xC3"},
+           {"kwr:remé", "<refused>"},
+           {"kwr:remx", "<refused>"},
+           {"kwl:b", "b"},
+           {"kwl:éb", "éb"},
+           {"kwl:bé", "<refused>"},
+           {"kwl:éé", "éé"},
+           {"kwg:if€", "if€"},
+           {"kwg:ifé", "<refused>"},
+       })
+    check(p, text, want);
+}
+
 void a_word_boundary_reads_a_character(const cursiv::Parser& p) {
   check(p, "kw:if", "if");
   check(p, with("kw:", std::string("if") + std::string(kAcute)), "<refused>");
@@ -181,6 +202,7 @@ void a_word_boundary_reads_a_character(const cursiv::Parser& p) {
   check(p, with("kwt:", std::string("if") + std::string(kAcute)), "<refused>");
   check(p, with("kwt:", std::string("if") + "\xE6\x97\xA5"), "<refused>");
   check(p, with("kwt:", std::string("if") + "\xE2\x82\xAC"), "if|\xE2\x82\xAC");
+  keyword_boundary_before_a_scalar(p);
 }
 
 // The characters of a text, by the rule: a well-formed scalar, else a byte.

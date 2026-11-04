@@ -7,13 +7,7 @@
 
 namespace cursiv {
 
-// The passes that rewrite a merged table, skipped where a lane reads the
-// table as the merge laid it.
-struct LrBuildOptions {
-  bool passes = true;
-};
-
-LrBuildTable lr_build_automaton(const LrLowered& low, LrBuildOptions opt = {});
+LrBuildTable lr_build_automaton(const LrLowered& low);
 // The wider graph, whose states carry their kernel lookaheads; given the
 // narrower one, no further than its merge where it does not stand against it.
 LrBuildTable lr_build_wide(const LrLowered& low,

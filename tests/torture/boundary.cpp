@@ -44,7 +44,8 @@ void generic_typo_runs_keep_the_terminal_guard() {
   for (const auto text : {"he llo x", "he\tllo x", "he\nllo x", "he\rllo x",
                           "h llo x", "h\tllo x", "h\nllo x", "h\rllo x"}) {
     const auto typo = rescan(text);
-    CHECK(typo.term != cursiv::kInvalidSymbol && typo.faults == 1);
+    CHECK(typo.term != cursiv::kInvalidSymbol &&
+          typo.cost == cursiv::kRepairReread);
     CHECK(typo.end == std::string_view(text).size() - 2);
   }
   // Whitespace, punctuation and mixed runs pay the same fault. The DFA
@@ -52,7 +53,8 @@ void generic_typo_runs_keep_the_terminal_guard() {
   for (const auto run : {"  ", "\r\n", " @", "@@@@", "/**/", "\n@ \t"}) {
     const auto text = std::string("he") + run + "llo x";
     const auto typo = rescan(text);
-    CHECK(typo.term != cursiv::kInvalidSymbol && typo.faults == 1);
+    CHECK(typo.term != cursiv::kInvalidSymbol &&
+          typo.cost == cursiv::kRepairReread);
     CHECK(typo.end == text.size() - 2);
   }
   // More than four invalid bytes, two separated faults or a missing real

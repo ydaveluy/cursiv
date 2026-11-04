@@ -17,6 +17,7 @@ using tregionboundary::Document;
 // trivia settings; the guarded nullable/counted tails document analysis
 // limits, rather than a demonstrated ambiguity of the language. The direct
 // nullable tail is instead covered by the positive Optional runtime cases.
+// GuardedRun and ImpliedTail are the shapes only one engine refuses.
 struct RefusalBase : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct X : terminal<lit<"x">> {};
@@ -39,18 +40,16 @@ struct CountedEnd : RefusalBase {
       tight(lit<"["> + repeat<2, 4>(ref<X>)) + eof)> {};
   using entry = Root;
 };
-
-template <class Grammar>
-void refuses_shared_lr_exit(const char* name) {
-  const auto table = cursiv::lr_build_automaton(
-      cursiv::LrLowering<Grammar>::table());
-  if (!table.cfg.lowerFail() ||
-      table.cfg.lowerWhy != cursiv::LowerFail::regionBoundaryShared)
-    std::fprintf(stderr, "region historical refusal [%s]: lower=%u\n", name,
-                 unsigned(table.cfg.lowerWhy));
-  CHECK(table.cfg.lowerFail());
-  CHECK(table.cfg.lowerWhy == cursiv::LowerFail::regionBoundaryShared);
-}
+struct GuardedRun : RefusalBase {
+  struct Root : rule<create<Document>(
+      tight(many(lit<","> + ref<X>) + !lit<",">) + lit<";">)> {};
+  using entry = Root;
+};
+struct ImpliedTail : RefusalBase {
+  struct Root : rule<create<Document>(
+      lit<"a"> + tight(ref<X> + implied(lit<";">, gap::line | eof)))> {};
+  using entry = Root;
+};
 
 template <class Entry>
 struct Grammar : tregionboundary::Base {
@@ -91,11 +90,15 @@ struct MixedGuardedTail : cursiv::GrammarSpec {
 };
 
 template <class G>
-void refuses_shared_exit() {
+void refuses_shared_exit(bool byLl = true, bool byLr = true) {
   const auto ll = cursiv::ll_build_program(cursiv::LlLowering<G>::lower());
   const auto lr = cursiv::lr_build_automaton(cursiv::LrLowering<G>::lower());
-  CHECK(ll.cfg.lowerWhy == cursiv::LowerFail::regionBoundaryShared);
-  CHECK(lr.cfg.lowerWhy == cursiv::LowerFail::regionBoundaryShared);
+  const auto why = [](bool refused) {
+    return refused ? cursiv::LowerFail::regionBoundaryShared
+                   : cursiv::LowerFail::none;
+  };
+  CHECK(ll.cfg.lowerWhy == why(byLl));
+  CHECK(lr.cfg.lowerWhy == why(byLr));
 }
 
 // Construct each mode independently, without requiring a generated parser.
@@ -145,8 +148,10 @@ int main() {
   refuses_shared_exit<LongerMaskedTail>();
   refuses_shared_exit<SharedNullableTail>();
   refuses_shared_exit<MixedGuardedTail>();
-  refuses_shared_lr_exit<DifferentArms>("different-arms");
-  refuses_shared_lr_exit<GuardedNullableTail>("guarded-nullable-tail");
-  refuses_shared_lr_exit<CountedEnd>("counted-end");
+  refuses_shared_exit<DifferentArms>(false, true);
+  refuses_shared_exit<GuardedRun>(false, true);
+  refuses_shared_exit<ImpliedTail>(true, false);
+  refuses_shared_exit<GuardedNullableTail>();
+  refuses_shared_exit<CountedEnd>();
   return cursiv::test::report("RegionBoundaryAnalysis_test");
 }

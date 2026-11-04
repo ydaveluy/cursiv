@@ -29,9 +29,15 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
 
   bool relays() const { return !a.relays.empty(); }
 
-  // What the rungs ask beyond the shared ones.
-  void emit_bound_exit(unsigned, const std::uint8_t*) const {
-    /* the LL walk has no bound exit */
+  // What the rungs ask beyond the shared ones: the election a checked state
+  // makes out of line is known where the terminal it accepts reserves nothing
+  // and no other terminal it accepts has a boundary.
+  void emit_bound_exit(unsigned st, const std::uint8_t* spelled) {
+    if (a.dfaAccept[st] == 0) return;
+    const auto top = static_cast<SymbolId>(a.dfaAccept[st] - 1u);
+    for (const LlLexAccept& x : a.choices(static_cast<std::uint16_t>(st)))
+      if (x.term != top && x.bound != kNoSet) return;
+    if (!a.dfaResSet[st].test(top)) emit_keyword_exit(st, spelled, "kTable");
   }
 
   // What the walk around them asks.

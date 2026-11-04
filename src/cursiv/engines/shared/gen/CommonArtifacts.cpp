@@ -175,7 +175,7 @@ GenCode write_common_artifacts(const std::string& dir,
     return GenCode::ast;
   if (!put("Grammar.hpp", emit_records_decl(what.ns)) ||
       !put("Grammar.cpp",
-           emit_records(what.ns, what.terminals, what.records, what.registry)))
+           emit_records(what.ns, what.terminals, what.records)))
     return GenCode::records;
   if (!put("Module.hpp", emit_module_decl(what.ns, what.lang)) ||
       !put("Module.cpp", emit_module(what.ns, what.lang, what.parserHeader,

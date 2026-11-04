@@ -7,34 +7,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
-#include <unordered_map>
 #include <vector>
 
+#include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/shared/runtime/TypoWalk.hpp"
+#include "cursiv/engines/shared/table/FlatMap.hpp"
 
 namespace cursiv {
 
 class TypoCandidates {
  public:
-  void add(const Typo& candidate) {
-    const std::uint64_t key =
-        (std::uint64_t{candidate.term} << 32) | candidate.end;
-    std::size_t at = _found.size();
-    if (_indexed.empty() && _found.size() <= kScanned) {
-      for (std::size_t k = 0; k < _found.size() && at == _found.size(); ++k)
-        if (_found[k].term == candidate.term && _found[k].end == candidate.end)
-          at = k;
-    } else {
-      // A long token has a candidate at every end: found by key from here on.
-      if (_indexed.empty())
-        for (std::size_t k = 0; k < _found.size(); ++k)
-          _indexed.emplace(
-              (std::uint64_t{_found[k].term} << 32) | _found[k].end, k);
-      if (const auto it = _indexed.find(key); it != _indexed.end())
-        at = it->second;
-    }
-    if (at == _found.size()) {
-      if (!_indexed.empty()) _indexed.emplace(key, at);
+  // Out of line: inlined into the walk, it costs the walk the inlining of its
+  // own table calls, which a search pays byte by byte.
+  CURSIV_NOINLINE void add(const Typo& candidate) {
+    // Never `~0`, which the map keeps: a terminal is 16 bits of the high word.
+    const auto [at, fresh] =
+        _at.emplace((std::uint64_t{candidate.term} << 32) | candidate.end);
+    if (fresh) {
+      at = _found.size();
       _found.push_back(candidate);
       _emitted.push_back(_clock++);
       return;
@@ -61,11 +51,10 @@ class TypoCandidates {
   }
 
  private:
-  static constexpr std::size_t kScanned = 32;
   std::vector<Typo> _found;
   std::vector<std::uint64_t> _emitted;
   std::uint64_t _clock = 0;
-  std::unordered_map<std::uint64_t, std::size_t> _indexed;
+  FlatMap<std::size_t> _at;
 };
 
 }  // namespace cursiv

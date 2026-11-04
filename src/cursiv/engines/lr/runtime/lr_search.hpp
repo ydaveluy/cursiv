@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -500,8 +501,16 @@ void lr_search_lexical(LrContext& c, LrSearch& s, std::uint32_t bi,
     return lex_cuts<A.cfg>(c.src, c.len, x);
   };
   for (std::size_t k = 0; !lr_search_spent(s); ++k) {
-    if (k == ends.found.size() && !ends.more(c.src, c.len, p, r, s.work, cuts))
-      return;
+    if (k == ends.found.size()) {
+      const TextOffset from = ends.regime == RepairEnds::none ? p : ends.scanned;
+      bool cut = false;
+      if (!ends.more(c.src, c.len, p, r, s.work, cuts,
+                     lr_search_walk_end(c, s, std::min(from, c.len)), cut,
+                     c.stop, s.limit)) {
+        if (cut) lr_search_cut(s);
+        return;
+      }
+    }
     if (one(ends.found[k]) && ends.regime == RepairEnds::lines) return;
   }
 }
@@ -554,10 +563,10 @@ void lr_search_replace(LrContext& c, LrSearch& s, std::uint32_t gi) {
     if (t.end == end && t.term == term) return;
   std::uint64_t read = 0;
   const LrTypoTape<A> tape{
-      {.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
+      {{.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
+       la.begin},
       nullptr,
-      nullptr,
-      la.begin};
+      nullptr};
   if (lr_search_spent(s) || !tape.replaces(A.modeStart[mode], term, end))
     return;
   const LrSearchLaid pools(s);
@@ -672,7 +681,8 @@ void lr_search_expand(LrContext& c, LrSearch& s, std::uint32_t bi) {
     lr_search_read<A>(c, s, e);
     lr_search_admit_out(s, pools);
   }
-  if (b.mayAbandon() && b.run.size() > 1) {
+  // Bytes no terminal reads no state takes: giving up frames lays nothing.
+  if (b.mayAbandon() && b.run.size() > 1 && b.la.sym < A.cfg.nterms) {
     LrConfig g = LrConfig::abandonGenerator(
         b, bi, b.run.size() - 1, b.run.top(), b.run.begin_node(), choice);
     g.lost += 1;
@@ -707,9 +717,7 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
     if (lr_search_spent(s)) return;
     ++s.work;
     const std::uint32_t below = s.cactus.parent(node);
-    if (la >= A.cfg.nterms ||
-        !A.cold.follow[s.cactus.state(below)].test(la))
-      continue;
+    if (!A.cold.follow[s.cactus.state(below)].test(la)) continue;
     const std::int64_t at = s.cactus.begin_of(begin);
     // Counted only as far as this cost could pay: past it, a floor.
     const std::int64_t lost =
@@ -749,7 +757,8 @@ void lr_search_abandon(LrContext& c, LrSearch& s, std::uint32_t gi,
 // furthest reading was refused, or `kRepairReachAll`. The reading furthest back
 // steps, so two bound for one future meet and go on as one; settled once
 // every reading still going stands for the same candidates past every other's
-// refusal. True where the search's share ran out first.
+// refusal, or after `kRepairRaceSteps` steps that read a token. True where the
+// search's share ran out first.
 template <const auto& A>
 bool lr_search_race(LrContext& c, LrSearch& s,
                     const std::vector<std::uint32_t>& of,
@@ -820,9 +829,10 @@ bool lr_search_race(LrContext& c, LrSearch& s,
     std::ranges::push_heap(queue, behind);
   };
   LrSearchPool<A> x{c, s};
+  std::uint32_t steps = 0;
   while (!queue.empty()) {
     c.stop.poll();
-    const bool settled = level();
+    const bool settled = steps > kRepairRaceSteps || level();
     if (settled || s.work > s.limit) {
       for (const std::uint32_t q : queue) settle(runners[q].of);
       return !settled;
@@ -838,6 +848,7 @@ bool lr_search_race(LrContext& c, LrSearch& s,
     s.reading.clear();
     lr_search_step<A>(c, x, i);
     lr_search_pay(c, s);
+    if (s.configs[i].run.tokens() != at) ++steps;
     for (const std::uint32_t j : s.reading) {
       runners.push_back(Runner{j, runners[w].of});
       place(static_cast<std::uint32_t>(runners.size()) - 1, at);
@@ -902,13 +913,15 @@ inline void lr_search_reset(LrSearch& s) {
   s.horizon = 0;
 }
 
-// A root is refused, so it owes at least one gesture.
+// A root is refused, so it owes at least one gesture. Laying its frames is paid
+// as reading that many bytes is.
 template <class Reading>
 void lr_search_root(LrSearch& s, const Reading& v, TextOffset at,
                     const LrStack& frames, NodeCount len, std::uint32_t choice,
                     bool fresh) {
   const auto src = static_cast<std::uint32_t>(s.sources.size());
   const LrCactus::Top top = s.cactus.add(frames, src);
+  s.work += frames.size() / kRepairLexBytes;
   LrConfig root;
   root.run = LrCactusClimb(s.cactus, top);
   root.at = at;
@@ -942,6 +955,7 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
   bool bounds = false;
   constexpr std::uint32_t kNone = kLrNoConfig;
   std::uint32_t furthest = kNone;
+  std::uint32_t finished = kNone;
   exhausted = false;
   raced = false;
   while (!s.heap.empty()) {
@@ -949,6 +963,15 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
     const RepairEntry e = s.pop();
     if (s.configs[e.at].gone) continue;
     if (!s.goals.empty() && e.f > s.configs[s.goals[0]].cost) break;
+    // A finished reading already reaches the whole text. A queued reading
+    // with a worse least key cannot beat it, even after the race. Equal keys
+    // stay in the search so their ranks and alternative insertions survive.
+    if (finished != kNone) {
+      const auto& g = s.configs[finished];
+      if (std::array{e.f, e.lost, e.gestures, e.faults, e.invented} >
+          std::array{g.cost, g.lost, g.gestures, g.faults, g.invented})
+        break;
+    }
     if (s.work > s.limit) {
       exhausted = true;
       break;
@@ -968,6 +991,9 @@ std::uint32_t lr_search_run(LrContext& c, LrSearch& s, bool& exhausted,
     }
     const LrConfig& x = s.configs[e.at];
     if (lr_search_goal(x)) {
+      if (x.done && (finished == kNone ||
+                     repair_key_cmp(x, s.configs[finished]) < 0))
+        finished = e.at;
       s.goals.push_back(e.at);
       continue;
     }

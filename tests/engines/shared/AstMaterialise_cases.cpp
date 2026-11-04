@@ -157,6 +157,51 @@ void stacked_wrappers_and_post_operand_flags_keep_their_meaning(const Reader& e)
   for (const auto* node : result.nodes) CHECK(seen.contains(node));
 }
 
+void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) {
+  constexpr std::string_view prefix = "mat:recursivecalls:";
+  for (const std::size_t depth : {0u, 1u, 2u, 16u}) {
+    std::string source(prefix);
+    source += "$a";
+    for (std::size_t i = 0; i < depth; ++i) source += ":$a";
+    const auto result = e.parser->parse(source);
+    CHECK(result.accepted && !result.cst().recovered() &&
+          result.diagnostics.empty());
+    CHECK(result.error == cursiv::AstBuildError::none);
+    CHECK(result.nodes.size() == 2 * depth + 1);
+    const auto* current = cursiv::ast_cast<tmaterialise::Expr>(result.value);
+    const cursiv::AstNode* parent = nullptr;
+    std::unordered_set<const cursiv::AstNode*> seen;
+    for (std::size_t i = 0; i < depth; ++i) {
+      const auto* call = cursiv::ast_cast<tmaterialise::Call>(current);
+      CHECK(call && call->flagged && call->args.size() == 1);
+      if (!call || call->args.size() != 1) break;
+      CHECK(seen.insert(call).second);
+      CHECK(call->parent == parent);
+      const auto& span = result.cst()[call->cstNodeId];
+      CHECK(span.begin == (i == 0 ? 0 : prefix.size() + 3 * i) &&
+            span.end == source.size());
+      const auto* callee = cursiv::ast_cast<tmaterialise::Var>(call->callee);
+      CHECK(callee && callee->name == "a");
+      if (callee) {
+        CHECK(seen.insert(callee).second);
+        part_span(result, callee, call, prefix.size() + 3 * i,
+                  prefix.size() + 3 * i + 2);
+      }
+      parent = call;
+      current = call->args[0];
+    }
+    const auto* last = cursiv::ast_cast<tmaterialise::Var>(current);
+    CHECK(last && last->name == "a" && last->parent == parent);
+    if (last) {
+      CHECK(seen.insert(last).second);
+      CHECK(result.cst()[last->cstNodeId].begin ==
+            (depth == 0 ? 0 : prefix.size() + 3 * depth));
+      CHECK(result.cst()[last->cstNodeId].end == source.size());
+    }
+    CHECK(seen.size() == result.nodes.size());
+  }
+}
+
 }  // namespace
 
 void run() {
@@ -294,6 +339,8 @@ void run() {
   const Reader lr{g::Lr::create_parser(), g::Lr::create_ast_reflection(), {}};
   stacked_wrappers_and_post_operand_flags_keep_their_meaning(ll);
   stacked_wrappers_and_post_operand_flags_keep_their_meaning(lr);
+  recursive_call_arguments_close_before_the_callers_effects(ll);
+  recursive_call_arguments_close_before_the_callers_effects(lr);
   fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLl", ll);
   fuzz<tmaterialise::FuzzSuite>("AstMaterialiseLr", lr);
 }

@@ -167,6 +167,43 @@ void distinct_tokens_may_share_a_prefix(const Reading& parser) {
   rejects(parser, "long-item:[ aba.");
 }
 
+void a_nest_at_the_head_keeps_the_callers_gap(const Reading& parser) {
+  for (const std::string_view source :
+       {"nest-head:x.x;", "nest-head:x .x;", "nest-head:x\n.x ;",
+        "nest-head:~x~.x~;"}) {
+    const auto result = parser.parse(source);
+    if (!clean(result))
+      std::fprintf(stderr, "region boundary [%s]: expected clean %.*s\n",
+                   parser.engine, int(source.size()), source.data());
+    CHECK(clean(result));
+    const auto* doc = result.value_as<Document>();
+    CHECK(doc && doc->items.size() == 1 && doc->in && doc->in->parent == doc);
+    CHECK(result.cst().text() == source);
+  }
+  for (const std::string_view source : {"nest-head:x. x;", "nest-head:x.~x;"})
+    rejects(parser, source);
+}
+
+void a_commit_at_the_tail_keeps_the_callers_gap(const Reading& parser) {
+  for (const std::string_view source :
+       {"commit-tail:;", "commit-tail: ;", "commit-tail:~;"})
+    accepts(parser, source, 0);
+  for (const std::string_view source :
+       {"commit-tail:,x;", "commit-tail: ,x ;", "commit-tail:,x\n;",
+        "commit-tail:~,x~;"})
+    accepts(parser, source, 1);
+  accepts(parser, "commit-tail:,x,x ;", 2);
+  for (const std::string_view source :
+       {"commit-tail:, x;", "commit-tail:,x ,x;", "commit-tail:,x~,x;"})
+    rejects(parser, source);
+  // A region that skips less than its caller, not only one that skips nothing.
+  accepts(parser, "commit-note:[;", 0);
+  accepts(parser, "commit-note:[ ,x ,x ~ ;", 2);
+  accepts(parser, "commit-note:[,x~;", 1);
+  rejects(parser, "commit-note:[~,x;");
+  rejects(parser, "commit-note:[,x~,x;");
+}
+
 }  // namespace
 
 int main() {
@@ -181,6 +218,8 @@ int main() {
     hidden_trivia_is_kept_only_outside_the_region(parser);
     a_long_run_keeps_the_same_boundaries(parser);
     distinct_tokens_may_share_a_prefix(parser);
+    a_nest_at_the_head_keeps_the_callers_gap(parser);
+    a_commit_at_the_tail_keeps_the_callers_gap(parser);
   }
   return cursiv::test::report("RegionBoundary_test");
 }

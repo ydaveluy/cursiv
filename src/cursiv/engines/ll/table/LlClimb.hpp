@@ -22,11 +22,8 @@ struct LlClimbOp {
 };
 
 struct LlClimb {
-  // The operand, as a rule. A grammar may climb over a TERMINAL instead --
-  // `infix<NUMBER, ...>` -- and then the operand is a position of the program
-  // like any other token, named here and not by a rule.
+  // The operand, a rule: a grammar's static checks refuse any other.
   std::uint16_t primary = kNoRow;
-  std::uint16_t primaryNode = kNoRow;
   // The record one join lays, and what its three positions write into it.
   std::uint16_t node = kNoRow;
   std::uint16_t leftRow = kNoRow, rightRow = kNoRow;
@@ -40,8 +37,7 @@ struct LlClimb {
   // The state a call of the operand returns into: a prediction inside it
   // stands on the climb's own frame like any other.
   std::uint32_t atnEntry = 0;
-  // A choice between operator bodies and leaving the climb, where operators
-  // require more than the one-token dispatch above.
+  // The choice between the operators and leaving the climb.
   std::uint16_t selectNode = kNoRow;
 
   constexpr bool operator==(const LlClimb&) const = default;

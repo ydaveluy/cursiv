@@ -195,7 +195,7 @@ void the_continuation_decides_the_repaired_span() {
   one_edit(*parser, "[worx?", 1, 5);       // the second same-spelling terminal
 }
 
-// Every distinct re-reading is a candidate, ranked: fewer faults first, then
+// Every distinct re-reading is a candidate, ranked: the cheaper first, then
 // the longer span. The walk bounds how many there are, not the room.
 void every_distinct_reading_is_a_ranked_candidate() {
   const std::string text = "ab;";
@@ -211,7 +211,7 @@ void every_distinct_reading_is_a_ranked_candidate() {
   for (std::size_t i = 1; i < candidates.size(); ++i) {
     const auto& a = candidates[i - 1];
     const auto& b = candidates[i];
-    CHECK(a.faults < b.faults || (a.faults == b.faults && a.end >= b.end));
+    CHECK(a.cost < b.cost || (a.cost == b.cost && a.end >= b.end));
     CHECK(a.term != b.term || a.end != b.end);
   }
 }
@@ -448,6 +448,17 @@ void run() {
 }
 
 }  // namespace mem_conv
+
+// The tier `t` reads at `s`: a keyword's reading kept beside it ranks it.
+template <const auto& A>
+unsigned tier_of(std::uint16_t s, unsigned t) {
+  auto out = 0u;
+  A.each_accept(s, [&](cursiv::SymbolId term, std::uint16_t, unsigned tier) {
+    if (term == t && tier > out) out = tier;
+    return false;
+  });
+  return out;
+}
 
 #ifdef CURSIV_LR_LEXER_CONTRACT
 namespace case_lexercontract {
@@ -756,7 +767,7 @@ void owed_terminals_agree() {
       todo.pop_back();
       if (A.dfaAccept[s] != 0) {
         const auto term = static_cast<cursiv::SymbolId>(A.dfaAccept[s] - 1u);
-        const auto tier = A.dfa_tier(s, term);
+        const auto tier = tier_of<A>(s, term);
         if (cursiv::LrLexTape<A>{}.prefers(term, tier, best, bestTier)) {
           best = term;
           bestTier = tier;
@@ -1420,7 +1431,7 @@ void audit() {
   CHECK(rows.typoSuccBase.back() == rows.typoSucc.size());
   std::uint32_t stops = 0;
   std::uint64_t read = 0;
-  const LrTypoTape<A> tape{{nullptr, 0, 0, &read}, nullptr, &stops};
+  const LrTypoTape<A> tape{{{nullptr, 0, 0, &read}, 0}, nullptr, &stops};
   for (std::uint16_t s = 0; s < A.dfaAccept.size(); ++s) {
     coverage.reserved |= A.dfa_res_set(s).any();
     CHECK(rows.lexElseBase[s] <= rows.lexElseBase[s + 1u]);
@@ -1437,7 +1448,7 @@ void audit() {
         for (unsigned t = 0; t < A.cfg.nterms; ++t) {
           if (!A.dfa_acc_set(s).test(t)) continue;
           const auto bound = A.dfa_acc_bound(s, t);
-          const auto tier = A.dfa_tier(s, t);
+          const auto tier = tier_of<A>(s, t);
           reserved = reserved ||
                      (tier == kTierLiteral &&
                       (bound == kNoSet || !A.cfg.sets[bound].has(byte))) ||
@@ -1445,7 +1456,7 @@ void audit() {
         }
         // Tier, then a token before a trivia, then the declaration.
         const auto rank = [&](unsigned t) {
-          return lex_rank(A.dfa_tier(s, t), A.cfg.terms[t].trivia);
+          return lex_rank(tier_of<A>(s, t), A.cfg.terms[t].trivia);
         };
         for (unsigned t = 0; t < A.cfg.nterms; ++t) {
           if (!A.dfa_acc_set(s).test(t)) continue;

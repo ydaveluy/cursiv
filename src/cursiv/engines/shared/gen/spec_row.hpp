@@ -12,24 +12,11 @@
 
 namespace cursiv::detail {
 
-// S is the stage or a view over it: the rows list reads the first, a
-// definition the second.
-template <class S>
-struct stage_of {
-  using type = S;
-};
-template <class S>
-  requires requires { typename S::stage; }
-struct stage_of<S> {
-  using type = typename S::stage;
-};
-
 // The payload a write converts, already erased: a rule indistinguishable
 // from a bare matcher is the same action, `void` where nothing converts.
 template <class St, class R>
 struct src_rule {
-  using type =
-      erased_src_t<pay_text<typename stage_of<St>::type::template rule<R>>>;
+  using type = erased_src_t<pay_text<typename St::template rule<R>>>;
 };
 template <class St>
 struct src_rule<St, void> {

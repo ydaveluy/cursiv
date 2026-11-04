@@ -66,12 +66,9 @@ struct LrDeriving {
 
     for (std::uint32_t s = 0; s < a.nstates; ++s) {
       want[a.mode[s]] |= a.follow[s];
-      for (const LrAction& x : a.action_row(s)) {
-        // The runtime reader visits only action cells in this state's follow.
-        if (!a.follow[s].test(x.term)) continue;
+      for (const LrAction& x : a.action_row(s))
         a.each_landing(
             x, [&](std::uint16_t to) { after[x.term] |= a.follow[to]; });
-      }
     }
     rows.typoReach = SetPool(reach.data(), static_cast<unsigned>(n));
     rows.after = SetPool(after.data(), a.cfg.nterms);
@@ -116,7 +113,7 @@ struct LrDeriving {
     std::vector<std::uint8_t> refused(nrows, 0);
     for (unsigned p = 0; p < c.nprods; ++p) {
       const auto& q = c.prods[p];
-      if (q.node == kNoRow || q.node >= nrows) continue;
+      if (q.node == kNoRow) continue;
       if (const auto b = c.nt_after(p, 0); b != kNoRow && nullable[b])
         refused[q.node] = 1;
       auto& lhs = named[q.node];
@@ -165,9 +162,8 @@ struct LrDeriving {
       row.clear();
       for (const auto e : a.gotoRows[s])
         row.insert(row.end(), {e.nt, e.to, e.guard});
-      if (s < a.tagKnown.size())
-        for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
-          row.push_back(!a.tagKnown[s].test(k) || a.tagTruth[s].test(k));
+      for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
+        row.push_back(!a.tagKnown[s].test(k) || a.tagTruth[s].test(k));
       rows.gotoClass[s] = classes
                               .try_emplace(row, static_cast<std::uint16_t>(
                                                     classes.size()))
@@ -246,7 +242,7 @@ struct LrDeriving {
       rows.expectBase.push_back(static_cast<std::uint32_t>(first));
       for (const LrAction& act : a.action_row(s)) {
         if (!lr_takes_token(act.kind)) continue;
-        if (act.term == 0 || act.term >= a.cfg.nterms) continue;
+        if (act.term == 0) continue;
         if (a.cfg.terms[act.term].trivia || a.cfg.terms[act.term].laid != 0)
           continue;
         const auto item = [&](ElementId site, ElementId landing) {

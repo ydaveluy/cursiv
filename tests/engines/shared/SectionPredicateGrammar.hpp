@@ -70,6 +70,21 @@ struct Reach : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Tokens that stay open in a section, read up to the token that closes it.
+struct Quoted : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<" ">)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct STR : terminal<through(lit<"\"">, lit<"\"">)> {};
+  struct NOTE : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct Item : rule<create<ast::Item>(assign<&ast::Item::text>(ref<ID>) |
+                                       assign<&ast::Item::text>(ref<STR>))> {};
+  struct Root : rule<create<ast::Items>(
+                    many(append<&ast::Items::items>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = NOTE;
+};
+
 template <class In>
 struct Host : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
@@ -137,6 +152,7 @@ struct Suite : Last {
   struct Root : rule<ref<Last::Root> | (lit<"reach:"> + ref<Reach::Root>) |
                      (lit<"inlast:"> + ref<Host<Last>::Root>) |
                      (lit<"inreach:"> + ref<Host<Reach>::Root>) |
+                     (lit<"inquoted:"> + ref<Host<Quoted>::Root>) |
                      (lit<"values:"> + ref<SectionValues::Root>)> {};
   using entry = Root;
 };

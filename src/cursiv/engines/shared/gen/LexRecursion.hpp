@@ -3,7 +3,6 @@
 #pragma once
 
 #include <cstdint>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -117,27 +116,6 @@ std::vector<std::uint8_t> lex_call_ancestors(const Cfg& g) {
       }
   }
   return calls;
-}
-
-namespace detail {
-
-template <class Cfg>
-bool lex_may_be_empty(const Cfg& g, std::uint16_t at,
-                      std::unordered_map<std::uint16_t, bool>& known) {
-  if (const auto it = known.find(at); it != known.end()) return it->second;
-  const bool empty = lex_derives(
-      g, at, [&](auto k) { return lex_may_be_empty(g, k, known); }, false);
-  known.emplace(at, empty);
-  return empty;
-}
-
-}  // namespace detail
-
-// Whether a lexical node may match nothing, for a graph with no cycle.
-template <class Cfg>
-bool lex_may_be_empty(const Cfg& g, std::uint16_t at) {
-  std::unordered_map<std::uint16_t, bool> known;
-  return detail::lex_may_be_empty(g, at, known);
 }
 
 // The lexical nodes that may match nothing.

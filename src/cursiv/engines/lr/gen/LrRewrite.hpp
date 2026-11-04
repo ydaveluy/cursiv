@@ -18,7 +18,7 @@ struct LrRewrite {
   };
   template <class St, class Op, auto P>
   using infix_src = typename detail::src_rule<
-      St, infix_op_src<Op, P, detail::stage_of<St>::type::template rule>>::type;
+      St, infix_op_src<Op, P, St::template rule>>::type;
 };
 
 }  // namespace cursiv

@@ -541,6 +541,26 @@ struct LexNfaBuild {
     return std::has_single_bit(tiers_of(choice)) ? q.b : at;
   }
 
+  // Whether the walk behind a refusal may read a byte its class decodes at: an
+  // edge is narrowed by bytes, so a scalar the class refuses would pass it. A
+  // loop whose head is not built yet may read anything.
+  bool reads_decoded(const ByteSet& decoded, int out) const {
+    if (!decoded.any()) return false;
+    std::vector<int> walks{out};
+    for (std::size_t i = 0; i < walks.size(); ++i)
+      for (const int at : n.eclose(walks[i])) {
+        const LexNfaState& st = n.s[static_cast<std::size_t>(at)];
+        if (st.set >= 0 ? g.sets[st.set].intersects(decoded)
+                        : st.t1 < 0 && st.t2 >= 0)
+          return true;
+        if (st.guard < 0) continue;
+        const int behind = n.guards[static_cast<std::size_t>(st.guard)].out;
+        if (std::ranges::find(walks, behind) == walks.end())
+          walks.push_back(behind);
+      }
+    return false;
+  }
+
   // Thompson, built backwards from the fragment's exit.
   int run(std::uint16_t node, int out) {
     switch (const LexNode& e = g.lex[node]; e.kind) {
@@ -631,13 +651,16 @@ struct LexNfaBuild {
       case LexKind::negative:
       case LexKind::nguard: {
         if (e.kind == LexKind::nguard) {
-          bool crossing = nativeGuards && (e.min != 1 || e.a != kNoSet);
+          const bool oneClass = e.min == 1 && e.a == kNoSet;
+          bool crossing = nativeGuards && !oneClass;
           if (nativeGuards && !crossing) {
             for (const int at : n.eclose(out))
               if (n.s[static_cast<std::size_t>(at)].relay >= 0 ||
                   n.s[static_cast<std::size_t>(at)].guard >= 0)
                 crossing = true;
           }
+          if (!crossing && oneClass)
+            crossing = reads_decoded(lex_decode_bytes(g, g.lexKid[e.b]), out);
           if (!crossing) return n.guard(node, out);
         } else if (!echoes_marked(node)) {
           throw std::logic_error("cursiv: an echo needs recognition");

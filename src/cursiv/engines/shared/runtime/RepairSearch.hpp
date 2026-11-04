@@ -23,35 +23,39 @@ namespace cursiv {
 // The reach of a goal that holds, or whose reading no refusal stopped.
 inline constexpr TextOffset kRepairReachAll = 0xFFFFFFFFu;
 
+// The steps a race between goals of one cost may take: past them, the text has
+// said what it can of the fault, and their key and rank decide.
+inline constexpr std::uint32_t kRepairRaceSteps = 1024;
+
 // A reading queued at `f`, with the rest of its key and the order it was
 // queued in.
 struct RepairEntry {
   std::uint32_t f, lost, gestures, faults, invented, seq, at;
 };
 
-// Two readings by key: cost, then the author's tokens lost, the gestures made
-// -- an owed run of insertions is one -- the faults, the tokens invented.
-template <class R>
-std::strong_ordering repair_key_cmp(const R& a, const R& b) {
-  const std::uint64_t ka = (std::uint64_t{a.cost} << 32) | a.lost;
-  const std::uint64_t kb = (std::uint64_t{b.cost} << 32) | b.lost;
+// Two keys in order: cost, then the author's tokens lost, the gestures made --
+// an owed run of insertions is one -- the faults, the tokens invented.
+template <class A, class B>
+CURSIV_ALWAYS_INLINE inline std::strong_ordering repair_key_order(
+    std::uint32_t costA, const A& a, std::uint32_t costB, const B& b) {
+  const std::uint64_t ka = (std::uint64_t{costA} << 32) | a.lost;
+  const std::uint64_t kb = (std::uint64_t{costB} << 32) | b.lost;
   if (ka != kb) return ka <=> kb;
   if (a.gestures != b.gestures) return a.gestures <=> b.gestures;
   return ((std::uint64_t{a.faults} << 32) | a.invented) <=>
          ((std::uint64_t{b.faults} << 32) | b.invented);
 }
 
+template <class R>
+std::strong_ordering repair_key_cmp(const R& a, const R& b) {
+  return repair_key_order(a.cost, a, b.cost, b);
+}
+
 // The queue hands out the least key first, then the first queued.
 inline constexpr auto repair_entry_after = [](const RepairEntry& a,
                                               const RepairEntry& b) {
-  const std::uint64_t ka = (std::uint64_t{a.f} << 32) | a.lost;
-  const std::uint64_t kb = (std::uint64_t{b.f} << 32) | b.lost;
-  if (ka != kb) return ka > kb;
-  if (a.gestures != b.gestures) return a.gestures > b.gestures;
-  const std::uint64_t la = (std::uint64_t{a.faults} << 32) | a.invented;
-  const std::uint64_t lb = (std::uint64_t{b.faults} << 32) | b.invented;
-  if (la != lb) return la > lb;
-  return a.seq > b.seq;
+  const auto k = repair_key_order(a.f, a, b.f, b);
+  return k != 0 ? k > 0 : a.seq > b.seq;
 };
 
 // Roots precede every gesture, so their link ids are source ranks, also

@@ -112,15 +112,6 @@ struct LrFrozenTable : LrTableFacts {
     else
       return dfaRelayRes[s];
   }
-  // The tier `t` reads at `s`: a keyword's reading kept beside it ranks it.
-  constexpr unsigned dfa_tier(std::uint16_t s, unsigned t) const {
-    auto out = 0u;
-    each_accept(s, [&](SymbolId term, std::uint16_t, unsigned tier) {
-      if (term == t && tier > out) out = tier;
-      return false;
-    });
-    return out;
-  }
   constexpr unsigned tier_at(unsigned k) const {
     if constexpr (S.accTiers == 0)
       return 0;

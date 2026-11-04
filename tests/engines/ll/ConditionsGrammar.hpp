@@ -28,8 +28,37 @@ struct Base : cursiv::GrammarSpec {
   struct SameLineAdd : rule<!gap::line + lit<"+">> {};
   struct Sum : infix<Atom, Binary, left(ref<SameLineAdd>)> {};
   static constexpr auto Eos = implied(lit<";">, gap::line | &lit<"}"> | eof);
+  // Where a condition refuses the longest token: `->` is a terminal read behind
+  // a gap, or past a line's end.
+  struct ArrowTail : rule<(lit<"-"> + lit<">"> + ref<ID>) | gap::line> {};
+  struct Mark : rule<option(lit<"%">)> {};
+  // A condition on `~>`, a spelling no terminal declares: at the head of an
+  // arm, behind a nullable rule, on a turn of a loop, on a climb's operand.
+  struct Waved : rule<create<Number>(!lit<"~>"> + option(lit<"~">) +
+                                     ref<NUMBER>)> {};
+  struct WavedSum : infix<Waved, Binary, left(lit<"*">)> {};
   struct Statement
       : rule<create<StatementNode>(
+            (lit<"gapexit:"> + ref<ID> + ref<ArrowTail> +
+             option(lit<"->"> + ref<ID>)) |
+            (lit<"gaparm:"> + ref<ID> +
+             ((gap::none + lit<"->"> + ref<ID>) |
+              (lit<"-"> + lit<">"> + ref<ID>))) |
+            (lit<"gapnull:"> + ((ref<Mark> + gap::none + lit<"->"> + ref<ID>) |
+                                (lit<"-"> + lit<">"> + ref<ID>))) |
+            (lit<"andloop:"> + many(&lit<"a"> + (ref<ID> | lit<"a">)) +
+             lit<";">) |
+            (lit<"andhead:"> + &lit<"a"> + (ref<ID> | lit<"a">) + ref<ID>) |
+            (lit<"atarm:"> + ((option(lit<"%">) + !lit<"~>"> +
+                               option(lit<"~">) + ref<ID>) |
+                              (lit<"~"> + lit<">">))) |
+            (lit<"atcall:"> + ((ref<Mark> + !lit<"~>"> + option(lit<"~">) +
+                                ref<ID>) |
+                               (lit<"~"> + lit<">">))) |
+            (lit<"atturn:"> + many(!lit<"~>"> + lit<"~"> + ref<ID>) +
+             option(lit<"~"> + lit<">">)) |
+            (lit<"atclimb:"> + (assign<&StatementNode::value>(ref<WavedSum>) |
+                                (lit<"~"> + lit<">">))) |
             (kw<"return"> + option(!gap::line + ref<ID>) + Eos) |
             (assign<&StatementNode::value>(ref<Sum>) + Eos) |
             (!kw<"reserved"> + ref<ID> +
@@ -37,10 +66,36 @@ struct Base : cursiv::GrammarSpec {
   struct Block : rule<create<Document>(
                      lit<"{"> + many(append<&Document::items>(ref<Statement>)) +
                      lit<"}">)> {};
+  // Arms that open alike, one waiting on the gap in front of its second word.
+  struct OnLine : rule<create<StatementNode>(ref<ID> + gap::line + kw<"over"> +
+                                             lit<";">)> {};
+  struct SameLine : rule<create<StatementNode>(ref<ID> + kw<"under"> +
+                                               lit<";">)> {};
+  // `->` reads over the `-` a statement goes on with, and opens the next
+  // statement: a gap decides which of the two a stack takes.
+  struct Tail : rule<(lit<"-"> + lit<">"> + ref<ID> + lit<";">) | gap::line> {};
+  struct LineEnded
+      : rule<create<StatementNode>(kw<"sv"> + ref<ID> + ref<Tail>)> {};
+  struct Tight : rule<create<StatementNode>(
+                     kw<"sz"> + ref<ID> +
+                     ((gap::none + lit<"->"> + ref<ID> + lit<";">) |
+                      (lit<"-"> + lit<">"> + ref<ID> + lit<";">)))> {};
+  struct Arrow : rule<create<StatementNode>(lit<"->"> + ref<ID> + lit<";">)> {};
+  // Alternatives alike past their first token, which conditions tell apart.
+  struct Fork : rule<create<StatementNode>(
+                    (kw<"fk"> + ref<ID> + gap::none + lit<";">) |
+                    (kw<"fk"> + ref<ID> + lit<"("> + lit<")">) |
+                    (kw<"fk"> + ref<ID> + &lit<"x"> + lit<"x"> + lit<";">))> {};
   struct Root
       : rule<create<Document>(
-            many(append<&Document::items>(ref<Block> | ref<Statement>)) +
-            eof)> {};
+            (many(append<&Document::items>(ref<Block> | ref<Statement>)) +
+             eof) |
+            (lit<"arrow:"> +
+             many(append<&Document::items>(ref<LineEnded> | ref<Tight> |
+                                           ref<Arrow> | ref<Fork>)) +
+             eof) |
+            (lit<"arms:"> +
+             append<&Document::items>(ref<OnLine> | ref<SameLine>) + eof))> {};
   using entry = Root;
   using ignored = WS;
   using hidden = COMMENT;

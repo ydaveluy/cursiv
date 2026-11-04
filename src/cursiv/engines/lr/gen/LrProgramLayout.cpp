@@ -40,9 +40,6 @@ LrProgramLayout::LrProgramLayout(const LrBuildTable& a) {
             for (std::size_t k = i; k < end; ++k) {
               const LrAction& x = a.actions[b + k];
               key.push_back(lr_op_of(x));
-              // A shift's terminal also controls virtual tokens and
-              // indentation.
-              key.push_back(lr_takes_token(x.kind) ? term : 0u);
               key.push_back(x.exact ? 1u : 0u);
             }
             const auto value =

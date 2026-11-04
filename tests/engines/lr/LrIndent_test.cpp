@@ -85,7 +85,9 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
     std::string prefix = "validation x";
     for (unsigned i = 0; i != count; ++i) prefix += " a";
     for (const std::string_view newline : {"\n", "\r\n"}) {
-      for (const std::string_view indent : {"  ", "\t"}) {
+      // The form feed belongs to the run, though no blank of this grammar reads
+      // it: the graph lays the indent as the drive does.
+      for (const std::string_view indent : {"  ", "\t", "\f  "}) {
         const std::string tail = std::string(newline) + std::string(indent) + "z";
         const auto r = engine->parse(prefix + tail);
         CHECK(r.accepted && r.diagnostics.size() == 1);
@@ -135,9 +137,24 @@ void an_indent_settles_a_cell_without_the_graph() {
 
 }  // namespace
 
+// A level a repair dropped closes where a shallower line is read, whoever reads
+// that line: the graph hands the text back with the levels it read, so a later
+// line is told against the levels that are open.
+void a_dropped_level_closes_in_the_graph() {
+  std::string text = "marked z\n    y\n    h:\n";
+  for (unsigned i = 0; i != 20; ++i) text += "  z\n";
+  text += "+\nz\n";
+  const std::size_t fault = text.size();
+  text += "    w\n";
+  const auto r = tindent::laid::generated::Cases::create_parser()->parse(text);
+  CHECK(r.accepted && r.diagnostics.size() == 2);
+  if (r.diagnostics.size() == 2) CHECK(r.diagnostics[1].begin >= fault);
+}
+
 int main() {
   an_indent_keeps_an_earlier_repair_reading_alive();
   an_indent_settles_a_cell_without_the_graph();
+  a_dropped_level_closes_in_the_graph();
   CHECK(parse("a\nb\n") == "a b");
   CHECK(parse("a:\n  b\n  c\nd\n") == "a(b c) d");
   CHECK(parse("a:\n  b:\n    c\n  d\ne\n") == "a(b(c) d) e");

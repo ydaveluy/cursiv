@@ -119,7 +119,8 @@ text.
 
 ### `infixOperatorNotText`
 
-> rule `Sum` names as an operator a rule that builds a node
+> rule `Sum` names as an operator something other than one token or a rule that
+> gives a value
 
 An operator gives a value, not a node. Use a literal, a terminal, a data rule
 or a sequence of these, with a converter if the operator member is not text.
@@ -392,6 +393,13 @@ A rule returns one node, and this alternative may build two:
 - A precedence level written `ref<Product> + many(lit<"+"> + ref<Product>)`:
   declare the levels with [`infix`](grammar.md#operator-precedence).
 
+### A directive over a creation that holds a second node
+
+> a create<> or nest<> here starts a second node inside it
+
+`assign<&N::one>(create<A>(create<B>(lit<"k">)))` writes one node and loses the
+other. Store the inner node in a member of the outer one, or drop one of them.
+
 ### An alternative whose node may not exist
 
 > this alternative returns a node that the text may leave out
@@ -440,6 +448,12 @@ writes one `Part`'s `n` on every turn.
 
 Write `struct Guest : cursiv::Extends<Person> {}`, not
 `struct Guest : Person {}`.
+
+### A class that derives from two node classes
+
+> this rule builds a class that reaches cursiv::AstNode through two bases
+
+A node has one `parent` link, so derive the class through one base only.
 
 ### A directive on the wrong storage
 
@@ -516,7 +530,8 @@ as `kw<"NOT"> + kw<"IN">` (read as `NOTIN`), into a `bool` or enum member, its
 text must be the name of one of the member's values. Use an enumerator's
 name, or give the value: `as<Op::add>(lit<"+">)`. Enumerators are found by
 name only when their value is between `CURSIV_ENUM_PROBE_MIN` and
-`CURSIV_ENUM_PROBE_MAX` (-64 and 512 unless you define them).
+`CURSIV_ENUM_PROBE_MAX` (-64 and 512 unless you define them). Written into a
+number member, a literal must spell a number; give any other a converter.
 
 ### A converter whose result the member cannot take
 
@@ -594,6 +609,12 @@ outside it, so the trivia before that token could follow either setting.
 Make the alternatives differ before the region opens, give the region its
 own opening token, or end the region on a token that no optional part or
 `eof` follows.
+
+The two engines do not refuse the same grammars here. LL chooses before the
+region opens, so it also takes alternatives that differ after it, and a region
+that ends on an optional part and a condition, `tight(many(x) + !y)`. LR takes
+a region that ends on an implied token, `tight(x + implied(y, cond))`, which LL
+refuses. A grammar meant for both engines stays clear of the three.
 
 ### `sectionPointShared`
 
@@ -792,8 +813,8 @@ word.
 > terminal `CMT` has a guard whose excluded word reaches into the text between
 > a `mark<>` and its `same<>`
 
-In a nested run, the guard may test only the first character of that text,
-and not as a keyword.
+In a nested run the end of the text does not close, the guard may test only
+the first character of that text, and not as a keyword.
 
 ### `rescueReadsPast`
 

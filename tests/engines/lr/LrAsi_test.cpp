@@ -14,9 +14,9 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "cursiv/test/CstAudit.hpp"
 #include "engines/lr/AsiAst.hpp"
 #include "engines/lr/ParseChecks.hpp"
+#include "engines/shared/CstAudit.hpp"
 
 namespace {
 
@@ -552,7 +552,7 @@ int main() {
       const std::string text = "doc " + std::string(body);
       const cursiv::ParseResult r = cases().parse(text);
       unsigned breaches = 0;
-      cursiv::test::audit_cst_structure(r, text, [&](const char* m) {
+      checks::audit_cst_structure(r, text, [&](const char* m) {
         std::printf("  %s: %s\n", text.c_str(), m);
         ++breaches;
       });

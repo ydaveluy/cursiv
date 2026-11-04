@@ -387,5 +387,10 @@ int main() {
     CHECK(items(run("y", n)) == n);
   for (const std::string& text : {run("x", 514), run("y", 2), run("y", 514)})
     CHECK(!ll->parse("long:" + text).diagnostics.empty());
+  // A construct too long to count is no cheaper to invent for it: the repair
+  // of an unknown character keeps the entry around it.
+  const auto dear = ll->parse("long:dear @;");
+  const auto* document = dear.value_as<Document>();
+  CHECK(document != nullptr && document->entries.size() == 1);
   return cursiv::test::report("LlCountedRepeat_test");
 }

@@ -24,6 +24,8 @@ struct NextFeature {
   // record the member belongs to may not be open yet at the caret, and the
   // same member name on two classes is two different references.
   const AstTypeTag* type = nullptr;
+
+  bool operator==(const NextFeature&) const = default;
 };
 
 }  // namespace cursiv

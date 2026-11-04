@@ -77,7 +77,7 @@ inline std::vector<std::uint16_t> printed_places(const GrammarImage& image,
     const bool merged = i + 1 < choice.count &&
                         image.nodes[arm[1]].kind == ImageKind::implied &&
                         image.kids[image.nodes[arm[1]].first] == arm[0];
-    out[i] = merged ? place : ++place;
+    out[i] = merged ? place + 1 : ++place;
   }
   return out;
 }

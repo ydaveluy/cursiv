@@ -208,10 +208,11 @@ struct LexRefusalProduct {
   // A refusal whose last byte is a nested relay's first content byte: the
   // walk reads that byte off the refused class, and the search starts a byte
   // behind. A longer stretch, a rescue class or a decoded class is not one
-  // byte.
+  // byte, and where the end of the text closes the run, no byte may follow.
   int relay_refusal(std::size_t k, const LexNode& e, unsigned lvl, int r) {
-    if (const bool ends = n.relays[static_cast<std::size_t>(r)].row.nested &&
-                          e.a == kNoSet && lvl + 1 == e.min;
+    const LexRelayGen& row = n.relays[static_cast<std::size_t>(r)].row;
+    if (const bool ends =
+            row.nested && !row.eof && e.a == kNoSet && lvl + 1 == e.min;
         !ends || lex_decode_bytes(g, g.lexKid[e.b + lvl]).any()) {
       refuse(LexRefusalFault::intoRelay, k, ByteSet{});
       return -1;

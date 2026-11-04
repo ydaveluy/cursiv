@@ -492,13 +492,16 @@ ImageId Lowerer::optional_item(ImageId item) const {
 // nothing could stand anywhere in the order, a reading of one text for each
 // place. An optional item is read in its present form, `x` for `option(x)`,
 // which must read input, and only in a group that holds no `nest`: such a
-// group spells every order in full. The rules are read as the pipeline
-// resolved them, before either engine lays a body; the first item refused is
-// named under the rule that holds it.
+// group spells every order in full. A repetition's item reads input too, or
+// the loop has no fixpoint; a condition lays no position and repeats nothing.
+// The rules are read as the pipeline resolved them, before either engine lays
+// a body; the first item refused is named under the rule that holds it, and a
+// group's refusal, which names the item, stands before a repetition's.
 void Lowerer::refuse_empty_items() {
   if (_fault) return;
   WrittenReads reads(_im);
   std::vector<ImageId> todo;
+  GrammarFault repeated;
   for (std::size_t i = 0; i < _ntRule.size(); ++i) {
     const ImageFace face = _im.ready(_ntRule[i]).face[1];
     if (face.kind != ImageRuleKind::data && face.kind != ImageRuleKind::node)
@@ -507,10 +510,14 @@ void Lowerer::refuse_empty_items() {
     while (!todo.empty()) {
       const ImageId id = todo.back();
       todo.pop_back();
-      const std::span<const ImageId> kids = _im.shape_kids(id);
-      todo.insert(todo.end(), kids.rbegin(), kids.rend());
       // An answer may lay the faces of the rules it reaches: read by index.
       const ImageNode n = at(id);
+      if (n.kind == ImageKind::andOf || n.kind == ImageKind::notOf) continue;
+      const std::span<const ImageId> kids = _im.shape_kids(id);
+      todo.insert(todo.end(), kids.rbegin(), kids.rend());
+      if (n.kind == ImageKind::repeat && n.n > 1 && reads.nothing(kid(n, 0)))
+        repeated.raise(GrammarFaultCode::nullableRepetition,
+                       static_cast<std::uint16_t>(i + 1));
       if (n.kind != ImageKind::unordered) continue;
       const bool nests = buries(id);
       for (std::uint32_t k = 0; k < n.count; ++k) {
@@ -529,6 +536,7 @@ void Lowerer::refuse_empty_items() {
       }
     }
   }
+  _fault = repeated;
 }
 
 void Lowerer::define() {

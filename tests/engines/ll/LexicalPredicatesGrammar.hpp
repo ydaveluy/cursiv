@@ -90,6 +90,8 @@ struct Base : cursiv::GrammarSpec {
       : terminal<lit<"a", &(ref<LongGroup> + lit<"d">)> + some(any)> {};
   struct Through
       : terminal<lit<"a", &(through(lit<"'">, lit<"'">))> + some(any)> {};
+  struct KeywordThenScalar : terminal<kw<"if"> + cr<"é€">> {};
+  struct KeywordRest : terminal<kw<"rem"> + many(cr<"^\n">)> {};
   template <class T>
   static constexpr auto Read = assign<&Node::text>(ref<T>);
   struct Root
@@ -132,7 +134,9 @@ struct Base : cursiv::GrammarSpec {
                            (lit<"exact-choice:"> + Read<ExactChoice>) |
                            (lit<"exact-assertions:"> + Read<ExactAssertions>) |
                            (lit<"twin:"> + Read<Twin> + (lit<"x"> | lit<"y">)) |
-                           (lit<"through:"> + Read<Through>)) +
+                           (lit<"through:"> + Read<Through>) |
+                           (lit<"kwe:"> + Read<KeywordThenScalar>) |
+                           (lit<"kwr:"> + Read<KeywordRest>)) +
                           eof)> {};
   using entry = Root;
   using ignored = WS;

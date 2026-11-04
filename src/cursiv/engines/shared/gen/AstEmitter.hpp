@@ -123,15 +123,15 @@ struct AstEmitter : EmitOutput {
   void emit_owe(Body& b, std::uint16_t r, int m) const;
   bool can_close_held(const Run& held, int cr, const Run& over,
                       const Run& added) const;
-  // A base run holds one creation at most, and every write before it belongs
-  // to its maker: fill_run and spare rely on it.
+  // Every write before a base run's one creation belongs to its maker: fill_run
+  // and spare rely on it.
   void check_base_chains() const;
   std::string write_pending(Body& b, std::uint16_t r) const;
   // Two passes: a fill takes its node payload off the region before the
   // creation consumes what is left.
   unsigned fill_run(Body& b, std::uint16_t cr, const Run& held) const;
   void run_held(Body& b, const Run& held, const Run& over, int cr,
-                int heldMade = -1) const;
+                int heldMade) const;
   Body entry_body(std::uint32_t e) const;
   // One function per distinct program. Programs that differ only in their
   // constants expand one form where it spells less: a macro, since GCC

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -10,6 +11,7 @@
 #include "cursiv/core/grammar/Conversion.hpp"
 #include "cursiv/core/grammar/ExprShape.hpp"
 #include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/core/grammar/GrammarUtils.hpp"
 #include "cursiv/core/grammar/PayloadOf.hpp"
 #include "cursiv/core/grammar/expr.hpp"
 #include "cursiv/core/syntax-tree/AstField.hpp"
@@ -262,15 +264,36 @@ consteval bool LiteralConversion() {
   return true;
 }
 
+// Whether a literal may read as a number of type `X`. The conversion is no
+// constant expression, so this asks only what no number can be without: a sign
+// at most, then digits, or for a floating type what may open one.
+template <class X>
+consteval bool may_spell_number(std::string_view text) {
+  if (text.starts_with('+')) text.remove_prefix(1);
+  if (text.starts_with('-')) text.remove_prefix(1);
+  const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  if constexpr (std::is_floating_point_v<X>)
+    return !text.empty() &&
+           (digit(text[0]) ||
+            std::string_view(".iInN").find(text[0]) != std::string_view::npos);
+  else
+    return !text.empty() && std::ranges::all_of(text, digit);
+}
+
 template <auto P, class Src>
 consteval bool check_lit_write() {
   using X = typename field_tag<P>::held;
-  // Type compatibility does not ensure a bool or enum literal names a value.
-  if constexpr (field_tag<P>::nature == FieldNature::value &&
-                (std::is_same_v<X, bool> || std::is_enum_v<X>))
-    return LiteralConversion<P, Src::spelling, X>();
-  else
+  if constexpr (field_tag<P>::nature != FieldNature::value) {
     return true;
+  } else if constexpr (std::is_same_v<X, bool> || std::is_enum_v<X>) {
+    // Type compatibility does not ensure the literal names a value.
+    return LiteralConversion<P, Src::spelling, X>();
+  } else if constexpr (from_chars_number<X> &&
+                       !may_spell_number<X>(Src::spelling.view())) {
+    return ::NumberLiteral<P, Src::spelling>();
+  } else {
+    return true;
+  }
 }
 
 template <auto P, class... Srcs>
@@ -420,6 +443,22 @@ template <auto S, class E>
 struct payloads_ok<Append<S, E>, TypeList<E>>
     : std::bool_constant<spec_ok<S, E, true> && payloads_ok<E>::value> {};
 
+// A creation holding a second one: the writer over it takes one node and the
+// other is lost. In a rule's own alternative the rule's check says so; here a
+// directive stands over it.
+template <class E>
+consteval bool holds_one_node() {
+  static_assert(!mat::look<E>::may,
+                "a create<> or nest<> here starts a second node inside it, and "
+                "the directive over it writes only one of the two: the other "
+                "is lost -- store the inner node in a member of the outer one "
+                "with `assign` or `append`, or drop one of the two");
+  return true;
+}
+template <class T, class E>
+struct payloads_ok<Create<T, E>, TypeList<E>>
+    : std::bool_constant<holds_one_node<E>() && payloads_ok<E>::value> {};
+
 template <auto P>
 consteval bool nest_ok() {
   static_assert(field_tag<P>::nature == FieldNature::node,
@@ -429,7 +468,8 @@ consteval bool nest_ok() {
 }
 template <class T, auto P, class E>
 struct payloads_ok<Nest<T, P, E>, TypeList<E>>
-    : std::bool_constant<nest_ok<P>() && payloads_ok<E>::value> {};
+    : std::bool_constant<nest_ok<P>() && holds_one_node<E>() &&
+                         payloads_ok<E>::value> {};
 
 // A climb whose primary builds no node has no node to put in its operands.
 // Dispatched on a bool so the false side is not instantiated, `check_write`

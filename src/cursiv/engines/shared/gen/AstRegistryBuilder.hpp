@@ -1,7 +1,7 @@
 // The registries of a grammar's AST, settled from the rows it publishes. A row
 // names its class, member, conversion and narrowing by the address of a
-// constant descriptor; the indices are assigned here, once, in the order the
-// registries have always listed them.
+// constant descriptor; the indices are assigned here, once: built classes,
+// named families, targets, then owners.
 #pragma once
 
 #include <cstddef>

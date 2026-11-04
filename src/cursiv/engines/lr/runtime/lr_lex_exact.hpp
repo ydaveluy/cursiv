@@ -118,30 +118,17 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
       return *seen;
   const typename LrLexTape<A>::Skipping tape{.skip = &skip};
   bool crossing = false;
-  TextOffset p = from;
-  for (;;) {
-    const TextOffset blank = p;
-    while (p < c.len && lr_skips<A>(mode, static_cast<unsigned char>(c.src[p])))
-      ++p;
-    if (p != blank) {
-      crossed(p, nullptr);
-      crossing = true;
-    }
-    if (p >= c.len) return Token{p, p, kEofSymbol};
-    const Scan s = lex_match(tape, c.src, c.len, mode, p);
-    if (s.term == kInvalidSymbol || s.end == p)
-      return Token{p, p, kInvalidSymbol};
-    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(depth, s.term)) {
-      const Token token{p, s.end, s.term, mode};
-      if (named && !crossing)
-        c.skipMemo.put(from, mode, depth, names, n, token);
-      return token;
-    }
-    const Token trivia{p, s.end, s.term, mode};
-    p = s.end;
-    crossed(p, &trivia);
-    crossing = true;
-  }
+  const Token token = lr_cross_trivia<A>(
+      c, mode, from, c.len, depth,
+      [&](TextOffset p) { return lex_match(tape, c.src, c.len, mode, p); },
+      [&](TextOffset to, const Token* trivia) {
+        crossed(to, trivia);
+        crossing = true;
+      });
+  if (named && !crossing && token.sym < A.cfg.nterms &&
+      token.sym != kEofSymbol)
+    c.skipMemo.put(from, mode, depth, names, n, token);
+  return token;
 }
 
 // A reading's token `la`, a winner of `mode`, read again while it is a

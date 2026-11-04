@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "cursiv/engines/shared/gen/CLiteral.hpp"
-#include "cursiv/engines/shared/gen/AstRegistry.hpp"
 #include "cursiv/engines/shared/gen/EmitOutput.hpp"
 
 namespace cursiv {
@@ -54,8 +53,7 @@ std::string record_text(std::string_view s) {
 
 std::string emit_records(std::string_view ns,
                          const std::vector<TerminalGen>& terminals,
-                         const std::vector<RecordGen>& records,
-                         const AstRegistry& registry) {
+                         const std::vector<RecordGen>& records) {
   // One function per distinct set of members. The comparison is a set: the
   // same members, in any order and however often listed, give one function.
   std::map<std::string, std::string> bodies;
@@ -93,10 +91,6 @@ std::string emit_records(std::string_view ns,
   // A record names its member's class by its index in the AST tables.
   const auto type_of = [&](const RecordGen& rec) -> std::string {
     if (rec.typeSlot == detail::kNoIndex) return "::cursiv::detail::kNoIndex";
-    if (rec.typeSlot >= registry.types.size())
-      throw std::logic_error(std::format(
-          "a record writes class {}, past the {} of the AST registry",
-          rec.typeSlot, registry.types.size()));
     return std::format("{}u", rec.typeSlot);
   };
 

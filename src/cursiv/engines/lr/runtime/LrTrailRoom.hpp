@@ -11,8 +11,7 @@ namespace cursiv {
 struct LrTrailRoom {
   static constexpr std::uint32_t kNone = ~std::uint32_t{0};
   // A subtree, as the events of `events[events, events + size)` in the
-  // order the rule reads them, and the `owed` words after them its parent
-  // places.
+  // order the rule reads them.
   struct Node {
     std::uint32_t tag;
     std::uint32_t sym;

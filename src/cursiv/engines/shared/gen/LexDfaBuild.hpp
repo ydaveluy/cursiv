@@ -788,13 +788,8 @@ struct LexDfaBuild {
       }
       _kernel.clear();
       each_bit(row, mWordsM, [&](std::size_t q) {
-        const int t = nst[static_cast<std::size_t>(mw[q])].t1;
-        if (t >= 0) _kernel.push_back(t);
+        _kernel.push_back(nst[static_cast<std::size_t>(mw[q])].t1);
       });
-      if (_kernel.empty()) {
-        nrow[c] = kNoLocal;
-        continue;
-      }
       prevAt = number(close_kernel());
       nrow[c] = prevAt;
       prevRow = row;

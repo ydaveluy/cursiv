@@ -56,7 +56,6 @@ struct TypoPoint {
 struct Typo {
   TextOffset end = 0;
   SymbolId term = kInvalidSymbol;
-  std::uint8_t faults = 0;
   std::uint32_t cost = kRepairReread;
 };
 
@@ -221,7 +220,7 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
               repair_typo_cost(w.faults, span > w.spelt ? span : w.spelt);
           if (cost < kRepairReplace) {
             const auto offer = [&](SymbolId t) {
-              emit(Typo{w.pos, t, w.faults, cost});
+              emit(Typo{w.pos, t, cost});
             };
             ad.owed(w.state, w.pos, offer);
           }

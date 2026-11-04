@@ -42,7 +42,7 @@ domainmodel	hole	32	32	32	24	56	1314	1478
 domainmodel	typo	32	32	32	7	39	1482	1482
 arithmetics	byte	22	22	16	3	19	2865	2894
 arithmetics	multi:1	32	96	79	13	92	3739	3842
-arithmetics	multi:3	32	96	80	10	90	3745	3848
+arithmetics	multi:3	32	96	80	9	89	3745	3848
 arithmetics	multi:10	32	96	84	22	106	3612	3784
 arithmetics	sep-series	32	127	127	0	127	3873	3873
 arithmetics	eof:1	32	32	32	0	32	2174	2190
@@ -52,7 +52,7 @@ arithmetics	eof:8-20	32	32	32	0	32	1210	1234
 arithmetics	lex:quote	0	0	0	0	0	0	0
 arithmetics	lex:esc	0	0	0	0	0	0	0
 arithmetics	lex:comment	32	32	32	0	32	832	832
-arithmetics	hole	32	32	32	43	75	3844	3923
+arithmetics	hole	32	32	32	45	77	3844	3923
 arithmetics	typo	32	32	32	27	59	3767	3973
 indent	byte	25	25	18	5	23	1449	1493
 indent	multi:1	32	96	46	32	78	1456	1734

@@ -434,22 +434,6 @@ void LexReifier::declare_section_word(const ImageClassDesc& bound) {
                           : lex_intern_cps_bound(_c, cps.bytes(), cps)});
 }
 
-bool LexReifier::word_final(std::string_view s, bool ci) const {
-  if (s.empty()) return false;
-  const auto last = static_cast<unsigned char>(s.back());
-  if (_c.wordRanges.size() != 0 && last >= 0x80) {
-    std::size_t at = s.size();
-    while (at > 0 && (static_cast<unsigned char>(s[at - 1]) & 0xC0u) == 0x80u)
-      --at;
-    if (at > 0) --at;
-    std::size_t len = 0;
-    const char32_t cp = scalar_at(s.data() + at, s.size() - at, len);
-    return cp != kNoScalar && at + len == s.size() &&
-           unicode::within(_c.wordRanges.data(), _c.wordRanges.size(), cp);
-  }
-  return case_set(static_cast<char>(last), ci).intersects(_wordBytes);
-}
-
 bool LexReifier::refusable(ImageId id) const {
   const ImageNode& n = at(id);
   if (n.kind == ImageKind::cpset)
@@ -541,7 +525,10 @@ std::uint16_t LexReifier::guard_set(const Guard& g, bool tail) {
 
 std::uint16_t LexReifier::lit_guard(const ImageNode& lit, const Guard& g,
                                     bool tail) {
-  return g.word && !word_final(lit.text, (lit.flags & kLitFolded) != 0)
+  const ImageClassDesc& bound = _lowerer._d.bound;
+  return g.word && !detail::word_final_in(lit.text, bound.props,
+                                          bound.complement, bound.scalars,
+                                          (lit.flags & kLitFolded) != 0)
              ? kNoSet
              : guard_set(g, tail);
 }
@@ -693,8 +680,7 @@ std::uint16_t LexReifier::reify_class(ImageId id) {
 
 bool LexReifier::mark_run(ImageId id) const {
   const ImageNode& n = at(id);
-  if (n.kind != ImageKind::repeat) return false;
-  const ImageNode& k = at(kid(n, 0));
+  const ImageNode& k = n.kind == ImageKind::repeat ? at(kid(n, 0)) : n;
   if (k.kind == ImageKind::cpset) return true;
   return k.kind == ImageKind::lit && k.flags == 0 && one_character(k.text);
 }
@@ -901,9 +887,9 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
           "terminal is one token, and a section parses a grammar");
     case ImageKind::doc:
       refuse_lowering(
-          "a `doc` inside a guard has nothing to attach to: the guard is "
-          "part of the token before it -- document the literal the guard "
-          "belongs to");
+          "a `doc` goes on a literal a rule reads, not inside a terminal or a "
+          "guard: those are part of one token -- document the token where a "
+          "rule reads it");
     default:
       refuse_lowering(
           "this expression cannot be used inside a terminal: a terminal "

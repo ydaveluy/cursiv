@@ -60,6 +60,11 @@ struct Base : cursiv::GrammarSpec {
   };
   struct Marked : terminal<lit<"<"> + mark<Capture>(some(cr<"=">)) + lit<">"> +
                            ref<Code> + same<Capture> + lit<";">> {};
+  struct MarkedClass : terminal<lit<"<"> + mark<Capture>(cr<"=-">) + lit<">"> +
+                                same<Capture> + lit<";">> {};
+  struct MarkedLiteral
+      : terminal<lit<"<"> + mark<Capture>(lit<"#">) + lit<">"> + same<Capture> +
+                 lit<";">> {};
   struct Echo
       : terminal<through(lit<"<"> + mark<Capture>(some(cr<"-">)) + lit<">">,
                          lit<"]"> + same<Capture> + lit<";">) +
@@ -130,6 +135,8 @@ struct Base : cursiv::GrammarSpec {
              (lit<"through:"> + Read<Through>) |
              (lit<"emptyopen:"> + Read<Delimited>) |
              (lit<"marked:"> + Read<Marked>) | (lit<"echo:"> + Read<Echo>) |
+             (lit<"markclass:"> + Read<MarkedClass>) |
+             (lit<"marklit:"> + Read<MarkedLiteral>) |
              (lit<"paddecho:"> + Read<PaddedEcho>) |
              (lit<"emptyecho:"> + Read<EmptyPaddedEcho>) |
              (lit<"altecho:"> + Read<AlternateEcho>) |

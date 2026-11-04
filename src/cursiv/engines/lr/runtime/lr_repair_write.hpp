@@ -19,6 +19,7 @@
 #include "cursiv/engines/lr/runtime/lr_moves.hpp"
 #include "cursiv/engines/lr/runtime/lr_read.hpp"
 #include "cursiv/engines/lr/runtime/lr_reduce.hpp"
+#include "cursiv/engines/lr/runtime/lr_rescan.hpp"
 #include "cursiv/engines/lr/runtime/lr_states.hpp"
 #include "cursiv/engines/lr/table/LrAction.hpp"
 #include "cursiv/engines/lr/table/LrActionKind.hpp"
@@ -59,20 +60,12 @@ bool lr_write_reduce(LrContext& c, std::uint16_t prod, Holds&& holds) {
 struct LrWriteReading : LrPin {
   struct Run {
     const LrStack* s;
-    [[nodiscard]] std::uint32_t size() const {
-      return static_cast<std::uint32_t>(s->size());
-    }
     [[nodiscard]] std::uint32_t back() const { return s->top().state; }
-    [[nodiscard]] std::uint32_t state_at(std::uint32_t i) const {
-      return (*s)[i].state;
-    }
   };
   Run run;
-  TextOffset at = 0;
   Token la{};
   std::uint16_t laMode = kNoMode;
   bool done = false;
-  bool dead = false;
   LrVirtualAt virt;
   IndentAt indent;
 };
@@ -81,7 +74,6 @@ struct LrWriteReading : LrPin {
 inline LrWriteReading lr_write_reading(const LrContext& c) {
   LrWriteReading w;
   w.run = {&c.stack};
-  w.at = c.committed;
   w.la = c.la;
   w.laMode = c.laMode;
   w.virt = c.virt;
@@ -132,7 +124,6 @@ bool lr_write_apply(LrContext& c, LrWriteReading& w, std::uint32_t at) {
     }
     if constexpr (kIndented<A.cfg>) lr_read_indent_shift<A>(c, w);
     w.virt.shift(w.la);
-    w.at = implied ? c.committed : w.la.end;
     w.laMode = kNoMode;
     if (held) {
       w.pin = false;
@@ -173,16 +164,11 @@ bool lr_write_token(LrContext& c, SymbolId term, bool reread, TextOffset end,
           w.laMode = A.mode[c.stack.top().state];
         },
         [] {});
-    if (actions.count == 0) {
-      if (actions.lone == kLrNoProd ||
-          !lr_write_reduce<A>(c, actions.lone, lr_shadow_holds(c, w)))
-        return false;
-    } else {
-      std::uint32_t arm = 0;
-      if (actions.count > 1 && used < narms) arm = arms[used++];
-      if (arm >= actions.count) arm = 0;
-      if (!lr_write_apply<A>(c, w, actions.first + arm)) return false;
-    }
+    if (actions.count == 0) return false;
+    std::uint32_t arm = 0;
+    if (actions.count > 1 && used < narms) arm = arms[used++];
+    if (arm >= actions.count) arm = 0;
+    if (!lr_write_apply<A>(c, w, actions.first + arm)) return false;
   }
   c.virt = w.virt;
   c.indent = w.indent;
@@ -207,8 +193,10 @@ TextOffset lr_error_end(const LrContext& c, std::uint16_t mode, const Token& t,
   const auto open = [&](std::uint16_t m) {
     if (c.reads.spent()) return LexReading{};
     TextOffset read = t.begin;
-    const LexReading r = lr_lex_reading<A>(c.src, end, m, t.begin, read);
-    c.reads.pay(t.begin, read);
+    std::uint64_t closer = 0;
+    const LexReading r =
+        lr_open_reading<A>(c, mode, m, t.begin, end, read, closer);
+    c.reads.pay(t.begin, read + static_cast<TextOffset>(closer));
     if (read > reached) reached = read;
     return r;
   };
@@ -233,21 +221,16 @@ TextOffset lr_error_end(const LrContext& c, std::uint16_t mode,
 }
 
 // The token in hand as the mode that lexes everything reads it where its own
-// read nothing: what conditions ask about a re-reading of it. A scoped mode
-// names its section's grammar; the unscoped overload uses the global mode.
-template <const auto& A, bool Scoped = true>
+// read nothing, in a section under its grammar's: what conditions ask about a
+// re-reading of it.
+template <const auto& A>
 CURSIV_ALWAYS_INLINE inline Token lr_written(const LrContext& c, const Token& t,
                                              std::uint16_t mode) {
   if (t.sym != kInvalidSymbol || t.begin >= c.len) return t;
-  if constexpr (Scoped) mode = lr_err_mode<A>(mode);
-  const Scan s = c.drive->walk(c.src, c.len, mode, t.begin);
+  const Scan s = c.drive->walk(c.src, c.len, lr_err_mode<A>(mode), t.begin);
   if (s.term != kInvalidSymbol && s.end > t.begin)
     return Token{t.begin, s.end, s.term};
   return t;
-}
-template <const auto& A>
-Token lr_written(const LrContext& c, const Token& t) {
-  return lr_written<A, false>(c, t, A.errMode);
 }
 
 // Token `t` dropped: an implied one is no longer owed, an indent still opens

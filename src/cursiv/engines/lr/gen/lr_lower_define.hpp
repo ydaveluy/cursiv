@@ -21,10 +21,7 @@ namespace cursiv {
 // A chain of auxiliaries passes `like` to spell its name once.
 template <class Cfg>
 std::uint16_t lr_new_aux(Cfg& c, std::uint16_t like = kNoRow) {
-  if (c.nnts >= kNtBase) {
-    lower_refuse(c, LowerFail::tooManyRules);
-    throw LowerRefused(LowerFail::tooManyRules);
-  }
+  if (c.nnts >= kNtBase) throw LowerRefused(LowerFail::tooManyRules);
   const std::uint16_t i = c.nnts++;
   if (like != kNoRow) {
     c.nts[i].nameOff = c.nts[like].nameOff;
@@ -265,12 +262,10 @@ inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
     in.row.insert(in.row.end(), row.begin(), row.end());
     return in;
   }
-  // An item that may match nothing reads one text many ways under a
-  // repetition; one holding no position names no symbol either.
-  if (in.optional || in.none || in.end) {
-    o.fault.raise(GrammarFaultCode::nullableRepetition, p.owner);
+  // An item that may match nothing is refused: one holding no position names
+  // no symbol to go on with either.
+  if (in.optional || in.none || in.end)
     return LrLowerSlot{.sym = in.sym, .cfg = in.cfg};
-  }
   const std::uint16_t aux = lr_new_aux(o.cfg);
   if (e.max == kEndless && e.min != 0 && in.trail != 0) {
     // An unbounded run closing a region has a required final item. Keep its
@@ -279,8 +274,7 @@ inline LrLowerSlot lr_slot_for_rep(LrLowered& o, LrLowerPool& p, LrShapeId at,
     const std::uint16_t prefix = lr_new_aux(o.cfg);
     LrLowerSlot repeated = in;
     repeated.trail = 0;
-    lr_emit_left_recursion(o, p, prefix, repeated,
-                           e.min > 1 ? e.min - 1u : 1u);
+    lr_emit_left_recursion(o, p, prefix, repeated, e.min - 1u);
     LrLowerSlot last = in;
     last.lead = 0;
     std::vector<LrLowerSlot> slots{
@@ -315,10 +309,6 @@ inline LrLowerSlot lr_slot_for(LrLowered& o, LrLowerPool& p, LrShapeId at,
                                const LrActs& made, const LrActs& row) {
   switch (const LrLowerNode& e = p.e[at]; e.kind) {
     case LrShape::sym:
-      // A turn over one symbol is a production of its own: riding that
-      // symbol's record, it could not reach back over its receiver.
-      if (p.turning && p.turns(made))
-        return lr_slot_for_group(o, p, at, made, row);
       return LrLowerSlot{.sym = static_cast<std::uint16_t>(e.sym),
                          .cfg = e.cfg,
                          .lead = e.lead,

@@ -80,9 +80,10 @@ void an_empty_production_reads_no_neighbour() {
 }
 
 // A cell the second token would decide keeps its fork when a reduce lands
-// in another lex mode.
+// in another lex mode. Where that mode reads the keyword's bytes as a name, the
+// keyword beats the name: the lexer elects one token for both readings.
 void a_peek_never_crosses_a_lex_mode() {
-  CHECK(clean("peek ", "b x in foo"));
+  CHECK(repaired("peek ", "b x in foo"));
   CHECK(clean("peek ", "b x foo bar"));
   CHECK(clean("peek ", "a x in z"));
   CHECK(clean("peek ", "a x in foo bar baz"));

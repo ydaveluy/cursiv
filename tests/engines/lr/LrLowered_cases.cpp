@@ -518,6 +518,20 @@ struct EndlessTokens : Base {
   struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
   using entry = Root;
 };
+// A token whose body reads through a delimiter, or a mark and its echo.
+struct EndlessThrough : Base {
+  struct Note : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct Item : rule<!(many(ref<Note>) + lit<".">)+ref<X>> {};
+  struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
+  using entry = Root;
+};
+struct EndlessMark : Base {
+  struct Tag {};
+  struct Marked : terminal<mark<Tag>(some(cr<"=">)) + same<Tag>> {};
+  struct Item : rule<!(many(ref<Marked>) + lit<".">)+ref<X>> {};
+  struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
+  using entry = Root;
+};
 struct Bounded : Base {
   struct Item : rule<!(repeat<1, 9>(cr<"0-9">) + lit<".">) + ref<X>> {};
   struct Root : rule<create<Doc>(many(ref<Item>) + lit<";">)> {};
@@ -593,6 +607,8 @@ void run() {
             std::string::npos);
   CHECK(cfg<Tokens>().unbounded.empty());
   CHECK(cfg<EndlessTokens>().unbounded.size() == 1);
+  CHECK(cfg<EndlessThrough>().unbounded.size() == 1);
+  CHECK(cfg<EndlessMark>().unbounded.size() == 1);
 }
 }  // namespace case_lrambiguity
 

@@ -52,6 +52,11 @@ struct Base : cursiv::GrammarSpec {
   struct AcuteFirst : terminal<!~cr<"é"> + any> {};
   struct XGuarded : terminal<lit<"x", !~cr<"é">>> {};
   struct Name : terminal<kw<"if">> {};
+  // A keyword's boundary reads a scalar, and so may what follows the keyword.
+  struct KwThenScalar : terminal<kw<"if"> + cr<"é€">> {};
+  struct KwRest : terminal<kw<"rem"> + many(cr<"^\n">)> {};
+  struct KwRun : terminal<some(kw<"b"> | cr<"é">)> {};
+  struct KwThenRefusal : terminal<kw<"if"> + !lit<"x"> + cr<"é€">> {};
   struct Delim {};
   struct Run {};
   struct Closed : terminal<through(lit<"<">, lit<"\xA9">)> {};
@@ -83,7 +88,9 @@ struct Base : cursiv::GrammarSpec {
               arm<"nl:", NotLetter> | arm<"a:", LetterA> | arm<"na:", NotA> |
               arm<"nna:", NotNotA> | arm<"either:", Either> |
               arm<"nd:", NonDigit> | arm<"nnd:", NotNonDigit> |
-              arm<"kw:", Name> |
+              arm<"kw:", Name> | arm<"kwe:", KwThenScalar> |
+              arm<"kwr:", KwRest> | arm<"kwl:", KwRun> |
+              arm<"kwg:", KwThenRefusal> |
               arm<"thr:", Closed> | arm<"here:", Heredoc> |
               arm<"run:", Letters> | arm<"first:", AcuteFirst> |
               then<"rna:", RunNotA> | then<"rne:", RunNotAcute> |

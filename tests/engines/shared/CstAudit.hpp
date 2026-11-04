@@ -9,18 +9,18 @@
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 
-namespace cursiv::test {
+namespace checks {
 
 template <class Say>
-void audit_cst_structure(const ParseResult& r, std::string_view text,
+void audit_cst_structure(const cursiv::ParseResult& r, std::string_view text,
                          Say&& say) {
-  const Cst& cst = r.cst();
-  const NodeCount n = cst.size();
+  const cursiv::Cst& cst = r.cst();
+  const cursiv::NodeCount n = cst.size();
   char b[256];
 
-  TextOffset lastEnd = 0;
-  for (NodeId i = 0; i < n; ++i) {
-    const CstNode& x = cst[i];
+  cursiv::TextOffset lastEnd = 0;
+  for (cursiv::NodeId i = 0; i < n; ++i) {
+    const cursiv::CstNode& x = cst[i];
     if (x.begin > x.end || x.end > text.size()) {
       std::snprintf(b, sizeof b, "A1 node %u span [%u,%u) outside text (%zu)",
                     i, x.begin, x.end, text.size());
@@ -41,12 +41,12 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
     }
     // The children, walked right to left: ordered, disjoint, inside.
     if (x.subtreeSize == 1) continue;
-    NodeCount left = x.subtreeSize - 1;
-    NodeId cur = i - 1;
-    TextOffset lo = x.end;  // the previous (righter) child's begin
+    cursiv::NodeCount left = x.subtreeSize - 1;
+    cursiv::NodeId cur = i - 1;
+    cursiv::TextOffset lo = x.end;  // the previous (righter) child's begin
     bool broke = false;
     while (left > 0) {
-      const CstNode& c = cst[cur];
+      const cursiv::CstNode& c = cst[cur];
       if (c.subtreeSize == 0 || c.subtreeSize > left) {
         std::snprintf(b, sizeof b, "A5 node %u child chain broken at %u", i,
                       cur);
@@ -81,9 +81,9 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
   }
 
   // Leaves tile the text: in run order, non-overlapping and never going back.
-  TextOffset cursor = 0;
-  for (NodeId i = 0; i < n; ++i) {
-    const CstNode& x = cst[i];
+  cursiv::TextOffset cursor = 0;
+  for (cursiv::NodeId i = 0; i < n; ++i) {
+    const cursiv::CstNode& x = cst[i];
     if (x.subtreeSize != 1 || x.begin == x.end) continue;
     if (x.begin < cursor) {
       std::snprintf(b, sizeof b,
@@ -95,9 +95,9 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
   }
 
   // Trivia posted twice: two hidden leaves over one span.
-  for (NodeId i = 0; i < n; ++i) {
+  for (cursiv::NodeId i = 0; i < n; ++i) {
     if (!cst[i].hidden || cst[i].begin == cst[i].end) continue;
-    for (NodeId j = i + 1; j < n; ++j)
+    for (cursiv::NodeId j = i + 1; j < n; ++j)
       if (cst[j].hidden && cst[j].begin == cst[i].begin &&
           cst[j].end == cst[i].end) {
         std::snprintf(b, sizeof b, "A10 hidden %u and %u both hold [%u,%u)", i,
@@ -113,7 +113,7 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
     say("A11 accepted without an entry root");
     return;
   }
-  const NodeId root = cst.entry_root();
+  const cursiv::NodeId root = cst.entry_root();
   if (root >= n) {
     std::snprintf(b, sizeof b, "A12 entry root %u past the run (%u)", root, n);
     say(b);
@@ -124,10 +124,10 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
   // repair's leftovers, which is what the bind excludes. A record of the
   // derivation standing outside it is a document half of which the tree does
   // not describe.
-  const NodeId lo = root + 1 - cst[root].subtreeSize;
-  for (NodeId i = 0; i < n; ++i) {
+  const cursiv::NodeId lo = root + 1 - cst[root].subtreeSize;
+  for (cursiv::NodeId i = 0; i < n; ++i) {
     if (i >= lo && i <= root) continue;
-    const CstNode& x = cst[i];
+    const cursiv::CstNode& x = cst[i];
     if (x.hidden || (x.recovered && x.subtreeSize == 1)) continue;
     std::snprintf(b, sizeof b,
                   "A13 record %u [%u,%u) sub=%u stands outside the entry root "
@@ -143,4 +143,4 @@ void audit_cst_structure(const ParseResult& r, std::string_view text,
   if (r.value == nullptr) say("A14 accepted, and no AST was built");
 }
 
-}  // namespace cursiv::test
+}  // namespace checks

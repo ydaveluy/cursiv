@@ -100,6 +100,14 @@ inline bool lr_shadow_same(const LrShadow& a, const LrShadow& b,
          lr_same_run(a.run, b.run, klass);
 }
 
+// Whether action `at` shifted the token `s` holds, one of the text.
+template <const auto& A>
+CURSIV_ALWAYS_INLINE inline bool lr_shifts_text(const LrShadow& s,
+                                                std::uint32_t at) {
+  return lr_takes_token_in<A>(lr_shadow_action<A>(at).kind) &&
+         A.cfg.terms[s.la.sym].laid == 0;
+}
+
 // A cell's readings, as the shared step reads them, and the round's budgets.
 template <const auto& A, unsigned Arms>
 struct LrCellPool {
@@ -149,9 +157,7 @@ struct LrCellPool {
   void drop(std::size_t) { --n; }
   CURSIV_ALWAYS_INLINE bool apply(std::size_t i, std::uint32_t at) {
     if (!lr_trail_apply<A>(c, sh[i], at)) return false;
-    sh[i].shifted =
-        sh[i].shifted || (lr_takes_token_in<A>(lr_shadow_action<A>(at).kind) &&
-                          A.cfg.terms[sh[i].la.sym].laid == 0);
+    sh[i].shifted = sh[i].shifted || lr_shifts_text<A>(sh[i], at);
     return true;
   }
   CURSIV_ALWAYS_INLINE bool reduce(std::size_t i, std::uint16_t p) {
@@ -376,6 +382,7 @@ CURSIV_ALWAYS_INLINE inline std::size_t lr_seed_arms(LrContext& c,
     s.virt = c.virt;
     if constexpr (kIndented<A.cfg>) s.indent = c.indent;
     s.keptAt = kLrNoKeep;
+    s.shifted = false;
     LrBitSet<kArms>* const arms = lr_origin_room<kArms>(c, n + 1);
     arms[n] = {};
     arms[n].set(k);
@@ -421,7 +428,9 @@ unsigned lr_resolve(LrContext& c, std::uint32_t state, std::uint32_t first,
   return lr_resolve_seeded<A, LrSplit::cell>(
       c, state, count, [&](LrShadow& s, unsigned arm) {
         s.la = c.la;
-        return lr_trail_apply<A>(c, s, first + arm);
+        if (!lr_trail_apply<A>(c, s, first + arm)) return false;
+        s.shifted = lr_shifts_text<A>(s, first + arm);
+        return true;
       });
 }
 

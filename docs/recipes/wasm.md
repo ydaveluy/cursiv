@@ -49,6 +49,45 @@ npm run package
 The `.vsix` contains the client and the WebAssembly server. To check its
 contents, see [Packaging](../learn/editor-integration.md#packaging).
 
+## Add application imports
+
+The Cursiv runner can load an application-owned host module before starting
+WebAssembly:
+
+```bash
+node tools/wasi-run.mjs --host-module /path/to/host.mjs server.wasm --stdio
+```
+
+The module exports `createHost(context)`, which may be asynchronous and returns
+`{ imports, env }`. For example:
+
+```js
+export function createHost({ memory }) {
+  return {
+    imports: {
+      app: {
+        read_byte(offset) {
+          return new Uint8Array(memory().buffer)[offset];
+        },
+      },
+    },
+    env: { APP_MODE: 'embedded' },
+  };
+}
+```
+
+Call `memory()` inside imported functions to obtain the current memory after
+any growth. The context also contains the WebAssembly `args` and the resolved
+`runner` and `hostModule` paths. Application environment entries supplement the
+host environment; `PWD` always reflects the actual working directory.
+
+`CURSIV_WASI_HOST_MODULE` selects the same module without a command-line flag.
+An explicit flag takes precedence. The selection reaches the command and its
+nested WASI threads, and is exposed in their environment for application hosts
+that launch further modules. Options after `server.wasm` remain application
+arguments. The application owns its imports; Cursiv supplies WASI, memory and
+thread lifecycle support.
+
 ## Advanced: build configuration
 
 To start again from a fresh CMake cache, run

@@ -20,8 +20,8 @@
 #include "cursiv/core/syntax-tree/ParseResult.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
-#include "cursiv/test/CstAudit.hpp"
 #include "edges/generated/G/Module.hpp"
+#include "engines/shared/CstAudit.hpp"
 #include "torture/generated/Torture/Module.hpp"
 
 // Domain A audit lane: CST integrity invariants over LR.
@@ -50,8 +50,8 @@ void bad(const std::string& lang, const std::string& text,
 void audit(const std::string& lang, const std::string& text,
            const cursiv::ParseResult& r) {
   ++checked;
-  cursiv::test::audit_cst_structure(r, text,
-                                    [&](const char* m) { bad(lang, text, m); });
+  checks::audit_cst_structure(r, text,
+                              [&](const char* m) { bad(lang, text, m); });
 }
 
 const std::string kAlpha = " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";

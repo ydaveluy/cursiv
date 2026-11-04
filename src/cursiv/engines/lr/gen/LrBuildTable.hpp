@@ -159,8 +159,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   LrGotoRows gotoRows{};
 
   void set_gotos(LrGotoRows rows) {
-    if (!rows.canonicalize(cfg.nnts))
-      cap_hit("one rule is reached from more than 65 535 parser states");
+    rows.canonicalize();
     gotoRows = std::move(rows);
   }
 
@@ -293,8 +292,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
     return accBound[accBoundBase[s] + dfaAcc[s].rank(t)];
   }
   std::uint16_t dfa_acc_stand(std::uint16_t s, unsigned t) const {
-    const std::size_t at = accBoundBase[s] + dfaAcc[s].rank(t);
-    return at < accStand.size() ? accStand[at] : kNoSet;
+    return accStand[accBoundBase[s] + dfaAcc[s].rank(t)];
   }
   bool standing() const {
     return std::ranges::any_of(accStand.v,

@@ -1,8 +1,10 @@
 // The operators of a table's prefix and postfix levels, against the rest of
 // it. The same text on two prefix levels, or on two postfix levels, reads one
 // operand two ways; a postfix operator that is also binary leaves the text
-// after an operand two readings that no token tells apart. An operator whose
-// strings cannot be listed may clash, and is refused where it could.
+// after an operand two readings that no token tells apart. A terminal that
+// reads a pattern is listed as one token, which clashes only with itself. An
+// operator whose strings cannot be listed may clash, and is refused where it
+// could.
 #pragma once
 
 #include <cstdint>

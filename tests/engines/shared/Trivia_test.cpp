@@ -41,6 +41,20 @@ void a_blank_keeps_its_head_refusal(const cursiv::Parser& parser) {
   }
 }
 
+// A comment left open is laid as the trivia it would be, in a grammar whose
+// other regions read its bytes as a token: the two engines repair it alike.
+void an_open_comment_is_skipped_where_it_is_trivia(const cursiv::Parser& ll,
+                                                   const cursiv::Parser& lr) {
+  const std::string_view text = "ranked:a /*open";
+  const cursiv::ParseResult a = ll.parse(text);
+  const cursiv::ParseResult b = lr.parse(text);
+  CHECK(a.diagnostics.size() == 1 && b.diagnostics.size() == 1);
+  if (a.diagnostics.size() != 1 || b.diagnostics.size() != 1) return;
+  const auto& x = a.diagnostics.front();
+  const auto& y = b.diagnostics.front();
+  CHECK(x.kind == y.kind && x.begin == y.begin && x.end == y.end);
+}
+
 // The trivia in front of a region's first token is its caller's, which skips
 // none here; the region's own blanks stand between its tokens and before its
 // `eof`.
@@ -51,6 +65,17 @@ void a_region_head_is_its_callers(const cursiv::Parser& parser) {
     CHECK(!r.accepted || !r.diagnostics.empty());
   }
   for (const std::string_view text : {"tied:a", "tied:a b ", "tied:"}) {
+    const cursiv::ParseResult r = parser.parse(text);
+    CHECK(r.accepted && r.diagnostics.empty());
+  }
+}
+
+// An implied token's condition reads the trivia of the place it stands in, so
+// a comment a region skips stands in no way there.
+void an_implied_condition_reads_the_trivia_of_its_place(
+    const cursiv::Parser& parser) {
+  for (const std::string_view text :
+       {"twice:k x y t k x y e", "twice:k x y t k x /*c*/ y e"}) {
     const cursiv::ParseResult r = parser.parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
   }
@@ -88,12 +113,16 @@ void a_trivia_terminal_is_no_bracket() {
 }  // namespace
 
 void run() {
+  an_open_comment_is_skipped_where_it_is_trivia(
+      *ttrivia::generated::Ll::create_parser(),
+      *ttrivia::generated::Lr::create_parser());
   for (const auto make : {&ttrivia::generated::Ll::create_parser,
                           &ttrivia::generated::Lr::create_parser}) {
     two_ignored_terminals_may_read_one_text(*make(), "tied:");
     two_ignored_terminals_may_read_one_text(*make(), "ranked:");
     a_blank_keeps_its_head_refusal(*make());
     a_region_head_is_its_callers(*make());
+    an_implied_condition_reads_the_trivia_of_its_place(*make());
   }
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Ll::kTable>();
   a_trivia_terminal_is_no_bracket<ttrivia::generated::Lr::kTable>();

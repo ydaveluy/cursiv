@@ -261,6 +261,20 @@ struct Base : cursiv::GrammarSpec {
 }  // namespace tleading
 
 namespace ttrivia {
+// One implied token read in the grammar's trivia and in a region's: its
+// condition reads the trivia of the place it stands in.
+struct ImpliedTwice : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct NOTE : terminal<lit<"/*"> + many(cr<"^*">) + lit<"*/">> {};
+  struct Stmt : rule<lit<"k"> + implied(lit<";">, &(lit<"x"> + lit<"y">)) +
+                     lit<"x"> + lit<"y">> {};
+  struct Root : rule<create<ast::Node>(
+                    ref<Stmt> + lit<"t"> +
+                    skip(ignore<WS, NOTE>, hide<>, ref<Stmt>) + lit<"e">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 struct Suite : cursiv::GrammarSpec {
   struct Entry
       : rule<(lit<"tied:"> + skip(ignore<Tied::SPACE, Tied::BLANK>, hide<>,
@@ -279,7 +293,9 @@ struct Suite : cursiv::GrammarSpec {
              skip(ignore<tleading::Base::WS>, hide<tleading::Base::COMMENT>,
                   lit<"leading:"> + ref<tleading::Base::Document> + eof) |
              (lit<"lines:"> + skip(ignore<tunary::Lines::WS, tunary::Lines::NL>,
-                                   hide<>, ref<tunary::Lines::Root> + eof))> {};
+                                   hide<>, ref<tunary::Lines::Root> + eof)) |
+             (lit<"twice:"> + skip(ignore<ImpliedTwice::WS>, hide<>,
+                                   ref<ImpliedTwice::Root> + eof))> {};
   using entry = Entry;
   static constexpr auto indent_open = lit<"(">;
   static constexpr auto indent_close = lit<")">;

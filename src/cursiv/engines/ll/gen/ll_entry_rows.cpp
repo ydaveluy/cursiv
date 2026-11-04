@@ -118,12 +118,11 @@ AstEntryTable ll_entry_table(const LlFinalProgram& done,
         }
       }
     } else {
-      if (makes(over)) {
-        held.insert(held.end(), over.begin(), over.end());
-        over.clear();
-      }
-      scopes.push_back(held);
-      if (!over.empty()) scopes.push_back(over);
+      // Each join is a scope boundary even when it opens no node. A close
+      // followed by a caller's write and flag must finish the child before
+      // owing those effects outward: combining all but the final run would
+      // let an adopting child of the same family claim the caller's write.
+      scopes = std::move(raw);
     }
     const auto own = static_cast<std::uint32_t>(t.runs.size());
     for (auto& run : scopes) t.runs.push_back(std::move(run));

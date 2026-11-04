@@ -142,11 +142,7 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
     return;
   }
   LlClimb cl;
-  if (const std::uint16_t base = _p.e[lay_ref(cfg, _im.rule(*st.primary))].sym;
-      is_term(base))
-    cl.primaryNode = put_node(_o, LlNode{.kind = LlShape::term, .sym = base});
-  else
-    cl.primary = nt_index(base);
+  cl.primary = nt_index(_p.e[lay_ref(cfg, _im.rule(*st.primary))].sym);
   cl.node = climb_chain(st.climbRow);
   cl.leftRow = climb_chain(st.leftRow);
   cl.rightRow = climb_chain(st.rightRow);

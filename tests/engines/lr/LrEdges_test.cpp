@@ -758,7 +758,8 @@ void the_section_end_is_looked_for_in_linear_work() {
       std::uint64_t read = 0;
       g_steps = 0;
       const auto end = cursiv::lr_text_end<kLr>(
-          room.context, section_state<kLr>(), 1, room.context.len, read);
+          room.context, kLr.mode[section_state<kLr>()], 1, room.context.len,
+          read);
       CHECK(end == n + 1);
       CHECK(g_steps < 40ull * n);
       CHECK(read >= n && read < 40ull * n);
@@ -823,7 +824,8 @@ void the_engines_tell_a_cancelled_scan() {
     std::uint64_t read = 0;
     bool told = false;
     try {
-      (void)cursiv::lr_text_end<kLr>(room.context, section_state<kLr>(), 1,
+      (void)cursiv::lr_text_end<kLr>(room.context,
+                                     kLr.mode[section_state<kLr>()], 1,
                                      room.context.len, read);
     } catch (const cursiv::OperationCancelled&) {
       told = true;

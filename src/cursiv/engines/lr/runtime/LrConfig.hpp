@@ -142,8 +142,8 @@ struct LrConfig : LrPin {
            work == LrWorkKind::forcedReplacement);
     return _keep;
   }
-  // Of abandons: the frames the next one gives up, the cactus node at the top
-  // of them and its begin node.
+  // Of abandons: the frames the next one keeps, the cactus node at the top of
+  // those it gives up and its begin node.
   std::uint32_t abandonDepth() const {
     assert(work == LrWorkKind::enumerateAbandons);
     return _keep;

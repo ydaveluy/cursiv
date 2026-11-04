@@ -106,9 +106,6 @@ class LlStackSet {
 
   // The leading member first: its words are those the cell's readings go on
   // extending, and the ones the others are laid under.
-  const std::vector<Member>& members(std::uint32_t cell) const {
-    return _cells[index(cell)].members;
-  }
   std::vector<Member>& members(std::uint32_t cell) {
     return _cells[index(cell)].members;
   }

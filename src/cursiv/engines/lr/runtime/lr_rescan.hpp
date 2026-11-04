@@ -8,9 +8,10 @@
 #include <type_traits>
 #include <vector>
 
-#include "cursiv/core/text/scalar_at.hpp"
 #include "cursiv/engines/lr/runtime/LrContext.hpp"
+#include "cursiv/engines/lr/runtime/lr_lex_reading.hpp"
 #include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
+#include "cursiv/engines/shared/runtime/TypoTape.hpp"
 #include "cursiv/engines/lr/runtime/lr_matcher.hpp"
 #include "cursiv/engines/shared/runtime/LexFailedWalks.hpp"
 #include "cursiv/engines/shared/runtime/Scan.hpp"
@@ -21,22 +22,20 @@ namespace cursiv {
 
 // One walk's table, as `typo_each` reads it.
 template <const auto& A>
-struct LrTypoTape : TypoBounds {
+struct LrTypoTape : TypoTape<A> {
   using Set = std::remove_cvref_t<decltype(A.cold.follow[0])>;
 
   // The terminals this state can act on, shift or reduce: a state reached
   // right after a modifier shifts nothing.
   Set* want;
   std::uint32_t* stops;
-  // Where the token begins: a keyword's own refusal is asked of its head.
-  TextOffset head = 0;
 
   std::span<const std::uint16_t> successors(std::uint16_t s) const {
     return typo_successors(A.derived.typoSuccBase.data(),
                            A.derived.typoSucc.data(), s);
   }
   std::uint16_t next_byte(std::uint16_t s, unsigned char b) const {
-    ++*read;
+    ++*this->read;
     return A.next_byte(s, b);
   }
   // A walk standing where no terminal it wants can end offers nothing more:
@@ -55,8 +54,9 @@ struct LrTypoTape : TypoBounds {
   bool reserves(std::uint16_t s, TextOffset p) const {
     if (!A.dfa_res_set(s).any()) return false;
     TextOffset unseen = p;
-    const auto refused = lr_refused_from<A>(src, head, docLen);
-    return lex_reserves<A>(s, src, p, docLen, unseen,
+    const auto refused =
+        lr_refused_from<A>(this->src, this->head, this->docLen);
+    return lex_reserves<A>(s, this->src, p, this->docLen, unseen,
                            [&](SymbolId t) { return !refused(t); });
   }
   // A spelling a keyword reserved is not a word terminal, whatever the walk
@@ -67,54 +67,24 @@ struct LrTypoTape : TypoBounds {
     Set open = A.dfa_acc_set(s);
     if (reserves(s, p)) open.andnot(A.dfa_res_set(s));
     open &= *want;
-    for (unsigned t = open.take(); t < A.cfg.nterms; t = open.take())
-      if (closed(s, t, p) && !trails(t, p)) emit(static_cast<SymbolId>(t));
-  }
-  // A word the terminal refuses where its token ends, spelled behind the
-  // re-reading: its head may be the one misspelt.
-  bool trails(unsigned t, TextOffset p) const {
-    return A.cfg.terms[t].refuses &&
-           A.tail_refuses(static_cast<SymbolId>(t), src + p, docLen - p);
-  }
-  // The boundary is the one the ACCEPTANCE declares: a repair may not read
-  // what the lexer would refuse. An unbounded terminal still ends at a word
-  // edge -- a repair cutting a word in two is a cascade, not a reading.
-  bool closed(std::uint16_t s, unsigned t, TextOffset p) const {
-    if (p >= docLen) return true;
-    if (inside_scalar(src, p, docLen)) return false;
-    const std::uint16_t set = A.dfa_acc_bound(s, t);
-    return set == kNoSet ? !lex_boundary(A.cfg).word_at(src, p, docLen)
-                         : !lex_boundary(A.cfg).at(set, src, p, docLen);
+    for (unsigned t = open.take(); t < A.cfg.nterms; t = open.take()) {
+      const auto term = static_cast<SymbolId>(t);
+      if (this->closed(s, term, p) && !this->trails(term, p)) emit(term);
+    }
   }
   void refused() const { ++*stops; }
-  // Whether the word up to `p` may be read as spelled terminal `t`: its
-  // spelling, read from `start`, accepts it, and closes where the lexer
-  // would let it.
-  bool replaces(std::uint16_t start, unsigned t, TextOffset p) const {
-    std::uint16_t s = start;
-    for (const char ch : A.cfg.term_text(static_cast<std::uint16_t>(t))) {
-      s = A.next_byte(s, static_cast<unsigned char>(ch));
-      if (s == kDeadState) return false;
-    }
-    if (A.dfaAccept[s] == 0 || !A.dfa_acc_set(s).test(t)) return false;
-    if constexpr (LexTape<A>::kRefuses)
-      if (A.cfg.terms[t].refuses &&
-          A.head_refuses(static_cast<SymbolId>(t), src + head, docLen - head))
-        return false;
-    return closed(s, t, p) && !trails(t, p);
-  }
 };
 
-// Where the text a state reads ends: the document's end, or in a section the
+// Where the text `mode` reads ends: the document's end, or in a section the
 // first token that closes it. Looked for no further than `upto`. The bytes
 // read are paid into `read`; a failed walk counts once however many starts
 // it serves.
 template <const auto& A>
-TextOffset lr_text_end(const LrContext& c, std::uint32_t state, TextOffset at,
+TextOffset lr_text_end(const LrContext& c, std::uint16_t mode, TextOffset at,
                        TextOffset upto, std::uint64_t& read) {
-  const SymbolId close = lr_text_close<A>(state);
+  const SymbolId close = lr_mode_close<A>(mode);
   if (close == kEofSymbol) return c.len;
-  const std::uint16_t err = lr_err_mode<A>(A.mode[state]);
+  const std::uint16_t err = lr_err_mode<A>(mode);
   LexFailedWalks<LrLexTape<A>> failed;
   TextOffset reached = at;
   for (TextOffset p = at; p < c.len && p < upto;) {
@@ -135,6 +105,24 @@ TextOffset lr_text_end(const LrContext& c, std::uint32_t state, TextOffset at,
     p = s.end;
   }
   return c.len;
+}
+
+// The lexer's refused reading at `p` under alphabet `m`, the text ending at
+// `end` or at the token that closes the section `mode` reads in. The closer is
+// looked for no further than the reading read, so a run of open tokens costs
+// the run: `reached` rises to how far the walks read, `read` adds what the
+// closer's search read.
+template <const auto& A>
+LexReading lr_open_reading(const LrContext& c, std::uint16_t mode,
+                           std::uint16_t m, TextOffset p, TextOffset end,
+                           TextOffset& reached, std::uint64_t& read) {
+  LexReading r = lr_lex_reading<A>(c.src, end, m, p, reached);
+  if (const TextOffset close = lr_text_end<A>(c, mode, p, reached, read);
+      close < reached) {
+    reached = p;
+    r = lr_lex_reading<A>(c.src, close, m, p, reached);
+  }
+  return r;
 }
 
 // The re-readings of a misspelling from `at`, over the terminals `state` can
@@ -159,7 +147,8 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
         want.reset(t);
   if (want.none()) return {};
   const TextOffset len = lr_text_end<A>(
-      c, state, at, c.len - at > 2 * reach ? at + 2 * reach : c.len, read);
+      c, A.mode[state], at, c.len - at > 2 * reach ? at + 2 * reach : c.len,
+      read);
   // Head faults must end at `plain`, the widest ordinary token. An internal
   // fault may join fragments beyond it.
   const TextOffset cap = len - at > reach ? at + reach : len;
@@ -176,7 +165,7 @@ std::vector<Typo> lr_rescan_candidates(LrContext& c, std::uint32_t state,
   TypoCandidates found;
   const auto keep = [&](const Typo& candidate) { found.add(candidate); };
   const TypoBounds bounds{c.src, horizon, len, &read, &cut, most, scratch};
-  typo_each(LrTypoTape<A>{bounds, &want, &c.stats.searchStops, at},
+  typo_each(LrTypoTape<A>{{bounds, at}, &want, &c.stats.searchStops},
             A.modeStart[A.mode[state]], at, plain, keep);
   return found.ranked();
 }

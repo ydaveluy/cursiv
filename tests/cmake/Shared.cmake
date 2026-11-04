@@ -105,6 +105,17 @@ cursiv_test(EofRegion_test engines/shared/EofRegion_test.cpp
     eofpurellGenerated eofpurelrGenerated)
 cursiv_test(GuardedClimb_test engines/shared/GuardedClimb_test.cpp
     guardedclimbllGenerated guardedclimblrGenerated)
+# The conflicts a generator names on demand: a guarded shift lands in the states
+# its outcomes reach, and nothing shifts into the start state.
+if(NOT CMAKE_CROSSCOMPILING)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/conflict_report)
+  add_test(NAME conflict_report COMMAND guardedclimblr_gen
+      ${CMAKE_CURRENT_BINARY_DIR}/conflict_report)
+  set_tests_properties(conflict_report PROPERTIES
+      ENVIRONMENT CURSIV_CONFLICTS=1
+      PASS_REGULAR_EXPRESSION "shift   -> state [1-9]"
+      FAIL_REGULAR_EXPRESSION "shift   -> state 0\n")
+endif()
 cursiv_test(LexSuffixSession_test engines/shared/LexSuffixSession_test.cpp)
 cursiv_test(AstTree_test
     "engines/shared/AstTree_test.cpp;engines/shared/AstMaterialise_cases.cpp;engines/shared/DirectiveSequence_cases.cpp"

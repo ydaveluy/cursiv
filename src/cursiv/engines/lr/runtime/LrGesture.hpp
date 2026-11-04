@@ -24,7 +24,7 @@ struct LrGesture {
   // An arm taken while an invented token was still in hand: the writer
   // follows it, the drive does not see it.
   bool held = false;
-  // ins, rep, skip: the terminal. del: the one left in hand after it.
+  // ins, rep, skip: the terminal.
   SymbolId term = 0;
   // rep, del, skip: where the author's bytes it takes end. abandon: frames
   // kept.

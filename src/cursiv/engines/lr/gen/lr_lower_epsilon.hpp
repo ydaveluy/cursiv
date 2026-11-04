@@ -190,12 +190,11 @@ inline LrLowerSlot lr_receiver(LrLowered& o, LrLowerPool& p,
 }
 
 inline std::vector<LrLowerSlot> lr_slots_for_sequence(
-    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> kids, bool turn,
+    LrLowered& o, LrLowerPool& p, std::span<const LrShapeId> kids,
     std::uint8_t cfg) {
   const bool turning = p.turning;
   std::vector<LrLowerSlot> slots;
   std::vector<LrShapeId> pending(kids.rbegin(), kids.rend());
-  bool held = false;
   slots.reserve(kids.size());
   std::size_t i = 0;
   while (!pending.empty()) {
@@ -211,8 +210,7 @@ inline std::vector<LrLowerSlot> lr_slots_for_sequence(
         pending.push_back(p.kid[node.sym + child]);
       continue;
     }
-    bool reaches =
-        i == 0 ? turning && !turn : !p.inTurn && !held && p.head_turns(k);
+    bool reaches = i == 0 ? turning : p.head_turns(k);
     if (reaches && i != 0)
       for (const LrLowerSlot& s : slots)
         if (!lr_holds_position(s)) {
@@ -226,65 +224,33 @@ inline std::vector<LrLowerSlot> lr_slots_for_sequence(
     }
     p.turning = reaches;
     slots.push_back(lr_slot_for(o, p, k, p.e[k].made, p.e[k].row));
-    // A checkpoint has already closed the preceding receiver. It does not
-    // keep a region open over the later payload or its next checkpoint.
-    held = held || (p.turns(p.e[k].made) &&
-                    !(p.e[k].kind == LrShape::seq && p.e[k].count == 0));
     ++i;
   }
   return slots;
 }
 
 // The productions of `lhs` over `kids` in order, `made` and `row` over them.
-// A turn's own positions reach back to nothing; its record stands over
-// whatever it holds...
 inline void lr_emit_sequence(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
-                             std::span<const LrShapeId> kids,
-                             const LrLowerNode& e, const LrActs& made,
-                             const LrActs& row) {
+                             std::span<const LrShapeId> kids, std::uint8_t cfg,
+                             const LrActs& made, const LrActs& row) {
   const auto priority = lr_priority_alt(o.cfg, lhs);
-  const bool turning = p.turning, inTurn = p.inTurn;
-  const bool turn = p.turns(made);
-  if (turn) p.inTurn = true;
-  // ...and what it writes over its positions stands on them, not on that
-  // record, which reaches back over its receiver.
-  const bool apart = turning && turn && !row.empty();
-  std::vector<LrLowerSlot> slots;
-  if (apart) {
-    p.turning = false;
-    const std::uint16_t inner = lr_new_aux(o.cfg);
-    lr_emit_sequence(o, p, inner, kids, e, {}, row);
-    slots.push_back(LrLowerSlot{
-        .sym = nt_sym(inner), .cfg = e.cfg, .lead = e.lead, .trail = e.trail});
-  } else {
-    slots = lr_slots_for_sequence(o, p, kids, turn, e.cfg);
-  }
+  const bool turning = p.turning;
+  std::vector<LrLowerSlot> slots = lr_slots_for_sequence(o, p, kids, cfg);
   p.turning = turning;
-  p.inTurn = inTurn;
-  lr_emit_subsets(o, p, lhs, std::move(slots), apart ? made : lr_cat(made, row),
-                  priority);
+  lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
 }
 
 inline void lr_emit_one(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                         LrShapeId at, const LrActs& made, const LrActs& row) {
   if (const LrLowerNode& e = p.e[at]; e.kind == LrShape::seq) {
-    lr_emit_sequence(o, p, lhs, std::span(p.kid).subspan(e.sym, e.count), e,
+    lr_emit_sequence(o, p, lhs, std::span(p.kid).subspan(e.sym, e.count), e.cfg,
                      made, row);
     return;
   }
-  // `made` and `row` are already the production's chain: a turn's writes
-  // ride its one position.
+  // `made` and `row` are already the production's chain.
   const auto priority = lr_priority_alt(o.cfg, lhs);
-  const bool turning = p.turning, inTurn = p.inTurn;
-  const bool turn = p.turns(made);
-  if (turn) p.inTurn = true;
-  const bool apart = turning && turn && !row.empty();
-  p.turning = turning && !turn;
-  std::vector slots{lr_slot_for(o, p, at, LrActs{}, apart ? row : LrActs{})};
-  p.turning = turning;
-  p.inTurn = inTurn;
-  lr_emit_subsets(o, p, lhs, std::move(slots), apart ? made : lr_cat(made, row),
-                  priority);
+  std::vector slots{lr_slot_for(o, p, at, LrActs{}, LrActs{})};
+  lr_emit_subsets(o, p, lhs, std::move(slots), lr_cat(made, row), priority);
 }
 
 // Each item of an unordered group once, in any order. Every item reads input,
@@ -330,7 +296,7 @@ inline void lr_emit_unordered(LrLowered& o, LrLowerPool& p, std::uint16_t lhs,
                        : i + 1 == n ? tails[order[i]]
                                     : kids[order[i]];
       const std::uint16_t before = o.cfg.nprods;
-      lr_emit_sequence(o, p, lhs, positions, e, made, row);
+      lr_emit_sequence(o, p, lhs, positions, e.cfg, made, row);
       if (o.cfg.lowerFail()) return;
       for (std::uint16_t k = before; k < o.cfg.nprods; ++k)
         if (o.cfg.prods[k].lhs == lhs) o.cfg.prodBuild[k].permuted = true;

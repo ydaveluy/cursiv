@@ -383,11 +383,6 @@ inline constexpr RowsTape kRowsTape{};
     });
   }
 
-  bool marked(unsigned set) const {
-    return (a.cfg.wordRanges.size() != 0 || a.cfg.scalarRanges.size() != 0) &&
-           a.cfg.setDecode[set] != kNoSet;
-  }
-
   // Transposed, one row per target mode: the call site's `to` is a constant.
   void emit_mode_sub() {
     if (!subs) return;
@@ -900,32 +895,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   }
 
   void emit_bound_exit(unsigned st, const std::uint8_t* spelled) {
-    const auto bound = a.dfaBound[st];
-    if (a.dfaAccept[st] == 0 || bound == kNoSet ||
-        a.dfaRelay[st] != kNoRelay || marked(bound))
-      return;
-    unsigned to = kDeadState;
-    for (unsigned b = 0; b < 256; ++b) {
-      const auto edge = a.next_dfa(static_cast<std::uint16_t>(st), a.cls[b]);
-      if ((edge != kDeadState) !=
-          a.cfg.sets[bound].has(static_cast<unsigned char>(b)))
-        return;
-      if (edge == kDeadState) continue;
-      if (to != kDeadState && to != edge) return;
-      to = edge;
-    }
-    if (to == kDeadState || (spelled && !spelled[to]) ||
-        a.dfaAccept[to] == 0 || a.dfaBound[to] != kNoSet ||
-        a.dfaRelay[to] != kNoRelay)
-      return;
-    fmt("  if (i < len && ::cursiv::lex_boundary(kTable.cfg).at({}, src, i, "
-        "len)) "
-        "{{ ++i; goto W{}; }}\n",
-        bound, to);
-    line("  end = i;");
-    fmt("  term = {};\n", a.dfaAccept[st] - 1u);
-    fmt("  match.state = {};\n", st);
-    line("  goto Wdone;");
+    emit_keyword_exit(st, spelled, "kTable.cfg");
   }
 
   void walk_foot() {
@@ -1333,8 +1303,7 @@ again:
   // the state it opened in: one helper each, which every site inlines.
   void emit_guard_lands() {
     if (a.guards.empty()) return;
-    if (conds())
-      raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
+    raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
     const ::cursiv::LrContext& c, ::std::uint32_t k) {
   return ::cursiv::lr_guard_land<kTable>(
       k, [&](unsigned j) { return drive_cond(c, j, c.virt.from, c.la); });
@@ -2091,7 +2060,8 @@ again:
     }
   }
   // Whether a state may probe: a flagged mode collects its candidates in the
-  // lexer, and an indented grammar reads its token first.
+  // lexer, an indented grammar reads its token first, and a mode read for
+  // length has its lexer lengthen the token.
   bool asks(unsigned s) const {
     return !multiMode(a.mode[s]) && !indented() &&
            a.modeLonger[a.mode[s]] == kNoMode;
@@ -2158,10 +2128,8 @@ again:
     else
       emit_plain_lex(s);
     fmt("D{}:\n", s);
-    if (dispShared[s]) fmt("DS{}:\n", s);
     std::string d = dispPiece[s].text;
-    replace_all(d, "@D",
-                std::string(dispShared[s] ? "DS" : "D") + std::to_string(s));
+    replace_all(d, "@D", "D" + std::to_string(s));
     replace_all(d, "@X", "X" + std::to_string(s));
     raw(d);
   }
@@ -2221,7 +2189,7 @@ again:
   void emit_banner() {
     raw(kGenerated);
     raw(R"(// Every state keeps its labels, reached or not: the file maps the table.
-// Labels: G/S/L entry, C lexed, D/DS dispatch, X refused, H/P hop, AC arm,
+// Labels: G/S/L entry, C lexed, D dispatch, X refused, H/P hop, AC arm,
 // R reduce, T shared landing, Acc accept.
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wunused-label"

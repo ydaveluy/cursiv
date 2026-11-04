@@ -296,6 +296,31 @@ struct G : joined::Words {
 };
 }  // namespace dotted
 
+// Arms that open alike, the lowest opening a block, beside a line the end of
+// the input may end; and a terminal whose last bytes are a line's end behind a
+// backslash, which that terminal holds.
+namespace heads {
+struct G : joined::Words {
+  struct LINK : terminal<lit<"%"> + many(cr<"a-z">) + lit<"\\"> + eol> {};
+  struct Stmt;
+  struct HeadA : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  struct HeadB : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  static constexpr auto suite =
+      lit<":"> + ref<NEWLINE> + ref<INDENT> +
+      some(append<&ast::Node::body>(ref<Stmt>)) + ref<DEDENT>;
+  static constexpr auto end = ref<NEWLINE> | eof;
+  struct Stmt : rule<create<ast::Node>(
+                    (append<&ast::Node::body>(ref<HeadA>) + suite + lit<"!"> +
+                     end) |
+                    (append<&ast::Node::body>(ref<HeadB>) + suite + lit<"?"> +
+                     end) |
+                    (assign<&ast::Node::name>(ref<ID>) + option(ref<LINK>) +
+                     end))> {};
+  struct Root : rule<create<ast::Node>(
+                    many(append<&ast::Node::body>(ref<Stmt>)))> {};
+};
+}  // namespace heads
+
 // One list rule reads the document and every suite, so the state that ends
 // a list reads a dedent wherever the list stands; the document then owes a
 // full stop, which a repair at the end of the input inserts.
@@ -320,6 +345,27 @@ struct G : cursiv::GrammarSpec {
 };
 }  // namespace body
 
+// Two heads read alike down a whole suite and told apart by the mark after it:
+// past what a look-ahead reads, the graph reads the suite.
+namespace marked {
+struct G : joined::Words {
+  struct Stmt;
+  struct Plus : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  struct Minus : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  static constexpr auto suite = lit<":"> + ref<NEWLINE> + ref<INDENT> +
+                                some(append<&ast::Node::body>(ref<Stmt>)) +
+                                ref<DEDENT>;
+  struct Stmt : rule<create<ast::Node>(
+                    (append<&ast::Node::body>(ref<Plus>) + suite + lit<"+"> +
+                     (ref<NEWLINE> | eof)) |
+                    (append<&ast::Node::body>(ref<Minus>) + suite + lit<"-"> +
+                     (ref<NEWLINE> | eof)) |
+                    (assign<&ast::Node::name>(ref<ID>) + (ref<NEWLINE> | eof)))> {};
+  struct Root : rule<create<ast::Node>(
+                    many(append<&ast::Node::body>(ref<Stmt>)))> {};
+};
+}  // namespace marked
+
 // Three bracket and newline cases use the same lexical policy.
 struct G : Plain {
   struct Case : rule<ref<Plain::Root> |
@@ -339,7 +385,9 @@ struct Cases : G {
 namespace laid {
 struct Cases : G {
   struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>) |
-                     (kw<"dotted"> + ref<dotted::G::Root>)> {};
+                     (kw<"dotted"> + ref<dotted::G::Root>) |
+                     (kw<"heads"> + ref<heads::G::Root>) |
+                     (kw<"marked"> + ref<marked::G::Root>)> {};
   using entry = Case;
 };
 }  // namespace laid

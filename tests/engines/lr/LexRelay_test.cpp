@@ -225,13 +225,14 @@ void an_indented_closer_ends_a_heredoc() {
 }
 
 void long_closer_search() {
+  const auto any = [](const char*) { return true; };
   for (const std::string_view text : {"", "a", "aba", "ababa", "aaaab"})
     for (const std::string_view pattern : {"", "a", "ab", "aba", "aaaab", "aaaaaa"})
       for (std::size_t first = 0; first <= pattern.size(); ++first)
         for (std::size_t last = first; last <= pattern.size(); ++last) {
           const auto* hit = cursiv::lex_find_long(
               text, pattern.substr(0, first), pattern.substr(first, last - first),
-              pattern.substr(last));
+              pattern.substr(last), any);
           const auto want = text.find(pattern);
           CHECK(hit == (want == std::string_view::npos ? nullptr : text.data() + want));
         }
@@ -245,14 +246,16 @@ void long_closer_search() {
     const unsigned after = at + rng() % (pattern.size() - at);
     const std::string_view p = pattern;
     const auto* hit = cursiv::lex_find_long(text, p.substr(0, at),
-                                           p.substr(at, after - at), p.substr(after));
+                                           p.substr(at, after - at), p.substr(after),
+                                           any);
     const auto want = text.find(pattern);
     CHECK(hit == (want == std::string::npos ? nullptr : text.data() + want));
   }
   const std::string mark(4096, 'a');
   const std::string text = std::string(100000, 'a') + 'b';
-  CHECK(cursiv::lex_find_long(text, "a", mark, "b") == text.data() + 95903);
-  CHECK(cursiv::lex_find_long(text, "a", mark, "c") == nullptr);
+  CHECK(cursiv::lex_find_long(text, "a", mark, "b", any) ==
+        text.data() + 95903);
+  CHECK(cursiv::lex_find_long(text, "a", mark, "c", any) == nullptr);
 }
 
 struct Other {};

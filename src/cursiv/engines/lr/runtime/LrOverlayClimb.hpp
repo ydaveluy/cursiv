@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 
 #include "cursiv/engines/lr/runtime/LrWalkTail.hpp"
@@ -19,12 +20,12 @@ class LrOverlayClimb {
   [[nodiscard]] std::uint32_t back() const {
     if (_tail.size() != 0) return _tail.back();
     _low = std::min(_low, _kept - 1);
-    return _kept == _base->size() ? _base->back() : _base->state_at(_kept - 1);
+    return frame(_kept - 1);
   }
   [[nodiscard]] std::uint32_t state_at(std::uint32_t i) const {
     if (i >= _kept) return _tail[i - _kept];
     _low = std::min(_low, i);
-    return _base->state_at(i);
+    return frame(i);
   }
   void push(std::uint32_t state) { _tail.push(state); }
   void pop(std::uint32_t n) {
@@ -40,10 +41,30 @@ class LrOverlayClimb {
   [[nodiscard]] bool bottom() const { return _low == 0; }
 
  private:
+  // A base that finds a frame from its top is read through a cursor: a walk only
+  // goes down the frames, so it steps over each once.
+  [[nodiscard]] std::uint32_t frame(std::uint32_t i) const {
+    if constexpr (requires { _base->pool(); }) {
+      if (_cursorAt == kNoCursor) {
+        _cursor = _base->top();
+        _cursorAt = _base->size() - 1;
+      }
+      assert(i <= _cursorAt);
+      for (; _cursorAt > i; --_cursorAt)
+        _cursor = _base->pool().parent(_cursor);
+      return _base->pool().state(_cursor);
+    } else {
+      return _base->state_at(i);
+    }
+  }
+  static constexpr std::uint32_t kNoCursor = 0xFFFFFFFFu;
+
   const Base* _base;
   std::uint32_t _kept;
   std::uint32_t _start;
   mutable std::uint32_t _low;
+  mutable std::uint32_t _cursor = 0;
+  mutable std::uint32_t _cursorAt = kNoCursor;
   LrWalkTail _tail;
 };
 

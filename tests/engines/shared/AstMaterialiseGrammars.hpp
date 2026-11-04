@@ -71,6 +71,11 @@ struct Flags : cursiv::Extends<cursiv::AstNode> {
 struct Box : cursiv::Extends<Flags> {
   Flags* in = nullptr;
 };
+struct Call : cursiv::Extends<Expr> {
+  Expr* callee = nullptr;
+  vector<Expr*> args;
+  boolean flagged = false;
+};
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -140,6 +145,18 @@ struct FlagGroup : Base {
                     option(flag<&Holder::flag>(lit<"!">) +
                            assign<&Holder::value>(ref<VarBase>)) +
                     many(lit<";"> + append<&Holder::kids>(ref<VarBase>)))> {};
+  using ignored = WS;
+};
+
+// A call's argument can itself close over a call. The argument write and the
+// following flag still belong to the outer call, even when the inner rule
+// returns their common base class and all three effects share one record.
+struct RecursiveCalls : Base {
+  struct Expression
+      : rule<ref<VarBase> + option(nest<Call, &Call::callee>(
+                               lit<":"> + flag<&Call::flagged>(
+                                   some(append<&Call::args>(ref<Expression>),
+                                        lit<",">))))> {};
   using ignored = WS;
 };
 
@@ -215,6 +232,7 @@ struct Suite : Base {
                      (lit<"sharedprefix:"> + ref<SharedPrefix::Unary>) |
                      (lit<"payloadcreate:"> + ref<PayloadCreate::Root>) |
                      (lit<"flaggroup:"> + ref<FlagGroup::Root>) |
+                     (lit<"recursivecalls:"> + ref<RecursiveCalls::Expression>) |
                      (lit<"optionalnest:"> + ref<OptionalNest::Sum>) |
                      (lit<"passthrough:"> + ref<PassThrough::Expression>) |
                      (lit<"relay:"> + ref<Relay::Root>) |

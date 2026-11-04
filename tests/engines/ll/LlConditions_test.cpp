@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -38,12 +39,15 @@ namespace cache_test {
 constexpr const auto& base = tllconditions::generated::Ll::kTable;
 constexpr auto identifier = ll_terms::named<base>("ID");
 static_assert(identifier != cursiv::kInvalidSymbol);
+// One choice in a rule of its own, called by the document.
 constexpr cursiv::LlAtnState states[] = {
-    {cursiv::LlAtnKind::basic, 0, 0, 0, 2},
-    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 2, 1},
-    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 3, 1},
-    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 4, 1},
-    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 5, 1},
+    {cursiv::LlAtnKind::basic, 1, 0, 0, 2},
+    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 2, 1},
+    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 3, 1},
+    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 4, 1},
+    {cursiv::LlAtnKind::basic, 1, cursiv::kNoRow, 5, 1},
+    {cursiv::LlAtnKind::ruleStop, 1},
+    {cursiv::LlAtnKind::basic, 0, cursiv::kNoRow, 6, 1},
     {cursiv::LlAtnKind::ruleStop, 0}};
 constexpr cursiv::LlAtnEdge edges[] = {
     {cursiv::LlEdgeKind::epsilon, 0, 1},
@@ -51,8 +55,10 @@ constexpr cursiv::LlAtnEdge edges[] = {
     {cursiv::LlEdgeKind::condition, 0, 3},
     {cursiv::LlEdgeKind::condition, 1, 4},
     {cursiv::LlEdgeKind::atom, identifier, 5},
-    {cursiv::LlEdgeKind::atom, identifier, 5}};
-constexpr std::uint32_t starts[] = {0}, callers[] = {0, 0};
+    {cursiv::LlEdgeKind::atom, identifier, 5},
+    {cursiv::LlEdgeKind::rule, 1, 0, 7}};
+constexpr std::uint32_t starts[] = {6, 0}, callers[] = {0, 0, 1},
+                        returns[] = {7};
 constexpr cursiv::LlTable::Decision decisions[] = {
     {.how = cursiv::LlPredict::adaptive, .mode = base.errMode, .state = 0}};
 bool line_condition(const char* text, cursiv::TextOffset len, unsigned k,
@@ -72,9 +78,10 @@ bool end_condition(const char*, cursiv::TextOffset len, unsigned k,
 }
 constexpr auto gapTable = [] {
   auto t = base;
-  t.atn = {states, 6, edges, starts, callers, nullptr};
+  t.atn = {states, 8, edges, starts, callers, returns, nullptr};
+  t.atnStart = 6;
   t.edgeNode = nullptr;
-  t.nrules = 1;
+  t.nrules = 2;
   t.decisions = decisions;
   t.ndecisions = 1;
   t.condition = line_condition;
@@ -166,6 +173,46 @@ void predicates_and_implied_tokens_match_the_table_engine() {
 
 // After a name, `#` continues `a #b?`: the implied `;` is not inserted there,
 // even where that reading fails at `c`. After a number it is.
+// A terminal a condition refuses is taken off the position, and the text is
+// read without it. A token only a condition names stands: no terminal reads
+// it, so it is an error, and it is never read again in pieces.
+void a_refused_token_is_read_again_and_a_named_one_stands() {
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  const auto clean = [&](std::string_view text, bool want) {
+    for (const cursiv::Parser* parser : {
+             static_cast<const cursiv::Parser*>(ll.get()),
+             static_cast<const cursiv::Parser*>(lr.get()),
+         }) {
+      const auto r = parser->parse(text);
+      if ((r.accepted && r.diagnostics.empty()) != want)
+        std::printf("%s [%.*s]: wanted %s, got %zu diagnostics\n",
+                    parser == ll.get() ? "LL" : "LR",
+                    static_cast<int>(text.size()), text.data(),
+                    want ? "read" : "refused", r.diagnostics.size());
+      CHECK((r.accepted && r.diagnostics.empty()) == want);
+    }
+  };
+  for (const std::string_view text :
+       {"gapexit:a - > b", "gapexit:a -> b", "gapexit:a\n-> b", "gaparm:a->b",
+        "gaparm:a -> b", "gaparm:a - > b", "gapnull:->a", "gapnull:-> a",
+        "gapnull: -> a", "gapnull:%->a", "andloop:aa;", "andloop:aaa;",
+        "andloop:a a;", "andhead:aa"})
+    clean(text, true);
+  for (const std::string_view text :
+       {"gapexit:a ->", "andloop:ab;", "andhead:ba"})
+    clean(text, false);
+  for (const std::string_view head :
+       {"atarm:", "atcall:", "atturn:", "atclimb:"}) {
+    const std::string spaced = std::string(head) + "~ >";
+    const std::string joined = std::string(head) + "~>";
+    clean(spaced, true);
+    clean(joined, false);
+  }
+  clean("atturn:~a ~ >", true);
+  clean("atturn:~a ~>", false);
+}
+
 void a_normal_continuation_blocks_an_implied_token() {
   const auto ll = tllconditions::generated::RivalLl::create_parser();
   const auto lr = tllconditions::generated::RivalLr::create_parser();
@@ -309,12 +356,19 @@ void predicates_survive_lowering_and_prevent_static_token_decisions() {
     hasImplied = hasImplied || node.kind == cursiv::LlShape::implied;
   }
   CHECK(hasCondition && hasImplied);
-  CHECK(low.cfg.nclimbOps == 1);
-  const auto body = low.cfg.climbOps[0].body;
-  const auto& op = low.cfg.nodes[body];
-  CHECK(op.kind == cursiv::LlShape::seq && op.count == 2);
-  CHECK(low.cfg.nodes[low.cfg.kids[op.sym]].kind == cursiv::LlShape::condition);
-  CHECK(low.cfg.atomic_operator(body) != cursiv::kNoRow);
+  // The guarded operator of `Sum`.
+  bool guarded = false;
+  for (std::uint16_t i = 0; i < low.cfg.nclimbOps && !guarded; ++i) {
+    const auto body = low.cfg.climbOps[i].body;
+    const auto& op = low.cfg.nodes[body];
+    if (op.kind != cursiv::LlShape::seq) continue;
+    guarded = true;
+    CHECK(op.count == 2);
+    CHECK(low.cfg.nodes[low.cfg.kids[op.sym]].kind ==
+          cursiv::LlShape::condition);
+    CHECK(low.cfg.atomic_operator(body) != cursiv::kNoRow);
+  }
+  CHECK(guarded);
   const auto built = cursiv::ll_build_program(low);
   CHECK(!built.fault && !built.overflow);
   CHECK(built.nadaptive != 0);
@@ -396,6 +450,7 @@ int main() {
   predicates_survive_lowering_and_prevent_static_token_decisions();
   conditions_past_the_table_are_refused();
   predicates_and_implied_tokens_match_the_table_engine();
+  a_refused_token_is_read_again_and_a_named_one_stands();
   a_normal_continuation_blocks_an_implied_token();
   prediction_crosses_only_the_active_trivia();
   an_implied_position_reads_a_refused_token_again();

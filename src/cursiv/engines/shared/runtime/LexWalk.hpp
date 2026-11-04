@@ -126,13 +126,8 @@ CURSIV_ALWAYS_INLINE inline Scan lex_walk_settle(
   return out;
 }
 
-// `Ad` names one engine's table: `start`, `step`, `accept`, `bounded`,
-// `bound_has`, `bound_reach`, and `refused` or, where a state's election
-// answers for every acceptance, `qualified` -- and, where its tokens echo a
-// mark, `relay`, `relay_of`, `sets`, `names`, `prefers`; where a terminal
-// refuses words behind its head, `Skipping`. Each answers with a lookup.
-// What `kQualified` and `kRelays` announce is checked against these first
-// (`LexAdapter.hpp`).
+// `Ad` names one engine's table, as `LexAdapter.hpp` says, and each thing it
+// offers answers with a lookup. What it announces is checked first.
 //
 // Inlined into the one entry point each engine gives it: a descent asks this
 // once per token, and a frame between the two would be paid on every one.

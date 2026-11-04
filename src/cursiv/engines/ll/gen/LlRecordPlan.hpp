@@ -92,9 +92,7 @@ class LlRecordPlan {
       const LlRuleInfo& u = _cfg.rules[r];
       const auto id = rule(r);
       if (u.climb != kNoRow) {
-        if (const auto primary = _cfg.climbs[u.climb].primary;
-            primary != kNoRow)
-          supplies(rule(primary), id);
+        supplies(rule(_cfg.climbs[u.climb].primary), id);
         opens[id] = true;
         doesOpen.push_back(id);
       } else if (u.body != kNoRow) {
@@ -193,9 +191,7 @@ class LlRecordPlan {
     for (std::uint16_t r = 1; r < _cfg.nrules; ++r) {
       const LlRuleInfo& u = _cfg.rules[r];
       if (u.climb != kNoRow) {
-        const LlClimb& cl = _cfg.climbs[u.climb];
-        users[cl.primary != kNoRow ? rule(cl.primary) : cl.primaryNode]
-            .push_back(rule(r));
+        users[rule(_cfg.climbs[u.climb].primary)].push_back(rule(r));
       } else if (u.body != kNoRow) {
         users[u.body].push_back(rule(r));
       }
@@ -239,8 +235,7 @@ class LlRecordPlan {
         if (u.climb != kNoRow) {
           const LlClimb& cl = _cfg.climbs[u.climb];
           add(out, cl.node);
-          append(out, cl.primary != kNoRow ? _ruleRows[cl.primary]
-                                           : _nodeRows[cl.primaryNode]);
+          append(out, _ruleRows[cl.primary]);
         } else if (u.body != kNoRow) {
           append(out, _nodeRows[u.body]);
         }

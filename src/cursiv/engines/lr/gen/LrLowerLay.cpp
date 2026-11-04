@@ -21,14 +21,11 @@ LrShapeId LrLowerer::lay_repeat(unsigned cfg, ImageId e) {
     return _p.push(LrLowerNode{LrShape::none});
   }
   const LrShapeId k = lay(cfg, kid(n, 0));
-  const LrShapeId id = mark(
-      cfg, _p.push(LrLowerNode{LrShape::rep, k, 0,
-                               static_cast<std::uint32_t>(n.m),
-                               n.n == kUnbounded
-                                   ? kEndless
-                                   : static_cast<std::uint32_t>(n.n)}));
-  if (n.n > 1) _p.repeatedOperands.emplace_back(k, _p.owner);
-  return id;
+  return mark(cfg, _p.push(LrLowerNode{LrShape::rep, k, 0,
+                                       static_cast<std::uint32_t>(n.m),
+                                       n.n == kUnbounded
+                                           ? kEndless
+                                           : static_cast<std::uint32_t>(n.n)}));
 }
 
 std::uint16_t LrLowerer::open_tail(std::uint16_t reading, std::uint8_t tail) {
@@ -68,6 +65,12 @@ void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
   if (kind == LrShape::sym) {
     const auto sym = static_cast<std::uint16_t>(base);
     if (open || is_term(sym)) return;
+    // A commit's exit that ends the region stands past it, as a loop's own end
+    // does: the token in hand is read for the caller as well.
+    if (const std::uint16_t cut = _p.stop_of(sym); cut != 0) {
+      _p.e[at].sym = nt_sym(closing_stop(cut, edge));
+      return;
+    }
     std::uint16_t reading = nt_index(sym);
     if (const auto was = _p.openOf.find(reading); was != _p.openOf.end())
       reading = was->second.first;
@@ -80,11 +83,14 @@ void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
       const LrShapeId k = _p.kid[base + (open ? j : count - 1 - j)];
       ambient(k, open, edge);
       // A condition that ends the region reads past it, so what it follows
-      // ends the region too.
-      const bool reads = !open && is_condition(k);
-      if (_p.e[k].kind != LrShape::none && !reads &&
-          (!open || _p.e[k].kind != LrShape::end))
-        break;
+      // ends the region too. A nest's checkpoint holds no position, so what
+      // follows it opens the region.
+      const auto held = _p.e[k].kind;
+      const bool passes =
+          open ? held == LrShape::end ||
+                     (held == LrShape::seq && _p.e[k].count == 0)
+               : is_condition(k);
+      if (held != LrShape::none && !passes) break;
     }
   } else if (kind == LrShape::alt) {
     for (unsigned i = 0; i < count; ++i) ambient(_p.kid[base + i], open, edge);
@@ -202,13 +208,23 @@ LrShapeId LrLowerer::lay_condition(unsigned cfg, ImageId e) {
   if (_p.gapNt.size() <= k) _p.gapNt.resize(k + 1u, 0);
   if (_p.gapNt[k] == 0) {
     const std::uint16_t aux = lr_new_aux(_cfg);
-    const std::uint16_t before = _cfg.nprods;
-    lr_push_prod(_o, _p, aux, {});
-    if (_cfg.nprods != before)
-      _cfg.prods[before].gap = static_cast<std::uint8_t>(k + 1u);
+    if (const std::uint16_t prod = lr_push_prod(_o, _p, aux, {}); prod != kNoRow)
+      _cfg.prods[prod].gap = static_cast<std::uint8_t>(k + 1u);
     _p.gapNt[k] = static_cast<std::uint16_t>(aux + 1u);
   }
   return push_sym(nt_sym(_p.gapNt[k] - 1u), cfg);
+}
+
+// The empty rule of a commit's exit, its production pushed under `trail`.
+std::uint16_t LrLowerer::stop_rule(DynSet terms, std::uint8_t trail) {
+  const std::uint16_t aux = lr_new_aux(_cfg);
+  const std::uint16_t prod = lr_push_prod(_o, _p, aux, {});
+  _cfg.stopCuts.push_back(std::move(terms));
+  if (prod != kNoRow)
+    _cfg.prodBuild[prod].stop = static_cast<std::uint16_t>(_cfg.stopCuts.size());
+  lr_close_region(_cfg, prod, trail);
+  _p.stopNt.push_back(static_cast<std::uint16_t>(aux + 1u));
+  return aux;
 }
 
 LrShapeId LrLowerer::lay_stop(unsigned cfg, ImageId e, const Cut& cut) {
@@ -219,15 +235,15 @@ LrShapeId LrLowerer::lay_stop(unsigned cfg, ImageId e, const Cut& cut) {
   if (fresh) {
     DynSet terms;
     cut_terms(cfg, cut.token, terms);
-    const std::uint16_t aux = lr_new_aux(_cfg);
-    const std::uint16_t before = _cfg.nprods;
-    lr_push_prod(_o, _p, aux, {});
-    _cfg.stopCuts.push_back(std::move(terms));
-    if (_cfg.nprods != before)
-      _cfg.prodBuild[before].stop = static_cast<std::uint16_t>(_cfg.stopCuts.size());
-    _p.stopNt.push_back(static_cast<std::uint16_t>(aux + 1u));
+    stop_rule(std::move(terms), 0);
   }
   return push_sym(nt_sym(_p.stopNt[at_->second] - 1u), cfg);
+}
+
+std::uint16_t LrLowerer::closing_stop(std::uint16_t cut, std::uint8_t trail) {
+  const auto [at, fresh] = _p.stopTail.try_emplace({cut, trail}, 0);
+  if (fresh) at->second = stop_rule(_cfg.stopCuts[cut - 1u], trail);
+  return at->second;
 }
 
 LrShapeId LrLowerer::lay_implied(unsigned cfg, ImageId e) {

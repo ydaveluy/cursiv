@@ -74,7 +74,6 @@ LrLowered LrLowerer::run() {
   _cfg.entryNt = static_cast<std::uint16_t>(1 + _ntIdx.at(entry));
   declare();
   define();
-  lr_no_non_consuming(_o, _p);
   _p.owner = kNoElement;
   const LrLowerSlot start{.sym = nt_sym(_cfg.entryNt)};
   _cfg.startProd = _cfg.nprods;

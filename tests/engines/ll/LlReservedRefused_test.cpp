@@ -15,6 +15,7 @@
 #include "cursiv/engines/ll/runtime/ll_search.hpp"
 #include "cursiv/engines/lr/runtime/LrContext.hpp"
 #include "cursiv/engines/lr/runtime/lr_rescan.hpp"
+#include "cursiv/engines/lr/runtime/lr_search.hpp"
 #include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
 #include "cursiv/test/AstText.hpp"
 #include "cursiv/test/Check.hpp"
@@ -143,18 +144,36 @@ void a_refused_keyword_reserves_nothing_from_a_misspelling() {
   };
   const auto whole = [&](std::string_view text) {
     for (const cursiv::Typo& t : lr_names(text))
-      if (t.term == name && t.end == len(text) && t.faults == 1) return true;
+      if (t.term == name && t.end == len(text) &&
+          t.cost == cursiv::kRepairReread)
+        return true;
     return false;
   };
   CHECK(whole("in-place"));
   CHECK(whole("inx-place"));
   CHECK(!whole("in place"));
+  // A search's bound reads as the search does: the keyword's refusal is told at
+  // its token, wherever that stands in the text.
+  {
+    const std::string_view text = "x in-place";
+    cursiv::Cst cst(text);
+    cursiv::CstBuilder builder(cst);
+    cursiv::LrContext c(text, builder);
+    cursiv::LrSearch s(c.len, cursiv::RepairBudget{}, c.indentArena);
+    cursiv::lr_search_reset(s);
+    bool found = false;
+    for (const cursiv::Typo& t : cursiv::lr_search_misread<lr::kTable>(c, s, 2))
+      found = found || (t.term == name && t.end == len(text));
+    CHECK(found);
+  }
   namespace ll = tllrefused::generated::Ll;
   const auto llName =
       cursiv::ll_match_text<ll::kTable>("inx", 3, ll::kTable.errMode, 0).term;
   const auto ll_whole = [&](std::string_view text) {
     for (const cursiv::Typo& t : ll_names(text))
-      if (t.term == llName && t.end == len(text) && t.faults == 1) return true;
+      if (t.term == llName && t.end == len(text) &&
+          t.cost == cursiv::kRepairReread)
+        return true;
     return false;
   };
   CHECK(ll_whole("in-place"));
@@ -184,14 +203,15 @@ void a_word_refused_at_a_cut_runs_into_it() {
   const auto llCut =
       cursiv::ll_match_text<table>(text.data(), cut, mode, 0, reached);
   CHECK(reached == cut && llCut.term != llWhole.term);
-  // A search reading the token to that end keeps nothing of it.
-  cursiv::Cst tree(text);
+  // A search whose share ends inside a token keeps nothing of it.
+  const std::string word(2 * cursiv::kRepairLexBytes, 'x');
+  cursiv::Cst tree(word);
   cursiv::CstBuilder builder(tree);
-  cursiv::LlContext c(text, builder);
+  cursiv::LlContext c(word, builder);
   cursiv::LlSearch s(table.atn, c.len);
-  s.limit = 1000;
+  s.limit = 1;
   auto& row = cursiv::ll_search_row<table>(s, 0);
-  CHECK(cursiv::ll_search_scan<table>(c, s, row, mode, 0, cut).term ==
+  CHECK(cursiv::ll_search_scan<table>(c, s, row, mode, 0).term ==
         cursiv::kInvalidSymbol);
   CHECK(row[mode].end == cursiv::kLlUnscanned && cursiv::ll_search_spent(s));
 }

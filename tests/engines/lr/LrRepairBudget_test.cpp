@@ -45,6 +45,15 @@ using namespace std::chrono_literals;
 
 namespace {
 
+// Whether the lexer elects `u` over `t`, the tie read again in their alphabets.
+template <const auto& A>
+bool beats(const cursiv::LrContext& c, const cursiv::Token& u,
+           const cursiv::Token& t) {
+  return cursiv::lr_token_beats(u, t, [&] {
+    return cursiv::lr_token_weight<A>(c, u) > cursiv::lr_token_weight<A>(c, t);
+  });
+}
+
 // A re-read after a flagged token retains its alphabet, including in the memo:
 // otherwise a keyword cannot defeat that same-length identifier in a split.
 void a_rescanned_token_keeps_its_mode_for_the_election() {
@@ -78,8 +87,8 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     if (text == "module")
       CHECK(context.skipMemo.find(0, table.errMode, 0, &keyword.sym, 1) !=
             nullptr);
-    CHECK(cursiv::lr_token_beats<table>(context, keyword, identifier));
-    CHECK(!cursiv::lr_token_beats<table>(context, identifier, keyword));
+    CHECK(beats<table>(context, keyword, identifier));
+    CHECK(!beats<table>(context, identifier, keyword));
 
     std::vector<cursiv::LrShadow> readings(2);
     readings[0].la = identifier;
@@ -101,7 +110,7 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     }
     CHECK(own.mode != cursiv::kNoMode && own.mode != table.errMode);
     if (own.mode == cursiv::kNoMode) return;
-    CHECK(cursiv::lr_token_beats<table>(context, keyword, own));
+    CHECK(beats<table>(context, keyword, own));
     cursiv::TextOffset reached = keyword.begin;
     const auto shortRead = cursiv::lr_scan_at<table, true>(
         context, own.mode, keyword.begin, 0, nullptr, keyword.end - 1,
@@ -110,9 +119,9 @@ void a_rescanned_token_keeps_its_mode_for_the_election() {
     for (const auto& a : tokens)
       for (const auto& b : tokens)
         for (const auto& c : tokens)
-          if (cursiv::lr_token_beats<table>(context, a, b) &&
-              cursiv::lr_token_beats<table>(context, b, c))
-            CHECK(cursiv::lr_token_beats<table>(context, a, c));
+          if (beats<table>(context, a, b) &&
+              beats<table>(context, b, c))
+            CHECK(beats<table>(context, a, c));
   }
 }
 
@@ -149,6 +158,20 @@ cursiv::RepairBudget floor_only(std::uint64_t floor) {
           .perByte = 0,
           .perSearch = ~std::uint64_t{0},
           .perParse = ~std::uint64_t{0}};
+}
+
+// Two repairs of one fault stand in different stacks and cost the same: they
+// cannot meet before the bracket behind the fault closes, so a race stops long
+// before it, and the bracket's length costs the search nothing.
+void a_tie_before_a_long_bracket_stops_racing() {
+  for (const unsigned terms : {4000u, 40000u}) {
+    std::string text = "module m f(1 + , (";
+    for (unsigned i = 0; i != terms; ++i) text += "2 + ";
+    text += "2));";
+    const Parsed p = parse<garith::kTable>(text, garith::kDrive);
+    CHECK(p.accepted && p.notes.size() == 1);
+    CHECK(p.stats.work < 16384);
+  }
 }
 
 // Past the budget at the end of the text, an owed insertion that leads back
@@ -302,6 +325,7 @@ int main() {
     wake.wait_for(lock, stop, kWatchdog, [] { return false; });
     if (!stop.stop_requested()) std::abort();
   });
+  a_tie_before_a_long_bracket_stops_racing();
   an_owed_run_that_grows_its_stack_ends();
   a_deep_nest_past_the_budget_is_closed();
   the_closers_of_a_deep_nest_hold_one_reading();

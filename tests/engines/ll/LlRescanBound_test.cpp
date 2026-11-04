@@ -41,10 +41,10 @@ cursiv::SymbolId owed_after(std::string_view word, std::string_view text,
     state = T.next_byte(state, static_cast<unsigned char>(c));
   std::uint64_t read = 0;
   const cursiv::LlTypoTape<T> tape{
-      {text.data(), static_cast<cursiv::TextOffset>(text.size()),
-       static_cast<cursiv::TextOffset>(text.size()), &read},
-      want.data(),
-      0};
+      {{text.data(), static_cast<cursiv::TextOffset>(text.size()),
+        static_cast<cursiv::TextOffset>(text.size()), &read},
+       0},
+      want.data()};
   cursiv::SymbolId first = cursiv::kInvalidSymbol;
   tape.owed(state, static_cast<cursiv::TextOffset>(word.size()),
             [&](cursiv::SymbolId t) {

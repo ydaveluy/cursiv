@@ -133,7 +133,9 @@ inline std::uint16_t ll_nest_receiver(LlContext& c, CstBuilder::Open region,
 // A fault is reclassified at the token the point refused. Changing to the
 // broad alphabet must not redo the preceding gap under another trivia
 // configuration, which could hide the refused token or expose an earlier
-// blank that the point had already skipped.
+// blank that the point had already skipped. A token only a condition names
+// stands too: no terminal reads it, and read again it would come apart into
+// tokens the repair then finds nothing wrong with.
 template <const auto& T>
 inline void ll_repair_peek(LlContext& c) {
   const std::uint16_t mode = ll_err_mode<T>(c);
@@ -143,7 +145,8 @@ inline void ll_repair_peek(LlContext& c) {
   }
   if (c.laMode == mode) return;
   if (c.la.sym == kEofSymbol ||
-      (c.la.sym < T.nterms && T.terms[c.la.sym].laid != 0)) {
+      (c.la.sym < T.nterms &&
+       (T.terms[c.la.sym].laid != 0 || !T.mode_admits(T.errMode, c.la.sym)))) {
     c.laMode = mode;
     return;
   }
@@ -226,6 +229,7 @@ inline void ll_skip(LlContext& c, std::uint16_t term, TextOffset end) {
   f.end = end;
   f.at = end;
   c.at = end;
+  c.heldEnd = end;
   c.invented = 0;
   c.laValid = false;
   c.laMode = kInvalidSymbol;
@@ -258,7 +262,10 @@ CURSIV_NOINLINE inline bool ll_drop(LlContext& c) {
   const NodeId id = c.tape.leaf(c.la.begin, span, T.stamp.make(kNoRow, 0));
   ll_mark(c, id);
   // No byte taken: the inventions before it still count.
-  if (end != c.la.begin) c.invented = 0;
+  if (end != c.la.begin) {
+    c.invented = 0;
+    c.heldEnd = end;
+  }
   c.at = end;
   c.laValid = false;
   c.laMode = kInvalidSymbol;
@@ -306,7 +313,7 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlGesture& g) {
       ll_drop<T>(c);
       break;
     case LlGesture::rep:
-      ll_take_typo<T>(c, mode, Typo{g.end, g.term, 1}, false);
+      ll_take_typo<T>(c, mode, Typo{g.end, g.term}, false);
       break;
     case LlGesture::skip:
       ll_skip<T>(c, g.term, g.end);
@@ -344,14 +351,34 @@ inline void ll_write(LlContext& c, std::uint16_t mode, const LlGesture& g) {
   ++c.search->next;
 }
 
+// The implied token of `condition`, where the condition holds. It stands before
+// the gap, as an explicit separator would. A parent may already have flushed
+// hidden trivia, so keep the tape monotone.
+template <const auto& T>
+inline bool ll_implied_holds(LlContext& c, std::uint16_t mode,
+                             std::uint16_t condition, std::uint16_t row,
+                             std::uint16_t pos) {
+  if (!ll_condition<T>(c, condition, ll_normal_token<T>(c, c.la, mode), c.at))
+    return false;
+  const CstRun& run = c.tape.stream();
+  const TextOffset floor =
+      run.records() != 0 ? run.at(run.records() - 1u).end : 0;
+  const TextOffset at = std::max(c.at, floor);
+  c.last = c.tape.leaf(at, at, T.stamp.make(row, pos));
+  return true;
+}
+
 // One terminal, matched or repaired. A position that reads on after a
 // gesture is filled, and the descent carries on -- a rule that gave up here
-// would cost the tree everything after it.
+// would cost the tree everything after it. An implied token's `condition` is
+// asked again past the last gesture: what was deleted may be all that stood in
+// its way.
 template <const auto& T>
 CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
                                              std::uint16_t term,
                                              std::uint16_t row,
-                                             std::uint16_t pos) {
+                                             std::uint16_t pos,
+                                             std::uint16_t condition) {
   const LlRoot root{kNoRow, static_cast<std::uint16_t>(pos - 1)};
   bool again = true;
   for (;;) {
@@ -361,6 +388,13 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
     ll_repair_peek<T>(c);
     const LlPause pause = pos != 0 ? ll_pause<T>(c, root)
                                    : LlPause{nullptr, kNoRow, true};
+    if constexpr (T.ngapConds != 0)
+      if (condition != kNoRow && pause.gesture == nullptr) {
+        ll_peek<T>(c, mode);
+        if (c.la.sym != term &&
+            ll_implied_holds<T>(c, mode, condition, row, pos))
+          return;
+      }
     if (const LlGesture* g = pause.gesture; g != nullptr) {
       if (g->kind == LlGesture::ins) {
         if (g->term == term) {
@@ -395,7 +429,7 @@ CURSIV_NOINLINE inline void ll_expect_repair(LlContext& c, std::uint16_t mode,
       const Scan exact = ll_match_text<T>(c.src, c.len, mode, c.la.begin);
       if (exact.term == term && exact.end == c.la.end &&
           exact.end > c.la.begin) {
-        ll_take_typo<T>(c, mode, Typo{exact.end, term, 1}, true);
+        ll_take_typo<T>(c, mode, Typo{exact.end, term}, true);
         ll_consume<T>(c, row, pos);
         ll_mark(c, c.last);
         return;
@@ -422,13 +456,14 @@ template <const auto& T>
 CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t mode,
                                            std::uint16_t term,
                                            std::uint16_t row,
-                                           std::uint16_t pos = 0) {
+                                           std::uint16_t pos = 0,
+                                           std::uint16_t condition = kNoRow) {
   if (c.give) return;
   ll_peek<T>(c, mode);
   if (c.la.sym == term) [[likely]]
     ll_consume<T>(c, row, pos);
   else
-    ll_expect_repair<T>(c, mode, term, row, pos);
+    ll_expect_repair<T>(c, mode, term, row, pos, condition);
 }
 
 // Whether `mode` reads `term` off its one byte alone.
@@ -505,7 +540,7 @@ inline int ll_climb_reads(LlContext& c, std::uint16_t decision,
   if (ll_ends<T>(c, sym)) return 2;
   LlSearch& s = ll_search_of<T>(c);
   const std::uint32_t state = T.decisions[decision].state;
-  s.sim.start(state, ll_search_open(c, s.sim, kLlSearchFrames));
+  s.sim.start(state, ll_search_open(c, s.sim, s.frames));
   if (!s.sim.step(sym)) return 0;
   const auto exitArm = T.atn.state(state).nedges - 1u;
   for (const LlConfig& x : s.sim.configs())

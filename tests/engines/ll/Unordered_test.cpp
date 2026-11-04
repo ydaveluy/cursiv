@@ -416,6 +416,18 @@ void optional_items(const cursiv::Parser& parser,
     const auto* node = accepted(result, text);
     if (node) CHECK(node->first == first);
   }
+  for (const auto& [text, first] : {std::pair{"closing ! ;", ""},
+                                    {"closing !;", ""},
+                                    {"closing !? ;", "?"},
+                                    {"closing ?! ;", "?"}}) {
+    const auto result = parser.parse(text);
+    const auto* node = accepted(result, text);
+    if (!node) continue;
+    CHECK(node->flag);
+    CHECK(node->first == first);
+  }
+  for (const auto text : {"closing ! ? ;", "closing ? ! ;", "closing ? ;"})
+    refused(parser, text);
   for (const auto text : {"region < > b;", "region <>;", "region b <> <>;"})
     refused(parser, text);
 

@@ -22,14 +22,13 @@ struct RepairEnds {
   bool done = false;
 
   // The next end the token's reading `r` from `p` may stop at, past the ones
-  // found, the bytes scanned for it added to `work`; false where none is
-  // left. `cuts(x)` says an end at `x` cuts a word.
+  // found, the bytes scanned for it added to `work` up to `maxWork`; false where
+  // none is left. `cuts(x)` says an end at `x` cuts a word; `shortOf` falls where
+  // the scan stopped at `upto` or at what `work` pays for.
   template <class Cuts>
   bool more(const char* src, TextOffset len, TextOffset p, const LexReading& r,
-            std::uint64_t& work, Cuts&& cuts,
-            TextOffset upto = ~TextOffset{0}, bool* shortOf = nullptr,
-            const CancellationPoll* stop = nullptr,
-            std::uint64_t maxWork = ~std::uint64_t{0}) {
+            std::uint64_t& work, Cuts&& cuts, TextOffset upto, bool& shortOf,
+            const CancellationPoll& stop, std::uint64_t maxWork) {
     if (done) return false;
     const auto eol = [&](TextOffset i) { return lex_line_end_at(src, i); };
     const auto pay = [&](TextOffset from, TextOffset to) {
@@ -41,11 +40,11 @@ struct RepairEnds {
       const TextOffset cap = std::min(
           upto, r.end - i > bytes ? static_cast<TextOffset>(i + bytes) : r.end);
       while (i < r.end && i < cap && keep(i)) {
-        if (stop != nullptr) stop->poll();
+        stop.poll();
         ++i;
       }
       if (i < cap || cap >= r.end) return true;
-      if (shortOf != nullptr) *shortOf = true;
+      shortOf = true;
       return false;
     };
     Regime nextRegime = regime;
@@ -67,10 +66,8 @@ struct RepairEnds {
     } else {
       x = r.end;
     }
-    // `last` jumps to an end the initial scan already inspected. The bounded
-    // caller pays only the walks it performs; legacy callers keep their count.
-    if (nextRegime != last || maxWork == ~std::uint64_t{0})
-      pay(nextScanned, x);
+    // `last` jumps to an end the initial scan already inspected.
+    if (nextRegime != last) pay(nextScanned, x);
     if (!complete) return false;
     found.push_back(x);
     regime = nextRegime;

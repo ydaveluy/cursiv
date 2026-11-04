@@ -14,11 +14,6 @@
 
 namespace cursiv {
 
-// A count the tables address with sixteen bits: true where `n` fits. Where it
-// does not, the sentence names which count and what it holds -- an author who
-// hits this splits the grammar.
-bool ll_fits(std::string_view grammar, std::size_t n, const char* what);
-
 // The built program, checked and planned, held read-only: no write reaches a
 // row an emitter reads. It is the program that was handed in, not a copy.
 class LlFinalProgram {

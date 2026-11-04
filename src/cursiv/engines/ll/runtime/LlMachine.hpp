@@ -4,13 +4,15 @@
 // here too. The native stack never holds more than a step, the callee it runs
 // in place and the plain rules below them, a chain the generator bounds and
 // none of which reaches a rule that calls itself: how deep the text nests is
-// bounded by memory, not by the stack.
+// bounded by memory, not by the stack, and by the 4 GiB of frames a call's
+// place can name: past them a parse throws `std::length_error`.
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 
 #include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/ll/runtime/LlContext.hpp"
@@ -74,6 +76,8 @@ class LlMachine {
   }
 
   CURSIV_NOINLINE void grow() {
+    if (_used > kNoCall)
+      throw std::length_error("cursiv: LL stack is too deep");
     std::size_t room = _room == 0 ? 4096 : _room;
     while (room < _used) room *= 2;
     auto frames = std::make_unique_for_overwrite<std::byte[]>(room);

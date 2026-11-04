@@ -71,7 +71,6 @@ namespace {
 namespace ga = ::arith::generated::Arith;
 namespace gdm = ::dm::generated::DomainModel;
 namespace gi = ::tindent::generated::G;
-namespace gt = ::tambtail::generated::G;
 namespace gd = ::telect::generated::Election;
 
 using checks::Stand;
@@ -469,20 +468,32 @@ void exact(const cursiv::LrDrive& drive, std::string_view text) {
       [](const cursiv::LrSearch&, std::uint32_t) { return 0u; });
 }
 
+// The writer's reading as a read step asks it: its stack's frames by depth, the
+// cursor its indentation reads from, and whether the table refused it.
+struct Written : cursiv::LrWriteReading {
+  struct Frames : Run {
+    [[nodiscard]] std::uint32_t size() const { return s->size(); }
+    [[nodiscard]] std::uint32_t state_at(std::uint32_t i) const {
+      return (*s)[i].state;
+    }
+  };
+  Frames run;
+  cursiv::TextOffset at = 0;
+  bool dead = false;
+};
+
 // The writer's pool over a whole document: the lexing is the drive's --
 // trivia laid, the cursor past it -- and a cell is decided as the drive
 // decides it.
 template <const auto& A>
 struct Whole {
   cursiv::LrContext& c;
-  cursiv::LrWriteReading& w;
+  Written& w;
   std::uint32_t forks = 0;
   bool split = false;
-  cursiv::LrWriteReading scratch{};
+  Written scratch{};
 
-  cursiv::LrWriteReading& operator[](std::size_t i) {
-    return i == 0 ? w : scratch;
-  }
+  Written& operator[](std::size_t i) { return i == 0 ? w : scratch; }
   std::size_t fork(std::size_t) {
     ++forks;
     return 1;
@@ -498,7 +509,12 @@ struct Whole {
       at += arm;
       forks = 0;
     }
-    return cursiv::lr_write_apply<A>(c, w, at);
+    return write(at);
+  }
+  bool write(std::uint32_t at) {
+    const bool wrote = cursiv::lr_write_apply<A>(c, w, at);
+    w.at = c.committed;
+    return wrote;
   }
   bool reduce(std::size_t, std::uint16_t p) {
     return cursiv::lr_write_reduce<A>(c, p, cursiv::lr_shadow_holds(c, w));
@@ -561,7 +577,7 @@ bool writes_as_drive(const cursiv::LrDrive& drive, std::string_view text,
   if (drive.enter(ran.c) != cursiv::LrExit::accept) return false;
   Stand<A> read(text, drive);
   cursiv::LrContext& c = read.c;
-  cursiv::LrWriteReading w;
+  Written w;
   w.run.s = &c.stack;
   Whole<A> x{c, w};
   while (!w.done) {
@@ -581,14 +597,11 @@ bool writes_as_drive(const cursiv::LrDrive& drive, std::string_view text,
 }
 
 // The drive read off the table: the interpreted writer takes the actions the
-// generated states take, lexes as they lex, and decides a cell and a position
-// of several candidates as they decide them -- stopping where they stop for
-// the graph.
+// generated states take, lexes as they lex, and decides a cell as they decide
+// it -- stopping where they stop for the graph.
 template <const auto& A>
 struct Interpreted {
   static inline cursiv::LrDrive drive{};
-  // The positions of several candidates the writer decided as the drive does.
-  [[maybe_unused]] static inline unsigned picks = 0;
 
   struct Pool : Whole<A> {
     void sync() {
@@ -611,34 +624,15 @@ struct Interpreted {
         at += arm;
         this->forks = 0;
       }
-      return cursiv::lr_write_apply<A>(this->c, this->w, at);
-    }
-    void pick(std::size_t, std::uint32_t state, cursiv::Scan* room,
-              std::uint32_t n) {
-      ++Interpreted::picks;
-      const cursiv::Scan best = room[0];
-      std::uint32_t kept = 0;
-      for (std::uint32_t k = 0; k < n; ++k)
-        if (A.cold.follow[state].test(room[k].term)) room[kept++] = room[k];
-      if (kept == 0) {
-        this->w.la = cursiv::Token{this->w.la.begin, best.end, best.term};
-        return;
-      }
-      sync();
-      std::vector<cursiv::Scan> arms(room, room + kept);
-      const std::uint32_t k =
-          kept > 1 ? this->c.candAt(this->c, state, arms.data(), kept) : 0;
-      if (k >= kept) {
-        this->w.la = cursiv::Token{this->w.la.begin, this->w.la.begin,
-                                   cursiv::kInvalidSymbol};
-        return;
-      }
-      this->w.la = cursiv::Token{this->w.la.begin, arms[k].end, arms[k].term};
+      return this->write(at);
     }
   };
 
   static cursiv::LrExit enter(cursiv::LrContext& c) {
-    cursiv::LrWriteReading w = cursiv::lr_write_reading(c);
+    Written w;
+    static_cast<cursiv::LrWriteReading&>(w) = cursiv::lr_write_reading(c);
+    w.run.s = &c.stack;
+    w.at = c.committed;
     Pool x{{c, w}};
     for (;;) {
       w.dead = false;
@@ -1293,7 +1287,6 @@ int main() {
         "module m f(,1);", "module m f(1, g(2 3), h(3, 4));",
         "module m f(g(1, 2), g(3 4), h(5));", "module m f(g(h(1, 2), 3);"})
     exact<ga::kTable>(ga::kDrive, t);
-
   unsigned read = 0;
   for (const char* doc :
        {"package p {\n  entity A { a: B many c: D.E }\n  datatype T\n"
@@ -1330,14 +1323,6 @@ int main() {
           "a\n  b\n  c\n  d\n  e"})
       repairs_through<gb::kTable>(gb::kDrive, text);
   }
-  // A line break both trivia and token: the interpreted writer decides the
-  // position of two candidates as the drive does, through `pick`.
-  {
-    (void)writes_through<gt::kTable>(gt::kDrive, "k pa\n\nb;\nk pa\nb;\n",
-                                     "ambtail lines");
-    CHECK(Interpreted<gt::kTable>::picks != 0);
-  }
-
   // A separator missing between two short values is inserted: the author's
   // value stays.
   {

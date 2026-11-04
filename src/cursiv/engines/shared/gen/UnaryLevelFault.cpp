@@ -91,6 +91,13 @@ class Speller {
     const ImageFace f = _im.ready(rule).face[1];
     if (f.kind == ImageRuleKind::terminal) {
       const ImageNode body = _im.nodes[f.body];
+      // A choice of words is spelled by its words, as if written in the table.
+      const auto first = _im.kids.begin() + body.first;
+      if (body.kind == ImageKind::choice &&
+          std::all_of(first, first + body.count, [&](ImageId kid) {
+            return _im.nodes[kid].kind == ImageKind::lit;
+          }))
+        return spell(f.body, out);
       out.assign(1,
                  Spelling{body.kind == ImageKind::lit ? literal(body)
                                                       : Token{.rule = rule}});

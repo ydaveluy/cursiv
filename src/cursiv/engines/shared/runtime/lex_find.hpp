@@ -28,8 +28,7 @@ inline bool lex_character_boundary(std::string_view text, const char* at) {
 // accepts, or null.
 const char* lex_find_long(std::string_view text, std::string_view before,
                           std::string_view mark, std::string_view after,
-                          function_ref<bool(const char*)> take =
-                              [](const char*) { return true; });
+                          function_ref<bool(const char*)> take);
 
 // The same, where a closer short enough to copy is found by memchr.
 template <class Take>

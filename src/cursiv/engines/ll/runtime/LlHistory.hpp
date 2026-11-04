@@ -6,12 +6,15 @@
 // goes on from it. Concatenation copies only paths in the balanced trees.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+
+#include "cursiv/core/utils/macros.hpp"
 
 namespace cursiv {
 
@@ -167,6 +170,8 @@ class LlHistory {
   using Id = std::uint32_t;
   static constexpr std::uint32_t kTail = 8;
   static constexpr std::size_t kMinTable = 16;
+  // A table up to this size is wiped for the next episode, not grown again.
+  static constexpr std::size_t kKeepTable = 256;
   static constexpr std::size_t kKeep = std::size_t{1} << 18;
 
   static std::uint64_t mix(std::uint64_t h) {
@@ -222,7 +227,10 @@ class LlHistory {
     std::vector<Id> table;
     void clear() {
       rows.assign(1, Row{});
-      table.assign(kMinTable, 0u);
+      if (table.empty() || table.size() > kKeepTable)
+        table.assign(kMinTable, 0u);
+      else
+        std::ranges::fill(table, 0u);
     }
     void release() {
       std::vector<Row>().swap(rows);
@@ -234,24 +242,24 @@ class LlHistory {
     }
     template <class Same>
     Id intern(const Row& row, Same&& same) {
+      if ((rows.size() + 1u) * 2u > table.size()) grow();
       std::size_t at = slot(row.hash());
       for (const auto mask = table.size() - 1u; table[at] != 0;
            at = (at + 1u) & mask)
         if (same(rows[table[at]], row)) return table[at];
-      if ((rows.size() + 1u) * 2u > table.size()) {
-        table.assign(table.size() * 2u, 0u);
-        const auto mask = table.size() - 1u;
-        for (Id n = 1; n < rows.size(); ++n) {
-          std::size_t i = slot(rows[n].hash());
-          while (table[i] != 0) i = (i + 1u) & mask;
-          table[i] = n;
-        }
-        return intern(row, same);
-      }
       const auto id = static_cast<Id>(rows.size());
       rows.push_back(row);
       table[at] = id;
       return id;
+    }
+    CURSIV_NOINLINE void grow() {
+      table.assign(table.size() * 2u, 0u);
+      const auto mask = table.size() - 1u;
+      for (Id n = 1; n < rows.size(); ++n) {
+        std::size_t i = slot(rows[n].hash());
+        while (table[i] != 0) i = (i + 1u) & mask;
+        table[i] = n;
+      }
     }
     Id intern(const Row& row) {
       return intern(row, [](const Row& a, const Row& b) { return a.same(b); });

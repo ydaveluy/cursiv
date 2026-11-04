@@ -24,7 +24,7 @@
                                             ::std::uint16_t, ::cursiv::Scan);  \
   How template void cursiv::ll_expect_repair<T>(                               \
       ::cursiv::LlContext&, ::std::uint16_t, ::std::uint16_t, ::std::uint16_t, \
-      ::std::uint16_t);                                                        \
+      ::std::uint16_t, ::std::uint16_t);                                       \
   How template void cursiv::ll_expect_arm<T>(::cursiv::LlContext&,             \
                                              const ::cursiv::LlTermArm&);      \
   How template bool cursiv::ll_drop<T>(::cursiv::LlContext&);                  \

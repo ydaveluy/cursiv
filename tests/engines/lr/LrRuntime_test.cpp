@@ -9,7 +9,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 #include "cursiv/core/grammar/ElementId.hpp"
@@ -334,10 +333,6 @@ void run() {
     CHECK(alias.top().word == 0);
     alias.push(alias[capacity - 1]);
     CHECK(alias.top().word == capacity - 1);
-    cursiv::LrStack moved = std::move(alias);
-    CHECK(alias.size() == 0 && moved.size() == capacity + 2);
-    alias.push(moved.top());
-    CHECK(alias.top().word == capacity - 1);
   }
   cursiv::LrStack stack;
   stack.reserve(1);
@@ -357,10 +352,6 @@ void run() {
   CHECK(stack.size() == 2);
   CHECK(&stack[0] == first);
   CHECK(stack[0].state == 0 && stack[0].word == 4);
-  stack.top() = {22, 23, 24, 25, 26};
-  cursiv::LrStack copy = stack;
-  CHECK(copy.size() == 2);
-  CHECK(copy.top().state == 22 && copy.top().word == 26);
   CHECK(stack[0].open == 2 && stack[0].begin == 3);
 }
 

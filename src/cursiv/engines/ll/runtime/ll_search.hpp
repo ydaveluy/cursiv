@@ -1,7 +1,8 @@
 // The repair search: best-first over the gestures a refused reading can make,
-// each reading read ahead by the graph's own step until three tokens hold it.
-// Among the cheapest, the one read furthest on is elected, and its path is
-// written one gesture per pause.
+// each reading read ahead by the graph's own step until three tokens past its
+// last gesture hold it and it names one arm, or until a plan replay would read
+// no further. Among the cheapest, the one read furthest on is elected, and its
+// path is written one gesture per pause.
 #pragma once
 
 #include <algorithm>
@@ -47,9 +48,10 @@ inline std::uint32_t ll_search_kind(const LlGesture& g) {
 
 inline bool ll_search_goal(const LlReading& r) {
   // A choice may begin before the actual refusal. Its sound prefix does not
-  // validate a repair: the three tokens must follow at least one gesture.
+  // validate a repair: the three tokens must follow at least one gesture. Arms
+  // that still stand as far as a plan replay reads are not told apart here.
   return r.done || (r.faults != 0 && r.shifts >= kRepairValidateShifts &&
-                    r.settled);
+                    (r.settled || r.shifts >= kLlArmReach));
 }
 
 inline void ll_search_queue(LlSearch& s, std::uint32_t f, const LlReading& r,
@@ -249,12 +251,11 @@ std::vector<Scan>& ll_search_row(LlSearch& s, TextOffset p) {
 
 template <const auto& T>
 Scan ll_search_scan(const LlContext& c, LlSearch& s, std::vector<Scan>& row,
-                    std::uint16_t mode, TextOffset p,
-                    TextOffset upto = kLlUnscanned) {
+                    std::uint16_t mode, TextOffset p) {
   Scan& sc = row[mode];
   if (sc.end == kLlUnscanned) {
     c.stop.check();
-    const TextOffset end = std::min(ll_search_walk_end(c, s, p), upto);
+    const TextOffset end = ll_search_walk_end(c, s, p);
     TextOffset reached = p;
     const Scan read = ll_match_text<T>(c.src, end, mode, p, reached);
     ++s.work;
@@ -266,23 +267,21 @@ Scan ll_search_scan(const LlContext& c, LlSearch& s, std::vector<Scan>& row,
 }
 
 // A section's closer is recognized only by complete tokens. Looking for it
-// obeys the same share as the reading that needs the boundary.
+// obeys the same share as the reading that needs the boundary: the bytes read
+// are paid together, and a walk the share cut answers nothing.
 template <const auto& T>
-TextOffset ll_search_text_end(const LlContext& c, LlSearch& s, TextOffset at,
-                              TextOffset upto) {
+TextOffset ll_search_text_end(const LlContext& c, LlSearch& s, TextOffset at) {
   if constexpr (T.nsections != 0) {
-    if (c.section != 0)
-      for (TextOffset p = at; p < upto && !ll_search_spent(s);) {
-        const Scan sc = ll_search_scan<T>(c, s, ll_search_row<T>(s, p),
-                                          ll_err_mode<T>(c), p, upto);
-        if (ll_search_spent(s)) break;
-        if (sc.term == kInvalidSymbol || sc.end <= p) {
-          ++p;
-        } else {
-          if (ll_ends<T>(c, sc.term)) return p;
-          p = sc.end;
-        }
-      }
+    if (c.section != 0) {
+      const TextOffset end = ll_search_walk_end(c, s, at);
+      TextOffset reached = at;
+      const TextOffset closes = ll_text_end<T>(c, at, end, reached, end);
+      ++s.work;
+      if (!ll_search_walked(c, s, at, end, reached) && closes == c.len &&
+          end < c.len)
+        ll_search_cut(s);
+      return closes;
+    }
   }
   return c.len;
 }
@@ -301,12 +300,16 @@ LlAhead ll_search_ahead(const LlContext& c, LlSearch& s) {
 
 // The visible token, trivia crossed unless `cross` is false; only complete,
 // level-independent reads enter the memo. An artificial end never synthesizes
-// EOF or a dedent.
+// EOF or a dedent. With `cross` false the descent's own token is read: one only
+// a condition names is as the descent holds it, no alphabet here reads it.
 template <const auto& T>
 Token ll_search_peek_ahead(
     const LlContext& c, LlSearch& s, LlAhead& ahead,
     std::uint16_t look = kNoRow,
     const LlMask<T.termWords>* viable = nullptr, bool cross = true) {
+  if (!cross && c.la.sym < T.nterms && c.la.sym != kEofSymbol &&
+      !T.mode_admits(T.errMode, c.la.sym))
+    return c.la;
   const auto mode = ll_err_mode<T>(c);
   TextOffset p = ahead.p;
   bool head = ahead.head;
@@ -410,12 +413,14 @@ Token ll_search_peek(const LlContext& c, LlSearch& s, LlReading& r) {
   return t;
 }
 
-// All readings of the token's bytes in the positions' shared alphabet. A
-// keyword reserves its spelling from a name while both are wanted; where
-// only the name is wanted, it reads as that name.
+// All readings of the token's bytes in the positions' shared alphabet, up to
+// where that alphabet ends it, as the descent reads it: a terminal no position
+// wants may read further under the broad one. A keyword reserves its spelling
+// from a name while both are wanted; where only the name is wanted, it reads as
+// that name.
 template <const auto& T>
 void ll_search_terms(const LlContext& c, LlSearch& s, const LlConfig* cfg,
-                     std::size_t n, const Token& tok,
+                     std::size_t n, Token& tok,
                      std::vector<std::uint16_t>& out) {
   out.clear();
   if (tok.sym < T.nterms && T.terms[tok.sym].laid != 0) {
@@ -435,14 +440,28 @@ void ll_search_terms(const LlContext& c, LlSearch& s, const LlConfig* cfg,
     }
   }
   if (!any || ll_search_spent(s)) return;
+  // Under the broad alphabet two terminals never tie, and a wider one read this
+  // token: where the positions want it, no walk under theirs reads otherwise.
+  if (T.nrelays == 0 && !LexTape<T>::kRefuses &&
+      tok.mode == ll_err_mode<T>(c) && T.modeMulti[tok.mode] == 0 &&
+      tok.sym < T.nterms && viable.test(tok.sym)) {
+    out.push_back(tok.sym);
+    ++s.work;
+    return;
+  }
   c.stop.check();
   const TextOffset cap = ll_search_walk_end(c, s, tok.begin);
   TextOffset reached = tok.begin;
   const TextOffset end =
       ll_match_in<T>(c.src, cap, tok.begin, viable, out, &reached);
   ++s.work;
-  if (ll_search_walked(c, s, tok.begin, cap, reached) || end != tok.end)
+  // A spelling only a condition names stays one token: it is no broad reading.
+  if (ll_search_walked(c, s, tok.begin, cap, reached) ||
+      (end != tok.end && tok.sym < T.nterms &&
+       !T.mode_admits(T.errMode, tok.sym)))
     out.clear();
+  else if (!out.empty())
+    tok.end = end;
 }
 
 // How many calls deep a context stands, by its first return.
@@ -450,8 +469,7 @@ inline std::uint32_t ll_search_calls(LlSearch& s, std::uint32_t ctx) {
   std::uint32_t depth = 0;
   std::vector<std::uint32_t>& chain = s.chain;
   chain.clear();
-  for (; ctx != kLlCtxNone && ctx != kLlCtxApart;
-       ctx = s.sim.contexts().parent(ctx, 0)) {
+  for (; ctx != kLlCtxNone; ctx = s.sim.contexts().parent(ctx, 0)) {
     if (const auto it = s.depths.find(ctx); it != s.depths.end()) {
       depth = it->second;
       break;
@@ -462,14 +480,35 @@ inline std::uint32_t ll_search_calls(LlSearch& s, std::uint32_t ctx) {
   return depth;
 }
 
+// The author's real tokens read by actual call `frame` before this pause, of
+// the frames the search stands on. Calls are nested, so one backward walk
+// answers every frame it passes.
+inline std::uint32_t ll_search_source_tokens(const LlContext& c, LlSearch& s,
+                                             std::uint32_t frame,
+                                             std::uint32_t most) {
+  const CstRun& run = c.tape.stream();
+  const std::size_t base = c.stack.size() - s.sourceTokens.size();
+  for (std::size_t i = c.stack.size(); i-- > frame;) {
+    if (s.sourceTokens[i - base] != kLlNoNode) continue;
+    while (s.sourceScanned > c.stack.begin(i)) {
+      if (ll_search_spent(s)) return 0;
+      if (s.sourceCount > most) return s.sourceCount;
+      const CstNode& n = run.at(--s.sourceScanned);
+      s.sourceCount += !n.hidden && !n.recovered && n.subtreeSize == 1 &&
+                               n.end > n.begin
+                           ? 1u
+                           : 0u;
+      ++s.work;
+    }
+    s.sourceTokens[i - base] = s.sourceCount;
+  }
+  return s.sourceTokens[frame - base];
+}
+
 // What the positions of reading `i` offer, taken once for the reading asked
 // last; the reference holds until another is asked. The terminals are in the
 // order a repair tries them: the innermost call's first, then as the graph
 // wrote them.
-inline std::uint32_t ll_search_source_tokens(const LlContext& c, LlSearch& s,
-                                             std::uint32_t frame,
-                                             std::uint32_t most);
-
 template <const auto& T>
 const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
                                std::uint32_t i) {
@@ -524,16 +563,19 @@ const LlFacts& ll_search_facts(const LlContext& c, LlSearch& s,
   for (const std::uint16_t m : f.modes) f.key = (f.key ^ m) * 1099511628211ull;
   for (const std::uint64_t w : f.bits) f.key = (f.key ^ w) * 1099511628211ull;
   // Filtering keeps ready positions only. The original call positions still
-  // prove what an unfinished caller owes, including a required child.
+  // prove what an unfinished caller owes, including a required child. A call of
+  // the descent is begun once anything under it read a token: a frame that read
+  // nothing is what its callers still owe.
   ll_search_load(s, r);
+  const auto lowest =
+      static_cast<std::uint32_t>(c.stack.size() - s.sourceTokens.size());
   ll_owed<T>().due(s.sim, f.due, [&](std::uint32_t ctx) {
     if (ctx == kLlCtxNone) return r.tokens != 0;
     for (unsigned k = 0; k < s.sim.contexts().count(ctx); ++k) {
       const std::int64_t start = s.sim.contexts().start(ctx, k);
       if (start >= 0 ? r.tokens > static_cast<std::uint64_t>(start)
                      : r.tokens != 0 ||
-                           ll_search_source_tokens(
-                               c, s, static_cast<std::uint32_t>(-1 - start), 0) != 0)
+                           ll_search_source_tokens(c, s, lowest, 0) != 0)
         return true;
     }
     return false;
@@ -560,6 +602,24 @@ bool ll_search_laid(const Token& t) {
   return t.sym < T.nterms && T.terms[t.sym].laid != 0;
 }
 
+// The end of input while a level is open, as the drive reads it where the
+// positions loaded stand: the end where they take it and no dedent, and the
+// dedent first where they take one. A line's dedent never stands at the end.
+template <const auto& T>
+void ll_search_at_end(const LlContext& c, const LlSearch& s,
+                      const LlAhead& ahead, Token& tok) {
+  if constexpr (kIndented<T>) {
+    if (tok.sym == kEofSymbol &&
+        ll_end_dedents<T>(s.indent.arena, ahead.at, false) &&
+        ll_dedent_over_end<T>(s.sim.configs()))
+      tok.sym = kLaid<T, kLaidDedent>;
+    else if (kLaid<T, kLaidDedent> != 0 &&
+             tok.sym == kLaid<T, kLaidDedent> && tok.begin == c.len &&
+             ll_end_stands_over<T>(s.sim.configs()))
+      tok.sym = kEofSymbol;
+  }
+}
+
 enum class LlRead : std::uint8_t { shifted, refused, done, spent };
 
 // One token read by reading `i`: the conditions on its gap asked, the
@@ -575,19 +635,7 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
   if (tok.sym == kInvalidSymbol) return LlRead::refused;
   s.work += 8;
   ll_search_load(s, r);
-  // The end of input while a level is open is read as the drive reads it:
-  // the end where the readings take it and no dedent, and the dedent first
-  // where they take one. A line's dedent never stands at the end.
-  if constexpr (kIndented<T>) {
-    if (tok.sym == kEofSymbol &&
-        ll_end_dedents<T>(s.indent.arena, r.ahead.at, false) &&
-        ll_dedent_over_end<T>(s.sim.configs()))
-      tok.sym = kLaid<T, kLaidDedent>;
-    else if (kLaid<T, kLaidDedent> != 0 &&
-             tok.sym == kLaid<T, kLaidDedent> && tok.begin == c.len &&
-             ll_end_stands_over<T>(s.sim.configs()))
-      tok.sym = kEofSymbol;
-  }
+  ll_search_at_end<T>(c, s, r.ahead, tok);
   const bool ends = ll_ends<T>(c, tok.sym);
   bool passed = true;
   if constexpr (T.ngapConds != 0)
@@ -625,7 +673,6 @@ LlRead ll_search_step(LlContext& c, LlSearch& s, std::uint32_t i) {
 template <const auto& T>
 bool ll_search_read(LlContext& c, LlSearch& s, std::uint32_t i) {
   for (;;) {
-    if (s.nodes[i].gone) return false;
     if (ll_search_goal(s.nodes[i])) break;
     const LlRead read = ll_search_step<T>(c, s, i);
     if (read == LlRead::spent) return false;
@@ -740,18 +787,19 @@ void ll_search_inserts(LlContext& c, LlSearch& s, std::uint32_t gi) {
       });
 }
 
+// The lexer's refused reading of the token at `p` under `mode`, each once.
 template <const auto& T>
-const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p) {
+const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p,
+                                    std::uint16_t mode) {
   static constexpr LexReading kNone{};
-  const auto mode = ll_err_mode<T>(c);
   if (p >= c.len ||
       !T.lexOpeners[mode].has(static_cast<unsigned char>(c.src[p])))
     return kNone;
-  if (const auto it = s.readings.find(p); it != s.readings.end())
+  const std::uint64_t key = std::uint64_t{p} << 16 | mode;
+  if (const auto it = s.readings.find(key); it != s.readings.end())
     return it->second;
   if (c.reads.spent()) return kNone;
-  const TextOffset textEnd =
-      ll_search_text_end<T>(c, s, p, ll_search_walk_end(c, s, p));
+  const TextOffset textEnd = ll_search_text_end<T>(c, s, p);
   if (ll_search_spent(s)) return kNone;
   const TextOffset end = std::min(textEnd, ll_search_walk_end(c, s, p));
   TextOffset reached = p;
@@ -760,7 +808,20 @@ const LexReading& ll_search_reading(LlContext& c, LlSearch& s, TextOffset p) {
   c.reads.pay(p, reached);
   ++s.work;
   if (ll_search_walked(c, s, p, end, reached, textEnd)) return kNone;
-  return s.readings.emplace(p, r).first->second;
+  return s.readings.emplace(key, r).first->second;
+}
+
+// The alphabet reading `r`'s token is read under for what the lexer refused:
+// its positions' own where they share one, as the descent reads it. Under the
+// broad one, a trivia another region reads as a token is that token.
+template <const auto& T>
+std::uint16_t ll_search_lex_mode(const LlContext& c, const LlSearch& s,
+                                 const LlReading& r) {
+  LlMask<T.termWords> viable;
+  const auto look =
+      ll_search_look<T>(s.pool.data() + r.cfg, r.ncfg, viable,
+                        kIndented<T> && r.ahead.at.depth != 0);
+  return look != kNoRow ? look : ll_err_mode<T>(c);
 }
 
 // The token in hand read as `term` up to `end` at `cost`: `rep` where its
@@ -806,7 +867,8 @@ std::uint32_t ll_search_reread(LlContext& c, LlSearch& s, std::uint32_t bi,
 template <const auto& T>
 void ll_search_lexical(LlContext& c, LlSearch& s, std::uint32_t bi,
                        const Token& tok, std::uint32_t& choice) {
-  const LexReading r = ll_search_reading<T>(c, s, tok.begin);
+  const std::uint16_t mode = ll_search_lex_mode<T>(c, s, s.nodes[bi]);
+  const LexReading r = ll_search_reading<T>(c, s, tok.begin, mode);
   if (r.term == kInvalidSymbol || r.term == ll_search_closer<T>(c)) return;
   const bool trivia = T.terms[r.term].trivia;
   if (!trivia) {
@@ -832,7 +894,7 @@ void ll_search_lexical(LlContext& c, LlSearch& s, std::uint32_t bi,
     one(r.end);
     return;
   }
-  RepairEnds& ends = s.ends[tok.begin];
+  RepairEnds& ends = s.ends[std::uint64_t{tok.begin} << 16 | mode];
   const auto cuts = [&](TextOffset x) { return lex_cuts<T>(c.src, c.len, x); };
   for (std::size_t k = 0; !ll_search_spent(s); ++k) {
     if (k == ends.found.size()) {
@@ -840,8 +902,8 @@ void ll_search_lexical(LlContext& c, LlSearch& s, std::uint32_t bi,
                                   ? tok.begin : ends.scanned;
       bool cut = false;
       if (!ends.more(c.src, c.len, tok.begin, r, s.work, cuts,
-                     ll_search_walk_end(c, s, std::min(from, c.len)), &cut,
-                     &c.stop, s.limit)) {
+                     ll_search_walk_end(c, s, std::min(from, c.len)), cut,
+                     c.stop, s.limit)) {
         if (cut) ll_search_cut(s);
         return;
       }
@@ -863,8 +925,7 @@ const std::vector<Typo>& ll_search_typos(LlContext& c, LlSearch& s,
         it->second.bits == f.bits)
       return it->second.typos;
   TypoCandidates found;
-  const TextOffset len = ll_search_text_end<T>(
-      c, s, tok.begin, ll_search_walk_end(c, s, tok.begin));
+  const TextOffset len = ll_search_text_end<T>(c, s, tok.begin);
   const std::uint64_t most = repair_bytes(s.work, s.limit);
   const auto reach = static_cast<TextOffset>(
       std::min<std::uint64_t>(most, kLlUnscanned));
@@ -892,7 +953,8 @@ TextOffset ll_search_drop_end(LlContext& c, LlSearch& s, const Token& tok) {
   if (tok.end != tok.begin) return tok.end;
   if (const auto it = s.drops.find(tok.begin); it != s.drops.end())
     return it->second;
-  const LexReading r = ll_search_reading<T>(c, s, tok.begin);
+  const LexReading r =
+      ll_search_reading<T>(c, s, tok.begin, ll_err_mode<T>(c));
   if (ll_search_spent(s)) return tok.begin;
   if (r.term != kInvalidSymbol)
     return s.drops.emplace(tok.begin, lex_cut(tok.begin, r)).first->second;
@@ -910,33 +972,13 @@ template <const auto& T>
 bool ll_search_rereads(LlContext& c, LlSearch& s, std::uint32_t bi,
                        const Token& tok) {
   if (ll_ends<T>(c, tok.sym) || ll_search_laid<T>(tok)) return false;
-  if (ll_search_reading<T>(c, s, tok.begin).term != kInvalidSymbol) return true;
+  if (ll_search_reading<T>(c, s, tok.begin,
+                           ll_search_lex_mode<T>(c, s, s.nodes[bi]))
+          .term != kInvalidSymbol)
+    return true;
   return (s.nodes[bi].phase <= 2 &&
           !ll_search_typos<T>(c, s, bi, tok).empty()) ||
          ll_search_spent(s);
-}
-
-// The author's real tokens read by actual call `frame` before this pause.
-// Calls are nested, so one backward walk answers every frame it passes.
-inline std::uint32_t ll_search_source_tokens(const LlContext& c, LlSearch& s,
-                                             std::uint32_t frame,
-                                             std::uint32_t most) {
-  const CstRun& run = c.tape.stream();
-  for (std::size_t i = c.stack.size(); i-- > frame;) {
-    if (s.sourceTokens[i] != kLlNoNode) continue;
-    while (s.sourceScanned > c.stack.begin(i)) {
-      if (ll_search_spent(s)) return 0;
-      if (s.sourceCount > most) return s.sourceCount;
-      const CstNode& n = run.at(--s.sourceScanned);
-      s.sourceCount += !n.hidden && !n.recovered && n.subtreeSize == 1 &&
-                               n.end > n.begin
-                           ? 1u
-                           : 0u;
-      ++s.work;
-    }
-    s.sourceTokens[i] = s.sourceCount;
-  }
-  return s.sourceTokens[frame];
 }
 
 // Count and lay an abandon only when the queue reaches what it costs. A
@@ -988,7 +1030,9 @@ void ll_search_abandon(LlContext& c, LlSearch& s, std::uint32_t gi,
 }
 
 // Leave a partially read call, retaining its exact continuation. Context
-// forks may share callers; visit each (context, depth, arm) only once.
+// forks may share callers, and a stack's frames lie at many depths of the
+// positions that stand on it: each (context, arm) is left once, from the least
+// depth the walk reaches it at. The others are the same reading, ranked later.
 template <const auto& T>
 void ll_search_abandons(const LlContext& c, LlSearch& s, std::uint32_t bi,
                          std::uint32_t& choice) {
@@ -1001,12 +1045,11 @@ void ll_search_abandons(const LlContext& c, LlSearch& s, std::uint32_t bi,
   struct At {
     std::uint32_t ctx, depth;
     std::uint16_t alt;
-    bool operator==(const At&) const = default;
+    bool operator==(const At& o) const { return ctx == o.ctx && alt == o.alt; }
   };
   struct AtHash {
     std::size_t operator()(const At& a) const {
-      return std::hash<std::uint64_t>{}(std::uint64_t{a.ctx} << 32 ^
-                                        std::uint64_t{a.depth} << 16 ^ a.alt);
+      return std::hash<std::uint64_t>{}(std::uint64_t{a.ctx} << 16 ^ a.alt);
     }
   };
   // A deep nest's callers are many: the visited set is not searched linearly.
@@ -1092,9 +1135,9 @@ void ll_search_replace(LlContext& c, LlSearch& s, std::uint32_t gi) {
       start = T.modeStart[f.modes[m]];
   std::uint64_t read = 0;
   const LlTypoTape<T> tape{
-      {.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
-      nullptr,
-      tok.begin};
+      {{.src = c.src, .extent = c.len, .docLen = c.len, .read = &read},
+       tok.begin},
+      nullptr};
   if (start == kDeadState || ll_search_spent(s) ||
       !tape.replaces(start, term, end))
     return;
@@ -1207,8 +1250,12 @@ void ll_search_expand(LlContext& c, LlSearch& s, std::uint32_t bi) {
 // furthest reading was refused, or `kRepairReachAll`; `of[g]` is the candidate
 // goal `g` stands for. The reading furthest back steps, so two bound for one
 // future meet and go on as one; settled once every reading still going stands
-// for the same candidates past every other's refusal. True where the search's
-// share ran out first.
+// for the same candidates past every other's refusal, or after
+// `kRepairRaceSteps` steps: rivals in different stacks meet only where those
+// stacks close, and the text that far on says little of this fault. True where
+// the search's share ran out first. A race makes no gesture, so it prices no
+// call: `tokens` is the place in the text here, or two readings that took
+// different tokens to reach one place would never meet.
 template <const auto& T>
 bool ll_search_race(LlContext& c, LlSearch& s,
                     const std::vector<std::uint32_t>& of,
@@ -1228,7 +1275,8 @@ bool ll_search_race(LlContext& c, LlSearch& s,
       reach[of[g]] = kRepairReachAll;
       continue;
     }
-    const LlReading r = s.nodes[s.goals[g]];
+    LlReading r = s.nodes[s.goals[g]];
+    r.tokens = r.ahead.p;
     s.nodes.push_back(r);
     runners.push_back(
         Runner{static_cast<std::uint32_t>(s.nodes.size()) - 1, {of[g]}});
@@ -1252,9 +1300,10 @@ bool ll_search_race(LlContext& c, LlSearch& s,
   };
   std::unordered_multimap<LlSearch::Future, std::uint32_t, LlSearch::FutureHash>
       met;
+  std::uint32_t steps = 0;
   while (!queue.empty()) {
     c.stop.poll();
-    const bool settled = level();
+    const bool settled = ++steps > kRepairRaceSteps || level();
     if (settled || ll_search_spent(s)) {
       for (const std::uint32_t q : queue) settle(runners[q].of);
       return !settled;
@@ -1271,6 +1320,7 @@ bool ll_search_race(LlContext& c, LlSearch& s,
       }
     s.nodes[i].shifts = 0;
     const LlRead read = ll_search_step<T>(c, s, i);
+    s.nodes[i].tokens = s.nodes[i].ahead.p;
     if (read == LlRead::spent) {
       settle(runners[w].of);
       for (const std::uint32_t q : queue) settle(runners[q].of);
@@ -1414,10 +1464,6 @@ inline void ll_search_plan(LlSearch& s, std::uint32_t ci) {
     s.also.clear();
 }
 
-// How many frames of the descent's stack a search stands on at first: deeper
-// ones are read only while a reading returns out of the ones it knows.
-inline constexpr std::size_t kLlSearchFrames = 256;
-
 // The simulation opened over the context of the descent: the top `frames`
 // frames of its stack, below them an unknown caller.
 inline std::uint32_t ll_search_open(const LlContext& c, LlSimulation& sim,
@@ -1442,10 +1488,8 @@ template <const auto& T>
 std::uint32_t ll_search_root(LlContext& c, LlSearch& s, const LlRoot& root,
                              std::size_t frames) {
   LlSimulation& sim = s.sim;
-  if (s.sourceTokens.empty()) {
-    s.sourceTokens.assign(c.stack.size(), kLlNoNode);
-    s.sourceScanned = c.tape.stream().records();
-  }
+  s.sourceTokens.assign(std::min(frames, c.stack.size()), kLlNoNode);
+  s.sourceScanned = c.tape.stream().records();
   const std::uint32_t ctx = ll_search_open(c, sim, frames);
   std::vector<LlConfig> roots;
   if (root.decision != kNoRow) {
@@ -1494,8 +1538,7 @@ template <const auto& T>
 std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
                                std::uint16_t decision) {
   LlSimulation& sim = s.sim;
-  sim.start(T.decisions[decision].state,
-            ll_search_open(c, sim, kLlSearchFrames));
+  sim.start(T.decisions[decision].state, ll_search_open(c, sim, s.frames));
   LlAhead ahead = ll_search_ahead<T>(c, s);
   TextOffset gap = c.at;
   std::uint16_t arm = kNoRow;
@@ -1508,14 +1551,25 @@ std::uint16_t ll_search_arm_of(LlContext& c, LlSearch& s,
     const bool joined = kIndented<T> && ahead.at.depth != 0;
     const auto look = ll_search_look<T>(
         sim.configs().data(), sim.configs().size(), viable, joined);
-    const Token tok =
-        ll_search_peek_ahead<T>(c, s, ahead, look, &viable, !inHand);
+    Token tok = ll_search_peek_ahead<T>(c, s, ahead, look, &viable, !inHand);
     if (ll_search_spent(s)) return arm;
+    ll_search_at_end<T>(c, s, ahead, tok);
     sim.at_token(tokens);
-    if constexpr (T.ngapConds != 0)
-      if (!ll_search_filter<T>(c, s, tok, gap)) return arm;
-    if (k < s.plan.size() && s.plan[k].at == gap &&
-        s.plan[k].begin == tok.begin) {
+    const bool planned = k < s.plan.size() && s.plan[k].at == gap &&
+                         s.plan[k].begin == tok.begin;
+    // The conditions on the gap are asked as the search asked them: of the
+    // token a re-reading reads, and of the one in hand under an insertion or no
+    // gesture. A deletion, a skip and an abandon ask nothing of it.
+    if constexpr (T.ngapConds != 0) {
+      const LlGesture::Kind kind = planned ? s.plan[k].kind : LlGesture::ins;
+      if (kind == LlGesture::ins && !ll_search_filter<T>(c, s, tok, gap))
+        return arm;
+      if (kind == LlGesture::rep &&
+          !ll_search_filter<T>(
+              c, s, Token{tok.begin, s.plan[k].end, s.plan[k].term}, gap))
+        return arm;
+    }
+    if (planned) {
       const LlGesture& g = s.plan[k++];
       if (g.kind == LlGesture::ins) {
         if (!sim.step(g.term)) return first ? kNoRow : arm;
@@ -1583,6 +1637,7 @@ void ll_search_new(LlContext& c, LlSearch& s, const LlRoot& root) {
   std::uint32_t elected = kLlNoNode;
   for (std::size_t frames = kLlSearchFrames;; frames *= 2) {
     ll_search_reset(s);
+    s.frames = frames;
     const std::uint32_t r = ll_search_root<T>(c, s, root, frames);
     ll_search_lay<T>(c, s, r);
     elected = ll_search_run<T>(c, s, exhausted, raced);

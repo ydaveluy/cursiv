@@ -63,12 +63,6 @@ void report(const cursiv::LlBuiltProgram& a) {
       a.nadaptive, a.nopen, a.nmodes, a.ndfa, a.nstates);
 }
 
-// A count the tables address with sixteen bits, refused under this grammar's
-// name where it overruns them.
-bool fits(std::size_t n, const char* what) {
-  return cursiv::ll_fits(CURSIV_GEN_NAME, n, what);
-}
-
 }  // namespace
 
 int run(int argc, char** argv) try {
@@ -85,19 +79,6 @@ int run(int argc, char** argv) try {
     return exit_status(GenCode::refused);
 
   const cursiv::LlLowered& low = cursiv::LlLowering<G>::table();
-  // The counters the lowering fills are sixteen bits wide while the store
-  // behind them is not: a grammar that overran one would have kept writing at
-  // an offset that wrapped, so the store's own extent is what says so.
-  if (!fits(low.cfg.names.size(), "name characters") ||
-      !fits(low.cfg.sets.size(), "byte classes") ||
-      !fits(low.cfg.lex.size(), "lexer nodes") ||
-      !fits(low.cfg.lexKid.size(), "lexer edges") ||
-      !fits(low.cfg.terms.size(), "terminals") ||
-      !fits(low.cfg.rules.size(), "rules") ||
-      !fits(low.cfg.decisions.size(), "choice points") ||
-      !fits(low.cfg.climbs.size(), "precedence tables") ||
-      !fits(low.cfg.climbOps.size(), "precedence operators"))
-    return exit_status(GenCode::refused);
   // What the emitters cannot write is refused before anything is written:
   // the sentence names the rule, and no table exists to name it in. From here
   // the program is read-only.

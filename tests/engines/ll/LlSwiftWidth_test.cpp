@@ -60,25 +60,27 @@ void a_closing_walk_reads_the_closer() {
   if (decision == cursiv::kNoRow || close == cursiv::kInvalidSymbol) return;
   const auto& dec = table.decisions[decision];
   const std::string_view text = "#\"\"\"\nx\n\"\"\"#\n";
-  cursiv::Cst tree(text);
-  cursiv::CstBuilder builder(tree);
-  builder.bind_stream();
-  cursiv::LlContext context(text, builder);
-  context.at = 7;
-  context.la = {7, 11, close};
-  context.laValid = true;
-  context.laMode = dec.mode;
-  context.document = true;
-  context.stack.push_back(
-      table.atn.callerAt[table.atn.callerBase[table.atn.state(dec.state).rule]]);
-  {
+  const auto at_the_closer = [&](auto&& ask) {
+    cursiv::Cst tree(text);
+    cursiv::CstBuilder builder(tree);
+    builder.bind_stream();
+    cursiv::LlContext context(text, builder);
+    context.at = 7;
+    context.la = {7, 11, close};
+    context.laValid = true;
+    context.laMode = dec.mode;
+    context.stack.push_back(
+        table.atn
+            .callerAt[table.atn.callerBase[table.atn.state(dec.state).rule]]);
     cursiv::LlPredictionSession<table> session;
-    CHECK(cursiv::ll_episode<table>(context, decision) == 1);
-  }
-  {
-    cursiv::LlPredictionSession<table> session;
-    CHECK(cursiv::ll_predict<table>(context, decision) == 1);
-  }
+    CHECK(ask(context) == 1);
+  };
+  at_the_closer([&](cursiv::LlContext& context) {
+    return cursiv::ll_episode<table>(context, decision);
+  });
+  at_the_closer([&](cursiv::LlContext& context) {
+    return cursiv::ll_predict<table>(context, decision);
+  });
 }
 }  // namespace
 int main() {

@@ -151,7 +151,7 @@ struct LrLexTape : LexTape<A> {
   }
 };
 
-// The same for a walk whose caller reads no horizon.
+// A refused head walked past, for a walk whose caller reads no horizon.
 template <const auto& A>
 CURSIV_ALWAYS_INLINE inline Scan lr_unrefused_hot(const char* src,
                                                   TextOffset len,
@@ -203,16 +203,20 @@ constexpr std::uint16_t lr_err_mode([[maybe_unused]] std::uint16_t mode) {
   }
 }
 
-// The token that ends the text state `st` reads: in a section, the one that
-// closes it, which a repair there never invents, drops or reads as another,
-// as a grammar alone treats the end of its text.
+// The token that ends the text `mode` reads: in a section, the one that closes
+// it, which a repair there never invents, drops or reads as another, as a
+// grammar alone treats the end of its text.
 template <const auto& A>
-constexpr SymbolId lr_text_close([[maybe_unused]] std::uint32_t st) {
+constexpr SymbolId lr_mode_close([[maybe_unused]] std::uint16_t mode) {
   if constexpr (A.modeEnd.size() == 0) {
     return kEofSymbol;
   } else {
-    return A.modeEnd[A.mode[st]];
+    return A.modeEnd[mode];
   }
+}
+template <const auto& A>
+constexpr SymbolId lr_text_close(std::uint32_t st) {
+  return lr_mode_close<A>(A.mode[st]);
 }
 
 }  // namespace cursiv

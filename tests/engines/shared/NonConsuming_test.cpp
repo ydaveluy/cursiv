@@ -24,6 +24,18 @@ namespace non_consuming_cases {
 
 namespace {
 
+struct Leaf : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+};
+struct Bin : cursiv::Extends<cursiv::AstNode> {
+  cursiv::AstNode* left{};
+  string_view op;
+  cursiv::AstNode* right{};
+};
+struct Holder : cursiv::Extends<cursiv::AstNode> {
+  vector<cursiv::AstNode*> kids;
+};
+
 struct EmptyKinds : cursiv::GrammarSpec {
   struct End : rule<eof> {};
   struct Alias : rule<ref<End>> {};
@@ -33,6 +45,9 @@ struct EmptyKinds : cursiv::GrammarSpec {
   struct Maybe : rule<option(lit<"b">)> {};
   struct Indirect : rule<ref<Maybe>> {};
   struct Consuming : rule<lit<"x"> + ref<Alias>> {};
+  struct Operand : rule<create<Leaf>(option(assign<&Leaf::name>(lit<"b">)))> {};
+  struct Climb : infix<Operand, Bin, left(lit<"+">)> {};
+  struct Over : infix<Climb, Bin, left(lit<"*">)> {};
 };
 
 template <auto Body>
@@ -91,6 +106,20 @@ void run() {
   refuses_empty_turns<E::many(E::ref<E::Either>)>(F::nullableRepetition);
   refuses_empty_turns<E::many(E::ref<E::Implied>)>(F::nullableRepetition);
   refuses_empty_turns<E::repeat<2>(E::ref<E::Consuming>)>(F::none);
+  // An operator table reads nothing where its operand does, through every table
+  // it stands on, and a commit's parts read as they are written.
+  refuses_empty_turns<E::create<Holder>(
+      E::many(E::append<&Holder::kids>(E::ref<E::Climb>)))>(
+      F::nullableRepetition);
+  refuses_empty_turns<E::create<Holder>(
+      E::many(E::append<&Holder::kids>(E::ref<E::Over>)))>(
+      F::nullableRepetition);
+  refuses_empty_turns<E::many(
+      E::commit(E::option(E::lit<"b">), E::option(E::lit<"c">)))>(
+      F::nullableRepetition);
+  // A condition reads ahead and holds no position, so it repeats nothing.
+  refuses_empty_turns<!E::many(E::option(E::lit<"b">)) + E::lit<"x">>(F::none);
+  refuses_empty_turns<&E::many(E::option(E::lit<"b">)) + E::lit<"x">>(F::none);
   // An unordered item reads input or is an optional item, whatever reads
   // nothing in it: both engines refuse any other before laying the group, and
   // name it.

@@ -15,7 +15,6 @@ struct LrGotoRows {
   struct Edge {
     std::uint16_t nt = 0, to = 0;
     std::uint32_t guard = 0;
-    bool operator==(const Edge&) const = default;
   };
   std::vector<std::uint32_t> base{0};
   std::vector<Edge> edges;
@@ -29,17 +28,13 @@ struct LrGotoRows {
     close_row();
   }
 
-  // Rows ascend by nonterminal; equal keys keep their order. Each column
-  // still has to fit the table's construction limit.
-  bool canonicalize(unsigned nnts) {
-    std::vector<std::uint32_t> count(nnts, 0);
-    for (const Edge& e : edges) ++count[e.nt];
+  // Rows ascend by nonterminal; equal keys keep their order.
+  void canonicalize() {
     for (std::uint32_t s = 0; s + 1 < base.size(); ++s) {
       auto row = std::span(edges).subspan(base[s], base[s + 1] - base[s]);
       if (!std::ranges::is_sorted(row, {}, &Edge::nt))
         std::ranges::stable_sort(row, {}, &Edge::nt);
     }
-    return std::ranges::all_of(count, [](auto n) { return n <= 0xffffu; });
   }
 };
 

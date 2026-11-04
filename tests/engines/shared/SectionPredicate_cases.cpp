@@ -192,6 +192,20 @@ void run() {
   same(lastLl, inLastLl, words);
   same(lastLr, inLastLr, words);
   CHECK(alone(lastLl, words) == alone(lastLr, words));
+  // A token left open in a section ends at the token that closes the section:
+  // what it holds stays the author's, and the next block stands.
+  for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
+    const auto blocks = [&](std::string_view text) {
+      const std::string source = "inquoted:" + std::string(text);
+      const auto r = parser->parse(source);
+      std::string out;
+      if (const auto* d = r.value_as<ast::Doc>())
+        for (const ast::Block* b : d->blocks) out += items(b->items) + '|';
+      return out;
+    };
+    CHECK(blocks("<a \"b c> <d>") == "a,\"b c,|d,|");
+    CHECK(blocks("<a /* b c> <d>") == "a,|d,|");
+  }
   // A predicate of the last word that reads to the caret is answered by what
   // is typed there: behind `x ` the word is the last one on the document's
   // text, and a word typed after it makes `x` an item before the last.

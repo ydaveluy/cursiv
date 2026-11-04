@@ -472,6 +472,40 @@ struct LexWalkRungs : EmitOutput {
          k = view.relay_of(k).next)
       fmt("{}relays.launch(kTape, {}u, src, len, start, i);\n", ind, k);
   }
+  // A keyword whose one way on is the word it starts: its boundary is the edge,
+  // so the rung settles both here and asks no election. The caller knows the
+  // state elects the terminal it accepts. `cfg` spells what the emitted code
+  // reads the boundary from.
+  void emit_keyword_exit(unsigned st, const std::uint8_t* spelled,
+                         std::string_view cfg) {
+    const auto s = static_cast<std::uint16_t>(st);
+    const auto& g = view.a.cfg;
+    const auto bound = view.a.dfaBound[st];
+    if (view.accept(s) == 0 || bound == kNoSet || view.relay(s) != kNoRelay ||
+        ((g.wordRanges.size() != 0 || g.scalarRanges.size() != 0) &&
+         g.setDecode[bound] != kNoSet))
+      return;
+    std::uint16_t to = kDeadState;
+    for (unsigned b = 0; b < 256; ++b) {
+      const auto edge = view.next(s, view.cls(b));
+      if ((edge != kDeadState) !=
+          g.sets[bound].has(static_cast<unsigned char>(b)))
+        return;
+      if (edge == kDeadState) continue;
+      if (to != kDeadState && to != edge) return;
+      to = edge;
+    }
+    if (to == kDeadState || (spelled && !spelled[to]) || view.accept(to) == 0 ||
+        view.bounded(to) || view.relay(to) != kNoRelay)
+      return;
+    fmt("  if (i < len && ::cursiv::lex_boundary({}).at({}, src, i, len)) "
+        "{{ ++i; goto W{}; }}\n",
+        cfg, bound, to);
+    line("  end = i;");
+    fmt("  term = {};\n", view.accept(s) - 1u);
+    fmt("  match.state = {};\n", st);
+    line("  goto Wdone;");
+  }
   void emit_run_adv(const ByteSet& stay, std::string_view var,
                     std::string_view setName, bool content = true) {
     runs.advance(*this, stay, var, setName, content);

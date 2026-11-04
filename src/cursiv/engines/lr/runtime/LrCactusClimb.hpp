@@ -50,6 +50,7 @@ class LrCactusClimb {
     _go = false;
   }
 
+  [[nodiscard]] const LrCactus& pool() const { return *_pool; }
   [[nodiscard]] std::uint32_t top() const { return _top; }
   [[nodiscard]] std::uint32_t begin_node() const { return _begin; }
   // The shallowest this reading stood since the search set out: below it,

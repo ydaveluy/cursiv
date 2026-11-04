@@ -44,24 +44,26 @@ inline bool ll_condition(const LlContext& c, std::uint16_t condition,
 
 // Where the text the descent reads ends: the document's end, or in a section
 // the first token that closes it, looked for from `at` up to a token starting
-// at `upto`. `reached` rises to how far the search read.
+// at `upto`, in the bytes before `clip`. `reached` rises to how far the search
+// read, which is `clip` where a walk ran into it.
 template <const auto& T>
 TextOffset ll_text_end(const LlContext& c, TextOffset at, TextOffset upto,
-                       TextOffset& reached) {
+                       TextOffset& reached, TextOffset clip = ~TextOffset{0}) {
   if constexpr (T.nsections == 0) {
-    (void)at, (void)upto, (void)reached;
+    (void)at, (void)upto, (void)reached, (void)clip;
     return c.len;
   } else {
     if (c.section == 0) return c.len;
+    const TextOffset len = std::min(clip, c.len);
     LexFailedWalks<LlLexTape<T>> failed;
     const auto mode = ll_err_mode<T>(c);
-    for (TextOffset p = at; p < c.len && p <= upto;) {
+    for (TextOffset p = at; p < len && p <= upto;) {
       c.stop.poll();
       TextOffset halt = p;
       Scan s;
-      if (!failed.fails(LlLexTape<T>{}, c.src, c.len, mode, p, halt,
+      if (!failed.fails(LlLexTape<T>{}, c.src, len, mode, p, halt,
                         [&] { c.stop.poll(); }))
-        s = ll_match_text<T>(c.src, c.len, mode, p);
+        s = ll_match_text<T>(c.src, len, mode, p, halt);
       reached = std::max({reached, halt, s.end});
       if (s.term == kInvalidSymbol || s.end <= p) {
         ++p;

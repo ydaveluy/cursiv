@@ -17,7 +17,8 @@ enum class LlAtnKind : std::uint8_t { basic, ruleStop };
 struct LlAtnState {
   LlAtnKind kind = LlAtnKind::basic;
   std::uint16_t rule = kNoRow;
-  // The choice leaving this state, `kNoRow` where it leaves at most one edge.
+  // The choice leaving this state, `kNoRow` where nothing is asked: it leaves
+  // at most one edge, or an end mark's two.
   std::uint16_t decision = kNoRow;
   std::uint32_t edge = 0, nedges = 0;
 

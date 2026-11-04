@@ -55,8 +55,18 @@ bool WrittenReads::nothing_of(ImageId id) {
       return false;
     case ImageKind::repeat:
       return n.m == 0 || nothing_of(kid(0));
-    case ImageKind::ref:
-      return reads_into(n.a) ? slot(n.a).nothing : false;
+    case ImageKind::ref: {
+      // An operator table reads nothing where its operand does, through every
+      // table it stands on. A cycle of tables reads something: others refuse it.
+      std::uint32_t rule = n.a;
+      for (std::size_t hop = 0;
+           hop < _image.rules.size() && !_image.rules[rule].grammar; ++hop) {
+        const ImageFace& face = _image.ready(rule).face[1];
+        if (face.kind != ImageRuleKind::infix) break;
+        rule = face.primary;
+      }
+      return reads_into(rule) ? slot(rule).nothing : false;
+    }
     default:
       return false;
   }

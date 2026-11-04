@@ -1263,7 +1263,6 @@ struct LrActions {
       const DynSet& la = gr.closLaPool[ci];
       const std::uint16_t stop = g.prodBuild[it.prod].stop;
       each_bit(la.w.data(), la.w.size(), [&](std::size_t t) {
-        if (t >= g.nterms) return;
         if (stop != 0 && g.stopCuts[stop - 1u].test(static_cast<unsigned>(t)))
           return;
         if (g.prodBuild[it.prod].endOnly && t != kEofSymbol &&
@@ -1447,8 +1446,6 @@ std::vector<unsigned> lr_refuse(const LrGraph& gr, const LrActions& actions,
               ? !same_landings(u[a].arg, v[a].arg)
               : u[a].arg != v[a].arg)
         return false;
-      // The outer site counts, the caret's call site does not.
-      if (u[a].outer != v[a].outer) return false;
     }
     return true;
   };
@@ -1674,7 +1671,6 @@ class LrWrittenOrder {
       for (const LrItem& k : _gr.kernel(s))
         _maxDot = std::max<std::uint32_t>(_maxDot, k.dot);
     _reach.resize(_maxDot + 2u);
-    _climbOf.reset();
   }
 
   static constexpr std::size_t kMostHeld = std::size_t{1} << 26;
@@ -1861,7 +1857,6 @@ class LrWrittenOrder {
 
   template <class Out>
   void words_at(unsigned p, std::uint16_t at, Out&& out) const {
-    if (_A.electAt.empty()) return;
     for (std::uint32_t i = _A.electAt[p]; i < _A.electAt[p + 1]; ++i)
       if (_A.electPos[i] == at) out(_A.electWord[i]);
   }
@@ -2080,9 +2075,8 @@ class LrWrittenOrder {
       for (const std::uint32_t w : _keys[lead]) out.push_back({w, false});
     }
     // A production's words ascend by the child they stand before.
-    const bool any = !_A.electAt.empty();
-    std::uint32_t w = any ? _A.electAt[n.prod] : 0;
-    const std::uint32_t end = any ? _A.electAt[n.prod + 1] : 0;
+    std::uint32_t w = _A.electAt[n.prod];
+    const std::uint32_t end = _A.electAt[n.prod + 1];
     for (unsigned i = 0; i <= n.dot; ++i) {
       for (; w < end && _A.electPos[w] == i; ++w)
         out.push_back({_A.electWord[w], false});
@@ -2749,13 +2743,11 @@ class LrWrittenOrder {
       if (A.rootChain[a.cls[i]] == kNone || a.roots[i].dot != height) continue;
       const Chain& ra = A.chains[A.rootChain[a.cls[i]]];
       const unsigned p = a.roots[i].prod;
-      ensure_tops(B, height);
       const auto [first, last] = with_prod(B.at[height], p);
       for (auto it = first; it != last; ++it) {
         const Chain& cb = B.chains[static_cast<std::uint32_t>(*it)];
         for (const std::uint16_t j : b.members.of(cb.root))
-          if (each_state(p, height, false, here, cb.top.dot, cb.len > 1,
-                         states(B, cb),
+          if (each_state(p, height, here, cb.top.dot, states(B, cb),
                          [&](std::uint64_t ex, std::uint64_t ey) {
                            return incident(a, A, ra, i, b, B, cb, j, ex, ey, at);
                          }))
@@ -2766,7 +2758,7 @@ class LrWrittenOrder {
             b.roots[j].prod != p)
           continue;
         const Chain& rb = B.chains[B.rootChain[b.cls[j]]];
-        if (each_state(p, height, false, here, height, false, here,
+        if (each_state(p, height, here, height, here,
                        [&](std::uint64_t ex, std::uint64_t ey) {
                          return incident(a, A, ra, i, b, B, rb, j, ex, ey, at);
                        }))
@@ -2777,13 +2769,11 @@ class LrWrittenOrder {
       if (B.rootChain[b.cls[j]] == kNone || b.roots[j].dot != height) continue;
       const Chain& rb = B.chains[B.rootChain[b.cls[j]]];
       const unsigned p = b.roots[j].prod;
-      ensure_tops(A, height);
       const auto [first, last] = with_prod(A.at[height], p);
       for (auto it = first; it != last; ++it) {
         const Chain& ca = A.chains[static_cast<std::uint32_t>(*it)];
         for (const std::uint16_t i : a.members.of(ca.root))
-          if (each_state(p, ca.top.dot, ca.len > 1, states(A, ca), height,
-                         false, here,
+          if (each_state(p, ca.top.dot, states(A, ca), height, here,
                          [&](std::uint64_t ex, std::uint64_t ey) {
                            return incident(a, A, ca, i, b, B, rb, j, ex, ey, at);
                          }))
@@ -2869,14 +2859,11 @@ class LrWrittenOrder {
   }
 
   // Calls `f(x, y)` on the states of `xs` and `ys` the tops of two chains may
-  // stand in on one stack: those alike where both chains go on under a top of
-  // one dot, else those a walk of the production's symbols joins. True where
-  // `f` stops it.
+  // stand in on one stack, those a walk of the production's symbols joins. True
+  // where `f` stops it.
   template <class F>
-  bool each_state(unsigned p, unsigned dx, bool xTall,
-                  std::span<const std::uint64_t> xs, unsigned dy, bool yTall,
-                  std::span<const std::uint64_t> ys, F&& f) {
-    if (dx == dy && xTall && yTall) return join_keys(xs, ys, first_of, f);
+  bool each_state(unsigned p, unsigned dx, std::span<const std::uint64_t> xs,
+                  unsigned dy, std::span<const std::uint64_t> ys, F&& f) {
     return each_linked(
         p, dx, xs, dy, ys, first_of,
         [&](std::span<const std::uint64_t> lo,
@@ -3053,12 +3040,14 @@ class LrWrittenOrder {
     const unsigned dx = ca.top.dot, dy = cb.top.dot;
     if (dx == dy && ca.len == 3 && cb.len == 3 && ca.next == cb.next)
       return false;
-    return each_state(ca.top.prod, dx, true,
-               std::span(A.states).subspan(ca.from, ca.to - ca.from), dy, true,
-               std::span(B.states).subspan(cb.from, cb.to - cb.from),
-               [&](std::uint64_t ex, std::uint64_t ey) {
-                 return note(A, ca, B, cb, ex, ey);
-               });
+    const auto xs = std::span(A.states).subspan(ca.from, ca.to - ca.from);
+    const auto ys = std::span(B.states).subspan(cb.from, cb.to - cb.from);
+    const auto f = [&](std::uint64_t ex, std::uint64_t ey) {
+      return note(A, ca, B, cb, ex, ey);
+    };
+    // Both chains go on under a top of one dot: their states are alike.
+    if (dx == dy) return join_keys(xs, ys, first_of, f);
+    return each_state(ca.top.prod, dx, xs, dy, ys, f);
   }
 
   static unsigned prod_of(const Run& r) {
@@ -3521,7 +3510,6 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
                       const std::vector<unsigned>& newId,
                       const LrLookback& lb, LrWrittenOrder& order) {
   const auto& g = A.cfg;
-  const ChainPool& writes = A.writes;
   const unsigned nT = g.nterms;
   const unsigned ns = gr.states();
   // One key per ambiguity, deduplicated at the end.
@@ -3625,12 +3613,9 @@ bool lr_merge_entries(LrBuildTable& A, const LrGraph& gr,
         const std::uint32_t head =
             headGen[out.term] == entryGen ? headTerm[out.term] : kNoMerged;
         for (std::uint32_t mi = head; mi != kNoMerged; mi = nextMerged[mi]) {
-          LrAction& m = merged[mi];
+          const LrAction& m = merged[mi];
           if (m.kind == out.kind && m.arg == out.arg) {
             dup = true;
-            // Two sites leave the caret without one.
-            if (!lr_same_site(writes, m.site, out.site)) m.site = kNoElement;
-            if (!lr_same_site(writes, m.outer, out.outer)) m.outer = kNoElement;
             break;
           }
         }
@@ -4071,8 +4056,7 @@ void lr_order_insertions(LrBuildTable& A, const LrItemDomain& dom,
 // state configurations and the modes. None of the graph outlives it.
 template <bool WithLa>
 std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
-    LrBuildTable& A, const LrLowered& low, const LexAlphabet& alpha,
-    const LrBuildTable* against) {
+    LrBuildTable& A, const LexAlphabet& alpha, const LrBuildTable* against) {
   const auto& g = A.cfg;
   const LrBuckets<std::uint16_t> pn = lr_by_lhs(g);
   const LrItemDomain dom = lr_item_domain(g);
@@ -4117,7 +4101,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   if (WithLa)
     flagged = lr_group_flags(gr, LrActions{g, gr}, newId, A.nstates, overtakes);
   lr_order_insertions(A, dom, gr, newId);
-  if (!lr_fold_chains(A, low)) return std::nullopt;
+  if (!lr_fold_chains(A)) return std::nullopt;
 
   const LrPoolRows<LrItem> clos = gr.clos();
   lr_close_rows(A, clos, pick);
@@ -4130,7 +4114,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
 }
 
 template <bool WithLa>
-LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
+LrBuildTable lr_build_impl(const LrLowered& low,
                            const LrBuildTable* against = nullptr) {
   LrBuildTable A;
   A.identity = WithLa ? LrIdentity::core_plus_lookaheads : LrIdentity::core;
@@ -4145,13 +4129,13 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
   if (A.overflow || A.cfg.lowerFail()) return A;
   alpha.section_ends(A.cfg, lr_section_reads);
 
-  const auto front = lr_build_front<WithLa>(A, low, alpha, against);
+  const auto front = lr_build_front<WithLa>(A, alpha, against);
   if (!front) return A;
   const auto& [cfgs, modes] = *front;
   const std::vector<DynSet> wordAt = lr_lex_automaton(A, alpha, modes);
   if (A.overflow) return A;
   lr_state_symbols(A);
-  if (opt.passes) lr_unit_elimination(A, modes, cfgs);
+  lr_unit_elimination(A, modes, cfgs);
   lr_lex_candidates(A, alpha, modes, wordAt);
   if (A.overflow) return A;
   lr_lex_condition_flags(A);
@@ -4163,12 +4147,10 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
     A.electWord.clear();
     A.electPos.clear();
   }
-  if (opt.passes) {
-    lr_minimize_states(A);
-    // The last pass that moves cells or targets: a peek proves the table as
-    // it stands.
-    lr_peek_oracle(A);
-  }
+  lr_minimize_states(A);
+  // The last pass that moves cells or targets: a peek proves the table as it
+  // stands.
+  lr_peek_oracle(A);
   if (!A.indented()) lr_subsume_modes(A, modes);
   lr_share_action_rows(A);
   if (A.overflow) return A;
@@ -4191,12 +4173,12 @@ LrBuildTable lr_build_impl(const LrLowered& low, LrBuildOptions opt,
 
 // `core` first, the cheaper graph: `nMergeInduced` says where the wider one is
 // worth building.
-LrBuildTable lr_build_automaton(const LrLowered& low, LrBuildOptions opt) {
-  return lr_build_impl<false>(low, opt);
+LrBuildTable lr_build_automaton(const LrLowered& low) {
+  return lr_build_impl<false>(low);
 }
 
 LrBuildTable lr_build_wide(const LrLowered& low, const LrBuildTable* against) {
-  return lr_build_impl<true>(low, {}, against);
+  return lr_build_impl<true>(low, against);
 }
 
 // Ambiguities, not cells: the passes copy a cell into every state they mint.

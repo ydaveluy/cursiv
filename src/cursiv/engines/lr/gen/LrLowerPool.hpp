@@ -11,17 +11,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/lr/gen/LrBuildCfg.hpp"
 #include "cursiv/engines/shared/gen/LowerPool.hpp"
 #include "cursiv/engines/shared/table/Symbol.hpp"
-#include "cursiv/engines/shared/table/TermInfo.hpp"
 #include "cursiv/engines/shared/table/WriteKind.hpp"
 
 namespace cursiv {
 
-// The walk over types lays a body out as a tree of these, and a production is
-// decided over the whole body, since its optional positions distribute over
-// one another. `end` is end of input at a position; `none` takes no slot.
+// The walk lays a body out as a tree of these, and a production is decided over
+// the whole body, since its optional positions distribute over one another.
+// `end` is end of input at a position; `none` takes no slot.
 enum class LrShape : std::uint8_t {
   sym,
   seq,
@@ -58,10 +56,6 @@ struct LrLowerNode {
   // unordered: the items the text may leave out, one bit each. Each stands in
   // its present form, and the group may end where only these are left.
   std::uint32_t unorderedOptional = 0;
-
-  bool left_out(std::size_t item) const {
-    return item < 32 && (unorderedOptional >> item & 1u) != 0;
-  }
 };
 
 // What one element is to the right-hand side it stands in, and the actions
@@ -96,6 +90,8 @@ struct LrLowerPool : LowerPool {
   // ...and the same for a commit's exit the token in hand decides, by cut.
   std::unordered_map<std::uint64_t, std::uint16_t> stopCut{};
   std::vector<std::uint16_t> stopNt{};
+  // ...and the rule of such an exit that ends a region, by cut and edge.
+  std::map<std::pair<std::uint16_t, std::uint8_t>, std::uint16_t> stopTail{};
   bool is_gap(std::uint16_t sym) const {
     return !is_term(sym) &&
            (std::ranges::find(gapNt, nt_index(sym) + 1u) != gapNt.end() ||
@@ -122,25 +118,20 @@ struct LrLowerPool : LowerPool {
 
   std::vector<LrLowerNode> e{};
   std::vector<LrShapeId> kid{};
-  std::vector<std::pair<LrShapeId, std::uint16_t>> repeatedOperands{};
   std::unordered_map<LrShapeId, std::vector<LrShapeId>> unorderedHead{};
   std::unordered_map<LrShapeId, std::vector<LrShapeId>> unorderedTail{};
 
   // The kind of every write, by row id.
   std::vector<WriteKind> rowKind{};
-  // Lowering a position whose turns reach back; nothing inside a turn does.
+  // Lowering a position whose turn reaches back.
   bool turning = false;
-  bool inTurn = false;
   // The rule's close, dropped from an alternative that is one rule call.
   std::uint16_t passClose = kNoRow;
 
-  // Actions whose record wraps what stands before it: a nest innermost, and no
-  // creation around it, which would open the node the nest wraps.
+  // Actions whose record wraps what stands before it: a nest's checkpoint,
+  // the one position that writes a nest.
   bool turns(const LrActs& made) const {
-    if (made.empty() || rowKind[made.front()] != WriteKind::nest) return false;
-    return std::ranges::none_of(made, [&](std::uint16_t r) {
-      return rowKind[r] == WriteKind::create || rowKind[r] == WriteKind::climb;
-    });
+    return !made.empty() && rowKind[made.front()] == WriteKind::nest;
   }
   // Flags run after their operand in the same construction context. Unlike
   // assign/append, they do not give that operand a separate current node.
@@ -215,37 +206,5 @@ struct LrLowerPool : LowerPool {
     return fresh;
   }
 };
-
-inline bool lr_shape_nullable(const LrLowerPool& p, LrShapeId at,
-                              const LrBuildCfg& cfg,
-                              const std::vector<std::uint8_t>& nullable) {
-  switch (const LrLowerNode& n = p.e[at]; n.kind) {
-    case LrShape::none:
-    case LrShape::end:
-      return true;
-    case LrShape::sym: {
-      const auto sym = static_cast<std::uint16_t>(n.sym);
-      return is_term(sym) ? cfg.terms[sym].laid == kLaidImplied
-                          : nt_index(sym) < nullable.size() &&
-                                nullable[nt_index(sym)] != 0;
-    }
-    case LrShape::scope:
-      return lr_shape_nullable(p, n.sym, cfg, nullable);
-    case LrShape::rep:
-      return n.min == 0 || lr_shape_nullable(p, n.sym, cfg, nullable);
-    case LrShape::alt:
-      for (std::size_t i = 0; i < n.count; ++i)
-        if (lr_shape_nullable(p, p.kid[n.sym + i], cfg, nullable)) return true;
-      return false;
-    case LrShape::seq:
-    case LrShape::unordered:
-      for (std::size_t i = 0; i < n.count; ++i)
-        if (!n.left_out(i) &&
-            !lr_shape_nullable(p, p.kid[n.sym + i], cfg, nullable))
-          return false;
-      return true;
-  }
-  return false;
-}
 
 }  // namespace cursiv

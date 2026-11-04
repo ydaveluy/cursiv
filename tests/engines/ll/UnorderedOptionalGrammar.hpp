@@ -46,6 +46,11 @@ struct Base : cursiv::GrammarSpec {
                  (kw<"region"> + unordered(tight(option(assign<&Record::first>(
                                                lit<"<"> + lit<">">))),
                                            kw<"b">)) |
+                 // A region that ends on its optional items: the blank behind
+                 // it is the caller's.
+                 (kw<"closing"> +
+                  tight(unordered(flag<&Record::flag>(lit<"!">),
+                                  option(assign<&Record::first>(lit<"?">))))) |
                  // A node made over a group that may match nothing.
                  (kw<"child"> + assign<&Record::child>(create<Child>(unordered(
                                     option(assign<&Child::name>(ref<ID>)),

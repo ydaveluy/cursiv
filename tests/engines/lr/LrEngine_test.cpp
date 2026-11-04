@@ -97,10 +97,10 @@ void a_table_may_stand_inside_a_region() {
   CHECK(repaired(*t.lr, "[1+2 ]"));
 }
 
-// The walk keeps one acceptance per state. Where that one's guard refuses at
-// the cursor, the terminals it outranked still match, and only the sweep holds
-// them: asking it is what tells a refusal from a lexical failure. The reader a
-// look-ahead uses owes the same answer, so the `x q` entry asks it there too.
+// Where the guard of the acceptance a state elects refuses at the cursor, the
+// terminals it outranked still match: that tells a refusal from a lexical
+// failure. The reader a look-ahead uses owes the same answer, so the `x q` entry
+// asks it there too.
 void a_refused_guard_leaves_the_reading_it_outranked() {
   const auto p = tedges::generated::G::create_parser();
   CHECK(clean(*p, "fallback:a_"));
@@ -121,7 +121,7 @@ void a_refused_guard_leaves_the_reading_it_outranked() {
 }
 
 // What the drive read past a refused guard, the caret reads too: the leaf
-// `a` of `a_` is the identifier the sweep kept, and the `_` behind it is
+// `a` of `a_` is the identifier the guard left, and the `_` behind it is
 // owed. After `a;` the leaf is the guarded terminal, which outranks the
 // identifier where it stands: `;` is offered and `_` is not.
 void a_refused_guard_leaves_the_caret_its_reading() {
@@ -511,7 +511,7 @@ void a_failed_walk_is_the_walk() {
       const cursiv::Scan real = cursiv::lr_match_halt<kTable>(
           text.data(), len, kTable.errMode, from, realHalt);
       if (!failed.fails(cursiv::LrLexTape<kTable>{}, text.data(), len,
-                        kTable.errMode, from, halt))
+                        kTable.errMode, from, halt, [] {}))
         continue;
       ++known;
       CHECK(real.term == cursiv::kInvalidSymbol || real.end <= from);
@@ -546,7 +546,7 @@ void a_failed_walk_halts_as_the_lexer(
         const cursiv::Scan real =
             cursiv::lr_match_halt<A>(text.data(), len, mode, from, realHalt);
         if (!failed.fails(cursiv::LrLexTape<A>{}, text.data(), len, mode, from,
-                          halt))
+                          halt, [] {}))
           continue;
         ++known;
         CHECK(real.term == cursiv::kInvalidSymbol || real.end <= from);

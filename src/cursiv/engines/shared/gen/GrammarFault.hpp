@@ -181,9 +181,10 @@ inline std::string grammar_fault_text(const GrammarFault& f) {
              "tell which of the two it is -- give the postfix and the binary "
              "operator different texts";
     case GrammarFaultCode::infixOperatorNotText:
-      return "names as an operator a rule that builds a node: an operator "
-             "gives a value, not a node -- use a literal, a terminal or a data "
-             "rule, with a converter if the operator member is not text";
+      return "names as an operator something other than one token or a rule "
+             "that gives a value: an operator gives a value, not a node -- use "
+             "a literal, a terminal or a data rule, with a converter if the "
+             "operator member is not text";
     case GrammarFaultCode::directiveOnNoPosition:
       return "writes a member from `eof` alone, or from nothing: such a "
              "directive matches no text, so the member would never be "

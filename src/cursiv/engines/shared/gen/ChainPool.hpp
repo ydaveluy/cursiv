@@ -81,9 +81,8 @@ struct ChainPool {
     return intern(run.data(), run.size(), true);
   }
 
-  // A chain opens a record when it starts with a creation, and states nothing
-  // else when that is all it is -- the second is what may travel up to the
-  // chain that closes over it.
+  // A chain opens a record when it starts with a creation, and hands a node
+  // back when it starts with a creation or a close.
   void note_makes(std::span<const WriteKind> kind) {
     for (std::uint16_t i = 0; i < nchains; ++i) {
       const Chain& ch = chains[i];
@@ -110,8 +109,7 @@ struct ChainPool {
  private:
   ChainIndex _index{};
 
-  // The run alone: `turn` is read at the probe, after a build may have
-  // rewritten it.
+  // The run alone: the probe compares `turn`.
   static std::uint64_t hash_run(const std::uint16_t* a, std::size_t n) {
     std::uint64_t h = hash_mix(0x9e3779b97f4a7c15ull, n);
     for (std::size_t k = 0; k < n; ++k) h = hash_mix(h, a[k]);
@@ -127,11 +125,7 @@ struct ChainPool {
 
   std::uint16_t intern(const std::uint16_t* a, std::size_t n,
                        bool turn = false) {
-    if (_index.head.size() < (std::size_t{nchains} + 1) * 2) {
-      _index.init(std::size_t{nchains} * 2 + 8);
-      for (std::uint16_t i = 0; i < nchains; ++i)
-        _index.add(hash_run(acts.data() + chains[i].off, chains[i].count), i);
-    }
+    if (_index.head.empty()) _index.init(8);
     const std::uint64_t h = hash_run(a, n);
     const Chain* const ch = chains.data();
     const std::uint16_t* const ac = acts.data();

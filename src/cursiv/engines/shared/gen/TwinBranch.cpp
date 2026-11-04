@@ -76,8 +76,7 @@ std::uint32_t TwinReader::key(ImageId id) {
 
 std::uint32_t TwinReader::shape(ImageId id) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind))
-    return n.count == 0 ? intern({kEmpty}) : key(kid(id, 0));
+  if (reads_operand(n.kind)) return key(kid(id, 0));
   switch (n.kind) {
     case ImageKind::epsilon:
       return intern({kEmpty});
@@ -205,10 +204,7 @@ void TwinReader::analyse_calls(std::uint32_t rule) {
 // that branch.
 void TwinReader::flatten(ImageId id, std::vector<Item>& out) {
   const ImageNode n = _im.nodes[id];
-  if (reads_operand(n.kind)) {
-    if (n.count != 0) flatten(kid(id, 0), out);
-    return;
-  }
+  if (reads_operand(n.kind)) return flatten(kid(id, 0), out);
   switch (n.kind) {
     case ImageKind::epsilon:
       return;

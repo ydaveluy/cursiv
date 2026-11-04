@@ -165,6 +165,18 @@ struct Letters : cursiv::GrammarSpec {
   static constexpr auto word_boundary = uc::L | uc::Nd | cr<"_">;
 };
 
+// A member written from a sequence no rule names.
+struct Dotted : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<" ">)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Set>(
+                    assign<&ast::Set::name>(ref<ID> + lit<"."> + ref<ID>))> {};
+  struct Root : rule<create<ast::Lines>(
+                    many(append<&ast::Lines::sets>(ref<Item>)) + eof)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // Nothing skipped: a state of its section and one of the document's tight
 // region may want the same tokens.
 struct Tiny : cursiv::GrammarSpec {
@@ -232,12 +244,16 @@ struct Doc : cursiv::GrammarSpec {
       : rule<create<ast::Block>(kw<"letters"> +
                                 assign<&ast::Block::script>(
                                     section<Letters>(lit<"<">, lit<">">)))> {};
+  struct Sequenced
+      : rule<create<ast::Block>(kw<"dotted"> +
+                                assign<&ast::Block::script>(
+                                    section<Dotted>(lit<"<">, lit<">">)))> {};
 };
 
 struct DocLl : Doc {
   struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
                       ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
-                      ref<Lettered>)+ref<NL>> {};
+                      ref<Lettered> | ref<Sequenced>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;
@@ -251,7 +267,7 @@ struct DocLr : Doc {
                                        lit<"<%">, lit<"%>">)))> {};
   struct Line : rule<(ref<Data> | ref<Raw> | ref<Each> | ref<Count> |
                       ref<Small> | ref<Narrowed> | ref<Dashed> | ref<Widened> |
-                      ref<Lettered> | ref<Code>)+ref<NL>> {};
+                      ref<Lettered> | ref<Sequenced> | ref<Code>)+ref<NL>> {};
   struct Root
       : rule<create<ast::Doc>(many(append<&ast::Doc::blocks>(ref<Line>)))> {};
   using entry = Root;

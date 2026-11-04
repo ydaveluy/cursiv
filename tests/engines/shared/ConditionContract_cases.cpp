@@ -73,6 +73,9 @@ void run() {
     reads(name, p, "tokwhole <<", true);
     reads(name, p, "tokchoice <<", true);
     reads(name, p, "tokchoice x", false);
+    reads(name, p, "condskip x_y", true);
+    reads(name, p, "condskip xy", true);
+    reads(name, p, "condskip x y", false);
     reads(name, p, "joined ==", false);
     reads(name, p, "joined = =", true);
     reads(name, p, "head abc", false);
@@ -138,6 +141,14 @@ void run() {
     reads(name, p, "seplist x:1,end", false);
     reads(name, p, "expand <<", true);
     reads(name, p, "expand < x <<", true);
+    // A condition at the head of an operand lengthens the token for a sibling
+    // arm, however the operand is called.
+    reads(name, p, "direct - x", true);
+    reads(name, p, "direct - >", true);
+    reads(name, p, "direct ->", false);
+    reads(name, p, "climbed - x + y", true);
+    reads(name, p, "climbed - >", true);
+    reads(name, p, "climbed ->", false);
     const auto r = p.parse("abc");
     const auto* holder = r.value_as<tcondcontract::Holder>();
     const bool got = r.accepted && r.diagnostics.empty() && holder != nullptr &&

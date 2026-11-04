@@ -156,21 +156,17 @@ class LrGssRope {
   template <class Holds>
   [[nodiscard]] Length first_where(Id r, Holds&& holds) const {
     if (r == none) return 0;
-    Prefix acc;
-    const auto with = [&](const Agg& next) {
-      Prefix p = acc;
-      p.add(next);
-      return p;
-    };
-    if (!holds(with(_nodes[r].agg).agg)) return _nodes[r].len;
+    if (!holds(_nodes[r].agg)) return _nodes[r].len;
+    Agg acc{};
     Length index = 0;
     while (_nodes[r].right != none) {
       const Node& x = _nodes[r];
       const Length before = _nodes[x.left].len;
-      if (holds(with(_nodes[x.left].agg).agg)) {
+      const Agg upTo = Agg::join(acc, _nodes[x.left].agg);
+      if (holds(upTo)) {
         r = x.left;
       } else {
-        acc.add(_nodes[x.left].agg);
+        acc = upTo;
         index += before;
         r = x.right;
       }
@@ -221,16 +217,6 @@ class LrGssRope {
   }
 
  private:
-  // The aggregate of a prefix: `any` is false for the empty one.
-  struct Prefix {
-    Agg agg{};
-    bool any = false;
-    void add(const Agg& next) {
-      agg = any ? Agg::join(agg, next) : next;
-      any = true;
-    }
-  };
-
   struct Node {
     // The value of a leaf, the left child of a node.
     Id left;

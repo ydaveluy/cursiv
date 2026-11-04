@@ -104,8 +104,7 @@ class LrGssGraph {
 
   Id add(Step step) {
     const auto id = static_cast<Id>(_steps.size());
-    if (step.vertex != none && _vertices[step.vertex].steps == none)
-      _vertices[step.vertex].steps = id;
+    if (_vertices[step.vertex].steps == none) _vertices[step.vertex].steps = id;
     _steps.push_back(std::move(step));
     return id;
   }
@@ -221,8 +220,7 @@ class LrGssGraph {
   std::vector<Id>& rejected() { return _rejected; }
 
   // Vertices before `before` gain no edge any more; neither do their forests.
-  // `last`: no more text follows, so no pop reads what a prune would drop.
-  void settle(TextOffset before, bool last = false);
+  void settle(TextOffset before);
   // Whether the text goes back to the drive before `v` opens: at `v`, alone
   // and past every opened vertex, when its stack has one path once pruned and
   // that path validated the arms that died; else at the last vertex alone
@@ -265,14 +263,10 @@ class LrGssGraph {
     // asks, once every vertex under it is closed.
     Id best = none;
     // The frames under it along `best`, set with it; the vertex a skew-binary
-    // jump down `best` reaches; the fork steps in those frames, and the edge
-    // and the rope under it they were joined from, so as not to join them
-    // twice.
+    // jump down `best` reaches; the fork steps in those frames.
     std::uint32_t depth = 0;
     Id jump = none;
     Rope::Id forks = Rope::none;
-    Id forksEdge = none;
-    Rope::Id forksUnder = Rope::none;
     // The first of the steps taken at it, which follow one another.
     Id steps = none;
     // While a vertex is held: the most real tokens a derivation shifted from
@@ -339,14 +333,14 @@ class LrGssGraph {
                        .forest;
     }
   };
-  bool alike(Id a, Id b) const;
+  Id meet(Id a, Id b) const;
   // The ordering and whether it came from the table's arms.
   struct Order {
     int value = 0;
     bool byTable = false;
   };
   Order written(Id a, Id b);
-  Order written_lone(Id a, Id b);
+  Order written_lone(Id a, Id b, Id floor);
   Order forked(Id top, Id shared, const std::array<Climb, 2>& stacks);
   void load(std::size_t side, const Climb& stack, Id shared);
   Order fork_scan(TextOffset at);

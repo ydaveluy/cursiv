@@ -20,6 +20,7 @@
 #include "cursiv/core/syntax-tree/CstLeaf.hpp"
 #include "cursiv/core/text/white_space.hpp"
 #include "cursiv/core/utils/macros.hpp"
+#include "cursiv/engines/lr/runtime/LrGssIndex.hpp"
 #include "cursiv/engines/lr/runtime/LrVirtualAt.hpp"
 #include "cursiv/engines/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/engines/lr/runtime/lr_refusal.hpp"
@@ -74,8 +75,8 @@ struct CaretLaid {
 
 // The parser's stacks rebuilt over the tape with the final tables: nodes at
 // one position share state, offset and lookahead, and keep every compatible
-// caller. A graph, since nullable cycles add frames without a token; each
-// closure saturates, so no depth or step budget bounds it.
+// caller. A graph, since readings merge; each closure saturates, so no depth or
+// step budget bounds it.
 class CaretStacks {
   using Id = std::size_t;
   static constexpr Id kNoParent = static_cast<Id>(-1);
@@ -114,7 +115,7 @@ class CaretStacks {
   struct Stage {
     std::size_t rank = 0;
     std::vector<Id> active;
-    std::unordered_multimap<std::size_t, Id> index;
+    LrGssIndex index;
     std::size_t seeds = 0;
     void reset(std::size_t r, std::span<const Id> heads = {}) {
       rank = r;
@@ -178,7 +179,10 @@ class CaretStacks {
     // A token of the text that ends at the edge is read first in the modes of
     // the states that reduce before it is shifted.
     _passing = edge && leaf.begin != leaf.end;
-    if (_passing) _edgeHeads = _heads;
+    if (_passing) {
+      _edgeHeads = _heads;
+      _edgeGapFrom = _gapFrom;
+    }
     close(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
@@ -344,11 +348,18 @@ class CaretStacks {
     bool operator==(const LeafRead&) const = default;
   };
   std::span<const LeafRead> leaf_reads() const { return _leafReads; }
-  // Whether a reading that read the leaf at the edge takes `token`.
+  // Whether a reading that read the leaf at the edge takes `token`, read where
+  // that leaf stands: the stacks before it are asked of the document, as the
+  // replay asked them, and a candidate's text begins behind it.
   bool edge_takes(const Token& token) {
-    return _edgeHeads.empty() ||
-           std::ranges::any_of(_edgeHeads,
-                               [&](Id head) { return takes(head, token); });
+    if (_edgeHeads.empty()) return true;
+    const bool candidate = std::exchange(_candidate, false);
+    const TextOffset gapFrom = std::exchange(_gapFrom, _edgeGapFrom);
+    const bool taken = std::ranges::any_of(
+        _edgeHeads, [&](Id head) { return takes(head, token); });
+    _gapFrom = gapFrom;
+    _candidate = candidate;
+    return taken;
   }
   // `la`, a winner of `mode`, read again by `rescan(skip, from)` while the
   // mode flags it and `taken` refuses it, as the drive reads it.
@@ -655,15 +666,14 @@ class CaretStacks {
     mix(laid.mode);
     mix(laid.assumes);
     mix(laid.passes);
-    const auto [first, last] = stage.index.equal_range(hash);
-    for (auto candidate = first; candidate != last; ++candidate) {
-      const Id id = candidate->second;
-      const Frame& f = _frames[id];
-      if (f.state == state && f.at == at && f.laMode == laMode && f.la == la &&
-          f.laid == laid)
-        return {id, false};
-    }
     const Id id = _frames.size();
+    const Id found = stage.index.intern(
+        hash, static_cast<LrGssIndex::Id>(id), [&](LrGssIndex::Id seen) {
+          const Frame& f = _frames[seen];
+          return f.state == state && f.at == at && f.laMode == laMode &&
+                 f.la == la && f.laid == laid;
+        });
+    if (found != id) return {found, false};
     _frames.push_back(Frame{.state = state,
                             .laMode = laMode,
                             .at = at,
@@ -671,7 +681,6 @@ class CaretStacks {
                             .la = la,
                             .laid = laid});
     stage.active.push_back(id);
-    stage.index.emplace(hash, id);
     return {id, true};
   }
 
@@ -1323,8 +1332,7 @@ class CaretStacks {
         });
   }
 
-  // `chain` grown by the reduction `prod` that `state` took. A chain is a
-  // set, so a closure through a nullable cycle still saturates.
+  // `chain` grown by the reduction `prod` that `state` took. A chain is a set.
   CURSIV_NOINLINE std::uint32_t pass(std::uint32_t chain, std::uint16_t state,
                                      std::uint16_t prod) {
     for (auto l = chain; l != 0; l = _passes[l].rest)
@@ -1436,7 +1444,8 @@ class CaretStacks {
   }
 
   // Whether some stack under `head` shifts `token` after the reductions the
-  // table lays for it. What the gap decides counts as taken.
+  // table lays for it, a guarded shift as the drive asks it. What the replay
+  // leaves to the candidates counts as taken.
   bool takes(Id head, const Token& token) {
     return lr_graph_takes(
         _takes, head, [&](Id v) { return std::uint32_t{_frames[v].state}; },
@@ -1446,6 +1455,13 @@ class CaretStacks {
               _table.run(static_cast<std::uint16_t>(top), token.sym);
           if (cell.count == 0) return 0;
           const LrAction action = _table.action(cell.first);
+          if (cell.count == 1 && action.kind == LrActionKind::guard)
+            return defers_any(token,
+                              static_cast<std::uint32_t>(_table.mode.size()) +
+                                  action.arg) ||
+                           takes(static_cast<std::uint16_t>(top), action, token)
+                       ? 1
+                       : 0;
           if (cell.count != 1 || action.kind != LrActionKind::reduce) return 1;
           const LrProduction& p = _table.prods[action.arg];
           if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
@@ -1635,8 +1651,9 @@ class CaretStacks {
   std::vector<Id> _parentsOf;
   std::vector<Id> _heads;
   std::vector<Id> _stood;
-  // The readings before the leaf at the edge.
+  // The readings before the leaf at the edge, and the gap they stood before.
   std::vector<Id> _edgeHeads;
+  TextOffset _edgeGapFrom = 0;
   Id _singleton = 0;
   std::uint32_t _epoch = 0;
   // The last unwind walk that passed each frame.
@@ -1951,16 +1968,8 @@ void lr_next_features_at(const LrCaretTable& table,
       leaf && shifted < table.shiftTerm.size() ? table.shiftTerm[shifted] : 0;
   const bool glued = leaf && leaf.end == at && !table.laid(leafTerm);
   CaretStacks stacks(table, text, at);
-  if (const unsigned tokens = stacks.phrase_tokens(); tokens != 0) {
-    const NodeCount onward = cst.leaves_before(resume);
-    stacks.read_through(tokens < kUnboundedTokens
-                            ? token_end_from(cst,
-                                             onward < cst.leaf_count()
-                                                 ? cst.leaf(onward).id
-                                                 : cst.size(),
-                                             tokens)
-                            : static_cast<TextOffset>(text.size()));
-  }
+  if (const unsigned tokens = stacks.phrase_tokens(); tokens != 0)
+    stacks.read_through(phrase_end(cst, resume, tokens));
   // Only trivia, or a token the drive laid of no width, may stand between
   // the leaf and the token before it: a repair between them read the leaf in
   // a mode that token cannot name, so a leaf the replay did not read is asked
@@ -2273,15 +2282,9 @@ void lr_next_features_at(const LrCaretTable& table,
                 const NextFeature feature{e.feature, grammar.rowFeature(e.site),
                                           grammar.rowNarrow(e.site),
                                           grammar.rowType(e.site)};
-                const bool seen =
-                    std::any_of(out.begin() + static_cast<std::ptrdiff_t>(mine),
-                                out.end(), [&](const NextFeature& f) {
-                                  return f.feature == feature.feature &&
-                                         f.property == feature.property &&
-                                         f.narrow == feature.narrow &&
-                                         f.type == feature.type;
-                                });
-                if (!seen) out.push_back(feature);
+                if (std::find(out.begin() + static_cast<std::ptrdiff_t>(mine),
+                              out.end(), feature) == out.end())
+                  out.push_back(feature);
               }
             });
       };

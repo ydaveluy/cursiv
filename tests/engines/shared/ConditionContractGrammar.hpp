@@ -15,8 +15,15 @@
 namespace tcondcontract {
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {};
+struct Sum : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  Sum* left{};
+  string_view op;
+  Sum* right{};
+};
 struct Holder : cursiv::Extends<cursiv::AstNode> {
   string_view name;
+  Sum* sum{};
 };
 
 inline std::string_view tagged(std::string_view text, char tag,
@@ -40,9 +47,15 @@ struct Main : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct ID : terminal<as<id_text>(some(cr<"a-zA-Z">))> {};
   struct NAME : terminal<as<name_text>(some(cr<"a-zA-Z">))> {};
+  // An operand that opens on a condition, called alone and through a climb.
+  struct Operand : rule<create<Sum>(!lit<"->"> + option(lit<"-">) +
+                                    assign<&Sum::name>(ref<ID>))> {};
+  struct Climb : infix<Operand, Sum, left(lit<"+">)> {};
   struct LOW : terminal<some(cr<"a-z">)> {};
   struct REST : terminal<some(any)> {};
   struct CLOSER : terminal<cr<"})">> {};
+  // Named only by the region of a condition.
+  struct USCORE : terminal<some(cr<"_">)> {};
   struct ATERM : terminal<&lit<"a"> + ref<NAME>> {};
   struct Pair : rule<lit<"a"> + lit<"b">> {};
   struct Root
@@ -56,6 +69,9 @@ struct Main : cursiv::GrammarSpec {
                  (kw<"tokphrase"> + &(lit<"<"> + lit<"<">) + lit<"<<">) |
                  (kw<"tokwhole"> + &lit<"<<"> + lit<"<<">) |
                  (kw<"tokchoice"> + !(lit<"<"> | lit<"x">) + lit<"<<">) |
+                 (kw<"condskip"> +
+                  &skip(ignore<USCORE>, hide<>, lit<"x"> + lit<"y">) +
+                  lit<"x"> + many(lit<"_">) + lit<"y">) |
                  (kw<"joined"> + !lit<"=="> + lit<"="> + lit<"=">) |
                  (kw<"head"> + &lit<"a"> + assign<&Holder::name>(ref<NAME>)) |
                  (kw<"inside"> + ref<ATERM>) |
@@ -106,7 +122,12 @@ struct Main : cursiv::GrammarSpec {
                   !(lit<"x"> + lit<"a">)+lit<"x"> + lit<"ab">) |
                  (kw<"pair"> + &ref<Pair> + lit<"a"> + lit<"b">) |
                  (kw<"expand"> + many(lit<"<"> + lit<"x">) + !lit<"<"> +
-                  lit<"<<">)) +
+                  lit<"<<">) |
+                 (kw<"arrow"> + lit<"->">) |
+                 (kw<"direct"> + (assign<&Holder::sum>(ref<Operand>) |
+                                  (lit<"-"> + lit<">">))) |
+                 (kw<"climbed"> +
+                  (assign<&Holder::sum>(ref<Climb>) | (lit<"-"> + lit<">">)))) +
              eof> {};
   using entry = Root;
   using ignored = WS;

@@ -68,11 +68,6 @@ class LexFailedWalks {
     return true;
   }
 
-  bool fails(const Tape& tape, const char* src, TextOffset len,
-             std::uint16_t mode, TextOffset from, TextOffset& halt) {
-    return fails(tape, src, len, mode, from, halt, [] {});
-  }
-
  private:
   static constexpr TextOffset kStride = 16;
   // A key stood on, and how far the assertions read from there up to the next

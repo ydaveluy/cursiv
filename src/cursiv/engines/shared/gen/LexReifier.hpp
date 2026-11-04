@@ -104,7 +104,6 @@ class LexReifier {
   Guard guard_of(const ImageNode& lit) const;
   Guard classify(ImageId guard) const;
   bool refusable(ImageId id) const;
-  bool word_final(std::string_view spelling, bool folded) const;
   std::uint16_t word_set();
   std::uint16_t guard_set(const Guard& g, bool tail);
   std::uint16_t lit_guard(const ImageNode& lit, const Guard& g, bool tail);

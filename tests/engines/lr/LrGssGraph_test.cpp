@@ -28,11 +28,11 @@ Reading at(std::uint32_t state, TextOffset offset) {
   return r;
 }
 
-cursiv::LrStack stack_of(std::initializer_list<std::uint16_t> states) {
-  cursiv::LrStack s;
-  for (const std::uint16_t state : states) s.push({state, 0, 0, 0, 0});
-  return s;
-}
+struct Frames : cursiv::LrStack {
+  explicit Frames(std::initializer_list<std::uint16_t> states) {
+    for (const std::uint16_t state : states) push({state, 0, 0, 0, 0});
+  }
+};
 
 // The first word a step's edge was laid with, carried in its unread action:
 // collection renumbers steps.
@@ -84,7 +84,7 @@ struct Elected {
 };
 Elected elect(const Arms& a, const Arms& b, bool exact = false) {
   LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
+  g.seed(Frames({0, 3}), at(3, 0));
   const Id s = open_next(g);
   Reading one = at(5, 1), other = at(5, 1);
   one.laMode = 1;
@@ -143,7 +143,7 @@ void an_order_the_table_does_not_prove_drops_no_stack() {
 // may stand under either, which their words do not say, so both stay.
 void two_symbols_onto_one_state_both_stay() {
   LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
+  g.seed(Frames({0, 3}), at(3, 0));
   const Id s = open_next(g);
   const Id x = shift(g, s, 7, 1, 5, {1});
   CHECK(shift(g, s, 8, 1, 5, {0}) == x);
@@ -158,7 +158,7 @@ void two_symbols_onto_one_state_both_stay() {
 // and the text is not handed back over two paths.
 void two_arms_over_different_states_both_stay() {
   LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
+  g.seed(Frames({0, 3}), at(3, 0));
   const Id s = open_next(g);
   shift(g, s, 7, 1, 4, {0});
   shift(g, s, 8, 1, 6, {1});
@@ -178,7 +178,7 @@ void two_arms_over_different_states_both_stay() {
 // past it: the text comes back on the third.
 void a_dead_arm_holds_the_text_three_tokens() {
   LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
+  g.seed(Frames({0, 3}), at(3, 0));
   Id v = open_next(g);
   g.die(0);
   for (TextOffset to = 1; to <= 3; ++to) {
@@ -198,7 +198,7 @@ void a_dead_arm_holds_the_text_three_tokens() {
 // the text back at the held vertex: the derivation ends there.
 void a_reading_past_a_held_vertex_gives_the_text_back_at_it() {
   LrGssGraph g;
-  g.seed(stack_of({0, 3}), at(3, 0));
+  g.seed(Frames({0, 3}), at(3, 0));
   const Id s = open_next(g);
   g.die(0);
   const Id held = shift(g, s, 7, 1, 5, {});
@@ -231,7 +231,7 @@ void a_reading_past_a_held_vertex_gives_the_text_back_at_it() {
 // the frozen sources wait for three real tokens.
 void laid_shifts_do_not_validate_or_expire_frozen_readings() {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   Id v = open_next(g);
   Reading frozen = g.reading(v);
   frozen.la = {0, 0, 0};
@@ -252,7 +252,7 @@ void laid_shifts_do_not_validate_or_expire_frozen_readings() {
 // The cap selects by rank, including at zero and one, rather than by DFS order.
 void frozen_stacks_are_ranked_before_the_cap() {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   const Id root = open_next(g);
   std::vector<Id> arms;
   for (unsigned i = 0; i != 513; ++i)
@@ -280,7 +280,7 @@ void frozen_stacks_are_ranked_before_the_cap() {
 // without enumerating all of them; equal ranks retain the first DFS paths.
 void frozen_stacks_share_prefixes_and_keep_equal_rank_order() {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   Id top = open_next(g);
   for (unsigned i = 0; i != 24; ++i) {
     const Id a = shift(g, top, 7, 2 * i + 1, 2 * i + 1, {});
@@ -308,7 +308,7 @@ void frozen_stacks_share_prefixes_and_keep_equal_rank_order() {
 // path throughout the stack, rather than only at its top.
 void bounded_frozen_stacks_match_exhaustive_election() {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   Id top = open_next(g);
   for (unsigned level = 0; level != 6; ++level) {
     std::vector<Id> arms;
@@ -336,7 +336,7 @@ void bounded_frozen_stacks_match_exhaustive_election() {
 // of the elected derivation hold over a long run.
 void repeated_reductions_keep_their_nested_rank() {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   Id top = open_next(g);
   std::vector<Id> children;
   for (TextOffset to = 1; to <= 128; ++to) {
@@ -444,7 +444,7 @@ Id reduce_frame(LrGssGraph& g, Id top, cursiv::SymbolId symbol, Reading to,
 // Two arms onto one vertex, each a reduction of a ranked token: the arm written
 // first reads the token the lexer ranks last.
 Id arms_against_the_lexers_rank(LrGssGraph& g) {
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   const Id root = open_next(g);
   const Id x = ranked_shift(g, root, 7, 1, 4, 5);
   const Id y = ranked_shift(g, root, 8, 1, 5, 2);
@@ -496,7 +496,7 @@ Id taken_shift(LrGssGraph& g, Id v, cursiv::SymbolId symbol, TextOffset to,
 void the_lexers_rank_far_below_orders_frozen_stacks_of_unequal_depth() {
   constexpr unsigned kLong = 200;
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   const Id root = open_next(g);
   Id left = ranked_shift(g, root, 7, 1, 100, 5);
   Id right = ranked_shift(g, root, 8, 1, 300, 2);
@@ -530,7 +530,7 @@ void the_lexers_rank_far_below_orders_frozen_stacks_of_unequal_depth() {
 void a_tall_stack_gives_the_best_of_its_exponentially_many() {
   constexpr unsigned kLevels = 100, kTop = 3;
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   Id top = open_next(g);
   std::vector<std::array<Id, 2>> arms;
   for (unsigned i = 0; i != kLevels; ++i) {
@@ -559,7 +559,7 @@ void a_tall_stack_gives_the_best_of_its_exponentially_many() {
 // whichever froze first.
 std::vector<std::vector<Id>> prefix_spelling_sources(bool laterFirst) {
   LrGssGraph g;
-  g.seed(stack_of({0}), at(0, 0));
+  g.seed(Frames({0}), at(0, 0));
   const Id top = open_next(g);
   const std::array<Id, 2> arms{shift(g, top, 7, 1, 1, {1}),
                                shift(g, top, 8, 1, 2, {1, 2})};

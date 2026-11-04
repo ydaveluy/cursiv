@@ -240,6 +240,7 @@ void owed_terminals_stop_at_the_first_acceptance() {
     a.accBoundBase.v[s + 1u] =
         a.accBoundBase.v[s] + a.dfaAcc[s].rank(a.cfg.nterms);
   a.accBound.v.assign(a.accBoundBase.v[a.ndfa], kNoSet);
+  a.accStand.v.assign(a.accBoundBase.v[a.ndfa], kNoSet);
   a.accTier.v.assign(a.accBoundBase.v[a.ndfa], 0);
   a.accTier.v[a.accBoundBase.v[5]] = kTierKeyword;
   a.accTier.v[a.accBoundBase.v[12]] = kTierKeyword;
@@ -499,6 +500,7 @@ void programs_preserve_order_and_shift_effects() {
       {reduce, shift}, {reduce, shift}, {reduce, shift}, {reduce, shift}, {},
       {shift, reduce}, {reduce, reduce}};
   rows[1][1].arg = 5;
+  rows[2][1].arg = 6;
   for (auto& x : rows[2]) x.term = 2;
   rows[3] = {reduce, reduce};
   for (auto& x : rows[6]) x.term = 2;
@@ -783,8 +785,7 @@ void name_pool_refuses_before_returning_an_invalid_span() {
   c.terms[2].nameOff = 65534;
   c.terms[2].nameLen = 2;
   CHECK(c.term_name(2).empty());
-  CHECK(refused([&] { (void)lr_intern_name(c, "y"); }, LowerFail::namePool) &&
-        c.lowerWhy == LowerFail::namePool);
+  CHECK(refused([&] { (void)lr_intern_name(c, "y"); }, LowerFail::namePool));
   CHECK(c.nameLen == 65535 && c.names.size() == 65535);
   CHECK(c.term_name(0) == text);
   LrBuildCfg empty;
@@ -1372,7 +1373,7 @@ void precomposition_keeps_bare_records_through_renames() {
     g.prods[3].lhs = 2;
     g.slotSym[3] = nt_sym(wrappedLeaf ? 0 : 1);
     g.slots[3].row = 1;
-    CHECK(lr_fold_chains(a, LrLowered{}));
+    CHECK(lr_fold_chains(a));
     LrDerivedRows plans;
     lr_derive_reductions(a, plans);
     const auto folds = [&](ElementId held, ElementId over) {
@@ -1432,7 +1433,7 @@ void substituted_reductions_keep_the_returned_row() {
   lr_reduce_key(g, 2, objectKey);
   lr_reduce_key(g, 3, arrayKey);
   CHECK(objectKey == arrayKey);
-  CHECK(lr_fold_chains(a, LrLowered{}));
+  CHECK(lr_fold_chains(a));
   LrDerivedRows plans;
   lr_derive_reductions(a, plans);
   const auto folds = [&](ElementId held, ElementId over) {

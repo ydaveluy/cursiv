@@ -48,18 +48,15 @@ class LexRightLinear {
       if (const unsigned needed = prefix.size() == 1 ? 1 : 2;
           std::size_t{_g.nlex} + needed > kNoLexNode)
         continue;
-      std::uint16_t one;
-      if (prefix.size() == 1) {
-        one = prefix[0];
-      } else {
+      std::uint16_t one = prefix[0];
+      if (prefix.size() != 1) {
         // The prefix is an existing contiguous row.
         const LexNode seq = _g.lex[_prefixSeq];
-        one = _g.nlex;
-        _g.lex[_g.nlex++] =
-            LexNode{LexKind::seq, seq.a, static_cast<std::uint16_t>(seq.b - 1)};
+        one = _g.push_lex(LexNode{LexKind::seq, seq.a,
+                                  static_cast<std::uint16_t>(seq.b - 1)});
       }
-      const auto closure = _g.nlex;
-      _g.lex[_g.nlex++] = LexNode{LexKind::rep, one, kNoLexNode, 1, kEndless};
+      const auto closure =
+          _g.push_lex(LexNode{LexKind::rep, one, kNoLexNode, 1, kEndless});
       // An internal call: the root reads the closure, not the terminal.
       _g.lex[root] = LexNode{LexKind::call, closure, kNoLexNode};
     }

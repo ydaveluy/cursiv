@@ -72,6 +72,31 @@ CURSIV_ALWAYS_INLINE inline bool lr_is_trivia(unsigned t) {
   return kLrTermMask<A, false>.test(t);
 }
 
+// The token at `from` under one alphabet and bracket depth `depth`, the trivia
+// before it crossed, `walk(p)` reading each position; past `end`, the end of the
+// text. `crossed(to, trivia)` is told each stretch of trivia: the bytes the mode
+// skips (`trivia` null), or one token.
+template <const auto& A, class Walk, class Crossed>
+CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
+    const LrContext& c, std::uint16_t mode, TextOffset from, TextOffset end,
+    std::uint32_t depth, Walk&& walk, Crossed&& crossed) {
+  TextOffset p = from;
+  for (;;) {
+    const TextOffset blank = p;
+    while (p < end && lr_skips<A>(mode, static_cast<unsigned char>(c.src[p])))
+      ++p;
+    if (p != blank) crossed(p, nullptr);
+    if (p >= end) return Token{p, p, kEofSymbol};
+    const Scan s = walk(p);
+    if (s.term == kInvalidSymbol || s.end == p)
+      return Token{p, p, kInvalidSymbol};
+    const Token t{p, s.end, s.term, mode};
+    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(depth, s.term)) return t;
+    p = s.end;
+    crossed(p, &t);
+  }
+}
+
 // The token at `from` under one alphabet, trivia crossed and not recorded,
 // read by the drive's own walk under bracket depth `depth`: of the levels of
 // the reading that asks, a scan reads that depth alone. `Short` reads the text
@@ -85,38 +110,23 @@ CURSIV_NOINLINE inline Token lr_scan_at(const LrContext& c, std::uint16_t mode,
                         bool* refused = nullptr, TextOffset end = 0,
                         TextOffset* reached = nullptr) {
   const TextOffset len = Short ? end : c.len;
-  TextOffset p = from;
-  for (;;) {
-    while (p < len && lr_skips<A>(mode, static_cast<unsigned char>(c.src[p])))
-      ++p;
-    if (p >= len) {
-      if constexpr (Short) *reached = p;
-      return Token{p, p, kEofSymbol};
-    }
-    TextOffset halt = p;
-    Scan s = Short ? lr_match_halt<A>(c.src, len, mode, p, halt)
-                   : c.drive->walk(c.src, len, mode, p);
-    if constexpr (Short) {
-      if (halt > *reached) *reached = halt;
-      if (refused != nullptr) *refused = halt > s.end;
-    }
-    // Where the ranked acceptance's boundary refuses it, the terminals it
-    // outranked live in the sweep alone, and the drive reads on from there.
-    if (s.term == kInvalidSymbol || s.end == p) {
-      if constexpr (A.maxCands > 1) {
-        ScanRoom<A.maxCands> room;
-        if (c.drive->scanText != nullptr &&
-            c.drive->scanText(c.src, len, mode, p, room.data(), A.maxCands) !=
-                0)
-          s = room[0];
-      }
-      if (s.term == kInvalidSymbol || s.end == p)
-        return Token{p, p, kInvalidSymbol};
-    }
-    if (!lr_is_trivia<A>(s.term) && !lr_joins<A>(depth, s.term))
-      return Token{p, s.end, s.term, mode};
-    p = s.end;
-  }
+  const Token t = lr_cross_trivia<A>(
+      c, mode, from, len, depth,
+      [&](TextOffset p) {
+        if constexpr (Short) {
+          TextOffset halt = p;
+          const Scan s = lr_match_halt<A>(c.src, len, mode, p, halt);
+          if (halt > *reached) *reached = halt;
+          if (refused != nullptr) *refused = halt > s.end;
+          return s;
+        } else {
+          return c.drive->walk(c.src, len, mode, p);
+        }
+      },
+      [](TextOffset, const Token*) { /* the crossed trivia is not wanted */ });
+  if constexpr (Short)
+    if (t.sym == kEofSymbol) *reached = t.begin;
+  return t;
 }
 
 // Whether the lexer, choosing once for every parse at one place, elects `u`
@@ -136,13 +146,6 @@ template <const auto& A>
 inline unsigned lr_token_weight(const LrContext& c, const Token& x) {
   return lex_weight(lex_reading_tier(LrLexTape<A>{}, c.src, c.len, x.mode,
                                     x.begin, x.end, x.sym));
-}
-
-template <const auto& A>
-inline bool lr_token_beats(const LrContext& c, const Token& u, const Token& t) {
-  return lr_token_beats(u, t, [&] {
-    return lr_token_weight<A>(c, u) > lr_token_weight<A>(c, t);
-  });
 }
 
 template <const auto& A>

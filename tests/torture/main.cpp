@@ -13,10 +13,10 @@
 #include "cursiv/core/parser/Parser.hpp"
 #include "cursiv/core/syntax-tree/Cst.hpp"
 #include "cursiv/test/Check.hpp"
-#include "cursiv/test/CstAudit.hpp"
 #include "cursiv/test/MutationOracle.hpp"
 #include "cursiv/test/RecoveryLane.hpp"
 #include "cursiv/test/SkippedLeaf.hpp"
+#include "engines/shared/CstAudit.hpp"
 #include "optionals/generated/OptionalsG/Module.hpp"
 #include "torture/generated/Torture/Module.hpp"
 
@@ -24,7 +24,7 @@ namespace {
 
 void check_tree(const cursiv::ParseResult& r, const std::string& text,
                 const std::string& name) {
-  cursiv::test::audit_cst_structure(r, text, [&](const char* m) {
+  checks::audit_cst_structure(r, text, [&](const char* m) {
     std::printf("  STRUCT %s: %s\n", name.c_str(), m);
     ++failures;
   });

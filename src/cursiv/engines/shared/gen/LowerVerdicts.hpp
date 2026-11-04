@@ -192,8 +192,9 @@ constexpr std::string_view lower_fail_text(LowerFail f) {
     case LowerFail::refusalIntoRelay:
       return "has a guard whose excluded word reaches into the text between a "
              "`mark<>` and its `same<>`, which the generator cannot check -- in "
-             "a nested run, a guard may test only the first character of that "
-             "text, and not as a keyword";
+             "a nested run the end of the text does not close, a guard may "
+             "test only the first character of that text, and not as a "
+             "keyword";
     case LowerFail::rescueReadsPast:
       return "excludes a word with a keyword guard, then may read after it a "
              "character outside `word_boundary`: whether the guard holds "

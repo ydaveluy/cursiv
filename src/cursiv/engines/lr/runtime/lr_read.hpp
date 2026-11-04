@@ -319,9 +319,9 @@ CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
 
 // One action of reading `i` of pool `x`: `x.fork(i)` is a copy beside it or
 // `kLrNoFork`, `x.drop(j)` a fork its action refused, `x.apply` and `x.reduce`
-// false where the reading dies, `x.pick`, optional, the candidate it takes;
-// the pool counts its work in `lexed`, `kept_at` and `stepped`. A
-// reading the table refuses is marked `dead` and left as it stood.
+// false where the reading dies; the pool counts its work in `lexed`, `kept_at`
+// and `stepped`. A reading the table refuses is marked `dead` and left as it
+// stood.
 template <const auto& A, class Pool>
 CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
                                               std::size_t i) {
@@ -371,28 +371,24 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
           lr_has_rivals<A>(mode, x[i].la.sym)) {
         Scan* const room = c.cand;
         const std::uint32_t nc = lr_rivals<A>(c, mode, x[i].la.begin, room);
-        if constexpr (requires { x.pick(i, state, room, nc); }) {
-          if (nc != 0) x.pick(i, state, room, nc);
-        } else {
-          // Where the lexer ranks rivals apart, a token's rank is a word of
-          // the derivation that reads it.
-          [[maybe_unused]] const bool ranked = lr_rivals_ranked(room, nc);
-          [[maybe_unused]] const auto rank = [&](const Scan& scan) {
-            return ranked ? ~lex_weight(scan.tier) : 0u;
-          };
-          for (std::uint32_t q = 1; q < nc; ++q) {
-            if (room[q].term == room[0].term) continue;
-            const std::size_t j = x.fork(i);
-            if (j == kLrNoFork) break;
-            x[j].la = Token{x[i].la.begin, room[q].end, room[q].term, mode};
-            if constexpr (requires { x[j].lexRank; })
-              x[j].lexRank = rank(room[q]);
-          }
-          if (nc != 0) {
-            x[i].la = Token{x[i].la.begin, room[0].end, room[0].term, mode};
-            if constexpr (requires { x[i].lexRank; })
-              x[i].lexRank = rank(room[0]);
-          }
+        // Where the lexer ranks rivals apart, a token's rank is a word of the
+        // derivation that reads it.
+        [[maybe_unused]] const bool ranked = lr_rivals_ranked(room, nc);
+        [[maybe_unused]] const auto rank = [&](const Scan& scan) {
+          return ranked ? ~lex_weight(scan.tier) : 0u;
+        };
+        for (std::uint32_t q = 1; q < nc; ++q) {
+          if (room[q].term == room[0].term) continue;
+          const std::size_t j = x.fork(i);
+          if (j == kLrNoFork) break;
+          x[j].la = Token{x[i].la.begin, room[q].end, room[q].term, mode};
+          if constexpr (requires { x[j].lexRank; })
+            x[j].lexRank = rank(room[q]);
+        }
+        if (nc != 0) {
+          x[i].la = Token{x[i].la.begin, room[0].end, room[0].term, mode};
+          if constexpr (requires { x[i].lexRank; })
+            x[i].lexRank = rank(room[0]);
         }
       }
     }

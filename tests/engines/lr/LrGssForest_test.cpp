@@ -16,6 +16,21 @@ namespace {
 using Forest = cursiv::LrGssForest;
 using Id = Forest::Id;
 
+// Two stacks ordered once their nodes are elected, as the graph orders them.
+int order(Forest& forest, std::span<const Id> left, std::span<const Id> right) {
+  for (const Id n : left) (void)forest.elect(n);
+  for (const Id n : right) (void)forest.elect(n);
+  return forest.ordered(left, right);
+}
+
+// Whether `node`'s elected rank reads `words`: alike to a leaf that spells them,
+// and no prefix of it either way.
+bool reads(Forest& forest, Id node, std::span<const std::uint32_t> words) {
+  const Id spelled = forest.node();
+  forest.add(spelled, {}, Forest::none, words);
+  return order(forest, std::array{node}, std::array{spelled}) == 0;
+}
+
 void a_late_child_alternative_changes_the_parent_election() {
   Forest forest;
   const Id parent = forest.node();
@@ -27,9 +42,9 @@ void a_late_child_alternative_changes_the_parent_election() {
   forest.add(parent, children, 30, one);
   forest.add(child, {}, 40, zero);
 
-  CHECK(std::ranges::equal(forest.rank(parent), std::array{0u, 1u}));
+  CHECK(reads(forest, parent, std::array{0u, 1u}));
   CHECK(forest.steps(parent) == std::vector<Id>({40, 30}));
-  CHECK(std::ranges::equal(forest.rank(child), zero));
+  CHECK(reads(forest, child, zero));
   CHECK(forest.elect(parent) != Forest::none);
 }
 
@@ -45,7 +60,7 @@ void the_first_zero_arm_precedes_a_later_better_choice() {
   forest.add(parent, laterChild, 30, zero);
   forest.add(parent, firstChild, 40, one);
 
-  CHECK(std::ranges::equal(forest.rank(parent), std::array{0u, 1u}));
+  CHECK(reads(forest, parent, std::array{0u, 1u}));
   CHECK(forest.steps(parent) == std::vector<Id>({10, 40}));
 }
 
@@ -63,7 +78,7 @@ void shared_children_and_equal_ranks_preserve_replay_order() {
   forest.add(parent, children, 30, one);
 
   CHECK(forest.size() == 3);
-  CHECK(std::ranges::equal(forest.rank(parent), std::array{0u, 0u, 1u}));
+  CHECK(reads(forest, parent, std::array{0u, 0u, 1u}));
   CHECK(forest.steps(parent) == std::vector<Id>({10, 10, 20}));
   CHECK(forest.steps(seed).empty());
 }
@@ -97,7 +112,7 @@ void clearing_allows_a_different_election_in_the_next_generation() {
 
     CHECK(forest.steps(parent) ==
           std::vector<Id>({generation == 0 ? 10u : 20u, 30}));
-    CHECK(std::ranges::equal(forest.rank(parent), std::array{0u, 0u}));
+    CHECK(reads(forest, parent, std::array{0u, 0u}));
     forest.clear();
     CHECK(forest.size() == 0 && forest.alternatives() == 0);
     CHECK(forest.links() == 0 && forest.rankCells() == 0);
@@ -118,7 +133,7 @@ void prefixes_empty_ranks_and_late_winners_keep_lexical_order() {
   forest.add(parent, {}, 40, winning);
   forest.add(parent, {}, 50, prefix);
   forest.add(parent, {}, 60, winning);
-  CHECK(std::ranges::equal(forest.rank(parent), prefix));
+  CHECK(reads(forest, parent, prefix));
   CHECK(forest.steps(parent) == std::vector<Id>({50}));
   CHECK(forest.rankCells() == 0);
 
@@ -128,7 +143,7 @@ void prefixes_empty_ranks_and_late_winners_keep_lexical_order() {
   forest.add(empty, {}, 20, {});
   forest.add(empty, {}, 30, {});
   forest.add(empty, {}, 40, initial);
-  CHECK(forest.rank(empty).empty());
+  CHECK(reads(forest, empty, {}));
   CHECK(forest.steps(empty) == std::vector<Id>({20}));
 }
 
@@ -165,7 +180,7 @@ void segment_boundaries_do_not_change_comparison_or_first_ties() {
               const Id parent = forest.node();
               add_segmented(forest, parent, initial, a, b, 10);
               add_segmented(forest, parent, later, c, d, 20);
-              CHECK(std::ranges::equal(forest.rank(parent), wins ? later : initial));
+              CHECK(reads(forest, parent, wins ? later : initial));
               CHECK(forest.steps(parent) == std::vector<Id>({wins ? 20u : 10u}));
               forest.clear();
             }
@@ -202,12 +217,12 @@ void shared_segments_survive_arena_growth_and_keep_the_first_equal_winner() {
   expected.insert(expected.end(), last.begin(), last.end());
   expected.insert(expected.end(), first.begin(), first.end());
   expected.insert(expected.end(), better.begin(), better.end());
-  CHECK(std::ranges::equal(forest.rank(parent), expected));
+  CHECK(reads(forest, parent, expected));
   CHECK(forest.steps(parent) == std::vector<Id>({101, 102, 101, 20}));
   const auto earlier = expected;
   expected.insert(expected.end(), extra.begin(), extra.end());
-  CHECK(std::ranges::equal(forest.rank(laterRoot), expected));
-  CHECK(std::ranges::equal(forest.rank(parent), earlier));
+  CHECK(reads(forest, laterRoot, expected));
+  CHECK(reads(forest, parent, earlier));
   CHECK(forest.steps(laterRoot) == std::vector<Id>({101, 102, 101, 20, 40}));
 }
 
@@ -240,7 +255,7 @@ void block_boundaries_keep_uint32_order_instead_of_byte_order() {
             add_segmented(forest, parent, later,
                            std::min<std::size_t>(17, rightSize), rightSize, 20);
           }
-          CHECK(std::ranges::equal(forest.rank(parent), wins ? later : initial));
+          CHECK(reads(forest, parent, wins ? later : initial));
           CHECK(forest.steps(parent) == std::vector<Id>({wins ? 20u : 10u}));
           forest.clear();
         }
@@ -287,22 +302,22 @@ void deep_rank_prefixes_are_shared_without_copying_their_words() {
     }
   }
   const std::array<Id, 1> lhs{left}, rhs{right};
-  CHECK(!forest.precedes(lhs, rhs));
-  CHECK(!forest.precedes(rhs, lhs));
-  CHECK(forest.rank(left) == expected);
-  CHECK(forest.rank(right) == expected);
   CHECK(forest.choiceWords() == 2 * count);
   CHECK(forest.rankCells() <= 32 * (forest.links() + forest.size()));
+  CHECK(order(forest, lhs, rhs) == 0);
+  CHECK(reads(forest, left, expected));
+  CHECK(reads(forest, right, expected));
 
   const Id parent = forest.node();
   const std::array<std::uint32_t, 1> worse{256}, better{255};
+  const std::size_t words = forest.choiceWords();
   forest.add(parent, lhs, 10, worse);
   forest.add(parent, rhs, 20, better);
   forest.add(parent, lhs, 30, better);
   CHECK(forest.steps(parent) == std::vector<Id>({20}));
   expected.push_back(255);
-  CHECK(forest.rank(parent) == expected);
-  CHECK(forest.choiceWords() == 2 * count + 3);
+  CHECK(forest.choiceWords() == words + 3);
+  CHECK(reads(forest, parent, expected));
 }
 
 void an_exponentially_shared_prefix_is_compared_without_spelling_it_out() {
@@ -326,10 +341,10 @@ void an_exponentially_shared_prefix_is_compared_without_spelling_it_out() {
   forest.add(left, separate, Forest::none, better);
   forest.add(right, joined, Forest::none, worse);
   const std::array<Id, 1> lhs{left}, rhs{right};
-  CHECK(forest.precedes(lhs, rhs));
-  CHECK(!forest.precedes(rhs, lhs));
   CHECK(forest.choiceWords() == 3);
   CHECK(forest.rankCells() <= 32 * (forest.links() + forest.size()));
+  CHECK(order(forest, lhs, rhs) < 0);
+  CHECK(order(forest, rhs, lhs) > 0);
 }
 
 void a_virtual_rank_cannot_wrap_its_length() {
@@ -344,23 +359,23 @@ void a_virtual_rank_cannot_wrap_its_length() {
   }
   // A 2^63-word rank is valid and is compared without materializing it.
   const std::array large{prefix}, small{leaf};
-  CHECK(forest.order(large, small) == Forest::kOpen);
+  CHECK(order(forest, large, small) == Forest::kOpen);
   const Id overflow = forest.node();
   forest.add(overflow, std::array{prefix, prefix}, Forest::none, {});
   CHECK(forest.size() == 65);
   const std::array tooLarge{overflow};
   bool refused = false;
   try {
-    (void)forest.order(tooLarge, small);
+    (void)order(forest, tooLarge, small);
   } catch (const std::length_error&) {
     refused = true;
   }
   CHECK(refused);
-  CHECK(forest.order(large, small) == Forest::kOpen);
+  CHECK(order(forest, large, small) == Forest::kOpen);
   forest.clear();
   const Id fresh = forest.node();
   forest.add(fresh, {}, Forest::none, std::array{2u});
-  CHECK(forest.rank(fresh) == std::vector<std::uint32_t>{2u});
+  CHECK(reads(forest, fresh, std::array{2u}));
 }
 
 void a_frame_one_stack_reads_whole_leaves_the_stacks_open() {
@@ -375,15 +390,14 @@ void a_frame_one_stack_reads_whole_leaves_the_stacks_open() {
   const Id shorter = leaf(zero), longer = leaf(zeros);
   const Id late = leaf(five), soon = leaf(one);
   const std::array<Id, 2> lhs{shorter, late}, rhs{longer, soon};
-  CHECK(forest.order(lhs, rhs) == Forest::kOpen);
-  CHECK(forest.order(rhs, lhs) == Forest::kOpen);
-  CHECK(!forest.precedes(lhs, rhs) && !forest.precedes(rhs, lhs));
+  CHECK(order(forest, lhs, rhs) == Forest::kOpen);
+  CHECK(order(forest, rhs, lhs) == Forest::kOpen);
 
   const Id first = leaf(zeroOne), second = leaf(zeroTwo);
   const std::array<Id, 2> parted{first, late}, other{second, soon};
-  CHECK(forest.order(parted, other) < 0 && forest.order(other, parted) > 0);
+  CHECK(order(forest, parted, other) < 0 && order(forest, other, parted) > 0);
   const std::array<Id, 2> shared{first, soon};
-  CHECK(forest.order(parted, shared) > 0);
+  CHECK(order(forest, parted, shared) > 0);
 }
 
 // The lexer's rank of the first token a frame reads comes before the words
@@ -407,11 +421,10 @@ void a_frame_is_ordered_by_the_lexers_rank_of_its_first_token() {
   };
   const Id late = arm(token(5), 0), soon = arm(token(2), 1);
   const std::array<Id, 1> left{late}, right{soon};
-  CHECK(forest.order(left, right) > 0 && forest.order(right, left) < 0);
-  CHECK(forest.precedes(right, left) && !forest.precedes(left, right));
+  CHECK(order(forest, left, right) > 0 && order(forest, right, left) < 0);
   const Id alike = arm(token(5), 1);
   const std::array<Id, 1> same{alike};
-  CHECK(forest.precedes(left, same) && !forest.precedes(same, left));
+  CHECK(order(forest, left, same) < 0 && order(forest, same, left) > 0);
 
   const Id parent = forest.node();
   const std::array<Id, 1> first{late}, second{soon};
@@ -468,7 +481,7 @@ void random_forests_elect_what_spelled_ranks_elect() {
       steps.push_back(std::move(bestSteps));
     }
     for (std::size_t i = 0; i != count; ++i) {
-      CHECK(forest.rank(static_cast<Id>(i)) == words[i]);
+      CHECK(reads(forest, static_cast<Id>(i), words[i]));
       CHECK(forest.steps(static_cast<Id>(i)) == steps[i]);
     }
     // Two stacks part inside a frame, or stay open where one frame is a
@@ -491,8 +504,7 @@ void random_forests_elect_what_spelled_ranks_elect() {
         else if (a.size() != b.size())
           want = Forest::kOpen;
       }
-      CHECK(forest.order(left, right) == want);
-      CHECK(forest.precedes(left, right) == (want < 0));
+      CHECK(order(forest, left, right) == want);
     }
   }
 }

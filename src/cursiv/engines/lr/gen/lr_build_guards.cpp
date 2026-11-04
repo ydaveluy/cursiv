@@ -46,7 +46,6 @@ bool lr_guard_positions(LrBuildCfg& g, ChainPool& writes) {
   bool ok = true;
   const auto join = [&](std::uint8_t a, std::uint8_t b) {
     if (a == 0 || a == b) return b;
-    if (b == 0) return a;
     if (joined[a].size() <= b) joined[a].resize(b + 1u, 0);
     if (joined[a][b] == 0) {
       const std::uint8_t id = lr_guard_lay(g, a, b);

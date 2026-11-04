@@ -39,6 +39,20 @@ class LexSeparation {
     return apart;
   }
 
+  // Whether one peek under the trivia of configuration `out` may stand for an
+  // item of `first` read under `in`: it crosses every gap the item accepts,
+  // and its own trivia hides no such item, not even its prefix.
+  bool peek_safe(const DynSet& first, unsigned in, unsigned out) {
+    DynSet own, caller;
+    for (auto i = _g.cfgTriviaAt[in]; i < _g.cfgTriviaAt[in + 1]; ++i)
+      own.set(_g.cfgTrivia[i]);
+    for (auto i = _g.cfgTriviaAt[out]; i < _g.cfgTriviaAt[out + 1]; ++i)
+      caller.set(_g.cfgTrivia[i]);
+    if (!caller.covers(own)) return false;
+    caller.andnot(own);
+    return disjoint(first, caller, true);
+  }
+
  private:
   const Cfg& _g;
   const LexAlphabet& _alphabet;

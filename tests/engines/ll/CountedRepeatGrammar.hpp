@@ -74,11 +74,26 @@ struct Long : Base {
                     repeat<0, 513>(append<&Range::items>(ref<ItemRule>)))> {};
   struct Floor : rule<create<Range>(
                      repeat<3, 513>(append<&Range::items>(ref<ItemRule>)))> {};
+  // Sixteen calls of the rule below, down nine rules: written out, the first
+  // holds more tokens than a repair can count. The other arm is the cheap one.
+  struct Dear8 : rule<kw<"q">> {};
+  struct Dear7 : rule<repeat<16>(ref<Dear8>)> {};
+  struct Dear6 : rule<repeat<16>(ref<Dear7>)> {};
+  struct Dear5 : rule<repeat<16>(ref<Dear6>)> {};
+  struct Dear4 : rule<repeat<16>(ref<Dear5>)> {};
+  struct Dear3 : rule<repeat<16>(ref<Dear4>)> {};
+  struct Dear2 : rule<repeat<16>(ref<Dear3>)> {};
+  struct Dear1 : rule<repeat<16>(ref<Dear2>)> {};
+  struct Dear0 : rule<repeat<16>(ref<Dear1>)> {};
+  struct Dear
+      : rule<create<Range>(kw<"dear"> + (ref<Dear0> | (kw<"a"> + kw<"z">)) +
+                           lit<";">)> {};
   struct Top
       : rule<create<Document>(
-            many((lit<"x"> + append<&Document::entries>(ref<Past>) + lit<";">) |
-                 (lit<"y"> + append<&Document::entries>(ref<Floor>) +
-                  lit<";">)) +
+            many(
+                (lit<"x"> + append<&Document::entries>(ref<Past>) + lit<";">) |
+                (lit<"y"> + append<&Document::entries>(ref<Floor>) + lit<";">) |
+                append<&Document::entries>(ref<Dear>)) +
             eof)> {};
   using entry = Top;
 };

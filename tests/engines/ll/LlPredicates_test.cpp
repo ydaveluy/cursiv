@@ -97,6 +97,11 @@ void check(const cursiv::Parser& parser, std::string_view text, bool expected) {
 }
 
 void exercise(const cursiv::Parser& parser) {
+  // A keyword's boundary refuses a word scalar the terminal goes on to read.
+  for (const auto text : {"kwe:if€", "kwr:rem", "kwr:rem x", "kwr:rem€"})
+    check(parser, text, true);
+  for (const auto text : {"kwe:ifé", "kwr:remé", "kwr:remx"})
+    check(parser, text, false);
   for (const auto tail : {"#a", "#b", "#bc", "#bcd", "#bx", "#aaaa"})
     CHECK(clean(parser, std::string("s:") + tail) ==
           clean(parser, std::string("c:") + tail));
@@ -284,8 +289,11 @@ void normal_recognition_is_preserved(const cursiv::Parser& parser) {
     for (const std::string_view suffix :
          {"b", "ab", "a b", "a a b", "b b", "b a b", "a/*x*/b", "abc", " ab",
           "/*c*/a b", "\nb b"}) {
+      // Where the condition refuses the name `ab`, the text is read without
+      // it, as `a` and `b`; a rule alone has no condition to refuse it.
       const bool ranked =
-          prefixes[0] == "optional:" ? among(suffix, {"b b", "\nb b"})
+          prefixes[0] == "choice:"     ? among(suffix, {"ab", " ab"})
+          : prefixes[0] == "optional:" ? among(suffix, {"b b", "\nb b"})
           : prefixes[0] == "many:"   ? among(suffix, {"b b", "b a b", "\nb b"})
                                      : false;
       if (ranked)
@@ -294,7 +302,7 @@ void normal_recognition_is_preserved(const cursiv::Parser& parser) {
         same(parser, prefixes[0], prefixes[1], suffix);
     }
   CHECK(!clean(parser, "choice-read:ab"));
-  CHECK(!clean(parser, "choice:ab"));
+  CHECK(clean(parser, "choice:ab"));
   for (const std::string_view suffix :
        {"a", "a x a", "a a", "x", " a", "/*c*/a "})
     same(parser, "commit:", "commit-read:", suffix);

@@ -72,9 +72,6 @@ struct LrBuildCfg : LrLowFacts, LowerPools {
     const LrLowProd& q = prods[p];
     return i == q.len ? prodBuild[p].tailCfg : slotCfg[q.at + i];
   }
-  std::uint8_t home_at(std::uint8_t k) const {
-    return k < cfgHome.size() ? cfgHome[k] : std::uint8_t{0};
-  }
   // `i == len` is the reduction's own guard.
   std::uint8_t guard_at(const LrLowProd& p, unsigned i) const {
     return i == p.len ? p.gap : slotGuard[p.at + i];

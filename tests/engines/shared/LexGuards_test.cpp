@@ -48,6 +48,35 @@ void a_rescued_refusal_keeps_the_shorter_match(const cursiv::Parser& p) {
   CHECK(items(p, "xif aλ") == Items{"refused"});
 }
 
+// A choice of more words than a recognizer tests one by one is read as data.
+// The word a byte opens may still not be there: `λ` opens as `α` does.
+void an_assertion_reads_a_choice_of_many_words(const cursiv::Parser& p) {
+  CHECK(items(p, "uαz") == Items{"uαz"});
+  CHECK(items(p, "uсz") == Items{"uсz"});
+  CHECK(items(p, "uz") == Items{"refused"});
+  CHECK(items(p, "uλz") == Items{"refused"});
+  CHECK(items(p, "u") == Items{"refused"});
+  CHECK(items(p, "u\xCE") == Items{"refused"});
+}
+
+// A run of more refusals than a recognizer tests one by one is read as data:
+// each word refused, short of the letter that rescues it.
+void an_assertion_reads_a_run_of_many_refusals(const cursiv::Parser& p) {
+  CHECK(items(p, "vqz") == Items{"vqz"});
+  CHECK(items(p, "vqλz") == Items{"vqλz"});
+  CHECK(items(p, "vq") == Items{"vq"});
+  CHECK(items(p, "vqαz") == Items{"refused"});
+  CHECK(items(p, "vqс") == Items{"refused"});
+  CHECK(items(p, "vz") == Items{"refused"});
+  CHECK(items(p, "wqz") == Items{"wqz"});
+  CHECK(items(p, "wqa") == Items{"wqa"});
+  CHECK(items(p, "wqa0z") == Items{"wqa0z"});
+  CHECK(items(p, "wqd2z") == Items{"wqd2z"});
+  CHECK(items(p, "wqa0") == Items{"refused"});
+  CHECK(items(p, "wqa0!") == Items{"refused"});
+  CHECK(items(p, "wqd2") == Items{"refused"});
+}
+
 // The links a parser reads, `from>to` where a link goes on, or one mark
 // where it refuses the text.
 Items links(const cursiv::Parser& parser, std::string_view text) {
@@ -91,6 +120,8 @@ int main() {
   for (const cursiv::Parser* parser : {ll.get(), lr.get()}) {
     a_keyword_keeps_a_complemented_boundary(*parser);
     a_rescued_refusal_keeps_the_shorter_match(*parser);
+    an_assertion_reads_a_choice_of_many_words(*parser);
+    an_assertion_reads_a_run_of_many_refusals(*parser);
   }
   auto overtakeLl = tlexguards::generated::OvertakeLl::create_parser();
   auto overtakeLr = tlexguards::generated::OvertakeLr::create_parser();

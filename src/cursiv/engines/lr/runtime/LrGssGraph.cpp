@@ -254,17 +254,16 @@ void LrGssGraph::edge(Id to, Id from, std::uint32_t symbol,
   else
     _forest.add(f, children, step, words, at,
                 token ? LrGssForest::Kind::token : LrGssForest::Kind::inner);
-  const Id under = s.shifts ? from : s.vertex;
-  _arcs.push_back(Arc{to, under, token ? s.reading.la.end : 0});
+  _arcs.push_back(Arc{to, s.vertex, token ? s.reading.la.end : 0});
   if (_held != none) {
     const auto ahead = static_cast<std::uint8_t>(
-        std::min(_vertices[under].ahead + std::uint32_t{token},
+        std::min(_vertices[s.vertex].ahead + std::uint32_t{token},
                  kRepairValidateShifts));
     if (ahead > _vertices[to].ahead) _vertices[to].ahead = ahead;
   }
 }
 
-void LrGssGraph::settle(TextOffset before, bool last) {
+void LrGssGraph::settle(TextOffset before) {
   if (before <= _settled) return;
   _settled = before;
   std::size_t kept = 0;
@@ -280,8 +279,7 @@ void LrGssGraph::settle(TextOffset before, bool last) {
     return std::pair(_vertices[a].reading.at, a) <
            std::pair(_vertices[b].reading.at, b);
   });
-  if (!last)
-    for (const Id u : _batch) prune(u);
+  for (const Id u : _batch) prune(u);
 }
 
 // Two out-edges whose chains down share states and end hold stacks with one
@@ -313,10 +311,11 @@ void LrGssGraph::prune(Id u) {
     std::size_t j = i + 1;
     while (j < _group.size() && key(_group[j]) == key(_group[i])) ++j;
     for (std::size_t best = i, k = i + 1; k < j; ++k) {
-      if (!alike(_group[best].edge, _group[k].edge)) continue;
+      const Id floor = meet(_group[best].edge, _group[k].edge);
+      if (floor == none) continue;
       _strict = true;
       const auto [first, byTable] =
-          written_lone(_group[best].edge, _group[k].edge);
+          written_lone(_group[best].edge, _group[k].edge, floor);
       _strict = false;
       if (first == 0 || first == kUnknown) continue;
       if (byTable) ++_tabled;
@@ -342,43 +341,35 @@ void LrGssGraph::prune(Id u) {
   _vertices[u].lastEdge = tail;
 }
 
-// Whether two edges over lone chains that end at one vertex, and as deep, lay
-// the same symbols over the same states: the hash tells where to look, never
-// that they do.
-bool LrGssGraph::alike(Id a, Id b) const {
-  if (_edges[a].symbol != _edges[b].symbol) return false;
+// The vertex two edges' lone chains meet on, where the chains end at one vertex,
+// are as deep and lay the same symbols over the same states up to it; `none`
+// where they do not: the hash tells where to look, never that they do.
+LrGssGraph::Id LrGssGraph::meet(Id a, Id b) const {
+  if (_edges[a].symbol != _edges[b].symbol) return none;
   Id x = _edges[a].previous, y = _edges[b].previous;
-  const Id end = _vertices[x].chainEnd;
-  while (x != end) {
-    if (y == end ||
-        _vertices[x].reading.run.state != _vertices[y].reading.run.state)
-      return false;
+  while (x != y) {
+    if (_vertices[x].reading.run.state != _vertices[y].reading.run.state)
+      return none;
     const Edge &ex = _edges[_vertices[x].edges],
                &ey = _edges[_vertices[y].edges];
-    if (ex.symbol != ey.symbol) return false;
+    if (ex.symbol != ey.symbol) return none;
     x = ex.previous;
     y = ey.previous;
   }
-  return y == end;
+  return x;
 }
 
-// `written` for two edges whose stacks are lone chains down to one vertex. The
-// chains are ranked for this comparison alone, that vertex their floor, so
-// that nothing under it is compared.
-LrGssGraph::Order LrGssGraph::written_lone(Id a, Id b) {
+// `written` for two edges whose stacks are lone chains down to `floor`, the
+// vertex they meet on. The chains are ranked for this comparison alone, so that
+// nothing under it is compared.
+LrGssGraph::Order LrGssGraph::written_lone(Id a, Id b, Id floor) {
   const Id x = _edges[a].previous, y = _edges[b].previous;
-  const Id floor = _vertices[x].chainEnd;
   Vertex& end = _vertices[floor];
-  const bool based = end.edges != none && end.best == none;
-  if (based) {
-    end.depth = 0;
-    end.jump = floor;
-  }
+  end.jump = floor;
   _staged.clear();
   for (const Id side : {x, y}) {
     const std::size_t from = _staged.size();
-    for (Id v = side; v != floor && _vertices[v].best == none;
-         v = _edges[_vertices[v].edges].previous)
+    for (Id v = side; v != floor; v = _edges[_vertices[v].edges].previous)
       _staged.push_back(v);
     for (std::size_t i = _staged.size(); i-- > from;)
       set_best(_staged[i], _vertices[_staged[i]].edges);
@@ -389,11 +380,9 @@ LrGssGraph::Order LrGssGraph::written_lone(Id a, Id b) {
     w.best = none;
     w.depth = 0;
     w.jump = none;
+    w.forks = Rope::none;
   }
-  if (based) {
-    end.depth = 0;
-    end.jump = none;
-  }
+  end.jump = none;
   return first;
 }
 
@@ -461,14 +450,9 @@ void LrGssGraph::set_best(Id v, Id edge) {
   x.jump = depth - frames_under(jump) == frames_under(jump) - frames_under(beyond)
                ? beyond
                : under;
-  const Rope::Id below = _vertices[under].forks;
-  if (x.forksEdge != edge || x.forksUnder != below) {
-    x.forks = _digest.join(below,
-                           _digest.of(_forest, _edges[edge].forest,
-                                      [this](Id step) { return facts(step); }));
-    x.forksEdge = edge;
-    x.forksUnder = below;
-  }
+  x.forks = _digest.join(_vertices[under].forks,
+                         _digest.of(_forest, _edges[edge].forest,
+                                    [this](Id step) { return facts(step); }));
 }
 
 void LrGssGraph::note_cut(Id v) {
@@ -479,7 +463,6 @@ void LrGssGraph::note_cut(Id v) {
 
 LrGssDigest::Facts LrGssGraph::facts(Id step) const {
   const Id v = _steps[step].vertex;
-  if (v == none) return {0, false};
   const bool fork = (step != 0 && _steps[step - 1].vertex == v) ||
                     (step + 1 < _steps.size() && _steps[step + 1].vertex == v);
   return {_vertices[v].reading.at, fork};
@@ -696,7 +679,7 @@ LrGssGraph::Order LrGssGraph::parted_order(Id top) {
       }
     }
   }
-  if (verdict != 0 || top == none || _vertices[top].steps == none)
+  if (verdict != 0 || _vertices[top].steps == none)
     return {verdict, byTable};
   // One stack was made at the top by an arm the other has yet to take: it
   // stands first where that arm is the cell's first.
@@ -732,7 +715,7 @@ LrGssGraph::Order LrGssGraph::fork_order(const Step& x, const Step& y) const {
 }
 
 bool LrGssGraph::linear(Id v) const {
-  for (std::size_t n = 0; n != _vertices.size(); ++n) {
+  for (;;) {
     // Only the seed's top is interned; its lower frames stay a private chain.
     if (v + 1u < _seedDepth) return true;
     const Id e = _vertices[v].edges;
@@ -740,7 +723,6 @@ bool LrGssGraph::linear(Id v) const {
     if (_edges[e].next != none) return false;
     v = _edges[e].previous;
   }
-  return false;
 }
 
 // A dead arm is a frozen reading, a repair's source until a rival reads
@@ -801,7 +783,6 @@ std::vector<LrGssGraph::Id> LrGssGraph::elected() {
 }
 
 bool LrGssGraph::close() {
-  settle(std::numeric_limits<TextOffset>::max(), true);
   for (const auto& [v, s] : _accepts) accept(v, s);
   return _accepted;
 }

@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
-#include <utility>
 
 #include "cursiv/core/utils/macros.hpp"
 #include "cursiv/engines/lr/runtime/LrFrame.hpp"
@@ -17,31 +16,9 @@ namespace cursiv {
 class LrStack {
  public:
   LrStack() = default;
-  LrStack(const LrStack& other) { *this = other; }
-  LrStack& operator=(const LrStack& other) {
-    if (this == &other) return *this;
-    // Room to push, not just to hold: a copy is a working stack, and one
-    // sized to the depth it took reallocates on its very first shift.
-    if (other._n > _cap) reallocate(room_for(other._n));
-    for (std::uint32_t i = 0; i < other._n; ++i) _f[i] = other._f[i];
-    _n = other._n;
-    return *this;
-  }
-  LrStack(LrStack&& other) noexcept
-      : _f(std::exchange(other._f, nullptr)),
-        _n(std::exchange(other._n, 0)),
-        _cap(std::exchange(other._cap, 0)) {}
-  LrStack& operator=(LrStack&& other) noexcept {
-    swap(other);
-    return *this;
-  }
+  LrStack(const LrStack&) = delete;
+  LrStack& operator=(const LrStack&) = delete;
   ~LrStack() { delete[] _f; }
-
-  void swap(LrStack& other) noexcept {
-    std::swap(_f, other._f);
-    std::swap(_n, other._n);
-    std::swap(_cap, other._cap);
-  }
 
   void reserve(std::uint32_t n) {
     if (n > _cap) reallocate(n);

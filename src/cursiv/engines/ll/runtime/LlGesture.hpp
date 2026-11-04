@@ -19,11 +19,13 @@ struct LlGesture {
   // Its order among the choices it was taken from: what a tie falls to.
   std::uint32_t choice = 0;
   Kind kind = ins;
-  // ins, rep, skip: the terminal.
+  // ins, rep, skip: the terminal. abandon: what the call owed, or `kNoElement`
+  // where no one terminal says it.
   SymbolId term = 0;
-  // rep, del, skip: where the author's bytes it takes end.
+  // rep, del, skip: where the author's bytes it takes end. abandon: how many
+  // calls it leaves.
   TextOffset end = 0;
-  // abandon: exact return state; `end` is how many calls are left.
+  // abandon: exact return state.
   std::uint32_t state = 0;
   // The pause it was made at: where the text taken stands, and where the token
   // in hand begins.

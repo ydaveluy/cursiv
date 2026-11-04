@@ -35,15 +35,13 @@ struct LlEpisodeCache {
   std::optional<LlEpisodeSim> plain, tracked;
   LlPlan plan;
   LlPredictionWork work;
-  // Where the entry rule returns to, in the pool of that life.
-  std::uint64_t documentLife = 0;
-  std::uint32_t document = 0;
+  // Where the entry rule returns to, once a stack has asked.
+  std::uint32_t document = kLlCtxNone;
   // The plans kept per choice, by the text each read.
   std::vector<LlEpisodeMemo> memo;
 };
 
-// A public parse owns its learned state. Raw prediction helpers outside a
-// parse keep no plan between calls: a plan names places in one document.
+// A public parse owns its learned state: a plan names places in one document.
 template <const auto& T>
 inline std::optional<LlEpisodeCache>*& ll_episode_session_slot() {
   thread_local std::optional<LlEpisodeCache>* active = nullptr;
@@ -52,12 +50,8 @@ inline std::optional<LlEpisodeCache>*& ll_episode_session_slot() {
 
 template <const auto& T>
 inline LlEpisodeCache& ll_episode_cache() {
-  if (auto* active = ll_episode_session_slot<T>()) {
-    if (!active->has_value()) active->emplace();
-    return active->value();
-  }
-  thread_local LlEpisodeCache cache;
-  return cache;
+  auto& active = *ll_episode_session_slot<T>();
+  return active.has_value() ? *active : active.emplace();
 }
 
 // A pool of the parse's cache, made at its first ask: `exact`, or `lent`.
@@ -88,14 +82,11 @@ inline LlEpisodeSim& ll_episode_sim(bool tracked) {
 }
 
 // Where the entry rule returns to: the document, whatever other calls of it the
-// grammar has. A rule that is not the entry returns to a caller not known.
+// grammar has.
 template <const auto& T>
-inline std::uint32_t ll_document_context(
-    LlReturnPool& pool, bool document) {
-  if (!document) return kLlCtxNone;
+inline std::uint32_t ll_document_context(LlReturnPool& pool) {
   auto& cache = ll_episode_cache<T>();
-  if (cache.documentLife != pool.contexts().life()) {
-    cache.documentLife = pool.contexts().life();
+  if (cache.document == kLlCtxNone) {
     const LlAtnState& entry = T.atn.state(T.atnStart);
     cache.document = pool.push_return(
         kLlCtxNone, pool.return_of(T.atn.edge(entry.edge).follow));
@@ -143,9 +134,8 @@ struct LlExactWalk {
   explicit LlExactWalk(const LlContext& c)
       : _cache(&ll_episode_cache<T>()),
         _pool(ll_pool<T>(false)),
-        key(c.stack.context(
-            ll_pool<T>(true),
-            ll_document_context<T>(ll_pool<T>(true), c.document))),
+        key(c.stack.context(ll_pool<T>(true),
+                            ll_document_context<T>(ll_pool<T>(true)))),
         context(ll_lend_stack(*_cache, key)),
         _holds(_pool.contexts().begin_scratch()) {}
   ~LlExactWalk() {
