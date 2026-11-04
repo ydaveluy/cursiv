@@ -71,8 +71,12 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
 ```
 
 A description does not copy its name, so `copy_into` stores the computed
-name in the document's memory. Do not resolve references here: other
-documents may not have exported their symbols yet.
+name in the document's memory, which is only freed by the next parse. Use it
+here, where each name is written once per parse. A service that allocates more
+often, such as a scope provider or a validator, owns a
+`std::pmr::memory_resource` per document and clears it when it needs to. Do not
+resolve references here: other documents may not have exported their symbols
+yet.
 
 ## Install the implementation
 

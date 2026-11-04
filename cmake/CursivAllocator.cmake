@@ -46,8 +46,10 @@ FetchContent_MakeAvailable(cursiv_mimalloc)
 add_library(cursivAllocator OBJECT ${cursiv_mimalloc_SOURCE_DIR}/src/static.c)
 target_include_directories(cursivAllocator SYSTEM PRIVATE
     ${cursiv_mimalloc_SOURCE_DIR}/include)
+# Documents are small: huge pages would hold far more memory than they use, and
+# clearing them costs more than they save. MIMALLOC_ALLOW_THP=1 restores them.
 target_compile_definitions(cursivAllocator PRIVATE
-    MI_STATIC_LIB MI_MALLOC_OVERRIDE)
+    MI_STATIC_LIB MI_MALLOC_OVERRIDE MI_DEFAULT_ALLOW_THP=0)
 # Not this tree's to keep warning-clean.
 target_compile_options(cursivAllocator PRIVATE -w)
 set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)

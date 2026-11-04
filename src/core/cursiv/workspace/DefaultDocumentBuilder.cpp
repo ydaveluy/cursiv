@@ -302,7 +302,7 @@ void DefaultDocumentBuilder::buildDocuments(
             at != _buildOptions.end() && !at->second.completed)
           requested = at->second.options;
       }
-      resetToState(*d, DocumentState::IndexedContent);
+      resetToState(*d, DocumentState::ComputedScopes);
       if (requested) prepareBuild({&d, 1}, *requested);
     }
     if (scheduled.insert(d).second) work.push_back(d);
@@ -348,7 +348,7 @@ void DefaultDocumentBuilder::buildDocuments(
     for (const auto& heldDocument : held) {
       auto* const d = heldDocument.get();
       if (changed.contains(d->id)) continue;
-      if (d->state.load() <= DocumentState::IndexedContent &&
+      if (d->state.load() <= DocumentState::ComputedScopes &&
           scheduled.contains(d))
         continue;
       if (index.isAffected(*d, changed)) rebuild(d);
@@ -483,7 +483,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
     Document* const d = doc.get();
     if (moved.contains(d->id)) continue;
     if (d->hasLinkingErrors() || index.isAffected(*d, moved))
-      resetToState(*d, DocumentState::IndexedContent);
+      resetToState(*d, DocumentState::ComputedScopes);
     else if (!moved.empty() &&
              d->state.load() < DocumentState::IndexedReferences) {
       // Unindexed resolutions have no dependency row to protect their targets.

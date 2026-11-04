@@ -263,15 +263,16 @@ through these states, in order:
 
 A build stops at `IndexedReferences` with `BuildOptions{.validation = false}`.
 After an edit, `documentBuilder->update` rebuilds the changed documents and
-the documents that depend on them. Each `Document` stays the same object, but
-its trees may be replaced.
+relinks the documents that depend on them. Each `Document` stays the same
+object, but the trees of a changed document are replaced.
 
 To customize scopes, override `collectExportedSymbols` (symbols other
 documents can see) and `collectLocalSymbols` (symbols visible inside the
-document) in a custom `scopeComputation`. Do not resolve references in these
-methods: the scopes of other documents may not be ready yet. The default
-`scopeProvider` then looks for a reference's candidates from the nearest
-enclosing container outward, then in the global index. The linker and
+document) in a custom `scopeComputation`. They run when the document is parsed,
+not when a document it depends on changes, so read only the document itself and
+do not resolve references: the scopes of other documents may not be ready yet.
+The default `scopeProvider` then looks for a reference's candidates from the
+nearest enclosing container outward, then in the global index. The linker and
 completion both use these candidates.
 
 ## Advanced: add a service

@@ -197,7 +197,7 @@ void DefaultWorkspaceManager::initializeWorkspace(
     if (document->state.load() >= DocumentState::IndexedReferences &&
         document->hasLinkingErrors())
       shared.documentBuilder->resetToState(*document,
-                                           DocumentState::IndexedContent);
+                                           DocumentState::ComputedScopes);
     all.push_back(document.get());
   }
   shared.documentBuilder->build(all, _initialBuildOptions, cancelToken);

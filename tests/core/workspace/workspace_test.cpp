@@ -16,6 +16,7 @@
 #include <latch>
 #include <limits>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -360,6 +361,61 @@ void an_update_honors_an_overridden_affected_check() {
   CHECK(!dependent->hasLinkingErrors());
   const std::unordered_set<cursiv::DocumentId> moved = {dependent->id, target->id};
   CHECK(world.shared.indexManager->isAffected(*dependent, moved));
+}
+
+// Names a scope computation copies live as long as the parse, so a document
+// relinked on the same parse keeps the scopes it has: computing them again
+// would grow its memory with each edit of what it depends on.
+void a_relinked_document_keeps_its_scopes() {
+  World world;
+  struct Affected final : cursiv::DefaultIndexManager {
+    using DefaultIndexManager::DefaultIndexManager;
+    cursiv::DocumentId forced = cursiv::kNoDocument;
+    bool isAffected(const cursiv::Document& document,
+                    const std::unordered_set<cursiv::DocumentId>& changed)
+        const override {
+      return document.id == forced ||
+             DefaultIndexManager::isAffected(document, changed);
+    }
+  };
+  auto index = std::make_unique<Affected>(world.shared);
+  Affected* const observed = index.get();
+  world.shared.indexManager = std::move(index);
+  cursiv::Document* const target = world.add("file:///target.ws", "datatype Type");
+  cursiv::Document* const dependent =
+      world.add("file:///dependent.ws", "entity D { f : Type }");
+  cursiv::Document* const broken =
+      world.add("file:///broken.ws", "entity B { f : Missing }");
+  cursiv::Document* const forced =
+      world.add("file:///forced.ws", "datatype Other");
+  cursiv::Document* documents[] = {target, dependent, broken, forced};
+  world.shared.documentBuilder->build(documents);
+  CHECK(!dependent->hasLinkingErrors());
+  CHECK(broken->hasLinkingErrors());
+  observed->forced = forced->id;
+
+  struct Phases final : cursiv::DocumentPhaseListener {
+    std::mutex mutex;
+    std::map<std::pair<cursiv::DocumentId, cursiv::DocumentState>, int> count;
+    void onDocumentPhase(cursiv::Document& document, cursiv::DocumentState state,
+                         const cursiv::CancellationToken&) override {
+      const std::scoped_lock lock(mutex);
+      ++count[{document.id, state}];
+    }
+  } phases;
+  world.shared.documentBuilder->addDocumentPhaseListener(phases);
+  const std::string_view changed[] = {target->uri};
+  world.shared.documentBuilder->update(changed, {});
+  world.shared.documentBuilder->removeDocumentPhaseListener(phases);
+
+  for (const cursiv::Document* const kept : {dependent, broken, forced}) {
+    CHECK(!kept->localSymbols.empty());
+    CHECK(phases.count[{kept->id, cursiv::DocumentState::ComputedScopes}] == 0);
+    CHECK(phases.count[{kept->id, cursiv::DocumentState::Linked}] == 1);
+  }
+  CHECK(phases.count[{target->id, cursiv::DocumentState::ComputedScopes}] == 1);
+  CHECK(!dependent->hasLinkingErrors());
+  CHECK(broken->hasLinkingErrors());
 }
 
 using support::CountingParser;
@@ -2240,6 +2296,7 @@ void run() {
   exports_keep_uri_order(false);
   exports_keep_uri_order(true);
   an_update_honors_an_overridden_affected_check();
+  a_relinked_document_keeps_its_scopes();
   a_new_homonym_retargets_without_reparsing(false, false);
   a_new_homonym_retargets_without_reparsing(true, false);
   a_new_homonym_retargets_without_reparsing(false, true);
@@ -4400,6 +4457,35 @@ void the_scan_builds_what_the_folders_hold() {
   CHECK(ready.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
 }
 
+// A second scan links what was broken against what arrived, on the same parse.
+void a_scan_relinks_what_is_broken_with_its_scopes_kept() {
+  World world;
+  world.disk->addFile("file:///w/use.ws", "entity E { f : Late }\n");
+  const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  const auto use = world.shared.documents->getDocument("file:///w/use.ws");
+  CHECK(use != nullptr && use->hasLinkingErrors());
+  if (use == nullptr) return;
+
+  struct Scoped final : cursiv::DocumentPhaseListener {
+    cursiv::DocumentId watched = cursiv::kNoDocument;
+    std::atomic<unsigned> scoped{0};
+    void onDocumentPhase(cursiv::Document& document, cursiv::DocumentState state,
+                         const cursiv::CancellationToken&) override {
+      if (document.id == watched && state == cursiv::DocumentState::ComputedScopes)
+        ++scoped;
+    }
+  } phases;
+  phases.watched = use->id;
+  world.shared.documentBuilder->addDocumentPhaseListener(phases);
+  world.disk->addFile("file:///w/late.ws", "datatype Late\n");
+  world.shared.workspaceManager->initializeWorkspace(folders);
+  world.shared.documentBuilder->removeDocumentPhaseListener(phases);
+  CHECK(!use->hasLinkingErrors());
+  CHECK(!use->localSymbols.empty());
+  CHECK(phases.scoped == 0);
+}
+
 void an_unclaimed_file_kept_by_a_custom_filter_is_skipped() {
   struct IncludeAll final : cursiv::DefaultWorkspaceManager {
     using DefaultWorkspaceManager::DefaultWorkspaceManager;
@@ -4581,6 +4667,7 @@ void ready_resolves_when_the_scan_throws() {
 
 void run() {
   the_scan_builds_what_the_folders_hold();
+  a_scan_relinks_what_is_broken_with_its_scopes_kept();
   the_filter_keeps_what_a_language_claims();
   an_upper_case_scheme_names_the_same_file();
   an_entry_outside_the_root_of_its_folder_is_not_included();
