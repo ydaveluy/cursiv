@@ -1417,6 +1417,27 @@ struct Session {
   }
 };
 
+// What a document holds need not be UTF-8, and a message must be: the text a
+// server quotes goes out repaired, and the header counts what goes out.
+void a_message_on_the_wire_is_well_formed() {
+  Session s([](Server& server) {
+    server.onRequest("x/echo", [](const lsp::LSPAny& value,
+                                  const cursiv::CancellationToken&) {
+      return value;
+    });
+  });
+  s.initialize();
+  for (const auto& [sent, read] :
+       {std::pair<std::string_view, std::string_view>{"[\"Mod\xE8le\"]",
+                                                      "\"Mod\xEF\xBF\xBDle\""},
+        {"[\"\xE2\x82 x\"]", "\"\xEF\xBF\xBD x\""},
+        {"[\"caf\xC3\xA9\"]", "\"caf\xC3\xA9\""}}) {
+    s.request(2, "x/echo", sent);
+    const auto reply = s.answer().get();
+    CHECK(lsp::json::stringify(reply.result.value_or(nullptr)) == read);
+  }
+}
+
 // Methods the protocol does not define reach the language as the standard ones
 // do: refused or dropped outside the session, and given the one value the
 // client sent.
@@ -1709,6 +1730,7 @@ void a_notification_does_not_cancel_its_own_write() {
 
 void run() {
   custom_methods_reach_the_language();
+  a_message_on_the_wire_is_well_formed();
   shutdown_obeys_the_handshake();
   answers_take_the_shapes_the_client_reads();
   cancellation_does_not_wait_for_an_earlier_notification();

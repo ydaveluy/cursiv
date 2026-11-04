@@ -217,6 +217,14 @@ void an_indentation_error_says_so() {
     }
 }
 
+// A line a bracket joins stands in the gap to the caret behind it.
+void a_caret_crosses_a_line_its_bracket_joins() {
+  const auto p = tdelim::generated::Ll::create_parser();
+  const std::vector<std::string> word{"ID"};
+  CHECK(caret_offers::offered(*p, "f(\na)\n", 3) == word);
+  CHECK(caret_offers::offered(*p, "f(\n   a)\n", 4) == word);
+}
+
 // A caret on or past a line a form feed starts reads what it reads without one.
 void a_form_feed_leaves_a_caret_its_reading() {
   const auto ll = tllindent::generated::Ll::create_parser();
@@ -608,6 +616,7 @@ int main() {
   an_invented_indent_opens_a_level();
   an_indentation_error_says_so();
   a_form_feed_starts_the_indentation_again();
+  a_caret_crosses_a_line_its_bracket_joins();
   a_form_feed_leaves_a_caret_its_reading();
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();

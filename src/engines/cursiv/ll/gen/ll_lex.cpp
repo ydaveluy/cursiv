@@ -187,7 +187,7 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
     b.afterGap.assign(g.nnodes, kNoRow);
     for (std::uint32_t id = 0; id < b.afterCfg.size(); ++id)
       if (b.afterCfg[id] < skips.size())
-        b.afterGap[id] = intern(skips[b.afterCfg[id]]);
+        b.afterGap[id] = intern(skips[b.afterCfg[id]] | modes.joins);
   }
   b.modeTrivia.clear();
   b.modeJoinedTrivia.clear();

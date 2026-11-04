@@ -369,30 +369,13 @@ static void write_json_string(std::ostream& out, std::string_view text) {
     const char ch = text[index];
     const auto byte = static_cast<unsigned char>(ch);
     if (byte >= 0x80u) {
-      const std::size_t width = utf8_width(ch);
-      std::size_t length = 1;
-      if (byte >= 0xc2u && byte <= 0xf4u) {
-        while (length < width && index + length < text.size()) {
-          const auto next = static_cast<unsigned char>(text[index + length]);
-          if ((next & 0xc0u) != 0x80u) break;
-          // Exclude overlong encodings, surrogates and values above U+10FFFF.
-          if (length == 1 && ((byte == 0xe0u && next < 0xa0u) ||
-                              (byte == 0xedu && next >= 0xa0u) ||
-                              (byte == 0xf0u && next < 0x90u) ||
-                              (byte == 0xf4u && next >= 0x90u)))
-            break;
-          ++length;
-        }
-        if (length == width) {
-          index += length;
-          continue;
-        }
+      const Utf8Step step = utf8_step(text.data() + index, text.size() - index);
+      if (!step.wellFormed) {
+        writePlain(index);
+        out << "\\ufffd";
       }
-      writePlain(index);
-      out << "\\ufffd";
-      // Consume the valid prefix of the failed sequence, leaving the next
-      // character intact (for example E1 80 'x' becomes U+FFFD followed by x).
-      index += length;
+      index += step.bytes;
+      if (step.wellFormed) continue;
       plain = index;
       continue;
     }

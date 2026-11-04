@@ -37,6 +37,7 @@
 #include "cursiv/workspace/FileOperationHandler.hpp"
 #include "cursiv/McpServer.hpp"
 #include "cursiv/McpService.hpp"
+#include "cursiv/utils/Utf8.hpp"
 #include "lsp/types.h"
 
 namespace cursiv {
@@ -908,8 +909,58 @@ void add_custom_handlers(Session& session) {
 
 }  // namespace
 
-int start_language_server(SharedLspServices& shared, lsp::io::Stream& stream) {
+namespace {
+
+// A message on the wire is UTF-8 and a document need not be, so what a server
+// quotes from one goes out with each ill-formed part as U+FFFD, as an editor shows
+// it. A connection writes a message as its header, then its content: the header
+// waits, for the length it states.
+class WellFormedStream final : public lsp::io::Stream {
+ public:
+  explicit WellFormedStream(lsp::io::Stream& inner) : _inner(inner) {}
+
+  void read(char* buffer, std::size_t size) override {
+    _inner.read(buffer, size);
+  }
+  void write(const char* buffer, std::size_t size) override {
+    if (!std::exchange(_inContent, !_inContent)) {
+      _header.assign(buffer, size);
+      return;
+    }
+    const std::string_view content(buffer, size);
+    if (utf8_well_formed(content)) {
+      _inner.write(_header.data(), _header.size());
+      _inner.write(buffer, size);
+      return;
+    }
+    std::string repaired;
+    repaired.reserve(size + 16);
+    for (std::size_t at = 0; at < size;) {
+      const Utf8Step step = utf8_step(buffer + at, size - at);
+      if (step.wellFormed)
+        repaired.append(buffer + at, step.bytes);
+      else
+        repaired += "\xEF\xBF\xBD";
+      at += step.bytes;
+    }
+    const std::string header = "Content-Length: " +
+                               std::to_string(repaired.size()) +
+                               _header.substr(_header.find("\r\n"));
+    _inner.write(header.data(), header.size());
+    _inner.write(repaired.data(), repaired.size());
+  }
+
+ private:
+  lsp::io::Stream& _inner;
+  std::string _header;
+  bool _inContent = false;
+};
+
+}  // namespace
+
+int start_language_server(SharedLspServices& shared, lsp::io::Stream& raw) {
   ignore_sigpipe_process_wide();
+  WellFormedStream stream(raw);
 
   // Declared before the endpoint: the pool it joins as it dies still serves
   // requests that wait on the queue and leave `pending`.

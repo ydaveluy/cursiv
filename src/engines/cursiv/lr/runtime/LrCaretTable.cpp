@@ -162,16 +162,14 @@ class CaretStacks {
     Scan scan;
   };
 
-  // The trivia token that ends at `to` and goes on over a word typed there,
+  // The trivia token that ends at `to`, which a word typed there may go on from,
   // when the tokens from `from` run to it.
   bool comment_before(std::uint16_t mode, TextOffset from, TextOffset to,
                       Trivia& comment) {
     Trivia last;
     if (!trivia_scan(mode, from, to, false, &last,
                      [](const Token&) { return false; }) ||
-        last.scan.end != to ||
-        last.scan.end <= last.begin ||
-        ends_before_word(mode, last.begin, to, last.scan.term))
+        last.scan.end != to || last.scan.end <= last.begin)
       return false;
     comment = last;
     return true;
@@ -1448,7 +1446,7 @@ class CaretStacks {
     const auto without = [&](TextOffset from) {
       const auto len = static_cast<TextOffset>(_text.size());
       for (TextOffset p = from;;) {
-        p = past_skip_run(mode, p, len);
+        p = past_skip_run(mode, p);
         if (p == len) return Token{p, p, kEofSymbol};
         TextOffset halt = 0;
         const Scan t =
@@ -1602,7 +1600,7 @@ class CaretStacks {
     const auto len = static_cast<TextOffset>(_text.size());
     auto at = from;
     for (;;) {
-      at = past_skip_run(mode, at, len);
+      at = past_skip_run(mode, at);
       if (at == len) return result.emplace_back(Token{at, at, kEofSymbol});
       std::uint32_t count = 0;
       const Scan first = elect(mode, at, true, count);
@@ -1663,10 +1661,6 @@ class CaretStacks {
   bool trivia_scan(std::uint16_t mode, TextOffset at, TextOffset to,
                    bool inside, Trivia* tail, Refuses&& refuses) {
     while (at < to) {
-      if (const TextOffset past = past_skip_run(mode, at, to); past != at) {
-        at = past;
-        continue;
-      }
       std::uint32_t count = 0;
       Scan next = elect(mode, at, false, count);
       if (next.term == kInvalidSymbol || next.end <= at) return false;
@@ -1684,12 +1678,12 @@ class CaretStacks {
     return at == to;
   }
 
-  // Whether the token read at `at` still ends at `to` with a word right
+  // Whether the text from `at` to `to` is still all trivia with a word right
   // behind, as `StampedGrammar::ends_before_word` asks it.
   bool ends_before_word(std::uint16_t mode, TextOffset at, TextOffset to,
                         SymbolId term) const {
     return StampedGrammar::ends_before_word(
-        _text.substr(at, to - at), term, _table.terms, _table.names,
+        _text.substr(at, to - at), term, _table.terms,
         [&](std::string_view s) {
           TextOffset halt = 0;
           return _table.lex(s.data(), static_cast<TextOffset>(s.size()), mode,
@@ -1698,9 +1692,9 @@ class CaretStacks {
   }
 
   // Past the run of blanks at `at`.
-  TextOffset past_skip_run(std::uint16_t mode, TextOffset at, TextOffset to) const {
+  TextOffset past_skip_run(std::uint16_t mode, TextOffset at) const {
     return lex_past_run(
-        _text.data(), at, to,
+        _text.data(), at, static_cast<TextOffset>(_text.size()),
         [&](unsigned char b) {
           return mode_row_has(_table.skipSet.data(), mode, b);
         },

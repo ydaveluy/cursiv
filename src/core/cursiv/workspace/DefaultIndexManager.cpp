@@ -279,12 +279,10 @@ bool DefaultIndexManager::visitElements(
     const AstTypeTag* type, std::span<const DocumentId> documents,
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
   const auto view = exportsView();
-  const auto wanted = [&](DocumentId id) {
-    return documents.empty() ||
-           std::ranges::find(documents, id) != documents.end();
-  };
+  std::vector<DocumentId> asked(documents.begin(), documents.end());
+  std::ranges::sort(asked);
   for (const auto& [id, elements] : view->rows) {
-    if (!wanted(id)) continue;
+    if (!documents.empty() && !std::ranges::binary_search(asked, id)) continue;
     for (const AstNodeDescription& element : elements->elements) {
       if (type != nullptr &&
           (element.type == nullptr || !element.type->derivesFrom(type)))

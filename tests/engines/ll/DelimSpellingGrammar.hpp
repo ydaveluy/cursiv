@@ -47,6 +47,7 @@ struct Base : cursiv::GrammarSpec {
                       ref<RBRACE> + (ref<NEWLINE> | eof)) |
                      (ref<LANGLE> + some(append<&ast::Node::body>(ref<Item>)) +
                       ref<RANGLE> + (ref<NEWLINE> | eof)) |
+                     (lit<"!"> + tight(ref<ID>) + (ref<NEWLINE> | eof)) |
                      (ref<NEWLINE> | eof)))> {};
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};

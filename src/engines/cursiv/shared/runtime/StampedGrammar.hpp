@@ -110,9 +110,10 @@ struct StampedGrammar final : Grammar {
   }
 
   // The words a caret types for a terminal that spells none, to ask of it what
-  // only a word can answer.
+  // only a word can answer. The last two only end a line.
   static constexpr std::array<std::string_view, 9> samples{
       "a", "name", "0", "1", "_", "\"\"", "''", "\n", "\r\n"};
+  static constexpr std::size_t kSampleWords = samples.size() - 2;
 
   // The text from `from` to the caret `at`, the spelling, then the real text
   // past `resume` in growing slices, until `walk` halts inside one or the
@@ -132,27 +133,27 @@ struct StampedGrammar final : Grammar {
     }
   }
 
-  // Whether the trivia token `term` that `run` holds still ends where `run`
-  // does with a word typed behind it: a blank run does, a line comment does
-  // not. The word is the first spelling of `terms`, else sample, that `lex`
-  // reads whole as no trivia.
+  // Whether `run`, the text of the token `term` up to a caret, is still all
+  // trivia with a word typed behind it: a blank run is, a line comment reads on,
+  // and the blanks of a continuation are, though the word takes them out of it.
+  // The words are the sample words, but for those `lex` reads as trivia themselves.
   static bool ends_before_word(std::string_view run, std::uint16_t term,
-                               std::span<const TermInfo> terms,
-                               const char* names, auto&& lex) {
-    const auto whole = [&](std::string_view word) {
-      const auto read = lex(word);
-      return read.end == word.size() && read.term < terms.size() &&
-             !terms[read.term].trivia;
+                               std::span<const TermInfo> terms, auto&& lex) {
+    const auto trivia = [&](std::uint16_t t) {
+      return t < terms.size() && terms[t].trivia;
     };
-    std::string_view word;
-    for (const TermInfo& t : terms)
-      if (word.empty() && t.spelled && whole({names + t.textOff, t.textLen}))
-        word = {names + t.textOff, t.textLen};
-    for (const std::string_view sample : samples)
-      if (word.empty() && whole(sample)) word = sample;
-    if (word.empty()) return true;
-    const auto s = lex(std::string(run).append(word));
-    return s.term == term && s.end == run.size();
+    std::string typed;
+    for (std::size_t w = 0; w < kSampleWords; ++w) {
+      if (trivia(lex(samples[w]).term)) continue;
+      typed.assign(run).append(samples[w]);
+      for (std::size_t from = 0; from < run.size();) {
+        const auto s = lex(std::string_view(typed).substr(from));
+        if (s.end > run.size() - from || (s.term != term && !trivia(s.term)))
+          return false;
+        from += s.end;
+      }
+    }
+    return true;
   }
 
   StampLayout stamp() const noexcept { return _stamp; }

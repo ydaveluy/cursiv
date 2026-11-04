@@ -12,6 +12,7 @@
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
+#include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/Checks.hpp"
 #include "engines/shared/TriviaGrammar.hpp"
 #include <cstdio>
@@ -175,6 +176,48 @@ void a_run_of_blanks_reads_on_from_its_last_byte(const cursiv::Parser& p) {
   }
 }
 
+// A caret in a gap answers for what is typed there. A word typed in the blanks of
+// a continuation leaves them plain blanks, so it reads; behind the continuation's
+// `_` it reads as one word with it, behind a splice's `\\` that byte is a token,
+// and behind a note's opener it goes on the note.
+void a_caret_answers_for_what_is_typed_in_a_gap(const cursiv::Parser& ll,
+                                                const cursiv::Parser& lr) {
+  using Offers = std::vector<std::string>;
+  const Offers none;
+  const Offers word{"ID"};
+  const Offers both{"ID", "later"};
+  const Offers item{"ID", "\\"};
+  const Offers closes{"!"};
+  const Offers equals{"="};
+  const Offers ended{"\n"};
+  const struct {
+    std::string_view text;
+    cursiv::TextOffset at;
+    const Offers& offers;
+  } cases[] = {
+      {"spliced:a   _\n b", 10, item}, {"spliced:a   _\n b", 11, item},
+      {"spliced:a   _\n b", 12, item}, {"spliced:a   _\n b", 13, none},
+      {"spliced:a   _\n b", 14, item}, {"spliced:a   _\n b", 15, item},
+      {"spliced:a \\\n b", 11, none},  {"noted:", 6, both},
+      {"noted:a #", 8, word},          {"noted:a #", 9, none},
+      {"noted:a #b c", 9, none},       {"noted:a #b c", 10, none},
+      {"noted:a #b c", 11, word},      {"noted:a ## c", 9, none},
+      {"noted:a %1 c", 9, none},       {"inside:#!", 8, closes},
+      {"paired:a /*x*/", 14, equals},  {"paired:a\n/*x*/", 14, none},
+      {"noted:a   c", 9, both},        {"lined:a   \nb\n", 9, ended},
+  };
+  for (const auto& sample : cases) {
+    const std::string source(sample.text);
+    const Offers fromLl = caret_offers::offered(ll, source, sample.at);
+    const Offers fromLr = caret_offers::offered(lr, source, sample.at);
+    CHECK(fromLl == sample.offers);
+    CHECK(fromLr == sample.offers);
+    if (fromLl != sample.offers || fromLr != sample.offers)
+      std::printf("  %s at %u: ll %zu, lr %zu\n", source.c_str(), sample.at,
+                  fromLl.size(), fromLr.size());
+  }
+}
+
 // The reader a choice's readings cross a gap with steps back as the lexer does.
 void a_reading_reads_on_from_a_runs_last_byte() {
   constexpr const auto& table = ttrivia::generated::Lr::kTable;
@@ -242,6 +285,9 @@ void a_trivia_taken_as_a_token_stays_a_rival(const cursiv::Parser& p) {
 
 void run() {
   a_reading_reads_on_from_a_runs_last_byte();
+  a_caret_answers_for_what_is_typed_in_a_gap(
+      *ttrivia::generated::Ll::create_parser(),
+      *ttrivia::generated::Lr::create_parser());
   an_open_comment_is_skipped_where_it_is_trivia(
       *ttrivia::generated::Ll::create_parser(),
       *ttrivia::generated::Lr::create_parser());

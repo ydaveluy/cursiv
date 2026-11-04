@@ -323,6 +323,56 @@ struct Both : cursiv::GrammarSpec {
   using ignored = list<WS>;
 };
 
+// A note whose one-byte opener its body never reads again: that byte crosses
+// like a blank, yet the note reads on over a word typed behind it, and a tally
+// over a number alone. A keyword typed behind a space is a trivia of its own, and
+// two quotes are a blank that reads like a word.
+struct Noted : cursiv::GrammarSpec {
+  struct WS : terminal<some(s | lit<"''">)> {};
+  struct NOTE : terminal<lit<"#"> + many(cr<"a-z">)> {};
+  struct TALLY : terminal<lit<"%"> + many(d)> {};
+  struct LATER : terminal<lit<" "> + kw<"later">> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) |
+                                       kw<"later">)> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = list<WS, NOTE, TALLY, LATER>;
+};
+
+// A line of blanks is a trivia, where a line end alone is a token: a word typed in
+// those blanks leaves them plain, whatever a line end would make of them.
+struct Lined : cursiv::GrammarSpec {
+  struct WS : terminal<some(lit<" ">)> {};
+  struct BLANKS : terminal<some(lit<" ">) + lit<"\n">> {};
+  struct END : terminal<lit<"\n">> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
+                                       ref<END>)> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = list<WS, BLANKS>;
+};
+
+// Inside a pair only spaces and tabs stand in front of its `=`, and a note
+// anywhere: a line in that gap stays a fault, whatever note stands behind it.
+struct Paired : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct HWS : terminal<some(cr<" \t">)> {};
+  struct REMARK : terminal<lit<"/*"> + many(cr<"^*">) + lit<"*/">> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Item : rule<create<ast::Node>(skip(
+                    ignore<HWS>, hide<REMARK>,
+                    assign<&ast::Node::name>(ref<ID>) + lit<"="> + ref<ID>))> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = REMARK;
+};
+
 struct Suite : cursiv::GrammarSpec {
   struct Entry
       : rule<(lit<"both:"> + skip(ignore<Both::WS>, hide<>,
@@ -333,6 +383,14 @@ struct Suite : cursiv::GrammarSpec {
                                      ref<Doubled::Root> + eof)) |
              (lit<"spliced:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
                                      ref<Spliced::Root> + eof)) |
+             (lit<"noted:"> + skip(ignore<Noted::WS, Noted::NOTE, Noted::TALLY,
+                                          Noted::LATER>,
+                                   hide<>, ref<Noted::Root> + eof)) |
+             (section<Noted>(lit<"inside:">, lit<"!">) + eof) |
+             (lit<"lined:"> + skip(ignore<Lined::WS, Lined::BLANKS>, hide<>,
+                                   ref<Lined::Root> + eof)) |
+             skip(ignore<Paired::WS>, hide<Paired::REMARK>,
+                  lit<"paired:"> + ref<Paired::Root> + eof) |
              (lit<"forked:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
                                     ref<Spliced::Forked> + eof)) |
              (lit<"tied:"> + skip(ignore<Tied::SPACE, Tied::BLANK>, hide<>,

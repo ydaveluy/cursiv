@@ -668,13 +668,13 @@ inline std::string_view ll_condition_tail(const Cst& cst, TextOffset resume) {
   return text.substr(resume, read);
 }
 
-// Whether the token `mode` reads at `from` still ends at `to` with a word typed
-// right behind, as `StampedGrammar::ends_before_word` asks it.
+// Whether the text from `from` to `to` is still all trivia under `mode` with a
+// word typed right behind, as `StampedGrammar::ends_before_word` asks it.
 template <const auto& T>
 inline bool ll_ends_before_word(std::string_view text, std::uint16_t mode,
                                 TextOffset from, TextOffset to, SymbolId term) {
   return StampedGrammar::ends_before_word(
-      text.substr(from, to - from), term, {T.terms, T.nterms}, T.names,
+      text.substr(from, to - from), term, {T.terms, T.nterms},
       [&](std::string_view s) {
         return ll_match_text<T>(s.data(), static_cast<TextOffset>(s.size()),
                                 mode, 0);
@@ -698,7 +698,8 @@ inline bool ll_sample_takes(SymbolId term, std::uint16_t mode, Take&& take) {
 }
 
 // Whether `mode` reads the text from `from` to `to` as trivia and arrives at
-// `to`. `tail` takes the last whole token read, `begin` where it starts.
+// `to`. A line in that gap is one a bracket joined, or the descent would hold it
+// as a token. `tail` takes the last whole token read, `begin` where it starts.
 template <const auto& T>
 inline bool ll_trivia_to(std::string_view text, std::uint16_t mode,
                          TextOffset from, TextOffset to, TextOffset& begin,
@@ -707,7 +708,7 @@ inline bool ll_trivia_to(std::string_view text, std::uint16_t mode,
   while (from < to) {
     const Scan s = ll_match_text<T>(
         text.data(), static_cast<TextOffset>(text.size()), mode, from);
-    if (s.term == kInvalidSymbol || s.end <= from || !T.terms[s.term].trivia)
+    if (s.term == kInvalidSymbol || s.end <= from || !ll_blank<T>(s.term, 1u))
       return false;
     if (s.end > to) return ll_ends_before_word<T>(text, mode, from, to, s.term);
     begin = from;
@@ -805,8 +806,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // nothing of its own goes on over what is typed there: `//` then `entity` is
   // one comment. A candidate is offered where the comment read again with it
   // behind still ends here; the leaves the tape laid of no width behind it do
-  // not hide it. It is read under the alphabet of the last token, and where
-  // there is none under the candidate's.
+  // not hide it. It is read under the alphabet of the candidate's gap.
   NodeCount behind = cst.leaves_before(at);
   while (behind > 0 && cst.leaf(behind - 1).begin == cst.leaf(behind - 1).end)
     --behind;
@@ -817,57 +817,36 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   // the caret -- a caret inside a comment is part of it -- and the comment
   // that ends there, if one does.
   struct Comment {
-    std::uint16_t key = 0;
+    std::uint16_t mode = 0;
     bool crossed = true;
     TextOffset begin = 0;
     SymbolId term = kInvalidSymbol;
-    // The alphabet that reads it.
-    std::uint16_t mode = 0;
   };
   std::vector<Comment> comments;
   const auto comment_in = [&](std::uint16_t candidate) -> const Comment& {
     for (const Comment& seen : comments)
-      if (seen.key == candidate) return seen;
+      if (seen.mode == candidate) return seen;
     Comment found{candidate};
-    found.mode = leaf ? leafMode : candidate;
+    TextOffset begin = 0;
+    Scan last{};
     if (prior.hidden && !prior.recovered && prior.end == at) {
-      const auto read_in = [&](std::uint16_t mode) {
-        return ll_match_text<T>(text.data(), prior.end, mode, prior.begin);
-      };
-      const auto whole = [&](const Scan& s) {
-        return s.term != kInvalidSymbol && s.end == prior.end;
-      };
-      Scan s = read_in(found.mode);
-      // A region's last token holds no comment of its caller's.
-      if (!whole(s) && found.mode != candidate) {
-        found.mode = candidate;
-        s = read_in(candidate);
-      }
-      if (whole(s)) {
+      const Scan s =
+          ll_match_text<T>(text.data(), prior.end, candidate, prior.begin);
+      if (s.term != kInvalidSymbol && s.end == prior.end) {
         found.begin = prior.begin;
         found.term = s.term;
       } else {
         // A comment no end closes reads on over what is typed.
         found.crossed = false;
       }
-      if constexpr (!kIndented<T>) {
-        TextOffset begin = 0;
-        Scan last{};
-        found.crossed =
-            found.crossed &&
-            ll_trivia_to<T>(known, candidate, gapFrom, at, begin, last);
-      }
-    } else if constexpr (!kIndented<T>) {
-      TextOffset begin = 0;
-      Scan last{};
+      found.crossed =
+          found.crossed &&
+          ll_trivia_to<T>(known, candidate, gapFrom, at, begin, last);
+    } else {
       found.crossed =
           ll_trivia_to<T>(text, candidate, gapFrom, at, begin, last);
-      if (!prior.recovered &&
-          (found.mode == candidate
-               ? found.crossed
-               : ll_trivia_to<T>(text, found.mode, gapFrom, at, begin, last)) &&
-          last.term != kInvalidSymbol && last.end == at && last.end > begin &&
-          !ll_ends_before_word<T>(text, found.mode, begin, at, last.term)) {
+      if (!prior.recovered && found.crossed && last.term != kInvalidSymbol &&
+          last.end == at && last.end > begin) {
         found.begin = begin;
         found.term = last.term;
       }

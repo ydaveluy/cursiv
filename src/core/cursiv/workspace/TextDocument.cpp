@@ -18,6 +18,7 @@
 
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/Utf8.hpp"
 
 // Nothing here is on a parse's path: a document is addressed in client units
 // only when a client asks. It compiles once.
@@ -50,54 +51,6 @@ constexpr std::uint64_t kHighs = 0x8080808080808080ull;
   const std::uint64_t wide = zero_byte((w ^ (kOnes * 0xF0U)) & (kOnes * 0xF8U));
   return 8U - static_cast<std::uint32_t>(std::popcount(tail)) +
          static_cast<std::uint32_t>(std::popcount(wide));
-}
-
-// One step of a decode that replaces, as an editor opening the file does: a
-// well-formed sequence is its scalar, two units past the BMP, and each
-// maximal ill-formed subpart is one U+FFFD.
-struct Decoded {
-  std::uint32_t units;
-  std::uint32_t bytes;
-  bool wellFormed;
-};
-
-[[nodiscard]] Decoded decode_one(const char* p, std::size_t left) noexcept {
-  const auto lead = static_cast<unsigned char>(p[0]);
-  if (lead < 0x80U) return {1, 1, true};
-  std::uint32_t need = 0;
-  unsigned lo = 0x80U;
-  unsigned hi = 0xBFU;
-  if (lead >= 0xC2U && lead <= 0xDFU) {
-    need = 1;
-  } else if (lead >= 0xE0U && lead <= 0xEFU) {
-    need = 2;
-    if (lead == 0xE0U) lo = 0xA0U;
-    if (lead == 0xEDU) hi = 0x9FU;
-  } else if (lead >= 0xF0U && lead <= 0xF4U) {
-    need = 3;
-    if (lead == 0xF0U) lo = 0x90U;
-    if (lead == 0xF4U) hi = 0x8FU;
-  } else {
-    return {1, 1, false};
-  }
-  for (std::uint32_t i = 1; i <= need; ++i) {
-    if (i >= left) return {1, i, false};
-    if (const auto next = static_cast<unsigned char>(p[i]);
-        next < lo || next > hi)
-      return {1, i, false};
-    lo = 0x80U;
-    hi = 0xBFU;
-  }
-  return {need == 3 ? 2U : 1U, need + 1, true};
-}
-
-[[nodiscard]] bool well_formed(const char* p, std::size_t n) noexcept {
-  for (std::size_t at = 0; at < n;) {
-    const Decoded step = decode_one(p + at, n - at);
-    if (!step.wellFormed) return false;
-    at += step.bytes;
-  }
-  return true;
 }
 
 }  // namespace
@@ -220,7 +173,7 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
       at += 8;
     }
   while (at < end && units < position.character) {
-    const Decoded step = decode_one(p + at, _text.size() - at);
+    const Utf8Step step = utf8_step(p + at, _text.size() - at);
     units += step.units;
     at = static_cast<TextOffset>(at + step.bytes);
   }
@@ -257,7 +210,7 @@ std::uint32_t TextDocument::advanceUtf16(TextOffset& from, TextOffset to,
       at += 8;
     }
   while (at < to) {
-    const Decoded step = decode_one(p + at, _text.size() - at);
+    const Utf8Step step = utf8_step(p + at, _text.size() - at);
     units += step.units;
     at = static_cast<TextOffset>(at + step.bytes);
   }
@@ -303,7 +256,7 @@ void TextDocument::ensureLineIndex() const {
     const std::uint64_t bit = std::uint64_t{1} << (line % 64);
     const TextOffset start = _lineStarts.back();
     if (high == 0) _asciiLines.back() |= bit;
-    if (high == 0 || well_formed(p + start, end - start))
+    if (high == 0 || utf8_well_formed({p + start, end - start}))
       _wellFormedLines.back() |= bit;
     high = 0;
   };

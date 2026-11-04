@@ -669,17 +669,13 @@ std::string DocComment::toMarkdown(
 
 bool is_doc_comment(std::string_view comment,
                     const DocCommentParseOptions& options) {
-  const auto lines = get_lines(comment);
-  if (lines.empty()) {
-    return false;
-  }
-  const bool startsOk =
-      options.start.empty() ||
-      match_prefix_marker(lines.front(), options.start).has_value();
-  const bool endsOk =
-      options.end.empty() ||
-      match_suffix_marker(lines.back(), options.end).has_value();
-  return startsOk && endsOk;
+  const std::size_t lastBreak = comment.find_last_of("\r\n");
+  const std::string_view first = comment.substr(0, comment.find_first_of("\r\n"));
+  const std::string_view last =
+      lastBreak == std::string_view::npos ? comment : comment.substr(lastBreak + 1);
+  return (options.start.empty() ||
+          match_prefix_marker(first, options.start).has_value()) &&
+         (options.end.empty() || match_suffix_marker(last, options.end).has_value());
 }
 
 DocComment parse_doc_comment(std::string_view comment, DocCommentPosition start,
