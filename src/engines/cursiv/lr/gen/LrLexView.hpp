@@ -15,10 +15,8 @@ struct LrLexView : LexTableView<LrBuildTable> {
   // Whether a state also accepts a terminal that stands only where no byte
   // follows: its token is read there with the others, not alone.
   bool ends(std::uint16_t s) const {
-    for (unsigned t = 1; t < a.cfg.nterms; ++t)
-      if (a.dfa_acc_set(s).test(t) &&
-          lex_bound_ends(a.cfg, a.dfa_acc_bound(s, t)))
-        return true;
+    for (const unsigned t : a.dfa_acc_set(s).members())
+      if (t != 0 && lex_bound_ends(a.cfg, a.dfa_acc_bound(s, t))) return true;
     return false;
   }
   std::uint16_t relay(std::uint16_t s) const {

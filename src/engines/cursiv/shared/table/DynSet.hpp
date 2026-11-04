@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <vector>
 
 namespace cursiv {
@@ -17,6 +18,42 @@ struct DynSet {
   std::vector<std::uint64_t> w;
 
   std::uint64_t word(std::size_t k) const { return k < w.size() ? w[k] : 0; }
+
+  // The members, ascending: what a walk costs is how many there are, however
+  // far they may range.
+  class Members {
+   public:
+    explicit Members(const DynSet& s) : _s(s) {}
+    struct Cursor {
+      const std::vector<std::uint64_t>& w;
+      std::size_t k = 0;
+      std::uint64_t bits = 0;
+
+      void seek() {
+        while (bits == 0 && ++k < w.size()) bits = w[k];
+      }
+      unsigned operator*() const {
+        return static_cast<unsigned>(k << 6) +
+               static_cast<unsigned>(std::countr_zero(bits));
+      }
+      Cursor& operator++() {
+        bits &= bits - 1;
+        seek();
+        return *this;
+      }
+      bool operator!=(std::default_sentinel_t) const { return bits != 0; }
+    };
+    Cursor begin() const {
+      Cursor at{_s.w, 0, _s.w.empty() ? 0 : _s.w[0]};
+      at.seek();
+      return at;
+    }
+    std::default_sentinel_t end() const { return {}; }
+
+   private:
+    const DynSet& _s;
+  };
+  Members members() const { return Members(*this); }
 
   void trim() {
     while (!w.empty() && w.back() == 0) w.pop_back();

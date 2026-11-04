@@ -15,6 +15,12 @@ namespace cursiv {
 struct LlBuildWork {
   std::uint64_t nullable = 0, first = 0, follow = 0, productive = 0, repair = 0;
   std::uint64_t gapShape = 0, gapSets = 0;
+  // The rows a record's list was read for: what keeping each row once comes to.
+  std::uint64_t rows = 0;
+  // The joins read off the chains: a pair asked again is answered at once.
+  std::uint64_t joins = 0;
+  // The pairs of terminals walked to learn whether one reads over the other.
+  std::uint64_t overtakes = 0;
 };
 
 // Every optimisation the construction makes, switchable: an attribution runs

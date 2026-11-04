@@ -18,6 +18,7 @@
 #include "cursiv/lr/gen/lr_build_passes.hpp"
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
+#include "cursiv/shared/gen/KeepFirst.hpp"
 #include "cursiv/shared/gen/LexFirstByte.hpp"
 #include "cursiv/shared/gen/LexOwedRows.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
@@ -168,6 +169,7 @@ struct LrDeriving {
   void expect(LrDerivedRows& rows) const {
     // Distinct pairs in first appearance; a state lists each once.
     std::map<std::array<std::uint16_t, 4>, std::uint16_t> pooled;
+    KeepFirst keep(a.work != nullptr ? &a.work->expects : nullptr);
     for (std::uint16_t s = 0; s < a.nstates; ++s) {
       const auto first = rows.expectItems.size();
       rows.expectBase.push_back(static_cast<std::uint32_t>(first));
@@ -185,10 +187,7 @@ struct LrDeriving {
               key, static_cast<std::uint16_t>(rows.expectPool.size()));
           if (fresh)
             rows.expectPool.push_back({act.term, site, landing, entered});
-          const auto begin = rows.expectItems.begin() + first;
-          if (std::find(begin, rows.expectItems.end(), at->second) ==
-              rows.expectItems.end())
-            rows.expectItems.push_back(at->second);
+          rows.expectItems.push_back(at->second);
         };
         if (act.kind != LrActionKind::guard) {
           for (const LrCaretSite& read : sites_read(act.alts))
@@ -213,6 +212,8 @@ struct LrDeriving {
         for (const Landed& l : landed)
           item(l.site, alike ? kNoElement : l.to, l.entered);
       }
+      rows.expectItems.resize(
+          first + keep(std::span(rows.expectItems).subspan(first)));
       // By terminal, so a completion finds one candidate's entries by search.
       std::stable_sort(rows.expectItems.begin() + first,
                        rows.expectItems.end(),

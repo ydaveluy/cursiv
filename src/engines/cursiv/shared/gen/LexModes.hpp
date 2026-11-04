@@ -127,9 +127,28 @@ struct LexModes {
     std::vector<DynSet> blank;
     if (sameTrivia)
       for (const DynSet& s : set) blank.push_back(s & trivia);
+    // A mode that covers `b` lexes each terminal `b` does: the modes that lex
+    // the rarest of them are all it takes to ask.
+    std::vector<std::vector<std::uint32_t>> lexing;
     for (std::size_t a = 0; a < set.size(); ++a)
-      for (std::size_t b = 0; b < set.size(); ++b)
+      for (const unsigned t : set[a].members()) {
+        if (t >= lexing.size()) lexing.resize(t + 1u);
+        lexing[t].push_back(static_cast<std::uint32_t>(a));
+      }
+    for (std::size_t b = 0; b < set.size(); ++b) {
+      const std::vector<std::uint32_t>* rarest = nullptr;
+      for (const unsigned t : set[b].members())
+        if (rarest == nullptr || lexing[t].size() < rarest->size())
+          rarest = &lexing[t];
+      const auto ask = [&](std::size_t a) {
         if (covers(a, b) && (!sameTrivia || blank[a] == blank[b])) mark(a, b);
+      };
+      if (rarest != nullptr) {
+        for (const std::uint32_t a : *rarest) ask(a);
+      } else {
+        for (std::size_t a = 0; a < set.size(); ++a) ask(a);
+      }
+    }
   }
 };
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <utility>
@@ -58,7 +59,27 @@ struct LrCaretSite {
   auto operator<=>(const LrCaretSite&) const = default;
 };
 
+// Optional construction counters: what each pass came to.
+struct LrBuildWork {
+  // The pairs of terminals walked to learn whether one reads over the other.
+  std::uint64_t overtakes = 0;
+  // The edges read to close the lookaheads, and every read of a set of them.
+  std::uint64_t lookaheads = 0;
+  // The states read for where a repair's reading goes on.
+  std::uint64_t insertions = 0;
+  // The continuations of the states, read for whether a state lists them.
+  std::uint64_t expects = 0;
+  // The actions read for whether a condition may refuse them.
+  std::uint64_t refusals = 0;
+  // The productions read for the chains their rules hand back.
+  std::uint64_t folds = 0;
+  // The states read for which class they stand in, and those that moved.
+  std::uint64_t minimizes = 0, moves = 0;
+};
+
 struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
+  // Where the passes count their work, while the table is built.
+  LrBuildWork* work = nullptr;
   std::uint16_t ncanonical = 0;  // states before re-fusion
   LrIdentity identity = LrIdentity::core_plus_lookaheads;
   // Offsets are 32 bits: a grammar can outgrow sixteen.
@@ -271,12 +292,18 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   bool lands_nowhere(std::uint32_t k) const {
     return std::ranges::count(guards[k].to, LrGuard::kNoState) != 0;
   }
+  // The first goto of `lhs` from state `from`, null where it has none: a row
+  // ascends by nonterminal.
+  const LrGotoRows::Edge* goto_edge(unsigned from, unsigned lhs) const {
+    const auto row = gotoRows[from];
+    const auto at = std::ranges::lower_bound(row, lhs, {}, &LrGotoRows::Edge::nt);
+    return at != row.end() && at->nt == lhs ? std::to_address(at) : nullptr;
+  }
   // The guard the goto of `lhs` from state `from` lands by, plus one; 0 for a
   // plain goto.
   std::uint32_t goto_guard(unsigned from, unsigned lhs) const {
-    for (const auto& e : gotoRows[from])
-      if (e.nt == lhs) return e.guard;
-    return 0;
+    const LrGotoRows::Edge* const e = goto_edge(from, lhs);
+    return e != nullptr ? e->guard : 0;
   }
   // An empty rule's reduce whose goto the gap decides and may leave nowhere:
   // there the token has no action in state `s`.

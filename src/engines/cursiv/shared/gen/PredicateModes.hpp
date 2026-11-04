@@ -151,13 +151,12 @@ DynSet longer_firsts(const Cfg& cfg, const DynSet& want, const DynSet& first) {
   DynSet out;
   const auto twin_wanted = [&](unsigned t) {
     if (!cfg.termBuild[t].predicateOnly || !cfg.terms[t].spelled) return false;
-    for (unsigned u = 1; u < cfg.nterms; ++u)
-      if (want.test(u) && spelled_twin(cfg, t, u)) return true;
+    for (const unsigned u : want.members())
+      if (u != 0 && spelled_twin(cfg, t, u)) return true;
     return false;
   };
-  for (unsigned t = 1; t < cfg.nterms; ++t)
-    if (first.test(t) && !want.test(t) && !cfg.terms[t].trivia &&
-        !twin_wanted(t))
+  for (const unsigned t : first.members())
+    if (t != 0 && !want.test(t) && !cfg.terms[t].trivia && !twin_wanted(t))
       out.set(t);
   return out;
 }

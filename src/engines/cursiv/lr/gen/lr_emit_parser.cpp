@@ -310,8 +310,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   void emit_set_test(const char* var, const DynSet& set) {
     raw("(");
     bool first = true;
-    for (unsigned t = 0; t < a.cfg.nterms; ++t) {
-      if (!set.test(t)) continue;
+    for (const unsigned t : set.members()) {
       if (!first) raw(" || ");
       first = false;
       fmt("{} == {}", var, t);
@@ -581,9 +580,8 @@ inline constexpr RowsTape kRowsTape{};
   bool candidate_blind(unsigned st) const {
     const auto state = static_cast<std::uint16_t>(st);
     if (a.dfaRelay[st] != kNoRelay || a.dfa_res_set(state).any()) return false;
-    for (unsigned t = 1; t < a.cfg.nterms; ++t)
-      if (a.dfa_acc_set(state).test(t) && a.dfa_acc_bound(state, t) != kNoSet)
-        return false;
+    for (const unsigned t : a.dfa_acc_set(state).members())
+      if (t != 0 && a.dfa_acc_bound(state, t) != kNoSet) return false;
     return true;
   }
 
@@ -793,8 +791,8 @@ full:
     for (std::uint16_t st = 0; st < a.ndfa; ++st) {
       // `kCandBase` counts every bit a state accepts.
       assert(!a.dfa_acc_set(st).test(0));
-      for (unsigned t = 1; t < a.cfg.nterms; ++t)
-        if (a.dfa_acc_set(st).test(t)) cands.push_back(t);
+      for (const unsigned t : a.dfa_acc_set(st).members())
+        if (t != 0) cands.push_back(t);
     }
     array(
         "inline constexpr ::std::uint16_t kCandPool[]", cands.size(),
@@ -992,8 +990,9 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
         a.dfa_acc_set(a.modeStart[m]).any())
       return false;
     for (const unsigned st : dfa.states_from(a.modeStart[m])) {
-      for (unsigned t = 1; t < a.cfg.nterms; ++t) {
-        if (!a.dfa_acc_set(static_cast<std::uint16_t>(st)).test(t)) continue;
+      const DynSet& accepted = a.dfa_acc_set(static_cast<std::uint16_t>(st));
+      for (const unsigned t : accepted.members()) {
+        if (t == 0) continue;
         const auto& term = a.cfg.terms[t];
         if (!term.trivia && !term.spelled && !a.modeWin[m].test(t))
           return false;
@@ -1747,9 +1746,9 @@ again:
       DynSet more = named;
       unsigned n = nnamed;
       bool ok = true;
-      for (unsigned t = 0; t < a.cfg.nterms && ok; ++t) {
-        if (!reach.test(t)) continue;
+      for (const unsigned t : reach.members()) {
         ok = plain(t) != nullptr;
+        if (!ok) break;
         if (!more.test(t)) {
           more.set(t);
           ++n;
@@ -1837,12 +1836,12 @@ again:
           line("      switch (sc.term) {");
           // Terminals reducing alike share their arm.
           std::vector<bool> done(a.cfg.nterms, false);
-          for (unsigned t = 0; t < a.cfg.nterms; ++t) {
-            if (!named.test(t) || done[t]) continue;
+          for (const unsigned t : named.members()) {
+            if (done[t]) continue;
             const LrAction& x = *plain(t);
             case_rows([&](auto&& put) {
-              for (unsigned u = t; u < a.cfg.nterms; ++u) {
-                if (!named.test(u) || done[u]) continue;
+              for (const unsigned u : named.members()) {
+                if (u < t || done[u]) continue;
                 if (const LrAction& y = *plain(u);
                     u != t && (x.kind != LrActionKind::reduce ||
                                y.kind != x.kind || y.arg != x.arg))

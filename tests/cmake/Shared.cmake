@@ -138,6 +138,10 @@ cursiv_grammar_pair(condgrowth engines/shared/ConditionGrowthGrammar.hpp tcondgr
 cursiv_test(ConditionGrowth_test engines/shared/ConditionGrowth_test.cpp
     cursiv::bench condgrowthllGenerated condgrowthlrGenerated)
 
+# What the analyses of a generator cost as a grammar laid at run time grows.
+cursiv_test(GeneratorGrowth_test engines/shared/GeneratorGrowth_test.cpp
+    cursivLlGen cursivLrGen)
+
 # Guards that decide where a token ends, in both engines: a keyword under a
 # complemented word boundary, and a refusal rescued past a terminal's head.
 cursiv_grammar_pair(lexguards engines/shared/LexGuardsGrammar.hpp tlexguards::Lr tlexguards::Ll)

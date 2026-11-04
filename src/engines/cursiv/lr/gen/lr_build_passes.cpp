@@ -6,7 +6,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
+#include <queue>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -208,9 +210,8 @@ bool lr_peek_arm(const LrBuildTable& A, const LrGotoColumns& go,
       else if (mode != A.mode[w])
         return false;
       // An implied token is an insertion the peek cannot see.
-      for (unsigned u = 1; u < A.cfg.nterms; ++u)
-        if (A.cfg.terms[u].laid == kLaidImplied && A.follow[w].test(u))
-          return false;
+      for (const unsigned u : A.follow[w].members())
+        if (u != 0 && A.cfg.terms[u].laid == kLaidImplied) return false;
       tok2 |= A.follow[w];
     } else if (x.kind == LrActionKind::reduce) {
       // A reduce the gap decides is not one the next token decides.
@@ -323,8 +324,6 @@ void lr_minimize_states(LrBuildTable& A) {
   const std::vector<std::uint32_t> held = lr_kept_cells(A, n, width);
   const LrAction* const acts = A.actions.data();
   const LrGotoRows& go = A.gotoRows;
-  // A guard is read by the classes it lands in.
-  std::vector guardCls(A.guards.size(), std::uint32_t{0});
   const std::vector<std::uint8_t> live = lr_live_states(A, go);
   const std::uint8_t* const lv = live.data();
 
@@ -341,85 +340,174 @@ void lr_minimize_states(LrBuildTable& A) {
     }
   }
 
-  // The first partition holds each row's fixed data. Later keys retain
-  // that class and compare only its destinations: refinement only splits.
-  std::vector<std::uint32_t> cls(n, 0), next(n);
-  std::uint32_t nclasses = 1;
-  std::vector<std::uint32_t> key;
-  for (;;) {
-    const bool initial = nclasses == 1;
-    std::vector<unsigned> size(nclasses);
-    for (std::uint32_t s = 0; s < n; ++s)
-      if (lv[s]) ++size[cls[s]];
-    // After the first round only a changed successor can split a class.
-    // `next` still holds the preceding partition until rows are written.
-    std::vector<char> dirty(nclasses, initial), represented(nclasses);
-    for (std::uint32_t s = 0; s < n; ++s) {
-      if (!lv[s] || size[cls[s]] == 1 || dirty[cls[s]]) continue;
-      const auto moved = [&](std::uint16_t to) {
-        dirty[cls[s]] = dirty[cls[s]] || cls[to] != next[to];
-      };
-      for (const LrAction& x : A.action_row(s)) A.each_landing(x, moved);
-      for (const auto& e : go[s]) A.each_goto_landing(e, moved);
+  std::vector<std::uint32_t> cls(n, 0);
+  std::vector<std::uint32_t> key, guardKey;
+  // A guard is read by the classes it lands in.
+  std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> guardIds;
+  const auto guard_class = [&](std::size_t q) {
+    lr_guard_key(A.guards[q], [&](std::uint16_t to) { return cls[to]; }, guardKey);
+    return guardIds
+        .try_emplace(guardKey, static_cast<std::uint32_t>(guardIds.size()))
+        .first->second;
+  };
+  // The first key holds a row's fixed data. Later keys compare only its
+  // destinations: refinement only splits.
+  const auto read_key = [&](std::uint32_t s, bool initial) {
+    key.clear();
+    if (initial) {
+      key.push_back(shiftTerm[s]);
+      const auto cells = held.begin() + static_cast<std::ptrdiff_t>(s) * width;
+      key.insert(key.end(), cells, cells + width);
     }
-    auto count = nclasses;
-    std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash>
-        guards, states;
-    states.reserve(n);
-    for (std::size_t q = 0; q < A.guards.size(); ++q) {
-      lr_guard_key(A.guards[q], [&](std::uint16_t to) { return cls[to]; }, key);
-      guardCls[q] =
-          guards.try_emplace(key, static_cast<std::uint32_t>(guards.size()))
-              .first->second;
+    for (unsigned i = 0, c = acount[s]; i < c; ++i) {
+      const LrAction& x = acts[abase[s] + i];
+      if (!initial && x.kind != LrActionKind::shift &&
+          x.kind != LrActionKind::guard)
+        continue;
+      if (initial) {
+        key.push_back(x.term);
+        key.push_back(static_cast<std::uint32_t>(x.kind));
+      }
+      key.push_back(x.kind == LrActionKind::shift ? 0x80000000u | cls[x.arg]
+                    : x.kind == LrActionKind::guard
+                        ? 0x20000000u | guard_class(x.arg)
+                        : 0x40000000u | pc[x.arg]);
+      if (initial) {
+        key.push_back(x.alts);
+        key.push_back(x.exact ? 1u : 0u);
+      }
     }
+    for (const LrGotoRows::Edge& e : go[s]) {
+      key.push_back(0xC0000000u | e.nt);
+      key.push_back(e.guard == 0 ? cls[e.to] << 1
+                                 : guard_class(e.guard - 1u) << 1 | 1u);
+    }
+  };
+
+  // The states of each class, and where each stands among them.
+  std::vector<std::vector<std::uint32_t>> members;
+  std::vector<std::uint32_t> seat(n, 0);
+  const auto leave = [&](std::uint32_t s) {
+    auto& row = members[cls[s]];
+    seat[row.back()] = seat[s];
+    row[seat[s]] = row.back();
+    row.pop_back();
+  };
+  const auto enter = [&](std::uint32_t s, std::uint32_t c) {
+    cls[s] = c;
+    seat[s] = static_cast<std::uint32_t>(members[c].size());
+    members[c].push_back(s);
+  };
+  {
+    // Every row is read before any state takes a class: the keys name none yet.
+    std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> first;
+    first.reserve(n);
+    std::vector<std::uint32_t> opening(n, 0);
     for (std::uint32_t s = 0; s < n; ++s) {
       if (!lv[s]) continue;
-      if (size[cls[s]] == 1 || !dirty[cls[s]]) {
-        next[s] = cls[s];
-        continue;
-      }
-      key.assign(1, cls[s]);
-      if (initial) {
-        key.push_back(shiftTerm[s]);
-        const auto cells =
-            held.begin() + static_cast<std::ptrdiff_t>(s) * width;
-        key.insert(key.end(), cells, cells + width);
-      }
-      for (unsigned i = 0, c = acount[s]; i < c; ++i) {
-        const LrAction& x = acts[abase[s] + i];
-        if (!initial && x.kind != LrActionKind::shift &&
-            x.kind != LrActionKind::guard)
-          continue;
-        if (initial) {
-          key.push_back(x.term);
-          key.push_back(static_cast<std::uint32_t>(x.kind));
-        }
-        key.push_back(x.kind == LrActionKind::shift ? 0x80000000u | cls[x.arg]
-                      : x.kind == LrActionKind::guard
-                          ? 0x20000000u | guardCls[x.arg]
-                          : 0x40000000u | pc[x.arg]);
-        if (initial) {
-          key.push_back(x.alts);
-          key.push_back(x.exact ? 1u : 0u);
-        }
-      }
-      for (const LrGotoRows::Edge& e : go[s]) {
-        key.push_back(0xC0000000u | e.nt);
-        key.push_back(e.guard == 0 ? cls[e.to] << 1
-                                   : guardCls[e.guard - 1u] << 1 | 1u);
-      }
-      const auto [at, fresh] = states.try_emplace(key, cls[s]);
-      if (fresh && std::exchange(represented[cls[s]], 1)) at->second = count++;
-      next[s] = at->second;
+      read_key(s, true);
+      opening[s] = first
+                       .try_emplace(key, static_cast<std::uint32_t>(first.size()))
+                       .first->second;
     }
-    cls.swap(next);
-    if (count == nclasses) break;
-    nclasses = count;
+    members.resize(first.size());
+    for (std::uint32_t s = 0; s < n; ++s)
+      if (lv[s]) enter(s, opening[s]);
+  }
+  // Per state, the states whose rows land on it, by the edges of the live ones.
+  std::vector<std::uint32_t> edgeFrom, edgeTo;
+  for (std::uint32_t s = 0; s < n; ++s) {
+    if (!lv[s]) continue;
+    const auto note = [&](std::uint16_t to) {
+      edgeFrom.push_back(s);
+      edgeTo.push_back(to);
+    };
+    for (const LrAction& x : A.action_row(s)) A.each_landing(x, note);
+    for (const auto& e : go[s]) A.each_goto_landing(e, note);
+  }
+  const LrBuckets<> into(n, static_cast<std::uint32_t>(edgeTo.size()),
+                         [&](std::uint32_t k) { return edgeTo[k]; });
+
+  // Each round reads the states a class's move reached. Two states of one class
+  // agreed on where they land before it: one that lands on a state that moved
+  // now differs from one that does not, so only the first kind is read. A class
+  // keeps its id with its largest part, so a state moves at most a logarithm of
+  // times; the classes only split, and a round with no move ends the walk.
+  std::vector<std::uint32_t> reached, moved, dirty;
+  std::vector<std::vector<std::uint32_t>> parts;
+  std::vector<std::uint32_t> readIn(n, 0), inClass;
+  std::uint32_t round = 0;
+  for (std::uint32_t s = 0; s < n; ++s)
+    if (lv[s]) reached.push_back(s);
+  while (!reached.empty()) {
+    ++round;
+    dirty.clear();
+    inClass.resize(members.size());
+    std::vector<std::vector<std::uint32_t>> byClass(0);
+    for (const std::uint32_t s : reached) {
+      if (A.work != nullptr) ++A.work->minimizes;
+      const std::uint32_t c = cls[s];
+      if (members[c].size() == 1) continue;
+      if (inClass[c] == 0) {
+        dirty.push_back(c);
+        byClass.emplace_back();
+        inClass[c] = static_cast<std::uint32_t>(byClass.size());
+      }
+      byClass[inClass[c] - 1].push_back(s);
+    }
+    moved.clear();
+    for (const std::uint32_t c : dirty) {
+      std::vector<std::uint32_t>& read = byClass[inClass[c] - 1];
+      inClass[c] = 0;
+      std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> parted;
+      parts.clear();
+      for (const std::uint32_t s : read) {
+        read_key(s, false);
+        const auto [at, fresh] =
+            parted.try_emplace(key, static_cast<std::uint32_t>(parts.size()));
+        if (fresh) parts.emplace_back();
+        parts[at->second].push_back(s);
+      }
+      const std::size_t untouched = members[c].size() - read.size();
+      std::size_t largest = 0;
+      for (std::size_t i = 1; i < parts.size(); ++i)
+        if (parts[i].size() > parts[largest].size()) largest = i;
+      // The part that keeps the class: those not read, or the largest read.
+      const bool keepRest = untouched >= parts[largest].size();
+      if (!keepRest) {
+        // Those not read stand apart from every part read: they move together.
+        for (const std::uint32_t s : read) readIn[s] = round;
+        std::vector<std::uint32_t> rest;
+        rest.reserve(untouched);
+        for (const std::uint32_t s : members[c])
+          if (readIn[s] != round) rest.push_back(s);
+        if (!rest.empty()) parts.push_back(std::move(rest));
+      }
+      for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (!keepRest && i == largest) continue;
+        const auto to = static_cast<std::uint32_t>(members.size());
+        members.emplace_back();
+        for (const std::uint32_t s : parts[i]) {
+          leave(s);
+          enter(s, to);
+          moved.push_back(s);
+        }
+      }
+    }
+    if (A.work != nullptr) A.work->moves += moved.size();
+    ++round;
+    reached.clear();
+    for (const std::uint32_t t : moved)
+      for (const std::uint32_t k : into.of(t))
+        if (readIn[edgeFrom[k]] != round) {
+          readIn[edgeFrom[k]] = round;
+          reached.push_back(edgeFrom[k]);
+        }
   }
   // One representative per class, numbered by first occurrence so the start
   // state keeps its seat.
   std::vector<std::uint32_t> reps;
-  reps.reserve(nclasses);
+  reps.reserve(members.size());
   const auto newIdx = lr_representatives(cls, reps, live);
   const auto remap = [&](std::uint32_t s) {
     return static_cast<std::uint16_t>(newIdx[cls[s]]);
@@ -530,29 +618,53 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
   const auto add = [](std::uint64_t a, std::uint64_t b) {
     return a > kInf - b ? kInf : a + b;
   };
+  // What each rule costs at least. The cheapest rule not settled yet can get no
+  // cheaper, a sum being no less than what it adds up: a production is read once,
+  // when the last rule it names settles.
   std::vector yieldN(nN, kInf);
+  std::vector<std::vector<std::uint32_t>> readers(nN);
+  std::vector<std::uint32_t> unsettled(nP, 0);
+  for (unsigned p = 0; p < nP; ++p)
+    g.each_nt(prods[p], [&](unsigned, std::uint16_t nt) {
+      readers[nt].push_back(p);
+      ++unsettled[p];
+    });
   const auto yieldSym = [&](std::uint16_t x) {
     return is_term(x) ? std::uint64_t{1} : yieldN[nt_index(x)];
   };
-  const auto yieldFrom = [&](const LrLowProd& p, unsigned i) {
-    std::uint64_t s = 0;
-    for (; i < p.len; ++i) s = add(s, yieldSym(g.sym_at(p, i)));
-    return s;
+  using Cost = std::pair<std::uint64_t, std::uint16_t>;
+  std::priority_queue<Cost, std::vector<Cost>, std::greater<>> cheapest;
+  const auto read_cost = [&](std::uint32_t p) {
+    std::uint64_t cost = 0;
+    for (unsigned i = 0; i < prods[p].len; ++i)
+      cost = add(cost, yieldSym(g.sym_at(prods[p], i)));
+    if (cost != kInf) cheapest.emplace(cost, prods[p].lhs);
   };
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (unsigned p = 0; p < nP; ++p) {
-      const std::uint64_t s = yieldFrom(prods[p], 0);
-      if (s < yieldN[prods[p].lhs]) {
-        yieldN[prods[p].lhs] = s;
-        changed = true;
-      }
-    }
+  for (unsigned p = 0; p < nP; ++p)
+    if (unsettled[p] == 0) read_cost(p);
+  while (!cheapest.empty()) {
+    const auto [cost, nt] = cheapest.top();
+    cheapest.pop();
+    if (yieldN[nt] != kInf) continue;
+    yieldN[nt] = cost;
+    for (const std::uint32_t reader : readers[nt])
+      if (--unsettled[reader] == 0) read_cost(reader);
   }
+  // What each item still owes, read once off the costs settled above.
+  std::vector<std::uint32_t> itemAt(nP + 1u, 0);
+  for (unsigned p = 0; p < nP; ++p) itemAt[p + 1u] = itemAt[p] + prods[p].len + 1u;
+  std::vector<std::uint64_t> rest(itemAt[nP], 0);
+  for (unsigned p = 0; p < nP; ++p)
+    for (unsigned i = prods[p].len; i-- > 0;)
+      rest[itemAt[p] + i] =
+          add(yieldSym(g.sym_at(prods[p], i)), rest[itemAt[p] + i + 1u]);
+  const auto yieldFrom = [&](std::uint32_t p, unsigned i) {
+    return rest[itemAt[p] + i];
+  };
   std::vector<DynSet> firstN(nN);
-  const auto firstFrom = [&](const LrLowProd& p, unsigned i, DynSet& out) {
-    for (; i < p.len; ++i) {
-      const std::uint16_t x = g.sym_at(p, i);
+  const auto firstFrom = [&](const LrLowProd& q, unsigned i, DynSet& out) {
+    for (; i < q.len; ++i) {
+      const std::uint16_t x = g.sym_at(q, i);
       if (yieldSym(x) == 0) continue;
       if (is_term(x))
         out.set(x);
@@ -561,22 +673,31 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
       return;
     }
   };
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (unsigned p = 0; p < nP; ++p) {
-      const LrLowProd& pr = prods[p];
-      if (yieldN[pr.lhs] == kInf || yieldFrom(pr, 0) != yieldN[pr.lhs])
-        continue;
-      DynSet grown = firstN[pr.lhs];
-      firstFrom(pr, 0, grown);
-      if (grown == firstN[pr.lhs]) continue;
-      firstN[pr.lhs] = std::move(grown);
-      changed = true;
-    }
+  // The first terminals of a rule's shortest readings, from the first symbol of
+  // each that owes anything: a set only grows, so the walk ends.
+  std::vector<std::uint8_t> reads(nP, 0), queued(nP, 1);
+  std::vector<std::uint32_t> todo(nP);
+  for (unsigned p = 0; p < nP; ++p) {
+    reads[p] = yieldN[prods[p].lhs] != kInf &&
+               yieldFrom(p, 0) == yieldN[prods[p].lhs];
+    todo[p] = nP - 1u - p;
+  }
+  while (!todo.empty()) {
+    const std::uint32_t p = todo.back();
+    todo.pop_back();
+    queued[p] = 0;
+    if (reads[p] == 0) continue;
+    DynSet grown = firstN[prods[p].lhs];
+    firstFrom(prods[p], 0, grown);
+    if (grown == firstN[prods[p].lhs]) continue;
+    firstN[prods[p].lhs] = std::move(grown);
+    for (const std::uint32_t reader : readers[prods[p].lhs])
+      if (std::exchange(queued[reader], std::uint8_t{1}) == 0)
+        todo.push_back(reader);
   }
   A.closeMax = 0;
   for (unsigned p = 0; p < nP; ++p)
-    if (const std::uint64_t y = yieldFrom(prods[p], 0); y != kInf)
+    if (const std::uint64_t y = yieldFrom(p, 0); y != kInf)
       A.closeMax = std::max(A.closeMax, y);
 
   const auto owed = [&](const LrItem& it) {
@@ -585,7 +706,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
     if (const std::uint16_t head = p.len != 0 ? g.sym_at(p, 0) : kNtBase;
         it.dot == 1 && !is_term(head) && nt_index(head) == p.lhs)
       return kInf;
-    return yieldFrom(p, it.dot);
+    return yieldFrom(it.prod, it.dot);
   };
   DynSet implied;
   for (unsigned t = 0; t < g.nterms; ++t)
@@ -605,7 +726,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
       const LrLowProd& p = prods[it.prod];
       if (o != kInf || it.dot >= p.len) return o;
       const std::uint16_t t = g.sym_at(p, it.dot);
-      return is_term(t) && due.test(t) ? yieldFrom(p, it.dot) : kInf;
+      return is_term(t) && due.test(t) ? yieldFrom(it.prod, it.dot) : kInf;
     };
     std::uint64_t least = owe;
     for (const LrItem& it : items) least = std::min(least, counted(it));
@@ -626,7 +747,7 @@ void lr_close_rows(LrBuildTable& A, const LrPoolRows<LrItem>& clos,
       std::uint64_t next = kInf;
       for (const LrItem& o : items)
         if (o.dot < prods[o.prod].len && g.sym_at(prods[o.prod], o.dot) == t)
-          next = std::min(next, yieldFrom(prods[o.prod], o.dot + 1u));
+          next = std::min(next, yieldFrom(o.prod, o.dot + 1u));
       assert(next + 1 == owe && "a due shift owes one token less");
     }
 #endif
@@ -676,8 +797,17 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   if (std::ranges::any_of(hasE, [](std::uint8_t x) { return x != 0; })) {
     // A substituted cell reads the same token where the successor's
     // alphabet is within this one's, under the same configuration.
+    // The cells of a row mostly ask one pair of modes: the last answer stands.
+    std::uint16_t askedOver = kNoRow, askedOf = kNoRow;
+    bool coveredLast = false;
     const auto wantWithin = [&](std::uint32_t u, std::uint32_t x) {
-      return cfgS[u] == cfgS[x] && modes.covers(A.mode[x], A.mode[u]);
+      if (cfgS[u] != cfgS[x]) return false;
+      if (A.mode[x] != askedOver || A.mode[u] != askedOf) {
+        askedOver = A.mode[x];
+        askedOf = A.mode[u];
+        coveredLast = modes.covers(askedOver, askedOf);
+      }
+      return coveredLast;
     };
 
     // Index only the original edges, before any copy is appended. Columns

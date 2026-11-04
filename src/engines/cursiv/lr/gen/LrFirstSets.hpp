@@ -163,8 +163,8 @@ inline std::vector<DynSet> lr_terminal_follow(const LrBuildCfg& g,
       if (is_term(sym)) {
         if (sym != kEofSymbol) out[sym] |= next;
       } else {
-        for (unsigned b = 1; b < g.nterms; ++b)
-          if (last[nt_index(sym)].test(b)) out[b] |= next;
+        for (const unsigned b : last[nt_index(sym)].members())
+          if (b != 0) out[b] |= next;
       }
       if (is_term(sym) || !fs.nullable[nt_index(sym)]) next.w.clear();
       fs.add(next, sym);

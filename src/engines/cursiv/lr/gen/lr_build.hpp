@@ -7,11 +7,13 @@
 
 namespace cursiv {
 
-LrBuildTable lr_build_automaton(const LrLowered& low);
+LrBuildTable lr_build_automaton(const LrLowered& low,
+                                LrBuildWork* work = nullptr);
 // The wider graph, whose states carry their kernel lookaheads; given the
 // narrower one, no further than its merge where it does not stand against it.
 LrBuildTable lr_build_wide(const LrLowered& low,
-                           const LrBuildTable* against = nullptr);
+                           const LrBuildTable* against = nullptr,
+                           LrBuildWork* work = nullptr);
 
 // Whether the wider graph owes fewer ambiguities, no cap given way.
 bool lr_wider_stands(const LrBuildTable& c, const LrBuildTable& w);

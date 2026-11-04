@@ -121,9 +121,8 @@ LexReserved lex_reserve(const Cfg& g, const View& v, std::size_t ndfa,
       });
     if (!reserving && !readers) continue;
     const DynSet& acc = accepted(s);
-    for (unsigned u = 1; u < g.nterms; ++u) {
-      if (!acc.test(u) || g.terms[u].spelled || words.test(u) ||
-          literals.test(u))
+    for (const unsigned u : acc.members()) {
+      if (u == 0 || g.terms[u].spelled || words.test(u) || literals.test(u))
         continue;
       if (reserving) reserve(s, u);
       if (readers && !pending[s].test(u)) held(s, u);

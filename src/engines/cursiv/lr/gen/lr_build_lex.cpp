@@ -754,27 +754,42 @@ void lr_lex_candidates(LrBuildTable& A, const LexAlphabet& alpha,
 }
 
 void lr_lex_condition_flags(LrBuildTable& A) {
-  // Whether a condition may refuse `x`, the one action of its cell in state
-  // `s`, or the one action a state an empty rule's goto lands in takes on it.
-  const auto refusable = [&](unsigned s, LrAction x) {
-    for (unsigned hops = A.nstates; !A.may_refuse(s, x); --hops) {
-      if (hops == 0 || x.kind != LrActionKind::reduce ||
-          A.cfg.prods[x.arg].len != 0)
-        return false;
-      const unsigned lhs = A.cfg.prods[x.arg].lhs;
-      const auto edge = std::ranges::find_if(
-          A.gotoRows[s], [&](const auto& e) { return e.nt == lhs; });
-      if (edge == A.gotoRows[s].end()) return false;
+  // Whether a condition may refuse action `at` of state `s`, or the one action
+  // a state an empty rule's goto lands in takes on its terminal. An action leads
+  // to one other at most: each is answered once, for all that lead to it, and
+  // a run of them that comes back to itself refuses nothing.
+  enum : std::uint8_t { kUnasked, kNo, kYes, kWalking };
+  std::vector<std::uint8_t> refusing(A.nactions, kUnasked);
+  std::vector<std::uint32_t> walked;
+  const auto refusable = [&](unsigned s, std::uint32_t at) {
+    walked.clear();
+    bool answer = false;
+    for (;;) {
+      if (A.work != nullptr) ++A.work->refusals;
+      const LrAction x = A.actions[at];
+      if (A.may_refuse(s, x)) {
+        answer = true;
+        break;
+      }
+      if (x.kind != LrActionKind::reduce || A.cfg.prods[x.arg].len != 0) break;
+      if (const std::uint8_t known = refusing[at]; known != kUnasked) {
+        answer = known == kYes;
+        break;
+      }
+      refusing[at] = kWalking;
+      walked.push_back(at);
+      const LrGotoRows::Edge* const edge =
+          A.goto_edge(s, A.cfg.prods[x.arg].lhs);
+      if (edge == nullptr) break;
       s = edge->to;
-      std::size_t cells = 0;
-      for (const LrAction& y : A.action_row(s))
-        if (y.term == x.term) {
-          x = y;
-          ++cells;
-        }
-      if (cells != 1) return false;
+      const std::uint32_t base = A.actionBase[s];
+      const auto [lo, cells] =
+          lr_term_run(A.actions.data() + base, A.actionCount[s], x.term);
+      if (cells != 1) break;
+      at = base + lo;
     }
-    return true;
+    for (const std::uint32_t k : walked) refusing[k] = answer ? kYes : kNo;
+    return answer;
   };
   // Per mode, the terminals a condition may refuse in a state reading in it:
   // every action of their cell. A state a reduce lands in under another mode
@@ -787,7 +802,8 @@ void lr_lex_condition_flags(LrBuildTable& A) {
       const LrAction& x = row[i];
       if (A.cfg.terms[x.term].laid != 0) return;
       for (std::size_t k = i; k < j; ++k)
-        if (!refusable(s, row[k])) return;
+        if (!refusable(s, A.actionBase[s] + static_cast<std::uint32_t>(k)))
+          return;
       asked[A.mode[s]].set(x.term);
       all.set(x.term);
     });

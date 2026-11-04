@@ -194,8 +194,8 @@ LexModes ll_lex_modes_of(LlBuiltProgram& b) {
   // By index: interning a trivia set may append a mode while it is read.
   for (std::size_t m = 0; m < modes.set.size(); ++m) {
     DynSet blank, joined;
-    for (std::uint16_t t = 1; t < g.nterms; ++t) {
-      if (!modes.set[m].test(t)) continue;
+    for (const unsigned t : modes.set[m].members()) {
+      if (t == 0) continue;
       if (g.terms[t].trivia) blank.set(t);
       if (g.terms[t].trivia || g.terms[t].joins) joined.set(t);
     }
@@ -451,7 +451,7 @@ void ll_mode_cover(LlBuiltProgram& b, const LexModes& modes) {
 // frames it stands in before it takes one. What those frames answer, what each
 // caller reads past the call, is kept with them.
 void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
-                     const LexModes& modes) {
+                     const LexModes& modes, std::uint64_t* walks) {
   const auto& g = b.cfg;
   b.decFlag.assign(g.ndecisions, DynSet{});
   const LlExitReads exits(b);
@@ -485,11 +485,13 @@ void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
         b.decFlag[d].set(static_cast<unsigned>(t));
     });
   }
+  if (walks != nullptr) *walks += overtakes.walks();
 }
 
 }  // namespace
 
-void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha) {
+void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha,
+                    std::uint64_t* walks) {
   alpha.section_ends(b.cfg, ll_section_reads);
   const LexModes modes = ll_lex_modes_of(b);
   // For a mode `modeMulti` marks 2, the terminals that meet at the text's end.
@@ -517,7 +519,7 @@ void ll_build_lexer(LlBuiltProgram& b, LexAlphabet& alpha) {
     decision.how = LlPredict::adaptive;
     ++b.nadaptive;
   }
-  ll_flag_choices(b, alpha, modes);
+  ll_flag_choices(b, alpha, modes, walks);
 }
 
 }  // namespace cursiv::detail

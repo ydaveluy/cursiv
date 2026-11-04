@@ -8,6 +8,7 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -36,6 +37,7 @@
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/PredicateModes.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
+#include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
@@ -277,7 +279,9 @@ LrItemDomain lr_item_domain(const LrBuildCfg& g) {
 
 // What `. B` adds for every nonterminal B, and the items it sets as a mask.
 struct LrClosures {
-  // Each rule's entries, ascending by production.
+  // Each rule's entries, ascending by production; without `lookaheads`, only
+  // which productions they name.
+  bool lookaheads = false;
   std::vector<LrClosEntry> entries;
   std::vector<std::uint32_t> base;
   std::vector<std::uint64_t> maskArena;
@@ -288,12 +292,14 @@ struct LrClosures {
   }
 };
 
-// Close the productions reachable through each rule's first symbol once.
-// The same entries serve canonical lookaheads and the order a cell forks in.
+// Close the productions reachable through each rule's first symbol once. The
+// entries serve canonical lookaheads and the order a cell forks in, and a graph
+// under `core` with no cell to order reads neither: `lookaheads` lays them.
 LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
                        const LrBuckets<std::uint16_t>& pn,
-                       const LrFirstSets& fs) {
-  LrClosures cl{{},
+                       const LrFirstSets& fs, bool lookaheads) {
+  LrClosures cl{lookaheads,
+                {},
                 std::vector<std::uint32_t>(g.nnts + 1),
                 std::vector<std::uint64_t>(dom.words * g.nnts),
                 std::vector<LrBitWords>(g.nnts)};
@@ -329,7 +335,7 @@ LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
         todo.push_back(p);
       }
     };
-    for (const std::uint16_t p : pn.of(B)) add(p, {}, true);
+    for (const std::uint16_t p : pn.of(B)) add(p, {}, lookaheads);
     DynSet fixed;
     while (!todo.empty()) {
       const auto p = todo.back();
@@ -338,7 +344,7 @@ LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
       const LrLowProd& pr = g.prods[p];
       if (pr.len == 0 || is_term(g.sym_at(pr, 0))) continue;
       fixed.w.clear();
-      bool inherit = true;
+      bool inherit = lookaheads;
       for (unsigned i = 1; i < pr.len && inherit; ++i) {
         const auto sym = g.sym_at(pr, i);
         fs.add(fixed, sym);
@@ -1110,15 +1116,91 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   return gr;
 }
 
+// Sets told by what they hold, each kept once.
+class LrSetNames {
+ public:
+  LrSetNames() { _index.init(64); }
+
+  std::uint32_t name(const DynSet& s) {
+    const std::uint64_t h = set_hash(s);
+    for (unsigned i = _index.first(h); i != ChainIndex::kNone;
+         i = _index.after(i))
+      if (_sets[i] == s) return i;
+    const auto id = static_cast<std::uint32_t>(_sets.size());
+    _sets.push_back(s);
+    _index.add(h, id);
+    return id;
+  }
+  // Holds only until the next `name`.
+  const DynSet& operator[](std::uint32_t id) const {
+    if (_reads != nullptr) ++*_reads;
+    return _sets[id];
+  }
+  std::size_t size() const { return _sets.size(); }
+  void count_reads(std::uint64_t* reads) { _reads = reads; }
+
+ private:
+  std::vector<DynSet> _sets;
+  ChainIndex _index;
+  std::uint64_t* _reads = nullptr;
+};
+
+// The least sets where `v[into[k]]` holds `v[from[k]]`, by name. Transitions that
+// reach each other hold one set, and a component takes what it depends on once,
+// closed: each edge is read once, whatever the order the edges come in.
+void lr_close_over(LrSetNames& sets, std::vector<std::uint32_t>& v,
+                   const std::vector<std::uint32_t>& into,
+                   const std::vector<std::uint32_t>& from,
+                   std::uint64_t* work) {
+  const auto nv = static_cast<std::uint32_t>(v.size());
+  const LrBuckets<> edges(nv, static_cast<std::uint32_t>(into.size()),
+                          [&](std::uint32_t k) { return into[k]; });
+  std::vector<std::uint32_t> targets(into.size());
+  for (std::size_t i = 0; i < targets.size(); ++i)
+    targets[i] = from[edges.item[i]];
+  const auto scc = StrongComponents<>::build(edges.base, targets);
+  std::uint32_t count = 0;
+  for (const std::uint32_t c : scc.component) count = std::max(count, c + 1u);
+  const LrBuckets<> members(count, nv, [&](std::uint32_t d) {
+    return scc.component[d];
+  });
+  std::vector<std::uint32_t> closed(count), taken(sets.size(), 0);
+  DynSet all;
+  for (std::uint32_t c = 0; c < count; ++c) {
+    all.w.clear();
+    std::uint32_t distinct = 0, only = 0;
+    const auto take = [&](std::uint32_t id) {
+      if (work != nullptr) ++*work;
+      if (taken.size() <= id) taken.resize(sets.size(), 0);
+      if (std::exchange(taken[id], c + 1u) == c + 1u) return;
+      ++distinct;
+      only = id;
+      all |= sets[id];
+    };
+    for (const std::uint32_t d : members.of(c)) {
+      take(v[d]);
+      for (std::uint32_t i = edges.base[d]; i < edges.base[d + 1]; ++i)
+        if (const std::uint32_t to = scc.component[targets[i]]; to != c)
+          take(closed[to]);
+    }
+    closed[c] = distinct == 1 ? only : sets.name(all);
+    for (const std::uint32_t d : members.of(c)) v[d] = closed[c];
+  }
+}
+
 // What each reduction looks back to, kept for the conflicts laid later.
 struct LrLookback {
   std::vector<std::uint32_t> from, origin;
   std::vector<std::uint16_t> prod;
-  std::vector<DynSet> follow, read;
-  // The transitions whose lookahead a transition takes in: `inclBy.of(d)`
-  // lists the pairs of `d`, `inclSrc` their sources.
-  std::vector<std::uint32_t> inclSrc;
-  LrBuckets<> inclBy;
+  // What each transition reads and what may follow it, by name: transitions by
+  // the thousand hold the same few sets.
+  LrSetNames sets;
+  std::vector<std::uint32_t> followOf, readOf;
+  const DynSet& follow(std::uint32_t d) const { return sets[followOf[d]]; }
+  const DynSet& read(std::uint32_t d) const { return sets[readOf[d]]; }
+  // What each transition's reductions answer, each set once, by name: what it
+  // reads, and what follows the transitions whose lookahead it takes in.
+  std::vector<std::vector<std::uint32_t>> answers;
   // The lookbacks of each state, ordered on (production, transition).
   LrBuckets<> byState;
 
@@ -1133,7 +1215,7 @@ struct LrLookback {
                                       [&](std::uint32_t x) { return prod[x]; });
     };
     const auto hands = [&](std::uint32_t d) {
-      return d != 0xffffffffu && follow[d].test(t);
+      return d != 0xffffffffu && follow(d).test(t);
     };
     const auto r2 = run(p2);
     bool any = false;
@@ -1148,7 +1230,7 @@ struct LrLookback {
       for (; at != r2.end() && origin[*at] == o; ++at) {
         const std::uint32_t d2 = from[*at];
         if (!hands(d2)) continue;
-        if (d2 == d || read[d].test(t) || read[d2].test(t)) return false;
+        if (d2 == d || read(d).test(t) || read(d2).test(t)) return false;
       }
     }
     // No transition handed it the token: no context to keep apart.
@@ -1159,36 +1241,28 @@ struct LrLookback {
   // callers takes: the merged row asked against each caller's own lookahead
   // beside the shifts.
   DynSet lex_flagged(unsigned st, const DynSet& shifted,
-                     LexOvertakes<LrBuildCfg>& overtakes) const {
+                     LexOvertakes<LrBuildCfg>& overtakes,
+                     RoundMarks& once) const {
     const std::span<const std::uint32_t> row = byState.of(st);
-    struct Run {
-      std::vector<DynSet> parts;
-      DynSet all;
-    };
-    std::vector<Run> runs;
+    // The sets each production's reduction answers, each once.
+    std::vector<std::vector<std::uint32_t>> runs;
     for (std::size_t i = 0, j; i < row.size(); i = j) {
-      Run run;
-      const auto add = [&](const DynSet& x) {
-        if (x.none()) return;
-        run.all |= x;
-        if (std::ranges::find(run.parts, x) == run.parts.end())
-          run.parts.push_back(x);
-      };
-      for (j = i; j < row.size() && prod[row[j]] == prod[row[i]]; ++j) {
-        const std::uint32_t d = from[row[j]];
-        if (d == 0xffffffffu) continue;
-        add(read[d]);
-        for (const std::uint32_t k : inclBy.of(d)) add(follow[inclSrc[k]]);
-      }
-      runs.push_back(std::move(run));
+      std::vector<std::uint32_t> parts;
+      once.next();
+      for (j = i; j < row.size() && prod[row[j]] == prod[row[i]]; ++j)
+        if (const std::uint32_t d = from[row[j]]; d != 0xffffffffu)
+          for (const std::uint32_t id : answers[d])
+            if (sets[id].any() && once.first(id)) parts.push_back(id);
+      runs.push_back(std::move(parts));
     }
     DynSet merged = shifted;
-    for (const Run& run : runs) merged |= run.all;
+    for (const auto& parts : runs)
+      for (const std::uint32_t id : parts) merged |= sets[id];
     DynSet flagged;
-    for (const Run& run : runs)
-      if (run.parts.size() > 1)
-        for (const DynSet& part : run.parts)
-          flagged |= overtakes.overtaking(merged, part | shifted);
+    for (const auto& parts : runs)
+      if (parts.size() > 1)
+        for (const std::uint32_t id : parts)
+          flagged |= overtakes.overtaking(merged, sets[id] | shifted);
     return flagged;
   }
 
@@ -1198,7 +1272,7 @@ struct LrLookback {
   bool implied_mixed(unsigned st, const DynSet& implied) const {
     const std::span<const std::uint32_t> row = byState.of(st);
     const auto handed = [&](std::uint32_t q) {
-      return follow[from[q]] & implied;
+      return follow(from[q]) & implied;
     };
     for (std::size_t i = 0, j; i < row.size(); i = j) {
       DynSet all;
@@ -1216,7 +1290,8 @@ struct LrLookback {
 // says whether the merge put two readings in one cell, asked of every
 // identity; only `writeLa` writes the sets.
 LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
-                         const LrFirstSets& fs, bool writeLa) {
+                         const LrFirstSets& fs, bool writeLa,
+                         std::uint64_t* work) {
   const LrLowProd* const prods = g.prods.data();
   const unsigned nP = g.nprods;
   const unsigned ns = gr.states();
@@ -1224,9 +1299,29 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   const auto& gt = gr.gotos;
   const auto ntr = static_cast<std::uint32_t>(gt.pool.size());
   LrLookback lb;
-  std::vector<DynSet> read(ntr);
-  for (std::uint32_t d = 0; d < ntr; ++d)
-    for (const LrEdge& e : gr.shifts[gt.pool[d].to]) read[d].set(e.sym);
+  LrSetNames& sets = lb.sets;
+  sets.count_reads(work);
+  // What a transition reads to begin with: what the state it lands in shifts.
+  std::vector<std::uint32_t> read(ntr);
+  {
+    constexpr std::uint32_t kUnnamed = 0xffffffffu;
+    std::vector<std::uint32_t> shifted(ns, kUnnamed);
+    for (std::uint32_t d = 0; d < ntr; ++d) {
+      std::uint32_t& name = shifted[gt.pool[d].to];
+      if (name == kUnnamed) {
+        DynSet row;
+        for (const LrEdge& e : gr.shifts[gt.pool[d].to]) row.set(e.sym);
+        name = sets.name(row);
+      }
+      read[d] = name;
+    }
+  }
+  const auto read_end = [&](std::uint32_t d) {
+    if (sets[read[d]].test(kEofSymbol)) return;
+    DynSet row = sets[read[d]];
+    row.set(kEofSymbol);
+    read[d] = sets.name(row);
+  };
   // The goto rows of the state last asked, by nonterminal.
   std::vector<std::uint32_t> trAsked(g.nnts, 0);
   std::vector<std::pair<std::uint32_t, std::uint32_t>> trRow(g.nnts);
@@ -1244,7 +1339,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
   if (const std::uint16_t b = g.nt_after(g.startProd, 0);
       b != kNoRow && prods[g.startProd].len == 1) {
     const auto [e0, e1] = trIds(0, b);
-    for (std::uint32_t e = e0; e < e1; ++e) read[e].set(kEofSymbol);
+    for (std::uint32_t e = e0; e < e1; ++e) read_end(e);
   }
 
   // The goto that closes a span: the landing its guard picks off the tag of
@@ -1262,41 +1357,18 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
     return 0xffffffffu;
   };
 
-  // The fixpoint of one relation: `v[into[k]]` holds `v[from[k]]`.
-  const auto close_over = [&](std::vector<DynSet>& v,
-                              const std::vector<std::uint32_t>& into,
-                              const std::vector<std::uint32_t>& from) {
-    const LrBuckets<> out(ntr, static_cast<std::uint32_t>(from.size()),
-                          [&](std::uint32_t k) { return from[k]; });
-    std::vector queued(ntr, char{1});
-    std::vector<std::uint32_t> fw(ntr);
-    std::iota(fw.begin(), fw.end(), 0u);
-    std::uint32_t nfw = ntr;
-    while (nfw != 0) {
-      const std::uint32_t d = fw[--nfw];
-      queued[d] = 0;
-      for (const std::uint32_t k : out.of(d)) {
-        const std::uint32_t up = into[k];
-        if (v[up].add(v[d]) && !queued[up]) {
-          queued[up] = 1;
-          fw[nfw++] = up;
-        }
-      }
-    }
-  };
-
   // `reads`: past a nullable nonterminal, the next transition's reads.
   {
     std::vector<std::uint32_t> into, from;
     for (std::uint32_t d = 0; d < ntr; ++d)
       for (const LrEdge& e : gt[gt.pool[d].to]) {
-        if (fs.first[nt_index(e.sym)].test(kEofSymbol)) read[d].set(kEofSymbol);
+        if (fs.first[nt_index(e.sym)].test(kEofSymbol)) read_end(d);
         if (fs.nullable[nt_index(e.sym)]) {
           into.push_back(d);
           from.push_back(static_cast<std::uint32_t>(&e - gt.pool.data()));
         }
       }
-    close_over(read, into, from);
+    lr_close_over(sets, read, into, from, work);
   }
 
   // `includes` and `lookback`, read off one walk of a right-hand side from
@@ -1345,7 +1417,7 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
         const auto dst =
             static_cast<std::uint32_t>(step[i].data() - gt.pool.data());
         if (g.prodBuild[prod].endOnly)
-          read[dst].set(kEofSymbol);
+          read_end(dst);
         else {
           inclDst.push_back(dst);
           inclSrc.push_back(src);
@@ -1399,19 +1471,20 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
     }
   const auto nLb = static_cast<std::uint32_t>(lbState.size());
 
-  std::vector<DynSet> follow = read;
-  close_over(follow, inclDst, inclSrc);
+  std::vector<std::uint32_t> follow = read;
+  lr_close_over(sets, follow, inclDst, inclSrc, work);
 
   // Written into the room the graph left empty.
   DynSet* const closLa = gr.closLaPool.data();
+  DynSet endOnly;
+  endOnly.set(kEofSymbol);
   for (std::uint32_t q = 0; q < nLb && writeLa; ++q) {
-    DynSet in;
-    if (lb.prod[q] == g.startProd)
-      in.set(kEofSymbol);  // the accept owes end of input, nothing else
-    else if (lb.from[q] != 0xffffffffu)
-      in = follow[lb.from[q]];
-    else
-      continue;
+    // The accept owes end of input, nothing else.
+    const DynSet* in = &endOnly;
+    if (lb.prod[q] != g.startProd) {
+      if (lb.from[q] == 0xffffffffu) continue;
+      in = &sets[follow[lb.from[q]]];
+    }
     const std::uint16_t pd = lb.prod[q];
     const std::uint16_t dot = prods[pd].len;
     // A closure is emitted by increasing item index, hence sorted by
@@ -1424,13 +1497,22 @@ LrLookback lr_lookaheads(const LrBuildCfg& g, LrGraph& gr,
           return a.prod != b.prod ? a.prod < b.prod : a.dot < b.dot;
         });
     if (hit != last && *hit == key)
-      closLa[hit - clos.items] |= in;
+      closLa[hit - clos.items] |= *in;
   }
-  lb.follow = std::move(follow);
-  lb.read = std::move(read);
-  lb.inclBy = LrBuckets<>(ntr, static_cast<std::uint32_t>(inclDst.size()),
-                          [&](std::uint32_t k) { return inclDst[k]; });
-  lb.inclSrc = std::move(inclSrc);
+  lb.followOf = std::move(follow);
+  lb.readOf = std::move(read);
+  const LrBuckets<> inclBy(ntr, static_cast<std::uint32_t>(inclDst.size()),
+                           [&](std::uint32_t k) { return inclDst[k]; });
+  lb.answers.resize(ntr);
+  RoundMarks once;
+  for (std::uint32_t d = 0; d < ntr; ++d) {
+    once.next();
+    const auto answer = [&](std::uint32_t id) {
+      if (once.first(id)) lb.answers[d].push_back(id);
+    };
+    answer(lb.readOf[d]);
+    for (const std::uint32_t k : inclBy.of(d)) answer(lb.followOf[inclSrc[k]]);
+  }
   lb.byState =
       LrBuckets<>(ns, nLb, [&](std::uint32_t q) { return lbState[q]; });
   for (std::uint32_t st = 0; st < ns; ++st)
@@ -1495,10 +1577,11 @@ struct LrActions {
 std::vector<DynSet> lr_lex_flags(const LrGraph& gr, const LrLookback& lb,
                                  LexOvertakes<LrBuildCfg>& overtakes) {
   std::vector<DynSet> flagged(gr.states());
+  RoundMarks once;
   for (unsigned s = 0; s < gr.states(); ++s) {
     DynSet shifted;
     for (const LrEdge& e : gr.shifts[s]) shifted.set(e.sym);
-    flagged[s] = lb.lex_flagged(s, shifted, overtakes);
+    flagged[s] = lb.lex_flagged(s, shifted, overtakes, once);
   }
   return flagged;
 }
@@ -2166,8 +2249,11 @@ class LrWrittenOrder {
 
   // Production `p`'s entry in the closure of rule `b`, if it has one: a rule's
   // entries ascend by production.
-  const LrClosEntry* entry(unsigned b, unsigned p) const {
-    const std::span<const LrClosEntry> of = _cl.of(b);
+  const LrClosEntry* entry(unsigned b, unsigned p) {
+    if (!_cl.lookaheads && _read.base.empty())
+      _read = lr_closures(_g, _dom, _pn, _fs, true);
+    const std::span<const LrClosEntry> of =
+        _cl.lookaheads ? _cl.of(b) : _read.of(b);
     const auto it = std::ranges::lower_bound(of, p, {}, &LrClosEntry::prod);
     return it != of.end() && it->prod == p ? std::to_address(it) : nullptr;
   }
@@ -3580,6 +3666,9 @@ class LrWrittenOrder {
   const LrItemDomain& _dom;
   const LrGraph& _gr;
   const LrClosures& _cl;
+  // The entries with their lookaheads, laid when an order first reads them,
+  // where the graph did not.
+  LrClosures _read;
   const LrFirstSets& _fs;
   const LrBuckets<std::uint16_t>& _pn;
   const LrBuildTable& _A;
@@ -4000,10 +4089,8 @@ class LrInsertOrder {
                 const std::vector<std::uint8_t>& nullable, const LrGraph& gr)
       : _g(g), _dom(dom), _nullable(nullable), _gr(gr),
         _arm(lr_by_lhs(g)), _rank(g.nprods, kUnread), _nullFrom(g.nprods, 0),
-        _seen(g.nnts, 0), _met(g.nterms, 0), _visited(gr.states(), 0),
         _under(gr.states(), 0), _preds(gr.predecessors()),
-        _succ(gr.states()), _succMade(gr.states(), 0),
-        _listed(gr.states(), 0), _coreOf(gr.states()) {
+        _returnsOf(gr.states(), kNoList) {
     for (unsigned n = 0; n < g.nnts; ++n)
       std::stable_sort(_arm.item.begin() + _arm.base[n],
                        _arm.item.begin() + _arm.base[n + 1],
@@ -4024,8 +4111,9 @@ class LrInsertOrder {
       _nullFrom[p] = static_cast<std::uint16_t>(from);
     }
     order_items();
-    group_kernels();
   }
+
+  std::uint64_t reads() const { return _reads; }
 
   // The terminals of `row` (those marked `stamp` there, `want` of them) that
   // the canonical state made of `members` meets, in the order it meets them;
@@ -4034,31 +4122,25 @@ class LrInsertOrder {
           std::span<const std::uint32_t> row, std::uint32_t stamp,
           std::size_t want, std::vector<std::uint16_t>& out) {
     out.clear();
-    ++_gen;
-    _level.assign(members.begin(), members.end());
-    for (const std::uint32_t s : _level) _visited[s] = _gen;
+    _seen.next();
+    _met.next();
+    _walked.next();
+    _level.assign(1, list_of({members.begin(), members.end()}));
+    _walked.first(_level[0]);
     while (!_level.empty() && out.size() < want) {
-      ++_layer;
+      _placed.next();
       _picked.clear();
-      for (const std::uint32_t s : _level) {
-        const std::uint32_t c = _coreOf[s];
-        if (_reached[c] == _layer) continue;
-        _reached[c] = _layer;
-        for (const std::uint32_t at : _cores[c])
-          if (_placed[at] != _layer) {
-            _placed[at] = _layer;
-            _picked.push_back(at);
-          }
+      _next.clear();
+      for (const std::uint32_t id : _level) {
+        const Listed& list = laid(id);
+        _reads += list.places.size() + list.returns.size();
+        for (const std::uint32_t at : list.places)
+          if (_placed.first(at)) _picked.push_back(at);
+        for (const std::uint32_t to : list.returns)
+          if (_walked.first(to)) _next.push_back(to);
       }
       std::ranges::sort(_picked);
       read(row, stamp, want, out);
-      _next.clear();
-      for (const std::uint32_t s : _level)
-        for (const std::uint32_t t : returns(s))
-          if (_visited[t] != _gen) {
-            _visited[t] = _gen;
-            _next.push_back(t);
-          }
       _level.swap(_next);
     }
   }
@@ -4066,6 +4148,17 @@ class LrInsertOrder {
  private:
   static constexpr std::uint64_t kUnread = ~std::uint64_t{0};
   static constexpr std::uint64_t kStays = std::uint64_t{1} << 32;
+  static constexpr std::uint32_t kNoList = ~std::uint32_t{0};
+
+  // A list of states, each kept once: the states that end a rule return to all
+  // its callers, so few lists stand for many states. Once read, the places of
+  // the items they hold and the lists they return to. An item read again in a
+  // later layer meets nothing new.
+  struct Listed {
+    const std::vector<std::uint32_t>* states;
+    std::vector<std::uint32_t> places{}, returns{};
+    bool isLaid = false;
+  };
 
   // Each production's place in a reading of the grammar from its start, a
   // nonterminal opened where it is first met; a turn of a left recursion
@@ -4114,28 +4207,33 @@ class LrInsertOrder {
     std::ranges::sort(all, {}, &Keyed::key);
     _placeOf.resize(all.size());
     _itemAt.resize(all.size());
-    _placed.assign(all.size(), 0);
     for (std::uint32_t at = 0; at < all.size(); ++at) {
       _itemAt[at] = all[at].item;
       _placeOf[_dom.base[all[at].item.prod] + all[at].item.dot] = at;
     }
   }
 
-  // The states that hold the same items read the same: one entry each.
-  void group_kernels() {
-    std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> ids;
-    std::vector<std::uint32_t> key;
-    for (unsigned s = 0; s < _gr.states(); ++s) {
-      key.clear();
-      for (const LrItem& k : _gr.kernel(s))
-        key.push_back(_placeOf[_dom.base[k.prod] + k.dot]);
-      lr_sort_unique(key);
-      const auto [at, fresh] =
-          ids.try_emplace(key, static_cast<std::uint32_t>(_cores.size()));
-      if (fresh) _cores.push_back(key);
-      _coreOf[s] = at->second;
+  std::uint32_t list_of(std::vector<std::uint32_t> states) {
+    lr_sort_unique(states);
+    const auto [at, fresh] = _listIds.try_emplace(
+        std::move(states), static_cast<std::uint32_t>(_lists.size()));
+    if (fresh) _lists.push_back({&at->first});
+    return at->second;
+  }
+
+  const Listed& laid(std::uint32_t id) {
+    Listed& list = _lists[id];
+    if (std::exchange(list.isLaid, true)) return list;
+    for (const std::uint32_t s : *list.states) {
+      for (const LrItem& k : _gr.kernel(s)) {
+        ++_reads;
+        list.places.push_back(_placeOf[_dom.base[k.prod] + k.dot]);
+      }
+      list.returns.push_back(returns(s));
     }
-    _reached.assign(_cores.size(), 0);
+    lr_sort_unique(list.places);
+    lr_sort_unique(list.returns);
+    return list;
   }
 
   // Reads `_picked` in order: a terminal of `row` is met, a nonterminal opens
@@ -4152,15 +4250,11 @@ class LrInsertOrder {
       for (; j < q.len; ++j) {
         const std::uint16_t y = _g.sym_at(q, j);
         if (is_term(y)) {
-          if (_met[y] != _gen) {
-            _met[y] = _gen;
-            if (row[y] == stamp) out.push_back(y);
-          }
+          if (_met.first(y) && row[y] == stamp) out.push_back(y);
           break;
         }
         const unsigned b = nt_index(y);
-        if (_seen[b] != _gen) {
-          _seen[b] = _gen;
+        if (_seen.first(b)) {
           if (_nullable[b])
             _todo.push_back({p, static_cast<std::uint16_t>(j + 1u)});
           for (const std::uint16_t arm : std::views::reverse(_arm.of(b)))
@@ -4172,14 +4266,11 @@ class LrInsertOrder {
     }
   }
 
-  // The states the rules of the kernel items of `s` that can end return to:
-  // the goto on the left side of each from the states under its symbols.
-  const std::vector<std::uint32_t>& returns(unsigned s) {
-    std::vector<std::uint32_t>& out = _succ[s];
-    if (_succMade[s]) return out;
-    _succMade[s] = 1;
-    ++_stamp;
-    const std::uint64_t mine = _stamp;
+  // The list of states the rules of the kernel items of `s` that can end return
+  // to: the goto on the left side of each from the states under its symbols.
+  std::uint32_t returns(unsigned s) {
+    if (_returnsOf[s] != kNoList) return _returnsOf[s];
+    std::vector<std::uint32_t> out;
     _asked.clear();
     for (const LrItem& k : _gr.kernel(s)) {
       if (k.dot < _nullFrom[k.prod]) continue;
@@ -4189,13 +4280,9 @@ class LrInsertOrder {
       _asked.push_back(ask);
       const auto here = lr_back(_preds, _under, _stamp, s, k.dot);
       for (const std::uint32_t b : here)
-        for (const LrEdge& e : _gr.edges(b, nt_sym(lhs)))
-          if (_listed[e.to] != mine) {
-            _listed[e.to] = mine;
-            out.push_back(e.to);
-          }
+        for (const LrEdge& e : _gr.edges(b, nt_sym(lhs))) out.push_back(e.to);
     }
-    return out;
+    return _returnsOf[s] = list_of(std::move(out));
   }
 
   const LrBuildCfg& _g;
@@ -4205,19 +4292,16 @@ class LrInsertOrder {
   LrBuckets<std::uint16_t> _arm;
   std::vector<std::uint64_t> _rank;
   std::vector<std::uint16_t> _nullFrom;
-  std::uint32_t _gen = 0;
-  std::vector<std::uint32_t> _seen, _met, _visited;
+  std::uint64_t _reads = 0;
+  RoundMarks _seen, _met, _walked, _placed;
   std::uint64_t _stamp = 0;
   std::vector<std::uint64_t> _under;
   std::vector<std::vector<std::uint32_t>> _preds;
-  std::vector<std::vector<std::uint32_t>> _succ;
-  std::vector<char> _succMade;
-  std::vector<std::uint64_t> _listed;
-  std::vector<std::uint32_t> _asked;
-  std::vector<std::uint32_t> _placeOf, _placed, _reached, _coreOf, _picked;
+  std::vector<std::uint32_t> _returnsOf, _asked;
+  std::vector<std::uint32_t> _placeOf, _picked;
   std::vector<LrItem> _itemAt;
-  std::vector<std::vector<std::uint32_t>> _cores;
-  std::uint32_t _layer = 0;
+  std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> _listIds;
+  std::deque<Listed> _lists;
   std::vector<std::uint32_t> _level, _next;
   std::vector<std::pair<std::uint16_t, std::uint16_t>> _todo;
 };
@@ -4263,6 +4347,7 @@ void lr_order_insertions(LrBuildTable& A, const LrItemDomain& dom,
     }
     A.insertOf[f] = at->second;
   }
+  if (A.work != nullptr) A.work->insertions += order.reads();
 }
 
 // The graph, its merge and its folds, down to what the lexer reads: the
@@ -4275,7 +4360,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   const LrItemDomain dom = lr_item_domain(g);
   const LrFirstSets fs = lr_first_sets(g);
   A.nullable = fs.nullable;
-  const LrClosures cl = lr_closures(g, dom, pn, fs);
+  const LrClosures cl = lr_closures(g, dom, pn, fs, WithLa);
 
   LrGraph gr = lr_graph<WithLa>(A, dom, fs, cl);
   if (A.overflow) return std::nullopt;
@@ -4286,7 +4371,8 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   LexOvertakes overtakes(alpha.nfa, A.cfg, alpha.startOf, followers);
   std::vector<DynSet> flagged;
   {
-    const LrLookback lb = lr_lookaheads(g, gr, fs, !WithLa);
+    const LrLookback lb = lr_lookaheads(
+        g, gr, fs, !WithLa, A.work != nullptr ? &A.work->lookaheads : nullptr);
     const LrActions actions{g, gr};
 
     // Under `core` no two states share a core: nothing to re-fuse.
@@ -4313,6 +4399,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   if (against != nullptr && !lr_wider_stands(*against, A)) return std::nullopt;
   if (WithLa)
     flagged = lr_group_flags(gr, LrActions{g, gr}, newId, A.nstates, overtakes);
+  if (A.work != nullptr) A.work->overtakes += overtakes.walks();
   lr_order_insertions(A, dom, gr, newId);
   if (!lr_fold_chains(A)) return std::nullopt;
 
@@ -4327,9 +4414,10 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
 }
 
 template <bool WithLa>
-LrBuildTable lr_build_impl(const LrLowered& low,
-                           const LrBuildTable* against = nullptr) {
+LrBuildTable lr_build_impl(const LrLowered& low, const LrBuildTable* against,
+                           LrBuildWork* work) {
   LrBuildTable A;
+  A.work = work;
   A.identity = WithLa ? LrIdentity::core_plus_lookaheads : LrIdentity::core;
   A.cfg = low.cfg;
   A.writes = low.writes;
@@ -4386,12 +4474,13 @@ LrBuildTable lr_build_impl(const LrLowered& low,
 
 // `core` first, the cheaper graph: `nMergeInduced` says where the wider one is
 // worth building.
-LrBuildTable lr_build_automaton(const LrLowered& low) {
-  return lr_build_impl<false>(low);
+LrBuildTable lr_build_automaton(const LrLowered& low, LrBuildWork* work) {
+  return lr_build_impl<false>(low, nullptr, work);
 }
 
-LrBuildTable lr_build_wide(const LrLowered& low, const LrBuildTable* against) {
-  return lr_build_impl<true>(low, against);
+LrBuildTable lr_build_wide(const LrLowered& low, const LrBuildTable* against,
+                           LrBuildWork* work) {
+  return lr_build_impl<true>(low, against, work);
 }
 
 // Ambiguities, not cells: the passes copy a cell into every state they mint.

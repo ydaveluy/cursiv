@@ -13,6 +13,7 @@
 #include <numeric>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -71,7 +72,6 @@ void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
       users[c.nnodes + n.sym].push_back(id);
     else
       for (const auto child : c.children(n)) users[child].push_back(id);
-    pending.push(id);
   }
   for (std::uint16_t r = 1; r < c.nrules; ++r) {
     const LlRuleInfo& u = c.rules[r];
@@ -81,8 +81,35 @@ void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
     } else if (u.body != kNoRow) {
       users[u.body].push_back(id);
     }
-    pending.push(id);
   }
+  // Each element comes after what it reads, as far as a cycle allows: a fact
+  // then reaches a reader whole, rather than once per element it passed through.
+  // Whatever the order, each fact only grows towards the one least fixpoint.
+  std::vector<std::uint32_t> finished;
+  finished.reserve(size);
+  std::vector<std::uint8_t> entered(size, 0);
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> path;
+  for (std::uint32_t root = 0; root < size; ++root) {
+    if (entered[root] != 0) continue;
+    entered[root] = 1;
+    path.emplace_back(root, 0);
+    while (!path.empty()) {
+      auto& [id, next] = path.back();
+      if (next < users[id].size()) {
+        const std::uint32_t reader = users[id][next++];
+        if (entered[reader] == 0) {
+          entered[reader] = 1;
+          path.emplace_back(reader, 0);
+        }
+        continue;
+      }
+      finished.push_back(id);
+      path.pop_back();
+    }
+  }
+  // Rule zero has no body.
+  for (auto id = finished.rbegin(); id != finished.rend(); ++id)
+    if (*id != c.nnodes) pending.push(*id);
   while (!pending.empty()) {
     const auto id = pending.pop();
     if (work) ++*work;
@@ -206,8 +233,8 @@ void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
   std::vector<DynSet> impliedHeads(c.ngapConds);
   const std::vector<DynSet> firsts = condition_firsts(c);
   for (unsigned k = 0; k < c.ngapConds; ++k)
-    for (unsigned t = 1; t < c.nterms; ++t) {
-      if (!firsts[k].test(t)) continue;
+    for (const unsigned t : firsts[k].members()) {
+      if (t == 0) continue;
       if (c.termBuild[t].predicateOnly)
         impliedHeads[k] |= spelled_twins(c, t);
       else
@@ -451,10 +478,10 @@ void refuse_unproductive(Built& b, std::uint64_t* work) {
   }
 }
 
-std::vector<std::uint16_t> opening_of(const Built& b, const DynSet& set) {
+std::vector<std::uint16_t> opening_of(const DynSet& set) {
   std::vector<std::uint16_t> out;
-  for (std::uint16_t t = 0; t < b.cfg.nterms; ++t)
-    if (set.test(t)) out.push_back(t);
+  for (const unsigned t : set.members())
+    out.push_back(static_cast<std::uint16_t>(t));
   return out;
 }
 
@@ -503,7 +530,7 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
       case LlShape::rep:
         if (n.max == kEndless) {
           spelt = n.min == 0 ? OperatorWords::nothing() : OperatorWords::none();
-          spelt.unite(OperatorWords::unlisted(opening_of(b, b.first[n.sym])));
+          spelt.unite(OperatorWords::unlisted(opening_of(b.first[n.sym])));
           return false;
         }
         todo.emplace_back(
@@ -512,7 +539,7 @@ OperatorWords words_of(const Built& b, std::uint16_t root,
         return true;
       case LlShape::call:
         if (b.cfg.rules[n.sym].body == kNoRow || walk.walking[n.sym]) {
-          spelt = OperatorWords::unlisted(opening_of(b, b.ruleFirst[n.sym]));
+          spelt = OperatorWords::unlisted(opening_of(b.ruleFirst[n.sym]));
           return false;
         }
         if (const bool settled = walk.onPath[walk.scc.component[n.sym]] == 0;
@@ -1483,8 +1510,8 @@ bool explore_decision(Built& b, LlDecision& dec, const LlBuildOptions& opt) {
     if (apart[at]) return false;
     if (depthOf[at] >= opt.depth || setOf.size() >= kExploreCap) return false;
     const DynSet terms = viable_terms(atn, setOf[at]);
-    for (std::uint16_t t = 0; t < b.cfg.nterms; ++t) {
-      if (!terms.test(t)) continue;
+    for (const unsigned term : terms.members()) {
+      const auto t = static_cast<std::uint16_t>(term);
       sim.reset();
       sim.load(setOf[at]);
       const bool survives = sim.step(t);
@@ -1837,11 +1864,13 @@ void settle_decisions(Built& b, const LlBuildOptions& opt) {
     // A choice the entry never reaches is never asked, and has no graph.
     if (!b.liveRules[dec.rule]) continue;
     if (opt.staticPredict) give_the_turn_what_it_dominates(b, atn, dec);
+    // No arm reads a token of an arm before it.
     bool disjoint = opt.staticPredict;
     const unsigned nalts = b.cfg.decisionBuild[d].nalts;
+    DynSet read;
     for (unsigned i = 0; disjoint && i < nalts; ++i)
-      for (unsigned j = i + 1; disjoint && j < nalts; ++j)
-        disjoint = !b.laSet[base + i].intersects(b.laSet[base + j]);
+      disjoint = !read.intersects(b.laSet[base + i]) &&
+                 (read |= b.laSet[base + i], true);
     if (disjoint && b.cfg.ngapConds != 0) {
       // A guard elsewhere in the grammar does not prevent this token from
       // selecting an arm. Prove that the initial closure has no pending
@@ -1869,51 +1898,78 @@ void settle_decisions(Built& b, const LlBuildOptions& opt) {
 }
 
 // The join, interned, and its provenance kept: two runs become one chain, and
-// the pair that made it is what an entry is written from.
-std::uint16_t join_chain(Built& b, std::uint16_t held, std::uint16_t over) {
-  const ChainBuild left =
-      held == kNoRow ? ChainBuild{} : b.writes.chainBuild[held];
-  const ChainBuild right =
-      over == kNoRow ? ChainBuild{} : b.writes.chainBuild[over];
-  std::uint16_t r;
-  // Closing the same value twice on one record is idempotent. A recursive
-  // adoption (parenthesized expressions, for example) can otherwise append
-  // that close forever while computing the possible rows of a rule.
-  if (held != kNoRow && over != kNoRow && right.makes && !right.creates) {
-    const Chain x = b.writes.chains[held], y = b.writes.chains[over];
-    const auto* acts = b.writes.acts.data();
-    if (x.count != 0 && y.count != 0 &&
-        acts[x.off + x.count - 1] == acts[y.off]) {
-      std::vector<std::uint16_t> joined(acts + x.off, acts + x.off + x.count);
-      joined.insert(joined.end(), acts + y.off + 1, acts + y.off + y.count);
-      r = b.writes.intern_chain(joined.data(), joined.size(),
-                                b.writes.doc_of(held, over));
-    } else {
-      r = b.writes.concat(held, over);
-    }
-  } else {
-    r = b.writes.concat(held, over);
-  }
-  if (r == kNoRow) return r;
-  // Joined chains still carry their creations: the interned chain starts with
-  // an empty build row, which a later join would read as one that makes
-  // nothing.
-  b.writes.chainBuild[r] = {.makes = left.makes || right.makes,
-                            .creates = left.creates || right.creates,
-                            .doc = b.writes.chainBuild[r].doc};
-  if (r >= b.nestChains.size()) b.nestChains.resize(b.writes.nchains, 0);
-  const bool leftNest = held < b.nestChains.size() && b.nestChains[held] != 0;
-  const bool rightNest = over < b.nestChains.size() && b.nestChains[over] != 0;
-  b.nestChains[r] = leftNest || rightNest;
-  if (r >= b.origin.size())
-    b.origin.resize(b.writes.nchains, LlFuse{kNoRow, kNoRow});
-  if (r != held && r != over && b.origin[r].from == kNoRow)
-    b.origin[r] = LlFuse{held, over};
-  return r;
-}
+// the pair that made it is what an entry is written from. A pair asked again
+// reads the chain it made: the rows of a position are joined at each of its
+// visits, and hashing a chain costs its length.
+class ChainJoin {
+ public:
+  ChainJoin(Built& b, std::uint64_t* reads) : b(b), _reads(reads) {}
 
-void settle_fusion(Built& b) {
+  std::uint16_t operator()(std::uint16_t held, std::uint16_t over) {
+    const ChainBuild left =
+        held == kNoRow ? ChainBuild{} : b.writes.chainBuild[held];
+    const ChainBuild right =
+        over == kNoRow ? ChainBuild{} : b.writes.chainBuild[over];
+    const std::uint16_t r = chain_of(held, over, right);
+    if (r == kNoRow) return r;
+    // Joined chains still carry their creations: the interned chain starts with
+    // an empty build row, which a later join would read as one that makes
+    // nothing.
+    b.writes.chainBuild[r] = {.makes = left.makes || right.makes,
+                              .creates = left.creates || right.creates,
+                              .doc = b.writes.chainBuild[r].doc};
+    if (r >= b.nestChains.size()) b.nestChains.resize(b.writes.nchains, 0);
+    const bool leftNest = held < b.nestChains.size() && b.nestChains[held] != 0;
+    const bool rightNest =
+        over < b.nestChains.size() && b.nestChains[over] != 0;
+    b.nestChains[r] = leftNest || rightNest;
+    if (r >= b.origin.size())
+      b.origin.resize(b.writes.nchains, LlFuse{kNoRow, kNoRow});
+    if (r != held && r != over && b.origin[r].from == kNoRow)
+      b.origin[r] = LlFuse{held, over};
+    return r;
+  }
+
+ private:
+  std::uint16_t chain_of(std::uint16_t held, std::uint16_t over,
+                         const ChainBuild& right) {
+    // A later join may restate what `over` makes, which decides how it joins.
+    const std::uint64_t key = std::uint64_t{right.makes && !right.creates} << 32 |
+                              std::uint64_t{held} << 16 | over;
+    if (const auto at = _made.find(key); at != _made.end()) return at->second;
+    if (_reads != nullptr) ++*_reads;
+    const std::uint16_t r = intern(held, over, right);
+    if (r != kNoRow) _made.emplace(key, r);
+    return r;
+  }
+
+  std::uint16_t intern(std::uint16_t held, std::uint16_t over,
+                       const ChainBuild& right) {
+    // Closing the same value twice on one record is idempotent. A recursive
+    // adoption (parenthesized expressions, for example) can otherwise append
+    // that close forever while computing the possible rows of a rule.
+    if (held != kNoRow && over != kNoRow && right.makes && !right.creates) {
+      const Chain x = b.writes.chains[held], y = b.writes.chains[over];
+      const auto* acts = b.writes.acts.data();
+      if (x.count != 0 && y.count != 0 &&
+          acts[x.off + x.count - 1] == acts[y.off]) {
+        std::vector<std::uint16_t> joined(acts + x.off, acts + x.off + x.count);
+        joined.insert(joined.end(), acts + y.off + 1, acts + y.off + y.count);
+        return b.writes.intern_chain(joined.data(), joined.size(),
+                                     b.writes.doc_of(held, over));
+      }
+    }
+    return b.writes.concat(held, over);
+  }
+
+  Built& b;
+  std::uint64_t* _reads;
+  std::unordered_map<std::uint64_t, std::uint16_t> _made;
+};
+
+void settle_fusion(Built& b, LlBuildWork* work) {
   b.origin.assign(b.writes.nchains, LlFuse{kNoRow, kNoRow});
+  ChainJoin join(b, work ? &work->joins : nullptr);
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
     const LlNode& n = b.cfg.nodes[id];
     if (!n.owns || n.kind != LlShape::seq || n.count != 1 ||
@@ -1923,9 +1979,9 @@ void settle_fusion(Built& b) {
     const LlNode& only = b.cfg.nodes[b.cfg.kids[n.sym]];
     if (only.kind != LlShape::term) continue;
     const std::uint16_t stated =
-        only.row == kNoRow ? n.row : join_chain(b, n.row, only.row);
+        only.row == kNoRow ? n.row : join(n.row, only.row);
     b.cfg.nodeBuild[id].leafRow =
-        join_chain(b, b.cfg.terms[only.sym].element, stated);
+        join(b.cfg.terms[only.sym].element, stated);
   }
   // A terminal's own conversion joins its position's chain first: what a leaf
   // carries is then one row, and every walk below reads it as such.
@@ -1933,12 +1989,10 @@ void settle_fusion(Built& b) {
     LlNode& n = b.cfg.nodes[id];
     if (n.kind != LlShape::term) continue;
     const std::uint16_t own = b.cfg.terms[n.sym].element;
-    n.row = n.row == kNoRow ? own : join_chain(b, own, n.row);
+    n.row = n.row == kNoRow ? own : join(own, n.row);
   }
   LlRecordPlan records(b.cfg, b.writes, b.nestChains);
-  const auto join = [&](std::uint16_t held, std::uint16_t over) {
-    return join_chain(b, held, over);
-  };
+  records.count_rows(work ? &work->rows : nullptr);
   records.settle_rows(b.nullable, join);
   b.fuseBase.assign(b.cfg.nnodes + 1, 0);
   for (std::uint32_t id = 0; id < b.cfg.nnodes; ++id) {
@@ -1946,7 +2000,7 @@ void settle_fusion(Built& b) {
     b.fuseBase[id] = static_cast<std::uint32_t>(b.fuse.size());
     if (n.kind != LlShape::call || n.row == kNoRow || n.owns) continue;
     for (std::uint16_t x : records.rule_rows(n.sym))
-      b.fuse.push_back(LlFuse{x, join_chain(b, x, n.row)});
+      b.fuse.push_back(LlFuse{x, join(x, n.row)});
   }
   b.fuseBase[b.cfg.nnodes] = static_cast<std::uint32_t>(b.fuse.size());
   // ...and what an owning group would ride onto when the text gives it one
@@ -1970,14 +2024,15 @@ void settle_fusion(Built& b) {
   for (std::uint16_t k = 0; k < b.cfg.nclimbs; ++k) {
     LlClimb& cl = b.cfg.climbs[k];
     std::vector<std::uint16_t> hands = records.rule_rows(cl.primary);
-    LlRecordPlan::add(hands, cl.node);
+    hands.push_back(cl.node);
+    records.keep_first(hands);
     cl.leftBase = static_cast<std::uint32_t>(b.fuse.size());
     for (std::uint16_t h : hands)
-      b.fuse.push_back(LlFuse{h, join_chain(b, h, cl.leftRow)});
+      b.fuse.push_back(LlFuse{h, join(h, cl.leftRow)});
     cl.leftCount = static_cast<std::uint32_t>(b.fuse.size()) - cl.leftBase;
     cl.rightBase = static_cast<std::uint32_t>(b.fuse.size());
     for (std::uint16_t h : hands)
-      b.fuse.push_back(LlFuse{h, join_chain(b, h, cl.rightRow)});
+      b.fuse.push_back(LlFuse{h, join(h, cl.rightRow)});
     cl.rightCount = static_cast<std::uint32_t>(b.fuse.size()) - cl.rightBase;
   }
 }
@@ -2230,9 +2285,9 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   settle_decisions(b, opt);
   refuse_section_lookahead(b);
   settle_repair(b, opt.work ? &opt.work->repair : nullptr);
-  settle_fusion(b);
+  settle_fusion(b, opt.work);
   if (b.writes.capped) b.cap_hit(kTooManyChains);
-  detail::ll_build_lexer(b, alphabet);
+  detail::ll_build_lexer(b, alphabet, opt.work ? &opt.work->overtakes : nullptr);
   if (b.cfg.lowerFail()) return b;
   settle_after_states(b);
   settle_head_nodes(b, ruleNullable);

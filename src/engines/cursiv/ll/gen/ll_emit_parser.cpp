@@ -338,8 +338,8 @@ bool Emit::word_rule(std::uint16_t r) const {
     const LlNode& x = at(kid(n, i));
     if (x.kind != LlShape::term || x.owns || x.row != at(kid(n, 0)).row)
       return false;
-    for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
-      if (a.laSet[dec.set + i].test(t) != (t == x.sym)) return false;
+    const DynSet& reads = a.laSet[dec.set + i];
+    if (!reads.test(x.sym) || reads.more_than_one()) return false;
   }
   return true;
 }
@@ -661,8 +661,8 @@ void Emit::decision(std::uint16_t id) {
   // Which arms one token admits: an arm alone on a token is a case of its own.
   std::vector<std::vector<std::uint16_t>> armOf(a.cfg.nterms);
   for (std::uint16_t i = 0; i < db.nalts; ++i)
-    for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
-      if (a.laSet[dec.set + i].test(t)) armOf[t].push_back(i);
+    for (const unsigned t : a.laSet[dec.set + i].members())
+      armOf[t].push_back(i);
   std::vector<std::vector<std::uint16_t>> byArm(db.nalts);
   bool shared = false;
   for (std::uint16_t t = 0; t < a.cfg.nterms; ++t) {
@@ -976,8 +976,8 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     line("go = false;");
     open("switch (c.la.sym) {");
     std::string cases;
-    for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
-      if (a.laSet[dec.set].test(t)) cases += std::format("case {}u: ", t);
+    for (const unsigned t : a.laSet[dec.set].members())
+      cases += std::format("case {}u: ", t);
     if (!cases.empty()) put("{}go = true; break;", cases);
     line("default: break;");
     close("}");
@@ -1297,9 +1297,8 @@ void Emit::climb(std::uint16_t r) {
     if (leaf == kNoRow) {
       const LlDecision& choice = a.cfg.decisions[selectDec];
       std::string cases;
-      for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
-        if (a.laSet[choice.set + k].test(t))
-          cases += std::format("case {}u: ", t);
+      for (const unsigned t : a.laSet[choice.set + k].members())
+        cases += std::format("case {}u: ", t);
       put("{}f.prec = {}u;{} body = {}u; break;", cases, op.prec, grouping(op),
           k);
       continue;

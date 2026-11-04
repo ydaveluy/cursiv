@@ -16,6 +16,7 @@
 #include "cursiv/ll/gen/LlLowCfg.hpp"
 #include "cursiv/ll/table/LlFuse.hpp"
 #include "cursiv/shared/gen/ChainPool.hpp"
+#include "cursiv/shared/gen/KeepFirst.hpp"
 
 namespace cursiv {
 
@@ -130,26 +131,27 @@ class LlRecordPlan {
     return _ruleRows[rule];
   }
 
-  static void add(std::vector<std::uint16_t>& out, std::uint16_t row) {
-    if (std::ranges::find(out, row) == out.end()) out.push_back(row);
+  // Each row of `rows` once, where it first stands.
+  void keep_first(std::vector<std::uint16_t>& rows) {
+    rows.resize(_keepFirst(rows));
   }
-  static void append(std::vector<std::uint16_t>& out,
-                     const std::vector<std::uint16_t>& rows) {
-    for (const auto row : rows) add(out, row);
-  }
+  // Counts the rows `keep_first` reads.
+  void count_rows(std::uint64_t* work) { _keepFirst = KeepFirst(work); }
 
   template <class Join, class Sink>
-  void own_joins(std::uint16_t id, Join&& join, Sink&& sink) const {
+  void own_joins(std::uint16_t id, Join&& join, Sink&& sink) {
     assert(!_nodeRows.empty());
     const LlNode& n = _cfg.nodes[id];
     if (_cfg.nodeBuild[id].foldStep) return;
     std::vector<std::uint16_t> inner;
-    if (n.kind == LlShape::call)
-      append(inner, _ruleRows[n.sym]);
-    else if (group(n))
+    if (n.kind == LlShape::call) {
+      inner = _ruleRows[n.sym];
+    } else if (group(n)) {
       sources(id, Source::sole, inner);
-    else
+      keep_first(inner);
+    } else {
       return;
+    }
     const bool nests =
         n.row != kNoRow && n.row < _nests.size() && _nests[n.row] != 0;
     for (const auto row : inner) {
@@ -214,17 +216,18 @@ class LlRecordPlan {
         const LlNode& n = _cfg.nodes[id];
         std::vector<std::uint16_t> out;
         if (n.owns) {
-          add(out, n.row);
+          out.push_back(n.row);
           own_joins(static_cast<std::uint16_t>(id), join,
-                    [&](const LlFuse& j) { add(out, j.to); });
+                    [&](const LlFuse& j) { out.push_back(j.to); });
         } else if (n.kind == LlShape::term || n.kind == LlShape::implied) {
-          add(out, n.row);
+          out.push_back(n.row);
         } else if (n.kind == LlShape::call) {
           for (const auto row : _ruleRows[n.sym])
-            add(out, n.row == kNoRow ? row : join(row, n.row));
+            out.push_back(n.row == kNoRow ? row : join(row, n.row));
         } else if (group(n)) {
           sources(static_cast<std::uint16_t>(id), Source::last, out);
         }
+        keep_first(out);
         moved = out != _nodeRows[id];
         if (moved) _nodeRows[id] = std::move(out);
       } else {
@@ -234,11 +237,15 @@ class LlRecordPlan {
         const auto before = out.size();
         if (u.climb != kNoRow) {
           const LlClimb& cl = _cfg.climbs[u.climb];
-          add(out, cl.node);
-          append(out, _ruleRows[cl.primary]);
+          out.push_back(cl.node);
+          if (cl.primary != r)
+            out.insert(out.end(), _ruleRows[cl.primary].begin(),
+                       _ruleRows[cl.primary].end());
         } else if (u.body != kNoRow) {
-          append(out, _nodeRows[u.body]);
+          out.insert(out.end(), _nodeRows[u.body].begin(),
+                     _nodeRows[u.body].end());
         }
+        keep_first(out);
         moved = out.size() != before;
       }
       if (!moved) continue;
@@ -307,10 +314,12 @@ class LlRecordPlan {
     }
   }
 
+  // The rows of each source, repeats included.
   void sources(std::uint16_t id, Source source,
                std::vector<std::uint16_t>& out) const {
-    each_source(id, source,
-                [&](std::uint16_t child) { append(out, _nodeRows[child]); });
+    each_source(id, source, [&](std::uint16_t child) {
+      out.insert(out.end(), _nodeRows[child].begin(), _nodeRows[child].end());
+    });
   }
 
   const LlLowCfg& _cfg;
@@ -320,6 +329,7 @@ class LlRecordPlan {
   std::span<const std::uint8_t> _nullable;
   std::vector<std::uint16_t> _last, _required;
   std::vector<std::vector<std::uint16_t>> _nodeRows, _ruleRows;
+  KeepFirst _keepFirst;
 };
 
 }  // namespace cursiv

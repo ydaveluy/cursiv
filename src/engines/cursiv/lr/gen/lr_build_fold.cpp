@@ -2,10 +2,13 @@
 // productions.
 #include "cursiv/lr/gen/lr_build_fold.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <queue>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,9 +35,12 @@ bool lr_fold_chains(LrBuildTable& A) {
   std::vector<bool> unsafe(nN, false);
   for (unsigned p = 0; p < nP; ++p)
     if (g.prodBuild[p].turnNode != kNoRow) unsafe[wprods[p].lhs] = true;
+  // What each nonterminal hands back, in the order it came.
+  std::vector<std::vector<ElementId>> handed(nN);
   const auto mark = [&](unsigned B, unsigned e) {
     if (rec[B].test(e)) return false;
     rec[B].set(e);
+    handed[B].push_back(static_cast<ElementId>(e));
     return true;
   };
   // The callback may grow this row: address it afresh at every word.
@@ -68,55 +74,105 @@ bool lr_fold_chains(LrBuildTable& A) {
     return id;
   };
 
-  for (bool grew = true; grew && !full;) {
-    grew = false;
-    for (unsigned p = 0; p < nP && !full; ++p) {
-      const LrLowProd& pr = wprods[p];
-      // A call site states over the run the callee came back with.
-      for (unsigned i = 0; i < pr.len; ++i) {
-        const std::uint16_t site = g.row_at(pr, i);
-        if (site == kNoRow) continue;
-        const std::uint16_t sym = g.sym_at(pr, i);
-        if (is_term(sym))
-          fold(g.terms[sym].element, site);
-        else
-          each(nt_index(sym), [&](ElementId r) { fold(r, site); });
-      }
-      // A chain of its own also stands alone where no position returns one.
-      if (pr.node != kNoRow && mark(pr.lhs, pr.node)) grew = true;
-      if (pr.len != 1) continue;
-      const std::uint16_t site = g.row_at(pr, 0);
-      const std::uint16_t sym = g.sym_at(pr, 0);
-      if (const bool risk = is_term(sym)
-                                ? g.terms[sym].element == kNoRow &&
-                                      ((pr.node == kNoRow && site == kNoRow) ||
-                                       (pr.node != kNoRow && site != kNoRow))
-                                : unsafe[nt_index(sym)];
-          risk && !unsafe[pr.lhs]) {
-        unsafe[pr.lhs] = true;
-        grew = true;
-      }
-      // A bare pass-through is a set union, with no chain to compose.
-      if (pr.node == kNoRow && site == kNoRow && !is_term(sym)) {
-        if (rec[pr.lhs].add(rec[nt_index(sym)])) grew = true;
-        continue;
-      }
-      const auto onto = [&](ElementId r) {
-        if (pr.node != kNoRow && r == kNoRow) return;
-        ElementId back = site == kNoRow ? r : fold(r, site);
-        if (pr.node != kNoRow) back = fold(back, pr.node);
-        if (back != kNoRow && mark(pr.lhs, back)) grew = true;
-      };
-      if (is_term(sym)) {
-        onto(g.terms[sym].element);
-      } else {
-        bool any = false;
-        each(nt_index(sym), [&](ElementId r) {
-          any = true;
-          onto(r);
-        });
-        if (pr.node == kNoRow && !any && mark(pr.lhs, site)) grew = true;
-      }
+  // What `nt` handed back since this reader last asked, ascending: what it asked
+  // about before says nothing new.
+  std::vector<std::uint32_t> readerAt(nP + 1u, 0);
+  for (unsigned p = 0; p < nP; ++p)
+    readerAt[p + 1u] = readerAt[p] + wprods[p].len + 1u;
+  std::vector<std::uint32_t> asked(readerAt[nP], 0);
+  std::vector<ElementId> fresh;
+  const auto unread = [&](unsigned nt, std::uint32_t& seen) -> const auto& {
+    fresh.assign(handed[nt].begin() + seen, handed[nt].end());
+    seen = static_cast<std::uint32_t>(handed[nt].size());
+    std::ranges::sort(fresh);
+    if (A.work != nullptr) A.work->folds += fresh.size();
+    return fresh;
+  };
+  // What production `p` says of its rule: whether what the rule hands back grew.
+  const auto read = [&](std::uint32_t p) {
+    const LrLowProd& pr = wprods[p];
+    std::uint32_t* const seen = asked.data() + readerAt[p];
+    bool grew = false;
+    // A call site states over the run the callee came back with.
+    for (unsigned i = 0; i < pr.len; ++i) {
+      const std::uint16_t site = g.row_at(pr, i);
+      if (site == kNoRow) continue;
+      const std::uint16_t sym = g.sym_at(pr, i);
+      if (is_term(sym))
+        fold(g.terms[sym].element, site);
+      else
+        for (const ElementId r : unread(nt_index(sym), seen[i])) fold(r, site);
+    }
+    // A chain of its own also stands alone where no position returns one.
+    if (pr.node != kNoRow && mark(pr.lhs, pr.node)) grew = true;
+    if (pr.len != 1) return grew;
+    const std::uint16_t site = g.row_at(pr, 0);
+    const std::uint16_t sym = g.sym_at(pr, 0);
+    if (const bool risk = is_term(sym)
+                              ? g.terms[sym].element == kNoRow &&
+                                    ((pr.node == kNoRow && site == kNoRow) ||
+                                     (pr.node != kNoRow && site != kNoRow))
+                              : unsafe[nt_index(sym)];
+        risk && !unsafe[pr.lhs]) {
+      unsafe[pr.lhs] = true;
+      grew = true;
+    }
+    // A bare pass-through is a set union, with no chain to compose.
+    if (pr.node == kNoRow && site == kNoRow && !is_term(sym)) {
+      if (nt_index(sym) == pr.lhs) return grew;
+      for (const ElementId r : unread(nt_index(sym), seen[pr.len]))
+        if (mark(pr.lhs, r)) grew = true;
+      return grew;
+    }
+    const auto onto = [&](ElementId r) {
+      if (pr.node != kNoRow && r == kNoRow) return;
+      ElementId back = site == kNoRow ? r : fold(r, site);
+      if (pr.node != kNoRow) back = fold(back, pr.node);
+      if (back != kNoRow && mark(pr.lhs, back)) grew = true;
+    };
+    if (is_term(sym)) {
+      onto(g.terms[sym].element);
+      return grew;
+    }
+    bool any = rec[nt_index(sym)].any();
+    if (nt_index(sym) == pr.lhs) {
+      // A rule that reads itself grows what it walks.
+      each(pr.lhs, onto);
+    } else {
+      for (const ElementId r : unread(nt_index(sym), seen[pr.len])) onto(r);
+    }
+    if (pr.node == kNoRow && !any && mark(pr.lhs, site)) grew = true;
+    return grew;
+  };
+  // The productions that read what each nonterminal hands back: only they have
+  // anything new to say when it grows.
+  std::vector<std::vector<std::uint32_t>> readers(nN);
+  for (unsigned p = 0; p < nP; ++p) {
+    const LrLowProd& pr = wprods[p];
+    for (unsigned i = 0; i < pr.len; ++i) {
+      const std::uint16_t sym = g.sym_at(pr, i);
+      if (!is_term(sym) && (pr.len == 1 || g.row_at(pr, i) != kNoRow))
+        readers[nt_index(sym)].push_back(p);
+    }
+  }
+  // Productions run in rounds, by number, which is the order the ids are minted
+  // in. A set only grows, up to every id, and a production runs again only where
+  // one it reads grew: the walk ends.
+  std::priority_queue<std::uint64_t, std::vector<std::uint64_t>, std::greater<>>
+      todo;
+  std::vector<std::uint8_t> queued(nP, 1);
+  for (unsigned p = 0; p < nP; ++p) todo.push(p);
+  while (!todo.empty() && !full) {
+    const std::uint64_t step = todo.top();
+    todo.pop();
+    const auto p = static_cast<std::uint32_t>(step);
+    queued[p] = 0;
+    if (A.work != nullptr) ++A.work->folds;
+    if (!read(p)) continue;
+    for (const std::uint32_t reader : readers[wprods[p].lhs]) {
+      if (std::exchange(queued[reader], std::uint8_t{1}) != 0) continue;
+      const std::uint64_t round = (step >> 32) + (reader <= p ? 1u : 0u);
+      todo.push(round << 32 | reader);
     }
   }
   if (full) {
