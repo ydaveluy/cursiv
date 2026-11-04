@@ -32,6 +32,7 @@ RecordGen record_gen(std::span<const AstRowGen> rows,
       rec.made |= own && row.makes();
       if (rec.rule.empty() && row.converts() && !row.rule.empty())
         rec.rule = row.rule;
+      rec.dataRule |= row.converts() && row.dataRule;
     }
   };
   read(held, rec.held, true);
@@ -108,8 +109,8 @@ std::string emit_records(std::string_view ns,
     const std::size_t g = name_of(rec.feature);
     const std::size_t r = name_of(rec.rule);
     const std::string answer =
-        std::format("{{&{}, &{}, {}u, {}u, {}, {}u}}", w, f, g, r, type_of(rec),
-                    name_of(rec.doc));
+        std::format("{{&{}, &{}, {}u, {}u, {}, {}u, {}}}", w, f, g, r,
+                    type_of(rec), name_of(rec.doc), rec.dataRule);
     const auto [at, fresh] = answerIds.try_emplace(answer, answers.size());
     if (fresh) answers.push_back(answer);
     recordAnswers.push_back(at->second);

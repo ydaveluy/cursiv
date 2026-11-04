@@ -173,14 +173,20 @@ ImageId Lowerer::token_core(ImageId id) const {
 
 void Lowerer::note_docs() {
   std::unordered_map<std::string_view, std::string_view> first;
-  const std::function<void(ImageId)> walk = [&](ImageId id) {
-    if (const ImageNode n = at(id); n.kind == ImageKind::doc &&
-                                    at(kid(n, 0)).kind == ImageKind::lit) {
-      const std::string_view word = at(kid(n, 0)).text;
-      const auto [text, fresh] = first.try_emplace(word, n.text);
-      if (!fresh && text->second != n.text) _docsDiffer.insert(word);
+  std::vector<ImageId> pending;
+  const auto walk = [&](ImageId root) {
+    pending.push_back(root);
+    while (!pending.empty()) {
+      const ImageId id = pending.back();
+      pending.pop_back();
+      if (const ImageNode n = at(id); n.kind == ImageKind::doc &&
+                                      at(kid(n, 0)).kind == ImageKind::lit) {
+        const std::string_view word = at(kid(n, 0)).text;
+        const auto [text, fresh] = first.try_emplace(word, n.text);
+        if (!fresh && text->second != n.text) _docsDiffer.insert(word);
+      }
+      for (const ImageId k : _im.shape_kids(id)) pending.push_back(k);
     }
-    for (const ImageId k : _im.shape_kids(id)) walk(k);
   };
   for (const std::uint32_t rule : _ntRule) {
     const ImageStageDesc& st = stage(rule);

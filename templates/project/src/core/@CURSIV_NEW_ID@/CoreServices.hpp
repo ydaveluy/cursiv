@@ -19,9 +19,7 @@ struct @CURSIV_NEW_CLASS@CoreServices
     : cursiv::CoreServicesFor<@CURSIV_NEW_CLASS@SharedCoreServices> {
   std::unique_ptr<const @CURSIV_NEW_CLASS@Validator> validator;
 
-  explicit @CURSIV_NEW_CLASS@CoreServices(
-      @CURSIV_NEW_CLASS@SharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   // Lists the services after the default ones, so that a missing required
   // service is reported by name. Add a line for each service you add.

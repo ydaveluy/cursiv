@@ -1,4 +1,4 @@
-#include "cursiv/semantic/DefaultSemanticTokenProvider.hpp"
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 
 #include <lsp/types.h>
 
@@ -99,14 +99,14 @@ void emit(std::vector<lsp::Uint>& data, TextDocument::Cursor& cursor,
 
 }  // namespace
 
-lsp::SemanticTokens DefaultSemanticTokenProvider::semanticHighlight(
+lsp::SemanticTokens GrammarSemanticTokenProvider::semanticHighlight(
     const Document& document, const CancellationToken& token) const {
   const TextDocument& text = document.textDocument();
   return highlight(document, 0, static_cast<TextOffset>(text.getText().size()),
                    token);
 }
 
-lsp::SemanticTokens DefaultSemanticTokenProvider::semanticHighlightRange(
+lsp::SemanticTokens GrammarSemanticTokenProvider::semanticHighlightRange(
     const Document& document, lsp::Range range,
     const CancellationToken& token) const {
   const TextDocument& text = document.textDocument();
@@ -114,7 +114,7 @@ lsp::SemanticTokens DefaultSemanticTokenProvider::semanticHighlightRange(
                    text.offsetAt(from_lsp(range.end)), token);
 }
 
-lsp::SemanticTokens DefaultSemanticTokenProvider::highlight(
+lsp::SemanticTokens GrammarSemanticTokenProvider::highlight(
     const Document& document, TextOffset begin, TextOffset end,
     const CancellationToken& token) const {
   throw_if_cancelled(token);

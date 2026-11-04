@@ -408,7 +408,7 @@ void DefaultDocumentValidator::validateAstBefore(
   for (const ValidationPreparationEntry& entry : registry->checksBefore()) {
     throw_if_cancelled(token);
     run_document_check(entry, document, accept, categories, token,
-                       _core.shared.observabilitySink.get(),
+                       _core.shared().observabilitySink.get(),
                        _core.languageMetaData.languageId);
   }
 }
@@ -505,7 +505,7 @@ void DefaultDocumentValidator::validateAstAfter(
   for (const ValidationPreparationEntry& entry : registry->checksAfter()) {
     throw_if_cancelled(token);
     run_document_check(entry, document, accept, categories, token,
-                       _core.shared.observabilitySink.get(),
+                       _core.shared().observabilitySink.get(),
                        _core.languageMetaData.languageId);
   }
 }

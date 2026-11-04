@@ -482,7 +482,7 @@ struct HuntingScopes final : cursiv::DefaultScopeComputation {
     for (const auto* element :
          document.parseResult.value_as<ws::ast::Workspace>()->elements)
       if (const auto* entity = cursiv::ast_cast<ws::ast::Entity>(element))
-        if (const auto* found = services.shared.indexManager->findByName(
+        if (const auto* found = services.shared().indexManager->findByName(
                 entity->superType.refText, true, {}, *services.astReflection))
           if (const auto* parent = cursiv::ast_cast<ws::ast::Entity>(found->node))
             for (int k = 0; k < 8; ++k) {

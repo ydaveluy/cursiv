@@ -17,9 +17,7 @@ struct ArithmeticsCoreServices
     : cursiv::CoreServicesFor<ArithmeticsSharedCoreServices> {
   std::unique_ptr<const ArithmeticsValidator> validator;
 
-  explicit ArithmeticsCoreServices(
-      ArithmeticsSharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {

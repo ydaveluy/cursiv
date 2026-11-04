@@ -66,7 +66,7 @@ std::optional<lsp::WorkspaceEdit> DomainModelRenameProvider::rename(
     std::string_view newName, const cursiv::CancellationToken& token) const {
   const QualifiedNameProvider& names = *_dm.qualifiedNameProvider;
   const cursiv::References& references = *core().references;
-  const cursiv::Documents& store = *core().shared.documents;
+  const cursiv::Documents& store = *core().shared().documents;
 
   // The declaration edit is the base's: what a new name may be, and where a
   // declaration writes it, is not this language's business.

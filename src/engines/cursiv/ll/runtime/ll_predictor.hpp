@@ -31,9 +31,11 @@ inline bool ll_read_refused(LlContext& c, std::uint16_t decision,
   const std::uint16_t firstMode = c.laMode;
   LlSkipped<T> skip{};
   bool again = false;
+  std::vector<std::uint16_t> ties;
   while (T.holds(T.dec_first(decision), c.la.sym) &&
          ll_read_without<T>(c, T.decisions[decision].mode, skip)) {
-    const std::uint16_t read = episode.run(c, decision);
+    ll_ties_without<T>(c, T.decisions[decision].mode, skip, ties);
+    const std::uint16_t read = episode.run(c, decision, &ties);
     if (!episode.refused()) {
       arm = read;
       if (firstMode == kLaHeld) ll_hold<T>(c);

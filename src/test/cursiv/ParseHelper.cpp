@@ -30,7 +30,7 @@ std::atomic<unsigned> nextDocumentId{1};
 std::shared_ptr<Document> parseHelper(const CoreServices& services,
                                       std::string text,
                                       const ParseHelperOptions& options) {
-  const SharedCoreServices& shared = services.shared;
+  const SharedCoreServices& shared = services.shared();
   std::string uri = options.documentUri;
   if (uri.empty()) {
     const std::vector<std::string>& extensions =
@@ -75,7 +75,7 @@ void clearDocuments(const SharedCoreServices& shared,
 
 void clearDocuments(const CoreServices& services,
                     std::span<const std::shared_ptr<Document>> documents) {
-  clearDocuments(services.shared, documents);
+  clearDocuments(services.shared(), documents);
 }
 
 }  // namespace cursiv::test

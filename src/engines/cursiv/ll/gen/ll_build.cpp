@@ -10,6 +10,7 @@
 #include <deque>
 #include <iterator>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <utility>
@@ -1030,7 +1031,8 @@ struct Follow {
   const std::vector<DynSet>& first;
   std::vector<DynSet>& after;
   std::vector<DynSet>& ruleFollow;
-  bool moved = false;
+  // A rule's walk reads only its own FOLLOW: it is walked again when that grows.
+  Pending grown;
 
   void walk(std::uint16_t id, const DynSet& set) {
     struct Visit {
@@ -1045,7 +1047,7 @@ struct Follow {
       const LlNode& n = c.nodes[visit.id];
       switch (n.kind) {
         case LlShape::call:
-          moved = ruleFollow[n.sym].add(visit.follow) || moved;
+          if (ruleFollow[n.sym].add(visit.follow)) grown.push(n.sym);
           break;
         case LlShape::seq: {
           const auto k = c.children(n);
@@ -1080,32 +1082,33 @@ struct Follow {
 void settle_after(const Cfg& c, const std::vector<std::uint8_t>& nullable,
                   const std::vector<DynSet>& first,
                   const std::vector<DynSet>& ruleFirst,
-                  std::vector<DynSet>& after, std::vector<DynSet>& ruleFollow) {
+                  std::vector<DynSet>& after, std::vector<DynSet>& ruleFollow,
+                  std::uint64_t* work) {
   after.assign(c.nnodes, DynSet{});
   ruleFollow.assign(c.nrules, DynSet{});
   // The document ends after the entry, and nothing else may.
   ruleFollow[c.entryRule].set(kEofSymbol);
-  Follow f{c, nullable, first, after, ruleFollow};
-  for (f.moved = true; f.moved;) {
-    f.moved = false;
-    for (std::uint16_t r = 1; r < c.nrules; ++r) {
-      const LlRuleInfo& u = c.rules[r];
-      if (u.climb != kNoRow) {
-        // An operand is followed by an operator of the table, or by whatever
-        // follows the climb.
-        const LlClimb& cl = c.climbs[u.climb];
-        DynSet ops = ruleFollow[r];
-        for (unsigned i = 0; i < cl.opCount; ++i)
-          ops |= first[c.climbOps[cl.opBase + i].body];
-        f.moved = ruleFollow[cl.primary].add(ops) || f.moved;
-        after[cl.selectNode].add(ruleFollow[r]);
-        const auto& select = c.nodes[cl.selectNode];
-        for (unsigned i = 0; i < cl.opCount; ++i)
-          f.walk(c.kids[select.sym + i], ruleFirst[cl.primary]);
-        f.walk(c.kids[select.sym + cl.opCount], ruleFollow[r]);
-      } else if (u.body != kNoRow) {
-        f.walk(u.body, ruleFollow[r]);
-      }
+  Follow f{c, nullable, first, after, ruleFollow, Pending(c.nrules)};
+  for (std::uint16_t r = 1; r < c.nrules; ++r) f.grown.push(r);
+  while (!f.grown.empty()) {
+    const auto r = static_cast<std::uint16_t>(f.grown.pop());
+    if (work) ++*work;
+    const LlRuleInfo& u = c.rules[r];
+    if (u.climb != kNoRow) {
+      // An operand is followed by an operator of the table, or by whatever
+      // follows the climb.
+      const LlClimb& cl = c.climbs[u.climb];
+      DynSet ops = ruleFollow[r];
+      for (unsigned i = 0; i < cl.opCount; ++i)
+        ops |= first[c.climbOps[cl.opBase + i].body];
+      if (ruleFollow[cl.primary].add(ops)) f.grown.push(cl.primary);
+      after[cl.selectNode].add(ruleFollow[r]);
+      const auto& select = c.nodes[cl.selectNode];
+      for (unsigned i = 0; i < cl.opCount; ++i)
+        f.walk(c.kids[select.sym + i], ruleFirst[cl.primary]);
+      f.walk(c.kids[select.sym + cl.opCount], ruleFollow[r]);
+    } else if (u.body != kNoRow) {
+      f.walk(u.body, ruleFollow[r]);
     }
   }
 }
@@ -1983,8 +1986,15 @@ void settle_episode_flags(Built& b) {
 }  // namespace
 
 std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
-                                          std::uint16_t nrules) {
+                                          std::uint16_t nrules,
+                                          std::uint64_t* visits) {
   std::vector<std::uint8_t> nullable(nrules, 0), shared(nrules, 0);
+  // Only a state with several ways out shares a rule: with none, the regions
+  // below would be built for nothing.
+  bool forks = false;
+  for (std::uint32_t at = 0; at < atn.nstates && !forks; ++at)
+    forks = atn.state(at).nedges >= 2;
+  if (!forks) return shared;
   std::vector<std::uint32_t> seen(atn.nstates, 0), todo;
   // Each rule walks its own states once. A call waits until its rule can
   // return unread; conditions, like tokens, stop this unguarded walk.
@@ -2015,18 +2025,8 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
     }
     std::ranges::fill(seen, 0);
   }
-  // A rule the entry never reaches has no states, its start being another's,
-  // and no edge calls it: the regions below number the others densely.
-  std::vector<std::uint16_t> live, dense(nrules, kNoRow);
-  for (std::uint16_t r = 0; r < nrules; ++r)
-    if (atn.state(atn.ruleStart[r]).rule == r) {
-      dense[r] = static_cast<std::uint16_t>(live.size());
-      live.push_back(r);
-    }
-  const std::size_t words = (live.size() + 63u) / 64u;
   std::uint32_t round = 0;
-  // The rules called from `from` before a token is read, into `bits`:
-  // the visitor either records a direct call or folds its settled region.
+  // The rules called from `from` before a token is read, told to `call`.
   const auto scan = [&](std::uint32_t from, auto&& call) {
     ++round;
     todo.assign(1, from);
@@ -2039,67 +2039,108 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
         if (e.kind == LlEdgeKind::epsilon) {
           todo.push_back(e.target);
         } else if (e.kind == LlEdgeKind::rule) {
-          call(dense[e.label]);
+          call(e.label);
           if (nullable[e.label] != 0) todo.push_back(e.follow);
         }
       }
     }
   };
-  std::vector<std::vector<std::uint32_t>> heads(live.size());
-  for (std::size_t r = 0; r < live.size(); ++r) {
-    scan(atn.ruleStart[live[r]],
-         [&](auto called) { heads[r].push_back(called); });
+  // A rule the entry never reaches has no states, its start being another's,
+  // and no edge calls it.
+  std::vector<std::vector<std::uint32_t>> heads(nrules);
+  for (std::uint16_t r = 0; r < nrules; ++r) {
+    if (atn.state(atn.ruleStart[r]).rule != r) continue;
     auto& row = heads[r];
+    scan(atn.ruleStart[r], [&](std::uint16_t called) { row.push_back(called); });
     std::ranges::sort(row);
     row.erase(std::ranges::unique(row).begin(), row.end());
   }
+  // Components close callees first, so a rule and all it calls stand between
+  // its component and `lowest` of it. Two ways whose spans do not meet share
+  // nothing, and neither is walked.
   const auto scc = StrongComponents<>::of(heads);
-  const auto count =
-      live.empty() ? 0u : *std::ranges::max_element(scc.component) + 1u;
-  std::vector<std::vector<std::uint16_t>> members(count);
-  std::vector<std::uint64_t> region(std::size_t{count} * words, 0);
-  // Rule indices fit 16 bits: a grammar with more rules is refused.
-  for (std::size_t r = 0; r < live.size(); ++r) {
-    members[scc.component[r]].push_back(static_cast<std::uint16_t>(r));
-    region[std::size_t{scc.component[r]} * words + (r >> 6)] |=
-        std::uint64_t{1} << (r & 63u);
-  }
-  // Tarjan closes dependencies before their callers. Each component's
-  // transitive region is therefore folded once per direct outgoing edge.
-  for (std::uint32_t c = 0; c < count; ++c)
-    for (const auto r : members[c])
-      for (const auto called : heads[r]) {
-        const auto to = scc.component[called];
-        if (to == c) continue;
-        for (std::size_t w = 0; w < words; ++w)
-          region[std::size_t{c} * words + w] |=
-              region[std::size_t{to} * words + w];
-      }
-  std::vector<std::uint64_t> bits(words), once(words), twice(words);
-  const auto include = [&](std::uint16_t rule) {
-    for (std::size_t w = 0; w < words; ++w)
-      bits[w] |= region[std::size_t{scc.component[rule]} * words + w];
+  std::vector<std::uint32_t> byComponent(nrules), lowest(nrules);
+  std::iota(byComponent.begin(), byComponent.end(), 0u);
+  std::ranges::sort(byComponent, {},
+                    [&](std::uint32_t r) { return scc.component[r]; });
+  std::iota(lowest.begin(), lowest.end(), 0u);
+  for (const std::uint32_t r : byComponent)
+    for (const std::uint32_t called : heads[r])
+      lowest[scc.component[r]] = std::min(lowest[scc.component[r]],
+                                          lowest[scc.component[called]]);
+  // A rule reached by a second way out of a fork is shared, and so is all it
+  // calls: the first way walked those already, so the second finds them too. A
+  // walk therefore stops at what is shared, and holds one mark per rule whatever
+  // the number of forks.
+  constexpr std::uint32_t kNoFork = 0xffffffffu;
+  struct Span {
+    std::uint32_t low, high, way;
   };
-  for (std::uint32_t at = 0; at < atn.nstates; ++at) {
-    if (atn.state(at).nedges < 2) continue;
-    std::ranges::fill(once, 0);
-    for (const LlAtnEdge& e : atn.outgoing(at)) {
-      std::ranges::fill(bits, 0);
+  std::vector<std::uint32_t> forkOf(nrules, kNoFork), wayOf(nrules, 0);
+  std::vector<std::uint8_t> twice(nrules, 0), meets;
+  std::vector<std::pair<std::uint32_t, std::uint16_t>> calls;
+  std::vector<std::uint32_t> stack;
+  std::vector<Span> spans;
+  for (std::uint32_t fork = 0; fork < atn.nstates; ++fork) {
+    if (atn.state(fork).nedges < 2) continue;
+    calls.clear();
+    spans.clear();
+    std::uint32_t way = 0;
+    for (const LlAtnEdge& e : atn.outgoing(fork)) {
+      const std::size_t before = calls.size();
+      const auto call = [&](std::uint16_t rule) {
+        calls.emplace_back(way, rule);
+      };
       if (e.kind == LlEdgeKind::epsilon) {
-        scan(e.target, include);
+        scan(e.target, call);
       } else if (e.kind == LlEdgeKind::rule) {
-        include(dense[e.label]);
-        if (nullable[e.label] != 0) scan(e.follow, include);
+        call(e.label);
+        if (nullable[e.label] != 0) scan(e.follow, call);
       }
-      for (std::size_t w = 0; w < words; ++w) {
-        twice[w] |= once[w] & bits[w];
-        once[w] |= bits[w];
+      if (calls.size() != before) {
+        Span span{0xffffffffu, 0, way};
+        for (std::size_t i = before; i < calls.size(); ++i) {
+          const std::uint32_t component = scc.component[calls[i].second];
+          span.low = std::min(span.low, lowest[component]);
+          span.high = std::max(span.high, component);
+        }
+        spans.push_back(span);
+      }
+      ++way;
+    }
+    if (spans.size() < 2) continue;
+    // Sorted by where they begin, a span meets another if it begins inside one
+    // before it, or if the next begins inside it.
+    std::ranges::sort(spans, {}, &Span::low);
+    meets.assign(way, 0);
+    std::uint32_t reach = spans[0].high;
+    for (std::size_t i = 1; i < spans.size(); ++i) {
+      if (spans[i].low <= reach) meets[spans[i].way] = 1;
+      if (spans[i].low <= spans[i - 1].high) meets[spans[i - 1].way] = 1;
+      reach = std::max(reach, spans[i].high);
+    }
+    for (const auto& [taken, first] : calls) {
+      if (meets[taken] == 0) continue;
+      stack.assign(1, first);
+      while (!stack.empty()) {
+        const std::uint32_t rule = stack.back();
+        stack.pop_back();
+        if (visits != nullptr) ++*visits;
+        if (twice[rule] != 0) continue;
+        if (forkOf[rule] != fork) {
+          forkOf[rule] = fork;
+          wayOf[rule] = taken;
+        } else if (wayOf[rule] != taken) {
+          twice[rule] = 1;
+        } else {
+          continue;
+        }
+        stack.insert(stack.end(), heads[rule].begin(), heads[rule].end());
       }
     }
   }
-  for (std::size_t r = 0; r < live.size(); ++r)
-    if (((twice[r >> 6] >> (r & 63u)) & 1u) != 0 && nullable[live[r]] == 0)
-      shared[live[r]] = 1;
+  for (std::uint16_t r = 0; r < nrules; ++r)
+    shared[r] = twice[r] != 0 && nullable[r] == 0 ? 1 : 0;
   return shared;
 }
 
@@ -2128,7 +2169,8 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   // Nor does one refused here: a left-cyclic rule has no fixpoint for the walks
   // below, and the follow pass would descend it for ever.
   if (b.fault) return b;
-  settle_after(b.cfg, b.nullable, b.first, b.ruleFirst, b.after, b.ruleFollow);
+  settle_after(b.cfg, b.nullable, b.first, b.ruleFirst, b.after, b.ruleFollow,
+               opt.work ? &opt.work->follow : nullptr);
   settle_cuts(b);
   build_atn(b);
   LexAlphabet alphabet;

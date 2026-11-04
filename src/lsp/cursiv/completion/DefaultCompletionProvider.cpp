@@ -73,9 +73,10 @@ namespace {
   return unicode::within(unicode::kL, std::size(unicode::kL), scalar);
 }
 
-// What one answer offers at most. A reference caret with nothing typed
-// enumerates the whole global index, and every entry it keeps costs a handful
-// of allocations plus a documentation render, under the workspace read lock.
+// The names one answer offers at most; its keywords always come. A reference
+// caret with nothing typed enumerates the whole global index, and every entry
+// it keeps costs a handful of allocations plus a documentation render, under
+// the workspace read lock.
 // `isIncomplete` is already always true, which is the protocol's licence to
 // stop: what the author types next asks again.
 constexpr std::size_t kMaxItems = 1000;
@@ -124,10 +125,9 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
   std::vector<lsp::CompletionItem> items;
   const auto accept = [&](const CompletionContext& context,
                           CompletionValueItem&& value) {
-    if (items.size() >= kMaxItems) return false;
     if (fillCompletionItem(context, value))
       items.push_back(std::move(static_cast<lsp::CompletionItem&>(value)));
-    return true;
+    return items.size() < kMaxItems;
   };
   buildContexts(document, position, cancelToken,
                 [&](const CompletionContext& context) {
@@ -250,7 +250,8 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
   if (rank >= cst.leaf_count()) return std::nullopt;
   const CstLeaf leaf = cst.leaf(rank);
   if (leaf.hidden || leaf.begin > at || at >= leaf.end) return std::nullopt;
-  NodeId found = kNoNode;
+  // A data rule of one token has no record but its leaf.
+  NodeId found = grammar.recordIsDataRule(cst[leaf.id]) ? leaf.id : kNoNode;
   for (NodeId i = leaf.id + 1; i < cst.size(); ++i) {
     if (!cst.contains(i, leaf.id)) continue;
     if (grammar.recordRule(cst[i]).empty() ||
@@ -329,25 +330,27 @@ void DefaultCompletionProvider::completionFor(const CompletionContext& context,
   // A cross-reference is not a token to name but a scope to offer: the grammar
   // names the member, the node at the caret names its class, and reflection
   // joins the two into the reference the scope answers for.
+  AstNodePtr entered;
   if (const std::optional<ReferenceInfo> reference =
-          referenceInfoOf(context, next)) {
+          referenceInfoOf(context, next, entered)) {
     completionForCrossReference(context, next, *reference, accept);
     return;
   }
-  // Everything else is a keyword or nothing at all: a terminal's name is not
-  // its text, and an item labelled `ID` would insert those letters. A terminal
-  // that reads a choice of words offers each, as the keywords of a rule reading
-  // the same words would.
-  for (const std::string_view spelled :
-       services.parser->getGrammar().terminalSpellings(next.feature))
+  // Everything else is a keyword or nothing at all: a named terminal says
+  // nothing of its contents, and a data rule offers its words through its
+  // keywords.
+  const Grammar& grammar = services.parser->getGrammar();
+  if (!grammar.terminalName(next.feature).empty()) return;
+  for (const std::string_view spelled : grammar.terminalSpellings(next.feature))
     completionForKeyword(context, next, spelled, accept);
 }
 
 std::optional<ReferenceInfo> DefaultCompletionProvider::referenceInfoOf(
-    const CompletionContext& context, const NextFeature& next) const {
+    const CompletionContext& context, const NextFeature& next,
+    AstNodePtr& entered) const {
   const std::string_view feature = next.property;
   if (feature.empty()) return std::nullopt;
-  AstNode* const container = context.node();
+  AstNode* container = context.node();
   if (container == nullptr) return std::nullopt;
   const AstReflection& reflection = *services.astReflection;
 
@@ -382,6 +385,14 @@ std::optional<ReferenceInfo> DefaultCompletionProvider::referenceInfoOf(
     }
   }
 
+  if (next.type != nullptr &&
+      (next.entered || !reflection.isSubtype(container->type, next.type))) {
+    entered = reflection.createNode(next.type);
+    if (entered != nullptr) {
+      entered->parent = container;
+      container = entered.get();
+    }
+  }
   ReferenceInfo info;
   info.container = container;
   info.document = &context.document;

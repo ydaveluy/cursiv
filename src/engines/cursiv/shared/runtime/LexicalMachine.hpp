@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/PredicateState.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 
@@ -204,7 +205,12 @@ class LexicalMachine {
   LexicalState run(std::uint16_t root, LexicalState in, Step&& step) {
     _memo.clear();
     enter(root, std::move(in));
-    while (!_frames.empty()) step(*this);
+    // One token can last seconds: the parser only reads a stop between tokens.
+    const CancellationPoll stop = ThreadStop::poll();
+    while (!_frames.empty()) {
+      stop.poll();
+      step(*this);
+    }
     return std::move(_returned);
   }
 

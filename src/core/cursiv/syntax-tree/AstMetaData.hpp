@@ -8,6 +8,7 @@
 
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
@@ -52,6 +53,7 @@ struct PropertyRow {
 };
 
 using WrittenFn = bool (*)(const AstNode&);
+using NewNodeFn = AstNodePtr (*)();
 using YieldFn = void (*)(
     const AstNode&,
     cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>);
@@ -78,6 +80,8 @@ struct AstMetaData {
   // One dispatch per known type, with inherited members selected at generation.
   const detail::WrittenFn* complete = nullptr;
   const detail::YieldFn* memberVisitors = nullptr;
+  // One per known type, null for a class no rule builds.
+  const detail::NewNodeFn* newNodes = nullptr;
   detail::YieldFn unknownMembers = nullptr;
   std::span<const std::uint16_t> referenceFields;
   const std::span<const std::uint16_t>* referenceRows = nullptr;

@@ -80,6 +80,14 @@ std::string emit_ast_members(const AstRegistry& registry,
       "constexpr ::cursiv::detail::YieldFn kMemberVisitors[]", typeIds,
       [](std::size_t t) { return std::format("&Members{}::visit", t); },
       "nullptr");
+  out += emit_table(
+      "constexpr ::cursiv::detail::NewNodeFn kNewNodes[]", typeIds,
+      [&](std::size_t t) -> std::string {
+        return registry.types[t].built
+                   ? std::format("&::cursiv::new_ast_node<{}>", types[t])
+                   : "nullptr";
+      },
+      "nullptr");
   // A grammar with no reference member keeps no reference rows.
   if (!refFields.empty()) {
     out += emit_table("constexpr ::std::uint16_t kReferenceFields[]",
@@ -235,6 +243,7 @@ std::string emit_ast_metadata_record(const AstRegistry& registry) {
     .referenceTags = {},
     .complete = ast_detail::kComplete,
     .memberVisitors = ast_detail::kMemberVisitors,
+    .newNodes = ast_detail::kNewNodes,
     .unknownMembers = &ast_detail::UnknownMembers::visitUnknown,
     .referenceFields = {},
     .referenceRows = {},

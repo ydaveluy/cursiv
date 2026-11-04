@@ -6,6 +6,7 @@
 #include "arithmetics/CoreServices.hpp"
 #include "arithmetics/ArithmeticsCodeActionProvider.hpp"
 #include "arithmetics/ArithmeticsFormatter.hpp"
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/EmptyFileSystemProvider.hpp"
@@ -16,6 +17,8 @@ namespace arith {
 
 void install_lsp_module(ArithmeticsServices& services) {
   cursiv::install_default_lsp_services(services);
+  services.semanticTokenProvider =
+      std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
   services.formatter = std::make_unique<const ArithmeticsFormatter>(services);
   services.codeActionProvider =
       std::make_unique<const ArithmeticsCodeActionProvider>();

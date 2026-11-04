@@ -53,51 +53,86 @@ std::vector<Feature> features_at(const cursiv::Parser& parser,
   return out;
 }
 
-void every_reading_must_agree_on_the_complete_metadata() {
+// The entries of the identifier at the head of `text`, behind its keyword.
+std::vector<Feature> identifiers_of(const cursiv::Parser& parser,
+                                    const std::string& source,
+                                    const cursiv::ParseResult& parsed) {
+  const auto at = static_cast<cursiv::TextOffset>(source.find(' ') + 1u);
+  std::vector<Feature> found;
+  for (const Feature& f : features_at(parser, parsed.cst(), at))
+    if (f.terminal == "ID") found.push_back(f);
+  return found;
+}
+
+// Readings of one token each name their own member: the class, the member and
+// what the site accepts tell two apart, and sites alike are one entry.
+void each_reading_names_its_own_member() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
-  for (const std::string_view text :
-       {"use target+", "use target-", "via target+", "via target-",
-        "narrow target+", "narrow target-", "mixed target+", "mixed target-",
-        "field target+", "field target-", "same target+", "same target-",
-        "filtered target+", "filtered target-", "alpha target+",
-        "beta target-"}) {
-    const std::string source = "agree:" + std::string(text);
-    const auto b = ll->parse(source);
-    CHECK(b.accepted && b.diagnostics.empty() && b.value);
-    const auto at = static_cast<cursiv::TextOffset>(source.find(' ') + 1u);
-    const auto actual = features_at(*ll, b.cst(), at);
-    const auto found =
-        std::find_if(actual.begin(), actual.end(),
-                     [](const auto& f) { return f.terminal == "ID"; });
-    CHECK(found != actual.end());
-    if (found == actual.end()) continue;
-    const auto head = text.substr(0, at - 7u);
-    const bool named = head == "same" || head == "filtered" ||
-                       head == "alpha" || head == "beta";
-    if (named) {
-      CHECK(found->property == "to" && found->type == b.value->type);
-      CHECK((found->narrow != cursiv::kNoNarrow) == (head == "filtered"));
-    } else {
-      CHECK(found->property.empty() && found->type == nullptr &&
-            found->narrow == cursiv::kNoNarrow);
+  struct Case {
+    std::string_view head;
+    std::size_t entries;
+    bool narrowed;
+  };
+  for (const Case& k : {Case{"same", 1, false}, Case{"filtered", 1, true},
+                        Case{"alpha", 1, false}, Case{"beta", 1, false},
+                        Case{"use", 2, false}, Case{"via", 2, false},
+                        Case{"field", 2, false}, Case{"narrow", 2, true}}) {
+    for (const std::string_view end : {" target+", " target-"}) {
+      if ((k.head == "alpha" && end == " target-") ||
+          (k.head == "beta" && end == " target+"))
+        continue;
+      const std::string source =
+          "agree:" + std::string(k.head) + std::string(end);
+      const auto parsed = ll->parse(source);
+      CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
+      const auto found = identifiers_of(*ll, source, parsed);
+      CHECK(found.size() == k.entries);
+      for (const Feature& f : found) {
+        CHECK(!f.property.empty() && f.type != nullptr);
+        CHECK((f.narrow != cursiv::kNoNarrow) == k.narrowed);
+      }
     }
   }
 }
 
-void an_unnamed_reading_prevents_member_attribution() {
+// One site narrows the member and the other does not: neither stands for both.
+void a_narrowed_site_keeps_its_own_entry() {
+  const auto ll = tllsemantic::generated::Ll::create_parser();
+  const std::string source = "agree:mixed target+";
+  const auto parsed = ll->parse(source);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  const auto found = identifiers_of(*ll, source, parsed);
+  CHECK(found.size() == 2);
+  if (found.size() == 2)
+    CHECK((found[0].narrow != cursiv::kNoNarrow) !=
+          (found[1].narrow != cursiv::kNoNarrow));
+}
+
+// Rules sharing a prefix part into a member each, behind data rules.
+void rules_sharing_a_prefix_each_name_their_member() {
+  const auto ll = tllsemantic::generated::Ll::create_parser();
+  const std::string source = "agree:shared x : ";
+  const auto parsed = ll->parse(source);
+  std::vector<std::string_view> names;
+  for (const Feature& f :
+       features_at(*ll, parsed.cst(),
+                   static_cast<cursiv::TextOffset>(source.size())))
+    if (f.terminal == "ID") names.push_back(f.property);
+  std::sort(names.begin(), names.end());
+  CHECK(names == (std::vector<std::string_view>{"other", "to"}));
+}
+
+// A reading that fills nothing takes nothing from one that does.
+void a_reading_naming_nothing_leaves_the_member() {
   const auto ll = tllsemantic::generated::Ll::create_parser();
   for (const std::string_view text : {"bare target+", "bare target-"}) {
     const std::string source = "agree:" + std::string(text);
     const auto parsed = ll->parse(source);
     CHECK(parsed.accepted && parsed.diagnostics.empty() && parsed.value);
-    const auto features = features_at(*ll, parsed.cst(), 11);
-    const auto found =
-        std::find_if(features.begin(), features.end(),
-                     [](const auto& f) { return f.terminal == "ID"; });
-    CHECK(found != features.end());
-    if (found != features.end())
-      CHECK(found->property.empty() && found->type == nullptr &&
-            found->narrow == cursiv::kNoNarrow);
+    const auto found = identifiers_of(*ll, source, parsed);
+    CHECK(found.size() == 1);
+    if (found.size() == 1)
+      CHECK(found[0].property == "to" && found[0].type != nullptr);
   }
 }
 
@@ -182,8 +217,10 @@ void the_guarded_reference_keeps_its_member() {
 
 void run() {
   the_guarded_reference_keeps_its_member();
-  every_reading_must_agree_on_the_complete_metadata();
-  an_unnamed_reading_prevents_member_attribution();
+  each_reading_names_its_own_member();
+  a_narrowed_site_keeps_its_own_entry();
+  rules_sharing_a_prefix_each_name_their_member();
+  a_reading_naming_nothing_leaves_the_member();
   an_unstamped_tree_does_not_supply_engine_positions();
   generated_return_nodes_match_the_call_graph();
 }

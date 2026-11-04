@@ -24,15 +24,17 @@
 #include "cursiv/navigation/TypeDefinitionProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/ranges/DefaultFoldingRangeProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/ranges/DefaultSelectionRangeProvider.hpp"  // NOLINT(misc-include-cleaner)
-#include "cursiv/semantic/DefaultSemanticTokenProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/semantic/InlayHintProvider.hpp"  // NOLINT(misc-include-cleaner)
+#include "cursiv/semantic/SemanticTokenProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/semantic/SignatureHelpProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/symbols/DefaultDocumentSymbolProvider.hpp"  // NOLINT(misc-include-cleaner)
 
 namespace cursiv {
 
 LspServices::LspServices(SharedLspServices& sharedServices) noexcept
-    : CoreServices(sharedServices), lspShared(sharedServices) {}
+    : lspShared(sharedServices) {
+  bindShared(sharedServices);
+}
 
 LspServices::~LspServices() noexcept = default;
 
@@ -89,11 +91,6 @@ void install_default_lsp_services(LspServices& services) {
   if (services.documentHighlightProvider == nullptr)
     services.documentHighlightProvider =
         std::make_unique<DefaultDocumentHighlightProvider>(services);
-  // A default the reference leaves to the language: the colouring reads only
-  // the grammar model and the name provider, so every language has one.
-  if (services.semanticTokenProvider == nullptr)
-    services.semanticTokenProvider =
-        std::make_unique<DefaultSemanticTokenProvider>(services);
   if (services.foldingRangeProvider == nullptr)
     services.foldingRangeProvider =
         std::make_unique<DefaultFoldingRangeProvider>(services);

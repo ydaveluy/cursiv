@@ -151,15 +151,25 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
 
   out.typeWords = (typeKeys.size() + 63) / 64;
   out.derives.assign(typeKeys.size() * out.typeWords, 0);
-  const auto derives = [&](std::size_t base, std::size_t sub) {
-    const AstTypeTag* const b = typeKeys[base]->tag;
+  // A class derives from itself and from what its tag names, each looked up
+  // rather than tried against every class. A type with no tag has only itself.
+  std::unordered_multimap<const AstTypeTag*, std::size_t> ofTag;
+  for (std::size_t t = 0; t < typeKeys.size(); ++t)
+    if (typeKeys[t]->tag != nullptr) ofTag.emplace(typeKeys[t]->tag, t);
+  for (std::size_t sub = 0; sub < typeKeys.size(); ++sub) {
+    const auto derives_from = [&](const AstTypeTag* tag) {
+      const auto [first, last] = ofTag.equal_range(tag);
+      for (auto at = first; at != last; ++at)
+        out.derives[at->second * out.typeWords + sub / 64] |=
+            std::uint64_t{1} << (sub % 64);
+    };
+    out.derives[sub * out.typeWords + sub / 64] |= std::uint64_t{1}
+                                                   << (sub % 64);
     const AstTypeTag* const s = typeKeys[sub]->tag;
-    return b == nullptr || s == nullptr ? base == sub : s->derivesFrom(b);
-  };
-  for (std::size_t i = 0; i < typeKeys.size(); ++i)
-    for (std::size_t j = 0; j < typeKeys.size(); ++j)
-      if (derives(i, j))
-        out.derives[i * out.typeWords + j / 64] |= std::uint64_t{1} << (j % 64);
+    if (s == nullptr) continue;
+    derives_from(s);
+    for (std::uint32_t b = 0; b < s->baseCount; ++b) derives_from(s->bases[b]);
+  }
 
   const std::size_t count = fields.keys().size();
   // Only a reference site accepts, so the rows stop past the last reference

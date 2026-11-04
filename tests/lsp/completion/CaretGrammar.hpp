@@ -52,6 +52,19 @@ struct Nest : cursiv::Extends<Stmt> {
   cursiv::reference<Alpha> to;
   Stmt* inner = nullptr;
 };
+// Each writes its own member: where a token may open either, both are read.
+struct SeesAlpha : cursiv::Extends<Stmt> {
+  std::string_view name;
+  cursiv::reference<Alpha> alpha;
+  std::string_view text;
+};
+struct SeesBeta : cursiv::Extends<Stmt> {
+  std::string_view name;
+  cursiv::reference<Beta> beta;
+};
+struct Instance : cursiv::Extends<Stmt> {
+  Stmt* instance = nullptr;
+};
 struct Held : cursiv::Extends<cursiv::AstNode> {};
 struct Box : cursiv::Extends<Held> {};
 struct Bag : cursiv::Extends<Held> {};
@@ -136,9 +149,56 @@ struct Caret : cursiv::GrammarSpec {
   struct BagR : rule<create<ast::Bag>(kw<"bag"> + lit<";">)> {};
   struct HoldR : rule<create<ast::Hold>(
                      assign<&ast::Hold::inner>(ref<BoxR> | ref<BagR>))> {};
+  // One token, two members: read directly, through a data rule, through rules
+  // that open on it, and beside a reading that fills nothing.
+  struct EitherR
+      : rule<create<ast::SeesAlpha>(kw<"either"> +
+                                    assign<&ast::SeesAlpha::alpha>(ref<ID>) +
+                                    lit<"+">) |
+             create<ast::SeesBeta>(kw<"either"> +
+                                   assign<&ast::SeesBeta::beta>(ref<ID>) +
+                                   lit<"-">)> {};
+  struct Dotted : rule<ref<ID> + many(lit<"."> + ref<ID>)> {};
+  struct DottedR
+      : rule<create<ast::SeesAlpha>(kw<"dotted"> +
+                                    assign<&ast::SeesAlpha::alpha>(ref<Dotted>) +
+                                    lit<"+">) |
+             create<ast::SeesBeta>(kw<"dotted"> +
+                                   assign<&ast::SeesBeta::beta>(ref<Dotted>) +
+                                   lit<"-">)> {};
+  struct OpensAlpha : rule<create<ast::SeesAlpha>(
+                          assign<&ast::SeesAlpha::alpha>(ref<ID>) + lit<"+">)> {};
+  struct OpensBeta : rule<create<ast::SeesBeta>(
+                         assign<&ast::SeesBeta::beta>(ref<ID>) + lit<"-">)> {};
+  struct OpensR : rule<kw<"opens"> + (ref<OpensAlpha> | ref<OpensBeta>)> {};
+  struct MaybeR
+      : rule<create<ast::SeesAlpha>(kw<"maybe"> +
+                                    assign<&ast::SeesAlpha::alpha>(ref<ID>) +
+                                    lit<"+">) |
+             create<ast::SeesBeta>(kw<"maybe"> + ref<ID> + lit<"-">)> {};
+  // Two rules sharing a prefix, each going on to a member behind data rules: one
+  // through a list of the other's, and one of them with a string beside it.
+  struct Word : rule<ref<ID> | kw<"word">> {};
+  struct Words : rule<some(ref<Word>, lit<".">)> {};
+  struct STR : terminal<lit<"'"> + many(cr<"a-z">) + lit<"'">> {};
+  struct ModelR
+      : rule<create<ast::SeesAlpha>(
+            assign<&ast::SeesAlpha::name>(ref<Word>) +
+            option(lit<":"> + (assign<&ast::SeesAlpha::alpha>(ref<Words>) |
+                               assign<&ast::SeesAlpha::text>(ref<STR>))) +
+            option(lit<"{"> + lit<"}">))> {};
+  struct AssemblyR
+      : rule<create<ast::SeesBeta>(assign<&ast::SeesBeta::name>(ref<Word>) +
+                                   lit<":"> +
+                                   assign<&ast::SeesBeta::beta>(ref<Word>) +
+                                   lit<"<"> + lit<">">)> {};
+  struct InstanceR : rule<create<ast::Instance>(
+                         kw<"child"> + assign<&ast::Instance::instance>(
+                                           ref<ModelR> | ref<AssemblyR>))> {};
   struct StmtR : rule<ref<DeclR> | ref<UseR> | ref<WordR> | ref<CallR> |
                       ref<AlphaR> | ref<BetaR> | ref<SeeR> | ref<TieR> |
-                      ref<AnyR> | ref<HoldR> | ref<NestR>> {};
+                      ref<AnyR> | ref<HoldR> | ref<NestR> | ref<EitherR> |
+                      ref<DottedR> | ref<OpensR> | ref<MaybeR> | ref<InstanceR>> {};
   struct BlockR : rule<create<ast::Block>(
                       lit<"{"> + many(append<&ast::Block::stmts>(ref<StmtR>)) +
                       lit<"}">)> {};

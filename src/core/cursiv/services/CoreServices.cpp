@@ -24,7 +24,9 @@
 namespace cursiv {
 
 CoreServices::CoreServices(SharedCoreServices& sharedServices) noexcept
-    : shared(sharedServices) {}
+    : _shared(std::addressof(sharedServices)) {}
+
+CoreServices::CoreServices() noexcept = default;
 
 CoreServices::~CoreServices() noexcept = default;
 

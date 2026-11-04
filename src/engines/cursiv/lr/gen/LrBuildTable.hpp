@@ -50,6 +50,14 @@ struct LrStateMerge {
   std::uint16_t none;
 };
 
+// What one reading of a token says to a caret: the site it fills, and whether
+// the token opens the rule that writes it.
+struct LrCaretSite {
+  ElementId site = kNoElement;
+  bool entered = false;
+  auto operator<=>(const LrCaretSite&) const = default;
+};
+
 struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   std::uint16_t ncanonical = 0;  // states before re-fusion
   LrIdentity identity = LrIdentity::core_plus_lookaheads;
@@ -166,6 +174,8 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   // The programs of `guard` actions and guarded gotos, and per state what its
   // tag knows of the gap its span opened on and which conditions held there.
   std::vector<LrGuard> guards{};
+  // The sets of sites that actions and guards name by index. Zero names none.
+  std::vector<std::vector<LrCaretSite>> siteSets{{}};
   Vec<DynSet> tagKnown{};
   Vec<DynSet> tagTruth{};
 

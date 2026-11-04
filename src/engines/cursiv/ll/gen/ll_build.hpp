@@ -13,7 +13,7 @@ namespace cursiv {
 
 // Optional construction counters: each visit evaluates one position or rule.
 struct LlBuildWork {
-  std::uint64_t nullable = 0, first = 0, productive = 0, repair = 0;
+  std::uint64_t nullable = 0, first = 0, follow = 0, productive = 0, repair = 0;
   std::uint64_t gapShape = 0, gapSets = 0;
 };
 
@@ -35,8 +35,9 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt = {});
 // The rules that two ways out of one choice can call before a token is read:
 // a closure reaches them over two stacks, and the body of each is read again
 // unless the callers share it. A rule that can end unread is not shared: its
-// callers join only after it has left.
+// callers join only after it has left. `visits` counts the rules walked.
 std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
-                                          std::uint16_t nrules);
+                                          std::uint16_t nrules,
+                                          std::uint64_t* visits = nullptr);
 
 }  // namespace cursiv

@@ -51,6 +51,11 @@ struct AstReflection {
       const AstTypeTag* subtype,
       const AstTypeTag* supertype) const noexcept = 0;
 
+  // A new node of `type`, its members at their defaults, its parent null. Empty
+  // for a class this grammar's rules do not build. A completion stands such a
+  // node where a reference is about to be written.
+  [[nodiscard]] virtual AstNodePtr createNode(const AstTypeTag* type) const = 0;
+
   // Whether every member that can be absent was written. A scalar has no
   // absent state, so this does not pretend to check one; a reference is
   // judged on its text and never on its target -- an unresolved name is a

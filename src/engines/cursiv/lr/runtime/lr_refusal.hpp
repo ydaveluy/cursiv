@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/lr/runtime/LrWalkTail.hpp"
@@ -120,6 +121,24 @@ bool lr_graph_takes(Id vertex, State&& state, Below&& below, Act&& act,
   return lr_graph_takes(w, vertex, state, below, act, target);
 }
 
+// Whether an arm of a cell of several takes a token, from `state` and through
+// the states its empty reductions lead to, each read once: their number is the
+// grammar's, not the native stack's. `arms(state, leads)` answers one state,
+// telling `leads` each state an empty reduction leads to.
+template <class Arms>
+bool lr_cell_walk(std::uint32_t state, Arms&& arms) {
+  std::vector<std::uint32_t> states;
+  std::unordered_set<std::uint32_t> seen;
+  const auto leads = [&](std::uint32_t to) {
+    if (seen.insert(to).second) states.push_back(to);
+  };
+  for (std::size_t at = 0;; ++at) {
+    if (arms(state, leads)) return true;
+    if (at == states.size()) return false;
+    state = states[at];
+  }
+}
+
 // `la` read again by `rescan(la)`, without its terminal, while that terminal
 // is flagged and `takes(la)` refuses it. Whether any was refused.
 template <class Flagged, class Takes, class Rescan>
@@ -131,6 +150,22 @@ inline bool lr_refused(Flagged&& flagged, Takes&& takes, Token& la,
     refused = true;
   }
   return refused;
+}
+
+// What ties with `at`, a token a refusal elected: the sweep answers the keyword
+// that was refused and not what it reserved, so each is read in turn by
+// `without(at)`, with the ones before it off the position. `ties` says where
+// that ends; a token the mode flags stays only if `takes` it. `keep` is told
+// each one that stays, and says whether there is room for another.
+template <class Without, class Ties, class Flagged, class Takes, class Keep>
+inline void lr_refused_ties(Token at, Without&& without, Ties&& ties,
+                            Flagged&& flagged, Takes&& takes, Keep&& keep) {
+  for (;;) {
+    at = without(at);
+    if (!ties(at)) return;
+    if (flagged(at.sym) && !takes(at)) continue;
+    if (!keep(at)) return;
+  }
 }
 
 }  // namespace cursiv

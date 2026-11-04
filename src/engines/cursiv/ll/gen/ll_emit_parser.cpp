@@ -246,6 +246,7 @@ struct Emit : EmitOutput {
   void decision(std::uint16_t id);
   void peek_choice(std::uint16_t d, std::string_view mode, bool constant);
   void arm(std::uint16_t id, std::uint16_t hand);
+  bool word_rule(std::uint16_t r) const;
   void term_choice(std::uint16_t id,
                    const std::vector<std::vector<std::uint16_t>>& byArm);
   void sequence(std::uint16_t id, std::uint16_t hand);
@@ -320,6 +321,29 @@ void Emit::join(std::uint32_t base, std::uint32_t count,
   put("::cursiv::ll_join<kTable>(c, {}, kFuse + {}u, {}u);", from, base, count);
 }
 
+// A rule that reads one terminal whichever way it goes, each on a token of its
+// own, and states the same over each: its site can read it as a terminal.
+bool Emit::word_rule(std::uint16_t r) const {
+  const LlRuleInfo& u = a.cfg.rules[r];
+  if (u.body == kNoRow || u.climb != kNoRow) return false;
+  const LlNode& n = at(u.body);
+  if (n.kind != LlShape::alt || n.owns || n.row != kNoRow) return false;
+  const LlDecision& dec = a.cfg.decisions[n.decision];
+  const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
+  if ((a.cfg.ngapConds != 0 && dec.how != LlPredict::single) ||
+      a.modeMulti[dec.mode] == 1 || a.decEnded[n.decision] != 0 ||
+      a.decFlag[n.decision].any() || a.decStands[n.decision] != 0)
+    return false;
+  for (std::uint16_t i = 0; i < db.nalts; ++i) {
+    const LlNode& x = at(kid(n, i));
+    if (x.kind != LlShape::term || x.owns || x.row != at(kid(n, 0)).row)
+      return false;
+    for (std::uint16_t t = 0; t < a.cfg.nterms; ++t)
+      if (a.laSet[dec.set + i].test(t) != (t == x.sym)) return false;
+  }
+  return true;
+}
+
 void Emit::call_site(std::uint16_t id) {
   const FieldScope scope(*this);
   const LlNode& n = at(id);
@@ -335,6 +359,28 @@ void Emit::call_site(std::uint16_t id) {
   // What the site keeps across a plain callee ends with it, as a group's
   // locals do.
   const bool held = may_suspend(id);
+  // The token in place, as a terminal is read: the rule is called only for a
+  // repair, where the token is none of its own.
+  const bool word = !held && section == 0 && count <= 1 && !a.callerPeek[id] &&
+                    word_rule(n.sym);
+  if (word) {
+    const LlNode& body = at(a.cfg.rules[n.sym].body);
+    const std::string pos = name("p");
+    put("::std::uint16_t {} = 0u;", pos);
+    open("if (!c.give) {");
+    peek_choice(body.decision,
+                std::format("{}u", a.cfg.decisions[body.decision].mode), true);
+    open("switch (c.la.sym) {");
+    for (std::uint16_t i = 0; i < a.cfg.decisionBuild[body.decision].nalts; ++i)
+      put("case {}u: {} = {}u; break;", at(kid(body, i)).sym, pos,
+          kid(body, i) + 1);
+    line("default: break;");
+    close("}");
+    close("}");
+    put("if ({0} != 0u) [[likely]] ::cursiv::ll_consume<kTable>(c, {1}u, {0});",
+        pos, count == 1 ? a.fuse[base].to : at(kid(body, 0)).row);
+    open("else {");
+  }
   const bool scoped = !held && (count != 0 || section != 0);
   if (scoped) open("{");
   const std::string was =
@@ -353,6 +399,7 @@ void Emit::call_site(std::uint16_t id) {
   if (section != 0) put("::cursiv::ll_section_close<kTable>(c, {});", outer);
   join(base, count, was);
   if (scoped) close("}");
+  if (word) close("}");
 }
 
 // Whether a position calls, anywhere inside, a rule that is not plain: the

@@ -223,6 +223,7 @@ void run() {
         "a=true b=false c=false d=true ", flag_of);
   // So do bytes no alphabet reads, in front of a value that takes no rule.
   built("gatedinline: a = ^ 3; b = ^ -4;", "a=3 b=-4 ", count_of);
+  built("faced: a faced;", "clean a=23 ", count_of);
 
   // One record a word, naming the rule written there, if any.
   records("token: a = TRUE;", "[a|ID|name][TRUE|BOOL|flag][a = TRUE;||items]");

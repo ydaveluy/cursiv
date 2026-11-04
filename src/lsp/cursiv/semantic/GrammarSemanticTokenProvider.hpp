@@ -1,6 +1,9 @@
 // Computes semantic tokens for `textDocument/semanticTokens/full` and
-// `/range`. Not templated by the grammar: everything read here is already
-// erased except the name provider's typed lookup.
+// `/range` from the grammar and the name provider. A server announces semantic
+// tokens only for a language that installs a provider, so a language asks for
+// this one in its `install_lsp_module`; an editor then paints its colours over
+// its own syntax rules. Not templated by the grammar: everything read here is
+// already erased except the name provider's typed lookup.
 #pragma once
 
 #include <lsp/types.h>
@@ -13,9 +16,9 @@
 
 namespace cursiv {
 
-class DefaultSemanticTokenProvider : public SemanticTokenProvider {
+class GrammarSemanticTokenProvider : public SemanticTokenProvider {
  public:
-  explicit DefaultSemanticTokenProvider(const CoreServices& core) noexcept
+  explicit GrammarSemanticTokenProvider(const CoreServices& core) noexcept
       : _core(core) {}
 
   [[nodiscard]] lsp::SemanticTokens semanticHighlight(

@@ -38,6 +38,10 @@ struct Grammar {
   // data rule's. Empty for a record that converts nothing.
   constexpr virtual std::string_view recordRule(
       const CstNode&) const noexcept = 0;
+  // Whether a data rule converts what the record spans. A data rule of one token
+  // has no record of its own, so `recordRule` of its leaf names the terminal and
+  // this still answers true.
+  constexpr virtual bool recordIsDataRule(const CstNode&) const noexcept = 0;
   // The member the record writes first -- the innermost directive standing
   // over the position, which is the one the token itself fills.
   constexpr virtual std::string_view recordFeature(

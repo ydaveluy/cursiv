@@ -38,6 +38,7 @@
 #include "cursiv/ranges/SelectionRangeProvider.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
 #include "cursiv/services/LspServices.hpp"
@@ -427,7 +428,15 @@ namespace {
 
 namespace ct = cursiv::test;
 
-using World = support::LspWorkspace;
+// A language asks for colours: none come by default.
+struct World : support::LspWorkspace {
+  World()
+      : WorkspaceWorld([](cursiv::LspServices& language) {
+          language.semanticTokenProvider =
+              std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
+                  language);
+        }) {}
+};
 
 // One token, absolute: what the client reconstructs from the deltas.
 struct Decoded {

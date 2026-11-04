@@ -270,8 +270,79 @@ void a_repair_invalidates_the_prediction_plan() {
   CHECK(plan.say(5, 15, 0, 0, false) == kLlUnplanned);
 }
 
+// What the plan owes, read the plain way: the first entry of the choice there
+// that is still open, whatever was asked or laid before.
+struct PlainPlan {
+  std::vector<cursiv::LlPlanEntry> entries;
+
+  std::uint16_t say(std::uint16_t decision, cursiv::TextOffset at,
+                    std::uint32_t lull, bool again) {
+    for (auto& e : entries) {
+      if (e.at != at || e.decision != decision || e.lull != lull || e.taken)
+        continue;
+      e.taken = !again && e.arm != cursiv::kNoRow;
+      return e.arm;
+    }
+    return cursiv::kLlUnplanned;
+  }
+};
+
+// Asks, entries laid behind them and refusals dropped, in any order, get the
+// plain answers.
+void a_plan_answers_as_a_plain_read_does() {
+  std::mt19937 rng(11);
+  const auto below = [&rng](std::uint32_t n) {
+    return static_cast<std::uint32_t>(rng() % n);
+  };
+  for (unsigned round = 0; round < 2000; ++round) {
+    cursiv::TextOffset last = 0;
+    const auto entries_after = [&](unsigned count) {
+      std::vector<cursiv::LlPlanEntry> out;
+      for (unsigned i = 0; i < count; ++i) {
+        last += below(3);
+        out.push_back({.at = last,
+                       .lull = below(2),
+                       .decision = static_cast<std::uint16_t>(below(3)),
+                       .arm = below(5) == 0 ? cursiv::kNoRow
+                                            : static_cast<std::uint16_t>(below(4)),
+                       .below = below(6) == 0});
+      }
+      return out;
+    };
+    cursiv::LlPlan plan;
+    PlainPlan plain;
+    auto first = entries_after(below(8));
+    plain.entries = first;
+    std::vector<cursiv::LlPlanWay> ways;
+    const auto laid = plan.install(first, &ways, 0);
+    bool dropped = false;
+    for (unsigned step = 0; step < 40; ++step) {
+      if (const unsigned what = below(10); what == 0) {
+        const auto more = entries_after(below(4));
+        CHECK(plan.extend(laid, more));
+        plain.entries.insert(plain.entries.end(), more.begin(), more.end());
+      } else if (what == 1 && below(8) == 0) {
+        // Only the plan's first drop takes anything: it has no ways left to hold.
+        plan.drop_below();
+        if (!dropped)
+          std::erase_if(plain.entries,
+                        [](const cursiv::LlPlanEntry& e) { return e.below; });
+        dropped = true;
+      } else {
+        const auto decision = static_cast<std::uint16_t>(below(3));
+        const cursiv::TextOffset at = below(last + 2);
+        const std::uint32_t lull = below(2);
+        const bool again = below(4) == 0;
+        CHECK(plan.say(decision, at, lull, 0, again) ==
+              plain.say(decision, at, lull, again));
+      }
+    }
+  }
+}
+
 int main() {
   a_repair_invalidates_the_prediction_plan();
+  a_plan_answers_as_a_plain_read_does();
   std::mt19937 rng(7);
   cursiv::LlHistory h;
   std::vector<cursiv::LlHistory::Node> nodes{cursiv::LlHistory::kRoot};

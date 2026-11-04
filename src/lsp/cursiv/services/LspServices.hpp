@@ -41,7 +41,7 @@ struct LspServices : virtual CoreServices {
   explicit LspServices(SharedLspServices& sharedServices) noexcept;
   ~LspServices() noexcept override;
 
-  // The same object the base's `shared` names, seen as what it is. Not a
+  // The same object as `shared()`, seen as what it is. Not a
   // second container: retyping is the whole of what it does.
   SharedLspServices& lspShared;
 

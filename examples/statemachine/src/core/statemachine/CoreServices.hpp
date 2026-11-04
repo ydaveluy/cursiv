@@ -17,9 +17,7 @@ struct StateMachineCoreServices
     : cursiv::CoreServicesFor<StateMachineSharedCoreServices> {
   std::unique_ptr<const StateMachineValidator> validator;
 
-  explicit StateMachineCoreServices(
-      StateMachineSharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {

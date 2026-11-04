@@ -3,6 +3,7 @@
 #include <memory>
 #include <utility>
 
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/EmptyFileSystemProvider.hpp"
@@ -15,6 +16,8 @@ namespace sm {
 
 void install_lsp_module(StateMachineServices& services) {
   cursiv::install_default_lsp_services(services);
+  services.semanticTokenProvider =
+      std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
   services.formatter = std::make_unique<const StatemachineFormatter>(services);
 }
 

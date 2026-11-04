@@ -38,4 +38,7 @@ cursiv_grammar(growthfastalr engines/lr/GrowthGrammars.hpp tgfasta::Lr ENGINE LR
 cursiv_grammar(growth engines/lr/GrowthGrammars.hpp tgrowth::G ENGINE LR)
 cursiv_test(LrGrowth_test engines/lr/LrGrowth_test.cpp
     cursiv::bench growthfastalrGenerated growthGenerated)
+# A project may build strict C++: this table has no rivals, which once sized an
+# array at zero in the headers a parser instantiates.
+target_compile_options(LrGrowth_test PRIVATE -pedantic-errors)
 set_tests_properties(LrGrowth_test PROPERTIES TIMEOUT 120)

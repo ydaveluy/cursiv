@@ -159,6 +159,64 @@ void a_site_that_narrows_nothing_offers_the_whole_member(
   return "<absent>";
 }
 
+// The members an identifier fills at the end of what is written, sorted.
+[[nodiscard]] std::vector<std::string_view> identifier_members(
+    const World& world, std::string_view text) {
+  const cursiv::Parser& parser = *world.lang->parser;
+  const std::string source{text};
+  const cursiv::ParseResult result = parser.parse(source);
+  const auto at = static_cast<cursiv::TextOffset>(source.size());
+  std::vector<cursiv::NextFeature> out;
+  parser.nextFeaturesAt(result.cst(), at, at, out);
+  std::vector<std::string_view> members;
+  for (const cursiv::NextFeature& f : out)
+    if (parser.getGrammar().terminalName(f.feature) == "ID")
+      members.push_back(f.property);
+  std::ranges::sort(members);
+  return members;
+}
+
+// A token two readings take, each filling its own member: both are named, and
+// each member's own targets are offered, however the token reaches the member.
+void readings_of_one_token_each_name_their_member(const CaretDoor& door) {
+  const World world(door);
+  const std::vector<std::string_view> both{"alpha", "beta"};
+  for (const std::string_view head : {"either", "dotted", "opens"}) {
+    const std::string text =
+        "fn f() { alpha a; beta b; " + std::string(head) + " ";
+    CHECK(identifier_members(world, text) == both);
+    offered(*world.lang, text + "<|> }", [](const lsp::CompletionList& list) {
+      CHECK(offers(list, "a"));
+      CHECK(offers(list, "b"));
+    });
+  }
+}
+
+// The rules of a choice share a prefix, and only then part into a member each,
+// behind data rules: both members are read at the caret past the prefix.
+void rules_sharing_a_prefix_each_name_their_member(const CaretDoor& door) {
+  const World world(door);
+  const std::string text = "fn f() { alpha a; beta b; child x : ";
+  CHECK(identifier_members(world, text) ==
+        (std::vector<std::string_view>{"alpha", "beta"}));
+  offered(*world.lang, text + "<|> }", [](const lsp::CompletionList& list) {
+    CHECK(offers(list, "a"));
+    CHECK(offers(list, "b"));
+  });
+}
+
+// A reading that fills nothing takes nothing from one that fills a member.
+void a_reading_naming_nothing_leaves_the_member(const CaretDoor& door) {
+  const World world(door);
+  const std::string text = "fn f() { alpha a; beta b; maybe ";
+  CHECK(identifier_members(world, text) ==
+        std::vector<std::string_view>{"alpha"});
+  offered(*world.lang, text + "<|> }", [](const lsp::CompletionList& list) {
+    CHECK(offers(list, "a"));
+    CHECK(!offers(list, "b"));
+  });
+}
+
 // A member filled by a whole rule that lays a record of its own: the write
 // cannot ride onto the callee, and reading the call site instead names the
 // member of whatever encloses it -- `stmts`, which `box` does not fill.
@@ -245,4 +303,7 @@ void run_caret_lane(const CaretDoor& door) {
   a_member_written_by_a_record_of_its_own_is_named(door);
   the_call_that_names_a_rule_wins_over_one_that_reaches_it(door);
   a_token_inside_a_rule_names_no_member(door);
+  readings_of_one_token_each_name_their_member(door);
+  rules_sharing_a_prefix_each_name_their_member(door);
+  a_reading_naming_nothing_leaves_the_member(door);
 }

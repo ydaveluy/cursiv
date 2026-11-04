@@ -14,7 +14,12 @@ CURSIV_NOINLINE static const char* lex_find_kmp(
     std::string_view text, std::string_view before, std::string_view mark,
     std::string_view after, function_ref<bool(const char*)> take) {
   const auto size = before.size() + mark.size() + after.size();
-  if (size == 0) return text.data();
+  // An empty search stands at every position `take` may accept.
+  if (size == 0) {
+    for (std::size_t i = 0; i <= text.size(); ++i)
+      if (take(text.data() + i)) return text.data() + i;
+    return nullptr;
+  }
   const auto byte = [&](std::size_t i) {
     if (i < before.size()) return before[i];
     i -= before.size();

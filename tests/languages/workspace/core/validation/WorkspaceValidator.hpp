@@ -33,7 +33,7 @@ class WorkspaceValidator final : public cursiv::DefaultCoreService {
   // Whether the climb from this entity ends, memoised -- unmemoised this
   // check is quadratic over a document. Keyed by document, so a rebuild
   // drops exactly the entries it invalidates.
-  cursiv::DocumentCache<const ast::Entity*, bool> _terminates{services.shared};
+  cursiv::DocumentCache<const ast::Entity*, bool> _terminates{shared};
 };
 
 }  // namespace ws

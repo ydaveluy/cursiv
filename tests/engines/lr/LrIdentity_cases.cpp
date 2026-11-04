@@ -664,7 +664,7 @@ void run() {
   for (bool wide : {false, true}) {
     keeps_actions<ttableorder::Lr>(wide, 12584957980273038131ull, 13, 13, 5, 3);
     keeps_actions<tgchain::Lr>(wide, 5582408504362784204ull, 11, 12, 2, 2);
-    keeps_actions<tcornerkey::Lr>(wide, 311705177790204545ull, 49, 51, 1, 1);
+    keeps_actions<tcornerkey::Lr>(wide, 15627357034739539105ull, 49, 51, 1, 1);
   }
   // This grammar reaches the uniform-descendant shortcut, including the
   // inexact written order of nested dangling-else choices.

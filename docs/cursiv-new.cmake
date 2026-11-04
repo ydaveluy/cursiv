@@ -531,9 +531,7 @@ struct @CURSIV_NEW_CLASS@CoreServices
     : cursiv::CoreServicesFor<@CURSIV_NEW_CLASS@SharedCoreServices> {
   std::unique_ptr<const @CURSIV_NEW_CLASS@Validator> validator;
 
-  explicit @CURSIV_NEW_CLASS@CoreServices(
-      @CURSIV_NEW_CLASS@SharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   // Lists the services after the default ones, so that a missing required
   // service is reported by name. Add a line for each service you add.
@@ -720,7 +718,7 @@ _cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspServices.hpp]==] [==[// The serv
 // the editor services. To add an editor service, declare it here.
 #pragma once
 
-#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/LspServicesFor.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
@@ -729,20 +727,9 @@ namespace @CURSIV_NEW_ID@ {
 struct @CURSIV_NEW_CLASS@SharedServices : @CURSIV_NEW_CLASS@SharedCoreServices,
                                            cursiv::SharedLspServices {};
 
-struct @CURSIV_NEW_CLASS@Services final : @CURSIV_NEW_CLASS@CoreServices,
-                                           cursiv::LspServices {
-  explicit @CURSIV_NEW_CLASS@Services(
-      @CURSIV_NEW_CLASS@SharedServices& sharedServices)
-      : cursiv::CoreServices(sharedServices),
-        @CURSIV_NEW_CLASS@CoreServices(sharedServices),
-        cursiv::LspServices(sharedServices) {}
-
-  // Lists the core services, then the editor services.
-  void visitServices(
-      cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const override {
-    @CURSIV_NEW_CLASS@CoreServices::visitServices(yield);
-    cursiv::LspServices::visitOwnServices(yield);
-  }
+struct @CURSIV_NEW_CLASS@Services final
+    : cursiv::LspServicesFor<@CURSIV_NEW_CLASS@CoreServices, @CURSIV_NEW_CLASS@SharedServices> {
+  using LspServicesFor::LspServicesFor;
 };
 
 }  // namespace @CURSIV_NEW_ID@

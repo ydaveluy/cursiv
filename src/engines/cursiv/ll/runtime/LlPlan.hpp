@@ -47,6 +47,7 @@ class LlPlan {
     _ways.clear();
     _below = false;
     _repairs = 0;
+    ++_layout;
     ++_laid;
   }
   bool empty() const { return _entries.empty(); }
@@ -61,6 +62,7 @@ class LlPlan {
   Laid install(std::vector<LlPlanEntry>& entries, std::vector<LlPlanWay>* ways,
                std::uint32_t repairs) {
     _entries.swap(entries);
+    ++_layout;
     _ways.clear();
     _below = ways != nullptr;
     if (_below) _ways.swap(*ways);
@@ -96,6 +98,7 @@ class LlPlan {
   void drop_below() {
     if (!_below) return;
     std::erase_if(_entries, [](const LlPlanEntry& e) { return e.below; });
+    ++_layout;
     _ways.clear();
     _below = false;
   }
@@ -109,19 +112,52 @@ class LlPlan {
   std::uint16_t say(std::uint16_t decision, TextOffset at, std::uint32_t lull,
                     std::uint32_t repairs, bool again) {
     if (_entries.empty() || repairs != _repairs) return kLlUnplanned;
-    auto it = std::lower_bound(
-        _entries.begin(), _entries.end(), at,
-        [](const LlPlanEntry& e, TextOffset p) { return e.at < p; });
-    for (; it != _entries.end() && it->at == at; ++it) {
-      if (it->decision != decision || it->lull != lull || it->taken) continue;
-      it->taken = !again && it->arm != kNoRow;
-      return it->arm;
+    // Many levels may ask one choice at one place: each picks up where the last
+    // one left it, past what can no longer answer it.
+    if (decision >= _seats.size()) _seats.resize(decision + 1u);
+    Seat& seat = _seats[decision];
+    if (seat.layout != _layout || seat.at != at) seat = {_layout, at, 0};
+    // Past the entries before this place, among them those laid since.
+    if (seat.next < _entries.size() && _entries[seat.next].at < at) {
+      const auto first = std::lower_bound(
+          _entries.begin() + static_cast<std::ptrdiff_t>(seat.next),
+          _entries.end(), at,
+          [](const LlPlanEntry& e, TextOffset p) { return e.at < p; });
+      seat.next = static_cast<std::size_t>(first - _entries.begin());
+    }
+    bool moving = true;
+    for (std::size_t i = seat.next;
+         i < _entries.size() && _entries[i].at == at; ++i) {
+      ++_visits;
+      LlPlanEntry& e = _entries[i];
+      if (e.decision != decision || e.taken) {
+        if (moving) seat.next = i + 1;
+        continue;
+      }
+      moving = false;
+      if (e.lull != lull) continue;
+      e.taken = !again && e.arm != kNoRow;
+      return e.arm;
     }
     return kLlUnplanned;
   }
 
+  // The entries `say` has read, for a test of its growth.
+  std::uint64_t visits() const { return _visits; }
+
  private:
+  // Where a choice stands in the entries of the place it was last asked at.
+  struct Seat {
+    std::uint64_t layout = 0;
+    TextOffset at = 0;
+    std::size_t next = 0;
+  };
+
   std::vector<LlPlanEntry> _entries;
+  std::vector<Seat> _seats;
+  // Names the positions of `_entries`, which the seats count on.
+  std::uint64_t _layout = 1;
+  std::uint64_t _visits = 0;
   std::vector<LlPlanWay> _ways;
   bool _below = false;
   std::uint32_t _repairs = 0;

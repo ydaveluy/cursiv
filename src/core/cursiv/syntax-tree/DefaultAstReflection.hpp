@@ -32,6 +32,13 @@ struct DefaultAstReflection : AstReflection {
     return subtype != nullptr && subtype->derivesFrom(supertype);
   }
 
+  [[nodiscard]] AstNodePtr createNode(const AstTypeTag* type) const override {
+    const auto index = typeIndexOf(type);
+    return index != kNoType && _f.newNodes[index] != nullptr
+               ? _f.newNodes[index]()
+               : AstNodePtr{};
+  }
+
   void visitMembers(
       const AstNode& node,
       cursiv::function_ref<void(std::string_view, std::uint32_t, AstNode&)>

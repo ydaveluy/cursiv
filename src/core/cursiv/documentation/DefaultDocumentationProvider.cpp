@@ -67,7 +67,7 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   const Document* target = &document;
   std::shared_ptr<Document> held;
   if (description->documentId != document.id) {
-    held = services.shared.documents->getDocument(description->documentId);
+    held = shared.documents->getDocument(description->documentId);
     if (held == nullptr) return std::nullopt;
     target = held.get();
   }
@@ -77,7 +77,7 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   const CoreServices* const language =
       target->language != nullptr
           ? target->language
-          : services.shared.serviceRegistry->findServices(
+          : shared.serviceRegistry->findServices(
                 target->uri, target->textDocument().languageId());
   if (language == nullptr) return std::nullopt;
   const std::optional<CstNodeView> site =
@@ -125,7 +125,7 @@ DefaultDocumentationProvider::findNameInGlobalScope(
   // An empty AcceptSet accepts everything: a doc link names prose, not a
   // reference the reflection could narrow.
   const AstNodeDescription* const found =
-      services.shared.indexManager->findByName(name, /*caseSensitive=*/true, {},
+      shared.indexManager->findByName(name, /*caseSensitive=*/true, {},
                                                *services.astReflection);
   if (found == nullptr) return std::nullopt;
   return *found;

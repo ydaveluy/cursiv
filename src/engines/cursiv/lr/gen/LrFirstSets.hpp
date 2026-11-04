@@ -41,34 +41,72 @@ struct LrFirstSets {
   }
 };
 
+// Productions still to walk, each once however often it is asked for.
+class LrProductionQueue {
+ public:
+  explicit LrProductionQueue(unsigned count) : _queued(count, 1) {
+    _work.resize(count);
+    for (unsigned p = 0; p < count; ++p) _work[p] = count - 1u - p;
+  }
+  bool more() const { return !_work.empty(); }
+  unsigned next() {
+    const unsigned p = _work.back();
+    _work.pop_back();
+    _queued[p] = 0;
+    return p;
+  }
+  void push(unsigned p) {
+    if (_queued[p] != 0) return;
+    _queued[p] = 1;
+    _work.push_back(p);
+  }
+
+ private:
+  std::vector<unsigned> _work;
+  std::vector<std::uint8_t> _queued;
+};
+
 // FIRST reads a nullable prefix; LAST reads the same fixpoint from the tail.
 // Only FIRST includes the end assertion of an otherwise empty production.
 template <bool Last = false>
 inline std::vector<DynSet> lr_first(const LrBuildCfg& g,
                                     std::span<const std::uint8_t> nullable) {
   std::vector<DynSet> first(g.nnts);
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (unsigned p = 0; p < g.nprods; ++p) {
-      const auto& q = g.prods[p];
-      DynSet& into = first[q.lhs];
-      unsigned i = 0;
-      for (; i < q.len; ++i) {
-        const auto sym = g.sym_at(q, Last ? q.len - 1u - i : i);
-        if (is_term(sym)) {
-          changed = !into.test(sym) || changed;
-          into.set(sym);
-          break;
-        }
-        changed = into.add(first[nt_index(sym)]) || changed;
-        if (!nullable[nt_index(sym)]) break;
-      }
-      if constexpr (!Last)
-        if (i == q.len && g.prodBuild[p].endOnly) {
-          changed = !into.test(kEofSymbol) || changed;
-          into.set(kEofSymbol);
-        }
+  // The productions whose set reads each rule's, walked once per change.
+  std::vector<std::vector<unsigned>> readers(g.nnts);
+  for (unsigned p = 0; p < g.nprods; ++p) {
+    const auto& q = g.prods[p];
+    for (unsigned i = 0; i < q.len; ++i) {
+      const auto sym = g.sym_at(q, Last ? q.len - 1u - i : i);
+      if (is_term(sym)) break;
+      readers[nt_index(sym)].push_back(p);
+      if (!nullable[nt_index(sym)]) break;
     }
+  }
+  LrProductionQueue queue(g.nprods);
+  while (queue.more()) {
+    const unsigned p = queue.next();
+    const auto& q = g.prods[p];
+    DynSet& into = first[q.lhs];
+    bool changed = false;
+    unsigned i = 0;
+    for (; i < q.len; ++i) {
+      const auto sym = g.sym_at(q, Last ? q.len - 1u - i : i);
+      if (is_term(sym)) {
+        changed = !into.test(sym) || changed;
+        into.set(sym);
+        break;
+      }
+      changed = into.add(first[nt_index(sym)]) || changed;
+      if (!nullable[nt_index(sym)]) break;
+    }
+    if constexpr (!Last)
+      if (i == q.len && g.prodBuild[p].endOnly) {
+        changed = !into.test(kEofSymbol) || changed;
+        into.set(kEofSymbol);
+      }
+    if (changed)
+      for (const unsigned reader : readers[q.lhs]) queue.push(reader);
   }
   return first;
 }
@@ -79,26 +117,30 @@ inline std::vector<DynSet> lr_follow(
     std::span<const DynSet> first) {
   std::vector<DynSet> follow(g.nnts);
   follow[0].set(kEofSymbol);
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (unsigned p = 0; p < g.nprods; ++p) {
-      const auto& q = g.prods[p];
-      DynSet suffix;
-      if (g.prodBuild[p].endOnly)
-        suffix.set(kEofSymbol);
-      else
-        suffix = follow[q.lhs];
-      for (unsigned i = q.len; i != 0;) {
-        const auto sym = g.sym_at(q, --i);
-        if (is_term(sym)) {
-          suffix.w.clear();
-          suffix.set(sym);
-        } else {
-          const auto nt = nt_index(sym);
-          changed = follow[nt].add(suffix) || changed;
-          if (!nullable[nt]) suffix.w.clear();
-          suffix |= first[nt];
-        }
+  // A production reads only its own rule's FOLLOW: it is walked again when that
+  // grows.
+  std::vector<std::vector<unsigned>> ofRule(g.nnts);
+  for (unsigned p = 0; p < g.nprods; ++p) ofRule[g.prods[p].lhs].push_back(p);
+  LrProductionQueue queue(g.nprods);
+  while (queue.more()) {
+    const unsigned p = queue.next();
+    const auto& q = g.prods[p];
+    DynSet suffix;
+    if (g.prodBuild[p].endOnly)
+      suffix.set(kEofSymbol);
+    else
+      suffix = follow[q.lhs];
+    for (unsigned i = q.len; i != 0;) {
+      const auto sym = g.sym_at(q, --i);
+      if (is_term(sym)) {
+        suffix.w.clear();
+        suffix.set(sym);
+      } else {
+        const auto nt = nt_index(sym);
+        if (follow[nt].add(suffix))
+          for (const unsigned reader : ofRule[nt]) queue.push(reader);
+        if (!nullable[nt]) suffix.w.clear();
+        suffix |= first[nt];
       }
     }
   }

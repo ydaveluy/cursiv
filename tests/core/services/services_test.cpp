@@ -154,7 +154,7 @@ void the_container_s_parser_is_the_engine() {
 
   const cursiv::ParseResult r = s.parser->parse("datatype String\n");
   CHECK(static_cast<bool>(r));
-  CHECK(&s.shared == &shared);
+  CHECK(&s.shared() == &shared);
 }
 
 // A derived container that adds a slot declares it in `visitServices`, and the
@@ -162,8 +162,7 @@ void the_container_s_parser_is_the_engine() {
 struct Derived final : cursiv::CoreServicesFor<cursiv::SharedCoreServices> {
   std::unique_ptr<const cursiv::NameProvider> extra;
 
-  explicit Derived(cursiv::SharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {
@@ -206,8 +205,7 @@ struct FacadeB : virtual cursiv::CoreServices {
 };
 struct Both final : FacadeA, FacadeB {
   explicit Both(cursiv::SharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices),
-        FacadeA(sharedServices),
+      : FacadeA(sharedServices),
         FacadeB(sharedServices) {}
 };
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -7,10 +8,14 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/ll/runtime/LlContext.hpp"
+#include "cursiv/ll/runtime/LlLanguageParser.hpp"
+#include "cursiv/ll/runtime/LlPredictionWork.hpp"
 #include "cursiv/ll/runtime/ll_rescan.hpp"
 #include "cursiv/ll/runtime/ll_search.hpp"
 #include "cursiv/lr/runtime/LrContext.hpp"
@@ -26,7 +31,10 @@
 #include "rcondll/generated/Ll/Module.hpp"
 #include "refusedcondll/generated/CondLl/Module.hpp"
 #include "refusedcondll/generated/CondLl/Table.hpp"
+#include "refusedll/generated/Ll/AstReflection.hpp"
+#include "refusedll/generated/Ll/Grammar.hpp"
 #include "refusedll/generated/Ll/Module.hpp"
+#include "refusedll/generated/Ll/Parser.hpp"
 #include "refusedll/generated/Ll/Table.hpp"
 #include "refusedlr/generated/Lr/Module.hpp"
 #include "refusedlr/generated/Lr/Table.hpp"
@@ -240,7 +248,167 @@ void a_reservation_reads_the_word_its_keyword_refuses() {
 // A keyword refused at a position is off it and reserves nothing there: the
 // bytes read as a name, in either engine, and in a mode that reads several
 // candidates.
+// A refused keyword takes itself out of the election, and only itself.
+void refused_keyword_cases(const char* engine, const cursiv::Parser& parser) {
+  std::string far = "rivals: X";
+  for (unsigned i = 0; i < 100; ++i) far += " a";
+  for (const std::string& text :
+       {std::string{"rivals:X q"}, std::string{"rivals: X b"},
+        std::string{"rivals: X c"}, std::string{"rivals: X a b"},
+        std::string{"rivals: X a c"}, far + " b", far + " c"}) {
+    const auto result = parser.parse(text);
+    CHECK(result.accepted && result.diagnostics.empty());
+    if (!result.diagnostics.empty())
+      std::printf("%s: %.20s: %zu diagnostics\n", engine, text.c_str(),
+                  result.diagnostics.size());
+  }
+}
+
+void a_refused_keyword_leaves_the_terminals_behind_it() {
+  refused_keyword_cases("LL", *tllrefused::generated::Ll::create_parser());
+  refused_keyword_cases("LR", *tllrefused::generated::Lr::create_parser());
+}
+
+bool parse_clean(const cursiv::Parser& parser, std::string_view text) {
+  const auto result = parser.parse(text);
+  return result.accepted && result.diagnostics.empty();
+}
+
+std::vector<std::string> offered(const cursiv::Parser& parser,
+                                 const std::string& text,
+                                 cursiv::TextOffset at) {
+  const cursiv::ParseResult parsed = parser.parse(text);
+  std::vector<cursiv::NextFeature> next;
+  parser.nextFeaturesAt(parsed.cst(), at, at, next);
+  std::vector<std::string> out;
+  for (const cursiv::NextFeature& f : next) {
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    out.emplace_back(spellings.size() == 1
+                         ? spellings.front()
+                         : parser.getGrammar().terminalName(f.feature));
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+// Completion reads what the parse reads: each terminal that ties behind a
+// refused keyword goes on, on a whole document as on a cut one.
+void completion_keeps_the_terminals_behind_a_refused_keyword() {
+  const auto ll = tllrefused::generated::Ll::create_parser();
+  const auto lr = tllrefused::generated::Lr::create_parser();
+  const std::vector<std::string> next{"a", "b", "c"};
+  std::string far = "rivals: X";
+  for (unsigned i = 0; i < 100; ++i) far += " a";
+  for (const std::string& written :
+       {std::string{"rivals: X "}, std::string{"rivals: X a "}, far + " "})
+    for (const char* rest : {"", "b", "c"}) {
+      const std::string text = written + rest;
+      const auto at = static_cast<cursiv::TextOffset>(written.size());
+      CHECK(offered(*ll, text, at) == next);
+      CHECK(offered(*lr, text, at) == next);
+    }
+  // Past the terminal the first reading would not have taken, the replay still
+  // stands: the next items, and a caret inside one of them.
+  const std::vector<std::string> item{"-",      "IN",    "NAME",
+                                      "cell:",  "glued:", "note:",
+                                      "rivals:"};
+  for (const std::string& text :
+       {std::string{"rivals: X c"}, std::string{"rivals: X a c"}, far + " c"}) {
+    const auto at = static_cast<cursiv::TextOffset>(text.size());
+    CHECK(offered(*ll, text, at) == item);
+    CHECK(offered(*lr, text, at) == item);
+    CHECK(offered(*ll, text + " rivals: X a b", at + 1) == item);
+    CHECK(offered(*lr, text + " rivals: X a b", at + 1) == item);
+  }
+  // Where no gap refuses it the keyword stands and reserves its spelling; where
+  // one does, the terminal the same gap guards is refused with it.
+  const std::vector<std::string> tight{"q"};
+  for (const char* rest : {"", "q"}) {
+    const std::string text = std::string{"rivals:X "} + rest;
+    CHECK(offered(*ll, text, 9) == tight);
+    CHECK(offered(*lr, text, 9) == tight);
+  }
+  CHECK(!parse_clean(*ll, "rivals:X z") && !parse_clean(*lr, "rivals:X z"));
+  CHECK(!parse_clean(*ll, "rivals: X z") && !parse_clean(*lr, "rivals: X z"));
+  // A caret glued behind the word: the reading it follows may be either tie.
+  const std::vector<std::string> marks{"!", "?"};
+  for (const char* text : {"glued: W", "glued: W!", "glued: W?"}) {
+    CHECK(offered(*ll, text, 8) == marks);
+    CHECK(offered(*lr, text, 8) == marks);
+  }
+  // Two readings refuse the keyword from one cell.
+  for (const char* text : {"cell: V !", "cell: V ?"}) {
+    CHECK(parse_clean(*ll, text) && parse_clean(*lr, text));
+    CHECK(offered(*ll, text, 8) == marks);
+    CHECK(offered(*lr, text, 8) == marks);
+  }
+  // A keyword refused where a trivia ties leaves the position to the trivia,
+  // and completion reads on past it.
+  CHECK(parse_clean(*lr, "note: N k m"));
+  CHECK(offered(*lr, "note: N k m", 10) == std::vector<std::string>{"m"});
+  CHECK(parse_clean(*ll, "note: k m") && parse_clean(*lr, "note: k m"));
+  // What a run with ties answered is no answer to a run without.
+  for (const char* text : {"rivals: Xa b rivals: X a c",
+                           "rivals: X a c rivals: Xa b"})
+    CHECK(parse_clean(*ll, text) && parse_clean(*lr, text));
+  CHECK(parse_clean(*ll, "note:N q") && parse_clean(*lr, "note:N q"));
+  // Both engines read every caret alike.
+  for (const std::string text :
+       {"rivals: X b", "rivals: X c", "rivals: X a b", "rivals: X a c",
+        "rivals:X q", "rivals:X z", "x rivals: X a c",
+        "rivals: X a c rivals: X a b", "rivals:  X  a  c", "rivals: X",
+        "rivals: X a", "glued: W", "glued: W!", "glued: W?", "glued:W q",
+        "cell: V !", "cell: V ?", "cell:V q", "cell:V r", "cell:e1V q",
+        "cell:e2V r", "note: k m", "note:N q"})
+    for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
+      const auto a = offered(*ll, text, at), b = offered(*lr, text, at);
+      CHECK(a == b);
+      if (a != b)
+        std::printf("caret differs: [%s|%s]\n", text.substr(0, at).c_str(),
+                    text.substr(at).c_str());
+    }
+}
+
+cursiv::CancellationTokenSource* stopOnEntry = nullptr;
+void stopping_drive(cursiv::LlContext& c) {
+  if (stopOnEntry != nullptr) stopOnEntry->request_stop();
+  tllrefused::generated::Ll::kDrive(c);
+}
+
+// A stop during the reading a refusal asks for leaves nothing of that reading
+// to the next parse on the thread.
+void a_stop_in_a_refused_reading_leaves_nothing_behind() {
+  namespace ll = tllrefused::generated::Ll;
+  const cursiv::LlLanguageParser<ll::kTable> parser(
+      ll::kGrammarMetaData, ll::kAstActions, stopping_drive);
+  std::string far = "rivals: X";
+  for (unsigned i = 0; i < 2000; ++i) far += " a";
+  far += " c";
+  cursiv::CancellationTokenSource source;
+  stopOnEntry = &source;
+  bool threw = false;
+  try {
+    (void)parser.parse(far, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    threw = true;
+  }
+  stopOnEntry = nullptr;
+  CHECK(threw);
+  const auto read = [&] {
+    const std::uint64_t before = cursiv::LlPredictionWork::current().tokens;
+    const auto after = parser.parse(far);
+    CHECK(after.accepted && after.diagnostics.empty());
+    return cursiv::LlPredictionWork::current().tokens - before;
+  };
+  const std::uint64_t first = read();
+  CHECK(first == read());
+}
+
 void run() {
+  a_refused_keyword_leaves_the_terminals_behind_it();
+  completion_keeps_the_terminals_behind_a_refused_keyword();
+  a_stop_in_a_refused_reading_leaves_nothing_behind();
   a_refused_keyword_reserves_nothing_from_a_misspelling();
   a_word_refused_at_a_cut_runs_into_it();
   a_reservation_reads_the_word_its_keyword_refuses();

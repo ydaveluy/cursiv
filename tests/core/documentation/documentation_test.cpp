@@ -10,6 +10,7 @@
 
 #include "comments/generated/Comments/Module.hpp"
 #include "core/documentation/CommentsGrammar.hpp"
+#include "cursiv/documentation/CommentNode.hpp"
 #include "cursiv/documentation/DefaultCommentProvider.hpp"
 #include "cursiv/documentation/DefaultDocumentationProvider.hpp"
 #include "cursiv/documentation/DocComment.hpp"
@@ -74,6 +75,37 @@ struct Parsed {
     return root->elements.size() > at ? root->elements[at] : nullptr;
   }
 };
+
+// The comment as a place: found through the node, and its tags read at their
+// place in the document, whatever stands before them on a line.
+void a_comment_node_gives_its_tags_their_place() {
+  const std::string text =
+      "entity Before { } /** @first é one\r\n * @second two\n */ entity Person { }\n";
+  const Parsed p(text);
+  const std::vector<std::string> names{"ML_COMMENT"};
+  const cursiv::NodeId id =
+      cursiv::find_comment_node(p.document, *p.element(1), names);
+  CHECK(id != cursiv::kNoNode);
+  if (id == cursiv::kNoNode) return;
+  const cursiv::Cst& cst = p.result.cst();
+  CHECK(cst.text(id).starts_with("/** @first"));
+  const cursiv::DocComment doc = cursiv::parse_doc_comment(cst, id);
+  const auto spelled = [&](const cursiv::DocCommentRange& range) {
+    return text.substr(range.start.offset, range.end.offset - range.start.offset);
+  };
+  const cursiv::DocCommentNode* const first = doc.getTag("first");
+  CHECK(first != nullptr);
+  if (first != nullptr) CHECK(spelled(first->range).starts_with("@first"));
+  const cursiv::DocCommentNode* const second = doc.getTag("second");
+  CHECK(second != nullptr);
+  if (second != nullptr) {
+    CHECK(spelled(second->range).starts_with("@second"));
+    CHECK(second->range.start.line == 1);
+    CHECK(spelled(second->range).ends_with("two"));
+  }
+  CHECK(cursiv::find_comment_node(p.document, *p.element(0), names) ==
+        cursiv::kNoNode);
+}
 
 void a_doc_comment_answers_as_written() {
   const Parsed p("/** The person. */\nentity Person { }\n");
@@ -233,6 +265,7 @@ void a_homeless_node_answers_nothing() {
 
 void run() {
   a_doc_comment_answers_as_written();
+  a_comment_node_gives_its_tags_their_place();
   the_node_alone_finds_its_document();
   a_plain_block_answers_as_written();
   a_line_comment_does_not_answer();

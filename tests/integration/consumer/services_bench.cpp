@@ -1,5 +1,6 @@
 #include "cursiv/LanguageBench.hpp"
 #include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/InlayHintProvider.hpp"
 #include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "tiny/generated/Tiny/Module.hpp"
@@ -47,6 +48,8 @@ bool register_language(cursiv::SharedCoreServices& shared) {
   cursiv::install_default_core_services(*services);
   tiny::generated::Tiny::install_generated_module(*services);
   cursiv::install_default_lsp_services(*services);
+  services->semanticTokenProvider =
+      std::make_unique<const cursiv::GrammarSemanticTokenProvider>(*services);
   services->documentSymbolProvider = std::make_unique<Symbols>();
   services->formatter = std::make_unique<Formatter>();
   services->inlayHintProvider = std::make_unique<Hints>();

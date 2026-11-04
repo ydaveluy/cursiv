@@ -18,6 +18,9 @@ struct LrGuard {
   // Per outcome, the call site and the enclosing rule's an action carries.
   std::vector<ElementId> site;
   std::vector<ElementId> outer;
+  // ...and the set of sites where its readings name several.
+  std::vector<std::uint16_t> alts;
+  std::vector<std::uint8_t> entered;
 
   bool operator==(const LrGuard&) const = default;
 
@@ -38,6 +41,8 @@ void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
     key.push_back(to == LrGuard::kNoState ? 0xffffffffu : name(to));
   key.insert(key.end(), p.site.begin(), p.site.end());
   key.insert(key.end(), p.outer.begin(), p.outer.end());
+  key.insert(key.end(), p.alts.begin(), p.alts.end());
+  key.insert(key.end(), p.entered.begin(), p.entered.end());
 }
 
 }  // namespace cursiv

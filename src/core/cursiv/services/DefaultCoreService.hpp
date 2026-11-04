@@ -6,18 +6,19 @@
 //
 // Reach a sibling service through `services` on each call, never cached at
 // construction: a language module replaces slots a default already filled.
-// Caching `services.shared` is fine -- it is fixed for the container's life.
+// `shared` is fixed for the container's life.
 
 namespace cursiv {
 
 class DefaultCoreService {
  public:
   explicit DefaultCoreService(const CoreServices& coreServices) noexcept
-      : services(coreServices) {}
+      : services(coreServices), shared(coreServices.shared()) {}
   virtual ~DefaultCoreService() noexcept = default;
 
  protected:
   const CoreServices& services;
+  SharedCoreServices& shared;
 };
 
 }  // namespace cursiv

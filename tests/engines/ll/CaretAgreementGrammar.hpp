@@ -17,6 +17,15 @@ struct Beta : cursiv::Extends<cursiv::AstNode> {
 struct Link : cursiv::Extends<cursiv::AstNode> {
   reference<Target> to, other;
 };
+struct Named : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  reference<Target> to;
+  string_view text;
+};
+struct Tagged : cursiv::Extends<cursiv::AstNode> {
+  string_view name;
+  reference<Target> other;
+};
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
@@ -66,9 +75,24 @@ struct Base : cursiv::GrammarSpec {
   struct OnlyBeta
       : rule<create<Beta>(kw<"beta"> + assign<&Beta::to>(ref<ID>) + lit<"-">)> {
   };
+  // Rules sharing a prefix, then a member each behind data rules: one through a
+  // list, and one with a string beside it.
+  struct Word : rule<ref<ID> | kw<"word">> {};
+  struct Words : rule<some(ref<Word>, lit<".">)> {};
+  struct STR : terminal<lit<"'"> + many(cr<"a-z">) + lit<"'">> {};
+  struct NamedR
+      : rule<create<Named>(assign<&Named::name>(ref<Word>) +
+                           option(lit<":"> + (assign<&Named::to>(ref<Words>) |
+                                              assign<&Named::text>(ref<STR>))) +
+                           option(lit<"{"> + lit<"}">))> {};
+  struct TaggedR : rule<create<Tagged>(assign<&Tagged::name>(ref<Word>) +
+                                       lit<":"> +
+                                       assign<&Tagged::other>(ref<Word>) +
+                                       lit<"<"> + lit<">">)> {};
+  struct Shared : rule<kw<"shared"> + (ref<NamedR> | ref<TaggedR>)> {};
   struct Root : rule<ref<Owner> | ref<IndirectOwner> | ref<Narrow> | ref<Same> |
                      ref<SameNarrow> | ref<Mixed> | ref<Field> | ref<Bare> |
-                     ref<OnlyAlpha> | ref<OnlyBeta>> {};
+                     ref<OnlyAlpha> | ref<OnlyBeta> | ref<Shared>> {};
   using entry = Root;
   using ignored = WS;
 };

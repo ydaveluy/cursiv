@@ -53,6 +53,10 @@ struct LrEdge {
   ElementId outer = kNoElement;
   // The guard program that picks this edge among its symbol's, plus one.
   std::uint32_t prog = 0;
+  // Terminal edges: the token opens the rule that writes the site's member.
+  bool entered = false;
+  // Terminal edges: the set of sites, where the readings name several.
+  std::uint16_t alts = 0;
 };
 
 // What an item needs of the gap to advance: it advances where one of these
@@ -87,11 +91,14 @@ void lr_req_conds(const LrReq& r, DynSet& out) {
 
 // Two chains that lead with one write say one thing to a caret: `(name=ID)?`
 // mints a chain per branch. A fused id stands above the pool, unbounded.
+std::uint32_t lr_site_key(const ChainPool& w, ElementId e) {
+  return e < w.nchains && w.chainBuild[e].lead != kNoRow
+             ? 0x10000u + w.chainBuild[e].lead
+             : e;
+}
+
 bool lr_same_site(const ChainPool& w, ElementId a, ElementId b) {
-  if (a == b) return true;
-  if (a >= w.nchains || b >= w.nchains) return false;
-  const std::uint16_t lead = w.chainBuild[a].lead;
-  return lead != kNoRow && lead == w.chainBuild[b].lead;
+  return lr_site_key(w, a) == lr_site_key(w, b);
 }
 
 void lr_agree(const ChainPool& w, ElementId& acc, bool& seen, ElementId e) {
@@ -102,6 +109,44 @@ void lr_agree(const ChainPool& w, ElementId& acc, bool& seen, ElementId e) {
     acc = kNoElement;
   }
 }
+
+// Each site once, whatever row spells it: the first reading names it, and it
+// opens its rule only if every reading of it does.
+void lr_merge_readings(const ChainPool& w, std::vector<LrCaretSite>& readings) {
+  std::ranges::stable_sort(readings, {}, [&](const LrCaretSite& reading) {
+    return lr_site_key(w, reading.site);
+  });
+  std::size_t kept = 0;
+  for (std::size_t i = 0; i < readings.size(); ++i) {
+    if (kept != 0 && lr_same_site(w, readings[kept - 1].site, readings[i].site))
+      readings[kept - 1].entered = readings[kept - 1].entered && readings[i].entered;
+    else
+      readings[kept++] = readings[i];
+  }
+  readings.resize(kept);
+}
+
+// Which sites a list holds, by key: a round per list walked, so a list costs
+// its length however many sites are asked of it.
+struct LrSiteMarks {
+  std::vector<std::uint32_t> mark = std::vector<std::uint32_t>(0x20000u, 0);
+  std::uint32_t round = 0;
+
+  void keep_first(const ChainPool& w, std::vector<ElementId>& sites) {
+    ++round;
+    std::erase_if(sites, [&](ElementId s) {
+      return std::exchange(mark[lr_site_key(w, s)], round) == round;
+    });
+  }
+  void add(const ChainPool& w, std::vector<ElementId>& to,
+           const std::vector<ElementId>& from) {
+    ++round;
+    for (const ElementId s : to) mark[lr_site_key(w, s)] = round;
+    for (const ElementId s : from)
+      if (std::exchange(mark[lr_site_key(w, s)], round) != round)
+        to.push_back(s);
+  }
+};
 
 // A pool grows sixteenfold: a pointer into one holds only until it grows.
 void lr_room(auto& pool, std::size_t want) {
@@ -582,8 +627,23 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   // A state reached again is a state already done.
   std::vector work{0u};
   std::vector<ElementId> entrySite(nN);
+  // Every site a nonterminal is entered to fill, where `entrySite` holds only
+  // what they agree on.
+  std::vector<std::vector<ElementId>> entrySites(nN);
+  LrSiteMarks siteMarks;
+  std::vector<unsigned> entryCalled, handWork;
+  std::vector<std::uint8_t> handQueued(nN, 0);
+  std::map<std::vector<LrCaretSite>, std::uint16_t> siteSetIds;
   std::vector entrySeen(nN, std::uint32_t{});
   std::vector<std::pair<unsigned, unsigned>> entryHands;
+  // The rules some call in the state enters past a token of its caller, and the
+  // calls that hand that on to a rule opening where the caller opens.
+  std::vector entryPast(nN, std::uint32_t{});
+  std::vector<std::pair<unsigned, unsigned>> pastHands;
+  // A table laid by hand names no rule, and has none that builds a node.
+  std::vector<bool> buildsNode(nN, false);
+  for (std::size_t n = 0; n < std::min<std::size_t>(nN, g.nts.size()); ++n)
+    buildsNode[n] = g.nts[n].node;
   std::uint32_t gen = 0;
   std::vector ntSyms(nN, std::uint16_t{});
   std::uint32_t nNtSyms = 0;
@@ -702,11 +762,19 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
     // the rule, it fills nothing the rule's caller states.
     const auto entered = [&](auto&& kept) {
       ++gen;
-      const auto agree = [&](unsigned nt, ElementId site) {
+      const auto agree_collapsed = [&](unsigned nt, ElementId site) {
         bool known = std::exchange(entrySeen[nt], gen) == gen;
+        if (!known) entrySites[nt].clear();
         lr_agree(writes, entrySite[nt], known, site);
       };
+      const auto agree = [&](unsigned nt, ElementId site) {
+        agree_collapsed(nt, site);
+        if (entrySites[nt].empty()) entryCalled.push_back(nt);
+        entrySites[nt].push_back(site);
+      };
       entryHands.clear();
+      pastHands.clear();
+      entryCalled.clear();
       for (std::uint32_t ci = 0; ci < csn; ++ci) {
         const LrItem& it = cs[ci];
         const LrLowProd& p = prods[it.prod];
@@ -717,23 +785,68 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         // caller each lay a record.
         const ElementId site =
             row != kNoElement || p.len != 1 ? row : ElementId{p.node};
-        if (says(site))
-          agree(Bx, site);
-        else if (it.dot != 0)
+        // A rule's call of itself at its start reads what was already read: a
+        // token at the caret fills no such member.
+        if (says(site)) {
+          if (it.dot == 0 && Bx == p.lhs)
+            agree_collapsed(Bx, site);
+          else
+            agree(Bx, site);
+        } else if (it.dot != 0) {
           agree(Bx, kNoElement);
-        else
+        } else {
           entryHands.emplace_back(p.lhs, Bx);
+        }
+        if (it.dot != 0)
+          entryPast[Bx] = gen;
+        else if (!buildsNode[p.lhs])
+          pastHands.emplace_back(p.lhs, Bx);
       }
-      for (bool moved = true; moved;) {
-        moved = false;
-        for (const auto& [from, to] : entryHands) {
-          if (entrySeen[from] != gen) continue;
+      for (const unsigned nt : entryCalled)
+        siteMarks.keep_first(writes, entrySites[nt]);
+      // Each rule goes again only when what it holds has changed, so a chain of
+      // hands costs its length in any order.
+      using Hand = std::pair<unsigned, unsigned>;
+      const auto hands_of = [](const std::vector<Hand>& hands, unsigned from) {
+        return std::ranges::equal_range(hands, from, {}, &Hand::first);
+      };
+      const auto queue = [&](unsigned nt) {
+        if (std::exchange(handQueued[nt], std::uint8_t{1}) == 0)
+          handWork.push_back(nt);
+      };
+      const auto drain = [&](auto&& hand) {
+        for (std::size_t head = 0; head < handWork.size(); ++head) {
+          const unsigned from = handWork[head];
+          handQueued[from] = 0;
+          hand(from);
+        }
+        handWork.clear();
+      };
+      std::ranges::stable_sort(pastHands, {}, &Hand::first);
+      for (const auto& [from, to] : pastHands)
+        if (entryPast[from] == gen) queue(from);
+      drain([&](unsigned from) {
+        for (const auto& [_, to] : hands_of(pastHands, from))
+          if (std::exchange(entryPast[to], gen) != gen) queue(to);
+      });
+      std::ranges::stable_sort(entryHands, {}, &Hand::first);
+      for (const auto& [from, to] : entryHands)
+        if (entrySeen[from] == gen) queue(from);
+      drain([&](unsigned from) {
+        for (const auto& [_, to] : hands_of(entryHands, from)) {
           const bool known = entrySeen[to] == gen;
           const ElementId before = entrySite[to];
-          agree(to, entrySite[from]);
-          moved = moved || !known || entrySite[to] != before;
+          const std::size_t had = known ? entrySites[to].size() : 0;
+          // Marks `to` known even where `from` was only entered by itself, and
+          // so holds no site.
+          agree_collapsed(to, entrySite[from]);
+          if (to != from)
+            siteMarks.add(writes, entrySites[to], entrySites[from]);
+          if (!known || entrySite[to] != before ||
+              entrySites[to].size() != had)
+            queue(to);
         }
-      }
+      });
     };
     entered([](std::uint32_t) { return true; });
     std::uint32_t symTop = 0;
@@ -761,7 +874,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       const bool terminal = is_term(sym);
       const std::uint32_t k0 = symAt[key], k1 = symFill[key];
       const auto advance = [&](std::uint32_t k, ElementId& site, bool& seenSite,
-                               ElementId& outer, bool& seenOuter) {
+                               ElementId& outer, bool& seenOuter, bool& opening,
+                               std::vector<LrCaretSite>& readings) {
         const LrItem& it = cs[symItem[k]];
         const LrLowProd& p = prods[it.prod];
         const std::size_t ni = dom.base[it.prod] + it.dot + 1;
@@ -775,6 +889,35 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         const ElementId ent =
             entrySeen[p.lhs] == gen ? entrySite[p.lhs] : kNoElement;
         lr_agree(writes, outer, seenOuter, it.dot != 0 ? row : ent);
+        // A token opens the rule that builds a node where it stands first in
+        // it, through the calls of the rules that build none.
+        const bool opens = it.dot == 0 &&
+                           (buildsNode[p.lhs] || entryPast[p.lhs] != gen);
+        opening = opening && opens;
+        // What this reading says for itself: its own position, or where that
+        // writes nothing and it opens the rule, each call of the rule.
+        if (says(row) || it.dot != 0 || entrySeen[p.lhs] != gen) {
+          readings.push_back({row, opens});
+        } else {
+          for (const ElementId call : entrySites[p.lhs])
+            readings.push_back({call, opens});
+        }
+      };
+      // The readings' sites by index, where they name more than one.
+      const auto site_set = [&](std::vector<LrCaretSite>& readings) {
+        lr_merge_readings(writes, readings);
+        if (readings.size() < 2) return std::uint16_t{0};
+        std::ranges::sort(readings);
+        const auto id = static_cast<std::uint16_t>(A.siteSets.size());
+        const auto [at, fresh] = siteSetIds.try_emplace(readings, id);
+        if (fresh) {
+          if (A.siteSets.size() > 0xfffeu) {
+            A.cap_hit("it needs more than 65 535 sets of completion sites");
+            return std::uint16_t{0};
+          }
+          A.siteSets.push_back(readings);
+        }
+        return at->second;
       };
       const auto opens = [&](std::uint32_t y) {
         return left[nt_index(g.sym_at(prods[cs[y].prod], cs[y].dot))].test(
@@ -789,13 +932,14 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       }
       if (ask.none()) {
         ElementId site = kNoElement, outer = kNoElement;
-        bool seenSite = false, seenOuter = false;
+        bool seenSite = false, seenOuter = false, opening = terminal;
+        std::vector<LrCaretSite> readings;
         for (std::uint32_t k = k0; k < k1; ++k)
-          advance(k, site, seenSite, outer, seenOuter);
+          advance(k, site, seenSite, outer, seenOuter, opening, readings);
         bool fresh = false;
         const unsigned t = find_or_add(harvest(), fresh, noTag, noTag);
-        edgeRow.push_back(
-            LrEdge{sym, static_cast<std::uint16_t>(t), site, outer});
+        edgeRow.push_back(LrEdge{sym, static_cast<std::uint16_t>(t), site, outer,
+                                 0, opening, site_set(readings)});
         if (fresh) work.push_back(t);
         return;
       }
@@ -816,6 +960,8 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
       prog.to.assign(nOut, LrGuard::kNoState);
       prog.site.assign(nOut, kNoElement);
       prog.outer.assign(nOut, kNoElement);
+      prog.alts.assign(nOut, 0);
+      prog.entered.assign(nOut, 0);
       const auto progId = static_cast<std::uint32_t>(progs.size());
       const std::size_t rowAt = edgeRow.size();
       for (std::size_t v = 0; v < nOut; ++v) {
@@ -828,9 +974,11 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         if (terminal && !openers.empty()) entered(kept);
         ElementId site = kNoElement, outer = kNoElement;
         bool seenSite = false, seenOuter = false, any = false;
+        bool opening = terminal;
+        std::vector<LrCaretSite> readings;
         for (std::uint32_t k = k0; k < k1; ++k)
           if (kept(symItem[k])) {
-            advance(k, site, seenSite, outer, seenOuter);
+            advance(k, site, seenSite, outer, seenOuter, opening, readings);
             any = true;
           }
         if (!any) continue;
@@ -857,12 +1005,14 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         prog.to[v] = static_cast<std::uint16_t>(t);
         prog.site[v] = site;
         prog.outer[v] = outer;
+        prog.alts[v] = site_set(readings);
+        prog.entered[v] = opening;
         if (fresh) work.push_back(t);
         if (std::none_of(edgeRow.begin() + static_cast<std::ptrdiff_t>(rowAt),
                          edgeRow.end(),
                          [&](const LrEdge& e) { return e.to == t; }))
           edgeRow.push_back(LrEdge{sym, static_cast<std::uint16_t>(t), site,
-                                   outer, progId + 1u});
+                                   outer, progId + 1u, opening, prog.alts[v]});
       }
       lr_guard_key(prog, [](std::uint16_t to) { return std::uint32_t{to}; },
                    progKey);
@@ -1261,12 +1411,16 @@ struct LrActions {
       LrAction a{e.sym, e.prog == 0 ? LrActionKind::shift : LrActionKind::guard,
                  static_cast<std::uint16_t>(e.prog == 0 ? e.to : e.prog - 1u),
                  e.site, e.outer};
+      a.entered = e.entered;
+      a.alts = e.alts;
       // One guarded terminal is one action. Its landings name one caret
       // hint, or none.
       while (e.prog != 0 && k + 1 < row.size() && row[k + 1].sym == e.sym) {
         const LrEdge& next = row[++k];
         if (a.site != next.site) a.site = kNoElement;
         if (a.outer != next.outer) a.outer = kNoElement;
+        if (a.alts != next.alts) a.alts = 0;
+        a.entered = a.entered && next.entered;
       }
       f(a);
     }

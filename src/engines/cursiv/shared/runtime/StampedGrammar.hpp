@@ -49,6 +49,11 @@ struct StampedGrammar final : Grammar {
     return holds(e) ? _f->names[answer(e).rule] : std::string_view{};
   }
 
+  bool recordIsDataRule(const CstNode& n) const noexcept override {
+    const ElementId e = _stamp.row(n);
+    return holds(e) && answer(e).dataRule;
+  }
+
   // The same answer from a row and not a record: a continuation has no
   // record yet -- the table names the site a shift would write in.
   std::string_view rowFeature(ElementId e) const noexcept {

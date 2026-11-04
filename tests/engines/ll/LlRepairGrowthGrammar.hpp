@@ -34,7 +34,15 @@ struct Ll : cursiv::GrammarSpec {
                               option(append<&N1::kids>(ref<R0>)) + lit<"c">) |
                    ref<R2>> {};
   struct R2 : rule<create<N2>(many(lit<"b">) + lit<"c"> + option(lit<"c">))> {};
-  using entry = R0;
+  // Whether a "b" closes this level or a deeper one is read to the end of the
+  // document, and the answers of all the levels stand in one plan.
+  struct Nested : rule<create<N1>(lit<"a"> + option(append<&N1::kids>(ref<Nested>)) +
+                                  option(lit<"b">))> {};
+  struct Mixed : rule<create<N1>(lit<"a"> + option(append<&N1::kids>(ref<Mixed>)) +
+                                 option(lit<"b">) + option(lit<"c">))> {};
+  struct Root : rule<(lit<"nested:"> + ref<Nested>) |
+                     (lit<"mixed:"> + ref<Mixed>) | ref<R0>> {};
+  using entry = Root;
   using ignored = WS;
 };
 

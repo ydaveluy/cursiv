@@ -23,9 +23,47 @@ struct Base : cursiv::GrammarSpec {
   struct Part : rule<create<Item>(flag<&Item::keyword>(ref<IN>) |
                                   assign<&Item::name>(ref<NAME>) |
                                   flag<&Item::dash>(lit<"-">))> {};
-  struct Root : rule<create<Doc>(many(append<&Doc::items>(ref<Part>)))> {};
+  // A keyword its gap may refuse, over two terminals that tie behind it: what
+  // refuses it leaves both, and the parse goes on with the one it can take.
+  struct One : terminal<cr<"X">> {};
+  struct Two : terminal<cr<"X">> {};
+  struct Three : terminal<cr<"X">> {};
+  struct Rivals : rule<create<Item>(
+                      lit<"rivals:"> +
+                      ((gap::none + kw<"X"> + lit<"q">) |
+                       (gap::none + ref<Three> + lit<"z">) |
+                       (ref<One> + many(lit<"a">) + lit<"b">) |
+                       (ref<Two> + many(lit<"a">) + lit<"c">)))> {};
+  // The same, glued to what follows: the reading of a word a caret stands
+  // behind is one of those that tie.
+  struct Four : terminal<cr<"W">> {};
+  struct Five : terminal<cr<"W">> {};
+  struct Glued : rule<create<Item>(lit<"glued:"> +
+                                   ((gap::none + kw<"W"> + lit<"q">) |
+                                    (ref<Four> + lit<"!">) |
+                                    (ref<Five> + lit<"?">)))> {};
+  // A keyword two readings refuse from one cell, each past a rule that can be
+  // empty: what they leave still reads.
+  struct Six : terminal<cr<"V">> {};
+  struct Seven : terminal<cr<"V">> {};
+  struct E1 : rule<many(lit<"e1">)> {};
+  struct E2 : rule<many(lit<"e2">)> {};
+  struct Cell : rule<create<Item>(lit<"cell:"> +
+                                  ((ref<E1> + gap::none + kw<"V"> + lit<"q">) |
+                                   (ref<E2> + gap::none + kw<"V"> + lit<"r">) |
+                                   (ref<Six> + lit<"!">) |
+                                   (ref<Seven> + lit<"?">)))> {};
+  // A keyword refused where a trivia ties with it: the trivia is crossed.
+  struct Hushed : terminal<cr<"N">> {};
+  struct Note : rule<create<Item>(lit<"note:"> +
+                                  ((gap::none + kw<"N"> + lit<"q">) |
+                                   (lit<"k"> + lit<"m">)))> {};
+  struct Root : rule<create<Doc>(many(append<&Doc::items>(
+                    ref<Part> | ref<Rivals> | ref<Glued> | ref<Cell> |
+                    ref<Note>)))> {};
   using entry = Root;
   using ignored = WS;
+  using hidden = list<Hushed>;
 };
 struct Ll : Base {};
 struct Lr : Base {};

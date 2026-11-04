@@ -25,9 +25,7 @@ struct WorkspaceCoreServices
   // the registry files pointers into it, never copies.
   std::unique_ptr<const WorkspaceValidator> validator;
 
-  explicit WorkspaceCoreServices(
-      WorkspaceSharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {

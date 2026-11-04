@@ -77,6 +77,47 @@ const auto* model = cursiv::ast_cast<recipe::ast::Model>(root);
 
 For an exact class match, compare `node->type == &cursiv::ast_type_tag<T>`.
 
+## Walk a tree
+
+`cursiv/syntax-tree/AstWalk.hpp` walks down through the language's reflection and
+up through the parents:
+
+```cpp
+const cursiv::AstReflection& reflection = *services.astReflection;
+
+// The nodes directly inside `node`.
+cursiv::visit_contents(reflection, node, [&](cursiv::AstNode& child) { /* ... */ });
+
+// Every node below `node`, a parent first. Return AstWalk::prune to skip what
+// a node contains, or return nothing to read them all.
+cursiv::visit_all_contents(reflection, node, [&](cursiv::AstNode& child) {
+  return cursiv::ast_cast<ast::Comment>(&child) != nullptr
+             ? cursiv::AstWalk::prune
+             : cursiv::AstWalk::enter;
+});
+
+// The node itself or the nearest node containing it of that class, or null.
+const auto* entity = cursiv::container_of_type<ast::Entity>(&node);
+```
+
+## Read a node's comment
+
+`commentProvider->getComment(node)` gives a comment's text. To report on a tag of
+the comment, `cursiv/documentation/CommentNode.hpp` gives its place in the
+document:
+
+```cpp
+const std::vector<std::string> rules{"ML_COMMENT"};
+const cursiv::NodeId comment = cursiv::find_comment_node(document, node, rules);
+if (comment != cursiv::kNoNode) {
+  const cursiv::DocComment doc =
+      cursiv::parse_doc_comment(document.parseResult.cst(), comment);
+  if (const auto* tag = doc.getTag("uuid")) {
+    // tag->range.start.offset and tag->range.end.offset are document offsets.
+  }
+}
+```
+
 ## Advanced: node metadata
 
 | Member | Meaning |

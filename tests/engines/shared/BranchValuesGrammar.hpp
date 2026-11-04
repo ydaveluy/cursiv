@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -28,6 +29,11 @@ struct Items : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace ast
 
+// Answers otherwise at run time, as a `constexpr` function may: it is called,
+// and not read as a value.
+inline constexpr auto two_faced = [] {
+  return std::is_constant_evaluated() ? 11 : 23;
+};
 inline constexpr auto count_parts = [](std::span<const std::string_view> p) {
   return static_cast<std::int32_t>(p.size());
 };
@@ -101,6 +107,10 @@ struct Suite : cursiv::GrammarSpec {
             assign<&ast::Item::name>(ref<ID>) + lit<"="> +
             assign<&ast::Item::count>(!lit<"%"> + (ref<NUM> | ref<NEG>)) +
             lit<";">)> {};
+  struct FACED : terminal<as<two_faced>(kw<"faced">)> {};
+  struct FacedItem : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) +
+                                            assign<&ast::Item::count>(ref<FACED>) +
+                                            lit<";">)> {};
   struct SizeItem : rule<create<ast::Item>(
                         assign<&ast::Item::name>(ref<ID>) + lit<":"> +
                         assign<&ast::Item::size>(ref<SIZE>) + lit<";">)> {};
@@ -111,6 +121,7 @@ struct Suite : cursiv::GrammarSpec {
             (lit<"inline:"> +
              many(append<&ast::Items::items>(ref<InlineItem>))) |
             (lit<"size:"> + many(append<&ast::Items::items>(ref<SizeItem>))) |
+            (lit<"faced:"> + many(append<&ast::Items::items>(ref<FacedItem>))) |
             (lit<"flag:"> + many(append<&ast::Items::items>(ref<FlagItem>))) |
             (lit<"gated:"> +
              many(append<&ast::Items::items>(ref<GatedItem>))) |

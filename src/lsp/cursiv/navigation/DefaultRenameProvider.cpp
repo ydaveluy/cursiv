@@ -151,7 +151,7 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
     const CancellationToken& token) const {
   throw_if_cancelled(token);
   const References& references = *_core.references;
-  const Documents& store = *_core.shared.documents;
+  const Documents& store = *_core.shared().documents;
 
   const Declaration found = references.findDeclaration(
       document, document.textDocument().offsetAt(from_lsp(position)), token);

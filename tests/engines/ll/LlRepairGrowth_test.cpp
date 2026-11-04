@@ -157,6 +157,32 @@ void a_dead_end_deep_in_nesting_is_read_once() {
       predictions_of);
 }
 
+// Every level asks the plan at the one place past the last token: the answers
+// it has given, and the choices that never ask, are not read again.
+void a_plan_is_read_once(const char* prefix) {
+  const auto parser = tllrepairgrowth::generated::Ll::create_parser();
+  const auto visits = [&](unsigned depth) {
+    cursiv::LlPredictionWork::current() = {};
+    const cursiv::ParseResult result =
+        parser->parse(prefix + repeat("a", depth) + "b");
+    CHECK(result.accepted && result.diagnostics.empty());
+    return cursiv::LlPredictionWork::current().planVisits;
+  };
+  std::uint64_t before = visits(1024);
+  CHECK(before != 0);
+  for (const unsigned depth : {2048u, 4096u}) {
+    const std::uint64_t after = visits(depth);
+    const bool within =
+        static_cast<double>(after) <= kLinear * static_cast<double>(before);
+    CHECK(within);
+    if (!within)
+      std::printf("plan visits of %s at depth %u: %llu -> %llu\n", prefix, depth,
+                  static_cast<unsigned long long>(before),
+                  static_cast<unsigned long long>(after));
+    before = after;
+  }
+}
+
 // A first reading with an unknown caller cannot join a known one. Nor can a
 // one-frame stack join a two-frame stack. Neither prevents the two compatible
 // two-frame stacks from sharing their intermediate and consuming positions.
@@ -356,5 +382,7 @@ int main() {
   a_parse_costs_the_same_whatever_was_parsed_before();
   a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands();
   a_dead_end_deep_in_nesting_is_read_once();
+  a_plan_is_read_once("nested:");
+  a_plan_is_read_once("mixed:");
   return cursiv::test::report("LlRepairGrowth_test");
 }

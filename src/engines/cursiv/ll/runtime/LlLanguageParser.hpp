@@ -65,6 +65,7 @@ class LlLanguageParser final : public Parser {
       std::string_view text,
       const CancellationToken& cancelToken = kNoCancel) const override {
     throw_if_cancelled(cancelToken);
+    const ThreadStop threadStop(cancelToken);
     LlPredictionSession<T> predictionSession;
     LexSuffixSession<LlLexTape<T>> predicateSession(
         text.data(), static_cast<TextOffset>(text.size()));
@@ -80,7 +81,9 @@ class LlLanguageParser final : public Parser {
     _drive(c);
     ll_finish<T>(c);
     // What the predictions read goes to the thread's count, as the searches'.
-    LlPredictionWork::current().tokens += predictionSession.work().tokens;
+    const LlPredictionWork predicted = predictionSession.work();
+    LlPredictionWork::current().tokens += predicted.tokens;
+    LlPredictionWork::current().planVisits += predicted.planVisits;
     builder.bind_entry(0, static_cast<NodeId>(cst.size()), c.last);
     // Converting the tree is another phase; answer a stop requested after
     // the descent's last periodic poll before materialising the AST.

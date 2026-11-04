@@ -101,8 +101,13 @@ class DefaultCompletionProvider : public CompletionProvider {
   // The cross-reference a feature fills, if its member holds one and the caret
   // has a node: a caret with none answers no scope -- not the global one, which
   // would hand out symbols a local scope excludes.
+  // Where the caret opens the rule that writes the member, or the member belongs
+  // to a class the caret's node is not, a node of that class is made for the
+  // occasion, as a child of the caret's node, and `entered` owns it: the answer's
+  // `container` holds as long as `entered` does.
   [[nodiscard]] std::optional<ReferenceInfo> referenceInfoOf(
-      const CompletionContext& context, const NextFeature& next) const;
+      const CompletionContext& context, const NextFeature& next,
+      AstNodePtr& entered) const;
 
   // The candidates of a cross-reference: what the scope sees, by default. A
   // visitor returning false stops the walk.
@@ -117,8 +122,7 @@ class DefaultCompletionProvider : public CompletionProvider {
   [[nodiscard]] virtual std::optional<lsp::MarkupContent>
   getReferenceDocumentation(const AstNodeDescription& candidate) const;
 
-  // `next` says which token the keyword is: a terminal reading a choice of words
-  // offers each.
+  // `next` says which token the keyword is.
   virtual void completionForKeyword(const CompletionContext& context,
                                     const NextFeature& next,
                                     std::string_view keyword,

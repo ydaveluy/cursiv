@@ -911,6 +911,9 @@ struct CountingGrammar final : cursiv::Grammar {
   std::string_view recordDoc(const cursiv::CstNode&) const noexcept override {
     return {};
   }
+  bool recordIsDataRule(const cursiv::CstNode&) const noexcept override {
+    return false;
+  }
 };
 
 std::string repeated_pairs(std::size_t pairs) {

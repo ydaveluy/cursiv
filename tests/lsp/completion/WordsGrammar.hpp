@@ -52,9 +52,20 @@ struct Suite : cursiv::GrammarSpec {
       : rule<create<ast::Item>(assign<&ast::Item::name>(ref<Path>) +
                                lit<"->"> + assign<&ast::Item::target>(ref<Path>) +
                                lit<";">)> {};
+  // A keyword beside a reference, after it in the grammar.
+  struct CapItem
+      : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) + lit<":"> +
+                               (assign<&ast::Item::target>(ref<ID>) |
+                                kw<"none">) +
+                               lit<";">)> {};
+  // A reference first in its rule: the caret enters the rule to write it.
+  struct NewItem : rule<create<ast::Item>(assign<&ast::Item::target>(ref<ID>) +
+                                          lit<";">)> {};
   struct Root
       : rule<create<ast::Items>(
             (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
+            (lit<"cap:"> + many(append<&ast::Items::items>(ref<CapItem>))) |
+            (lit<"new:"> + many(append<&ast::Items::items>(ref<NewItem>))) |
             (lit<"branch:"> +
              many(append<&ast::Items::items>(ref<BranchItem>))) |
             (lit<"whole:"> + many(append<&ast::Items::items>(ref<WholeItem>))) |

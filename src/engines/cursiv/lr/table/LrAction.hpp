@@ -19,6 +19,11 @@ struct LrAction {
   ElementId outer = kNoElement;
   // The cell's order is the election's for every text.
   bool exact = false;
+  // Where the readings of the token name several sites, their set in the build
+  // table's `siteSets`; zero where `site` and `outer` say it all.
+  std::uint16_t alts = 0;
+  // The token opens the rule that writes the site's member.
+  bool entered = false;
 
   constexpr bool operator==(const LrAction&) const = default;
 };

@@ -3,6 +3,7 @@
 #include <memory>
 #include <utility>
 
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "workspace/core/CoreServices.hpp"
@@ -13,6 +14,8 @@ namespace ws {
 
 void install_lsp_module(WorkspaceServices& services) {
   cursiv::install_default_lsp_services(services);
+  services.semanticTokenProvider =
+      std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
   services.formatter = std::make_unique<const WorkspaceFormatter>(services);
   services.renameProvider =
       std::make_unique<const WorkspaceRenameProvider>(services);

@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <random>
 #include <vector>
 
 #include "indirectfoldll/generated/Ll/Module.hpp"
@@ -718,6 +719,234 @@ void shared_head_calls_are_settled_in_dependency_order() {
   const auto shared = cursiv::ll_shared_rules(atn, count);
   CHECK(shared[0] == 0);
   for (unsigned r = 1; r < count; ++r) CHECK(shared[r] == 1);
+}
+
+// Rules as their alternatives, each a sequence: a rule's number, or one of these.
+constexpr int kReadsToken = -1, kAsksCondition = -2, kPasses = -3;
+using SharedRules = std::vector<std::vector<std::vector<int>>>;
+struct SharedGraph {
+  std::vector<cursiv::LlAtnState> states;
+  std::vector<cursiv::LlAtnEdge> edges;
+  std::vector<std::uint32_t> starts;
+  [[nodiscard]] cursiv::LlAtnView view() const {
+    return {.states = states.data(),
+            .nstates = static_cast<std::uint32_t>(states.size()),
+            .edges = edges.data(),
+            .ruleStart = starts.data()};
+  }
+};
+
+SharedGraph shared_graph(const SharedRules& rules) {
+  using Kind = cursiv::LlEdgeKind;
+  SharedGraph g;
+  std::vector<std::vector<cursiv::LlAtnEdge>> out;
+  const auto state = [&](std::size_t rule, cursiv::LlAtnKind kind) {
+    g.states.push_back({.kind = kind, .rule = static_cast<std::uint16_t>(rule)});
+    out.emplace_back();
+    return static_cast<std::uint32_t>(g.states.size() - 1);
+  };
+  const cursiv::LlAtnKind plain = cursiv::LlAtnState{}.kind;
+  for (std::size_t r = 0; r < rules.size(); ++r)
+    g.starts.push_back(state(r, plain));
+  for (std::size_t r = 0; r < rules.size(); ++r) {
+    const std::uint32_t stop = state(r, cursiv::LlAtnKind::ruleStop);
+    for (const auto& alternative : rules[r]) {
+      std::uint32_t at = g.starts[r];
+      if (rules[r].size() > 1) {
+        const std::uint32_t arm = state(r, plain);
+        out[at].push_back({.kind = Kind::epsilon, .target = arm});
+        at = arm;
+      }
+      if (alternative.empty())
+        out[at].push_back({.kind = Kind::epsilon, .target = stop});
+      for (std::size_t i = 0; i < alternative.size(); ++i) {
+        const int item = alternative[i];
+        const std::uint32_t next =
+            i + 1 == alternative.size() ? stop : state(r, plain);
+        if (item >= 0)
+          out[at].push_back({.kind = Kind::rule,
+                             .label = static_cast<std::uint16_t>(item),
+                             .target = g.starts[item],
+                             .follow = next});
+        else if (item == kReadsToken)
+          out[at].push_back({.kind = Kind::atom, .label = 1, .target = next});
+        else if (item == kAsksCondition)
+          out[at].push_back({.kind = Kind::condition, .target = next});
+        else
+          out[at].push_back({.kind = Kind::epsilon, .target = next});
+        at = next;
+      }
+    }
+  }
+  for (std::size_t s = 0; s < g.states.size(); ++s) {
+    g.states[s].edge = static_cast<std::uint32_t>(g.edges.size());
+    g.states[s].nedges = static_cast<std::uint16_t>(out[s].size());
+    g.edges.insert(g.edges.end(), out[s].begin(), out[s].end());
+  }
+  return g;
+}
+
+// The definition itself, each way of each fork walked whole.
+std::vector<std::uint8_t> shared_by_definition(const SharedGraph& g) {
+  using Kind = cursiv::LlEdgeKind;
+  const cursiv::LlAtnView atn = g.view();
+  const std::size_t nrules = g.starts.size();
+  std::vector<std::uint8_t> nullable(nrules, 0);
+  // Each state read before a token from `todo`, into the rules called where
+  // `enter` holds; a call to a rule that can end unread goes on past it.
+  const auto walk = [&](std::vector<std::uint32_t> todo, bool enter,
+                        auto&& visit) {
+    std::vector<std::uint8_t> seen(g.states.size(), 0);
+    while (!todo.empty()) {
+      const std::uint32_t at = todo.back();
+      todo.pop_back();
+      if (seen[at] != 0) continue;
+      seen[at] = 1;
+      visit(at);
+      for (const cursiv::LlAtnEdge& e : atn.outgoing(at)) {
+        if (e.kind == Kind::epsilon) todo.push_back(e.target);
+        if (e.kind != Kind::rule) continue;
+        if (nullable[e.label] != 0) todo.push_back(e.follow);
+        if (enter) todo.push_back(e.target);
+      }
+    }
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (std::size_t r = 0; r < nrules; ++r)
+      walk({g.starts[r]}, false, [&](std::uint32_t at) {
+        if (atn.state(at).kind == cursiv::LlAtnKind::ruleStop &&
+            nullable[atn.state(at).rule] == 0) {
+          nullable[atn.state(at).rule] = 1;
+          changed = true;
+        }
+      });
+  }
+  std::vector<std::uint8_t> shared(nrules, 0);
+  for (std::uint32_t fork = 0; fork < atn.nstates; ++fork) {
+    if (atn.state(fork).nedges < 2) continue;
+    std::vector<unsigned> reached(nrules, 0);
+    for (const cursiv::LlAtnEdge& e : atn.outgoing(fork)) {
+      std::vector<std::uint32_t> from;
+      std::vector<std::uint8_t> mine(nrules, 0);
+      if (e.kind == Kind::epsilon) from.push_back(e.target);
+      if (e.kind == Kind::rule) {
+        mine[e.label] = 1;
+        from.push_back(g.starts[e.label]);
+        if (nullable[e.label] != 0) from.push_back(e.follow);
+      }
+      walk(from, true, [&](std::uint32_t at) {
+        for (const cursiv::LlAtnEdge& o : atn.outgoing(at))
+          if (o.kind == Kind::rule) mine[o.label] = 1;
+      });
+      for (std::size_t r = 0; r < nrules; ++r) reached[r] += mine[r];
+    }
+    for (std::size_t r = 0; r < nrules; ++r)
+      if (reached[r] >= 2 && nullable[r] == 0) shared[r] = 1;
+  }
+  return shared;
+}
+
+void head_sharing_is_what_each_way_walked_whole_finds() {
+  std::mt19937 random(12345);
+  unsigned sharing = 0;
+  for (unsigned round = 0; round < 3000; ++round) {
+    const unsigned count = 1 + random() % 16;
+    SharedRules rules(count);
+    for (auto& alternatives : rules) {
+      alternatives.resize(1 + random() % 3);
+      for (auto& alternative : alternatives) {
+        const unsigned length = random() % 4;
+        for (unsigned i = 0; i < length; ++i) {
+          const unsigned pick = random() % 10;
+          alternative.push_back(pick < 6    ? static_cast<int>(random() % count)
+                                : pick < 8  ? kReadsToken
+                                : pick == 8 ? kAsksCondition
+                                            : kPasses);
+        }
+      }
+    }
+    const SharedGraph g = shared_graph(rules);
+    const auto expected = shared_by_definition(g);
+    CHECK(cursiv::ll_shared_rules(g.view(),
+                                  static_cast<std::uint16_t>(count)) == expected);
+    if (std::ranges::find(expected, 1) != expected.end()) ++sharing;
+  }
+  CHECK(sharing > 500);
+}
+
+// A fork whose ways cannot share costs nothing, and what is shared is walked
+// once.
+void head_sharing_walks_grow_with_the_rules() {
+  const auto chain = [](unsigned n) {
+    SharedRules rules(n);
+    for (unsigned r = 0; r + 1 < n; ++r)
+      rules[r] = {{static_cast<int>(r + 1)}};
+    rules[n - 1] = {{kReadsToken}};
+    return rules;
+  };
+  const auto oneway = [&](unsigned n) {
+    SharedRules rules = chain(n);
+    for (unsigned r = 0; r + 1 < n; ++r)
+      rules[r] = {{static_cast<int>(r + 1)}, {kReadsToken}};
+    return rules;
+  };
+  const auto apart = [&](unsigned n) {
+    SharedRules rules = chain(n);
+    rules[0] = {{1}, {static_cast<int>(n / 2)}};
+    rules[n / 2 - 1] = {{kReadsToken}};
+    return rules;
+  };
+  const auto diamond = [&](unsigned n) {
+    SharedRules rules = chain(n);
+    for (unsigned r = 0; r + 1 < n; ++r)
+      rules[r] = {{static_cast<int>(r + 1)}, {static_cast<int>(r + 1)}};
+    return rules;
+  };
+  const auto leaves = [](unsigned n) {
+    SharedRules rules(n);
+    for (unsigned r = 1; r < n; ++r) {
+      rules[0].push_back({static_cast<int>(r)});
+      rules[r] = {{kReadsToken}};
+    }
+    return rules;
+  };
+  const auto visits = [](const SharedRules& rules) {
+    const SharedGraph g = shared_graph(rules);
+    std::uint64_t walked = 0;
+    (void)cursiv::ll_shared_rules(
+        g.view(), static_cast<std::uint16_t>(rules.size()), &walked);
+    return walked;
+  };
+  // Each rule chooses between a leaf of its own and the next: nothing is shared.
+  const auto comb = [](unsigned n) {
+    SharedRules rules(n);
+    for (unsigned r = 0; r + 2 < n; r += 2) {
+      rules[r] = {{static_cast<int>(r + 1)}, {static_cast<int>(r + 2)}};
+      rules[r + 1] = {{kReadsToken}};
+    }
+    rules[n - 1] = rules[n - 2] = {{kReadsToken}};
+    return rules;
+  };
+  // Many rules choose between one long chain and a leaf of their own.
+  const auto beside = [&](unsigned n) {
+    SharedRules rules = chain(3 * n);
+    for (unsigned r = 0; r < n; ++r) {
+      rules[r] = {{static_cast<int>(n)}, {static_cast<int>(2 * n + r)}};
+      rules[2 * n + r] = {{kReadsToken}};
+    }
+    rules[2 * n - 1] = {{kReadsToken}};
+    return rules;
+  };
+  constexpr unsigned kRules = 8000;
+  CHECK(visits(oneway(kRules)) == 0);
+  CHECK(visits(leaves(kRules)) == 0);
+  CHECK(visits(comb(kRules)) == 0);
+  CHECK(visits(apart(kRules)) == 0);
+  CHECK(visits(beside(kRules)) == 0);
+  CHECK(visits(diamond(kRules)) != 0);
+  CHECK(visits(diamond(kRules)) <= 4 * kRules);
+  CHECK(visits(diamond(2 * kRules)) <= 8 * kRules);
 }
 
 void head_sharing_stops_at_conditions_and_closes_cycles() {
@@ -1651,9 +1880,9 @@ void a_forked_stack_is_read_once_per_context() {
   std::uint32_t ctx = pool.push(cursiv::kLlCtxNone, 0);
   for (unsigned level = 0; level < kLevels; ++level)
     ctx = pool.merge(pool.push(ctx, 0), pool.push(pool.push(ctx, 0), 1));
-  cursiv::LlAgree agree;
-  cursiv::ll_member_up<T>(grammar, sim, ctx, agree);
-  CHECK(agree.frames <= 4 * kLevels);
+  cursiv::LlMembers members;
+  cursiv::ll_members_up<T>(grammar, sim, ctx, members);
+  CHECK(members.frames <= 4 * kLevels);
 }
 
 // The spellings a caret is offered, as a set: the two engines number their
@@ -1989,6 +2218,8 @@ int main() {
   context_keys_keep_both_halves_on_every_platform();
   deep_context_joins_keep_their_canonical_stacks();
   shared_head_calls_are_settled_in_dependency_order();
+  head_sharing_is_what_each_way_walked_whole_finds();
+  head_sharing_walks_grow_with_the_rules();
   head_sharing_stops_at_conditions_and_closes_cycles();
   owed_prefixes_walk_deep_paths_and_keep_the_shortest_readings();
   a_return_stack_pushes_only_the_frames_that_changed();

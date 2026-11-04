@@ -69,9 +69,12 @@ std::string show(const std::vector<Entry>& entries) {
   return out;
 }
 
+// The tokens a caret offers, each once: one token has an entry per member, and
+// the two engines name different members for an operand.
 std::vector<std::string> spellings(const std::vector<Entry>& entries) {
   std::vector<std::string> out;
   for (const Entry& e : entries) out.push_back(e.spelling);
+  out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
 }
 
@@ -308,7 +311,9 @@ void a_misspelt_word_glues_what_is_typed_behind_it() {
   const std::string text = "shw all x, y;";
   for (const cursiv::Parser* parser : {lr.get(), ll.get()}) {
     const auto behind = features_at(*parser, text, 3);
-    CHECK(offers(behind, "(") && !offers(behind, "all", "all"));
+    CHECK(std::ranges::any_of(behind,
+                              [](const Entry& e) { return e.spelling == "("; }));
+    CHECK(!offers(behind, "all", "all"));
     CHECK(offers(features_between(*parser, text, 4, 7), "all", "all"));
   }
 }

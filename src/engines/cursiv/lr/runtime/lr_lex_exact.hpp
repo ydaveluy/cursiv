@@ -28,23 +28,25 @@ namespace cursiv {
 // generator's flags are: an arm that reduces anything else counts as taken.
 template <const auto& A, class Holds>
 bool lr_cell_takes(std::uint32_t state, SymbolId term, Holds&& holds) {
-  std::uint32_t first = 0;
-  unsigned count = 0;
-  lr_action_run<A>(state, term, first, count);
-  for (unsigned k = 0; k < count; ++k) {
-    const LrAction x = lr_action_of(A.programs.op[first + k]);
-    if (x.kind == LrActionKind::accept) return true;
-    if (x.kind != LrActionKind::reduce) {
-      if (lr_shift_target<A>(x.kind, x.arg, holds) != kInvalidSymbol)
-        return true;
-      continue;
+  return lr_cell_walk(state, [&](std::uint32_t at, auto&& leads) {
+    std::uint32_t first = 0;
+    unsigned count = 0;
+    lr_action_run<A>(at, term, first, count);
+    for (unsigned k = 0; k < count; ++k) {
+      const LrAction x = lr_action_of(A.programs.op[first + k]);
+      if (x.kind == LrActionKind::accept) return true;
+      if (x.kind != LrActionKind::reduce) {
+        if (lr_shift_target<A>(x.kind, x.arg, holds) != kInvalidSymbol)
+          return true;
+        continue;
+      }
+      if (!lr_reduce_allowed<A>(x.arg, holds)) continue;
+      if (A.cfg.prods[x.arg].len != 0) return true;
+      const auto to = lr_reduce_target<A>(at, x.arg, kLrNoFirst, holds);
+      if (to != kInvalidSymbol) leads(to);
     }
-    if (!lr_reduce_allowed<A>(x.arg, holds)) continue;
-    if (A.cfg.prods[x.arg].len != 0) return true;
-    const auto to = lr_reduce_target<A>(state, x.arg, kLrNoFirst, holds);
-    if (to != kInvalidSymbol && lr_cell_takes<A>(to, term, holds)) return true;
-  }
-  return false;
+    return false;
+  });
 }
 
 // What `state` alone answers on `term`, `holds` answering the conditions of
@@ -157,11 +159,12 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
 // A reading's token `la`, a winner of `mode`, read again while it is a
 // terminal the mode flags and the stack refuses it: `takes(la)` asks the
 // stack, `rescan(skip, from)` reads the token from `from`, where the winner
-// began, without the terminals of `skip`. Whether any was refused.
+// began, without the terminals of `skip`, which it leaves holding them. Whether
+// any was refused.
 template <const auto& A, class Takes, class Rescan>
 CURSIV_NOINLINE bool lr_lex_refused(Takes&& takes, std::uint16_t mode,
-                                    Token& la, Rescan&& rescan) {
-  LrSkipped<A> skip{};
+                                    Token& la, LrSkipped<A>& skip,
+                                    Rescan&& rescan) {
   return lr_refused(
       [&](SymbolId sym) { return sym < A.cfg.nterms && A.flagged(mode, sym); },
       takes, la, [&](const Token& t) {
@@ -170,20 +173,60 @@ CURSIV_NOINLINE bool lr_lex_refused(Takes&& takes, std::uint16_t mode,
       });
 }
 
+// What ties with `la`, a token a refusal elected. `skip` holds what was refused.
+// The count is `room`'s, with `la` first; none where the mode holds no rivals.
+template <const auto& A, class Takes>
+CURSIV_NOINLINE std::uint32_t lr_refused_rivals(const LrContext& c,
+                                                std::uint16_t mode,
+                                                std::uint32_t depth,
+                                                const Token& la,
+                                                LrSkipped<A> skip, Scan* room,
+                                                Takes&& takes) {
+  if (A.modeMulti[mode] != 1 || la.sym >= A.cfg.nterms) return 0;
+  const auto tier = [&](const Token& t) {
+    return static_cast<std::uint8_t>(lex_reading_tier(
+        LrLexTape<A>{}, c.src, c.len, mode, t.begin, t.end, t.sym));
+  };
+  room[0] = Scan{la.end, la.sym, tier(la)};
+  std::uint32_t n = 1;
+  lr_refused_ties(
+      la,
+      [&](const Token& at) {
+        skip.set(at.sym);
+        return lr_scan_skipping<A>(c, mode, la.begin, depth, skip,
+                                   [](TextOffset, const Token*) {
+                                     /* what crosses a trivia ties with nothing */
+                                   });
+      },
+      [&](const Token& at) {
+        return at.sym < A.cfg.nterms && at.begin == la.begin &&
+               at.end == la.end &&
+               lex_weight(tier(at)) == lex_weight(room[0].tier);
+      },
+      [&](SymbolId sym) { return A.flagged(mode, sym); }, takes,
+      [&](const Token& at) {
+        room[n++] = Scan{at.end, at.sym, tier(at)};
+        return n < A.maxCands;
+      });
+  return n;
+}
+
 // The drive's token, a winner of `mode` that the mode flags: read again from
-// where it began while the stack refuses it. The trivia before it stays as the
-// lexer recorded it; a terminal the walk skips never wins over a trivia.
+// where it began while the stack refuses it, and what tied with the new winner
+// stays a candidate. A trivia left where the terminal is refused is crossed, and
+// recorded: a line break may be a token in one state and a trivia in another.
 template <const auto& A>
 CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
   Token la = c.la;
+  const auto takes = [&](const Token& t) {
+    return lr_climb_takes<A>(
+        LrOverlayClimb<LrStack>(c.stack), t.sym,
+        [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, t); },
+        c.walkMemo);
+  };
+  LrSkipped<A> skipped{};
   const bool refused = lr_lex_refused<A>(
-      [&](const Token& t) {
-        return lr_climb_takes<A>(
-            LrOverlayClimb<LrStack>(c.stack), t.sym,
-            [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, t); },
-            c.walkMemo);
-      },
-      mode, la, [&](const LrSkipped<A>& skip, TextOffset from) {
+      takes, mode, la, skipped, [&](const LrSkipped<A>& skip, TextOffset from) {
         return lr_scan_skipping<A>(
             c, mode, from, c.indent.depth, skip,
             [&](TextOffset end, const Token* t) {
@@ -197,6 +240,13 @@ CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
   c.la.mode = mode;
   c.laMode = mode;
   c.ncand = 0;
+  if constexpr (A.maxCands > 1) {
+    if (c.drive->scanText != nullptr) {
+      const std::uint32_t n = lr_refused_rivals<A>(
+          c, mode, c.indent.depth, la, skipped, c.cand, takes);
+      if (n > 1) c.ncand = n;
+    }
+  }
 }
 
 }  // namespace cursiv

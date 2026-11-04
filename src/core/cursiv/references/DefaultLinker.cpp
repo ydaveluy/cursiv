@@ -98,7 +98,7 @@ LinkingError DefaultLinker::createLinkingError(
     document = reference.container->getDocument();
   if (document != nullptr && document->state.load(std::memory_order_relaxed) <
                                  DocumentState::ComputedScopes)
-    services.shared.observabilitySink->publish(
+    shared.observabilitySink->publish(
         {.severity = ObservationSeverity::Warning,
          .code = ObservationCode::ScopeReadBeforeComputed,
          .message = "reference resolution before scopes were computed",

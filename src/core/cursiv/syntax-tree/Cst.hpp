@@ -156,8 +156,8 @@ class Cst {
 
   const CstNode& operator[](NodeId id) const { return node(id); }
 
-  std::string_view text(NodeId id) const noexcept {
-    const CstNode& n = node(id);
+  std::string_view text(NodeId id) const noexcept { return text(node(id)); }
+  std::string_view text(const CstNode& n) const noexcept {
     return std::string_view(_text.data() + n.begin, n.end - n.begin);
   }
 

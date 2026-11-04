@@ -68,6 +68,7 @@ struct LrParser {
              const LrDrive* drive, const RepairBudget& budget = {},
              const CancellationToken& cancelToken = kNoCancel) const try {
     throw_if_cancelled(cancelToken);
+    const ThreadStop threadStop(cancelToken);
     cst.reset(text);
     text = cst.text();
     LexSuffixSession<LrLexTape<A>> predicateSession(
@@ -80,7 +81,7 @@ struct LrParser {
     c.stop = CancellationPoll(cancelToken);
     if constexpr (kTermsRecorded<A.cfg>) c.pending.reserve(8);
     // The room a position's candidates fill, for the life of the parse.
-    ScanRoom<(A.maxCands != 0 ? A.maxCands : 1)> room;
+    ScanRoom<A.maxCands> room;
     c.cand = room.data();
     c.drive = drive;
     LrSearch search(c.len, budget, c.indentArena);

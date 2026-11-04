@@ -140,6 +140,25 @@ void an_indent_settles_a_cell_without_the_graph() {
 // A level a repair dropped closes where a shallower line is read, whoever reads
 // that line: the graph hands the text back with the levels it read, so a later
 // line is told against the levels that are open.
+// A first line the indentation refuses drops its level, and every rival of a
+// later token is read with that level gone: the repair stays the only one.
+void rivals_share_the_levels_a_line_start_dropped() {
+  namespace g = tindent::laid::generated::Cases;
+  for (const std::string_view end : {"% :", "& :"}) {
+    std::string text = "  rivals h\nA";
+    for (unsigned i = 0; i < 100; ++i) text += " +";
+    text += " ";
+    text += end;
+    text += "\n  b\n";
+    text += end[0] == '%' ? "!" : "?";
+    cursiv::Cst cst;
+    cursiv::LrParseStats stats;
+    CHECK(cursiv::lr_parser<g::kTable>.parse(text, cst, &stats, &g::kDrive));
+    CHECK(stats.splits != 0);
+    CHECK(cst.diagnostics().size() == 1);
+  }
+}
+
 void a_dropped_level_closes_in_the_graph() {
   std::string text = "marked z\n    y\n    h:\n";
   for (unsigned i = 0; i != 20; ++i) text += "  z\n";
@@ -155,6 +174,7 @@ int main() {
   an_indent_keeps_an_earlier_repair_reading_alive();
   an_indent_settles_a_cell_without_the_graph();
   a_dropped_level_closes_in_the_graph();
+  rivals_share_the_levels_a_line_start_dropped();
   CHECK(parse("a\nb\n") == "a b");
   CHECK(parse("a:\n  b\n  c\nd\n") == "a(b c) d");
   CHECK(parse("a:\n  b:\n    c\n  d\ne\n") == "a(b(c) d) e");

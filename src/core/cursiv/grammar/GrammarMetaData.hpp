@@ -39,6 +39,8 @@ struct GrammarMetaData {
     // The hover text of the word use the entry stands on: an index of `names`,
     // 0 for none.
     std::uint16_t doc = 0;
+    // A data rule converts what the entry's record spans.
+    bool dataRule = false;
   };
 
   const Answer* answers = nullptr;

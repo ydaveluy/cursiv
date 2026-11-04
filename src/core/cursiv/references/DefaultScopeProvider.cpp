@@ -85,7 +85,7 @@ bool DefaultScopeProvider::visitGlobalScopeEntries(
   // about the text, not a filter on what may stand there -- filtering by it
   // would hide every other completion.
   const AstTypeTag* const narrowed = narrowed_to(reflection, context);
-  return services.shared.indexManager->visitElements(
+  return shared.indexManager->visitElements(
       nullptr, {}, [&](const AstNodeDescription& e) {
         return reflection.acceptsTag(accepts, e.type) &&
                        reflection.isSubtype(e.type, narrowed)
@@ -100,9 +100,9 @@ bool DefaultScopeProvider::visitGlobalScopeEntries(
     cursiv::function_ref<bool(const AstNodeDescription&)> visitor) const {
   const AstTypeTag* const narrowed = narrowed_to(reflection, context);
   if (narrowed == nullptr)
-    return services.shared.indexManager->visitByName(
+    return shared.indexManager->visitByName(
         name, caseSensitive, accepts, reflection, visitor);
-  return services.shared.indexManager->visitByName(
+  return shared.indexManager->visitByName(
       name, caseSensitive, accepts, reflection,
       [&](const AstNodeDescription& e) {
         return reflection.isSubtype(e.type, narrowed) ? visitor(e) : true;
@@ -173,7 +173,7 @@ const AstNodeDescription* DefaultScopeProvider::getGlobalScopeEntry(
     const ReferenceInfo& context, std::string_view name, AcceptSet accepts,
     const AstReflection& reflection, bool caseSensitive) const {
   if (narrowed_to(reflection, context) == nullptr)
-    return services.shared.indexManager->findByName(name, caseSensitive,
+    return shared.indexManager->findByName(name, caseSensitive,
                                                     accepts, reflection);
   const AstNodeDescription* found = nullptr;
   (void)visitGlobalScopeEntries(context, name, accepts, reflection,

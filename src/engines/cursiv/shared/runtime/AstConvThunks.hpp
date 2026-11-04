@@ -334,7 +334,7 @@ std::optional<std::string_view> payload_text(AstBuildCtx& ctx, NodeId id) {
     if (n.subtreeSize == 1 && !n.hidden && !n.recovered) [[likely]] {
       if (Base || !texting<Text>(ctx) ||
           ctx.actions->text_at(ctx.stamp.row(n)) == nullptr)
-        return ctx.cst->text(id);
+        return ctx.cst->text(n);
     }
     return joined_parts<Text, Base>(ctx, id);
   } else {
@@ -446,11 +446,11 @@ consteval ValueSlot value_slot() {
           &value_tag<T>};
 }
 
-// One symbol per (converter, member) pair. `out` points at the member's type,
-// `conv_target_t` on both sides.
+// What a payload converts to, on every path.
 template <class CR, class M, std::size_t Alt, bool Data, bool Text,
           bool Guarded, bool Base>
-bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
+CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
+                                                 void* out) {
   using A = typename conv_alt_at<M, Alt>::type;
   M& slot = *static_cast<M*>(out);
 
@@ -499,6 +499,38 @@ bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
     return conversion_settled(ctx, id, default_convert<A>(*text), store);
   }
 }
+template <class CR, class M, std::size_t Alt, bool Data, bool Text,
+          bool Guarded, bool Base>
+CURSIV_NOINLINE bool convert_payload_slow(AstBuildCtx& ctx, NodeId id,
+                                          void* out) {
+  return convert_payload<CR, M, Alt, Data, Text, Guarded, Base>(ctx, id, out);
+}
+
+// One symbol per (converter, member) pair. `out` points at the member's type,
+// `conv_target_t` on both sides. A data rule read as text is almost always one
+// clean leaf: that leaf converts as a terminal does, joining nothing, and with
+// the rest out of line it costs no frame.
+template <class CR, class M, std::size_t Alt, bool Data, bool Text,
+          bool Guarded, bool Base>
+bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
+  if constexpr (Data && (std::is_void_v<CR> ||
+                         (converts_input<CR> && !ConvertsParts<CR> &&
+                          !ConvertsPartsMem<CR>))) {
+    if (!ctx.repaired) [[likely]] {
+      const CstNode& n = (*ctx.cst)[id];
+      if (n.subtreeSize == 1 && !n.hidden && !n.recovered &&
+          (Base || !Text ||
+           ctx.actions->text_at(ctx.stamp.row(n)) == nullptr)) [[likely]]
+        return convert_payload<CR, M, Alt, false, Text, false, Base>(ctx, id,
+                                                                     out);
+    }
+    return convert_payload_slow<CR, M, Alt, Data, Text, Guarded, Base>(ctx, id,
+                                                                       out);
+  } else {
+    return convert_payload<CR, M, Alt, Data, Text, Guarded, Base>(ctx, id, out);
+  }
+}
+
 // What a leaf denotes, its own converter applied: a data rule joins what its
 // parts mean, not the bytes they occupy. The leaves it is asked of are read
 // text, never one a repair invented.
@@ -574,16 +606,15 @@ concept DenotesText = [] {
     return false;
 }();
 
-// A converter that reads nothing answers one constant value. Only a member
-// it can be stored into plainly qualifies: a variant and a reference stay
-// with the call.
+// A value the grammar states with `as<V>`. Any other converter that reads
+// nothing is called: a `constexpr` function may answer otherwise at run time.
+// Only a member it can be stored into plainly qualifies: a variant and a
+// reference stay with the call.
 template <class CR, class M>
 concept StatesValue =
-    ConvertsNothing<CR> && !ConvertsParts<CR> && !ConvertsPartsMem<CR> &&
-    !ConvertsText<CR> && !ConvertsTextMem<CR> && !is_variant_v<M> &&
+    detail::is_value_conv<CR> && !is_variant_v<M> &&
     std::is_trivially_copyable_v<M> &&
-    std::is_same_v<std::remove_cvref_t<decltype(CR::convert())>, M> &&
-    requires { std::bool_constant<(CR::convert(), true)>{}; };
+    std::is_same_v<std::remove_cvref_t<decltype(CR::convert())>, M>;
 
 // One slot of the conversion registry: the thunk, and the value where the
 // grammar stated one.

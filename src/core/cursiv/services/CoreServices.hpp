@@ -38,7 +38,9 @@ struct CoreServices {
   CoreServices(const CoreServices&) = delete;
   CoreServices& operator=(const CoreServices&) = delete;
 
-  SharedCoreServices& shared;
+  [[nodiscard]] SharedCoreServices& shared() const noexcept {
+    return *_shared;
+  }
 
   LanguageMetaData languageMetaData;
 
@@ -78,6 +80,17 @@ struct CoreServices {
       cursiv::function_ref<void(const ServiceSlot&)> yield) const;
 
   [[nodiscard]] std::string_view firstMissingService() const;
+
+ protected:
+  // A virtual base is built by the most derived class. This lets it name no
+  // such base: the base it derives through hands over the shared services.
+  CoreServices() noexcept;
+  void bindShared(SharedCoreServices& sharedServices) noexcept {
+    _shared = std::addressof(sharedServices);
+  }
+
+ private:
+  SharedCoreServices* _shared = nullptr;
 };
 
 // Fills the slots no grammar decides, fill-if-empty: a language module that

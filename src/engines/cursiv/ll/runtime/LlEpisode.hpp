@@ -143,7 +143,10 @@ inline std::uint16_t ll_planned(const LlContext& c, std::uint16_t decision) {
 template <const auto& T>
 class LlEpisode {
  public:
-  std::uint16_t run(LlContext& c, std::uint16_t decision) {
+  // `ties`, where a refusal read the token in hand, is what ties with it: the
+  // run reads those instead of what the mode's table says.
+  std::uint16_t run(LlContext& c, std::uint16_t decision,
+                    const std::vector<std::uint16_t>* ties = nullptr) {
     _cp = &c;
     _decision = decision;
     _inspected = _chosenAt = 0;
@@ -159,7 +162,7 @@ class LlEpisode {
         if (!held) walk.reset();
       }
     } release{_walk, _held};
-    return solve();
+    return solve(ties);
   }
 
   // The episode that stopped where its choice was made, with readings left,
@@ -200,16 +203,19 @@ class LlEpisode {
   }
   void release(const LlEpisodeCache* owner) {
     if (_held && _heldBy == owner) abandon();
+    // What a stopped run read is no later parse's.
+    _steps = 0;
   }
 
-  std::uint16_t solve() {
+  std::uint16_t solve(const std::vector<std::uint16_t>* ties) {
     std::uint16_t remembered = kNoRow;
-    _kept = memo();
+    // What ties was read for this one run: nothing keys an answer on it.
+    _kept = ties == nullptr ? memo() : nullptr;
     if (_kept != nullptr) _q = question();
     if (recall(remembered)) return remembered;
     auto& scratch = ll_scratch<T.termWords>();
     LlLookRead first;
-    ll_first_read<T>(ctx(), dec(), scratch.viable, scratch.read, &first);
+    ll_first_read<T>(ctx(), dec(), scratch.viable, scratch.read, &first, ties);
     touch(first);
     _firstTerms = scratch.read;
     _firstTop = first.top;

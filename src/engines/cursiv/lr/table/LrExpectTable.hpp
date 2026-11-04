@@ -16,6 +16,7 @@ struct LrExpect {
   ElementId feature = kNoElement;
   ElementId site = kNoElement;
   ElementId landing = kNoElement;
+  bool entered = false;
 };
 
 // One row per state over a pool of the distinct continuations.

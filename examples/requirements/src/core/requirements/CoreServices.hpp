@@ -22,9 +22,7 @@ struct RequirementsCoreServices
   std::unique_ptr<const RequirementsValidator> requirementsValidator;
   std::unique_ptr<const TestsValidator> testsValidator;
 
-  explicit RequirementsCoreServices(
-      RequirementsSharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   // Optional both: each of the two languages fills its own and leaves the
   // other empty.

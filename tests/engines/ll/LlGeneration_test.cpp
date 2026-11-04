@@ -1,4 +1,7 @@
+#include <pthread.h>
+
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -233,8 +236,10 @@ struct AnalysisAliases : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Backward, each alias calls the rule numbered before it, so what a caller
+// hands on is seen only after its callee has been read.
 template <bool Nullable>
-cursiv::LlBuildWork analyse_aliases(unsigned count) {
+cursiv::LlBuildWork analyse_aliases(unsigned count, bool backward = false) {
   auto low = cursiv::LlLowering<AnalysisAliases<Nullable>>::lower();
   auto& cfg = low.cfg;
   std::uint16_t tail = 0;
@@ -244,10 +249,12 @@ cursiv::LlBuildWork analyse_aliases(unsigned count) {
   if (tail == 0) return {};
   const auto leaf = cfg.rules[tail].body;
   const auto base = cfg.nrules;
+  const auto alias = [&](unsigned i) {
+    return static_cast<std::uint16_t>(base + (backward ? count - 1 - i : i));
+  };
   for (unsigned i = 0; i < count; ++i) {
-    const auto caller =
-        i == 0 ? tail : static_cast<std::uint16_t>(base + i - 1);
-    const auto callee = static_cast<std::uint16_t>(base + i);
+    const auto caller = i == 0 ? tail : alias(i - 1);
+    const auto callee = alias(i);
     const auto node = cfg.nnodes++;
     cfg.nodes[node] = {.kind = cursiv::LlShape::call, .sym = callee};
     cfg.nodeBuild[node] = {.cfg = cfg.ruleCfg[tail]};
@@ -256,7 +263,7 @@ cursiv::LlBuildWork analyse_aliases(unsigned count) {
     cfg.rules[callee] = {};
   }
   cfg.nrules = static_cast<std::uint16_t>(base + count);
-  cfg.rules[cfg.nrules - 1].body = leaf;
+  cfg.rules[alias(count - 1)].body = leaf;
   cursiv::LlBuildWork work;
   const auto built =
       cursiv::ll_build_program(low, {.staticPredict = false, .work = &work});
@@ -269,25 +276,50 @@ cursiv::LlBuildWork analyse_aliases(unsigned count) {
   return work;
 }
 
+// An alias chain may be as long as the grammar: the analysis reads it on a stack
+// of its own, so a small native stack holds it.
+void* analyse_long_aliases(void*) {
+  for (const bool backward : {false, true}) {
+    (void)analyse_aliases<false>(16000, backward);
+    (void)analyse_aliases<true>(16000, backward);
+  }
+  return nullptr;
+}
+
+void a_small_stack_holds_a_long_alias_chain() {
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, std::size_t{1} << 20);
+  pthread_t th;
+  const bool started =
+      pthread_create(&th, &attr, &analyse_long_aliases, nullptr) == 0;
+  CHECK(started);
+  if (started) pthread_join(th, nullptr);
+  pthread_attr_destroy(&attr);
+}
+
 void alias_analysis_visits_only_changed_dependencies() {
-  const auto check = [](bool nullable) {
-    const auto small =
-        nullable ? analyse_aliases<true>(1000) : analyse_aliases<false>(1000);
-    const auto large =
-        nullable ? analyse_aliases<true>(4000) : analyse_aliases<false>(4000);
+  const auto check = [](bool nullable, bool backward) {
+    const auto small = nullable ? analyse_aliases<true>(1000, backward)
+                                : analyse_aliases<false>(1000, backward);
+    const auto large = nullable ? analyse_aliases<true>(4000, backward)
+                                : analyse_aliases<false>(4000, backward);
     // A fourfold alias chain costs fourfold work, including nullable calls
     // and both the local and caller-facing trivia configurations.
     for (const auto member :
          {&cursiv::LlBuildWork::nullable, &cursiv::LlBuildWork::first,
-          &cursiv::LlBuildWork::productive, &cursiv::LlBuildWork::repair,
+          &cursiv::LlBuildWork::follow, &cursiv::LlBuildWork::productive,
+          &cursiv::LlBuildWork::repair,
           &cursiv::LlBuildWork::gapShape, &cursiv::LlBuildWork::gapSets}) {
       CHECK(small.*member != 0);
       CHECK(large.*member <= 5 * (small.*member));
       CHECK(large.*member < 20 * 4000);
     }
   };
-  check(false);
-  check(true);
+  for (const bool backward : {false, true}) {
+    check(false, backward);
+    check(true, backward);
+  }
 }
 
 struct UnsupportedGap : cursiv::GrammarSpec {
@@ -774,6 +806,7 @@ void byte_recognizers_spell_each_shape_once() {
 
 int main() {
   alias_analysis_visits_only_changed_dependencies();
+  a_small_stack_holds_a_long_alias_chain();
   record_sources_keep_nullable_suffixes_and_only_required_children();
   record_aliases_propagate_changes_without_rejoining_every_rule();
   record_rows_keep_the_order_of_first_arrival_through_aliases();

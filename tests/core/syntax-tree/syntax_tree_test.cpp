@@ -55,6 +55,7 @@
 #include "cursiv/grammar/GrammarUtils.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstWalk.hpp"
 #include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstMetaData.hpp"
@@ -1102,6 +1103,31 @@ namespace nest {
 
 using namespace tab::nested;
 
+// A walk reads what a node contains, a parent first, and skips what is pruned;
+// a climb finds the nearest node of a class, the node itself first.
+void a_walk_reads_what_a_node_contains() {
+  cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
+  N* const outer = r.value_as<N>();
+  CHECK(outer != nullptr && outer->child != nullptr);
+  if (outer == nullptr || outer->child == nullptr) return;
+  std::vector<const cursiv::AstNode*> all;
+  cursiv::visit_all_contents(refl(), *outer,
+                             [&](cursiv::AstNode& node) { all.push_back(&node); });
+  CHECK(all.size() >= 2);
+  if (!all.empty()) CHECK(all.front() == outer->child);
+  CHECK(std::ranges::find(all, outer) == all.end());
+  std::size_t direct = 0, pruned = 0;
+  cursiv::visit_contents(refl(), *outer, [&](cursiv::AstNode&) { ++direct; });
+  cursiv::visit_all_contents(refl(), *outer, [&](cursiv::AstNode&) {
+    ++pruned;
+    return cursiv::AstWalk::prune;
+  });
+  CHECK(direct != 0 && pruned == direct && pruned < all.size());
+  CHECK(cursiv::container_of_type<N>(all.back()) != nullptr);
+  CHECK(cursiv::container_of_type<N>(outer) == outer);
+  CHECK(cursiv::container_of_type<N>(nullptr) == nullptr);
+}
+
 void nest_chain() {
   cursiv::ParseResult r = engine().parse("$nest pub a . b !!");
   CHECK(r.accepted && static_cast<bool>(r));
@@ -1620,6 +1646,7 @@ void run() {
   nodealt::the_variant_child_is_visited();
   region::adopts_and_wraps();
   nest::nest_chain();
+  nest::a_walk_reads_what_a_node_contains();
   wrapper::wrapper_owns_what_follows_the_nest();
   wrapper::adopts_the_wrapper_as_itself();
   move::move_keeps_the_views_valid();
@@ -4022,6 +4049,28 @@ void run() {
 
 }  // namespace reference_resolution
 
+namespace node_on_its_own {
+
+// A plain base first puts the `AstNode` after the start of the object: what is
+// freed is the storage, not the `AstNode`.
+struct Plain {
+  int before = 7;
+};
+struct Later : cursiv::Extends<Plain, cursiv::AstNode> {
+  int after = 3;
+};
+
+void run() {
+  const cursiv::AstNodePtr node = cursiv::new_ast_node<Later>();
+  CHECK(node->type == &cursiv::ast_type_tag<Later>);
+  CHECK(node->parent == nullptr && node->cstNodeId == cursiv::kNoNode);
+  const auto* const later = static_cast<const Later*>(node.get());
+  CHECK(later->before == 7 && later->after == 3);
+  CHECK(static_cast<const void*>(node.get()) != static_cast<const void*>(later));
+}
+
+}  // namespace node_on_its_own
+
 int main() {
   const auto run = [](const char* section, void (*test)()) {
     // Keep the current section visible even if CTest terminates the process.
@@ -4033,6 +4082,7 @@ int main() {
   run("ast_reflection", ast_reflection::run);
   run("convert", convert::run);
   run("cst", cst::run);
+  run("node_on_its_own", node_on_its_own::run);
   run("cst_node", cst_node::run);
   run("cst_utils", cst_utils::run);
   run("reference_resolution", reference_resolution::run);

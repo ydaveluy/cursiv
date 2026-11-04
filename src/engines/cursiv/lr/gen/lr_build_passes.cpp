@@ -135,7 +135,9 @@ void lr_share_action_rows(LrBuildTable& A) {
       key.push_back((std::uint64_t{x.term} << 18) |
                     (std::uint64_t{x.arg} << 2) |
                     static_cast<std::uint64_t>(x.kind));
-      key.push_back((std::uint64_t{x.exact} << 32) |
+      key.push_back((std::uint64_t{x.alts} << 34) |
+                    (std::uint64_t{x.entered} << 33) |
+                    (std::uint64_t{x.exact} << 32) |
                     (std::uint64_t{x.site} << 16) | x.outer);
     }
     const auto [at, fresh] = rows.try_emplace(
@@ -401,7 +403,8 @@ void lr_minimize_states(LrBuildTable& A) {
         if (initial) {
           key.push_back(static_cast<std::uint32_t>(x.site));
           key.push_back(static_cast<std::uint32_t>(x.outer));
-          key.push_back(x.exact ? 1u : 0u);
+          key.push_back(static_cast<std::uint32_t>(x.alts));
+          key.push_back((x.exact ? 1u : 0u) | (x.entered ? 2u : 0u));
         }
       }
       for (const LrGotoRows::Edge& e : go[s]) {

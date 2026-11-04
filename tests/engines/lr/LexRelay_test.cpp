@@ -226,6 +226,15 @@ void an_indented_closer_ends_a_heredoc() {
 
 void long_closer_search() {
   const auto any = [](const char*) { return true; };
+  // An empty search stands at every position, and `take` still decides.
+  {
+    const std::string_view text = "ab";
+    CHECK(cursiv::lex_find_long(text, "", "", "",
+                                [](const char*) { return false; }) == nullptr);
+    CHECK(cursiv::lex_find_long(text, "", "", "", [&](const char* at) {
+            return at == text.data() + 1;
+          }) == text.data() + 1);
+  }
   for (const std::string_view text : {"", "a", "aba", "ababa", "aaaab"})
     for (const std::string_view pattern : {"", "a", "ab", "aba", "aaaab", "aaaaaa"})
       for (std::size_t first = 0; first <= pattern.size(); ++first)

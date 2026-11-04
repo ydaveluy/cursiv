@@ -420,9 +420,15 @@ template <const auto& T>
 inline void ll_first_read(const LlContext& c, const LlTable::Decision& dec,
                           LlMask<T.termWords>& viable,
                           std::vector<std::uint16_t>& read,
-                          LlLookRead* details = nullptr) {
+                          LlLookRead* details = nullptr,
+                          const std::vector<std::uint16_t>* ties = nullptr) {
   read.assign(1, c.la.sym);
   if (details != nullptr) *details = {c.la, c.la.end, c.la.sym == kEofSymbol};
+  // A refusal already read what stands here.
+  if (ties != nullptr) {
+    read = *ties;
+    return;
+  }
   if (!ll_reads_rivals<T>(c, dec.mode) || c.la.sym == kEofSymbol ||
       c.la.sym == kInvalidSymbol || T.terms[c.la.sym].laid != 0)
     return;

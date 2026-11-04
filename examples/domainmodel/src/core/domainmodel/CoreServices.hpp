@@ -25,9 +25,7 @@ struct DomainModelCoreServices
   // the registry files pointers into it, never copies.
   std::unique_ptr<const DomainModelValidator> validator;
 
-  explicit DomainModelCoreServices(
-      DomainModelSharedCoreServices& sharedServices)
-      : cursiv::CoreServices(sharedServices), CoreServicesFor(sharedServices) {}
+  using CoreServicesFor::CoreServicesFor;
 
   void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
                          yield) const override {

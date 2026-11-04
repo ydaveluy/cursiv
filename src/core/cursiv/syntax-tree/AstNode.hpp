@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -718,6 +720,26 @@ template <class T>
                  node->type->derivesFrom(&ast_type_tag<std::remove_cv_t<T>>)
              ? static_cast<const T*>(node)
              : nullptr;
+}
+
+// A node on its own, outside any tree's arena. A node is trivially destructible,
+// so freeing it only gives back its storage. The storage is kept because a plain
+// base declared first puts the `AstNode` after the start of the object.
+struct AstNodeFree {
+  void* storage = nullptr;
+  void operator()(AstNode*) const noexcept { ::operator delete(storage); }
+};
+using AstNodePtr = std::unique_ptr<AstNode, AstNodeFree>;
+
+// A new `T`, its members at their defaults, its parent null.
+template <class T>
+[[nodiscard]] AstNodePtr new_ast_node() {
+  static_assert(std::is_trivially_destructible_v<T>);
+  static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+  void* const storage = ::operator new(sizeof(T));
+  AstNode* const node = std::construct_at(static_cast<T*>(storage));
+  node->type = &ast_type_tag<T>;
+  return AstNodePtr(node, AstNodeFree{storage});
 }
 
 }  // namespace cursiv

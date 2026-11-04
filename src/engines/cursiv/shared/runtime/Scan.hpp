@@ -23,12 +23,14 @@ template <std::size_t N>
 class ScanRoom {
  public:
   [[nodiscard]] Scan* data() noexcept {
-    return start_implicit_array<Scan>(_bytes, N);
+    return start_implicit_array<Scan>(_bytes, kRoom);
   }
   [[nodiscard]] Scan& operator[](std::size_t i) noexcept { return data()[i]; }
 
  private:
-  alignas(Scan) std::byte _bytes[sizeof(Scan) * N];
+  // A table with no rivals still names the room: C++ has no empty array.
+  static constexpr std::size_t kRoom = N != 0 ? N : 1;
+  alignas(Scan) std::byte _bytes[sizeof(Scan) * kRoom];
 };
 
 }  // namespace cursiv

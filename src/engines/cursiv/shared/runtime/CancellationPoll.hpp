@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
@@ -36,6 +37,30 @@ class CancellationPoll {
 
   const CancellationToken* _token = nullptr;
   mutable std::uint32_t _left = std::numeric_limits<std::uint32_t>::max();
+};
+
+// The stop of the parse this thread runs, for generated code that no context
+// reaches.
+class ThreadStop {
+ public:
+  explicit ThreadStop(const CancellationToken& token)
+      : _previous(std::exchange(current(), &token)) {}
+  ~ThreadStop() { current() = _previous; }
+  ThreadStop(const ThreadStop&) = delete;
+  ThreadStop& operator=(const ThreadStop&) = delete;
+
+  static CancellationPoll poll() {
+    const CancellationToken* const token = current();
+    return token != nullptr ? CancellationPoll(*token) : CancellationPoll();
+  }
+
+ private:
+  static const CancellationToken*& current() {
+    thread_local const CancellationToken* token = nullptr;
+    return token;
+  }
+
+  const CancellationToken* _previous;
 };
 
 }  // namespace cursiv

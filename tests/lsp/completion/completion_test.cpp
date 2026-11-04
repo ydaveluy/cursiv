@@ -395,6 +395,29 @@ struct Hooked final : cursiv::DefaultCompletionProvider {
 struct SeesNode final : cursiv::DefaultCompletionProvider {
   using DefaultCompletionProvider::DefaultCompletionProvider;
   mutable std::vector<std::string> nodes;
+  mutable std::optional<std::pair<unsigned, unsigned>> span;
+  mutable std::string container;
+  void visitReferenceCandidates(
+      const cursiv::ReferenceInfo& reference,
+      const cursiv::CompletionContext& context,
+      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      const override {
+    const cursiv::AstNode* const node = reference.container;
+    container = std::string(node->type->name);
+    container += node->cstNodeId == cursiv::kNoNode ? "+new" : "+read";
+    if (node->parent != nullptr) {
+      container += " in ";
+      container += node->parent->type->name;
+    }
+    DefaultCompletionProvider::visitReferenceCandidates(reference, context,
+                                                        visitor);
+  }
+  void completionFor(const cursiv::CompletionContext& context,
+                     const cursiv::NextFeature& next,
+                     cursiv::CompletionAcceptor accept) const override {
+    if (!span.has_value()) span = {context.tokenOffset, context.tokenEndOffset};
+    DefaultCompletionProvider::completionFor(context, next, accept);
+  }
   bool filterKeyword(const cursiv::CompletionContext& context,
                      std::string_view) const override {
     const cursiv::AstNode* const node = context.node();
@@ -429,6 +452,17 @@ struct World : support::World<cursiv::SharedLspServices> {
           [this](cursiv::LspServices& language) {
             auto provider = std::make_unique<SeesNode>(language);
             sees = provider.get();
+            language.completionProvider = std::move(provider);
+          });
+  const SeesNode* seesLl = nullptr;
+  const cursiv::LspServices* seeingLl =
+      &support::add_language<cursiv::LspServices>(
+          shared, {"words-seeing-ll", {".wsl"}, {}},
+          twords::generated::Ll::create_parser(),
+          twords::generated::Ll::create_ast_reflection(),
+          [this](cursiv::LspServices& language) {
+            auto provider = std::make_unique<SeesNode>(language);
+            seesLl = provider.get();
             language.completionProvider = std::move(provider);
           });
 };
@@ -477,57 +511,62 @@ std::vector<std::string> labels_at(const cursiv::LspServices& language,
   return out;
 }
 
-constexpr const char* kTerminalForms[] = {"branch:\n", "whole:\n"};
-
-// Every caret of each document, behind each form: the body starts a line of
-// its own, so the edits of the forms read alike. The documents read whole, so
-// the forms agree on the tree and only the words are compared.
-void the_words_are_offered_as_the_data_rule_offers_its_keywords() {
+// Opening the rule that writes a reference, a scope sees a new node of its class
+// under the node at the caret, even one of that class. Past a token of the rule,
+// it sees the node read.
+void a_scope_sees_the_node_of_the_rule_entered() {
   const World world;
-  for (const cursiv::LspServices* language : {world.ll, world.lr})
-    for (const std::string_view body :
-         {"a TRUE; b false; c TRUE;", "a // note\nTRUE; b FALSE;"})
-      for (std::size_t at = 0; at <= body.size(); ++at) {
-        std::string marked(body);
-        marked.insert(at, "<|>");
-        const auto rule = items_at(*language, "rule:\n" + marked);
-        for (const char* form : kTerminalForms) {
-          const auto token = items_at(*language, form + marked);
-          if (token != rule) {
-            std::printf(
-                "%s [%s%s]\n  token:", language == world.ll ? "LL" : "LR", form,
-                marked.c_str());
-            for (const std::string& item : token)
-              std::printf(" %s", item.c_str());
-            std::printf("\n  rule: ");
-            for (const std::string& item : rule)
-              std::printf(" %s", item.c_str());
-            std::printf("\n");
-          }
-          CHECK(token == rule);
-        }
-      }
+  const std::pair<const cursiv::LspServices*, const SeesNode*> engines[] = {
+      {world.seeing, world.sees}, {world.seeingLl, world.seesLl}};
+  for (const auto& [language, sees] : engines) {
+    sees->container.clear();
+    (void)items_at(*language, "new:\n<|>");
+    CHECK(sees->container == "Item+new in Items");
+    sees->container.clear();
+    (void)items_at(*language, "new:\na; <|>");
+    CHECK(sees->container == "Item+new in Item");
+    sees->container.clear();
+    (void)items_at(*language, "cap:\nz: <|>");
+    CHECK(sees->container == "Item+read in Items");
+  }
 }
 
-// The words as written, `ikw` ones too, filtered on what is typed; nested
-// choices give theirs. Glued to a name, or at the end of a comment, a word
-// would join it, and none is offered. A name is matched by a pattern and
-// offers nothing.
-void a_terminal_offers_its_words_and_a_pattern_none() {
+// A data rule offers its words as written, filtered on what is typed. Glued to a
+// name, or at the end of a comment, a word would join it, and none is offered. A
+// terminal whose alternatives each convert is a data rule too. Any other terminal
+// says nothing of its contents, whatever it reads.
+void a_data_rule_offers_its_words_and_a_terminal_none() {
   const World world;
   using Labels = std::vector<std::string>;
   for (const cursiv::LspServices* language : {world.ll, world.lr}) {
-    for (const std::string form : {"branch:\n", "whole:\n", "rule:\n"}) {
-      CHECK(labels_at(*language, form + "a <|>") == Labels{"FALSE", "TRUE"});
+    for (const std::string form : {"rule:\n", "branch:\n"}) {
+      CHECK(labels_at(*language, form + "a <|>") == (Labels{"FALSE", "TRUE"}));
       CHECK(labels_at(*language, form + "a t<|>") == Labels{"TRUE"});
       CHECK(labels_at(*language, form + "a<|> TRUE;").empty());
       CHECK(labels_at(*language, form + "a // c<|>").empty());
       CHECK(labels_at(*language, form + "<|>").empty());
     }
-    CHECK(labels_at(*language, "size:\na <|>") ==
-          Labels{"L", "large", "s", "small"});
+    for (const std::string form : {"whole:\n", "size:\n"}) {
+      CHECK(labels_at(*language, form + "a <|>").empty());
+      CHECK(labels_at(*language, form + "a t<|>").empty());
+    }
   }
 }
+
+// Names stop at the cap, and a keyword beside them still comes.
+void the_cap_on_names_leaves_the_keywords() {
+  const World world;
+  std::string text = "cap:\n";
+  for (unsigned i = 0; i < 1100; ++i)
+    text += "n" + std::to_string(i) + ": none;\n";
+  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
+    const std::vector<std::string> labels =
+        labels_at(*language, text + "z: <|>");
+    CHECK(labels.size() == 1001);
+    CHECK(std::ranges::find(labels, "none") != labels.end());
+  }
+}
+
 
 // The tokens of a data rule say nothing of what may stand there: a caret in one
 // is answered from its start. Past a comment inside it no name matches, and its
@@ -551,6 +590,32 @@ void a_data_rule_is_completed_from_its_start() {
     CHECK(labels_at(*language, names + "John.<|>") == john);
     CHECK(labels_at(*language, names + "<|>John.// c\nMiller;") == all);
     CHECK(labels_at(*language, names + "John.// c\n<|>Miller;").empty());
+  }
+}
+
+// A data rule of one token has no record of its own and is still read whole, so
+// a caret at its start replaces it and is offered its words. A plain terminal
+// holds no such place: a caret at its start asks there and replaces nothing.
+void a_data_rule_of_one_token_is_read_whole() {
+  const World world;
+  using Span = std::pair<unsigned, unsigned>;
+  const std::pair<const cursiv::LspServices*, const SeesNode*> engines[] = {
+      {world.seeing, world.sees}, {world.seeingLl, world.seesLl}};
+  for (const auto& [language, sees] : engines) {
+    const auto first_span = [&, sees = sees, language = language](std::string text) {
+      sees->span.reset();
+      (void)items_at(*language, std::move(text));
+      return sees->span.value_or(Span{0, 0});
+    };
+    //                       0123456 7890123456
+    const std::string path = "path:\nZ -> ";
+    CHECK(first_span(path + "<|>John;") == Span(11, 15));
+    CHECK(first_span(path + "Jo<|>hn;") == Span(11, 15));
+    CHECK(first_span(path + "John<|>;") == Span(11, 15));
+    CHECK(first_span(path + "<|>John.Smith;") == Span(11, 21));
+    CHECK(first_span("size:\n<|>abc s;") == Span(6, 6));
+    CHECK(labels_at(*language, "rule:\na <|>TRUE;") ==
+          (std::vector<std::string>{"FALSE", "TRUE"}));
   }
 }
 
@@ -592,9 +657,11 @@ void the_hooks_shape_what_is_offered() {
 }  // namespace
 
 void run() {
-  the_words_are_offered_as_the_data_rule_offers_its_keywords();
-  a_terminal_offers_its_words_and_a_pattern_none();
+  a_data_rule_offers_its_words_and_a_terminal_none();
+  the_cap_on_names_leaves_the_keywords();
+  a_scope_sees_the_node_of_the_rule_entered();
   a_data_rule_is_completed_from_its_start();
+  a_data_rule_of_one_token_is_read_whole();
   the_hooks_shape_what_is_offered();
   a_context_names_the_node_of_its_token();
 }

@@ -16,7 +16,7 @@ Services live in four containers:
 - **Shared services** serve the whole workspace and every language in it:
   documents, index, document builder.
 - **Language services** belong to one language: parser, scoping, validation,
-  editor providers. They reach the shared services through `services.shared`.
+  editor providers. They reach the shared services through `services.shared()`.
 - **Core services** are what the CLI, tests and programs need. **LSP
   services** add the editor features. An LSP container extends the core one,
   so a language server has both.
@@ -129,7 +129,7 @@ The server advertises an editor feature only when its provider is installed.
 | `documentSymbolProvider` | Document outline | Framework |
 | `foldingRangeProvider` | Folding | Framework |
 | `selectionRangeProvider` | Expand selection | Framework |
-| `semanticTokenProvider` | Semantic highlighting | Framework |
+| `semanticTokenProvider` | Semantic highlighting, see [Editor integration](../learn/editor-integration.md) | None |
 | `codeActionProvider` | Quick fixes | Framework |
 | `formatter` | Formatting rules, see [Formatting](../recipes/formatting.md) | None |
 | `declarationProvider` | Go to declaration | None |
@@ -163,7 +163,16 @@ Derive from `DefaultCompletionProvider` and override what your language changes:
 Pass a value to `accept(context, value)`. A value with no `textEdit` must match
 what is typed. It gets its label from `label`, `node` or `nodeDescription`.
 `context.node()` gives the node at the caret, or null at the very start of a
-document.
+document. Where the caret opens the rule that writes a reference, or the reference
+belongs to a class the node at the caret is not, a scope asked for its targets
+sees a new node of that class as `container`, with the node at the caret as its
+parent and its own members empty. It lasts only for the request, so do not keep
+it.
+
+Keywords are always offered, and at most 1000 names per answer: what the author
+types next asks again. A terminal offers nothing, whatever it reads. To offer a
+choice of words, write it as a data rule. A terminal with `as<V>` on each
+alternative is one.
 
 ## Add your own protocol methods
 

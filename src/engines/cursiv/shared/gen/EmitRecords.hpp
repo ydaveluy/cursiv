@@ -28,6 +28,7 @@ struct RecordGen {
   std::uint8_t narrow = kNoNarrow;
   std::string_view rule;
   std::string_view doc;
+  bool dataRule = false;
 };
 
 RecordGen record_gen(std::span<const AstRowGen> rows,

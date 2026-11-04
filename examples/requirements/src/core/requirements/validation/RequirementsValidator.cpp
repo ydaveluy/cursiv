@@ -25,8 +25,8 @@ bool has_digit(std::string_view value) {
 RequirementsValidator::RequirementsValidator(
     const cursiv::CoreServices& services)
     : cursiv::DefaultCoreService(services),
-      _owner(services.shared),
-      _covered(services.shared) {}
+      _owner(shared),
+      _covered(shared) {}
 
 void RequirementsValidator::checkRequirementNameContainsANumber(
     const ast::Requirement& requirement,
@@ -41,7 +41,7 @@ void RequirementsValidator::checkRequirementNameContainsANumber(
 
 std::shared_ptr<const RequirementsValidator::Covered>
 RequirementsValidator::computeCoverage() const {
-  const auto& documents = *services.shared.documents;
+  const auto& documents = *shared.documents;
   auto referenced = std::make_shared<Covered>();
   for (const std::shared_ptr<cursiv::Document>& document : documents.all()) {
     const cursiv::AstNode* const root = document->parseResult.value;

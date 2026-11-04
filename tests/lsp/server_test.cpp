@@ -73,6 +73,7 @@
 #include "cursiv/runtime/LanguageServer.hpp"
 #include "cursiv/runtime/LanguageServerMain.hpp"
 #include "cursiv/runtime/LanguageServerRuntime.hpp"
+#include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/services/AbstractExecuteCommandHandler.hpp"
 #include "cursiv/services/ExecuteCommandHandler.hpp"
@@ -316,6 +317,8 @@ void the_handshake_promises_only_what_is_installed() {
   CHECK(!result.capabilities.typeDefinitionProvider.has_value());
   CHECK(!result.capabilities.callHierarchyProvider.has_value());
   CHECK(!result.capabilities.typeHierarchyProvider.has_value());
+  // No colours unless a language asks for them: the editor keeps its own.
+  CHECK(!result.capabilities.semanticTokensProvider.has_value());
   CHECK(!result.capabilities.signatureHelpProvider.has_value());
   CHECK(!result.capabilities.inlayHintProvider.has_value());
   CHECK(!result.capabilities.documentLinkProvider.has_value());
@@ -325,6 +328,15 @@ void the_handshake_promises_only_what_is_installed() {
   // The workspace arm exists for the folders, and says nothing about files.
   CHECK(result.capabilities.workspace.has_value());
   CHECK(!result.capabilities.workspace->fileOperations.has_value());
+}
+
+// A language that asks for colours has them announced, with what reads them.
+void the_handshake_announces_the_colours_a_language_installs() {
+  World world;
+  world.ws->semanticTokenProvider =
+      std::make_unique<const cursiv::GrammarSemanticTokenProvider>(*world.ws);
+  const lsp::InitializeResult result = world.handshake();
+  CHECK(result.capabilities.semanticTokensProvider.has_value());
 }
 
 // What a provider claims reaches the client verbatim: a character absent from
@@ -1168,6 +1180,7 @@ void the_watcher_follows_the_clients_capability() {
 void run() {
   the_installed_defaults_leave_no_slot_owed();
   the_handshake_promises_only_what_is_installed();
+  the_handshake_announces_the_colours_a_language_installs();
   the_completion_triggers_are_the_providers_own();
   completion_edits_follow_insert_replace_support();
   prose_follows_the_clients_preferred_format();
@@ -1835,7 +1848,12 @@ namespace {
 struct World : support::World<cursiv::SharedLspServices> {
   cursiv::LspServices* doc = &support::add_language<cursiv::LspServices>(
       shared, {"doc", {".doc"}, {}}, fdoc::generated::DocG::create_parser(),
-      fdoc::generated::DocG::create_ast_reflection());
+      fdoc::generated::DocG::create_ast_reflection(),
+      [](cursiv::LspServices& language) {
+        language.semanticTokenProvider =
+            std::make_unique<const cursiv::GrammarSemanticTokenProvider>(
+                language);
+      });
 
   mutable unsigned minted = 0;
 

@@ -114,7 +114,7 @@ struct Token {
 };
 
 DocCommentPosition position(std::uint32_t line, std::size_t character) {
-  return {line, static_cast<std::uint32_t>(character)};
+  return {line, static_cast<std::uint32_t>(character), 0};
 }
 
 // Matches a block `@tag` starting at `index` (after optional whitespace).
@@ -687,7 +687,28 @@ DocComment parse_doc_comment(std::string_view comment, DocCommentPosition start,
   const auto lines = get_lines(comment);
   const auto tokens = tokenize(lines, start, options);
   ParseContext context{tokens, 0, start};
-  return parse_comment(context);
+  DocComment parsed = parse_comment(context);
+  // A position's offset, from where its line stands in the comment. The first
+  // line's columns count from where the comment starts.
+  const auto place = [&](DocCommentPosition& at) {
+    const std::size_t line = at.line - start.line;
+    const auto from = static_cast<std::size_t>(lines[line].data() - comment.data());
+    at.offset = static_cast<std::uint32_t>(
+        start.offset + from + at.character -
+        (line == 0 ? start.character : 0u));
+  };
+  place(parsed.range.start);
+  place(parsed.range.end);
+  std::vector<DocCommentNode*> pending;
+  for (DocCommentNode& node : parsed.elements) pending.push_back(&node);
+  while (!pending.empty()) {
+    DocCommentNode& node = *pending.back();
+    pending.pop_back();
+    place(node.range.start);
+    place(node.range.end);
+    for (DocCommentNode& child : node.children) pending.push_back(&child);
+  }
+  return parsed;
 }
 
 }  // namespace cursiv

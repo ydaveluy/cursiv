@@ -15,27 +15,24 @@
 namespace cursiv {
 
 // Derives virtually, so a language that is both a core language and an LSP one
-// holds exactly one `CoreServices` through the diamond. A language derives this
-// and adds its own slots; it must still spell the constructor out, an inherited
-// one never initialising a virtual base:
+// holds exactly one `CoreServices` through the diamond. A language derives this,
+// adds its own slots and takes the constructor:
 //
 //   struct MyCoreServices : cursiv::CoreServicesFor<MySharedCoreServices> {
 //     std::unique_ptr<const MyValidator> validator;
-//     explicit MyCoreServices(MySharedCoreServices& sharedServices)
-//         : cursiv::CoreServices(sharedServices),
-//         CoreServicesFor(sharedServices)
-//         {}
+//     using CoreServicesFor::CoreServicesFor;
 //   };
 template <class TShared>
 struct CoreServicesFor : virtual CoreServices {
   static_assert(std::is_base_of_v<SharedCoreServices, TShared>,
                 "TShared derives from cursiv::SharedCoreServices");
 
-  // Shadows `CoreServices::shared`, which names the same object.
+  // The same object as the base's `shared()`, as the type the language gave it.
   TShared& shared;
 
-  explicit CoreServicesFor(TShared& sharedServices)
-      : CoreServices(sharedServices), shared(sharedServices) {}
+  explicit CoreServicesFor(TShared& sharedServices) : shared(sharedServices) {
+    bindShared(sharedServices);
+  }
 };
 
 // One language container with the defaults filled -- the headless counterpart

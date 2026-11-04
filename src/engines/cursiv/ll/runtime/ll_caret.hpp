@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -129,41 +131,43 @@ inline std::uint16_t ll_call_at(std::uint32_t ret) {
 // first answer stands; a second that differs ends the question, since a member
 // two readings disagree about is a guess, and an editor shown a guess cannot
 // tell it from an answer.
-struct LlAgree {
-  ElementId site = kNoElement;
-  std::string_view member;
+// What the readings of one token say to a caret: the members they fill, each
+// once. A reading naming none adds nothing: it only makes the token a candidate.
+struct LlMembers {
+  struct Site {
+    ElementId site = kNoElement;
+    std::string_view member;
+    // Every reading of it opens the rule that writes the member.
+    bool entered = true;
+  };
+  std::vector<Site> sites;
+  // Each member, class and narrowing to its place in `sites`.
+  using Key = std::tuple<std::string_view, const AstTypeTag*, std::uint8_t>;
+  std::map<Key, std::size_t> places;
   bool seen = false;
-  bool split = false;
   // A path ran out of frames: the stack below the last one is not known.
   bool floor = false;
   unsigned frames = 0;
 
-  bool fold(const StampedGrammar& grammar, ElementId s, std::string_view m) {
-    if (!seen) {
-      seen = true;
-      site = s;
-      member = m;
-      return true;
-    }
-    if (split) return false;
-    if (member == m &&
-        (site == s || (grammar.rowType(site) == grammar.rowType(s) &&
-                       grammar.rowNarrow(site) == grammar.rowNarrow(s))))
-      return true;
-    split = true;
-    return false;
+  void add(const StampedGrammar& grammar, ElementId s, std::string_view m,
+           bool head = false) {
+    seen = true;
+    if (m.empty()) return;
+    const auto [at, fresh] = places.try_emplace(
+        Key{m, grammar.rowType(s), grammar.rowNarrow(s)}, sites.size());
+    if (fresh)
+      sites.push_back({s, m, head});
+    else
+      sites[at->second].entered = sites[at->second].entered && head;
   }
 };
 
-// The member every reading agrees on. A path up the stack gives the first call
-// that names one, and a path that reaches the top naming none is a reading
-// too: `NULL` under a select is the operand of a null test on one reading and
-// the item's own value on the other, and neither is the answer. A context
-// reached twice is read once: a stack that forks at every level is as large as
-// its graph, not as its routes.
+// The members the readings under a call fill. A path up the stack gives the
+// first call that names one. A context reached twice is read once: a stack that
+// forks at every level is as large as its graph, not as its routes.
 template <const auto& T>
-inline bool ll_member_up(const StampedGrammar& grammar, LlSimulation& sim,
-                         std::uint32_t ctx, LlAgree& out) {
+inline void ll_members_up(const StampedGrammar& grammar, LlSimulation& sim,
+                          std::uint32_t ctx, LlMembers& out) {
   struct Cursor {
     std::uint32_t ctx;
     unsigned next;
@@ -176,7 +180,7 @@ inline bool ll_member_up(const StampedGrammar& grammar, LlSimulation& sim,
     const Cursor at = path.back();
     if (at.ctx == kLlCtxNone) {
       out.floor = true;
-      if (!out.fold(grammar, kNoElement, {})) return false;
+      out.add(grammar, kNoElement, {});
       path.pop_back();
       continue;
     }
@@ -196,15 +200,14 @@ inline bool ll_member_up(const StampedGrammar& grammar, LlSimulation& sim,
     else
       ++path.back().next;
     if (!named.empty()) {
-      if (!out.fold(grammar, above, named)) return false;
+      out.add(grammar, above, named, T.nodes[outer].head);
     } else if (outer != kNoRow && !T.nodes[outer].head) {
       // Past a token of its rule, a call fills nothing the rule's caller states.
-      if (!out.fold(grammar, kNoElement, {})) return false;
+      out.add(grammar, kNoElement, {});
     } else if (!forked || seen.insert(parent).second) {
       path.push_back({parent, 0});
     }
   }
-  return true;
 }
 
 // The widths a replay takes in turn, each wider than the last: a few tokens,
@@ -1200,16 +1203,16 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     constexpr std::uint16_t kNoSlot = 0xFFFFu;
     std::vector<std::uint16_t> slot_of(T.nterms, kNoSlot);
     std::vector<std::uint16_t> seen;
-    std::vector<LlAgree> agreed;
+    std::vector<LlMembers> members;
     const auto fold = [&](const LlConfig& c, std::uint32_t edge,
-                          LlAgree& into) {
+                          LlMembers& into) {
       const std::uint16_t hop = T.edgeNode[edge];
       // Innermost first: a position owes the run its directives state, and
       // the first write of that run is the one the token itself fills.
       const ElementId own = hop != kNoRow ? T.nodes[hop].row : kNoElement;
       const std::string_view named = grammar.rowFeature(own);
       if (!named.empty()) {
-        into.fold(grammar, own, named);
+        into.add(grammar, own, named, T.nodes[hop].head);
         return;
       }
       // ...and where the position names none and no token of its rule
@@ -1218,10 +1221,10 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
       // writes nothing on the way. A token past the first fills no member
       // its rule's caller states.
       if (hop == kNoRow || !T.nodes[hop].head) {
-        into.fold(grammar, kNoElement, {});
+        into.add(grammar, kNoElement, {});
         return;
       }
-      ll_member_up<T>(grammar, sim, c.ctx, into);
+      ll_members_up<T>(grammar, sim, c.ctx, into);
     };
     // A choice still open before the token at the caret read it under every
     // terminal its arms admit there, and the position that takes it reads it
@@ -1328,13 +1331,13 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
         if (k == kNoSlot) {
           k = static_cast<std::uint16_t>(seen.size());
           seen.push_back(e.label);
-          agreed.emplace_back();
+          members.emplace_back();
         }
-        if constexpr (T.ngapConds == 0) fold(c, q.edge + i, agreed[k]);
+        if constexpr (T.ngapConds == 0) fold(c, q.edge + i, members[k]);
       }
     }
-    // Under conditions the member is what the readings they leave agree on:
-    // the closure had joined those with the readings they refuse in one stack.
+    // Under conditions the members are what the readings they leave fill: the
+    // closure had joined those with the readings they refuse in one stack.
     if constexpr (T.ngapConds != 0)
       for (std::size_t k = 0; k < seen.size(); ++k)
         for (const LlConfig& c : survivors[seen[k]]) {
@@ -1343,21 +1346,20 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
             const LlAtnEdge& e = T.atn.edge(q.edge + i);
             if (e.label == seen[k] && offers(e, q.edge + i) &&
                 follows(c, e, q.edge + i))
-              fold(c, q.edge + i, agreed[k]);
+              fold(c, q.edge + i, members[k]);
           }
         }
     if (widens &&
-        (beyond || std::any_of(agreed.begin(), agreed.end(),
-                               [](const LlAgree& a) { return a.floor; })))
+        (beyond || std::any_of(members.begin(), members.end(),
+                               [](const LlMembers& a) { return a.floor; })))
       continue;
     for (std::size_t k = 0; k < seen.size(); ++k) {
       // A term no surviving reading follows is no candidate.
-      if (!agreed[k].seen) continue;
-      const bool named = !agreed[k].split;
-      const ElementId site = named ? agreed[k].site : kNoElement;
-      out.push_back(
-          NextFeature{seen[k], named ? agreed[k].member : std::string_view{},
-                      grammar.rowNarrow(site), grammar.rowType(site)});
+      if (!members[k].seen) continue;
+      if (members[k].sites.empty()) out.push_back(NextFeature{seen[k]});
+      for (const LlMembers::Site& s : members[k].sites)
+        out.push_back(NextFeature{seen[k], s.member, grammar.rowNarrow(s.site),
+                                  grammar.rowType(s.site), s.entered});
     }
     return;
   }

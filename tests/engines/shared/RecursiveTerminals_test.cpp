@@ -13,12 +13,14 @@
 #include "lexicalbackendslr/generated/Lr/Table.hpp"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <map>
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -166,9 +168,34 @@ void exercise(const cursiv::Parser& parser) {
 
 }  // namespace
 
+constexpr std::size_t kLongToken = 8000;
+
+// One token of many endings lasts seconds: a stop reaches it while it is read.
+void a_stop_reaches_a_long_token(const cursiv::Parser& parser) {
+  const std::string text = "continuation:" + std::string(kLongToken, 'a') +
+                           std::string(kLongToken, 'b') + "!";
+  cursiv::CancellationTokenSource source;
+  std::thread stopper([&source] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    source.request_stop();
+  });
+  const auto begin = std::chrono::steady_clock::now();
+  bool stopped = false;
+  try {
+    (void)parser.parse(text, source.get_token());
+  } catch (const cursiv::OperationCancelled&) {
+    stopped = true;
+  }
+  stopper.join();
+  CHECK(stopped);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+}
+
 void run() {
   exercise(*tlexbackends::generated::Ll::create_parser());
   exercise(*tlexbackends::generated::Lr::create_parser());
+  a_stop_reaches_a_long_token(*tlexbackends::generated::Ll::create_parser());
+  a_stop_reaches_a_long_token(*tlexbackends::generated::Lr::create_parser());
   const auto pureLl = tlexbackends::generated::Ll::create_parser();
   const auto pureLr = tlexbackends::generated::Lr::create_parser();
   for (const auto* parser : {pureLl.get(), pureLr.get()}) {

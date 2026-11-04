@@ -470,7 +470,53 @@ inline void lr_ride_chains_down(LrLowered& o, const std::vector<bool>& hands,
   }
 }
 
-inline void lr_settle(LrLowered& o) {
+// A data rule that reads one keyword whichever way it goes, and states nothing
+// but its conversion: the conversion moves onto the sites that call it. Its
+// productions then lay nothing and the table skips them, so the keyword costs
+// what a terminal costs, and its leaf is named once, where the caller reduces.
+inline void lr_sink_word_rules(LrLowered& o, std::span<const WriteKind> kind) {
+  LrBuildCfg& c = o.cfg;
+  const auto only_converts = [&](std::uint16_t r) {
+    if (r == kNoRow || !o.writes.chainBuild[r].doc.empty()) return false;
+    const Chain chain = o.writes.chains[r];
+    for (std::uint16_t k = 0; k < chain.count; ++k)
+      if (kind[o.writes.acts[chain.off + k]] != WriteKind::convert) return false;
+    return chain.count != 0;
+  };
+  std::vector<std::uint16_t> row(c.nnts, kNoRow);
+  std::vector<bool> sinks(c.nnts, true);
+  for (std::uint16_t k = 0; k < c.nprods; ++k) {
+    const LrLowProd& q = c.prods[k];
+    const LrProdBuild& b = c.prodBuild[k];
+    const std::uint16_t r = q.len == 1 ? c.row_at(q, 0) : kNoRow;
+    const std::uint16_t sym = q.len == 1 ? c.sym_at(q, 0) : kNoRow;
+    if (q.len != 1 || q.node != kNoRow || q.gap != 0 || b.endOnly ||
+        b.closesRegion || b.regionExit || b.turn || b.stop != 0 ||
+        !is_term(sym) || c.terms[sym].element != kNoRow || !only_converts(r) ||
+        (row[q.lhs] != kNoRow && row[q.lhs] != r)) {
+      sinks[q.lhs] = false;
+      continue;
+    }
+    row[q.lhs] = r;
+  }
+  sinks[c.entryNt] = false;
+  for (std::size_t k = 1; k < c.cfgHome.size(); ++k)
+    if (c.cfgHome[k] == k) sinks[c.cfgEntry[k]] = false;
+  for (std::uint16_t k = 0; k < c.nprods; ++k) {
+    const LrLowProd& q = c.prods[k];
+    if (sinks[q.lhs]) {
+      c.slots[q.at].row = kNoRow;
+      continue;
+    }
+    for (unsigned i = 0; i < q.len; ++i) {
+      const std::uint16_t sym = c.sym_at(q, i);
+      if (is_term(sym) || !sinks[nt_index(sym)]) continue;
+      c.slots[q.at + i].row = o.writes.concat(row[nt_index(sym)], c.row_at(q, i));
+    }
+  }
+}
+
+inline void lr_settle(LrLowered& o, std::span<const WriteKind> kind) {
   const std::vector<std::uint8_t> empty = lr_nullable(o.cfg, false);
   lr_no_unit_cycle(o, empty);
   lr_no_hidden_left_recursion(o, empty);
@@ -479,6 +525,7 @@ inline void lr_settle(LrLowered& o) {
   const std::vector<bool> hands = lr_hands_a_record(o.cfg, users);
   const std::vector<bool> opens = lr_opens_a_record(o, users);
   lr_ride_chains_down(o, hands, opens);
+  lr_sink_word_rules(o, kind);
   if (!o.fault && !o.cfg.lowerFail()) lr_split_loops(o);
 }
 

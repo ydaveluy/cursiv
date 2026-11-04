@@ -252,6 +252,12 @@ class LrGss {
 
   void open(Id v) {
     unsigned candidates = 1;
+    // The candidates of one reading, collected by the first, and the reading as
+    // it left it: a line start may have dropped levels from it. The others read
+    // the same text from the same place, so they take both.
+    [[maybe_unused]] ScanRoom<A.maxCands> room;
+    [[maybe_unused]] Reading collected;
+    [[maybe_unused]] bool collectedRanked = false;
     for (unsigned candidate = 0; candidate < candidates; ++candidate) {
       Reading r = _g.reading(v);
       Step step;
@@ -262,6 +268,17 @@ class LrGss {
       const auto scan = [&] {
         const std::uint16_t mode = A.mode[r.run.state];
         r.laMode = mode;
+        if constexpr (A.maxCands > 1) {
+          if (candidate != 0) {
+            step.scanned = true;
+            r = collected;
+            r.la.end = room[candidate].end;
+            r.la.sym = room[candidate].term;
+            step.ranked = collectedRanked;
+            step.lexRank = ~lex_weight(room[candidate].tier);
+            return;
+          }
+        }
         if constexpr (kLrImplied<A>.size() != 0) {
           if (r.virt.pending != 0) {
             r.la = r.virt.in_hand();
@@ -277,22 +294,24 @@ class LrGss {
         }
         r.la = lr_scan_at<A>(_c, mode, r.at, r.indent.depth);
         [[maybe_unused]] bool refused = false;
+        [[maybe_unused]] std::uint32_t tied = 0;
         if constexpr (A.has_flags())
           if (r.la.sym < A.cfg.nterms && A.flagged(mode, r.la.sym))
             [[unlikely]]
-            refused = refuse(v, r, mode);
+            refused = refuse(v, r, mode, room, tied);
         r.pendEnd = r.la.begin;
         if constexpr (A.maxCands > 1) {
-          if (!refused && lr_has_rivals<A>(r.laMode, r.la.sym)) {
-            ScanRoom<A.maxCands> room;
+          if (refused || lr_has_rivals<A>(r.laMode, r.la.sym)) {
             const unsigned keep =
-                lr_rivals<A>(_c, r.laMode, r.la.begin, room.data());
+                refused ? tied
+                        : lr_rivals<A>(_c, r.laMode, r.la.begin, room.data());
             if (keep != 0) {
               candidates = keep;
-              const SymbolId term = room[candidate].term;
-              r.la = Token{r.la.begin, room[candidate].end, term, r.laMode};
-              step.ranked = lr_rivals_ranked(room.data(), keep);
-              step.lexRank = ~lex_weight(room[candidate].tier);
+              collectedRanked = lr_rivals_ranked(room.data(), keep);
+              r.la = Token{r.la.begin, room[0].end, room[0].term, r.laMode};
+              collected = r;
+              step.ranked = collectedRanked;
+              step.lexRank = ~lex_weight(room[0].tier);
             }
           }
         }
@@ -357,16 +376,23 @@ class LrGss {
   // under `v` takes it after the reductions the table lays for it, the
   // graph's paths popped as a reduction pops them. What the gap decides counts
   // as taken.
-  CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode) {
-    return lr_lex_refused<A>(
-        [&](const Token& t) {
-          return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
-        },
-        mode, r.la,
+  CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode,
+                              ScanRoom<A.maxCands>& room, std::uint32_t& tied) {
+    const auto takes = [&](const Token& t) {
+      return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
+    };
+    LrSkipped<A> skipped{};
+    const bool refused = lr_lex_refused<A>(
+        takes, mode, r.la, skipped,
         [&](const LrSkipped<A>& skip, TextOffset from) {
           return lr_scan_skipping<A>(_c, mode, from, r.indent.depth, skip,
                                      [](TextOffset, const Token*) {});
         });
+    if constexpr (A.maxCands > 1)
+      if (refused)
+        tied = lr_refused_rivals<A>(_c, mode, r.indent.depth, r.la, skipped,
+                                    room.data(), takes);
+    return refused;
   }
 
   // The nearest unopened vertex, once the shifts from every place before it

@@ -128,7 +128,7 @@ Declaration DefaultReferences::at(const Document& document, TextOffset offset,
   const AstNode* const node = node_at(document, offset);
   if (node == nullptr) return found;
   const CoreServices* const language =
-      language_of(document, *services.shared.serviceRegistry);
+      language_of(document, *shared.serviceRegistry);
   if (language == nullptr) return found;
   const std::optional<CstNodeView> name =
       language->nameProvider->getNameNode(*node, &document);
@@ -143,8 +143,8 @@ Declaration DefaultReferences::at(const Document& document, TextOffset offset,
 
 std::vector<const AstNode*> DefaultReferences::getSelfNodes(
     const AstNode& node, const CancellationToken& cancelToken) const {
-  const Documents& store = *services.shared.documents;
-  const IndexManager& index = *services.shared.indexManager;
+  const Documents& store = *shared.documents;
+  const IndexManager& index = *shared.indexManager;
   const Document* const home = node.getDocument();
   if (home == nullptr || node.cstNodeId == kNoNode) return {&node};
   // Incoming references define the group, including those from another
@@ -181,7 +181,7 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
 std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
     const AstNode& node, const CancellationToken& cancelToken) const {
   std::vector<ReferenceDescription> rows;
-  const ServiceRegistry& registry = *services.shared.serviceRegistry;
+  const ServiceRegistry& registry = *shared.serviceRegistry;
   for (const AstNode* const member : getSelfNodes(node, cancelToken)) {
     throw_if_cancelled(cancelToken);
     const Document* const home = member->getDocument();
@@ -232,7 +232,7 @@ std::vector<ReferenceDescription> DefaultReferences::findReferences(
     const CancellationToken& cancelToken) const {
   std::vector<ReferenceDescription> references;
   throw_if_cancelled(cancelToken);
-  const IndexManager& index = *services.shared.indexManager;
+  const IndexManager& index = *shared.indexManager;
 
   // Which document declares it is the climb's answer: a node carries no
   // back-pointer, and a target reached through the global index routinely lives

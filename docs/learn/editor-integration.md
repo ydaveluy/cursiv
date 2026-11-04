@@ -48,15 +48,24 @@ Update these files when you change the language:
 | `vscode/language-configuration.json` | Brackets, comment toggling and auto-closing pairs |
 
 Cursiv does not update the TextMate rules: add new grammar keywords to them
-yourself. Semantic tokens refine the highlighting once the server has parsed
-the document.
+yourself.
+
+A server sends no semantic tokens unless a language installs a provider. To
+colour from the grammar, install the ready-made one in `install_lsp_module`. The
+editor then paints its colours over the TextMate rules once the server has parsed
+the document:
+
+```cpp
+services.semanticTokenProvider =
+    std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
+```
 
 ## Default editor features
 
 Completion, hover, go-to-definition, find references, highlights, rename,
-document and workspace symbols, folding, selection ranges, semantic tokens and
-code actions work by default. Other features, such as formatting, signature
-help and inlay hints, need providers of your own.
+document and workspace symbols, folding, selection ranges and code actions work
+by default. Other features, such as formatting, semantic tokens, signature help
+and inlay hints, need a provider that you install.
 
 To customize a feature, implement a provider and install it in the LSP
 module. For example, after defining `MyLangHoverProvider`:

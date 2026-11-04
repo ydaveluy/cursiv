@@ -52,7 +52,7 @@ void run_one(const ValidationCheck& check, const AstNode& node,
     set_data_code(diagnostic, kValidationError);
     accept.accept(std::move(diagnostic));
     const Document* const home = node.getDocument();
-    core.shared.observabilitySink->publish(
+    core.shared().observabilitySink->publish(
         {.severity = ObservationSeverity::Warning,
          .code = ObservationCode::ValidationCheckThrew,
          .message = std::format("a validation check threw: {}", what),

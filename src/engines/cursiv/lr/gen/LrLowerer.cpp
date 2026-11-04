@@ -35,7 +35,13 @@ void LrLowerer::declare_start() {
   name_row(_cfg.nts[0], "$accept");
 }
 
-void LrLowerer::declare_rules() { name_rules(_cfg.nts, _cfg.nnts); }
+void LrLowerer::declare_rules() {
+  const std::uint16_t first = _cfg.nnts;
+  name_rules(_cfg.nts, _cfg.nnts);
+  for (std::uint16_t n = first; n < _cfg.nnts; ++n)
+    _cfg.nts[n].node =
+        stage(_ntRule[(n - first) % _ntRule.size()]).kind != ImageRuleKind::data;
+}
 
 ImageId LrLowerer::ended(ImageId id) {
   if (const auto it = _ended.find(id); it != _ended.end()) return it->second;
@@ -89,7 +95,7 @@ LrLowered LrLowerer::run() {
     _cfg.entryRow = _o.writes.intern_chain(&r, 1);
   }
   _o.writes.note_makes(_rowKind);
-  lr_settle(_o);
+  lr_settle(_o, _rowKind);
   for (std::uint16_t k = 0; k < _cfg.nprods; ++k)
     if (_cfg.prodBuild[k].turn)
       _cfg.prodBuild[k].turnNode = _o.writes.turn_chain(_cfg.prods[k].node);

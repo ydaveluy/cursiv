@@ -193,9 +193,10 @@ void check_terminal_conditions() {
     CHECK(!offers(*p, "no", "NAME", prefix));
     CHECK(offers(*p, "group {", "NAME", prefix));
   }
-  // Each word a reading admits is asked: the member is the one every reading
-  // fills, and the two branches of `pair` fill two.
-  CHECK(members(*ll, "pair ", "NAME", "terms:") == std::vector<std::string_view>{""});
+  // Each word a reading admits is asked, and the two branches of `pair` each
+  // name the member they fill.
+  CHECK(members(*ll, "pair ", "NAME", "terms:") ==
+        std::vector<std::string_view>({"left", "right"}));
   // A caret measures a phrase that opens on its gap from where the gap
   // begins: it reads on to the `;` standing where its last name would.
   {

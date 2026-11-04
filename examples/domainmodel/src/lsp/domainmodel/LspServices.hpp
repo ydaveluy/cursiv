@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/LspServicesFor.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "domainmodel/CoreServices.hpp"
 
@@ -13,20 +13,9 @@ namespace dm {
 struct DomainModelSharedServices : DomainModelSharedCoreServices,
                                    cursiv::SharedLspServices {};
 
-struct DomainModelServices final : DomainModelCoreServices,
-                                   cursiv::LspServices {
-  explicit DomainModelServices(DomainModelSharedServices& sharedServices)
-      : cursiv::CoreServices(sharedServices),
-        DomainModelCoreServices(sharedServices),
-        cursiv::LspServices(sharedServices) {}
-
-  // One emission per storey through the diamond: the language rows through
-  // the core side, the LSP rows alone.
-  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
-                         yield) const override {
-    DomainModelCoreServices::visitServices(yield);
-    cursiv::LspServices::visitOwnServices(yield);
-  }
+struct DomainModelServices final
+    : cursiv::LspServicesFor<DomainModelCoreServices, DomainModelSharedServices> {
+  using LspServicesFor::LspServicesFor;
 };
 
 }  // namespace dm

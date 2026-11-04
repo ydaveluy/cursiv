@@ -382,9 +382,36 @@ struct Cases : G {
 };
 }  // namespace folded
 
+// Readings the text settles only far on, over a token that two terminals read:
+// each of the two meets the line starts as the other does.
+namespace rivals {
+struct G : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<R"( \t)">)> {};
+  struct NEWLINE : terminal<eol> {};
+  using INDENT = Plain::INDENT;
+  using DEDENT = Plain::DEDENT;
+  struct One : terminal<some(cr<"A">)> {};
+  struct Two : terminal<some(cr<"A">)> {};
+  struct HeadOne : rule<lit<"h">> {};
+  struct HeadTwo : rule<lit<"h">> {};
+  struct Suite
+      : rule<((ref<One> + many(lit<"+">) + lit<"%">) |
+              (ref<Two> + many(lit<"+">) + lit<"&">)) +
+             lit<":"> + ref<NEWLINE> + ref<INDENT> + lit<"b"> + ref<NEWLINE> +
+             ref<DEDENT>> {};
+  struct Root : rule<create<ast::Node>(
+                    (ref<HeadOne> + ref<NEWLINE> + ref<Suite> + lit<"!">) |
+                    (ref<HeadTwo> + ref<NEWLINE> + ref<Suite> + lit<"?">))> {};
+  using entry = Root;
+  using ignored = WS;
+  using indent_newline = NEWLINE;
+};
+}  // namespace rivals
+
 namespace laid {
 struct Cases : G {
   struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>) |
+                     (kw<"rivals"> + ref<rivals::G::Root>) |
                      (kw<"dotted"> + ref<dotted::G::Root>) |
                      (kw<"heads"> + ref<heads::G::Root>) |
                      (kw<"marked"> + ref<marked::G::Root>)> {};

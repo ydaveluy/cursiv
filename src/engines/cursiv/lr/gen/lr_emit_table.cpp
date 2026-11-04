@@ -157,7 +157,8 @@ struct LrTableEmitter : EmitOutput {
         static_cast<std::uint32_t>(r.hi));
   }
   void cell(const LrExpect& e) {
-    fmt("{{.feature={},.site={},.landing={}}}", e.feature, e.site, e.landing);
+    fmt("{{.feature={},.site={},.landing={},.entered={}}}", e.feature, e.site,
+        e.landing, e.entered);
   }
 
   // The first `n` cells of `src`, sixteen a line.

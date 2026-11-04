@@ -1405,28 +1405,59 @@ class CaretStacks {
   // What a head reads: the token it holds where its mode is the one that
   // read it, else what its mode lexes where it stands. A flagged winner its
   // stacks refuse is taken off the position and the position read again, as
-  // the drive reads it.
+  // the drive reads it, with what ties with the new winner.
   std::span<const Token> reading(Id head, const Token& held) {
     const Frame& frame = _frames[head];
     const auto mode = _table.mode[frame.state];
     if (frame.laMode == mode) return {&held, 1};
     const auto& seen =
         _scanned[lex(mode, frame.at, frame.laid.indent.depth != 0)];
-    _unrefused = seen.won;
-    if (!refused(
-            mode, _unrefused, [&](const Token& t) { return takes(head, t); },
-            [&](std::span<const SymbolId> skip, TextOffset from) {
-              // A terminal taken off a position never leaves it to a trivia.
-              TextOffset halt = 0;
-              const Scan t = _table.lexWithout(
-                  _text.data(), static_cast<TextOffset>(_text.size()), mode,
-                  from, skip, halt);
-              return t.term == kInvalidSymbol || t.end <= from
-                         ? Token{from, from, kInvalidSymbol}
-                         : Token{from, t.end, t.term};
-            }))
+    const auto stands = [&](const Token& t) { return takes(head, t); };
+    const bool inside = frame.laid.indent.depth != 0;
+    unsigned weight = 0;
+    // A trivia left where a terminal is refused is crossed, as the drive does.
+    const auto without = [&](TextOffset from) {
+      const auto len = static_cast<TextOffset>(_text.size());
+      for (TextOffset p = from;;) {
+        while (p < len && ignored(mode, p)) ++p;
+        if (p == len) return Token{p, p, kEofSymbol};
+        TextOffset halt = 0;
+        const Scan t =
+            _table.lexWithout(_text.data(), len, mode, p, _skip, halt);
+        weight = lex_weight(t.tier);
+        if (t.term == kInvalidSymbol || t.end <= p)
+          return Token{p, p, kInvalidSymbol};
+        if (!crosses(t.term, inside)) return Token{p, t.end, t.term};
+        p = t.end;
+      }
+    };
+    Token winner = seen.won;
+    if (!refused(mode, winner, stands,
+                 [&](std::span<const SymbolId>, TextOffset from) {
+                   return without(from);
+                 }))
       return {_tokens.data() + seen.first, seen.count};
-    return {&_unrefused, 1};
+    _unrefused.assign(1, winner);
+    if (_table.modeMulti[mode] != 1 || _table.scan == nullptr ||
+        _table.maxCands < 2 || winner.sym >= _table.terms.size())
+      return _unrefused;
+    const unsigned won = weight;
+    lr_refused_ties(
+        winner,
+        [&](const Token& t) {
+          _skip.push_back(t.sym);
+          return without(t.begin);
+        },
+        [&](const Token& t) {
+          return t.sym < _table.terms.size() && t.begin == winner.begin &&
+                 t.end == winner.end && weight == won;
+        },
+        [&](SymbolId sym) { return _table.flagged(mode, sym); }, stands,
+        [&](const Token& t) {
+          _unrefused.push_back(t);
+          return _unrefused.size() < _table.maxCands;
+        });
+    return _unrefused;
   }
 
   // The scan of `mode` at `from`, by its place among the scans kept.
@@ -1441,6 +1472,37 @@ class CaretStacks {
         Scanned{mode, inside, from, first,
                 static_cast<std::uint32_t>(_tokens.size() - first), won});
     return _scanned.size() - 1;
+  }
+
+  // Whether an arm of a cell of several takes `token`, as the drive asks it.
+  // Conditions are read through empty rules; an arm that reduces anything else
+  // counts as taken, and so does what the replay leaves to the candidates.
+  bool cell_takes(std::uint32_t state, const Token& token) const {
+    const auto mayLand = [&](unsigned k) { return outcome(k + 1u, token); };
+    return lr_cell_walk(state, [&](std::uint32_t at, auto&& leads) {
+      const auto cell = _table.run(static_cast<std::uint16_t>(at), token.sym);
+      for (std::uint32_t slot = cell.first; slot < cell.first + cell.count;
+           ++slot) {
+        const LrAction action = _table.action(slot);
+        if (action.kind == LrActionKind::guard) {
+          if (defers_any(token, static_cast<std::uint32_t>(_table.mode.size()) +
+                                    action.arg) ||
+              takes(static_cast<std::uint16_t>(at), action, token))
+            return true;
+          continue;
+        }
+        if (action.kind != LrActionKind::reduce) return true;
+        const LrProduction& p = _table.prods[action.arg];
+        if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
+          continue;
+        if (p.guarded != 0 || p.len != 0) return true;
+        const std::uint32_t target =
+            _table.go(static_cast<std::uint16_t>(at), p.lhs);
+        if (defers_any(token, target)) return true;
+        _table.land_each(target, mayLand, leads);
+      }
+      return false;
+    });
   }
 
   // Whether some stack under `head` shifts `token` after the reductions the
@@ -1462,7 +1524,8 @@ class CaretStacks {
                            takes(static_cast<std::uint16_t>(top), action, token)
                        ? 1
                        : 0;
-          if (cell.count != 1 || action.kind != LrActionKind::reduce) return 1;
+          if (cell.count != 1) return cell_takes(top, token) ? 1 : 0;
+          if (action.kind != LrActionKind::reduce) return 1;
           const LrProduction& p = _table.prods[action.arg];
           if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
             return 0;
@@ -1661,7 +1724,7 @@ class CaretStacks {
   Token _virt{};
   Token _rival{};
   // A flagged winner read again, and the terminals taken off its position.
-  Token _unrefused{};
+  std::vector<Token> _unrefused;
   std::vector<SymbolId> _skip;
   bool _outlasted = false;
   std::vector<std::pair<std::uint16_t, std::uint16_t>> _shifted;
@@ -2036,15 +2099,44 @@ void lr_next_features_at(const LrCaretTable& table,
           return;
         }
         Scan s = reads(m, reading, h);
+        std::vector<SymbolId> off;
+        unsigned weight = 0;
+        const auto without = [&] {
+          const Scan r = reads(m, reading, h, off);
+          weight = lex_weight(r.tier);
+          return Token{leaf.begin, leaf.begin + r.end, r.term};
+        };
+        const auto edge = [&](const Token& t) { return stacks.edge_takes(t); };
         if (Token la{leaf.begin, leaf.begin + s.end, s.term};
             s.term != reading && s.end != 0 &&
-            stacks.refused(
-                m, la, [&](const Token& t) { return stacks.edge_takes(t); },
-                [&](std::span<const SymbolId> skip, TextOffset) {
-                  const Scan r = reads(m, reading, h, skip);
-                  return Token{leaf.begin, leaf.begin + r.end, r.term};
-                }))
+            stacks.refused(m, la, edge,
+                           [&](std::span<const SymbolId> skip, TextOffset) {
+                             off.assign(skip.begin(), skip.end());
+                             return without();
+                           })) {
           s = Scan{la.end - leaf.begin, la.sym};
+          // The reading may be one of those that tie with the new winner.
+          if (la.sym != reading && table.modeMulti[m] == 1 && !room.empty() &&
+              la.sym < table.terms.size()) {
+            const unsigned won = weight;
+            lr_refused_ties(
+                la,
+                [&](const Token& t) {
+                  off.push_back(t.sym);
+                  return without();
+                },
+                [&](const Token& t) {
+                  return t.sym < table.terms.size() && t.end == la.end &&
+                         weight == won;
+                },
+                [&](SymbolId sym) { return table.flagged(m, sym); }, edge,
+                [&](const Token& t) {
+                  if (t.sym != reading) return true;
+                  s = Scan{t.end - leaf.begin, t.sym};
+                  return false;
+                });
+          }
+        }
         if (s.term == reading && s.end == at - leaf.begin) ok = true;
         halt = std::max(halt, h);
       };
@@ -2281,7 +2373,7 @@ void lr_next_features_at(const LrCaretTable& table,
                 if (e.landing != kNoElement && e.landing != landing) continue;
                 const NextFeature feature{e.feature, grammar.rowFeature(e.site),
                                           grammar.rowNarrow(e.site),
-                                          grammar.rowType(e.site)};
+                                          grammar.rowType(e.site), e.entered};
                 if (std::find(out.begin() + static_cast<std::ptrdiff_t>(mine),
                               out.end(), feature) == out.end())
                   out.push_back(feature);

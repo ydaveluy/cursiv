@@ -297,24 +297,35 @@ CURSIV_ALWAYS_INLINE inline LrReadActions lr_read_actions(LrContext& c,
           k == 0 ? lr_shadow_lone_reduce<A>(c, state, reading()) : kLrNoProd};
 }
 
+// Whether the stack of a reading takes `t`.
+template <const auto& A, class R>
+bool lr_read_takes(const LrContext& c, R& s, const Token& t) {
+  return lr_climb_takes<A>(
+      LrOverlayClimb<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
+      lr_shadow_holds(c, s), c.walkMemo);
+}
+
 // The token a reading holds, a flagged winner of `mode`, read again while its
 // stack refuses it.
 template <const auto& A, class R>
 CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
-                                     std::uint16_t mode) {
-  return lr_lex_refused<A>(
-      [&](const Token& t) {
-        return lr_climb_takes<A>(
-            LrOverlayClimb<std::remove_cvref_t<decltype(s.run)>>(s.run), t.sym,
-            lr_shadow_holds(c, s), c.walkMemo);
-      },
-      mode, s.la,
+                                     std::uint16_t mode, std::uint32_t& tied) {
+  LrSkipped<A> skipped{};
+  const bool refused = lr_lex_refused<A>(
+      [&](const Token& t) { return lr_read_takes<A>(c, s, t); }, mode, s.la,
+      skipped,
       [&](const LrSkipped<A>& skip, TextOffset from) {
         return lr_scan_skipping<A>(c, mode, from, s.indent.depth, skip,
                                    [](TextOffset, const Token*) {
                                      /* the crossed trivia is not wanted */
                                    });
       });
+  if constexpr (A.maxCands > 1)
+    if (refused && c.drive->scanText != nullptr)
+      tied = lr_refused_rivals<A>(
+          c, mode, s.indent.depth, s.la, skipped, c.cand,
+          [&](const Token& t) { return lr_read_takes<A>(c, s, t); });
+  return refused;
 }
 
 // One action of reading `i` of pool `x`: `x.fork(i)` is a copy beside it or
@@ -360,17 +371,19 @@ CURSIV_ALWAYS_INLINE inline void lr_read_step(LrContext& c, Pool& x,
     x[i].laMode = mode;
     x.lexed();
     [[maybe_unused]] bool refused = false;
+    [[maybe_unused]] std::uint32_t tied = 0;
     if constexpr (A.has_flags())
       if (x[i].la.sym < A.cfg.nterms && A.flagged(mode, x[i].la.sym))
         [[unlikely]]
-        refused = lr_read_refused<A>(c, x[i], mode);
+        refused = lr_read_refused<A>(c, x[i], mode, tied);
     // The drive would have this position's rivals in hand, so a
     // reading takes one fork each, not the longest match alone.
     if constexpr (A.maxCands > 1) {
-      if (!refused && c.drive->scanText != nullptr &&
-          lr_has_rivals<A>(mode, x[i].la.sym)) {
+      if (c.drive->scanText != nullptr &&
+          (refused || lr_has_rivals<A>(mode, x[i].la.sym))) {
         Scan* const room = c.cand;
-        const std::uint32_t nc = lr_rivals<A>(c, mode, x[i].la.begin, room);
+        const std::uint32_t nc =
+            refused ? tied : lr_rivals<A>(c, mode, x[i].la.begin, room);
         // Where the lexer ranks rivals apart, a token's rank is a word of the
         // derivation that reads it.
         [[maybe_unused]] const bool ranked = lr_rivals_ranked(room, nc);

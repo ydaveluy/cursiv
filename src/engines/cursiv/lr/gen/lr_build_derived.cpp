@@ -232,11 +232,33 @@ struct LrDeriving {
     return site;
   }
 
+  // What the readings of `term` say to a caret: each site once, and no site only
+  // where none of them names one.
+  std::vector<LrCaretSite> sites_read(std::uint16_t term, ElementId raw,
+                                      ElementId outer, std::uint16_t alts,
+                                      bool entered,
+                                      const TerminalSites& terms) const {
+    if (alts == 0) return {{feature_site(term, raw, outer, terms), entered}};
+    std::vector<LrCaretSite> out;
+    for (const LrCaretSite& reading : a.siteSets[alts]) {
+      const ElementId site =
+          feature_site(term, reading.site, kNoElement, terms);
+      if (site == kNoElement) continue;
+      const auto known = std::ranges::find(out, site, &LrCaretSite::site);
+      if (known != out.end())
+        known->entered = known->entered && reading.entered;
+      else
+        out.push_back({site, reading.entered});
+    }
+    if (out.empty()) out.push_back({kNoElement, false});
+    return out;
+  }
+
   // The continuations of each state, read off its shifts, less end of input,
   // trivia and the tokens no author types.
   void expect(const TerminalSites& terms, LrDerivedRows& rows) const {
     // Distinct pairs in first appearance; a state lists each once.
-    std::map<std::array<std::uint16_t, 3>, std::uint16_t> pooled;
+    std::map<std::array<std::uint16_t, 4>, std::uint16_t> pooled;
     for (std::uint16_t s = 0; s < a.nstates; ++s) {
       const auto first = rows.expectItems.size();
       rows.expectBase.push_back(static_cast<std::uint32_t>(first));
@@ -245,37 +267,45 @@ struct LrDeriving {
         if (act.term == 0) continue;
         if (a.cfg.terms[act.term].trivia || a.cfg.terms[act.term].laid != 0)
           continue;
-        const auto item = [&](ElementId site, ElementId landing) {
-          const auto key =
-              std::array<std::uint16_t, 3>{act.term, site, landing};
+        const auto item = [&](ElementId site, ElementId landing, bool entered) {
+          const auto key = std::array<std::uint16_t, 4>{
+              act.term, site, landing, std::uint16_t{entered}};
           if (rows.expectPool.size() > UINT16_MAX && !pooled.contains(key))
             throw LowerRefused(LowerFail::tableTooLarge);
           const auto [at, fresh] = pooled.try_emplace(
               key, static_cast<std::uint16_t>(rows.expectPool.size()));
-          if (fresh) rows.expectPool.push_back({act.term, site, landing});
+          if (fresh)
+            rows.expectPool.push_back({act.term, site, landing, entered});
           const auto begin = rows.expectItems.begin() + first;
           if (std::find(begin, rows.expectItems.end(), at->second) ==
               rows.expectItems.end())
             rows.expectItems.push_back(at->second);
         };
         if (act.kind != LrActionKind::guard) {
-          item(feature_site(act.term, act.site, act.outer, terms), kNoElement);
+          for (const LrCaretSite& read : sites_read(act.term, act.site, act.outer,
+                                                    act.alts, act.entered, terms))
+            item(read.site, kNoElement, read.entered);
           continue;
         }
         // Landings that write one member are one entry; otherwise each lands
         // on its own.
         const LrGuard& guard = a.guards[act.arg];
-        std::vector<std::pair<ElementId, ElementId>> landed;
+        struct Landed {
+          ElementId site, to;
+          bool entered;
+        };
+        std::vector<Landed> landed;
         for (std::size_t v = 0; v < guard.to.size(); ++v)
           if (guard.to[v] != LrGuard::kNoState)
-            landed.emplace_back(
-                feature_site(act.term, guard.site[v], guard.outer[v], terms),
-                guard.to[v]);
+            for (const LrCaretSite& read :
+                 sites_read(act.term, guard.site[v], guard.outer[v],
+                            guard.alts[v], guard.entered[v] != 0, terms))
+              landed.push_back({read.site, guard.to[v], read.entered});
         const bool alike = std::ranges::all_of(landed, [&](const auto& l) {
-          return l.first == landed.front().first;
+          return l.site == landed.front().site;
         });
-        for (const auto& [site, to] : landed)
-          item(site, alike ? kNoElement : to);
+        for (const Landed& l : landed)
+          item(l.site, alike ? kNoElement : l.to, l.entered);
       }
       // By terminal, so a completion finds one candidate's entries by search.
       std::stable_sort(rows.expectItems.begin() + first,

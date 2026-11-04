@@ -51,8 +51,8 @@ class AstArena {
     assert(_mem != nullptr && "AstArena needs a memory resource before make()");
     void* s = carve_for<T>();
     T* v = std::construct_at(static_cast<T*>(s));
-    // The type tag is written at construction, here and nowhere else, so a node
-    // built by hand carries the same identity a parsed one does.
+    // The type tag is written at construction, here and in `new_ast_node`, so a
+    // node built by hand carries the same identity a parsed one does.
     AstNode* const base = v;
     base->type = &ast_type_tag<T>;
     return v;

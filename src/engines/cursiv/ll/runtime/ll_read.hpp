@@ -376,6 +376,27 @@ inline bool ll_read_without(LlContext& c, std::uint16_t mode,
   return true;
 }
 
+// The terminals that tie with the token in hand, itself first, under what
+// `skip` took off the position. A terminal a refused keyword reserved reads
+// nowhere in the mode's own table, so each is read with the ones before it off.
+template <const auto& T>
+inline void ll_ties_without(const LlContext& c, std::uint16_t mode,
+                            LlSkipped<T> skip,
+                            std::vector<std::uint16_t>& ties) {
+  ties.assign(1, c.la.sym);
+  const typename LlLexTape<T>::Skipping tape{.skip = &skip};
+  const Scan own = lex_match(tape, c.src, c.len, mode, c.la.begin);
+  for (Scan at = own;;) {
+    skip.set(at.term);
+    at = lex_match(tape, c.src, c.len, mode, c.la.begin);
+    if (at.term == kInvalidSymbol || at.end != own.end ||
+        lex_weight(at.tier) != lex_weight(own.tier) ||
+        ll_blank<T>(at.term, c.indent.depth))
+      return;
+    ties.push_back(at.term);
+  }
+}
+
 // The token in hand at a choice whose alphabet admits, for a caller alone, a
 // terminal that reads over another of its own: where no frame the descent
 // stands in goes on from it, no reading of the choice takes that longer

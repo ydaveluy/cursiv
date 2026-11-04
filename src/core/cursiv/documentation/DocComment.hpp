@@ -15,10 +15,13 @@
 namespace cursiv {
 
 /// Zero-based line/character position inside the source document.
-/// `character` counts BYTES of the comment's text, not UTF-16 units.
+/// `character` counts BYTES of the comment's text, not UTF-16 units. `offset`
+/// is the byte offset in the same document, past the `offset` of the position
+/// the comment was parsed from.
 struct DocCommentPosition {
   std::uint32_t line = 0;
   std::uint32_t character = 0;
+  std::uint32_t offset = 0;
 };
 
 /// Half-open source range `[start, end)`.

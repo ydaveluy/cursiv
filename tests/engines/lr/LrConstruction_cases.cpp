@@ -2,6 +2,7 @@
 // reduces, the stamp split and the lowering's limits.
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -1102,6 +1103,172 @@ void first_sets_include_the_last_nonterminal() {
   CHECK(fs.first[last].test(1));
 }
 
+// Reads every production until none changes: the sets a worklist must settle on.
+template <bool Last>
+std::vector<DynSet> first_by_passes(const LrBuildCfg& g,
+                                    const std::vector<std::uint8_t>& nullable) {
+  std::vector<DynSet> first(g.nnts);
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (unsigned p = 0; p < g.nprods; ++p) {
+      const auto& q = g.prods[p];
+      DynSet into = first[q.lhs];
+      unsigned i = 0;
+      for (; i < q.len; ++i) {
+        const auto sym = g.sym_at(q, Last ? q.len - 1u - i : i);
+        if (is_term(sym)) {
+          into.set(sym);
+          break;
+        }
+        into |= first[nt_index(sym)];
+        if (!nullable[nt_index(sym)]) break;
+      }
+      if constexpr (!Last)
+        if (i == q.len && g.prodBuild[p].endOnly) into.set(kEofSymbol);
+      changed = !(into == first[q.lhs]) || changed;
+      first[q.lhs] = std::move(into);
+    }
+  }
+  return first;
+}
+
+std::vector<DynSet> follow_by_passes(const LrBuildCfg& g,
+                                     const std::vector<std::uint8_t>& nullable,
+                                     const std::vector<DynSet>& first) {
+  std::vector<DynSet> follow(g.nnts);
+  follow[0].set(kEofSymbol);
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (unsigned p = 0; p < g.nprods; ++p) {
+      const auto& q = g.prods[p];
+      DynSet suffix;
+      if (g.prodBuild[p].endOnly)
+        suffix.set(kEofSymbol);
+      else
+        suffix = follow[q.lhs];
+      for (unsigned i = q.len; i != 0;) {
+        const auto sym = g.sym_at(q, --i);
+        if (is_term(sym)) {
+          suffix.w.clear();
+          suffix.set(sym);
+        } else {
+          const auto nt = nt_index(sym);
+          changed = follow[nt].add(suffix) || changed;
+          if (!nullable[nt]) suffix.w.clear();
+          suffix |= first[nt];
+        }
+      }
+    }
+  }
+  return follow;
+}
+
+// Reads every production until none changes.
+std::vector<std::uint8_t> nullable_by_passes(const LrBuildCfg& g,
+                                             bool beforeToken) {
+  std::vector<std::uint8_t> nullable(g.nnts, 0);
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (unsigned p = 0; p < g.nprods; ++p) {
+      const auto& q = g.prods[p];
+      if (nullable[q.lhs] != 0 || (beforeToken && g.prodBuild[p].endOnly))
+        continue;
+      bool empty = true;
+      for (unsigned i = 0; i < q.len && empty; ++i) {
+        const auto sym = g.sym_at(q, i);
+        empty = !is_term(sym) && nullable[nt_index(sym)] != 0;
+      }
+      if (empty) {
+        nullable[q.lhs] = 1;
+        changed = true;
+      }
+    }
+  }
+  return nullable;
+}
+
+void first_and_follow_settle_where_passes_do() {
+  std::uint32_t seed = 1;
+  const auto below = [&seed](std::uint32_t n) {
+    seed = seed * 1664525u + 1013904223u;
+    return (seed >> 16) % n;
+  };
+  for (unsigned round = 0; round < 500; ++round) {
+    LrBuildCfg cfg;
+    cfg.nnts = 1 + below(8);
+    cfg.nterms = 2 + below(5);
+    cfg.nprods = 1 + below(16);
+    cfg.prodBuild.row(0, cfg.nprods);
+    for (unsigned p = 0; p < cfg.nprods; ++p) {
+      const auto len = static_cast<std::uint16_t>(below(5));
+      cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(below(cfg.nnts)),
+                      .at = cfg.nslots,
+                      .len = len};
+      cfg.prodBuild[p].endOnly = below(8) == 0;
+      for (unsigned i = 0; i < len; ++i)
+        cfg.slotSym[cfg.nslots++] =
+            below(2) == 0 ? nt_sym(static_cast<std::uint16_t>(below(cfg.nnts)))
+                          : static_cast<std::uint16_t>(1 + below(cfg.nterms - 1));
+    }
+    const auto nullable = lr_nullable(cfg, true);
+    CHECK(nullable == nullable_by_passes(cfg, true));
+    CHECK(lr_nullable(cfg, false) == nullable_by_passes(cfg, false));
+    const auto first = first_by_passes<false>(cfg, nullable);
+    CHECK(lr_first(cfg, nullable) == first);
+    CHECK(lr_first<true>(cfg, nullable) == first_by_passes<true>(cfg, nullable));
+    CHECK(lr_follow(cfg, nullable, first) ==
+          follow_by_passes(cfg, nullable, first));
+  }
+}
+
+// A rule that reads the next one, in the order that makes each pass of a fixpoint
+// carry a set one rule further: only what changed is walked again.
+void first_and_follow_stay_linear_on_a_chain() {
+  for (const bool ascending : {true, false}) {
+    LrBuildCfg cfg;
+    cfg.nnts = kNtBase;
+    cfg.nterms = 2;
+    cfg.nprods = kNtBase;
+    cfg.nslots = kNtBase;
+    cfg.prodBuild.row(0, cfg.nprods);
+    for (unsigned n = 0; n < kNtBase; ++n) {
+      const auto p = static_cast<std::uint16_t>(ascending ? n : kNtBase - 1u - n);
+      cfg.prods[p] = {.lhs = static_cast<std::uint16_t>(n), .at = p, .len = 1};
+      cfg.slotSym[p] = n + 1 == kNtBase
+                           ? std::uint16_t{1}
+                           : nt_sym(static_cast<std::uint16_t>(n + 1));
+    }
+    const auto begin = std::chrono::steady_clock::now();
+    const LrFirstSets fs = lr_first_sets(cfg);
+    const auto follow = lr_follow(cfg, fs.nullable, fs.first);
+    CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+    CHECK(fs.first[0].test(1));
+    CHECK(follow[kNtBase - 1].test(kEofSymbol));
+  }
+}
+
+// Each rule reads the next, the last reads nothing, and each pass of a fixpoint
+// would settle one more.
+void nullable_stays_linear_on_a_chain() {
+  LrBuildCfg cfg;
+  cfg.nnts = kNtBase;
+  cfg.nterms = 2;
+  cfg.nprods = kNtBase;
+  cfg.nslots = kNtBase - 1;
+  cfg.prodBuild.row(0, cfg.nprods);
+  for (unsigned n = 0; n < kNtBase; ++n) {
+    const auto p = static_cast<std::uint16_t>(n);
+    const bool last = n + 1 == kNtBase;
+    cfg.prods[p] = {.lhs = p, .at = p, .len = static_cast<std::uint16_t>(last ? 0 : 1)};
+    if (!last) cfg.slotSym[p] = nt_sym(static_cast<std::uint16_t>(n + 1));
+  }
+  const auto begin = std::chrono::steady_clock::now();
+  const auto nullable = lr_nullable(cfg, true);
+  CHECK(std::chrono::steady_clock::now() - begin <
+        std::chrono::milliseconds(200));
+  CHECK(std::ranges::all_of(nullable, [](auto n) { return n != 0; }));
+}
+
 void unit_cycle_checks_use_bounded_stack_space() {
   LrLowered low;
   auto& cfg = low.cfg;
@@ -1326,6 +1493,9 @@ void run() {
   a_word_the_graph_reads_whole_stays_in_it();
   auxiliary_self_markers_are_outside_the_symbol_domain();
   first_sets_include_the_last_nonterminal();
+  first_and_follow_settle_where_passes_do();
+  first_and_follow_stay_linear_on_a_chain();
+  nullable_stays_linear_on_a_chain();
   unit_cycle_checks_use_bounded_stack_space();
   left_recursion_splitting_uses_bounded_stack_space();
   left_recursion_splitting_restores_each_siblings_path();
