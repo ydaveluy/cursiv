@@ -59,13 +59,13 @@ full text and gives each node its `element` (terminal or data rule) and its
 
 ## Customize the CLI
 
-The scaffold's `cli/main.cpp` calls `run_cli` with your language registration
+The scaffold's `src/cli.cpp` calls `run_cli` with your language registration
 function:
 
-```cpp title="cli/main.cpp"
-#include "cursiv/cli/cli.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "mylang/core/CoreServices.hpp"
+```cpp title="src/cli.cpp"
+#include "cursiv/cli.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "mylang/CoreServices.hpp"
 
 constexpr auto kRegister =
     &cursiv::register_language<mylang::MyLangCoreServices,

@@ -2,9 +2,9 @@
 #include <memory>
 #include <string_view>
 
-#include "cursiv/test/MutationOracle.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
-#include "requirements/core/CoreModule.hpp"
+#include "cursiv/MutationOracle.hpp"
+#include "cursiv/RecoveryLane.hpp"
+#include "requirements/CoreModule.hpp"
 
 namespace {
 using namespace cursiv::test;

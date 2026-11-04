@@ -5,8 +5,8 @@
 // descent, whatever labels it holds, and the table engine reads the same text
 // the same way.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // Two runs, each of a kind, a token, a floor and a ceiling: the kinds P, S and
 // G read no rule, C and X call one. The paired bounds below cover each

@@ -8,7 +8,7 @@ the Recipe language from the [tutorial](../learn/walkthrough.md).
 Declare the check in your validator class, here the tutorial's
 `RecipeValidator`:
 
-```cpp title="src/recipe/core/validation/RecipeValidator.hpp"
+```cpp title="src/core/recipe/validation/RecipeValidator.hpp"
 void checkNoDuplicateUse(const ast::Recipe& recipe,
                          cursiv::ValidationAcceptor& accept) const;
 ```
@@ -16,8 +16,8 @@ void checkNoDuplicateUse(const ast::Recipe& recipe,
 The type of the first parameter selects the nodes: this check runs on every
 `Recipe` node. You do not walk the tree yourself.
 
-```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
-#include "recipe/core/validation/RecipeValidator.hpp"
+```cpp title="src/core/recipe/validation/RecipeValidator.cpp"
+#include "recipe/validation/RecipeValidator.hpp"
 
 #include <unordered_set>
 
@@ -57,7 +57,7 @@ Each also accepts a `TextRange` instead of a node.
 The scaffold's `register_validation_checks`, in the validator's `.cpp` file,
 lists the checks. Add yours to the list:
 
-```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
+```cpp title="src/core/recipe/validation/RecipeValidator.cpp"
 services.validationRegistry->registerChecks(
     {cursiv::ValidationRegistry::makeValidationCheck<&V::checkNoDuplicateUse>(
         *services.validator)});

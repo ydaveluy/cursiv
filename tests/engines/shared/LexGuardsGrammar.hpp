@@ -6,8 +6,8 @@
 // that starts a token on a blank, and assertions over more words than a
 // recognizer tests one by one.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlexguards {
 

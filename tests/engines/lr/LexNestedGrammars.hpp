@@ -3,8 +3,8 @@
 // A comment that nests: the closer that ends it is the one balancing every
 // opener inside, and a string outside carries no opener at all.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tnestedlex {
 

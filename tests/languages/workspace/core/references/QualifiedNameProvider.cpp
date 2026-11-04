@@ -3,8 +3,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace ws {
 

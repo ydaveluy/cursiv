@@ -3,7 +3,7 @@
 // the byte behind the word, which the rival's own frontier answers.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/ReservedBoundAst.hpp"
 
 namespace tllbound {

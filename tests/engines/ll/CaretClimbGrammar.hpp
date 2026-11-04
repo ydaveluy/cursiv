@@ -4,8 +4,8 @@
 // an operand: the `!` goes on from the twin, the operand from the operator,
 // and a `<` typed right behind the operator makes it the twin.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tcaretclimb {
 

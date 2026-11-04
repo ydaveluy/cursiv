@@ -4,8 +4,8 @@
 // after it: `>>` written as two `>` against `>`, `->` against `-` and `>`,
 // `not in` and `not like` against each other and against a prefix `not`.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace topening {
 

@@ -3,8 +3,8 @@
 // Cell and graph widths at the runtime boundaries, shared by the engine,
 // ceiling and tape audits through one generated language.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/NamedSplitGrammar.hpp"
 #include "engines/lr/NestedSplitGrammars.hpp"
 

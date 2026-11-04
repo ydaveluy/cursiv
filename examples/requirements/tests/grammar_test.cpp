@@ -17,22 +17,22 @@
 #include <thread>
 #endif
 
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "cursiv/core/workspace/BuildOptions.hpp"
-#include "cursiv/core/workspace/DefaultDocuments.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "cursiv/test/ValidationResult.hpp"
-#include "requirements/core/CoreModule.hpp"
-#include "requirements/core/ast.hpp"
-#include "requirements/core/validation/RequirementsValidator.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/BuildOptions.hpp"
+#include "cursiv/workspace/DefaultDocuments.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ValidationResult.hpp"
+#include "requirements/CoreModule.hpp"
+#include "requirements/ast.hpp"
+#include "requirements/validation/RequirementsValidator.hpp"
 
 namespace {
 

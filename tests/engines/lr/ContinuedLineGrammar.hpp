@@ -5,8 +5,8 @@
 // continuation: read ahead from a cell, the first stands as the election
 // orders it.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tcontinued {
 namespace ast {

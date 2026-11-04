@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tguardedclimb {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};

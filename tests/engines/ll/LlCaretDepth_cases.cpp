@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "semanticll/generated/Ll/Module.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 
 namespace ll_caret_depth_cases {
 

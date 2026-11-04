@@ -3,8 +3,8 @@
 // trivia policy has its own table.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/AlikeCandidatesGrammar.hpp"
 #include "engines/lr/KeywordHandoffGrammar.hpp"
 #include "engines/lr/RefusedHeadWordsGrammar.hpp"

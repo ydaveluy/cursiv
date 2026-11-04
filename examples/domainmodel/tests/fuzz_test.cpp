@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "cursiv/fuzz/FuzzLane.hpp"
-#include "domainmodel/core/DomainModelGrammar.hpp"
+#include "cursiv/FuzzLane.hpp"
+#include "domainmodel/DomainModelGrammar.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
 namespace {

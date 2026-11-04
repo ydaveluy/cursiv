@@ -3,7 +3,7 @@
 // More spellings than eight words of bits hold, one terminal each: the
 // construction's sets grow with the grammar.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/lr/WideTerminalsAst.hpp"
 
 namespace twide {

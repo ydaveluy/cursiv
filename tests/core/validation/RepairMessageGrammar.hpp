@@ -5,8 +5,8 @@
 // a primary the state may shift another `+` or reduce -- the ambiguity an
 // unwind resolves by deleting exactly the operator the resumed state owes.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tmsg {
 

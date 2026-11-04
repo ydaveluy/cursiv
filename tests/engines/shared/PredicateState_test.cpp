@@ -1,11 +1,11 @@
-#include "cursiv/engines/shared/runtime/PredicateState.hpp"
+#include "cursiv/shared/runtime/PredicateState.hpp"
 
 #include <cstddef>
 #include <utility>
 
-#include "cursiv/engines/shared/runtime/LexicalMachine.hpp"
-#include "cursiv/engines/shared/table/Token.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/shared/runtime/LexicalMachine.hpp"
+#include "cursiv/shared/table/Token.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

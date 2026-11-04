@@ -6,9 +6,9 @@
 #include <tuple>
 #include <utility>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/DataTextGrammar.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"

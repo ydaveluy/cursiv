@@ -5,8 +5,8 @@
 // ranks first, wherever it is declared, and keeps them only where its own
 // condition holds.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tkwrelay {
 struct Item : cursiv::Extends<cursiv::AstNode> {

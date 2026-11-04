@@ -6,14 +6,14 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/references/NameProvider.hpp"
-#include "cursiv/core/references/References.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/TextDocument.hpp"
-#include "cursiv/lsp/text/Position.hpp"
+#include "cursiv/references/NameProvider.hpp"
+#include "cursiv/references/References.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/text/LspPosition.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/core/references/QualifiedNameProvider.hpp"

@@ -3,7 +3,7 @@
 // stands. `/` stays against `//` and `/* */` by longest match.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/KeywordTriviaAst.hpp"
 
 namespace tllkwtrivia {

@@ -20,16 +20,16 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/execution/TaskScheduler.hpp"
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/grammar/dump.hpp"
-#include "cursiv/core/references/ImportedNames.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/core/utils/Published.hpp"
-#include "cursiv/core/workspace/DefaultWorkspaceLock.hpp"
-#include "cursiv/core/workspace/WorkspaceLock.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/dump.hpp"
+#include "cursiv/references/ImportedNames.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/Published.hpp"
+#include "cursiv/workspace/DefaultWorkspaceLock.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 
 // Pins the contract of the parallel-for, which is what a change of pool has to

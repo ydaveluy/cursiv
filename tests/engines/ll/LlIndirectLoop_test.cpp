@@ -7,10 +7,10 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/ll_build.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/IndirectLoopGrammar.hpp"
 #include "indirectloopcycle/generated/CycleLr/Module.hpp"
 #include "semanticll/generated/Ll/Module.hpp"

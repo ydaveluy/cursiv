@@ -4,8 +4,8 @@
 // budget of 100 and a byte-sized position count. Folding once per element
 // still fails, without growing the generated parser beyond those boundaries.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // clang-format off
 #define TWIDE_10(X, p)                                                    \

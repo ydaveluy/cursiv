@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/RuleRefusalGrammars.hpp"
 #include "rulerefusal/generated/G/Module.hpp"

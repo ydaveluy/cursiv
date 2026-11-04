@@ -1,11 +1,11 @@
 #include <cstdio>
 
-#include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/ll_build.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_build.hpp"
-#include "cursiv/engines/lr/table/LrReducePlan.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/gen/lr_build.hpp"
+#include "cursiv/lr/table/LrReducePlan.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/RegionBoundaryGrammar.hpp"
 
 namespace {

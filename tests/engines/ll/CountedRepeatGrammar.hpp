@@ -1,6 +1,6 @@
 #pragma once
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 namespace tllcounted {
 struct Entry : cursiv::Extends<cursiv::AstNode> {};
 struct Item : cursiv::Extends<cursiv::AstNode> {

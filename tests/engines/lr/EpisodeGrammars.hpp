@@ -3,8 +3,8 @@
 // A cell after `x` on `a` that reduce or shift settle only at the token that
 // ends the statement, however long the run of `a` before it.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tepisode {
 

@@ -15,9 +15,9 @@
 #include "indirectfoldll/generated/Ll/Module.hpp"
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "paritylr/generated/Lr/Module.hpp"
 

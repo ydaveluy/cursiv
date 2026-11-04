@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "cursiv/fuzz/FuzzLane.hpp"
-#include "requirements/core/RequirementsGrammar.hpp"
+#include "cursiv/FuzzLane.hpp"
+#include "requirements/RequirementsGrammar.hpp"
 #include "requirements/generated/Requirements/Module.hpp"
 #include "requirements/generated/Tests/Module.hpp"
 

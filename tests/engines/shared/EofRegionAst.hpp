@@ -2,7 +2,7 @@
 
 #include <variant>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace teofregion {
 struct Island : cursiv::Extends<cursiv::AstNode> {

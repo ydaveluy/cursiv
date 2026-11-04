@@ -3,8 +3,8 @@
 // A grammar with a `skip()` region for each of N terminals: each region skips
 // its own `#n` between the two words it holds, and nothing else.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 #define SKIPCFG_10(X, H)                                                       \
   X(H##0) X(H##1) X(H##2) X(H##3) X(H##4) X(H##5) X(H##6) X(H##7) X(H##8)      \

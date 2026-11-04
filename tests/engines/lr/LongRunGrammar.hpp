@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <utility>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // One production past what a byte counts: both its items' dot and the
 // insertions its first state owes run beyond 255.

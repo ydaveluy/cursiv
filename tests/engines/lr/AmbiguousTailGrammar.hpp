@@ -4,8 +4,8 @@
 // is the call's or the next statement's, and both readings stay valid to the
 // end. Every reading that passes it forks; the arms must fall back together.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tambtail {
 

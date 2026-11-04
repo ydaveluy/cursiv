@@ -56,9 +56,9 @@ The language server installs the standard tools. To add tools, derive from
 ```cpp
 #include <memory>
 
-#include "cursiv/lsp/mcp/LspMcpService.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "cursiv/mcp/McpServer.hpp"
+#include "cursiv/mcp/LspMcpService.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/McpServer.hpp"
 
 class MyMcpService final : public cursiv::LspMcpService {
  public:

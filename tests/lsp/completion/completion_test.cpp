@@ -17,16 +17,18 @@
 #include "caret/generated/Caret/AstReflection.hpp"
 #include "caret/generated/Caret/Module.hpp"
 #include "caret/generated/Caret/Table.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultScopeProvider.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/lsp/completion/DefaultFuzzyMatcher.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultScopeProvider.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/completion/DefaultCompletionProvider.hpp"
+#include "cursiv/completion/DefaultFuzzyMatcher.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectedCompletion.hpp"
 #include "lsp/completion/CaretLane.hpp"
+#include "support/OffersEveryKeyword.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "wordsll/generated/Ll/Module.hpp"
@@ -44,19 +46,19 @@ using support::offered;
 using support::offers;
 using World = support::LspWorkspace;
 
-// `extends` glued to `E` spells `Eextends`, which is not the keyword: only a
-// literal with no word boundary of its own may be inserted there.
-void a_caret_glued_to_a_name_is_offered_no_word() {
-  const World world;
+// A name ending in a letter is still being typed: nothing that follows it is
+// offered, not even a literal that would not join it.
+void a_caret_glued_to_a_name_is_offered_nothing() {
+  const World world(support::offer_every_keyword);
   offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
-    CHECK(offers(list, "{"));
+    CHECK(!offers(list, "{"));
     CHECK(!offers(list, "extends"));
   });
 }
 
 // One space later the boundary is back, and both offers stand.
 void a_caret_past_the_space_is_offered_the_word() {
-  const World world;
+  const World world(support::offer_every_keyword);
   offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "extends"));
     CHECK(offers(list, "{"));
@@ -91,7 +93,7 @@ void a_reference_context_names_the_member_being_completed() {
 }  // namespace
 
 void run() {
-  a_caret_glued_to_a_name_is_offered_no_word();
+  a_caret_glued_to_a_name_is_offered_nothing();
   a_caret_past_the_space_is_offered_the_word();
   a_reference_context_names_the_member_being_completed();
 }
@@ -315,11 +317,11 @@ struct World : support::World<cursiv::SharedLspServices> {
 }
 
 // `begin` to `end` is one token over two lines: the ranges take the caret's
-// line of it only, and what is typed there is the filter.
+// line of it only, and what is typed there is the filter. A caret at its start
+// stands before it, where a keyword would run on into it.
 void a_word_spanning_lines_is_replaced_on_the_carets_line() {
   const World world;
-  CHECK(ranges_of_entity(world, "<|>begin\nend") ==
-        std::vector<lsp::Uint>{0, 0, 0, 0, 0, 0, 0, 5});
+  CHECK(ranges_of_entity(world, "<|>begin\nend").empty());
   CHECK(ranges_of_entity(world, "begin\nen<|>d") ==
         std::vector<lsp::Uint>{1, 0, 1, 2, 1, 0, 1, 3});
 }
@@ -348,6 +350,59 @@ namespace word_terminals {
 
 namespace {
 
+// Each hook as a language uses it: a value the grammar cannot name, candidates
+// the scope sees and the language does not want, items of its own form, and
+// every way of reading the caret tried.
+struct Hooked final : cursiv::DefaultCompletionProvider {
+  using DefaultCompletionProvider::DefaultCompletionProvider;
+  void completionFor(const cursiv::CompletionContext& context,
+                     const cursiv::NextFeature& next,
+                     cursiv::CompletionAcceptor accept) const override {
+    if (next.property == "size" && context.node() != nullptr) {
+      cursiv::CompletionValueItem item;
+      item.label = "huge";
+      (void)accept(context, std::move(item));
+      return;
+    }
+    DefaultCompletionProvider::completionFor(context, next, accept);
+  }
+  void visitReferenceCandidates(
+      const cursiv::ReferenceInfo& reference,
+      const cursiv::CompletionContext& context,
+      cursiv::function_ref<bool(const cursiv::AstNodeDescription&)> visitor)
+      const override {
+    DefaultCompletionProvider::visitReferenceCandidates(
+        reference, context, [&](const cursiv::AstNodeDescription& candidate) {
+          return candidate.name == "Z" || visitor(candidate);
+        });
+  }
+  cursiv::CompletionValueItem createReferenceCompletionItem(
+      const cursiv::AstNodeDescription& candidate,
+      const cursiv::ReferenceInfo& reference,
+      const cursiv::CompletionContext& context) const override {
+    cursiv::CompletionValueItem item = DefaultCompletionProvider::
+        createReferenceCompletionItem(candidate, reference, context);
+    item.detail = "target";
+    return item;
+  }
+  bool continueCompletion(
+      const std::vector<lsp::CompletionItem>&) const override {
+    return true;
+  }
+};
+
+// What a hook reads as the node of each keyword it is asked about.
+struct SeesNode final : cursiv::DefaultCompletionProvider {
+  using DefaultCompletionProvider::DefaultCompletionProvider;
+  mutable std::vector<std::string> nodes;
+  bool filterKeyword(const cursiv::CompletionContext& context,
+                     std::string_view) const override {
+    const cursiv::AstNode* const node = context.node();
+    nodes.emplace_back(node != nullptr ? std::string(node->type->name) : "none");
+    return true;
+  }
+};
+
 struct World : support::World<cursiv::SharedLspServices> {
   const cursiv::LspServices* ll = &support::add_language<cursiv::LspServices>(
       shared, {"words-ll", {".wll"}, {}},
@@ -357,6 +412,25 @@ struct World : support::World<cursiv::SharedLspServices> {
       shared, {"words-lr", {".wlr"}, {}},
       twords::generated::Lr::create_parser(),
       twords::generated::Lr::create_ast_reflection());
+  const cursiv::LspServices* hooked =
+      &support::add_language<cursiv::LspServices>(
+          shared, {"words-hooked", {".whk"}, {}},
+          twords::generated::Lr::create_parser(),
+          twords::generated::Lr::create_ast_reflection(),
+          [](cursiv::LspServices& language) {
+            language.completionProvider = std::make_unique<Hooked>(language);
+          });
+  const SeesNode* sees = nullptr;
+  const cursiv::LspServices* seeing =
+      &support::add_language<cursiv::LspServices>(
+          shared, {"words-seeing", {".wse"}, {}},
+          twords::generated::Lr::create_parser(),
+          twords::generated::Lr::create_ast_reflection(),
+          [this](cursiv::LspServices& language) {
+            auto provider = std::make_unique<SeesNode>(language);
+            sees = provider.get();
+            language.completionProvider = std::move(provider);
+          });
 };
 
 // Each item as an editor reads it -- what it shows, how it sorts, what it
@@ -455,11 +529,74 @@ void a_terminal_offers_its_words_and_a_pattern_none() {
   }
 }
 
+// The tokens of a data rule say nothing of what may stand there: a caret in one
+// is answered from its start. Past a comment inside it no name matches, and its
+// own tokens offer nothing.
+void a_data_rule_is_completed_from_its_start() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  const std::string names =
+      "path:\nJohn.Miller -> Z;\nJohn.Smith.Junior -> Z;\n"
+      "John.Smith.Senior -> Z;\nZ -> ";
+  const Labels john{"John.Miller", "John.Smith.Junior", "John.Smith.Senior"};
+  const Labels smith{"John.Smith.Junior", "John.Smith.Senior"};
+  for (const cursiv::LspServices* language : {world.ll, world.lr}) {
+    Labels all = john;
+    all.emplace_back("Z");
+    CHECK(labels_at(*language, names + "<|>John.Smith.Junior;") == all);
+    CHECK(labels_at(*language, names + "John<|>.Smith.Junior;") == john);
+    CHECK(labels_at(*language, names + "John.Smi<|>th.Junior;") == smith);
+    CHECK(labels_at(*language, names + "John.Smith.Jun<|>ior;") ==
+          Labels{"John.Smith.Junior"});
+    CHECK(labels_at(*language, names + "John.<|>") == john);
+    CHECK(labels_at(*language, names + "<|>John.// c\nMiller;") == all);
+    CHECK(labels_at(*language, names + "John.// c\n<|>Miller;").empty());
+  }
+}
+
+// The node of a context is that of the last token begun before the caret, and
+// none where no token stands: nothing else tells a hook it is at the very start.
+void a_context_names_the_node_of_its_token() {
+  const World world;
+  const auto nodes_at = [&](std::string text) {
+    world.sees->nodes.clear();
+    (void)items_at(*world.seeing, std::move(text));
+    return world.sees->nodes;
+  };
+  const std::vector<std::string> atStart = nodes_at("<|>");
+  CHECK(!atStart.empty());
+  for (const std::string& node : atStart) CHECK(node == "none");
+  const std::vector<std::string> behind = nodes_at("path:\na <|>");
+  CHECK(!behind.empty());
+  for (const std::string& node : behind) CHECK(node == "Item");
+}
+
+// A language overrides what one feature offers, which candidates a reference
+// has and their form, and whether the next way of reading the caret is tried.
+void the_hooks_shape_what_is_offered() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  CHECK(labels_at(*world.hooked, "size:\na <|>") == Labels{"huge"});
+  CHECK(labels_at(*world.hooked, "size:\na h<|>") == Labels{"huge"});
+  const std::string names = "path:\nJohn.Miller -> Z;\nZ -> ";
+  const std::vector<std::string> items =
+      items_at(*world.hooked, names + "<|>");
+  CHECK(items.size() == 1);
+  CHECK(items.front().starts_with("John.Miller|") &&
+        items.front().find("|target|") != std::string::npos);
+  CHECK(labels_at(*world.hooked, names + "John.<|>") ==
+        (Labels{"John.Miller", "in"}));
+  CHECK(labels_at(*world.lr, names + "John.<|>") == Labels{"John.Miller"});
+}
+
 }  // namespace
 
 void run() {
   the_words_are_offered_as_the_data_rule_offers_its_keywords();
   a_terminal_offers_its_words_and_a_pattern_none();
+  a_data_rule_is_completed_from_its_start();
+  the_hooks_shape_what_is_offered();
+  a_context_names_the_node_of_its_token();
 }
 
 }  // namespace word_terminals

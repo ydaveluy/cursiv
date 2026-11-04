@@ -4,8 +4,8 @@
 // only where the merge may have made a conflict, and that graph fuses the
 // states a real conflict leaves alike.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tidcase {
 

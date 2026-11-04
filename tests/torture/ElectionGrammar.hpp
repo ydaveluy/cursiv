@@ -5,7 +5,7 @@
 // alike stay distinct: a rank follows the order rules are first reached in,
 // which a shared rule would carry from one case into the next.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "torture/DanglingAst.hpp"
 #include "torture/DeepIfGrammar.hpp"
 #include "torture/ElectionAst.hpp"

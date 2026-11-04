@@ -321,8 +321,8 @@ std::string RgramGrammar::header() const {
       std::string(family) +
       ").\n"
       "#pragma once\n"
-      "#include \"cursiv/core/grammar/GrammarSpec.hpp\"\n"
-      "#include \"cursiv/core/syntax-tree/AstNode.hpp\"\n"
+      "#include \"cursiv/grammar/GrammarSpec.hpp\"\n"
+      "#include \"cursiv/syntax-tree/AstNode.hpp\"\n"
       "namespace " + ns + " {\nnamespace ast {\n";
   if (ast) {
     out += "struct Node : cursiv::Extends<cursiv::AstNode> { vector<Node*> kids; };\n";

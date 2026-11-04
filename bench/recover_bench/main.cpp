@@ -15,8 +15,8 @@
 
 #include "arithmetics/generated/Arith/Module.hpp"
 #include "bench.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
 namespace {

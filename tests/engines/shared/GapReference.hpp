@@ -5,10 +5,10 @@
 #include <cstdint>
 #include <utility>
 
-#include "cursiv/engines/shared/runtime/GapPositions.hpp"
-#include "cursiv/engines/shared/runtime/LexBoundary.hpp"
-#include "cursiv/engines/shared/table/LexNode.hpp"
-#include "cursiv/engines/shared/table/TermInfo.hpp"
+#include "cursiv/shared/runtime/GapPositions.hpp"
+#include "cursiv/shared/runtime/LexBoundary.hpp"
+#include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/shared/table/TermInfo.hpp"
 
 namespace cursiv::test {
 

@@ -29,11 +29,11 @@ package:
 #include <string>
 #include <vector>
 
-#include "cursiv/core/grammar/Conversion.hpp"
-#include "cursiv/core/references/DefaultScopeComputation.hpp"
-#include "cursiv/core/workspace/AstNodeDescriptionProvider.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "domainmodel/core/ast.hpp"
+#include "cursiv/grammar/Conversion.hpp"
+#include "cursiv/references/DefaultScopeComputation.hpp"
+#include "cursiv/workspace/AstNodeDescriptionProvider.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "domainmodel/ast.hpp"
 
 namespace dm {
 

@@ -9,8 +9,8 @@
 #include <string_view>
 #include <system_error>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // A literal's guard names a terminal: the dialect's override is the one it
 // asks, in both engines.
@@ -129,7 +129,8 @@ struct RuleDialect : cursiv::extends<Base> {
 }  // namespace tderive
 
 // A dialect restating a terminal's text converter: a data rule joining its
-// parts reads each through the dialect's converter.
+// parts reads each through the dialect's converter. The base names no entry,
+// so it is only there to be shared, and each dialect names its own.
 namespace ttext {
 
 namespace ast {
@@ -150,7 +151,6 @@ struct Base : cursiv::GrammarSpec {
   struct DocRule
       : rule<create<ast::Doc>(many(append<&ast::Doc::paths>(ref<Path>)))> {};
 
-  using entry = DocRule;
   using ignored = WS;
 };
 
@@ -161,6 +161,8 @@ struct Dialect : cursiv::extends<Base> {
   template <class T>
     requires std::same_as<T, Base::WORD>
   struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
+
+  using entry = DocRule;
 };
 
 struct BaseLl : Base {};
@@ -172,6 +174,8 @@ struct DialectLl : cursiv::extends<BaseLl> {
   template <class T>
     requires std::same_as<T, Base::WORD>
   struct override<T> : terminal<as<drop_two>(lit<"@@"> + some(cr<"a-z">))> {};
+
+  using entry = DocRule;
 };
 
 }  // namespace ttext

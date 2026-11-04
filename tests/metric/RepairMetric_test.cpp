@@ -10,16 +10,16 @@
 #include <type_traits>
 #include <vector>
 
-#include "cursiv/core/grammar/ElementId.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/engines/shared/runtime/RepairFault.hpp"
-#include "cursiv/fuzz/CursivActions.hpp"
-#include "cursiv/fuzz/SeededSource.hpp"
+#include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/shared/runtime/RepairFault.hpp"
+#include "cursiv/CursivActions.hpp"
+#include "cursiv/SeededSource.hpp"
 #include "recovery_metric/support/AstOverlap.hpp"
 #include "recovery_metric/support/FaultCorpus.hpp"
 #include "recovery_metric/support/FaultPairing.hpp"
@@ -28,8 +28,8 @@
 #include "recovery_metric/support/RepairFault.hpp"
 #include "recovery_metric/support/RepairTwin.hpp"
 #include "recovery_metric/support/TextKept.hpp"
-#include "cursiv/test/Check.hpp"
-#include "domainmodel/core/DomainModelGrammar.hpp"
+#include "cursiv/Check.hpp"
+#include "domainmodel/DomainModelGrammar.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
 using cursiv::test::failures;

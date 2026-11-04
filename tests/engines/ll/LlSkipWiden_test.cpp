@@ -3,9 +3,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "skipwidenll/generated/Ll/Module.hpp"
 
 namespace {

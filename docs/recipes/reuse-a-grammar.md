@@ -10,7 +10,7 @@ A derived grammar inherits the base grammar's rules and replaces only the
 ones you choose. Here `json::JSON` is the base grammar, with a whitespace
 terminal `WS`. Include its header, then declare the derived grammar:
 
-```cpp title="src/json5/core/Json5Grammar.hpp"
+```cpp title="src/core/json5/Json5Grammar.hpp"
 namespace json5 {
 
 struct JSON5 : cursiv::extends<json::JSON> {
@@ -37,7 +37,7 @@ Generate the base language first, then the dialect, with `BASE` set to the
 
 ```cmake title="src/CMakeLists.txt"
 cursiv_generate_language(ID         json5
-    GRAMMAR    json5/core/Json5Grammar.hpp
+    GRAMMAR    json5/Json5Grammar.hpp
     NAMESPACE  json5::JSON5
     EXTENSIONS .json5
     BASE       json
@@ -61,6 +61,28 @@ this one adds non-breaking spaces to the base's whitespace:
 
 An override keeps the base rule's converter unless it supplies one with
 `terminal<as<X>(Body)>`. See [Conversion](../reference/grammar.md#conversion).
+
+### Share rules without a base language
+
+A base does not have to be a language. Leave out `entry`, and its rules are
+only there to be shared. Each derived grammar then names its own `entry`. Do not
+generate the base, and leave out `BASE` when you generate a derived grammar:
+
+```cpp
+struct Common : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<cr<"a-z"> + many(w)> {};
+
+  using ignored = WS;
+};
+
+struct Config : cursiv::extends<Common> {
+  struct Root : rule<create<ast::Config>(
+                    kw<"config"> + assign<&ast::Config::name>(ref<ID>))> {};
+
+  using entry = Root;
+};
+```
 
 ### Rule constraints
 

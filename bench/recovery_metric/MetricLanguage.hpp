@@ -14,9 +14,9 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/fuzz/GrammarActions.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/GrammarActions.hpp"
 
 namespace cursiv {
 struct RepairBudget;

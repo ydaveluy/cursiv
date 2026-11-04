@@ -5,8 +5,8 @@
 // choices at every element. The elected rank grows with the text, while the
 // graph remains under its pruning budget.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace trankgrowth {
 

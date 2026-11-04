@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/text/TextOffset.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"
 
 namespace cursiv::recovery_metric {

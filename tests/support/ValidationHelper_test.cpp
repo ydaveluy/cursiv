@@ -3,7 +3,7 @@
 // nothing else pins -- the marker scanner that turns a text into offsets, and
 // the hook that lets a foreign harness receive the verdicts.
 
-#include "cursiv/test/ValidationHelper.hpp"
+#include "cursiv/ValidationHelper.hpp"
 
 #include <lsp/types.h>
 
@@ -16,38 +16,38 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/services/Diagnostic.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/FileSystemProvider.hpp"
-#include "cursiv/lsp/semantic/SemanticTokenProvider.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/FileSystemProvider.hpp"
+#include "cursiv/semantic/SemanticTokenProvider.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
-#include "cursiv/test/CodeActionResult.hpp"
-#include "cursiv/test/DecodedSemanticTokens.hpp"
-#include "cursiv/test/Disposable.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "cursiv/test/ExpectFormatting.hpp"
-#include "cursiv/test/ExpectFunction.hpp"
-#include "cursiv/test/ExpectationError.hpp"
-#include "cursiv/test/ExpectedBase.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
-#include "cursiv/test/ExpectedFindReferences.hpp"
-#include "cursiv/test/ExpectedFoldings.hpp"
-#include "cursiv/test/ExpectedGoToDefinition.hpp"
-#include "cursiv/test/ExpectedHighlight.hpp"
-#include "cursiv/test/ExpectedHover.hpp"
-#include "cursiv/test/ExpectedRename.hpp"
-#include "cursiv/test/ExpectedSymbols.hpp"
-#include "cursiv/test/ExpectedWorkspaceSymbols.hpp"
-#include "cursiv/test/ParseHelper.hpp"
-#include "cursiv/test/RangeUtils.hpp"
-#include "cursiv/test/ReplacedIndices.hpp"
-#include "cursiv/test/TextDocumentParams.hpp"
-#include "cursiv/test/TextPredicate.hpp"
-#include "cursiv/test/VirtualFileSystemProvider.hpp"
+#include "cursiv/CodeActionResult.hpp"
+#include "cursiv/DecodedSemanticTokens.hpp"
+#include "cursiv/Disposable.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ExpectFormatting.hpp"
+#include "cursiv/ExpectFunction.hpp"
+#include "cursiv/ExpectationError.hpp"
+#include "cursiv/ExpectedBase.hpp"
+#include "cursiv/ExpectedCompletion.hpp"
+#include "cursiv/ExpectedFindReferences.hpp"
+#include "cursiv/ExpectedFoldings.hpp"
+#include "cursiv/ExpectedGoToDefinition.hpp"
+#include "cursiv/ExpectedHighlight.hpp"
+#include "cursiv/ExpectedHover.hpp"
+#include "cursiv/ExpectedRename.hpp"
+#include "cursiv/ExpectedSymbols.hpp"
+#include "cursiv/ExpectedWorkspaceSymbols.hpp"
+#include "cursiv/ParseHelper.hpp"
+#include "cursiv/RangeUtils.hpp"
+#include "cursiv/ReplacedIndices.hpp"
+#include "cursiv/TextDocumentParams.hpp"
+#include "cursiv/TextPredicate.hpp"
+#include "cursiv/VirtualFileSystemProvider.hpp"
 #include "workspace/lsp/LspModule.hpp"
 #include "workspace/lsp/LspServices.hpp"
 
@@ -458,7 +458,7 @@ void a_repair_is_offered_and_really_fixes() {
       "parse-repaired", "datatype String\nentity A { x:  String }\n");
   CHECK(result.action.has_value());
   CHECK(!result.diagnosticsAll.empty());
-  CHECK(result.diagnosticRelevant.code.has_value());
+  CHECK(cursiv::data_code(result.diagnosticRelevant) == "parse-repaired");
   result.dispose();
 }
 

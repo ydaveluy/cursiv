@@ -7,14 +7,14 @@
 #include <string_view>
 #include <type_traits>
 
-#include "cursiv/core/grammar/expr.hpp"
-#include "cursiv/core/grammar/unicode/UnicodeRange.hpp"
-#include "cursiv/core/grammar/word_final_in.hpp"
-#include "cursiv/core/text/ClassItem.hpp"
-#include "cursiv/core/text/lower_case.hpp"
-#include "cursiv/core/utils/ctstring.hpp"
-#include "cursiv/engines/shared/gen/LexCodePoints.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/expr.hpp"
+#include "cursiv/grammar/unicode/UnicodeRange.hpp"
+#include "cursiv/grammar/word_final_in.hpp"
+#include "cursiv/text/ClassItem.hpp"
+#include "cursiv/text/lower_case.hpp"
+#include "cursiv/utils/ctstring.hpp"
+#include "cursiv/shared/gen/LexCodePoints.hpp"
+#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 
 using namespace cursiv;

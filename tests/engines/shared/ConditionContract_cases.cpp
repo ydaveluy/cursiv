@@ -5,9 +5,9 @@
 #include "ConformanceTest.hpp"
 #include "conformancell/generated/Ll/Module.hpp"
 #include "conformancelr/generated/Lr/Module.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/ConditionContractGrammar.hpp"
 
 namespace condition_contract_cases {

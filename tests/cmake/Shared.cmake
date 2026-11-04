@@ -135,7 +135,7 @@ set_tests_properties(LexicalBackends_test RecursiveTerminals_test
 # engines.
 cursiv_grammar_pair(condgrowth engines/shared/ConditionGrowthGrammar.hpp tcondgrowth::Lr tcondgrowth::Ll)
 cursiv_test(ConditionGrowth_test engines/shared/ConditionGrowth_test.cpp
-    condgrowthllGenerated condgrowthlrGenerated)
+    cursiv::bench condgrowthllGenerated condgrowthlrGenerated)
 
 # Guards that decide where a token ends, in both engines: a keyword under a
 # complemented word boundary, and a refusal rescued past a terminal's head.

@@ -5,8 +5,8 @@
 // a keyword the lexer ranks first decides before any arm.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlltextorder {
 struct Node : cursiv::Extends<cursiv::AstNode> {};

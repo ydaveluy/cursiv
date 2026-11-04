@@ -4,8 +4,8 @@
 // one of them shifted by a byte from the next, and one whose acceptance a word
 // after it refuses: text no token starts in, read by walks that go far.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tcycle {
 

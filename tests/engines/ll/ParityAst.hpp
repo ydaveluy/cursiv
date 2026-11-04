@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tpar::ast {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};

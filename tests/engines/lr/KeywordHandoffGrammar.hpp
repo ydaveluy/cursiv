@@ -5,8 +5,8 @@
 // leaves them both standing; the name's arm is written first, and the
 // lexer's rank still comes first.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tkeyword {
 

@@ -3,9 +3,9 @@
 // The conformance cases of the grammar reference, one grammar each. Letters
 // are distinct tokens, blanks are skipped and the whole input is read.
 
-#include "cursiv/core/grammar/Conversion.hpp"
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/Conversion.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "ConditionContractGrammar.hpp"
 namespace tconformance {
 

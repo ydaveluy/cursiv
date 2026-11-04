@@ -19,7 +19,7 @@ spelling.
 To let `StrinG` resolve to a declared `String`, override the scope provider:
 
 ```cpp
-#include "cursiv/core/references/DefaultScopeProvider.hpp"
+#include "cursiv/references/DefaultScopeProvider.hpp"
 
 class MyScopeProvider final : public cursiv::DefaultScopeProvider {
  public:

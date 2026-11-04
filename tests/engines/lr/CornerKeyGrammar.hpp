@@ -4,8 +4,8 @@
 // one node over both tokens, or `c` and a node over `a`. Each rung lays one
 // word, so the corner's last word is all that orders the readings.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tcornerkey {
 

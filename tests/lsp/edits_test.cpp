@@ -16,20 +16,21 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/TextDocument.hpp"
-#include "cursiv/lsp/completion/CompletionContext.hpp"
-#include "cursiv/lsp/completion/DefaultCompletionProvider.hpp"
-#include "cursiv/lsp/formatting/Formatter.hpp"
-#include "cursiv/lsp/formatting/FormattingEngine.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/text/Position.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectFormatting.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
-#include "cursiv/test/ParseHelper.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/completion/CompletionContext.hpp"
+#include "cursiv/completion/DefaultCompletionProvider.hpp"
+#include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/formatting/FormattingEngine.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/text/LspPosition.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectFormatting.hpp"
+#include "cursiv/ExpectedCompletion.hpp"
+#include "cursiv/ParseHelper.hpp"
+#include "support/OffersEveryKeyword.hpp"
 #include "support/Throws.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
@@ -47,24 +48,12 @@ namespace {
 
 namespace ct = cursiv::test;
 
-// A language that wants its punctuation back out of the list, which is the
-// only thing `filterKeyword` is there for.
-struct OffersOnlyWords final : cursiv::DefaultCompletionProvider {
-  using DefaultCompletionProvider::DefaultCompletionProvider;
-  bool filterKeyword(const cursiv::CompletionContext&,
-                     std::string_view keyword) const override {
-    return keyword.find_first_not_of("{}()[],;:=<>") != std::string_view::npos;
-  }
-};
-
 // The workspace fixture and not a bare grammar: its members hold a cross
 // reference, and the scope's answer is half of what this door owes an editor.
 struct World : support::LspWorkspace {
-  explicit World(bool onlyWords = false)
-      : WorkspaceWorld([onlyWords](cursiv::LspServices& language) {
-          if (onlyWords)
-            language.completionProvider =
-                std::make_unique<OffersOnlyWords>(language);
+  explicit World(bool everyKeyword = false)
+      : WorkspaceWorld([everyKeyword](cursiv::LspServices& language) {
+          if (everyKeyword) support::offer_every_keyword(language);
         }) {
     support::take_both_ranges(shared);
   }
@@ -249,18 +238,18 @@ void a_word_no_keyword_begins_offers_no_keyword() {
   });
 }
 
-// A keyword spelling no letter is offered like any other: the grammar states
-// it there, and only a language says otherwise, per keyword.
-void a_keyword_with_no_letter_is_offered() {
+// A keyword spelling no letter is left out, and a language says otherwise, per
+// keyword.
+void a_keyword_with_no_letter_is_left_out() {
   const World world;
   offered(*world.ws, "entity E <|>", [](const lsp::CompletionList& list) {
     CHECK(offers(list, "extends"));
-    CHECK(offers(list, "{"));
-  });
-  const World words(true);
-  offered(*words.ws, "entity E <|>", [](const lsp::CompletionList& list) {
-    CHECK(offers(list, "extends"));
     CHECK(!offers(list, "{"));
+  });
+  const World every(true);
+  offered(*every.ws, "entity E <|>", [](const lsp::CompletionList& list) {
+    CHECK(offers(list, "extends"));
+    CHECK(offers(list, "{"));
   });
 }
 
@@ -294,26 +283,13 @@ void a_keyword_says_what_it_is_and_sorts_after_the_names() {
           });
 }
 
-// A word that answers nothing falls back to the caret. After `entity E` the
-// anchor sits on `E`, and what may stand there is the name -- never offered
-// once something is typed, since the author is writing it, not choosing it.
-// The anchored question is then empty, so the caret's own is asked instead.
-void a_word_that_answers_nothing_asks_at_the_caret() {
-  // What may follow the name spells no letter; a word glued to it is
-  // `completion_boundary_test`'s.
-  const World world;
+// A word that ends in a letter is still being typed, and what may stand there
+// is the name: never offered once something is typed, since the author is
+// writing it, not choosing it. What follows it is not asked.
+void a_word_that_answers_nothing_offers_nothing() {
+  const World world(true);
   offered(*world.ws, "entity E<|>", [](const lsp::CompletionList& list) {
-    CHECK(offers(list, "{"));
-    // ...and it replaces nothing: the name it sits behind is not being
-    // rewritten.
-    const lsp::CompletionItem* const brace = find(list, "{");
-    CHECK(brace != nullptr);
-    if (brace == nullptr) return;
-    CHECK(brace->textEdit.has_value());
-    if (!brace->textEdit.has_value()) return;
-    const auto& edit = std::get<lsp::InsertReplaceEdit>(*brace->textEdit);
-    CHECK(edit.insert.start.character == edit.insert.end.character);
-    CHECK(edit.replace.start.character == edit.replace.end.character);
+    CHECK(list.items.empty());
   });
 }
 
@@ -458,7 +434,7 @@ void two_homonyms_of_different_types_stay_two_offers() {
 // what the walk reads, and it reaches the caret because an engaged frame closes
 // incomplete rather than unwinding.
 void a_broken_document_still_answers() {
-  const World world;
+  const World world(true);
   offered(*world.ws, "entity E { f : String\nentity <|>",
           [](const lsp::CompletionList& list) { CHECK(!list.items.empty()); });
 }
@@ -488,10 +464,10 @@ void run() {
   an_applied_edit_leaves_the_word_the_author_meant();
   a_keyword_is_offered_from_inside_a_word();
   a_word_no_keyword_begins_offers_no_keyword();
-  a_keyword_with_no_letter_is_offered();
+  a_keyword_with_no_letter_is_left_out();
   a_keyword_is_matched_like_a_name();
   a_keyword_says_what_it_is_and_sorts_after_the_names();
-  a_word_that_answers_nothing_asks_at_the_caret();
+  a_word_that_answers_nothing_offers_nothing();
   a_terminal_is_never_offered_by_name();
   a_reference_offers_the_names_in_scope();
   a_reference_offers_the_names_in_scope_mid_document();
@@ -793,6 +769,29 @@ void a_range_format_keeps_the_edits_on_its_lines() {
   }
   CHECK(pastTheEnd);
   CHECK(ranged.size() < format(world, *messy).size());
+}
+
+// A selection of several lines: the gap that only reaches its first line stays,
+// the gaps within it are formatted.
+void a_range_format_leaves_what_only_reaches_its_start() {
+  World world;
+  const cursiv::Document* const messy = world.built(std::string(kMessy));
+  CHECK(applied(*messy, formatRange(world, *messy, {{1, 0}, {2, 5}})) ==
+        "entity   Person{\n"
+        "name: String\n"
+        "  age: String\n"
+        "}\n"
+        "datatype     String\n");
+}
+
+// The document's own rules apply to any selection, even one that runs past the
+// last line of the document's text.
+void a_range_format_always_applies_the_root_rules() {
+  World world;
+  const cursiv::Document* const messy =
+      world.built("datatype A\ndatatype B    datatype C\n\n\n");
+  CHECK(applied(*messy, formatRange(world, *messy, {{1, 0}, {3, 0}})) ==
+        "datatype A\ndatatype B\ndatatype C\n\n\n");
 }
 
 // A repaired parse describes text the author did not write, so reprinting it
@@ -1193,6 +1192,8 @@ void run() {
   a_rule_can_shape_the_gap_before_the_first_token();
   indentation_counts_do_not_wrap();
   a_range_format_keeps_the_edits_on_its_lines();
+  a_range_format_leaves_what_only_reaches_its_start();
+  a_range_format_always_applies_the_root_rules();
   a_format_on_type_stays_on_the_carets_line();
   a_document_with_a_parse_error_is_not_formatted();
   a_conversion_error_does_not_withhold_formatting();

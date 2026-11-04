@@ -17,7 +17,7 @@ file(GLOB_RECURSE _ws_core CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace/core/*.cpp)
 list(FILTER _ws_core EXCLUDE REGEX "/CoreModule[.]cpp$")
 add_library(wsCoreObjects OBJECT ${_ws_core})
-target_link_libraries(wsCoreObjects PUBLIC cursiv::core)
+target_link_libraries(wsCoreObjects PUBLIC cursiv::engine::lr)
 target_include_directories(wsCoreObjects PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/languages>)
 
@@ -62,7 +62,7 @@ cursiv_test(edits_narrow_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsnarro
 # translated before its tokens are read, on both engines.
 cursiv_grammar_pair(translate core/parser/TranslationGrammar.hpp ttrans::Lr
     ttrans::Ll)
-cursiv_test(parser_test core/parser/parser_test.cpp wsCore translatelrGenerated
+cursiv_test(parser_test core/parser/parser_test.cpp cursiv::lsp wsCore translatelrGenerated
     translatellGenerated)
 
 cursiv_test(services_test core/services/services_test.cpp wsLsp)
@@ -70,14 +70,14 @@ cursiv_test(services_test core/services/services_test.cpp wsLsp)
 # Its grammar is its own: this lane exercises core and links core.
 cursiv_grammar(comments core/documentation/CommentsGrammar.hpp tcomment::Comments)
 
-cursiv_test(documentation_test core/documentation/documentation_test.cpp commentsGenerated wsCore)
+cursiv_test(documentation_test core/documentation/documentation_test.cpp cursiv::lsp commentsGenerated wsCore)
 
 cursiv_grammar(narrowedsite core/references/NarrowedSiteGrammar.hpp tns::NarrowedSite)
 cursiv_grammar(sharedrecord core/references/SharedRecordGrammar.hpp tsr::SharedRecord)
 
-cursiv_test(references_test core/references/references_test.cpp wsCore narrowedsiteGenerated
+cursiv_test(references_test core/references/references_test.cpp cursiv::lsp wsCore narrowedsiteGenerated
     multirefGenerated sharedrecordGenerated)
 
-cursiv_test(workspace_test core/workspace/workspace_test.cpp wsCore)
+cursiv_test(workspace_test core/workspace/workspace_test.cpp cursiv::lsp wsCore)
 target_compile_definitions(workspace_test PRIVATE
     CURSIV_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")

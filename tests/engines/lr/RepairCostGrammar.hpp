@@ -3,8 +3,8 @@
 // A repair-search probe: a keyword to misspell, three bracket kinds to leave
 // open, a separated list to lengthen, and a late-settling alternative.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace trepair {
 

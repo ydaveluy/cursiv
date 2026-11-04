@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/text/TextOffset.hpp"
 
 namespace cursiv::recovery_metric {
 

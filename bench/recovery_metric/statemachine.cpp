@@ -4,10 +4,10 @@
 #include <vector>
 
 #include "bench.hpp"
-#include "cursiv/fuzz/CursivActions.hpp"
+#include "cursiv/CursivActions.hpp"
 #include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
-#include "statemachine/core/StateMachineGrammar.hpp"
+#include "statemachine/StateMachineGrammar.hpp"
 #include "statemachine/generated/SM/AstReflection.hpp"
 #include "statemachine/generated/SM/Grammar.hpp"
 #include "statemachine/generated/SM/Module.hpp"

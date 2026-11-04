@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/references/DefaultScopeProvider.hpp"
+#include "cursiv/references/DefaultScopeProvider.hpp"
 
 // Symbol names match regardless of case: `StrinG` resolves the `String` the
 // document declares, whose spelling stays as written.

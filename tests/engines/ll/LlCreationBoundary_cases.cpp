@@ -4,8 +4,8 @@
 #include <string_view>
 #include <unordered_set>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/CreationBoundaryGrammar.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"

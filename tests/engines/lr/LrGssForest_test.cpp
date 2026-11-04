@@ -6,10 +6,10 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/lr/runtime/LrGssDigest.hpp"
-#include "cursiv/engines/lr/runtime/LrGssForest.hpp"
-#include "cursiv/engines/lr/table/LrColdTables.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/lr/runtime/LrGssDigest.hpp"
+#include "cursiv/lr/runtime/LrGssForest.hpp"
+#include "cursiv/lr/table/LrColdTables.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

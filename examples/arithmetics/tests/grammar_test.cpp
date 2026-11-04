@@ -8,16 +8,16 @@
 #include <string_view>
 #include <utility>
 
-#include "arithmetics/core/CoreServices.hpp"
-#include "arithmetics/core/validation/ArithmeticsValidator.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/core/services/Diagnostic.hpp"
-#include "cursiv/core/services/JsonValue.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "cursiv/test/ValidationHelper.hpp"
-#include "cursiv/test/ValidationResult.hpp"
+#include "arithmetics/CoreServices.hpp"
+#include "arithmetics/validation/ArithmeticsValidator.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ValidationHelper.hpp"
+#include "cursiv/ValidationResult.hpp"
 
 namespace {
 

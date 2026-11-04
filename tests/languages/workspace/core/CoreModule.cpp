@@ -3,7 +3,7 @@
 
 #include <memory>
 
-#include "cursiv/core/validation/ValidationRegistry.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
 #include "support/WorkspaceModule.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/references/WorkspaceScopeComputation.hpp"

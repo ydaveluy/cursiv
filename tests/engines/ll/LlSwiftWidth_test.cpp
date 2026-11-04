@@ -1,10 +1,10 @@
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/LlPredictionSession.hpp"
-#include "cursiv/engines/ll/runtime/ll_predictor.hpp"
-#include "cursiv/engines/ll/runtime/ll_read.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/LlPredictionSession.hpp"
+#include "cursiv/ll/runtime/ll_predictor.hpp"
+#include "cursiv/ll/runtime/ll_read.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/SwiftWidthAst.hpp"
 #include "swiftwidthll/generated/Ll/Module.hpp"

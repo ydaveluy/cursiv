@@ -5,12 +5,12 @@
 #include <tuple>
 #include <vector>
 
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/engines/ll/runtime/ll_caret.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/ll/runtime/ll_caret.hpp"
+#include "cursiv/Check.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"
 #include "semanticll/generated/Ll/Table.hpp"

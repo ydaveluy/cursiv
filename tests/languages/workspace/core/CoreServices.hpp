@@ -2,9 +2,9 @@
 
 #include <memory>
 
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/CoreServicesFor.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/CoreServicesFor.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
 #include "workspace/core/references/QualifiedNameProvider.hpp"
 #include "workspace/core/validation/WorkspaceValidator.hpp"
 

@@ -5,8 +5,8 @@
 // blank. The word before a newline and the word before a closer are one state,
 // which reads both.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tbracketcaret {
 

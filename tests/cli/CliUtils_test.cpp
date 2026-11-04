@@ -9,15 +9,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/cli/cli.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/workspace/DefaultDocumentFactory.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/EmptyFileSystemProvider.hpp"
-#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/cli.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/workspace/DefaultDocumentFactory.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/EmptyFileSystemProvider.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
+#include "cursiv/Check.hpp"
 #include "support/World.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 

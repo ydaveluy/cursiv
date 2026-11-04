@@ -1,5 +1,5 @@
 // Construction, lowering and generated pass cases share their engine headers.
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace lr_construction_cases { void run(); }
 namespace lr_lowered_cases { void run(); }

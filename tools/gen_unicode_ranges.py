@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write src/cursiv/core/grammar/unicode/UnicodeRanges.hpp from Python's
+"""Write src/core/cursiv/grammar/unicode/UnicodeRanges.hpp from Python's
 unicodedata: the code point ranges of every general category, their majors,
 the identifier properties `str.isidentifier` answers (XID_Start,
 XID_Continue), White_Space, and Alphabetic, read from the Unicode Character
@@ -53,7 +53,8 @@ for line in derived.splitlines():
 props['Alphabetic'] = ranges(sorted(alphabetic))
 
 here = os.path.dirname(__file__)
-unicode_dir = os.path.join(here, '..', 'src', 'cursiv', 'core', 'grammar', 'unicode')
+unicode_dir = os.path.join(here, '..', 'src', 'core', 'cursiv', 'core', 'grammar',
+                           'unicode')
 out = [
     '// The Unicode properties a class of code points may name, written by',
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
@@ -78,8 +79,8 @@ out = [
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
     '// Character Database: never edited.',
     '#pragma once', '', '#include <span>', '',
-    '#include "cursiv/core/grammar/unicode/UnicodeProperty.hpp"',
-    '#include "cursiv/core/grammar/unicode/UnicodeRange.hpp"', '',
+    '#include "cursiv/grammar/unicode/UnicodeProperty.hpp"',
+    '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
     'namespace cursiv::unicode {', '',
 ]
 for name, rs in props.items():
@@ -124,7 +125,7 @@ out = [
     '// written by tools/gen_unicode_ranges.py from Python\'s unicodedata: never',
     '// edited.',
     '#pragma once', '', '#include <cstdint>', '',
-    '#include "cursiv/core/grammar/unicode/UnicodeRange.hpp"', '',
+    '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
     'namespace cursiv::unicode {', '',
     '// From `first` to `last`, every `stride`-th scalar lowers by `delta`.',
     'struct LowerRun {', '  char32_t first;', '  char32_t last;',

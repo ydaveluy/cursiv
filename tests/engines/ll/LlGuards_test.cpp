@@ -1,4 +1,4 @@
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace rule_condition_cases { void run(); }
 namespace reserved_refused_cases { void run(); }

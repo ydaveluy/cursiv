@@ -3,8 +3,8 @@
 // A grammar whose only terminal is a trivia: the state that reads the end
 // and the repair's mode lex the same alphabet, so the table has one mode.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tonemode {
 

@@ -6,11 +6,11 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/LlContext.hpp"
-#include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/LlContext.hpp"
+#include "cursiv/ll/runtime/ll_lookahead.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/ExplicitUnitAst.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "unitsll/generated/Ll/Module.hpp"

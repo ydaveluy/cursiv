@@ -12,10 +12,10 @@ First create the services of your language:
 #include <cstdio>
 #include <string>
 
-#include "cursiv/core/parser/Parser.hpp"       // `parser->parse` needs it
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "recipe/core/CoreServices.hpp"
-#include "recipe/core/ast.hpp"
+#include "cursiv/parser/Parser.hpp"       // `parser->parse` needs it
+#include "cursiv/services/CoreLanguage.hpp"
+#include "recipe/CoreServices.hpp"
+#include "recipe/ast.hpp"
 
 const auto language = cursiv::create_language<
     recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,
@@ -61,9 +61,9 @@ To resolve references and run validation, add a document to the workspace
 and build it:
 
 ```cpp
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
 
 auto& shared = *language.shared;
 
@@ -126,8 +126,8 @@ By default, `create_language()` reads no files from disk. Pass a
 `LocalFileSystemProvider`, then let the workspace manager scan a folder URI:
 
 ```cpp
-#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
-#include "cursiv/core/workspace/WorkspaceManager.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
+#include "cursiv/workspace/WorkspaceManager.hpp"
 
 const auto language = cursiv::create_language<
     recipe::RecipeCoreServices, recipe::RecipeSharedCoreServices,

@@ -1,4 +1,4 @@
-#include "cursiv/engines/shared/runtime/AstReducer.hpp"
+#include "cursiv/shared/runtime/AstReducer.hpp"
 
 #include <array>
 #include <chrono>
@@ -10,13 +10,13 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/AstField.hpp"
-#include "cursiv/core/syntax-tree/AstMetaData.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/engines/shared/runtime/AstActions.hpp"
-#include "cursiv/engines/shared/runtime/AstConvThunks.hpp"
-#include "cursiv/engines/shared/table/StampLayout.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
+#include "cursiv/syntax-tree/AstMetaData.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/shared/runtime/AstActions.hpp"
+#include "cursiv/shared/runtime/AstConvThunks.hpp"
+#include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

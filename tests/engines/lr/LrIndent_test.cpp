@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/lr/IndentAst.hpp"
 #include "engines/lr/ParseChecks.hpp"
 #include "engines/lr/VirtualStateGrammar.hpp"

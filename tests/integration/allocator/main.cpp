@@ -1,6 +1,6 @@
 #include <cstdlib>
 
-#include "cursiv/core/workspace/TextDocument.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
 
 #ifdef EXPECT_MIMALLOC
 #include <mimalloc.h>

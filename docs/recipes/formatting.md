@@ -9,11 +9,11 @@ selected range.
 This example uses the AST from the [tutorial](../learn/walkthrough.md). Each
 callback receives a `FormattingBuilder` and the node to format:
 
-```cpp title="src/recipe/lsp/RecipeFormatter.hpp"
+```cpp title="src/lsp/recipe/RecipeFormatter.hpp"
 #pragma once
 
-#include "cursiv/lsp/formatting/AbstractFormatter.hpp"
-#include "recipe/core/ast.hpp"
+#include "cursiv/formatting/AbstractFormatter.hpp"
+#include "recipe/ast.hpp"
 
 namespace recipe {
 
@@ -68,7 +68,7 @@ changes those defaults.
 Include `RecipeFormatter.hpp` in your LSP module and install the formatter
 after the default services:
 
-```cpp title="src/recipe/lsp/LspModule.cpp"
+```cpp title="src/lsp/recipe/LspModule.cpp"
 void install_lsp_module(RecipeServices& services) {
   cursiv::install_default_lsp_services(services);
   services.formatter = std::make_unique<RecipeFormatter>(services);

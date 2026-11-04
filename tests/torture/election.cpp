@@ -9,12 +9,12 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/engines/lr/runtime/LrParseStats.hpp"
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/engines/shared/runtime/AstReducer.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/lr/runtime/LrParseStats.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/shared/runtime/AstReducer.hpp"
+#include "cursiv/Check.hpp"
 #include "election/generated/Election/AstReflection.hpp"
 #include "election/generated/Election/Parser.hpp"
 #include "election/generated/Election/Table.hpp"

@@ -6,14 +6,14 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/shared/gen/GrammarFault.hpp"
-#include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/shared/gen/GrammarFault.hpp"
+#include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/UnorderedGrammar.hpp"
 #include "engines/ll/UnorderedOptionalGrammar.hpp"
 #include "engines/ll/UnorderedTurnsGrammar.hpp"

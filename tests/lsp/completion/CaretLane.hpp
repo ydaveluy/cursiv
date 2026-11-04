@@ -4,8 +4,8 @@
 
 #include <memory>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
 
 struct CaretDoor {
   std::unique_ptr<cursiv::Parser> (*parser)();

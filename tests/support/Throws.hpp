@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/utils/FunctionRef.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
 
 namespace support {
 

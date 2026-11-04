@@ -4,10 +4,10 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/ll_matcher.hpp"
-#include "cursiv/engines/shared/runtime/LexAdapter.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/ll_matcher.hpp"
+#include "cursiv/shared/runtime/LexAdapter.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/KeywordRelayGrammar.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"

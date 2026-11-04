@@ -4,9 +4,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/SkipConfigsGrammar.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"

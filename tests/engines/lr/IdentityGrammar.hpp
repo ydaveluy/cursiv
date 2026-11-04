@@ -5,8 +5,8 @@
 // into one state and arbitrates by declaration order -- two of the four
 // sentences die.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tident {
 

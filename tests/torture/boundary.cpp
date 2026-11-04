@@ -9,11 +9,11 @@
 
 #include "optionals/generated/OptionalsG/Parser.hpp"
 #include "optionals/generated/OptionalsG/Table.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/engines/lr/runtime/lr_rescan.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/lr/runtime/lr_rescan.hpp"
+#include "cursiv/Check.hpp"
 
 namespace g = topt::generated::OptionalsG;
 

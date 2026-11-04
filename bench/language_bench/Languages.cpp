@@ -1,10 +1,10 @@
 #include "language_bench/Languages.hpp"
 
-#include "arithmetics/lsp/LspModule.hpp"
+#include "arithmetics/LspModule.hpp"
 #include "bench.hpp"
-#include "domainmodel/lsp/LspModule.hpp"
-#include "requirements/lsp/LspModule.hpp"
-#include "statemachine/lsp/LspModule.hpp"
+#include "domainmodel/LspModule.hpp"
+#include "requirements/LspModule.hpp"
+#include "statemachine/LspModule.hpp"
 
 namespace cursiv::bench::examples {
 

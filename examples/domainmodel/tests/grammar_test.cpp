@@ -10,16 +10,16 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "cursiv/test/ValidationHelper.hpp"
-#include "cursiv/test/ValidationResult.hpp"
-#include "domainmodel/core/CoreServices.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ValidationHelper.hpp"
+#include "cursiv/ValidationResult.hpp"
+#include "domainmodel/CoreServices.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
 namespace {

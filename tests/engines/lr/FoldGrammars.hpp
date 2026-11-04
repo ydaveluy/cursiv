@@ -5,8 +5,8 @@
 // `Or`, and a bare operand through both. The two readings of one operand never
 // take a different token, so the look-ahead must find them one.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tfold {
 

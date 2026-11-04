@@ -11,31 +11,31 @@
 #include <vector>
 
 #include "core/syntax-tree/ConvertGrammars.hpp"
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/utils/TypeName.hpp"
-#include "cursiv/engines/lr/gen/LrFinalTable.hpp"
-#include "cursiv/engines/lr/gen/LrGotoRows.hpp"
-#include "cursiv/engines/lr/gen/LrIdentity.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_build.hpp"
-#include "cursiv/engines/lr/gen/lr_build_derived.hpp"
-#include "cursiv/engines/lr/gen/lr_build_guards.hpp"
-#include "cursiv/engines/lr/gen/lr_build_passes.hpp"
-#include "cursiv/engines/lr/gen/lr_completion_sites.hpp"
-#include "cursiv/engines/lr/gen/lr_emit_parser.hpp"
-#include "cursiv/engines/lr/gen/lr_entry_rows.hpp"
-#include "cursiv/engines/lr/gen/lr_term_run.hpp"
-#include "cursiv/engines/lr/table/LrActionKind.hpp"
-#include "cursiv/engines/shared/gen/AstRegistry.hpp"
-#include "cursiv/engines/shared/gen/AstRowOf.hpp"
-#include "cursiv/engines/shared/gen/CommonArtifacts.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/utils/TypeName.hpp"
+#include "cursiv/lr/gen/LrFinalTable.hpp"
+#include "cursiv/lr/gen/LrGotoRows.hpp"
+#include "cursiv/lr/gen/LrIdentity.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/gen/lr_build.hpp"
+#include "cursiv/lr/gen/lr_build_derived.hpp"
+#include "cursiv/lr/gen/lr_build_guards.hpp"
+#include "cursiv/lr/gen/lr_build_passes.hpp"
+#include "cursiv/lr/gen/lr_completion_sites.hpp"
+#include "cursiv/lr/gen/lr_emit_parser.hpp"
+#include "cursiv/lr/gen/lr_entry_rows.hpp"
+#include "cursiv/lr/gen/lr_term_run.hpp"
+#include "cursiv/lr/table/LrActionKind.hpp"
+#include "cursiv/shared/gen/AstRegistry.hpp"
+#include "cursiv/shared/gen/AstRowOf.hpp"
+#include "cursiv/shared/gen/CommonArtifacts.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "deferrednested/generated/NestedFirst/Module.hpp"
 #include "engines/lr/AsiGrammar.hpp"
 #include "engines/lr/AuditGrammar.hpp"
@@ -276,8 +276,8 @@ void completion_sites_agree() {
   auto a = cursiv::lr_build_automaton(low);
   CHECK(!a.overflow);
   const auto registry = cursiv::ast_registry<G, cursiv::LrLowering<G>>();
-  const auto facts =
-      cursiv::lr_record_gens(cursiv::lr_entry_table(a), registry.rows);
+  const auto facts = cursiv::lr_record_gens(cursiv::lr_entry_table(a),
+                                            registry.rows, a.writes);
   const auto canonical = cursiv::lr_completion_sites(facts);
   const auto symbol = symbol_named<
       std::conditional_t<Direct, typename G::AT, typename G::Name>>(a.cfg);
@@ -663,8 +663,8 @@ void keeps_actions(bool wide, std::uint64_t digest, unsigned states,
 void run() {
   for (bool wide : {false, true}) {
     keeps_actions<ttableorder::Lr>(wide, 12584957980273038131ull, 13, 13, 5, 3);
-    keeps_actions<tgchain::Lr>(wide, 7874924981012405869ull, 11, 12, 2, 2);
-    keeps_actions<tcornerkey::Lr>(wide, 11114670162566949468ull, 49, 51, 1, 1);
+    keeps_actions<tgchain::Lr>(wide, 5582408504362784204ull, 11, 12, 2, 2);
+    keeps_actions<tcornerkey::Lr>(wide, 311705177790204545ull, 49, 51, 1, 1);
   }
   // This grammar reaches the uniform-descendant shortcut, including the
   // inexact written order of nested dangling-else choices.

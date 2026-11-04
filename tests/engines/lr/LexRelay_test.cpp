@@ -3,7 +3,7 @@
 // comes leaves the opener to the tokens it spells; a nested run ends at the
 // closer at depth zero; a relayed run repeated reads every rest once.
 
-#include "cursiv/engines/shared/table/LexRelay.hpp"
+#include "cursiv/shared/table/LexRelay.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -21,19 +21,19 @@
 #include "backreflua/generated/G/Module.hpp"
 #include "backreflua/generated/G/Table.hpp"
 #include "backref/generated/G/Table.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_build.hpp"
-#include "cursiv/engines/lr/runtime/lr_matcher.hpp"
-#include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/engines/shared/runtime/LexAdapter.hpp"
-#include "cursiv/engines/shared/runtime/LexMarkRun.hpp"
-#include "cursiv/engines/shared/runtime/LexNestedSearch.hpp"
-#include "cursiv/engines/shared/runtime/LexRelay.hpp"
-#include "cursiv/engines/shared/runtime/lex_find.hpp"
-#include "cursiv/engines/shared/table/ByteSet.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/gen/lr_build.hpp"
+#include "cursiv/lr/runtime/lr_matcher.hpp"
+#include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/runtime/LexAdapter.hpp"
+#include "cursiv/shared/runtime/LexMarkRun.hpp"
+#include "cursiv/shared/runtime/LexNestedSearch.hpp"
+#include "cursiv/shared/runtime/LexRelay.hpp"
+#include "cursiv/shared/runtime/lex_find.hpp"
+#include "cursiv/shared/table/ByteSet.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/lr/BackrefGrammars.hpp"
 #include "engines/lr/LexNestedGrammars.hpp"
 #include "nested/generated/G/Module.hpp"

@@ -5,10 +5,10 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LeftOptionGrammar.hpp"
 #include "leftoptionll/generated/Ll/Module.hpp"
 #include "leftoptionlr/generated/Lr/Module.hpp"

@@ -7,8 +7,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
 
 namespace infix_loop_cases {

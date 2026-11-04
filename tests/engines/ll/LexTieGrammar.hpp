@@ -2,8 +2,8 @@
 // decide, the first written winning whichever terminal the rules reach first.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlllextie {
 struct Value : cursiv::Extends<cursiv::AstNode> {};

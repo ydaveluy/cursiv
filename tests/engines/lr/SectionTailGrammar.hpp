@@ -4,8 +4,8 @@
 // `LONG`, and the section it opens ends at `>`, which its own grammar does not
 // know.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tsection {
 

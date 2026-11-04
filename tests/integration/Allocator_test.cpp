@@ -16,7 +16,7 @@
 #include <mimalloc.h>
 #include <mimalloc-stats.h>
 
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 void standard_allocations_use_the_module_allocator() {

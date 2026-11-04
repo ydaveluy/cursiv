@@ -5,9 +5,9 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/bench/LanguageBench.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/LanguageBench.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "workspace/lsp/LspModule.hpp"
 
 using namespace cursiv::bench;

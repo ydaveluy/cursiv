@@ -10,20 +10,20 @@
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionsll/generated/Ll/Table.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/ll_build.hpp"
-#include "cursiv/engines/ll/runtime/LlPredictionSession.hpp"
-#include "cursiv/engines/ll/runtime/ll_predictor.hpp"
-#include "cursiv/engines/ll/runtime/ll_read.hpp"
-#include "cursiv/engines/ll/runtime/ll_repair.hpp"
-#include "cursiv/engines/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/engines/shared/gen/UnboundedCondition.hpp"
-#include "cursiv/engines/shared/runtime/GapPositions.hpp"
-#include "cursiv/engines/shared/table/GapLeaf.hpp"
-#include "cursiv/engines/shared/table/StampLayout.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/ll/runtime/LlPredictionSession.hpp"
+#include "cursiv/ll/runtime/ll_predictor.hpp"
+#include "cursiv/ll/runtime/ll_read.hpp"
+#include "cursiv/ll/runtime/ll_repair.hpp"
+#include "cursiv/shared/gen/LowerVerdicts.hpp"
+#include "cursiv/shared/gen/UnboundedCondition.hpp"
+#include "cursiv/shared/runtime/GapPositions.hpp"
+#include "cursiv/shared/table/GapLeaf.hpp"
+#include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/ConditionsGrammar.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "gluedll/generated/GluedLl/Module.hpp"
@@ -196,19 +196,22 @@ void a_refused_token_is_read_again_and_a_named_one_stands() {
   for (const std::string_view text :
        {"gapexit:a - > b", "gapexit:a -> b", "gapexit:a\n-> b", "gaparm:a->b",
         "gaparm:a -> b", "gaparm:a - > b", "gapnull:->a", "gapnull:-> a",
-        "gapnull: -> a", "gapnull:%->a", "andloop:aa;", "andloop:aaa;",
+        "gapnull: -> a", "gapnull:%->a", "gapmany:->a", "gapmany: -> a",
+        "gapmany:\n-> a", "gapmany: - > a", "andloop:aa;", "andloop:aaa;",
         "andloop:a a;", "andhead:aa"})
     clean(text, true);
   for (const std::string_view text :
        {"gapexit:a ->", "andloop:ab;", "andhead:ba"})
     clean(text, false);
   for (const std::string_view head :
-       {"atarm:", "atcall:", "atturn:", "atclimb:"}) {
+       {"atarm:", "atcall:", "atshared:", "atturn:", "atclimb:"}) {
     const std::string spaced = std::string(head) + "~ >";
     const std::string joined = std::string(head) + "~>";
     clean(spaced, true);
     clean(joined, false);
   }
+  clean("atshared:%~ >", true);
+  clean("atshared:%~>", false);
   clean("atturn:~a ~ >", true);
   clean("atturn:~a ~>", false);
 }

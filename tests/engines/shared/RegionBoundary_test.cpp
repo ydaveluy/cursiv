@@ -2,9 +2,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/RegionBoundaryGrammar.hpp"
 #include "regionboundaryll/generated/Ll/Module.hpp"
 #include "regionboundarylr/generated/Lr/Module.hpp"

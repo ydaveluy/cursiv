@@ -5,8 +5,8 @@
 // global scope. Beside its names, a precedence table inside a region, whose
 // two readings, the descent's and the table's, must be the one AST.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tshadow::cursiv::std {
 

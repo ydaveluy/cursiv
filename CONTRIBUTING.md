@@ -75,14 +75,14 @@ python3 -m http.server -b localhost -d site
 
 | Area | Implementation | Tests |
 |---|---|---|
-| Grammar, AST and workspaces | `src/cursiv/core/` | `tests/core/` |
-| Parser engines | `src/cursiv/engines/` | `tests/engines/` |
-| Editor services | `src/cursiv/lsp/` | `tests/lsp/` |
+| Grammar, AST and workspaces | `src/core/cursiv/` | `tests/core/` |
+| Parser engines | `src/engines/` | `tests/engines/` |
+| Editor services | `src/lsp/cursiv/` | `tests/lsp/` |
 | Build integration | `cmake/` | `tests/integration/` |
 | Example languages | `examples/` | Each example's `tests/` directory |
 
 Follow the surrounding code style and the repository's `.clang-format`.
-Specialized contributor notes cover [LSP services](src/cursiv/lsp/README.md)
+Specialized contributor notes cover [LSP services](src/lsp/cursiv/README.md)
 and [allocator integration](cmake/patches/README.md).
 
 ## Update documentation

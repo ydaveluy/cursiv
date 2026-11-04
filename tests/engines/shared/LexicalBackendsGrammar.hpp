@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "LexicalBackendsAst.hpp"
 #include "RecursiveTerminalsGrammar.hpp"
 #include "CharactersGrammar.hpp"

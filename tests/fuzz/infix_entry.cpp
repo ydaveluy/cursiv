@@ -5,10 +5,10 @@
 #include <memory>
 #include <type_traits>
 
-#include "cursiv/core/grammar/expr.hpp"
-#include "cursiv/fuzz/CursivLexicon.hpp"
-#include "cursiv/fuzz/FuzzLane.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/expr.hpp"
+#include "cursiv/CursivLexicon.hpp"
+#include "cursiv/FuzzLane.hpp"
+#include "cursiv/Check.hpp"
 #include "fuzz/InfixEntryGrammar.hpp"
 #include "infixentry/generated/InfixEntryG/Module.hpp"
 

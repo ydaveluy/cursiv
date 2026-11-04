@@ -4,8 +4,8 @@
 // `,` and one a number no signed literal holds: the two engines write each
 // type's name into their units as the author spelled it.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace detail {
 struct CursivTag {};

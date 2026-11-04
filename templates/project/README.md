@@ -45,12 +45,12 @@ arguments or paths, and `3` for an internal or output error.
 
 | To change… | Edit |
 |---|---|
-| Syntax | `src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp` |
-| AST types | `src/@CURSIV_NEW_ID@/core/ast.hpp` |
-| Validation rules | `src/@CURSIV_NEW_ID@/core/validation/` |
-| Language services | `src/@CURSIV_NEW_ID@/core/CoreServices.hpp` and `CoreModule.cpp` |
-| CLI behavior | `src/@CURSIV_NEW_ID@/cli/main.cpp` |
-| Editor features | `src/@CURSIV_NEW_ID@/lsp/LspModule.cpp` |
+| Syntax | `src/core/@CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp` |
+| AST types | `src/core/@CURSIV_NEW_ID@/ast.hpp` |
+| Validation rules | `src/core/@CURSIV_NEW_ID@/validation/` |
+| Language services | `src/core/@CURSIV_NEW_ID@/CoreServices.hpp` and `CoreModule.cpp` |
+| CLI behavior | `src/cli.cpp` |
+| Editor features | `src/lsp/@CURSIV_NEW_ID@/LspModule.cpp` |
 | Tests | `tests/grammar_test.cpp` |
 
 Follow the [language tutorial](https://ydaveluy.github.io/cursiv/learn/walkthrough/)
@@ -78,10 +78,11 @@ cmake --build build --target @CURSIV_NEW_ID@_bench
 
 The benchmark measures parsing, document builds and installed editor providers.
 Use `--json bench.json` or `--csv bench.csv` to export results, and `--help` for
-all options. Its entry point is `src/@CURSIV_NEW_ID@/bench/main.cpp`.
+all options. Its entry point is `src/bench.cpp`.
 
 ## Optional components
 
 The CLI, server, benchmark and VS Code extension are included by default.
-Remove the component folders you do not need; CMake omits their targets and
-tests. Removing `lsp/` also disables the benchmark, which uses LSP services.
+Remove what you do not need: `src/cli.cpp`, `src/lsp.cpp` and `src/lsp/`,
+`src/bench.cpp` or `vscode/`. CMake omits their targets and tests. Removing
+`src/lsp/` also disables the benchmark, which uses LSP services.

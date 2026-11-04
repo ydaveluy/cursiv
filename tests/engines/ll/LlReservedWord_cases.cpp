@@ -2,9 +2,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/ReservedAssertGrammar.hpp"
 #include "engines/ll/ReservedEscapeGrammar.hpp"
 #include "engines/ll/ReservedWordGrammar.hpp"

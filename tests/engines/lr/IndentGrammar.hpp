@@ -3,7 +3,7 @@
 // Blocks by indentation: a statement's suite opens on a deeper line and
 // closes on a line back at an enclosing level, one dedent per level.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/lr/IndentAst.hpp"
 #include "engines/lr/VirtualStateGrammar.hpp"
 

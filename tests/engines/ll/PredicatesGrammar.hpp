@@ -5,7 +5,7 @@
 // one in hand there. Where the probe wants a longer token to be the one in
 // hand, the absorbing REST stands alone.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/PredicatesAst.hpp"
 
 namespace tpredicates {

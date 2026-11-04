@@ -18,8 +18,8 @@ to skip validation. To parse only, call `services.parser->parse(text)`.
 
 ## Check diagnostics
 
-Include `cursiv/test/ValidationHelper.hpp` and
-`cursiv/test/ExpectDiagnosticOptions.hpp`. With the Recipe `language` from
+Include `cursiv/ValidationHelper.hpp` and
+`cursiv/ExpectDiagnosticOptions.hpp`. With the Recipe `language` from
 [Test your language](../learn/testing.md):
 
 ```cpp
@@ -62,7 +62,7 @@ an expected range.
 | `expectSemanticToken` | Semantic highlighting |
 | `expectFormatting` | Formatted text |
 
-For example, with `cursiv/test/ExpectedHover.hpp` and the Recipe LSP
+For example, with `cursiv/ExpectedHover.hpp` and the Recipe LSP
 `services` created as in [Check editor features](../learn/testing.md#check-editor-features):
 
 ```cpp
@@ -86,7 +86,7 @@ that the declarations of one case do not leak into the next:
 
 ## Assertions and the test exit code
 
-Include `cursiv/test/Check.hpp`:
+Include `cursiv/Check.hpp`:
 
 | Function or macro | Purpose |
 |---|---|
@@ -99,12 +99,12 @@ Call `count_expectations()` first to report every failure, and return
 
 ## Recovery and fuzz
 
-`cursiv/test/RecoveryLane.hpp` compares how the parser repairs broken
+`cursiv/RecoveryLane.hpp` compares how the parser repairs broken
 documents with a reference file, `REFERENCE.txt`. Run the test with `--write`
 to regenerate it. If the LL and LR parsers repair a document differently,
 copy `REFERENCE.txt` to `REFERENCE-ll.txt` or `REFERENCE-lr.txt` beside it;
 `--write` then updates that copy for that parser.
 
-`cursiv/fuzz/FuzzRun.hpp` generates documents, checks their trees against the
+`cursiv/FuzzRun.hpp` generates documents, checks their trees against the
 grammar and reports grammar coverage. Each example language has both tests in
 its `tests/` directory.

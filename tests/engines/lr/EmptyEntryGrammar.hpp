@@ -3,8 +3,8 @@
 // A nullable entry: its empty production stands in the production pool, and
 // the closure must not read the next production's first slot as its own.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tempty {
 

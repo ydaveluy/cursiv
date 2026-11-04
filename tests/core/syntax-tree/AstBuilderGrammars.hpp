@@ -11,8 +11,8 @@
 #include <string_view>
 #include <variant>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // The member vocabulary over a three-level hierarchy.
 namespace tab::hier {

@@ -2,7 +2,7 @@
 // document accepted with a tree, and a run of owed insertions grows no bound.
 // A repair that never ends trips the watchdog, not the lane's timeout.
 
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 
 #include <chrono>
 #include <condition_variable>
@@ -19,15 +19,15 @@
 #include "arithmetics/generated/Arith/Table.hpp"
 #include "asi/generated/G/Parser.hpp"
 #include "asi/generated/G/Table.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/engines/lr/runtime/LrDrive.hpp"
-#include "cursiv/engines/lr/runtime/LrParseStats.hpp"
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/engines/lr/runtime/lr_lex_exact.hpp"
-#include "cursiv/engines/lr/runtime/lr_lookahead.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/lr/runtime/LrDrive.hpp"
+#include "cursiv/lr/runtime/LrParseStats.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/lr/runtime/lr_lex_exact.hpp"
+#include "cursiv/lr/runtime/lr_lookahead.hpp"
+#include "cursiv/Check.hpp"
 #include "degraded/generated/G/Parser.hpp"
 #include "degraded/generated/G/Table.hpp"
 #include "owed/generated/G/Parser.hpp"

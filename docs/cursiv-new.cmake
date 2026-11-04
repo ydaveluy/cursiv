@@ -291,12 +291,12 @@ arguments or paths, and `3` for an internal or output error.
 
 | To change… | Edit |
 |---|---|
-| Syntax | `src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp` |
-| AST types | `src/@CURSIV_NEW_ID@/core/ast.hpp` |
-| Validation rules | `src/@CURSIV_NEW_ID@/core/validation/` |
-| Language services | `src/@CURSIV_NEW_ID@/core/CoreServices.hpp` and `CoreModule.cpp` |
-| CLI behavior | `src/@CURSIV_NEW_ID@/cli/main.cpp` |
-| Editor features | `src/@CURSIV_NEW_ID@/lsp/LspModule.cpp` |
+| Syntax | `src/core/@CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp` |
+| AST types | `src/core/@CURSIV_NEW_ID@/ast.hpp` |
+| Validation rules | `src/core/@CURSIV_NEW_ID@/validation/` |
+| Language services | `src/core/@CURSIV_NEW_ID@/CoreServices.hpp` and `CoreModule.cpp` |
+| CLI behavior | `src/cli.cpp` |
+| Editor features | `src/lsp/@CURSIV_NEW_ID@/LspModule.cpp` |
 | Tests | `tests/grammar_test.cpp` |
 
 Follow the [language tutorial](https://ydaveluy.github.io/cursiv/learn/walkthrough/)
@@ -324,13 +324,14 @@ cmake --build build --target @CURSIV_NEW_ID@_bench
 
 The benchmark measures parsing, document builds and installed editor providers.
 Use `--json bench.json` or `--csv bench.csv` to export results, and `--help` for
-all options. Its entry point is `src/@CURSIV_NEW_ID@/bench/main.cpp`.
+all options. Its entry point is `src/bench.cpp`.
 
 ## Optional components
 
 The CLI, server, benchmark and VS Code extension are included by default.
-Remove the component folders you do not need; CMake omits their targets and
-tests. Removing `lsp/` also disables the benchmark, which uses LSP services.
+Remove what you do not need: `src/cli.cpp`, `src/lsp.cpp` and `src/lsp/`,
+`src/bench.cpp` or `vscode/`. CMake omits their targets and tests. Removing
+`src/lsp/` also disables the benchmark, which uses LSP services.
 ]==])
 _cursiv_new_emit([==[example/hello@CURSIV_NEW_EXT@]==] [==[// Two people.
 person Alice
@@ -341,11 +342,65 @@ person Bob
 Hello Alice!
 Hello Bob!
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/bench/main.cpp]==] [==[// The @CURSIV_NEW_ID@ benchmark: it times parsing, document builds and editor
+_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Core: the language itself. Generates the parser from the grammar, again when
+# the grammar changes, then builds the services and checks under core/. Every
+# other package links it.
+cursiv_generate_language(ID @CURSIV_NEW_ID@
+    GRAMMAR    @CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp
+    NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
+    EXTENSIONS @CURSIV_NEW_EXT@
+    OUT        @CURSIV_NEW_ID@/generated)
+
+file(GLOB_RECURSE _core CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)
+add_library(@CURSIV_NEW_ID@Core ${_core})
+target_link_libraries(@CURSIV_NEW_ID@Core PUBLIC @CURSIV_NEW_ID@Generated)
+
+# CLI: the command line. cli.cpp starts the executable; the code under cli/
+# builds into a library that the tests can link. Delete cli.cpp to drop it.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cli.cpp")
+  add_executable(@CURSIV_NEW_ID@_cli cli.cpp)
+  target_include_directories(@CURSIV_NEW_ID@_cli PRIVATE cli)
+  target_link_libraries(@CURSIV_NEW_ID@_cli PRIVATE @CURSIV_NEW_ID@Core cursiv::cli)
+  file(GLOB_RECURSE _cli CONFIGURE_DEPENDS
+       ${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp)
+  if(_cli)
+    add_library(@CURSIV_NEW_ID@Cli ${_cli})
+    target_include_directories(@CURSIV_NEW_ID@Cli PUBLIC cli)
+    target_link_libraries(@CURSIV_NEW_ID@Cli PUBLIC @CURSIV_NEW_ID@Core cursiv::cli)
+    target_link_libraries(@CURSIV_NEW_ID@_cli PRIVATE @CURSIV_NEW_ID@Cli)
+  endif()
+endif()
+
+# LSP: the language server. lsp.cpp starts the executable; the code under lsp/
+# builds into a library that the tests and the benchmark can link. Delete lsp.cpp
+# and lsp/ to drop it.
+if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lsp")
+  file(GLOB_RECURSE _lsp CONFIGURE_DEPENDS
+       ${CMAKE_CURRENT_SOURCE_DIR}/lsp/*.cpp)
+  add_library(@CURSIV_NEW_ID@Lsp ${_lsp})
+  target_include_directories(@CURSIV_NEW_ID@Lsp PUBLIC lsp)
+  target_link_libraries(@CURSIV_NEW_ID@Lsp PUBLIC @CURSIV_NEW_ID@Core cursiv::lsp)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lsp.cpp")
+    add_executable(@CURSIV_NEW_ID@_lsp lsp.cpp)
+    target_link_libraries(@CURSIV_NEW_ID@_lsp PRIVATE @CURSIV_NEW_ID@Lsp)
+  endif()
+endif()
+
+# Benchmark: bench.cpp measures the language through the LSP library. Delete it
+# to drop it.
+if(TARGET @CURSIV_NEW_ID@Lsp AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench.cpp")
+  cursiv_add_benchmark(@CURSIV_NEW_ID@ SOURCES bench.cpp)
+endif()
+
+# VS Code: a WASI build copies the language server into vscode/server/.
+cursiv_package_language(@CURSIV_NEW_ID@)
+]==])
+_cursiv_new_emit([==[src/bench.cpp]==] [==[// The @CURSIV_NEW_ID@ benchmark: it times parsing, document builds and editor
 // features on the given files. Run it with `--help` to list the options.
 
-#include "cursiv/bench/LanguageBench.hpp"
-#include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
+#include "cursiv/LanguageBench.hpp"
+#include "@CURSIV_NEW_ID@/LspModule.hpp"
 
 int main(int argc, char** argv) {
   return cursiv::bench::run_language<
@@ -353,14 +408,14 @@ int main(int argc, char** argv) {
       @CURSIV_NEW_ID@::register_lsp_services>(argc, argv);
 }
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/cli/main.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
+_cursiv_new_emit([==[src/cli.cpp]==] [==[// The @CURSIV_NEW_ID@ command line: it parses, links and validates a file and
 // prints its diagnostics. Run it with `--help` to list the options. It returns
 // 0 for no errors, 1 for document errors, 2 for invalid arguments or paths, and
 // 3 for an internal or output error.
 
-#include "cursiv/cli/cli.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
+#include "cursiv/cli.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
 // Adds the language to the workspace that the command line creates.
 constexpr auto kRegister =
@@ -373,12 +428,12 @@ int main(int argc, char** argv) {
       argc, argv, kRegister);
 }
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp]==] [==[// The grammar of the @CURSIV_NEW_ID@ language, written in C++. The build
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/@CURSIV_NEW_CLASS@Grammar.hpp]==] [==[// The grammar of the @CURSIV_NEW_ID@ language, written in C++. The build
 // generates the parser from this header.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "@CURSIV_NEW_ID@/core/ast.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "@CURSIV_NEW_ID@/ast.hpp"
 
 // The sample language declares people and greets them:
 //
@@ -438,12 +493,12 @@ struct @CURSIV_NEW_CLASS@ : cursiv::GrammarSpec {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreModule.cpp]==] [==[// Installs the services of the @CURSIV_NEW_ID@ language: first the parser and
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/CoreModule.cpp]==] [==[// Installs the services of the @CURSIV_NEW_ID@ language: first the parser and
 // the other services generated from the grammar, then your own, such as the
 // validation checks.
 
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
-#include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
+#include "@CURSIV_NEW_ID@/validation/@CURSIV_NEW_CLASS@Validator.hpp"
 #include "@CURSIV_NEW_ID@/generated/@CURSIV_NEW_CLASS@/Module.hpp"
 
 namespace @CURSIV_NEW_ID@ {
@@ -455,14 +510,14 @@ void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services) {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/CoreServices.hpp]==] [==[// The services of the @CURSIV_NEW_ID@ language.
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/CoreServices.hpp]==] [==[// The services of the @CURSIV_NEW_ID@ language.
 #pragma once
 
 #include <memory>
 
-#include "cursiv/core/services/CoreServicesFor.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
+#include "cursiv/services/CoreServicesFor.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "@CURSIV_NEW_ID@/validation/@CURSIV_NEW_CLASS@Validator.hpp"
 
 // The shared services belong to the whole workspace, such as its documents.
 // The core services belong to this language. To add a service, declare it in
@@ -494,11 +549,11 @@ void install_core_module(@CURSIV_NEW_CLASS@CoreServices& services);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/ast.hpp]==] [==[// The AST classes of the @CURSIV_NEW_ID@ language. The grammar fills their
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/ast.hpp]==] [==[// The AST classes of the @CURSIV_NEW_ID@ language. The grammar fills their
 // members when it parses a document.
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // `cursiv::Extends<cursiv::AstNode>` provides the member types used below:
 // `string_view` holds text, `vector<T*>` holds child nodes, and `reference<T>`
@@ -521,7 +576,7 @@ struct Model : cursiv::Extends<cursiv::AstNode> {
 
 }  // namespace @CURSIV_NEW_ID@::ast
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.cpp]==] [==[#include "@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp"
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/validation/@CURSIV_NEW_CLASS@Validator.cpp]==] [==[#include "@CURSIV_NEW_ID@/validation/@CURSIV_NEW_CLASS@Validator.hpp"
 
 #include <memory>
 #include <string>
@@ -529,8 +584,8 @@ _cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Valid
 #include <unordered_map>
 #include <vector>
 
-#include "cursiv/core/validation/ValidationRegistry.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -573,14 +628,14 @@ void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services) {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/core/validation/@CURSIV_NEW_CLASS@Validator.hpp]==] [==[// The validation checks of the @CURSIV_NEW_ID@ language: rules that the
+_cursiv_new_emit([==[src/core/@CURSIV_NEW_ID@/validation/@CURSIV_NEW_CLASS@Validator.hpp]==] [==[// The validation checks of the @CURSIV_NEW_ID@ language: rules that the
 // grammar alone cannot express. Declare a check here, write it in the .cpp
 // file and register it in `register_validation_checks`.
 #pragma once
 
-#include "cursiv/core/services/DefaultCoreService.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "@CURSIV_NEW_ID@/core/ast.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "@CURSIV_NEW_ID@/ast.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -601,15 +656,27 @@ void register_validation_checks(@CURSIV_NEW_CLASS@CoreServices& services);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspModule.cpp]==] [==[#include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
+_cursiv_new_emit([==[src/lsp.cpp]==] [==[// The @CURSIV_NEW_ID@ language server. The editor starts it and talks to it
+// over standard input and output.
+
+#include "cursiv/runtime/LanguageServerMain.hpp"
+#include "@CURSIV_NEW_ID@/LspModule.hpp"
+
+int main(int argc, char** argv) {
+  return cursiv::run_language_server_main<
+      @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedServices>(
+      argc, argv, "@CURSIV_NEW_ID@-lsp", &@CURSIV_NEW_ID@::register_lsp_services);
+}
+]==])
+_cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspModule.cpp]==] [==[#include "@CURSIV_NEW_ID@/LspModule.hpp"
 
 #include <memory>
 #include <utility>
 
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -632,10 +699,10 @@ bool register_lsp_services(cursiv::SharedCoreServices& sharedServices) {
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspModule.hpp]==] [==[#pragma once
+_cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspModule.hpp]==] [==[#pragma once
 
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "@CURSIV_NEW_ID@/lsp/LspServices.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "@CURSIV_NEW_ID@/LspServices.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -649,13 +716,13 @@ bool register_lsp_services(cursiv::SharedCoreServices& sharedServices);
 
 }  // namespace @CURSIV_NEW_ID@
 ]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/LspServices.hpp]==] [==[// The services of the language server: the core services of the language plus
+_cursiv_new_emit([==[src/lsp/@CURSIV_NEW_ID@/LspServices.hpp]==] [==[// The services of the language server: the core services of the language plus
 // the editor services. To add an editor service, declare it here.
 #pragma once
 
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
 
 namespace @CURSIV_NEW_ID@ {
 
@@ -679,61 +746,6 @@ struct @CURSIV_NEW_CLASS@Services final : @CURSIV_NEW_CLASS@CoreServices,
 };
 
 }  // namespace @CURSIV_NEW_ID@
-]==])
-_cursiv_new_emit([==[src/@CURSIV_NEW_ID@/lsp/main.cpp]==] [==[// The @CURSIV_NEW_ID@ language server. The editor starts it and talks to it
-// over standard input and output.
-
-#include "cursiv/lsp/runtime/LanguageServerMain.hpp"
-#include "@CURSIV_NEW_ID@/lsp/LspModule.hpp"
-
-int main(int argc, char** argv) {
-  return cursiv::run_language_server_main<
-      @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@SharedServices>(
-      argc, argv, "@CURSIV_NEW_ID@-lsp", &@CURSIV_NEW_ID@::register_lsp_services);
-}
-]==])
-_cursiv_new_emit([==[src/CMakeLists.txt]==] [==[# Generate the parser from the grammar. The build regenerates it when the
-# grammar changes.
-cursiv_generate_language(ID @CURSIV_NEW_ID@
-    GRAMMAR    @CURSIV_NEW_ID@/core/@CURSIV_NEW_CLASS@Grammar.hpp
-    NAMESPACE  @CURSIV_NEW_ID@::@CURSIV_NEW_CLASS@
-    EXTENSIONS @CURSIV_NEW_EXT@
-    OUT        @CURSIV_NEW_ID@/generated)
-
-# The language library: every .cpp file under core/.
-file(GLOB_RECURSE _core CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/core/*.cpp)
-add_library(@CURSIV_NEW_ID@Core ${_core})
-target_link_libraries(@CURSIV_NEW_ID@Core PUBLIC @CURSIV_NEW_ID@Generated)
-
-# The command line, the language server and the benchmark are optional:
-# delete the cli/, lsp/ or bench/ folder to drop its target.
-file(GLOB_RECURSE _cli CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/cli/*.cpp)
-if(_cli)
-  add_executable(@CURSIV_NEW_ID@_cli ${_cli})
-  target_link_libraries(@CURSIV_NEW_ID@_cli
-                        PRIVATE @CURSIV_NEW_ID@Core cursiv::cli)
-endif()
-
-if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/lsp")
-  file(GLOB_RECURSE _lsp CONFIGURE_DEPENDS
-       ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/lsp/*.cpp)
-  list(REMOVE_ITEM _lsp ${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/lsp/main.cpp)
-  add_library(@CURSIV_NEW_ID@Lsp ${_lsp})
-  target_link_libraries(@CURSIV_NEW_ID@Lsp PUBLIC @CURSIV_NEW_ID@Core cursiv::lsp)
-  add_executable(@CURSIV_NEW_ID@_lsp @CURSIV_NEW_ID@/lsp/main.cpp)
-  target_link_libraries(@CURSIV_NEW_ID@_lsp PRIVATE @CURSIV_NEW_ID@Lsp)
-endif()
-
-if(TARGET @CURSIV_NEW_ID@Lsp AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/@CURSIV_NEW_ID@/bench/main.cpp")
-  cursiv_add_benchmark(@CURSIV_NEW_ID@
-      SOURCES @CURSIV_NEW_ID@/bench/main.cpp)
-endif()
-
-# WASI builds copy the language server into vscode/server/.
-cursiv_package_language(@CURSIV_NEW_ID@)
 ]==])
 _cursiv_new_emit([==[tests/CMakeLists.txt]==] [==[# Parse the sample and check its syntax tree.
 add_executable(@CURSIV_NEW_ID@_grammar_test grammar_test.cpp)
@@ -759,11 +771,11 @@ _cursiv_new_emit([==[tests/grammar_test.cpp]==] [==[// Parses the sample documen
 #include <iterator>
 #include <string>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
-#include "@CURSIV_NEW_ID@/core/ast.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
+#include "@CURSIV_NEW_ID@/ast.hpp"
 
 namespace {
 

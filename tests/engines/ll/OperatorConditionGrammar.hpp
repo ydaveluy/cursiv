@@ -3,8 +3,8 @@
 // An operator rule that states a condition on the gap past its token reads
 // that gap, not the one in front of the token.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace toperatorcondition {
 

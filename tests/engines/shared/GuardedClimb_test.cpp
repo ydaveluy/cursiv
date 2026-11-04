@@ -1,7 +1,7 @@
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/GuardedClimbAst.hpp"
 #include "guardedclimbll/generated/Ll/Module.hpp"
 #include "guardedclimblr/generated/Lr/Module.hpp"

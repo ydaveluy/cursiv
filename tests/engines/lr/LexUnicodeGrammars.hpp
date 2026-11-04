@@ -5,8 +5,8 @@
 // Character decoding and category tests live in CharactersGrammar.hpp. These
 // remaining cases exercise rival scalar guards and intersected reservations.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tunicode {
 

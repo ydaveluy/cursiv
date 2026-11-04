@@ -142,6 +142,52 @@ The server advertises an editor feature only when its provider is installed.
 | `documentLinkProvider` | Document links | None |
 | `codeLensProvider` | Code lenses | None |
 
+## Customize completion
+
+Derive from `DefaultCompletionProvider` and override what your language changes:
+
+| Hook | Decides |
+|---|---|
+| `completionFor` | What one possible element offers |
+| `completionForCrossReference` | The items of a cross-reference |
+| `completionForKeyword` | The item of a keyword |
+| `visitReferenceCandidates` | Which targets a cross-reference proposes |
+| `createReferenceCompletionItem` | How a target is shown |
+| `getReferenceDocumentation` | The documentation of a target |
+| `filterKeyword` | Whether a keyword is offered; by default those with a letter |
+| `continueCompletion` | Whether to try the next way of reading the caret |
+| `deduplicateItems` | Which items are kept |
+| `fillCompletionItem`, `buildCompletionTextEdit` | How a value becomes an item and what it replaces |
+| `buildContexts`, `findFeaturesAt`, `findDataTypeRuleStart`, `backtrackToAnyToken`, `performCurrentTokenCompletion`, `performNextTokenCompletion` | How the caret is read |
+
+Pass a value to `accept(context, value)`. A value with no `textEdit` must match
+what is typed. It gets its label from `label`, `node` or `nodeDescription`.
+`context.node()` gives the node at the caret, or null at the very start of a
+document.
+
+## Add your own protocol methods
+
+Register methods the protocol does not define before the session starts:
+
+```cpp
+shared.languageServer->onRequest(
+    "mylang/generate",
+    [&](const lsp::LSPAny& param, const cursiv::CancellationToken& token)
+        -> lsp::LSPAny { return generate(param, token); });
+shared.languageServer->onNotification(
+    "mylang/refresh", [&](const lsp::LSPAny& param) { refresh(param); });
+```
+
+A handler receives the value the client sent, or null if it sent none. Requests
+can be cancelled, and notifications run in the order they arrive.
+
+To write to the client, call `shared.languageClient->sendNotification` or
+`sendRequest` during a session.
+
+To follow workspace folders, derive from `DefaultLanguageServer`, override
+`didChangeWorkspaceFolders`, and set `changeNotifications` on the
+`workspaceFolders` capability in `initialize`.
+
 ## Translate the text before parsing
 
 Some languages rewrite their text before reading tokens: Java decodes
@@ -179,8 +225,8 @@ document.
 `create_language` creates a workspace with your language registered:
 
 ```cpp
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "mylang/core/CoreServices.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "mylang/CoreServices.hpp"
 
 const auto language = cursiv::create_language<
     mylang::MyLangCoreServices, mylang::MyLangSharedCoreServices,

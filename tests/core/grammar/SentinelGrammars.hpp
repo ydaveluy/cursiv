@@ -4,8 +4,8 @@
 // width, and one grammar where a class that refuses it stands beside a quoted
 // run and the trivia that run up to a closer.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tsent {
 

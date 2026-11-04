@@ -4,8 +4,8 @@
 // opening keyword: surplus clauses use nullable auxiliaries, which must keep
 // end assertions in the body and add no conflict of their own.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/BoundaryGrammar.hpp"
 #include "engines/lr/NewlineGrammar.hpp"
 

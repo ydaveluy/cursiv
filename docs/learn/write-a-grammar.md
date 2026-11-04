@@ -24,12 +24,12 @@ cd calc
 ```
 
 Replace `example/hello.calc` with the program above. Then replace
-`src/calc/core/ast.hpp` with the AST classes that the grammar fills:
+`src/core/calc/ast.hpp` with the AST classes that the grammar fills:
 
-```cpp title="src/calc/core/ast.hpp"
+```cpp title="src/core/calc/ast.hpp"
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace calc::ast {
 
@@ -77,14 +77,14 @@ and evaluations, and an `Expression*` member holds any expression. See
 [AST vocabulary](../reference/ast.md).
 
 The scaffold's checks use hello-world classes that Calc does not have. Replace
-the two files in `src/calc/core/validation/` with a validator that checks
+the two files in `src/core/calc/validation/` with a validator that checks
 nothing yet. [Custom validation](../recipes/validation.md) shows how to add
 checks.
 
-```cpp title="src/calc/core/validation/CalcValidator.hpp"
+```cpp title="src/core/calc/validation/CalcValidator.hpp"
 #pragma once
 
-#include "cursiv/core/services/DefaultCoreService.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
 
 namespace calc {
 
@@ -99,12 +99,12 @@ void register_validation_checks(CalcCoreServices& services);
 }  // namespace calc
 ```
 
-```cpp title="src/calc/core/validation/CalcValidator.cpp"
-#include "calc/core/validation/CalcValidator.hpp"
+```cpp title="src/core/calc/validation/CalcValidator.cpp"
+#include "calc/validation/CalcValidator.hpp"
 
 #include <memory>
 
-#include "calc/core/CoreServices.hpp"
+#include "calc/CoreServices.hpp"
 
 namespace calc {
 
@@ -117,7 +117,7 @@ void register_validation_checks(CalcCoreServices& services) {
 
 ## 2. Read the tokens
 
-In `src/calc/core/CalcGrammar.hpp`, delete the members of `struct Calc`. Each
+In `src/core/calc/CalcGrammar.hpp`, delete the members of `struct Calc`. Each
 step below appends members to it. Start with the terminals and the trivia:
 
 ```cpp

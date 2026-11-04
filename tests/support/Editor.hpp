@@ -11,10 +11,10 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/ExpectedCompletion.hpp"
 #include "lsp/uri.h"
 
 namespace support {

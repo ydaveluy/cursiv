@@ -6,9 +6,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/engines/ll/runtime/ll_matcher.hpp"
-#include "cursiv/engines/shared/runtime/PredicateState.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/runtime/ll_matcher.hpp"
+#include "cursiv/shared/runtime/PredicateState.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LexicalPredicatesAst.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/PredicatesAst.hpp"

@@ -24,12 +24,12 @@
 #include <sched.h>
 #endif
 
-#include "cursiv/bench/PerfCounters.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
+#include "cursiv/PerfCounters.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "recovery_metric/support/FaultClass.hpp"
 #include "recovery_metric/support/FaultCorpus.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"

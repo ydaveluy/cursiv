@@ -7,10 +7,10 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 
 namespace caret_offers {
 

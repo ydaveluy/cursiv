@@ -6,9 +6,9 @@
 #include <cstdio>
 #include <string_view>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 
 inline void same_text(const char* engine, std::string_view input,
                       std::string_view got, std::string_view expected) {

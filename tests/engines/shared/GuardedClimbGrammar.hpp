@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/shared/GuardedClimbAst.hpp"
 
 // Calls, a guarded word infix or postfix, and the pattern boundaries that

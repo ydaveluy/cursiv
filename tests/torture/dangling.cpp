@@ -9,12 +9,12 @@
 #include <memory>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectedCompletion.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectedCompletion.hpp"
 #include "election/generated/Election/Module.hpp"
 #include "support/Editor.hpp"
 #include "support/World.hpp"

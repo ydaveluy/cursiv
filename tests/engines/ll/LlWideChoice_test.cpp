@@ -2,9 +2,9 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/WideChoiceGrammar.hpp"
 #include "widechoicell/generated/Ll/Module.hpp"
 #include "widechoicell/generated/Ll/Table.hpp"

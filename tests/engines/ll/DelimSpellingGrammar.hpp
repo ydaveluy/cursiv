@@ -3,8 +3,8 @@
 // The brackets the indentation is blind inside of, using literals, spelled
 // terminals, named terminals and a multi-byte opener in one language.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tdelim {
 namespace ast {

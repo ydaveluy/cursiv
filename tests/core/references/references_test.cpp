@@ -1,7 +1,7 @@
 // Names and what they reach: the linker, the name provider, references across
 // documents, and the scopes computed and provided.
 
-#include "cursiv/core/references/References.hpp"
+#include "cursiv/references/References.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -18,39 +18,39 @@
 
 #include "core/references/NarrowedSiteGrammar.hpp"
 #include "core/references/SharedRecordGrammar.hpp"
-#include "cursiv/core/execution/TaskScheduler.hpp"
-#include "cursiv/core/observability/ObservabilitySink.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultLinker.hpp"
-#include "cursiv/core/references/DefaultNameProvider.hpp"
-#include "cursiv/core/references/DefaultScopeComputation.hpp"
-#include "cursiv/core/references/DefaultScopeProvider.hpp"
-#include "cursiv/core/references/LinkingError.hpp"
-#include "cursiv/core/references/LinkingResult.hpp"
-#include "cursiv/core/references/NameProvider.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/syntax-tree/AstMetaData.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/CstNode.hpp"
-#include "cursiv/core/syntax-tree/DefaultAstReflection.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/syntax-tree/ReferenceInfo.hpp"
-#include "cursiv/core/utils/FunctionRef.hpp"
-#include "cursiv/core/validation/DefaultDocumentValidator.hpp"
-#include "cursiv/core/workspace/DefaultDocumentFactory.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/IndexManager.hpp"
-#include "cursiv/core/workspace/ReferenceDescription.hpp"
-#include "cursiv/core/workspace/WorkspaceLock.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectedFindReferences.hpp"
+#include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultLinker.hpp"
+#include "cursiv/references/DefaultNameProvider.hpp"
+#include "cursiv/references/DefaultScopeComputation.hpp"
+#include "cursiv/references/DefaultScopeProvider.hpp"
+#include "cursiv/references/LinkingError.hpp"
+#include "cursiv/references/LinkingResult.hpp"
+#include "cursiv/references/NameProvider.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/AstMetaData.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/DefaultAstReflection.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/syntax-tree/ReferenceInfo.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/validation/DefaultDocumentValidator.hpp"
+#include "cursiv/workspace/DefaultDocumentFactory.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/IndexManager.hpp"
+#include "cursiv/workspace/ReferenceDescription.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectedFindReferences.hpp"
 #include "languages/multiref/MultiRefGrammar.hpp"
 #include "multiref/generated/MultiG/AstReflection.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
@@ -1352,6 +1352,21 @@ struct ExportPair final : cursiv::DefaultScopeComputation {
 // they share a symbol, and are still two nodes. The multi reference holds
 // both; find-references lists their one declaration site and their one
 // reference once each.
+void an_unresolved_reference_names_every_type_it_accepts() {
+  support::World<> world;
+  (void)support::add_language<cursiv::CoreServices>(
+      world.shared, {"sharedrecord", {".srm"}, {}},
+      tsr::generated::SharedRecord::create_parser(),
+      tsr::generated::SharedRecord::create_ast_reflection());
+
+  const cursiv::Document* const document =
+      world.built("file:///absent.srm", "same;absent");
+  CHECK(document->diagnostics.size() == 1);
+  if (document->diagnostics.empty()) return;
+  CHECK(document->diagnostics.front().message ==
+        "Could not resolve reference to Outer or Inner named 'absent'.");
+}
+
 void two_nodes_on_one_record_are_two_targets() {
   support::World<> world;
   const cursiv::CoreServices* const srm =
@@ -1398,6 +1413,7 @@ void two_nodes_on_one_record_are_two_targets() {
 
 void run() {
   the_grammar_confesses_its_multi_reference();
+  an_unresolved_reference_names_every_type_it_accepts();
   navigation_uses_the_documents_language_id();
   navigation_resolves_a_reference_at_computed_scopes();
   a_declaration_stands_for_its_group(true);

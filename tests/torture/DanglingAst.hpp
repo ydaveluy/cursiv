@@ -5,7 +5,7 @@
 
 #include <string_view>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tdang::ast {
 

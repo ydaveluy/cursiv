@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include <cstdint>
 // Operators of a precedence table written in place as sequences: each reads as
 // an unnamed data rule, and its value is what a data rule's would be.

@@ -2,9 +2,9 @@
 
 #include <memory>
 
-#include "arithmetics/core/ArithmeticsGrammar.hpp"
+#include "arithmetics/ArithmeticsGrammar.hpp"
 #include "arithmetics/generated/Arith/Module.hpp"
-#include "cursiv/fuzz/FuzzLane.hpp"
+#include "cursiv/FuzzLane.hpp"
 
 namespace {
 void fuzz_arithmetics() {

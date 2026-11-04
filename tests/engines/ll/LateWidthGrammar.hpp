@@ -1,5 +1,5 @@
 #pragma once
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/LateWidthAst.hpp"
 
 namespace tlllatewidth {

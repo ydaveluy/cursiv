@@ -3,14 +3,14 @@
 #include <string>
 #include <vector>
 
-#include "arithmetics/core/ArithmeticsGrammar.hpp"
+#include "arithmetics/ArithmeticsGrammar.hpp"
 #include "arithmetics/generated/Arith/AstReflection.hpp"
 #include "arithmetics/generated/Arith/Grammar.hpp"
 #include "arithmetics/generated/Arith/Module.hpp"
 #include "arithmetics/generated/Arith/Parser.hpp"
 #include "arithmetics/generated/Arith/Table.hpp"
 #include "bench.hpp"
-#include "cursiv/fuzz/CursivActions.hpp"
+#include "cursiv/CursivActions.hpp"
 #include "recovery_metric/Searching.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 

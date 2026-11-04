@@ -6,8 +6,8 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/lr/RunOnEquationsGrammar.hpp"
 #include "runonlr/generated/Lr/Module.hpp"
 

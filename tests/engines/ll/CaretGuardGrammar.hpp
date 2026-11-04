@@ -3,8 +3,8 @@
 // Two references that only a guard tells apart: the text behind the name
 // decides which member it fills, before the name is read.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tllcaretguard {
 

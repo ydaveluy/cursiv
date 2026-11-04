@@ -3,8 +3,8 @@
 // Left recursion inside or behind optional items: each engine reads the
 // alternatives the items spell, the item taken before the item left out.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlloption {
 

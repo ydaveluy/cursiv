@@ -3,8 +3,8 @@
 // A loop over `dedent`, which closes a level and consumes no byte: each turn
 // closes the next level, as many as the text leaves open.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlldedentrun {
 struct Closure : cursiv::Extends<cursiv::AstNode> {};

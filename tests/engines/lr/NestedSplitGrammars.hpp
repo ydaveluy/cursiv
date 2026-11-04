@@ -5,8 +5,8 @@
 // contract is that a nest of undecidable cells still yields the one tree --
 // the narrow one and the widest the lane drives.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // Five arms outside, five inside: twenty-five readings.
 namespace tnsplit {

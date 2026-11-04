@@ -4,8 +4,8 @@
 // imply their tokens at the end of input, and arms that reduce one byte on
 // either side of an unbounded run.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tvirtual {
 

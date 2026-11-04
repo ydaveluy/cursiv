@@ -3,7 +3,7 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/core/references/DefaultScopeComputation.hpp"
+#include "cursiv/references/DefaultScopeComputation.hpp"
 #include "workspace/core/ast.hpp"
 
 // A declaration inside a package is known by its qualifier -- `foo.bar.E2`,

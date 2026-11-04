@@ -28,10 +28,10 @@ calculated values.
 
 ## Read the implementation
 
-- [Grammar](src/arithmetics/core/ArithmeticsGrammar.hpp): `infix` defines
+- [Grammar](src/arithmetics/ArithmeticsGrammar.hpp): `infix` defines
   operator precedence and associativity.
-- [AST](src/arithmetics/core/ast.hpp): definitions, calls and expressions.
-- [Services](src/arithmetics/core/): validation and expression evaluation.
+- [AST](src/arithmetics/ast.hpp): definitions, calls and expressions.
+- [Services](src/arithmetics/): validation and expression evaluation.
 
 `example/demo.calc` is valid input. `example/broken.calc` shows a syntax error
 caused by a missing semicolon.

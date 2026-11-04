@@ -1,6 +1,7 @@
 if(NOT CMAKE_CROSSCOMPILING)
 
-  set(_refusal_libraries cursivCore cursivGen cursivLrGen cursivLlGen)
+  set(_refusal_libraries cursivCore cursivEngineShared cursivEngineLl
+      cursivEngineLr cursivGen cursivLrGen cursivLlGen)
   if(TARGET cursivAllocator)
     list(APPEND _refusal_libraries cursivAllocator)
   endif()

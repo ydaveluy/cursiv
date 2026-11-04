@@ -5,9 +5,9 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/test/MutationOracle.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
-#include "statemachine/core/ast.hpp"
+#include "cursiv/MutationOracle.hpp"
+#include "cursiv/RecoveryLane.hpp"
+#include "statemachine/ast.hpp"
 #include "statemachine/generated/SM/Module.hpp"
 
 namespace {

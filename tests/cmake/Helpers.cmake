@@ -1,6 +1,7 @@
 function(cursiv_test name src)
   add_executable(${name} ${src})
-  target_link_libraries(${name} PRIVATE cursiv::test ${ARGN})
+  target_link_libraries(${name} PRIVATE cursiv::test cursiv::engine::ll
+      cursiv::engine::lr ${ARGN})
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME ${name} COMMAND ${name})
 endfunction()

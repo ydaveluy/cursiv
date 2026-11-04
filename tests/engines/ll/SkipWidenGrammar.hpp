@@ -2,8 +2,8 @@
 // the newline is skipped inside the brackets and a token again behind them.
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tllwiden {
 struct Value : cursiv::Extends<cursiv::AstNode> {};

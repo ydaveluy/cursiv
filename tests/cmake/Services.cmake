@@ -8,7 +8,7 @@ cursiv_grammar(block lsp/completion/BlockGrammar.hpp tblock::Block EXTENSIONS .b
 cursiv_grammar_pair(words lsp/completion/WordsGrammar.hpp twords::Lr twords::Ll)
 
 cursiv_grammar(repairmsg core/validation/RepairMessageGrammar.hpp tmsg::MessageG)
-cursiv_test(validation_test core/validation/validation_test.cpp wsCore repairmsgGenerated)
+cursiv_test(validation_test core/validation/validation_test.cpp cursiv::lsp wsCore repairmsgGenerated)
 
 cursiv_test(mcp_test mcp/mcp_test.cpp cursiv::lsp cursiv::mcp wsLsp
     wordslrGenerated)
@@ -49,7 +49,8 @@ if(CURSIV_NODE AND TARGET domainmodel_lsp AND NOT CMAKE_CROSSCOMPILING)
   set_tests_properties(lsp_session PROPERTIES TIMEOUT 60)
 endif()
 
-cursiv_test(navigation_test lsp/navigation_test.cpp cursiv::lsp wsLsp multirefGenerated)
+cursiv_test(navigation_test lsp/navigation_test.cpp cursiv::lsp wsLsp multirefGenerated
+    duallrGenerated dualllGenerated)
 
 cursiv_test(presentation_test lsp/presentation_test.cpp cursiv::lsp wsCore)
 

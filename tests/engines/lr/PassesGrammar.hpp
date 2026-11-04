@@ -5,8 +5,8 @@
 // own opening keyword in one grammar. No rule is shared, so each case keeps
 // the shape it pins.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/EmptyEntryGrammar.hpp"
 #include "engines/lr/LongRunGrammar.hpp"
 

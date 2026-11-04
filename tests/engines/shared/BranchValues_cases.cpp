@@ -10,11 +10,11 @@
 
 #include "branchvaluesll/generated/Ll/Module.hpp"
 #include "branchvalueslr/generated/Lr/Module.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstBuildError.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstBuildError.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/BranchValuesGrammar.hpp"
 
 namespace branch_values_cases {

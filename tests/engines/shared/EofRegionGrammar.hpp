@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "EofRegionAst.hpp"
 namespace teofregion {
 

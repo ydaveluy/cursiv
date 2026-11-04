@@ -29,12 +29,12 @@ unresolved supertype.
 
 ## Read the implementation
 
-- [Grammar](src/domainmodel/core/DomainModelGrammar.hpp): declarations and
+- [Grammar](src/domainmodel/DomainModelGrammar.hpp): declarations and
   qualified names such as `package.Type`.
-- [AST](src/domainmodel/core/ast.hpp): entities, features and packages.
-- [Scoping](src/domainmodel/core/references/): symbols visible within and
+- [AST](src/domainmodel/ast.hpp): entities, features and packages.
+- [Scoping](src/domainmodel/references/): symbols visible within and
   across packages.
-- [Formatter](src/domainmodel/lsp/): spacing and indentation rules.
+- [Formatter](src/domainmodel/): spacing and indentation rules.
 
 The [scoping recipe](../../docs/recipes/scoping.md) explains a small version of
 the qualified-name implementation.

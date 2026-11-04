@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <string_view>
 
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 
 namespace checks {
 

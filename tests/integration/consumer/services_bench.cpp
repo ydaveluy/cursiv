@@ -1,7 +1,7 @@
-#include "cursiv/bench/LanguageBench.hpp"
-#include "cursiv/lsp/formatting/Formatter.hpp"
-#include "cursiv/lsp/semantic/InlayHintProvider.hpp"
-#include "cursiv/lsp/symbols/DocumentSymbolProvider.hpp"
+#include "cursiv/LanguageBench.hpp"
+#include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/semantic/InlayHintProvider.hpp"
+#include "cursiv/symbols/DocumentSymbolProvider.hpp"
 #include "tiny/generated/Tiny/Module.hpp"
 
 struct Symbols final : cursiv::DocumentSymbolProvider {

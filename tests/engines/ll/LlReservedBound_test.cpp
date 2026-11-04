@@ -24,12 +24,12 @@
 #include "boundwidelr/generated/WideLr/Module.hpp"
 #include "boundwidelr/generated/WideLr/Parser.hpp"
 #include "boundwidelr/generated/WideLr/Table.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/lr/runtime/LrDrive.hpp"
-#include "cursiv/engines/lr/runtime/lr_matcher.hpp"
-#include "cursiv/engines/shared/runtime/Scan.hpp"
-#include "cursiv/engines/shared/table/Token.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/lr/runtime/LrDrive.hpp"
+#include "cursiv/lr/runtime/lr_matcher.hpp"
+#include "cursiv/shared/runtime/Scan.hpp"
+#include "cursiv/shared/table/Token.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/ReservedBoundAst.hpp"
 
 namespace {

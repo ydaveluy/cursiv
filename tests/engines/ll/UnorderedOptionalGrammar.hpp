@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // Unordered groups whose items the text may leave out: an absent item writes
 // nothing, as an absent `option` does in a sequence.

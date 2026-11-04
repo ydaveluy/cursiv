@@ -30,12 +30,12 @@ recipe Pancakes {
 ## 1. Define the AST
 
 The abstract syntax tree (AST) holds the data your program will use. Replace
-`core/ast.hpp` with:
+`src/core/recipe/ast.hpp` with:
 
-```cpp title="src/recipe/core/ast.hpp"
+```cpp title="src/core/recipe/ast.hpp"
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace recipe::ast {
 
@@ -75,11 +75,11 @@ resolves to a `T` after parsing. See [AST vocabulary](../reference/ast.md).
 
 Replace the grammar header with:
 
-```cpp title="src/recipe/core/RecipeGrammar.hpp"
+```cpp title="src/core/recipe/RecipeGrammar.hpp"
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "recipe/core/ast.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "recipe/ast.hpp"
 
 namespace recipe {
 
@@ -137,12 +137,12 @@ The scaffold's validator checks hello-world types that no longer exist.
 Replace both validator files with a check that rejects an ingredient used
 twice in one recipe:
 
-```cpp title="src/recipe/core/validation/RecipeValidator.hpp"
+```cpp title="src/core/recipe/validation/RecipeValidator.hpp"
 #pragma once
 
-#include "cursiv/core/services/DefaultCoreService.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "recipe/core/ast.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "recipe/ast.hpp"
 
 namespace recipe {
 
@@ -160,14 +160,14 @@ void register_validation_checks(RecipeCoreServices& services);
 }  // namespace recipe
 ```
 
-```cpp title="src/recipe/core/validation/RecipeValidator.cpp"
-#include "recipe/core/validation/RecipeValidator.hpp"
+```cpp title="src/core/recipe/validation/RecipeValidator.cpp"
+#include "recipe/validation/RecipeValidator.hpp"
 
 #include <memory>
 #include <unordered_set>
 
-#include "cursiv/core/validation/ValidationRegistry.hpp"
-#include "recipe/core/CoreServices.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
+#include "recipe/CoreServices.hpp"
 
 namespace recipe {
 

@@ -1,4 +1,4 @@
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace indirect_fold_cases { void run(); }
 namespace left_option_cases { void run(); }

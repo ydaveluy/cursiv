@@ -9,8 +9,8 @@
 #include <random>
 #include <vector>
 
-#include "cursiv/engines/ll/runtime/LlEpisodeCache.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/runtime/LlEpisodeCache.hpp"
+#include "cursiv/Check.hpp"
 
 namespace cursiv {
 

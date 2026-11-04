@@ -12,19 +12,19 @@ grammar header:
 
 ```cmake title="src/CMakeLists.txt"
 cursiv_generate_language(ID         requirements-lang
-    GRAMMAR    requirements/core/RequirementsGrammar.hpp
+    GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Requirements
     EXTENSIONS .req
     OUT        requirements/generated)
 
 cursiv_generate_language(ID         tests-lang
-    GRAMMAR    requirements/core/RequirementsGrammar.hpp
+    GRAMMAR    requirements/RequirementsGrammar.hpp
     NAMESPACE  req::Tests
     EXTENSIONS .tst
     OUT        requirements/generated)
 
 file(GLOB_RECURSE _core CONFIGURE_DEPENDS
-     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/core/*.cpp)
+     ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp)
 add_library(requirementsCore ${_core})
 target_link_libraries(requirementsCore
     PUBLIC requirements-langGenerated tests-langGenerated)
@@ -38,8 +38,8 @@ which can share AST types. Each generated language has its own parser.
 Define one installer per language and register both in the shared services:
 
 ```cpp title="core/CoreModule.cpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "requirements/core/CoreModule.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "requirements/CoreModule.hpp"
 #include "requirements/generated/Requirements/Module.hpp"
 #include "requirements/generated/Tests/Module.hpp"
 
@@ -87,8 +87,8 @@ file's declarations.
 The command line takes the function that registers both languages:
 
 ```cpp
-#include "cursiv/cli/cli.hpp"
-#include "requirements/core/CoreModule.hpp"
+#include "cursiv/cli.hpp"
+#include "requirements/CoreModule.hpp"
 
 int main(int argc, char** argv) {
   return cursiv::run_cli<req::RequirementsSharedCoreServices>(

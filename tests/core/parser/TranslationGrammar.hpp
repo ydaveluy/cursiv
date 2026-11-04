@@ -3,8 +3,8 @@
 // Declarations and line comments: small enough that a translated document
 // and its decoded text can be compared record by record.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace ttrans {
 

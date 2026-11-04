@@ -2,10 +2,10 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/test/MutationOracle.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
-#include "domainmodel/core/ast.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/MutationOracle.hpp"
+#include "cursiv/RecoveryLane.hpp"
+#include "domainmodel/ast.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 
 namespace {

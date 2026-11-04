@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "cursiv/fuzz/FuzzLane.hpp"
-#include "statemachine/core/StateMachineGrammar.hpp"
+#include "cursiv/FuzzLane.hpp"
+#include "statemachine/StateMachineGrammar.hpp"
 #include "statemachine/generated/SM/Module.hpp"
 
 namespace {

@@ -7,9 +7,9 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/ll_lookahead.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/KeywordTriviaAst.hpp"
 #include "keywordtriviabarell/generated/BareLl/Module.hpp"
 #include "keywordtriviabasicll/generated/BasicLl/Module.hpp"

@@ -8,8 +8,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/engines/ll/runtime/LlSearch.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/runtime/LlSearch.hpp"
+#include "cursiv/Check.hpp"
 #include "embedll/generated/DocLl/GrammarSource.hpp"
 #include "embedll/generated/DocLl/Module.hpp"
 #include "embedlr/generated/DocLr/GrammarSource.hpp"

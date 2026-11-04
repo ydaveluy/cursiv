@@ -4,8 +4,8 @@
 // front of another: whether `/` may stand before a `*` is read as far as the
 // comment it would open runs.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tlltail {
 

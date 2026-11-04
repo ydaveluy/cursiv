@@ -6,8 +6,8 @@
 // `Taken` commits each block to an equation wherever one can be read, which is
 // the reading `Open` elects.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace twhere {
 

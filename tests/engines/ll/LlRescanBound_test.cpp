@@ -9,11 +9,11 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/engines/ll/runtime/ll_lookahead.hpp"
-#include "cursiv/engines/ll/runtime/ll_rescan.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/ll/runtime/ll_lookahead.hpp"
+#include "cursiv/ll/runtime/ll_rescan.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/RescanBoundAst.hpp"
 #include "rescannarrowll/generated/NarrowLl/Module.hpp"

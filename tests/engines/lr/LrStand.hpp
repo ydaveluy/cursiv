@@ -5,12 +5,12 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/engines/lr/runtime/LrContext.hpp"
-#include "cursiv/engines/lr/runtime/LrDrive.hpp"
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/lr/runtime/LrContext.hpp"
+#include "cursiv/lr/runtime/LrDrive.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 
 namespace checks {
 

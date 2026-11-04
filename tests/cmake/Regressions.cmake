@@ -37,5 +37,5 @@ endif()
 cursiv_grammar(growthfastalr engines/lr/GrowthGrammars.hpp tgfasta::Lr ENGINE LR)
 cursiv_grammar(growth engines/lr/GrowthGrammars.hpp tgrowth::G ENGINE LR)
 cursiv_test(LrGrowth_test engines/lr/LrGrowth_test.cpp
-    growthfastalrGenerated growthGenerated)
+    cursiv::bench growthfastalrGenerated growthGenerated)
 set_tests_properties(LrGrowth_test PROPERTIES TIMEOUT 120)

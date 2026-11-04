@@ -3,8 +3,8 @@
 // A literal with a boundary of its own: `hello` may not be followed by `;`.
 // What the lexer refuses, a repair may not invent.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tbnd {
 

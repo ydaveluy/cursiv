@@ -3,8 +3,8 @@
 // A name that asserts what follows it is lexed behind a relay. The keywords
 // that spell its words reserve them all the same, whichever ranks first.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tllreservedassert {
 struct Item : cursiv::Extends<cursiv::AstNode> {

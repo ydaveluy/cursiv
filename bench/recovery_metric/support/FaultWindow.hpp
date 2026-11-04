@@ -11,8 +11,8 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/text/TextOffset.hpp"
 #include "recovery_metric/support/RepairCase.hpp"
 #include "recovery_metric/support/RepairFault.hpp"
 

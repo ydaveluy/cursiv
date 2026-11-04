@@ -6,11 +6,11 @@
 #include "compoundll/generated/Ll/Module.hpp"
 #include "compoundll/generated/Ll/Table.hpp"
 #include "compoundlr/generated/Lr/Module.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/engines/ll/runtime/ll_search.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/ll/runtime/ll_search.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/CompoundOpGrammar.hpp"
 
 // A deletion leaves the positions unchanged but asks their guards at another

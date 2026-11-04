@@ -5,7 +5,7 @@
 // whose body is one reference. The two grammars differ by their name alone,
 // which is what lets one tree hold both generated modules.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/ParityAst.hpp"
 
 namespace tpar {

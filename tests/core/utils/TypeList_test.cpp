@@ -1,12 +1,12 @@
 // Lists of thousands under a template depth of 100: a fold whose depth grows
 // with the list does not compile.
-#include "cursiv/core/utils/typelist.hpp"
+#include "cursiv/utils/typelist.hpp"
 
 #include <cstddef>
 #include <type_traits>
 #include <utility>
 
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

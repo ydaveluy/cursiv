@@ -16,10 +16,10 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/utils/FunctionRef.hpp"
-#include "cursiv/fuzz/GrammarActions.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/GrammarActions.hpp"
 
 namespace cursiv::recovery_metric {
 

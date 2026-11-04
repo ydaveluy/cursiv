@@ -6,8 +6,8 @@
 // asked about it, and a line comment can end right before one. A size is a
 // terminal of words in nested choices, keywords of either case.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace twords {
 
@@ -16,6 +16,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   bool flag = false;
   string_view size;
+  reference<Item> target;
 };
 struct Items : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
@@ -44,8 +45,16 @@ struct Suite : cursiv::GrammarSpec {
   struct SizeItem : rule<create<ast::Item>(assign<&ast::Item::name>(ref<ID>) +
                                            assign<&ast::Item::size>(ref<SIZE>) +
                                            lit<";">)> {};
+  // A name in several tokens, through rules that write nothing on the way.
+  struct Part : rule<ref<ID> | kw<"in">> {};
+  struct Path : rule<some(ref<Part>, lit<".">)> {};
+  struct PathItem
+      : rule<create<ast::Item>(assign<&ast::Item::name>(ref<Path>) +
+                               lit<"->"> + assign<&ast::Item::target>(ref<Path>) +
+                               lit<";">)> {};
   struct Root
       : rule<create<ast::Items>(
+            (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
             (lit<"branch:"> +
              many(append<&ast::Items::items>(ref<BranchItem>))) |
             (lit<"whole:"> + many(append<&ast::Items::items>(ref<WholeItem>))) |

@@ -9,11 +9,11 @@
 
 #include "condgrowthll/generated/Ll/Module.hpp"
 #include "condgrowthlr/generated/Lr/Module.hpp"
-#include "cursiv/bench/PerfCounters.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/shared/runtime/PredicateRuns.hpp"
-#include "cursiv/engines/shared/runtime/PredicateState.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/PerfCounters.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/shared/runtime/PredicateRuns.hpp"
+#include "cursiv/shared/runtime/PredicateState.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/ConditionGrowthGrammar.hpp"
 

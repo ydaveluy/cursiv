@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // Prefix and postfix levels in a precedence table: each level reads the one
 // below it as its operand, so a prefix applies to everything that binds

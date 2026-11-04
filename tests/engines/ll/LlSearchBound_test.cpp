@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/engines/ll/runtime/ll_search.hpp"
-#include "cursiv/engines/shared/runtime/LexSuffixSession.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/runtime/ll_search.hpp"
+#include "cursiv/shared/runtime/LexSuffixSession.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "llindent/generated/Ll/Table.hpp"
 #include "parityll/generated/Ll/Table.hpp"

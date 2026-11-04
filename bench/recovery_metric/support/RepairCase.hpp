@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/text/TextOffset.hpp"
+#include "cursiv/text/TextOffset.hpp"
 #include "recovery_metric/support/RepairFault.hpp"
 
 namespace cursiv::recovery_metric {

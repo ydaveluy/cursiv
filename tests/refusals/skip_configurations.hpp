@@ -7,9 +7,9 @@
 #include <type_traits>
 #include <utility>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/utils/typelist.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/utils/typelist.hpp"
 
 namespace refuse {
 

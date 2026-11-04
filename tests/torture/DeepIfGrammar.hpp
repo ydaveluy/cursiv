@@ -3,7 +3,7 @@
 // The dangling else: `if a then if b then x else e` reads two ways, and no
 // precedence says which -- the table keeps both actions and the engine elects.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "torture/DanglingAst.hpp"
 
 namespace tdang {

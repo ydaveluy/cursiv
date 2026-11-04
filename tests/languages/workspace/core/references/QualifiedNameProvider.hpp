@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/services/SharedCoreServices.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
 #include "workspace/core/ast.hpp"
 
 // The name a declaration answers to from outside its package: `foo.bar.E2`

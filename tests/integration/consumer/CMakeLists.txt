@@ -19,8 +19,7 @@ cursiv_generate_language(ID         tiny
     GRAMMAR    tiny/TinyParser.hpp
     NAMESPACE  tiny::Tiny
     EXTENSIONS .tiny
-    OUT        ${CMAKE_CURRENT_BINARY_DIR}/generated-src/src/tiny/generated
-    INCLUDE_DIRS src)
+    OUT        ${CMAKE_CURRENT_BINARY_DIR}/generated-src/src/tiny/generated)
 
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE tinyGenerated)

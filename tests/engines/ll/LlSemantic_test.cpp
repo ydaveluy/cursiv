@@ -1,5 +1,5 @@
 // Semantic, completion and trivia cases share one generated language.
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 namespace ll_caret_agreement_cases { void run(); }
 namespace ll_caret_depth_cases { void run(); }
 namespace ll_creation_boundary_cases { void run(); }

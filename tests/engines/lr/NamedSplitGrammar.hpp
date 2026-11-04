@@ -5,8 +5,8 @@
 // token and the literal that decides. What the elected reading named is what
 // the AST holds.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tnamedsplit {
 

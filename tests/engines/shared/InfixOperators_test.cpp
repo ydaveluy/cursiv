@@ -9,11 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/fuzz/FuzzLane.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/FuzzLane.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "engines/shared/InfixOperatorsGrammar.hpp"
 #include "engines/shared/Checks.hpp"

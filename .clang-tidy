@@ -128,4 +128,4 @@ Checks: |
 UseColor: true
 # Include diagnostics from the framework headers as well as the main source
 # file: grammar definitions and much of the parser runtime live in headers.
-HeaderFilterRegex: 'src/cursiv/.*\.hpp$'
+HeaderFilterRegex: 'src/.*/cursiv/.*\.hpp$'

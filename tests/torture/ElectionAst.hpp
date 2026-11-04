@@ -4,7 +4,7 @@
 // rule whose own alternatives are ranked at the election, and a run grouped
 // into pairs or triples.
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace telect::ast {
 

@@ -11,11 +11,11 @@
 
 #include <unistd.h>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/AstText.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/AstText.hpp"
 #include "oracle/RgramCfg.hpp"
 #include "oracle/RgramGrammar.hpp"
 

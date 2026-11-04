@@ -1,6 +1,6 @@
 #include <algorithm>
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
 #include "termcondlr/generated/Lr/Module.hpp"
 #include "termcondlr/generated/Lr/Parser.hpp"
 #include <cstdint>
@@ -12,15 +12,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/utils/typelist.hpp"
-#include "cursiv/engines/ll/gen/LlLowering.hpp"
-#include "cursiv/engines/ll/gen/ll_build.hpp"
-#include "cursiv/engines/lr/gen/LrLowering.hpp"
-#include "cursiv/engines/lr/gen/lr_build.hpp"
-#include "cursiv/engines/shared/table/GapLeaf.hpp"
-#include "cursiv/engines/shared/table/LexNode.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/utils/typelist.hpp"
+#include "cursiv/ll/gen/LlLowering.hpp"
+#include "cursiv/ll/gen/ll_build.hpp"
+#include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/gen/lr_build.hpp"
+#include "cursiv/shared/table/GapLeaf.hpp"
+#include "cursiv/shared/table/LexNode.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/RuleConditionGrammar.hpp"
 #include "rcondll/generated/Ll/Module.hpp"
 #include "rcondnest/generated/Nested/Module.hpp"

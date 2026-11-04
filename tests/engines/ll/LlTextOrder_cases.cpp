@@ -4,10 +4,10 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/CstNode.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"

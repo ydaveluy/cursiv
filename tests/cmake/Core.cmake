@@ -1,12 +1,12 @@
 cursiv_test(bench_test bench/bench_test.cpp cursiv::bench wsLsp)
 
-cursiv_test(CliUtils_test cli/CliUtils_test.cpp cursiv::cli wsCore)
+cursiv_test(CliUtils_test cli/CliUtils_test.cpp cursiv::cli cursiv::lsp wsCore)
 target_compile_definitions(CliUtils_test PRIVATE
     CURSIV_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 
 cursiv_test(text_test core/text/text_test.cpp)
 
-cursiv_test(grammar_test core/grammar/grammar_test.cpp duallrGenerated dualllGenerated spellplainGenerated
+cursiv_test(grammar_test core/grammar/grammar_test.cpp cursiv::lsp duallrGenerated dualllGenerated spellplainGenerated
     spelldashedGenerated sentblobGenerated sentwordGenerated sentfreeGenerated derivebaseGenerated
     derivedialectGenerated deriveruleGenerated
     derivetextdialectGenerated derivetextdialectllGenerated docswideGenerated docswidellGenerated)
@@ -22,7 +22,7 @@ cursiv_grammar_pair(dual core/syntax-tree/DualGrammar.hpp tdual::Lr tdual::Ll)
 cursiv_test(threads_test core/threads_test.cpp)
 cursiv_test(TypeList_test core/utils/TypeList_test.cpp)
 target_compile_options(TypeList_test PRIVATE -ftemplate-depth=100)
-cursiv_test(utils_test core/utils/utils_test.cpp wsCore)
+cursiv_test(utils_test core/utils/utils_test.cpp cursiv::lsp wsCore)
 # Replaces the global allocator, which the thread sanitizer's runtime also
 # defines: the two do not link.
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
@@ -59,7 +59,7 @@ cursiv_grammar(cstinfix core/syntax-tree/CstNodeGrammars.hpp tcstn::InfixG ENGIN
 
 cursiv_grammar(abbare core/syntax-tree/AstBuilderGrammars.hpp tab::bare::G ENGINE LR)
 cursiv_grammar(aball core/syntax-tree/AstBuilderGrammars.hpp tab::All ENGINE LR)
-cursiv_test(syntax_tree_test core/syntax-tree/syntax_tree_test.cpp cursivLrGen
+cursiv_test(syntax_tree_test core/syntax-tree/syntax_tree_test.cpp cursiv::lsp cursivLrGen
     abbareGenerated aballGenerated duallrGenerated dualllGenerated convGenerated
     cstlexGenerated cstinfixGenerated)
 set_tests_properties(syntax_tree_test PROPERTIES TIMEOUT 30 PROCESSORS 4)

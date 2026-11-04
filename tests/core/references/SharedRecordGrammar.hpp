@@ -4,8 +4,8 @@
 // identifier, its `Inner` child. Both are named `same`, and a multi reference
 // that admits both kinds names them with one word: `same;same`.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tsr {
 

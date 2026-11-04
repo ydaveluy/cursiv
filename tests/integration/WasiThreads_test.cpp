@@ -8,7 +8,7 @@
 #include <string_view>
 #include <thread>
 
-#include "cursiv/test/Check.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 using namespace std::chrono_literals;

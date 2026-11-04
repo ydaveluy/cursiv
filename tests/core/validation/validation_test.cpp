@@ -12,40 +12,40 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/observability/ObservabilitySink.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/DefaultScopeProvider.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/Diagnostic.hpp"
-#include "cursiv/core/services/JsonValue.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/core/syntax-tree/CstNode.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/syntax-tree/ReferenceInfo.hpp"
-#include "cursiv/core/text/TextRange.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/core/utils/FunctionRef.hpp"
-#include "cursiv/core/validation/DefaultCodeActionProtocol.hpp"
-#include "cursiv/core/validation/DefaultDocumentValidator.hpp"
-#include "cursiv/core/validation/DocumentValidator.hpp"
-#include "cursiv/core/validation/RepairMessage.hpp"
-#include "cursiv/core/validation/SpellingActions.hpp"
-#include "cursiv/core/validation/ValidateSingleNodeOptions.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "cursiv/core/validation/ValidationCategory.hpp"
-#include "cursiv/core/validation/ValidationRegistry.hpp"
-#include "cursiv/core/workspace/AstNodeDescription.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/TextDocument.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/DefaultScopeProvider.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/JsonValue.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/syntax-tree/ReferenceInfo.hpp"
+#include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/validation/DefaultCodeActionProtocol.hpp"
+#include "cursiv/validation/DefaultDocumentValidator.hpp"
+#include "cursiv/validation/DocumentValidator.hpp"
+#include "cursiv/validation/RepairMessage.hpp"
+#include "cursiv/validation/SpellingActions.hpp"
+#include "cursiv/validation/ValidateSingleNodeOptions.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/validation/ValidationCategory.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
+#include "cursiv/workspace/AstNodeDescription.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
+#include "cursiv/Check.hpp"
 #include "repairmsg/generated/MessageG/Module.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
@@ -174,8 +174,7 @@ using Registry = cursiv::ValidationRegistry;
 const cursiv::Diagnostic* find_code(
     const std::vector<cursiv::Diagnostic>& diagnostics, std::string_view code) {
   for (const cursiv::Diagnostic& d : diagnostics)
-    if (d.code.has_value() && d.code->isString() && d.code->string() == code)
-      return &d;
+    if (cursiv::data_code(d) == code) return &d;
   return nullptr;
 }
 
@@ -785,7 +784,9 @@ void a_deletion_offers_no_quick_fix() {
   CHECK(repaired != nullptr);
   if (repaired == nullptr) return;
   CHECK(repaired->message == "Unexpected ')', expecting 'datatype'.");
-  CHECK(!repaired->data.has_value());
+  CHECK(!repaired->code.has_value());
+  const cursiv::JsonValue::Object& data = repaired->data->object();
+  CHECK(data.find(std::string(cursiv::kDefaultCodeActionsKey)) == data.end());
 }
 
 // The build publishes a repair with its edit rows, and applying the edit
@@ -905,6 +906,9 @@ struct CountingGrammar final : cursiv::Grammar {
     return {};
   }
   std::string_view spellingDoc(std::string_view) const noexcept override {
+    return {};
+  }
+  std::string_view recordDoc(const cursiv::CstNode&) const noexcept override {
     return {};
   }
 };

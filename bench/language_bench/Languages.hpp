@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/bench/LanguageBench.hpp"
+#include "cursiv/LanguageBench.hpp"
 
 namespace cursiv::bench::examples {
 

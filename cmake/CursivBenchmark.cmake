@@ -1,6 +1,6 @@
 # One small executable per language, using the same driver as language_bench.
-#   cursiv_add_benchmark(json SOURCES json/bench/main.cpp)
-# The language's LSP module is shared with its server, without its main.cpp.
+#   cursiv_add_benchmark(json SOURCES bench.cpp)
+# It links the language's LSP library, as the language's server does.
 function(cursiv_add_benchmark name)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "SOURCES")
   if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL ""

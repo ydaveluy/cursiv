@@ -25,8 +25,8 @@ what the grammar accepts or rejects before error recovery repairs the input.
 
 ```cpp
 #include <cstdint>
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace ast {
 struct Variable : cursiv::Extends<cursiv::AstNode> {
@@ -143,7 +143,8 @@ matches the start of `endx`. In a rule, the generator
 it has a guard. The `word_boundary` setting decides which characters continue
 a word: `w` (`a-zA-Z0-9_`) by default, or for example
 `uc::XID_Continue | cr<"_$">` in a Unicode language. `kw<"if">.doc<"…">()`
-adds hover text.
+adds hover text. A word with one text shows it wherever it is read. Give uses
+different texts, and each one shows its own.
 
 Keywords are contextual: a word reads as a keyword only where the grammar
 expects that keyword ([Tokens](#tokens)). Where only an identifier is

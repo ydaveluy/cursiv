@@ -3,7 +3,7 @@
 #include <optional>
 #include <string_view>
 
-#include "cursiv/lsp/navigation/DefaultRenameProvider.hpp"
+#include "cursiv/navigation/DefaultRenameProvider.hpp"
 
 // Renaming a package renames what it contains, as far as a reference site is
 // concerned: `foo.bar.E2` written elsewhere must become `foo.baz.E2`, and

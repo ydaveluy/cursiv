@@ -15,28 +15,30 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/references/NameProvider.hpp"
-#include "cursiv/core/references/References.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/core/workspace/AstNodeDescription.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/lsp/hierarchy/HierarchyProviderSupport.hpp"
-#include "cursiv/lsp/hover/HoverProvider.hpp"
-#include "cursiv/lsp/navigation/DefinitionProvider.hpp"
-#include "cursiv/lsp/navigation/DocumentHighlightProvider.hpp"
-#include "cursiv/lsp/navigation/ReferencesProvider.hpp"
-#include "cursiv/lsp/navigation/RenameProvider.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/symbols/DefaultWorkspaceSymbolProvider.hpp"
-#include "cursiv/lsp/symbols/DocumentSymbolProvider.hpp"
-#include "cursiv/lsp/symbols/WorkspaceSymbolProvider.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectedHover.hpp"
-#include "cursiv/test/ExpectedRename.hpp"
-#include "cursiv/test/ExpectedSymbols.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/NameProvider.hpp"
+#include "cursiv/references/References.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/workspace/AstNodeDescription.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/hierarchy/HierarchyProviderSupport.hpp"
+#include "cursiv/hover/HoverProvider.hpp"
+#include "cursiv/navigation/DefinitionProvider.hpp"
+#include "cursiv/navigation/DocumentHighlightProvider.hpp"
+#include "cursiv/navigation/ReferencesProvider.hpp"
+#include "cursiv/navigation/RenameProvider.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/symbols/DefaultWorkspaceSymbolProvider.hpp"
+#include "cursiv/symbols/DocumentSymbolProvider.hpp"
+#include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectedHover.hpp"
+#include "cursiv/ExpectedRename.hpp"
+#include "cursiv/ExpectedSymbols.hpp"
+#include "dualll/generated/Ll/Module.hpp"
+#include "duallr/generated/Lr/Module.hpp"
 #include "multiref/generated/MultiG/Module.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/lsp/LspModule.hpp"
@@ -753,6 +755,28 @@ void a_documented_keyword_answers_the_grammars_prose() {
   CHECK(hover->range->end.line == 1 && hover->range->end.character == 6);
 }
 
+// A word with a text per use answers with the text of the use under the caret,
+// even where two rules start alike. A word with one text answers it anywhere.
+void a_word_answers_the_text_of_its_use(
+    std::unique_ptr<cursiv::Parser> parser,
+    std::unique_ptr<cursiv::AstReflection> reflection) {
+  support::World<cursiv::SharedLspServices> world;
+  const cursiv::LspServices* const language =
+      &support::add_language<cursiv::LspServices>(
+          world.shared, {"dual", {".dual"}, {}}, std::move(parser),
+          std::move(reflection));
+  const auto expect = [&](std::string text, std::string hover) {
+    (void)ct::expectHover(*language, {.text = std::move(text),
+                                      .hover = std::move(hover),
+                                      .disposeAfterCheck = true});
+  };
+  expect("t<|>win a!", "First twin.");
+  expect("t<|>win a?", "Second twin.");
+  expect("tw<|>ice a twice", "Opens.");
+  expect("twice a tw<|>ice", "Closes.");
+  expect("st<|>ate a", "Names a state.");
+}
+
 // A CST span is half-open, so a caret at the very end of a word is one past
 // it: the one retry is what makes a double-click land on the word it selected.
 void a_caret_one_byte_past_the_word_is_still_on_it() {
@@ -807,6 +831,12 @@ void a_caret_on_nothing_answers_nothing() {
 
 void run() {
   a_documented_keyword_answers_the_grammars_prose();
+  a_word_answers_the_text_of_its_use(
+      tdual::generated::Lr::create_parser(),
+      tdual::generated::Lr::create_ast_reflection());
+  a_word_answers_the_text_of_its_use(
+      tdual::generated::Ll::create_parser(),
+      tdual::generated::Ll::create_ast_reflection());
   a_caret_one_byte_past_the_word_is_still_on_it();
   a_resolved_reference_answers_its_declarations_documentation();
   a_caret_on_nothing_answers_nothing();

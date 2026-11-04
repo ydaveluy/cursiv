@@ -9,9 +9,9 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "ConvertGrammars.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tdual {
 
@@ -83,6 +83,32 @@ struct G : cursiv::GrammarSpec {
                            lit<"a\0b">.doc<"binary literal">()) +
                           assign<&Word::name>(ref<ID>))> {};
 
+  // Words with a text per use: two rules that part only after the name, two uses
+  // in one rule, the arms of a data rule, a use that writes a member, an optional
+  // use and a repeated one, and a use with no text.
+  struct TwinA : rule<create<Word>(kw<"twin">.doc<"First twin.">() +
+                                   assign<&Word::name>(ref<ID>) + lit<"!">)> {};
+  struct TwinB : rule<create<Word>(kw<"twin">.doc<"Second twin.">() +
+                                   assign<&Word::name>(ref<ID>) + lit<"?">)> {};
+  struct Twice : rule<create<Word>(kw<"twice">.doc<"Opens.">() +
+                                   assign<&Word::name>(ref<ID>) +
+                                   kw<"twice">.doc<"Closes.">())> {};
+  struct Level : rule<kw<"high">.doc<"High.">() | kw<"low">.doc<"Low.">()> {};
+  struct Uses
+      : rule<create<Word>(kw<"use"> + kw<"twin"> +
+                          option(kw<"opt">.doc<"Maybe.">()) +
+                          many(kw<"rep">.doc<"Again.">()) +
+                          (assign<&Word::name>(ref<Level>) |
+                           assign<&Word::name>(kw<"named">.doc<"Named.">())))> {
+  };
+  struct Others : rule<create<Word>(kw<"other"> +
+                                    option(kw<"opt">.doc<"Perhaps.">()) +
+                                    option(kw<"rep">.doc<"Once more.">()) +
+                                    kw<"high">.doc<"Tall.">() +
+                                    kw<"low">.doc<"Short.">() +
+                                    assign<&Word::name>(
+                                        kw<"named">.doc<"Called.">()))> {};
+
   struct ChildR : rule<kw<"child"> + assign<&Child::name>(ref<ID>)> {};
   struct Reflected
       : rule<create<Derived> + assign<&Base::head>(ref<ChildR>) +
@@ -113,7 +139,8 @@ struct G : cursiv::GrammarSpec {
                           (kw<"ten"> + assign<&N::n>(ref<TEN>))> {};
 
   struct Root : rule<ref<Documented> | ref<Reflected> | ref<Quoted> |
-                     ref<Owner> | ref<Converted> | ref<Declared>> {};
+                     ref<Owner> | ref<Converted> | ref<Declared> | ref<TwinA> |
+                     ref<TwinB> | ref<Twice> | ref<Uses> | ref<Others>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = list<NOTE>;

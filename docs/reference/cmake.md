@@ -27,6 +27,7 @@ scaffolded projects accept the same option.
 | Target | Provides |
 |---|---|
 | `cursiv::core` | parsing, syntax trees, linking and validation |
+| `cursiv::engine::ll`, `cursiv::engine::lr` | the parser runtime of each engine; `<ID>Generated` links its own |
 | `cursiv::lsp` | the language server and its providers |
 | `cursiv::cli` | `run_cli`, for a [command-line tool](cli.md) |
 | `cursiv::mcp` | the MCP server and its default tools |
@@ -42,7 +43,7 @@ compiling them.
 
 ```cmake
 cursiv_generate_language(ID         mylang
-    GRAMMAR      mylang/core/MyLangGrammar.hpp
+    GRAMMAR      mylang/MyLangGrammar.hpp
     NAMESPACE    mylang::MyLang
     EXTENSIONS   .mylang
     OUT          mylang/generated)
@@ -51,22 +52,23 @@ cursiv_generate_language(ID         mylang
 | Argument | Required | Meaning |
 |---|---|---|
 | `ID` | yes | language id and target prefix |
-| `GRAMMAR` | yes | the header, spelled as an include path |
+| `GRAMMAR` | yes | the header, spelled as an include path from `core/` beside the calling `CMakeLists.txt` |
 | `NAMESPACE` | yes | the grammar type, qualified: `ns::Type` |
 | `OUT` | yes | absolute output directory, or a path under the caller's build tree |
 | `EXTENSIONS` | no | file extensions associated with the language |
 | `FILE_NAMES` | no | exact file names it claims, for a language like `Makefile` |
 | `BASE` | no | id of a language declared earlier in CMake; adds its generated library and include roots as dependencies |
 | `ENGINE` | no | `LL` or `LR`; defaults to `CURSIV_DEFAULT_ENGINE`, which is `LR`, the recommended engine |
-| `INCLUDE_DIRS` | no | extra include roots; relative paths start at the calling source directory |
 | `GENERATOR_ARGS` | no | additional arguments passed to the generator |
 
 `NAMESPACE ns::Type` generates into `ns::generated::Type`, under
 `<OUT>/Type/`, so languages with different type names can share `OUT`. A
 relative `OUT` goes under `generated-src/` in the build tree: `OUT
 mylang/generated` in `src/CMakeLists.txt` writes to
-`build/src/generated-src/mylang/generated/`. The calling source directory is
-also an include root.
+`build/src/generated-src/mylang/generated/`. `core/` is the include root of the
+grammar and of the targets that link the language, so the packages beside it
+stay out of reach. `GRAMMAR mylang/MyLangGrammar.hpp` in
+`src/CMakeLists.txt` names `src/core/mylang/MyLangGrammar.hpp`.
 
 `BASE` only adds build dependencies; declare grammar inheritance in C++ with
 `cursiv::extends<BaseGrammar>`.
@@ -85,7 +87,7 @@ directory.
 ## `cursiv_add_benchmark`
 
 ```cmake
-cursiv_add_benchmark(mylang SOURCES mylang/bench/main.cpp)
+cursiv_add_benchmark(mylang SOURCES bench.cpp)
 ```
 
 Creates `mylang_bench`, linked to `mylangLsp` and `cursiv::bench`, and adds

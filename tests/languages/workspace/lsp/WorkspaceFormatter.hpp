@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/lsp/formatting/AbstractFormatter.hpp"
+#include "cursiv/formatting/AbstractFormatter.hpp"
 #include "workspace/core/ast.hpp"
 
 namespace ws {

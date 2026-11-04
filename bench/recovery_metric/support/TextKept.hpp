@@ -15,11 +15,11 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/core/grammar/ElementId.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/core/utils/FunctionRef.hpp"
+#include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
 #include "recovery_metric/support/FaultWindow.hpp"
 #include "recovery_metric/support/RepairCase.hpp"
 

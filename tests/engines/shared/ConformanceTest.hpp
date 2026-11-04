@@ -8,10 +8,10 @@
 
 #include "conformancell/generated/Ll/Module.hpp"
 #include "conformancelr/generated/Lr/Module.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstBuildError.hpp"
-#include "cursiv/test/AstText.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstBuildError.hpp"
+#include "cursiv/AstText.hpp"
+#include "cursiv/Check.hpp"
 
 namespace conformance_test {
 

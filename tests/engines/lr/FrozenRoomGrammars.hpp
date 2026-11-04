@@ -5,8 +5,8 @@
 // still waits for a place: the search from the frozen ones runs out of the
 // parse's budget before the waiting reading finishes, at no cost.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace troom {
 

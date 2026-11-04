@@ -4,8 +4,8 @@
 #include <vector>
 
 #include "bench.hpp"
-#include "cursiv/fuzz/CursivActions.hpp"
-#include "domainmodel/core/DomainModelGrammar.hpp"
+#include "cursiv/CursivActions.hpp"
+#include "domainmodel/DomainModelGrammar.hpp"
 #include "domainmodel/generated/DomainModel/AstReflection.hpp"
 #include "domainmodel/generated/DomainModel/Grammar.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"

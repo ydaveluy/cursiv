@@ -5,8 +5,8 @@
 // meets `y` and `}` before anything: `Pick` writes `x` before `y`, and
 // `Block` goes on with `m` before it closes with `}`.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tinsertorder {
 

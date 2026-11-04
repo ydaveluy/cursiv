@@ -7,11 +7,11 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/core/grammar/Conversion.hpp"
-#include "cursiv/core/references/NameProvider.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/workspace/AstNodeDescriptionProvider.hpp"
-#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/grammar/Conversion.hpp"
+#include "cursiv/references/NameProvider.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/workspace/AstNodeDescriptionProvider.hpp"
+#include "cursiv/workspace/Document.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/core/references/QualifiedNameProvider.hpp"
 

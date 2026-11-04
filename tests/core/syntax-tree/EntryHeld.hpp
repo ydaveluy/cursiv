@@ -7,8 +7,8 @@
 #include <span>
 #include <vector>
 
-#include "cursiv/engines/lr/table/LrFusedRow.hpp"
-#include "cursiv/engines/shared/gen/ChainPool.hpp"
+#include "cursiv/lr/table/LrFusedRow.hpp"
+#include "cursiv/shared/gen/ChainPool.hpp"
 
 namespace cursiv::test {
 

@@ -3,8 +3,8 @@
 #include <memory>
 #include <utility>
 
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "workspace/core/CoreServices.hpp"
 #include "workspace/lsp/WorkspaceFormatter.hpp"
 #include "workspace/lsp/WorkspaceRenameProvider.hpp"

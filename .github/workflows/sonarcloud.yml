@@ -120,6 +120,6 @@ jobs:
             -Dsonar.cpp.file.suffixes=.cpp,.hpp
             -Dsonar.issue.ignore.multicriteria=benchlog,benchpath
             -Dsonar.issue.ignore.multicriteria.benchlog.ruleKey=cppsecurity:S5145
-            -Dsonar.issue.ignore.multicriteria.benchlog.resourceKey=src/cursiv/bench/**/*
+            -Dsonar.issue.ignore.multicriteria.benchlog.resourceKey=src/bench/**/*
             -Dsonar.issue.ignore.multicriteria.benchpath.ruleKey=cppsecurity:S2083
-            -Dsonar.issue.ignore.multicriteria.benchpath.resourceKey=src/cursiv/bench/**/*
+            -Dsonar.issue.ignore.multicriteria.benchpath.resourceKey=src/bench/**/*

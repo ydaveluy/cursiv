@@ -2,9 +2,9 @@
 #include "triviall/generated/Ll/Table.hpp"
 #include "trivialr/generated/Lr/Module.hpp"
 #include "trivialr/generated/Lr/Table.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/Checks.hpp"
 #include "engines/shared/TriviaGrammar.hpp"
 #include <memory>

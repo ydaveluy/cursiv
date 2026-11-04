@@ -1,4 +1,4 @@
-#include "cursiv/engines/lr/runtime/LrGssGraph.hpp"
+#include "cursiv/lr/runtime/LrGssGraph.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,9 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/lr/runtime/LrStack.hpp"
-#include "cursiv/engines/shared/runtime/CancellationPoll.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/lr/runtime/LrStack.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

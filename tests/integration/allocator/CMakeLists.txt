@@ -6,7 +6,7 @@ project(cursiv_allocator_consumer LANGUAGES CXX)
 add_library(cursivCore STATIC IMPORTED)
 set_target_properties(cursivCore PROPERTIES
     IMPORTED_LOCATION "${CORE}"
-    INTERFACE_INCLUDE_DIRECTORIES "${CURSIV}/src"
+    INTERFACE_INCLUDE_DIRECTORIES "${CURSIV}/src/core"
     INTERFACE_COMPILE_FEATURES cxx_std_20)
 set(FETCHCONTENT_SOURCE_DIR_CURSIV_MIMALLOC "${MIMALLOC_SOURCE}")
 include("${CURSIV}/cmake/CursivAllocator.cmake")

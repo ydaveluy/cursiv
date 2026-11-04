@@ -5,10 +5,10 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/OpeningTokenGrammar.hpp"
 #include "openingll/generated/Ll/Module.hpp"
 #include "openingshiftlr/generated/ShiftLr/Module.hpp"

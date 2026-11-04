@@ -5,8 +5,8 @@
 // keyword each, but the long bracket: its comment is hidden, and a hidden
 // terminal is read in every mode of its table.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tbackref {
 

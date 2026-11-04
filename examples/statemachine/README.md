@@ -39,10 +39,10 @@ misspelled keyword and an incomplete state declaration.
 
 ## Read the implementation
 
-- [Grammar](src/statemachine/core/StateMachineGrammar.hpp): `ikw` for keywords,
+- [Grammar](src/statemachine/StateMachineGrammar.hpp): `ikw` for keywords,
   `.doc` for hover text, and rules that assign names and references.
-- [AST](src/statemachine/core/ast.hpp): states, events, commands and transitions.
-- [Services](src/statemachine/core/): validation and reference resolution.
+- [AST](src/statemachine/ast.hpp): states, events, commands and transitions.
+- [Services](src/statemachine/): validation and reference resolution.
 
 ## Try it in VS Code
 

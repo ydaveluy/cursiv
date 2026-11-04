@@ -10,11 +10,11 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
 
 namespace checks {
 

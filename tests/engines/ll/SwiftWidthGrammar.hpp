@@ -1,5 +1,5 @@
 #pragma once
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/SwiftWidthAst.hpp"
 namespace tllswiftwidth {
 struct Base : cursiv::GrammarSpec {

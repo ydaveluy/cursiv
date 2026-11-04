@@ -22,7 +22,7 @@ run deploy
 
 ## The AST
 
-```cpp title="src/tasks/core/ast.hpp"
+```cpp title="src/core/tasks/ast.hpp"
 namespace tasks::ast {
 
 struct Statement : cursiv::Extends<cursiv::AstNode> {};
@@ -46,7 +46,7 @@ struct Model : cursiv::Extends<cursiv::AstNode> {
 
 ## The tokens
 
-```cpp title="src/tasks/core/TasksGrammar.hpp"
+```cpp title="src/core/tasks/TasksGrammar.hpp"
 namespace tasks {
 
 struct Tasks : cursiv::GrammarSpec {

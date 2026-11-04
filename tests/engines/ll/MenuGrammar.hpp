@@ -4,8 +4,8 @@
 // terminals than any bound on the order may cover, and the keyword written
 // first is not the one with the least id.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tmenu {
 

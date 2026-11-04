@@ -1,4 +1,4 @@
-#include "cursiv/engines/ll/runtime/LlPlan.hpp"
+#include "cursiv/ll/runtime/LlPlan.hpp"
 // Shared derivation histories against sequences compared the plain way.
 
 #include <algorithm>
@@ -6,8 +6,8 @@
 #include <random>
 #include <vector>
 
-#include "cursiv/engines/ll/runtime/LlHistory.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/ll/runtime/LlHistory.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

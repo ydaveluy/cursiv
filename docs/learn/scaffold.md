@@ -39,28 +39,37 @@ mylang/
 ├── example/hello.mylang    a document that parses
 ├── src/
 │   ├── CMakeLists.txt      language and executable targets
-│   └── mylang/
-│       ├── core/
-│       │   ├── ast.hpp                 your AST classes
-│       │   ├── MyLangGrammar.hpp       your grammar
-│       │   ├── CoreServices.hpp        your services
-│       │   ├── CoreModule.cpp          service configuration
-│       │   └── validation/             your checks
-│       ├── cli/                        the command line
-│       ├── lsp/                        the language server
-│       └── bench/                      the benchmark
+│   ├── core/mylang/
+│   │   ├── ast.hpp                 your AST classes
+│   │   ├── MyLangGrammar.hpp       your grammar
+│   │   ├── CoreServices.hpp        your services
+│   │   ├── CoreModule.cpp          service configuration
+│   │   └── validation/             your checks
+│   ├── lsp/mylang/                 the language server's services
+│   ├── cli.cpp                     the command line
+│   ├── lsp.cpp                     the language server
+│   └── bench.cpp                   the benchmark
 ├── tests/grammar_test.cpp  a test of the sample
 └── vscode/                 the editor client
 ```
 
-You mostly edit three places: `core/ast.hpp` for the data types,
-`MyLangGrammar.hpp` for the syntax and `validation/` for the checks. The
+Each folder directly under `src/` is a package with its own include root. The
+server includes `"mylang/ast.hpp"`, while the language core cannot include
+`"mylang/LspModule.hpp"`: that is a compile error.
+
+`cli.cpp`, `lsp.cpp` and `bench.cpp` start the executables. Code under `src/cli/`
+or `src/lsp/` builds into a library, `mylangCli` or `mylangLsp`, that your tests
+can link too.
+
+You mostly edit three places under `src/core/mylang/`: `ast.hpp` for the data
+types, `MyLangGrammar.hpp` for the syntax and `validation/` for the checks. The
 tutorial replaces all three. Generated sources go under `build/`; never edit
 them.
 
 If you do not need the command line, the server, the benchmark or the editor
-client, delete `cli/`, `lsp/`, `bench/` or `vscode/`. CMake then skips their
-targets and tests. The benchmark needs `lsp/`.
+client, delete `src/cli.cpp`, `src/lsp.cpp` and `src/lsp/`, `src/bench.cpp` or
+`vscode/`. CMake then skips their targets and tests. The benchmark needs
+`src/lsp/`.
 
 ## Open it in VS Code
 

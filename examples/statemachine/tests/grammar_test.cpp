@@ -8,13 +8,13 @@
 #include <string_view>
 #include <utility>
 
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "cursiv/test/ValidationHelper.hpp"
-#include "cursiv/test/ValidationResult.hpp"
-#include "statemachine/core/CoreServices.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "cursiv/ValidationHelper.hpp"
+#include "cursiv/ValidationResult.hpp"
+#include "statemachine/CoreServices.hpp"
 
 namespace {
 

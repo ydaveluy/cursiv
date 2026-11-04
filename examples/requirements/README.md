@@ -36,10 +36,10 @@ to declarations in other files as unresolved.
 
 ## Read the implementation
 
-- [Grammar](src/requirements/core/RequirementsGrammar.hpp): a common set of
+- [Grammar](src/requirements/RequirementsGrammar.hpp): a common set of
   rules with a separate entry rule for each language.
-- [AST](src/requirements/core/ast.hpp): requirements, environments and tests.
-- [Services](src/requirements/core/): registration of both languages and
+- [AST](src/requirements/ast.hpp): requirements, environments and tests.
+- [Services](src/requirements/): registration of both languages and
   cross-document validation.
 
 See [Several languages in one project](../../docs/recipes/multiple-languages.md)

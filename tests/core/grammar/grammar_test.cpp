@@ -2,7 +2,7 @@
 // source, rendering and utilities, word boundaries, documented words, the
 // embedded NULs, and a class spelled among bytes and among code points.
 
-#include "cursiv/core/grammar/Grammar.hpp"
+#include "cursiv/grammar/Grammar.hpp"
 
 #include <algorithm>
 #include <concepts>
@@ -18,20 +18,21 @@
 
 #include "core/grammar/DerivedGrammar.hpp"
 #include "core/grammar/SpellingGrammars.hpp"
-#include "cursiv/core/grammar/DefaultGrammarSource.hpp"
-#include "cursiv/core/grammar/GrammarDump.hpp"
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/grammar/GrammarUtils.hpp"
-#include "cursiv/core/grammar/dump.hpp"
-#include "cursiv/core/grammar/expr.hpp"
-#include "cursiv/core/grammar/word_final_in.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/core/utils/ctstring.hpp"
-#include "cursiv/engines/shared/gen/LexCodePoints.hpp"
-#include "cursiv/test/Check.hpp"
+#include "core/syntax-tree/DualGrammar.hpp"
+#include "cursiv/grammar/DefaultGrammarSource.hpp"
+#include "cursiv/grammar/GrammarDump.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarUtils.hpp"
+#include "cursiv/grammar/dump.hpp"
+#include "cursiv/grammar/expr.hpp"
+#include "cursiv/grammar/word_final_in.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/utils/ctstring.hpp"
+#include "cursiv/shared/gen/LexCodePoints.hpp"
+#include "cursiv/Check.hpp"
 #include "derivebase/generated/Base/Module.hpp"
 #include "derivedialect/generated/Dialect/Module.hpp"
 #include "deriverule/generated/RuleDialect/Module.hpp"
@@ -2247,6 +2248,52 @@ void expect(bool ok, const char* engine, const char* what) {
   }
 }
 
+// The text the tree holds over the `nth` leaf spelling `word`.
+std::string_view use_doc(const cursiv::Parser& parser, std::string_view text,
+                         std::string_view word, unsigned nth = 0) {
+  const cursiv::ParseResult read = parser.parse(text);
+  const cursiv::Cst& cst = read.cst();
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+    if (cst[id].subtreeSize == 1 && cst.text(id) == word && nth-- == 0)
+      return parser.getGrammar().recordDoc(cst[id]);
+  return {};
+}
+
+void words_with_a_text_per_use(const cursiv::Parser& parser,
+                               const char* engine) {
+  const auto is = [&](std::string_view text, std::string_view word,
+                      std::string_view doc, const char* what,
+                      unsigned nth = 0) {
+    expect(use_doc(parser, text, word, nth) == doc, engine, what);
+  };
+  is("twin a!", "twin", "First twin.", "a rule's own text, the start shared");
+  is("twin a?", "twin", "Second twin.", "the other rule's own text");
+  is("twice a twice", "twice", "Opens.", "a first use in one rule");
+  is("twice a twice", "twice", "Closes.", "a second use in one rule", 1);
+  is("use twin high", "twin", "", "a use with no text");
+  is("use twin high", "high", "High.", "an arm of a data rule");
+  is("use twin low", "low", "Low.", "the other arm");
+  is("use twin named", "named", "Named.", "a use that writes a member");
+  is("use twin opt high", "opt", "Maybe.", "an optional use");
+  is("use twin rep rep high", "rep", "Again.", "a repeated use", 1);
+  is("other opt rep high low named", "opt", "Perhaps.", "another optional use");
+  is("other opt rep high low named", "rep", "Once more.", "another use");
+  is("other opt rep high low named", "high", "Tall.", "a use in a sequence");
+  is("other opt rep high low named", "named", "Called.", "another member use");
+  is("state x", "state", "", "a word with one text is left to its spelling");
+  const cursiv::Grammar& g = parser.getGrammar();
+  expect(g.spellingDoc("twin").empty(), engine,
+         "a word with several texts has none of its own");
+  const cursiv::ParseResult low = parser.parse("use twin low");
+  const auto* const word = low.value_as<tdual::Word>();
+  expect(word != nullptr && word->name == "low", engine,
+         "a data rule's value keeps its text");
+  const cursiv::ParseResult named = parser.parse("use twin named");
+  const auto* const member = named.value_as<tdual::Word>();
+  expect(member != nullptr && member->name == "named", engine,
+         "a write keeps its value");
+}
+
 void documented_words(const cursiv::Parser& parser, const char* engine) {
   const cursiv::Grammar& g = parser.getGrammar();
   expect(g.spellingDoc("events") == "Opens the events.", engine, "events");
@@ -2275,6 +2322,8 @@ void documented_words(const cursiv::Parser& parser, const char* engine) {
 void run() {
   documented_words(*tdual::generated::Lr::create_parser(), "LR");
   documented_words(*tdual::generated::Ll::create_parser(), "LL");
+  words_with_a_text_per_use(*tdual::generated::Lr::create_parser(), "LR");
+  words_with_a_text_per_use(*tdual::generated::Ll::create_parser(), "LL");
 }
 
 }  // namespace default_grammar

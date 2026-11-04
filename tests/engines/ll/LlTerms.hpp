@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cursiv/engines/shared/table/Token.hpp"
+#include "cursiv/shared/table/Token.hpp"
 
 namespace ll_terms {
 

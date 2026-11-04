@@ -53,11 +53,11 @@ add_test(NAME recipe_validation_test COMMAND recipe_validation_test)
 ```
 
 ```cpp title="tests/validation_test.cpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/ValidationHelper.hpp"
-#include "cursiv/test/ExpectDiagnosticOptions.hpp"
-#include "recipe/core/CoreServices.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/ValidationHelper.hpp"
+#include "cursiv/ExpectDiagnosticOptions.hpp"
+#include "recipe/CoreServices.hpp"
 
 namespace ct = cursiv::test;
 
@@ -110,7 +110,7 @@ from the workspace.
 Without `count_expectations()`, the first failed `expect*` throws an exception.
 With it, each failure prints a message and the test goes on. `report` prints
 the result and returns the exit code that CTest reads. For your own
-assertions, use `CHECK(condition)` from `cursiv/test/Check.hpp`.
+assertions, use `CHECK(condition)` from `cursiv/Check.hpp`.
 
 ## Check editor features
 
@@ -121,9 +121,9 @@ server does. In the input text, `<|>` marks the cursor and `<|text|>` marks an
 expected range:
 
 ```cpp
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/test/ExpectedHover.hpp"
-#include "recipe/lsp/LspModule.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/ExpectedHover.hpp"
+#include "recipe/LspModule.hpp"
 
 recipe::RecipeSharedServices shared;
 cursiv::install_default_shared_lsp_services(shared);

@@ -1,7 +1,7 @@
-#include "cursiv/engines/shared/runtime/GestureRank.hpp"
-#include "cursiv/engines/shared/runtime/TiedInserts.hpp"
-#include "cursiv/engines/shared/runtime/TypoCandidates.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/shared/runtime/GestureRank.hpp"
+#include "cursiv/shared/runtime/TiedInserts.hpp"
+#include "cursiv/shared/runtime/TypoCandidates.hpp"
+#include "cursiv/Check.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>

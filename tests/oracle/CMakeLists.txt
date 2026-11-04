@@ -58,7 +58,7 @@ function(cursiv_rgram seed)
       RGRAM_SEED=${seed} RGRAM_NS=${id}
       RGRAM_MODULE="${id}/generated/G/Module.hpp"
       RGRAM_REFUSED="${own}/refused.txt")
-  target_link_libraries(${id}_check PRIVATE rgramOracle)
+  target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine::lr)
 endfunction()
 
 # One accepted seed per family. 107 and 242 close a region on a rule;

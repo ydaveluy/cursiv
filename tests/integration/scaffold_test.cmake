@@ -58,11 +58,34 @@ if(NOT _completion STREQUAL "NUMBER" OR NOT _stages EQUAL 5)
   message(FATAL_ERROR "the scaffold's benchmark does not measure LSP completion")
 endif()
 
-# Optional folders can be removed without editing the generated CMake files.
-file(REMOVE_RECURSE ${_project}/src/no/bench)
+# Each package has its own include root: the language core cannot reach the
+# server by either spelling, so a forbidden include is a compile error.
+set(_probe ${_project}/src/core/no/Probe.cpp)
+foreach(_header IN ITEMS no/LspModule.hpp lsp/no/LspModule.hpp)
+  file(WRITE ${_probe} "#include \"${_header}\"\n")
+  execute_process(COMMAND ${CMAKE_COMMAND} --build ${_project}/build --target noCore
+                  RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
+  file(REMOVE ${_probe})
+  if(_rc EQUAL 0 OR NOT _log MATCHES "LspModule[.]hpp")
+    message(FATAL_ERROR "the language core reached ${_header}: ${_log}")
+  endif()
+endforeach()
+
+# A source under cli/ builds into a library, and the command line still links.
+file(WRITE ${_project}/src/cli/no/Extra.cpp
+     "namespace no { int extra(); int extra() { return 1; } }\n")
+_step("the configure with a command-line library" ${CMAKE_COMMAND}
+      -S ${_project} -B ${_project}/build)
+_step("the command-line library" ${CMAKE_COMMAND} --build ${_project}/build
+      --target noCli no_cli)
+file(REMOVE_RECURSE ${_project}/src/cli)
+
+# Optional parts can be removed without editing the generated CMake files.
+file(REMOVE ${_project}/src/bench.cpp)
 _step("the configure without benchmark" ${CMAKE_COMMAND}
       -S ${_project} -B ${_project}/build)
-file(REMOVE_RECURSE ${_project}/src/no/cli ${_project}/src/no/lsp)
+file(REMOVE ${_project}/src/cli.cpp ${_project}/src/lsp.cpp)
+file(REMOVE_RECURSE ${_project}/src/lsp)
 _step("the core-only configure" ${CMAKE_COMMAND} -S ${_project} -B ${_project}/build)
 _step("the core-only build" ${CMAKE_COMMAND} --build ${_project}/build)
 _step("the core-only tests" ${CMAKE_CTEST_COMMAND} --test-dir ${_project}/build

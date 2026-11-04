@@ -4,8 +4,8 @@
 // one grammar both engines read. The grammar skips blanks and keeps `#`
 // comments; a newline is one of its tokens.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tskip {
 

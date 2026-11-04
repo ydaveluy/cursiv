@@ -5,8 +5,8 @@
 // grammar alone does. The regions open on a mark their text follows with no
 // gap, as a document's first token has none.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/GuardedChoiceGrammar.hpp"
 #include "engines/lr/PeekCaretGrammar.hpp"
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tllconditions {
 
@@ -46,6 +46,9 @@ struct Base : cursiv::GrammarSpec {
               (lit<"-"> + lit<">"> + ref<ID>))) |
             (lit<"gapnull:"> + ((ref<Mark> + gap::none + lit<"->"> + ref<ID>) |
                                 (lit<"-"> + lit<">"> + ref<ID>))) |
+            (lit<"gapmany:"> + ((gap::none + lit<"->"> + ref<ID>) |
+                                (ref<Mark> + gap::line + lit<"->"> + ref<ID>) |
+                                (lit<"-"> + lit<">"> + ref<ID>))) |
             (lit<"andloop:"> + many(&lit<"a"> + (ref<ID> | lit<"a">)) +
              lit<";">) |
             (lit<"andhead:"> + &lit<"a"> + (ref<ID> | lit<"a">) + ref<ID>) |
@@ -55,6 +58,9 @@ struct Base : cursiv::GrammarSpec {
             (lit<"atcall:"> + ((ref<Mark> + !lit<"~>"> + option(lit<"~">) +
                                 ref<ID>) |
                                (lit<"~"> + lit<">">))) |
+            (lit<"atshared:"> + ((ref<Mark> + !lit<"~>"> + option(lit<"~">) +
+                                  ref<ID>) |
+                                 (ref<Mark> + lit<"~"> + lit<">">))) |
             (lit<"atturn:"> + many(!lit<"~>"> + lit<"~"> + ref<ID>) +
              option(lit<"~"> + lit<">">)) |
             (lit<"atclimb:"> + (assign<&StatementNode::value>(ref<WavedSum>) |

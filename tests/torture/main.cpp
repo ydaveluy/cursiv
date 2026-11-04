@@ -10,12 +10,12 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/test/Check.hpp"
-#include "cursiv/test/MutationOracle.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
-#include "cursiv/test/SkippedLeaf.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/Check.hpp"
+#include "cursiv/MutationOracle.hpp"
+#include "cursiv/RecoveryLane.hpp"
+#include "cursiv/SkippedLeaf.hpp"
 #include "engines/shared/CstAudit.hpp"
 #include "optionals/generated/OptionalsG/Module.hpp"
 #include "torture/generated/Torture/Module.hpp"

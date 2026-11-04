@@ -12,14 +12,14 @@ For project documentation, read:
 
 Source directories:
 
-- `src/cursiv/core/`: Grammar model, syntax trees, linking, and workspaces.
-- `src/cursiv/engines/`: LL/LR generators, runtimes, and shared code.
-- `src/cursiv/cli/`: Command-line support for language tools.
-- `src/cursiv/lsp/`: Language-server services.
-- `src/cursiv/mcp/`: Model Context Protocol server and language tools.
-- `src/cursiv/test/`: Parse, validation, and editor test helpers.
-- `src/cursiv/bench/`: Benchmark harness and performance counters.
-- `src/cursiv/fuzz/`: Grammar-based input generation and tree checks.
+- `src/core/cursiv/`: Grammar model, syntax trees, linking, and workspaces.
+- `src/engines/cursiv/`: LL/LR generators, runtimes, and shared code.
+- `src/cli/cursiv/`: Command-line support for language tools.
+- `src/lsp/cursiv/`: Language-server services.
+- `src/mcp/cursiv/`: Model Context Protocol server and language tools.
+- `src/test/cursiv/`: Parse, validation, and editor test helpers.
+- `src/bench/cursiv/`: Benchmark harness and performance counters.
+- `src/fuzz/cursiv/`: Grammar-based input generation and tree checks.
 - `examples/`: Complete example languages.
 - `docs/demo/`: The "Try it online" page of the documentation.
 - `tests/`: Framework tests.

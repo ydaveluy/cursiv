@@ -5,8 +5,8 @@
 // state above it, up to `S`, which writes `b` before `a`. `x` is read first,
 // so its state is the first the construction orders and walks the whole chain.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tchaininsert {
 

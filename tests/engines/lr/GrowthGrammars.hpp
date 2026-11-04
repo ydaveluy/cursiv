@@ -6,8 +6,8 @@
 
 #include <string_view>
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 // A run of lines that is a section of its own, inside a document that is a
 // run of sections: N lines group in 2^(N-1) ways.

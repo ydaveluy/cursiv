@@ -6,12 +6,12 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/grammar/Grammar.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/Check.hpp"
 #include "door/generated/G/Module.hpp"
 #include "engines/lr/DoorGrammar.hpp"
 #include "engines/lr/ParseChecks.hpp"

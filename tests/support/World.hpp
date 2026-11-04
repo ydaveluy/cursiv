@@ -13,19 +13,19 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/observability/ObservabilitySink.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/LanguageMetaData.hpp"
-#include "cursiv/core/services/ServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/LanguageMetaData.hpp"
+#include "cursiv/services/ServiceRegistry.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 
 namespace support {
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/LexUnicodeGrammars.hpp"
 // A class reads one character: a well-formed scalar whole, or the byte where
 // none starts. Each reading is a terminal behind a tag, so a document names

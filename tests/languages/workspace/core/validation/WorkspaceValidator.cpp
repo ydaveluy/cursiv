@@ -3,7 +3,7 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/workspace/Document.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace ws {
 

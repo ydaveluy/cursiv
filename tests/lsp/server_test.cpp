@@ -33,62 +33,63 @@
 #include <variant>
 #include <vector>
 
-#include "cursiv/core/grammar/ElementId.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/Diagnostic.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/syntax-tree/AstReflection.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstBuilder.hpp"
-#include "cursiv/core/text/Position.hpp"
-#include "cursiv/core/text/Range.hpp"
-#include "cursiv/core/text/TextRange.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/core/utils/FunctionRef.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
-#include "cursiv/core/validation/ValidationCategory.hpp"
-#include "cursiv/core/validation/ValidationRegistry.hpp"
-#include "cursiv/core/workspace/DefaultDocumentFactory.hpp"
-#include "cursiv/core/workspace/DefaultWorkspaceLock.hpp"
-#include "cursiv/core/workspace/DefaultWorkspaceManager.hpp"
-#include "cursiv/core/workspace/Document.hpp"
-#include "cursiv/core/workspace/DocumentBuilder.hpp"
-#include "cursiv/core/workspace/DocumentFactory.hpp"
-#include "cursiv/core/workspace/DocumentState.hpp"
-#include "cursiv/core/workspace/Documents.hpp"
-#include "cursiv/core/workspace/LocalFileSystemProvider.hpp"
-#include "cursiv/core/workspace/MemoryFileSystemProvider.hpp"
-#include "cursiv/core/workspace/WorkspaceFolder.hpp"
-#include "cursiv/core/workspace/WorkspaceLock.hpp"
-#include "cursiv/core/workspace/WorkspaceManager.hpp"
-#include "cursiv/engines/lr/runtime/LrParser.hpp"
-#include "cursiv/lsp/completion/CompletionProvider.hpp"
-#include "cursiv/lsp/completion/CompletionProviderOptions.hpp"
-#include "cursiv/lsp/content/DefaultTextDocumentContentProvider.hpp"
-#include "cursiv/lsp/formatting/Formatter.hpp"
-#include "cursiv/lsp/runtime/DefaultLanguageServer.hpp"
-#include "cursiv/lsp/runtime/LanguageClient.hpp"
-#include "cursiv/lsp/runtime/LanguageServer.hpp"
-#include "cursiv/lsp/runtime/LanguageServerMain.hpp"
-#include "cursiv/lsp/runtime/LanguageServerRuntime.hpp"
-#include "cursiv/lsp/semantic/SemanticTokenProvider.hpp"
-#include "cursiv/lsp/services/AbstractExecuteCommandHandler.hpp"
-#include "cursiv/lsp/services/ExecuteCommandHandler.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
-#include "cursiv/lsp/text/Position.hpp"
-#include "cursiv/lsp/workspace/ConfigurationProvider.hpp"
-#include "cursiv/lsp/workspace/DefaultConfigurationProvider.hpp"
-#include "cursiv/lsp/workspace/FileOperationHandler.hpp"
-#include "cursiv/lsp/workspace/LspDocumentBuilder.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/Diagnostic.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/text/Position.hpp"
+#include "cursiv/text/Range.hpp"
+#include "cursiv/text/TextRange.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/validation/ValidationCategory.hpp"
+#include "cursiv/validation/ValidationRegistry.hpp"
+#include "cursiv/workspace/DefaultDocumentFactory.hpp"
+#include "cursiv/workspace/DefaultWorkspaceLock.hpp"
+#include "cursiv/workspace/DefaultWorkspaceManager.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
+#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
+#include "cursiv/workspace/WorkspaceFolder.hpp"
+#include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/workspace/WorkspaceManager.hpp"
+#include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/completion/CompletionProvider.hpp"
+#include "cursiv/completion/CompletionProviderOptions.hpp"
+#include "cursiv/content/DefaultTextDocumentContentProvider.hpp"
+#include "cursiv/formatting/Formatter.hpp"
+#include "cursiv/runtime/DefaultLanguageServer.hpp"
+#include "cursiv/runtime/LanguageClient.hpp"
+#include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/runtime/LanguageServerMain.hpp"
+#include "cursiv/runtime/LanguageServerRuntime.hpp"
+#include "cursiv/semantic/SemanticTokenProvider.hpp"
+#include "cursiv/services/AbstractExecuteCommandHandler.hpp"
+#include "cursiv/services/ExecuteCommandHandler.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
+#include "cursiv/text/LspPosition.hpp"
+#include "cursiv/workspace/ConfigurationProvider.hpp"
+#include "cursiv/workspace/DefaultConfigurationProvider.hpp"
+#include "cursiv/workspace/FileOperationHandler.hpp"
+#include "cursiv/workspace/LspDocumentBuilder.hpp"
+#include "cursiv/Check.hpp"
 #include "doc/generated/DocG/Module.hpp"
 #include "doc/generated/DocG/Parser.hpp"
 #include "doc/generated/DocG/Table.hpp"
 #include "lsp/types.h"
 #include "lsp/uri.h"
+#include "support/OffersEveryKeyword.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -1252,8 +1253,13 @@ struct Server final : cursiv::DefaultLanguageServer {
   bool writeOnOpen = false;
   std::atomic<bool> openCancelled{false};
   mutable std::atomic<unsigned> symbols{0};
+  std::promise<std::string> foldersAdded;
   lsp::InitializeResult initialize(const lsp::InitializeParams&) override {
     return {};
+  }
+  void didChangeWorkspaceFolders(
+      const lsp::DidChangeWorkspaceFoldersParams& params) override {
+    foldersAdded.set_value(params.event.added.front().name);
   }
   void didOpen(const lsp::DidOpenTextDocumentParams&) override {
     if (writeOnOpen) {
@@ -1346,13 +1352,14 @@ struct Session {
   Server* server;
   StopLock* lock;
   std::future<int> running;
-  Session() {
+  explicit Session(const std::function<void(Server&)>& before = {}) {
     cursiv::install_default_shared_lsp_services(shared);
     auto heldLock = std::make_unique<StopLock>();
     lock = heldLock.get();
     shared.workspaceLock = std::move(heldLock);
     auto held = std::make_unique<Server>(shared);
     server = held.get();
+    if (before) before(*server);
     shared.languageServer = std::move(held);
     running = std::async(std::launch::async, [&] {
       return cursiv::start_language_server(shared, serverStream);
@@ -1394,6 +1401,88 @@ struct Session {
     responses.close();
   }
 };
+
+// Methods the protocol does not define reach the language as the standard ones
+// do: refused or dropped outside the session, and given the one value the
+// client sent.
+void custom_methods_reach_the_language() {
+  std::promise<std::string> heard;
+  Session s([&](Server& server) {
+    server.onRequest("x/echo", [](const lsp::LSPAny& value,
+                                  const cursiv::CancellationToken&) {
+      return value;
+    });
+    server.onNotification("x/note", [&](const lsp::LSPAny& value) {
+      heard.set_value(lsp::json::stringify(value));
+    });
+  });
+  s.request(2, "x/echo", "[1]");
+  const auto refused = s.answer().get();
+  CHECK(refused.error.has_value() && refused.error->code == -32002);
+  s.notify("x/note", "[0]");
+  s.initialize();
+
+  const auto read = [&] {
+    const auto reply = s.answer().get();
+    CHECK(!reply.error.has_value());
+    return lsp::json::stringify(reply.result.value_or(nullptr));
+  };
+  s.request(3, "x/echo", R"(["a"])");
+  CHECK(read() == R"("a")");
+  s.request(4, "x/echo", R"([["a"]])");
+  CHECK(read() == R"(["a"])");
+  s.request(5, "x/echo", R"([1,2])");
+  CHECK(read() == R"([1,2])");
+  s.request(6, "x/echo", R"({"k":1})");
+  CHECK(read() == R"({"k":1})");
+  {
+    auto sender = s.client.request("x/echo", lsp::json::Integer(7));
+    sender.submit();
+  }
+  CHECK(read() == "null");
+  s.request(8, "x/unknown");
+  const auto unknown = s.answer().get();
+  CHECK(unknown.error.has_value() && unknown.error->code == -32601);
+
+  s.notify("x/note", R"(["b"])");
+  CHECK(heard.get_future().get() == R"("b")");
+  s.notify("workspace/didChangeWorkspaceFolders",
+           R"({"event":{"added":[{"uri":"file:///a","name":"a"}],"removed":[]}})");
+  CHECK(s.server->foldersAdded.get_future().get() == "a");
+
+  // What the language sends is what a client of its own reads.
+  const auto next = [&] {
+    return std::async(std::launch::async, [&] {
+      auto message = s.client.readMessage();
+      return std::get<lsp::jsonrpc::Request>(
+          std::get<lsp::jsonrpc::Message>(std::move(message)));
+    });
+  };
+  s.shared.languageClient->sendNotification("x/out", std::string("v"));
+  const auto out = next().get();
+  CHECK(out.method == "x/out" && out.params.has_value() &&
+        lsp::json::stringify(*out.params) == R"(["v"])");
+  s.shared.languageClient->sendNotification("x/none");
+  const auto none = next().get();
+  CHECK(none.method == "x/none" && !none.params.has_value());
+
+  std::promise<std::string> replied;
+  s.shared.languageClient->sendRequest(
+      "x/ask", lsp::json::Object{}, [&](lsp::LSPAny value) {
+        replied.set_value(lsp::json::stringify(value));
+      });
+  const auto asked = next().get();
+  CHECK(asked.method == "x/ask" && asked.id.has_value());
+  {
+    auto sender = s.client.response(*asked.id);
+    sender.writeData(std::string("yes"));
+    sender.submit();
+  }
+  // The reply is read on the session's loop, which the client's next message
+  // keeps turning.
+  s.notify("x/idle");
+  CHECK(replied.get_future().get() == R"("yes")");
+}
 
 void shutdown_obeys_the_handshake() {
   for (unsigned mode = 0; mode != 4; ++mode) {
@@ -1604,6 +1693,7 @@ void a_notification_does_not_cancel_its_own_write() {
 }  // namespace
 
 void run() {
+  custom_methods_reach_the_language();
   shutdown_obeys_the_handshake();
   answers_take_the_shapes_the_client_reads();
   cancellation_does_not_wait_for_an_earlier_notification();
@@ -1819,6 +1909,8 @@ void the_two_answers_never_cross() {
 // its closer and not the value openers, which belong one position further in.
 void the_state_names_exactly_what_may_be_written() {
   const World world;
+  world.doc->completionProvider =
+      std::make_unique<support::OffersEveryKeyword>(*world.doc);
   const std::string object = R"({"a":1})";
   const cursiv::Document* const o = world.built(object);
   const std::vector<std::string> opened =

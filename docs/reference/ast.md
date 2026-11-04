@@ -5,7 +5,7 @@ Declare each node with `cursiv::Extends<Base>`, where `Base` is
 `cursiv::AstNode` or another node class:
 
 ```cpp
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 struct Person : cursiv::Extends<cursiv::AstNode> {
   string_view name;

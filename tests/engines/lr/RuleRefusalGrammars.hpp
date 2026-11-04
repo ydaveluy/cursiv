@@ -3,8 +3,8 @@
 // A word refused in a rule is refused there alone; elsewhere a keyword is a
 // name wherever the state reads names alone.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/ConditionRefsGrammar.hpp"
 
 namespace trefuse {

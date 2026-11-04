@@ -5,8 +5,8 @@
 // body that can run to EOF, and keywords of three lengths (2/4/9) for the typo
 // repair to misjudge differently.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tort {
 

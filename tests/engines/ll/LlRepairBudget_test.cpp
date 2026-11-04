@@ -7,12 +7,12 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/utils/Cancellation.hpp"
-#include "cursiv/engines/ll/runtime/LlLanguageParser.hpp"
-#include "cursiv/engines/lr/runtime/LrLanguageParser.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/ll/runtime/LlLanguageParser.hpp"
+#include "cursiv/lr/runtime/LrLanguageParser.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
+#include "cursiv/Check.hpp"
 #include "parityll/generated/Ll/AstReflection.hpp"
 #include "parityll/generated/Ll/Grammar.hpp"
 #include "parityll/generated/Ll/Parser.hpp"

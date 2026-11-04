@@ -82,7 +82,7 @@ if(NOT _rc EQUAL 0)
 endif()
 
 # A transitive grammar include must rebuild the generator and rerun generation.
-file(TOUCH ${SOURCE}/src/tiny/ast.hpp)
+file(TOUCH ${SOURCE}/core/tiny/ast.hpp)
 execute_process(COMMAND ${CMAKE_COMMAND} --build ${WORK} --target consumer
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
 if(NOT _rc EQUAL 0 OR NOT _log MATCHES "tiny: writing")

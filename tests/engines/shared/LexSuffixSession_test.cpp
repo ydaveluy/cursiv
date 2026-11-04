@@ -1,4 +1,4 @@
-#include "cursiv/engines/shared/runtime/LexSuffixSession.hpp"
+#include "cursiv/shared/runtime/LexSuffixSession.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/engines/shared/runtime/LexWalk.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/shared/runtime/LexWalk.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

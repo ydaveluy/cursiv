@@ -12,12 +12,12 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/CstLeaf.hpp"
-#include "cursiv/core/syntax-tree/CstNode.hpp"
-#include "cursiv/core/text/TextOffset.hpp"
-#include "cursiv/fuzz/SeededSource.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstLeaf.hpp"
+#include "cursiv/syntax-tree/CstNode.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/SeededSource.hpp"
 #include "recovery_metric/support/FaultClass.hpp"
 #include "recovery_metric/support/RepairCase.hpp"
 #include "recovery_metric/support/RepairFault.hpp"

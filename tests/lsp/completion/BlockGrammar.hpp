@@ -3,8 +3,8 @@
 // A token that spans lines and ends in a letter: the word under a caret can
 // then reach past the caret's line, which a completion edit may not.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tblock {
 

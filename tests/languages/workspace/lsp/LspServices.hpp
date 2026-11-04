@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/lsp/services/SharedLspServices.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/services/SharedLspServices.hpp"
 #include "workspace/core/CoreServices.hpp"
 
 // The same language one storey up. Both containers derive `CoreServices`

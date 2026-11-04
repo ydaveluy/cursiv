@@ -2,9 +2,9 @@
 
 #include <vector>
 
-#include "cursiv/core/services/DefaultCoreService.hpp"
-#include "cursiv/core/utils/DocumentCache.hpp"
-#include "cursiv/core/validation/ValidationAcceptor.hpp"
+#include "cursiv/services/DefaultCoreService.hpp"
+#include "cursiv/utils/DocumentCache.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
 #include "workspace/core/ast.hpp"
 
 // A method's first parameter is the type it watches, so the list in

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tasi::ast {
 struct Stmt : cursiv::Extends<cursiv::AstNode> {

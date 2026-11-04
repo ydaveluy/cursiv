@@ -11,11 +11,11 @@
 #include <string>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/LlPredictionWork.hpp"
-#include "cursiv/engines/ll/runtime/LlSearch.hpp"
-#include "cursiv/engines/ll/table/LlSimulation.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/LlPredictionWork.hpp"
+#include "cursiv/ll/runtime/LlSearch.hpp"
+#include "cursiv/ll/table/LlSimulation.hpp"
+#include "cursiv/Check.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "repairgrowthll/generated/Ll/Module.hpp"
 

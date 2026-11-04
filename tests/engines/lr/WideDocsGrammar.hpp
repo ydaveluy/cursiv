@@ -3,8 +3,8 @@
 // Nine words documented at 8 KiB each: the prose outweighs the 16-bit pool the
 // names of a table live in, and no table carries it.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 #define TDOCS_ROW "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_"
 #define TDOCS_X4(x) x x x x

@@ -4,8 +4,8 @@
 // of them and a `b`. Which turn takes an `a` is the election's, and what the
 // table lays first for it depends on how the text ends.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace ttableorder {
 namespace ast {

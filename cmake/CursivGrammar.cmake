@@ -17,7 +17,7 @@ function(cursiv_engine_parts engine outMain outLib)
     message(FATAL_ERROR "cursiv: ENGINE must be LL or LR, got `${engine}`")
   endif()
   cmake_path(SET _main NORMALIZE
-      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../src/cursiv/engines/${_engine}/gen/${_engine}_main.cpp")
+      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../src/engines/cursiv/${_engine}/gen/${_engine}_main.cpp")
   set(${outMain} "${_main}" PARENT_SCOPE)
   set(${outLib} "cursiv::${_engine}_gen" PARENT_SCOPE)
 endfunction()
@@ -127,6 +127,10 @@ function(_cursiv_generate_language test_only)
   if(NOT "${ARG_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: unknown arguments ${ARG_UNPARSED_ARGUMENTS}")
   endif()
+  if(NOT test_only AND DEFINED ARG_INCLUDE_DIRS)
+    message(FATAL_ERROR "cursiv_generate_language: unknown arguments INCLUDE_DIRS: "
+        "a language's grammar is always found from core/")
+  endif()
   if("${ARG_ID}" STREQUAL "" OR "${ARG_GRAMMAR}" STREQUAL ""
      OR "${ARG_NAMESPACE}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: ID, GRAMMAR and NAMESPACE are required")
@@ -173,7 +177,18 @@ function(_cursiv_generate_language test_only)
     endif()
     get_target_property(_baseRoots ${ARG_BASE}Generated INTERFACE_INCLUDE_DIRECTORIES)
   endif()
-  set(_roots ${_root} ${_srcRoot} ${CMAKE_CURRENT_SOURCE_DIR} ${_baseRoots})
+  # A language's grammar and AST are found from `core` alone, so the packages
+  # beside it stay out of reach. Test languages name their own roots.
+  if(test_only)
+    set(_sourceRoots ${_srcRoot} ${CMAKE_CURRENT_SOURCE_DIR})
+  else()
+    set(_sourceRoots ${CMAKE_CURRENT_SOURCE_DIR}/core)
+    if(NOT EXISTS "${_sourceRoots}/${ARG_GRAMMAR}")
+      message(FATAL_ERROR "cursiv_generate_language: GRAMMAR ${ARG_GRAMMAR} is "
+          "not under ${_sourceRoots}")
+    endif()
+  endif()
+  set(_roots ${_root} ${_sourceRoots} ${_baseRoots})
   foreach(_include IN LISTS ARG_INCLUDE_DIRS)
     if(NOT _include MATCHES "^\\$<")
       cmake_path(ABSOLUTE_PATH _include BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
@@ -278,7 +293,9 @@ function(_cursiv_generate_language test_only)
       $<$<PLATFORM_ID:WASI>:-mtail-call>
       $<$<PLATFORM_ID:WASI>:-fno-optimize-sibling-calls>)
   target_include_directories(${_name}Generated PUBLIC ${_roots})
-  target_link_libraries(${_name}Generated PUBLIC cursiv::core)
+  string(TOLOWER "${ARG_ENGINE}" _engineTarget)
+  target_link_libraries(${_name}Generated PUBLIC
+      cursiv::engine::${_engineTarget})
   target_compile_definitions(${_name}Generated PUBLIC CURSIV_ENGINE_${ARG_ENGINE}=1)
   set_target_properties(${_name}Generated PROPERTIES
       CURSIV_GENERATED_DIR ${_dir}

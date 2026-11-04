@@ -12,11 +12,11 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/engines/lr/runtime/LrGssIndex.hpp"
-#include "cursiv/engines/lr/runtime/LrGssPool.hpp"
-#include "cursiv/engines/lr/runtime/LrGssRope.hpp"
-#include "cursiv/engines/lr/runtime/LrGssRuns.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/lr/runtime/LrGssIndex.hpp"
+#include "cursiv/lr/runtime/LrGssPool.hpp"
+#include "cursiv/lr/runtime/LrGssRope.hpp"
+#include "cursiv/lr/runtime/LrGssRuns.hpp"
+#include "cursiv/Check.hpp"
 
 namespace {
 

@@ -5,8 +5,8 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/shared/LexGuardsGrammar.hpp"
 #include "lexblankheadll/generated/BlankHeadLl/Module.hpp"
 #include "lexblankheadlr/generated/BlankHeadLr/Module.hpp"

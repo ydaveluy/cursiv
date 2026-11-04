@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tindent::ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {

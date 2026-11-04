@@ -78,13 +78,6 @@ At this point, `ignored` or `hidden` skips the terminal as trivia, so the
 rule never sees it. This also applies to operators. Remove the call, or read
 it inside `tight(e)` or a `skip()` that does not skip it.
 
-### `docConflict`
-
-> rule `Root` documents one word twice with different prose
-
-`kw<"if">.doc<"a">()` and `kw<"if">.doc<"b">()` are one token, and a token has
-one hover text. Keep one.
-
 ### `precedenceClash`
 
 > rule `Sum` names the same operator text on two levels

@@ -1,12 +1,12 @@
 #include <string>
 #include <string_view>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/engines/ll/runtime/ll_indent.hpp"
-#include "cursiv/engines/ll/runtime/LlPredictionSession.hpp"
-#include "cursiv/engines/ll/runtime/ll_predictor.hpp"
-#include "cursiv/engines/ll/runtime/ll_read.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/ll/runtime/ll_indent.hpp"
+#include "cursiv/ll/runtime/LlPredictionSession.hpp"
+#include "cursiv/ll/runtime/ll_predictor.hpp"
+#include "cursiv/ll/runtime/ll_read.hpp"
+#include "cursiv/Check.hpp"
 #include "engines/ll/LateWidthAst.hpp"
 #include "latewidthll/generated/Ll/Module.hpp"
 #include "latewidthll/generated/Ll/Table.hpp"

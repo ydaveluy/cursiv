@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "bench.hpp"
-#include "cursiv/fuzz/CursivActions.hpp"
+#include "cursiv/CursivActions.hpp"
 #include "engines/lr/IndentGrammar.hpp"
 #include "indent/generated/G/AstReflection.hpp"
 #include "indent/generated/G/Grammar.hpp"

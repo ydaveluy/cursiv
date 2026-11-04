@@ -6,9 +6,9 @@
 #include <string_view>
 #include <type_traits>
 
-#include "cursiv/engines/ll/runtime/LlLanguageParser.hpp"
-#include "cursiv/engines/lr/runtime/LrLanguageParser.hpp"
-#include "cursiv/engines/shared/runtime/RepairBudget.hpp"
+#include "cursiv/ll/runtime/LlLanguageParser.hpp"
+#include "cursiv/lr/runtime/LrLanguageParser.hpp"
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "recovery_metric/MetricLanguage.hpp"
 
 namespace cursiv::recovery_metric {

@@ -4,7 +4,7 @@
 // its own: the first refuses the byte `;` behind it, the second ends at a word.
 // A misspelling is read again as either, judged on its own frontier.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/ll/RescanBoundAst.hpp"
 
 namespace tllrescan {

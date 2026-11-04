@@ -4,8 +4,8 @@
 // the node spelled inline or behind a rule of its own, the choice reads the
 // same texts.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tguardedchoice {
 

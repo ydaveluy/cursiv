@@ -5,7 +5,7 @@
 // implies the semicolon; a token the statement can take does not, and a
 // restricted production refuses a line break before what follows it.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
 #include "engines/lr/AsiAst.hpp"
 
 namespace tasi {

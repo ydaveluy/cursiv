@@ -61,7 +61,7 @@ help and inlay hints, need providers of your own.
 To customize a feature, implement a provider and install it in the LSP
 module. For example, after defining `MyLangHoverProvider`:
 
-```cpp title="src/mylang/lsp/LspModule.cpp"
+```cpp title="src/lsp/mylang/LspModule.cpp"
 void install_lsp_module(MyLangServices& services) {
   cursiv::install_default_lsp_services(services);
   services.hoverProvider = std::make_unique<MyLangHoverProvider>(services);

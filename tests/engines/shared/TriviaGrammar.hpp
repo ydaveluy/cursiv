@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 #include "engines/lr/BracketCaretGrammar.hpp"
 #include "engines/shared/UnaryLevelsGrammar.hpp"
 // What a terminal read as trivia is: two ignored terminals may read the same

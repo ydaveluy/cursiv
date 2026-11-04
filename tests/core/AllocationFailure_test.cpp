@@ -9,15 +9,15 @@
 #include <new>
 #include <thread>
 
-#include "cursiv/core/execution/TaskQueue.hpp"
-#include "cursiv/core/execution/WorkerPool.hpp"
-#include "cursiv/core/services/CoreServices.hpp"
-#include "cursiv/core/services/DefaultServiceRegistry.hpp"
-#include "cursiv/core/services/SharedCoreServices.hpp"
-#include "cursiv/core/syntax-tree/AstArena.hpp"
-#include "cursiv/core/syntax-tree/CstRun.hpp"
-#include "cursiv/core/utils/Published.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/execution/TaskQueue.hpp"
+#include "cursiv/execution/WorkerPool.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/DefaultServiceRegistry.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
+#include "cursiv/syntax-tree/AstArena.hpp"
+#include "cursiv/syntax-tree/CstRun.hpp"
+#include "cursiv/utils/Published.hpp"
+#include "cursiv/Check.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
 namespace {

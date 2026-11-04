@@ -22,8 +22,7 @@ foreach(_engine IN ITEMS Ll Lr)
       GRAMMAR      caret_bench/CaretPhraseGrammar.hpp
       NAMESPACE    tcaretphrase::${_engine}
       ENGINE       ${_engine_id}
-      OUT          generated/benchcaret${_id}/generated
-      INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
+      OUT          generated/benchcaret${_id}/generated)
   set_target_properties(benchcaret${_id}Generated PROPERTIES
       EXCLUDE_FROM_ALL ON)
 endforeach()
@@ -47,7 +46,8 @@ if(TARGET indentGenerated AND TARGET asiGenerated)
   list(APPEND _metricLinks indentGenerated asiGenerated)
 endif()
 add_executable(recovery_metric EXCLUDE_FROM_ALL ${_metricSources})
-target_link_libraries(recovery_metric PRIVATE ${_metricLinks})
+target_link_libraries(recovery_metric PRIVATE ${_metricLinks} cursiv::test
+    cursiv::engine::ll cursiv::engine::lr)
 target_include_directories(recovery_metric PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests)
 target_compile_definitions(recovery_metric PRIVATE
@@ -59,7 +59,7 @@ if(CURSIV_BUILD_TESTS)
   add_executable(recovery_metric_smoke recovery_metric/main.cpp
       recovery_metric/arithmetics.cpp)
   target_link_libraries(recovery_metric_smoke PRIVATE cursiv::bench
-      arithmeticsCore)
+      cursiv::test cursiv::engine::ll cursiv::engine::lr arithmeticsCore)
   target_include_directories(recovery_metric_smoke PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(recovery_metric_smoke PRIVATE

@@ -6,11 +6,11 @@
 #include <iterator>
 #include <string>
 
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/services/CoreLanguage.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
-#include "@CURSIV_NEW_ID@/core/CoreServices.hpp"
-#include "@CURSIV_NEW_ID@/core/ast.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
+#include "@CURSIV_NEW_ID@/CoreServices.hpp"
+#include "@CURSIV_NEW_ID@/ast.hpp"
 
 namespace {
 

@@ -4,8 +4,8 @@
 // one a `skip()` region's edge or an end-of-input assertion keeps in place:
 // both engines read them, whatever the count.
 
-#include "cursiv/core/grammar/GrammarSpec.hpp"
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 #define TWIDE_WORD(S) append<&ast::Doc::words>(lit<S>)
 #define TWIDE_TIGHT(S) tight(option(TWIDE_WORD(S)))

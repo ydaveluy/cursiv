@@ -18,9 +18,9 @@
 
 #include "benchcaretll/generated/Ll/Module.hpp"
 #include "benchcaretlr/generated/Lr/Module.hpp"
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/parser/Parser.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
 
 namespace {
 

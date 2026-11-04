@@ -3,7 +3,7 @@
 // a DataType or an Entity through the tag's family test, so one field serves both.
 #pragma once
 
-#include "cursiv/core/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace ws::ast {
 

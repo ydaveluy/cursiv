@@ -2,8 +2,8 @@
 #include <string_view>
 
 #include "arithmetics/generated/Arith/Module.hpp"
-#include "cursiv/test/MutationOracle.hpp"
-#include "cursiv/test/RecoveryLane.hpp"
+#include "cursiv/MutationOracle.hpp"
+#include "cursiv/RecoveryLane.hpp"
 
 namespace {
 using namespace cursiv::test;

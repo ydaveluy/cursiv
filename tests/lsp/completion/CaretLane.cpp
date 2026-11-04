@@ -14,12 +14,13 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/core/grammar/NextFeature.hpp"
-#include "cursiv/core/syntax-tree/Cst.hpp"
-#include "cursiv/core/syntax-tree/ParseResult.hpp"
-#include "cursiv/lsp/services/LspServices.hpp"
-#include "cursiv/test/Check.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/services/LspServices.hpp"
+#include "cursiv/Check.hpp"
 #include "lsp/completion/CaretGrammar.hpp"
+#include "support/OffersEveryKeyword.hpp"
 #include "support/Editor.hpp"
 #include "support/World.hpp"
 
@@ -36,7 +37,7 @@ struct World : support::World<cursiv::SharedLspServices> {
   explicit World(const CaretDoor& door)
       : lang(&support::add_language<cursiv::LspServices>(
             shared, {"caret", {".caret"}, {}}, door.parser(),
-            door.reflection())) {
+            door.reflection(), support::offer_every_keyword)) {
     support::take_both_ranges(shared);
   }
 };
