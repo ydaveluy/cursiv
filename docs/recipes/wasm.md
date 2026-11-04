@@ -7,14 +7,24 @@ project.
 
 ## Install the tools
 
-Install wasi-sdk 34 or newer, which provides the WASI compiler and libraries,
-and point `WASI_SDK` at it:
+By default, the presets use wasi-sdk 34 or newer, which provides a WASI compiler
+and libraries. A generated project's script installs and verifies it, the same
+way on Linux, macOS and Windows, on your machine and in CI:
 
 ```bash
-export WASI_SDK=$HOME/wasi-sdk-34.0
+cmake -P tools/fetch-wasi-sdk.cmake
 ```
 
-You can also pass `-DWASI_SDK=/path/to/wasi-sdk` to CMake.
+The presets find it in `~/wasi-sdk-34.0`, or `/opt/wasi-sdk`. To use an SDK
+elsewhere, point `WASI_SDK` at it, or pass `-DWASI_SDK=/path/to/wasi-sdk` to
+CMake:
+
+```bash
+export WASI_SDK=/path/to/wasi-sdk
+```
+
+To change the SDK version, replace `tools/fetch-wasi-sdk.cmake` and
+`cmake/wasi.cmake` with those of the Cursiv version you use.
 
 For Release builds, also put `wasm-opt` on your `PATH` to optimize the module.
 Take it from a [Binaryen release](https://github.com/WebAssembly/binaryen/releases)
@@ -30,6 +40,29 @@ cmake --build --preset wasi-release --target mylang_lsp
 
 The parser generator is still built and run natively on your machine. The
 WASI presets use their own build directories, apart from the native ones.
+
+## Use your own toolchain
+
+The SDK is only the default. To use another compiler, write a toolchain file
+that names it, adds the flags it needs for C++ exceptions, and includes the
+settings every WASI toolchain shares:
+
+```cmake
+# cmake/my-wasi.cmake
+set(CMAKE_C_COMPILER   /path/to/cc)
+set(CMAKE_CXX_COMPILER /path/to/c++)
+set(CMAKE_SYSROOT      /path/to/wasi-sysroot)
+include(${CMAKE_CURRENT_LIST_DIR}/wasi-platform.cmake)
+```
+
+Then pass it to a preset:
+
+```bash
+cmake --preset wasi-release --toolchain cmake/my-wasi.cmake
+```
+
+Cursiv needs C++ exceptions and wasi-libc. It adds the tail-call options of the
+parser for Clang only; another compiler must enable tail calls itself.
 
 To try the server, select `wasi-release` or `wasi-debug` in VS Code and press
 F5. See [Ship an editor extension](../learn/editor-integration.md).

@@ -21,8 +21,13 @@
 
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as path from 'node:path';
+
+// As an editor spells it: on Windows a lower-case drive letter, its colon escaped.
+const fileUri = (file) => pathToFileURL(path.resolve(file)).toString()
+    .replace(/^file:\/\/\/([A-Za-z]):/,
+             (_, drive) => `file:///${drive.toLowerCase()}%3A`);
 
 const argv = process.argv.slice(2);
 const rest = [];
@@ -90,7 +95,7 @@ if (renameCursor !== null && !/^\d+:\d+=.+$/.test(renameCursor)) {
 // A wasm module cannot be exec'd; it goes through the same runner ctest uses.
 const magic = (await import('node:fs')).readFileSync(serverPath).subarray(0, 4);
 const isWasm = magic.equals(Buffer.from([0x00, 0x61, 0x73, 0x6d]));
-const runner = new URL('./wasi-run.mjs', import.meta.url).pathname;
+const runner = fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const server = isWasm
     ? spawn(process.execPath, ['--no-warnings', runner, serverPath],
             { stdio: ['pipe', 'pipe', 'inherit'] })
@@ -189,7 +194,7 @@ try {
     // server that has not been told the client supports workspace folders is
     // entitled to ignore the field.
     const workspaceFolders = folderPaths.map((folder) => ({
-        uri: pathToFileURL(path.resolve(folder)).toString(),
+        uri: fileUri(folder),
         name: path.basename(path.resolve(folder))
     }));
     const initialize = await request({
@@ -229,7 +234,7 @@ try {
 
     if (workspaceFolders.length) {
         const first = documentPaths[0];
-        const firstUri = pathToFileURL(path.resolve(first)).toString();
+        const firstUri = fileUri(first);
         await waitFor(
             (m) => m.method === 'textDocument/publishDiagnostics' && m.params?.uri === firstUri,
             `the scan's diagnostics snapshot for ${path.basename(first)}`);
@@ -242,7 +247,7 @@ try {
 
     const documents = [];
     for (const documentPath of documentPaths) {
-        const uri = pathToFileURL(path.resolve(documentPath)).toString();
+        const uri = fileUri(documentPath);
         const text = await readFile(documentPath, 'utf8');
         documents.push({ uri, name: path.basename(documentPath) });
         send({

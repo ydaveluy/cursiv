@@ -9,7 +9,9 @@
 #include <string_view>
 #include <vector>
 
+#ifdef SIGALRM
 #include <unistd.h>
+#endif
 
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
@@ -29,10 +31,17 @@ constexpr unsigned kWatchSeconds = 10;
 char gHang[512];
 std::size_t gHangLen = 0;
 
+// Without alarms, as on Windows, the test's timeout is what stops a hang.
+#ifdef SIGALRM
 extern "C" void rgram_hang(int) {
   (void)!::write(2, gHang, gHangLen);
   ::_exit(3);
 }
+
+void watch(unsigned seconds) { ::alarm(seconds); }
+#else
+void watch(unsigned) {}
+#endif
 
 std::string shown(std::string_view text) {
   std::string out;
@@ -74,7 +83,9 @@ int rgram_lane(unsigned seed, const Parser& parser,
   const RgramCfg cfg(g);
   const std::vector<RgramDocument> docs =
       cfg.documents(std::uint64_t{seed} * 7919u + 1u, documents);
+#ifdef SIGALRM
   std::signal(SIGALRM, rgram_hang);
+#endif
   unsigned bad = 0, inLanguage = 0, trees = 0;
   for (std::size_t i = 0; i < docs.size(); ++i) {
     const RgramDocument& d = docs[i];
@@ -86,9 +97,9 @@ int rgram_lane(unsigned seed, const Parser& parser,
         "rgram %u: document %zu did not finish in %u s: \"%s\"\n", seed, i,
         kWatchSeconds, shown(d.text).c_str());
     gHangLen = len < 0 ? 0 : std::min<std::size_t>(len, sizeof gHang - 1);
-    ::alarm(kWatchSeconds);
+    watch(kWatchSeconds);
     const ParseResult r = parser.parse(d.text);
-    ::alarm(0);
+    watch(0);
     const bool clean = r.accepted && r.diagnostics.empty();
     if (clean != o.accepted || (clean && r.value == nullptr)) {
       ++bad;

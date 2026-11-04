@@ -75,7 +75,8 @@ function(cursiv_test_language_batch engine)
   target_sources(${_name} PRIVATE "${_file}")
   target_compile_options(${_name} PRIVATE
       $<$<AND:$<CONFIG:Release>,$<NOT:$<PLATFORM_ID:WASI>>>:-O0>
-      $<$<PLATFORM_ID:WASI>:-O1;-mtail-call;-fno-optimize-sibling-calls>)
+      $<$<PLATFORM_ID:WASI>:-O1>
+      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-mtail-call;-fno-optimize-sibling-calls>)
   if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|WASI)$")
     # A test using one module need not retain the other modules in its batch.
     target_compile_options(${_name} PRIVATE -ffunction-sections -fdata-sections)

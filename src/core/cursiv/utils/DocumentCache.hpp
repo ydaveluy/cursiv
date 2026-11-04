@@ -15,6 +15,7 @@
 
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/SharedMutex.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -102,7 +103,7 @@ class DocumentCache : private DocumentPhaseListener,
   // reason: it guards a value against its own document being evicted.
   static constexpr std::size_t kStripes = 64;
   struct Shard {
-    mutable std::shared_mutex mutex;
+    mutable SharedMutex mutex;
     std::uint64_t generation = 0;
     std::unordered_map<DocumentId, std::unordered_map<K, V, Hash, KeyEqual>>
         entries;

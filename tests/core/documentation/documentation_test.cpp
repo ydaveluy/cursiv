@@ -834,7 +834,7 @@ void a_link_resolves_to_the_declaration() {
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const std::optional<std::string> text =
       docs.getDocumentation(*w.element(*doc, 0), doc.get());
-  CHECK(text.has_value() && *text == "See [String](file:///w/a.ws#L3,10).");
+  CHECK(text.has_value() && *text == "See [String](file:///w/a.ws#L3%2C10).");
 }
 
 // The display text survives an unresolved target: the author chose it.
@@ -859,7 +859,7 @@ void a_link_crosses_documents() {
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const std::optional<std::string> text =
       docs.getDocumentation(*w.element(*doc, 0), doc.get());
-  CHECK(text.has_value() && *text == "See [Remote](file:///w/lib.ws#L1,10).");
+  CHECK(text.has_value() && *text == "See [Remote](file:///w/lib.ws#L1%2C10).");
   (void)lib;
 }
 
@@ -871,7 +871,7 @@ void a_link_replaces_the_targets_fragment() {
                            "/** See {@link Remote}. */\nentity Person { }\n");
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const auto text = docs.getDocumentation(*w.element(*doc, 0));
-  CHECK(text && *text == "See [Remote](mem:///lib.ws?view=source#L1,10).");
+  CHECK(text && *text == "See [Remote](mem:/lib.ws?view%3Dsource#L1%2C10).");
   (void)target;
 }
 
@@ -886,7 +886,7 @@ void a_link_uses_the_target_documents_language_id() {
       "/** See {@link Remote}. */\nentity Person { }\n");
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const auto text = docs.getDocumentation(*w.element(*doc, 0));
-  CHECK(text && *text == "See [Remote](file:///no-extension#L1,10).");
+  CHECK(text && *text == "See [Remote](file:///no-extension#L1%2C10).");
 }
 
 // The same name declared locally and exported elsewhere: the local one wins.
@@ -899,7 +899,7 @@ void a_local_name_beats_a_global_one() {
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const std::optional<std::string> text =
       docs.getDocumentation(*w.element(*doc, 0), doc.get());
-  CHECK(text.has_value() && *text == "See [Dup](file:///w/b.ws#L3,10).");
+  CHECK(text.has_value() && *text == "See [Dup](file:///w/b.ws#L3%2C10).");
   (void)lib;
 }
 
@@ -912,7 +912,7 @@ void a_linkcode_keeps_its_backticks() {
   const cursiv::DefaultDocumentationProvider docs(*w.ws);
   const std::optional<std::string> text =
       docs.getDocumentation(*w.element(*doc, 0), doc.get());
-  CHECK(text.has_value() && *text == "See [`String`](file:///w/a.ws#L3,10).");
+  CHECK(text.has_value() && *text == "See [`String`](file:///w/a.ws#L3%2C10).");
 }
 
 // An empty documentation comment says nothing: no raw answer, no markdown.

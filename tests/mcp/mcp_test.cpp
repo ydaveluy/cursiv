@@ -2,6 +2,7 @@
 // the errors JSON-RPC owes -- and the default tools over a real workspace, with
 // and without the lsp storey's formatter.
 
+#include <filesystem>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -17,6 +18,7 @@
 
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -531,9 +533,12 @@ void text_document_content_serves_the_held_text() {
                                 R"({"file":"file:///w/a.ws"})");
   CHECK(!text.isError);
   CHECK(text.text == "datatype D\nentity A { x : D }\n");
-  for (const std::string_view arguments :
-       {R"({"file":"/w/a#b?c%d.ws"})",
-        R"({"file":"file:///w/a%23b%3Fc%25d.ws"})"}) {
+  std::vector<std::string_view> spellings{
+      R"({"file":"file:///w/a%23b%3Fc%25d.ws"})"};
+  // Windows reads this path on the current drive, and forbids its `?`.
+  if (std::filesystem::path::preferred_separator != '\\')
+    spellings.push_back(R"({"file":"/w/a#b?c%d.ws"})");
+  for (const std::string_view arguments : spellings) {
     const Answer special = call_tool(server, "text-document-content", arguments);
     CHECK(!special.isError && special.text == "entity P { }\n");
   }
@@ -685,8 +690,8 @@ void validate_discards_the_scratch_after_an_initial_build_failure() {
 
 void validate_keeps_a_document_it_did_not_install() {
   World own;
-  constexpr std::string_view reserved =
-      "file:///.mcp-scratch/0/reserved.ws";
+  const std::string reserved =
+      cursiv::path_to_file_uri("/.mcp-scratch/0/reserved.ws");
   own.build({{reserved, "datatype D\n"}, {kB, "entity B { y : D }\n"}});
   const auto existing = own.shared.documents->getDocument(reserved);
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});

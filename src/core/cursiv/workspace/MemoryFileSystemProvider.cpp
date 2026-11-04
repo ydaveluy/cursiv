@@ -15,8 +15,8 @@ namespace cursiv {
 
 namespace {
 
-// Both spellings of one folder name it: `mem:///src` and `mem:///src/` differ
-// by a byte and by nothing else.
+// Both spellings of one folder name it: `mem:/src` and `mem:/src/` differ by a
+// byte and by nothing else.
 [[nodiscard]] std::string folder_prefix(std::string_view uri) {
   std::string prefix = normalize_uri(uri);
   if (!prefix.empty() && prefix.back() != '/') prefix.push_back('/');

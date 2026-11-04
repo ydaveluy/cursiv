@@ -4,6 +4,12 @@ set(CURSIV_DEFAULT_ENGINE "LR" CACHE STRING "Default parser engine: LL or LR")
 set_property(CACHE CURSIV_DEFAULT_ENGINE PROPERTY STRINGS LL LR)
 cmake_path(GET CMAKE_CURRENT_LIST_DIR PARENT_PATH _cursiv_root)
 set(CURSIV_SOURCE_ROOT "${_cursiv_root}" CACHE INTERNAL "")
+# How the host names an executable, whatever the build targets.
+if(CMAKE_HOST_WIN32)
+  set(CURSIV_HOST_EXE .exe)
+else()
+  set(CURSIV_HOST_EXE "")
+endif()
 set(CURSIV_HOST_TOOLS "" CACHE PATH "An existing native build containing the generators")
 if(CURSIV_HOST_TOOLS)
   set(CURSIV_HOST_DIR "${CURSIV_HOST_TOOLS}" CACHE INTERNAL "")
@@ -39,7 +45,7 @@ function(cursiv_grammar_generator name header ns gns id exts fileNames roots eng
       CURSIV_GEN_FILE_NAMES="${_fileNames}")
   # Generators run briefly; large grammars need generous compile-time limits.
   target_compile_options(${name}_gen PRIVATE -O0 -pipe
-      $<$<CXX_COMPILER_ID:Clang>:-fbracket-depth=16384>
+      $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fbracket-depth=16384>
       $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=2147483647>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-expand=200>
       $<$<CXX_COMPILER_ID:GNU>:--param=ggc-min-heapsize=1000000>)
@@ -57,7 +63,7 @@ endfunction()
 # after FetchContent_MakeAvailable. A single build command avoids concurrent Ninja runs.
 function(cursiv_host_tools)
   get_property(_targets GLOBAL PROPERTY CURSIV_HOST_GENERATORS)
-  list(TRANSFORM _targets PREPEND "${CURSIV_HOST_DIR}/gen/" OUTPUT_VARIABLE _files)
+  list(TRANSFORM _targets REPLACE "(.+)" "${CURSIV_HOST_DIR}/gen/\\1${CURSIV_HOST_EXE}" OUTPUT_VARIABLE _files)
   if(NOT CURSIV_HOST_TOOLS)
     FetchContent_GetProperties(lsp_framework SOURCE_DIR _lsp)
     execute_process(COMMAND ${CMAKE_COMMAND}
@@ -81,7 +87,7 @@ if(CMAKE_CROSSCOMPILING AND TARGET lspgen)
   file(WRITE "${CMAKE_BINARY_DIR}/host-tools.cmake" "")
   set_property(GLOBAL APPEND PROPERTY CURSIV_HOST_GENERATORS lspgen)
   set_target_properties(lspgen PROPERTIES
-      IMPORTED_LOCATION "${CURSIV_HOST_DIR}/gen/lspgen")
+      IMPORTED_LOCATION "${CURSIV_HOST_DIR}/gen/lspgen${CURSIV_HOST_EXE}")
   cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR} CALL cursiv_host_tools)
 elseif(TARGET lspgen)
   set_target_properties(lspgen PROPERTIES
@@ -225,7 +231,7 @@ function(_cursiv_generate_language test_only)
         cursiv_host_manifest("set_property(TARGET ${_name}_gen PROPERTY CXX_EXTENSIONS ON)")
       endif()
     endforeach()
-    set(_gen ${CURSIV_HOST_DIR}/gen/${_name}_gen)
+    set(_gen ${CURSIV_HOST_DIR}/gen/${_name}_gen${CURSIV_HOST_EXE})
     set_property(GLOBAL APPEND PROPERTY CURSIV_HOST_GENERATORS ${_name}_gen)
     set(_dep ${_gen})
   else()
@@ -287,11 +293,12 @@ function(_cursiv_generate_language test_only)
   # Keep generated WASI Debug functions within engine limits on local counts.
   # Debug symbols remain enabled; handwritten application code keeps its flags.
   # WASI needs tail calls between parser groups, but not for by-value C++ calls.
+  # Clang spells that as below; another compiler adds its own spelling here.
   set_property(SOURCE ${_parserSources} PROPERTY COMPILE_OPTIONS
       $<$<CONFIG:Release>:${_parserOptimization}>
       $<$<AND:$<PLATFORM_ID:WASI>,$<CONFIG:Debug>>:-O1>
-      $<$<PLATFORM_ID:WASI>:-mtail-call>
-      $<$<PLATFORM_ID:WASI>:-fno-optimize-sibling-calls>)
+      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-mtail-call>
+      $<$<AND:$<PLATFORM_ID:WASI>,$<CXX_COMPILER_ID:Clang>>:-fno-optimize-sibling-calls>)
   target_include_directories(${_name}Generated PUBLIC ${_roots})
   string(TOLOWER "${ARG_ENGINE}" _engineTarget)
   target_link_libraries(${_name}Generated PUBLIC

@@ -98,7 +98,7 @@ it to the aggregate `bench` target. Declare `mylangLsp` first.
 | Option | Default | Use it to… |
 |---|---|---|
 | `CURSIV_DEFAULT_ENGINE` | `LR` | Select `LL` or `LR` when a language does not specify `ENGINE`. |
-| `CURSIV_MIMALLOC` | `ON` | Link the mimalloc allocator into every executable. |
+| `CURSIV_MIMALLOC` | `ON`; `OFF` on Windows and macOS | Link the mimalloc allocator into every executable. |
 | `CURSIV_SOURCE_DIR` | — | Select a local checkout in the FetchContent setup above. |
 | `CURSIV_HOST_TOOLS` | — | When cross-compiling, run the parser generators from this existing native build instead of building them in `host-tools/` inside the build directory. |
 | `CURSIV_WASI_THREADS` | `ON` with the WASI toolchain | Build the threaded WebAssembly target, which the packaged language server needs. Set it only with the WASI toolchain. |

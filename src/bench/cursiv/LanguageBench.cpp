@@ -62,6 +62,7 @@
 #include <sched.h>
 #endif
 
+#include "cursiv/utils/HostDirectory.hpp"
 #include "cursiv/LanguageBench.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
 
@@ -113,14 +114,11 @@ void print_binary_age() {
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           t - std::filesystem::file_time_type::clock::now());
   const std::time_t tt = std::chrono::system_clock::to_time_t(sys);
-  std::tm local{};
-#ifdef _WIN32
-  if (localtime_s(&local, &tt) != 0) return;
-#else
-  if (localtime_r(&tt, &local) == nullptr) return;
-#endif
+  // Read once, before any thread starts.
+  const std::tm* const local = std::localtime(&tt);
+  if (local == nullptr) return;
   char buf[32];
-  if (std::strftime(buf, sizeof buf, "%F %T", &local) != 0)
+  if (std::strftime(buf, sizeof buf, "%F %T", local) != 0)
     std::printf(
         "binary built %s -- stale unless newer than your last change"
         " (`cmake --build build --target bench`)\n",
@@ -866,6 +864,7 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
 
 int cursiv::bench::run(int argc, char** argv,
                        std::span<const Language> languages) {
+  enter_host_directory();
   const Options o = options(argc, argv, languages);
   if (o.help) {
     std::printf(

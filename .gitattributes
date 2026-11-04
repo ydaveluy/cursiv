@@ -1,0 +1,2 @@
+# Sources, tests and fixtures are byte-exact: offsets depend on their line ends.
+* text=auto eol=lf

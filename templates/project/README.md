@@ -65,7 +65,8 @@ CMake build and press **F5**. The launch task builds the server and client,
 then opens `example/` in a development window.
 
 Native GCC/Clang presets run the native server. WASI presets run a WebAssembly
-server through Node. See
+server through Node; `cmake -P tools/fetch-wasi-sdk.cmake` installs the SDK they
+need. See
 [Editor integration](https://ydaveluy.github.io/cursiv/learn/editor-integration/)
 for customization and packaging.
 

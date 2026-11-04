@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/utils/HostDirectory.hpp"
 #include "cursiv/cli.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/parser/Parser.hpp"
@@ -177,7 +178,7 @@ void initialize_root(std::string_view root, SharedCoreServices& shared) {
       std::filesystem::absolute(std::filesystem::path(root), error);
   if (error || !std::filesystem::is_directory(absolute, error))
     throw UsageError(std::string(root) + " is not a directory");
-  const std::string uri = cursiv::path_to_file_uri(absolute.generic_string());
+  const std::string uri = cursiv::path_to_file_uri(absolute.string());
   const std::vector<WorkspaceFolder> folders{{std::string(uri), {}}};
   try {
     shared.workspaceManager->initializeWorkspace(folders);
@@ -199,7 +200,7 @@ Document& build_document_from_path(std::string_view path,
 
   // Must match the encoder the scan and the store use, or the same file
   // could be spelled as two different URIs.
-  const std::string uri = cursiv::path_to_file_uri(absolute.generic_string());
+  const std::string uri = cursiv::path_to_file_uri(absolute.string());
 
   if (const ServiceRegistry& registry = *shared.serviceRegistry;
       registry.findServices(uri) == nullptr)
@@ -521,6 +522,7 @@ int run_cli_on(
     int argc, char** argv,
     const std::function<bool(SharedCoreServices&)>& registerLanguageServices,
     SharedCoreServices& shared) {
+  enter_host_directory();
   try {
     // A CLI reads the disk, and says so: without this, the shared default
     // would be the empty provider.

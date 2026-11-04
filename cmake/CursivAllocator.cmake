@@ -2,7 +2,14 @@
 # its malloc family stands before libc's -- an archive would not guarantee
 # that. Global sanitizer flags disable it automatically; per-target sanitizer
 # flags require an explicit opt-out. The threadless wasm target is unsupported.
-option(CURSIV_MIMALLOC "Link mimalloc into every executable" ON)
+# On Windows and macOS the system's shared libraries keep their own allocator,
+# so a block could cross heaps: the system allocator stays the default there.
+if(WIN32 OR APPLE)
+  set(_allocator_default OFF)
+else()
+  set(_allocator_default ON)
+endif()
+option(CURSIV_MIMALLOC "Link mimalloc into every executable" ${_allocator_default})
 if(NOT CURSIV_MIMALLOC OR
    (CMAKE_SYSTEM_NAME STREQUAL "WASI" AND NOT CURSIV_WASI_THREADS))
   return()

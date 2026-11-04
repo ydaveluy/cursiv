@@ -6,13 +6,13 @@
 // confined to this file.
 import { WASI } from 'node:wasi';
 import { readFile } from 'node:fs/promises';
-import { realpathSync, writeSync } from 'node:fs';
+import { existsSync, realpathSync, writeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { availableParallelism } from 'node:os';
 import { setFlagsFromString } from 'node:v8';
 import { Worker, isMainThread, workerData, threadId } from 'node:worker_threads';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, win32 } from 'node:path';
 
 // Generated modules use standardized Wasm exceptions (try_table), which
 // Node 20 cannot compile. The runner needs Node 22 or later.
@@ -45,19 +45,44 @@ if (!WebAssembly.validate(exnrefProbe)) {
     throw new Error('Cannot enable WebAssembly exnref in this JavaScript runtime');
 }
 
-// The whole filesystem is preopened: this runner is the caller, so the
-// module reads the paths its caller chose. `.` is separate because WASI has
-// no chdir -- a relative path resolves against a preopen by name.
-const preopens = () => ({ '.': process.cwd(), '/': '/' });
+// The whole filesystem is preopened: this runner is the caller, so the module
+// reads the paths its caller chose. The module has one root, so on Windows each
+// drive is a directory of it, named as a file URI names it: `/c:/a` is `C:\\a`.
+export function preopensFor(platform, exists = existsSync) {
+  if (platform !== 'win32') return { '/': '/' };
+  const drives = {};
+  for (const letter of 'abcdefghijklmnopqrstuvwxyz')
+    if (exists(`${letter}:\\`)) drives[`/${letter}:`] = `${letter}:\\`;
+  return drives;
+}
+
+// A host path as the module reads it. On Windows, one outside every drive, a
+// share, stands nowhere the module can read.
+export function guestPath(platform, hostPath) {
+  if (platform !== 'win32') return hostPath;
+  const drive = /^([A-Za-z]):[\\/]*(.*)$/.exec(hostPath);
+  return drive
+    ? `/${drive[1].toLowerCase()}:/${drive[2].replaceAll('\\', '/')}`
+    : '/';
+}
+
+// The module reads `/`-separated paths: on Windows a command line that names a
+// host path goes to it in the module's own spelling. Whatever else it says, it
+// keeps.
+export function guestArguments(platform, args, exists = existsSync) {
+  if (platform !== 'win32') return args;
+  return args.map((arg, index) =>
+    index !== 0 && exists(arg) ? guestPath(platform, win32.resolve(arg)) : arg);
+}
 
 function wasiFor(args, environment, hostModule) {
   return new WASI({
     version: 'preview1',
-    args,
+    args: guestArguments(process.platform, args),
     env: { ...process.env, ...environment,
       ...(hostModule ? { CURSIV_WASI_HOST_MODULE: hostModule } : {}),
-      PWD: process.cwd() },
-    preopens: preopens(),
+      PWD: guestPath(process.platform, process.cwd()) },
+    preopens: preopensFor(process.platform),
     returnOnExit: true,
   });
 }

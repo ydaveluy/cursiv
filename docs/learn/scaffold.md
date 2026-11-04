@@ -36,6 +36,7 @@ the build regenerates the parser.
 mylang/
 ├── CMakeLists.txt          project and dependency configuration
 ├── CMakePresets.json       GCC, Clang and WASI in Debug/Release
+├── tools/fetch-wasi-sdk.cmake  installs the SDK of the WASI presets
 ├── example/hello.mylang    a document that parses
 ├── src/
 │   ├── CMakeLists.txt      language and executable targets

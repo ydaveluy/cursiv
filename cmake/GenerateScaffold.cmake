@@ -24,7 +24,8 @@ foreach(_rel IN LISTS _files)
 endforeach()
 # Files the project shares with this repository. Its .clang-format is not one
 # of them: templates/project/ carries its own.
-foreach(_rel IN ITEMS CMakePresets.json cmake/wasi.cmake)
+foreach(_rel IN ITEMS CMakePresets.json cmake/wasi.cmake cmake/wasi-platform.cmake
+                      tools/fetch-wasi-sdk.cmake)
   file(READ "${_root}/${_rel}" _content)
   string(APPEND _body
       "_cursiv_new_emit([==[${_rel}]==] [==[${_content}]==])\n")
@@ -36,8 +37,10 @@ set(_banner
 "# =============================================================================
 # GENERATED FILE -- DO NOT EDIT.
 # Produced by cmake/GenerateScaffold.cmake from cmake/cursiv-new.cmake.in and
-# templates/project/, CMakePresets.json and cmake/wasi.cmake. Edit those
-# and regenerate:  cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
+# templates/project/, CMakePresets.json, cmake/wasi.cmake,
+# cmake/wasi-platform.cmake and tools/fetch-wasi-sdk.cmake. Edit those and
+# regenerate:
+#   cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
 # =============================================================================
 ")
 file(WRITE "${OUT}" "${_banner}${_head}\n${_body}\n_cursiv_new_finish()\n")

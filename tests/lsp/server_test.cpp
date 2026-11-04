@@ -790,6 +790,8 @@ void a_scanned_document_publishes_without_a_tab() {
     }
   };
   for (unsigned root = 0; root != 6; ++root) {
+    // `rootPath` is a local path: Windows reads "/w" on the current drive.
+    if (std::filesystem::path::preferred_separator == '\\' && root == 2) continue;
     const World world(true);
     const bool configuration = root == 0 || root == 5;
     if (configuration)

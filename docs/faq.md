@@ -73,8 +73,8 @@ server then offers formatting to the editor. See
 
 Ship the WebAssembly server: the VS Code extension runs it with Node.js, on
 every platform VS Code supports. See
-[Cross-compiling to wasm](recipes/wasm.md). Native builds are tested on Linux
-only.
+[Cross-compiling to wasm](recipes/wasm.md). Native builds are tested on Linux,
+and also build on Windows (MSYS2) and macOS.
 
 ### What C++ do I need?
 

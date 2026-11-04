@@ -23,36 +23,48 @@ bool has_file_scheme(std::string_view uri) {
   return true;
 }
 
-// RFC 3986 unreserved plus `/`: what vscode-uri leaves bare in a path, so a
-// drive letter's `:` travels as `%3A`. A fixed ASCII table, never `isalnum`:
-// an active 8-bit locale would otherwise call a UTF-8 path byte alphanumeric
-// and leave it unescaped.
+// Whether the host writes its paths with drive letters and `\`. A WASI module
+// never does, whatever it runs on.
+inline constexpr bool kWindowsPaths =
+    std::filesystem::path::preferred_separator == '\\';
+
+// RFC 3986 unreserved, all that stays bare in a component: a drive letter's `:`
+// travels as `%3A`. A fixed ASCII table, never `isalnum`: an active 8-bit locale
+// would otherwise call a UTF-8 path byte alphanumeric and leave it unescaped.
 inline constexpr CharSet kUnreserved = [] {
   CharSet s;
   for (int c = 'a'; c <= 'z'; ++c) s.set(static_cast<unsigned char>(c));
   for (int c = 'A'; c <= 'Z'; ++c) s.set(static_cast<unsigned char>(c));
   for (int c = '0'; c <= '9'; ++c) s.set(static_cast<unsigned char>(c));
-  for (const char c : std::string_view("-._~/"))
+  for (const char c : std::string_view("-._~"))
     s.set(static_cast<unsigned char>(c));
   return s;
 }();
 
-#ifdef _WIN32
-inline constexpr CharSet kDriveLetter = [] {
-  CharSet s;
-  for (int c = 'a'; c <= 'z'; ++c) s.set(static_cast<unsigned char>(c));
-  for (int c = 'A'; c <= 'Z'; ++c) s.set(static_cast<unsigned char>(c));
+// A path keeps its separators, and an authority its brackets and port.
+inline constexpr CharSet kPathBare = [] {
+  CharSet s = kUnreserved;
+  s.set(static_cast<unsigned char>('/'));
   return s;
 }();
-#endif
+inline constexpr CharSet kAuthorityBare = [] {
+  CharSet s = kUnreserved;
+  for (const char c : std::string_view("[]:"))
+    s.set(static_cast<unsigned char>(c));
+  return s;
+}();
+
+bool is_ascii_letter(char c) noexcept {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
 
 char to_hex(unsigned char value) noexcept {
   return static_cast<char>(value < 10 ? '0' + value : 'A' + (value - 10));
 }
 
-std::string percent_encode(std::string_view text) {
-  if (std::ranges::all_of(text, [](char c) {
-        return kUnreserved.test(static_cast<unsigned char>(c));
+std::string percent_encode(std::string_view text, const CharSet& bare) {
+  if (std::ranges::all_of(text, [&](char c) {
+        return bare.test(static_cast<unsigned char>(c));
       }))
     return std::string(text);
 
@@ -60,7 +72,7 @@ std::string percent_encode(std::string_view text) {
   encoded.reserve(text.size());
   for (const char raw : text) {
     const auto c = static_cast<unsigned char>(raw);
-    if (kUnreserved.test(c)) {
+    if (bare.test(c)) {
       encoded.push_back(raw);
       continue;
     }
@@ -69,6 +81,10 @@ std::string percent_encode(std::string_view text) {
     encoded.push_back(to_hex(static_cast<unsigned char>(c & 0x0FU)));
   }
   return encoded;
+}
+
+char to_upper_hex(char c) noexcept {
+  return c >= 'a' && c <= 'f' ? static_cast<char>(c - 'a' + 'A') : c;
 }
 
 int from_hex(char c) noexcept {
@@ -102,22 +118,37 @@ std::string percent_decode(std::string_view text) {
   return decoded;
 }
 
-// Scheme, authority and path of a URI; query and fragment are not a place.
+// The components of a URI, as written and in that order.
 struct UriParts {
   std::string_view scheme;
   std::string_view authority;
   std::string_view path;
+  std::string_view query;
+  std::string_view fragment;
+  bool slashes = false;
+  bool marked = false;
+  bool hashed = false;
 };
 
 UriParts split_uri(std::string_view uri) {
-  uri = uri.substr(0, uri.find_first_of("?#"));
   UriParts parts;
+  if (const std::size_t hash = uri.find('#'); hash != std::string_view::npos) {
+    parts.fragment = uri.substr(hash + 1);
+    parts.hashed = true;
+    uri = uri.substr(0, hash);
+  }
+  if (const std::size_t mark = uri.find('?'); mark != std::string_view::npos) {
+    parts.query = uri.substr(mark + 1);
+    parts.marked = true;
+    uri = uri.substr(0, mark);
+  }
   if (const std::size_t colon = uri.find(':');
       colon != 0 && colon < uri.find('/')) {
     parts.scheme = uri.substr(0, colon);
     uri.remove_prefix(colon + 1);
   }
   if (uri.starts_with("//")) {
+    parts.slashes = true;
     uri.remove_prefix(2);
     const std::size_t slash = uri.find('/');
     parts.authority = uri.substr(0, slash);
@@ -133,22 +164,50 @@ bool same_place(const UriParts& a, const UriParts& b) {
   return a.scheme == b.scheme && a.authority == b.authority;
 }
 
-// The scheme and the authority in lower case, the userinfo apart: RFC 3986
-// makes both case-insensitive, and gives the scheme lower case as its
-// canonical form.
-std::string with_lower_scheme_and_authority(std::string_view uri) {
-  std::string out(uri);
-  const std::size_t scheme = split_uri(uri).scheme.size();
-  for (std::size_t i = 0; i < scheme; ++i) out[i] = to_lower(out[i]);
-  const std::size_t colon = out.find(':');
-  if (colon == std::string::npos || !uri.substr(colon + 1).starts_with("//"))
-    return out;
-  const std::size_t begin = colon + 3;
-  const std::size_t end = std::min(out.find_first_of("/?#", begin), out.size());
-  const std::size_t at = uri.substr(begin, end - begin).rfind('@');
-  for (std::size_t i = at == std::string_view::npos ? begin : begin + at + 1;
-       i < end; ++i)
-    out[i] = to_lower(out[i]);
+std::string lower_case(std::string_view text) {
+  std::string out(text);
+  for (char& c : out) c = to_lower(c);
+  return out;
+}
+
+// A drive letter is a syntactic fact of the URI, not of the host: the same
+// document arrives as `/c:/`, `/C:/` or `/c%3A/` and must land on one spelling
+// whatever platform the server runs on.
+void lower_drive_letter(std::string& path) {
+  if (path.size() >= 3 && path[0] == '/' && is_ascii_letter(path[1]) &&
+      path[2] == ':')
+    path[1] = to_lower(path[1]);
+  else if (path.size() >= 2 && is_ascii_letter(path[0]) && path[1] == ':')
+    path[0] = to_lower(path[0]);
+}
+
+// `authority` decoded: the userinfo keeps its case, and the host goes to lower
+// case, RFC 3986 making it case-insensitive.
+std::string format_authority(std::string_view authority) {
+  std::string out;
+  if (const std::size_t at = authority.find('@');
+      at != std::string_view::npos) {
+    const std::string_view userinfo = authority.substr(0, at);
+    if (const std::size_t colon = userinfo.rfind(':');
+        colon == std::string_view::npos) {
+      out += percent_encode(userinfo, kUnreserved);
+    } else {
+      out += percent_encode(userinfo.substr(0, colon), kUnreserved);
+      out += ':';
+      out += percent_encode(userinfo.substr(colon + 1), kAuthorityBare);
+    }
+    out += '@';
+    authority.remove_prefix(at + 1);
+  }
+  const std::string host = lower_case(authority);
+  if (const std::size_t colon = host.rfind(':');
+      colon == std::string::npos) {
+    out += percent_encode(host, kAuthorityBare);
+  } else {
+    out += percent_encode(std::string_view(host).substr(0, colon),
+                          kAuthorityBare);
+    out += host.substr(colon);
+  }
   return out;
 }
 
@@ -165,23 +224,105 @@ std::vector<std::string_view> path_segments(std::string_view path) {
   return segments;
 }
 
+std::string rooted_path_to_uri(const std::filesystem::path& path) {
+  auto normalized = path.lexically_normal().generic_string();
+  if (!normalized.starts_with('/')) normalized.insert(normalized.begin(), '/');
+  lower_drive_letter(normalized);
+  return "file://" + percent_encode(normalized, kPathBare);
+}
+
+// Whether `text` is one component as a URI writes it, escapes in upper case and
+// only where `bare` asks for them.
+bool is_encoded(std::string_view text, const CharSet& bare) {
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (bare.test(static_cast<unsigned char>(text[i]))) continue;
+    if (text[i] != '%' || i + 2 >= text.size()) return false;
+    const int high = from_hex(text[i + 1]);
+    const int low = from_hex(text[i + 2]);
+    if (high < 0 || low < 0 || to_upper_hex(text[i + 1]) != text[i + 1] ||
+        to_upper_hex(text[i + 2]) != text[i + 2] ||
+        bare.test(static_cast<unsigned char>(high * 16 + low)))
+      return false;
+    i += 2;
+  }
+  return true;
+}
+
+// Whether `normalize_uri` writes `uri` back as it stands. Nearly every URI comes
+// from it, and telling so allocates nothing. It may say no to a URI that would
+// be written back: a host beyond plain letters goes the long way.
+bool is_normal_uri(const UriParts& parts) {
+  const auto lower = [](char c) { return to_lower(c) == c; };
+  if (!std::ranges::all_of(parts.scheme, lower) ||
+      !std::ranges::all_of(parts.authority, lower) ||
+      !std::ranges::all_of(parts.authority, [](char c) {
+        return kUnreserved.test(static_cast<unsigned char>(c));
+      }))
+    return false;
+  const bool file = parts.scheme == "file";
+  if (parts.slashes != (file || !parts.authority.empty())) return false;
+  if ((file || parts.scheme == "http" || parts.scheme == "https") &&
+      !parts.path.starts_with('/'))
+    return false;
+  // The letter before an escaped colon, which lowers.
+  const std::string_view drive =
+      parts.path.substr(parts.path.starts_with('/') ? 1 : 0, 4);
+  if (drive.size() == 4 && drive.substr(1) == "%3A" &&
+      is_ascii_letter(drive[0]) && !lower(drive[0]))
+    return false;
+  if (parts.marked && parts.query.empty()) return false;
+  if (parts.hashed && parts.fragment.empty()) return false;
+  return is_encoded(parts.path, kPathBare) &&
+         is_encoded(parts.query, kUnreserved) &&
+         is_encoded(parts.fragment, kUnreserved);
+}
+
+// A URI in its one spelling, copied only where it is not in it already.
+class NormalUri {
+ public:
+  explicit NormalUri(std::string_view uri) {
+    const UriParts parts = split_uri(uri);
+    if (parts.scheme.empty() || is_normal_uri(parts)) {
+      _view = uri;
+    } else {
+      _owned = normalize_uri(uri);
+      _view = _owned;
+    }
+  }
+  NormalUri(const NormalUri&) = delete;
+  NormalUri& operator=(const NormalUri&) = delete;
+
+  [[nodiscard]] std::string_view view() const { return _view; }
+
+ private:
+  std::string _owned;
+  std::string_view _view;
+};
+
 }  // namespace
 
 std::string normalize_uri(std::string_view uri) {
-  if (const auto path = file_uri_to_path(uri); path.has_value()) {
-    std::string out = path_to_file_uri(*path);
-    // A Windows drive letter is a syntactic fact of the URI, not of the host:
-    // the same document arrives as `/c:/`, `/C:/` or `/c%3A/` and must land
-    // on one spelling whatever platform the server runs on.
-    if (constexpr std::size_t at = 8;  // past "file:///"
-        out.size() > at + 3 && out.compare(at + 1, 3, "%3A") == 0)
-      out[at] = to_lower(out[at]);
-    if (const std::size_t suffix = uri.find_first_of("?#");
-        suffix != std::string_view::npos)
-      out.append(uri.substr(suffix));
-    return out;
-  }
-  return with_lower_scheme_and_authority(uri);
+  const UriParts parts = split_uri(uri);
+  // A bare name is not a URI, and nothing here invents its scheme.
+  if (parts.scheme.empty() || is_normal_uri(parts)) return std::string(uri);
+  // Each component decoded, then written back one way: the spelling depends on
+  // the text alone, never on the host.
+  const std::string scheme = lower_case(parts.scheme);
+  std::string out = scheme + ':';
+  if (!parts.authority.empty() || scheme == "file") out += "//";
+  out += format_authority(percent_decode(parts.authority));
+  std::string path = percent_decode(parts.path);
+  // These schemes have no relative form: their paths are rooted.
+  if ((scheme == "file" || scheme == "http" || scheme == "https") &&
+      !path.starts_with('/'))
+    path.insert(path.begin(), '/');
+  lower_drive_letter(path);
+  out += percent_encode(path, kPathBare);
+  if (!parts.query.empty())
+    out += '?' + percent_encode(percent_decode(parts.query), kUnreserved);
+  if (!parts.fragment.empty())
+    out += '#' + percent_encode(percent_decode(parts.fragment), kUnreserved);
+  return out;
 }
 
 bool is_file_uri(std::string_view uri) { return has_file_scheme(uri); }
@@ -190,63 +331,55 @@ std::optional<std::string> file_uri_to_path(std::string_view uri) {
   if (!has_file_scheme(uri)) return std::nullopt;
   // URI components are separated before decoding: an escaped '?' or '#'
   // belongs to the file name, a literal one starts a query or fragment.
-  uri = uri.substr(0, uri.find_first_of("?#"));
-  // An authority with no path names no file, which is the rule the localhost
-  // test below already applies; an empty path would reach `absolute("")`,
-  // whose failure is a throw.
-
-  // `file:/path` has no authority; `file://authority/path` has one.
-  const std::string_view rest = uri.substr(5);
-  std::string_view path = rest;
-  if (rest.starts_with("//")) {
-    const std::string_view remainder = rest.substr(2);
-    path = remainder;
-    // An authority is allowed only if it is `localhost`: any other host names a
-    // file this process cannot open, so it is not a path at all.
-    if (!remainder.empty() && remainder.front() != '/') {
-      const auto slash = remainder.find('/');
-      if (const std::string_view authority = slash == std::string_view::npos
-                                                 ? remainder
-                                                 : remainder.substr(0, slash);
-          !authority.empty() &&
-          !std::ranges::equal(authority, std::string_view("localhost"), {},
-                              [](char c) { return to_lower(c); }))
-        return std::nullopt;
-      path = slash == std::string_view::npos ? std::string_view{}
-                                             : remainder.substr(slash);
-    }
-  } else if (!path.starts_with('/')) {
-    return std::nullopt;
+  const UriParts parts = split_uri(uri);
+  std::string decoded = percent_decode(parts.path);
+  // A host with no path names no file.
+  if (decoded.empty() && !parts.authority.empty()) return std::nullopt;
+  if (!decoded.starts_with('/')) decoded.insert(decoded.begin(), '/');
+  // An escaped NUL would end the path where the system call stops reading and
+  // open another file than the URI names.
+  if (decoded.find('\0') != std::string::npos) return std::nullopt;
+  const bool local =
+      parts.authority.empty() ||
+      std::ranges::equal(parts.authority, std::string_view("localhost"), {},
+                         [](char c) { return to_lower(c); });
+  if (local) lower_drive_letter(decoded);
+  // Elsewhere a drive keeps its root, where a WASI runner preopens it, and any
+  // other host names a file this process cannot open.
+  if (!kWindowsPaths) return local ? std::optional(std::move(decoded)) : std::nullopt;
+  if (local) {
+    if (decoded.size() >= 3 && is_ascii_letter(decoded[1]) &&
+        decoded[2] == ':')
+      decoded.erase(decoded.begin());
+  } else {
+    // A share: the host is the path's first component.
+    if (decoded == "/") return std::nullopt;
+    decoded.insert(0, "//" + percent_decode(parts.authority));
   }
-
-  std::string decoded = percent_decode(path);
-  // An escaped NUL would end the path where the system call stops reading
-  // and open another file than the URI names.
-  if (decoded.empty() || decoded.find('\0') != std::string::npos)
-    return std::nullopt;
-#ifdef _WIN32
-  if (decoded.size() >= 3 && decoded[0] == '/' &&
-      kDriveLetter.test(static_cast<unsigned char>(decoded[1])) &&
-      decoded[2] == ':')
-    decoded.erase(decoded.begin());
   std::ranges::replace(decoded, '/', '\\');
-#endif
   return decoded;
 }
 
 std::string path_to_file_uri(std::string_view path) {
   if (path.empty()) throw std::invalid_argument("an empty path names no file");
-  auto normalized = std::filesystem::absolute(std::filesystem::path(path))
-                        .lexically_normal()
-                        .generic_string();
-#ifdef _WIN32
-  if (normalized.size() >= 2 &&
-      kDriveLetter.test(static_cast<unsigned char>(normalized[0])) &&
-      normalized[1] == ':')
-    normalized.insert(normalized.begin(), '/');
-#endif
-  if (!normalized.starts_with('/')) normalized.insert(normalized.begin(), '/');
-  return "file://" + percent_encode(normalized);
+  // A share: the host is the URI's authority. Read here, since a standard path
+  // may fold the two separators that say it is one.
+  const auto separator = [](char c) { return c == '\\' || c == '/'; };
+  if (kWindowsPaths && path.size() > 2 && separator(path[0]) &&
+      separator(path[1])) {
+    const std::size_t end = path.find_first_of("\\/", 2);
+    const std::string_view host = path.substr(2, end - 2);
+    const std::string rest =
+        end == std::string_view::npos
+            ? "/"
+            : std::filesystem::path(path.substr(end))
+                  .lexically_normal()
+                  .generic_string();
+    return "file://" + format_authority(host) +
+           percent_encode(rest, kPathBare);
+  }
+  return rooted_path_to_uri(
+      std::filesystem::absolute(std::filesystem::path(path)));
 }
 
 std::string normalize_extension(std::string_view extension) {
@@ -275,14 +408,15 @@ std::string uri_extension(std::string_view uri) {
 }
 
 bool equals_uri(std::string_view left, std::string_view right) {
-  return normalize_uri(left) == normalize_uri(right);
+  return left == right ||
+         NormalUri(left).view() == NormalUri(right).view();
 }
 
 bool contains_uri(std::string_view parent, std::string_view child) {
-  const std::string normalizedParent = normalize_uri(parent);
-  const std::string normalizedChild = normalize_uri(child);
-  const UriParts p = split_uri(normalizedParent);
-  const UriParts c = split_uri(normalizedChild);
+  const NormalUri normalizedParent(parent);
+  const NormalUri normalizedChild(child);
+  const UriParts p = split_uri(normalizedParent.view());
+  const UriParts c = split_uri(normalizedChild.view());
   if (!same_place(p, c)) return false;
   const std::string_view parentPath = without_trailing_slash(p.path);
   const std::string_view childPath = without_trailing_slash(c.path);
@@ -300,8 +434,18 @@ std::string relative_uri(std::string_view from, std::string_view to) {
   const UriParts t = split_uri(normalizedTo);
   if (!same_place(f, t)) return normalizedTo;
 
-  const std::vector<std::string_view> fromParts = path_segments(f.path);
-  const std::vector<std::string_view> toParts = path_segments(t.path);
+  // On the decoded paths: what comes back is a path, not a part of a URI.
+  const std::string fromPath = percent_decode(f.path);
+  const std::string toPath = percent_decode(t.path);
+  const std::vector<std::string_view> fromParts = path_segments(fromPath);
+  const std::vector<std::string_view> toParts = path_segments(toPath);
+  // No way leads from one drive to another: the path stands whole.
+  const auto is_drive = [](std::string_view part) {
+    return part.size() == 2 && is_ascii_letter(part[0]) && part[1] == ':';
+  };
+  if (!fromParts.empty() && !toParts.empty() && is_drive(fromParts[0]) &&
+      is_drive(toParts[0]) && fromParts[0] != toParts[0])
+    return toPath.substr(1);
   std::size_t common = 0;
   while (common < fromParts.size() && common < toParts.size() &&
          fromParts[common] == toParts[common])

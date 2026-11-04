@@ -74,7 +74,7 @@
 #include "workspace/core/ast.hpp"
 #include "workspace/core/references/WorkspaceScopeProvider.hpp"
 
-#if !defined(NDEBUG) && !defined(__wasi__)
+#if !defined(NDEBUG) && !defined(__wasi__) && !defined(_WIN32)
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -2189,7 +2189,7 @@ void a_document_wait_is_answered_at_its_own_rung() {
   CHECK(waiter.get() == cursiv::WaitOutcome::Reached);
 }
 
-#if !defined(NDEBUG) && !defined(__wasi__)
+#if !defined(NDEBUG) && !defined(__wasi__) && !defined(_WIN32)
 // Loads a file into the store from the linking phase: what the store's
 // contract forbids.
 struct LoadingScope final : cursiv::DefaultScopeProvider {
@@ -2273,7 +2273,7 @@ void run() {
   a_new_file_waits_unparsed_for_the_parse_phase();
   a_new_file_that_cannot_be_read_is_said_and_left_out();
   a_document_wait_is_answered_at_its_own_rung();
-#if !defined(NDEBUG) && !defined(__wasi__)
+#if !defined(NDEBUG) && !defined(__wasi__) && !defined(_WIN32)
   the_store_refuses_a_load_from_a_build_phase();
 #endif
   every_document_is_announced_on_its_own();
@@ -2365,7 +2365,7 @@ void a_text_becomes_a_parsed_document() {
 // A spelling the caller wrote is not the name the document is known by.
 void the_uri_is_normalized_once() {
   World world(false);
-  const auto d = world.factory.fromString(kSource, "file:///w/./x/../a.ws");
+  const auto d = world.factory.fromString(kSource, "FILE:/w/a%2Ews");
   CHECK(d->uri == "file:///w/a.ws");
   CHECK(d->textDocument().uri() == "file:///w/a.ws");
 }
@@ -2505,10 +2505,10 @@ void a_text_document_becomes_a_parsed_document() {
 void from_text_document_keeps_the_callers_uri_spelling() {
   World world(false);
   const auto d = world.factory.fromTextDocument(cursiv::TextDocument::create(
-      "file:///w/./x/../a.ws", "workspace", 0, kSource));
+      "FILE:/w/a%2Ews", "workspace", 0, kSource));
   CHECK(d->uri == "file:///w/a.ws");
   // Pinned as is: see G3-6
-  CHECK(d->textDocument().uri() == "file:///w/./x/../a.ws");
+  CHECK(d->textDocument().uri() == "FILE:/w/a%2Ews");
 }
 
 // The storey holding the client's newest text installs it here: same object,
@@ -2688,8 +2688,8 @@ void one_file_is_one_id_however_it_is_spelled() {
   const auto d = document("file:///a/b.t");
   store.addDocument(d);
 
-  CHECK(store.getDocument("file:///a/./x/../b.t") == d);
-  CHECK(store.getDocumentId("file:///a/x/../b.t") == d->id);
+  CHECK(store.getDocument("FILE:/a/b.t") == d);
+  CHECK(store.getDocumentId("file:///a/b%2Et") == d->id);
   CHECK(store.getOrCreateDocumentId("file:///a/b.t") == d->id);
   CHECK(store.all().size() == 1);
 }
@@ -3045,7 +3045,7 @@ void homonyms_follow_normalized_uri_order() {
     const World world;
     const auto first = world.shared.documentFactory->fromString(
         "datatype Same\ndatatype Same\ndatatype FirstOnly\n",
-        "file:///z/../a.ws");
+        "file:/a.ws");
     const auto second = world.shared.documentFactory->fromString(
         "datatype Same\ndatatype SecondOnly\n", "file:///b.ws");
     CHECK(first->uri == "file:///a.ws");
@@ -3736,16 +3736,16 @@ void read_directory_walks_one_level() {
 
   const std::vector<cursiv::FileSystemNode> top = fs.readDirectory("mem:///w");
   CHECK(top.size() == 2);
-  CHECK(top[0].isFile && top[0].uri == "mem:///w/a.txt");
-  CHECK(top[1].isDirectory && top[1].uri == "mem:///w/sub");
+  CHECK(top[0].isFile && top[0].uri == "mem:/w/a.txt");
+  CHECK(top[1].isDirectory && top[1].uri == "mem:/w/sub");
   // Trailing slash names the same folder.
   CHECK(fs.readDirectory("mem:///w/").size() == 2);
 
   const std::vector<cursiv::FileSystemNode> sub =
       fs.readDirectory("mem:///w/sub");
   CHECK(sub.size() == 2);
-  CHECK(sub[0].isFile && sub[0].uri == "mem:///w/sub/b.txt");
-  CHECK(sub[1].isDirectory && sub[1].uri == "mem:///w/sub/deep");
+  CHECK(sub[0].isFile && sub[0].uri == "mem:/w/sub/b.txt");
+  CHECK(sub[1].isDirectory && sub[1].uri == "mem:/w/sub/deep");
 }
 
 }  // namespace

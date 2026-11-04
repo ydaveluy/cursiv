@@ -104,6 +104,159 @@ jobs:
       - name: compilation cache statistics
         if: always()
         run: ccache --show-stats
+      - name: keep the module for the other hosts
+        if: matrix.preset == 'wasi-release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasi-language-server
+          path: build-wasi/examples/domainmodel/src/domainmodel_lsp
+          retention-days: 1
+
+  # One module runs on every host, but the runner maps its files differently on
+  # each: a whole session on the module the Linux job built, whose workspace scan
+  # reads the disk through file URIs.
+  wasi-hosts:
+    needs: wasi
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    # Not blocking until a run on a real runner has passed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wasi-language-server
+          path: wasi-module
+      - name: session
+        run: >-
+          node tools/lsp-session.mjs wasi-module/domainmodel_lsp
+          examples/domainmodel/example/blog.dmodel
+          --folder examples/domainmodel/example
+
+  # MinGW-w64 GCC from MSYS2, the GCC of the gcc job on Windows: generated
+  # parsers use computed goto and guaranteed tail calls, which MSVC lacks.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    # Not blocking until a run on a real runner has passed.
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [gcc-debug, gcc-release]
+        include:
+          # Keep generated tables within the GCC Debug runner's memory.
+          - preset: gcc-debug
+            jobs: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-windows2025-ucrt64-gcc16-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-windows2025-ucrt64-gcc16-${{ matrix.preset }}-
+      - name: configure
+        # Debug runs for its assertions: debug info would fill the runner's disk.
+        run: >-
+          cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS_DEBUG=-g0
+      - name: build
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.jobs || env.CMAKE_BUILD_PARALLEL_LEVEL }}
+        run: |
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
+      # The host is detected and its archive unpacks, whatever the build did.
+      - name: fetch wasi-sdk
+        if: ${{ !cancelled() && matrix.preset == 'gcc-release' }}
+        run: cmake -P tools/fetch-wasi-sdk.cmake
+
+  # Apple Clang from the runner's default Xcode: std::jthread needs the libc++
+  # of Xcode 26.4 or later.
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 240
+    # Not blocking until a run on a real runner has passed.
+    continue-on-error: true
+    env:
+      # This runner has 3 cores and 7 GB.
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+      CTEST_PARALLEL_LEVEL: "3"
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [clang-debug, clang-release]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tools
+        run: |
+          brew install ccache
+          clang++ --version
+      - name: cache compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-macos26-appleclang-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: ccache-v1-macos26-appleclang-${{ matrix.preset }}-
+      - name: configure
+        # Debug runs for its assertions: debug info would fill the runner's disk.
+        run: >-
+          cmake --preset ${{ matrix.preset }} -DCURSIV_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS_DEBUG=-g0
+      - name: build
+        run: |
+          df -h .
+          ccache --zero-stats
+          cmake --build --preset ${{ matrix.preset }}
+      - name: test
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: compilation cache statistics
+        if: always()
+        run: ccache --show-stats
+      # The host is detected and its archive unpacks, whatever the build did.
+      - name: fetch wasi-sdk
+        if: ${{ !cancelled() && matrix.preset == 'clang-release' }}
+        run: cmake -P tools/fetch-wasi-sdk.cmake
 
   wasi:
     runs-on: ubuntu-26.04
@@ -143,7 +296,7 @@ jobs:
           key: wasi-sdk-34.0-x86_64-linux
       - name: fetch wasi-sdk (pinned, checksummed)
         if: steps.sdk.outputs.cache-hit != 'true'
-        run: tools/fetch-wasi-sdk.sh
+        run: cmake -P tools/fetch-wasi-sdk.cmake
       - name: Install Binaryen
         if: matrix.preset == 'wasi-release'
         run: |

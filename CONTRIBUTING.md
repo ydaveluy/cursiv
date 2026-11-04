@@ -31,6 +31,10 @@ The build fetches its dependencies. Use `gcc-debug`, `clang-release` or
 `clang-debug` for another configuration. Clang presets use `clang++`; pass
 `-DCMAKE_CXX_COMPILER=clang++-22` when your installation uses that name.
 
+On Windows, run the `gcc-*` presets in an MSYS2 UCRT64 shell. On macOS, run the
+`clang-*` presets with Xcode 26.4 or later. MSVC is not supported: generated
+parsers use computed `goto` and guaranteed tail calls.
+
 `CURSIV_BUILD_TESTS` builds the framework tests; `CURSIV_WARNINGS_AS_ERRORS`
 treats warnings as errors. Both default to `ON` for repository builds and
 `OFF` when Cursiv is a dependency.
@@ -103,9 +107,9 @@ Run `mkdocs serve` to preview the site locally.
 
 ## Update the scaffolder
 
-After editing `templates/project/`, `CMakePresets.json`,
-`cmake/wasi.cmake` or `cmake/cursiv-new.cmake.in`, regenerate the distributed
-script:
+After editing `templates/project/`, `CMakePresets.json`, `cmake/wasi.cmake`,
+`cmake/wasi-platform.cmake`, `tools/fetch-wasi-sdk.cmake` or
+`cmake/cursiv-new.cmake.in`, regenerate the distributed script:
 
 ```sh
 cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake

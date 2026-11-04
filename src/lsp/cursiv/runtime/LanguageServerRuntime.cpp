@@ -53,7 +53,7 @@ namespace {
 // no signals to ignore -- a write to a closed pipe already returns the
 // error this asks for.
 void ignore_sigpipe_process_wide() {
-#if !defined(_WIN32) && !defined(__wasi__)
+#if defined(SIGPIPE) && !defined(__wasi__)
   static const bool ignored = []() {
     std::signal(SIGPIPE, SIG_IGN);
     return true;

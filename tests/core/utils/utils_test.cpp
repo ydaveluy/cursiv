@@ -2,6 +2,8 @@
 // tree, the one form a URI is keyed in, and the caches that must die with the
 // build they answer for.
 
+#include <cstdio>
+#include <filesystem>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -29,6 +31,9 @@
 #include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
+
+inline constexpr bool kWindowsPaths =
+    std::filesystem::path::preferred_separator == '\\';
 
 #if !defined(__wasi__) || defined(_REENTRANT)
 #include <atomic>
@@ -222,17 +227,19 @@ void the_scheme_is_recognized_whatever_its_case() {
 // `file:/path` has no authority at all (RFC 8089): a Java client sends it
 // where the folder scan sends `file:///path`, and both name one document.
 void a_single_slash_names_the_same_file() {
-  CHECK(cursiv::file_uri_to_path("file:/a/b/c.txt").value() == "/a/b/c.txt");
+  if constexpr (!kWindowsPaths)
+    CHECK(cursiv::file_uri_to_path("file:/a/b/c.txt").value() == "/a/b/c.txt");
   CHECK(cursiv::normalize_uri("file:/a/b/c.txt") == "file:///a/b/c.txt");
   CHECK(cursiv::equals_uri("file:/a/b/c.txt", "file:///a/b/c.txt"));
   CHECK(cursiv::normalize_uri("file:/a/b.ws?rev=2#name") ==
-        "file:///a/b.ws?rev=2#name");
+        "file:///a/b.ws?rev%3D2#name");
   CHECK(cursiv::contains_uri("file:/a", "file:///a/b"));
-  CHECK(!cursiv::file_uri_to_path("file:a/b").has_value());
+  // No authority and no root: it is rooted, the scheme having no relative form.
+  CHECK(cursiv::normalize_uri("file:a/b") == "file:///a/b");
 }
 
-// A name is read as vscode-uri reads it, escapes decoded: an escaped dot is
-// still the dot of an extension.
+// A name is read with its escapes decoded: an escaped dot is still the dot of an
+// extension.
 void an_escape_does_not_hide_an_extension() {
   CHECK(cursiv::uri_extension("file:///a/b%2Ecalc") == ".calc");
   CHECK(cursiv::uri_file_name("file:///a/b%2Ecalc") == "b.calc");
@@ -259,41 +266,149 @@ void an_empty_path_names_no_file() {
 }
 
 void uri_suffixes_are_not_file_names() {
-  CHECK(cursiv::file_uri_to_path("file:///a.ws?rev=2#name") == "/a.ws");
-  CHECK(cursiv::file_uri_to_path("file:///a%3Frev%23name.ws") == "/a?rev#name.ws");
-  const std::string canonical = cursiv::normalize_uri("file:///w/../a.ws?rev=2#name");
-  CHECK(canonical == "file:///a.ws?rev=2#name");
+  if constexpr (!kWindowsPaths) {
+    CHECK(cursiv::file_uri_to_path("file:///a.ws?rev=2#name") == "/a.ws");
+    CHECK(cursiv::file_uri_to_path("file:///a%3Frev%23name.ws") ==
+          "/a?rev#name.ws");
+  }
+  const std::string canonical = cursiv::normalize_uri("file:///a.ws?rev=2#name");
+  CHECK(canonical == "file:///a.ws?rev%3D2#name");
   CHECK(cursiv::uri_extension(canonical) == ".ws");
   CHECK(!cursiv::equals_uri("file:///a.ws?rev=1", "file:///a.ws?rev=2"));
   CHECK(cursiv::contains_uri("http://host?query", "http://host/child"));
 }
 
 void a_path_makes_a_uri_and_back() {
-  CHECK(cursiv::path_to_file_uri("/a/b/c.txt") == "file:///a/b/c.txt");
-  CHECK(cursiv::file_uri_to_path("file:///a/b/c.txt").value() == "/a/b/c.txt");
-  // Only `localhost` is a host this process can read a file from.
-  CHECK(cursiv::file_uri_to_path("file://localhost/a").value() == "/a");
-  CHECK(!cursiv::file_uri_to_path("file://other-host/a").has_value());
+  if constexpr (kWindowsPaths) {
+    // A rooted path with no drive sits on the current one, unknown here. The
+    // drive letter is spelled as `normalize_uri` spells it.
+    CHECK(cursiv::path_to_file_uri("C:\\a\\b.txt") == "file:///c%3A/a/b.txt");
+    CHECK(cursiv::file_uri_to_path("file:///c%3A/a/b.txt").value() ==
+          "c:\\a\\b.txt");
+    CHECK(cursiv::normalize_uri("file:///w/a.ws") == "file:///w/a.ws");
+    CHECK(cursiv::file_uri_to_path("file://localhost/c:/a").value() == "c:\\a");
+    // A share: the host stands first, and its drive-like name is no drive.
+    CHECK(cursiv::file_uri_to_path("file://server/share/a.ws").value() ==
+          "\\\\server\\share\\a.ws");
+    CHECK(cursiv::file_uri_to_path("file://server/C:/a").value() ==
+          "\\\\server\\C:\\a");
+    CHECK(cursiv::file_uri_to_path("file://wsl.localhost/Ubuntu/a").value() ==
+          "\\\\wsl.localhost\\Ubuntu\\a");
+    CHECK(cursiv::path_to_file_uri("\\\\Server\\share\\a b") ==
+          "file://server/share/a%20b");
+    CHECK(!cursiv::file_uri_to_path("file://server").has_value());
+  } else {
+    CHECK(cursiv::path_to_file_uri("/a/b/c.txt") == "file:///a/b/c.txt");
+    CHECK(cursiv::file_uri_to_path("file:///a/b/c.txt").value() == "/a/b/c.txt");
+    // Only `localhost` is a host this process can read a file from.
+    CHECK(cursiv::file_uri_to_path("file://localhost/a").value() == "/a");
+    CHECK(!cursiv::file_uri_to_path("file://other-host/a").has_value());
+    // A drive letter keeps its root, and one spelling: a WASI runner on Windows
+    // preopens each drive under that name.
+    CHECK(cursiv::file_uri_to_path("file:///C%3A/a").value() == "/c:/a");
+    CHECK(cursiv::path_to_file_uri("/C:/a") == "file:///c%3A/a");
+    // A path is resolved, which a URI is not.
+    CHECK(cursiv::path_to_file_uri("/a/./b/../c") == "file:///a/c");
+  }
   CHECK(!cursiv::file_uri_to_path("http://x/a").has_value());
 }
 
 // A byte outside the unreserved set travels percent-encoded, and comes back.
 void what_is_escaped_comes_back() {
-  const std::string uri = cursiv::path_to_file_uri("/a/b c/d%e");
-  CHECK(uri == "file:///a/b%20c/d%25e");
-  CHECK(cursiv::file_uri_to_path(uri).value() == "/a/b c/d%e");
-  // A UTF-8 byte is never unreserved, whatever the locale says.
-  CHECK(cursiv::path_to_file_uri("/\xC3\xA9") == "file:///%C3%A9");
-  CHECK(cursiv::file_uri_to_path("file:///%C3%A9").value() == "/\xC3\xA9");
-  // A colon is not unreserved in a path: it travels as vscode-uri sends it.
-  CHECK(cursiv::path_to_file_uri("/a:b") == "file:///a%3Ab");
-  CHECK(cursiv::file_uri_to_path("file:///a%3Ab").value() == "/a:b");
+  if constexpr (kWindowsPaths) {
+    const std::string uri = cursiv::path_to_file_uri("C:\\a\\b c\\d%e");
+    CHECK(uri == "file:///c%3A/a/b%20c/d%25e");
+    CHECK(cursiv::file_uri_to_path(uri).value() == "c:\\a\\b c\\d%e");
+  } else {
+    const std::string uri = cursiv::path_to_file_uri("/a/b c/d%e");
+    CHECK(uri == "file:///a/b%20c/d%25e");
+    CHECK(cursiv::file_uri_to_path(uri).value() == "/a/b c/d%e");
+    // A UTF-8 byte is never unreserved, whatever the locale says.
+    CHECK(cursiv::path_to_file_uri("/\xC3\xA9") == "file:///%C3%A9");
+    CHECK(cursiv::file_uri_to_path("file:///%C3%A9").value() == "/\xC3\xA9");
+    // A colon is not unreserved in a path: it travels escaped.
+    CHECK(cursiv::path_to_file_uri("/a:b") == "file:///a%3Ab");
+    CHECK(cursiv::file_uri_to_path("file:///a%3Ab").value() == "/a:b");
+  }
+}
+
+// Each URI and the one spelling it has, whatever the host.
+void a_uri_has_one_spelling() {
+  const std::pair<std::string_view, std::string_view> spelled[] = {
+      {R"(file:///c%3A/Users/me/a.dsl)",
+       R"(file:///c%3A/Users/me/a.dsl)"},
+      {R"(file:///C:/Users/me/a.dsl)",
+       R"(file:///c%3A/Users/me/a.dsl)"},
+      {R"(file:///C%3a/x)",
+       R"(file:///c%3A/x)"},
+      {R"(file:///home/me/My%20File.dsl)",
+       R"(file:///home/me/My%20File.dsl)"},
+      {R"(file:///caf%C3%A9.dsl)",
+       R"(file:///caf%C3%A9.dsl)"},
+      {R"(file:///a+b/c%2Bd)",
+       R"(file:///a%2Bb/c%2Bd)"},
+      {R"(file:///a%2Fb)",
+       R"(file:///a/b)"},
+      {R"(file:///a%23b)",
+       R"(file:///a%23b)"},
+      {R"(file:///a%3Fb)",
+       R"(file:///a%3Fb)"},
+      {R"(file:///a%25b)",
+       R"(file:///a%25b)"},
+      {R"(file:///!$&'()*,;=@[])",
+       R"(file:///%21%24%26%27%28%29%2A%2C%3B%3D%40%5B%5D)"},
+      {R"(file:///a b)",
+       R"(file:///a%20b)"},
+      {R"(file:///a/b?x=1)",
+       R"(file:///a/b?x%3D1)"},
+      {R"(file:///a/b?a/b)",
+       R"(file:///a/b?a%2Fb)"},
+      {R"(file:///a/b#a/b)",
+       R"(file:///a/b#a%2Fb)"},
+      {R"(file:///a/b?)",
+       R"(file:///a/b)"},
+      {R"(file:///a/b#)",
+       R"(file:///a/b)"},
+      {R"(file://server/a/b)",
+       R"(file://server/a/b)"},
+      {R"(file://Host/a/b)",
+       R"(file://host/a/b)"},
+      {R"(file://wsl.localhost/a/b)",
+       R"(file://wsl.localhost/a/b)"},
+      {R"(file://server/C:/Users/me/a.dsl)",
+       R"(file://server/c%3A/Users/me/a.dsl)"},
+      {R"(http://Host/a/b)",
+       R"(http://host/a/b)"},
+      {R"(http://User:Pw@Host:80/a/b)",
+       R"(http://User:Pw@host:80/a/b)"},
+      {R"(http://User@Host/a/b)",
+       R"(http://User@host/a/b)"},
+      {R"(http://[::1]:8080/a/b)",
+       R"(http://[::1]:8080/a/b)"},
+      {R"(http://a%40b@c/a/b)",
+       R"(http://a@b%40c/a/b)"},
+      {R"(vscode-remote://wsl%2Bubuntu/a/b)",
+       R"(vscode-remote://wsl%2Bubuntu/a/b)"},
+      {R"(untitled:Untitled-1)",
+       R"(untitled:Untitled-1)"},
+      {R"(untitled:C:/x)",
+       R"(untitled:c%3A/x)"},
+      {R"(mem:///a b)",
+       R"(mem:/a%20b)"},
+  };
+  for (const auto& [uri, canonical] : spelled) {
+    CHECK(cursiv::normalize_uri(uri) == canonical);
+    if (cursiv::normalize_uri(uri) != canonical)
+      std::printf("%.*s\n", static_cast<int>(uri.size()), uri.data());
+    // Read again, it does not move.
+    CHECK(cursiv::normalize_uri(canonical) == canonical);
+  }
+  // Text, not a path: what `..` names is for the file system to say.
+  CHECK(cursiv::normalize_uri("file:///a/./b/../c") == "file:///a/./b/../c");
 }
 
 // The whole point: one file, one key.
 void one_file_normalizes_to_one_string() {
-  CHECK(cursiv::normalize_uri("file:///a/./b/../b/c") == "file:///a/b/c");
-  CHECK(cursiv::equals_uri("file:///a/b/c", "file:///a/x/../b/c"));
   CHECK(cursiv::equals_uri("file:///a/b c", "file:///a/b%20c"));
   CHECK(!cursiv::equals_uri("file:///a/b", "file:///a/c"));
   // Not a file URI: left alone, and still comparable.
@@ -302,7 +417,7 @@ void one_file_normalizes_to_one_string() {
   // ...but for its scheme, which has no case (RFC 3986): one spelling, the
   // lower one, which is how a client's URI already arrives. The path keeps its
   // case, and a colon after a `/` is no scheme.
-  CHECK(cursiv::normalize_uri("MEM:///A.ws") == "mem:///A.ws");
+  CHECK(cursiv::normalize_uri("MEM:///A.ws") == "mem:/A.ws");
   CHECK(cursiv::equals_uri("MEM:///A.ws", "mem:///A.ws"));
   CHECK(!cursiv::equals_uri("mem:///A.ws", "mem:///a.ws"));
   CHECK(cursiv::normalize_uri("dir/A:b.ws") == "dir/A:b.ws");
@@ -328,6 +443,10 @@ void a_relative_path_walks_back_up() {
   CHECK(cursiv::relative_uri("file:///a/b", "file:///a/b").empty());
   CHECK(cursiv::relative_uri("dir/a:one.ws", "dir/b:two.ws") == "../b:two.ws");
   // Two places: the absolute normalized target.
+  // A path, not a part of a URI; and no way leads from one drive to another.
+  CHECK(cursiv::relative_uri("file:///a/b%20c", "file:///a/d%20e") == "../d e");
+  CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///C:/a/b") == "b");
+  CHECK(cursiv::relative_uri("file:///c%3A/a", "file:///d%3A/b%20c") == "d:/b c");
   CHECK(cursiv::relative_uri("http://x/a", "file:///a/b") == "file:///a/b");
   CHECK(cursiv::relative_uri("//first.host/a", "//second.host/b") ==
         "//second.host/b");
@@ -396,8 +515,8 @@ void a_drive_letter_normalizes_on_any_host() {
   CHECK(cursiv::normalize_uri("file:///C:/w/a.ws") == canonical);
   CHECK(cursiv::normalize_uri("file:///c%3A/w/a.ws") == canonical);
   CHECK(canonical.starts_with("file:///c%3A/"));
-  // Any first segment `<letter>:` is a drive, as vscode-uri reads it: the
-  // letter is lowered and the colon escaped, on every host.
+  // Any first segment `<letter>:` is a drive: the letter is lowered and the
+  // colon escaped, on every host.
   CHECK(cursiv::normalize_uri("file:///X:foo/bar") == "file:///x%3Afoo/bar");
 }
 
@@ -410,6 +529,7 @@ void run() {
   a_path_makes_a_uri_and_back();
   uri_suffixes_are_not_file_names();
   what_is_escaped_comes_back();
+  a_uri_has_one_spelling();
   one_file_normalizes_to_one_string();
   containment_counts_segments();
   a_relative_path_walks_back_up();

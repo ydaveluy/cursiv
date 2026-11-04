@@ -183,6 +183,26 @@ inline constexpr double kPow10[23] = {
   return true;
 }
 
+// libc++ reads a decimal in the current rounding mode, where libstdc++ always
+// rounds to nearest. Nothing to do where the host has only that mode.
+#if defined(_LIBCPP_VERSION) && defined(FE_DOWNWARD)
+template <class M>
+constexpr std::from_chars_result from_chars(const char* first, const char* last,
+                                            M& value) {
+  if constexpr (std::floating_point<M>) {
+    const int mode = std::fegetround();
+    std::fesetround(FE_TONEAREST);
+    const std::from_chars_result read = std::from_chars(first, last, value);
+    std::fesetround(mode);
+    return read;
+  } else {
+    return std::from_chars(first, last, value);
+  }
+}
+#else
+using std::from_chars;
+#endif
+
 }  // namespace detail
 
 template <class M>
@@ -218,7 +238,7 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
         return ConversionResult<M>::ok(fast);
     }
     const auto [p, ec] =
-        std::from_chars(digits.data(), digits.data() + digits.size(), v);
+        detail::from_chars(digits.data(), digits.data() + digits.size(), v);
     if (ec == std::errc{} && p == digits.data() + digits.size())
       return ConversionResult<M>::ok(v);
     return ConversionResult<M>::err(ec == std::errc::result_out_of_range

@@ -196,7 +196,7 @@ class PredicateEmitter {
     for (const auto at : _order)
       if (_called[at]) out += node(at);
     out += _runDefs;
-    std::map<std::vector<std::uint8_t>, std::string> knowns;
+    std::map<std::string, std::string> knowns;
     for (unsigned l = 0; l < _g.ngapLeaves; ++l) {
       if (!compiled(l)) continue;
       const GapLeaf& leaf = _g.gapLeaves[l];
@@ -204,7 +204,8 @@ class PredicateEmitter {
       std::string known;
       if (const auto answers = decided(leaf); !answers.empty()) {
         auto [at, fresh] = knowns.try_emplace(
-            answers, std::format("kPredicateKnown_{}", knowns.size()));
+            std::string(answers.begin(), answers.end()),
+            std::format("kPredicateKnown_{}", knowns.size()));
         if (fresh) {
           out += std::format("inline constexpr ::std::uint8_t {}[] = {{",
                              at->second);

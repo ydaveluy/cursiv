@@ -1,3 +1,4 @@
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/documentation/DefaultDocumentationProvider.hpp"
 
 #include <cstdint>
@@ -87,8 +88,10 @@ DefaultDocumentationProvider::documentationLinkRenderer(
   // 1-based, lines and columns both.
   const Position at = target->textDocument().positionAt(site->begin());
   const std::string_view uri(target->uri);
-  return std::format("[{}]({}#L{},{})", display, uri.substr(0, uri.find('#')),
-                     at.line + 1, at.character + 1);
+  return std::format("[{}]({})", display,
+                     normalize_uri(std::format("{}#L{},{}",
+                                               uri.substr(0, uri.find('#')),
+                                               at.line + 1, at.character + 1)));
 }
 
 std::optional<std::string>

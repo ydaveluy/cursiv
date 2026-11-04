@@ -39,16 +39,12 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define CURSIV_NOINLINE [[gnu::noinline]]
-#elif defined(_MSC_VER)
-#define CURSIV_NOINLINE __declspec(noinline)
 #else
 #define CURSIV_NOINLINE
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define CURSIV_ALWAYS_INLINE __attribute__((always_inline))
-#elif defined(_MSC_VER)
-#define CURSIV_ALWAYS_INLINE __forceinline
 #else
 #define CURSIV_ALWAYS_INLINE
 #endif

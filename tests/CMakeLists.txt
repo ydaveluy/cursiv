@@ -1,8 +1,9 @@
 # Behaviour tests do not need the backend cost of full Release optimisation.
 add_compile_options($<$<CONFIG:Release>:-O1>)
 
-# Unit tests skip Binaryen; benchmarks in the sibling directory keep it.
-if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+# Unit tests skip Binaryen, which Clang runs at link; benchmarks in the sibling
+# directory keep it.
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_link_options(--no-wasm-opt)
 endif()
 

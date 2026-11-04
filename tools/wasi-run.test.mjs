@@ -5,13 +5,34 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { importedMemoryLimits } from './wasi-run.mjs';
+import { guestArguments, guestPath, importedMemoryLimits, preopensFor }
+  from './wasi-run.mjs';
 
 const runner = process.env.CURSIV_TEST_WASI_RUNNER ?? fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const argument = process.argv.indexOf('--sdk');
 const sdk = argument >= 0 ? process.argv[argument + 1]
   : [process.env.WASI_SDK, join(homedir(), 'wasi-sdk-34.0'), '/opt/wasi-sdk']
       .find(path => path && existsSync(join(path, 'bin/clang')));
+test('each Windows drive is a directory of the module\'s one root', () => {
+  const exists = (path) => path === 'c:\\' || path === 'D:\\' || path === 'd:\\';
+  assert.deepEqual(preopensFor('win32', exists),
+    { '/c:': 'c:\\', '/d:': 'd:\\' });
+  assert.deepEqual(preopensFor('linux', exists), { '/': '/' });
+  assert.deepEqual(preopensFor('darwin', exists), { '/': '/' });
+});
+
+test('a host path reaches the module in its own spelling', () => {
+  assert.equal(guestPath('win32', 'C:\\Users\\me'), '/c:/Users/me');
+  assert.equal(guestPath('win32', 'd:\\'), '/d:/');
+  // A share is no drive: the module stands at its root.
+  assert.equal(guestPath('win32', '\\\\server\\share'), '/');
+  assert.equal(guestPath('linux', '/home/me'), '/home/me');
+  assert.deepEqual(guestArguments('linux', ['m', 'a\\b'], () => true), ['m', 'a\\b']);
+  // The module's own name stands, and so does anything that names no file.
+  assert.deepEqual(guestArguments('win32', ['m', '--flag', 'C:\\a'],
+    (path) => path === 'C:\\a'), ['m', '--flag', '/c:/a']);
+});
+
 const u32 = value => {
   const bytes = [];
   do {
@@ -139,8 +160,9 @@ int main() {
         assert.equal(result.stdout, 'toolchain-contract\n', mode);
         if (mode === 'ON') assert.match(result.stderr, /toolchain-thread/);
       }
-      const fetcher = fileURLToPath(new URL('./fetch-wasi-sdk.sh', import.meta.url));
-      const existing = spawnSync('bash', [fetcher, sdk], { encoding: 'utf8', timeout: 5000 });
+      const fetcher = fileURLToPath(new URL('./fetch-wasi-sdk.cmake', import.meta.url));
+      const existing = spawnSync('cmake', [`-DDEST=${sdk}`, '-P', fetcher],
+        { encoding: 'utf8', timeout: 5000 });
       assert.equal(existing.status, 0, existing.stderr || String(existing.error));
       assert.match(existing.stdout, /already installed:/);
     } finally {

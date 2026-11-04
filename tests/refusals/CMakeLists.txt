@@ -21,7 +21,7 @@ cursiv_grammar_generator(refusal_${LANE} "refusals/${CASE}.hpp" refuse::G
 target_compile_options(refusal_${LANE}_gen PRIVATE
     # Wide invalid grammars need diagnostics without retaining debug types.
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>:-g0>
-    $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=0>)
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-ferror-limit=0>)
 add_custom_target(refuse
     COMMAND ${CMAKE_COMMAND} -E make_directory
             "${CMAKE_CURRENT_BINARY_DIR}/artifacts"

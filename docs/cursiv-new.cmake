@@ -1,8 +1,10 @@
 # =============================================================================
 # GENERATED FILE -- DO NOT EDIT.
 # Produced by cmake/GenerateScaffold.cmake from cmake/cursiv-new.cmake.in and
-# templates/project/, CMakePresets.json and cmake/wasi.cmake. Edit those
-# and regenerate:  cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
+# templates/project/, CMakePresets.json, cmake/wasi.cmake,
+# cmake/wasi-platform.cmake and tools/fetch-wasi-sdk.cmake. Edit those and
+# regenerate:
+#   cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
 # =============================================================================
 # cursiv-new.cmake -- scaffold a new cursiv language. CMake only, no other
 # tool. Usage:
@@ -311,7 +313,8 @@ CMake build and press **F5**. The launch task builds the server and client,
 then opens `example/` in a development window.
 
 Native GCC/Clang presets run the native server. WASI presets run a WebAssembly
-server through Node. See
+server through Node; `cmake -P tools/fetch-wasi-sdk.cmake` installs the SDK they
+need. See
 [Editor integration](https://ydaveluy.github.io/cursiv/learn/editor-integration/)
 for customization and packaging.
 
@@ -736,7 +739,7 @@ struct @CURSIV_NEW_CLASS@Services final
 ]==])
 _cursiv_new_emit([==[tests/CMakeLists.txt]==] [==[# Parse the sample and check its syntax tree.
 add_executable(@CURSIV_NEW_ID@_grammar_test grammar_test.cpp)
-if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   target_link_options(@CURSIV_NEW_ID@_grammar_test PRIVATE --no-wasm-opt)
 endif()
 target_link_libraries(@CURSIV_NEW_ID@_grammar_test PRIVATE @CURSIV_NEW_ID@Core)
@@ -748,6 +751,10 @@ add_test(NAME @CURSIV_NEW_ID@_grammar_test COMMAND @CURSIV_NEW_ID@_grammar_test)
 if(TARGET @CURSIV_NEW_ID@_cli)
   add_test(NAME @CURSIV_NEW_ID@_cli_test COMMAND @CURSIV_NEW_ID@_cli
            ${PROJECT_SOURCE_DIR}/example/hello@CURSIV_NEW_EXT@)
+  # The same, named from where the caller stands.
+  add_test(NAME @CURSIV_NEW_ID@_cli_relative_test
+           COMMAND @CURSIV_NEW_ID@_cli example/hello@CURSIV_NEW_EXT@
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 ]==])
 _cursiv_new_emit([==[tests/grammar_test.cpp]==] [==[// Parses the sample document and checks its AST. Update the checks at the end
@@ -1348,20 +1355,26 @@ _cursiv_new_emit([==[CMakePresets.json]==] [==[{
   ]
 }
 ]==])
-_cursiv_new_emit([==[cmake/wasi.cmake]==] [==[# The WASI toolchain used by the wasi-debug and wasi-release presets.
-# wasi-sdk 34 is the pinned release. Cursiv throws: `-fwasm-exceptions` at
-# both compile and link selects the `eh` half of its dual `eh`/`noeh` sysroot.
-set(CMAKE_SYSTEM_NAME WASI)
-set(CMAKE_SYSTEM_VERSION 1)
-set(CMAKE_SYSTEM_PROCESSOR wasm32)
-
+_cursiv_new_emit([==[cmake/wasi.cmake]==] [==[# The default toolchain of the wasi-debug and wasi-release presets: the Clang of
+# wasi-sdk 34, the pinned release. Another compiler has a file like this one, and
+# shares the rest through wasi-platform.cmake.
+# Cursiv throws: `-fwasm-exceptions` at both compile and link selects the `eh`
+# half of the SDK's dual `eh`/`noeh` sysroot.
 if(NOT WASI_SDK)
   set(WASI_SDK $ENV{WASI_SDK})
 endif()
+if(CMAKE_HOST_WIN32)
+  set(_cursiv_exe .exe)
+  file(TO_CMAKE_PATH "${WASI_SDK}" WASI_SDK)
+  file(TO_CMAKE_PATH "$ENV{USERPROFILE}" _cursiv_home)
+else()
+  set(_cursiv_exe "")
+  set(_cursiv_home "$ENV{HOME}")
+endif()
 # The conventional spots, so a preset works with no environment at all.
 if(NOT WASI_SDK)
-  foreach(_cursiv_candidate "$ENV{HOME}/wasi-sdk-34.0" "/opt/wasi-sdk")
-    if(EXISTS "${_cursiv_candidate}/bin/clang++")
+  foreach(_cursiv_candidate "${_cursiv_home}/wasi-sdk-34.0" "/opt/wasi-sdk")
+    if(EXISTS "${_cursiv_candidate}/bin/clang++${_cursiv_exe}")
       set(WASI_SDK "${_cursiv_candidate}")
       break()
     endif()
@@ -1369,38 +1382,66 @@ if(NOT WASI_SDK)
 endif()
 if(NOT WASI_SDK)
   message(FATAL_ERROR
-      "set -DWASI_SDK=<wasi-sdk-34+ directory> (or install it at "
-      "~/wasi-sdk-34.0 or /opt/wasi-sdk). The wasm target builds ONLY with "
-      "the SDK's own clang -- gcc cannot emit wasm.")
+      "run cmake -P tools/fetch-wasi-sdk.cmake, or set "
+      "-DWASI_SDK=<wasi-sdk-34+ directory> (the presets also look in "
+      "~/wasi-sdk-34.0 and /opt/wasi-sdk), or pass your own toolchain with "
+      "--toolchain.")
 endif()
 
-# Carried into try_compile, which re-runs this file in a scope the cache
-# does not reach: without this line CMake probes the compiler with no
-# compiler set.
-set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
-    WASI_SDK CURSIV_WASI_THREADS CURSIV_WASI_MAX_MEMORY CURSIV_WASI_STACK)
+# Carried into try_compile, which re-runs this file in a scope the cache does
+# not reach: without this line CMake probes the compiler with no compiler set.
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES WASI_SDK)
 
-set(CMAKE_C_COMPILER   ${WASI_SDK}/bin/clang)
-set(CMAKE_CXX_COMPILER ${WASI_SDK}/bin/clang++)
-set(CMAKE_AR           ${WASI_SDK}/bin/llvm-ar)
-set(CMAKE_RANLIB       ${WASI_SDK}/bin/llvm-ranlib)
+set(CMAKE_C_COMPILER   ${WASI_SDK}/bin/clang${_cursiv_exe})
+set(CMAKE_CXX_COMPILER ${WASI_SDK}/bin/clang++${_cursiv_exe})
+set(CMAKE_AR           ${WASI_SDK}/bin/llvm-ar${_cursiv_exe})
+set(CMAKE_RANLIB       ${WASI_SDK}/bin/llvm-ranlib${_cursiv_exe})
 set(CMAKE_SYSROOT      ${WASI_SDK}/share/wasi-sysroot)
+
+# `-mllvm -wasm-use-legacy-eh=false` selects the EH scheme the runtime still
+# accepts.
+set(_cursiv_wasi_eh "-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false")
+set(CMAKE_C_FLAGS_INIT   "${_cursiv_wasi_eh}")
+set(CMAKE_CXX_FLAGS_INIT "${_cursiv_wasi_eh}")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-Wno-unused-command-line-argument -lunwind")
+
+include(${CMAKE_CURRENT_LIST_DIR}/wasi-platform.cmake)
+
+set(CMAKE_C_COMPILER_TARGET   ${CURSIV_WASI_TARGET})
+set(CMAKE_CXX_COMPILER_TARGET ${CURSIV_WASI_TARGET})
+
+# SDK Clang runs wasm-opt automatically for optimized links when it is on
+# PATH, and preserves target_features for it. Do not add another pass here.
+]==])
+_cursiv_new_emit([==[cmake/wasi-platform.cmake]==] [==[# What every WASI toolchain shares, whichever compiler it names. A toolchain
+# file names its compiler and includes this one: see cmake/wasi.cmake, and
+# "Use your own toolchain" in docs/recipes/wasm.md.
+set(CMAKE_SYSTEM_NAME WASI)
+set(CMAKE_SYSTEM_VERSION 1)
+set(CMAKE_SYSTEM_PROCESSOR wasm32)
+
+# Carried into try_compile, which re-runs the toolchain in a scope the cache
+# does not reach.
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+     CURSIV_WASI_THREADS CURSIV_WASI_MAX_MEMORY CURSIV_WASI_STACK)
+
 # Threads are a different target, not a flag: `wasm32-wasip1-threads` has
 # its own sysroot and libc++. It is the production target (vscode/node), so
 # it is the default; OFF builds the threadless `wasm32-wasip1`, inline-only.
 option(CURSIV_WASI_THREADS "Build for wasm32-wasip1-threads" ON)
 if(CURSIV_WASI_THREADS)
-  set(_cursiv_wasi_target wasm32-wasip1-threads)
+  set(CURSIV_WASI_TARGET wasm32-wasip1-threads)
 else()
-  set(_cursiv_wasi_target wasm32-wasip1)
+  set(CURSIV_WASI_TARGET wasm32-wasip1)
 endif()
-set(CMAKE_C_COMPILER_TARGET   ${_cursiv_wasi_target})
-set(CMAKE_CXX_COMPILER_TARGET ${_cursiv_wasi_target})
 
-# `-mllvm -wasm-use-legacy-eh=false` selects the EH scheme the runtime still
-# accepts; the _WASI_EMULATED_* defines are what lets `<csignal>` be included
-# on a target with no signals.
+# The _WASI_EMULATED_* defines are what lets `<csignal>` be included on a target
+# with no signals.
 set(_cursiv_wasi_emul "-D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS")
+string(APPEND CMAKE_C_FLAGS_INIT " ${_cursiv_wasi_emul}")
+string(APPEND CMAKE_CXX_FLAGS_INIT " ${_cursiv_wasi_emul}")
+string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT
+       " -lwasi-emulated-signal -lwasi-emulated-process-clocks")
 if(CURSIV_WASI_THREADS)
   # Define _REENTRANT when compiling. At link time the threaded target already
   # selects libpthread and shared memory; the memory must also be imported so
@@ -1412,12 +1453,8 @@ if(CURSIV_WASI_THREADS)
   # The 100,000-level LL stress test needs about 1 GiB with mimalloc.
   set(CURSIV_WASI_MAX_MEMORY 2147483648 CACHE STRING
       "Shared-memory maximum handed to the linker (bytes)")
-  # Clang already selects shared memory for the threaded target.
   add_link_options("LINKER:--import-memory,--max-memory=${CURSIV_WASI_MAX_MEMORY}")
 endif()
-set(_cursiv_wasi_eh "-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false")
-set(CMAKE_C_FLAGS_INIT   "${_cursiv_wasi_eh} ${_cursiv_wasi_emul}")
-set(CMAKE_CXX_FLAGS_INIT "${_cursiv_wasi_eh} ${_cursiv_wasi_emul}")
 # The linker's default stack is 64 KiB, which recursive AST walks and large
 # frames overrun: past it the stack pointer wraps into data and a store traps.
 set(CURSIV_WASI_STACK 1048576 CACHE STRING
@@ -1425,21 +1462,133 @@ set(CURSIV_WASI_STACK 1048576 CACHE STRING
 # Directory link options are regenerated when cache tunables change, without
 # rewriting the user's CMAKE_EXE_LINKER_FLAGS.
 add_link_options("LINKER:-z,stack-size=${CURSIV_WASI_STACK}")
-set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "-Wno-unused-command-line-argument -lunwind -lwasi-emulated-signal -lwasi-emulated-process-clocks")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
-# SDK Clang runs wasm-opt automatically for optimized links when it is on
-# PATH, and preserves target_features for it. Do not add another pass here.
-# The SDK's libraries contain DWARF even when our own sources use Release.
+# A sysroot's libraries can contain DWARF even when our own sources use Release.
 add_link_options("$<$<CONFIG:Release>:LINKER:--strip-debug>")
 
 # The project resolves the runner after locating the Cursiv source tree.
 find_program(CURSIV_NODE node)
+]==])
+_cursiv_new_emit([==[tools/fetch-wasi-sdk.cmake]==] [==[# The pinned SDK, fetched and verified -- one version, one checksum per host,
+# because an artifact is reproducible only against an exact release.
+# cmake/wasi.cmake finds the result on its own.
+#   cmake -P tools/fetch-wasi-sdk.cmake                 # to ~/wasi-sdk-34.0
+#   cmake -DDEST=<dir> -P tools/fetch-wasi-sdk.cmake
+cmake_minimum_required(VERSION 3.30)
+
+set(_version 34.0)
+set(_release https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34)
+set(_sha256_x86_64_linux b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4)
+set(_sha256_arm64_linux f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971)
+set(_sha256_x86_64_macos 87d27fa8adc68dee59bfbf2e22a6d34ef717c34d6bf1d8af2a56fc929d9ce0eb)
+set(_sha256_arm64_macos 9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9)
+set(_sha256_x86_64_windows cccb5c323a9b34f0349a9b09e8804a0a7632c68c3310f4b5f437ed57d7e71d8f)
+set(_sha256_arm64_windows 45e1c71f3e965621e7b98ebe1d37b0e4b1f77f3e8072113ffb4534e67b1a4b7c)
+
+if(CMAKE_HOST_WIN32)
+  set(_exe .exe)
+  file(TO_CMAKE_PATH "$ENV{USERPROFILE}" _home)
+else()
+  set(_exe "")
+  set(_home "$ENV{HOME}")
+endif()
+if(NOT DEFINED DEST)
+  set(DEST "${_home}/wasi-sdk-${_version}")
+endif()
+
+# Whether `dir` holds this version, whole.
+function(_sdk_complete dir out)
+  set(${out} FALSE PARENT_SCOPE)
+  if(NOT EXISTS "${dir}/VERSION")
+    return()
+  endif()
+  file(STRINGS "${dir}/VERSION" _lines LIMIT_COUNT 1)
+  if(NOT _lines STREQUAL _version)
+    return()
+  endif()
+  foreach(_tool clang clang++ llvm-ar llvm-ranlib wasm-ld)
+    if(NOT EXISTS "${dir}/bin/${_tool}${_exe}")
+      return()
+    endif()
+  endforeach()
+  foreach(_target wasm32-wasip1 wasm32-wasip1-threads)
+    foreach(_file include/${_target}/stdio.h include/${_target}/eh/c++/v1/format
+                  lib/${_target}/libc.a lib/${_target}/eh/libc++.a)
+      set(_path "${dir}/share/wasi-sysroot/${_file}")
+      if(NOT EXISTS "${_path}")
+        return()
+      endif()
+      file(SIZE "${_path}" _size)
+      if(_size EQUAL 0)
+        return()
+      endif()
+    endforeach()
+  endforeach()
+  set(${out} TRUE PARENT_SCOPE)
+endfunction()
+
+_sdk_complete("${DEST}" _done)
+if(_done)
+  message(STATUS "already installed: ${DEST} (${_version})")
+  return()
+endif()
+# Nothing here overwrites what it did not write.
+if(EXISTS "${DEST}")
+  message(FATAL_ERROR "${DEST} exists and is not wasi-sdk ${_version}: "
+                      "remove it, or choose another with -DDEST=<dir>")
+endif()
+
+string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" _os)
+if(_os STREQUAL "darwin")
+  set(_os macos)
+endif()
+cmake_host_system_information(RESULT _arch QUERY OS_PLATFORM)
+string(TOLOWER "${_arch}" _arch)
+if(_arch STREQUAL "amd64")
+  set(_arch x86_64)
+elseif(_arch STREQUAL "aarch64")
+  set(_arch arm64)
+endif()
+set(_sha256 "${_sha256_${_arch}_${_os}}")
+if(NOT _sha256)
+  message(FATAL_ERROR "wasi-sdk ${_version} has no release for ${_arch} ${_os}")
+endif()
+
+# Unpacked beside its destination, then moved in one step: an interrupted run
+# leaves no half-installed SDK behind.
+set(_name wasi-sdk-${_version}-${_arch}-${_os})
+set(_work "${DEST}.fetching")
+file(REMOVE_RECURSE "${_work}")
+set(_tarball "${_work}/${_name}.tar.gz")
+foreach(_attempt 1 2 3)
+  message(STATUS "fetching ${_release}/${_name}.tar.gz")
+  file(DOWNLOAD "${_release}/${_name}.tar.gz" "${_tarball}"
+       EXPECTED_HASH SHA256=${_sha256} TLS_VERIFY ON STATUS _status)
+  list(GET _status 0 _code)
+  if(_code EQUAL 0)
+    break()
+  endif()
+  list(GET _status 1 _why)
+  message(WARNING "download failed: ${_why}")
+endforeach()
+if(NOT _code EQUAL 0)
+  file(REMOVE_RECURSE "${_work}")
+  message(FATAL_ERROR "cannot fetch wasi-sdk ${_version}")
+endif()
+file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_work}")
+file(RENAME "${_work}/${_name}" "${DEST}")
+file(REMOVE_RECURSE "${_work}")
+
+_sdk_complete("${DEST}" _done)
+if(NOT _done)
+  message(FATAL_ERROR "incomplete wasi-sdk installation: ${DEST}")
+endif()
+message(STATUS "installed: ${DEST} (${_version})")
 ]==])
 
 _cursiv_new_finish()

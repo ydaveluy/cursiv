@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "cursiv/utils/Published.hpp"
+#include "cursiv/utils/SharedMutex.hpp"
 
 namespace cursiv {
 
@@ -84,7 +85,7 @@ class SimpleCache {
       _published.publish(std::make_shared<const Table>(_live));
   }
 
-  mutable std::shared_mutex _mutex;
+  mutable SharedMutex _mutex;
   // Bumped by every removal. It is what lets a provider run outside the lock
   // without a value outliving the workspace it describes.
   mutable std::uint64_t _generation = 0;
