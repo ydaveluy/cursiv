@@ -634,7 +634,7 @@ static_assert(std::is_same_v<std::remove_cv_t<decltype(ikw<"and">)>,
 
 // The generic classes exist and are CpSets (usable by every grammar).
 static_assert(std::is_same_v<std::remove_cv_t<decltype(s)>,
-                             std::remove_cv_t<decltype(cr<R"( \t\r\n\f\v)">)>>);
+                             std::remove_cv_t<decltype(cr<R"(\s)">)>>);
 static_assert(!std::is_same_v<std::remove_cv_t<decltype(w)>,
                               std::remove_cv_t<decltype(d)>>);
 
@@ -2047,7 +2047,7 @@ void run() {
   expect(cursiv::dump_declared<Q4::G>(),
          "grammar G skip WS;\n"
          "entry data Root: $0 $1;\n"
-         "terminal WS: [\\t-\\r ]+;\n"
+         "terminal WS: \\s+;\n"
          "terminal $0: [0-9]+;\n"
          "data $1: \"(\" \")\";",
          "inline rules named");
@@ -2055,7 +2055,7 @@ void run() {
   expect(cursiv::dump_declared<Dg>(),
          "grammar Dg skip WS;\n"
          "entry Item returns Node: \"item\" name=ID;\n"
-         "terminal WS: [\\t-\\r ]+;\n"
+         "terminal WS: \\s+;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;",
          "declared grammar");
 
@@ -2064,7 +2064,7 @@ void run() {
   expect(cursiv::dump_compiled<D2>(),
          "grammar D2 skip WS;\n"
          "entry Item returns Node: \"item\" name=ID;\n"
-         "terminal WS: [\\t-\\r ]+;\n"
+         "terminal WS: \\s+;\n"
          "terminal ID: [A-Z] [0-9A-Z_a-z]*;",
          "compiled grammar with override");
 

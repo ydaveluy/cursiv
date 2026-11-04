@@ -1447,7 +1447,7 @@ class CaretStacks {
     const auto without = [&](TextOffset from) {
       const auto len = static_cast<TextOffset>(_text.size());
       for (TextOffset p = from;;) {
-        while (p < len && ignored(mode, p)) ++p;
+        p = past_skip_run(mode, p, len);
         if (p == len) return Token{p, p, kEofSymbol};
         TextOffset halt = 0;
         const Scan t =
@@ -1601,7 +1601,7 @@ class CaretStacks {
     const auto len = static_cast<TextOffset>(_text.size());
     auto at = from;
     for (;;) {
-      while (at < len && ignored(mode, at)) ++at;
+      at = past_skip_run(mode, at, len);
       if (at == len) return result.emplace_back(Token{at, at, kEofSymbol});
       std::uint32_t count = 0;
       const Scan first = elect(mode, at, true, count);
@@ -1662,8 +1662,8 @@ class CaretStacks {
   bool trivia_scan(std::uint16_t mode, TextOffset at, TextOffset to,
                    bool inside, Trivia* tail, Refuses&& refuses) {
     while (at < to) {
-      if (ignored(mode, at)) {
-        ++at;
+      if (const TextOffset past = past_skip_run(mode, at, to); past != at) {
+        at = past;
         continue;
       }
       std::uint32_t count = 0;
@@ -1696,11 +1696,19 @@ class CaretStacks {
         });
   }
 
-  bool ignored(std::uint16_t mode, TextOffset at) const {
-    const auto byte = static_cast<unsigned char>(_text[at]);
-    return ((_table.skipSet[std::size_t{mode} * 4 + (byte >> 6)] >>
-             (byte & 63u)) &
-            1u) != 0;
+  static bool holds(std::span<const std::uint64_t> set, std::uint16_t mode,
+                    char at) {
+    const auto byte = static_cast<unsigned char>(at);
+    return ((set[std::size_t{mode} * 4 + (byte >> 6)] >> (byte & 63u)) & 1u) != 0;
+  }
+
+  // Past the run of blanks at `at`, on its last byte where that may read on with
+  // the byte behind it.
+  TextOffset past_skip_run(std::uint16_t mode, TextOffset at, TextOffset to) const {
+    const TextOffset from = at;
+    while (at < to && holds(_table.skipSet, mode, _text[at])) ++at;
+    if (at != from && at < to && holds(_table.skipStop, mode, _text[at])) --at;
+    return at;
   }
 
   // The token a mode elects at `at`, or the first rival its sweep holds

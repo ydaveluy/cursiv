@@ -52,7 +52,7 @@ inline TextOffset ll_unmatched_end(LlContext& c, TextOffset from,
       LlLexTape<T>{}, LexOwed{T.lexBodies, T.lexOwed, T.lexOpeners}, c.src, len,
       mode, from,
       [&]([[maybe_unused]] unsigned char b) {
-        if constexpr (T.skipSet != nullptr) return kLlBlanks<T>[mode][b];
+        if constexpr (T.skipSet != nullptr) return kLlSkips<T>[mode][b];
         return false;
       },
       reached, c.reads, [&c] { c.stop.poll(); });

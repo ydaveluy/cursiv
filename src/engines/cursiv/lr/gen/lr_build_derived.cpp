@@ -238,7 +238,9 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   d.row_lhs(r, sites.size());
   r.shiftTerm = lr_shift_terms(a);
   d.expect(r);
-  r.skipSet = lex_skip_set(LrLexView{a});
+  LexSkipRuns blanks = lex_skip_runs(LrLexView{a});
+  r.skipSet = std::move(blanks.skip);
+  r.skipStop = std::move(blanks.stop);
   lr_derive_lexical(a, r);
   d.repair_tables(r);
   lr_derive_reductions(a, r);

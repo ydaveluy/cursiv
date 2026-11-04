@@ -680,9 +680,20 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   const auto in_cycle = [&](unsigned lhs, unsigned n) {
     return cycles.component[lhs] == cycles.component[n];
   };
-  // Whether a position may read the first token of the rule it writes in.
+  const auto builds_node = [&](unsigned n) {
+    return n < g.nts.size() && g.nts[n].node;
+  };
+  // Per state, the rules that build no node and that a call there enters past
+  // a token of what calls them.
+  std::vector entryPast(nN, std::uint32_t{});
+  std::uint32_t gen = 0;
+  // Whether a position may read the first token of the rule it writes in. A
+  // rule's own start is read under the calls the state holds; further on, the
+  // state may hold none of them, and every call of the rule answers.
   const auto at_head = [&](const LrLowProd& p, unsigned dot) {
-    return opensRule[p.lhs] != 0 && stands_first(p, dot);
+    if (!stands_first(p, dot)) return false;
+    return dot != 0 ? opensRule[p.lhs] != 0
+                    : builds_node(p.lhs) || entryPast[p.lhs] != gen;
   };
   // What the calls of each rule fill, over the grammar, where they agree: a
   // position past a rule that may read nothing stands first in a rule its state
@@ -734,8 +745,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
   std::vector<unsigned> entryCalled, handWork;
   std::vector<std::uint8_t> handQueued(nN, 0);
   std::map<std::vector<LrCaretSite>, std::uint32_t> siteSetIds{{{}, 0u}};
-  std::vector<std::pair<unsigned, unsigned>> entryHands;
-  std::uint32_t gen = 0;
+  std::vector<std::pair<unsigned, unsigned>> entryHands, pastHands;
   std::vector ntSyms(nN, std::uint16_t{});
   std::uint32_t nNtSyms = 0;
   // Items bucketed by the symbol after the dot, each bucket in closure order.
@@ -853,6 +863,35 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         if (std::exchange(entrySeen[nt], gen) != gen) entrySites[nt].clear();
         return entrySites[nt];
       };
+      using Hand = std::pair<unsigned, unsigned>;
+      const auto hands_of = [](const std::vector<Hand>& hands, unsigned from) {
+        return std::ranges::equal_range(hands, from, {}, &Hand::first);
+      };
+      const auto queue = [&](unsigned nt) {
+        if (std::exchange(handQueued[nt], std::uint8_t{1}) == 0)
+          handWork.push_back(nt);
+      };
+      pastHands.clear();
+      for (std::uint32_t ci = 0; ci < csn; ++ci) {
+        const LrItem& it = cs[ci];
+        const LrLowProd& p = prods[it.prod];
+        const unsigned Bx = g.nt_after(it.prod, it.dot);
+        if (Bx == kNoRow || !kept(ci) || builds_node(Bx)) continue;
+        if (!builds_node(p.lhs) && it.dot == 0)
+          pastHands.emplace_back(p.lhs, Bx);
+        else if (!at_head(p, it.dot))
+          entryPast[Bx] = gen;
+      }
+      std::ranges::stable_sort(pastHands, {}, &Hand::first);
+      for (const auto& [from, to] : pastHands)
+        if (entryPast[from] == gen) queue(from);
+      for (std::size_t head = 0; head < handWork.size(); ++head) {
+        const unsigned from = handWork[head];
+        handQueued[from] = 0;
+        for (const auto& [_, to] : hands_of(pastHands, from))
+          if (std::exchange(entryPast[to], gen) != gen) queue(to);
+      }
+      handWork.clear();
       entryHands.clear();
       entryCalled.clear();
       for (std::uint32_t ci = 0; ci < csn; ++ci) {
@@ -875,14 +914,6 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         siteMarks.keep_first(writes, entrySites[nt]);
       // Each rule goes again only when what it holds has changed, so a chain of
       // hands costs its length in any order.
-      using Hand = std::pair<unsigned, unsigned>;
-      const auto hands_of = [](const std::vector<Hand>& hands, unsigned from) {
-        return std::ranges::equal_range(hands, from, {}, &Hand::first);
-      };
-      const auto queue = [&](unsigned nt) {
-        if (std::exchange(handQueued[nt], std::uint8_t{1}) == 0)
-          handWork.push_back(nt);
-      };
       std::ranges::stable_sort(entryHands, {}, &Hand::first);
       for (const auto& [from, to] : entryHands)
         if (entrySeen[from] == gen) queue(from);

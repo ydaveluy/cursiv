@@ -491,7 +491,7 @@ CURSIV_ALWAYS_INLINE inline void ll_expect(LlContext& c, std::uint16_t row,
     if (!c.laValid && ll_in_place<T>(c)) {
       constexpr auto kByte = static_cast<unsigned char>(T.term_text(Term)[0]);
       const TextOffset p =
-          ll_past_blanks<T>(c, Mode, std::max(c.at, c.triviaAt));
+          ll_past_skip_run<T>(c, Mode, std::max(c.at, c.triviaAt));
       if (p < c.len && static_cast<unsigned char>(c.src[p]) == kByte) {
         c.pending.clear();
         c.pendEnd = p;

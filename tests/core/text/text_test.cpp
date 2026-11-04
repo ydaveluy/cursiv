@@ -44,10 +44,12 @@ static_assert(key<R"(\0)"> == "\\x00");
 static_assert(key<R"(\cJ)"> == "\\x0a" && key<R"(\cj)"> == "\\x0a");
 static_assert(key<R"(\d)"> == "0-9");
 static_assert(key<R"(\w)"> == "0-9A-Z_a-z");
-static_assert(key<R"(\s)"> == "\\x09-\\x0d ");
+static_assert(
+    key<R"(\s)"> ==
+    key<R"(\t-\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF)">);
 static_assert(std::is_same_v<CR<R"(\D)">, CpSet<0, true, "0-9">>);
 static_assert(std::is_same_v<CR<R"(\W)">, CpSet<0, true, "0-9A-Z_a-z">>);
-static_assert(std::is_same_v<CR<R"(\S)">, CpSet<0, true, "\\x09-\\x0d ">>);
+static_assert(std::is_same_v<CR<R"(\S)">, CR<R"(^\s)">>);
 static_assert(std::is_same_v<CR<R"(a\D)">, CR<R"(\D)">>);
 static_assert(std::is_same_v<CR<R"(^\D)">, CR<"0-9">>);
 static_assert(key<R"(\\)"> == "\\x5c");
@@ -156,11 +158,12 @@ static_assert(holds<R"(\u{1F600})">(0x1F600) &&
 static_assert(holds<R"(é\x41)">(U'A') && holds<R"(é\xff)">(0xFF) &&
               !holds<R"(é\xff)">(0x7FF));
 static_assert(holds<R"(é\s)">(U' ') && holds<R"(é\s)">(U'\v') &&
-              !holds<R"(é\s)">(0xA0) && !holds<R"(é\s)">(0x2028) &&
-              !holds<R"(é\s)">(0x3000) && !holds<R"(é\s)">(0xFEFF) &&
-              !holds<R"(é\s)">(U'a'));
+              holds<R"(é\s)">(0xA0) && holds<R"(é\s)">(0x2028) &&
+              holds<R"(é\s)">(0x3000) && holds<R"(é\s)">(0xFEFF) &&
+              !holds<R"(é\s)">(0x85) && !holds<R"(é\s)">(U'a'));
 static_assert(holds<R"(é\S)">(U'a') && holds<R"(é\S)">(0x10FFFF) &&
-              holds<R"(é\S)">(0x3000) && !holds<R"(é\S)">(U' '));
+              holds<R"(é\S)">(0x85) && !holds<R"(é\S)">(0x3000) &&
+              !holds<R"(é\S)">(U' '));
 static_assert(holds<R"(é\d)">(U'5') && !holds<R"(é\d)">(0x0660));
 static_assert(holds<R"(é\W)">(0x4E00) && !holds<R"(é\W)">(U'_'));
 static_assert(holds<R"(é\-)">(U'-') && holds<R"(é-)">(U'-'));
@@ -278,9 +281,28 @@ void a_text_lowers_as_a_client_lowers_it() {
 
 int main() {
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\s)"),
-                    {{0x09, 0x0D}, {0x20, 0x20}}));
+                    {{0x09, 0x0D},
+                     {0x20, 0x20},
+                     {0xA0, 0xA0},
+                     {0x1680, 0x1680},
+                     {0x2000, 0x200A},
+                     {0x2028, 0x2029},
+                     {0x202F, 0x202F},
+                     {0x205F, 0x205F},
+                     {0x3000, 0x3000},
+                     {0xFEFF, 0xFEFF}}));
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\S)"),
-                    {{0, 0x08}, {0x0E, 0x1F}, {0x21, 0x10FFFF}}));
+                    {{0, 0x08},
+                     {0x0E, 0x1F},
+                     {0x21, 0x9F},
+                     {0xA1, 0x167F},
+                     {0x1681, 0x1FFF},
+                     {0x200B, 0x2027},
+                     {0x202A, 0x202E},
+                     {0x2030, 0x205E},
+                     {0x2060, 0x2FFF},
+                     {0x3001, 0xFEFE},
+                     {0xFF00, 0x10FFFF}}));
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\D)"),
              {{0, 0x2F}, {0x3A, 0x10FFFF}}));
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\u00e9-\u00ff\cA)"),

@@ -940,6 +940,13 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
   const auto put = [&sink](std::string_view v) {
     for (const char ch : v) sink(ch);
   };
+  // Whitespace goes by its short name.
+  if (props == 0 &&
+      scalars ==
+          R"(\x09-\x0d \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff)") {
+    put(complement ? "\\S" : "\\s");
+    return;
+  }
   put("\\p{");
   if (complement) sink('^');
   bool first = true;
@@ -1104,7 +1111,7 @@ inline constexpr Ref<R> ref{};
 
 // The classes every grammar ends up spelling, and their complements -- the six
 // of regex.
-inline constexpr auto s = cr<R"( \t\r\n\f\v)">;
+inline constexpr auto s = cr<R"(\s)">;
 inline constexpr auto S = ~s;
 inline constexpr auto w = cr<"a-zA-Z0-9_">;
 inline constexpr auto W = ~w;

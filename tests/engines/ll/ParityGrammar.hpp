@@ -234,9 +234,21 @@ struct Members : cursiv::GrammarSpec {
   struct Marks : rule<create<ast::Hold>(kw<"marked"> +
                                         assign<&ast::Hold::first>(ref<Marked>) +
                                         lit<";">)> {};
+  // A member past a repetition at the head of its rule, in a list of them.
+  struct Turn : rule<many(append<&ast::Hold::marks>(ref<Box>)) +
+                     ((assign<&ast::Hold::text>(ref<ID> | kw<"in">) +
+                       option(lit<"?">)) |
+                      kw<"zz"> |
+                      (ref<Mark> + assign<&ast::Hold::text>(kw<"nk">))) +
+                     lit<"=">> {};
+  struct Turns : rule<create<ast::Hold>(
+                     kw<"turns"> + lit<"{"> +
+                     option(some(append<&ast::Hold::turns>(ref<Turn>), lit<",">) +
+                            option(lit<",">)) +
+                     lit<"}">)> {};
   struct Stmt : rule<ref<Twice> | ref<Through> | ref<Lone> | ref<Both> |
                      ref<Ticked> | ref<Bare> | ref<Named> | ref<Plain> |
-                     ref<Marks>> {};
+                     ref<Marks> | ref<Turns>> {};
   struct UnitRule : rule<create<ast::Holds>(
                         many(append<&ast::Holds::holds>(ref<Stmt>)))> {};
 };

@@ -111,7 +111,7 @@ const std::vector<std::string> rules{"ML_COMMENT"};
 const cursiv::NodeId comment = cursiv::find_comment_node(document, node, rules);
 if (comment != cursiv::kNoNode) {
   const cursiv::DocComment doc =
-      cursiv::parse_doc_comment(document.parseResult.cst(), comment);
+      cursiv::parse_doc_comment(document, comment);
   if (const auto* tag = doc.getTag("uuid")) {
     // tag->range.start.offset and tag->range.end.offset are document offsets.
   }

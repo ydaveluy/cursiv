@@ -286,7 +286,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   const bool longer = std::ranges::any_of(
       a.modeLonger, [](std::uint16_t m) { return m != kNoMode; });
   const std::uint32_t words = (g.nterms + 63u) / 64u;
-  const std::vector<std::uint64_t> skipSet = lex_skip_set(LlLexView{a});
+  const LexSkipRuns blanks = lex_skip_runs(LlLexView{a});
   const ByteTerms byteTerms(a);
   const bool classes = g.scalarRanges.size() != 0;
   // A boundary reads `kSetDecode` only where the word class has ranges or a
@@ -414,10 +414,17 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.array("::std::uint16_t", "kModeJoinedTrivia", a.modeJoinedTrivia);
   o.array("::std::uint64_t", "kModeTerms", a.modeTerms);
   o.array("::std::uint64_t", "kModeSub", a.modeSub);
-  if (std::ranges::any_of(skipSet, [](std::uint64_t w) { return w != 0; }))
-    o.array("::std::uint64_t", "kSkipSet", skipSet);
+  const auto any = [](const std::vector<std::uint64_t>& set) {
+    return std::ranges::any_of(set, [](std::uint64_t w) { return w != 0; });
+  };
+  if (any(blanks.skip))
+    o.array("::std::uint64_t", "kSkipSet", blanks.skip);
   else
     o.omit("kSkipSet");
+  if (any(blanks.stop))
+    o.array("::std::uint64_t", "kSkipStop", blanks.stop);
+  else
+    o.omit("kSkipStop");
   o.array("::std::uint16_t", "kByteTerms", byteTerms.rows);
   o.array("::std::uint32_t", "kModeBytes", byteTerms.at);
   o.array("::std::uint16_t", "kLexNext",
@@ -716,6 +723,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("modeSub", "kModeSub");
   o.fmt("    .subWords = {}u,\n", a.subWords);
   o.ptr("skipSet", "kSkipSet");
+  o.ptr("skipStop", "kSkipStop");
   o.ptr("byteTerms", "kByteTerms");
   o.ptr("modeBytes", "kModeBytes");
   o.line("    .walk = &walk_all,");

@@ -81,8 +81,21 @@ struct Base : cursiv::GrammarSpec {
                                       option(append<&Item::kids>(ref<Dangling>)) +
                                       option(flag<&Item::dash>(lit<":">)))> {};
   struct Pending : rule<lit<"pending:"> + ref<Dangling>> {};
+  // A continuation that begins as a run of blanks and ends behind a byte that is
+  // a token of its own, read where a state takes a one-byte token straight off
+  // its first byte.
+  struct SpBlank : terminal<some(s)> {};
+  struct SpMore : terminal<some(cr<R"( \t)">) + lit<"_"> + lit<"\n">> {};
+  struct SpWord : terminal<some(cr<"a-z">)> {};
+  struct SpItem : rule<create<Item>(assign<&Item::name>(ref<SpWord>) |
+                                    flag<&Item::dash>(lit<"_">) |
+                                    flag<&Item::keyword>(lit<";">))> {};
+  struct Spliced : rule<create<Item>(
+                       lit<"sp:"> + skip(ignore<SpBlank, SpMore>, hide<>,
+                                         many(append<&Item::kids>(ref<SpItem>)) +
+                                             lit<".">))> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
-                    ref<Part> | ref<Rivals> | ref<Glued> | ref<Cell> |
+                    ref<Spliced> | ref<Part> | ref<Rivals> | ref<Glued> | ref<Cell> |
                     ref<Note> | ref<Marked> | ref<Plain> | ref<Head> | ref<Pending>)))> {};
   using entry = Root;
   using ignored = WS;

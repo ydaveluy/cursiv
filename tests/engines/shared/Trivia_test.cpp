@@ -1,15 +1,24 @@
 #include "triviall/generated/Ll/Module.hpp"
 #include "triviall/generated/Ll/Table.hpp"
 #include "trivialr/generated/Lr/Module.hpp"
+#include "trivialr/generated/Lr/Parser.hpp"
 #include "trivialr/generated/Lr/Table.hpp"
+#include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/lr/runtime/LrContext.hpp"
+#include "cursiv/lr/runtime/lr_matcher.hpp"
+#include "cursiv/lr/runtime/lr_states.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/Checks.hpp"
 #include "engines/shared/TriviaGrammar.hpp"
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace trivia_cases {
 
@@ -112,7 +121,82 @@ void a_trivia_terminal_is_no_bracket() {
 
 }  // namespace
 
+// Blanks read on past a run's last byte: a splice, and a continuation whose first
+// byte may also begin a word. Every gap reads the same, at the end of a run or
+// not, and completion crosses it too.
+void a_run_of_blanks_reads_on_from_its_last_byte(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text;
+    std::size_t items;
+    bool clean;
+  } cases[] = {
+      {"spliced:a b", 2, true},
+      {"spliced:a   b", 2, true},
+      {"spliced:a \\\n b", 2, true},
+      {"spliced:a\\\nb", 2, true},
+      {"spliced:a \\\n \\\n b", 2, true},
+      {"spliced:a   _\n b", 2, true},
+      {"spliced:a _b", 2, true},
+      {"spliced:a   _b _c", 3, true},
+      {"spliced:a   _", 2, true},
+      {"spliced:a \\", 2, true},
+      {"spliced:a \\ b", 3, true},
+      {"spliced:a   \\\\\n b", 3, true},
+  };
+  for (const auto& sample : cases) {
+    const std::string source(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const bool clean = r.accepted && r.diagnostics.empty();
+    CHECK(clean == sample.clean);
+    if (clean != sample.clean) std::printf("  %s\n", source.c_str());
+    // A continuation read as a word would leave a clean document with one more.
+    const auto* const root = r.value_as<ttrivia::ast::Node>();
+    if (sample.clean) CHECK(root != nullptr && root->body.size() == sample.items);
+  }
+  // A choice that reads on across such a gap.
+  for (const std::string_view text :
+       {"forked:a b !", "forked:a b ?", "forked:a _\n b !", "forked:a   _\n b ?",
+        "forked:a \\\n b !", "forked:a \\\n \\\n b ?"}) {
+    const std::string source(text);
+    const cursiv::ParseResult r = p.parse(source);
+    CHECK(r.accepted && r.diagnostics.empty());
+    if (!r.accepted || !r.diagnostics.empty())
+      std::printf("  %s\n", source.c_str());
+  }
+  // Behind any of those gaps, the next word.
+  for (const std::string_view text :
+       {"spliced:a ", "spliced:a   ", "spliced:a \\\n ", "spliced:a _\n "}) {
+    const std::string source(text);
+    const cursiv::ParseResult r = p.parse(source);
+    std::vector<cursiv::NextFeature> next;
+    const auto at = static_cast<cursiv::TextOffset>(source.size());
+    p.nextFeaturesAt(r.cst(), at, at, next);
+    CHECK(!next.empty());
+  }
+}
+
+// The reader a choice's readings cross a gap with steps back as the lexer does.
+void a_reading_reads_on_from_a_runs_last_byte() {
+  constexpr const auto& table = ttrivia::generated::Lr::kTable;
+  unsigned asked = 0;
+  for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
+    if (!cursiv::lr_stops<table>(mode, '_')) continue;
+    ++asked;
+    const std::string_view text = "  _\n b";
+    cursiv::Cst tree(text);
+    cursiv::CstBuilder builder(tree);
+    builder.bind_stream();
+    cursiv::LrContext context(text, builder);
+    context.drive = &ttrivia::generated::Lr::kDrive;
+    const cursiv::Token token = cursiv::lr_scan_at<table>(context, mode, 0, 0);
+    // A mode that reads no word still stands past the continuation.
+    CHECK(token.begin == 5);
+  }
+  CHECK(asked != 0);
+}
+
 void run() {
+  a_reading_reads_on_from_a_runs_last_byte();
   an_open_comment_is_skipped_where_it_is_trivia(
       *ttrivia::generated::Ll::create_parser(),
       *ttrivia::generated::Lr::create_parser());
@@ -121,6 +205,7 @@ void run() {
     two_ignored_terminals_may_read_one_text(*make(), "tied:");
     two_ignored_terminals_may_read_one_text(*make(), "ranked:");
     a_blank_keeps_its_head_refusal(*make());
+    a_run_of_blanks_reads_on_from_its_last_byte(*make());
     a_region_head_is_its_callers(*make());
     an_implied_condition_reads_the_trivia_of_its_place(*make());
   }

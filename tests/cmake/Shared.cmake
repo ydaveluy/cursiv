@@ -12,6 +12,7 @@ cursiv_grammar(characterslr engines/shared/CharactersGrammar.hpp tchars::Lr ENGI
 cursiv_grammar_pair(trivia engines/shared/TriviaGrammar.hpp ttrivia::Lr ttrivia::Ll)
 
 cursiv_grammar_pair(regionboundary engines/shared/RegionBoundaryGrammar.hpp tregionboundary::Lr tregionboundary::Ll)
+cursiv_test(LexSkipSet_test engines/shared/LexSkipSet_test.cpp)
 cursiv_test(RegionBoundary_test engines/shared/RegionBoundary_test.cpp
     regionboundaryllGenerated regionboundarylrGenerated)
 cursiv_test(RegionBoundaryAnalysis_test engines/shared/RegionBoundaryAnalysis_test.cpp

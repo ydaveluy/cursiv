@@ -3,6 +3,7 @@
 // byte past ASCII is read as UTF-8.
 #pragma once
 
+#include <iterator>
 #include <cstddef>
 #include <string_view>
 
@@ -162,10 +163,15 @@ constexpr void class_escape_ranges(char klass, Sink sink) {
   };
   constexpr Span kDigit[] = {{'0', '9'}};
   constexpr Span kWord[] = {{'0', '9'}, {'A', 'Z'}, {'_', '_'}, {'a', 'z'}};
-  constexpr Span kSpace[] = {{0x09, 0x0D}, {0x20, 0x20}};
+  constexpr Span kSpace[] = {{0x09, 0x0D},     {0x20, 0x20},     {0xA0, 0xA0},
+                             {0x1680, 0x1680}, {0x2000, 0x200A}, {0x2028, 0x2029},
+                             {0x202F, 0x202F}, {0x205F, 0x205F}, {0x3000, 0x3000},
+                             {0xFEFF, 0xFEFF}};
   const auto lower = static_cast<char>(klass | 0x20);
   const Span* r = lower == 'd' ? kDigit : lower == 'w' ? kWord : kSpace;
-  const std::size_t n = lower == 'd' ? 1 : lower == 'w' ? 4 : 2;
+  const std::size_t n = lower == 'd'   ? std::size(kDigit)
+                        : lower == 'w' ? std::size(kWord)
+                                       : std::size(kSpace);
   if (klass == lower) {
     for (std::size_t k = 0; k < n; ++k) sink(r[k].lo, r[k].hi);
     return;

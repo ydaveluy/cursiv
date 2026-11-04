@@ -16,6 +16,7 @@ namespace cursiv {
 
 struct LrDerivedRows {
   std::vector<std::uint64_t> skipSet{};
+  std::vector<std::uint64_t> skipStop{};
   std::vector<std::uint32_t> lexElseBase{};
   std::vector<LrLexElse> lexElseRows{};
   std::vector<std::uint32_t> typoSuccBase{};

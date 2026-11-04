@@ -20,6 +20,9 @@ template <LrSizes S, LrDerivedSizes D>
 struct LrDerivedTables {
   // The bytes a run the parse ignores is made of, one bit each, per mode.
   std::array<std::uint64_t, S.modes * 4> skipSet{};
+  // The bytes such a run's last byte may read on with: a reader steps back onto
+  // that byte and reads on from it.
+  std::array<std::uint64_t, S.modes * 4> skipStop{};
 
   // The fallback election, guarded and ranked: its byte sets are disjoint
   // within a state, and the sentinel closes the last row.

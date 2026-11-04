@@ -275,9 +275,32 @@ struct ImpliedTwice : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Blanks that read on: a line splice inside the run, whose first byte is also a
+// token of its own, and a continuation that begins as a run and ends in a word's
+// first byte. `Forked` asks across such a gap before it reduces.
+struct Spliced : cursiv::GrammarSpec {
+  struct WS : terminal<some(s | (lit<"\\"> + lit<"\n">))> {};
+  struct MORE : terminal<some(cr<R"( \t)">) + lit<"_"> + lit<"\n">> {};
+  struct ID : terminal<some(cr<"a-z_">)> {};
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) |
+                                       lit<"\\">)> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  struct One : rule<ref<ID>> {};
+  struct Two : rule<ref<ID>> {};
+  struct Forked : rule<create<ast::Node>((ref<One> + ref<ID> + lit<"!">) |
+                                         (ref<Two> + ref<ID> + lit<"?">))> {};
+  using entry = Root;
+  using ignored = list<WS, MORE>;
+};
+
 struct Suite : cursiv::GrammarSpec {
   struct Entry
-      : rule<(lit<"tied:"> + skip(ignore<Tied::SPACE, Tied::BLANK>, hide<>,
+      : rule<(lit<"spliced:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
+                                     ref<Spliced::Root> + eof)) |
+             (lit<"forked:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
+                                    ref<Spliced::Forked> + eof)) |
+             (lit<"tied:"> + skip(ignore<Tied::SPACE, Tied::BLANK>, hide<>,
                                   ref<Tied::Root> + eof)) |
              (lit<"ranked:"> + skip(ignore<Ranked::WS>, hide<Ranked::NOTE>,
                                     ref<Ranked::Root> + eof)) |

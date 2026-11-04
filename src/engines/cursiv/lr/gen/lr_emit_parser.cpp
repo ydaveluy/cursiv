@@ -1013,17 +1013,21 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     for (unsigned st = 0; st < a.nstates; ++st) lexed[a.mode[st]] = 1;
     wsLead.resize(a.nmodes);
     tailLead.resize(a.nmodes);
-    std::map<std::array<std::uint64_t, 4>, unsigned> first;
+    std::map<std::array<std::uint64_t, 8>, unsigned> first;
     std::map<std::tuple<unsigned, unsigned, bool, std::string>, unsigned> tails;
     for (unsigned m = 0; m < a.nmodes; ++m) {
       wsLead[m] = m;
       tailLead[m] = m;
       if (!lexed[m]) continue;
-      ByteSet ws{};
+      ByteSet ws{}, stop{};
       mode_ws(m, ws);
-      wsLead[m] =
-          first.try_emplace(std::array{ws.w[0], ws.w[1], ws.w[2], ws.w[3]}, m)
-              .first->second;
+      mode_stop(m, stop);
+      wsLead[m] = first
+                      .try_emplace(std::array{ws.w[0], ws.w[1], ws.w[2], ws.w[3],
+                                              stop.w[0], stop.w[1], stop.w[2],
+                                              stop.w[3]},
+                                   m)
+                      .first->second;
       tailLead[m] = tails
                         .try_emplace(std::tuple{a.modeMulti[m], wsLead[m],
                                                 collect_first(m), win_test(m)},
@@ -1037,6 +1041,12 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
       shared([&] {
         fmt("inline constexpr ::std::array<::std::uint64_t, 4> kWs_{}{{", m);
         set64(ws);
+        line("};");
+      });
+    if (ByteSet stop{}; mode_stop(m, stop) && wsLead[m] == m)
+      shared([&] {
+        fmt("inline constexpr ::std::array<::std::uint64_t, 4> kStop_{}{{", m);
+        set64(stop);
         line("};");
       });
     if (tailLead[m] == m) emit_lex_tail(m);
@@ -1140,11 +1150,20 @@ again:
           nm);
       line("      ++p;");
       emit_run_adv(ws, "p", nm, false);
+      ByteSet stop{};
+      const bool stops = mode_stop(m, stop);
+      // Its last byte reads on: the walk takes it from there.
+      if (stops)
+        fmt("      if (p < len && in_set<kStop_{}>("
+            "static_cast<unsigned char>(src[p]))) {{\n"
+            "        c.pendEnd = --p;\n        goto past_run;\n      }}\n",
+            wsLead[m]);
       raw(R"(      c.pendEnd = p;
       goto again;
     }
   }
 )");
+      if (stops) line("past_run:");
     }
     const bool asks = multiMode(m);
     const bool collected = collect_first(m);
@@ -1457,6 +1476,12 @@ again:
     return ws.any();
   }
 
+  bool mode_stop(unsigned m, ByteSet& stop) const {
+    for (unsigned k = 0; k < 4; ++k)
+      stop.w[k] = a.skipStop[std::size_t{m} * 4 + k];
+    return stop.any();
+  }
+
   // The entry of a state that does not probe: no shift enters it, its mode
   // collects candidates in its lexer, or its grammar reads indentation first.
   void emit_plain_lex(unsigned s) {
@@ -1750,6 +1775,11 @@ again:
     line("    ::cursiv::TextOffset p = c.committed;");
     if (ByteSet ws{}; mode_ws(m, ws))
       emit_run_adv(ws, "p", std::format("kWs_{}", wsLead[m]), false);
+    // Its last byte may read on: the lexer takes the whole gap.
+    if (ByteSet stop{}; mode_stop(m, stop))
+      fmt("    if (p != c.committed && p < len && in_set<kStop_{}>("
+          "static_cast<unsigned char>(c.src[p]))) {{ lex_{}(c); goto D{}; }}\n",
+          wsLead[m], m, s);
     line("    c.pendEnd = p;");
     fmt("    if (p >= len) {{ c.la = ::cursiv::Token{{p, p, 0, {0}}};"
         " c.laMode = {0}; goto D{1}; }}\n",

@@ -58,7 +58,7 @@ inline Scan ll_scan(const LlContext& c, std::uint16_t mode, TextOffset from) {
 // The blank bytes of each mode, a member one load: modes whose sets agree
 // read one table.
 template <const auto& T>
-inline constexpr auto kLlBlanks =
+inline constexpr auto kLlSkips =
     []<std::size_t... M>(std::index_sequence<M...>) {
       constexpr auto row = [](std::size_t m) {
         return std::array<std::uint64_t, 4>{
@@ -68,15 +68,33 @@ inline constexpr auto kLlBlanks =
       return std::array<const bool*, sizeof...(M)>{kInSet<row(M)>.data()...};
     }(std::make_index_sequence<T.nmodes>{});
 
-// Past the run of blanks `mode` reads blind from `p` on: the walk would read
-// it as one unrecorded trivia token.
+// The same for the bytes a run's last byte may read on with.
 template <const auto& T>
-CURSIV_ALWAYS_INLINE inline TextOffset ll_past_blanks(const LlContext& c,
+inline constexpr auto kLlStops =
+    []<std::size_t... M>(std::index_sequence<M...>) {
+      constexpr auto row = [](std::size_t m) {
+        return std::array<std::uint64_t, 4>{
+            T.skipStop[m * 4], T.skipStop[m * 4 + 1], T.skipStop[m * 4 + 2],
+            T.skipStop[m * 4 + 3]};
+      };
+      return std::array<const bool*, sizeof...(M)>{kInSet<row(M)>.data()...};
+    }(std::make_index_sequence<T.nmodes>{});
+
+// Past the run of blanks `mode` reads blind from `p` on: the walk would read
+// it as unrecorded trivia. On the run's last byte where that may read on with
+// the byte behind it, for the walk to go on from.
+template <const auto& T>
+CURSIV_ALWAYS_INLINE inline TextOffset ll_past_skip_run(const LlContext& c,
                                                       std::uint16_t mode,
                                                       TextOffset p) {
   if constexpr (T.skipSet != nullptr) {
-    const bool* const blank = kLlBlanks<T>[mode];
+    const bool* const blank = kLlSkips<T>[mode];
+    const TextOffset from = p;
     while (p < c.len && blank[static_cast<unsigned char>(c.src[p])]) ++p;
+    if constexpr (T.skipStop != nullptr)
+      if (p != from && p < c.len &&
+          kLlStops<T>[mode][static_cast<unsigned char>(c.src[p])])
+        --p;
   }
   return p;
 }
@@ -97,11 +115,11 @@ CURSIV_ALWAYS_INLINE inline bool ll_in_place(const LlContext& c) {
 // Crosses the run of blanks `mode` reads blind at `p`, if one stands there.
 // A section reads under its own alphabet first, so there the walk reads it.
 template <const auto& T>
-CURSIV_ALWAYS_INLINE inline bool ll_blanks(const LlContext& c,
+CURSIV_ALWAYS_INLINE inline bool ll_crosses_skip_run(const LlContext& c,
                                            std::uint16_t mode, TextOffset& p) {
   if constexpr (T.nsections != 0)
     if (c.section != 0) return false;
-  const TextOffset past = ll_past_blanks<T>(c, mode, p);
+  const TextOffset past = ll_past_skip_run<T>(c, mode, p);
   if (past == p) return false;
   p = past;
   return true;
@@ -126,7 +144,7 @@ CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
       }
     }
     if (p >= c.len) break;
-    if (ll_blanks<T>(c, mode, p)) {
+    if (ll_crosses_skip_run<T>(c, mode, p)) {
       head = false;
       continue;
     }
@@ -197,7 +215,7 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline bool ll_probe(LlContext& c, std::uint16_t mode) {
   if (!ll_in_place<T>(c)) return false;
-  const TextOffset p = ll_past_blanks<T>(c, mode, std::max(c.at, c.triviaAt));
+  const TextOffset p = ll_past_skip_run<T>(c, mode, std::max(c.at, c.triviaAt));
   Token la{p, p, kEofSymbol, mode};
   if (p < c.len) {
     const Scan sc = ll_scan_text<T>(c.src, c.len, mode, p);
@@ -474,7 +492,7 @@ inline Token ll_ahead_peek(const LlContext& c,
         return virtualToken;
     }
     if (p >= c.len) return Token{p, p, kEofSymbol};
-    if (ll_blanks<T>(c, mode, p)) {
+    if (ll_crosses_skip_run<T>(c, mode, p)) {
       head = false;
       continue;
     }

@@ -52,6 +52,8 @@ struct Hold : cursiv::Extends<cursiv::AstNode> {
   Expr* first{};
   Expr* second{};
   string_view text;
+  vector<Expr*> marks;
+  vector<Hold*> turns;
 };
 struct Holds : cursiv::Extends<cursiv::AstNode> {
   vector<Hold*> holds;

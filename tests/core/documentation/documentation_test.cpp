@@ -1,6 +1,7 @@
 // Documentation comments: the comment a provider binds to a node, the parse of
 // a doc comment, and the markdown the documentation provider renders.
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -78,6 +79,23 @@ struct Parsed {
 
 // The comment as a place: found through the node, and its tags read at their
 // place in the document, whatever stands before them on a line.
+// Every comment of a long file read once costs the comments, not the file for
+// each: no counter sees it, so the time is the proof, by two orders of magnitude.
+void comments_read_without_the_file_before_them() {
+  std::string text;
+  for (unsigned i = 0; i < 20000; ++i)
+    text += "/** @uuid x */ entity E" + std::to_string(i) + " { }\n";
+  const Parsed p(text);
+  const cursiv::Cst& cst = p.result.cst();
+  const auto begin = std::chrono::steady_clock::now();
+  std::uint32_t last = 0;
+  for (cursiv::NodeId id = 0; id < cst.size(); ++id)
+    if (cst[id].hidden != 0 && cst.text(id).starts_with("/**"))
+      last = cursiv::parse_doc_comment(p.document, id).range.start.line;
+  CHECK(last == 19999);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+}
+
 void a_comment_node_gives_its_tags_their_place() {
   const std::string text =
       "entity Before { } /** @first é one\r\n * @second two\n */ entity Person { }\n";
@@ -89,7 +107,7 @@ void a_comment_node_gives_its_tags_their_place() {
   if (id == cursiv::kNoNode) return;
   const cursiv::Cst& cst = p.result.cst();
   CHECK(cst.text(id).starts_with("/** @first"));
-  const cursiv::DocComment doc = cursiv::parse_doc_comment(cst, id);
+  const cursiv::DocComment doc = cursiv::parse_doc_comment(p.document, id);
   const auto spelled = [&](const cursiv::DocCommentRange& range) {
     return text.substr(range.start.offset, range.end.offset - range.start.offset);
   };
@@ -266,6 +284,7 @@ void a_homeless_node_answers_nothing() {
 void run() {
   a_doc_comment_answers_as_written();
   a_comment_node_gives_its_tags_their_place();
+  comments_read_without_the_file_before_them();
   the_node_alone_finds_its_document();
   a_plain_block_answers_as_written();
   a_line_comment_does_not_answer();

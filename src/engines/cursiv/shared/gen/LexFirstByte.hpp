@@ -1,11 +1,13 @@
 // What a lexer reads off a token's first byte without its walk, for every
-// engine: the blank runs it crosses blind, and the one-byte literals it takes
-// whole. Also the part of the automaton's view both engines share.
+// engine: the runs of dropped trivia it crosses blind, and the one-byte literals
+// it takes whole. Also the part of the automaton's view both engines share.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cursiv/shared/table/LexRelay.hpp"
@@ -43,36 +45,127 @@ struct LexTableView {
   bool folded(unsigned t) const { return a.cfg.termBuild[t].folded; }
 };
 
-// The bytes an ignored run is made of, four words per mode: the mode's start
-// takes the byte to an unrecorded trivia token whose every live edge comes
-// back to it. A trivia that refuses words behind its head stays with the
-// matcher, which asks them, and so does every run of a mode whose start
-// launches a relay: the token it reads may begin with that run.
+// What a mode crosses blind, four words per mode, whatever its grammar calls
+// trivia: nothing here knows a character. `skip`: the bytes a run of dropped
+// trivia is made of. `stop`: a byte that, right behind such a run, the run's last
+// byte may read on with: the reader steps back onto that last byte and reads on
+// from it with the walk.
+struct LexSkipRuns {
+  std::vector<std::uint64_t> skip{};
+  std::vector<std::uint64_t> stop{};
+};
+
+// Whether only trivia that nobody keeps can be read from state `from`: nothing
+// there says where it began, so the read may begin later.
 template <class Dfa>
-std::vector<std::uint64_t> lex_skip_set(const Dfa& d) {
-  std::vector<std::uint64_t> t(std::size_t{d.modes()} * 4, 0);
+bool lex_reads_only_dropped(const Dfa& d, std::uint16_t from) {
+  std::vector<std::uint16_t> states{from};
+  for (std::size_t i = 0; i < states.size(); ++i) {
+    const std::uint16_t s = states[i];
+    if constexpr (requires { d.ends(s); })
+      if (d.ends(s)) return false;
+    if (d.bounded(s) || d.relay(s) != kNoRelay) return false;
+    if (d.accept(s) != 0) {
+      const TermInfo& term = d.term(d.accept(s) - 1u);
+      if (!term.trivia || term.recorded || term.refuses) return false;
+    }
+    for (unsigned c = 0; c < d.classes(); ++c) {
+      const std::uint16_t n = d.next(s, c);
+      if (n != kDeadState && std::ranges::find(states, n) == states.end())
+        states.push_back(n);
+    }
+  }
+  return true;
+}
+
+// Whether a walk that stands in `run` reads what a new walk that stands in
+// `started` reads, as far as `run` can go: a run ended where only the new walk
+// reads on, and that text is read from the start either way. An acceptance on
+// the run's side leaves both in one state, or the new walk could read on past it.
+template <class Dfa>
+bool lex_read_alike(const Dfa& d, std::uint16_t run, std::uint16_t started) {
+  if (run == started) return true;
+  if (started == kDeadState || d.accept(run) != 0) return false;
+  using Pair = std::pair<std::uint16_t, std::uint16_t>;
+  std::vector<Pair> pairs{{run, started}};
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    const auto [ran, began] = pairs[i];
+    for (unsigned c = 0; c < d.classes(); ++c) {
+      const std::uint16_t n = d.next(ran, c);
+      if (n == kDeadState) continue;
+      const std::uint16_t m = d.next(began, c);
+      if (m == n) continue;
+      if (m == kDeadState || d.accept(n) != 0) return false;
+      if (std::ranges::find(pairs, Pair{n, m}) == pairs.end())
+        pairs.emplace_back(n, m);
+    }
+  }
+  return true;
+}
+
+// A byte belongs to a run where the start takes it to a state that accepts, and
+// from which only dropped trivia reads. Two such bytes in a row leave the walk in
+// the state the second reaches from the start, or end its token there, which
+// leaves it in that same state: so the state behind a run is the one its last
+// byte reaches alone, and what the run reads on with is read from that byte as
+// well as from the run's first. A byte that breaks this is out. A byte stops a run only
+// where reading it from the start could read otherwise. A mode whose start
+// launches a relay crosses nothing: the token it reads may begin with the run.
+template <class Dfa>
+LexSkipRuns lex_skip_runs(const Dfa& d) {
+  LexSkipRuns out;
+  out.skip.assign(std::size_t{d.modes()} * 4, 0);
+  out.stop.assign(std::size_t{d.modes()} * 4, 0);
+  const unsigned classes = d.classes();
   for (std::uint32_t m = 0; m < d.modes(); ++m) {
     const std::uint16_t s0 = d.start(m);
     if (d.relay(s0) != kNoRelay) continue;
-    for (unsigned b = 0; b < 256; ++b) {
-      const std::uint16_t s1 = d.next(s0, d.cls(b));
-      if (s1 == kDeadState || d.accept(s1) == 0 || d.bounded(s1) ||
-          d.relay(s1) != kNoRelay)
-        continue;
-      if (const TermInfo& term = d.term(d.accept(s1) - 1u);
-          !term.trivia || term.recorded || term.refuses)
-        continue;
-      bool loops = true;
-      for (unsigned c = 0; c < d.classes() && loops; ++c) {
-        const std::uint16_t n = d.next(s1, c);
-        if (n == kDeadState) continue;
-        if (n != s1 || d.next(s0, c) != s1) loops = false;
+    std::vector<std::uint8_t> inRun(classes, 0);
+    // A state answers for every class that reaches it.
+    std::vector<std::pair<std::uint16_t, bool>> asked;
+    for (unsigned c = 0; c < classes; ++c) {
+      const std::uint16_t s1 = d.next(s0, c);
+      if (s1 == kDeadState || d.accept(s1) == 0) continue;
+      auto known =
+          std::ranges::find(asked, s1, &std::pair<std::uint16_t, bool>::first);
+      if (known == asked.end()) {
+        asked.emplace_back(s1, lex_reads_only_dropped(d, s1));
+        known = asked.end() - 1;
       }
-      if (loops)
-        t[std::size_t{m} * 4 + (b >> 6)] |= std::uint64_t{1} << (b & 63u);
+      inRun[c] = known->second ? 1 : 0;
+    }
+    for (bool again = true; again;) {
+      again = false;
+      for (unsigned c = 0; c < classes; ++c) {
+        if (inRun[c] == 0) continue;
+        for (unsigned e = 0; e < classes; ++e) {
+          if (inRun[e] == 0) continue;
+          // The byte whose state reads on otherwise is the one that goes.
+          const std::uint16_t n = d.next(d.next(s0, c), e);
+          if (n != kDeadState && n != d.next(s0, e)) {
+            inRun[c] = 0;
+            again = true;
+            break;
+          }
+        }
+      }
+    }
+    std::vector<std::uint8_t> stops(classes, 0);
+    for (unsigned c = 0; c < classes; ++c) {
+      if (inRun[c] == 0) continue;
+      for (unsigned e = 0; e < classes; ++e) {
+        const std::uint16_t n = d.next(d.next(s0, c), e);
+        if (n != kDeadState && !lex_read_alike(d, n, d.next(s0, e))) stops[e] = 1;
+      }
+    }
+    for (unsigned b = 0; b < 256; ++b) {
+      const unsigned c = d.cls(b);
+      const std::uint64_t bit = std::uint64_t{1} << (b & 63u);
+      if (inRun[c] != 0) out.skip[std::size_t{m} * 4 + (b >> 6)] |= bit;
+      if (stops[c] != 0) out.stop[std::size_t{m} * 4 + (b >> 6)] |= bit;
     }
   }
-  return t;
+  return out;
 }
 
 // Whether terminal `t` is an unguarded one-byte literal, which a mode may read

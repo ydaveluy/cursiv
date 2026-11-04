@@ -115,6 +115,7 @@ constinit const LrCaretTable LrLanguageParser<A>::kCaret{
     .modeMulti = A.modeMulti,
     .modeTight = A.modeTight,
     .skipSet = A.derived.skipSet,
+    .skipStop = A.derived.skipStop,
     .errMode = A.errMode,
     .run =
         +[](std::uint16_t state, SymbolId term) {

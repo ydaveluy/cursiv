@@ -311,7 +311,7 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   // Past the terminal the first reading would not have taken, the replay still
   // stands: the next items, and a caret inside one of them.
   const std::vector<std::string> item{
-      "-", "IN", "NAME", "cell:", "glued:", "head:", "marked:", "note:", "pending:", "plain:", "rivals:"};
+      "-", "IN", "NAME", "cell:", "glued:", "head:", "marked:", "note:", "pending:", "plain:", "rivals:", "sp:"};
   for (const std::string& text :
        {std::string{"rivals: X c"}, std::string{"rivals: X a c"}, far + " c"}) {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
@@ -521,7 +521,28 @@ void a_stop_in_a_refused_reading_leaves_nothing_behind() {
   CHECK(first == read());
 }
 
+// A run's last byte reads on: a continuation stays a blank, its last byte alone a
+// token, in a state that takes a one-byte token off its first byte.
+void a_splice_is_no_token_behind_a_run(const cursiv::Parser& parser) {
+  const auto kids = [&](const std::string& text) {
+    const auto result = parser.parse(text);
+    CHECK(result.accepted && result.diagnostics.empty());
+    const auto* const doc = result.value_as<tllrefused::Doc>();
+    return doc != nullptr && doc->items.size() == 1
+               ? doc->items[0]->kids.size()
+               : std::size_t{99};
+  };
+  CHECK(kids("sp:a .") == 1);
+  CHECK(kids("sp:a _\n b .") == 2);
+  CHECK(kids("sp:a   _\n ; .") == 2);
+  CHECK(kids("sp:a _ b .") == 3);
+  CHECK(kids("sp:a_ .") == 2);
+  CHECK(kids("sp:a ; _\n ; _ .") == 4);
+}
+
 void run() {
+  a_splice_is_no_token_behind_a_run(*tllrefused::generated::Ll::create_parser());
+  a_splice_is_no_token_behind_a_run(*tllrefused::generated::Lr::create_parser());
   a_refused_keyword_leaves_the_terminals_behind_it();
   completion_keeps_the_terminals_behind_a_refused_keyword();
   a_caret_reads_the_word_a_keyword_is_refused_by();

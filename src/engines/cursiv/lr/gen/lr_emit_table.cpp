@@ -372,6 +372,7 @@ struct LrTableEmitter : EmitOutput {
         "kDerived{");
     aggregate = true;
     array("skipSet", a.skipSet);
+    array("skipStop", a.skipStop);
     array("lexElseBase", a.lexElseBase);
     array("lexElseRows", a.lexElseRows);
     array("typoSuccBase", a.typoSuccBase);

@@ -60,20 +60,18 @@ NodeId find_comment_node(const Document& document, const AstNode& node,
   return kNoNode;
 }
 
-DocComment parse_doc_comment(const Cst& cst, NodeId comment,
+DocComment parse_doc_comment(const Document& document, NodeId comment,
                              const DocCommentParseOptions& options) {
+  const Cst& cst = document.parseResult.cst();
   const TextOffset begin = cst[comment].begin;
-  const std::string_view before = cst.text().substr(0, begin);
-  // Lines as `TextDocument` counts them: a line feed, a return, or both.
-  DocCommentPosition start{0, 0, begin};
-  std::size_t lineStart = 0;
-  for (std::size_t i = 0; i < before.size(); ++i) {
-    if (before[i] != '\n' && before[i] != '\r') continue;
-    if (before[i] == '\r' && i + 1 < before.size() && before[i + 1] == '\n') ++i;
-    ++start.line;
-    lineStart = i + 1;
-  }
-  start.character = static_cast<std::uint32_t>(begin - lineStart);
+  // The document's index says the line; its columns count code units, where a
+  // comment's count bytes, so the column is read back to the line's start.
+  const std::size_t lastBreak = cst.text().substr(0, begin).find_last_of("\r\n");
+  const std::size_t lineStart =
+      lastBreak == std::string_view::npos ? 0 : lastBreak + 1;
+  const DocCommentPosition start{
+      document.textDocument().positionAt(begin).line,
+      static_cast<std::uint32_t>(begin - lineStart), begin};
   return parse_doc_comment(cst.text(comment), start, options);
 }
 

@@ -23,6 +23,6 @@ struct Document;
 // The documentation in comment record `comment`, its ranges those of the
 // document: `offset` is what a diagnostic's range takes.
 [[nodiscard]] DocComment parse_doc_comment(
-    const Cst& cst, NodeId comment, const DocCommentParseOptions& options = {});
+    const Document& document, NodeId comment, const DocCommentParseOptions& options = {});
 
 }  // namespace cursiv

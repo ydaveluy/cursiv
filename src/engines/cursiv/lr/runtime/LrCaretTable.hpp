@@ -80,6 +80,7 @@ struct LrCaretTable {
   std::span<const std::uint8_t> modeMulti;
   std::span<const std::uint8_t> modeTight;
   std::span<const std::uint64_t> skipSet;
+  std::span<const std::uint64_t> skipStop;
   std::uint16_t errMode = 0;
   // The full transition relation: the running parser keeps no stack journal.
   struct Run {

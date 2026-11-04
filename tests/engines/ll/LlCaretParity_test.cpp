@@ -407,6 +407,19 @@ void each_member_a_token_fills_is_named_as_the_descent_names_it() {
        {"member:bare ", "member:plain ", "member:named ", "member:marked ",
         "member:marked mk ", "member:", "member:bare $a; "})
     CHECK(end(*lr, text) == end(*ll, text));
+  // A member past a repetition opens its rule while no turn of it was read, and
+  // so does one under a choice of what spells it, a state at a time. Past a rule
+  // that may read nothing, the state holds no call of the choice, and every call
+  // of it answers.
+  const Names unread{"ID:text/Hold/entered", "bx:marks/Hold/entered",
+                     "in:text/Hold/entered", "mk:turns/Hold",
+                     "nk:text/Hold",         "zz:turns/Hold",
+                     "}"};
+  CHECK(end(*lr, "member:turns { ") == unread);
+  CHECK(end(*lr, "member:turns { a = , ") == unread);
+  CHECK(end(*lr, "member:turns { bx ") ==
+        (Names{"ID:text/Hold", "bx:marks/Hold/entered", "in:text/Hold", "mk",
+               "nk:text/Hold", "zz"}));
   // A rule entered by itself alone fills nothing at a caret.
   const auto start = end(*lr, "");
   CHECK(std::ranges::count(start, std::string("s0")) == 1);

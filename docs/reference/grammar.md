@@ -123,7 +123,8 @@ escapes and Unicode.
 | `cr<"^…">`, `~c` | one character outside the class |
 | `uc::L`, `uc::Lu`, `uc::Nd`, … | a Unicode general category or subcategory |
 | `uc::XID_Start`, `uc::XID_Continue`, `uc::White_Space`, `uc::Alphabetic` | a Unicode property |
-| `s`, `w`, `d`; `S`, `W`, `D` | ASCII shorthands and their complements |
+| `s`; `S` | one whitespace character, Unicode's included (no-break spaces, line separators, the byte order mark); its complement |
+| `w`, `d`; `W`, `D` | ASCII word and digit characters; their complements |
 | `any`; `byte` | one character; one raw byte |
 
 ### Literals and keywords
@@ -653,7 +654,7 @@ it is literal.
 |---|---|
 | `\n`, `\r`, `\t`, `\f`, `\v`, `\b`, `\0`, `\cX` | Control characters: `\b` is backspace, `\0` NUL when no digit follows, `\cX` a control letter |
 | `\xHH`, `\uHHHH`, `\u{H…}` | A Unicode scalar, never a raw byte |
-| `\d`, `\w`, `\s`; `\D`, `\W`, `\S` | `0-9`, `a-zA-Z0-9_`, space/tab/LF/CR/FF/VT; their complements |
+| `\d`, `\w`, `\s`; `\D`, `\W`, `\S` | `0-9`, `a-zA-Z0-9_`, whitespace as `s` reads it; their complements |
 | `\` before punctuation | The punctuation itself |
 
 Unknown escapes, reversed ranges, shorthands as range ends (`a-\d`),

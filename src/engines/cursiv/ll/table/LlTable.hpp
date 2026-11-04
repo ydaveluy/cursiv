@@ -154,6 +154,9 @@ struct LlTable {
   // is the one unrecorded trivia token the walk would read there. Null where
   // no mode crosses any blind.
   const std::uint64_t* skipSet = nullptr;
+  // The bytes such a run's last byte may read on with: a reader steps back onto
+  // that byte and reads on from it. Null where no mode has any.
+  const std::uint64_t* skipStop = nullptr;
   // Per mode, the one-byte literal each first byte reads whole,
   // `kInvalidSymbol` where the walk reads it: rows of 256, and per mode where
   // its row starts. Null where no mode reads one.

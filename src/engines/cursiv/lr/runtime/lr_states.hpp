@@ -85,6 +85,10 @@ CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
     const TextOffset blank = p;
     while (p < end && lr_skips<A>(mode, static_cast<unsigned char>(c.src[p])))
       ++p;
+    if constexpr (kLrStops<A>)
+      if (p != blank && p < end &&
+          lr_stops<A>(mode, static_cast<unsigned char>(c.src[p])))
+        --p;
     if (p != blank) crossed(p, nullptr);
     if (p >= end) return Token{p, p, kEofSymbol};
     const Scan s = walk(p);
