@@ -108,6 +108,11 @@ int main() {
          {"1;!", "Doc{value=Bang{} }"},
          {"@1;", name},
          {"1.5;", number}}, "cell:");
+  expect_cases(Ll::create_parser(), Ll::create_ast_reflection(),
+        {{"x % k", name},
+         {"x %^&", number},
+         {"x %^& q", number},
+         {"x %^&q q", number}}, "inside:");
   constexpr std::string_view ctor = "Class{members0=Ctor{} }";
   constexpr std::string_view method = "Class{members0=Method{} }";
   expect_cases(Ll::create_parser(), Ll::create_ast_reflection(),

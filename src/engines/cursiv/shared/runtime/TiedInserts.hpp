@@ -13,6 +13,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/shared/runtime/GestureRank.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 
@@ -75,12 +76,7 @@ class TiedInserts {
   }
 
   // A new set of terminals, each to be named once.
-  void open() {
-    if (++_stamp == 0) {
-      std::ranges::fill(_seen, 0u);
-      _stamp = 1;
-    }
-  }
+  void open() { _seen.next(); }
 
   // The terminals named, in the order the grammar declares them.
   static void order(std::vector<ElementId>& terms) { std::ranges::sort(terms); }
@@ -105,16 +101,12 @@ class TiedInserts {
 
   // Whether `term` is new to the set opened last; asking makes it old.
   bool fresh(ElementId term) {
-    if (_seen.size() <= term) _seen.resize(term + 1u, 0u);
-    if (_seen[term] == _stamp) return false;
-    _seen[term] = _stamp;
-    return true;
+    return _seen.first(term);
   }
 
   std::unordered_map<std::uint32_t, std::vector<ElementId>> _under;
   std::vector<ElementId> _moved;
-  std::vector<std::uint32_t> _seen;
-  std::uint32_t _stamp = 0;
+  RoundMarks _seen;
 };
 
 }  // namespace cursiv

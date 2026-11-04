@@ -480,10 +480,7 @@ void ll_flag_choices(LlBuiltProgram& b, const LexAlphabet& alpha,
     if (g.nodes[dec.node].kind == LlShape::rep)
       beside |= modes.set[b.headMode[d]];
     beside.andnot(modes.trivia);
-    each_bit(caller.w.data(), caller.w.size(), [&](std::size_t t) {
-      if (overtakes.reads_over(static_cast<unsigned>(t), beside))
-        b.decFlag[d].set(static_cast<unsigned>(t));
-    });
+    b.decFlag[d] = overtakes.over(caller, beside);
   }
   if (walks != nullptr) *walks += overtakes.walks();
 }

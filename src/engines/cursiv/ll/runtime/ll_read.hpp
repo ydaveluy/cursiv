@@ -55,48 +55,38 @@ inline Scan ll_scan(const LlContext& c, std::uint16_t mode, TextOffset from) {
   return ll_scan_text<T>(c.src, c.len, mode, from);
 }
 
-// The blank bytes of each mode, a member one load: modes whose sets agree
-// read one table.
-template <const auto& T>
-inline constexpr auto kLlSkips =
+// A set of bytes per mode, a member one load: modes whose sets agree read one
+// table.
+template <const auto& T, auto Rows>
+inline constexpr auto kLlBytes =
     []<std::size_t... M>(std::index_sequence<M...>) {
       constexpr auto row = [](std::size_t m) {
-        return std::array<std::uint64_t, 4>{
-            T.skipSet[m * 4], T.skipSet[m * 4 + 1], T.skipSet[m * 4 + 2],
-            T.skipSet[m * 4 + 3]};
-      };
-      return std::array<const bool*, sizeof...(M)>{kInSet<row(M)>.data()...};
-    }(std::make_index_sequence<T.nmodes>{});
-
-// The same for the bytes a run's last byte may read on with.
-template <const auto& T>
-inline constexpr auto kLlStops =
-    []<std::size_t... M>(std::index_sequence<M...>) {
-      constexpr auto row = [](std::size_t m) {
-        return std::array<std::uint64_t, 4>{
-            T.skipStop[m * 4], T.skipStop[m * 4 + 1], T.skipStop[m * 4 + 2],
-            T.skipStop[m * 4 + 3]};
+        const std::uint64_t* const w = T.*Rows;
+        return std::array<std::uint64_t, 4>{w[m * 4], w[m * 4 + 1], w[m * 4 + 2],
+                                            w[m * 4 + 3]};
       };
       return std::array<const bool*, sizeof...(M)>{kInSet<row(M)>.data()...};
     }(std::make_index_sequence<T.nmodes>{});
 
 // Past the run of blanks `mode` reads blind from `p` on: the walk would read
-// it as unrecorded trivia. On the run's last byte where that may read on with
-// the byte behind it, for the walk to go on from.
+// it as unrecorded trivia.
 template <const auto& T>
 CURSIV_ALWAYS_INLINE inline TextOffset ll_past_skip_run(const LlContext& c,
-                                                      std::uint16_t mode,
-                                                      TextOffset p) {
-  if constexpr (T.skipSet != nullptr) {
-    const bool* const blank = kLlSkips<T>[mode];
-    const TextOffset from = p;
-    while (p < c.len && blank[static_cast<unsigned char>(c.src[p])]) ++p;
-    if constexpr (T.skipStop != nullptr)
-      if (p != from && p < c.len &&
-          kLlStops<T>[mode][static_cast<unsigned char>(c.src[p])])
-        --p;
+                                                        std::uint16_t mode,
+                                                        TextOffset p) {
+  if constexpr (T.skipSet == nullptr) {
+    return p;
+  } else {
+    const bool* const blank = kLlBytes<T, &LlTable::skipSet>[mode];
+    return lex_past_run(
+        c.src, p, c.len, [&](unsigned char b) { return blank[b]; },
+        [&]([[maybe_unused]] unsigned char b) {
+          if constexpr (T.skipStop == nullptr)
+            return false;
+          else
+            return kLlBytes<T, &LlTable::skipStop>[mode][b];
+        });
   }
-  return p;
 }
 
 // Whether the read at the point may take a token in place, past the blanks:
@@ -125,42 +115,43 @@ CURSIV_ALWAYS_INLINE inline bool ll_crosses_skip_run(const LlContext& c,
   return true;
 }
 
-// The gap from `p` on, and the token behind it in hand, under `mode`: the trivia
-// that is recorded waits for the tape. `sc`, where it ends past `p`, is what the
-// lexer read there already.
-template <const auto& T>
-CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
-                                             TextOffset p, bool head, Scan sc) {
+// The gap from `p` on under `mode`, under the levels given, and the token behind
+// it. `sc`, where it ends past `p`, is what the lexer read there already.
+template <const auto& T, class Levels, class At, class Held, class Recorded>
+CURSIV_ALWAYS_INLINE inline Token ll_cross_gap(const LlContext& c,
+                                               const Levels& levels, At& at,
+                                               Held& held, std::uint16_t mode,
+                                               TextOffset& p, bool head, Scan sc,
+                                               Recorded&& recorded) {
   for (;;) {
     if constexpr (kIndented<T>) {
       Token virtualToken;
-      if (ll_indent_read<T>(c.src, c.len, c.indentArena, c.indent, p, head,
-                            c.heldEnd, virtualToken, ll_mode_ends<T>(mode))) {
-        c.pendEnd = p;
-        c.la = virtualToken;
-        c.laValid = true;
-        c.laMode = mode;
-        return;
-      }
+      if (ll_indent_read<T>(c.src, c.len, levels, at, p, head, held, virtualToken,
+                            ll_mode_ends<T>(mode)))
+        return virtualToken;
     }
-    if (p >= c.len) break;
+    if (p >= c.len) return Token{p, p, kEofSymbol, mode};
     if (ll_crosses_skip_run<T>(c, mode, p)) {
       head = false;
       continue;
     }
     if (sc.end <= p) sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p ||
-        !ll_blank<T>(sc.term, c.indent.depth))
-      break;
-    if (T.terms[sc.term].recorded)
-      c.pending.push_back(Token{p, sc.end, sc.term});
+    if (sc.term == kInvalidSymbol || sc.end == p || !ll_blank<T>(sc.term, at.depth))
+      return Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
+    if (T.terms[sc.term].recorded) recorded(Token{p, sc.end, sc.term});
     p = sc.end;
     head = false;
   }
+}
+
+// The gap from `p` on, and the token behind it in hand, under `mode`: the trivia
+// that is recorded waits for the tape.
+template <const auto& T>
+CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
+                                             TextOffset p, bool head, Scan sc) {
+  c.la = ll_cross_gap<T>(c, c.indentArena, c.indent, c.heldEnd, mode, p, head, sc,
+                         [&](const Token& t) { c.pending.push_back(t); });
   c.pendEnd = p;
-  c.la = p >= c.len
-             ? Token{p, p, kEofSymbol, mode}
-             : Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
   c.laValid = true;
   c.laMode = mode;
 }
@@ -483,27 +474,12 @@ inline Token ll_ahead_peek(const LlContext& c,
                            const std::vector<IndentLevel>& levels, LlAhead& a,
                            std::uint16_t mode) {
   TextOffset p = a.p;
-  bool head = a.head;
-  for (;;) {
-    if constexpr (kIndented<T>) {
-      Token virtualToken;
-      if (ll_indent_read<T>(c.src, c.len, levels, a.at, p, head, a.held,
-                            virtualToken, ll_mode_ends<T>(mode)))
-        return virtualToken;
-    }
-    if (p >= c.len) return Token{p, p, kEofSymbol};
-    if (ll_crosses_skip_run<T>(c, mode, p)) {
-      head = false;
-      continue;
-    }
-    const Scan sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p)
-      return Token{p, p, kInvalidSymbol};
-    if (!ll_blank<T>(sc.term, a.at.depth))
-      return Token{p, sc.end, sc.term, mode};
-    p = sc.end;
-    head = false;
-  }
+  const Token t = ll_cross_gap<T>(c, levels, a.at, a.held, mode, p, a.head, Scan{},
+                                  [](const Token&) {});
+  // Only a token that reads holds a mode, and an end.
+  return t.sym == kInvalidSymbol || t.sym == kEofSymbol
+             ? Token{t.begin, t.begin, t.sym}
+             : t;
 }
 
 

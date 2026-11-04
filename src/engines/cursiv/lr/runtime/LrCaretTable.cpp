@@ -25,6 +25,7 @@
 #include "cursiv/lr/runtime/lr_lookahead.hpp"
 #include "cursiv/lr/runtime/lr_refusal.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
+#include "cursiv/shared/runtime/LexByteRun.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/token_end_from.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
@@ -1696,19 +1697,16 @@ class CaretStacks {
         });
   }
 
-  static bool holds(std::span<const std::uint64_t> set, std::uint16_t mode,
-                    char at) {
-    const auto byte = static_cast<unsigned char>(at);
-    return ((set[std::size_t{mode} * 4 + (byte >> 6)] >> (byte & 63u)) & 1u) != 0;
-  }
-
-  // Past the run of blanks at `at`, on its last byte where that may read on with
-  // the byte behind it.
+  // Past the run of blanks at `at`.
   TextOffset past_skip_run(std::uint16_t mode, TextOffset at, TextOffset to) const {
-    const TextOffset from = at;
-    while (at < to && holds(_table.skipSet, mode, _text[at])) ++at;
-    if (at != from && at < to && holds(_table.skipStop, mode, _text[at])) --at;
-    return at;
+    return lex_past_run(
+        _text.data(), at, to,
+        [&](unsigned char b) {
+          return mode_row_has(_table.skipSet.data(), mode, b);
+        },
+        [&](unsigned char b) {
+          return mode_row_has(_table.skipStop.data(), mode, b);
+        });
   }
 
   // The token a mode elects at `at`, or the first rival its sweep holds

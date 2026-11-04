@@ -13,6 +13,7 @@
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/lr/table/LrLexElse.hpp"
 #include "cursiv/shared/runtime/LexBoundary.hpp"
+#include "cursiv/shared/runtime/LexByteRun.hpp"
 #include "cursiv/shared/runtime/LexTape.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
@@ -22,8 +23,7 @@ namespace cursiv {
 
 template <const auto& A>
 CURSIV_ALWAYS_INLINE inline bool lr_skips(std::uint16_t mode, unsigned char b) {
-  return ((A.derived.skipSet[std::size_t{mode} * 4 + (b >> 6)] >> (b & 63u)) &
-          1) != 0;
+  return mode_row_has(A.derived.skipSet.data(), mode, b);
 }
 
 // Whether a mode of the table steps back from any byte behind a run of blanks.
@@ -33,13 +33,6 @@ inline constexpr bool kLrStops = [] {
     if (word != 0) return true;
   return false;
 }();
-
-// Whether the last byte of a run of blanks may read on with `b`.
-template <const auto& A>
-CURSIV_ALWAYS_INLINE inline bool lr_stops(std::uint16_t mode, unsigned char b) {
-  return ((A.derived.skipStop[std::size_t{mode} * 4 + (b >> 6)] >> (b & 63u)) &
-          1) != 0;
-}
 
 // Whether a fallback row of the table asks the scalar a lead byte starts.
 template <const auto& A>

@@ -14,6 +14,7 @@
 #include "cursiv/grammar/GrammarImage.hpp"
 #include "cursiv/grammar/GrammarPrinter.hpp"
 #include "cursiv/shared/gen/WrittenReads.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 
@@ -39,15 +40,12 @@ class WarningFound {
   // answers whether to walk the node's parts.
   template <class Enter>
   void each_node(std::span<const ImageId> roots, Enter enter) {
-    ++_walk;
+    _seen.next();
     _todo.assign(roots.rbegin(), roots.rend());
     while (!_todo.empty()) {
       const ImageId id = _todo.back();
       _todo.pop_back();
-      if (id >= _seen.size())
-        _seen.resize(std::max<std::size_t>(id + 1u, _image.nodes.size()));
-      if (_seen[id] == _walk) continue;
-      _seen[id] = _walk;
+      if (!_seen.first(id)) continue;
       if (!enter(id)) continue;
       const std::span<const ImageId> kids = _image.shape_kids(id);
       _todo.insert(_todo.end(), kids.rbegin(), kids.rend());
@@ -61,8 +59,7 @@ class WarningFound {
   std::vector<std::uint32_t> _rules;
   std::vector<std::uint32_t> _tables;
   // The walk in hand, and the last walk that read each node.
-  std::uint32_t _walk = 0;
-  std::vector<std::uint32_t> _seen;
+  RoundMarks _seen;
   std::vector<ImageId> _todo;
 };
 

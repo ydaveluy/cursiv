@@ -83,12 +83,14 @@ CURSIV_ALWAYS_INLINE inline Token lr_cross_trivia(
   TextOffset p = from;
   for (;;) {
     const TextOffset blank = p;
-    while (p < end && lr_skips<A>(mode, static_cast<unsigned char>(c.src[p])))
-      ++p;
-    if constexpr (kLrStops<A>)
-      if (p != blank && p < end &&
-          lr_stops<A>(mode, static_cast<unsigned char>(c.src[p])))
-        --p;
+    p = lex_past_run(
+        c.src, p, end, [&](unsigned char b) { return lr_skips<A>(mode, b); },
+        [&]([[maybe_unused]] unsigned char b) {
+          if constexpr (kLrStops<A>)
+            return mode_row_has(A.derived.skipStop.data(), mode, b);
+          else
+            return false;
+        });
     if (p != blank) crossed(p, nullptr);
     if (p >= end) return Token{p, p, kEofSymbol};
     const Scan s = walk(p);

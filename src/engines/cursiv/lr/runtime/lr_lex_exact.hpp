@@ -156,23 +156,6 @@ Token lr_scan_skipping(const LrContext& c, std::uint16_t mode, TextOffset from,
   return token;
 }
 
-// A reading's token `la`, a winner of `mode`, read again while it is a
-// terminal the mode flags and the stack refuses it: `takes(la)` asks the
-// stack, `rescan(skip, from)` reads the token from `from`, where the winner
-// began, without the terminals of `skip`, which it leaves holding them. Whether
-// any was refused.
-template <const auto& A, class Takes, class Rescan>
-CURSIV_NOINLINE bool lr_lex_refused(Takes&& takes, std::uint16_t mode,
-                                    Token& la, LrSkipped<A>& skip,
-                                    Rescan&& rescan) {
-  return lr_refused(
-      [&](SymbolId sym) { return sym < A.cfg.nterms && A.flagged(mode, sym); },
-      takes, la, [&](const Token& t) {
-        skip.set(t.sym);
-        return rescan(skip, t.begin);
-      });
-}
-
 // What ties with `la`, a token a refusal elected. `skip` holds what was refused.
 // The count is `room`'s, with `la` first; none where the mode holds no rivals.
 template <const auto& A, class Takes>
@@ -211,6 +194,27 @@ CURSIV_NOINLINE std::uint32_t lr_refused_rivals(const LrContext& c,
   return n;
 }
 
+// `la`, a winner of `mode` that the mode flags, read again from where it began
+// while `takes(la)` refuses it. `crossed` hears the trivia a refusal leaves to, and
+// what ties with the new winner lands in `room`, `tied` its count. Whether any was
+// refused.
+template <const auto& A, class Takes, class Crossed>
+CURSIV_NOINLINE bool lr_lex_refused(const LrContext& c, std::uint16_t mode,
+                                    std::uint32_t depth, Token& la, Takes&& takes,
+                                    Crossed&& crossed, Scan* room,
+                                    std::uint32_t& tied) {
+  LrSkipped<A> skip{};
+  const bool refused = lr_refused(
+      [&](SymbolId sym) { return sym < A.cfg.nterms && A.flagged(mode, sym); },
+      takes, la, [&](const Token& t) {
+        skip.set(t.sym);
+        return lr_scan_skipping<A>(c, mode, t.begin, depth, skip, crossed);
+      });
+  if constexpr (A.maxCands > 1)
+    if (refused) tied = lr_refused_rivals<A>(c, mode, depth, la, skip, room, takes);
+  return refused;
+}
+
 // The drive's token, a winner of `mode` that the mode flags: read again from
 // where it began while the stack refuses it, and what tied with the new winner
 // stays a candidate. A trivia left where the terminal is refused is crossed, and
@@ -224,29 +228,19 @@ CURSIV_NOINLINE void lr_drive_exact(LrContext& c, std::uint16_t mode) {
         [&](unsigned k) { return c.drive->cond(c, k, c.virt.from, t); },
         c.walkMemo);
   };
-  LrSkipped<A> skipped{};
+  std::uint32_t tied = 0;
   const bool refused = lr_lex_refused<A>(
-      takes, mode, la, skipped, [&](const LrSkipped<A>& skip, TextOffset from) {
-        return lr_scan_skipping<A>(
-            c, mode, from, c.indent.depth, skip,
-            [&](TextOffset end, const Token* t) {
-              if (t != nullptr && A.cfg.terms[t->sym].recorded)
-                c.pending.push_back(*t);
-              c.pendEnd = end;
-            });
-      });
+      c, mode, c.indent.depth, la, takes,
+      [&](TextOffset end, const Token* t) {
+        if (t != nullptr && A.cfg.terms[t->sym].recorded) c.pending.push_back(*t);
+        c.pendEnd = end;
+      },
+      c.cand, tied);
   if (!refused) return;
   c.la = la;
   c.la.mode = mode;
   c.laMode = mode;
-  c.ncand = 0;
-  if constexpr (A.maxCands > 1) {
-    if (c.drive->scanText != nullptr) {
-      const std::uint32_t n = lr_refused_rivals<A>(
-          c, mode, c.indent.depth, la, skipped, c.cand, takes);
-      if (n > 1) c.ncand = n;
-    }
-  }
+  c.ncand = tied > 1 ? tied : 0;
 }
 
 }  // namespace cursiv

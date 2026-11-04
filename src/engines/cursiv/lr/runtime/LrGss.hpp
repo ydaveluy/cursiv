@@ -380,21 +380,12 @@ class LrGss {
   // graph's paths popped as a reduction pops them.
   CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode,
                               ScanRoom<A.maxCands>& room, std::uint32_t& tied) {
-    const auto takes = [&](const Token& t) {
-      return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
-    };
-    LrSkipped<A> skipped{};
-    const bool refused = lr_lex_refused<A>(
-        takes, mode, r.la, skipped,
-        [&](const LrSkipped<A>& skip, TextOffset from) {
-          return lr_scan_skipping<A>(_c, mode, from, r.indent.depth, skip,
-                                     [](TextOffset, const Token*) {});
-        });
-    if constexpr (A.maxCands > 1)
-      if (refused)
-        tied = lr_refused_rivals<A>(_c, mode, r.indent.depth, r.la, skipped,
-                                    room.data(), takes);
-    return refused;
+    return lr_lex_refused<A>(
+        _c, mode, r.indent.depth, r.la,
+        [&](const Token& t) {
+          return lr_gss_takes<A>(_g, v, t.sym, lr_shadow_holds(_c, r));
+        },
+        [](TextOffset, const Token*) {}, room.data(), tied);
   }
 
   // The nearest unopened vertex, once the shifts from every place before it

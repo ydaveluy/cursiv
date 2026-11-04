@@ -40,22 +40,22 @@ class LexOvertakes {
   }
 
   // The terminals of `added` that, offered beside those of `kept` and the
-  // trivia, read over one of them. With `tied`, one also reads over a trivia
-  // whose text it matches, as the lexer elects the token: a reduction added
-  // for another caller asks it, and that caller then reads the text again as
-  // trivia. The flags leave it out: they would cost a check on every read of
-  // the terminal, and the reduction the merged row makes on it already lets
-  // the caller read the text again.
-  DynSet overtaking(const DynSet& added, const DynSet& kept,
-                    bool tied = false) {
+  // trivia, read over one of them, or over a trivia whose text they match, as
+  // the lexer elects the token: a caller that does not take the token reads
+  // that text as trivia, and the position past it is another's to answer.
+  DynSet overtaking(const DynSet& added, const DynSet& kept) {
     DynSet fresh = added;
     fresh.andnot(kept);
-    const DynSet beside = kept | _trivia;
+    return over(fresh, kept);
+  }
+
+  // Those of `candidates` that read over one of `beside` or over a trivia.
+  DynSet over(const DynSet& candidates, const DynSet& beside) {
     DynSet out;
-    each_bit(fresh.w.data(), fresh.w.size(), [&](std::size_t a) {
+    each_bit(candidates.w.data(), candidates.w.size(), [&](std::size_t a) {
       if (a >= _g.nterms || _trivia.test(static_cast<unsigned>(a))) return;
       if (reads_over(static_cast<unsigned>(a), beside) ||
-          (tied && takes_trivia(static_cast<unsigned>(a))))
+          takes_trivia(static_cast<unsigned>(a)))
         out.set(static_cast<unsigned>(a));
     });
     return out;
@@ -92,6 +92,20 @@ class LexOvertakes {
   // Ends the sweep now, whatever the walks have read.
   void finish_sweep() {
     while (!_sweepOver) sweep_step();
+  }
+
+  // Whether `a` reads over a trivia, one of the same text included.
+  bool takes_trivia(unsigned a) {
+    if (_tied[a] == 0) {
+      bool over = false;
+      if (_startOf[a] >= 0)
+        each_bit(_trivia.w.data(), _trivia.w.size(), [&](std::size_t b) {
+          over = over || (b < _g.nterms && _startOf[b] >= 0 &&
+                          walk(static_cast<unsigned>(b), a, true));
+        });
+      _tied[a] = over ? 2 : 1;
+    }
+    return _tied[a] == 2;
   }
 
  private:
@@ -295,19 +309,6 @@ class LexOvertakes {
     if (!walk(b, a)) return false;
     _past[a].set(b);
     return true;
-  }
-
-  bool takes_trivia(unsigned a) {
-    if (_tied[a] == 0) {
-      bool over = false;
-      if (_startOf[a] >= 0)
-        each_bit(_trivia.w.data(), _trivia.w.size(), [&](std::size_t b) {
-          over = over || (b < _g.nterms && _startOf[b] >= 0 &&
-                          walk(static_cast<unsigned>(b), a, true));
-        });
-      _tied[a] = over ? 2 : 1;
-    }
-    return _tied[a] == 2;
   }
 
   // With `tied`, `a` also reads over `b`, a trivia, where both end on one

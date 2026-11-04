@@ -25,6 +25,27 @@ CURSIV_ALWAYS_INLINE inline bool in_set(unsigned char b) {
   return kInSet<S>[b];
 }
 
+// Whether a table of four words per mode holds `b` for `mode`.
+CURSIV_ALWAYS_INLINE inline bool mode_row_has(const std::uint64_t* rows,
+                                              std::uint16_t mode,
+                                              unsigned char b) {
+  return ((rows[std::size_t{mode} * 4 + (b >> 6)] >> (b & 63u)) & 1u) != 0;
+}
+
+// Past the run of blanks from `p` that a reader crosses blind: on its last byte
+// where that may read on with the byte behind it, for the walk to go on from.
+template <class Skips, class Stops>
+CURSIV_ALWAYS_INLINE inline std::uint32_t lex_past_run(const char* src,
+                                                       std::uint32_t p,
+                                                       std::uint32_t end,
+                                                       Skips&& skips,
+                                                       Stops&& stops) {
+  const std::uint32_t from = p;
+  while (p < end && skips(static_cast<unsigned char>(src[p]))) ++p;
+  if (p != from && p < end && stops(static_cast<unsigned char>(src[p]))) --p;
+  return p;
+}
+
 inline constexpr std::uint64_t kRep = 0x0101010101010101ull;
 inline constexpr std::uint64_t kHi = 0x8080808080808080ull;
 CURSIV_ALWAYS_INLINE inline std::uint64_t ld64(const char* p) {

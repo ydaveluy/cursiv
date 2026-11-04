@@ -14,6 +14,7 @@
 #include "cursiv/ll/table/LlSimulation.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 
@@ -161,13 +162,8 @@ class LlOwed {
   template <class From>
   void begin(const LlSimulation& sim, std::vector<std::uint16_t>& out,
              From&& from, std::size_t most = SIZE_MAX) const {
-    thread_local std::vector<std::uint32_t> seen;
-    thread_local std::uint32_t round = 0;
-    if (seen.size() < _owes.size()) seen.assign(_owes.size(), 0u);
-    if (++round == 0) {
-      std::ranges::fill(seen, 0u);
-      round = 1;
-    }
+    thread_local RoundMarks seen;
+    seen.next();
     struct Frame {
       std::uint32_t state, next = 0;
     };
@@ -178,11 +174,10 @@ class LlOwed {
       Frame& f = todo.back();
       const auto& state = T.atn.state(f.state);
       if (f.next == 0) {
-        if (seen[f.state] == round) {
+        if (!seen.first(f.state)) {
           todo.pop_back();
           continue;
         }
-        seen[f.state] = round;
       }
       if (f.next == state.nedges) {
         todo.pop_back();

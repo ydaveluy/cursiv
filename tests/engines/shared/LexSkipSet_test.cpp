@@ -214,13 +214,13 @@ void the_rule_says_what_it_should_on_each_shape() {
                                       {{kX, kX, kX, 3}, 2}});
   CHECK(blind_blank(longer) && !stop_on(longer, 1) && !stop_on(longer, 3));
   // A word that may hold the first byte of that character: the two walks part
-  // there but read that character alike, and only one of them reads on.
+  // there, so the reader steps back on it.
   const Automaton shared = from_rows({{{1, 4, kX, 3}, 0},
                                       {{1, 2, kX, kX}, 1},
                                       {{kX, kX, 1, kX}, 0},
                                       {{kX, kX, kX, 3}, 2},
                                       {{kX, kX, 1, 3}, 0}});
-  CHECK(blind_blank(shared) && !stop_on(shared, 1));
+  CHECK(blind_blank(shared) && stop_on(shared, 1));
   // A character of the run that a longer token also begins: cut before it, that
   // token would win.
   const Automaton longest = from_rows({{{1, 2, kX, kX}, 0},

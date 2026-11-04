@@ -6,6 +6,8 @@
 #include <span>
 #include <vector>
 
+#include "cursiv/utils/RoundMarks.hpp"
+
 namespace cursiv {
 
 // One stamp per id a list can hold, so a list costs its own length however many
@@ -17,21 +19,17 @@ class KeepFirst {
 
   // Moves the ids to keep to the front of `ids`, and says how many there are.
   std::size_t operator()(std::span<std::uint16_t> ids) {
-    if (_stamp.empty()) _stamp.assign(std::size_t{1} << 16, 0);
-    ++_round;
+    _seen.next();
     if (_reads != nullptr) *_reads += ids.size();
     std::size_t kept = 0;
     for (const std::uint16_t id : ids) {
-      if (_stamp[id] == _round) continue;
-      _stamp[id] = _round;
-      ids[kept++] = id;
+      if (_seen.first(id)) ids[kept++] = id;
     }
     return kept;
   }
 
  private:
-  std::vector<std::uint32_t> _stamp;
-  std::uint32_t _round = 0;
+  RoundMarks _seen;
   std::uint64_t* _reads;
 };
 

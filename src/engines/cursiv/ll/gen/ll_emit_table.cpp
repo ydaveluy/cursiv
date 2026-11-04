@@ -188,6 +188,7 @@ std::string staged_source(const Built& a) {
     if (state.alt != kNoRow) continue;
     for (std::uint32_t e = 0; e < state.nedges; ++e) {
       const auto target = a.dfaEdge[state.edge + e].target;
+      if (target == kLlDfaHandOver) continue;
       reads[target] = true;
       pending.push_back(target);
     }
@@ -234,7 +235,7 @@ std::string staged_source(const Built& a) {
       o.fmt(
           "  if (!::cursiv::ll_look<kTable>(c, from, viable, read, {},\n"
           "          &nextRead, &indent) || read.size() != 1 || "
-          "nextRead.different)\n"
+          "nextRead.different || nextRead.over)\n"
           "    return ::cursiv::kNoRow;\n  sym = read.front();\n",
           own != kNoRow ? std::format("{}u", own) : "look");
     }
@@ -245,7 +246,8 @@ std::string staged_source(const Built& a) {
       o.line("  switch (sym) {");
       for (std::uint32_t e = 0; e < state.nedges; ++e) {
         const auto& edge = a.dfaEdge[state.edge + e];
-        o.fmt("    case {}u: goto R{};\n", edge.term, edge.target);
+        if (edge.target != kLlDfaHandOver)
+          o.fmt("    case {}u: goto R{};\n", edge.term, edge.target);
       }
       o.line("    default: return ::cursiv::kNoRow;\n  }");
     }

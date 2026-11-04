@@ -24,7 +24,7 @@ class FlatMap {
   }
 
   void reset() {
-    if (_keys.empty()) return;
+    if (_size == 0) return;
     _keys.assign(64, kFree);
     _vals.assign(64, V{});
     _size = 0;

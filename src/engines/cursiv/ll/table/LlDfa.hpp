@@ -23,6 +23,10 @@ struct LlDfaState {
   constexpr bool operator==(const LlDfaState&) const = default;
 };
 
+// A terminal the readings admit that settles no arm however far it reads: the
+// walk reads under it, and hands the choice over where the text spells it.
+inline constexpr std::uint32_t kLlDfaHandOver = ~std::uint32_t{0};
+
 struct LlDfaEdge {
   std::uint16_t term = 0;
   std::uint32_t target = 0;

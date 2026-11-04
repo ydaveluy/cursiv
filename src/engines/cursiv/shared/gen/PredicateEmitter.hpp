@@ -202,7 +202,8 @@ class PredicateEmitter {
       const GapLeaf& leaf = _g.gapLeaves[l];
       // What the token in hand alone decides is answered before any reading.
       std::string known;
-      if (const auto answers = decided(leaf); !answers.empty()) {
+      ByteSet trivia;
+      if (const auto answers = decided(leaf, trivia); !answers.empty()) {
         auto [at, fresh] = knowns.try_emplace(
             std::string(answers.begin(), answers.end()),
             std::format("kPredicateKnown_{}", knowns.size()));
@@ -213,9 +214,12 @@ class PredicateEmitter {
           out += "};\n";
         }
         known = std::format(
-            "  if (la.end > la.begin && la.sym < {0}u && {1}[la.sym] != 0)\n"
+            "  if (la.end > la.begin && la.sym < {0}u && {1}[la.sym] != 0 &&\n"
+            "      (la.begin >= len || !::cursiv::ByteSet{{{{0x{2:x}ull, 0x{3:x}ull, "
+            "0x{4:x}ull, 0x{5:x}ull}}}}.has(static_cast<unsigned char>(src[la.begin]))))\n"
             "    return {1}[la.sym] == 2u;\n",
-            answers.size(), at->second);
+            answers.size(), at->second, trivia.w[0], trivia.w[1], trivia.w[2],
+            trivia.w[3]);
       }
       const std::string start =
           "::cursiv::PredicateState{::cursiv::PredicateCursor{at, "
@@ -297,9 +301,9 @@ class PredicateEmitter {
   // What a head leaf of literal tokens answers of a token in hand of each
   // terminal, known from the terminal alone: 0 unknown, 1 false, 2 true; empty
   // where none is known. The leaf holds on its own terminals and fails on a
-  // literal of another text, unless its skip may read trivia at the token's
-  // first byte.
-  std::vector<std::uint8_t> decided(const GapLeaf& leaf) const {
+  // literal of another text, unless its skip reads trivia at the token's first
+  // byte, which `trivia` holds for the reader to ask.
+  std::vector<std::uint8_t> decided(const GapLeaf& leaf, ByteSet& trivia) const {
     if (leaf.kind != GapLeafKind::head || leaf.trigger) return {};
     const LexNode& root = _g.lex[leaf.node];
     std::vector<std::uint16_t> heads;
@@ -311,7 +315,6 @@ class PredicateEmitter {
           return _g.lex[k].kind != LexKind::token;
         }))
       return {};
-    ByteSet trivia;
     if (leaf.skip != kNoLexNode) {
       const LexNode& skip = _g.lex[leaf.skip];
       for (unsigned i = 0; i < skip.b; ++i)
@@ -338,7 +341,7 @@ class PredicateEmitter {
       } else {
         first = lex_first_bytes(_g, _g.termBuild[t].lex).first;
       }
-      if (first.intersects(trivia)) continue;
+      if (!first.intersects(lex_not(trivia))) continue;
       bool own = false, other = literal(t);
       for (const std::uint16_t k : heads) {
         const unsigned x = _g.lex[k].a;

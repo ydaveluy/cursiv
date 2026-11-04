@@ -165,11 +165,22 @@ struct Clauses : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Arms no token tells apart behind a spelling that holds another's.
+struct Inside : cursiv::GrammarSpec {
+  struct XID : terminal<some(cr<"x-z">)> {};
+  struct Short : rule<create<Name>(ref<XID> + lit<"%"> + lit<"k">)> {};
+  struct First : rule<create<Number>(ref<XID> + lit<"%^&"> + many(lit<"q">))> {};
+  struct Second : rule<create<Bang>(ref<XID> + lit<"%^&"> + many(lit<"q">))> {};
+  struct Root : rule<create<Doc>(assign<&Doc::value>(ref<Short> | ref<First> |
+                                                     ref<Second>))> {};
+};
+
 struct Suite : Members {
   struct Root : rule<(lit<"cell:"> + ref<Cell::Root>) |
                      (lit<"ctor:"> + ref<CtorFirst::Root>) |
                      (lit<"method:"> + ref<MethodFirst::Root>) |
-                     (lit<"clauses:"> + ref<Clauses::Root>)> {};
+                     (lit<"clauses:"> + ref<Clauses::Root>) |
+                     (lit<"inside:"> + ref<Inside::Root>)> {};
   using entry = Root;
   using ignored = WS;
 };

@@ -10,6 +10,7 @@
 
 #include "cursiv/lr/runtime/LrWalkTail.hpp"
 #include "cursiv/lr/runtime/lr_guard.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
@@ -28,26 +29,8 @@ struct LrTakesScratch {
   std::vector<Id> layer, next;
   // The landings a reduction already queued, as vertex and state.
   FlatMap<std::uint8_t> seen;
-  bool seenAny = false;
-  // The step that last reached each vertex, from 1.
-  std::vector<std::uint32_t> reached;
-  std::uint32_t step = 0;
-
-  // A step that has reached nothing yet.
-  void begin_step() {
-    if (++step != 0) return;
-    std::ranges::fill(reached, 0u);
-    step = 1;
-  }
-  // Whether `u` is reached for the first time in this step.
-  bool reach(Id u) {
-    const auto k = static_cast<std::size_t>(u);
-    if (k >= reached.size())
-      reached.resize(std::max(k + 1, reached.size() * 2), 0u);
-    if (reached[k] == step) return false;
-    reached[k] = step;
-    return true;
-  }
+  // The vertices a step has reached.
+  RoundMarks reached;
 };
 
 // Whether one stack below `vertex` takes the token in hand after its
@@ -65,8 +48,7 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
   using Pending = typename LrTakesScratch<Id>::Pending;
   std::vector<Pending>& pending = w.pending;
   pending.assign(1, Pending{vertex, kInvalidSymbol});
-  if (w.seenAny) w.seen.reset();
-  w.seenAny = false;
+  w.seen.reset();
   std::vector<Id>& layer = w.layer;
   std::vector<Id>& next = w.next;
   while (!pending.empty()) {
@@ -94,10 +76,8 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
       const auto land = [&](Id u, std::uint32_t first) {
         const std::uint32_t to = target(state(u), prod, first);
         if (to != kInvalidSymbol &&
-            w.seen.emplace(std::uint64_t{u} << 32 | to).second) {
-          w.seenAny = true;
+            w.seen.emplace(std::uint64_t{u} << 32 | to).second)
           pending.push_back({u, to});
-        }
       };
       // At each remaining depth a shared vertex is visited once, however
       // many paths of the popped production reach it. In particular a
@@ -109,10 +89,10 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
       for (std::uint32_t left = len - above.size() - (reads ? 1u : 0u);
            left != 0 && !layer.empty(); --left) {
         next.clear();
-        w.begin_step();
+        w.reached.next();
         for (const Id v : layer)
           below(v, [&](Id u) {
-            if (w.reach(u)) next.push_back(u);
+            if (w.reached.first(static_cast<std::size_t>(u))) next.push_back(u);
           });
         layer.swap(next);
       }

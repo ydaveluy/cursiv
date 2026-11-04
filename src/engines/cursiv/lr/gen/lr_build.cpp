@@ -42,6 +42,7 @@
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 #include "cursiv/utils/StrongComponents.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 namespace {
@@ -119,24 +120,22 @@ void lr_merge_readings(const ChainPool& w, std::vector<LrCaretSite>& readings) {
 // its length however many sites are asked of it. A site whose calls differ in
 // opening its rule stands in a list twice, and its readings merge them.
 struct LrSiteMarks {
-  std::vector<std::uint32_t> mark = std::vector<std::uint32_t>(0x40000u, 0);
-  std::uint32_t round = 0;
+  RoundMarks marks;
 
   static std::uint32_t key(const ChainPool& w, const LrCaretSite& s) {
     return lr_site_key(w, s.site) << 1 | (s.entered ? 1u : 0u);
   }
   void keep_first(const ChainPool& w, std::vector<LrCaretSite>& sites) {
-    ++round;
-    std::erase_if(sites, [&](const LrCaretSite& s) {
-      return std::exchange(mark[key(w, s)], round) == round;
-    });
+    marks.next();
+    std::erase_if(sites,
+                  [&](const LrCaretSite& s) { return !marks.first(key(w, s)); });
   }
   void add(const ChainPool& w, std::vector<LrCaretSite>& to,
            const std::vector<LrCaretSite>& from) {
-    ++round;
-    for (const LrCaretSite& s : to) mark[key(w, s)] = round;
+    marks.next();
+    for (const LrCaretSite& s : to) marks.first(key(w, s));
     for (const LrCaretSite& s : from)
-      if (std::exchange(mark[key(w, s)], round) != round) to.push_back(s);
+      if (marks.first(key(w, s))) to.push_back(s);
   }
 };
 
@@ -197,11 +196,6 @@ struct LrBitWords {
     hi = std::max(k, hi);
   }
   bool test(std::size_t i) const { return ((w[i >> 6] >> (i & 63)) & 1) != 0; }
-  void merge(const LrBitWords& o) {
-    for (std::size_t k = o.lo; k <= o.hi; ++k) w[k] |= o.w[k];
-    lo = std::min(o.lo, lo);
-    if (o.hi > hi && o.lo <= o.hi) hi = o.hi;
-  }
 };
 
 struct SegHash {
@@ -277,34 +271,28 @@ LrItemDomain lr_item_domain(const LrBuildCfg& g) {
   return d;
 }
 
-// What `. B` adds for every nonterminal B, and the items it sets as a mask.
+// What `. B` adds for every nonterminal B.
 struct LrClosures {
   // Each rule's entries, ascending by production; without `lookaheads`, only
   // which productions they name.
   bool lookaheads = false;
   std::vector<LrClosEntry> entries;
   std::vector<std::uint32_t> base;
-  std::vector<std::uint64_t> maskArena;
-  std::vector<LrBitWords> mask;
 
   std::span<const LrClosEntry> of(unsigned B) const {
     return {entries.data() + base[B], base[B + 1] - base[B]};
+  }
+  bool names(unsigned B, std::uint16_t p) const {
+    return std::ranges::binary_search(of(B), p, {}, &LrClosEntry::prod);
   }
 };
 
 // Close the productions reachable through each rule's first symbol once. The
 // entries serve canonical lookaheads and the order a cell forks in, and a graph
 // under `core` with no cell to order reads neither: `lookaheads` lays them.
-LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
-                       const LrBuckets<std::uint16_t>& pn,
+LrClosures lr_closures(const LrBuildCfg& g, const LrBuckets<std::uint16_t>& pn,
                        const LrFirstSets& fs, bool lookaheads) {
-  LrClosures cl{lookaheads,
-                {},
-                std::vector<std::uint32_t>(g.nnts + 1),
-                std::vector<std::uint64_t>(dom.words * g.nnts),
-                std::vector<LrBitWords>(g.nnts)};
-  for (unsigned B = 0; B < g.nnts; ++B)
-    cl.mask[B].init(cl.maskArena.data() + dom.words * B, dom.words);
+  LrClosures cl{lookaheads, {}, std::vector<std::uint32_t>(g.nnts + 1)};
   std::vector<LrClosEntry> row(g.nprods);
   std::vector<char> live(g.nprods), queued(g.nprods);
   std::vector<std::uint16_t> active, todo;
@@ -357,10 +345,7 @@ LrClosures lr_closures(const LrBuildCfg& g, const LrItemDomain& dom,
     }
     std::ranges::sort(active);
     cl.base[B] = static_cast<std::uint32_t>(cl.entries.size());
-    for (const auto p : active) {
-      cl.entries.push_back(row[p]);
-      cl.mask[B].set(dom.base[p]);
-    }
+    for (const auto p : active) cl.entries.push_back(row[p]);
   }
   cl.base[g.nnts] = static_cast<std::uint32_t>(cl.entries.size());
   return cl;
@@ -511,7 +496,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
         ntMark[B] = 1;
         if (WithLa) ntLa[B] = DynSet{};
         ntList[nNtList++] = B;
-        seen.merge(cl.mask[B]);
+        for (const LrClosEntry& e : cl.of(B)) seen.set(dom.base[e.prod]);
       }
       if (WithLa) ntLa[B] |= fs.after(it.prod, it.dot + 1, kla[j]);
     }
@@ -1056,7 +1041,7 @@ LrGraph lr_graph(LrBuildTable& A, const LrItemDomain& dom,
             if (!kept(ci)) continue;
             const bool starts =
                 (key == nT + n && ci == y) ||
-                (cs[ci].dot == 0 && cl.mask[n].test(dom.base[cs[ci].prod]));
+                (cs[ci].dot == 0 && cl.names(n, cs[ci].prod));
             if (starts && !lr_req_implies(req[ci], req[y])) {
               lr_req_conds(req[y], known);
               break;
@@ -1678,7 +1663,7 @@ void lr_caller_lookaheads(LrGraph& gr, const LrActions& actions,
         actions.each(s, [&](const LrAction& a) { row.set(a.term); });
         known = true;
       }
-      la |= overtakes.overtaking(row & others, la, true);
+      la |= overtakes.overtaking(row & others, la);
     }
   }
 }
@@ -2251,7 +2236,7 @@ class LrWrittenOrder {
   // entries ascend by production.
   const LrClosEntry* entry(unsigned b, unsigned p) {
     if (!_cl.lookaheads && _read.base.empty())
-      _read = lr_closures(_g, _dom, _pn, _fs, true);
+      _read = lr_closures(_g, _pn, _fs, true);
     const std::span<const LrClosEntry> of =
         _cl.lookaheads ? _cl.of(b) : _read.of(b);
     const auto it = std::ranges::lower_bound(of, p, {}, &LrClosEntry::prod);
@@ -2314,17 +2299,13 @@ class LrWrittenOrder {
   // The kernel items of `o` a node of production `p` stands under.
   template <class F>
   void each_parent(unsigned o, unsigned p, F&& f) {
-    const unsigned at = _dom.base[p];
-    const std::uint64_t bit = std::uint64_t{1} << (at & 63);
     for (const Next& n : nexts(o))
-      if ((_cl.mask[n.nt].w[at >> 6] & bit) != 0) f(n.item);
+      if (_cl.names(n.nt, static_cast<std::uint16_t>(p))) f(n.item);
   }
 
   bool has_parent(unsigned o, unsigned p) {
-    const unsigned at = _dom.base[p];
-    const std::uint64_t bit = std::uint64_t{1} << (at & 63);
     return std::ranges::any_of(nexts(o), [&](const Next& n) {
-      return (_cl.mask[n.nt].w[at >> 6] & bit) != 0;
+      return _cl.names(n.nt, static_cast<std::uint16_t>(p));
     });
   }
 
@@ -2770,7 +2751,7 @@ class LrWrittenOrder {
       for (unsigned d = 0; d < _g.prods[q].len; ++d) {
         const LrLowProd& pr = _g.prods[q];
         if (is_term(_g.sym_at(pr, d))) continue;
-        if (_cl.mask[nt_index(_g.sym_at(pr, d))].test(_dom.base[p]))
+        if (_cl.names(nt_index(_g.sym_at(pr, d)), static_cast<std::uint16_t>(p)))
           out.push_back({static_cast<std::uint16_t>(q),
                          static_cast<std::uint16_t>(d)});
       }
@@ -4360,7 +4341,7 @@ std::optional<std::pair<std::vector<std::uint8_t>, LexModes>> lr_build_front(
   const LrItemDomain dom = lr_item_domain(g);
   const LrFirstSets fs = lr_first_sets(g);
   A.nullable = fs.nullable;
-  const LrClosures cl = lr_closures(g, dom, pn, fs, WithLa);
+  const LrClosures cl = lr_closures(g, pn, fs, WithLa);
 
   LrGraph gr = lr_graph<WithLa>(A, dom, fs, cl);
   if (A.overflow) return std::nullopt;

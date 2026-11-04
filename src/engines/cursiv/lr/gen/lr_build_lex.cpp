@@ -593,8 +593,11 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
     // the one the priority answers.
     bool multi = false;
     // What the mode's parser states read, unioned once.
-    DynSet modeAct;
-    for (const auto f : parserStates) modeAct |= reads(f);
+    DynSet modeAct, modeTakes = modes.joins | relayTerms;
+    for (const auto f : parserStates) {
+      modeAct |= reads(f);
+      for (const LrAction& action : A.action_row(f)) modeTakes.set(action.term);
+    }
     // Whether every parser state of the mode answers `t` as it answers
     // `win`, by reduces alone, and one answers it at all: which of the two is
     // elected changes nothing the mode's states do.
@@ -632,7 +635,9 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
       const unsigned win = accept[s] != 0 ? accept[s] - 1u : relayTerm;
       DynSet accX = acc;
       if (relaying < 2) accX.reset(win);
-      accX &= modeAct;
+      // A candidate stands only where a state takes it: a state that refuses
+      // the winner crosses a trivia as the flags say.
+      accX &= modeTakes;
       const DynSet read = accX;
       each_bit(read.w.data(), read.w.size(), [&](std::size_t t) {
         if (indifferent(static_cast<unsigned>(t), win))

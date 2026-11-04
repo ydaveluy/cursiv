@@ -180,7 +180,7 @@ void a_reading_reads_on_from_a_runs_last_byte() {
   constexpr const auto& table = ttrivia::generated::Lr::kTable;
   unsigned asked = 0;
   for (std::uint16_t mode = 0; mode < table.modeStart.size(); ++mode) {
-    if (!cursiv::lr_stops<table>(mode, '_')) continue;
+    if (!cursiv::mode_row_has(table.derived.skipStop.data(), mode, '_')) continue;
     ++asked;
     const std::string_view text = "  _\n b";
     cursiv::Cst tree(text);
@@ -195,6 +195,51 @@ void a_reading_reads_on_from_a_runs_last_byte() {
   CHECK(asked != 0);
 }
 
+// A scalar a name and a blank both spell, in each role, and the names around it
+// that no rival reads. A position where only one is taken reads that one, and
+// where both are the text past it decides.
+void a_tie_stands_only_behind_its_first_byte(const cursiv::Parser& p) {
+  const std::string bom = "\xef\xbb\xbf";
+  const struct {
+    std::string text;
+    std::vector<std::string> names;
+  } cases[] = {
+      {"doubled:a;b;", {"a", "b"}},
+      {"doubled:" + bom + "a;", {bom + "a"}},
+      {"doubled:a" + bom + ";", {"a" + bom}},
+      {"doubled:a " + bom + ";", {"a"}},
+      {"doubled:" + bom + ";", {bom}},
+      {"doubled:a;" + bom + " b;", {"a", "b"}},
+      {"doubled:a;" + bom + bom + "b ;", {"a", bom + bom + "b"}},
+      {"doubled:a; " + bom + bom + "b ;", {"a", "b"}},
+  };
+  for (const auto& sample : cases) {
+    const cursiv::ParseResult r = p.parse(sample.text);
+    const bool clean = r.accepted && r.diagnostics.empty();
+    CHECK(clean);
+    if (!clean) std::printf("  %s\n", sample.text.c_str());
+    std::vector<std::string> names;
+    if (const auto* const root = r.value_as<ttrivia::ast::Node>(); root != nullptr)
+      for (const auto* const item : root->body)
+        names.emplace_back(item->name);
+    CHECK(names == sample.names);
+    if (names != sample.names)
+      std::printf("  %s: %zu names\n", sample.text.c_str(), names.size());
+  }
+}
+
+// A terminal the winner beats is a rival where a state takes it, though it is a
+// trivia elsewhere.
+void a_trivia_taken_as_a_token_stays_a_rival(const cursiv::Parser& p) {
+  for (const std::string_view text :
+       {"both:a\n!", "both:a\n?", "both:a \n !", "bothlines:a\nb", "bothlines:a b"}) {
+    const cursiv::ParseResult r = p.parse(text);
+    const bool clean = r.accepted && r.diagnostics.empty();
+    CHECK(clean);
+    if (!clean) std::printf("  %s\n", std::string(text).c_str());
+  }
+}
+
 void run() {
   a_reading_reads_on_from_a_runs_last_byte();
   an_open_comment_is_skipped_where_it_is_trivia(
@@ -206,6 +251,8 @@ void run() {
     two_ignored_terminals_may_read_one_text(*make(), "ranked:");
     a_blank_keeps_its_head_refusal(*make());
     a_run_of_blanks_reads_on_from_its_last_byte(*make());
+    a_tie_stands_only_behind_its_first_byte(*make());
+    a_trivia_taken_as_a_token_stays_a_rival(*make());
     a_region_head_is_its_callers(*make());
     an_implied_condition_reads_the_trivia_of_its_place(*make());
   }

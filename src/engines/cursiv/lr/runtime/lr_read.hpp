@@ -310,22 +310,11 @@ bool lr_read_takes(const LrContext& c, R& s, const Token& t) {
 template <const auto& A, class R>
 CURSIV_NOINLINE bool lr_read_refused(const LrContext& c, R& s,
                                      std::uint16_t mode, std::uint32_t& tied) {
-  LrSkipped<A> skipped{};
-  const bool refused = lr_lex_refused<A>(
-      [&](const Token& t) { return lr_read_takes<A>(c, s, t); }, mode, s.la,
-      skipped,
-      [&](const LrSkipped<A>& skip, TextOffset from) {
-        return lr_scan_skipping<A>(c, mode, from, s.indent.depth, skip,
-                                   [](TextOffset, const Token*) {
-                                     /* the crossed trivia is not wanted */
-                                   });
-      });
-  if constexpr (A.maxCands > 1)
-    if (refused && c.drive->scanText != nullptr)
-      tied = lr_refused_rivals<A>(
-          c, mode, s.indent.depth, s.la, skipped, c.cand,
-          [&](const Token& t) { return lr_read_takes<A>(c, s, t); });
-  return refused;
+  return lr_lex_refused<A>(
+      c, mode, s.indent.depth, s.la,
+      [&](const Token& t) { return lr_read_takes<A>(c, s, t); },
+      [](TextOffset, const Token*) { /* the crossed trivia is not wanted */ },
+      c.cand, tied);
 }
 
 // One action of reading `i` of pool `x`: `x.fork(i)` is a copy beside it or

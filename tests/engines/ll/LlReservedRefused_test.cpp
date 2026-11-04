@@ -311,7 +311,8 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   // Past the terminal the first reading would not have taken, the replay still
   // stands: the next items, and a caret inside one of them.
   const std::vector<std::string> item{
-      "-", "IN", "NAME", "cell:", "glued:", "head:", "marked:", "note:", "pending:", "plain:", "rivals:", "sp:"};
+      "-",       "IN",    "NAME",     "cell:",  "glued:",  "head:", "inside:",
+      "marked:", "note:", "pending:", "plain:", "rivals:", "sp:",   "spelt:"};
   for (const std::string& text :
        {std::string{"rivals: X c"}, std::string{"rivals: X a c"}, far + " c"}) {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
@@ -486,6 +487,38 @@ void a_dangling_mark_goes_to_the_deepest_level() {
   CHECK(nest(*lr, "pending: ? : :").front() == '!');
 }
 
+// A prediction reads what the stack admits, whatever else its choice admits for
+// another caller: a comment stays one where this caller takes no token it
+// spells, and a spelling stays whole where its arms read on alike.
+void a_read_ahead_takes_what_the_callers_take() {
+  const auto ll = tllrefused::generated::Ll::create_parser();
+  const auto lr = tllrefused::generated::Lr::create_parser();
+  for (const std::string_view text :
+       {"spelt: <1> y , .", "spelt: <1> y , ; , .", "spelt: <1> y //x\n , .",
+        "spelt: <1> y //x\n , ; , .", "spelt: <1> y , //x\n ; , .",
+        "spelt: <1> y // x\n , ; , .", "spelt: <3> , .", "spelt: <3> + ; , .",
+        "spelt: <3> //x\n , .", "spelt: <3> //x\n + ; , .",
+        "spelt: <5> ~ , .", "spelt: <5> ~ * , .", "spelt: <5> ~ //x\n , .",
+        "spelt: <5> ~ //x\n * , .", "spelt: <5> ~ * //x\n * , .",
+        "inside: x %^&", "inside: x %^& ,", "inside: x %^& , ,",
+        "inside: x %^&,", "inside: x % !", "inside: x %!"}) {
+    const bool a = parse_clean(*ll, text), b = parse_clean(*lr, text);
+    CHECK(a);
+    CHECK(b);
+    if (!a || !b)
+      std::printf("refused [%.*s]: LL %d, LR %d\n",
+                  static_cast<int>(text.size()), text.data(), a, b);
+  }
+  // Where the token's own caller stands the comment's spelling is the token.
+  for (const cursiv::Parser* p : {ll.get(), lr.get()}) {
+    CHECK(parse_clean(*p, "spelt: <2> y //x\n!"));
+    CHECK(parse_clean(*p, "spelt: <2> y , ; //x\n!"));
+    CHECK(parse_clean(*p, "spelt: <4> //x\n!"));
+    CHECK(parse_clean(*p, "spelt: <6> ~ * //x\n!"));
+    CHECK(!parse_clean(*p, "inside: x %^& !"));
+  }
+}
+
 cursiv::CancellationTokenSource* stopOnEntry = nullptr;
 void stopping_drive(cursiv::LlContext& c) {
   if (stopOnEntry != nullptr) stopOnEntry->request_stop();
@@ -547,6 +580,7 @@ void run() {
   completion_keeps_the_terminals_behind_a_refused_keyword();
   a_caret_reads_the_word_a_keyword_is_refused_by();
   a_dangling_mark_goes_to_the_deepest_level();
+  a_read_ahead_takes_what_the_callers_take();
   a_stop_in_a_refused_reading_leaves_nothing_behind();
   a_refused_keyword_reserves_nothing_from_a_misspelling();
   a_word_refused_at_a_cut_runs_into_it();

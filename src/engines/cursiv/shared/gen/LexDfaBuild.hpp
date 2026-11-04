@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/gen/PartitionRefine.hpp"
 #include "cursiv/utils/StrongComponents.hpp"
 #include "cursiv/shared/gen/ChainIndex.hpp"
 #include "cursiv/shared/gen/LexAlphabet.hpp"
@@ -365,90 +366,28 @@ struct LexDfaBuild {
   // would have them hold millions of subsets before the first refusal.
   static constexpr std::size_t kMaxSubsets = std::size_t{8} * kDeadState;
 
-  // The coarsest refinement of `cls` every byte class respects, by Hopcroft's
-  // splitting: a split queues its smaller half, so no state moves more than
-  // log n times. Blocks are numbered by their first state, the dead row apart.
+  // The coarsest refinement of `cls` every byte class respects. Blocks are
+  // numbered by their first state, the dead row apart.
   std::vector<std::uint32_t> blocks(const std::vector<std::uint32_t>& cls,
                                     const std::vector<std::uint32_t>& rows,
                                     std::uint32_t& count) const {
     const std::size_t n = cls.size(), k = _ncls;
     const auto dead = static_cast<std::uint32_t>(n);
-    const auto to = [&](std::size_t s, std::size_t c) {
-      const std::uint32_t r = s == n ? kNoLocal : rows[s * k + c];
-      return r == kNoLocal ? dead : r;
-    };
-    // `from[at[t * k + c]]` up to `from[at[t * k + c + 1]]` reach `t` on `c`.
-    std::vector<std::uint32_t> at((n + 1) * k + 1, 0), from((n + 1) * k);
-    for (std::size_t s = 0; s <= n; ++s)
-      for (std::size_t c = 0; c < k; ++c) ++at[to(s, c) * k + c + 1];
-    for (std::size_t i = 1; i < at.size(); ++i) at[i] += at[i - 1];
-    {
-      std::vector<std::uint32_t> put(at.begin(), at.end() - 1);
-      for (std::size_t s = 0; s <= n; ++s)
-        for (std::size_t c = 0; c < k; ++c)
-          from[put[to(s, c) * k + c]++] = static_cast<std::uint32_t>(s);
-    }
-    // Block `b` is `elem[first[b]]` up to `elem[last[b]]`; a pass moves the
-    // states it marks to the front, up to `mid[b]`.
     std::uint32_t initial = 0;
     for (const std::uint32_t c : cls) initial = std::max(initial, c + 1);
-    std::vector<std::uint32_t> blk(n + 1), elem(n + 1), pos(n + 1);
-    std::vector<std::uint32_t> first(initial + 2, 0), last, mid;
-    for (std::size_t s = 0; s <= n; ++s) {
-      blk[s] = s == n ? initial : cls[s];
-      ++first[blk[s] + 1];
-    }
-    for (std::size_t b = 1; b < first.size(); ++b) first[b] += first[b - 1];
-    last.assign(first.begin() + 1, first.end());
-    first.pop_back();
-    mid = first;
-    for (std::size_t s = 0; s <= n; ++s) {
-      pos[s] = mid[blk[s]]++;
-      elem[pos[s]] = static_cast<std::uint32_t>(s);
-    }
-    mid = first;
-    std::vector<std::uint32_t> work(first.size()), splitter, touched;
-    for (std::uint32_t b = 0; b < work.size(); ++b) work[b] = b;
-    std::vector<char> queued(first.size(), 1);
-    while (!work.empty()) {
-      const std::uint32_t a = work.back();
-      work.pop_back();
-      queued[a] = 0;
-      splitter.assign(elem.begin() + first[a], elem.begin() + last[a]);
-      for (std::size_t c = 0; c < k; ++c) {
-        touched.clear();
-        for (const std::uint32_t t : splitter)
-          for (auto i = at[t * k + c]; i < at[t * k + c + 1]; ++i) {
-            const std::uint32_t p = from[i], b = blk[p];
-            if (mid[b] == first[b]) touched.push_back(b);
-            const std::uint32_t q = elem[mid[b]];
-            elem[pos[p]] = q;
-            pos[q] = pos[p];
-            elem[mid[b]] = p;
-            pos[p] = mid[b]++;
-          }
-        for (const std::uint32_t b : touched) {
-          if (mid[b] == last[b]) {
-            mid[b] = first[b];
-            continue;
-          }
-          const auto part = static_cast<std::uint32_t>(first.size());
-          first.push_back(first[b]);
-          last.push_back(mid[b]);
-          mid.push_back(first[b]);
-          queued.push_back(0);
-          first[b] = mid[b];
-          for (auto i = first[part]; i < last[part]; ++i) blk[elem[i]] = part;
-          const bool smaller = last[part] - first[part] <= last[b] - first[b];
-          const std::uint32_t add = queued[b] || smaller ? part : b;
-          if (!queued[add]) {
-            queued[add] = 1;
-            work.push_back(add);
-          }
-        }
-      }
-    }
-    std::vector<std::uint32_t> id(first.size(), kNoLocal), out(n);
+    std::vector<std::uint32_t> opening(cls);
+    opening.push_back(initial);
+    const std::vector<std::uint32_t> blk = partition_refine(
+        opening, static_cast<std::uint32_t>(k), [&](auto&& edge) {
+          for (std::size_t s = 0; s <= n; ++s)
+            for (std::size_t c = 0; c < k; ++c) {
+              const std::uint32_t r = s == n ? kNoLocal : rows[s * k + c];
+              edge(static_cast<std::uint32_t>(s), static_cast<std::uint32_t>(c),
+                   r == kNoLocal ? dead : r);
+            }
+        });
+    std::vector<std::uint32_t> id(*std::ranges::max_element(blk) + 1u, kNoLocal),
+        out(n);
     count = 0;
     for (std::size_t s = 0; s < n; ++s) {
       std::uint32_t& b = id[blk[s]];

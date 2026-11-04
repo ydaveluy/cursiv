@@ -2,6 +2,8 @@
 // where a reading is decided, never which readings there are.
 #include "cursiv/lr/gen/lr_build_passes.hpp"
 
+#include "cursiv/shared/gen/PartitionRefine.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -28,6 +30,7 @@
 #include "cursiv/shared/gen/set_dedup.hpp"
 #include "cursiv/shared/table/Symbol.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 namespace {
@@ -172,19 +175,15 @@ namespace {
 
 // The actions a walk has pushed, stamped rather than cleared.
 struct LrPeekWalk {
-  std::vector<std::uint32_t> seen;
+  RoundMarks seen;
   std::vector<std::uint32_t> wl;
-  std::uint32_t gen = 0;
 
-  void open(std::uint32_t nactions) {
-    if (seen.size() < nactions) seen.resize(nactions, 0);
-    ++gen;
+  void open() {
+    seen.next();
     wl.clear();
   }
   void push(std::uint32_t i) {
-    if (seen[i] == gen) return;
-    seen[i] = gen;
-    wl.push_back(i);
+    if (seen.first(i)) wl.push_back(i);
   }
 };
 
@@ -193,7 +192,7 @@ struct LrPeekWalk {
 bool lr_peek_arm(const LrBuildTable& A, const LrGotoColumns& go,
                  LrPeekWalk& walk, std::uint32_t ai, std::uint16_t t,
                  std::uint16_t cellMode, std::uint16_t& mode, DynSet& tok2) {
-  walk.open(A.nactions);
+  walk.open();
   std::vector<std::uint32_t>& wl = walk.wl;
   walk.push(ai);
   while (!wl.empty()) {
@@ -350,164 +349,77 @@ void lr_minimize_states(LrBuildTable& A) {
         .try_emplace(guardKey, static_cast<std::uint32_t>(guardIds.size()))
         .first->second;
   };
-  // The first key holds a row's fixed data. Later keys compare only its
-  // destinations: refinement only splits.
-  const auto read_key = [&](std::uint32_t s, bool initial) {
+  // A row's fixed data, every landing read as one class: what the classes then
+  // tell apart is where each place of a row lands.
+  const auto read_key = [&](std::uint32_t s) {
     key.clear();
-    if (initial) {
-      key.push_back(shiftTerm[s]);
-      const auto cells = held.begin() + static_cast<std::ptrdiff_t>(s) * width;
-      key.insert(key.end(), cells, cells + width);
-    }
+    key.push_back(shiftTerm[s]);
+    const auto cells = held.begin() + static_cast<std::ptrdiff_t>(s) * width;
+    key.insert(key.end(), cells, cells + width);
     for (unsigned i = 0, c = acount[s]; i < c; ++i) {
       const LrAction& x = acts[abase[s] + i];
-      if (!initial && x.kind != LrActionKind::shift &&
-          x.kind != LrActionKind::guard)
-        continue;
-      if (initial) {
-        key.push_back(x.term);
-        key.push_back(static_cast<std::uint32_t>(x.kind));
-      }
-      key.push_back(x.kind == LrActionKind::shift ? 0x80000000u | cls[x.arg]
-                    : x.kind == LrActionKind::guard
-                        ? 0x20000000u | guard_class(x.arg)
-                        : 0x40000000u | pc[x.arg]);
-      if (initial) {
-        key.push_back(x.alts);
-        key.push_back(x.exact ? 1u : 0u);
-      }
+      key.push_back(x.term);
+      key.push_back(static_cast<std::uint32_t>(x.kind));
+      key.push_back(x.kind == LrActionKind::shift   ? 0x80000000u
+                    : x.kind == LrActionKind::guard ? 0x20000000u | guard_class(x.arg)
+                                                    : 0x40000000u | pc[x.arg]);
+      key.push_back(x.alts);
+      key.push_back(x.exact ? 1u : 0u);
     }
     for (const LrGotoRows::Edge& e : go[s]) {
       key.push_back(0xC0000000u | e.nt);
-      key.push_back(e.guard == 0 ? cls[e.to] << 1
-                                 : guard_class(e.guard - 1u) << 1 | 1u);
+      key.push_back(e.guard == 0 ? 0u : guard_class(e.guard - 1u) << 1 | 1u);
     }
   };
-
-  // The states of each class, and where each stands among them.
-  std::vector<std::vector<std::uint32_t>> members;
-  std::vector<std::uint32_t> seat(n, 0);
-  const auto leave = [&](std::uint32_t s) {
-    auto& row = members[cls[s]];
-    seat[row.back()] = seat[s];
-    row[seat[s]] = row.back();
-    row.pop_back();
-  };
-  const auto enter = [&](std::uint32_t s, std::uint32_t c) {
-    cls[s] = c;
-    seat[s] = static_cast<std::uint32_t>(members[c].size());
-    members[c].push_back(s);
-  };
+  // Dead states stand apart, with no edge.
+  std::vector<std::uint32_t> opening(n, 0);
   {
-    // Every row is read before any state takes a class: the keys name none yet.
     std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> first;
     first.reserve(n);
-    std::vector<std::uint32_t> opening(n, 0);
+    for (std::uint32_t s = 0; s < n; ++s)
+      if (lv[s]) {
+        read_key(s);
+        opening[s] = first
+                         .try_emplace(key, static_cast<std::uint32_t>(first.size()))
+                         .first->second;
+      }
+    for (std::uint32_t s = 0; s < n; ++s)
+      if (!lv[s]) opening[s] = static_cast<std::uint32_t>(first.size());
+  }
+  // Each place of a row a landing may stand at, in the row's order: the rows of
+  // one class have one shape.
+  const auto each_edge = [&](auto&& edge) {
     for (std::uint32_t s = 0; s < n; ++s) {
       if (!lv[s]) continue;
-      read_key(s, true);
-      opening[s] = first
-                       .try_emplace(key, static_cast<std::uint32_t>(first.size()))
-                       .first->second;
-    }
-    members.resize(first.size());
-    for (std::uint32_t s = 0; s < n; ++s)
-      if (lv[s]) enter(s, opening[s]);
-  }
-  // Per state, the states whose rows land on it, by the edges of the live ones.
-  std::vector<std::uint32_t> edgeFrom, edgeTo;
-  for (std::uint32_t s = 0; s < n; ++s) {
-    if (!lv[s]) continue;
-    const auto note = [&](std::uint16_t to) {
-      edgeFrom.push_back(s);
-      edgeTo.push_back(to);
-    };
-    for (const LrAction& x : A.action_row(s)) A.each_landing(x, note);
-    for (const auto& e : go[s]) A.each_goto_landing(e, note);
-  }
-  const LrBuckets<> into(n, static_cast<std::uint32_t>(edgeTo.size()),
-                         [&](std::uint32_t k) { return edgeTo[k]; });
-
-  // Each round reads the states a class's move reached. Two states of one class
-  // agreed on where they land before it: one that lands on a state that moved
-  // now differs from one that does not, so only the first kind is read. A class
-  // keeps its id with its largest part, so a state moves at most a logarithm of
-  // times; the classes only split, and a round with no move ends the walk.
-  std::vector<std::uint32_t> reached, moved, dirty;
-  std::vector<std::vector<std::uint32_t>> parts;
-  std::vector<std::uint32_t> readIn(n, 0), inClass;
-  std::uint32_t round = 0;
-  for (std::uint32_t s = 0; s < n; ++s)
-    if (lv[s]) reached.push_back(s);
-  while (!reached.empty()) {
-    ++round;
-    dirty.clear();
-    inClass.resize(members.size());
-    std::vector<std::vector<std::uint32_t>> byClass(0);
-    for (const std::uint32_t s : reached) {
-      if (A.work != nullptr) ++A.work->minimizes;
-      const std::uint32_t c = cls[s];
-      if (members[c].size() == 1) continue;
-      if (inClass[c] == 0) {
-        dirty.push_back(c);
-        byClass.emplace_back();
-        inClass[c] = static_cast<std::uint32_t>(byClass.size());
-      }
-      byClass[inClass[c] - 1].push_back(s);
-    }
-    moved.clear();
-    for (const std::uint32_t c : dirty) {
-      std::vector<std::uint32_t>& read = byClass[inClass[c] - 1];
-      inClass[c] = 0;
-      std::unordered_map<std::vector<std::uint32_t>, std::uint32_t, VecHash> parted;
-      parts.clear();
-      for (const std::uint32_t s : read) {
-        read_key(s, false);
-        const auto [at, fresh] =
-            parted.try_emplace(key, static_cast<std::uint32_t>(parts.size()));
-        if (fresh) parts.emplace_back();
-        parts[at->second].push_back(s);
-      }
-      const std::size_t untouched = members[c].size() - read.size();
-      std::size_t largest = 0;
-      for (std::size_t i = 1; i < parts.size(); ++i)
-        if (parts[i].size() > parts[largest].size()) largest = i;
-      // The part that keeps the class: those not read, or the largest read.
-      const bool keepRest = untouched >= parts[largest].size();
-      if (!keepRest) {
-        // Those not read stand apart from every part read: they move together.
-        for (const std::uint32_t s : read) readIn[s] = round;
-        std::vector<std::uint32_t> rest;
-        rest.reserve(untouched);
-        for (const std::uint32_t s : members[c])
-          if (readIn[s] != round) rest.push_back(s);
-        if (!rest.empty()) parts.push_back(std::move(rest));
-      }
-      for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (!keepRest && i == largest) continue;
-        const auto to = static_cast<std::uint32_t>(members.size());
-        members.emplace_back();
-        for (const std::uint32_t s : parts[i]) {
-          leave(s);
-          enter(s, to);
-          moved.push_back(s);
+      std::uint32_t place = 0;
+      const auto outcomes = [&](std::size_t q) {
+        for (const std::uint16_t to : A.guards[q].to) {
+          if (to != LrGuard::kNoState) edge(s, place, to);
+          ++place;
         }
+      };
+      for (const LrAction& x : A.action_row(s)) {
+        if (x.kind == LrActionKind::shift) edge(s, place++, x.arg);
+        if (x.kind == LrActionKind::guard) outcomes(x.arg);
+      }
+      for (const LrGotoRows::Edge& e : go[s]) {
+        if (e.guard == 0)
+          edge(s, place++, e.to);
+        else
+          outcomes(e.guard - 1u);
       }
     }
-    if (A.work != nullptr) A.work->moves += moved.size();
-    ++round;
-    reached.clear();
-    for (const std::uint32_t t : moved)
-      for (const std::uint32_t k : into.of(t))
-        if (readIn[edgeFrom[k]] != round) {
-          readIn[edgeFrom[k]] = round;
-          reached.push_back(edgeFrom[k]);
-        }
-  }
+  };
+  std::uint32_t places = 0;
+  each_edge([&](std::uint32_t, std::uint32_t place, std::uint32_t) {
+    places = std::max(places, place + 1);
+  });
+  cls = partition_refine(opening, places, each_edge,
+                         A.work != nullptr ? &A.work->minimizes : nullptr,
+                         A.work != nullptr ? &A.work->moves : nullptr);
   // One representative per class, numbered by first occurrence so the start
   // state keeps its seat.
   std::vector<std::uint32_t> reps;
-  reps.reserve(members.size());
   const auto newIdx = lr_representatives(cls, reps, live);
   const auto remap = [&](std::uint32_t s) {
     return static_cast<std::uint16_t>(newIdx[cls[s]]);

@@ -19,6 +19,7 @@
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
 #include "cursiv/utils/EditDistance.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/utils/SimpleCache.hpp"
 #include "cursiv/utils/UriTrie.hpp"
@@ -771,7 +772,20 @@ void run() {
 
 }  // namespace caching
 
+namespace round_marks {
+
+void run() {
+  cursiv::RoundMarks marks(2);
+  // Past its first size, and each id once a round.
+  CHECK(marks.first(0) && !marks.first(0) && marks.first(9) && !marks.first(9));
+  marks.next();
+  CHECK(marks.first(0) && marks.first(9) && !marks.first(0));
+}
+
+}  // namespace round_marks
+
 int main() {
+  round_marks::run();
   case_fold::run();
   edit_distance::run();
   function_ref::run();

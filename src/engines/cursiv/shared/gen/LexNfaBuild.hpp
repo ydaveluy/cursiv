@@ -19,6 +19,7 @@
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 
@@ -322,24 +323,14 @@ struct LexNfaBuild {
   // A node is visited in the walk whose number it holds. The walks below run
   // once per node of a terminal and never nest, so they share the array, and a
   // new number empties it whole.
-  std::vector<std::uint32_t> _seen = std::vector<std::uint32_t>(g.nlex);
-  std::uint32_t _walk = 0;
-
-  std::uint32_t next_walk() {
-    if (++_walk == 0) {
-      std::ranges::fill(_seen, 0);
-      _walk = 1;
-    }
-    return _walk;
-  }
+  RoundMarks _seen{g.nlex};
 
   bool guards_read_outer_marks(std::uint16_t node) {
     std::vector<std::uint32_t> marks;
     std::vector<std::uint16_t> guards;
-    auto walk = next_walk();
+    _seen.next();
     const auto collect = [&](auto&& self, std::uint16_t at) {
-      if (at == kNoLexNode || _seen[at] == walk) return;
-      _seen[at] = walk;
+      if (at == kNoLexNode || !_seen.first(at)) return;
       const LexNode& e = g.lex[at];
       if (e.kind == LexKind::mark) marks.push_back(e.min);
       if (e.kind == LexKind::positive || e.kind == LexKind::negative) {
@@ -350,10 +341,9 @@ struct LexNfaBuild {
     };
     collect(collect, node);
     if (marks.empty() || guards.empty()) return false;
-    walk = next_walk();
+    _seen.next();
     const auto reads = [&](auto&& self, std::uint16_t at) {
-      if (at == kNoLexNode || _seen[at] == walk) return false;
-      _seen[at] = walk;
+      if (at == kNoLexNode || !_seen.first(at)) return false;
       if (const LexNode& e = g.lex[at];
           (e.kind == LexKind::same &&
            std::ranges::find(marks, e.min) != marks.end()) ||
@@ -442,7 +432,7 @@ struct LexNfaBuild {
   // after.
   bool echoes_marked(std::uint16_t node) {
     using Tags = std::vector<std::uint32_t>;
-    const auto walked = next_walk();
+    _seen.next();
     const auto scope = [&](auto&& self, std::uint16_t root) {
       std::vector<std::uint16_t> callsHere;
       bool bound = true;
@@ -510,13 +500,10 @@ struct LexNfaBuild {
       walk(walk, root, marks);
       if (!bound) return false;
       for (const auto call : callsHere)
-        if (_seen[call] != walked) {
-          _seen[call] = walked;
-          if (!self(self, call)) return false;
-        }
+        if (_seen.first(call) && !self(self, call)) return false;
       return true;
     };
-    _seen[node] = walked;
+    _seen.first(node);
     return scope(scope, node);
   }
 

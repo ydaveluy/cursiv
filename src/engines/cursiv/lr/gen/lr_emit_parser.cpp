@@ -1035,6 +1035,36 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     }
   }
 
+  // The first bytes on which a token the mode flags may lose its text: where a
+  // walk can answer one terminal alone, none other reads it. False where that
+  // spares no byte the mode starts on.
+  bool flag_bytes(unsigned m, ByteSet& bytes) const {
+    const unsigned start = a.modeStart[m];
+    if (!a.flags_mode(m) || a.dfaRelay[start] != kNoRelay) return false;
+    bool spared = false;
+    for (unsigned b = 0; b < 256; ++b) {
+      const auto e = a.next_dfa(start, a.cls[b]);
+      if (e == kDeadState) continue;
+      const DynSet& reach = reached_terms(e);
+      if (reach.more_than_one() && reach.intersects(a.modeFlag[m]))
+        bytes.add(static_cast<unsigned char>(b));
+      else
+        spared = true;
+    }
+    return spared;
+  }
+  std::string flag_test(unsigned m) const {
+    std::string test = std::format("kTable.flagged({}, c.la.sym)", m);
+    if (ByteSet bytes{}; flag_bytes(m, bytes)) {
+      test += std::format(
+          " && (c.la.begin >= c.len || ::cursiv::in_set<::std::array<::std::"
+          "uint64_t, 4>{{0x{:x}ull, 0x{:x}ull, 0x{:x}ull, 0x{:x}ull}}>("
+          "static_cast<unsigned char>(c.src[c.la.begin])))",
+          bytes.w[0], bytes.w[1], bytes.w[2], bytes.w[3]);
+    }
+    return test;
+  }
+
   void emit_lexer(unsigned m) {
     if (ByteSet ws{}; mode_ws(m, ws) && wsLead[m] == m)
       shared([&] {
@@ -1069,9 +1099,8 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     fmt("  lex_tail_{}(c, c.committed, {});\n", tailLead[m], m);
     if (a.modeLonger[m] != kNoMode) line("  lengthen(c);");
     if (a.flags_mode(m))
-      fmt("  if (kTable.flagged({0}, c.la.sym)) [[unlikely]] "
-          "::cursiv::lr_drive_exact<kTable>(c, {0});\n",
-          m);
+      fmt("  if ({}) [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, {});\n",
+          flag_test(m), m);
     raw("}\n\n");
   }
 
@@ -1717,8 +1746,7 @@ again:
       literals.push_back(x);
     }
     // The terminal's one action, where it is a shift or a reduce no gap
-    // decides; a flagged terminal's reduce is the lexer's to read again, since
-    // no stack may take it past the reduction.
+    // decides.
     const auto plain = [&](unsigned t) -> const LrAction* {
       if (const auto& term = a.cfg.terms[t]; term.trivia || term.laid != 0)
         return nullptr;
@@ -1727,10 +1755,18 @@ again:
       if (n != 1) return nullptr;
       const LrAction& x = row[lo];
       if (x.kind == LrActionKind::shift) return &x;
-      if (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap == 0 &&
-          !(a.flags_mode(m) && a.modeFlag[m].test(t)))
+      if (x.kind == LrActionKind::reduce && a.cfg.prods[x.arg].gap == 0)
         return &x;
       return nullptr;
+    };
+    // A flagged terminal's reduce, on a byte where the flag holds, is the lexer's
+    // to read again, since no stack may take it past the reduction.
+    ByteSet flagBytes{};
+    const bool spared = flag_bytes(m, flagBytes);
+    const auto owes = [&](unsigned t, unsigned b) {
+      return a.flags_mode(m) && a.modeFlag[m].test(t) &&
+             plain(t)->kind == LrActionKind::reduce &&
+             (!spared || flagBytes.has(static_cast<unsigned char>(b)));
     };
     // The bytes the walk answers alone. Rivals at one byte stay the lexer's
     // to rank where the end of the text holds candidates.
@@ -1747,7 +1783,7 @@ again:
       unsigned n = nnamed;
       bool ok = true;
       for (const unsigned t : reach.members()) {
-        ok = plain(t) != nullptr;
+        ok = plain(t) != nullptr && !owes(t, b);
         if (!ok) break;
         if (!more.test(t)) {
           more.set(t);
@@ -1868,9 +1904,8 @@ again:
     }
     fmt("    lex_tail_{}(c, p, {});\n", tailLead[m], m);
     if (a.flags_mode(m))
-      fmt("    if (kTable.flagged({0}, c.la.sym)) [[unlikely]] "
-          "::cursiv::lr_drive_exact<kTable>(c, {0});\n",
-          m);
+      fmt("    if ({}) [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, {});\n",
+          flag_test(m), m);
     line("  }");
   }
 

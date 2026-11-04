@@ -31,6 +31,7 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 
 namespace cursiv {
 namespace {
@@ -85,31 +86,14 @@ void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
   // Each element comes after what it reads, as far as a cycle allows: a fact
   // then reaches a reader whole, rather than once per element it passed through.
   // Whatever the order, each fact only grows towards the one least fixpoint.
-  std::vector<std::uint32_t> finished;
-  finished.reserve(size);
-  std::vector<std::uint8_t> entered(size, 0);
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> path;
-  for (std::uint32_t root = 0; root < size; ++root) {
-    if (entered[root] != 0) continue;
-    entered[root] = 1;
-    path.emplace_back(root, 0);
-    while (!path.empty()) {
-      auto& [id, next] = path.back();
-      if (next < users[id].size()) {
-        const std::uint32_t reader = users[id][next++];
-        if (entered[reader] == 0) {
-          entered[reader] = 1;
-          path.emplace_back(reader, 0);
-        }
-        continue;
-      }
-      finished.push_back(id);
-      path.pop_back();
-    }
-  }
+  const auto cycles = StrongComponents<>::of(users);
+  std::vector<std::uint32_t> order(size);
+  std::iota(order.begin(), order.end(), 0u);
+  std::ranges::stable_sort(order, std::ranges::greater{},
+                           [&](std::uint32_t id) { return cycles.component[id]; });
   // Rule zero has no body.
-  for (auto id = finished.rbegin(); id != finished.rend(); ++id)
-    if (*id != c.nnodes) pending.push(*id);
+  for (const std::uint32_t id : order)
+    if (id != c.nnodes) pending.push(id);
   while (!pending.empty()) {
     const auto id = pending.pop();
     if (work) ++*work;
@@ -1521,8 +1505,9 @@ bool explore_decision(Built& b, LlDecision& dec, const LlBuildOptions& opt) {
       if (sim.capped() ||
           (sim.needs_filter() && sim.settled() == kNoRow))
         return false;
-      if (!survives) continue;
-      const auto to = intern(static_cast<std::uint8_t>(depthOf[at] + 1));
+      const auto to = survives
+                          ? intern(static_cast<std::uint8_t>(depthOf[at] + 1))
+                          : kLlDfaHandOver;
       out[at].push_back(LlDfaEdge{.term = t, .target = to});
     }
   }
@@ -1537,25 +1522,31 @@ bool explore_decision(Built& b, LlDecision& dec, const LlBuildOptions& opt) {
     for (std::size_t i = 0; i < setOf.size(); ++i)
       if (settles[i] == 0 &&
           std::ranges::any_of(out[i], [&](const LlDfaEdge& e) {
-            return settles[e.target] != 0;
+            return e.target != kLlDfaHandOver && settles[e.target] != 0;
           }))
         settles[i] = grew = true;
   }
+  // The terminal stays: the walk reads under all that the readings admit, or a
+  // longer spelling reads as the shorter one it holds.
   for (auto& edges : out)
-    std::erase_if(edges,
-                  [&](const LlDfaEdge& e) { return settles[e.target] == 0; });
+    for (LlDfaEdge& e : edges)
+      if (e.target != kLlDfaHandOver && settles[e.target] == 0)
+        e.target = kLlDfaHandOver;
   // ...and into the pool, where a state's arm is what its readings agree on.
   const auto base = static_cast<std::uint32_t>(b.dfa.size());
   bool open = false;
   for (std::size_t i = 0; i < setOf.size(); ++i) {
     const std::uint16_t alt = armOf[i];
-    open = open || (alt == kNoRow && out[i].empty());
+    open = open || (alt == kNoRow && std::ranges::all_of(
+                                         out[i], [](const LlDfaEdge& e) {
+                                           return e.target == kLlDfaHandOver;
+                                         }));
     LlDfaState st{.alt = alt,
                   .edge = static_cast<std::uint32_t>(b.dfaEdge.size()),
                   .nedges = static_cast<std::uint32_t>(out[i].size()),
                   .node = nodeOf[i]};
     for (LlDfaEdge e : out[i]) {
-      e.target += base;
+      if (e.target != kLlDfaHandOver) e.target += base;
       b.dfaEdge.push_back(e);
     }
     b.dfa.push_back(st);
@@ -1710,13 +1701,12 @@ void settle_after_states(Built& b) {
 // anything: only there does the rule's caller state what the token fills.
 void settle_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
   b.nodeHead.assign(b.cfg.nnodes, 0);
-  std::vector<std::uint32_t> stamp(b.nstates, 0);
+  RoundMarks seen(b.nstates);
   std::vector<std::uint32_t> todo;
-  std::uint32_t round = 0;
   const auto walk = [&](std::uint16_t rule, auto&& visit) {
-    ++round;
+    seen.next();
     todo.assign(1, b.ruleStart[rule]);
-    stamp[todo.back()] = round;
+    seen.first(todo.back());
     while (!todo.empty()) {
       const std::uint32_t at = todo.back();
       todo.pop_back();
@@ -1729,10 +1719,7 @@ void settle_head_nodes(Built& b, const std::vector<std::uint8_t>& nullable) {
           continue;
         const std::uint32_t next =
             e.kind == LlEdgeKind::rule ? e.follow : e.target;
-        if (stamp[next] != round) {
-          stamp[next] = round;
-          todo.push_back(next);
-        }
+        if (seen.first(next)) todo.push_back(next);
       }
     }
   };
@@ -2126,18 +2113,16 @@ std::vector<std::uint8_t> ll_shared_rules(const LlAtnView& atn,
         }
       }
     }
-    std::ranges::fill(seen, 0);
   }
-  std::uint32_t round = 0;
+  RoundMarks scanned(atn.nstates);
   // The rules called from `from` before a token is read, told to `call`.
   const auto scan = [&](std::uint32_t from, auto&& call) {
-    ++round;
+    scanned.next();
     todo.assign(1, from);
     while (!todo.empty()) {
       const std::uint32_t at = todo.back();
       todo.pop_back();
-      if (seen[at] == round) continue;
-      seen[at] = round;
+      if (!scanned.first(at)) continue;
       for (const LlAtnEdge& e : atn.outgoing(at)) {
         if (e.kind == LlEdgeKind::epsilon) {
           todo.push_back(e.target);

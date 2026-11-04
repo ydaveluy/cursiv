@@ -10,6 +10,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   vector<Item*> kids;
 };
+struct OtherItem : cursiv::Extends<Item> {};
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
 };
@@ -94,11 +95,31 @@ struct Base : cursiv::GrammarSpec {
                        lit<"sp:"> + skip(ignore<SpBlank, SpMore>, hide<>,
                                          many(append<&Item::kids>(ref<SpItem>)) +
                                              lit<".">))> {};
+  // A token only one caller takes, which a comment spells: past a choice that
+  // reads ahead, an option and a loop, the other caller reads the comment.
+  struct Sharp : terminal<lit<"//"> + many(cr<"^\r\n">)> {};
+  struct Ahead : rule<ref<NAME> | (ref<NAME> + lit<","> + lit<";">)> {};
+  struct Maybe : rule<option(lit<"+"> + lit<";">)> {};
+  struct Turns : rule<lit<"~"> + many(lit<"*">)> {};
+  struct Spelt : rule<create<Item>(
+                     lit<"spelt:"> +
+                     ((lit<"<1>"> + ref<Ahead> + lit<","> + lit<".">) |
+                      (lit<"<2>"> + ref<Ahead> + lit<"//x"> + lit<"!">) |
+                      (lit<"<3>"> + ref<Maybe> + lit<","> + lit<".">) |
+                      (lit<"<4>"> + ref<Maybe> + lit<"//x"> + lit<"!">) |
+                      (lit<"<5>"> + ref<Turns> + lit<","> + lit<".">) |
+                      (lit<"<6>"> + ref<Turns> + lit<"//x"> + lit<"!">)))> {};
+  // Arms no token tells apart behind a spelling that holds another's.
+  struct Same1 : rule<create<Item>(ref<NAME> + lit<"%^&"> + many(lit<",">))> {};
+  struct Same2 : rule<create<OtherItem>(ref<NAME> + lit<"%^&"> + many(lit<",">))> {};
+  struct Inside : rule<lit<"inside:"> + (create<Item>(ref<NAME> + lit<"%"> + lit<"!">) |
+                                         ref<Same1> | ref<Same2>)> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
-                    ref<Spliced> | ref<Part> | ref<Rivals> | ref<Glued> | ref<Cell> |
-                    ref<Note> | ref<Marked> | ref<Plain> | ref<Head> | ref<Pending>)))> {};
+                    ref<Spliced> | ref<Spelt> | ref<Inside> | ref<Part> |
+                    ref<Rivals> | ref<Glued> | ref<Cell> | ref<Note> | ref<Marked> |
+                    ref<Plain> | ref<Head> | ref<Pending>)))> {};
   using entry = Root;
-  using ignored = WS;
+  using ignored = list<WS, Sharp>;
   using hidden = list<Hushed, Hash>;
 };
 struct Ll : Base {};

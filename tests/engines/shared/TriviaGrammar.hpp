@@ -294,9 +294,44 @@ struct Spliced : cursiv::GrammarSpec {
   using ignored = list<WS, MORE>;
 };
 
+// A name that may spell what a blank spells: only a text starting on that
+// scalar's first byte reads as either.
+struct Doubled : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z"> | lit<"\xef\xbb\xbf">)> {};
+  struct Item : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
+                                       lit<";">)> {};
+  struct Root
+      : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Item>)))> {};
+  using entry = Root;
+  using ignored = list<WS>;
+};
+
+// A line break that is a trivia in one place and a token in another, where a
+// terminal that wins over it spells it too: the two are rivals where both stand.
+struct Both : cursiv::GrammarSpec {
+  struct WS : terminal<some(cr<" ">)> {};
+  struct WON : terminal<cr<"\n">> {};
+  struct NL : terminal<cr<"\n">> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Lines : rule<create<ast::Node>(
+                     assign<&ast::Node::name>(ref<ID>) + ref<ID>)> {};
+  struct Taken : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) +
+                                        ((ref<WON> + lit<"?">) |
+                                         (ref<NL> + lit<"!">)))> {};
+  using entry = Taken;
+  using ignored = list<WS>;
+};
+
 struct Suite : cursiv::GrammarSpec {
   struct Entry
-      : rule<(lit<"spliced:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
+      : rule<(lit<"both:"> + skip(ignore<Both::WS>, hide<>,
+                                  ref<Both::Taken> + eof)) |
+             (lit<"bothlines:"> + skip(ignore<Both::WS, Both::NL>, hide<>,
+                                       ref<Both::Lines> + eof)) |
+             (lit<"doubled:"> + skip(ignore<Doubled::WS>, hide<>,
+                                     ref<Doubled::Root> + eof)) |
+             (lit<"spliced:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
                                      ref<Spliced::Root> + eof)) |
              (lit<"forked:"> + skip(ignore<Spliced::WS, Spliced::MORE>, hide<>,
                                     ref<Spliced::Forked> + eof)) |

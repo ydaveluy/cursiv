@@ -135,7 +135,8 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
                               bool* ended = nullptr, bool* different = nullptr,
                               std::uint16_t mode = T.errMode,
                               std::size_t* top = nullptr,
-                              std::vector<LlLexReading>* lengths = nullptr) {
+                              std::vector<LlLexReading>* lengths = nullptr,
+                              bool* reserved = nullptr) {
   LlMask<T.termWords> room;
   const LlMask<T.termWords>& viable =
       ll_unrefused_mask<T>(wanted, src, from, len, room);
@@ -262,6 +263,8 @@ inline TextOffset ll_match_in(const char* src, TextOffset len, TextOffset from,
     const bool reserve = ll_reserves_in<T>(best, viable, src, end, len, far);
     const std::uint64_t* const res = reserve ? T.dfa_res_set(best).w : nullptr;
     for (std::uint32_t k = 0; k < T.termWords; ++k) {
+      if (reserved != nullptr && reserve && (acc[k] & res[k] & viable.word(k)) != 0)
+        *reserved = true;
       std::uint64_t bits =
           acc[k] & (reserve ? ~res[k] : ~std::uint64_t{0}) & viable.word(k);
       while (bits != 0) {
@@ -391,6 +394,9 @@ struct LlLookRead {
   // The readings of the highest tier lead the read, and this many are they;
   // zero where the read holds one tier.
   std::size_t top = 0;
+  // The token took the text from another reading of it: a blank it spells, or a
+  // terminal it reserves. Under fewer terminals that reading stands.
+  bool over = false;
 };
 
 // A head condition consumes within the candidate token, but a word guard
@@ -492,7 +498,8 @@ inline Scan ll_look_blank(const LlContext& c, TextOffset p, std::uint16_t look,
                           bool joined, std::vector<std::uint16_t>& out,
                           TextOffset& inspected, bool& ended,
                           const LlMask<T.termWords>* viable = nullptr,
-                          std::uint16_t scanMode = T.errMode) {
+                          std::uint16_t scanMode = T.errMode,
+                          bool* over = nullptr) {
   const auto mode = ll_skips_of<T>(look, joined);
   TextOffset halt = p;
   const Scan result = ll_match_text<T>(c.src, c.len, mode, p, halt);
@@ -521,7 +528,10 @@ inline Scan ll_look_blank(const LlContext& c, TextOffset p, std::uint16_t look,
                                     nullptr, scanMode);
     inspected = std::max(inspected, far);
     ended = ended || atEnd;
-    if (end >= result.end) return {p, kInvalidSymbol};
+    if (end >= result.end) {
+      if (over != nullptr) *over = true;
+      return {p, kInvalidSymbol};
+    }
   }
   return result;
 }
@@ -540,6 +550,7 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
   TextOffset inspected = p;
   bool ended = false;
   bool head = true;
+  bool over = false;
   for (;;) {
     if constexpr (kIndented<T>) {
       if (indent != nullptr) {
@@ -565,7 +576,7 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
     const bool joined =
         kIndented<T> && indent != nullptr && indent->at.depth != 0;
     const Scan sc = ll_look_blank<T>(c, p, look, joined, out, inspected, ended,
-                                     &viable, scanMode);
+                                     &viable, scanMode, &over);
     if (sc.term == kInvalidSymbol || sc.end == p) break;
     assert(ll_blank<T>(sc.term, joined ? indent->at.depth : 0u));
     p = sc.end;
@@ -583,7 +594,7 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
   std::size_t top = 0;
   const TextOffset end =
       ll_match_in<T>(c.src, c.len, p, viable, out, &matched, &matchEnded,
-                     &different, scanMode, &top);
+                     &different, scanMode, &top, nullptr, &over);
   from = end;
   if constexpr (kIndented<T>) {
     if (shift && indent != nullptr && !out.empty()) {
@@ -596,7 +607,8 @@ inline bool ll_look(const LlContext& c, TextOffset& from,
                 std::max(inspected, matched),
                 ended || matchEnded,
                 different,
-                top};
+                top,
+                over};
   return end != p && !out.empty();
 }
 
