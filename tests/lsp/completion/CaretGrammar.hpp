@@ -195,7 +195,20 @@ struct Caret : cursiv::GrammarSpec {
   struct InstanceR : rule<create<ast::Instance>(
                          kw<"child"> + assign<&ast::Instance::instance>(
                                            ref<ModelR> | ref<AssemblyR>))> {};
-  struct StmtR : rule<ref<DeclR> | ref<UseR> | ref<WordR> | ref<CallR> |
+  // A terminal that writes a reference where it opens a rule, and stands bare
+  // past a keyword, where no reference is written.
+  struct TICK : terminal<lit<"'"> + many(word_boundary)> {};
+  struct TickR : rule<create<ast::Link>(assign<&ast::Link::to>(ref<TICK>) +
+                                        lit<";">)> {};
+  struct BareR
+      : rule<create<ast::Word>(kw<"bare"> + ref<TICK> + lit<";">)> {};
+  // A data rule nested in itself: each level is a rule the caret stands in.
+  struct DeepD;
+  struct DeepD : rule<(lit<"["> + ref<DeepD> + lit<"]">) | ref<ID>> {};
+  struct DeepR : rule<create<ast::Link>(
+                     kw<"deep"> + assign<&ast::Link::to>(ref<DeepD>) + lit<";">)> {
+  };
+  struct StmtR : rule<ref<TickR> | ref<BareR> | ref<DeepR> | ref<DeclR> | ref<UseR> | ref<WordR> | ref<CallR> |
                       ref<AlphaR> | ref<BetaR> | ref<SeeR> | ref<TieR> |
                       ref<AnyR> | ref<HoldR> | ref<NestR> | ref<EitherR> |
                       ref<DottedR> | ref<OpensR> | ref<MaybeR> | ref<InstanceR>> {};

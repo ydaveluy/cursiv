@@ -107,6 +107,46 @@ CURSIV_ALWAYS_INLINE inline bool ll_blanks(const LlContext& c,
   return true;
 }
 
+// The gap from `p` on, and the token behind it in hand, under `mode`: the trivia
+// that is recorded waits for the tape. `sc`, where it ends past `p`, is what the
+// lexer read there already.
+template <const auto& T>
+CURSIV_ALWAYS_INLINE inline void ll_read_gap(LlContext& c, std::uint16_t mode,
+                                             TextOffset p, bool head, Scan sc) {
+  for (;;) {
+    if constexpr (kIndented<T>) {
+      Token virtualToken;
+      if (ll_indent_read<T>(c.src, c.len, c.indentArena, c.indent, p, head,
+                            c.heldEnd, virtualToken, ll_mode_ends<T>(mode))) {
+        c.pendEnd = p;
+        c.la = virtualToken;
+        c.laValid = true;
+        c.laMode = mode;
+        return;
+      }
+    }
+    if (p >= c.len) break;
+    if (ll_blanks<T>(c, mode, p)) {
+      head = false;
+      continue;
+    }
+    if (sc.end <= p) sc = ll_scan<T>(c, mode, p);
+    if (sc.term == kInvalidSymbol || sc.end == p ||
+        !ll_blank<T>(sc.term, c.indent.depth))
+      break;
+    if (T.terms[sc.term].recorded)
+      c.pending.push_back(Token{p, sc.end, sc.term});
+    p = sc.end;
+    head = false;
+  }
+  c.pendEnd = p;
+  c.la = p >= c.len
+             ? Token{p, p, kEofSymbol, mode}
+             : Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
+  c.laValid = true;
+  c.laMode = mode;
+}
+
 // The lookahead under one alphabet, where the token in hand does not answer
 // it. A token already read under another is read again where it begins: the
 // two alphabets may not agree on where it ends, and the point that asks is
@@ -148,39 +188,7 @@ CURSIV_NOINLINE inline void ll_peek_read(LlContext& c, std::uint16_t mode,
     // a second pass of the lexer over every token of the document.
     c.pending.clear();
   }
-  bool head = p == c.at;
-  for (;;) {
-    if constexpr (kIndented<T>) {
-      Token virtualToken;
-      if (ll_indent_read<T>(c.src, c.len, c.indentArena, c.indent, p, head,
-                            c.heldEnd, virtualToken, ll_mode_ends<T>(mode))) {
-        c.pendEnd = p;
-        c.la = virtualToken;
-        c.laValid = true;
-        c.laMode = mode;
-        return;
-      }
-    }
-    if (p >= c.len) break;
-    if (ll_blanks<T>(c, mode, p)) {
-      head = false;
-      continue;
-    }
-    if (sc.end <= p) sc = ll_scan<T>(c, mode, p);
-    if (sc.term == kInvalidSymbol || sc.end == p ||
-        !ll_blank<T>(sc.term, c.indent.depth))
-      break;
-    if (T.terms[sc.term].recorded)
-      c.pending.push_back(Token{p, sc.end, sc.term});
-    p = sc.end;
-    head = false;
-  }
-  c.pendEnd = p;
-  c.la = p >= c.len
-             ? Token{p, p, kEofSymbol, mode}
-             : Token{p, sc.end, sc.end == p ? kInvalidSymbol : sc.term, mode};
-  c.laValid = true;
-  c.laMode = mode;
+  ll_read_gap<T>(c, mode, p, p == c.at, sc);
 }
 
 // The token at the point, read in place where nothing is in hand: the blanks
@@ -356,9 +364,28 @@ inline void ll_repeat_read(LlContext& c, std::uint16_t mode) {
 template <const auto& T>
 using LlSkipped = typename LlLexTape<T>::Skip;
 
-// The token in hand read again under `mode`, its terminal added to `skip`.
-// False, the token left as it stands, where it is no terminal's or where
-// nothing but trivia reads there. The trivia before it stays read.
+// A read that a refusal may give back: the token in hand and the trivia read in
+// front of it.
+struct LlHeldRead {
+  Token la;
+  std::uint16_t mode;
+  std::size_t pending;
+  TextOffset pendEnd;
+};
+inline LlHeldRead ll_hold_read(const LlContext& c) {
+  return {c.la, c.laMode, c.pending.size(), c.pendEnd};
+}
+inline void ll_give_back(LlContext& c, const LlHeldRead& read) {
+  c.la = read.la;
+  c.laMode = read.mode;
+  c.pending.resize(read.pending);
+  c.pendEnd = read.pendEnd;
+}
+
+// The token in hand read again under `mode`, its terminal added to `skip`. A
+// trivia that reads there instead is crossed, and the position past it is read
+// whole. False, the read left as it stands, where the token is no terminal's or
+// where nothing reads there. The trivia before it stays read.
 template <const auto& T>
 inline bool ll_read_without(LlContext& c, std::uint16_t mode,
                             LlSkipped<T>& skip) {
@@ -368,12 +395,20 @@ inline bool ll_read_without(LlContext& c, std::uint16_t mode,
   skip.set(c.la.sym);
   const typename LlLexTape<T>::Skipping tape{.skip = &skip};
   const Scan sc = lex_match(tape, c.src, c.len, mode, c.la.begin);
-  if (sc.term == kInvalidSymbol || sc.end == c.la.begin ||
-      ll_blank<T>(sc.term, c.indent.depth))
-    return false;
-  c.la = Token{c.la.begin, sc.end, sc.term, mode};
-  c.laMode = mode;
-  return true;
+  if (sc.term == kInvalidSymbol || sc.end == c.la.begin) return false;
+  if (!ll_blank<T>(sc.term, c.indent.depth)) {
+    c.la = Token{c.la.begin, sc.end, sc.term, mode};
+    c.laMode = mode;
+    return true;
+  }
+  const LlHeldRead held = ll_hold_read(c);
+  if (T.terms[sc.term].recorded)
+    c.pending.push_back(Token{c.la.begin, sc.end, sc.term});
+  skip = {};
+  ll_read_gap<T>(c, mode, sc.end, false, Scan{});
+  if (c.la.sym != kInvalidSymbol) return true;
+  ll_give_back(c, held);
+  return false;
 }
 
 // The terminals that tie with the token in hand, itself first, under what
@@ -384,6 +419,10 @@ inline void ll_ties_without(const LlContext& c, std::uint16_t mode,
                             LlSkipped<T> skip,
                             std::vector<std::uint16_t>& ties) {
   ties.assign(1, c.la.sym);
+  // A read past a trivia may stand on the end, or on a token nothing lexes.
+  if (c.la.sym == kEofSymbol || c.la.sym >= T.nterms ||
+      T.terms[c.la.sym].laid != 0)
+    return;
   const typename LlLexTape<T>::Skipping tape{.skip = &skip};
   const Scan own = lex_match(tape, c.src, c.len, mode, c.la.begin);
   for (Scan at = own;;) {

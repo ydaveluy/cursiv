@@ -185,6 +185,70 @@ struct Forks : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// What a token at a caret fills: a record it opens for two members, one behind a
+// rule of one word, a member past a rule that may read nothing, and a rule that
+// reads itself first.
+struct Members : cursiv::GrammarSpec {
+  using WS = Base::WS;
+  using ID = Base::ID;
+  struct Box : rule<create<ast::Lit>(kw<"bx">)> {};
+  struct Twice : rule<create<ast::Hold>(
+                     kw<"twice"> + ((assign<&ast::Hold::first>(ref<Box>) +
+                                     lit<"+">) |
+                                    (assign<&ast::Hold::second>(ref<Box>) +
+                                     lit<"-">)))> {};
+  struct Word : rule<kw<"ck">> {};
+  struct Worded : rule<create<ast::Lit>(ref<Word>)> {};
+  struct Through : rule<create<ast::Hold>(
+                       kw<"through"> + assign<&ast::Hold::first>(ref<Worded>) +
+                       lit<";">)> {};
+  struct Chain;
+  struct Chain : rule<create<ast::Chained>(assign<&ast::Chained::left>(
+                                               ref<Chain>) +
+                                           lit<"."> +
+                                           assign<&ast::Chained::name>(ref<ID>)) |
+                      create<ast::Lit>(kw<"lx">)> {};
+  struct Lone : rule<create<ast::Hold>(kw<"lone"> +
+                                       assign<&ast::Hold::first>(ref<Chain>) +
+                                       lit<";">)> {};
+  struct Both : rule<create<ast::Hold>(
+                    kw<"both"> + ((assign<&ast::Hold::first>(ref<Chain>) +
+                                   lit<"+">) |
+                                  (assign<&ast::Hold::second>(ref<Chain>) +
+                                   lit<"-">)))> {};
+  // A terminal that writes a member only where it opens a rule, and stands bare
+  // past a keyword; the same through a data rule.
+  struct TICK : terminal<lit<"$"> + many(w)> {};
+  struct Ticked : rule<create<ast::Hold>(assign<&ast::Hold::text>(ref<TICK>) +
+                                         lit<"=">)> {};
+  struct Bare : rule<create<ast::Hold>(kw<"bare"> + ref<TICK> + lit<";">)> {};
+  struct QUOTE : terminal<lit<"%"> + many(w)> {};
+  struct Spelt : rule<ref<QUOTE>> {};
+  struct Named : rule<create<ast::Hold>(kw<"named"> +
+                                        assign<&ast::Hold::text>(ref<Spelt>) +
+                                        lit<";">)> {};
+  struct Plain : rule<create<ast::Hold>(kw<"plain"> + ref<QUOTE> + lit<";">)> {};
+  // A record past a rule that may read nothing.
+  struct Mark : rule<option(kw<"mk">)> {};
+  struct Marked : rule<create<ast::Lit>(ref<Mark> + kw<"nk">)> {};
+  struct Marks : rule<create<ast::Hold>(kw<"marked"> +
+                                        assign<&ast::Hold::first>(ref<Marked>) +
+                                        lit<";">)> {};
+  struct Stmt : rule<ref<Twice> | ref<Through> | ref<Lone> | ref<Both> |
+                     ref<Ticked> | ref<Bare> | ref<Named> | ref<Plain> |
+                     ref<Marks>> {};
+  struct UnitRule : rule<create<ast::Holds>(
+                        many(append<&ast::Holds::holds>(ref<Stmt>)))> {};
+};
+struct Itself : cursiv::GrammarSpec {
+  struct Self;
+  struct Self : rule<create<ast::Chained>(assign<&ast::Chained::left>(ref<Self>) +
+                                          lit<"@"> +
+                                          assign<&ast::Chained::name>(
+                                              ref<Base::ID>)) |
+                     create<ast::Lit>(kw<"s0">)> {};
+};
+
 // The declaration recovery cases use the same identifier and whitespace as
 // the expression language. Their own scope keeps comments out of declarations.
 struct Suite : Base {
@@ -192,7 +256,9 @@ struct Suite : Base {
                      skip(ignore<WS>, hide<>,
                           (lit<"decl:"> + ref<Decls::UnitRule> + eof) |
                               (lit<"fork:"> + ref<Forks::UnitRule> + eof)) |
-                     (lit<"rep:"> + ref<Repairs::UnitRule> + eof)> {};
+                     (lit<"rep:"> + ref<Repairs::UnitRule> + eof) |
+                     (lit<"member:"> + ref<Members::UnitRule> + eof) |
+                     ref<Itself::Self>> {};
   using entry = Root;
 };
 

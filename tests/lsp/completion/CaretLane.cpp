@@ -8,6 +8,7 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -139,6 +140,32 @@ void a_site_that_narrows_nothing_offers_the_whole_member(
             CHECK(offers(list, "a"));
             CHECK(offers(list, "b"));
           });
+}
+
+// A site that writes nothing offers no name, though the terminal writes a
+// reference where it opens another rule.
+void a_bare_terminal_offers_no_reference(const CaretDoor& door) {
+  const World world(door);
+  offered(*world.lang, "fn f() { alpha a; beta b; bare <|> }",
+          [](const lsp::CompletionList& list) {
+            CHECK(!offers(list, "a"));
+            CHECK(!offers(list, "b"));
+          });
+}
+
+// The levels of a data rule around the caret each read what the one inside read
+// already: their depth costs what the depth does.
+void a_deep_data_rule_costs_its_depth(const CaretDoor& door) {
+  const World world(door);
+  const std::size_t depth = 40000;
+  const std::string text = "fn f() { alpha a; deep " +
+                           std::string(depth, '[') + "<|>x" +
+                           std::string(depth, ']') + "; }";
+  const auto begin = std::chrono::steady_clock::now();
+  offered(*world.lang, text, [](const lsp::CompletionList& list) {
+    CHECK(list.isIncomplete);
+  });
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(8));
 }
 
 // The member a completion would fill, which no `CompletionList` carries: it
@@ -299,6 +326,8 @@ void run_caret_lane(const CaretDoor& door) {
   a_narrowed_site_offers_its_subtype_alone(door);
   a_member_two_classes_spell_answers_for_its_own_site(door);
   a_site_that_narrows_nothing_offers_the_whole_member(door);
+  a_bare_terminal_offers_no_reference(door);
+  a_deep_data_rule_costs_its_depth(door);
   a_caret_under_nested_open_constructs_keeps_its_state(door);
   a_member_written_by_a_record_of_its_own_is_named(door);
   the_call_that_names_a_rule_wins_over_one_that_reaches_it(door);

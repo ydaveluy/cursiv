@@ -43,4 +43,17 @@ struct Unit : cursiv::Extends<cursiv::AstNode> {
   vector<Let*> lets;
   vector<Show*> shows;
 };
+struct Lit : cursiv::Extends<Expr> {};
+struct Chained : cursiv::Extends<Expr> {
+  Expr* left{};
+  string_view name;
+};
+struct Hold : cursiv::Extends<cursiv::AstNode> {
+  Expr* first{};
+  Expr* second{};
+  string_view text;
+};
+struct Holds : cursiv::Extends<cursiv::AstNode> {
+  vector<Hold*> holds;
+};
 }  // namespace tpar::ast

@@ -28,6 +28,7 @@
 #include "cursiv/shared/runtime/IndentLevel.hpp"
 #include "cursiv/shared/runtime/token_end_from.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
+#include "cursiv/shared/table/FlatMap.hpp"
 
 namespace cursiv {
 
@@ -82,8 +83,8 @@ class CaretStacks {
   static constexpr Id kNoParent = static_cast<Id>(-1);
   static constexpr TextOffset kNoEdge = ~TextOffset{0};
   static constexpr std::uint32_t kContradicted = ~std::uint32_t{0};
-  // The predecessors past the first, sorted, in the pool: a block is
-  // relocated when it fills, so a frame's own room doubles.
+  // The predecessors past the first, in the pool: a block is relocated when it
+  // fills, so a frame's own room doubles.
   struct Block {
     std::uint32_t at;
     std::uint32_t size;
@@ -103,8 +104,8 @@ class CaretStacks {
     NodeCount rank;
     Token la;
     Laid laid{};
-    // Predecessors in increasing order, the first inline and the others in a
-    // block of the replay's pool.
+    // Predecessors in the order they came, the first inline and the others in
+    // a block of the replay's pool.
     Id parent = kNoParent;
     Id more = kNoParent;
   };
@@ -117,11 +118,15 @@ class CaretStacks {
     std::vector<Id> active;
     LrGssIndex index;
     std::size_t seeds = 0;
+    // The predecessors past the first of each node it minted.
+    FlatMap<std::uint8_t> edges;
+    bool anyEdge = false;
     void reset(std::size_t r, std::span<const Id> heads = {}) {
       rank = r;
       active.assign(heads.begin(), heads.end());
       index.clear();
       seeds = heads.size();
+      if (std::exchange(anyEdge, false)) edges.reset();
     }
     std::span<const Id> nodes() const {
       return std::span(active).subspan(seeds);
@@ -161,7 +166,9 @@ class CaretStacks {
   bool comment_before(std::uint16_t mode, TextOffset from, TextOffset to,
                       Trivia& comment) {
     Trivia last;
-    if (!trivia_scan(mode, from, to, false, &last) || last.scan.end != to ||
+    if (!trivia_scan(mode, from, to, false, &last,
+                     [](const Token&) { return false; }) ||
+        last.scan.end != to ||
         last.scan.end <= last.begin ||
         ends_before_word(mode, last.begin, to, last.scan.term))
       return false;
@@ -183,10 +190,16 @@ class CaretStacks {
       _edgeHeads = _heads;
       _edgeGapFrom = _gapFrom;
     }
+    _tape = &leaf;
     close(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
-          if (virt != kInvalidSymbol && frame.at == leaf.begin &&
+          // An indent stands behind the form feeds of its line's blanks.
+          if (virt != kInvalidSymbol &&
+              (frame.at == leaf.begin ||
+               (virt == _indent && frame.at < leaf.begin &&
+                indent_run(_text.data(), frame.at, leaf.begin).stop ==
+                    leaf.begin)) &&
               frame.laMode != _table.mode[frame.state]) {
             _virt = Token{leaf.begin, leaf.end, virt};
             return {&_virt, 1};
@@ -210,6 +223,7 @@ class CaretStacks {
                      .passes = edge ? _frames[from].laid.passes : 0});
           }
         });
+    _tape = nullptr;
     _passing = false;
     _heads.swap(_next.active);
     ++_rank;
@@ -231,8 +245,7 @@ class CaretStacks {
     close(
         [&](Id head, const Token&) -> std::span<const Token> {
           const Frame& frame = _frames[head];
-          if (!trivia_to(_table.mode[frame.state], frame.at, first.begin,
-                         frame.laid.indent.depth))
+          if (!trivia_to(head, _table.mode[frame.state], frame.at, first.begin))
             return {};
           return {&first, 1};
         },
@@ -335,8 +348,7 @@ class CaretStacks {
   bool reads_blanks_to(TextOffset at) {
     return std::ranges::any_of(_heads, [&](Id head) {
       const Frame& f = _frames[head];
-      return f.at <= at &&
-             trivia_to(_table.mode[f.state], f.at, at, f.laid.indent.depth);
+      return f.at <= at && trivia_to(head, _table.mode[f.state], f.at, at);
     });
   }
   // The modes the last leaf was read in, with the terminal each read it as:
@@ -354,10 +366,12 @@ class CaretStacks {
   bool edge_takes(const Token& token) {
     if (_edgeHeads.empty()) return true;
     const bool candidate = std::exchange(_candidate, false);
+    const bool asWritten = std::exchange(_asWritten, true);
     const TextOffset gapFrom = std::exchange(_gapFrom, _edgeGapFrom);
     const bool taken = std::ranges::any_of(
         _edgeHeads, [&](Id head) { return takes(head, token); });
     _gapFrom = gapFrom;
+    _asWritten = asWritten;
     _candidate = candidate;
     return taken;
   }
@@ -414,8 +428,8 @@ class CaretStacks {
           const Frame& frame = _frames[head];
           if (inserted ? held.begin < begin ||
                              (held.begin > begin &&
-                              !trivia_to(_table.mode[frame.state], begin,
-                                         held.begin, frame.laid.indent.depth))
+                              !trivia_to(head, _table.mode[frame.state], begin,
+                                         held.begin))
                        : held.begin != begin)
             return {};
           landed =
@@ -450,10 +464,7 @@ class CaretStacks {
       // and the issues that reading took.
       const IndentAt indent = _frames[error].laid.indent;
       const auto assumes = _frames[error].laid.assumes;
-      if (++_epoch == 0) {
-        std::fill(_seen.begin(), _seen.end(), 0u);
-        _epoch = 1;
-      }
+      next_walk();
       _seen.resize(_frames.size());
       // An unwind abandons at least one frame; the current head itself
       // cannot be the retained ancestor.
@@ -580,17 +591,13 @@ class CaretStacks {
           if (_table.cond != nullptr) typed_in(mode);
           if (!glues(frame.laid.reading, frame.laid.mode, frame.laid.passes))
             return {};
-          // The candidate cannot jump a gap this mode refuses. A sole region
-          // exit can instead reduce on the real invalid byte, as the drive
-          // does, and let the caller re-read that gap before the candidate.
-          if (!trivia_to(mode, frame.at, at, frame.laid.indent.depth)) {
-            const auto sole = _table.soleReduce[frame.state];
-            if (sole == kLrNoProd || sole >= _table.reductions.size() ||
-                !_table.reductions[sole].regionExit)
-              return {};
+          // What this mode reads in the gap is a token to it, on which the drive
+          // reduces: the state it lands on may read the gap as trivia, and go on
+          // to the candidate. A shift of that token leaves the candidate behind.
+          if (!trivia_to(head, mode, frame.at, at)) {
             const auto gap = reading(head, held);
-            return gap.size() == 1 && gap.front().sym == kInvalidSymbol &&
-                           gap.front().begin < at
+            return !gap.empty() && gap.front().begin < at &&
+                           gap.front().end <= at
                        ? gap
                        : std::span<const Token>{};
           }
@@ -630,6 +637,7 @@ class CaretStacks {
         },
         [&](Id from, const LrAction& action, const Token& read,
             std::uint32_t) {
+          if (read.begin < at) return;
           if (read.sym == term)
             _shifted.emplace_back(_frames[from].state, action.arg);
           else if (implied_of(read.sym) >= 0)
@@ -700,28 +708,24 @@ class CaretStacks {
     for (std::uint32_t i = 0; i < b.size; ++i) visit(_pool[b.at + i]);
   }
 
-  // One predecessor into a frame's sorted set: the first inline, the rest in
-  // its block by binary search. Whether it was missing.
-  bool add_parent(Frame& frame, Id parent) {
+  // One predecessor into the set of a node `stage` minted: the first inline, the
+  // rest in its block, each once. Whether it was missing.
+  bool add_parent(Stage& stage, Id id, Id parent) {
     if (parent == kNoParent) return false;
+    Frame& frame = _frames[id];
     if (frame.parent == kNoParent) {
       frame.parent = parent;
       return true;
     }
     if (parent == frame.parent) return false;
-    // The inline one is the least: a lesser arrival takes its place, and the
-    // one it displaces is the block's first.
-    const bool displaces = parent < frame.parent;
-    if (displaces) std::swap(parent, frame.parent);
+    stage.anyEdge = true;
+    if (!stage.edges.emplace(std::uint64_t{id} << 32 | parent).second)
+      return false;
     if (frame.more == kNoParent) {
       frame.more = _blocks.size();
       _blocks.push_back(Block{static_cast<std::uint32_t>(_pool.size()), 0, 0});
     }
     Block& b = _blocks[frame.more];
-    const auto first = _pool.begin() + b.at;
-    const auto pos = std::lower_bound(first, first + b.size, parent);
-    if (pos != first + b.size && *pos == parent) return displaces;
-    const auto index = static_cast<std::uint32_t>(pos - first);
     if (b.size == b.cap) {
       const std::uint32_t cap = b.cap == 0 ? 4 : b.cap * 2;
       const auto at = static_cast<std::uint32_t>(_pool.size());
@@ -731,20 +735,17 @@ class CaretStacks {
       b.at = at;
       b.cap = cap;
     }
-    const auto begin = _pool.begin() + b.at;
-    std::copy_backward(begin + index, begin + b.size, begin + b.size + 1);
-    begin[index] = parent;
-    ++b.size;
+    _pool[b.at + b.size++] = parent;
     return true;
   }
 
   // Union of predecessor sets: the destination keeps what it has, only a
   // missing predecessor is added. `more` names the source's block.
-  bool merge_parents(Frame& frame, Id parent, Id more = kNoParent) {
-    bool changed = add_parent(frame, parent);
+  bool merge_parents(Stage& stage, Id id, Id parent, Id more = kNoParent) {
+    bool changed = add_parent(stage, id, parent);
     if (more != kNoParent)
       for (std::uint32_t i = 0; i < _blocks[more].size; ++i)
-        changed = add_parent(frame, _pool[_blocks[more].at + i]) || changed;
+        changed = add_parent(stage, id, _pool[_blocks[more].at + i]) || changed;
     return changed;
   }
 
@@ -759,7 +760,7 @@ class CaretStacks {
     const Id to = node(stage, old.state, at, la, laMode,
                        {.indent = indent, .assumes = assumes})
                       .first;
-    merge_parents(_frames[to], old.parent, old.more);
+    merge_parents(stage, to, old.parent, old.more);
   }
 
   // The heads that refuse what they read, as the drive met the fault: an
@@ -768,7 +769,7 @@ class CaretStacks {
   bool errors() {
     forget_scans();
     _next.reset(_rank);
-    _faulting = true;
+    _asWritten = true;
     close(
         [&](Id head, const Token& held) -> std::span<const Token> {
           const Frame& frame = _frames[head];
@@ -790,7 +791,7 @@ class CaretStacks {
           const auto state = _frames[head].state;
           copy(_next, head, _frames[head].at, token, _table.mode[state]);
         });
-    _faulting = false;
+    _asWritten = false;
     // A reading refused before another is dropped by the drive, not
     // repaired: the fault is where the last reading standing was refused.
     TextOffset last = 0;
@@ -807,7 +808,7 @@ class CaretStacks {
                                 std::uint16_t laMode = kDeadState,
                                 Laid laid = {}) {
     const auto [to, fresh] = node(stage, state, at, la, laMode, laid);
-    if (!merge_parents(_frames[to], parent)) return;
+    if (!merge_parents(stage, to, parent)) return;
     // Fresh nodes are appended to active and read by the closure in due time.
     // Only a new edge of an old node can change reductions already read.
     if (_closing && &stage == &_closure) [[likely]] {
@@ -849,11 +850,15 @@ class CaretStacks {
   }
   // `id` gained predecessor `via`: it reads its reductions again by that edge
   // alone, and whatever the closure built on it reads through it in whole. A
-  // node not yet read will see the predecessor when it is.
+  // node not yet read will see the predecessor when it is, and one to read in
+  // whole already will; what rests on such a node may have been read since it
+  // was queued, so the walk goes on through it.
   void grown(Id id, Id via) {
-    if (marked(id) != kDone) return;
-    _queue.push_back(Reread{id, via});
+    const unsigned stood = marked(id);
+    if (stood == 0) return;
+    if (stood == kDone) _queue.push_back(Reread{id, via});
     if (_inner.empty()) return;
+    const std::uint32_t walk = next_walk();
     _todo.clear();
     _todo.push_back(id);
     while (!_todo.empty()) {
@@ -864,12 +869,26 @@ class CaretStacks {
       for (std::uint32_t e = _innerOf[at - _closureBase].head; e != kNoLink;
            e = _inner[e].next) {
         const Id above = _inner[e].above;
-        if (marked(above) != kDone) continue;
-        mark(above, kDone | kQueued);
-        _queue.push_back(Reread{above, kNoParent});
+        const unsigned read = marked(above);
+        if (read == 0) continue;
+        if (above >= _seen.size()) _seen.resize(_frames.size(), 0);
+        if (std::exchange(_seen[above], walk) == walk) continue;
+        if (read == kDone) {
+          mark(above, kDone | kQueued);
+          _queue.push_back(Reread{above, kNoParent});
+        }
         _todo.push_back(above);
       }
     }
+  }
+
+  // A stamp for `_seen` no frame holds.
+  std::uint32_t next_walk() {
+    if (++_epoch == 0) {
+      std::ranges::fill(_seen, 0u);
+      _epoch = 1;
+    }
+    return _epoch;
   }
 
   std::span<const Id> below(Id head, unsigned len, Id via = kNoParent) {
@@ -1279,11 +1298,11 @@ class CaretStacks {
   // The replay leaves such a condition to the candidates: the text it was
   // read on decides nothing past the edge.
   bool defers(const Token& token, unsigned gap) const {
-    return !_candidate && !_loose && !_faulting && reaches(token, gap);
+    return !_candidate && !_loose && !_asWritten && reaches(token, gap);
   }
   // ...and a guard, when any condition it asks is one of them.
   bool defers_any(const Token& token, std::uint32_t target) const {
-    if (_candidate || _loose || _faulting) return false;
+    if (_candidate || _loose || _asWritten) return false;
     for (const std::uint16_t condition : _table.conditions_of(target))
       if (reaches(token, condition + 1u)) return true;
     return false;
@@ -1412,7 +1431,16 @@ class CaretStacks {
     if (frame.laMode == mode) return {&held, 1};
     const auto& seen =
         _scanned[lex(mode, frame.at, frame.laid.indent.depth != 0)];
-    const auto stands = [&](const Token& t) { return takes(head, t); };
+    // A condition the replay would leave to the candidates decides a token the
+    // tape did not read here on the text as it is: the drive refused it.
+    const auto stands = [&](const Token& t) {
+      const bool faulting = _asWritten;
+      _asWritten = faulting || (_tape != nullptr && (t.begin != _tape->begin ||
+                                                    t.end != _tape->end));
+      const bool taken = takes(head, t);
+      _asWritten = faulting;
+      return taken;
+    };
     const bool inside = frame.laid.indent.depth != 0;
     unsigned weight = 0;
     // A trivia left where a terminal is refused is crossed, as the drive does.
@@ -1495,7 +1523,7 @@ class CaretStacks {
         const LrProduction& p = _table.prods[action.arg];
         if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
           continue;
-        if (p.guarded != 0 || p.len != 0) return true;
+        if (p.len != 0) return true;
         const std::uint32_t target =
             _table.go(static_cast<std::uint16_t>(at), p.lhs);
         if (defers_any(token, target)) return true;
@@ -1506,9 +1534,10 @@ class CaretStacks {
   }
 
   // Whether some stack under `head` shifts `token` after the reductions the
-  // table lays for it, a guarded shift as the drive asks it. What the replay
-  // leaves to the candidates counts as taken.
+  // table lays for it, a guarded shift or landing as the drive asks it. What
+  // the replay leaves to the candidates counts as taken.
   bool takes(Id head, const Token& token) {
+    const auto mayLand = [&](unsigned k) { return outcome(k + 1u, token); };
     return lr_graph_takes(
         _takes, head, [&](Id v) { return std::uint32_t{_frames[v].state}; },
         [&](Id v, auto&& f) { each_parent(_frames[v], f); },
@@ -1529,13 +1558,33 @@ class CaretStacks {
           const LrProduction& p = _table.prods[action.arg];
           if (p.gap != 0 && !defers(token, p.gap) && !condition(p.gap, token))
             return 0;
-          if (p.guarded != 0) return 1;
+          // An empty span's landing asks the token: what the text does not
+          // settle goes on to several states.
+          if (p.guarded != 0 && p.len == 0) {
+            const std::uint32_t target = _table.go(top, p.lhs);
+            if (defers_any(token, target)) return 1;
+            unsigned landings = 0;
+            _table.land_each(target, mayLand,
+                             [&](std::uint32_t) { ++landings; });
+            if (landings != 1) return landings == 0 ? 0 : 1;
+          }
           prod = action.arg;
           len = p.len;
           return -1;
         },
-        [&](std::uint32_t from, std::uint32_t prod) {
-          return _table.go(from, _table.prods[prod].lhs);
+        [&](std::uint32_t prod) { return _table.prods[prod].guarded != 0; },
+        [&](std::uint32_t from, std::uint32_t prod, std::uint32_t first) {
+          std::uint32_t to = kInvalidSymbol;
+          const auto landed = [&](std::uint32_t state) { to = state; };
+          const std::uint32_t target = _table.go(from, _table.prods[prod].lhs);
+          if (first == kLrNoFirst)
+            _table.land_each(target, mayLand, landed);
+          else
+            _table.land_each(
+                target,
+                [&](unsigned k) { return _table.holds(first, k) ? 2u : 0u; },
+                landed);
+          return to;
         });
   }
 
@@ -1573,31 +1622,60 @@ class CaretStacks {
     }
   }
 
-  // Asked once per mode and span: the heads of one closure share both.
-  bool trivia_to(std::uint16_t mode, TextOffset at, TextOffset to,
-                 std::uint32_t depth) {
-    const bool inside = depth != 0;
+  // Whether only trivia stands between `at` and `to` for `head`. Asked once per
+  // mode and span, which the heads of one closure share, unless a terminal the
+  // mode flags stands there: the stacks of the head decide that one.
+  bool trivia_to(Id head, std::uint16_t mode, TextOffset at, TextOffset to) {
+    const bool inside = _frames[head].laid.indent.depth != 0;
     for (const Crossed& c : _crossed)
       if (c.mode == mode && c.inside == inside && c.at == at && c.to == to)
         return c.ok;
-    const bool ok = trivia_scan(mode, at, to, inside);
-    _crossed.push_back(Crossed{mode, inside, at, to, ok});
+    bool asked = false;
+    const bool ok = trivia_scan(mode, at, to, inside, nullptr, [&](Token& la) {
+      asked = true;
+      return refused_in_place(head, mode, la);
+    });
+    if (!asked) _crossed.push_back(Crossed{mode, inside, at, to, ok});
     return ok;
   }
 
-  // `tail` takes the last token the walk read.
+  // `la` read again in place while `head` refuses it, as the drive reads it: a
+  // refused terminal may leave its position to a trivia.
+  bool refused_in_place(Id head, std::uint16_t mode, Token& la) {
+    return refused(
+        mode, la, [&](const Token& t) { return takes(head, t); },
+        [&](std::span<const SymbolId> skip, TextOffset from) {
+          TextOffset halt = 0;
+          const Scan t = _table.lexWithout(
+              _text.data(), static_cast<TextOffset>(_text.size()), mode, from,
+              skip, halt);
+          return t.term == kInvalidSymbol || t.end <= from
+                     ? Token{from, from, kInvalidSymbol}
+                     : Token{from, t.end, t.term};
+        });
+  }
+
+  // Whether only trivia runs from `at` to `to`. `tail` takes the last token the
+  // walk read; `refuses(la)` reads a token that is no trivia again, where a
+  // stack can refuse it.
+  template <class Refuses>
   bool trivia_scan(std::uint16_t mode, TextOffset at, TextOffset to,
-                   bool inside, Trivia* tail = nullptr) {
+                   bool inside, Trivia* tail, Refuses&& refuses) {
     while (at < to) {
       if (ignored(mode, at)) {
         ++at;
         continue;
       }
       std::uint32_t count = 0;
-      const Scan next = elect(mode, at, false, count);
-      if (next.term == kInvalidSymbol || next.end <= at ||
-          !crosses(next.term, inside))
-        return false;
+      Scan next = elect(mode, at, false, count);
+      if (next.term == kInvalidSymbol || next.end <= at) return false;
+      if (!crosses(next.term, inside)) {
+        Token la{at, next.end, next.term};
+        if (!refuses(la) || la.sym == kInvalidSymbol || la.end <= at ||
+            !crosses(la.sym, inside))
+          return false;
+        next = Scan{la.end, la.sym};
+      }
       if (next.end > to) return ends_before_word(mode, at, to, next.term);
       if (tail != nullptr) *tail = Trivia{at, next};
       at = next.end;
@@ -1670,7 +1748,10 @@ class CaretStacks {
   std::unordered_map<std::uint64_t, std::uint32_t> _grown;
   std::vector<char> _refuted;
   std::vector<char> _dead;
-  bool _faulting = false;
+  // Conditions read the text as it is: none is left to the candidates.
+  bool _asWritten = false;
+  // The leaf the closure in hand replays, what the tape says was read there.
+  const CstLeaf* _tape = nullptr;
   SymbolId _indent = 0, _dedent = 0;
   bool _bracketed = false;
   std::vector<SymbolId> _implied;
@@ -1719,7 +1800,7 @@ class CaretStacks {
   TextOffset _edgeGapFrom = 0;
   Id _singleton = 0;
   std::uint32_t _epoch = 0;
-  // The last unwind walk that passed each frame.
+  // The last walk that passed each frame.
   std::vector<std::uint32_t> _seen;
   Token _virt{};
   Token _rival{};
@@ -2257,7 +2338,10 @@ void lr_next_features_at(const LrCaretTable& table,
           table.lex(splice.data(), static_cast<TextOffset>(splice.size()),
                     commentMode, 0, h);
       halt = h;
-      return s.term == comment.scan.term && s.end == at - comment.begin;
+      // A terminal refused where the comment stands leaves it to a trivia.
+      return (s.term == comment.scan.term ||
+              (s.term < table.terms.size() && table.terms[s.term].trivia)) &&
+             s.end == at - comment.begin;
     });
   };
   // The sample words a terminal that spells none is read as under a mode.

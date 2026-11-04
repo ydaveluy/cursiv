@@ -7,6 +7,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
+#include "engines/shared/CaretOffers.hpp"
 #include "dedentrunflatll/generated/FlatLl/Module.hpp"
 #include "dedentrunll/generated/Ll/Module.hpp"
 #include "delimll/generated/Ll/Module.hpp"
@@ -213,6 +215,28 @@ void an_indentation_error_says_so() {
       for (const auto& d : result.diagnostics)
         CHECK(cursiv::repair_message(p->getGrammar(), d, text) == message);
     }
+}
+
+// A caret on or past a line a form feed starts reads what it reads without one.
+void a_form_feed_leaves_a_caret_its_reading() {
+  const auto ll = tllindent::generated::Ll::create_parser();
+  const auto lr = tindent::generated::G::create_parser();
+  for (const auto& [fed, plain, behind] :
+       {std::tuple<std::string_view, std::string_view, std::size_t>{
+            "a:\n\f  b\n", "a:\n  b\n", 0},
+        {"a:\n\f  b\n", "a:\n  b\n", 2},
+        {"a:\n  b\n\f  c\n", "a:\n  b\n  c\n", 0},
+        {"a:\n  b\n  \f  c\n", "a:\n  b\n  c\n", 2},
+        {"a:\n  \f\f  b:\n    c\nd\n", "a:\n  b:\n    c\nd\n", 0}}) {
+    const std::string left(fed), right(plain);
+    for (const cursiv::Parser* const p : {ll.get(), lr.get()})
+      CHECK(caret_offers::offered(*p, left,
+                                  static_cast<cursiv::TextOffset>(left.size() -
+                                                                  behind)) ==
+            caret_offers::offered(*p, right,
+                                  static_cast<cursiv::TextOffset>(right.size() -
+                                                                  behind)));
+  }
 }
 
 // A form feed starts a line's indentation again, as in Python: the blanks
@@ -572,7 +596,8 @@ int main() {
       *tllindent::generated::Ll::create_parser(),
       *tindent::generated::G::create_parser(),
       {"a:\n  b\n  c\n", "a:\n  b\nc\n", "a:\n  b:\n    c\n  d\ne\n",
-       "a:\n  b:\n    c\n", "a\nb:\n  c\n"});
+       "a:\n  b:\n    c\n", "a\nb:\n  c\n", "a [\n  b\n  c\n]\nd\n",
+       "a:\n  b [ c\n      d\n  ]\n  e\n"});
   explicit_statement_newlines_win_over_their_trivia_twin();
   dropped_dedents_split_no_token();
   muted_levels_lay_no_dedent_at_the_end();
@@ -583,6 +608,7 @@ int main() {
   an_invented_indent_opens_a_level();
   an_indentation_error_says_so();
   a_form_feed_starts_the_indentation_again();
+  a_form_feed_leaves_a_caret_its_reading();
   a_stray_indent_costs_one_fault();
   an_invented_bracket_moves_the_levels_of_the_lines_behind();
   an_invented_block_closed_at_once_ends();

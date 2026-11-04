@@ -155,14 +155,14 @@ void run() {
   stable_set_classes();
   deep_entry_chains();
   using namespace cursiv;
-  const LrAction shift{.term = 2, .arg = 7, .site = 9, .outer = 11};
+  const LrAction shift{.term = 2, .arg = 7, .alts = 9};
   const LrAction reduce{.term = 2, .kind = LrActionKind::reduce, .arg = 5};
   std::vector<std::vector<LrAction>> rows{
       {}, {shift, reduce}, {shift, reduce}, {shift}, {shift}, {shift},
       {shift}, {shift}, {reduce, shift}, {reduce}, {}};
   rows[4][0].term = 4;
-  rows[5][0].site = 10;
-  rows[6][0].outer = 12;
+  rows[5][0].alts = 10;
+  rows[6][0].exact = true;
   rows[7][0].arg = 8;
   LrBuildTable a;
   a.nstates = static_cast<std::uint16_t>(rows.size());
@@ -495,7 +495,7 @@ void programs_preserve_order_and_shift_effects() {
   a.cfg.nterms = 4;
   a.cfg.nnts = 3;
   a.nstates = 7;
-  const LrAction shift{.term = 1, .arg = 2, .site = 3, .outer = 4};
+  const LrAction shift{.term = 1, .arg = 2, .alts = 3};
   const LrAction reduce{.term = 1, .kind = LrActionKind::reduce, .arg = 7};
   std::vector<std::vector<LrAction>> rows{
       {reduce, shift}, {reduce, shift}, {reduce, shift}, {reduce, shift}, {},

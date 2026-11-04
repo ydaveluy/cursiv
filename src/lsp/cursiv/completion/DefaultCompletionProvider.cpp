@@ -97,14 +97,18 @@ struct ItemKeyHash {
 };
 
 // A data rule reads tokens and writes nothing: no member, no node of its own.
+// The records of `[from, to)` read so already, which an inner rule's are.
 [[nodiscard]] bool writes_nothing(const Cst& cst, const Grammar& grammar,
-                                  NodeId record) {
-  for (NodeId k = cst.subtree_begin(record); k < record; ++k) {
+                                  NodeId record, NodeId from, NodeId to) {
+  const auto writes = [&](NodeId k) {
     const CstNode& n = cst[k];
-    if (n.hidden) continue;
-    if (!grammar.recordFeature(n).empty()) return false;
-    if (n.subtreeSize > 1 && grammar.recordRule(n).empty()) return false;
-  }
+    return !n.hidden && (!grammar.recordFeature(n).empty() ||
+                         (n.subtreeSize > 1 && grammar.recordRule(n).empty()));
+  };
+  for (NodeId k = cst.subtree_begin(record); k < from; ++k)
+    if (writes(k)) return false;
+  for (NodeId k = to; k < record; ++k)
+    if (writes(k)) return false;
   return true;
 }
 
@@ -252,12 +256,16 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
   if (leaf.hidden || leaf.begin > at || at >= leaf.end) return std::nullopt;
   // A data rule of one token has no record but its leaf.
   NodeId found = grammar.recordIsDataRule(cst[leaf.id]) ? leaf.id : kNoNode;
+  NodeId from = leaf.id;
+  NodeId to = leaf.id;
   for (NodeId i = leaf.id + 1; i < cst.size(); ++i) {
     if (!cst.contains(i, leaf.id)) continue;
     if (grammar.recordRule(cst[i]).empty() ||
-        !writes_nothing(cst, grammar, i))
+        !writes_nothing(cst, grammar, i, from, to))
       break;
     found = i;
+    from = cst.subtree_begin(i);
+    to = i;
   }
   if (found == kNoNode) return std::nullopt;
   return std::pair{cst[found].begin, cst[found].end};

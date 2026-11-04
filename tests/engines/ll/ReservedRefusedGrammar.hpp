@@ -8,6 +8,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   bool keyword = false;
   bool dash = false;
   string_view name;
+  vector<Item*> kids;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
@@ -58,12 +59,34 @@ struct Base : cursiv::GrammarSpec {
   struct Note : rule<create<Item>(lit<"note:"> +
                                   ((gap::none + kw<"N"> + lit<"q">) |
                                    (lit<"k"> + lit<"m">)))> {};
+  // A literal a merged state flags, tied with a trivia: the state behind the name
+  // serves a caller that takes `#x`, and one where it is a comment.
+  struct Hash : terminal<lit<"#"> + many(w)> {};
+  struct Value : rule<ref<NAME>> {};
+  struct Marked : rule<create<Item>(lit<"marked:"> + ref<Value> + lit<"#x"> +
+                                    lit<";">)> {};
+  struct Plain
+      : rule<create<Item>(lit<"plain:"> + ref<Value> + lit<";">)> {};
+  // Two arms told apart past the word that refuses or bounds the head: a caret
+  // behind that word reads the arm the parse reads.
+  struct Bare : terminal<kw<"bare">> {};
+  struct Head : rule<create<Item>(
+                    lit<"head:"> +
+                    ((lit<"z:"> + ref<IN> + lit<"-"> + ref<NAME> + lit<"a!">) |
+                     (lit<"z:"> + ref<NAME> + lit<"-"> + ref<NAME> + lit<"b!">) |
+                     (lit<"y:"> + ref<Bare> + lit<"-"> + lit<"a!">) |
+                     (lit<"y:"> + ref<NAME> + lit<"-"> + lit<"b!">)))> {};
+  // A dangling `else`: the mark goes to the deepest level that stands open.
+  struct Dangling : rule<create<Item>(lit<"?"> +
+                                      option(append<&Item::kids>(ref<Dangling>)) +
+                                      option(flag<&Item::dash>(lit<":">)))> {};
+  struct Pending : rule<lit<"pending:"> + ref<Dangling>> {};
   struct Root : rule<create<Doc>(many(append<&Doc::items>(
                     ref<Part> | ref<Rivals> | ref<Glued> | ref<Cell> |
-                    ref<Note>)))> {};
+                    ref<Note> | ref<Marked> | ref<Plain> | ref<Head> | ref<Pending>)))> {};
   using entry = Root;
   using ignored = WS;
-  using hidden = list<Hushed>;
+  using hidden = list<Hushed, Hash>;
 };
 struct Ll : Base {};
 struct Lr : Base {};

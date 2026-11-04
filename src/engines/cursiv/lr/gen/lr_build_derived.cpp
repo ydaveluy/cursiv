@@ -16,7 +16,6 @@
 #include "cursiv/lr/gen/lr_build_fold.hpp"
 #include "cursiv/lr/gen/lr_build_lex.hpp"
 #include "cursiv/lr/gen/lr_build_passes.hpp"
-#include "cursiv/lr/gen/lr_nullable.hpp"
 #include "cursiv/lr/table/LrAction.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/shared/gen/LexFirstByte.hpp"
@@ -77,30 +76,6 @@ struct LrDeriving {
 
   ElementId canonical(ElementId row) const {
     return row == kNoElement ? kNoElement : sites[row];
-  }
-
-  // Unvisited is not a bare caller: once reached, a missing member agrees or
-  // disagrees like a named one, and disagreement sticks.
-  struct Agreement {
-    enum Kind : std::uint8_t { unseen, unique, ambiguous } kind = unseen;
-    ElementId site = kNoElement;
-
-    bool add(const Agreement& from) {
-      if (from.kind == unseen || kind == ambiguous) return false;
-      if (kind == unseen) {
-        *this = from;
-        return true;
-      }
-      if (from.kind == unique && from.site == site) return false;
-      kind = ambiguous;
-      site = kNoElement;
-      return true;
-    }
-    ElementId agreed() const { return kind == unique ? site : kNoElement; }
-  };
-
-  Agreement at(ElementId row) const {
-    return {Agreement::unique, canonical(row)};
   }
 
   // The nonterminals a laid row's record may reduce to. A production that may
@@ -171,78 +146,12 @@ struct LrDeriving {
     }
   }
 
-  // A call without a row inherits its caller's agreement; an explicit row
-  // answers for itself.
-  std::vector<Agreement> rule_sites() const {
-    const auto& c = a.cfg;
-    std::vector<Agreement> found(c.nnts);
-    found[0] = at(kNoElement);
-    for (bool moved = true; moved;) {
-      moved = false;
-      for (std::uint16_t k = 0; k < c.nprods; ++k) {
-        const LrLowProd& q = c.prods[k];
-        c.each_nt(q, [&](unsigned i, std::uint16_t into) {
-          const ElementId row = c.row_at(q, i);
-          const Agreement source = row != kNoElement ? at(row)
-              : q.len == 1 && q.node != kNoRow ? at(q.node) : found[q.lhs];
-          moved = found[into].add(source) || moved;
-        });
-      }
-    }
-    return found;
-  }
-
-  struct TerminalSites {
-    std::vector<Agreement> own;
-    std::vector<Agreement> open;
-  };
-
-  TerminalSites terminal_sites() const {
-    const auto& c = a.cfg;
-    const auto callers = rule_sites();
-    // Skip nullable calls to reach the first direct terminal. An EOF-only
-    // reduction makes no call nullable here.
-    const auto nullable = lr_nullable(c, true);
-    TerminalSites found{std::vector<Agreement>(c.nterms),
-                        std::vector<Agreement>(c.nterms)};
-    for (std::uint16_t k = 0; k < c.nprods; ++k) {
-      const auto& q = c.prods[k];
-      for (unsigned i = 0; i < q.len; ++i) {
-        const auto sym = c.sym_at(q, i);
-        if (is_term(sym)) {
-          found.own[sym].add(at(c.row_at(q, i)));
-          // An unknown caller must not borrow another head's member.
-          found.open[sym].add(callers[q.lhs].kind == Agreement::unseen
-                                  ? at(kNoElement)
-                                  : callers[q.lhs]);
-          break;
-        }
-        if (!nullable[nt_index(sym)]) break;
-      }
-    }
-    return found;
-  }
-
-  ElementId feature_site(std::uint16_t term, ElementId raw, ElementId outer,
-                         const TerminalSites& terms) const {
-    ElementId site = canonical(raw);
-    if (site == kNoElement) site = terms.own[term].agreed();
-    if (site == kNoElement) site = terms.open[term].agreed();
-    if (site == kNoElement) site = canonical(outer);
-    return site;
-  }
-
-  // What the readings of `term` say to a caret: each site once, and no site only
+  // What the readings of a token say to a caret: each site once, and no site only
   // where none of them names one.
-  std::vector<LrCaretSite> sites_read(std::uint16_t term, ElementId raw,
-                                      ElementId outer, std::uint16_t alts,
-                                      bool entered,
-                                      const TerminalSites& terms) const {
-    if (alts == 0) return {{feature_site(term, raw, outer, terms), entered}};
+  std::vector<LrCaretSite> sites_read(std::uint32_t alts) const {
     std::vector<LrCaretSite> out;
     for (const LrCaretSite& reading : a.siteSets[alts]) {
-      const ElementId site =
-          feature_site(term, reading.site, kNoElement, terms);
+      const ElementId site = canonical(reading.site);
       if (site == kNoElement) continue;
       const auto known = std::ranges::find(out, site, &LrCaretSite::site);
       if (known != out.end())
@@ -256,7 +165,7 @@ struct LrDeriving {
 
   // The continuations of each state, read off its shifts, less end of input,
   // trivia and the tokens no author types.
-  void expect(const TerminalSites& terms, LrDerivedRows& rows) const {
+  void expect(LrDerivedRows& rows) const {
     // Distinct pairs in first appearance; a state lists each once.
     std::map<std::array<std::uint16_t, 4>, std::uint16_t> pooled;
     for (std::uint16_t s = 0; s < a.nstates; ++s) {
@@ -282,8 +191,7 @@ struct LrDeriving {
             rows.expectItems.push_back(at->second);
         };
         if (act.kind != LrActionKind::guard) {
-          for (const LrCaretSite& read : sites_read(act.term, act.site, act.outer,
-                                                    act.alts, act.entered, terms))
+          for (const LrCaretSite& read : sites_read(act.alts))
             item(read.site, kNoElement, read.entered);
           continue;
         }
@@ -297,9 +205,7 @@ struct LrDeriving {
         std::vector<Landed> landed;
         for (std::size_t v = 0; v < guard.to.size(); ++v)
           if (guard.to[v] != LrGuard::kNoState)
-            for (const LrCaretSite& read :
-                 sites_read(act.term, guard.site[v], guard.outer[v],
-                            guard.alts[v], guard.entered[v] != 0, terms))
+            for (const LrCaretSite& read : sites_read(guard.alts[v]))
               landed.push_back({read.site, guard.to[v], read.entered});
         const bool alike = std::ranges::all_of(landed, [&](const auto& l) {
           return l.site == landed.front().site;
@@ -331,7 +237,7 @@ void lr_derive_tables(LrBuildTable& a, std::span<const ElementId> sites) {
   if (a.nconflicts != 0 || a.multiCand) d.goto_classes(r);
   d.row_lhs(r, sites.size());
   r.shiftTerm = lr_shift_terms(a);
-  d.expect(d.terminal_sites(), r);
+  d.expect(r);
   r.skipSet = lex_skip_set(LrLexView{a});
   lr_derive_lexical(a, r);
   d.repair_tables(r);

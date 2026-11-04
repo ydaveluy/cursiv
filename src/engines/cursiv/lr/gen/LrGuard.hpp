@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "cursiv/grammar/ElementId.hpp"
 
 namespace cursiv {
 
@@ -15,12 +14,8 @@ struct LrGuard {
   // with no landing.
   std::vector<std::uint8_t> conds;
   std::vector<std::uint16_t> to;
-  // Per outcome, the call site and the enclosing rule's an action carries.
-  std::vector<ElementId> site;
-  std::vector<ElementId> outer;
-  // ...and the set of sites where its readings name several.
-  std::vector<std::uint16_t> alts;
-  std::vector<std::uint8_t> entered;
+  // Per outcome, the set of sites its readings fill.
+  std::vector<std::uint32_t> alts;
 
   bool operator==(const LrGuard&) const = default;
 
@@ -39,10 +34,7 @@ void lr_guard_key(const LrGuard& p, F&& name, std::vector<std::uint32_t>& key) {
   key.push_back(0xffffffffu);
   for (const std::uint16_t to : p.to)
     key.push_back(to == LrGuard::kNoState ? 0xffffffffu : name(to));
-  key.insert(key.end(), p.site.begin(), p.site.end());
-  key.insert(key.end(), p.outer.begin(), p.outer.end());
   key.insert(key.end(), p.alts.begin(), p.alts.end());
-  key.insert(key.end(), p.entered.begin(), p.entered.end());
 }
 
 }  // namespace cursiv

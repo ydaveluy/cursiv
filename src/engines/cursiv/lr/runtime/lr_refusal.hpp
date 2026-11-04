@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cursiv/lr/runtime/LrWalkTail.hpp"
+#include "cursiv/lr/runtime/lr_guard.hpp"
 #include "cursiv/shared/table/FlatMap.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
@@ -49,15 +50,18 @@ struct LrTakesScratch {
   }
 };
 
-// Whether one stack below `vertex` takes the token in hand after its plain
+// Whether one stack below `vertex` takes the token in hand after its
 // reductions. `act(s, prod, len)` is 1 where state `s` takes it, 0 where it
 // refuses it, -1 where it reduces by `prod` of `len` symbols, which lands at
-// `target(s, prod)`. A pending reading has one pushed state over a vertex:
-// reductions inside that tail stay local, those reaching the graph open a new
-// reading, and none uses the machine stack.
-template <class Id, class State, class Below, class Act, class Target>
+// `target(s, prod, first)`, `kInvalidSymbol` for nowhere. `first` is the state
+// the span opened on where `opened(prod)` says the landing reads it, and
+// `kLrNoFirst` otherwise or for an empty span. A pending reading has one pushed
+// state over a vertex: reductions inside that tail stay local, those reaching
+// the graph open a new reading, and none uses the machine stack.
+template <class Id, class State, class Below, class Act, class Opened,
+          class Target>
 bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
-                    Below&& below, Act&& act, Target&& target) {
+                    Below&& below, Act&& act, Opened&& opened, Target&& target) {
   using Pending = typename LrTakesScratch<Id>::Pending;
   std::vector<Pending>& pending = w.pending;
   pending.assign(1, Pending{vertex, kInvalidSymbol});
@@ -78,18 +82,31 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
       if (taken > 0) return true;
       if (taken == 0) break;
       if (len <= above.size()) {
+        const std::uint32_t first =
+            len != 0 ? above[above.size() - len] : kLrNoFirst;
         above.pop(len);
-        const std::uint32_t to =
-            target(above.size() != 0 ? above.back() : state(p.vertex), prod);
+        const std::uint32_t to = target(
+            above.size() != 0 ? above.back() : state(p.vertex), prod, first);
         if (to == kInvalidSymbol) break;
         above.push(to);
         continue;
       }
+      const auto land = [&](Id u, std::uint32_t first) {
+        const std::uint32_t to = target(state(u), prod, first);
+        if (to != kInvalidSymbol &&
+            w.seen.emplace(std::uint64_t{u} << 32 | to).second) {
+          w.seenAny = true;
+          pending.push_back({u, to});
+        }
+      };
       // At each remaining depth a shared vertex is visited once, however
       // many paths of the popped production reach it. In particular a
-      // diamond chain costs its graph, not its exponentially many paths.
+      // diamond chain costs its graph, not its exponentially many paths. A
+      // landing that reads where its span opened stops one depth short, on
+      // those states, and goes down each of their edges.
+      const bool reads = opened(prod);
       layer.assign(1, p.vertex);
-      for (std::uint32_t left = len - above.size();
+      for (std::uint32_t left = len - above.size() - (reads ? 1u : 0u);
            left != 0 && !layer.empty(); --left) {
         next.clear();
         w.begin_step();
@@ -99,26 +116,17 @@ bool lr_graph_takes(LrTakesScratch<Id>& w, Id vertex, State&& state,
           });
         layer.swap(next);
       }
-      for (auto at = layer.rbegin(); at != layer.rend(); ++at) {
-        const std::uint32_t to = target(state(*at), prod);
-        if (to != kInvalidSymbol &&
-            w.seen.emplace(std::uint64_t{*at} << 32 | to).second) {
-          w.seenAny = true;
-          pending.push_back({*at, to});
-        }
+      if (reads) {
+        for (const Id v : layer)
+          below(v, [&](Id u) { land(u, state(v)); });
+      } else {
+        for (auto at = layer.rbegin(); at != layer.rend(); ++at)
+          land(*at, kLrNoFirst);
       }
       break;
     }
   }
   return false;
-}
-
-// The same, in room of its own.
-template <class Id, class State, class Below, class Act, class Target>
-bool lr_graph_takes(Id vertex, State&& state, Below&& below, Act&& act,
-                    Target&& target) {
-  LrTakesScratch<Id> w;
-  return lr_graph_takes(w, vertex, state, below, act, target);
 }
 
 // Whether an arm of a cell of several takes a token, from `state` and through

@@ -1759,6 +1759,53 @@ std::vector<std::uint16_t> loop_exits(const Built& b) {
   return exits;
 }
 
+// The terminals a reading takes from `from` before it reads anything, over any
+// caller and short of the choice `stop`. False where a condition stands on the
+// way.
+bool reads_short_of(const LlAtnView& atn, std::uint32_t from,
+                    std::uint32_t stop, DynSet& out) {
+  std::vector<std::uint8_t> seen(atn.nstates, 0);
+  std::vector<std::uint32_t> todo{from};
+  while (!todo.empty()) {
+    const std::uint32_t s = todo.back();
+    todo.pop_back();
+    if (s == stop || seen[s] != 0) continue;
+    seen[s] = 1;
+    const LlAtnState& q = atn.state(s);
+    if (q.kind == LlAtnKind::ruleStop)
+      todo.insert(todo.end(), atn.callerAt + atn.callerBase[q.rule],
+                  atn.callerAt + atn.callerBase[q.rule + 1]);
+    for (const LlAtnEdge& e : atn.outgoing(s)) {
+      if (e.kind == LlEdgeKind::condition) return false;
+      if (e.kind == LlEdgeKind::atom)
+        out.set(e.label);
+      else
+        todo.push_back(e.target);
+    }
+  }
+  return true;
+}
+
+// A repetition's way out that reads a token only through this same choice in a
+// caller, a dangling `else`, reads nothing a turn does not: the body read here
+// ends where the way out starts, and from there the same empty moves lead down
+// to that caller. The first arm that admits the text wins, so the token is the
+// turn's, whatever follows it, and no closure walks the levels that stand open.
+void give_the_turn_what_it_dominates(Built& b, const LlAtnView& atn,
+                                     const LlDecision& dec) {
+  const LlNode& n = b.cfg.nodes[dec.node];
+  if (n.kind != LlShape::rep || b.nullable[n.sym]) return;
+  DynSet& out = b.laSet[dec.set + 1];
+  DynSet both = out;
+  both &= b.laSet[dec.set];
+  if (both.none()) return;
+  DynSet read;
+  const std::uint32_t target =
+      atn.edge(atn.state(dec.state).edge + 1u).target;
+  if (!reads_short_of(atn, target, dec.state, read)) return;
+  if (!read.intersects(both)) out.andnot(both);
+}
+
 // One token separates the arms, or the choice is left to the simulation. What
 // the static separation cannot do costs a closure per parse; what it can is a
 // switch.
@@ -1789,6 +1836,7 @@ void settle_decisions(Built& b, const LlBuildOptions& opt) {
     dec.set = base;
     // A choice the entry never reaches is never asked, and has no graph.
     if (!b.liveRules[dec.rule]) continue;
+    if (opt.staticPredict) give_the_turn_what_it_dominates(b, atn, dec);
     bool disjoint = opt.staticPredict;
     const unsigned nalts = b.cfg.decisionBuild[d].nalts;
     for (unsigned i = 0; disjoint && i < nalts; ++i)

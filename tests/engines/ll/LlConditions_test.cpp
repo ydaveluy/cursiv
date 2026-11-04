@@ -14,6 +14,7 @@
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/ll/gen/ll_build.hpp"
 #include "cursiv/ll/runtime/LlPredictionSession.hpp"
+#include "cursiv/ll/runtime/LlPredictionWork.hpp"
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
 #include "cursiv/ll/runtime/ll_repair.hpp"
@@ -141,6 +142,34 @@ void predictions_keep_the_gap_and_embedded_section() {
     CHECK(at(0, 1) == 0);
     CHECK(at(0, 2) == 1);
     CHECK(at(0, 1) == 0);
+  }
+}
+
+// A grammar's conditions cost a choice that meets none of them nothing: the
+// levels of an unclosed nest are refused by the first that reads to its end.
+void a_choice_that_meets_no_condition_reads_a_nest_once() {
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  std::uint64_t before = 0;
+  for (const unsigned n : {256u, 512u, 1024u}) {
+    std::string text = "nest:";
+    for (unsigned i = 0; i < n; ++i) text += "1+(";
+    cursiv::LlPredictionWork::current() = {};
+    const auto a = ll->parse(text + "1");
+    const std::uint64_t after = cursiv::LlPredictionWork::current().tokens;
+    CHECK(a.accepted && !a.diagnostics.empty());
+    const bool within = before == 0 || after <= 2.2 * before;
+    CHECK(within);
+    if (!within)
+      std::printf("nest of %u read %llu tokens\n", n,
+                  static_cast<unsigned long long>(after));
+    before = after;
+  }
+  for (const std::string_view text :
+       {"nest:1", "nest:1!", "nest:(1)", "nest:(1)!", "nest:1+(2)!+(3+(4!))",
+        "nest:((1)!)!"}) {
+    CHECK(ll->parse(text).diagnostics.empty());
+    CHECK(lr->parse(text).diagnostics.empty());
   }
 }
 
@@ -453,6 +482,7 @@ int main() {
   predicates_survive_lowering_and_prevent_static_token_decisions();
   conditions_past_the_table_are_refused();
   predicates_and_implied_tokens_match_the_table_engine();
+  a_choice_that_meets_no_condition_reads_a_nest_once();
   a_refused_token_is_read_again_and_a_named_one_stands();
   a_normal_continuation_blocks_an_implied_token();
   prediction_crosses_only_the_active_trivia();

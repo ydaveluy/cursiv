@@ -310,9 +310,8 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
     }
   // Past the terminal the first reading would not have taken, the replay still
   // stands: the next items, and a caret inside one of them.
-  const std::vector<std::string> item{"-",      "IN",    "NAME",
-                                      "cell:",  "glued:", "note:",
-                                      "rivals:"};
+  const std::vector<std::string> item{
+      "-", "IN", "NAME", "cell:", "glued:", "head:", "marked:", "note:", "pending:", "plain:", "rivals:"};
   for (const std::string& text :
        {std::string{"rivals: X c"}, std::string{"rivals: X a c"}, far + " c"}) {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
@@ -345,9 +344,28 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
   }
   // A keyword refused where a trivia ties leaves the position to the trivia,
   // and completion reads on past it.
-  CHECK(parse_clean(*lr, "note: N k m"));
-  CHECK(offered(*lr, "note: N k m", 10) == std::vector<std::string>{"m"});
+  for (const cursiv::Parser* p : {ll.get(), lr.get()}) {
+    CHECK(parse_clean(*p, "note: N k m"));
+    CHECK(parse_clean(*p, "note: N N k m"));
+    CHECK(offered(*p, "note: N k m", 10) == std::vector<std::string>{"m"});
+    // What stands past the trivia reads no arm: the read is given back, and the
+    // trivia goes with it.
+    const auto refused = p->parse("note: N z");
+    CHECK(refused.accepted && !refused.diagnostics.empty());
+  }
   CHECK(parse_clean(*ll, "note: k m") && parse_clean(*lr, "note: k m"));
+  // ...and over that trivia to the caret behind it, each stack by its own
+  // reading: `#x` is a comment behind `plain:`, the literal behind `marked:`.
+  CHECK(offered(*lr, "note: N k m", 8) == std::vector<std::string>{"k"});
+  CHECK(offered(*lr, "note: N k m", 7) == std::vector<std::string>{"k"});
+  CHECK(parse_clean(*lr, "plain: y #x ;") && parse_clean(*ll, "plain: y #x ;"));
+  CHECK(parse_clean(*lr, "marked: y #x ;"));
+  CHECK(offered(*lr, "plain: y #x ;", 12) == std::vector<std::string>{";"});
+  CHECK(offered(*ll, "plain: y #x ;", 12) == std::vector<std::string>{";"});
+  CHECK(offered(*lr, "plain: y #x plain: y;", 12) ==
+        std::vector<std::string>{";"});
+  CHECK(offered(*lr, "marked: y #x ;", 13) == std::vector<std::string>{";"});
+  CHECK(offered(*lr, "marked: y #x ;", 10) == std::vector<std::string>{"#x"});
   // What a run with ties answered is no answer to a run without.
   for (const char* text : {"rivals: Xa b rivals: X a c",
                            "rivals: X a c rivals: Xa b"})
@@ -360,7 +378,8 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
         "rivals: X a c rivals: X a b", "rivals:  X  a  c", "rivals: X",
         "rivals: X a", "glued: W", "glued: W!", "glued: W?", "glued:W q",
         "cell: V !", "cell: V ?", "cell:V q", "cell:V r", "cell:e1V q",
-        "cell:e2V r", "note: k m", "note:N q"})
+        "cell:e2V r", "note: k m", "note:N q", "note: N k m", "note: N", "head: z: in",
+        "head: y: bare- a!", "head: y: bare- b!"})
     for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
       const auto a = offered(*ll, text, at), b = offered(*lr, text, at);
       CHECK(a == b);
@@ -368,6 +387,103 @@ void completion_keeps_the_terminals_behind_a_refused_keyword() {
         std::printf("caret differs: [%s|%s]\n", text.substr(0, at).c_str(),
                     text.substr(at).c_str());
     }
+}
+
+// A token behind which the caret has read on is the token the parse read: the
+// word that refuses its keyword stands before the caret, and what stands past
+// the caret may still settle it.
+void a_caret_reads_the_word_a_keyword_is_refused_by() {
+  const auto ll = tllrefused::generated::Ll::create_parser();
+  const auto lr = tllrefused::generated::Lr::create_parser();
+  const auto both = [&](const std::string& text, cursiv::TextOffset at,
+                        const std::vector<std::string>& next) {
+    const auto a = offered(*ll, text, at), b = offered(*lr, text, at);
+    CHECK(a == next);
+    CHECK(b == next);
+    if (a != next || b != next) {
+      std::printf("[%s|%s] LL:", text.substr(0, at).c_str(),
+                  text.substr(at).c_str());
+      for (const std::string& s : a) std::printf(" %s", s.c_str());
+      std::printf(" LR:");
+      for (const std::string& s : b) std::printf(" %s", s.c_str());
+      std::printf("\n");
+    }
+  };
+  const auto end = [&](const std::string& text,
+                       const std::vector<std::string>& next) {
+    both(text, static_cast<cursiv::TextOffset>(text.size()), next);
+  };
+  const std::vector<std::string> a{"a!"}, b{"b!"}, ab{"a!", "b!"};
+  end("head: z: in-place ", b);
+  end("head: z: in-other ", a);
+  end("head: z: name-other ", b);
+  CHECK(!parse_clean(*ll, "head: z: in-place a!"));
+  CHECK(parse_clean(*ll, "head: z: in-place b!"));
+  // Behind the bound, as behind the refusal: `bare` reads whole or not at all.
+  end("head: y: bare- ", a);
+  end("head: y: barer- ", b);
+  // Past the caret the word is not there yet.
+  both("head: z: in-place", 12, {"NAME"});
+  // In front of the word that refuses it, the keyword still stands for what is
+  // typed there.
+  CHECK((offered(*ll, "head: z: in-place b!", 11) ==
+         std::vector<std::string>{"-"}));
+  for (const std::string text :
+       {"head: z: in-place b!", "head: z: in-other a!", "head: y: bare- a!",
+        "head: y: barer- b!", "head: z: in-pla"})
+    for (cursiv::TextOffset at = 12; at <= text.size(); ++at) {
+      const auto x = offered(*ll, text, at), y = offered(*lr, text, at);
+      CHECK(x == y);
+      if (x != y)
+        std::printf("caret differs: [%s|%s]\n", text.substr(0, at).c_str(),
+                    text.substr(at).c_str());
+    }
+}
+
+std::string nest_of(const tllrefused::Item& item) {
+  std::string out = "?";
+  for (const tllrefused::Item* kid : item.kids) out += nest_of(*kid);
+  return item.dash ? out + ":" : out;
+}
+
+// The arm a dangling mark takes is the deepest level, in both engines, and a
+// caret reads the levels below it as it reads any other way out.
+void a_dangling_mark_goes_to_the_deepest_level() {
+  const auto ll = tllrefused::generated::Ll::create_parser();
+  const auto lr = tllrefused::generated::Lr::create_parser();
+  const auto nest = [](const cursiv::Parser& p, const std::string& text) {
+    const auto r = p.parse(text);
+    const auto* d = r.value_as<tllrefused::Doc>();
+    std::string out = r.diagnostics.empty() ? "" : "!";
+    if (d != nullptr)
+      for (const tllrefused::Item* i : d->items) out += nest_of(*i) + ' ';
+    return out;
+  };
+  for (const auto& [text, want] :
+       std::vector<std::pair<std::string, std::string>>{
+           {"pending: ?", "? "},
+           {"pending: ? :", "?: "},
+           {"pending: ? ? :", "??: "},
+           {"pending: ? ? : :", "??:: "},
+           {"pending: ? ? ? : :", "???:: "},
+           {"pending: ? ? : pending: ? :", "??: ?: "},
+           {"pending: ? ? : x", "??: x "}}) {
+    if (want.find('x') == std::string::npos) {
+      CHECK(nest(*ll, text) == want);
+      CHECK(nest(*lr, text) == want);
+    }
+    CHECK(nest(*ll, text).front() != '!' && nest(*lr, text).front() != '!');
+    for (cursiv::TextOffset at = 0; at <= text.size(); ++at) {
+      const auto x = offered(*ll, text, at), y = offered(*lr, text, at);
+      CHECK(x == y);
+      if (x != y)
+        std::printf("caret differs: [%s|%s]\n", text.substr(0, at).c_str(),
+                    text.substr(at).c_str());
+    }
+  }
+  // One mark too many is the one the levels cannot take, in both.
+  CHECK(nest(*ll, "pending: ? : :").front() == '!');
+  CHECK(nest(*lr, "pending: ? : :").front() == '!');
 }
 
 cursiv::CancellationTokenSource* stopOnEntry = nullptr;
@@ -408,6 +524,8 @@ void a_stop_in_a_refused_reading_leaves_nothing_behind() {
 void run() {
   a_refused_keyword_leaves_the_terminals_behind_it();
   completion_keeps_the_terminals_behind_a_refused_keyword();
+  a_caret_reads_the_word_a_keyword_is_refused_by();
+  a_dangling_mark_goes_to_the_deepest_level();
   a_stop_in_a_refused_reading_leaves_nothing_behind();
   a_refused_keyword_reserves_nothing_from_a_misspelling();
   a_word_refused_at_a_cut_runs_into_it();

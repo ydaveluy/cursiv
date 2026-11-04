@@ -218,6 +218,8 @@ struct Empties : Base {
   struct Bang : rule<create<ast::Block>(item(ref<Empty16>) +
                                         option(item(ref<Nest>)) + lit<"!">)> {};
   struct Root : rule<ref<Semi> | ref<Bang>> {};
+  // Sixteen of them, which the stacks of a caret's closure merge.
+  struct Few : rule<create<ast::Block>(item(ref<Empty4>) + lit<";">)> {};
 };
 
 struct Suite : Base {
@@ -229,6 +231,7 @@ struct Suite : Base {
                      (lit<"heads:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                            ref<Lines::Heads> + eof)) |
                      (lit<"empties:"> + ref<Empties::Root> + eof) |
+                     (lit<"few:"> + ref<Empties::Few> + eof) |
                      (lit<"blocks:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                             ref<Lines::Blocks> + eof))> {};
   using entry = Root;

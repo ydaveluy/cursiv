@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
@@ -204,6 +207,50 @@ void a_commit_at_the_tail_keeps_the_callers_gap(const Reading& parser) {
   rejects(parser, "commit-note:[,x~,x;");
 }
 
+std::vector<std::string> offered(const Reading& reading, std::string text) {
+  const std::size_t caret = text.find("<|>");
+  text.erase(caret, 3);
+  const cursiv::ParseResult result = reading.parse(text);
+  std::vector<cursiv::NextFeature> next;
+  const auto at = static_cast<cursiv::TextOffset>(caret);
+  reading.parser.nextFeaturesAt(result.cst(), at, at, next);
+  std::vector<std::string> out;
+  for (const cursiv::NextFeature& f : next)
+    for (const std::string_view s :
+         reading.parser.getGrammar().terminalSpellings(f.feature))
+      out.emplace_back(s);
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+// Each candidate crosses the whole gap in front of it under its own alphabet,
+// the comments in it included: a region's token does not cross its caller's
+// comment, and the caller's closer does.
+void a_caret_crosses_the_gap_under_each_candidates_alphabet(
+    const Reading& reading) {
+  const auto check = [&](const std::string& text,
+                         const std::vector<std::string>& want) {
+    const auto got = offered(reading, text);
+    CHECK(got == want);
+    if (got != want) {
+      std::fprintf(stderr, "region caret [%s] %s:", reading.engine,
+                   text.c_str());
+      for (const std::string& s : got) std::fprintf(stderr, " %s", s.c_str());
+      std::fprintf(stderr, "\n");
+    }
+  };
+  check("many:~xx~<|>].", {"]"});
+  check("many:~xx<|>~].", {"]", "x"});
+  check("many:xx ~ <|>].", {"]"});
+  check("commit-note:[ ,x ,x ~ <|>;", {";"});
+  check("commit-note:[ ,x ,x ~<|>;", {";"});
+  check("commit-note:[ ,x ,x <|>~;", {",", ";"});
+  check("commit-note:[,x~<|>;", {";"});
+  check("commit-tail:,x~<|>;", {";"});
+  check("commit-tail:,x <|>;", {";"});
+}
+
 }  // namespace
 
 int main() {
@@ -220,6 +267,7 @@ int main() {
     distinct_tokens_may_share_a_prefix(parser);
     a_nest_at_the_head_keeps_the_callers_gap(parser);
     a_commit_at_the_tail_keeps_the_callers_gap(parser);
+    a_caret_crosses_the_gap_under_each_candidates_alphabet(parser);
   }
   return cursiv::test::report("RegionBoundary_test");
 }

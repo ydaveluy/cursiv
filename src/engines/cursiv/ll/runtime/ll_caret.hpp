@@ -86,6 +86,41 @@ inline CstLeaf ll_leaf_before(const Cst& cst, StampLayout stamp,
   return {};
 }
 
+// A line's end the repair read past a closer it invented, which only the end of
+// the text made it invent: the bracket stands open at a caret behind that line,
+// and inside it the line's end is a blank. The token before the closer, then.
+template <const auto& T>
+inline CstLeaf ll_before_invented_closer(const Cst& cst, StampLayout stamp,
+                                         const CstLeaf& leaf, NodeCount& rank) {
+  if constexpr (!kBracketed<T>) {
+    return leaf;
+  } else {
+    const auto term_of = [&](const CstLeaf& l) -> SymbolId {
+      const std::uint16_t pos = stamp.state(cst[l.id]);
+      return pos != 0 && pos <= T.nafter ? T.nodes[pos - 1].term : kNoRow;
+    };
+    const auto is = [&](SymbolId term, auto&& test) {
+      return term != kNoRow && term < T.nterms && test(T.terms[term]);
+    };
+    if (!leaf || !is(term_of(leaf), [](const TermInfo& t) { return t.joins; }))
+      return leaf;
+    NodeCount at = rank;
+    bool closes = false;
+    while (at > 0) {
+      const CstLeaf before = cst.leaf(--at);
+      if (before.hidden) continue;
+      if (!ll_invented(before)) {
+        if (!closes || !ll_replayable(cst, stamp, before)) return leaf;
+        rank = at;
+        return before;
+      }
+      closes = closes ||
+               is(term_of(before), [](const TermInfo& t) { return t.delim < 0; });
+    }
+    return leaf;
+  }
+}
+
 // Whether the operator opening at `hop`, of a step that groups nothing, would
 // chain behind the operand the last token ends: the innermost join of its
 // climb that the token ends and that binds no tighter is of its step. The
@@ -208,6 +243,14 @@ inline void ll_members_up(const StampedGrammar& grammar, LlSimulation& sim,
       path.push_back({parent, 0});
     }
   }
+}
+
+// The first of each configuration, in the order they came.
+inline void ll_first_of_each(std::vector<LlConfig>& configs) {
+  std::unordered_set<LlConfig, LlConfigHash> seen;
+  seen.reserve(configs.size());
+  std::erase_if(configs,
+                [&](const LlConfig& c) { return !seen.insert(c).second; });
 }
 
 // The widths a replay takes in turn, each wider than the last: a few tokens,
@@ -420,8 +463,10 @@ inline bool ll_step_token(LlSimulation& sim, std::uint16_t term,
 // Reads what the descent read as `token` at every position that takes it, as
 // `token`'s terminal or as another the readings admit for its text: the descent
 // named one arm of a choice the text past the caret may settle otherwise.
+// `known` is the text up to the caret, which is read as the parse reads it: a
+// word behind the token may refuse or bound a terminal.
 template <const auto& T>
-inline bool ll_step_text(LlSimulation& sim, std::string_view text,
+inline bool ll_step_text(LlSimulation& sim, std::string_view known,
                          const Token& token) {
   LlMask<T.termWords> wanted;
   sim.possible_terms([&](std::uint16_t term) {
@@ -429,8 +474,8 @@ inline bool ll_step_text(LlSimulation& sim, std::string_view text,
   });
   std::vector<std::uint16_t> rivals;
   if (token.begin == token.end ||
-      ll_match_in<T>(text.data(), token.end, token.begin, wanted, rivals) !=
-          token.end)
+      ll_match_in<T>(known.data(), static_cast<TextOffset>(known.size()),
+                     token.begin, wanted, rivals) != token.end)
     rivals.clear();
   return ll_step_token<T>(sim, token.sym, nullptr, rivals);
 }
@@ -439,11 +484,11 @@ inline bool ll_step_text(LlSimulation& sim, std::string_view text,
 // repair's token stands where the repair put it, and an implied one is read
 // across the condition that stands for it.
 template <const auto& T>
-inline bool ll_step_leaf(LlSimulation& sim, std::string_view text,
+inline bool ll_step_leaf(LlSimulation& sim, std::string_view known,
                          const CstLeaf& leaf, std::uint16_t pos) {
   const SymbolId term = T.nodes[pos - 1].term;
   if (!leaf.recovered && term != kNoRow && T.terms[term].laid != kLaidImplied)
-    return ll_step_text<T>(sim, text, Token{leaf.begin, leaf.end, term});
+    return ll_step_text<T>(sim, known, Token{leaf.begin, leaf.end, term});
   return sim.step_edges(
       [&](std::uint32_t edge) { return T.edgeNode[edge] == pos - 1; });
 }
@@ -534,6 +579,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
     if (bound && ll_names_arm<T>(sim, state, stack)) return LlReplay::named;
   }
   const std::string_view text = cst.text();
+  const std::string_view known = text.substr(0, tail.edge);
   std::vector<LlConfig> held;
   std::vector<std::pair<std::uint16_t, bool>> asked;
   // The tokens that stand between a step and the caret, itself among them.
@@ -559,7 +605,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
         if (bound && !exact && sim.at_unbound_return())
           return LlReplay::shallow;
       }
-      if (!ll_step_leaf<T>(sim, text, leaf, pos)) return LlReplay::broken;
+      if (!ll_step_leaf<T>(sim, known, leaf, pos)) return LlReplay::broken;
       if (bound && !exact && sim.at_unbound_return()) return LlReplay::shallow;
       continue;
     }
@@ -585,7 +631,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
           reaches = reaches || tail.reaches(seen, text.size());
           asked.emplace_back(condition, holds);
           return holds;
-        }) && ll_step_leaf<T>(sim, text, leaf, pos);
+        }) && ll_step_leaf<T>(sim, known, leaf, pos);
         if (!crossed) sim.load(held);
       }
       if (!kept && reaches && T.condReach.phrase && tail.steps.empty())
@@ -594,7 +640,7 @@ inline LlReplay ll_replay(LlSimulation& sim, const Cst& cst, StampLayout stamp,
         tail.steps.push_back({token, gapFrom,
                               static_cast<std::uint16_t>(pos - 1), asked});
     }
-    if (!crossed && !ll_step_leaf<T>(sim, text, leaf, pos))
+    if (!crossed && !ll_step_leaf<T>(sim, known, leaf, pos))
       return LlReplay::broken;
     if (bound && !exact && sim.at_unbound_return()) return LlReplay::shallow;
   }
@@ -715,12 +761,14 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   if (!StampedGrammar::caret_in(cst, at, resume)) return;
   const StampLayout stamp = grammar.stamp();
   NodeCount rank = 0;
-  const CstLeaf leaf = ll_leaf_before(cst, stamp, at, rank);
+  CstLeaf leaf = ll_leaf_before(cst, stamp, at, rank);
+  leaf = ll_before_invented_closer<T>(cst, stamp, leaf, rank);
   const std::uint16_t pos = leaf ? stamp.state(cst[leaf.id]) : 0;
   if (pos > T.nafter) return;
   const std::uint32_t seed = pos == 0 ? T.atnStart : T.nodeAfter[pos - 1];
   if (seed == 0xFFFFFFFFu) return;
   const std::string_view text = cst.text();
+  const std::string_view known = text.substr(0, at);
 
   // A literal is answered only where the lexer accepts it spliced in, and the
   // lexer is the judge, since the boundary is the literal's own. Left: glued
@@ -765,34 +813,53 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     bool crossed = true;
     TextOffset begin = 0;
     SymbolId term = kInvalidSymbol;
+    // The alphabet that reads it.
+    std::uint16_t mode = 0;
   };
   std::vector<Comment> comments;
   const auto comment_in = [&](std::uint16_t candidate) -> const Comment& {
     for (const Comment& seen : comments)
       if (seen.key == candidate) return seen;
     Comment found{candidate};
-    const std::uint16_t mode = leaf ? leafMode : candidate;
+    found.mode = leaf ? leafMode : candidate;
     if (prior.hidden && !prior.recovered && prior.end == at) {
-      const Scan s =
-          ll_match_text<T>(text.data(), prior.end, mode, prior.begin);
-      if (s.term != kInvalidSymbol && s.end == prior.end) {
+      const auto read_in = [&](std::uint16_t mode) {
+        return ll_match_text<T>(text.data(), prior.end, mode, prior.begin);
+      };
+      const auto whole = [&](const Scan& s) {
+        return s.term != kInvalidSymbol && s.end == prior.end;
+      };
+      Scan s = read_in(found.mode);
+      // A region's last token holds no comment of its caller's.
+      if (!whole(s) && found.mode != candidate) {
+        found.mode = candidate;
+        s = read_in(candidate);
+      }
+      if (whole(s)) {
         found.begin = prior.begin;
         found.term = s.term;
       } else {
         // A comment no end closes reads on over what is typed.
         found.crossed = false;
       }
+      if constexpr (!kIndented<T>) {
+        TextOffset begin = 0;
+        Scan last{};
+        found.crossed =
+            found.crossed &&
+            ll_trivia_to<T>(known, candidate, gapFrom, at, begin, last);
+      }
     } else if constexpr (!kIndented<T>) {
       TextOffset begin = 0;
       Scan last{};
-      const TextOffset from = prior ? prior.end : 0;
-      found.crossed = ll_trivia_to<T>(text, candidate, from, at, begin, last);
+      found.crossed =
+          ll_trivia_to<T>(text, candidate, gapFrom, at, begin, last);
       if (!prior.recovered &&
-          (mode == candidate
+          (found.mode == candidate
                ? found.crossed
-               : ll_trivia_to<T>(text, mode, from, at, begin, last)) &&
+               : ll_trivia_to<T>(text, found.mode, gapFrom, at, begin, last)) &&
           last.term != kInvalidSymbol && last.end == at && last.end > begin &&
-          !ll_ends_before_word<T>(text, mode, begin, at, last.term)) {
+          !ll_ends_before_word<T>(text, found.mode, begin, at, last.term)) {
         found.begin = begin;
         found.term = last.term;
       }
@@ -811,8 +878,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   };
   const auto comment_ends = [&](const Comment& comment,
                                 std::string_view spelling) {
-    const Scan s =
-        spliced(comment.begin, spelling, leaf ? leafMode : comment.key);
+    const Scan s = spliced(comment.begin, spelling, comment.mode);
     return s.term == comment.term && s.end == at - comment.begin;
   };
   // A candidate with no spelling is typed as some word its terminal reads:
@@ -894,8 +960,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
   const std::vector<SymbolId> laidAhead =
       ll_laid_at<T>(cst, stamp, leaf ? rank + 1 : 0, gapFrom, at);
   bool named = false;
+  LlSimulation sim(T.atn);
   for (unsigned window = widths.next();; window = widths.next(named)) {
-    thread_local LlSimulation sim(T.atn);
     sim.forget();
     conditioned.clear();
     LlTail tail;
@@ -991,16 +1057,15 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
         if (!ll_step_token<T>(sim, readings[k], &read_in)) continue;
         if (read_in != kNoRow && readings[k] != leafTerm)
           readingMode[k] = alphabet(read_in);
-        for (const LlConfig& config : sim.configs())
-          if (std::ranges::find(landed, config) == landed.end())
-            landed.push_back(config);
+        landed.insert(landed.end(), sim.configs().begin(), sim.configs().end());
       }
       if (!landed.empty()) {
+        ll_first_of_each(landed);
         sim.load(landed);
         return true;
       }
       ask(again.term, lexed ? note(again.term) : nullptr, 0);
-      return ll_step_leaf<T>(sim, text, leaf, pos);
+      return ll_step_leaf<T>(sim, known, leaf, pos);
     };
     // The caret's line is read at its level before any candidate.
     const auto read_levels = [&] {
@@ -1019,8 +1084,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
         sim.possible_terms([&](std::uint16_t term) {
           if (term != kEofSymbol) wanted.set(term);
         });
-        if (ll_match_in<T>(text.data(), leaf.end, leaf.begin, wanted,
-                           readings) != leaf.end)
+        if (ll_match_in<T>(known.data(), at, leaf.begin, wanted, readings) !=
+            leaf.end)
           readings.clear();
       }
       readingMode.assign(readings.size(), leafMode);
@@ -1074,7 +1139,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
                                         step.token.end - base, step.token.sym},
                                   step.gapFrom - base);
             })) &&
-            ll_step_text<T>(sim, text, step.token);
+            ll_step_text<T>(sim, known, step.token);
         beyond = beyond || (widens && sim.at_unbound_return());
         if (crossed) continue;
         sim.load(pending);
@@ -1124,9 +1189,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
           for (const LlConfig& config : sim.configs()) {
             for (const LlAtnEdge& edge : T.atn.outgoing(config.state)) {
               if (edge.kind == LlEdgeKind::atom && edge.label == term) {
-                if (std::ranges::find(survivors[term], config) ==
-                    survivors[term].end())
-                  survivors[term].push_back(config);
+                survivors[term].push_back(config);
                 any = true;
                 break;
               }
@@ -1339,7 +1402,8 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
     // Under conditions the members are what the readings they leave fill: the
     // closure had joined those with the readings they refuse in one stack.
     if constexpr (T.ngapConds != 0)
-      for (std::size_t k = 0; k < seen.size(); ++k)
+      for (std::size_t k = 0; k < seen.size(); ++k) {
+        ll_first_of_each(survivors[seen[k]]);
         for (const LlConfig& c : survivors[seen[k]]) {
           const LlAtnState& q = T.atn.state(c.state);
           for (std::uint32_t i = 0; i < q.nedges; ++i) {
@@ -1349,6 +1413,7 @@ inline void ll_next_features_at(const StampedGrammar& grammar, const Cst& cst,
               fold(c, q.edge + i, members[k]);
           }
         }
+      }
     if (widens &&
         (beyond || std::any_of(members.begin(), members.end(),
                                [](const LlMembers& a) { return a.floor; })))

@@ -521,7 +521,7 @@ void call_cells_are_sealed_after_their_actual_dependencies() {
     if (threads.size() != 2) return;
     CHECK(sim.stacks().canon(threads[0].stack) !=
           sim.stacks().canon(threads[1].stack));
-    CHECK(!ll_stuck_apart(sim, threads));
+    CHECK(ll_arms_outread(sim, threads, false, threads.front().root) == 0);
     for (const auto term : {std::uint16_t{1}, std::uint16_t{6}}) {
       std::vector<LlThread> origins, next;
       for (const auto& t : threads)

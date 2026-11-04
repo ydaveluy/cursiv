@@ -21,17 +21,13 @@ CURSIV_NOINLINE inline void ll_condition_node(LlContext& c, std::uint16_t mode,
     // token only a condition names stands, and nothing here reads it. Where no
     // reading holds, the token first read is the one that is repaired.
     if (!holds) {
-      const Token first = c.la;
-      const std::uint16_t firstMode = c.laMode;
+      const LlHeldRead first = ll_hold_read(c);
       LlSkipped<T> skip{};
       while (!holds && !ll_lengthens<T>(mode, c.la.sym) &&
              ll_read_without<T>(c, mode, skip))
         holds = !ll_lengthens<T>(mode, c.la.sym) &&
                 ll_condition<T>(c, condition, c.la, c.at);
-      if (!holds) {
-        c.la = first;
-        c.laMode = firstMode;
-      }
+      if (!holds) ll_give_back(c, first);
     }
     if (holds) {
       ll_hold<T>(c);

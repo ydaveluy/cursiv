@@ -3,7 +3,6 @@
 
 #include <cstdint>
 
-#include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/lr/table/LrActionKind.hpp"
 
 namespace cursiv {
@@ -12,18 +11,11 @@ struct LrAction {
   std::uint16_t term = 0;
   LrActionKind kind = LrActionKind::shift;
   std::uint16_t arg = 0;  // shift: target state ; reduce: production
-  // The call site a completion caret expects here, `kNoElement` where the
-  // sites the state serves disagree.
-  ElementId site = kNoElement;
-  // The enclosing rule's entry site, read where the position names none.
-  ElementId outer = kNoElement;
   // The cell's order is the election's for every text.
   bool exact = false;
-  // Where the readings of the token name several sites, their set in the build
-  // table's `siteSets`; zero where `site` and `outer` say it all.
-  std::uint16_t alts = 0;
-  // The token opens the rule that writes the site's member.
-  bool entered = false;
+  // The sites the readings of the token fill, a set in the build table's
+  // `siteSets`.
+  std::uint32_t alts = 0;
 
   constexpr bool operator==(const LrAction&) const = default;
 };

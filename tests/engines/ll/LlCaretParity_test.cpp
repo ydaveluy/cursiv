@@ -4,6 +4,7 @@
 // does.
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -318,6 +319,118 @@ void a_misspelt_word_glues_what_is_typed_behind_it() {
   }
 }
 
+// The drive refuses `aa` behind the first `a` through the guarded reductions of
+// the loop's turn, and reads `a`: the replay reads it as the drive does, or
+// loses the text from there on.
+void a_guarded_reduction_refuses_a_token_as_the_drive_does() {
+  const auto lr = tllconditions::generated::Lr::create_parser();
+  const auto ll = tllconditions::generated::Ll::create_parser();
+  const auto at = [](const cursiv::Parser& parser, const std::string& text,
+                     std::size_t caret) {
+    return spellings(
+        features_at(parser, text, static_cast<cursiv::TextOffset>(caret)));
+  };
+  const std::string text = "andloop:aaa;";
+  const auto clean = lr->parse(text);
+  CHECK(clean.accepted && clean.diagnostics.empty());
+  CHECK(std::ranges::count(at(*lr, text, 11), std::string(";")) == 1);
+  CHECK(!at(*lr, text, 12).empty());
+  CHECK(at(*lr, text, 12) == at(*ll, text, 12));
+  const std::string behind = text + "\nreturn ";
+  CHECK(at(*lr, behind, behind.size()) == at(*ll, behind, behind.size()));
+  CHECK(!at(*lr, behind, behind.size()).empty());
+  // The same refusal, by a condition that reads on past the caret: the drive
+  // read `a`, so the `b` behind it is what goes on.
+  const std::string pairs = "andpair:ababab;";
+  const auto twice = lr->parse(pairs);
+  CHECK(twice.accepted && twice.diagnostics.empty());
+  for (const std::size_t caret : {9u, 11u, 13u}) {
+    CHECK(at(*lr, pairs, caret) == std::vector<std::string>{"b"});
+    CHECK(at(*lr, pairs, caret) == at(*ll, pairs, caret));
+  }
+}
+
+// What the two engines say a token fills at a caret: the member, its class and
+// whether the token opens the rule that writes it.
+std::vector<std::string> members_at(const cursiv::Parser& parser,
+                                    const std::string& text,
+                                    cursiv::TextOffset at) {
+  const cursiv::ParseResult parsed = parser.parse(text);
+  std::vector<cursiv::NextFeature> next;
+  parser.nextFeaturesAt(parsed.cst(), at, at, next);
+  std::vector<std::string> out;
+  for (const cursiv::NextFeature& f : next) {
+    const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
+    std::string entry{spellings.size() == 1
+                          ? spellings.front()
+                          : parser.getGrammar().terminalName(f.feature)};
+    if (!f.property.empty()) {
+      entry += ':' + std::string(f.property);
+      entry += '/' + std::string(f.type != nullptr ? f.type->name : "");
+      if (f.entered) entry += "/entered";
+    }
+    out.push_back(std::move(entry));
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+void each_member_a_token_fills_is_named_as_the_descent_names_it() {
+  const auto lr = tpar::generated::Lr::create_parser();
+  const auto ll = tpar::generated::Ll::create_parser();
+  using Names = std::vector<std::string>;
+  const auto end = [](const cursiv::Parser& parser, const std::string& text) {
+    return members_at(parser, text, static_cast<cursiv::TextOffset>(text.size()));
+  };
+  // A record the token opens goes to the member of each call of its rule.
+  CHECK(end(*lr, "member:twice ") ==
+        (Names{"bx:first/Hold", "bx:second/Hold"}));
+  // A word behind a rule of its own, past the token of the rule that writes it.
+  CHECK(end(*lr, "member:through ") == Names{"ck:first/Hold"});
+  // A rule that reads itself first: the call that names it, not its own.
+  CHECK(end(*lr, "member:lone ") == Names{"lx:first/Hold"});
+  CHECK(end(*lr, "member:both ") ==
+        (Names{"lx:first/Hold", "lx:second/Hold"}));
+  for (const std::string text :
+       {"member:twice ", "member:through ", "member:lone ", "member:both ",
+        "member:lone lx.", "member:lone lx.a ", "member:lone lx; lone "})
+    CHECK(end(*lr, text) == end(*ll, text));
+  // Only a site says what a token fills: elsewhere in the grammar the terminal
+  // writes a member, which a site past a keyword does not.
+  CHECK(end(*lr, "member:bare ") == Names{"TICK"});
+  CHECK(end(*lr, "member:plain ") == Names{"QUOTE"});
+  CHECK(end(*lr, "member:named ") == Names{"QUOTE:text/Hold"});
+  // A rule that may read nothing keeps the member of the record behind it.
+  CHECK(end(*lr, "member:marked ") == (Names{"mk:first/Hold", "nk:first/Hold"}));
+  CHECK(end(*lr, "member:marked mk ") == Names{"nk:first/Hold"});
+  for (const std::string text :
+       {"member:bare ", "member:plain ", "member:named ", "member:marked ",
+        "member:marked mk ", "member:", "member:bare $a; "})
+    CHECK(end(*lr, text) == end(*ll, text));
+  // A rule entered by itself alone fills nothing at a caret.
+  const auto start = end(*lr, "");
+  CHECK(std::ranges::count(start, std::string("s0")) == 1);
+  CHECK(start == end(*ll, ""));
+  // The member stands past the token of the rule that writes it: no token opens
+  // that rule at the caret, whatever opens behind it.
+  CHECK(end(*lr, "let a ") == end(*ll, "let a "));
+}
+
+// The stacks of a caret's closure land on one frame from each of a long chain of
+// prefixes: its predecessors cost their number.
+void a_frame_of_many_predecessors_costs_their_number() {
+  const auto lr = tpar::generated::Lr::create_parser();
+  const std::string text = "let a = " + std::string(512000, '~') + "1;";
+  const auto parsed = lr->parse(text);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  std::vector<cursiv::NextFeature> next;
+  const auto begin = std::chrono::steady_clock::now();
+  lr->nextFeaturesAt(parsed.cst(), static_cast<cursiv::TextOffset>(text.size()),
+                     static_cast<cursiv::TextOffset>(text.size()), next);
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(8));
+  CHECK(!next.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -333,5 +446,8 @@ int main() {
   alternatives_alike_past_their_first_token_all_go_on();
   a_gap_takes_a_token_off_the_position_as_the_drive_does();
   a_misspelt_word_glues_what_is_typed_behind_it();
+  a_guarded_reduction_refuses_a_token_as_the_drive_does();
+  each_member_a_token_fills_is_named_as_the_descent_names_it();
+  a_frame_of_many_predecessors_costs_their_number();
   return cursiv::test::report("LlCaretParity_test");
 }

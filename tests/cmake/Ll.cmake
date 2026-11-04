@@ -88,6 +88,12 @@ cursiv_test(LlRepairBudget_test engines/ll/LlRepairBudget_test.cpp
     parityllGenerated paritylrGenerated)
 cursiv_test(LlRepairGrowth_test engines/ll/LlRepairGrowth_test.cpp
     parityllGenerated repairgrowthllGenerated)
+# Replaces the global allocator, as `AllocationFailure_test` does.
+if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
+  cursiv_test(LlCaretMemory_test engines/ll/LlCaretMemory_test.cpp
+      repairgrowthllGenerated)
+  set_target_properties(LlCaretMemory_test PROPERTIES CURSIV_OWN_ALLOCATOR ON)
+endif()
 cursiv_test(LlRescanBound_test engines/ll/LlRescanBound_test.cpp
     rescannarrowllGenerated rescanshadowllGenerated)
 cursiv_test(LlReservedBound_test engines/ll/LlReservedBound_test.cpp

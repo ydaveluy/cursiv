@@ -149,6 +149,16 @@ void a_dead_end_deep_in_nesting_is_read_once() {
   doubling_costs_at_most_double(
       "predictions under owed calls", 64,
       [](unsigned n) { return unclosed(n, "f("); }, predictions_of);
+  // ...and the choices between the levels that one arm alone goes on from are
+  // answered with them.
+  doubling_costs_at_most_double(
+      "predictions under owed sums", 64,
+      [](unsigned n) { return "let x = " + repeat("1+(", n) + "1;\n"; },
+      predictions_of);
+  doubling_costs_at_most_double(
+      "predictions under owed arguments", 64,
+      [](unsigned n) { return "let x = " + repeat("f(1,", n) + "1;\n"; },
+      predictions_of);
   doubling_costs_at_most_double(
       "predictions under strays", 64,
       [](unsigned n) {
@@ -179,6 +189,62 @@ void a_plan_is_read_once(const char* prefix) {
       std::printf("plan visits of %s at depth %u: %llu -> %llu\n", prefix, depth,
                   static_cast<unsigned long long>(before),
                   static_cast<unsigned long long>(after));
+    before = after;
+  }
+}
+
+// A dangling `else` is settled by the token in hand: no reading walks the levels
+// that stand open, which a count of tokens read does not show of itself, and
+// that would be the square of the levels in time and in memory.
+void a_dangling_choice_reads_nothing_ahead() {
+  const auto parser = tllrepairgrowth::generated::Ll::create_parser();
+  for (const unsigned depth : {1024u, 2048u}) {
+    const std::string open = repeat("a ", depth);
+    for (const std::string& text :
+         {"dangling: " + open + repeat("b ", depth),
+          "dangling: " + open + repeat("b ", depth / 2),
+          "danglingtwo: " + open + repeat("b c ", depth),
+          "danglingtwo: " + open + repeat("c ", depth / 2) +
+              repeat("b ", depth / 2)}) {
+      cursiv::LlPredictionWork::current() = {};
+      const cursiv::ParseResult result = parser->parse(text);
+      CHECK(result.accepted && result.diagnostics.empty());
+      CHECK(cursiv::LlPredictionWork::current().tokens == 0);
+      if (cursiv::LlPredictionWork::current().tokens != 0)
+        std::printf("dangling read ahead: %llu tokens at depth %u\n",
+                    static_cast<unsigned long long>(
+                        cursiv::LlPredictionWork::current().tokens),
+                    depth);
+    }
+  }
+}
+
+// Two loops over one token read alike behind the choice of the first: each turn
+// is settled by the next token, and one fault far along is one diagnostic where
+// it stands, however far along.
+void loops_that_read_alike_do_not_read_to_the_fault() {
+  const auto parser = tllrepairgrowth::generated::Ll::create_parser();
+  const auto read = [&](const std::string& text) {
+    cursiv::LlPredictionWork::current() = {};
+    return parser->parse(text);
+  };
+  std::uint64_t before = 0;
+  for (const unsigned turns : {512u, 1024u, 2048u}) {
+    const std::string turned = "two: " + repeat("a ", turns);
+    CHECK(read(turned + "b").diagnostics.empty());
+    const cursiv::ParseResult broken = read(turned + "!");
+    CHECK(broken.accepted && broken.diagnostics.size() == 1);
+    if (!broken.diagnostics.empty())
+      CHECK(broken.diagnostics.front().begin == turned.size());
+    const std::uint64_t after = cursiv::LlPredictionWork::current().tokens;
+    const bool within =
+        before == 0 ||
+        static_cast<double>(after) <= kLinear * static_cast<double>(before);
+    CHECK(within);
+    if (!within)
+      std::printf("two loops: %u turns read %llu tokens, %zu diagnostics\n",
+                  turns, static_cast<unsigned long long>(after),
+                  broken.diagnostics.size());
     before = after;
   }
 }
@@ -382,6 +448,8 @@ int main() {
   a_parse_costs_the_same_whatever_was_parsed_before();
   a_fault_deep_in_nesting_costs_what_it_reads_not_how_deep_it_stands();
   a_dead_end_deep_in_nesting_is_read_once();
+  a_dangling_choice_reads_nothing_ahead();
+  loops_that_read_alike_do_not_read_to_the_fault();
   a_plan_is_read_once("nested:");
   a_plan_is_read_once("mixed:");
   return cursiv::test::report("LlRepairGrowth_test");

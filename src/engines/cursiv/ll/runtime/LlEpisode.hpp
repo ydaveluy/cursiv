@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -54,30 +55,50 @@ inline void ll_thread_set_key(const LlEpisodeSim& sim,
   key.erase(std::unique(key.begin(), key.end()), key.end());
 }
 
-// No token further on tells the arms apart: every reading stands with another
-// at one place and one stack, and every place names the same arms.
-inline bool ll_stuck_apart(const LlEpisodeSim& sim,
-                           const std::vector<LlThread>& threads) {
-  if (threads.size() < 2) return false;
+// The arms that can no longer win, one bit each. Readings at one place with one
+// stack have one future: an arm that stands, at every place it stands, with an
+// arm before it reads nothing that one does not, and the first arm that admits
+// the text is the reading the grammar states. An episode that tracks lexical
+// choices ranks those before the arms: there the arms go only where all of them
+// stand at every place, and `best` is the one that stays.
+inline std::uint64_t ll_arms_outread(const LlEpisodeSim& sim,
+                                     const std::vector<LlThread>& threads,
+                                     bool tracked, std::uint16_t best) {
+  if (threads.size() < 2) return 0;
   thread_local LlThreadSetKey seats;
   ll_thread_set_key(sim, threads, seats);
   const auto place = [](const auto& s) {
     return std::pair{std::get<0>(s), std::get<1>(s)};
   };
-  std::size_t first = 0;
-  while (first < seats.size() && place(seats[first]) == place(seats[0]))
-    ++first;
-  if (first < 2) return false;
-  for (std::size_t at = first; at < seats.size();) {
-    std::size_t k = 0;
-    for (; at + k < seats.size() && place(seats[at + k]) == place(seats[at]);
-         ++k)
-      if (k >= first || std::get<2>(seats[at + k]) != std::get<2>(seats[k]))
-        return false;
-    if (k != first) return false;
-    at += k;
+  // For each arm, the arms that stand with it wherever it stands.
+  std::array<std::uint64_t, 64> beside{};
+  std::uint64_t seen = 0, first = 0;
+  bool alike = true;
+  for (std::size_t at = 0; at < seats.size();) {
+    std::uint64_t arms = 0;
+    std::size_t end = at;
+    for (; end < seats.size() && place(seats[end]) == place(seats[at]); ++end) {
+      const std::uint16_t arm = std::get<2>(seats[end]);
+      if (arm >= beside.size()) return 0;
+      arms |= std::uint64_t{1} << arm;
+    }
+    if (at == 0) first = arms;
+    alike = alike && arms == first;
+    for (std::uint64_t left = arms; left != 0; left &= left - 1) {
+      const auto arm = std::countr_zero(left);
+      beside[arm] = (seen >> arm & 1u) != 0 ? beside[arm] & arms : arms;
+    }
+    seen |= arms;
+    at = end;
   }
-  return true;
+  if (tracked) return alike ? first & ~(std::uint64_t{1} << best) : 0;
+  std::uint64_t gone = 0;
+  for (std::uint64_t left = seen; left != 0; left &= left - 1) {
+    const auto arm = std::countr_zero(left);
+    if ((beside[arm] & ((std::uint64_t{1} << arm) - 1u)) != 0)
+      gone |= std::uint64_t{1} << arm;
+  }
+  return gone;
 }
 
 // The decisions on the path to `node` below `from`. False where the path does
@@ -211,6 +232,7 @@ class LlEpisode {
     std::uint16_t remembered = kNoRow;
     // What ties was read for this one run: nothing keys an answer on it.
     _kept = ties == nullptr ? memo() : nullptr;
+    _conditioned = ties != nullptr;
     if (_kept != nullptr) _q = question();
     if (recall(remembered)) return remembered;
     auto& scratch = ll_scratch<T.termWords>();
@@ -570,20 +592,20 @@ class LlEpisode {
   }
 
   // Whether the readings that stand agree on the choice the descent asks: then
-  // the plan is laid as far as they go, and the episode waits again.
+  // the plan is laid as far as they go, and the episode waits again. Where they
+  // have read as far as that choice and do not, it asks an episode of its own,
+  // which holds the arms of that choice alone: these would read on with every
+  // reading they keep.
   std::uint16_t names_want() {
     if (_positions.front().key[0] < _want.at) return kLlUnplanned;
     thread_local std::vector<LlPlanEntry> path;
     path.clear();
-    const bool open = laid_path(true, path, _laidAt);
-    if (!_stood || _common == _laidAt) return kLlUnplanned;
+    if (!laid_path(true, path, _laidAt) || !_stood) return kLost;
     bool named = false;
     for (std::size_t i = 0; i < path.size() && !named; ++i)
       named = path[i].at == _want.at && path[i].lull == _want.lull &&
               path[i].decision == _want.decision;
-    if (!named)
-      return open && path.back().at <= _want.at ? kLlUnplanned : kLost;
-    if (!ll_plan_extend<T>(_plan, path)) return kLost;
+    if (!named || !ll_plan_extend<T>(_plan, path)) return kLost;
     _laidAt = _common;
     return kHeldOn;
   }
@@ -638,17 +660,18 @@ class LlEpisode {
   // Every reading died and none chose an arm: all the arms of the choice
   // still stood among the last readings. A choice below that they went by is
   // refused as well where, after every way to it, all its arms still stood
-  // among them too: an episode asked there would read the same text and
-  // refuse it. The refusals hold while the descent stays on the way of the
-  // readings: any arm of a refused choice keeps it there, and where the
-  // generated automaton answers, `LlPlan::went` checks the arm it takes. An
-  // episode that tracks lexical choices and a grammar with gap conditions or
-  // indentation keep the one refusal.
+  // among them too, and answered where one alone did: an episode asked there
+  // would read the same text and come to the same. The answers hold while the
+  // descent stays on the way of the readings: any arm of a refused choice keeps
+  // it there, and where the generated automaton answers, `LlPlan::went` checks
+  // the arm it takes. An episode that tracks lexical choices, one that met a
+  // condition or was read for a refusal, and a grammar with indentation keep the
+  // one refusal.
   void refuse_below() {
-    if constexpr (T.ngapConds != 0 || kIndented<T>) {
+    if constexpr (kIndented<T>) {
       return;
     } else {
-      if (_tracked || _frontierStep != _steps ||
+      if (_tracked || _conditioned || _frontierStep != _steps ||
           !_sim->choices(_frontier, _choices))
         return;
       const auto all = [](std::uint16_t decision) {
@@ -665,11 +688,17 @@ class LlEpisode {
           continue;
         }
         const LlTable::Decision& d = T.decisions[k.decision];
-        if (d.how == LlPredict::staged)
+        if (d.how == LlPredict::staged) {
           _ways.push_back({k.at, k.lull, k.decision, k.arms});
-        else if (d.how == LlPredict::adaptive && k.at < _frontierAt &&
-                 k.arms == all(k.decision) && T.modeMulti[d.mode] == 0)
-          _below.push_back({k.at, k.lull, k.decision, kNoRow, false, true});
+        } else if (d.how == LlPredict::adaptive && k.at < _frontierAt &&
+                   all(k.decision) != 0 && T.modeMulti[d.mode] == 0) {
+          if (k.arms == all(k.decision))
+            _below.push_back({k.at, k.lull, k.decision, kNoRow, false, true});
+          else if (std::has_single_bit(k.arms))
+            _below.push_back({k.at, k.lull, k.decision,
+                              static_cast<std::uint16_t>(std::countr_zero(k.arms)),
+                              false, true});
+        }
       }
       if (!rooted || _below.empty()) {
         _below.clear();
@@ -933,20 +962,29 @@ class LlEpisode {
     std::vector<LlThread>& threads = p.threads;
     if (_tracked) merge(threads, p.mixed);
     const bool deferred = T.ngapConds != 0 && _sim->needs_filter(threads);
+    _conditioned = _conditioned || deferred;
     // Two readings at one place with one stack: no token further on tells
-    // them apart, so the text is ambiguous here. The arms are ordered, and the
-    // first that admits it is the reading the grammar states.
+    // them apart, so the text is ambiguous here.
     if (_answer == kNoRow && !p.first && _positions.empty() && !deferred &&
-        ll_stuck_apart(*_sim, threads)) {
-      decide(preferred(_completed, best(threads)).root);
-      std::erase_if(threads,
-                    [&](const LlThread& t) { return t.root != _answer; });
-      if (threads.empty()) return Verdict::go;
-      if (threads.size() == 1 && _sim->standing(threads.front().stack) == 1) {
-        _final = threads;
-        return Verdict::done;
+        !threads.empty())
+      if (const std::uint64_t gone = ll_arms_outread(
+              *_sim, threads, _tracked, threads.front().root);
+          gone != 0) {
+        std::erase_if(threads, [&](const LlThread& t) {
+          return (gone >> t.root & 1u) != 0;
+        });
+        if (ll_settled_arm(threads) != kNoRow) {
+          decide(preferred(_completed, best(threads)).root);
+          std::erase_if(threads,
+                        [&](const LlThread& t) { return t.root != _answer; });
+          if (threads.empty()) return Verdict::go;
+          if (threads.size() == 1 &&
+              _sim->standing(threads.front().stack) == 1) {
+            _final = threads;
+            return Verdict::done;
+          }
+        }
       }
-    }
     bool anyRead = false;
     for (const LlThread& t : threads)
       anyRead = anyRead || T.atn.has(t.state, LlEdgeKind::atom);
@@ -1561,6 +1599,8 @@ class LlEpisode {
   std::vector<std::pair<std::uint32_t, Token>> _insertions;
   // Whether the last laid path met a reading or a candidate.
   bool _stood = false;
+  // Whether this run was read for a refusal, or a reading of it met a condition.
+  bool _conditioned = false;
   TextOffset _frontierAt = 0;
   // The step that met the frontier: where it is the last step, the frontier
   // is every reading that was left.

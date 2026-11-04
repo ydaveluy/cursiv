@@ -52,6 +52,9 @@ struct Base : cursiv::GrammarSpec {
             (lit<"andloop:"> + many(&lit<"a"> + (ref<ID> | lit<"a">)) +
              lit<";">) |
             (lit<"andhead:"> + &lit<"a"> + (ref<ID> | lit<"a">) + ref<ID>) |
+            (lit<"andpair:"> +
+             many(&(lit<"a"> + lit<"b">) + (ref<ID> | lit<"a">) + lit<"b">) +
+             lit<";">) |
             (lit<"atarm:"> + ((option(lit<"%">) + !lit<"~>"> +
                                option(lit<"~">) + ref<ID>) |
                               (lit<"~"> + lit<">">))) |
@@ -92,10 +95,17 @@ struct Base : cursiv::GrammarSpec {
                     (kw<"fk"> + ref<ID> + gap::none + lit<";">) |
                     (kw<"fk"> + ref<ID> + lit<"("> + lit<")">) |
                     (kw<"fk"> + ref<ID> + &lit<"x"> + lit<"x"> + lit<";">))> {};
+  // Nesting behind an operand that no condition stands in: the rest of the
+  // grammar has conditions, this choice meets none.
+  struct NestPrimary;
+  struct NestPostfix : rule<(ref<NestPrimary> + lit<"!">) | ref<NestPrimary>> {};
+  struct NestSum : rule<ref<NestPostfix> + many(lit<"+"> + ref<NestPostfix>)> {};
+  struct NestPrimary : rule<ref<NUMBER> | (lit<"("> + ref<NestSum> + lit<")">)> {};
   struct Root
       : rule<create<Document>(
             (many(append<&Document::items>(ref<Block> | ref<Statement>)) +
              eof) |
+            (lit<"nest:"> + ref<NestSum> + eof) |
             (lit<"arrow:"> +
              many(append<&Document::items>(ref<LineEnded> | ref<Tight> |
                                            ref<Arrow> | ref<Fork>)) +

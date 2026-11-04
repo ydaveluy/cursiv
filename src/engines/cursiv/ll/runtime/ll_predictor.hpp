@@ -27,8 +27,7 @@ inline std::uint64_t& ll_staged_reads() {
 template <const auto& T>
 inline bool ll_read_refused(LlContext& c, std::uint16_t decision,
                             LlEpisode<T>& episode, std::uint16_t& arm) {
-  const Token first = c.la;
-  const std::uint16_t firstMode = c.laMode;
+  const LlHeldRead first = ll_hold_read(c);
   LlSkipped<T> skip{};
   bool again = false;
   std::vector<std::uint16_t> ties;
@@ -38,13 +37,12 @@ inline bool ll_read_refused(LlContext& c, std::uint16_t decision,
     const std::uint16_t read = episode.run(c, decision, &ties);
     if (!episode.refused()) {
       arm = read;
-      if (firstMode == kLaHeld) ll_hold<T>(c);
+      if (first.mode == kLaHeld) ll_hold<T>(c);
       return true;
     }
     again = true;
   }
-  c.la = first;
-  c.laMode = firstMode;
+  ll_give_back(c, first);
   if (again) episode.run(c, decision);
   return false;
 }
@@ -55,13 +53,11 @@ inline bool ll_read_refused(LlContext& c, std::uint16_t decision,
 template <const auto& T>
 CURSIV_NOINLINE inline std::uint16_t ll_read_stopped(LlContext& c,
                                                      std::uint16_t decision) {
-  const Token first = c.la;
-  const std::uint16_t firstMode = c.laMode;
+  const LlHeldRead first = ll_hold_read(c);
   LlSkipped<T> skip{};
   const bool other = T.holds(T.dec_first(decision), c.la.sym) &&
                      ll_read_without<T>(c, T.decisions[decision].mode, skip);
-  c.la = first;
-  c.laMode = firstMode;
+  ll_give_back(c, first);
   std::uint16_t arm = kNoRow;
   if (other) {
     LlEpisode<T>& episode = ll_episode_engine<T>();

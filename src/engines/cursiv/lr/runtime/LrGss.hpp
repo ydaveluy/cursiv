@@ -42,8 +42,8 @@ inline constexpr std::size_t kLrGssStacks = 512;
 // The stack frames an episode's graph first holds.
 inline constexpr std::uint32_t kLrSeedWindow = 32;
 
-// Whether one stack below `vertex` takes `term` after its plain reductions,
-// as `lr_graph_takes` walks the graph.
+// Whether one stack below `vertex` takes `term` after its reductions, as
+// `lr_graph_takes` walks the graph.
 template <const auto& A, class Holds>
 bool lr_gss_takes(LrGssGraph& graph, LrGssGraph::Id vertex, SymbolId term,
                   Holds&& holds) {
@@ -56,12 +56,15 @@ bool lr_gss_takes(LrGssGraph& graph, LrGssGraph::Id vertex, SymbolId term,
         const int act = lr_climb_act<A>(top, term, holds, prod);
         if (act >= 0) return act;
         if (!lr_reduce_allowed<A>(prod, holds)) return 0;
-        if (kLrGuarded<A> && A.cfg.prods[prod].guarded != 0) return 1;
         len = A.cfg.prods[prod].len;
         return -1;
       },
-      [&](std::uint32_t from, std::uint32_t prod) {
-        return lr_reduce_target<A>(from, prod, kLrNoFirst, holds);
+      [](std::uint32_t prod) {
+        if constexpr (kLrGuarded<A>) return A.cfg.prods[prod].guarded != 0;
+        else return false;
+      },
+      [&](std::uint32_t from, std::uint32_t prod, std::uint32_t first) {
+        return lr_reduce_target<A>(from, prod, first, holds);
       });
 }
 
@@ -374,8 +377,7 @@ class LrGss {
 
   // The token of `r`, a flagged winner of `mode`, read again while no stack
   // under `v` takes it after the reductions the table lays for it, the
-  // graph's paths popped as a reduction pops them. What the gap decides counts
-  // as taken.
+  // graph's paths popped as a reduction pops them.
   CURSIV_NOINLINE bool refuse(Id v, Reading& r, std::uint16_t mode,
                               ScanRoom<A.maxCands>& room, std::uint32_t& tied) {
     const auto takes = [&](const Token& t) {

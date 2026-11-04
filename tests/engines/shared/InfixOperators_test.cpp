@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <initializer_list>
@@ -888,7 +889,43 @@ void a_stop_reaches_a_long_closure(const cursiv::Parser& p) {
   CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
 }
 
+// The stacks of a caret's closure merge over rules that read nothing, and every
+// path through a merge reaches the token behind them.
+void the_token_behind_rules_that_read_nothing_is_offered(
+    const cursiv::Parser& p) {
+  for (const char* text : {"few:;", "few:a ;", "few:a a ;"}) {
+    const std::string source = text;
+    const auto at = static_cast<cursiv::TextOffset>(source.size() - 1);
+    CHECK(caret_offers::offered(p, source, at) ==
+          (std::vector<std::string>{";", "a"}));
+  }
+}
+
+// A caret reads as many ways through those rules as the closure does, each once
+// however many readings land on it. No counter sees this: the time is its proof,
+// by two orders of magnitude.
+void a_caret_keeps_each_way_once(const cursiv::Parser& p) {
+  const std::string text = "empties:a;";
+  const cursiv::ParseResult r = p.parse(text);
+  CHECK(r.accepted && r.diagnostics.empty());
+  std::vector<cursiv::NextFeature> next;
+  const auto begin = std::chrono::steady_clock::now();
+  p.nextFeaturesAt(r.cst(), 8, 8, next);
+  CHECK(!next.empty());
+  CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(30));
+  next.clear();
+  p.nextFeaturesAt(r.cst(), 9, 9, next);
+  std::vector<std::string_view> spelt;
+  for (const cursiv::NextFeature& f : next)
+    for (const std::string_view s : p.getGrammar().terminalSpellings(f.feature))
+      spelt.push_back(s);
+  std::sort(spelt.begin(), spelt.end());
+  spelt.erase(std::unique(spelt.begin(), spelt.end()), spelt.end());
+  CHECK((spelt == std::vector<std::string_view>{"!", "(", ";"}));
+}
+
 void every_engine(const cursiv::Parser& p) {
+  the_token_behind_rules_that_read_nothing_is_offered(p);
   a_prefix_binds_what_is_tighter(p);
   a_postfix_binds_what_is_tighter(p);
   a_looser_operator_is_refused_inside(p);
@@ -904,8 +941,15 @@ void run() {
   engine = "Ll";
   every_engine(*tunary::generated::Ll::create_parser());
   a_stop_reaches_a_long_closure(*tunary::generated::Ll::create_parser());
+  a_caret_keeps_each_way_once(*tunary::generated::Ll::create_parser());
   engine = "Lr";
   every_engine(*tunary::generated::Lr::create_parser());
+  {
+    const auto lr = tunary::generated::Lr::create_parser();
+    const std::string text = "empties:a ;";
+    CHECK(caret_offers::offered(*lr, text, 10) ==
+          (std::vector<std::string>{"!", "(", ";", "a"}));
+  }
   // The fuzz lane writes the binary chains of a table with unary levels, and
   // each engine's tree agrees with the one the table states.
   cursiv::fuzzer::lane<Fuzzed>(

@@ -636,8 +636,6 @@ std::uint64_t action_digest(const cursiv::LrBuildTable& a) {
       add(x.term);
       add(static_cast<unsigned>(x.kind));
       add(x.arg);
-      add(x.site);
-      add(x.outer);
       add(x.exact);
     }
   }
@@ -662,14 +660,14 @@ void keeps_actions(bool wide, std::uint64_t digest, unsigned states,
 
 void run() {
   for (bool wide : {false, true}) {
-    keeps_actions<ttableorder::Lr>(wide, 12584957980273038131ull, 13, 13, 5, 3);
-    keeps_actions<tgchain::Lr>(wide, 5582408504362784204ull, 11, 12, 2, 2);
-    keeps_actions<tcornerkey::Lr>(wide, 15627357034739539105ull, 49, 51, 1, 1);
+    keeps_actions<ttableorder::Lr>(wide, 10429889345856645406ull, 13, 13, 5, 3);
+    keeps_actions<tgchain::Lr>(wide, 9605603089127358186ull, 11, 12, 2, 2);
+    keeps_actions<tcornerkey::Lr>(wide, 5644451147524273797ull, 49, 51, 1, 1);
   }
   // This grammar reaches the uniform-descendant shortcut, including the
   // inexact written order of nested dangling-else choices.
-  keeps_actions<tlldangling::Lr>(false, 6348924868896240653ull, 38, 41, 3, 3);
-  keeps_actions<tlldangling::Lr>(true, 15855575149852123932ull, 53, 71, 3, 3);
+  keeps_actions<tlldangling::Lr>(false, 10026520441406684489ull, 38, 41, 3, 3);
+  keeps_actions<tlldangling::Lr>(true, 3537574922240923604ull, 53, 71, 3, 3);
 }
 }  // namespace case_lrwrittenorder
 
