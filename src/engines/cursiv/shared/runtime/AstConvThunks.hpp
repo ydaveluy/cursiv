@@ -472,26 +472,35 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
     static_assert(
         has_default_convert<A> || std::is_constructible_v<A, std::string>,
         "a value member is vocabulary or written by a converter");
-    const auto text = payload_text<Data, Text, Base>(ctx, id);
-    if (!text) return false;
     // A text is its own value and the exact decimal path answers first: only
     // what they decline pays for the result's diagnostic.
-    if constexpr (std::is_same_v<A, std::string_view> ||
-                  std::is_same_v<A, std::string>) {
-      place<A>(slot, *text);
-      return true;
-    } else if constexpr (!has_default_convert<A>) {
-      place<A>(slot, std::string(*text));
-      return true;
-    } else {
-      if constexpr (std::is_same_v<A, double>) {
-        double fast = 0.0;
-        if (detail::fast_decimal(*text, fast)) {
-          place<A>(slot, fast);
-          return true;
+    const auto settle = [&](std::string_view text) CURSIV_ALWAYS_INLINE {
+      if constexpr (std::is_same_v<A, std::string_view> ||
+                    std::is_same_v<A, std::string>) {
+        place<A>(slot, text);
+        return true;
+      } else if constexpr (!has_default_convert<A>) {
+        place<A>(slot, std::string(text));
+        return true;
+      } else {
+        if constexpr (std::is_same_v<A, double>) {
+          double fast = 0.0;
+          if (detail::fast_decimal(text, fast)) {
+            place<A>(slot, fast);
+            return true;
+          }
         }
+        return conversion_settled(ctx, id, default_convert<A>(text), store);
       }
-      return conversion_settled(ctx, id, default_convert<A>(*text), store);
+    };
+    // One token's text is never absent, and a view passed on is held in
+    // registers where an optional one goes through memory: the member copy
+    // that follows would then wait on its two halves.
+    if constexpr (Data) {
+      const auto text = payload_text<Data, Text, Base>(ctx, id);
+      return text && settle(*text);
+    } else {
+      return settle(ctx.cst->text(id));
     }
   }
 }
