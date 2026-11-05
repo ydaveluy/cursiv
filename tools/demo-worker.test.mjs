@@ -11,10 +11,12 @@ import { importedMemoryLimits } from './wasi-run.mjs';
 
 const script = fileURLToPath(new URL('../docs/demo/wasi-worker.js', import.meta.url));
 
-// The globals of a browser's worker, over a Node one.
+// The globals of a browser's worker, over a Node one, with stacks written as
+// Firefox writes them: frames only, without the error's message.
 const host = `
   const { parentPort } = require('node:worker_threads');
   globalThis.postMessage = (message) => parentPort.postMessage(message);
+  Error.prepareStackTrace = (error, frames) => frames.map((f) => '@' + f).join('\\n');
   require('node:vm').runInThisContext(
       require('node:fs').readFileSync(${JSON.stringify(script)}, 'utf8'));
   parentPort.once('message', (data) => globalThis.onmessage({ data }));
@@ -61,5 +63,6 @@ test('a module that cannot start says why', async () => {
   ]);
   const word = await firstWord(bytes, { initial: 1, maximum: 1 });
   assert.equal(word.type, 'crash');
-  assert.match(word.text, /no_such_call/);
+  // The page shows the first line only.
+  assert.match(word.text.split('\n')[0], /no_such_call/);
 });

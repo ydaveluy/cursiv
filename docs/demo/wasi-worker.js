@@ -294,7 +294,8 @@ const instantiate = () => WebAssembly.instantiate(ctx.module, {
 
 function report(error) {
   if (error === EXIT) return;
-  postMessage({ type: 'crash', text: String(error?.stack ?? error) });
+  // The message first: Firefox leaves it out of the stack.
+  postMessage({ type: 'crash', text: `${error}\n${error?.stack ?? ''}` });
 }
 
 async function run(data) {
