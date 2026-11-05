@@ -6,16 +6,16 @@
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
+#include "cursiv/execution/SpinLock.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/utils/SharedMutex.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -32,6 +32,11 @@ namespace cursiv {
 // Only `Linked` and `IndexedReferences` are accepted: an earlier rung could
 // still be holding what an eviction would take, and `Validated`, the last
 // rung, has nothing left to rebuild what it dropped.
+//
+// So a value may read its own document and, with `state`, the nodes that
+// document's references resolve to: a change to one of them relinks it. A
+// change further away rebuilds neither the document nor its entries, so a
+// value that reads past those belongs in a `WorkspaceCache`.
 template <class K, class V, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class DocumentCache : private DocumentPhaseListener,
@@ -44,42 +49,60 @@ class DocumentCache : private DocumentPhaseListener,
   DocumentCache(const DocumentCache&) = delete;
   DocumentCache& operator=(const DocumentCache&) = delete;
 
-  // The provider runs outside the lock. An eviction during computation keeps
-  // its result out of the cache, but still returns it to the caller.
+  // The provider runs outside the lock. A clear or a deletion of the
+  // document during computation, or a clear of the whole cache, keeps its
+  // result out of the cache, but still returns it to the caller.
   template <class Provider>
   [[nodiscard]] V get(DocumentId document, const K& key,
                       Provider&& provider) const {
     if (document == kNoDocument)
       return std::invoke(std::forward<Provider>(provider));
     Shard& s = shardOf(document);
-    std::uint64_t seen = 0;
+    Entry* entry = nullptr;
+    std::uint64_t generation = 0;
+    std::uint64_t erasures = 0;
     {
-      const std::shared_lock lock(s.mutex);
-      if (const auto at = s.entries.find(document); at != s.entries.end())
-        if (const auto found = at->second.find(key); found != at->second.end())
-          return found->second;
-      seen = s.generation;
+      const std::scoped_lock lock(s.mutex);
+      // Created on a miss, so a clear of the document during computation
+      // finds an entry to mark.
+      entry = &s.entries[document];
+      if (const auto found = entry->values.find(key);
+          found != entry->values.end())
+        return found->second;
+      generation = entry->generation;
+      erasures = s.erasures;
     }
     V computed = std::invoke(std::forward<Provider>(provider));
-    const std::unique_lock lock(s.mutex);
-    if (s.generation != seen) return computed;
-    return s.entries[document]
-        .try_emplace(key, std::move(computed))
-        .first->second;
+    const std::scoped_lock lock(s.mutex);
+    // With no erasure in the stripe since the miss, `entry` is still the
+    // document's own.
+    if (s.erasures != erasures || entry->generation != generation)
+      return computed;
+    return entry->values.try_emplace(key, std::move(computed)).first->second;
   }
 
   void clear(DocumentId document) {
     Shard& s = shardOf(document);
-    const std::unique_lock lock(s.mutex);
-    ++s.generation;
-    s.entries.erase(document);
+    Values dropped;  // freed once the lock is released
+    const std::scoped_lock lock(s.mutex);
+    if (const auto at = s.entries.find(document); at != s.entries.end()) {
+      ++at->second.generation;
+      // A swap exchanges the hash and the equality too, which not every pair
+      // allows without throwing: theirs are freed under the lock.
+      if constexpr (std::is_nothrow_swappable_v<Hash> &&
+                    std::is_nothrow_swappable_v<KeyEqual>)
+        dropped.swap(at->second.values);
+      else
+        at->second.values.clear();
+    }
   }
 
   void clear() {
     for (Shard& s : _shards) {
-      const std::unique_lock lock(s.mutex);
-      ++s.generation;
-      s.entries.clear();
+      Entries dropped;  // freed once the lock is released
+      const std::scoped_lock lock(s.mutex);
+      ++s.erasures;
+      dropped.swap(s.entries);
     }
   }
 
@@ -92,21 +115,45 @@ class DocumentCache : private DocumentPhaseListener,
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
 
+  // A deleted document never comes back under its id, so its entry goes
+  // rather than waiting empty for one. Without an entry, the document has no
+  // computation running either: each one starts by creating it.
+  void erase(DocumentId document) {
+    Shard& s = shardOf(document);
+    typename Entries::node_type dropped;  // freed once the lock is released
+    const std::scoped_lock lock(s.mutex);
+    dropped = s.entries.extract(document);
+    if (!dropped.empty()) ++s.erasures;
+  }
+
   SharedCoreServices& _shared;
   DocumentBuilder* _builder = nullptr;
   std::optional<DocumentState> _state;
 
-  // Striped by document: one mutex for the whole map would serialise every
-  // document a parallel build indexes at once. A document lives in exactly
-  // one stripe, so every per-document call takes one uncontended lock; only
-  // `clear()` walks them all. The generation is per stripe for the same
-  // reason: it guards a value against its own document being evicted.
-  static constexpr std::size_t kStripes = 64;
-  struct Shard {
-    mutable SharedMutex mutex;
+  // One document's values. `generation` counts its clears: a computation
+  // that started under an earlier count stores nothing.
+  using Values = std::unordered_map<K, V, Hash, KeyEqual>;
+  struct Entry {
     std::uint64_t generation = 0;
-    std::unordered_map<DocumentId, std::unordered_map<K, V, Hash, KeyEqual>>
-        entries;
+    Values values;
+  };
+  using Entries = std::unordered_map<DocumentId, Entry>;
+
+  // Striped by document: one lock for the whole map would serialise every
+  // document a parallel build reads at once. A document lives in exactly one
+  // stripe, so every per-document call takes one lock; only `clear()` walks
+  // them all. The lock is held for lookups and an insertion only, never while
+  // values are freed, so a spin lock suits it. Each stripe has lines of its
+  // own, or neighbouring documents read on different threads would contend
+  // through them. `erasures` counts the entries the stripe removed: an entry
+  // removed and then created again starts its generation over, so a
+  // computation that saw a removal stores nothing either. Erasures are rare,
+  // so they cost the stripe's other documents little.
+  static constexpr std::size_t kStripes = 64;
+  struct alignas(128) Shard {
+    mutable detail::SpinLock mutex;
+    std::uint64_t erasures = 0;
+    Entries entries;
   };
   [[nodiscard]] Shard& shardOf(DocumentId document) const {
     return _shards[stripe(document)];
@@ -151,15 +198,15 @@ void DocumentCache<K, V, Hash, KeyEqual>::onUpdate(
     std::span<const std::string_view> changed,
     std::span<const std::string_view> deleted) {
   const Documents& store = *_shared.documents;
-  const auto evict = [&](std::span<const std::string_view> uris) {
-    for (const std::string_view uri : uris)
-      if (const DocumentId id = store.getDocumentId(uri); id != kNoDocument)
-        clear(id);
-  };
   // A rung-based cache still drops a deleted document at once: it reaches no
   // rung to be evicted at.
-  if (!_state.has_value()) evict(changed);
-  evict(deleted);
+  if (!_state.has_value())
+    for (const std::string_view uri : changed)
+      if (const DocumentId id = store.getDocumentId(uri); id != kNoDocument)
+        clear(id);
+  for (const std::string_view uri : deleted)
+    if (const DocumentId id = store.getDocumentId(uri); id != kNoDocument)
+      erase(id);
 }
 
 }  // namespace cursiv

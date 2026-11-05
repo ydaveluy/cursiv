@@ -10,22 +10,13 @@
 #include <thread>
 #include <vector>
 
+#include "cursiv/execution/SpinLock.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
 namespace {
 
 // How long a publisher waits on the last parts before handing the core back.
 constexpr std::size_t kCorunSpins = 256;
-
-void pause_once() noexcept {
-#if defined(__x86_64__) || defined(__i386__)
-  __builtin_ia32_pause();
-#elif defined(__aarch64__)
-  __asm__ __volatile__("yield");
-#else
-  std::this_thread::yield();
-#endif
-}
 
 std::uint64_t next_random(std::uint64_t& state) noexcept {
   state ^= state >> 12;
@@ -262,7 +253,7 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
     // core the running parts need -- while a worker keeps yielding, since it
     // may not hold a thread those parts need.
     if (++misses < kCorunSpins) {
-      pause_once();
+      detail::pause_once();
       continue;
     }
     if (isWorker) {

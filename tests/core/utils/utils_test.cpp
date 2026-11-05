@@ -2,9 +2,12 @@
 // tree, the one form a URI is keyed in, and the caches that must die with the
 // build they answer for.
 
+#include <array>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -753,6 +756,192 @@ void a_document_cache_evicts_per_document() {
   }));
 }
 
+// A hit never recomputes, a document's entries are its own, and no document
+// at all is never cached.
+void a_document_cache_hits_per_document() {
+  World world;
+  cursiv::DocumentCache<int, int> cache(world.shared);
+  const cursiv::DocumentId a{1};
+  const cursiv::DocumentId b{2};
+  int computed = 0;
+  const auto provider = [&] { return ++computed; };
+  CHECK(cache.get(a, 1, provider) == 1);
+  CHECK(cache.get(a, 1, provider) == 1);
+  CHECK(cache.get(a, 2, provider) == 2);
+  CHECK(cache.get(b, 1, provider) == 3);
+  cache.clear(a);
+  CHECK(cache.get(a, 1, provider) == 4);
+  CHECK(cache.get(b, 1, provider) == 3);
+  cache.clear();
+  CHECK(cache.get(b, 1, provider) == 5);
+  CHECK(cache.get(cursiv::kNoDocument, 1, provider) == 6);
+  CHECK(cache.get(cursiv::kNoDocument, 1, provider) == 7);
+}
+
+// What the standard maps accept as a hash and an equality is enough: one that
+// can be copied but not swapped, or one whose assignment throws, still lets a
+// document be cleared and cached again.
+struct SaltedHash {
+  const std::size_t salt = 7;
+  std::size_t operator()(int key) const noexcept {
+    return std::hash<int>{}(key) ^ salt;
+  }
+};
+struct ThrowingAssignEqual {
+  ThrowingAssignEqual() = default;
+  ThrowingAssignEqual(const ThrowingAssignEqual&) = default;
+  ThrowingAssignEqual& operator=(const ThrowingAssignEqual&) {
+    throw std::runtime_error("assigned");
+  }
+  bool operator()(int a, int b) const noexcept { return a == b; }
+};
+
+void a_document_cache_clears_with_any_hash() {
+  World world;
+  cursiv::DocumentCache<int, int, SaltedHash> salted(world.shared);
+  cursiv::DocumentCache<int, int, std::hash<int>, ThrowingAssignEqual> throwing(
+      world.shared);
+  const cursiv::DocumentId a{1};
+  int computed = 0;
+  const auto provider = [&] { return ++computed; };
+  CHECK(salted.get(a, 1, provider) == 1);
+  salted.clear(a);
+  CHECK(salted.get(a, 1, provider) == 2);
+  CHECK(throwing.get(a, 1, provider) == 3);
+  CHECK(!support::throws<std::runtime_error>([&] { throwing.clear(a); }));
+  CHECK(throwing.get(a, 1, provider) == 4);
+  CHECK(throwing.get(a, 1, provider) == 4);
+}
+
+// A value computed across a removal of its document answers its caller but
+// stays out of the cache. Each provider removes while it runs, so the race is
+// played the same way every time.
+void a_document_cache_keeps_out_what_a_clear_overtakes() {
+  World world;
+  cursiv::DocumentCache<int, int> cache(world.shared);
+  const cursiv::DocumentId a{1};
+  // Its own document cleared, before it has any entry.
+  CHECK(cache.get(a, 1, [&] {
+    cache.clear(a);
+    return 1;
+  }) == 1);
+  CHECK(cache.get(a, 1, [] { return 2; }) == 2);
+  // Everything cleared, then the document cached again: the value still
+  // describes what was cleared. A document never cleared on its own, so a
+  // count of its clears alone would not tell.
+  const cursiv::DocumentId b{2};
+  CHECK(cache.get(b, 3, [&] {
+    cache.clear();
+    CHECK(cache.get(b, 4, [] { return 40; }) == 40);
+    return 3;
+  }) == 3);
+  CHECK(cache.get(b, 3, [] { return 30; }) == 30);
+  CHECK(cache.get(b, 4, [] { return 0; }) == 40);
+}
+
+// The same for a deletion, with and without a rung, and with the document
+// cached again before the value is done.
+void a_document_cache_keeps_out_what_a_deletion_overtakes() {
+  World world;
+  cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const set[] = {a};
+  world.shared.documentBuilder->build(set);
+  const cursiv::DocumentId id = a->id;
+
+  cursiv::DocumentCache<int, int> plain(world.shared);
+  cursiv::DocumentCache<int, int> staged(world.shared,
+                                         cursiv::DocumentState::Linked);
+  const std::string_view gone[] = {"file:///a.ws"};
+  const int seen = plain.get(id, 1, [&] {
+    return staged.get(id, 1, [&] {
+      world.shared.documentBuilder->update({}, gone);
+      CHECK(plain.get(id, 2, [] { return 20; }) == 20);
+      CHECK(staged.get(id, 2, [] { return 20; }) == 20);
+      return 1;
+    });
+  });
+  CHECK(seen == 1);
+  CHECK(plain.get(id, 1, [] { return 2; }) == 2);
+  CHECK(staged.get(id, 1, [] { return 2; }) == 2);
+}
+
+// Documents may share a lock, but a clear of one costs no other document its
+// computation, whatever the distance between their ids.
+void a_document_cache_keeps_what_a_neighbours_clear_does_not_touch() {
+  World world;
+  cursiv::DocumentCache<int, int> cache(world.shared);
+  constexpr std::uint32_t kOwn = 1;
+  for (std::uint32_t other = 0; other < 1024; ++other) {
+    if (other == kOwn) continue;
+    const auto key = static_cast<int>(other);
+    CHECK(cache.get(cursiv::DocumentId{kOwn}, key, [&] {
+      cache.clear(cursiv::DocumentId{other});
+      return key;
+    }) == key);
+    CHECK(cache.get(cursiv::DocumentId{kOwn}, key, [] { return -1; }) == key);
+  }
+}
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+// Readers and clearers at once, on documents whose ids are far apart and on
+// neighbours: a read never answers from before a clear that ended before the
+// read began. Each document counts its clears; a value is the count its
+// provider read.
+void a_document_cache_never_answers_from_before_a_finished_clear() {
+  World world;
+  cursiv::DocumentCache<int, std::uint64_t> cache(world.shared);
+  constexpr std::uint32_t kDocuments = 6;
+  const auto id = [](std::uint32_t d) {
+    return cursiv::DocumentId{d % 2 == 0 ? d * 64 : d};
+  };
+  std::array<std::atomic<std::uint64_t>, kDocuments> clears{};
+  std::array<std::atomic<std::uint64_t>, kDocuments> finished{};
+  const auto raise = [](std::atomic<std::uint64_t>& to, std::uint64_t value) {
+    auto at = to.load();
+    while (at < value && !to.compare_exchange_weak(at, value)) {
+    }
+  };
+  std::atomic<bool> stop{false};
+  std::atomic<int> stale{0};
+  std::vector<std::thread> threads;
+  for (std::uint32_t t = 0; t < 4; ++t)
+    threads.emplace_back([&, t] {
+      std::uint32_t d = t;
+      int key = 0;
+      while (!stop.load()) {
+        d = (d + 1) % kDocuments;
+        key = (key + 1) % 8;
+        const std::uint64_t floor = finished[d].load();
+        const std::uint64_t value =
+            cache.get(id(d), key, [&] { return clears[d].load(); });
+        if (value < floor) ++stale;
+      }
+    });
+  for (std::uint32_t t = 0; t < 2; ++t)
+    threads.emplace_back([&, t] {
+      std::uint32_t d = t;
+      for (std::uint64_t round = 1; !stop.load(); ++round) {
+        d = (d + 1) % kDocuments;
+        if (round % 16 == 0) {
+          std::array<std::uint64_t, kDocuments> owed{};
+          for (std::uint32_t i = 0; i < kDocuments; ++i) owed[i] = ++clears[i];
+          cache.clear();
+          for (std::uint32_t i = 0; i < kDocuments; ++i)
+            raise(finished[i], owed[i]);
+        } else {
+          const std::uint64_t owed = ++clears[d];
+          cache.clear(id(d));
+          raise(finished[d], owed);
+        }
+      }
+    });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  stop = true;
+  for (auto& thread : threads) thread.join();
+  CHECK(stale.load() == 0);
+}
+#endif
+
 }  // namespace
 
 void run() {
@@ -768,6 +957,14 @@ void run() {
   a_stateless_workspace_cache_empties_on_any_update();
   a_staged_workspace_cache_empties_at_its_rung();
   a_document_cache_evicts_per_document();
+  a_document_cache_hits_per_document();
+  a_document_cache_clears_with_any_hash();
+  a_document_cache_keeps_out_what_a_clear_overtakes();
+  a_document_cache_keeps_out_what_a_deletion_overtakes();
+  a_document_cache_keeps_what_a_neighbours_clear_does_not_touch();
+#if !defined(__wasi__) || defined(_REENTRANT)
+  a_document_cache_never_answers_from_before_a_finished_clear();
+#endif
 }
 
 }  // namespace caching
