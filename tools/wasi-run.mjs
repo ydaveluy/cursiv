@@ -6,13 +6,13 @@
 // confined to this file.
 import { WASI } from 'node:wasi';
 import { readFile } from 'node:fs/promises';
-import { existsSync, realpathSync, writeSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, writeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { availableParallelism } from 'node:os';
 import { setFlagsFromString } from 'node:v8';
 import { Worker, isMainThread, workerData, threadId } from 'node:worker_threads';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolve, win32 } from 'node:path';
+import { join, resolve, win32 } from 'node:path';
 
 // Generated modules use standardized Wasm exceptions (try_table), which
 // Node 20 cannot compile. The runner needs Node 22 or later.
@@ -45,6 +45,10 @@ if (!WebAssembly.validate(exnrefProbe)) {
     throw new Error('Cannot enable WebAssembly exnref in this JavaScript runtime');
 }
 
+const kOpenDirectory = 2;
+const kErrnoBadFd = 8;
+const kErrnoIo = 29;
+
 // The whole filesystem is preopened: this runner is the caller, so the module
 // reads the paths its caller chose. The module has one root, so on Windows each
 // drive is a directory of it, named as a file URI names it: `/c:/a` is `C:\\a`.
@@ -66,6 +70,65 @@ export function guestPath(platform, hostPath) {
     : '/';
 }
 
+// `node:wasi` has no `fd_readdir` on Windows, where the module could not list a
+// directory. This one lists it from the path it was opened by. An entry is a
+// header of 24 bytes then its name, cut off where the buffer ends. `preopens` are
+// the ones the runtime was given: their descriptors follow the standard streams.
+export function listDirectoriesByPath(imports, memoryOf, preopens) {
+  const { path_open: pathOpen, fd_close: fdClose } = imports;
+  const directories = new Map(
+    Object.values(preopens).map((path, index) => [index + 3, { path }]));
+  imports.path_open = (dirFd, dirFlags, path, length, oflags, ...rest) => {
+    const result = pathOpen(dirFd, dirFlags, path, length, oflags, ...rest);
+    const parent = directories.get(dirFd);
+    if (result === 0 && parent && (oflags & kOpenDirectory) !== 0) {
+      const { buffer } = memoryOf();
+      directories.set(new DataView(buffer).getUint32(rest.at(-1), true), {
+        path: join(parent.path, Buffer.from(buffer, path, length).toString()),
+      });
+    }
+    return result;
+  };
+  imports.fd_close = (fd) => {
+    directories.delete(fd);
+    return fdClose(fd);
+  };
+  imports.fd_readdir = (fd, buffer, length, cookie, used) => {
+    const directory = directories.get(fd);
+    if (!directory) return kErrnoBadFd;
+    // Read once per listing: the module comes back once per buffer.
+    if (cookie === 0n) {
+      try {
+        directory.entries = readdirSync(directory.path, { withFileTypes: true });
+      } catch {
+        return kErrnoIo;
+      }
+    }
+    const memory = memoryOf().buffer;
+    const target = new Uint8Array(memory, buffer, length);
+    let written = 0;
+    for (let index = Number(cookie);
+         index < directory.entries.length && written < length; ++index) {
+      const entry = directory.entries[index];
+      const name = Buffer.from(entry.name);
+      const record = Buffer.alloc(24 + name.length);
+      // The next cookie, then an inode: none is at hand, and zero would make the
+      // C library ask for each one.
+      record.writeBigUInt64LE(BigInt(index + 1), 0);
+      record.writeBigUInt64LE(BigInt(index + 1), 8);
+      record.writeUInt32LE(name.length, 16);
+      record[20] = entry.isDirectory() ? 3 : entry.isFile() ? 4
+        : entry.isSymbolicLink() ? 7 : 0;
+      name.copy(record, 24);
+      const kept = Math.min(record.length, length - written);
+      target.set(record.subarray(0, kept), written);
+      written += kept;
+    }
+    new DataView(memory).setUint32(used, written, true);
+    return 0;
+  };
+}
+
 // The module reads `/`-separated paths: on Windows a command line that names a
 // host path goes to it in the module's own spelling. Whatever else it says, it
 // keeps.
@@ -75,14 +138,14 @@ export function guestArguments(platform, args, exists = existsSync) {
     index !== 0 && exists(arg) ? guestPath(platform, win32.resolve(arg)) : arg);
 }
 
-function wasiFor(args, environment, hostModule) {
+function wasiFor(args, environment, hostModule, preopens) {
   return new WASI({
     version: 'preview1',
     args: guestArguments(process.platform, args),
     env: { ...process.env, ...environment,
       ...(hostModule ? { CURSIV_WASI_HOST_MODULE: hostModule } : {}),
       PWD: guestPath(process.platform, process.cwd()) },
-    preopens: preopensFor(process.platform),
+    preopens,
     returnOnExit: true,
   });
 }
@@ -228,8 +291,12 @@ async function execute(module, memory, args, command, needsThreads, control,
   let instance;
   const extension = await applicationHost(hostModule,
     () => memory ?? instance?.exports.memory, args);
-  const wasi = wasiFor(args, extension.env, hostModule);
+  const preopens = preopensFor(process.platform);
+  const wasi = wasiFor(args, extension.env, hostModule, preopens);
   const importObject = wasi.getImportObject();
+  if (process.platform === 'win32')
+    listDirectoriesByPath(importObject.wasi_snapshot_preview1,
+      () => memory ?? instance.exports.memory, preopens);
   for (const [namespace, entries] of Object.entries(extension.imports ?? {}))
     importObject[namespace] = { ...importObject[namespace], ...entries };
   if (!command) {

@@ -19,6 +19,11 @@ target_compile_definitions(mcp_test PRIVATE
 
 # The MCP stdio session end to end: spawn `--mcp`, handshake, tools, one rule.
 find_program(CURSIV_NODE node)
+if(CURSIV_NODE AND NOT CMAKE_CROSSCOMPILING)
+  add_test(NAME wasi_runner_test COMMAND ${CURSIV_NODE} --no-warnings --test
+      ${CURSIV_SOURCE_ROOT}/tools/wasi-run.test.mjs)
+  set_tests_properties(wasi_runner_test PROPERTIES TIMEOUT 300)
+endif()
 if(CURSIV_NODE AND TARGET domainmodel_lsp AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME mcp_session COMMAND ${CURSIV_NODE}
       ${CURSIV_SOURCE_ROOT}/tools/mcp-session.mjs $<TARGET_FILE:domainmodel_lsp>

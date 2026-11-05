@@ -127,6 +127,8 @@ jobs:
         with:
           name: wasi-language-server
           path: wasi-module
+      - name: runner
+        run: node --no-warnings --test tools/wasi-run.test.mjs
       - name: session
         run: >-
           node tools/lsp-session.mjs wasi-module/domainmodel_lsp

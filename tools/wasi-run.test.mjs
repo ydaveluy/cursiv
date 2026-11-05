@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { guestArguments, guestPath, importedMemoryLimits, preopensFor }
-  from './wasi-run.mjs';
+import { guestArguments, guestPath, importedMemoryLimits, listDirectoriesByPath,
+  preopensFor } from './wasi-run.mjs';
 
 const runner = process.env.CURSIV_TEST_WASI_RUNNER ?? fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const argument = process.argv.indexOf('--sdk');
@@ -19,6 +19,85 @@ test('each Windows drive is a directory of the module\'s one root', () => {
     { '/c:': 'c:\\', '/d:': 'd:\\' });
   assert.deepEqual(preopensFor('linux', exists), { '/': '/' });
   assert.deepEqual(preopensFor('darwin', exists), { '/': '/' });
+});
+
+test('a directory is listed from the path it was opened by', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cursiv-wasi-list-'));
+  try {
+    const listed = join(root, 'a', 'b');
+    mkdirSync(join(listed, 'folder'), { recursive: true });
+    const files = Array.from({ length: 40 }, (_, i) => `file-${i}-with-a-long-name.txt`);
+    for (const file of files) writeFileSync(join(listed, file), '');
+    // Creating a link takes a privilege on Windows.
+    const links = process.platform !== 'win32';
+    if (links) symlinkSync('folder', join(listed, 'link'));
+
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const closed = [];
+    let nextFd = 7;
+    const imports = {
+      path_open: (dirFd, dirFlags, path, length, oflags, base, inheriting, flags, opened) => {
+        new DataView(memory.buffer).setUint32(opened, nextFd++, true);
+        return 0;
+      },
+      fd_close: (fd) => { closed.push(fd); return 0; },
+    };
+    listDirectoriesByPath(imports, () => memory, { '/first': '/nowhere', '/second': root });
+
+    const [pathAt, usedAt, openedAt, bufferAt] = [16, 32, 40, 1024];
+    const open = (dirFd, path, oflags = 2) => {
+      new Uint8Array(memory.buffer).set(Buffer.from(path), pathAt);
+      assert.equal(imports.path_open(dirFd, 0, pathAt, path.length, oflags, 0n, 0n, 0, openedAt), 0);
+      return new DataView(memory.buffer).getUint32(openedAt, true);
+    };
+    // As the C library reads: what the buffer cut off comes again from the last
+    // whole entry's cookie, and a buffer left short says that was all.
+    const read = (fd, size) => {
+      const entries = new Map();
+      for (let cookie = 0n; ;) {
+        assert.equal(imports.fd_readdir(fd, bufferAt, size, cookie, usedAt), 0);
+        const view = new DataView(memory.buffer);
+        const used = view.getUint32(usedAt, true);
+        for (let at = 0; at + 24 <= used;) {
+          const nameLength = view.getUint32(bufferAt + at + 16, true);
+          if (at + 24 + nameLength > used) break;
+          const name = Buffer.from(memory.buffer, bufferAt + at + 24, nameLength).toString();
+          assert.ok(!entries.has(name), `${name} came twice`);
+          entries.set(name, view.getUint8(bufferAt + at + 20));
+          assert.notEqual(view.getBigUint64(bufferAt + at + 8, true), 0n);
+          cookie = view.getBigUint64(bufferAt + at, true);
+          at += 24 + nameLength;
+        }
+        if (used < size) return entries;
+      }
+    };
+
+    const fd = open(4, 'a/b');
+    const expected = new Map(files.map((file) => [file, 4]));
+    expected.set('folder', 3);
+    if (links) expected.set('link', 7);
+    assert.deepEqual(read(fd, 256), expected);
+    assert.deepEqual(read(fd, 4096), expected, 'a cookie of zero reads it again');
+
+    writeFileSync(join(listed, 'later.txt'), '');
+    expected.set('later.txt', 4);
+    assert.deepEqual(read(fd, 4096), expected, 'a new reading sees what changed');
+
+    // A directory opened from an open directory, not a preopen.
+    assert.deepEqual(read(open(fd, 'folder'), 256), new Map());
+
+    assert.equal(imports.fd_readdir(99, bufferAt, 64, 0n, usedAt), 8, 'an unknown descriptor');
+    const file = open(4, join('a', 'b', files[0]), 0);
+    assert.equal(imports.fd_readdir(file, bufferAt, 64, 0n, usedAt), 8, 'a file');
+    imports.fd_close(fd);
+    assert.deepEqual(closed, [fd]);
+    assert.equal(imports.fd_readdir(fd, bufferAt, 64, 0n, usedAt), 8, 'a closed directory');
+
+    const gone = open(4, 'a/gone');
+    assert.equal(imports.fd_readdir(gone, bufferAt, 64, 0n, usedAt), 29, 'a directory gone');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a host path reaches the module in its own spelling', () => {
