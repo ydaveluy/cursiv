@@ -78,11 +78,14 @@ void explicit_units_read_one_blank() {
     const auto* doc = parsed.value_as<tllunit::Document>();
     CHECK(doc && doc->padding == text.substr(1, 1));
   }
-  for (const std::string_view text : {"x   y", "x \t\r\n y", "xy"})
-    CHECK(!parser->parse("required:" + std::string(text)).diagnostics.empty());
+  for (const std::string_view text : {"x   y", "x \t\r\n y", "xy"}) {
+    const std::string input = "required:" + std::string(text);
+    CHECK(!parser->parse(input).diagnostics.empty());
+  }
   for (unsigned n = 1; n <= 6; ++n) {
     const std::string text = "[" + std::string(n, ' ') + "]";
-    CHECK(!parser->parse("required:" + text).diagnostics.empty());
+    const std::string input = "required:" + text;
+    CHECK(!parser->parse(input).diagnostics.empty());
   }
   for (const std::string_view text : {"[ ]xy", "[   ]  x   y", "[\t] x y"}) {
     const std::string source = "clone:" + std::string(text);

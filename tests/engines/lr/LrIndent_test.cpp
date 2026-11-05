@@ -89,7 +89,8 @@ void an_indent_keeps_an_earlier_repair_reading_alive() {
       // it: the graph lays the indent as the drive does.
       for (const std::string_view indent : {"  ", "\t", "\f  "}) {
         const std::string tail = std::string(newline) + std::string(indent) + "z";
-        const auto r = engine->parse(prefix + tail);
+        const std::string input = prefix + tail;
+        const auto r = engine->parse(input);
         CHECK(r.accepted && r.diagnostics.size() == 1);
         const auto* node = r.value_as<tvirtual::Node>();
         CHECK(node && node->first && !node->second);

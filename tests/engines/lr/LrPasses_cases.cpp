@@ -597,7 +597,8 @@ void long_postfix_chain_beside_a_fault() {
   for (unsigned i = 0; i < count; ++i) text += i % 2 == 0 ? ".a()" : ".b()";
   text += "; y = = ;";
   const auto p = tdoor::generated::G::create_parser();
-  const auto r = p->parse("nest " + text);
+  const std::string input = "nest " + text;
+  const auto r = p->parse(input);
   CHECK(r.accepted && r.error == cursiv::AstBuildError::none);
   CHECK(!r.diagnostics.empty() || !r.cst().diagnostics().empty());
   const auto* model = r.value_as<Model>();

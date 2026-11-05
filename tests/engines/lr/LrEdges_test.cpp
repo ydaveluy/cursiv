@@ -184,7 +184,8 @@ bool clean(const cursiv::Parser& p, std::string_view text) {
   return checks::clean(p, "guard " + std::string(text));
 }
 bool faulted(const cursiv::Parser& p, std::string_view text) {
-  const cursiv::ParseResult r = p.parse("guard " + std::string(text));
+  const std::string input = "guard " + std::string(text);
+  const cursiv::ParseResult r = p.parse(input);
   return !r.diagnostics.empty();
 }
 

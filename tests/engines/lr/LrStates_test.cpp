@@ -154,10 +154,12 @@ void run() {
     const auto at = static_cast<cursiv::TextOffset>(text.size());
     CHECK(checks::offers(*splice, text, at, at, "!") &&
           !checks::offers(*splice, text, at, at, ">"));
-    const auto glued = splice->parse(text + ">");
+    const std::string gluedText = text + ">";
+    const auto glued = splice->parse(gluedText);
     CHECK(!glued.accepted || !glued.diagnostics.empty());
     for (const std::string_view typed : {"!", " >"}) {
-      const auto parsed = splice->parse(text + std::string(typed));
+      const std::string typedText = text + std::string(typed);
+      const auto parsed = splice->parse(typedText);
       CHECK(parsed.accepted && parsed.diagnostics.empty());
     }
   }
@@ -168,7 +170,8 @@ void run() {
     const std::string text = "splice:%-" + std::string(gap);
     const auto at = static_cast<cursiv::TextOffset>(text.size());
     CHECK(checks::offers(*splice, text, at, at, ">") == !gap.empty());
-    const auto typed = splice->parse(text + ">");
+    const std::string input = text + ">";
+    const auto typed = splice->parse(input);
     CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
   }
   // A condition reads a run of `~` as one token, however many the arms read
@@ -289,7 +292,8 @@ void run() {
         const auto* root = r.value_as<treducecells::Node>();
         CHECK(root && root->first == (arm == 'a') &&
               root->second == (arm == 'b'));
-        const auto repaired = parser->parse(text.substr(0, text.size() - 1));
+        const std::string cutText = text.substr(0, text.size() - 1);
+        const auto repaired = parser->parse(cutText);
         CHECK(repaired.accepted && repaired.diagnostics.size() == 1);
         const auto* fixed = repaired.value_as<treducecells::Node>();
         CHECK(fixed && fixed->first == (arm == 'a') &&
@@ -459,8 +463,9 @@ std::set<std::string> offered(const std::string& text, std::size_t caret) {
   static const auto parser = g::create_parser();
   const auto at = static_cast<cursiv::TextOffset>(8 + caret);
   std::set<std::string> words;
+  const std::string input = "bracket:" + text;
   for (const auto& f :
-       checks::features(*parser, parser->parse("bracket:" + text), at, at)) {
+       checks::features(*parser, parser->parse(input), at, at)) {
     const auto spellings = parser->getGrammar().terminalSpellings(f.feature);
     words.insert(std::string(
         spellings.size() == 1 ? spellings.front()

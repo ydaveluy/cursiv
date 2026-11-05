@@ -55,7 +55,8 @@ void run() {
   CHECK(names(r) == "i ?x iff if_ whil while_ w ifwhile ?i cas cases Loops ");
   for (const std::string_view bad :
        {"if;", "while;", "if while;", "CASE;", "Loop;", "if case;"}) {
-    CHECK(!ll->parse("reserved:" + std::string(bad)).diagnostics.empty());
+    const std::string input = "reserved:" + std::string(bad);
+    CHECK(!ll->parse(input).diagnostics.empty());
   }
   const auto ruled = ll->parse("reserved:a; ----");
   const auto* doc = ruled.value_as<tllreserved::Doc>();

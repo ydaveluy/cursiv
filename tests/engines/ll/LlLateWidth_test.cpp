@@ -76,9 +76,11 @@ int main() {
     for (unsigned i = 0; i < n; ++i) prefix += "word;";
     // Both segmentations are syntactically viable. Keep the longest-token
     // preference and the Dimension creator after the long shared prefix.
-    expect_value(ll->parse(prefix + "5px!"), n, true);
+    const std::string valid = prefix + "5px!";
+    expect_value(ll->parse(valid), n, true);
     // Only NUMBER matches here.
-    expect_value(ll->parse(prefix + "5?"), n, false);
+    const std::string invalid = prefix + "5?";
+    expect_value(ll->parse(invalid), n, false);
   }
   a_long_shared_prefix_is_read_whole();
   return cursiv::test::report("LlLateWidth_test");

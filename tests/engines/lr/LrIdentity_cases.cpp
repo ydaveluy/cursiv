@@ -775,7 +775,8 @@ void run() {
     for (unsigned i = 0; i < 256; ++i) text += "a ";
     const auto r = parser->parse(text);
     CHECK(r.accepted && r.diagnostics.empty());
-    const auto cut = parser->parse(text.substr(0, 20));
+    const std::string cutText = text.substr(0, 20);
+    const auto cut = parser->parse(cutText);
     CHECK(cut.accepted && !cut.diagnostics.empty());
   }
 }

@@ -115,14 +115,16 @@ void run() {
     const std::string blanks(from, ' ');
     for (const unsigned count : {1u, 2u, 3u, 4u, 128u})
       for (const char closer : {'!', '?'}) {
+        const std::string input = blanks + std::string(count, 'a') + closer;
         const auto result =
-            parser->parse(blanks + std::string(count, 'a') + closer);
+            parser->parse(input);
         CHECK(result.accepted && result.diagnostics.empty());
       }
     for (const unsigned count : {0u, 1u, 2u})
       for (const char closer : {'!', '?'}) {
-        const auto result = parser->parse(
-            blanks + '"' + std::string(count, 'x') + '"' + closer);
+        const std::string input =
+            blanks + '"' + std::string(count, 'x') + '"' + closer;
+        const auto result = parser->parse(input);
         CHECK(result.accepted && result.diagnostics.empty());
       }
     const std::string prefix(from, '#');
@@ -1219,7 +1221,8 @@ void a_re_reading_keeps_the_guard_of_what_it_names() {
 void a_caret_offers_the_terminal_whose_own_guard_admits() {
   const auto offered = [&](const char* text) {
     const auto at = static_cast<cursiv::TextOffset>(std::strlen("own "));
-    return checks::features(parser(), parser().parse(in("own", text)), at, at)
+    const std::string input = in("own", text);
+    return checks::features(parser(), parser().parse(input), at, at)
         .size();
   };
   // `A` refuses a `;` right behind it, `B` does not; both spell `a` and both
@@ -1613,9 +1616,12 @@ void run() {
     }
 
   for (const std::string& w : all) {
-    CHECK(!parser->parse("heads =" + w + ";").diagnostics.empty());
-    CHECK(parser->parse("heads =" + w + "x;").diagnostics.empty());
-    CHECK(parser->parse("heads = " + w + "_ ;").diagnostics.empty());
+    const std::string glued = "heads =" + w + ";";
+    CHECK(!parser->parse(glued).diagnostics.empty());
+    const std::string longer = "heads =" + w + "x;";
+    CHECK(parser->parse(longer).diagnostics.empty());
+    const std::string spaced = "heads = " + w + "_ ;";
+    CHECK(parser->parse(spaced).diagnostics.empty());
   }
 }
 }  // namespace case_refusedheadwords
@@ -1791,8 +1797,10 @@ void run() {
   CHECK(s.accepted && s.diagnostics.empty());
   CHECK(items(s) ==
         "a b= yes yesx= c nox yes0123456789abcdef= abcdefghijklmnop0123456789 ");
-  for (const std::string_view bad : {"yes=", "no=", "a: yes="})
-    CHECK(!shifted->parse("shifted " + std::string(bad)).diagnostics.empty());
+  for (const std::string_view bad : {"yes=", "no=", "a: yes="}) {
+    const std::string input = "shifted " + std::string(bad);
+    CHECK(!shifted->parse(input).diagnostics.empty());
+  }
 }
 }  // namespace case_alikecandidates
 

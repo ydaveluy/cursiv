@@ -540,6 +540,13 @@ number member, a literal must spell a number; give any other a converter.
 
 The terminal's converter gives a type the member does not accept.
 
+### A temporary given to `parse`
+
+> this name is a temporary that owns its text
+
+The tree views the text it was parsed from, and a temporary dies at the end of the
+expression. Keep the text in a variable that lives as long as the tree.
+
 ### A number the member cannot always hold
 
 > this rule gives a number this member cannot always hold

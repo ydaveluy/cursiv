@@ -228,7 +228,8 @@ void a_token_the_choice_read_glues_as_the_choice_reads_it() {
     const auto offered = spellings(features_between(*ll, text, at, at));
     CHECK(offered == (gap.empty() ? std::vector<std::string>{}
                                   : std::vector<std::string>{">"}));
-    const auto typed = ll->parse(text + ">");
+    const std::string input = text + ">";
+    const auto typed = ll->parse(input);
     CHECK((typed.accepted && typed.diagnostics.empty()) == !gap.empty());
   }
 }

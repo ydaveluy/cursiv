@@ -173,8 +173,9 @@ void a_plan_is_read_once(const char* prefix) {
   const auto parser = tllrepairgrowth::generated::Ll::create_parser();
   const auto visits = [&](unsigned depth) {
     cursiv::LlPredictionWork::current() = {};
+    const std::string input = prefix + repeat("a", depth) + "b";
     const cursiv::ParseResult result =
-        parser->parse(prefix + repeat("a", depth) + "b");
+        parser->parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
     return cursiv::LlPredictionWork::current().planVisits;
   };
@@ -410,7 +411,8 @@ void a_condition_reads_every_new_context_of_a_published_union() {
 void a_parse_has_a_share_of_repair_and_says_so() {
   const auto parser = tpar::generated::Ll::create_parser();
   const auto told = [&](unsigned count) {
-    const auto result = parser->parse(lines(count, 1));
+    const std::string input = lines(count, 1);
+    const auto result = parser->parse(input);
     CHECK(result.accepted && result.value);
     return std::ranges::any_of(result.diagnostics, [](const auto& d) {
       return d.kind == cursiv::DiagnosticKind::bounded;

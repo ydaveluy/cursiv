@@ -785,7 +785,8 @@ void run() {
 
   const auto parser = g::create_parser();
   for (const bool second : {false, true}) {
-    const auto result = parser->parse(second ? text + "!" : text);
+    const std::string input = second ? text + "!" : text;
+    const auto result = parser->parse(input);
     CHECK(result.accepted && result.diagnostics.empty());
     const auto* node = result.value_as<trankgrowth::Node>();
     CHECK(node && node->first == !second && node->second == second);

@@ -155,7 +155,8 @@ void a_choice_that_meets_no_condition_reads_a_nest_once() {
     std::string text = "nest:";
     for (unsigned i = 0; i < n; ++i) text += "1+(";
     cursiv::LlPredictionWork::current() = {};
-    const auto a = ll->parse(text + "1");
+    const std::string input = text + "1";
+    const auto a = ll->parse(input);
     const std::uint64_t after = cursiv::LlPredictionWork::current().tokens;
     CHECK(a.accepted && !a.diagnostics.empty());
     const bool within = before == 0 || after <= 2.2 * before;

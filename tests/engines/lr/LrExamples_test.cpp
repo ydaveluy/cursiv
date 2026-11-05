@@ -214,8 +214,10 @@ void a_statement_may_still_be_carried_on() {
   // Past `applicable`, only `for` continues the written prefix. Starting
   // another requirement would first require abandoning the unfinished clause.
   const std::string two = "contact: \"m\"\nreq R1 \"t\" applicable ";
-  CHECK(engine->parse(two + "for env").diagnostics.empty());
-  CHECK(!engine->parse(two + "req R2 \"next\"").diagnostics.empty());
+  const std::string forEnv = two + "for env";
+  CHECK(engine->parse(forEnv).diagnostics.empty());
+  const std::string nextReq = two + "req R2 \"next\"";
+  CHECK(!engine->parse(nextReq).diagnostics.empty());
   CHECK(!offers(*engine, two, "req"));
   CHECK(offers(*engine, two, "for"));
 }

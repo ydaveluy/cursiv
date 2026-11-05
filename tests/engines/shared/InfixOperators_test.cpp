@@ -254,7 +254,8 @@ void a_condition_ending_a_region_reads_past_the_callers_trivia(
     const std::string start = "visible:" + std::string(head) + " protected";
     for (const std::string_view gap : {" ", "  ", "\n", " \n "})
       reads(head, start + std::string(gap) + "a");
-    const cursiv::ParseResult r = p.parse(start + "a");
+    const std::string input = start + "a";
+    const cursiv::ParseResult r = p.parse(input);
     CHECK(!r.accepted || !r.diagnostics.empty());
   }
   for (const std::string_view head :

@@ -214,7 +214,8 @@ void text_actions_run_once_per_declared_occurrence(const cursiv::Parser& p) {
 
 void a_bare_word_does_not_acquire_another_arms_flag(const cursiv::Parser& p) {
   for (const std::string_view word : {"COMMIT", "END"}) {
-    const auto r = p.parse("$k " + std::string(word));
+    const std::string input = "$k " + std::string(word);
+    const auto r = p.parse(input);
     CHECK(clean(r));
     const Node* const n = r.value_as<Node>();
     CHECK(n && !n->flagged && n->child);

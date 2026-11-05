@@ -41,6 +41,8 @@ of it that a converter returns, or the parts of a data rule. A converter that re
 a `std::string` needs a `string` member, and a `string_view` over it is refused. A
 `string_view` points into the source text or the `ParseResult`, so keep both alive
 while you read the AST.
+`Parser::parse` refuses a temporary `std::string` at compile time for that reason: name
+the text first.
 
 A `vector<T>` member grows with `append`. A rule that returns the whole
 `std::vector<T>` fills it with `assign` instead.

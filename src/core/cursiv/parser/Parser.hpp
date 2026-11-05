@@ -31,6 +31,14 @@ class Parser {
   [[nodiscard]] virtual ParseResult parse(
       std::string_view text,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
+  // A temporary that owns its text is refused where it is written: it dies at the
+  // end of the expression, and the tree would view it. It wins the overload as an
+  // exact match.
+  template <detail::owning_text_rvalue S>
+  ParseResult parse(S&&, const CancellationToken& = kNoCancel) const {
+    detail::refuse_owning_bind<S>();
+    return {};
+  }
 
   // What may be written at `at`, where the document's own text resumes at
   // `resume`: what lies between is what the answer replaces, `at == resume`
