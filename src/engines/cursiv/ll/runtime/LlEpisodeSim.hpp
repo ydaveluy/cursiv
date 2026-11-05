@@ -711,8 +711,11 @@ class LlEpisodeSim {
       for (; at < everyone.size(); ++at) {
         const LlThread t = everyone[at];
         bool fresh = false;
-        _crossed.at(key(t), fresh);
-        if (!fresh) continue;
+        std::uint32_t& crossed = _crossed.at(key(t), fresh);
+        // Met again, a reading crosses again only if it is the better one: what
+        // it reaches would otherwise keep the choices of the worse.
+        if (!fresh && !earlier(t, everyone[crossed])) continue;
+        crossed = static_cast<std::uint32_t>(at);
         const LlAtnState& s = _atn.state(t.state);
         for (std::uint32_t i = 0; i < s.nedges; ++i) {
           const LlAtnEdge& e = _atn.edge(s.edge + i);

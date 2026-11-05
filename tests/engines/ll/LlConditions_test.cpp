@@ -229,6 +229,10 @@ void a_refused_token_is_read_again_and_a_named_one_stands() {
         "gapmany:\n-> a", "gapmany: - > a", "andloop:aa;", "andloop:aaa;",
         "andloop:a a;", "andhead:aa"})
     clean(text, true);
+  // Both readings stand on a guard: past the one that lets it through, the token
+  // is read as any other.
+  clean("atguard:a ~", true);
+  clean("atguard:~", true);
   for (const std::string_view text :
        {"gapexit:a ->", "andloop:ab;", "andhead:ba"})
     clean(text, false);

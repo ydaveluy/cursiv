@@ -1086,8 +1086,12 @@ class LlEpisode {
   const LlThread* named_longer(const std::vector<LlThread>& threads,
                                TextOffset from) {
     if (!T.has_longer()) return nullptr;
+    // What they take, past the guards that let them through: a reading that still
+    // stands on such a guard takes a token too.
     LlMask<T.termWords> viable;
-    for (const LlThread& t : threads) atoms_into(t, viable);
+    _sim->possible_terms(
+        threads, [&](std::uint16_t term) { viable.set(term); },
+        [&](std::uint32_t edge) { return held_back(edge, from, from); });
     for (const LlThread& t : threads) {
       const LlAtnState& s = T.atn.state(t.state);
       for (std::uint32_t i = 0; i < s.nedges; ++i) {

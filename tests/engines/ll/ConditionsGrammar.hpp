@@ -64,6 +64,7 @@ struct Base : cursiv::GrammarSpec {
             (lit<"atshared:"> + ((ref<Mark> + !lit<"~>"> + option(lit<"~">) +
                                   ref<ID>) |
                                  (ref<Mark> + lit<"~"> + lit<">">))) |
+            (lit<"atguard:"> + many(!lit<"~"> + ref<ID>) + &lit<"~"> + lit<"~">) |
             (lit<"atturn:"> + many(!lit<"~>"> + lit<"~"> + ref<ID>) +
              option(lit<"~"> + lit<">">)) |
             (lit<"atclimb:"> + (assign<&StatementNode::value>(ref<WavedSum>) |

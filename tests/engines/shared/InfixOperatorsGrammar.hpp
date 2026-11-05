@@ -33,6 +33,9 @@ struct Coded : cursiv::Extends<Expr> {
 };
 // Declares no member of its own: its base declares the three a climb writes.
 struct Recoded : cursiv::Extends<Coded> {};
+struct Listed : cursiv::Extends<Expr> {
+  vector<Expr*> items;
+};
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   Expr* value = nullptr;
 };
@@ -149,6 +152,27 @@ struct Between : Base {
   struct E : infix<Primary, ast::Text,
                    (left(kw<"NOT"> + !gap::line + kw<"EQUAL">))> {};
   struct Root : Document<E> {};
+};
+
+// A sign a gap makes an operator, where the next column may open with the same
+// sign and an operand opens with a guard: past its own condition, the operator's
+// reading meets the column's at that guard, and it is the better of the two.
+struct Rowed : Base {
+  struct E;
+  struct Named : NameOrParen<E> {};
+  static constexpr auto head = ref<ID> + &lit<"(">;
+  struct Atom : rule<!head + ref<Named>> {};
+  struct Primary : rule<(lit<"-"> + ref<Atom>) | ref<Atom>> {};
+  struct E : infix<Primary, ast::Text,
+                   (left((gap::none + lit<"-">) | (lit<"-"> + !gap::none)))> {};
+  struct Row : rule<create<ast::Listed>(some(append<&ast::Listed::items>(ref<E>)))> {};
+  struct Array
+      : rule<create<ast::Listed>(lit<"["> +
+                                 many(append<&ast::Listed::items>(ref<Row>) +
+                                      some(lit<";">)) +
+                                 option(append<&ast::Listed::items>(ref<Row>)) +
+                                 lit<"]">)> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<Array>)) + eof> {};
 };
 
 struct Lead : Base {
@@ -341,6 +365,7 @@ struct Suite : Base {
                      (lit<"grouped:"> + ref<Grouped::Root>) |
                      (lit<"between:"> + ref<Between::Root>) |
                      (lit<"lead:"> + ref<Lead::Root>) |
+                     (lit<"rowed:"> + ref<Rowed::Root>) |
                      (lit<"valued:"> + ref<Valued::Root>) |
                      (lit<"stated:"> + ref<Stated::Root>) |
                      (lit<"visible:"> + ref<Visible::Root>) |

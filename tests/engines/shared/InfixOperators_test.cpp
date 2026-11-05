@@ -43,6 +43,14 @@ void spell(const ast::Expr& expr, std::string& out) {
     out += name->name;
     return;
   }
+  if (const auto* const listed = cursiv::ast_cast<ast::Listed>(&expr)) {
+    for (const ast::Expr* const item : listed->items) {
+      out += '[';
+      spell(*item, out);
+      out += ']';
+    }
+    return;
+  }
   const ast::Expr* left = nullptr;
   const ast::Expr* right = nullptr;
   std::string_view op;
@@ -118,6 +126,10 @@ void a_terminal_keeps_its_value(const cursiv::Parser& p) {
 }
 
 void conditions_around_one_element_keep_its_value(const cursiv::Parser& p) {
+  check(p, "rowed:", "[a-b]", "[[(a - b)]]");
+  check(p, "rowed:", "[a- b]", "[[(a - b)]]");
+  check(p, "rowed:", "[a - b]", "[[(a - b)]]");
+  check(p, "rowed:", "[a -b]", "[[a][b]]");
   check(p, "guarded:", "a = (b)", "(a equal b)");
   check(p, "guarded:", "a = b", "<refused>");
   check(p, "lead:", "a = b", "(a equal b)");
