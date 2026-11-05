@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/syntax-tree/BlockArena.hpp"
 #include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/CstRun.hpp"
@@ -43,12 +44,11 @@ struct Grammar;
 // The tree, the text it describes, and the arena both it and the AST come from.
 class Cst {
  public:
-  // By pointer so `Cst` stays movable: a monotonic buffer resource is neither
-  // copyable nor movable.
+  // By pointer so `Cst` stays movable: the arena is neither copyable nor
+  // movable.
   Cst()
       : _text(&kEmptyDocumentByte, std::size_t{0}),
-        _pool(std::make_unique<std::pmr::monotonic_buffer_resource>(
-            kFirstBuffer)) {
+        _pool(std::make_unique<detail::BlockArena>(kFirstBuffer)) {
     _stream.bind(_pool.get());
   }
   explicit Cst(std::string_view text) : Cst() { set_text(text); }
@@ -89,8 +89,7 @@ class Cst {
     if (_pool != nullptr)
       _pool->release();
     else
-      _pool =
-          std::make_unique<std::pmr::monotonic_buffer_resource>(kFirstBuffer);
+      _pool = std::make_unique<detail::BlockArena>(kFirstBuffer);
     _stream.bind(_pool.get());
     clear();
     set_text(text);
@@ -343,7 +342,7 @@ class Cst {
   static constexpr char kEmptyDocumentByte = '\0';
 
   std::string_view _text;
-  std::unique_ptr<std::pmr::monotonic_buffer_resource> _pool;
+  std::unique_ptr<detail::BlockArena> _pool;
   NodeId _entryBegin = 0;
   NodeId _entryEnd = 0;
   NodeId _entryRoot = kNoNode;

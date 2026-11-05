@@ -49,7 +49,7 @@ class CstRun {
   // The tree's own arena, and never a second allocator: the records and the
   // AST both come from it, so a parse frees in one release and the AST build
   // reads records laid next to the nodes it writes. A doubling leaves its
-  // predecessor behind -- a monotonic resource has no free -- which is what
+  // predecessor behind -- the arena has no free -- which is what
   // makes sizing from the document worth doing. Binding drops the buffer;
   // unbound, the run owns a heap buffer.
   void bind(std::pmr::memory_resource* mem) {
@@ -67,7 +67,7 @@ class CstRun {
   // need is never touched, so natively it never becomes resident. Wasm linear
   // memory charges untouched room too: there a quarter is estimated, and a
   // large one is taken only once records reach it, in one step, so a dense
-  // tree strands no series of smaller buffers in the monotonic pool.
+  // tree strands no series of smaller buffers in the arena.
   void reserve_for(std::size_t textBytes) {
     const std::size_t words = sizeof(void*) < 8 ? textBytes / 4 : textBytes;
     std::size_t want =

@@ -18,10 +18,12 @@
 #include <cstring>
 #include <functional>
 #include <latch>
+#include <map>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
 #include <random>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -72,6 +74,7 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/AstWalk.hpp"
+#include "cursiv/syntax-tree/BlockArena.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/CstLeaf.hpp"
@@ -4433,6 +4436,77 @@ void run() {
 
 }  // namespace node_on_its_own
 
+namespace block_arena {
+
+// Wasm linear memory, as an allocator without coalescing sees it: it only
+// grows, and a freed range serves again only a request that fits in it. The
+// bytes come from the heap; only their place in that memory is modelled.
+class LinearMemory final : public std::pmr::memory_resource {
+ public:
+  std::size_t peak = 0;
+
+ private:
+  void* do_allocate(std::size_t bytes, std::size_t align) override {
+    // The smallest freed range that holds it, else new memory at the top.
+    auto range = bytes;
+    if (const auto fit = _free.lower_bound(bytes); fit != _free.end()) {
+      range = *fit;
+      _free.erase(fit);
+    } else {
+      _top += bytes;
+      peak = std::max(peak, _top);
+    }
+    auto* p = std::pmr::new_delete_resource()->allocate(bytes, align);
+    _placed.emplace(p, range);
+    return p;
+  }
+  void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+    const auto range = _placed.find(p);
+    _free.insert(range->second);
+    _placed.erase(range);
+    std::pmr::new_delete_resource()->deallocate(p, bytes, align);
+  }
+  [[nodiscard]] bool do_is_equal(
+      const std::pmr::memory_resource& other) const noexcept override {
+    return this == &other;
+  }
+
+  std::size_t _top = 0;
+  std::multiset<std::size_t> _free;
+  // Each live request, and the size of the range it took.
+  std::map<void*, std::size_t> _placed;
+};
+
+// One parse of a document `step` times larger: the AST's 64 KiB chunks around
+// the syntax tree's records, one array sized from the text, all from one pool.
+std::size_t parse(std::pmr::memory_resource& pool, std::size_t step) {
+  constexpr std::size_t kChunk = std::size_t{64} << 10;
+  const auto records = step * (std::size_t{700} << 10);
+  for (std::size_t i = 0; i < 4 * step; ++i) (void)pool.allocate(kChunk, 16);
+  (void)pool.allocate(records, 16);
+  for (std::size_t i = 0; i < 4 * step; ++i) (void)pool.allocate(kChunk, 16);
+  return 8 * step * kChunk + records;
+}
+
+// A document that grows at every reparse, as one does under a series of
+// pastes, must not need much more memory than its largest parse: a pool whose
+// blocks keep doubling leaves each smaller one behind in memory that never
+// shrinks, and the editor's server runs out of it.
+void a_growing_document_reuses_its_blocks() {
+  LinearMemory memory;
+  cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
+  std::size_t largest = 0;
+  for (std::size_t step = 1; step <= 40; ++step) {
+    largest = std::max(largest, parse(pool, step));
+    pool.release();
+  }
+  CHECK(memory.peak <= 2 * largest);
+}
+
+void run() { a_growing_document_reuses_its_blocks(); }
+
+}  // namespace block_arena
+
 int main() {
   const auto run = [](const char* section, void (*test)()) {
     // Keep the current section visible even if CTest terminates the process.
@@ -4448,5 +4522,6 @@ int main() {
   run("cst_node", cst_node::run);
   run("cst_utils", cst_utils::run);
   run("reference_resolution", reference_resolution::run);
+  run("block_arena", block_arena::run);
   return cursiv::test::report("syntax_tree");
 }
