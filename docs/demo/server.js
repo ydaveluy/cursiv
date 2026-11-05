@@ -82,7 +82,10 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
     const worker = new Worker(new URL('./wasi-worker.js', import.meta.url));
     workers.push(worker);
     worker.addEventListener('message', onMessage(worker));
-    worker.addEventListener('message', ({ data }) => data.type === 'ready' && resolve(worker));
+    worker.addEventListener('message', ({ data }) => {
+      if (data.type === 'ready') resolve(worker);
+      else if (data.type === 'crash') reject(new Error(data.text.split('\n')[0]));
+    });
     worker.addEventListener('error', (e) => { reject(e); stop(`worker error: ${e.message}`); });
     worker.postMessage({ ...shared, ...msg });
     if (msg.role === 'main') resolve(worker);

@@ -256,6 +256,16 @@ function wasiImports() {
       postMessage({ type: 'exit', code });
       throw EXIT;
     },
+    // The allocator's entropy. getRandomValues refuses shared memory and takes
+    // 64 KiB at most.
+    random_get: (ptr, len) => {
+      const mem = u8();
+      for (let at = 0; at < len; at += 65536) {
+        const chunk = crypto.getRandomValues(new Uint8Array(Math.min(65536, len - at)));
+        mem.set(chunk, ptr + at);
+      }
+      return ESUCCESS;
+    },
     sched_yield: () => ESUCCESS,
   };
 }
@@ -287,7 +297,7 @@ function report(error) {
   postMessage({ type: 'crash', text: String(error?.stack ?? error) });
 }
 
-onmessage = async ({ data }) => {
+async function run(data) {
   ctx = data;
   nextFd = 16 + (data.role === 'main' ? 0 : (data.slot + 1) * 4096);
   if (data.role === 'main') {
@@ -309,4 +319,7 @@ onmessage = async ({ data }) => {
     catch (error) { report(error); if (error === EXIT) return; }
     instance = await instantiate();
   }
-};
+}
+
+// A rejection here would reach nobody: the page would wait for the worker forever.
+onmessage = ({ data }) => { run(data).catch(report); };

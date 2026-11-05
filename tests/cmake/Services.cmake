@@ -24,6 +24,13 @@ if(CURSIV_NODE AND NOT CMAKE_CROSSCOMPILING)
       ${CURSIV_SOURCE_ROOT}/tools/wasi-run.test.mjs)
   set_tests_properties(wasi_runner_test PROPERTIES TIMEOUT 300)
 endif()
+# The online demo's worker, on the servers it publishes.
+if(CURSIV_NODE AND TARGET domainmodel_lsp AND CMAKE_SYSTEM_NAME STREQUAL "WASI")
+  add_test(NAME demo_worker_test COMMAND ${CURSIV_NODE} --no-warnings
+      ${CURSIV_SOURCE_ROOT}/tools/demo-worker.test.mjs
+      $<TARGET_FILE:arithmetics_lsp> $<TARGET_FILE:domainmodel_lsp>
+      $<TARGET_FILE:requirements_lsp> $<TARGET_FILE:statemachine_lsp>)
+endif()
 if(CURSIV_NODE AND TARGET domainmodel_lsp AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME mcp_session COMMAND ${CURSIV_NODE}
       ${CURSIV_SOURCE_ROOT}/tools/mcp-session.mjs $<TARGET_FILE:domainmodel_lsp>
