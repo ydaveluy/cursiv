@@ -13,8 +13,12 @@
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
+#include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ValidationHelper.hpp"
@@ -100,6 +104,73 @@ void a_chain_that_ends_says_nothing() {
                      "entity C extends B {\n}\n"));
 }
 
+// A workspace on a disk the test writes: each write is announced as an editor
+// saving those files would announce it.
+struct Disk {
+  cursiv::MemoryFileSystemProvider* files = nullptr;
+  cursiv::CoreLanguage<Services, Shared> services = make(files);
+
+  static cursiv::CoreLanguage<Services, Shared> make(
+      cursiv::MemoryFileSystemProvider*& files) {
+    auto disk = std::make_unique<cursiv::MemoryFileSystemProvider>();
+    files = disk.get();
+    return cursiv::create_language<Services, Shared, dm::install_core_module>(
+        std::move(disk));
+  }
+
+  void write(const std::vector<std::pair<std::string, std::string>>& written) {
+    std::vector<std::string_view> uris;
+    for (const auto& [uri, text] : written) {
+      files->addFile(uri, text);
+      uris.emplace_back(uri);
+    }
+    services.shared->documentBuilder->update(uris, {});
+  }
+
+  [[nodiscard]] std::size_t cycles(std::string_view uri) const {
+    const auto document = services.shared->documents->getDocument(uri);
+    CHECK(document != nullptr);
+    if (document == nullptr) return 0;
+    return static_cast<std::size_t>(std::ranges::count_if(
+        document->diagnostics,
+        [](const cursiv::Diagnostic& d) { return d.message == kCycle; }));
+  }
+};
+
+constexpr std::string_view kA = "file:///a.dmodel";
+constexpr std::string_view kB = "file:///b.dmodel";
+constexpr std::string_view kC = "file:///c.dmodel";
+
+// The climb crosses documents, so an edit in one changes the answer in the
+// other: after the edit, both say what a fresh build says.
+void a_cycle_closed_in_another_document_is_an_error_in_both() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  CHECK(disk.cycles(kB) == 0);
+  disk.write({{std::string(kB), "entity B extends A {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
+  CHECK(disk.cycles(kB) == 1);
+}
+
+// The same through a document the edit does not touch: `a` names nothing
+// that changed, but the climbs from `b` and `c` go through it. `E` is on no
+// loop, but its climb never ends either.
+void a_cycle_through_an_untouched_document_is_an_error() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B extends C {\n}\n"},
+              {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kB) == 0);
+  CHECK(disk.cycles(kC) == 0);
+  disk.write({{std::string(kC),
+               "entity C extends A {\n}\n"
+               "entity E extends C {\n}\n"}});
+  CHECK(disk.cycles(kB) == 1);
+  CHECK(disk.cycles(kC) == 2);
+}
+
 }  // namespace
 
 // A token that opens a rule reached through a chain: the state has no shift
@@ -139,6 +210,8 @@ int main() {
   an_entity_extending_itself_is_an_error();
   a_cycle_through_a_third_entity_is_an_error_on_each_storey();
   a_chain_that_ends_says_nothing();
+  a_cycle_closed_in_another_document_is_an_error_in_both();
+  a_cycle_through_an_untouched_document_is_an_error();
   a_token_that_opens_an_element_names_the_member_it_fills();
   return cursiv::test::report("domainmodel_grammar_test");
 }

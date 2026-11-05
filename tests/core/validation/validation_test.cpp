@@ -16,6 +16,7 @@
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
+#include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/JsonValue.hpp"
@@ -44,11 +45,13 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/Check.hpp"
 #include "repairmsg/generated/MessageG/Module.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
+#include "workspace/core/CoreServices.hpp"
 #include "workspace/core/ast.hpp"
 
 // Pins the validation pass: who runs (family against exact filing, category
@@ -877,6 +880,94 @@ void run() {
 
 }  // namespace document_validator
 
+// The workspace language's own cycle check, which climbs `extends` across
+// documents: after an edit, every document the update rebuilds says what a
+// fresh build would say, even when the climb goes through one it left alone.
+namespace cross_document {
+
+namespace {
+
+constexpr std::string_view kCycle =
+    "Entity extends itself, directly or through a cycle.";
+
+// A workspace on a disk the test writes: each write is announced as an editor
+// saving those files would announce it.
+struct Disk {
+  cursiv::MemoryFileSystemProvider* files = nullptr;
+  cursiv::CoreLanguage<ws::WorkspaceCoreServices,
+                       ws::WorkspaceSharedCoreServices>
+      services = make(files);
+
+  static cursiv::CoreLanguage<ws::WorkspaceCoreServices,
+                              ws::WorkspaceSharedCoreServices>
+  make(cursiv::MemoryFileSystemProvider*& files) {
+    auto disk = std::make_unique<cursiv::MemoryFileSystemProvider>();
+    files = disk.get();
+    return cursiv::create_language<ws::WorkspaceCoreServices,
+                                   ws::WorkspaceSharedCoreServices,
+                                   ws::install_core_module>(std::move(disk));
+  }
+
+  void write(const std::vector<std::pair<std::string, std::string>>& written) {
+    std::vector<std::string_view> uris;
+    for (const auto& [uri, text] : written) {
+      files->addFile(uri, text);
+      uris.emplace_back(uri);
+    }
+    services.shared->documentBuilder->update(uris, {});
+  }
+
+  [[nodiscard]] std::size_t cycles(std::string_view uri) const {
+    const auto document = services.shared->documents->getDocument(uri);
+    CHECK(document != nullptr);
+    if (document == nullptr) return 0;
+    std::size_t said = 0;
+    for (const cursiv::Diagnostic& diagnostic : document->diagnostics)
+      if (diagnostic.message == kCycle) ++said;
+    return said;
+  }
+};
+
+constexpr std::string_view kA = "file:///a.ws";
+constexpr std::string_view kB = "file:///b.ws";
+constexpr std::string_view kC = "file:///c.ws";
+
+void a_cycle_closed_in_another_document_is_an_error_in_both() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  CHECK(disk.cycles(kB) == 0);
+  disk.write({{std::string(kB), "entity B extends A {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
+  CHECK(disk.cycles(kB) == 1);
+}
+
+// `a` names nothing that changed, but the climbs from `b` and `c` go through
+// it. `E` is on no loop, but its climb never ends either.
+void a_cycle_through_an_untouched_document_is_an_error() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B extends C {\n}\n"},
+              {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kB) == 0);
+  CHECK(disk.cycles(kC) == 0);
+  disk.write({{std::string(kC),
+               "entity C extends A {\n}\n"
+               "entity E extends C {\n}\n"}});
+  CHECK(disk.cycles(kB) == 1);
+  CHECK(disk.cycles(kC) == 2);
+}
+
+}  // namespace
+
+void run() {
+  a_cycle_closed_in_another_document_is_an_error_in_both();
+  a_cycle_through_an_untouched_document_is_an_error();
+}
+
+}  // namespace cross_document
+
 namespace validation_acceptor {
 
 namespace {
@@ -1196,6 +1287,7 @@ void run() {
 
 int main() {
   document_validator::run();
+  cross_document::run();
   validation_acceptor::run();
   repair_message::run();
   return cursiv::test::report("validation");
