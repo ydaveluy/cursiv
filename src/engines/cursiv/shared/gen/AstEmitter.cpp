@@ -8,10 +8,10 @@
 #include <stdexcept>
 #include <utility>
 
-#include "cursiv/shared/gen/EmitAstMetaData.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
-#include "cursiv/shared/table/WriteKind.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
+#include "cursiv/shared/gen/EmitAstMetaData.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/shared/table/WriteKind.hpp"
 
 namespace cursiv {
 
@@ -334,7 +334,7 @@ void AstEmitter::emit_entries() {
     if (v.find(',') == std::string::npos) return v;
     const auto [at, fresh] =
         aliases.try_emplace(v, "FormArg" + std::to_string(aliases.size()));
-    if (fresh) out += "using " + at->second + " = " + v + ";\n";
+    if (fresh) line("using ", at->second, " = ", v, ";");
     return at->second;
   };
   unsigned forms = 0;
@@ -344,15 +344,16 @@ void AstEmitter::emit_entries() {
     const Body& f = programs[i];
     const std::string fn = "CURSIV_FORM_" + std::to_string(forms);
     std::string decl = "#define " + fn + "(";
-    decl += join(std::views::iota(std::size_t{0}, f.args.size()), ", ",
-                 [](std::size_t k) { return "C" + std::to_string(k); }) +
-            ")";
+    decl += concat(joined(std::views::iota(std::size_t{0}, f.args.size()), ", ",
+                          [](std::size_t k) { return concat("C", k); }),
+                   ")");
     for (std::size_t at = 0, nl;
          (nl = f.form.find('\n', at)) != std::string::npos; at = nl + 1)
       decl += " \\\n" + f.form.substr(at, nl - at);
     decl += "\n";
     const auto call = [&](std::size_t p, const auto& spell) {
-      return "  " + fn + "(" + join(programs[p].args, ", ", spell) + ")\n";
+      return concat("  ", fn, "(", joined(programs[p].args, ", ", spell),
+                    ")\n");
     };
     std::size_t before = 0, after = decl.size();
     for (const std::size_t p : users) {
@@ -361,28 +362,26 @@ void AstEmitter::emit_entries() {
     }
     if (after >= before) continue;
     for (const std::size_t p : users) programs[p].text = call(p, arg);
-    out += decl;
+    write(decl);
     ++forms;
   }
   for (std::size_t i = 0; i < programs.size(); ++i)
-    out += programs[i].text.empty()
-               ? "void r" + std::to_string(i) +
-                     "(::cursiv::AstReducer&, ::cursiv::NodeId) {}\n"
-               : "void r" + std::to_string(i) +
-                     "(::cursiv::AstReducer& b, ::cursiv::NodeId id) {\n" +
-                     programs[i].text + "}\n";
-  for (unsigned i = 0; i < forms; ++i)
-    out += "#undef CURSIV_FORM_" + std::to_string(i) + "\n";
+    if (programs[i].text.empty())
+      line("void r", i, "(::cursiv::AstReducer&, ::cursiv::NodeId) {}");
+    else
+      line("void r", i, "(::cursiv::AstReducer& b, ::cursiv::NodeId id) {\n",
+           programs[i].text, "}");
+  for (unsigned i = 0; i < forms; ++i) line("#undef CURSIV_FORM_", i);
 }
 
 void AstEmitter::emit_types() {
-  out += emit_table(
+  write(emit_table(
       "constexpr ::cursiv::detail::MakeFn kMakes[]",
       std::span(reg.types).first(built),
       [](const auto& t) {
         return "&::cursiv::detail::make_node<" + t.source + ">";
       },
-      "nullptr");
+      "nullptr"));
 }
 
 void AstEmitter::emit_fields() {
@@ -447,16 +446,16 @@ void AstEmitter::emit_writers() {
       return "b.write<" + tag + ", " + conv_addr(slot) + ", " +
              variant_flag(f) + ">(" + args;
     };
-    line("CURSIV_ALWAYS_INLINE inline void w" + std::to_string(f) +
+    line("CURSIV_ALWAYS_INLINE inline void w", f,
          "(::cursiv::AstReducer& b, const ::cursiv::Pending& p, "
          "const ::cursiv::Made& m) {");
     if (convs.size() + (plain ? 1 : 0) == 1) {
-      line("  " + write(plain ? detail::kNoIndex : convs[0]));
+      line("  ", write(plain ? detail::kNoIndex : convs[0]));
     } else {
       line("  switch (p.conv) {");
       for (const std::uint16_t c : convs)
-        line("    case " + u(c) + ": " + write(c) + " return;");
-      line("    default: " + write(detail::kNoIndex) + " return;");
+        line("    case ", u(c), ": ", write(c), " return;");
+      line("    default: ", write(detail::kNoIndex), " return;");
       line("  }");
     }
     line("}");
@@ -470,13 +469,12 @@ void AstEmitter::emit_writers() {
       none = true;
       continue;
     }
-    line("CURSIV_ALWAYS_INLINE inline bool " + appliers[t] +
+    line("CURSIV_ALWAYS_INLINE inline bool ", appliers[t],
          "(::cursiv::AstReducer& b, const ::cursiv::Pending& p, "
          "const ::cursiv::Made& m) {");
     line("  switch (p.field) {");
     for (const std::uint16_t f : accepted[t])
-      line("    case " + u(f) + ": w" + std::to_string(f) +
-           "(b, p, m); return true;");
+      line("    case ", u(f), ": w", f, "(b, p, m); return true;");
     line("    default: return false;");
     line("  }");
     line("}");
@@ -485,9 +483,9 @@ void AstEmitter::emit_writers() {
     line(
         "bool a_none(::cursiv::AstReducer&, const ::cursiv::Pending&, "
         "const ::cursiv::Made&) { return false; }");
-  out += emit_table(
+  write(emit_table(
       "constexpr ::cursiv::AstApplyFn kApplies[]", appliers,
-      [](const std::string& n) { return "&" + n; }, "nullptr");
+      [](const std::string& n) { return "&" + n; }, "nullptr"));
 }
 
 void AstEmitter::emit_convs() {
@@ -511,7 +509,7 @@ void AstEmitter::emit_convs() {
   for (const auto& [held, slot] : heldSlots)
     slots[slot] = concat("::cursiv::detail::held_slot<", held.holder, ", ",
                          site(*rep[held.pass]), ">()");
-  out += emit_table("constexpr ::cursiv::detail::ConvSlot kConvs[]", slots);
+  write(emit_table("constexpr ::cursiv::detail::ConvSlot kConvs[]", slots));
 }
 
 AstEmitter::ConvPlan AstEmitter::plan_conversions(const Run& held,
@@ -586,16 +584,16 @@ void AstEmitter::emit_conversions() {
       inputs.push_back(static_cast<std::uint8_t>(
           (p.text.children ? 1u : 0u) | (p.call.children ? 2u : 0u)));
     }
-    out += emit_table("constexpr ::cursiv::detail::TextFn kTexts[]", texts);
+    write(emit_table("constexpr ::cursiv::detail::TextFn kTexts[]", texts));
     sharedCalls = calls == texts;
     if (!sharedCalls)
-      out += emit_table("constexpr ::cursiv::detail::TextFn kCalls[]", calls);
+      write(emit_table("constexpr ::cursiv::detail::TextFn kCalls[]", calls));
     // A grammar whose records never read their children first names no table.
     anyInputs =
         std::ranges::any_of(inputs, [](std::uint8_t c) { return c != 0; });
     if (anyInputs)
-      out += emit_table("constexpr ::std::uint8_t kTextInputs[]", inputs,
-                        [](std::uint8_t c) { return u(c); });
+      write(emit_table("constexpr ::std::uint8_t kTextInputs[]", inputs,
+                       [](std::uint8_t c) { return u(c); }));
   }
   // A call that read nothing is told from a token laid with no width only by
   // its record, and only a converter of parts counts the difference.
@@ -608,13 +606,13 @@ void AstEmitter::emit_conversions() {
   anyValues = std::ranges::any_of(
       reg.rows, [](const AstRowGen& g) { return g.passes; });
   if (anyValues)
-    out += emit_table("constexpr ::cursiv::detail::ValueSlot kValues[]", plans,
-                      [](const ConvPlan& p) {
-                        return p.value != nullptr
-                                   ? concat("::cursiv::detail::value_slot<",
-                                            p.value->valueRule, ">()")
-                                   : std::string("{}");
-                      });
+    write(emit_table("constexpr ::cursiv::detail::ValueSlot kValues[]", plans,
+                     [](const ConvPlan& p) {
+                       return p.value != nullptr
+                                  ? concat("::cursiv::detail::value_slot<",
+                                           p.value->valueRule, ">()")
+                                  : std::string("{}");
+                     }));
 }
 
 bool AstEmitter::emit_flags(std::string_view name,
@@ -623,15 +621,15 @@ bool AstEmitter::emit_flags(std::string_view name,
     return false;
   std::string row;
   for (const std::uint8_t c : cells) row += c != 0 ? "1," : "0,";
-  line("constexpr ::std::uint8_t " + std::string(name) + "[] = {" + row + "};");
+  line("constexpr ::std::uint8_t ", std::string(name), "[] = {", row, "};");
   return true;
 }
 
 std::string AstEmitter::run() {
   // Angle brackets: quoted, it would find a generated sibling of its name.
-  out += concat(R"(// generated by cursiv gen -- do not edit
+  write(R"(// generated by cursiv gen -- do not edit
 #include <)",
-                header, R"(>
+        header, R"(>
 #include "AstReflection.hpp"
 
 #include <cstdint>
@@ -644,10 +642,10 @@ std::string AstEmitter::run() {
 #include "cursiv/shared/runtime/AstMetaDataThunks.hpp"
 
 namespace )",
-                ns, R"( {
+        ns, R"( {
 namespace ast_detail {
 )");
-  out += emit_ast_metadata(reg, tags);
+  write(emit_ast_metadata(reg, tags));
   emit_types();
   emit_fields();
   plan_held();
@@ -657,47 +655,47 @@ namespace ast_detail {
   line("");
   emit_entries();
   line("");
-  out += emit_table(
+  write(emit_table(
       "constexpr ::cursiv::AstEntryFn kEntries[]", names,
-      [](const std::string& n) { return "&" + n; }, "nullptr");
+      [](const std::string& n) { return "&" + n; }, "nullptr"));
   emit_conversions();
   const bool turns = emit_flags("kTurns", a.turns);
-  out += "\n}  // namespace ast_detail\n\n";
-  out += emit_ast_metadata_record(reg);
-  out += concat(R"(constexpr ::cursiv::AstActions kAstActions{
+  line("\n}  // namespace ast_detail\n");
+  write(emit_ast_metadata_record(reg));
+  write(R"(constexpr ::cursiv::AstActions kAstActions{
     .meta = &kAstMetaData,
     .makes = ast_detail::kMakes,
     .entries = ast_detail::kEntries,
     .texts = )",
-                anyText ? "ast_detail::kTexts" : "nullptr", R"(,
+        anyText ? "ast_detail::kTexts" : "nullptr", R"(,
     .calls = )",
-                !anyText      ? "nullptr"
-                : sharedCalls ? "ast_detail::kTexts"
-                              : "ast_detail::kCalls",
-                R"(,
+        !anyText      ? "nullptr"
+        : sharedCalls ? "ast_detail::kTexts"
+                      : "ast_detail::kCalls",
+        R"(,
     .callRecords = )",
-                anyCalls ? "ast_detail::kCallRecords" : "nullptr", R"(,
+        anyCalls ? "ast_detail::kCallRecords" : "nullptr", R"(,
     .entryCount = )",
-                names.size(), R"(u,
+        names.size(), R"(u,
     .applies = ast_detail::kApplies,
     .takeBits = )",
-                takesNodes ? "ast_detail::kTakeBits" : "nullptr", R"(,
+        takesNodes ? "ast_detail::kTakeBits" : "nullptr", R"(,
     .anyNest = )",
-                reg.anyNest, R"(,
+        reg.anyNest, R"(,
     .turnsByState = )",
-                a.turnsByState, R"(,
+        a.turnsByState, R"(,
     .turns = )",
-                turns ? "ast_detail::kTurns" : "nullptr", R"(,
+        turns ? "ast_detail::kTurns" : "nullptr", R"(,
     .textInputs = )",
-                anyInputs ? "ast_detail::kTextInputs" : "nullptr", R"(,
+        anyInputs ? "ast_detail::kTextInputs" : "nullptr", R"(,
     .values = )",
-                anyValues ? "ast_detail::kValues" : "nullptr", R"(,
+        anyValues ? "ast_detail::kValues" : "nullptr", R"(,
 };
 
 }  // namespace )",
-                ns, R"(
+        ns, R"(
 )");
-  return out;
+  return take();
 }
 
 std::string emit_ast(const AstRegistry& registry, const AstEntryTable& table,

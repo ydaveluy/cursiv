@@ -142,3 +142,34 @@ language.shared->workspaceManager->initializeWorkspace(folders);
 `initializeWorkspace` loads the files of your language from the folder and
 its subfolders, then builds them all. For tests, `MemoryFileSystemProvider`
 supplies files from memory.
+
+## Generate text
+
+A code generator walks the AST and writes text. `TextBuilder` keeps the
+indentation for you:
+
+```cpp
+#include "cursiv/text/TextBuilder.hpp"
+
+std::string to_cpp(const recipe::ast::Model& model) {
+  cursiv::TextBuilder out;
+  out.open("enum class Recipe {");
+  for (const recipe::ast::Recipe* const r : model.recipes)
+    if (r != nullptr) out.line(r->name, ",");
+  out.close("};");
+  return out.take();
+}
+```
+
+- `write(parts...)` continues the current line, and `line(parts...)` ends it.
+- `open(parts...)` writes a line and indents what follows, until
+  `close(parts...)`. `indented()` does the same for a scope.
+- `joined(items, separator, cell)` writes a list where it stands. `cell` gives
+  what to write for an item, the item itself by default.
+
+A part is text, a number, a character, any type `std::format` knows, or a list
+from `joined`. To write a type of your own, give it a `std::formatter`. A line
+never ends with blanks. `take()` hands the text over.
+
+The generators in `examples/statemachine`, `examples/domainmodel` and
+`examples/requirements` are written this way.

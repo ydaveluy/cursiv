@@ -17,7 +17,7 @@
 #include "cursiv/ll/gen/LlLexView.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
 #include "cursiv/shared/gen/GapReach.hpp"
@@ -32,6 +32,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/CondReach.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 namespace {
@@ -47,7 +48,7 @@ std::string range(const unicode::Range& r) {
                 static_cast<std::uint32_t>(r.hi), "u}");
 }
 
-struct Out : EmitOutput {
+struct Out : TextBuilder {
   // The arrays left out, empty or not wanted: a reference to one is null.
   std::vector<std::string_view> emptyArrays;
 
@@ -60,11 +61,11 @@ struct Out : EmitOutput {
       emptyArrays.push_back(name);
       return;
     }
-    fmt("inline constexpr {} {}[] = {{", type, name);
+    write("inline constexpr ", type, " ", name, "[] = {");
     for (std::size_t i = 0; i < v.size(); ++i) {
-      if (i % 12 == 0) out += "\n    ";
-      out += one(v[i]);
-      if (i + 1 != v.size()) out += ',';
+      if (i % 12 == 0) write("\n    ");
+      write(one(v[i]));
+      if (i + 1 != v.size()) write(',');
     }
     line("};");
   }
@@ -82,7 +83,7 @@ struct Out : EmitOutput {
                : "nullptr";
   }
   void ptr(std::string_view field, std::string_view name) {
-    if (ref(name) != "nullptr") fmt("    .{} = {},\n", field, name);
+    if (ref(name) != "nullptr") line("    .", field, " = ", name, ",");
   }
 };
 
@@ -201,15 +202,15 @@ std::string staged_source(const Built& a) {
   const std::string_view unused = ahead ? "" : "[[maybe_unused]] ";
   o.line("::std::uint16_t ll_staged_predict(const ::cursiv::LlContext& c,");
   o.line("    ::std::uint16_t decision) {");
-  o.fmt("  {}auto& indent = ::cursiv::ll_look_indent<kTable>(c);\n", unused);
+  o.line("  ", unused, "auto& indent = ::cursiv::ll_look_indent<kTable>(c);");
   o.line(
       "  auto& scratch = ::cursiv::ll_scratch<kTable.termWords>();\n"
       "  auto& viable = scratch.viable;\n  auto& read = scratch.read;\n"
       "  const auto& dec = kTable.decisions[decision];");
-  o.fmt("  {}const auto look = kTable.look_mode(dec);\n",
-        a.lookMode.empty() && ahead ? "" : "[[maybe_unused]] ");
-  o.fmt("  {}auto from = c.la.end;\n  auto sym = c.la.sym;\n", unused);
-  o.fmt("  {}::cursiv::LlLookRead nextRead;\n", unused);
+  o.line("  ", a.lookMode.empty() && ahead ? "" : "[[maybe_unused]] ",
+         "const auto look = kTable.look_mode(dec);");
+  o.line("  ", unused, "auto from = c.la.end;\n  auto sym = c.la.sym;");
+  o.line("  ", unused, "::cursiv::LlLookRead nextRead;");
   o.line(
       "  if (::cursiv::ll_reads_rivals<kTable>(c, dec.mode)) {\n"
       "    ::cursiv::LlLookRead first;\n"
@@ -218,42 +219,42 @@ std::string staged_source(const Built& a) {
       "    sym = read.front();\n  }\n  switch (decision) {");
   for (std::uint16_t d = 0; d < a.cfg.ndecisions; ++d)
     if (const auto& dec = a.cfg.decisions[d]; dec.how == LlPredict::staged)
-      o.fmt("    case {}u: goto S{};\n", d, dec.dfa);
+      o.line("    case ", d, "u: goto S", dec.dfa, ";");
   o.line("    default: return ::cursiv::kNoRow;\n  }");
   for (std::size_t at = 0; at < live.size(); ++at) {
     if (!live[at]) continue;
     const auto& state = a.dfa[at];
-    if (reads[at]) o.fmt("R{}:\n", at);
+    if (reads[at]) o.line("R", at, ":");
     if (reads[at] && state.alt == kNoRow) {
       o.line("  ++::cursiv::ll_staged_reads<kTable>();\n  viable.reset();");
       for (std::uint32_t e = 0; e < state.nedges; ++e)
-        o.fmt("  viable.set({}u);\n", a.dfaEdge[state.edge + e].term);
+        o.line("  viable.set(", a.dfaEdge[state.edge + e].term, "u);");
       // The next token is crossed under the configuration of the position the
       // readings stand before.
       const std::uint16_t own =
           state.node != kNoRow ? a.cfg.nodes[state.node].mode : kNoRow;
-      o.fmt(
-          "  if (!::cursiv::ll_look<kTable>(c, from, viable, read, {},\n"
-          "          &nextRead, &indent) || read.size() != 1 || "
-          "nextRead.different || nextRead.over)\n"
-          "    return ::cursiv::kNoRow;\n  sym = read.front();\n",
-          own != kNoRow ? concat(own, "u") : "look");
+      o.line("  if (!::cursiv::ll_look<kTable>(c, from, viable, read, ",
+             own != kNoRow ? concat(own, "u") : "look",
+             ",\n"
+             "          &nextRead, &indent) || read.size() != 1 || "
+             "nextRead.different || nextRead.over)\n"
+             "    return ::cursiv::kNoRow;\n  sym = read.front();");
     }
-    if (entry[at]) o.fmt("S{}:\n", at);
+    if (entry[at]) o.line("S", at, ":");
     if (state.alt != kNoRow) {
-      o.fmt("  return {}u;\n", state.alt);
+      o.line("  return ", state.alt, "u;");
     } else {
       o.line("  switch (sym) {");
       for (std::uint32_t e = 0; e < state.nedges; ++e) {
         const auto& edge = a.dfaEdge[state.edge + e];
         if (edge.target != kLlDfaHandOver)
-          o.fmt("    case {}u: goto R{};\n", edge.term, edge.target);
+          o.line("    case ", edge.term, "u: goto R", edge.target, ";");
       }
       o.line("    default: return ::cursiv::kNoRow;\n  }");
     }
   }
   o.line("}");
-  return o.out;
+  return o.take();
 }
 
 }  // namespace
@@ -338,7 +339,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
         "#include \"cursiv/shared/runtime/LexicalMachine.hpp\"\n";
   if (lexical.searches())
     includes += "#include \"cursiv/shared/runtime/lex_find.hpp\"\n";
-  o.fmt("namespace {} {{\n", ns);
+  o.line("namespace ", ns, " {");
   o.line("");
   if (staged)
     o.line(
@@ -351,7 +352,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.line("inline constexpr char kNames[] =");
     const std::string_view names(pool.bytes.data(), pool.bytes.size());
     for (std::size_t at = 0; at < names.size(); at += 60)
-      o.fmt("    {}\n", c_literal(names.substr(at, 60)));
+      o.line("    ", c_literal(names.substr(at, 60)));
     o.line(";");
   }
 
@@ -589,14 +590,13 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       fn.line(reads.source("inline", concat("named_", l), g.gapLeaves[l].node));
   }
   if (g.ngapConds != 0) {
-    o.fmt("{};\n{};\n", conditionFn, namedFn);
+    o.line(conditionFn, ";\n", namedFn, ";");
     if (gaps.reads_boundary())
-      o.fmt(
-          "inline constexpr ::cursiv::LexBoundary kGapBoundary{{{}, {}, {{}}, "
-          "{}, {}u, {}, {}}};\n",
-          o.ref("kSets"), o.ref("kSetDecode"), o.ref("kWordRanges"),
-          g.wordRanges.size(), classes ? "kSetScalars" : "nullptr",
-          classes ? "kScalarRanges" : "nullptr");
+      o.line("inline constexpr ::cursiv::LexBoundary kGapBoundary{",
+             o.ref("kSets"), ", ", o.ref("kSetDecode"), ", {}, ",
+             o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u, ",
+             classes ? "kSetScalars" : "nullptr", ", ",
+             classes ? "kScalarRanges" : "nullptr", "};");
     o.line(gaps.source());
     const auto leaf = [&](unsigned l, bool partial) -> std::string {
       switch (g.gapLeaves[l].kind) {
@@ -621,7 +621,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       return "false";
     };
     for (const bool partial : {false, true}) {
-      fn.fmt("{} {{\n", partial ? namedFn : conditionFn);
+      fn.line(partial ? namedFn : conditionFn, " {");
       fn.line(
           "  const auto end = ::std::min(token.begin, len);\n"
           "  const auto begin = ::std::min(gapFrom, end);\n"
@@ -630,34 +630,34 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
       if (!partial) fn.line("  (void)atEnd; (void)seen;");
       fn.line("  switch (k) {");
       for (unsigned k = 0; k < g.ngapConds; ++k)
-        fn.fmt("    case {}u: return {};\n", k,
-               GapConditionEmitter(g).source(
-                   k, [&](unsigned l) { return leaf(l, partial); }, partial));
+        fn.line("    case ", k, "u: return ",
+                GapConditionEmitter(g).source(
+                    k, [&](unsigned l) { return leaf(l, partial); }, partial),
+                ";");
       fn.line("    default: return 0;\n  }\n}");
     }
   }
   const bool refusing = std::ranges::any_of(
       a.termHeads, [](const HeadMatcher& h) { return !h.words.empty(); });
   if (refusing) {
-    o.fmt("{};\n{};\n{};\n", headRefusesFn, headReachFn, termReachFn);
+    o.line(headRefusesFn, ";\n", headReachFn, ";\n", termReachFn, ";");
     fn.line(lex_head_source(
         a.termHeads, a.modeHeads, headRefusesFn, headReachFn,
         {concat(o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u"),
          o.ref("kScalarRanges")}));
-    fn.fmt("{} {{\n", termReachFn);
+    fn.line(termReachFn, " {");
     fn.line("  ::cursiv::TextOffset seen = 0;\n  switch (t) {");
     for (std::size_t t = 0; t < a.termHeads.size(); ++t)
       if (!a.termHeads[t].words.empty())
-        fn.fmt(
-            "    case {0}u:\n      reaches_{0}(p, rest, rest, seen);\n"
-            "      break;\n",
-            t);
+        fn.line("    case ", t, "u:\n      reaches_", t,
+                "(p, rest, rest, seen);\n"
+                "      break;");
     fn.line("    default:\n      break;\n  }\n  return seen;\n}");
   }
   const bool trailing = std::ranges::any_of(
       a.termTails, [](const HeadMatcher& h) { return !h.words.empty(); });
   if (trailing) {
-    o.fmt("{};\n", tailRefusesFn);
+    o.line(tailRefusesFn, ";");
     fn.line(lex_tail_source(
         a.termTails, tailRefusesFn,
         {concat(o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u"),
@@ -676,31 +676,31 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.line("inline constexpr ::cursiv::LlTable kTable{");
   o.ptr("names", "kNames");
   o.ptr("terms", "kTerms");
-  o.fmt("    .nterms = {}u,\n", g.nterms);
-  o.fmt("    .nrules = {}u,\n", g.nrules);
+  o.line("    .nterms = ", g.nterms, "u,");
+  o.line("    .nrules = ", g.nrules, "u,");
   o.ptr("nodes", "kNodes");
   o.ptr("decisions", "kDecisions");
-  o.fmt("    .ndecisions = {}u,\n", g.ndecisions);
+  o.line("    .ndecisions = ", g.ndecisions, "u,");
   if (g.ngapConds != 0) {
     o.line("    .condition = &condition, .conditionNamed = &condition_named,");
-    o.fmt("    .ngapConds = {}u,\n", g.ngapConds);
+    o.line("    .ngapConds = ", g.ngapConds, "u,");
     const CondReach reach = GapReach(g).widest();
-    o.fmt("    .condReach = {{{}u, {}u, {}, {}u}},\n", reach.look, reach.tail,
-          reach.phrase ? "true" : "false", reach.tokens);
+    o.line("    .condReach = {", reach.look, "u, ", reach.tail, "u, ",
+           reach.phrase ? "true" : "false", ", ", reach.tokens, "u},");
   }
   o.ptr("decFirst", "kDecFirst");
   o.ptr("nodeAfter", "kNodeAfter");
   o.ptr("nodeAfterGap", "kNodeAfterGap");
   o.ptr("nodeStep", "kNodeStep");
-  o.fmt("    .nafter = {}u,\n", (unsigned)a.nodeAfter.size());
+  o.line("    .nafter = ", (unsigned)a.nodeAfter.size(), "u,");
   o.ptr("edgeNode", "kEdgeNode");
   o.ptr("returnNode", "kReturnNode");
-  o.fmt("    .atnStart = {}u,\n", a.atnEntry);
+  o.line("    .atnStart = ", a.atnEntry, "u,");
   o.ptr("sets", "kSets");
   o.ptr("setDecode", "kSetDecode");
-  o.fmt("    .wordBytes = {},\n", byte_set(g.wordBytes));
+  o.line("    .wordBytes = ", byte_set(g.wordBytes), ",");
   o.ptr("wordRanges", "kWordRanges");
-  o.fmt("    .nwordRanges = {}u,\n", g.wordRanges.size());
+  o.line("    .nwordRanges = ", g.wordRanges.size(), "u,");
   if (classes) {
     o.ptr("setScalars", "kSetScalars");
     o.ptr("scalarRanges", "kScalarRanges");
@@ -711,9 +711,9 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
         "    .termReach = &term_reach,");
   if (trailing) o.line("    .tailRefuses = &tail_refuses,");
   o.ptr("cls", "kCls");
-  o.fmt("    .ncls = {}u,\n", a.ncls);
-  o.fmt("    .nmodes = {}u,\n    .errMode = {}u,\n    .tailMode = {}u,\n",
-        a.nmodes, a.errMode, a.tailMode);
+  o.line("    .ncls = ", a.ncls, "u,");
+  o.line("    .nmodes = ", a.nmodes, "u,\n    .errMode = ", a.errMode,
+         "u,\n    .tailMode = ", a.tailMode, "u,");
   if (!a.lookMode.empty()) o.ptr("lookMode", "kLookMode");
   o.ptr("modeStart", "kModeStart");
   o.ptr("modeMulti", "kModeMulti");
@@ -723,7 +723,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.ptr("modeJoinedTrivia", joinedApart ? "kModeJoinedTrivia" : "kModeTrivia");
   o.ptr("modeTerms", "kModeTerms");
   o.ptr("modeSub", "kModeSub");
-  o.fmt("    .subWords = {}u,\n", a.subWords);
+  o.line("    .subWords = ", a.subWords, "u,");
   o.ptr("skipSet", "kSkipSet");
   o.ptr("skipStop", "kSkipStop");
   o.ptr("byteTerms", "kByteTerms");
@@ -743,7 +743,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (!a.relays.empty()) {
     o.ptr("dfaRelay", "kLexRelay");
     o.ptr("relays", "kRelays");
-    o.fmt("    .nrelays = {}u,\n", a.relays.size());
+    o.line("    .nrelays = ", a.relays.size(), "u,");
     o.line("    .relay_run = &relay_run,");
   }
   o.ptr("lexAcc", "kLexAcc");
@@ -760,14 +760,14 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.ptr("wordBounds", "kWordBounds");
   if (reserving) o.line("    .reserves = true,");
-  o.fmt("    .termWords = {}u,\n", words);
-  o.fmt("    .atn = {{.states = {},\n", o.ref("kAtnStates"));
-  o.fmt("            .nstates = {}u,\n", a.nstates);
-  o.fmt("            .edges = {},\n", o.ref("kAtnEdges"));
-  o.fmt("            .ruleStart = {},\n", o.ref("kRuleStart"));
-  o.fmt("            .callerBase = {},\n", o.ref("kCallerBase"));
-  o.fmt("            .callerAt = {},\n", o.ref("kCallerAt"));
-  o.fmt("            .returnClass = {}}},\n", o.ref("kReturnClass"));
+  o.line("    .termWords = ", words, "u,");
+  o.line("    .atn = {.states = ", o.ref("kAtnStates"), ",");
+  o.line("            .nstates = ", a.nstates, "u,");
+  o.line("            .edges = ", o.ref("kAtnEdges"), ",");
+  o.line("            .ruleStart = ", o.ref("kRuleStart"), ",");
+  o.line("            .callerBase = ", o.ref("kCallerBase"), ",");
+  o.line("            .callerAt = ", o.ref("kCallerAt"), ",");
+  o.line("            .returnClass = ", o.ref("kReturnClass"), "},");
   if (callers) {
     o.ptr("callerReads", "kCallerReads");
     o.ptr("callerReadAt", "kCallerReadAt");
@@ -782,19 +782,19 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   if (!a.sectionErr.empty()) {
     o.ptr("sectionErr", "kSectionErr");
     o.ptr("sectionEnd", "kSectionEnd");
-    o.fmt("    .nsections = {}u,\n", a.sectionErr.size());
+    o.line("    .nsections = ", a.sectionErr.size(), "u,");
   }
   if (a.stamp != StampLayout{})
-    o.fmt("    .stamp = {{.rowBits = {}u}},\n", a.stamp.rowBits);
+    o.line("    .stamp = {.rowBits = ", a.stamp.rowBits, "u},");
   o.line("};");
   o.line("");
   if (compiledPredicates)
     o.line(predicates.source("::cursiv::LlLexTape<kTable>{}"));
   o.line("");
-  if (staged) fn.out += staged_source(a);
-  fn.out += lexical.source();
-  o.fmt("}}  // namespace {}\n", ns);
-  return {std::move(o.out), std::move(includes), std::move(fn.out)};
+  if (staged) fn.write(staged_source(a));
+  fn.write(lexical.source());
+  o.line("}  // namespace ", ns);
+  return {o.take(), std::move(includes), fn.take()};
 }
 
 }  // namespace cursiv

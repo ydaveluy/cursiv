@@ -4,16 +4,19 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace sm {
 namespace {
 
 using namespace sm::ast;
+using cursiv::TextBuilder;
 
 [[nodiscard]] std::string sanitize_file_stem(std::string_view inputPath) {
   auto stem = std::filesystem::path(inputPath).stem().string();
@@ -53,166 +56,174 @@ using namespace sm::ast;
   return result;
 }
 
-void write_state_base(std::ostringstream& out, const Statemachine& model) {
-  out << "class " << model.name << ";\n\n";
-  out << "class State {\n";
-  out << "protected:\n";
-  out << "    " << model.name << " *statemachine;\n\n";
-  out << "public:\n";
-  out << "    virtual ~State() {}\n\n";
-  out << "    void set_context(" << model.name << " *statemachine) {\n";
-  out << "        this->statemachine = statemachine;\n";
-  out << "    }\n\n";
-  out << "    virtual std::string get_name() {\n";
-  out << "        return \"Unknown\";\n";
-  out << "    }\n";
+void write_state_base(TextBuilder& out, const Statemachine& model) {
+  out.line("class ", model.name, ";");
+  out.line();
+  out.line("class State {");
+  out.open("protected:");
+  out.line(model.name, " *statemachine;");
+  out.close();
+  out.line();
+  out.open("public:");
+  out.line("virtual ~State() {}");
+  out.line();
+  out.open("void set_context(", model.name, " *statemachine) {");
+  out.line("this->statemachine = statemachine;");
+  out.close("}");
+  out.line();
+  out.open("virtual std::string get_name() {");
+  out.line(R"(return "Unknown";)");
+  out.close("}");
   for (const auto& event : model.events) {
     if (!event) {
       continue;
     }
-    out << "\n";
-    out << "    virtual void " << event->name << "() {\n";
-    out << "        std::cout << \"Impossible event for the current state.\" "
-           "<< std::endl;\n";
-    out << "    }\n";
+    out.line();
+    out.open("virtual void ", event->name, "() {");
+    out.line(
+        R"(std::cout << "Impossible event for the current state." << std::endl;)");
+    out.close("}");
   }
-  out << "};\n";
+  out.close("};");
 }
 
-void write_machine_class(std::ostringstream& out, const Statemachine& model) {
-  out << "class " << model.name << " {\n";
-  out << "private:\n";
-  out << "    State* state = nullptr;\n\n";
-  out << "public:\n";
-  out << "    " << model.name << "(State* initial_state) {\n";
-  out << "        initial_state->set_context(this);\n";
-  out << "        state = initial_state;\n";
-  out << "        std::cout << \"[\" << state->get_name() << \"]\" << "
-         "std::endl;\n";
-  out << "    }\n\n";
-  out << "    ~" << model.name << "() {\n";
-  out << "        if (state != nullptr) {\n";
-  out << "            delete state;\n";
-  out << "        }\n";
-  out << "    }\n\n";
-  out << "    void transition_to(State *new_state) {\n";
-  out << "        std::cout << state->get_name() << \" ===> \" << "
-         "new_state->get_name() << std::endl;\n";
-  out << "        if (state != nullptr) {\n";
-  out << "            delete state;\n";
-  out << "        }\n";
-  out << "        new_state->set_context(this);\n";
-  out << "        state = new_state;\n";
-  out << "    }\n";
+void write_machine_class(TextBuilder& out, const Statemachine& model) {
+  out.line("class ", model.name, " {");
+  out.open("private:");
+  out.line("State* state = nullptr;");
+  out.close();
+  out.line();
+  out.open("public:");
+  out.open(model.name, "(State* initial_state) {");
+  out.line("initial_state->set_context(this);");
+  out.line("state = initial_state;");
+  out.line(R"(std::cout << "[" << state->get_name() << "]" << std::endl;)");
+  out.close("}");
+  out.line();
+  out.open("~", model.name, "() {");
+  out.open("if (state != nullptr) {");
+  out.line("delete state;");
+  out.close("}");
+  out.close("}");
+  out.line();
+  out.open("void transition_to(State *new_state) {");
+  out.line(
+      R"(std::cout << state->get_name() << " ===> " << new_state->get_name() << std::endl;)");
+  out.open("if (state != nullptr) {");
+  out.line("delete state;");
+  out.close("}");
+  out.line("new_state->set_context(this);");
+  out.line("state = new_state;");
+  out.close("}");
   for (const auto& event : model.events) {
     if (!event) {
       continue;
     }
-    out << "\n";
-    out << "    void " << event->name << "() {\n";
-    out << "        state->" << event->name << "();\n";
-    out << "    }\n";
+    out.line();
+    out.open("void ", event->name, "() {");
+    out.line("state->", event->name, "();");
+    out.close("}");
   }
-  out << "};\n";
+  out.close("};");
 }
 
-void write_state_declarations(std::ostringstream& out,
-                              const Statemachine& model) {
+void write_state_declarations(TextBuilder& out, const Statemachine& model) {
   bool first = true;
   for (const auto& state : model.states) {
     if (!state) {
       continue;
     }
-    if (!first) {
-      out << "\n";
+    if (!std::exchange(first, false)) {
+      out.line();
     }
-    first = false;
-    out << "class " << state->name << " : public State {\n";
-    out << "public:\n";
-    out << "    std::string get_name() override { return \"" << state->name
-        << "\"; }\n";
+    out.line("class ", state->name, " : public State {");
+    out.open("public:");
+    out.line(R"(std::string get_name() override { return ")", state->name,
+             R"("; })");
     for (const auto* transition : distinct_event_transitions(*state)) {
-      out << "    void " << transition->event->name << "() override;\n";
+      out.line("void ", transition->event->name, "() override;");
     }
-    out << "};\n";
+    out.close("};");
   }
 }
 
-void write_state_definitions(std::ostringstream& out,
-                             const Statemachine& model) {
+void write_state_definitions(TextBuilder& out, const Statemachine& model) {
   for (const auto& state : model.states) {
     if (!state) {
       continue;
     }
-    out << "\n";
-    out << "// " << state->name << "\n";
+    out.line();
+    out.line("// ", state->name);
     const auto transitions = distinct_event_transitions(*state);
     for (std::size_t index = 0; index < transitions.size(); ++index) {
       const auto* transition = transitions[index];
-      out << "void " << state->name << "::" << transition->event->name
-          << "() {\n";
-      out << "    statemachine->transition_to(new " << transition->state->name
-          << ");\n";
-      out << "}\n";
-      out << "\n";
+      out.open("void ", state->name, "::", transition->event->name, "() {");
+      out.line("statemachine->transition_to(new ", transition->state->name,
+               ");");
+      out.close("}");
+      out.line();
       if (index + 1 < transitions.size()) {
-        out << "\n";
+        out.line();
       }
     }
   }
 }
 
-void write_main(std::ostringstream& out, const Statemachine& model) {
+void write_main(TextBuilder& out, const Statemachine& model) {
   if (!model.init) {
     throw std::runtime_error("Cannot generate C++ without an initial state.");
   }
 
-  out << "typedef void (" << model.name << "::*Event)();\n\n";
-  out << "int main() {\n";
-  out << "    " << model.name << " *statemachine = new " << model.name
-      << "(new " << model.init->name << ");\n\n";
-  out << "    static std::map<std::string, Event> event_by_name;\n";
+  out.line("typedef void (", model.name, "::*Event)();");
+  out.line();
+  out.open("int main() {");
+  out.line(model.name, " *statemachine = new ", model.name, "(new ",
+           model.init->name, ");");
+  out.line();
+  out.line("static std::map<std::string, Event> event_by_name;");
   for (const auto& event : model.events) {
     if (!event) {
       continue;
     }
-    out << "    event_by_name[\"" << event->name << "\"] = &" << model.name
-        << "::" << event->name << ";\n";
+    out.line(R"(event_by_name[")", event->name, R"("] = &)", model.name,
+             "::", event->name, ";");
   }
-  out << "\n";
-  out << "    for (std::string input; std::getline(std::cin, input);) {\n";
-  out << "        std::map<std::string, Event>::const_iterator "
-         "event_by_name_it = event_by_name.find(input);\n";
-  out << "        if (event_by_name_it == event_by_name.end()) {\n";
-  out << "            std::cout << \"There is no event <\" << input << \"> in "
-         "the "
-      << model.name << " statemachine.\" << std::endl;\n";
-  out << "            continue;\n";
-  out << "        }\n";
-  out << "        Event event_invoker = event_by_name_it->second;\n";
-  out << "        (statemachine->*event_invoker)();\n";
-  out << "    }\n\n";
-  out << "    delete statemachine;\n";
-  out << "    return 0;\n";
-  out << "}\n";
+  out.line();
+  out.open("for (std::string input; std::getline(std::cin, input);) {");
+  out.line(
+      "std::map<std::string, Event>::const_iterator event_by_name_it = "
+      "event_by_name.find(input);");
+  out.open("if (event_by_name_it == event_by_name.end()) {");
+  out.line(R"(std::cout << "There is no event <" << input << "> in the )",
+           model.name, R"( statemachine." << std::endl;)");
+  out.line("continue;");
+  out.close("}");
+  out.line("Event event_invoker = event_by_name_it->second;");
+  out.line("(statemachine->*event_invoker)();");
+  out.close("}");
+  out.line();
+  out.line("delete statemachine;");
+  out.line("return 0;");
+  out.close("}");
 }
 
 }  // namespace
 
 std::string generate_cpp_content(const ast::Statemachine& model) {
-  std::ostringstream out;
-  out << "#include <iostream>\n";
-  out << "#include <map>\n";
-  out << "#include <string>\n\n";
+  TextBuilder out;
+  out.line("#include <iostream>");
+  out.line("#include <map>");
+  out.line("#include <string>");
+  out.line();
   write_state_base(out, model);
-  out << "\n\n";
+  out.line().line();
   write_machine_class(out, model);
-  out << "\n\n";
+  out.line().line();
   write_state_declarations(out, model);
   write_state_definitions(out, model);
-  out << "\n";
+  out.line();
   write_main(out, model);
-  return out.str();
+  return out.take();
 }
 
 std::string generate_cpp(const ast::Statemachine& model,

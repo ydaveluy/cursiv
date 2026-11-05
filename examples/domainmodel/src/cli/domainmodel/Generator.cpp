@@ -9,12 +9,14 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/text/TextBuilder.hpp"
 #include "domainmodel/CliUtils.hpp"
 
 namespace dm {
 namespace {
 
 using namespace dm::ast;
+using cursiv::TextBuilder;
 
 [[nodiscard]] std::string upper_first(std::string_view text) {
   if (text.empty()) {
@@ -70,78 +72,58 @@ using namespace dm::ast;
   return {};
 }
 
-struct FeatureData {
-  std::string field;
-  std::string setterAndGetter;
-};
-
-[[nodiscard]] FeatureData generate_feature(const Feature& feature) {
+[[nodiscard]] std::string java_type(const Feature& feature) {
   auto type = referenced_type_name(feature);
   if (feature.many) {
     type += "[]";
   }
-  const std::string name(feature.name);
-  const auto upperName = upper_first(name);
-  return {
-      .field = "    private " + type + " " + name + ";",
-      .setterAndGetter = "    public void set" + upperName + "(" + type + " " +
-                         name +
-                         ") {\n"
-                         "        this." +
-                         name + " = " + name +
-                         ";\n"
-                         "    }\n\n"
-                         "    public " +
-                         type + " get" + upperName +
-                         "() {\n"
-                         "        return " +
-                         name +
-                         ";\n"
-                         "    }\n",
-  };
+  return type;
 }
 
-[[nodiscard]] std::string generate_entity(const Entity& entity) {
-  std::vector<FeatureData> featureData;
-  featureData.reserve(entity.features.size());
-  for (const auto& feature : entity.features) {
-    if (feature) {
-      featureData.push_back(generate_feature(*feature));
-    }
-  }
-
-  std::string out;
-  out += "class " + std::string(entity.name);
-  if (const auto maybeExtends = super_type_name(entity);
-      !maybeExtends.empty()) {
-    out += " extends " + maybeExtends;
-  }
-  out += " {\n";
-
-  for (const auto& feature : featureData) {
-    out += feature.field + "\n";
-  }
-  if (!featureData.empty()) {
-    out += "\n";
-  }
-
-  for (std::size_t index = 0; index < featureData.size(); ++index) {
-    out += featureData[index].setterAndGetter;
-    if (index + 1 < featureData.size()) {
-      out += "\n";
-    }
-  }
-
-  out += "}\n";
-  return out;
+void write_accessors(TextBuilder& out, const Feature& feature) {
+  const auto type = java_type(feature);
+  const auto upperName = upper_first(feature.name);
+  out.open("public void set", upperName, "(", type, " ", feature.name, ") {");
+  out.line("this.", feature.name, " = ", feature.name, ";");
+  out.close("}");
+  out.line();
+  out.open("public ", type, " get", upperName, "() {");
+  out.line("return ", feature.name, ";");
+  out.close("}");
 }
 
 [[nodiscard]] std::string generate_entity_file_content(
     const Entity& entity, std::string_view packagePath) {
-  std::string out;
-  out += "package " + std::string(packagePath) + ";\n\n";
-  out += generate_entity(entity);
-  return out;
+  std::vector<const Feature*> features;
+  features.reserve(entity.features.size());
+  for (const auto& feature : entity.features) {
+    if (feature) {
+      features.push_back(feature);
+    }
+  }
+
+  TextBuilder out;
+  out.line("package ", packagePath, ";");
+  out.line();
+  out.write("class ", entity.name);
+  if (const auto superType = super_type_name(entity); !superType.empty()) {
+    out.write(" extends ", superType);
+  }
+  out.open(" {");
+  for (const auto* feature : features) {
+    out.line("private ", java_type(*feature), " ", feature->name, ";");
+  }
+  if (!features.empty()) {
+    out.line();
+  }
+  for (std::size_t index = 0; index < features.size(); ++index) {
+    if (index != 0) {
+      out.line();
+    }
+    write_accessors(out, *features[index]);
+  }
+  out.close("}");
+  return out.take();
 }
 
 void generate_abstract_elements(const std::filesystem::path& destination,

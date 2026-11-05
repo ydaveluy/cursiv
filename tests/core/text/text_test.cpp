@@ -1,20 +1,24 @@
 // The class syntax of `cr<>`, a std::regex bracket expression without its
 // brackets read among scalars, and a text lowered as a client lowers it.
 #include <algorithm>
+#include <cstdint>
 #include <initializer_list>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
+#include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/text/ClassItem.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 #include "cursiv/text/lower_case.hpp"
 #include "cursiv/utils/ctstring.hpp"
-#include "cursiv/shared/gen/LexCodePoints.hpp"
-#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 
 using namespace cursiv;
@@ -279,6 +283,87 @@ void a_text_lowers_as_a_client_lowers_it() {
 
 }  // namespace
 
+void a_builder_lays_out_its_parts() {
+  TextBuilder w;
+  w.line("int a = ", 42, ';');
+  w.line(std::numeric_limits<long long>::min(), ' ', std::int8_t{-128}, ' ',
+         std::uint64_t{18446744073709551615u}, ' ', true, ' ', 1.5);
+  {
+    const auto in = w.indented();
+    w.line("first");
+    w.write("second");
+    w.write(" go on\nthird \t\r\n\n");
+    w.line("fourth   ");
+  }
+  w.line();
+  w.open("if (x) {");
+  w.line("y();");
+  w.close("}");
+  CHECK(w.take() ==
+        "int a = 42;\n"
+        "-9223372036854775808 -128 18446744073709551615 true 1.5\n"
+        "    first\n"
+        "    second go on\n"
+        "    third\n"
+        "\n"
+        "    fourth\n"
+        "\n"
+        "if (x) {\n"
+        "    y();\n"
+        "}\n");
+}
+
+void a_builder_joins_a_list() {
+  struct Item {
+    std::string_view name;
+  };
+  const std::string_view names[] = {"a", "b", "c"};
+  const Item items[] = {{"x"}, {"y"}};
+  TextBuilder w;
+  w.line("f(", joined(names, ", "), ");");
+  w.line(joined(names, "|", [](std::string_view n) { return n.size(); }));
+  w.line(joined(items, ", ", &Item::name));
+  w.line(joined(std::span<const std::string_view>{}, ", "));
+  CHECK(w.text() == "f(a, b, c);\n1|1|1\nx, y\n\n");
+}
+
+void a_builder_stays_within_its_indentation() {
+  TextBuilder w({.step = 4, .maxIndent = 6});
+  w.open();
+  w.open();
+  w.line("deep");
+  w.close();
+  w.line("back");
+  w.close();
+  CHECK(w.text() == "      deep\n    back\n");
+  CHECK(support::throws<std::logic_error>([&] { w.close(); }));
+}
+
+void a_builder_goes_back_to_a_place() {
+  TextBuilder w;
+  w.open();
+  w.write("kept ");
+  const std::size_t at = w.size();
+  w.write("gone\nmore");
+  CHECK(w.cut_from(at) == "gone\n    more");
+  w.line("on");
+  const std::size_t next = w.size();
+  w.line("gone");
+  CHECK(w.cut_from(next) == "    gone\n");
+  w.line("next");
+  CHECK(w.text() == "    kept on\n    next\n");
+}
+
+void a_builder_hands_over_its_text() {
+  TextBuilder w;
+  w.write("a ");
+  CHECK(w.take() == "a ");
+  CHECK(w.text().empty());
+  w.open();
+  w.line("b");
+  CHECK(w.take() == "    b\n");
+}
+
 int main() {
   CHECK(same_ranges(LexCodePoints::of(0, false, R"(\s)"),
                     {{0x09, 0x0D},
@@ -339,5 +424,10 @@ int main() {
     }));
   }
   a_text_lowers_as_a_client_lowers_it();
+  a_builder_lays_out_its_parts();
+  a_builder_joins_a_list();
+  a_builder_hands_over_its_text();
+  a_builder_stays_within_its_indentation();
+  a_builder_goes_back_to_a_place();
   return test::report("text_test");
 }

@@ -19,7 +19,7 @@
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/HeadMatcher.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/LexicalPredicateEmitter.hpp"
@@ -27,6 +27,7 @@
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -45,7 +46,7 @@ std::vector<std::uint8_t> lr_guarded_columns(const LrBuildTable& table) {
   return guarded;
 }
 
-struct LrTableEmitter : EmitOutput {
+struct LrTableEmitter : TextBuilder {
   explicit LrTableEmitter(const LrFinalTable& done)
       : a(done.table()),
         guarded(lr_guarded_columns(a)),
@@ -69,40 +70,40 @@ struct LrTableEmitter : EmitOutput {
                       static_cast<unsigned>(c.scalarRanges.size())};
   }
 
-  void u32(unsigned long long v) { fmt("{}u", v); }
-  void u64(unsigned long long v) { fmt("{}ull", v); }
+  void u32(unsigned long long v) { write(v, "u"); }
+  void u64(unsigned long long v) { write(v, "ull"); }
 
-  void cell(char c) { fmt("char({})", static_cast<unsigned char>(c)); }
-  void cell(std::uint8_t v) { num(v); }
-  void cell(std::uint16_t v) { num(v); }
+  void cell(char c) { write("char(", static_cast<unsigned char>(c), ")"); }
+  void cell(std::uint8_t v) { write(v); }
+  void cell(std::uint16_t v) { write(v); }
   void cell(std::uint32_t v) { u32(v); }
   void cell(std::uint64_t v) { u64(v); }
   void cell(const ByteSet& s) {
-    raw("{{");
+    write("{{");
     for (unsigned k = 0; k < 4; ++k) {
-      if (k) raw(",");
+      if (k) write(",");
       u64(s.w[k]);
     }
-    raw("}}");
+    write("}}");
   }
   void cell(const LrLexElse& e) {
-    raw("{.bytes=");
+    write("{.bytes=");
     cell(e.bytes);
-    fmt(",.term={}", e.term);
-    if (e.scalar != 0) fmt(",.scalar={}", e.scalar);
-    raw("}");
+    write(",.term=", e.term);
+    if (e.scalar != 0) write(",.scalar=", e.scalar);
+    write("}");
   }
   // A terminal set at the width the frozen table holds.
   void cell(const DynSet& s) {
     const unsigned words = (S.termBits() + 63u) / 64u;
-    raw("{{");
+    write("{{");
     for (unsigned k = 0; k < words; ++k) {
-      if (k) raw(",");
+      if (k) write(",");
       u64(s.word(k));
     }
-    raw("}}");
+    write("}}");
   }
-  void cell(const EmitFields& f) { fmt("{{{}}}", f.list()); }
+  void cell(const EmitFields& f) { write("{", f.list(), "}"); }
   void cell(const TermInfo& t) {
     constexpr TermInfo d{};
     EmitFields f;
@@ -151,22 +152,22 @@ struct LrTableEmitter : EmitOutput {
     f("fold", n.fold, d.fold);
     cell(f);
   }
-  void cell(const LexRelayGen& r) { raw(lex_relay_source(r, names)); }
+  void cell(const LexRelayGen& r) { write(lex_relay_source(r, names)); }
   void cell(const unicode::Range& r) {
-    fmt("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
-        static_cast<std::uint32_t>(r.hi));
+    write("{", static_cast<std::uint32_t>(r.lo), "u,",
+          static_cast<std::uint32_t>(r.hi), "u}");
   }
   void cell(const LrExpect& e) {
-    fmt("{{.feature={},.site={},.landing={},.entered={}}}", e.feature, e.site,
-        e.landing, e.entered);
+    write("{.feature=", e.feature, ",.site=", e.site, ",.landing=", e.landing,
+          ",.entered=", e.entered, "}");
   }
 
   // The first `n` cells of `src`, sixteen a line.
   template <class Src>
   void cells(const Src& src, std::size_t n) {
     for (std::size_t i = 0; i < n; ++i) {
-      if (i) raw(",");
-      if (i % 16 == 0) raw("\n    ");
+      if (i) write(",");
+      if (i % 16 == 0) write("\n    ");
       cell(src[i]);
     }
   }
@@ -180,13 +181,13 @@ struct LrTableEmitter : EmitOutput {
       while (count != 0 && src[count - 1] == 0) --count;
       if (count == 0) return;
     }
-    raw(aggregate ? "  ." : "  t.");
-    raw(member);
+    write(aggregate ? "  ." : "  t.");
+    write(member);
     if (count == 0) {
       line(aggregate ? " = {}," : " = {};");
       return;
     }
-    raw(" = {{");
+    write(" = {{");
     cells(src, count);
     line(aggregate ? "}}," : "}};");
   }
@@ -197,24 +198,28 @@ struct LrTableEmitter : EmitOutput {
   }
 
   void emit_sizes() {
-    fmt("inline constexpr ::cursiv::LrSizes "
-        "kSizes{{.terms={},.prods={},.states={},.modes={},.cls={},.dfa={},"
-        ".dfaAccSets={},.dfaResSets={},.modeWinSets={}",
-        S.terms, S.prods, S.states, S.modes, S.cls, S.dfa, S.dfaAccSets,
-        S.dfaResSets, S.modeWinSets);
+    write(
+        "inline constexpr ::cursiv::LrSizes "
+        "kSizes{.terms=",
+        S.terms, ",.prods=", S.prods, ",.states=", S.states,
+        ",.modes=", S.modes, ",.cls=", S.cls, ",.dfa=", S.dfa,
+        ","
+        ".dfaAccSets=",
+        S.dfaAccSets, ",.dfaResSets=", S.dfaResSets,
+        ",.modeWinSets=", S.modeWinSets);
     const auto field = [&](std::string_view name, unsigned n) {
-      if (n != 0) fmt(",.{}={}", name, n);
+      if (n != 0) write(",.", name, "=", n);
     };
     field("modeLongers", S.modeLongers);
     field("modeBacktracks", S.modeBacktracks);
     field("modeFlagSets", S.modeFlagSets);
-    fmt(",.accBounds={},.relays={},.followSets={},.closeSets={}", S.accBounds,
-        S.relays, S.followSets, S.closeSets);
+    write(",.accBounds=", S.accBounds, ",.relays=", S.relays,
+          ",.followSets=", S.followSets, ",.closeSets=", S.closeSets);
     field("dfaRelayResSets", S.dfaRelayResSets);
     field("accStands", S.accStands);
     field("accTiers", S.accTiers);
     field("errModes", S.errModes);
-    if (S.indented) raw(",.indented=true");
+    if (S.indented) write(",.indented=true");
     field("insertLists", S.insertLists);
     field("insertWords", S.insertWords);
     field("electWords", S.electWords);
@@ -224,12 +229,13 @@ struct LrTableEmitter : EmitOutput {
     field("electTwins", S.electTwins);
     field("electRhsSyms", S.electRhsSyms);
     field("orderWords", S.orderWords);
-    if (!S.gotoClasses) raw(",.gotoClasses=false");
+    if (!S.gotoClasses) write(",.gotoClasses=false");
     line("};");
     const LrLowSizes L = low_sizes();
-    fmt("inline constexpr ::cursiv::LrLowSizes kLow{{{},{},{},{},{}{}}};\n",
-        L.nameChars, L.sets, L.terms, L.prods, L.wordRanges,
-        L.scalarRanges != 0 ? concat(",", L.scalarRanges) : std::string());
+    line("inline constexpr ::cursiv::LrLowSizes kLow{", L.nameChars, ",",
+         L.sets, ",", L.terms, ",", L.prods, ",", L.wordRanges,
+         L.scalarRanges != 0 ? concat(",", L.scalarRanges) : std::string(),
+         "};");
   }
 
   void emit_cold() {
@@ -245,7 +251,7 @@ struct LrTableEmitter : EmitOutput {
     if (S.gotoClasses) array("gotoClass", a.gotoClass, S.states);
     array("closePool", a.closePool.sets);
     array("closeOf", a.closePool.of);
-    fmt("  .closeMax = {}u,\n", a.closeMax);
+    line("  .closeMax = ", a.closeMax, "u,");
     if (S.insertWords != 0) {
       array("insertOf", a.insertOf, S.states);
       array("insertAt", a.insertAt);
@@ -281,24 +287,28 @@ struct LrTableEmitter : EmitOutput {
 
   void emit_facts() {
     line("  static_cast<::cursiv::LrTableFacts&>(t) = ::cursiv::LrTableFacts{");
-    fmt("    .nstates={},.nconflicts={},.npeeks={},"
-        "\n    .cls={{",
-        a.nstates, a.nconflicts, a.npeeks);
-    for (unsigned b = 0; b < 256; ++b) fmt("{}{}", b ? "," : "", a.cls[b]);
-    fmt("}},\n    .ncls={},.multiCand={},"
-        "\n    .errMode={},.maxCands={},"
-        ".maxArms={}",
-        a.ncls, a.multiCand, a.errMode, a.maxCands, a.maxArms);
+    write("    .nstates=", a.nstates, ",.nconflicts=", a.nconflicts,
+          ",.npeeks=", a.npeeks,
+          ","
+          "\n    .cls={");
+    for (unsigned b = 0; b < 256; ++b) write(b ? "," : "", a.cls[b]);
+    write("},\n    .ncls=", a.ncls, ",.multiCand=", a.multiCand,
+          ","
+          "\n    .errMode=",
+          a.errMode, ",.maxCands=", a.maxCands,
+          ","
+          ".maxArms=",
+          a.maxArms);
     if (a.stamp != StampLayout{})
-      fmt(",\n    .stamp={{.rowBits={}}}", a.stamp.rowBits);
+      write(",\n    .stamp={.rowBits=", a.stamp.rowBits, "}");
     line("};");
   }
 
   void emit_cfg() {
     const auto& c = a.cfg;
     line("  static_cast<::cursiv::LrLowFacts&>(t.cfg) = ::cursiv::LrLowFacts{");
-    fmt("    .nterms={},.nnts={},.nprods={},.entryRow={},.wordBytes=", c.nterms,
-        c.nnts, c.nprods, c.entryRow);
+    write("    .nterms=", c.nterms, ",.nnts=", c.nnts, ",.nprods=", c.nprods,
+          ",.entryRow=", c.entryRow, ",.wordBytes=");
     cell(c.wordBytes);
     line("};");
     const LrLowSizes L = low_sizes();
@@ -359,13 +369,21 @@ struct LrTableEmitter : EmitOutput {
 
   void emit_derived() {
     const auto D = a.derivedSizes();
-    fmt("inline constexpr ::cursiv::LrDerivedSizes "
-        "kDerivedSizes{{.lexElseRows={},"
-        ".typoSucc={},.reduceNames={},"
-        ".expectItems={},.expectPool={},.rowLhsRows={},.rowLhs={},"
-        ".typoReachSets={},.afterSets={},.modeWantSets={}}};\n",
-        D.lexElseRows, D.typoSucc, D.reduceNames, D.expectItems, D.expectPool,
-        D.rowLhsRows, D.rowLhs, D.typoReachSets, D.afterSets, D.modeWantSets);
+    line(
+        "inline constexpr ::cursiv::LrDerivedSizes "
+        "kDerivedSizes{.lexElseRows=",
+        D.lexElseRows,
+        ","
+        ".typoSucc=",
+        D.typoSucc, ",.reduceNames=", D.reduceNames,
+        ","
+        ".expectItems=",
+        D.expectItems, ",.expectPool=", D.expectPool,
+        ",.rowLhsRows=", D.rowLhsRows, ",.rowLhs=", D.rowLhs,
+        ","
+        ".typoReachSets=",
+        D.typoReachSets, ",.afterSets=", D.afterSets,
+        ",.modeWantSets=", D.modeWantSets, "};");
     line(
         "inline constexpr ::cursiv::LrDerivedTables<kSizes, kDerivedSizes> "
         "kDerived{");
@@ -404,7 +422,7 @@ struct LrTableEmitter : EmitOutput {
   }
   // The same as member `name` of an aggregate.
   void emit_pool_member(std::string_view name, const SetPool& set) {
-    fmt("  .{} = {{\n", name);
+    line("  .", name, " = {");
     emit_pool("pool", "of", set);
     line("  },");
   }
@@ -412,9 +430,9 @@ struct LrTableEmitter : EmitOutput {
   template <class Values>
   void program_array(std::string_view type, std::string_view name,
                      const Values& values) {
-    fmt("inline constexpr {} {}[] = {{", type, name);
+    write("inline constexpr ", type, " ", name, "[] = {");
     cells(values, values.size());
-    if (values.empty()) raw("{}");
+    if (values.empty()) write("{}");
     line("};");
   }
 
@@ -434,9 +452,12 @@ struct LrTableEmitter : EmitOutput {
     const std::string rows = layer(row, "Rows", matrix.rows);
     const std::string blocks = layer(index, "Blocks", matrix.blocks);
     program_array(value, concat(name, "Values"), matrix.values);
-    fmt("inline constexpr ::cursiv::LrProgramRows<{}, {}, {}> {}{{\n"
-        "    {}, {}, {}Values, {}u, {}u}};\n",
-        row, index, value, name, rows, blocks, name, columns, absent);
+    line("inline constexpr ::cursiv::LrProgramRows<", row, ", ", index, ", ",
+         value, "> ", name,
+         "{\n"
+         "    ",
+         rows, ", ", blocks, ", ", name, "Values, ", columns, "u, ", absent,
+         "u};");
   }
 
   void emit_programs() {
@@ -449,12 +470,13 @@ struct LrTableEmitter : EmitOutput {
         p.ops.empty() ? 0 : *std::ranges::max_element(p.ops);
     const auto op = concat("::std::uint", LrProgramMatrix::bits(most), "_t");
     program_array(op, "kProgramOps", p.ops);
-    fmt("inline constexpr ::cursiv::LrActionPrograms<{}, {}, {}, {}> "
-        "kPrograms{{\n"
-        "    kActionMatrix, kProgramOps, {}u}};\n",
-        concat("::std::uint", p.actions.row_bits(), "_t"),
-        concat("::std::uint", p.actions.index_bits(), "_t"), value, op,
-        p.countBits);
+    line("inline constexpr ::cursiv::LrActionPrograms<", "::std::uint",
+         p.actions.row_bits(), "_t", ", ", "::std::uint",
+         p.actions.index_bits(), "_t", ", ", value, ", ", op,
+         "> "
+         "kPrograms{\n"
+         "    kActionMatrix, kProgramOps, ",
+         p.countBits, "u};");
   }
 
   // Guard `k` lays at `kGuardAt[k]` its condition count, the conditions and a
@@ -489,7 +511,7 @@ struct LrTableEmitter : EmitOutput {
   bool trailing() const { return any_words(a.termTails); }
 
   void emit(std::string_view ns) {
-    raw(R"(// GENERATED by the native table emitter -- do not edit.
+    write(R"(// GENERATED by the native table emitter -- do not edit.
 // The frozen table of one grammar, as data: the engine's whole reading of it.
 #pragma once
 #include <cstdint>
@@ -507,49 +529,58 @@ struct LrTableEmitter : EmitOutput {
       line("#include \"cursiv/shared/runtime/lex_scalar_in.hpp\"");
     }
     if (!a.guards.empty()) line("#include <span>");
-    fmt("namespace {} {{\n\n", ns);
-    raw(LexicalPredicateEmitter(a.cfg, ::std::span(a.relays.data(), a.nrelays),
-                                "")
-            .declarations());
+    line("namespace ", ns, " {\n");
+    write(LexicalPredicateEmitter(a.cfg,
+                                  ::std::span(a.relays.data(), a.nrelays), "")
+              .declarations());
     emit_sizes();
     emit_cold();
     emit_derived();
     emit_programs();
     emit_guards();
-    raw("struct Table : ::cursiv::LrFrozenTable<kSizes, kLow, kCold, "
+    line(
+        "struct Table : ::cursiv::LrFrozenTable<kSizes, kLow, kCold, "
         "kDerived> {\n"
         "  static constexpr auto& programs = kPrograms;\n"
-        "  static constexpr auto& gotoPrograms = kGotoPrograms;\n");
+        "  static constexpr auto& gotoPrograms = kGotoPrograms;");
     if (!a.guards.empty())
-      raw("  static constexpr ::std::span<const ::std::uint32_t> guardAt{"
+      line(
+          "  static constexpr ::std::span<const ::std::uint32_t> guardAt{"
           "kGuardAt};\n"
           "  static constexpr ::std::span<const ::std::uint16_t> guardOps{"
           "kGuardOps};\n"
-          "  static constexpr ::std::span<const ::std::uint64_t> held{kHeld};\n");
+          "  static constexpr ::std::span<const ::std::uint64_t> held{kHeld};");
     if (refusing())
-      raw("  static bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
+      line(
+          "  static bool head_refuses(::cursiv::SymbolId t, const char* p,\n"
           "                           ::cursiv::TextOffset rest);\n"
-          "  static ::cursiv::TextOffset head_reach(unsigned m, const char* p,\n"
-          "                                         ::cursiv::TextOffset rest);\n");
+          "  static ::cursiv::TextOffset head_reach(unsigned m, const char* "
+          "p,\n"
+          "                                         ::cursiv::TextOffset "
+          "rest);");
     if (const auto words = lex_word_bounds(a.cfg);
         !words.empty() && (refusing() || a.cfg.sections())) {
-      fmt("  static constexpr ::std::uint16_t kWordBounds[] = {{{}u", words[0]);
-      for (std::size_t i = 1; i < words.size(); ++i) fmt(", {}u", words[i]);
-      raw("};\n"
+      write("  static constexpr ::std::uint16_t kWordBounds[] = {", words[0],
+            "u");
+      for (std::size_t i = 1; i < words.size(); ++i) write(", ", words[i], "u");
+      line(
+          "};\n"
           "  static constexpr ::std::span<const ::std::uint16_t> wordBounds{"
-          "kWordBounds};\n");
+          "kWordBounds};");
     }
     if (trailing())
-      raw("  static bool tail_refuses(::cursiv::SymbolId t, const char* p,\n"
-          "                           ::cursiv::TextOffset rest);\n");
+      line(
+          "  static bool tail_refuses(::cursiv::SymbolId t, const char* p,\n"
+          "                           ::cursiv::TextOffset rest);");
     if (a.nrelays != 0)
-      raw("  static ::cursiv::TextOffset relay_run(::std::uint16_t, const "
+      line(
+          "  static ::cursiv::TextOffset relay_run(::std::uint16_t, const "
           "char*,\n"
-          "      ::cursiv::TextOffset, ::cursiv::TextOffset);\n");
+          "      ::cursiv::TextOffset, ::cursiv::TextOffset);");
     line("};");
     emit_automaton();
     if (refusing())
-      raw(lex_head_source(
+      write(lex_head_source(
           a.termHeads, a.modeHeads,
           "inline bool Table::head_refuses(::cursiv::SymbolId t, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
@@ -558,13 +589,13 @@ struct LrTableEmitter : EmitOutput {
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
            "kTable.cfg.scalarRanges.data()"}));
     if (trailing())
-      raw(lex_tail_source(
+      write(lex_tail_source(
           a.termTails,
           "inline bool Table::tail_refuses(::cursiv::SymbolId t, "
           "const char* p,\n    ::cursiv::TextOffset rest)",
           {"kTable.cfg.wordRanges.data(), kTable.cfg.wordRanges.size()",
            "kTable.cfg.scalarRanges.data()"}));
-    fmt("\n}}  // namespace {}\n", ns);
+    line("\n}  // namespace ", ns);
   }
 };
 
@@ -572,9 +603,9 @@ struct LrTableEmitter : EmitOutput {
 
 std::string lr_emit_table(const LrFinalTable& done, std::string_view ns) {
   LrTableEmitter e{done};
-  e.out.reserve(1u << 20);
+  e.reserve(1u << 20);
   e.emit(ns);
-  return e.out;
+  return e.take();
 }
 
 }  // namespace cursiv

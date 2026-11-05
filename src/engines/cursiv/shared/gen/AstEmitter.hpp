@@ -12,14 +12,15 @@
 #include <utility>
 #include <vector>
 
-#include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/shared/gen/AstEntryTable.hpp"
 #include "cursiv/shared/gen/AstRegistry.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
+#include "cursiv/syntax-tree/AstField.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
-struct AstEmitter : EmitOutput {
+struct AstEmitter : TextBuilder {
   using Run = std::vector<std::uint16_t>;
 
   // A statement's piece: a constant, when `param` names one of the body's

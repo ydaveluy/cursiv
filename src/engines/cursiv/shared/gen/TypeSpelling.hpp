@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/utils/TypeName.hpp"
 
 namespace cursiv {
@@ -139,7 +139,7 @@ inline std::string gen_qualified(std::string_view name) {
 
 // The narrowings are spelled qualified already.
 inline std::string narrow_list(const auto& narrows) {
-  return "::cursiv::TypeList<" + join(narrows, ", ") + ">";
+  return concat("::cursiv::TypeList<", joined(narrows, ", "), ">");
 }
 
 }  // namespace cursiv

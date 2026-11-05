@@ -16,6 +16,7 @@
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -53,20 +54,21 @@ class NamedHead {
   // `unsigned name(::cursiv::SymbolId t)`, answering for each terminal.
   std::string source(std::string_view linkage, std::string_view name,
                      std::uint16_t root) const {
-    std::string out = concat(linkage, " unsigned ", name,
-                             "(::cursiv::SymbolId t) {\n  switch (t) {\n");
+    TextBuilder out;
+    out.line(linkage, " unsigned ", name,
+             "(::cursiv::SymbolId t) {\n  switch (t) {");
     const auto& answers = answers_of(root);
     for (const unsigned v : {0u, 2u}) {
       bool some = false;
       for (unsigned t = 1; t < _g.nterms; ++t)
         if (answers[t] == v) {
-          out += concat("    case ", t, ":\n");
+          out.line("    case ", t, ":");
           some = true;
         }
-      if (some) out += concat("      return ", v, "u;\n");
+      if (some) out.line("      return ", v, "u;");
     }
-    out += "    default:\n      return 1u;\n  }\n}\n\n";
-    return out;
+    out.line("    default:\n      return 1u;\n  }\n}\n");
+    return out.take();
   }
 
  private:

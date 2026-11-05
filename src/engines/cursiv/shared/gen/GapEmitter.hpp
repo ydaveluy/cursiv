@@ -13,10 +13,11 @@
 #include <vector>
 
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -60,71 +61,70 @@ class GapProgramEmitter {
   }
 
   std::string source() const {
-    std::string out;
+    TextBuilder out;
     for (const auto id : _order) {
       const auto& e = _cfg.lex[id];
-      out += concat("template <class Set>\n", _linkage, " Set gap_pattern_", id,
-                    "(const char* g, "
-                    "::cursiv::TextOffset n, const Set& in) {\n"
-                    "  (void)g; (void)n; (void)in;\n");
+      out.line("template <class Set>\n", _linkage, " Set gap_pattern_", id,
+               "(const char* g, "
+               "::cursiv::TextOffset n, const Set& in) {\n"
+               "  (void)g; (void)n; (void)in;");
       switch (e.kind) {
         case LexKind::chars:
-          out += concat(
+          out.line(
               "  Set out;\n  in.each([&](::cursiv::TextOffset p) {\n"
               "    if (p < n && ",
               _boundary, ".at(", e.a,
               "u, g, p, n)) out.set(p + 1);\n"
-              "  });\n  return out;\n");
+              "  });\n  return out;");
           break;
         case LexKind::nguard:
-          out += "  Set out;\n  in.each([&](::cursiv::TextOffset p) {\n";
+          out.line("  Set out;\n  in.each([&](::cursiv::TextOffset p) {");
           if (e.min != 0)
-            out += concat("    if (", e.min,
-                          "u > n - p) { out.set(p); return; }\n");
+            out.line("    if (", e.min, "u > n - p) { out.set(p); return; }");
           for (unsigned k = 0; k < e.min; ++k)
-            out += concat("    if (!", _boundary, ".at(", _cfg.lexKid[e.b + k],
-                          "u, g, p + ", k,
-                          "u, n)) { out.set(p); return; "
-                          "}\n");
+            out.line("    if (!", _boundary, ".at(", _cfg.lexKid[e.b + k],
+                     "u, g, p + ", k,
+                     "u, n)) { out.set(p); return; "
+                     "}");
           if (e.a != kNoSet)
-            out += concat("    if (p + ", e.min, "u < n && ", _boundary, ".at(",
-                          e.a, "u, g, p + ", e.min,
-                          "u, n)) "
-                          "out.set(p);\n");
-          out += "  });\n  return out;\n";
+            out.line("    if (p + ", e.min, "u < n && ", _boundary, ".at(", e.a,
+                     "u, g, p + ", e.min,
+                     "u, n)) "
+                     "out.set(p);");
+          out.line("  });\n  return out;");
           break;
         case LexKind::seq:
-          out += "  auto cur = in;\n";
+          out.line("  auto cur = in;");
           for (unsigned k = 0; k < e.b; ++k)
-            out += concat(
+            out.line(
                 "  if (cur.empty()) return cur;\n"
                 "  cur = gap_pattern_",
-                _cfg.lexKid[e.a + k], "(g, n, cur);\n");
-          out += "  return cur;\n";
+                _cfg.lexKid[e.a + k], "(g, n, cur);");
+          out.line("  return cur;");
           break;
         case LexKind::alt:
-          out += "  Set out;\n";
+          out.line("  Set out;");
           for (unsigned k = 0; k < e.b; ++k)
-            out += concat("  out.unite(gap_pattern_", _cfg.lexKid[e.a + k],
-                          "(g, n, in));\n");
-          out += "  return out;\n";
+            out.line("  out.unite(gap_pattern_", _cfg.lexKid[e.a + k],
+                     "(g, n, in));");
+          out.line("  return out;");
           break;
         case LexKind::rep:
           if (e.max == 0)
-            out += "  return in;\n";
+            out.line("  return in;");
           else
-            out += concat("  return ::cursiv::gap_repeat<", e.min, "u, ", e.max,
-                          "u>(in, [&](const Set& "
-                          "cur) {\n"
-                          "    return gap_pattern_",
-                          e.a, "(g, n, cur);\n  });\n");
+            out.line("  return ::cursiv::gap_repeat<", e.min, "u, ", e.max,
+                     "u>(in, [&](const Set& "
+                     "cur) {\n"
+                     "    return gap_pattern_",
+                     e.a, "(g, n, cur);\n  });");
           break;
         default:
           throw std::logic_error("cursiv: nonregular node in a gap program");
       }
-      out += "}\n";
+      out.line("}");
     }
-    return out;
+    return out.take();
   }
 
  private:
@@ -136,7 +136,7 @@ class GapProgramEmitter {
 };
 
 template <class Cfg>
-class GapEmitter : private EmitOutput {
+class GapEmitter : private TextBuilder {
  public:
   GapEmitter(const Cfg& cfg, std::string sets, std::string boundary,
              std::string_view linkage = "static")
@@ -152,7 +152,7 @@ class GapEmitter : private EmitOutput {
         phrase(leaf.node);
   }
 
-  std::string source() const { return out + _program.source(); }
+  std::string source() const { return text() + _program.source(); }
 
   // Whether the source names the boundary the emitter was given: a gap that
   // reads only the sets, or has a constant answer, does not.
@@ -282,24 +282,26 @@ class GapEmitter : private EmitOutput {
         if (covered) patterns.erase(patterns.begin() + i);
       }
     }
-    fmt("{} bool {}(const char* g, ::cursiv::TextOffset n) {{\n", _linkage,
-        name({node, whole, How::patterns}));
+    line(_linkage, " bool ", name({node, whole, How::patterns}),
+         "(const char* g, ::cursiv::TextOffset n) {");
     if (!whole)
-      raw("  for (::cursiv::TextOffset p = 0; p < n;\n"
-          "       p += ::cursiv::gap_width(g + p, n - p)) {\n");
+      line(
+          "  for (::cursiv::TextOffset p = 0; p < n;\n"
+          "       p += ::cursiv::gap_width(g + p, n - p)) {");
     else
-      raw("  constexpr ::cursiv::TextOffset p = 0;\n");
+      line("  constexpr ::cursiv::TextOffset p = 0;");
     for (const auto& bytes : patterns) {
-      fmt("    if ({} {} {}u", whole ? "n" : "n - p",
-          whole ? "==" : ">=", bytes.size());
+      write("    if (", whole ? "n" : "n - p", " ", whole ? "==" : ">=", " ",
+            bytes.size(), "u");
       for (std::size_t b = 0; b < bytes.size(); ++b)
-        fmt(" && {}[{}].has("
-            "static_cast<unsigned char>(g[p + {}u]))",
-            _sets, bytes[b], b);
-      raw(") return true;\n");
+        write(" && ", _sets, "[", bytes[b],
+              "].has("
+              "static_cast<unsigned char>(g[p + ",
+              b, "u]))");
+      line(") return true;");
     }
-    if (!whole) raw("  }\n");
-    raw("  return false;\n}\n");
+    if (!whole) line("  }");
+    line("  return false;\n}");
     return How::patterns;
   }
 

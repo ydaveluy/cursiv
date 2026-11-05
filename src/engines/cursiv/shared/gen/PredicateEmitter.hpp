@@ -23,6 +23,7 @@
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -83,21 +84,21 @@ class PredicateEmitter {
   }
 
   std::string declarations() const {
-    std::string out;
+    TextBuilder out;
     for (unsigned l = 0; l < _g.ngapLeaves; ++l)
       if (compiled(l))
-        out += concat("inline bool predicate_", l,
-                      "(const char*, ::cursiv::TextOffset,\n"
-                      "    const ::cursiv::Token&, ::cursiv::TextOffset,\n"
-                      "    ::cursiv::TextOffset* = nullptr);\n");
-    return out;
+        out.line("inline bool predicate_", l,
+                 "(const char*, ::cursiv::TextOffset,\n"
+                 "    const ::cursiv::Token&, ::cursiv::TextOffset,\n"
+                 "    ::cursiv::TextOffset* = nullptr);");
+    return out.take();
   }
 
   bool compiled(unsigned l) const { return _g.gapLeaves[l].reads_tokens(); }
 
   // `tape` names the lexer tape the generated walk `walk_all` reads.
   std::string source(std::string_view tape) const {
-    std::string out;
+    TextBuilder out;
     bool lexed = false;
     bool reserved = false;
     bool sectioned = false;
@@ -114,7 +115,7 @@ class PredicateEmitter {
     // No condition's mode lexes for length (`predicate_modes`): the walk's
     // token is the mode's.
     if (lexed || sectioned)
-      out += concat(
+      out.line(
           "inline ::cursiv::Scan predicate_lex(const char* src,\n"
           "    ::cursiv::TextOffset len, ::cursiv::TextOffset at,\n"
           "    unsigned mode, ::cursiv::TextOffset* seen) {\n"
@@ -130,14 +131,14 @@ class PredicateEmitter {
           "        *seen = ::std::max(*seen, halt < len ? halt + 1 : len);\n"
           "        return sc;\n"
           "      });\n"
-          "}\n");
+          "}");
     if (reserved) {
       // The refusals a reserving keyword asks of the token read as a walk of
       // the mode from it does, halt counted as `predicate_lex` counts it.
       bool refusing = false;
       for (unsigned t = 1; t < _g.nterms; ++t)
         refusing = refusing || _g.terms[t].refuses;
-      out += concat(
+      out.line(
           "inline bool predicate_reserved(const char* src, "
           "::cursiv::TextOffset len,\n"
           "    ::cursiv::TextOffset at, ::cursiv::TextOffset end,\n"
@@ -166,10 +167,10 @@ class PredicateEmitter {
                 "  }\n"
               : "  if (seen) *seen = ::std::max(*seen, far);\n",
           "  return reserved;\n"
-          "}\n");
+          "}");
     }
     if (sectioned)
-      out +=
+      out.line(
           "inline ::cursiv::TextOffset predicate_close(const char* src,\n"
           "    ::cursiv::TextOffset len, ::cursiv::TextOffset at,\n"
           "    ::cursiv::TextOffset upto, unsigned mode,\n"
@@ -184,20 +185,20 @@ class PredicateEmitter {
           "    p = sc.end;\n"
           "  }\n"
           "  return len;\n"
-          "}\n";
+          "}");
     if (_nruns != 0)
-      out += concat(
+      out.line(
           "inline ::cursiv::PredicateRuns* predicate_runs(const char* src,\n"
           "    ::cursiv::TextOffset len) {\n"
           "  return ::cursiv::LexSuffixSession<decltype(",
           tape,
           ")>::runs(src, "
           "len);\n"
-          "}\n");
-    out += _runDecls;
+          "}");
+    out.write(_runDecls);
     for (const auto at : _order)
-      if (_called[at]) out += node(at);
-    out += _runDefs;
+      if (_called[at]) out.write(node(at));
+    out.write(_runDefs);
     std::map<std::string, std::string> knowns;
     for (unsigned l = 0; l < _g.ngapLeaves; ++l) {
       if (!compiled(l)) continue;
@@ -210,10 +211,9 @@ class PredicateEmitter {
             knowns.try_emplace(std::string(answers.begin(), answers.end()),
                                concat("kPredicateKnown_", knowns.size()));
         if (fresh) {
-          out +=
-              concat("inline constexpr ::std::uint8_t ", at->second, "[] = {");
-          for (const std::uint8_t v : answers) out += concat(v, ",");
-          out += "};\n";
+          out.write("inline constexpr ::std::uint8_t ", at->second, "[] = {");
+          for (const std::uint8_t v : answers) out.write(v, ",");
+          out.line("};");
         }
         known = std::format(
             "  if (la.end > la.begin && la.sym < {0}u && {1}[la.sym] != 0 &&\n"
@@ -229,46 +229,44 @@ class PredicateEmitter {
           "      la.end > la.begin ? la.sym : ::cursiv::kUnread, la.mode, "
           "la.end}}";
       const unsigned h = home(l);
-      out += concat(
-          "inline bool predicate_", l, h != 0 ? "_in" : "",
-          "(const char* src, ::cursiv::TextOffset "
-          "len,\n"
-          "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
-          "    ::cursiv::TextOffset* seen) {\n",
-          h != 0 ? "" : known,
-          "  const auto at = ::std::min(la.begin, len);\n"
-          "  return ",
-          holds(leaf.node,
-                leaf.skip == kNoLexNode ? start : call(leaf.skip, start)),
-          ";\n"
-          "}\n");
+      out.line("inline bool predicate_", l, h != 0 ? "_in" : "",
+               "(const char* src, ::cursiv::TextOffset "
+               "len,\n"
+               "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
+               "    ::cursiv::TextOffset* seen) {\n",
+               h != 0 ? "" : known,
+               "  const auto at = ::std::min(la.begin, len);\n"
+               "  return ",
+               holds(leaf.node,
+                     leaf.skip == kNoLexNode ? start : call(leaf.skip, start)),
+               ";\n"
+               "}");
       // A section's predicate reads its text alone: one that looked as far as
       // the token closing the section is read again up to there.
       if (h != 0)
-        out +=
-            concat("inline bool predicate_", l,
-                   "(const char* src, ::cursiv::TextOffset "
-                   "len,\n"
-                   "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
-                   "    ::cursiv::TextOffset* seen) {\n"
-                   "  ::cursiv::TextOffset reach = 0;\n"
-                   "  const bool value = predicate_",
-                   l,
-                   "_in(src, len, la, from, "
-                   "&reach);\n"
-                   "  const auto close = predicate_close(src, len, "
-                   "::std::min(la.begin, len),\n"
-                   "      reach, ",
-                   _err[h], "u, ", _g.cfgEnd[h],
-                   "u, &reach);\n"
-                   "  if (seen) *seen = ::std::max(*seen, reach);\n"
-                   "  return close < reach\n"
-                   "      ? predicate_",
-                   l,
-                   "_in(src, close, la, from, seen) : value;\n"
-                   "}\n");
+        out.line("inline bool predicate_", l,
+                 "(const char* src, ::cursiv::TextOffset "
+                 "len,\n"
+                 "    const ::cursiv::Token& la, ::cursiv::TextOffset from,\n"
+                 "    ::cursiv::TextOffset* seen) {\n"
+                 "  ::cursiv::TextOffset reach = 0;\n"
+                 "  const bool value = predicate_",
+                 l,
+                 "_in(src, len, la, from, "
+                 "&reach);\n"
+                 "  const auto close = predicate_close(src, len, "
+                 "::std::min(la.begin, len),\n"
+                 "      reach, ",
+                 _err[h], "u, ", _g.cfgEnd[h],
+                 "u, &reach);\n"
+                 "  if (seen) *seen = ::std::max(*seen, reach);\n"
+                 "  return close < reach\n"
+                 "      ? predicate_",
+                 l,
+                 "_in(src, close, la, from, seen) : value;\n"
+                 "}");
     }
-    return out;
+    return out.take();
   }
 
  private:
@@ -642,61 +640,66 @@ class PredicateEmitter {
   std::string rounds(std::uint16_t at, std::uint16_t skip, std::uint32_t min,
                      std::uint32_t max, const std::string& item) const {
     const LexNode e = _g.lex[at];
-    std::string out =
-        "  auto cur = ::std::move(in);\n" +
+    TextBuilder out;
+    out.write(
+        "  auto cur = ::std::move(in);\n",
         must_rounds("cur", min,
-                    call(e.a, skip == kNoLexNode ? "cur" : call(skip, "cur")));
-    if (min == max) return out + "  return cur;\n}\n";
-    out += "  auto visited = cur;\n";
-    return out +
-           concat(
-               "  ::cursiv::PredicateState out;\n"
-               "  for (::std::uint32_t k = ",
-               min, "u; k < ", max,
-               "u && !cur.empty(); ++k) "
-               "{\n"
-               "    ::cursiv::PredicateState active;\n"
-               "    for (::std::size_t i = 0; i < cur.size(); ++i) {\n"
-               "      auto p = ",
-               skip == kNoLexNode
-                   ? std::string("cur[i]")
-                   : call(skip, "::cursiv::PredicateState{cur[i]}") + "[0]",
-               ";\n", prelex(at, "      "), "      out.add(",
-               skip == kNoLexNode ? "p" : "cur[i]",
-               ");\n"
-               "      active.add(p);\n"
-               "    }\n"
-               "    auto next = ",
-               item,
-               ";\n"
-               "    cur = next.without(visited);\n"
-               "    visited.unite(cur);\n"
-               "  }\n"
-               "  out.unite(cur);\n"
-               "  return out;\n}\n");
+                    call(e.a, skip == kNoLexNode ? "cur" : call(skip, "cur"))));
+    if (min == max) return out.line("  return cur;\n}").take();
+    out.line("  auto visited = cur;");
+    return out
+        .line(
+            "  ::cursiv::PredicateState out;\n"
+            "  for (::std::uint32_t k = ",
+            min, "u; k < ", max,
+            "u && !cur.empty(); ++k) "
+            "{\n"
+            "    ::cursiv::PredicateState active;\n"
+            "    for (::std::size_t i = 0; i < cur.size(); ++i) {\n"
+            "      auto p = ",
+            skip == kNoLexNode
+                ? std::string("cur[i]")
+                : concat(call(skip, "::cursiv::PredicateState{cur[i]}"), "[0]"),
+            ";\n", prelex(at, "      "), "      out.add(",
+            skip == kNoLexNode ? "p" : "cur[i]",
+            ");\n"
+            "      active.add(p);\n"
+            "    }\n"
+            "    auto next = ",
+            item,
+            ";\n"
+            "    cur = next.without(visited);\n"
+            "    visited.unite(cur);\n"
+            "  }\n"
+            "  out.unite(cur);\n"
+            "  return out;\n}")
+        .take();
   }
 
   std::string node(std::uint16_t at) const {
     const LexNode e = _g.lex[at];
     const bool owns = e.kind == LexKind::seq || e.kind == LexKind::rep;
-    std::string out = concat(
+    TextBuilder out;
+    out.line(
         "inline ::cursiv::PredicateState predicate_node_", at,
         "(const char* src,\n"
         "    ::cursiv::TextOffset len, ",
         owns ? "::cursiv::PredicateState" : "const ::cursiv::PredicateState&",
         " in,\n"
         "    ::cursiv::TextOffset* seen) {\n"
-        "  (void)src; (void)len; (void)seen;\n");
+        "  (void)src; (void)len; (void)seen;");
     if (e.kind == LexKind::seq) {
       for (unsigned i = 0; i < e.b; ++i)
-        out += concat("  in = ", call(_g.lexKid[e.a + i], "::std::move(in)"),
-                      ";\n  if (in.empty()) return in;\n");
-      return out + "  return in;\n}\n";
+        out.line("  in = ", call(_g.lexKid[e.a + i], "::std::move(in)"),
+                 ";\n  if (in.empty()) return in;");
+      return out.line("  return in;\n}").take();
     }
     if (e.kind == LexKind::rep) {
       if (e.b == kNoLexNode || e.max <= 1)
-        return out + rounds(at, kNoLexNode, e.min, e.max,
-                            call(e.a, "::std::move(active)"));
+        return out
+            .write(rounds(at, kNoLexNode, e.min, e.max,
+                          call(e.a, "::std::move(active)")))
+            .take();
       // Trivia stands between rounds: the first reads none, and the boundary
       // after the last is the caller's.
       const auto more = [&](std::string_view input) {
@@ -713,39 +716,38 @@ class PredicateEmitter {
                        e.max == kEndless ? e.max : e.max - 1,
                        call(e.a, "::std::move(active)"));
       if (e.min == 0)
-        return helper + out +
-               rounds(at, kNoLexNode, 0, 1,
-                      more(call(e.a, "::std::move(active)")));
-      return helper + out +
-             concat("  in = ", call(e.a, "::std::move(in)"),
+        return concat(helper, out.text(),
+                      rounds(at, kNoLexNode, 0, 1,
+                             more(call(e.a, "::std::move(active)"))));
+      return concat(helper, out.text(), "  in = ", call(e.a, "::std::move(in)"),
                     ";\n  if (in.empty()) return in;\n  return ",
                     more("::std::move(in)"), ";\n}\n");
     }
 
-    out +=
+    out.line(
         "  ::cursiv::PredicateState out;\n"
         "  for (::std::size_t i = 0; i < in.size(); ++i) {\n"
-        "    auto p = in[i];\n";
+        "    auto p = in[i];");
     switch (e.kind) {
       case LexKind::token: {
         DynSet self;
         self.set(e.a);
         if (const auto none = read_nothing(self); !none.empty())
-          out += "    if (" + none + ") continue;\n";
+          out.line("    if (", none, ") continue;");
         // The token in hand opens a condition: it holds where the terminal
         // reads its bytes, the lexer's choice aside, and a commit's exit where
         // the rule reads it as that terminal. Any other token is the
         // predicate's own, read under the alphabet it was lexed in.
         if (_turn[at])
-          out += concat(
+          out.line(
               "    if (p.held != ::cursiv::kUnread &&\n"
               "        p.held != ::cursiv::kInvalidSymbol) {\n"
               "      if ",
               gap_terms_expression(_g, _turns.at(e.a), "p.held"),
               " out.add({p.end, p.end});\n"
               "      continue;\n"
-              "    }\n");
-        out += concat(
+              "    }");
+        out.line(
             "    const auto sc = p.held == ", e.a,
             "u\n"
             "        ? ::cursiv::Scan{p.end, p.held}\n"
@@ -767,7 +769,7 @@ class PredicateEmitter {
                          "p.mode, ",
                          e.a, "u, seen)"),
             "))))\n"
-            "      out.add({sc.end, sc.end});\n");
+            "      out.add({sc.end, sc.end});");
         break;
       }
       case LexKind::skip:
@@ -777,9 +779,9 @@ class PredicateEmitter {
             trivia |= _modes.first[_g.lexKid[e.a + i]];
           trivia.andnot(_modes.follow[at]);
           if (const auto none = read_nothing(_modes.want(at)); !none.empty())
-            out += "    if (" + none +
-                   ") {\n      out.add(p);\n      continue;\n    }\n";
-          out += concat(
+            out.line("    if (", none,
+                     ") {\n      out.add(p);\n      continue;\n    }");
+          out.line(
               "    for (;;) {\n"
               "      const auto sc = predicate_lex(src, len, p.at, ",
               _g.lexMode[at],
@@ -788,61 +790,61 @@ class PredicateEmitter {
               "      if (!",
               gap_terms_expression(_g, trivia, "sc.term"),
               " || sc.end <= p.at) {\n",
-              concat("        if (p.held == ::cursiv::kUnread) {\n"
-                     "          p.held = sc.term; p.end = sc.end; p.mode = ",
-                     _g.lexMode[at],
-                     "u;\n"
-                     "        }\n"),
+              "        if (p.held == ::cursiv::kUnread) {\n"
+              "          p.held = sc.term; p.end = sc.end; p.mode = ",
+              _g.lexMode[at],
+              "u;\n"
+              "        }\n",
               "        break;\n"
               "      }\n"
               "      p.at = sc.end;\n"
               "      p.held = ::cursiv::kUnread;\n"
-              "    }\n");
+              "    }");
         }
-        out += "    out.add(p);\n";
+        out.line("    out.add(p);");
         break;
       case LexKind::alt:
-        out += prelex(at, "    ");
+        out.write(prelex(at, "    "));
         // A mode covering the whole choice covers each token: all would skip.
         if (std::ranges::all_of(std::span(_g.lexKid.data() + e.a, e.b),
                                 [&](std::uint16_t k) {
                                   return _g.lex[k].kind == LexKind::token;
                                 }))
           if (const auto none = read_nothing(_modes.want(at)); !none.empty())
-            out += "    if (" + none + ") continue;\n";
+            out.line("    if (", none, ") continue;");
         for (unsigned i = 0; i < e.b; ++i) {
           const auto kid = _g.lexKid[e.a + i];
-          out += concat("      out.unite(",
-                        call(kid, "::cursiv::PredicateState{p}"), ");\n");
+          out.line("      out.unite(", call(kid, "::cursiv::PredicateState{p}"),
+                   ");");
         }
         break;
       case LexKind::positive:
       case LexKind::negative:
-        out += concat(
+        out.line(
             "    auto probe = p;\n"
             "    probe.held = ::cursiv::kUnread;\n"
             "    if (",
             e.kind == LexKind::positive ? "" : "!", "(",
-            holds(e.a, "::cursiv::PredicateState{probe}"), ")) out.add(p);\n");
+            holds(e.a, "::cursiv::PredicateState{probe}"), ")) out.add(p);");
         break;
       case LexKind::gap_has:
       case LexKind::gap_is:
-        out += concat("    if (",
-                      _gaps.expression(e.a, e.kind == LexKind::gap_is,
-                                       "src + p.from", "p.at - p.from"),
-                      ") out.add(p);\n");
+        out.line("    if (",
+                 _gaps.expression(e.a, e.kind == LexKind::gap_is,
+                                  "src + p.from", "p.at - p.from"),
+                 ") out.add(p);");
         break;
       case LexKind::end_mark:
-        out +=
+        out.line(
             "    if (seen) *seen = ::std::max(*seen, ::std::min(p.at + 1, "
-            "len));\n";
-        out += "    if (p.at == len) out.add(p);\n";
+            "len));");
+        out.line("    if (p.at == len) out.add(p);");
         break;
       default:
         throw std::logic_error(
             "cursiv: unexpected node in a generated predicate");
     }
-    return out + "  }\n  return out;\n}\n";
+    return out.line("  }\n  return out;\n}").take();
   }
 };
 

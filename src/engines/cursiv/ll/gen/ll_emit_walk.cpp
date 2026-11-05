@@ -10,7 +10,7 @@
 
 #include "cursiv/ll/gen/LlBuiltProgram.hpp"
 #include "cursiv/ll/gen/LlLexView.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/LexWalkEmitter.hpp"
 
 namespace cursiv {
@@ -46,15 +46,16 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
   void walk_entry() {
     line("  (void)end;\n  (void)term;");
     if (!a.modeBacktrack.empty())
-      raw(R"(  if (::cursiv::LexSuffixSession<
+      write(R"(  if (::cursiv::LexSuffixSession<
           ::cursiv::LlLexTape<kTable>>::has_backtracked())
     return ::cursiv::lex_walk(kTape, src, len, mode, i);
 )");
   }
   void emit_rows_loop() {
-    raw("Wtab:\n  {\n");
+    line("Wtab:\n  {");
     if (!relays()) line("    bool relays = false;");
-    raw(R"(    ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match,
+    write(
+        R"(    ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match,
         relays, [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
           if (!::cursiv::lex_run_blind(kTape, state)) return;
           while (at < len &&
@@ -86,7 +87,7 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
           "using Relays = "
           "::cursiv::LexRelayRun<::cursiv::LlLexTape<kTable>>;");
     // Every state keeps its labels, reached or not.
-    raw(R"(
+    write(R"(
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-label"
@@ -99,7 +100,7 @@ struct LlWalkEmitter : LexWalkRungs<LlLexView> {
                   "");
     if (relays())
       lex_emit_relay_runs(*this, dfa, runs, view, a.relays, "relay_run");
-    raw(R"(#ifdef __clang__
+    write(R"(#ifdef __clang__
 #pragma clang diagnostic pop
 #else
 #pragma GCC diagnostic pop
@@ -128,7 +129,7 @@ std::string ll_emit_walk_includes(const LlBuiltProgram& a) {
 std::string ll_emit_walk(const LlBuiltProgram& a) {
   LlWalkEmitter e(a);
   e.emit();
-  return std::move(e.out);
+  return e.take();
 }
 
 }  // namespace cursiv

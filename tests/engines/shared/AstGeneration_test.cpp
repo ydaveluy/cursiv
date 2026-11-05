@@ -303,18 +303,18 @@ void reflection_only_types_need_no_factory(
   const auto factory = [&registry]<class T>() {
     return "make_node<" + registry.types[type_of<T>(registry)].source + ">";
   };
-  CHECK(emitter.out.find(factory.template operator()<Base>()) ==
+  CHECK(emitter.text().find(factory.template operator()<Base>()) ==
         std::string::npos);
-  CHECK(emitter.out.find(factory.template operator()<RefOnly>()) ==
+  CHECK(emitter.text().find(factory.template operator()<RefOnly>()) ==
         std::string::npos);
-  CHECK(emitter.out.find(factory.template operator()<Derived>()) !=
+  CHECK(emitter.text().find(factory.template operator()<Derived>()) !=
         std::string::npos);
-  CHECK(emitter.out.find(factory.template operator()<Wrapper>()) !=
+  CHECK(emitter.text().find(factory.template operator()<Wrapper>()) !=
         std::string::npos);
   emitter.emit_writers();
   const auto name = field_of<&Base::name>(registry);
-  CHECK(emitter.out.find("case " + std::to_string(name) + "u: w" +
-                         std::to_string(name)) != std::string::npos);
+  CHECK(emitter.text().find("case " + std::to_string(name) + "u: w" +
+                            std::to_string(name)) != std::string::npos);
 }
 
 void a_truncated_operator_product_keeps_every_opening() {

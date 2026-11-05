@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"

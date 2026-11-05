@@ -34,7 +34,7 @@
 #include "cursiv/lr/table/LrReducePlan.hpp"
 #include "cursiv/shared/gen/CommonArtifacts.hpp"
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
 #include "cursiv/shared/gen/GapReach.hpp"
@@ -50,6 +50,7 @@
 #include "cursiv/shared/table/DynSet.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -91,14 +92,12 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     return narrowed() ? ", kTable.stamp" : "";
   }
 
-  // What `f` writes, taken back out of `out`.
+  // What `f` writes, taken back out.
   template <class F>
   std::string capture(F&& f) {
-    const std::size_t at = out.size();
+    const std::size_t at = size();
     f();
-    std::string text = out.substr(at);
-    out.resize(at);
-    return text;
+    return cut_from(at);
   }
 
   // `decl = {cells};`, `none` standing in for no cell; a column is sixteen
@@ -106,25 +105,25 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   template <class Cell>
   void array(std::string_view decl, std::size_t n, Cell&& cell,
              std::string_view none = "", bool column = false) {
-    fmt("{} = {{", decl);
+    write(decl, " = {");
     for (std::size_t i = 0; i < n; ++i) {
-      if (column && i % 16 == 0) out += '\n';
-      if (!column && i != 0) out += ',';
+      if (column && i % 16 == 0) write('\n');
+      if (!column && i != 0) write(',');
       cell(i);
-      if (column) out += ',';
+      if (column) write(',');
     }
-    if (n == 0) raw(none);
+    if (n == 0) write(none);
     line("};");
   }
 
   void set64(const ByteSet& s) {
-    out += '{';
+    write('{');
     for (int w = 0; w < 4; ++w) {
-      if (w) out += ',';
-      out += std::to_string(s.w[w]);
-      out += "ull";
+      if (w) write(',');
+      write(s.w[w]);
+      write("ull");
     }
-    out += '}';
+    write('}');
   }
 
   // The states split into groups, one function each: a jump that leaves its
@@ -155,7 +154,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   // Opens the definition of such a helper, `prefix` ahead of its signature,
   // and declares it.
   void define(std::string_view prefix, std::string_view signature) {
-    fmt("{}{} {{\n", prefix, signature);
+    line(prefix, signature, " {");
     declare(signature);
   }
   std::vector<unsigned> groupOf{};  // per state, then per reduce lead
@@ -279,12 +278,13 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
                       std::string_view ind) {
     const unsigned elem = a.cfg.terms[x.term].element;
     probesOf[s].emplace_back(x.arg, elem);
-    fmt("{0}hb = p;\n{0}he = {1};\n{0}goto P{2}_{3};\n", ind, end, x.arg, elem);
+    line(ind, "hb = p;\n", ind, "he = ", end, ";\n", ind, "goto P", x.arg, "_",
+         elem, ";");
   }
   void emit_probe_hops(const ProbeSet& probes) {
     for (const auto& [to, elem] : probes)
-      fmt("P{0}_{1}:\n  shift(c, {0}u, {1}, hb, he);\n  {2}\n", to, elem,
-          jump('S', to));
+      line("P", to, "_", elem, ":\n  shift(c, ", to, "u, ", elem,
+           ", hb, he);\n  ", jump('S', to));
   }
   // Where its group writes the probe's block for the same shift, `H` hands
   // the token in hand to it.
@@ -292,13 +292,13 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     if (!shifted(s)) return;
     const auto elem = static_cast<unsigned>(hopElem[s]);
     if (laidInto[s])
-      fmt("H{0}:\n  lay(c, {0}u, {1});\n  goto S{0};\n", s, elem);
+      line("H", s, ":\n  lay(c, ", s, "u, ", elem, ");\n  goto S", s, ";");
     else if (probes.contains({s, elem}))
-      fmt("H{0}:\n  hb = c.la.begin; he = c.la.end;\n  goto P{0}_{1};\n", s,
-          elem);
+      line("H", s, ":\n  hb = c.la.begin; he = c.la.end;\n  goto P", s, "_",
+           elem, ";");
     else
-      fmt("H{0}:\n  shift(c, {0}u, {1}, c.la.begin, c.la.end);\n  goto S{0};\n",
-          s, elem);
+      line("H", s, ":\n  shift(c, ", s, "u, ", elem,
+           ", c.la.begin, c.la.end);\n  goto S", s, ";");
   }
 
   // The two-token oracle of one conflict cell, its sets spelled as literals.
@@ -309,39 +309,41 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     return -1;
   }
   void emit_set_test(const char* var, const DynSet& set) {
-    raw("(");
+    write("(");
     bool first = true;
     for (const unsigned t : set.members()) {
-      if (!first) raw(" || ");
+      if (!first) write(" || ");
       first = false;
-      fmt("{} == {}", var, t);
+      write(var, " == ", t);
     }
-    if (first) raw("false");
-    raw(")");
+    if (first) write("false");
+    write(")");
   }
   void emit_k2(unsigned pk, unsigned s, unsigned i) {
     const LrPeek& p = a.peeks[pk];
     line("      {");
     if (p.set[0].any())
-      fmt("        const ::cursiv::SymbolId u0 = c.peekAt(c, {});\n",
-          p.mode[0]);
+      line("        const ::cursiv::SymbolId u0 = c.peekAt(c, ", p.mode[0],
+           ");");
     if (p.set[1].any() && p.set[0].any() && p.mode[1] == p.mode[0])
       line("        const ::cursiv::SymbolId u1 = u0;");
     else if (p.set[1].any())
-      fmt("        const ::cursiv::SymbolId u1 = c.peekAt(c, {});\n",
-          p.mode[1]);
-    raw("        const bool in0 = ");
+      line("        const ::cursiv::SymbolId u1 = c.peekAt(c, ", p.mode[1],
+           ");");
+    write("        const bool in0 = ");
     emit_set_test("u0", p.set[0]);
     line(";");
-    raw("        const bool in1 = ");
+    write("        const bool in1 = ");
     emit_set_test("u1", p.set[1]);
     line(";");
     // Build-time disjointness proves the peek, so both build modes avoid
     // forking a resolver to confirm it.
-    fmt("        if (in0 && !in1) goto AC{0}_{1};\n"
-        "        if (in1 && !in0) goto AC{0}_{2};\n"
-        "      }}\n",
-        s, i, i + 1);
+    line("        if (in0 && !in1) goto AC", s, "_", i,
+         ";\n"
+         "        if (in1 && !in0) goto AC",
+         s, "_", i + 1,
+         ";\n"
+         "      }");
   }
 
   void emit_lex_tables() {
@@ -349,9 +351,9 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
       // A state's acceptance and boundary in one word, read together.
       array("[[maybe_unused]] inline constexpr ::std::uint32_t kMeta[]", a.ndfa,
             [&](std::size_t i) {
-              num((std::uint32_t{a.dfaBound[i]} << 16) | a.dfaAccept[i]);
+              write((std::uint32_t{a.dfaBound[i]} << 16) | a.dfaAccept[i]);
             });
-      raw(R"(struct RowsTape : ::cursiv::LrLexTape<kTable> {
+      write(R"(struct RowsTape : ::cursiv::LrLexTape<kTable> {
   ::std::uint16_t accept(::std::uint16_t s) const { return kMeta[s]; }
   bool bounded(::std::uint16_t s) const { return (kMeta[s] >> 16) != 0xFFFFu; }
   bool bound_has(::std::uint16_t s, const char* src, ::cursiv::TextOffset i,
@@ -372,14 +374,14 @@ inline constexpr RowsTape kRowsTape{};
     shared([&] {
       array("inline constexpr ::std::uint8_t kTermFlags[]", a.cfg.nterms,
             [&](std::size_t t) {
-              num((a.cfg.terms[t].trivia ? 1u : 0u) |
-                  (a.cfg.terms[t].recorded ? 2u : 0u) |
-                  (flagged.test(static_cast<unsigned>(t)) ? 4u : 0u) |
-                  (a.cfg.terms[t].joins ? 8u : 0u));
+              write((a.cfg.terms[t].trivia ? 1u : 0u) |
+                    (a.cfg.terms[t].recorded ? 2u : 0u) |
+                    (flagged.test(static_cast<unsigned>(t)) ? 4u : 0u) |
+                    (a.cfg.terms[t].joins ? 8u : 0u));
             });
       if (any_recorded())
         array("inline constexpr ::std::uint16_t kTermElem[]", a.cfg.nterms,
-              [&](std::size_t t) { num(a.cfg.terms[t].element); });
+              [&](std::size_t t) { write(a.cfg.terms[t].element); });
     });
   }
 
@@ -387,21 +389,21 @@ inline constexpr RowsTape kRowsTape{};
   void emit_mode_sub() {
     if (!subs) return;
     const unsigned rowWords = (a.nmodes + 63u) / 64u;
-    fmt("inline constexpr ::std::uint64_t kModeSubTo[][{}] = {{", rowWords);
+    write("inline constexpr ::std::uint64_t kModeSubTo[][", rowWords, "] = {");
     for (unsigned to = 0; to < a.nmodes; ++to) {
-      if (to) raw(",");
-      raw("{");
+      if (to) write(",");
+      write("{");
       for (unsigned w = 0; w < rowWords; ++w) {
         std::uint64_t word = 0;
         for (unsigned from = w * 64u; from < a.nmodes && from < (w + 1u) * 64u;
              ++from)
           if (a.mode_covers(from, to)) word |= std::uint64_t{1} << (from & 63u);
-        if (w) raw(",");
-        fmt("{}ull", word);
+        if (w) write(",");
+        write(word, "ull");
       }
-      raw("}");
+      write("}");
     }
-    raw(R"(};
+    write(R"(};
 [[maybe_unused]] inline bool mode_sub(unsigned from, unsigned to) {
   return ((kModeSubTo[to][from >> 6] >> (from & 63u)) & 1u) != 0;
 }
@@ -410,21 +412,22 @@ inline constexpr RowsTape kRowsTape{};
 
   // The rows, read where a mode stops spelling states.
   void emit_rows_loop() {
-    raw(R"(Wtab:
+    write(R"(Wtab:
   {
 )");
     if (!a.dfaBacktrack.empty())
       line("    if (kTable.modeBacktrack[mode] != 0)\n"
            "      return walk_table_cached(src, len, mode, start);");
     if (a.nrelays == 0) line("    bool relays = false;");
-    raw(R"(    ::cursiv::lex_walk_rows(kRowsTape, src, len, start, st, i, far, match,
+    write(
+        R"(    ::cursiv::lex_walk_rows(kRowsTape, src, len, start, st, i, far, match,
         relays, [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
           if (!::cursiv::lex_run_blind(kRowsTape, state)) return;
           while (at < len && kRowsTape.step(state,
                      static_cast<unsigned char>(src[at])) == state)
             ++at;
 )");
-    raw(R"(        });
+    write(R"(        });
   }
 )");
     if (!a.dfaBacktrack.empty()) line("  goto Wdone;");
@@ -450,12 +453,12 @@ inline constexpr RowsTape kRowsTape{};
     const bool recorded = any_recorded();
     const std::string_view termElem = recorded ? "kTermElem" : "nullptr";
     line("inline void flush(::cursiv::LrContext& c) {");
-    fmt("  ::cursiv::lr_flush<{}{}>(c, {});\n}}\n\n", recorded, stamp_more(),
-        termElem);
+    line("  ::cursiv::lr_flush<", recorded, stamp_more(), ">(c, ", termElem,
+         ");\n}\n");
     line("inline void records(::cursiv::LrContext& c) {");
-    fmt("  ::cursiv::lr_record_trivia<{}{}>(c, {});\n}}\n\n", recorded,
-        stamp_more(), termElem);
-    raw(R"(CURSIV_ALWAYS_INLINE inline void shift(::cursiv::LrContext& c,
+    line("  ::cursiv::lr_record_trivia<", recorded, stamp_more(), ">(c, ",
+         termElem, ");\n}\n");
+    write(R"(CURSIV_ALWAYS_INLINE inline void shift(::cursiv::LrContext& c,
                                        ::std::uint32_t tgt, ::std::uint16_t row,
                                        ::cursiv::TextOffset b,
                                        ::cursiv::TextOffset e) {
@@ -465,18 +468,18 @@ inline constexpr RowsTape kRowsTape{};
          "c, tgt, ::cursiv::ElementId(row), b, e);");
     // The gap starts where the last token with a width ended.
     if (conds()) line("  if (e != b) c.virt.from = e;");
-    raw("}\n\n");
+    line("}\n");
     // An implied token is laid where the last token ended, and the trivia
     // past it is read again behind it. A dedent is shifted: the trivia of its
     // suite's last line is the suite's.
     if (!impliedTerms.empty()) {
-      raw(R"(inline void lay(::cursiv::LrContext& c, ::std::uint32_t tgt,
+      write(R"(inline void lay(::cursiv::LrContext& c, ::std::uint32_t tgt,
                 ::std::uint16_t row) {
   ::cursiv::lr_push_leaf<kTable.stamp, false>(c, tgt, ::cursiv::ElementId(row), c.committed,
                        c.committed);
 )");
       if (recorded) line("  c.pending.clear();");
-      raw("}\n\n");
+      line("}\n");
     }
   }
 
@@ -535,7 +538,7 @@ inline constexpr RowsTape kRowsTape{};
 
   void emit_folds() {
     if (a.nfused == 0) {
-      raw(R"(inline ::cursiv::ElementId folds(::cursiv::ElementId,
+      write(R"(inline ::cursiv::ElementId folds(::cursiv::ElementId,
                                   ::cursiv::ElementId) {
   return ::cursiv::kNoElement;
 }
@@ -550,18 +553,23 @@ inline constexpr RowsTape kRowsTape{};
     cursiv::lr_fused_hash(a.fused.data(), a.nfused, slots, mul, fk.data(),
                           fv.data());
     array("inline constexpr ::std::uint32_t kFusedKey[]", slots,
-          [&](std::size_t i) { num(fk[i]); });
+          [&](std::size_t i) { write(fk[i]); });
     array("inline constexpr ::std::uint16_t kFusedVal[]", slots,
-          [&](std::size_t i) { num(fv[i]); });
-    fmt("inline constexpr ::cursiv::ElementId kFusedFirst = {};\n"
-        "inline constexpr ::std::uint32_t kFusedMul = {}u;\n"
+          [&](std::size_t i) { write(fv[i]); });
+    line(
+        "inline constexpr ::cursiv::ElementId kFusedFirst = ", a.writes.nchains,
+        ";\n"
+        "inline constexpr ::std::uint32_t kFusedMul = ",
+        mul,
+        "u;\n"
         "inline ::cursiv::ElementId folds(::cursiv::ElementId held, "
         "::cursiv::ElementId over)"
-        " {{\n"
+        " {\n"
         "  return ::cursiv::lr_fused_probe(kFusedKey, kFusedVal, kFusedMul,"
-        " {}u, {}u,"
-        " kFusedFirst, held, over);\n}}\n\n",
-        a.writes.nchains, mul, cursiv::lr_fused_shift(slots), slots - 1u);
+        " ",
+        cursiv::lr_fused_shift(slots), "u, ", slots - 1u,
+        "u,"
+        " kFusedFirst, held, over);\n}\n");
   }
 
   void emit_data() {
@@ -590,7 +598,7 @@ inline constexpr RowsTape kRowsTape{};
     LrParserEmitter& emit;
 
     void emit_match(unsigned st, std::string_view ind) {
-      emit.fmt("{}match.take(kTape, {}u, src, i, len, far);\n", ind, st);
+      emit.write(ind, "match.take(kTape, ", st, "u, src, i, len, far);\n");
     }
     void emit_relay_call(unsigned st, std::string_view ind) {
       emit.emit_relay_call(st, ind);
@@ -618,17 +626,18 @@ inline constexpr RowsTape kRowsTape{};
       if (stay.any())
         byStay[{stay.w[0], stay.w[1], stay.w[2], stay.w[3]}].push_back(st);
     }
-    raw(R"(  ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match, relays,
+    write(
+        R"(  ::cursiv::lex_walk_rows(kTape, src, len, start, st, i, far, match, relays,
       [&](::std::uint16_t state, ::cursiv::TextOffset& at) {
 )");
     if (!byStay.empty()) {
       line("    switch (state) {");
       for (const auto& [words, states] : byStay) {
-        for (const unsigned st : states) fmt("    case {}:\n", st);
+        for (const unsigned st : states) line("    case ", st, ":");
         line("    {");
         ByteSet stay{};
         std::ranges::copy(words, stay.w);
-        raw("      static constexpr ::std::array<::std::uint64_t, 4> kStay{");
+        write("      static constexpr ::std::array<::std::uint64_t, 4> kStay{");
         set64(stay);
         line("};");
         if (const auto shape = LexRunShape::of(stay);
@@ -646,7 +655,7 @@ inline constexpr RowsTape kRowsTape{};
       line("        (void)state;");
       line("        (void)at;");
     }
-    raw(R"(      });
+    write(R"(      });
 )");
   }
 
@@ -660,7 +669,7 @@ inline constexpr RowsTape kRowsTape{};
       starts.push_back(start);
       partial |= dfa.ladder_from(start).size() != dfa.states_from(start).size();
     }
-    raw(R"(inline void match_all(const char* src, ::cursiv::TextOffset len,
+    write(R"(inline void match_all(const char* src, ::cursiv::TextOffset len,
                       ::cursiv::TextOffset i, ::cursiv::Scan* v,
                       ::std::uint32_t& n, ::std::uint32_t cap,
                       ::std::uint16_t st) {
@@ -679,7 +688,7 @@ inline constexpr RowsTape kRowsTape{};
     } else {
       line("  switch (st) {");
       for (const unsigned start : starts)
-        fmt("    case {0}: goto W{0};\n", start);
+        line("    case ", start, ": goto W", start, ";");
       line("    default: return;");
       line("  }");
       std::vector<unsigned> order;
@@ -694,7 +703,7 @@ inline constexpr RowsTape kRowsTape{};
       for (const unsigned st : order) dfa.state(*this, policy, st);
       line("Wdone:");
     }
-    raw(R"(  match.finish(src, len, start, first, relays);
+    write(R"(  match.finish(src, len, start, first, relays);
 }
 
 )");
@@ -748,7 +757,7 @@ inline constexpr RowsTape kRowsTape{};
   }
   void emit_known_candidates() {
     if (knownEnds.empty()) return;
-    raw(R"(inline void match_after(const char* src, ::cursiv::TextOffset len,
+    write(R"(inline void match_after(const char* src, ::cursiv::TextOffset len,
                         ::cursiv::TextOffset from, ::cursiv::Scan best,
                         ::cursiv::Scan* v, ::std::uint32_t& n,
                         ::std::uint32_t cap, ::std::uint16_t first) {
@@ -759,7 +768,7 @@ inline constexpr RowsTape kRowsTape{};
     case_rows([&](auto&& put) {
       for (const auto st : knownEnds) put(st);
     });
-    raw(concat(
+    write(
         R"(      for (unsigned k = kCandBase[st]; k < kCandBase[st + 1u]; ++k) {
         assert(n < cap);
         if (n < cap) v[n++] = ::cursiv::Scan{best.end, kCandPool[k])",
@@ -774,15 +783,16 @@ full:
   match_all(src, len, from, v, n, cap, first);
 }
 
-)"));
+)");
   }
 
   void emit_multi_data() {
     shared([&] {
-      fmt("// Terminals one position of this grammar can match at once, as "
+      line(
+          "// Terminals one position of this grammar can match at once, as "
           "the\n// table counted them: the room every reading of a position "
-          "fills.\ninline constexpr ::std::uint32_t kMaxCands = {}u;\n",
-          a.maxCands != 0 ? a.maxCands : 1);
+          "fills.\ninline constexpr ::std::uint32_t kMaxCands = ",
+          a.maxCands != 0 ? a.maxCands : 1, "u;");
     });
     line("// The candidate walk's own data: what each DFA state of a flagged");
     line("// mode accepts and reserves, and the word class.");
@@ -797,7 +807,7 @@ full:
     }
     array(
         "inline constexpr ::std::uint16_t kCandPool[]", cands.size(),
-        [&](std::size_t k) { num(cands[k]); }, "0", true);
+        [&](std::size_t k) { write(cands[k]); }, "0", true);
     emit_candidate_walk();
     emit_known_candidates();
   }
@@ -811,16 +821,16 @@ full:
     line("  switch (mode) {");
     for (unsigned m = 0; m < a.nmodes; ++m) {
       if (!sweepMode(m)) continue;
-      fmt("    case {}: match_all(src, len, i, v, n, cap, {}u); break;\n", m,
-          a.modeStart[m]);
+      line("    case ", m, ": match_all(src, len, i, v, n, cap, ",
+           a.modeStart[m], "u); break;");
     }
     line("    default: break;");
     line("  }");
-    raw("}\n\n");
+    line("}\n");
   }
 
   void emit_pick_cand() {
-    raw(R"(// Several terminals match at the cursor, and THE RESERVE IS THE
+    write(R"(// Several terminals match at the cursor, and THE RESERVE IS THE
 // STATE'S: what it has no action for is no reading of these bytes, and
 // what it alone admits it takes. Where it admits several, the same
 // look-ahead that decides an open cell decides here -- the candidates
@@ -902,8 +912,8 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
       line("Wbackup:");
       if (a.nrelays != 0)
         line("  if (relays.any()) goto Wdone;");
-      fmt("  if (term != ::cursiv::kInvalidSymbol{}) {{\n", sharing());
-      raw(R"(    const ::cursiv::TextOffset halt = i > far ? i : far;
+      line("  if (term != ::cursiv::kInvalidSymbol", sharing(), ") {");
+      write(R"(    const ::cursiv::TextOffset halt = i > far ? i : far;
     if (halt > end && halt - end > ::cursiv::kBacktrackTail)
       return ::cursiv::LexSuffixSession<::cursiv::LrLexTape<kTable>>::finish(
           kTape, src, len, kTable.modeStart[mode], start, halt,
@@ -913,7 +923,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     }
     line("Wdone:");
     if (a.nrelays != 0) {
-      raw(R"(  ::cursiv::TextOffset halt;
+      write(R"(  ::cursiv::TextOffset halt;
   return ::cursiv::lex_walk_settle(kTape, src, len, kTable.modeStart[mode],
                                     start, i, far, match, relays, halt);
 )");
@@ -924,7 +934,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
                  "      match.state);"
                : "  return ::cursiv::Scan{end, term};");
     }
-    raw("}\n\n");
+    line("}\n");
   }
 
   std::string_view done(unsigned st) const {
@@ -942,11 +952,12 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     check += " && ::cursiv::LexSuffixSession<"
              "::cursiv::LrLexTape<kTable>>::has_backtracked()";
     check += sharing();
-    fmt("  if ({}) [[unlikely]] {{\n", check);
-    fmt("    const auto suffix = ::cursiv::LexSuffixSession<"
-        "::cursiv::LrLexTape<kTable>>::continue_at(kTape, src, len, {}u, i);\n",
-        st);
-    raw(R"(    if (suffix.available)
+    line("  if (", check, ") [[unlikely]] {");
+    line(
+        "    const auto suffix = ::cursiv::LexSuffixSession<"
+        "::cursiv::LrLexTape<kTable>>::continue_at(kTape, src, len, ",
+        st, "u, i);");
+    write(R"(    if (suffix.available)
       return suffix.best.term == ::cursiv::kInvalidSymbol
                  ? ::cursiv::Scan{end, term} : suffix.best;
   }
@@ -967,7 +978,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   // backtrack stops spelling states.
   void walk_before(bool partial) {
     if (partial && !a.dfaBacktrack.empty())
-      raw(R"(CURSIV_NOINLINE inline ::cursiv::Scan walk_table_cached(
+      write(R"(CURSIV_NOINLINE inline ::cursiv::Scan walk_table_cached(
     const char* src, ::cursiv::TextOffset len, ::std::uint16_t mode,
     ::cursiv::TextOffset start) {
   return ::cursiv::lex_walk(kTape, src, len, mode, start);
@@ -1069,13 +1080,14 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
   void emit_lexer(unsigned m) {
     if (ByteSet ws{}; mode_ws(m, ws) && wsLead[m] == m)
       shared([&] {
-        fmt("inline constexpr ::std::array<::std::uint64_t, 4> kWs_{}{{", m);
+        write("inline constexpr ::std::array<::std::uint64_t, 4> kWs_", m, "{");
         set64(ws);
         line("};");
       });
     if (ByteSet stop{}; mode_stop(m, stop) && wsLead[m] == m)
       shared([&] {
-        fmt("inline constexpr ::std::array<::std::uint64_t, 4> kStop_{}{{", m);
+        write("inline constexpr ::std::array<::std::uint64_t, 4> kStop_", m,
+              "{");
         set64(stop);
         line("};");
       });
@@ -1083,30 +1095,35 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     shared([&] { emit_lex_entry(m); });
   }
   void emit_lex_entry(unsigned m) {
-    fmt("inline void lex_{}(::cursiv::LrContext& c) {{\n", m);
+    line("inline void lex_", m, "(::cursiv::LrContext& c) {");
     if (!impliedTerms.empty())
-      fmt("  if (c.virt.pending != 0) {{ c.la = c.virt.in_hand(); "
-          "c.laMode = {}; return; }}\n",
-          m);
+      line(
+          "  if (c.virt.pending != 0) { c.la = c.virt.in_hand(); "
+          "c.laMode = ",
+          m, "; return; }");
     line("  c.pending.clear();");
     line("  c.pendEnd = c.committed;");
     if (indented())
-      fmt("  if (c.indent.depth == 0 && ::cursiv::indent_virtual_at(c.src, "
+      line(
+          "  if (c.indent.depth == 0 && ::cursiv::indent_virtual_at(c.src, "
           "c.len, "
-          "c.indentArena, c.indent.head, {}, {}, c.committed, c.la, "
-          "[&c] {{ return c.tape.held(); }})) {{\n"
-          "{}    c.laMode = {};\n    return;\n  }}\n",
-          indentTerm, dedentTerm, multiMode(m) ? "    c.ncand = 0;\n" : "", m);
-    fmt("  lex_tail_{}(c, c.committed, {});\n", tailLead[m], m);
+          "c.indentArena, c.indent.head, ",
+          indentTerm, ", ", dedentTerm,
+          ", c.committed, c.la, "
+          "[&c] { return c.tape.held(); })) {\n",
+          multiMode(m) ? "    c.ncand = 0;\n" : "", "    c.laMode = ", m,
+          ";\n    return;\n  }");
+    line("  lex_tail_", tailLead[m], "(c, c.committed, ", m, ");");
     if (a.modeLonger[m] != kNoMode) line("  lengthen(c);");
     if (a.flags_mode(m))
-      fmt("  if ({}) [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, {});\n",
-          flag_test(m), m);
-    raw("}\n\n");
+      line("  if (", flag_test(m),
+           ") [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, ", m, ");");
+    line("}\n");
   }
 
   void emit_lengthen() {
-    raw(R"(// The token in hand is the longer of the mode's own and the one it lexes
+    write(
+        R"(// The token in hand is the longer of the mode's own and the one it lexes
 // for length alone, the trivia before it crossed.
 inline void lengthen(::cursiv::LrContext& c) {
   const ::cursiv::Scan own{c.la.end, c.la.sym};
@@ -1160,7 +1177,7 @@ inline void lengthen(::cursiv::LrContext& c) {
                   "::cursiv::TextOffset p, ::std::uint16_t mode)"));
     constexpr std::string_view mode = "mode",
                                start = "kTable.modeStart[mode]";
-    raw(R"(  const char* const src = c.src;
+    write(R"(  const char* const src = c.src;
   const ::cursiv::TextOffset len = c.len;
 again:
 )");
@@ -1173,20 +1190,20 @@ again:
     line("  }");
     if (ByteSet ws{}; mode_ws(m, ws)) {
       const std::string nm = concat("kWs_", wsLead[m]);
-      fmt("  {{\n    if (in_set<{}>("
-          "static_cast<unsigned char>(src[p]))) {{\n",
-          nm);
+      line("  {\n    if (in_set<", nm,
+           ">("
+           "static_cast<unsigned char>(src[p]))) {");
       line("      ++p;");
       emit_run_adv(ws, "p", nm, false);
       ByteSet stop{};
       const bool stops = mode_stop(m, stop);
       // Its last byte reads on: the walk takes it from there.
       if (stops)
-        fmt("      if (p < len && in_set<kStop_{}>("
-            "static_cast<unsigned char>(src[p]))) {{\n"
-            "        c.pendEnd = --p;\n        goto past_run;\n      }}\n",
-            wsLead[m]);
-      raw(R"(      c.pendEnd = p;
+        line("      if (p < len && in_set<kStop_", wsLead[m],
+             ">("
+             "static_cast<unsigned char>(src[p]))) {\n"
+             "        c.pendEnd = --p;\n        goto past_run;\n      }");
+      write(R"(      c.pendEnd = p;
       goto again;
     }
   }
@@ -1202,9 +1219,9 @@ again:
             : win;
     if (collected) {
       line("  {\n    c.ncand = 0;");
-      fmt("    match_all(src, len, p, c.cand, c.ncand, kMaxCands, {});\n",
-          start);
-      raw(R"(    if (c.ncand == 0u) {
+      line("    match_all(src, len, p, c.cand, c.ncand, kMaxCands, ", start,
+           ");");
+      write(R"(    if (c.ncand == 0u) {
       c.la = ::cursiv::Token{p, p, 0xFFFFu};
       goto done;
     }
@@ -1213,79 +1230,90 @@ again:
       if (kTape.prefers(c.cand[k].term, c.cand[k].tier, s.term, s.tier))
         s = c.cand[k];
 )");
-      fmt("    if (!({})) c.ncand = 0;\n", win);
+      line("    if (!(", win, ")) c.ncand = 0;");
     } else {
-      raw(asks ? "  {\n    ::cursiv::Scan s = "
-               : "  {\n    const ::cursiv::Scan s = ");
-      fmt("walk_all(src, len, {}, p);\n"
-          "    if (s.term == 0xFFFFu || s.end == p) {{\n",
-          mode);
+      write(asks ? "  {\n    ::cursiv::Scan s = "
+                 : "  {\n    const ::cursiv::Scan s = ");
+      line("walk_all(src, len, ", mode,
+           ", p);\n"
+           "    if (s.term == 0xFFFFu || s.end == p) {");
       // Where the ranked acceptance's boundary refuses, the terminals it
       // outranked are still there, and only the sweep holds them.
       if (asks)
-        fmt("      c.ncand = 0;\n"
-            "      match_all(src, len, p, c.cand, c.ncand, kMaxCands, {0});\n"
+        line(
+            "      c.ncand = 0;\n"
+            "      match_all(src, len, p, c.cand, c.ncand, kMaxCands, ",
+            start,
+            ");\n"
             "      rank_cands(c.cand, c.ncand);\n"
-            "      if (c.ncand == 0u) {{\n"
-            "        c.la = ::cursiv::Token{{p, p, 0xFFFFu}};\n"
+            "      if (c.ncand == 0u) {\n"
+            "        c.la = ::cursiv::Token{p, p, 0xFFFFu};\n"
             "        goto done;\n"
-            "      }}\n"
+            "      }\n"
             "      s = c.cand[0];\n"
-            "      if ((kTermFlags[s.term] & {1}u) == 0) {{\n"
-            "        c.la = ::cursiv::Token{{p, s.end, s.term}};\n"
-            "        {2}c.ncand = 0;\n"
+            "      if ((kTermFlags[s.term] & ",
+            indented() ? 9 : 1,
+            "u) == 0) {\n"
+            "        c.la = ::cursiv::Token{p, s.end, s.term};\n"
+            "        ",
+            win.empty() ? std::string() : concat("if (!(", win, ")) "),
+            "c.ncand = 0;\n"
             "        goto done;\n"
-            "      }}\n",
-            start, indented() ? 9 : 1,
-            win.empty() ? "" : "if (!(" + win + ")) ");
+            "      }");
       else
-        raw("      c.la = ::cursiv::Token{p, p, 0xFFFFu};\n      goto done;\n");
+        line("      c.la = ::cursiv::Token{p, p, 0xFFFFu};\n      goto done;");
       line("    }");
     }
-    raw(R"(    if (kTermFlags[s.term] & 1u) {
+    write(R"(    if (kTermFlags[s.term] & 1u) {
 )");
     if (any_recorded())
-      raw(R"(      if (kTermFlags[s.term] & 2u)
+      write(R"(      if (kTermFlags[s.term] & 2u)
         c.pending.push_back(::cursiv::Token{p, s.end, s.term});
 )");
-    raw(R"(      p = s.end;
+    write(R"(      p = s.end;
       c.pendEnd = p;
       goto again;
     }
 )");
     if (indented())
-      raw(R"(    if (c.indent.depth != 0 && (kTermFlags[s.term] & 8u)) {
+      write(R"(    if (c.indent.depth != 0 && (kTermFlags[s.term] & 8u)) {
       p = s.end;
       c.pendEnd = p;
       goto again;
     }
 )");
-    raw(R"(    c.la = ::cursiv::Token{p, s.end, s.term};
+    write(R"(    c.la = ::cursiv::Token{p, s.end, s.term};
 )");
     if (asks && !collected) {
       line("    c.ncand = 0;");
       if (!win.empty())
-        fmt("    if ({})\n"
-            "      {}(src, len, p, {}c.cand, c.ncand, kMaxCands, {});\n",
-            flagged, knownEnds.empty() ? "match_all" : "match_after",
-            knownEnds.empty() ? "" : "s, ", start);
+        line("    if (", flagged,
+             ")\n"
+             "      ",
+             knownEnds.empty() ? "match_all" : "match_after", "(src, len, p, ",
+             knownEnds.empty() ? "" : "s, ", "c.cand, c.ncand, kMaxCands, ",
+             start, ");");
     } else if (eofMode(m)) {
       // The rivals meet where the text ends, and the state reading the token
       // is the one on top of the stack.
-      fmt("    if (s.end == len && ({})) "
-          "[[unlikely]] {{\n"
-          "      c.laMode = {};\n"
-          "      c.ncand = 0;\n"
-          "      match_all(src, len, p, c.cand, c.ncand, kMaxCands, {});\n"
-          "      pick_cand(c, c.stack.top().state);\n"
-          "    }}\n",
-          flagged, mode, start);
+      line("    if (s.end == len && (", flagged,
+           ")) "
+           "[[unlikely]] {\n"
+           "      c.laMode = ",
+           mode,
+           ";\n"
+           "      c.ncand = 0;\n"
+           "      match_all(src, len, p, c.cand, c.ncand, kMaxCands, ",
+           start,
+           ");\n"
+           "      pick_cand(c, c.stack.top().state);\n"
+           "    }");
     }
     line("  }");
     line("done:");
-    fmt("  c.laMode = {};\n", mode);
-    fmt("  c.la.mode = {};\n", mode);
-    raw("}\n\n");
+    line("  c.laMode = ", mode, ";");
+    line("  c.la.mode = ", mode, ";");
+    line("}\n");
   }
 
   // Equivalent production plans share one reduction entry. The common move
@@ -1350,13 +1378,13 @@ again:
   // the state it opened in: one helper each, which every site inlines.
   void emit_guard_lands() {
     if (a.guards.empty()) return;
-    raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
+    write(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_land(
     const ::cursiv::LrContext& c, ::std::uint32_t k) {
   return ::cursiv::lr_guard_land<kTable>(
       k, [&](unsigned j) { return drive_cond(c, j, c.virt.from, c.la); });
 }
 )");
-    raw(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_held(
+    write(R"(CURSIV_ALWAYS_INLINE inline ::std::uint32_t guard_held(
     ::std::uint32_t first, ::std::uint32_t k) {
   return ::cursiv::lr_guard_land<kTable>(
       k, [&](unsigned j) { return ::cursiv::lr_held<kTable>(first, j); });
@@ -1375,16 +1403,16 @@ again:
                              std::string_view first = "") {
     const auto& targets = a.guards[guard - 1u].to;
     landed.resize(a.nstates);
-    fmt("{}switch ({}) {{\n", ind, guard_target(guard, first));
+    line(ind, "switch (", guard_target(guard, first), ") {");
     for (const std::uint16_t to : targets) {
       if (to == LrGuard::kNoState || landed[to]) continue;
       landed[to] = true;
-      fmt("{}case {}u:\n", ind, to);
+      line(ind, "case ", to, "u:");
       landing(to);
     }
     for (const std::uint16_t to : targets)
       if (to != LrGuard::kNoState) landed[to] = false;
-    fmt("{}default: {}\n{}}}\n", ind, none, ind);
+    line(ind, "default: ", none, "\n", ind, "}");
   }
 
   // Where a closed node is still owed the state it settles in: a goto column
@@ -1436,10 +1464,10 @@ again:
                                 ? "::cursiv::kNoElement"
                                 : "rec";
     const auto land = [&](unsigned to) {
-      fmt("      ::cursiv::lr_reduce_finish<kTable.stamp>(c, {}u, {}, {});\n",
-          to, row, settles(p.lhs, p.node != kNoRow) && reads_a_token(to));
-      fmt("      {}\n", stands(prod, to) ? jump('D', dispatch_label(to))
-                                         : jump('G', to));
+      line("      ::cursiv::lr_reduce_finish<kTable.stamp>(c, ", to, "u, ", row,
+           ", ", settles(p.lhs, p.node != kNoRow) && reads_a_token(to), ");");
+      line("      ",
+           stands(prod, to) ? jump('D', dispatch_label(to)) : jump('G', to));
     };
     if (one >= 0) {
       land(static_cast<unsigned>(one));
@@ -1460,14 +1488,14 @@ again:
       landings[it->second].from.push_back(e.from);
     }
     for (const Landing& l : landings) {
-      for (const std::uint16_t from : l.from) fmt("      case {}:\n", from);
+      for (const std::uint16_t from : l.from) line("      case ", from, ":");
       if (l.guard == 0)
         land(l.to);
       else
         emit_guarded_landings(l.guard, "        ", land, none,
                               p.len == 0 ? "" : "c.stack.top().state");
     }
-    fmt("      default: {}\n      }}\n", none);
+    line("      default: ", none, "\n      }");
   }
 
   // The landing switches that two reductions of one group spell alike, each
@@ -1484,18 +1512,19 @@ again:
 
   void emit_reduce(unsigned prod, std::string_view tail,
                    std::optional<unsigned> shared) {
-    fmt("R{}:\n", prod);
+    line("R", prod, ":");
     line("    {");
-    fmt("      {}::cursiv::lr_reduce_frame<kTable>(c, "
-        "::std::integral_constant<::std::uint16_t, {}>{{}}, folds);\n",
-        a.reductions[prod].row(a.cfg.prods[prod].len) == LrReduceRow::none
-            ? ""
-            : "rec = ",
-        prod);
+    line("      ",
+         a.reductions[prod].row(a.cfg.prods[prod].len) == LrReduceRow::none
+             ? ""
+             : "rec = ",
+         "::cursiv::lr_reduce_frame<kTable>(c, "
+         "::std::integral_constant<::std::uint16_t, ",
+         prod, ">{}, folds);");
     if (shared.has_value())
-      fmt("      goto T{};\n", *shared);
+      line("      goto T", *shared, ";");
     else
-      raw(tail);
+      write(tail);
     line("    }");
   }
 
@@ -1514,21 +1543,23 @@ again:
   // collects candidates in its lexer, or its grammar reads indentation first.
   void emit_plain_lex(unsigned s) {
     const unsigned m = a.mode[s];
-    fmt("  if (c.laMode != {}) {{\n", m);
+    line("  if (c.laMode != ", m, ") {");
     if (subs) {
-      fmt("    if (c.laMode != ::cursiv::kNoMode && mode_sub(c.laMode, {}){}) "
-          "goto D{};\n",
-          m, owes_walk(m), s);
+      line("    if (c.laMode != ::cursiv::kNoMode && mode_sub(c.laMode, ", m,
+           ")", owes_walk(m),
+           ") "
+           "goto D",
+           s, ";");
     }
-    fmt("    lex_{}(c);\n  }}\n", m);
+    line("    lex_", m, "(c);\n  }");
     if (shifted(s) || shares(s)) {
-      fmt("  goto C{};\n", s);
+      line("  goto C", s, ";");
       emit_entry_labels(s);
-      fmt("  lex_{}(c);\n", m);
-      fmt("C{}:\n", s);
+      line("  lex_", m, "(c);");
+      line("C", s, ":");
     }
     if (multiMode(m))
-      fmt("  if (c.ncand != 0) [[unlikely]] pick_cand(c, {});\n", s);
+      line("  if (c.ncand != 0) [[unlikely]] pick_cand(c, ", s, ");");
   }
 
   // The arm owed by the labels written since it was set.
@@ -1558,7 +1589,7 @@ again:
     const unsigned m = a.mode[s];
     pendBody.clear();
     caseOpen = false;
-    fmt("D{}:\n", s);
+    line("D", s, ":");
     curState = s;
     const unsigned base = a.actionBase[s], count = a.actionCount[s];
     const LrAction* const row = a.actions.data() + base;
@@ -1580,10 +1611,11 @@ again:
     });
     // The end of input is a dedent while a level no repair dropped is open.
     if (dedentTerm != 0 && a.follow[s].test(dedentTerm))
-      fmt("  if (c.la.sym == 0 && "
-          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) {{ "
-          "c.la = ::cursiv::Token{{c.la.begin, c.la.begin, {}}}; }}\n",
-          dedentTerm);
+      line(
+          "  if (c.la.sym == 0 && "
+          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) { "
+          "c.la = ::cursiv::Token{c.la.begin, c.la.begin, ",
+          dedentTerm, "}; }");
     line("  switch (c.la.sym) {");
     lr_each_run(row, count, [&](std::size_t i, std::size_t j) {
       const LrAction& x = row[i];
@@ -1595,14 +1627,14 @@ again:
         if (std::string body = capture([&] { emit_arm(x); });
             body != pendBody) {
           flush_cases();
-          raw(pendBody);
+          write(pendBody);
           pendBody = std::move(body);
         }
         case_label(x.term);
         return;
       }
       flush_cases();
-      raw(pendBody);
+      write(pendBody);
       pendBody.clear();
       for (unsigned t : cellTerms[i]) case_label(t);
       flush_cases();
@@ -1627,45 +1659,48 @@ again:
           programs.actions.rows, programs.actions.blocks,
           programs.actions.values, a.cfg.nterms, 0};
       const auto cell = matrix.get(s, x.term);
-      fmt("      switch (c.resolveAt(c, c.stack.top().state, {}u, {}u)) {{\n",
-          cell >> programs.countBits, run);
+      line("      switch (c.resolveAt(c, c.stack.top().state, ",
+           cell >> programs.countBits, "u, ", run, "u)) {");
       for (std::size_t k = i; k < j; ++k)
-        fmt("      case {}u: {}\n", k - i,
-            jumps[k - i].empty() ? concat("goto AC", s, "_", k, ";")
-                                 : jumps[k - i]);
-      fmt("      default: {}\n", leave("error"));
+        line("      case ", k - i, "u: ",
+             jumps[k - i].empty() ? concat("goto AC", s, "_", k, ";")
+                                  : jumps[k - i]);
+      line("      default: ", leave("error"));
       line("      }");
       for (std::size_t k = i; k < j; ++k) {
         if (!jumps[k - i].empty()) continue;
-        fmt("    AC{}_{}:\n", s, k);
-        raw(bodies[k - i]);
+        line("    AC", s, "_", k, ":");
+        write(bodies[k - i]);
       }
     });
     flush_cases();
-    raw(pendBody);
+    write(pendBody);
     pendBody.clear();
     line("    default:");
-    if (guards(s)) fmt("    X{}:\n", s);
+    if (guards(s)) line("    X", s, ":");
     if (subs) {
       // A subsumed lookahead that missed re-lexes once.
-      fmt("      if (c.laMode != {}) {{ lex_{}(c); {}goto D{}; }}\n", m, m,
-          multiMode(m) ? "if (c.ncand != 0) [[unlikely]] pick_cand(c, "
-                         "c.stack.top().state); "
-                       : "",
-          s);
+      line("      if (c.laMode != ", m, ") { lex_", m, "(c); ",
+           multiMode(m) ? "if (c.ncand != 0) [[unlikely]] pick_cand(c, "
+                          "c.stack.top().state); "
+                        : "",
+           "goto D", s, "; }");
     }
     // An end of input refused while suites are open owes a dedent first.
     if (dedentTerm != 0)
-      fmt("      if (c.la.sym == 0 && "
-          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) {{ "
-          "c.la = ::cursiv::Token{{c.la.begin, c.la.begin, {}}}; "
-          "goto D{}; }}\n",
-          dedentTerm, s);
+      line(
+          "      if (c.la.sym == 0 && "
+          "::cursiv::indent_owes_dedent(c.indentArena, c.indent.head)) { "
+          "c.la = ::cursiv::Token{c.la.begin, c.la.begin, ",
+          dedentTerm,
+          "}; "
+          "goto D",
+          s, "; }");
     // A refused token is an implied one where the state answers it and its
     // condition holds, once per position.
     for (unsigned q = 0; q < impliedTerms.size(); ++q)
       if (a.follow[s].test(impliedTerms[q]))
-        fmt("      if (imply_{}(c)) goto D{};\n", q, s);
+        line("      if (imply_", q, "(c)) goto D", s, ";");
     // With no token in hand, the sole guarded reduce or region exit can
     // still land. The exit hands the untouched gap to its caller; valid
     // tokens, including an optional item's shift, took priority above.
@@ -1673,15 +1708,15 @@ again:
         sole != kLrNoProd &&
         (a.cfg.prods[sole].gap != 0 || a.reductions[sole].regionExit) &&
         a.modeTight[a.mode[s]] != 0)
-      fmt("      if (c.la.sym == 0xFFFFu && {}{}) {}\n",
-          a.cfg.prods[sole].gap != 0 ? reduce_allowed(sole) : "true",
-          a.may_land_nowhere(s, sole)
-              ? concat(" && ",
-                       guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)),
-                       " != ::cursiv::kInvalidSymbol")
-              : std::string{},
-          jump('R', reduceOf[sole]));
-    fmt("      {}\n  }}\n}}\n", leave("pause"));
+      line("      if (c.la.sym == 0xFFFFu && ",
+           a.cfg.prods[sole].gap != 0 ? reduce_allowed(sole) : "true",
+           a.may_land_nowhere(s, sole)
+               ? concat(" && ",
+                        guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)),
+                        " != ::cursiv::kInvalidSymbol")
+               : std::string{},
+           ") ", jump('R', reduceOf[sole]));
+    line("      ", leave("pause"), "\n  }\n}");
   }
 
   // A probe already read its first byte. If every such byte enters the
@@ -1715,7 +1750,7 @@ again:
              concat("::cursiv::TextOffset scan_run_", run,
                     "(const char* src, "
                     "::cursiv::TextOffset len, ::cursiv::TextOffset i)"));
-      raw("  static constexpr ::std::array<::std::uint64_t, 4> kStay{");
+      write("  static constexpr ::std::array<::std::uint64_t, 4> kStay{");
       set64(dfa.stay(run));
       line("};");
       emit_run_adv(dfa.stay(run), "i", "kStay");
@@ -1800,11 +1835,11 @@ again:
       walked.add(static_cast<unsigned char>(b));
     }
     if (cut) ++probeCuts;
-    fmt("  if (c.laMode != ::cursiv::kNoMode) {{ if (c.laMode == {}) goto D{}",
-        m, s);
+    write("  if (c.laMode != ::cursiv::kNoMode) { if (c.laMode == ", m,
+          ") goto D", s);
     if (subs)
-      fmt("; if (mode_sub(c.laMode, {}){}) goto D{}", m, owes_walk(m), s);
-    fmt("; lex_{}(c); goto D{}; }}\n", m, s);
+      write("; if (mode_sub(c.laMode, ", m, ")", owes_walk(m), ") goto D", s);
+    line("; lex_", m, "(c); goto D", s, "; }");
     emit_entry_labels(s);
     line("  {");
     line("    ::cursiv::TextOffset p = c.committed;");
@@ -1812,21 +1847,22 @@ again:
       emit_run_adv(ws, "p", concat("kWs_", wsLead[m]), false);
     // Its last byte may read on: the lexer takes the whole gap.
     if (ByteSet stop{}; mode_stop(m, stop))
-      fmt("    if (p != c.committed && p < len && in_set<kStop_{}>("
-          "static_cast<unsigned char>(c.src[p]))) {{ lex_{}(c); goto D{}; }}\n",
-          wsLead[m], m, s);
+      line("    if (p != c.committed && p < len && in_set<kStop_", wsLead[m],
+           ">("
+           "static_cast<unsigned char>(c.src[p]))) { lex_",
+           m, "(c); goto D", s, "; }");
     line("    c.pendEnd = p;");
-    fmt("    if (p >= len) {{ c.la = ::cursiv::Token{{p, p, 0, {0}}};"
-        " c.laMode = {0}; goto D{1}; }}\n",
-        m, s);
+    line("    if (p >= len) { c.la = ::cursiv::Token{p, p, 0, ", m,
+         "};"
+         " c.laMode = ",
+         m, "; goto D", s, "; }");
     // A reduce takes the token in hand as the drive would have read it.
     const auto reduce_arm = [&](const LrAction& x, std::string_view end,
                                 std::string_view term, std::string_view ind) {
-      fmt("{0}c.la = ::cursiv::Token{{p, {1}, {2}, {3}}};\n"
-          "{0}c.laMode = {3};\n",
-          ind, end, term, m);
+      line(ind, "c.la = ::cursiv::Token{p, ", end, ", ", term, ", ", m, "};\n",
+           ind, "c.laMode = ", m, ";");
       emit_empty_landing(s, x.arg, ind);
-      fmt("{}{}\n", ind, jump('R', reduceOf[x.arg]));
+      line(ind, jump('R', reduceOf[x.arg]));
     };
     if (!literals.empty() || walked.any()) {
       line("    switch (static_cast<unsigned char>(src[p])) {");
@@ -1852,17 +1888,18 @@ again:
         if (const unsigned run = probe_run(m, walked, named);
             run != kDeadState) {
           probeRuns.insert(run);
-          fmt("      const ::cursiv::Scan sc{{scan_run_{}(src, len, p + 1), "
-              "{}}};\n", run, view.accept(run) - 1u);
+          line("      const ::cursiv::Scan sc{scan_run_", run,
+               "(src, len, p + 1), ", view.accept(run) - 1u, "};");
         } else {
-          fmt("      const ::cursiv::Scan sc = walk_all(src, len, {}, p);\n", m);
+          line("      const ::cursiv::Scan sc = walk_all(src, len, ", m,
+               ", p);");
         }
         // A real terminal consumes text; its id proves a nonempty match.
         if (!named.more_than_one()) {
           unsigned t = 0;
           while (!named.test(t)) ++t;
           const LrAction& x = *plain(t);
-          fmt("      if (sc.term == {}) [[likely]] {{\n", t);
+          line("      if (sc.term == ", t, ") [[likely]] {");
           if (x.kind == LrActionKind::shift)
             emit_probe_hop(s, x, "sc.end", "        ");
           else
@@ -1902,36 +1939,36 @@ again:
       line("    default: break;");
       line("    }");
     }
-    fmt("    lex_tail_{}(c, p, {});\n", tailLead[m], m);
+    line("    lex_tail_", tailLead[m], "(c, p, ", m, ");");
     if (a.flags_mode(m))
-      fmt("    if ({}) [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, {});\n",
-          flag_test(m), m);
+      line("    if (", flag_test(m),
+           ") [[unlikely]] ::cursiv::lr_drive_exact<kTable>(c, ", m, ");");
     line("  }");
   }
 
   // One action, as a state writes it.
   void emit_land(unsigned to, std::string_view ind) {
     assert(shifted(to));
-    fmt("{}{}\n", ind, jump('H', to));
+    line(ind, jump('H', to));
   }
   // A token that moves the levels or the bracket depth calls the helper
   // `indent_shift` picks for its kind: the drive and the replay move them
   // alike.
   void emit_take(const LrAction& x, std::string_view ind) {
-    if (implied(x.term)) fmt("{}c.virt.pending = 0;\n", ind);
+    if (implied(x.term)) line(ind, "c.virt.pending = 0;");
     if (indentTerm != 0 && x.term == indentTerm)
-      fmt("{}::cursiv::indent_shift_indent(c.indentArena, c.indent, c.la);\n",
-          ind);
+      line(ind,
+           "::cursiv::indent_shift_indent(c.indentArena, c.indent, c.la);");
     else if (dedentTerm != 0 && x.term == dedentTerm)
-      fmt("{}::cursiv::indent_shift_dedent(c.indentArena, c.indent);\n", ind);
+      line(ind, "::cursiv::indent_shift_dedent(c.indentArena, c.indent);");
     else if (indented() && a.cfg.terms[x.term].delim != 0)
-      fmt("{}::cursiv::indent_shift_delim(c.indent, {});\n", ind,
-          int{a.cfg.terms[x.term].delim});
+      line(ind, "::cursiv::indent_shift_delim(c.indent, ",
+           int{a.cfg.terms[x.term].delim}, ");");
   }
   void emit_empty_landing(unsigned s, unsigned prod, std::string_view ind) {
     if (!a.may_land_nowhere(s, prod)) return;
-    fmt("{}if ({} == ::cursiv::kInvalidSymbol) goto X{};\n", ind,
-        guard_target(a.goto_guard(s, a.cfg.prods[prod].lhs)), s);
+    line(ind, "if (", guard_target(a.goto_guard(s, a.cfg.prods[prod].lhs)),
+         " == ::cursiv::kInvalidSymbol) goto X", s, ";");
   }
   void emit_arm(const LrAction& x) {
     if (lr_takes_token(x.kind)) {
@@ -1954,9 +1991,9 @@ again:
     if (x.kind == LrActionKind::reduce) {
       // Where the reduce's condition fails, the token has no action here.
       if (const unsigned g = a.cfg.prods[x.arg].gap; g != 0)
-        fmt("    if (!{}) goto X{};\n", reduce_allowed(x.arg), curState);
+        line("    if (!", reduce_allowed(x.arg), ") goto X", curState, ";");
       emit_empty_landing(curState, x.arg, "    ");
-      fmt("    {}\n", jump('R', reduceOf[x.arg]));
+      line("    ", jump('R', reduceOf[x.arg]));
     } else {
       line("    goto Acc;");
     }
@@ -2037,26 +2074,28 @@ again:
   void emit_named_heads() {
     for (unsigned l = 0; l < a.cfg.ngapLeaves; ++l)
       if (a.cfg.gapLeaves[l].kind == GapLeafKind::head && named_heads(l))
-        raw(namedHead.source("static", concat("named_", l),
-                             a.cfg.gapLeaves[l].node));
+        write(namedHead.source("static", concat("named_", l),
+                               a.cfg.gapLeaves[l].node));
   }
   void emit_caret_seen() {
     if (!gapReach.skips_any()) return;
-    raw("::cursiv::TextOffset caret_seen(::std::string_view text, unsigned k,\n"
+    line(
+        "::cursiv::TextOffset caret_seen(::std::string_view text, unsigned k,\n"
         "                                ::cursiv::TextOffset from,\n"
-        "                                const ::cursiv::Token& la) {\n");
-    raw("  ::cursiv::TextOffset seen = 0;\n"
+        "                                const ::cursiv::Token& la) {");
+    line(
+        "  ::cursiv::TextOffset seen = 0;\n"
         "  const auto len = static_cast<::cursiv::TextOffset>(text.size());\n"
-        "  (void)len;\n  switch (k) {\n");
+        "  (void)len;\n  switch (k) {");
     for (unsigned k = 0; k < a.cfg.ngapConds; ++k) {
       if (!gapReach.skips_any(k)) continue;
-      fmt("    case {}:\n", k);
+      line("    case ", k, ":");
       for (const std::uint16_t v : gapReach.leaves(k))
         if (gapReach.skips(v))
-          fmt("      predicate_{}(text.data(), len, la, from, &seen);\n", v);
-      raw("      break;\n");
+          line("      predicate_", v, "(text.data(), len, la, from, &seen);");
+      line("      break;");
     }
-    raw("    default:\n      break;\n  }\n  return seen;\n}\n\n");
+    line("    default:\n      break;\n  }\n  return seen;\n}\n");
   }
   std::string gap_cond(unsigned k, bool partial = false) const {
     return GapConditionEmitter(a.cfg).source(
@@ -2065,25 +2104,26 @@ again:
 
   void emit_predicate_data() {
     if (!conds()) return;
-    raw(predicateEmitter.declarations());
+    write(predicateEmitter.declarations());
   }
 
   void emit_drive_cond() {
     if (!conds()) return;
     // The caret's reading answers false, unknown or true.
     const auto body = [&](bool caret) {
-      fmt("  const char* const g = {} + from;\n",
-          caret ? "text.data()" : "c.src");
-      raw("  const ::cursiv::TextOffset n = la.begin > from ? la.begin - from "
-          ": 0;\n  (void)g;\n  (void)n;\n");
+      line("  const char* const g = ", caret ? "text.data()" : "c.src",
+           " + from;");
+      line(
+          "  const ::cursiv::TextOffset n = la.begin > from ? la.begin - from "
+          ": 0;\n  (void)g;\n  (void)n;");
       if (caret) line("  (void)known;\n  (void)gaps;");
       line("  switch (k) {");
       for (unsigned k = 0; k < a.cfg.ngapConds; ++k)
         if (caret)
-          fmt("    case {}: return ({}) != 0;\n", k, gap_cond(k, true));
+          line("    case ", k, ": return (", gap_cond(k, true), ") != 0;");
         else
-          fmt("    case {}: return {};\n", k, gap_cond(k));
-      raw("  }\n  return false;\n}\n\n");
+          line("    case ", k, ": return ", gap_cond(k), ";");
+      line("  }\n  return false;\n}\n");
     };
     define("",
            "bool drive_cond(const ::cursiv::LrContext& c, unsigned k,\n"
@@ -2093,7 +2133,7 @@ again:
     if (std::ranges::any_of(std::span(a.cfg.prods.data(), a.cfg.nprods),
                             [](const auto& p) { return p.gap != 0; }))
       shared([&] {
-        raw(R"(CURSIV_ALWAYS_INLINE static inline bool reduce_allowed(
+        write(R"(CURSIV_ALWAYS_INLINE static inline bool reduce_allowed(
     const ::cursiv::LrContext& c, ::std::uint16_t prod) {
   return ::cursiv::lr_reduce_allowed<kTable>(prod, [&](unsigned k) {
     return drive_cond(c, k, c.virt.from, c.la);
@@ -2103,10 +2143,11 @@ again:
 )");
       });
     emit_named_heads();
-    raw("bool caret_cond(::std::string_view text, unsigned k,\n"
+    line(
+        "bool caret_cond(::std::string_view text, unsigned k,\n"
         "                ::cursiv::TextOffset from, const ::cursiv::Token& la, "
         "bool known,\n"
-        "                ::cursiv::LrGapMemo* gaps) {\n");
+        "                ::cursiv::LrGapMemo* gaps) {");
     body(true);
     emit_caret_seen();
   }
@@ -2115,13 +2156,17 @@ again:
     for (unsigned q = 0; q < impliedTerms.size(); ++q) {
       define(concat("CURSIV_NOINLINE ", linkage("static ")),
              concat("bool imply_", q, "(::cursiv::LrContext& c)"));
-      fmt("  if (c.virt.pending != 0 || (c.virt.laid_at(c.la) & {3}u) != 0 ||\n"
-          "      !drive_cond(c, {1}u, c.virt.from, c.la))\n"
-          "    return false;\n"
-          "  c.virt.lay(c.la, {0}u, {2});\n"
-          "  return true;\n"
-          "}}\n\n",
-          q, a.cfg.terms[impliedTerms[q]].cond, impliedTerms[q], 1u << q);
+      line("  if (c.virt.pending != 0 || (c.virt.laid_at(c.la) & ", 1u << q,
+           "u) != 0 ||\n"
+           "      !drive_cond(c, ",
+           a.cfg.terms[impliedTerms[q]].cond,
+           "u, c.virt.from, c.la))\n"
+           "    return false;\n"
+           "  c.virt.lay(c.la, ",
+           q, "u, ", impliedTerms[q],
+           ");\n"
+           "  return true;\n"
+           "}\n");
     }
   }
   // Whether a state may probe: a flagged mode collects its candidates in the
@@ -2174,29 +2219,29 @@ again:
   }
   // `S` after a shift, then `L` where others enter.
   void emit_entry_labels(unsigned s) {
-    if (shifted(s)) fmt("S{}:\n", s);
-    if (shares(s)) fmt("L{}:\n", s);
+    if (shifted(s)) line("S", s, ":");
+    if (shares(s)) line("L", s, ":");
   }
 
   void emit_state(unsigned s) {
     // A state whose reading another spells enters it.
     if (dispShared[s] != 0 && dispLead[s] != s) {
       const unsigned lead = dispLead[s];
-      fmt("G{}: {{\n  goto G{};\n", s, lead);
-      if (shifted(s)) fmt("S{}:\n  goto L{};\n", s, lead);
+      line("G", s, ": {\n  goto G", lead, ";");
+      if (shifted(s)) line("S", s, ":\n  goto L", lead, ";");
       line("}");
       return;
     }
-    fmt("G{}: {{\n", s);
+    line("G", s, ": {");
     if (asks(s) && (shifted(s) || shares(s)))
       emit_entry_probe(s);
     else
       emit_plain_lex(s);
-    fmt("D{}:\n", s);
+    line("D", s, ":");
     std::string d = dispPiece[s].text;
     replace_all(d, "@D", "D" + std::to_string(s));
     replace_all(d, "@X", "X" + std::to_string(s));
-    raw(d);
+    write(d);
   }
 
   // The one state each nonterminal's column leads to, or -1.
@@ -2222,16 +2267,16 @@ again:
     emit_banner();
     shared([&] {
       emit_includes(lexical);
-      if (split()) fmt("namespace {} {{\n\n", ns);
+      if (split()) line("namespace ", ns, " {\n");
     });
-    if (split()) fmt("#include \"{}\"\n\n", kGroupHeader);
-    fmt("namespace {} {{\n\n", ns);
+    if (split()) line("#include \"", kGroupHeader, "\"\n");
+    line("namespace ", ns, " {\n");
     line("::cursiv::LrExit drive_state(::cursiv::LrContext&);");
     line("");
     shared([&] { lex_emit_byte_runs(*this); });
     emit_data();
     emit_predicate_data();
-    raw(lexical.source());
+    write(lexical.source());
     emit_probe_runs();
     emit_walk();
     if (a.nrelays != 0)
@@ -2239,8 +2284,8 @@ again:
                           std::span(a.relays.data(), a.nrelays),
                           "Table::relay_run");
     if (conds()) {
-      raw(gapEmitter.source());
-      raw(predicateEmitter.source("::cursiv::LrLexTape<kTable>{}"));
+      write(gapEmitter.source());
+      write(predicateEmitter.source("::cursiv::LrLexTape<kTable>{}"));
     }
     if (a.longer_modes()) shared([&] { emit_lengthen(); });
     for (unsigned m = 0; m < a.nmodes; ++m)
@@ -2252,8 +2297,9 @@ again:
   static constexpr std::string_view kGenerated =
       "// GENERATED by the native parser emitter -- do not edit.\n";
   void emit_banner() {
-    raw(kGenerated);
-    raw(R"(// Every state keeps its labels, reached or not: the file maps the table.
+    write(kGenerated);
+    write(
+        R"(// Every state keeps its labels, reached or not: the file maps the table.
 // Labels: G/S/L entry, C lexed, D dispatch, X refused, H/P hop, AC arm,
 // R reduce, T shared landing, Acc accept.
 #ifdef __clang__
@@ -2265,7 +2311,7 @@ again:
   }
 
   void emit_includes(const auto& lexical) {
-    raw(R"(#include <array>
+    write(R"(#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -2287,7 +2333,7 @@ again:
       line("#include \"cursiv/shared/runtime/LexSuffixSession.hpp\"");
     if (a.multiCand && !(conds() || a.nrelays != 0))
       line("#include <utility>");
-    raw(R"(
+    write(R"(
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrExit.hpp"
 #include "cursiv/lr/runtime/LrFrame.hpp"
@@ -2312,7 +2358,7 @@ again:
     line("#include \"cursiv/lr/runtime/lr_reduce.hpp\"");
     if (!a.guards.empty())
       line("#include \"cursiv/lr/runtime/lr_guard.hpp\"");
-    raw(R"(#include "cursiv/lr/runtime/lr_moves.hpp"
+    write(R"(#include "cursiv/lr/runtime/lr_moves.hpp"
 #include "cursiv/lr/table/LrFusedRow.hpp"
 #include "cursiv/shared/table/Token.hpp"
 
@@ -2448,13 +2494,13 @@ again:
       probes.insert(probesOf[st].begin(), probesOf[st].end());
     }
     for (const unsigned st : mine) emit_hop(st, probes);
-    for (const unsigned st : mine) raw(resolved(statePiece[st].text, g));
+    for (const unsigned st : mine) write(resolved(statePiece[st].text, g));
     const Piece hops = piece([&] { emit_probe_hops(probes); });
     enter(g, hops);
-    raw(resolved(hops.text, g));
+    write(resolved(hops.text, g));
     line("Acc:");
     line("  flush(c);");
-    fmt("  {}\n", leave("accept"));
+    line("  ", leave("accept"));
     std::vector<unsigned> leads;
     for (unsigned prod = 0; prod < a.cfg.nprods; ++prod)
       if (used[prod] && reduceOf[prod] == prod &&
@@ -2489,9 +2535,9 @@ again:
           it != sharedTails.end() ? std::optional{it->second} : std::nullopt);
     }
     for (const auto& [tail, id] : sharedTails) {
-      fmt("T{}:\n", id);
+      line("T", id, ":");
       line("    {");
-      raw(tail);
+      write(tail);
       line("    }");
     }
     return std::ranges::any_of(leads, [&](unsigned prod) {
@@ -2544,7 +2590,7 @@ again:
       if (split())
         held[g * kParserUnits / ngroups] += text;
       else
-        raw(text);
+        write(text);
     }
     units.assign(kParserUnits, std::string(kGenerated));
     if (split()) {
@@ -2564,20 +2610,21 @@ again:
             // Under ASan every local is addressable, and GCC suspects each
             // one at a tail call although no helper keeps the address it is
             // handed.
-            raw(R"(#if defined(__SANITIZE_ADDRESS__) && !defined(__clang__)
+            write(R"(#if defined(__SANITIZE_ADDRESS__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-musttail-local-addr"
 #endif
 )");
-            fmt("#include \"{}\"\n\nnamespace {} {{\n\n", kGroupHeader, ns);
-            raw(held[u]);
-            fmt("}}  // namespace {}\n", ns);
+            line("#include \"", kGroupHeader, "\"\n\nnamespace ", ns, " {\n");
+            write(held[u]);
+            line("}  // namespace ", ns);
           });
     }
     // A lone group's entries are the states in order.
     if (split())
-      array("inline constexpr ::std::uint32_t kEnter[]", a.nstates,
-            [&](std::size_t s) { num((groupOf[s] << 16) | localOf[s]); }, "",
-            true);
+      array(
+          "inline constexpr ::std::uint32_t kEnter[]", a.nstates,
+          [&](std::size_t s) { write((groupOf[s] << 16) | localOf[s]); }, "",
+          true);
     line("::cursiv::LrExit drive_state(::cursiv::LrContext& c) {");
     if (!split()) {
       line("  return states_0(c, c.stack.top().state);");
@@ -2585,11 +2632,11 @@ again:
       line("  const ::std::uint32_t e = kEnter[c.stack.top().state];");
       line("  switch (e >> 16) {");
       for (unsigned g = 0; g + 1 < ngroups; ++g)
-        fmt("  case {0}: return states_{0}(c, e & 0xFFFFu);\n", g);
-      fmt("  default: return states_{}(c, e & 0xFFFFu);\n", ngroups - 1);
+        line("  case ", g, ": return states_", g, "(c, e & 0xFFFFu);");
+      line("  default: return states_", ngroups - 1, "(c, e & 0xFFFFu);");
       line("  }");
     }
-    raw(R"(}
+    write(R"(}
 
 ::cursiv::Scan drive_walk(const char* src, ::cursiv::TextOffset len,
                           ::std::uint16_t mode, ::cursiv::TextOffset from) {
@@ -2598,13 +2645,13 @@ again:
       [&](::std::uint16_t more) { return walk_all(src, len, more, from); });
 }
 )");
-    raw(R"(::cursiv::ElementId drive_folds(::cursiv::ElementId held,
+    write(R"(::cursiv::ElementId drive_folds(::cursiv::ElementId held,
                               ::cursiv::ElementId over) {
   return folds(held, over);
 }
 )");
     if (a.multiCand)
-      raw(R"(
+      write(R"(
 // The sweep, for a reading that is not the parse: it fills the caller's own
 // room, since the running position's candidates are still in hand.
 ::std::uint32_t scan_text(const char* src, ::cursiv::TextOffset len,
@@ -2617,14 +2664,14 @@ again:
 }
 )");
     line("");
-    fmt("}}  // namespace {}\n", ns);
+    line("}  // namespace ", ns);
   }
 
   // One group's function: its entry table, then its body.
   void emit_group(unsigned g, std::string_view signature, bool holdsRec,
                   std::string_view body) {
-    raw(signature);
-    raw(R"(::cursiv::LrContext& c, ::std::uint32_t e) {
+    write(signature);
+    write(R"(::cursiv::LrContext& c, ::std::uint32_t e) {
   const char* const src = c.src;
   const ::cursiv::TextOffset len = c.len;
   ::cursiv::TextOffset hb = 0, he = 0;
@@ -2634,19 +2681,20 @@ again:
   (void)he;
 )");
     if (holdsRec)
-      raw("  ::cursiv::ElementId rec = ::cursiv::kNoElement;\n"
-          "  (void)rec;\n");
-    raw("  static const void* const kIn[] = {");
+      line(
+          "  ::cursiv::ElementId rec = ::cursiv::kNoElement;\n"
+          "  (void)rec;");
+    write("  static const void* const kIn[] = {");
     for (std::size_t k = 0; k < entries[g].size(); ++k) {
-      if (k) out += ',';
-      if (k % 12 == 0) out += '\n';
-      raw("&&");
-      raw(entries[g][k]);
+      if (k) write(',');
+      if (k % 12 == 0) write('\n');
+      write("&&");
+      write(entries[g][k]);
     }
     line("};");
     line("  goto* kIn[e];");
-    raw(body);
-    raw("}\n\n");
+    write(body);
+    line("}\n");
   }
 
   // The files: `ParserStates.cpp`, the groups' header, then their units.
@@ -2662,7 +2710,7 @@ again:
     emit_imply();
     emit_states(ns);
     std::vector<std::pair<std::string, std::string>> files;
-    files.emplace_back("ParserStates.cpp", std::move(out));
+    files.emplace_back("ParserStates.cpp", take());
     files.emplace_back(kGroupHeader, std::string(kGenerated) +
                                          "#pragma once\n" +
                                          (head.empty() ? "" : "\n") + head);
@@ -2673,7 +2721,7 @@ again:
   }
 };
 
-struct LrParserDecl : EmitOutput {
+struct LrParserDecl : TextBuilder {
   explicit LrParserDecl(const LrBuildTable& table) : a(table) {}
 
   const LrBuildTable& a;
@@ -2681,14 +2729,14 @@ struct LrParserDecl : EmitOutput {
   bool conds() const { return a.cfg.ngapConds != 0; }
 
   void emit(std::string_view ns) {
-    raw(R"(// GENERATED by the native parser emitter -- do not edit.
+    write(R"(// GENERATED by the native parser emitter -- do not edit.
 #pragma once
 
 #include "cursiv/lr/runtime/LrDrive.hpp"
 
 )");
-    fmt("namespace {} {{\n", ns);
-    raw(R"(::cursiv::LrExit drive_state(::cursiv::LrContext&);
+    line("namespace ", ns, " {");
+    write(R"(::cursiv::LrExit drive_state(::cursiv::LrContext&);
 ::cursiv::Scan drive_walk(const char*, ::cursiv::TextOffset, ::std::uint16_t,
                           ::cursiv::TextOffset);
 )");
@@ -2707,19 +2755,20 @@ struct LrParserDecl : EmitOutput {
             "::cursiv::TextOffset, const ::cursiv::Token&);");
     }
     if (a.multiCand)
-      raw(R"(::std::uint32_t scan_text(const char*, ::cursiv::TextOffset, ::std::uint16_t,
+      write(
+          R"(::std::uint32_t scan_text(const char*, ::cursiv::TextOffset, ::std::uint16_t,
                         ::cursiv::TextOffset, ::cursiv::Scan*, ::std::uint32_t);
 )");
     if (conds()) {
-      raw("inline constexpr ::cursiv::CondReach kCondReach[] = {");
+      write("inline constexpr ::cursiv::CondReach kCondReach[] = {");
       for (unsigned k = 0; k < a.cfg.ngapConds; ++k) {
         const CondReach r = gapReach.of(k);
-        fmt("{}{{{}u, {}u, {}, {}u}}", k != 0 ? ", " : "", r.look, r.tail,
-            r.phrase ? "true" : "false", r.tokens);
+        write(k != 0 ? ", " : "", "{", r.look, "u, ", r.tail, "u, ",
+              r.phrase ? "true" : "false", ", ", r.tokens, "u}");
       }
       line("};");
     }
-    raw(R"(inline constexpr ::cursiv::LrDrive kDrive{
+    write(R"(inline constexpr ::cursiv::LrDrive kDrive{
     .enter = &drive_state,
     .walk = &drive_walk,
 )");
@@ -2733,7 +2782,7 @@ struct LrParserDecl : EmitOutput {
       if (gapReach.skips_any()) line("    .condSeen = &caret_seen,");
     }
     line("};");
-    fmt("}}  // namespace {}\n", ns);
+    line("}  // namespace ", ns);
   }
 };
 
@@ -2744,7 +2793,7 @@ std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
     unsigned groupLines) {
   LrParserEmitter e{done};
   e.groupLines = groupLines;
-  e.out.reserve(1u << 20);
+  e.reserve(1u << 20);
   auto files = e.emit_all(ns);
   if (probeCuts != nullptr) *probeCuts = e.probeCuts;
   return files;
@@ -2753,7 +2802,7 @@ std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
 std::string lr_emit_parser_decl(const LrFinalTable& done, std::string_view ns) {
   LrParserDecl d{done.table()};
   d.emit(ns);
-  return d.out;
+  return d.take();
 }
 
 }  // namespace cursiv

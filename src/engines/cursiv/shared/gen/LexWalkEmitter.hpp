@@ -15,11 +15,12 @@
 #include <vector>
 
 #include "cursiv/shared/gen/Concat.hpp"
-#include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/shared/gen/EmitTable.hpp"
 #include "cursiv/shared/runtime/LexMatch.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
 #include "cursiv/shared/table/LexRelay.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/text/TextBuilder.hpp"
 
 namespace cursiv {
 
@@ -103,7 +104,7 @@ class LexDfaEmitter {
   template <class Output, class Policy>
   void state(Output& out, Policy& policy, unsigned st,
              const std::uint8_t* spelled = nullptr) const {
-    out.fmt("W{}:\n", st);
+    out.line("W", st, ":");
     out.line("  ;");
     const auto done = [&]() -> std::string_view {
       if constexpr (requires { policy.done(st); })
@@ -169,11 +170,14 @@ class LexDfaEmitter {
     const auto emit_edge = [&](const EdgeGroup& g, std::string_view ind) {
       switch (g.kind) {
         case EdgeKind::done:
-          return out.fmt("{}goto {};\n", ind, done());
+          out.line(ind, "goto ", done(), ";");
+          return;
         case EdgeKind::direct:
-          return out.fmt("{}++i; goto W{};\n", ind, g.to);
+          out.line(ind, "++i; goto W", g.to, ";");
+          return;
         case EdgeKind::table:
-          return out.fmt("{}++i; st = {}; goto Wtab;\n", ind, g.to);
+          out.line(ind, "++i; st = ", g.to, "; goto Wtab;");
+          return;
       }
     };
     const auto only_done = [&] {
@@ -182,30 +186,30 @@ class LexDfaEmitter {
     };
     if (const int to = self ? -1 : policy.continuation_of(st, spelled);
         to >= 0) {
-      out.fmt("  if (i >= len) [[unlikely]] goto {};\n", done());
+      out.line("  if (i >= len) [[unlikely]] goto ", done(), ";");
       out.line("  b = static_cast<unsigned char>(src[i]);");
       for (const auto& g : groups) {
         if (g.kind == EdgeKind::done ||
             (g.kind == EdgeKind::direct && g.to == to))
           continue;
-        out.fmt("  if ({}) {{\n", byte_test(g));
+        out.line("  if (", byte_test(g), ") {");
         emit_edge(g, "    ");
         out.line("  }");
       }
-      out.fmt("  goto WC{};\n", to);
+      out.line("  goto WC", to, ";");
       return;
     }
     if (!self && only_done()) {
-      out.fmt("  goto {};\n", done());
+      out.line("  goto ", done(), ";");
       return;
     }
     if (self) {
-      out.fmt("  if (i >= len) [[unlikely]] goto {};\n", done());
+      out.line("  if (i >= len) [[unlikely]] goto ", done(), ";");
       out.line("  b = static_cast<unsigned char>(src[i]);");
-      if (policy.plain_run(st)) out.fmt("WC{}:\n", st);
-      out.raw("  { static constexpr ::std::array<::std::uint64_t, 4> kStay");
-      out.fmt("{{{{{}ull,{}ull,{}ull,{}ull}}}}", kept.w[0], kept.w[1],
-              kept.w[2], kept.w[3]);
+      if (policy.plain_run(st)) out.line("WC", st, ":");
+      out.write("  { static constexpr ::std::array<::std::uint64_t, 4> kStay");
+      out.write("{{", kept.w[0], "ull,", kept.w[1], "ull,", kept.w[2], "ull,",
+                kept.w[3], "ull}}");
       out.line(";");
       out.line("    if (in_set<kStay>(b)) [[likely]] {");
       out.line("      ++i;");
@@ -213,18 +217,18 @@ class LexDfaEmitter {
       policy.emit_match(st, "      ");
       policy.emit_relay_call(st, "      ");
       if (!only_done()) {
-        out.fmt("      if (i >= len) [[unlikely]] goto {};\n", done());
+        out.line("      if (i >= len) [[unlikely]] goto ", done(), ";");
         if (groups.size() > 1)
           out.line("      b = static_cast<unsigned char>(src[i]);");
       }
       out.line("    }");
       out.line("  }");
       if (only_done()) {
-        out.fmt("  goto {};\n", done());
+        out.line("  goto ", done(), ";");
         return;
       }
     } else {
-      out.fmt("  if (i >= len) [[unlikely]] goto {};\n", done());
+      out.line("  if (i >= len) [[unlikely]] goto ", done(), ";");
       if (groups.size() > 1)
         out.line("  b = static_cast<unsigned char>(src[i]);");
     }
@@ -249,8 +253,9 @@ class LexDfaEmitter {
     for (auto it = groups.begin(); it != groups.end(); ++it) {
       if (it == def) continue;
       for (const unsigned c : it->cls)
-        out.fmt("    case {}:\n",
-                byteCases ? std::ranges::find(_cls, c) - _cls.begin() : c);
+        out.line("    case ",
+                 byteCases ? std::ranges::find(_cls, c) - _cls.begin() : c,
+                 ":");
       emit_edge(*it, "      ");
     }
     out.line("    default:");
@@ -348,49 +353,59 @@ struct LexRunShape {
 // run's exit label is its own.
 class LexRunEmitter {
  public:
-  void advance(EmitOutput& o, const ByteSet& stay, std::string_view var,
+  void advance(TextBuilder& o, const ByteSet& stay, std::string_view var,
                std::string_view setName, bool content = true) {
     LexRunShape r = LexRunShape::of(stay);
     if (!content) r.ranges = false;
     if (!r.swar && !r.ranges) {
-      o.fmt(
-          "    while ({0} < len && in_set<{1}>("
-          "static_cast<unsigned char>(src[{0}]))) ++{0};\n",
-          var, setName);
+      o.line("    while (", var, " < len && in_set<", setName,
+             ">("
+             "static_cast<unsigned char>(src[",
+             var, "]))) ++", var, ";");
       return;
     }
     const unsigned id = _runId++;
-    o.fmt(
-        "    while (len - {0} >= 8) {{\n"
-        "      const ::std::uint64_t w = ld64(src + {0});\n",
-        var);
+    o.line("    while (len - ", var,
+           " >= 8) {\n"
+           "      const ::std::uint64_t w = ld64(src + ",
+           var, ");");
     if (r.swar) {
       assert(r.lo <= LexRunShape::kSwarBelowMax &&
              "lt8 answers no byte above it");
-      o.fmt("      const ::std::uint64_t bad = lt8(w, {})", r.lo);
-      for (unsigned k = 0; k < r.n; ++k) o.fmt(" | eq8(w, {})", r.b[k]);
+      o.write("      const ::std::uint64_t bad = lt8(w, ", r.lo, ")");
+      for (unsigned k = 0; k < r.n; ++k) o.write(" | eq8(w, ", r.b[k], ")");
     } else {
-      o.raw("      const ::std::uint64_t bad = (~(");
+      o.write("      const ::std::uint64_t bad = (~(");
       std::string_view sep;
       for (unsigned k = 0; k < r.nr; ++k) {
         const bool folded = r.paired(k);
         if (folded && (r.from[k] & 0x20u)) continue;
-        o.fmt("{}rng8(w, {}, {}{})", sep, r.from[k], r.to[k],
-              folded ? ", 0x5f" : "");
+        o.write(sep, "rng8(w, ", r.from[k], ", ", r.to[k],
+                folded ? ", 0x5f" : "", ")");
         sep = " | ";
       }
-      o.raw(r.high ? ") & kHi & ~w)" : ") & kHi) | (w & kHi)");
+      o.write(r.high ? ") & kHi & ~w)" : ") & kHi) | (w & kHi)");
     }
-    o.fmt(
+    o.line(
         ";\n"
-        "      if (bad) {{ {0} += static_cast<::cursiv::TextOffset>("
-        "::std::countr_zero(bad) >> 3); goto Lrun{1}; }}\n"
-        "      {0} += 8;\n"
-        "    }}\n"
-        "    while ({0} < len && in_set<{2}>("
-        "static_cast<unsigned char>(src[{0}]))) \n++{0};\n"
-        "Lrun{1}:;\n",
-        var, id, setName);
+        "      if (bad) { ",
+        var,
+        " += static_cast<::cursiv::TextOffset>("
+        "::std::countr_zero(bad) >> 3); goto Lrun",
+        id,
+        "; }\n"
+        "      ",
+        var,
+        " += 8;\n"
+        "    }\n"
+        "    while (",
+        var, " < len && in_set<", setName,
+        ">("
+        "static_cast<unsigned char>(src[",
+        var, "]))) \n++", var,
+        ";\n"
+        "Lrun",
+        id, ":;");
   }
 
  private:
@@ -448,7 +463,7 @@ int lex_continuation_of(const View& v, std::uint16_t st,
 // a state crosses, the match it takes and the relays it launches, to compete
 // with that match. An engine's emitter adds the walk around them.
 template <class View>
-struct LexWalkRungs : EmitOutput {
+struct LexWalkRungs : TextBuilder {
   explicit LexWalkRungs(View v) : view(v) {}
 
   const View view;
@@ -465,12 +480,12 @@ struct LexWalkRungs : EmitOutput {
   }
   void emit_match(unsigned st, std::string_view ind) {
     if (view.accept(static_cast<std::uint16_t>(st)) != 0)
-      fmt("{}match.take(kTape, {}u, src, i, len, far);\n", ind, st);
+      line(ind, "match.take(kTape, ", st, "u, src, i, len, far);");
   }
   void emit_relay_call(unsigned st, std::string_view ind) {
     for (auto k = view.relay(static_cast<std::uint16_t>(st)); k != kNoRelay;
          k = view.relay_of(k).next)
-      fmt("{}relays.launch(kTape, {}u, src, len, start, i);\n", ind, k);
+      line(ind, "relays.launch(kTape, ", k, "u, src, len, start, i);");
   }
   // A keyword whose one way on is the word it starts: its boundary is the edge,
   // so the rung settles both here and asks no election. The caller knows the
@@ -498,12 +513,13 @@ struct LexWalkRungs : EmitOutput {
     if (to == kDeadState || (spelled && !spelled[to]) || view.accept(to) == 0 ||
         view.bounded(to) || view.relay(to) != kNoRelay)
       return;
-    fmt("  if (i < len && ::cursiv::lex_boundary({}).at({}, src, i, len)) "
-        "{{ ++i; goto W{}; }}\n",
-        cfg, bound, to);
+    line("  if (i < len && ::cursiv::lex_boundary(", cfg, ").at(", bound,
+         ", src, i, len)) "
+         "{ ++i; goto W",
+         to, "; }");
     line("  end = i;");
-    fmt("  term = {};\n", view.accept(s) - 1u);
-    fmt("  match.state = {};\n", st);
+    line("  term = ", view.accept(s) - 1u, ";");
+    line("  match.state = ", st, ";");
     line("  goto Wdone;");
   }
   void emit_run_adv(const ByteSet& stay, std::string_view var,
@@ -516,14 +532,13 @@ struct LexWalkRungs : EmitOutput {
 // state a rest reaches and crosses blind, the advance over the bytes that keep
 // it there; `relays` are the table's relays, `v` its automaton.
 template <class View, class Relays>
-void lex_emit_relay_runs(EmitOutput& o, const LexDfaEmitter& dfa,
+void lex_emit_relay_runs(TextBuilder& o, const LexDfaEmitter& dfa,
                          LexRunEmitter& runs, const View& v,
                          const Relays& relays, std::string_view name) {
-  o.fmt(
-      "::cursiv::TextOffset {}(::std::uint16_t state, const char* src,\n"
-      "    ::cursiv::TextOffset len, ::cursiv::TextOffset i) {{\n"
-      "  (void)src;\n  (void)len;\n  switch (state) {{\n",
-      name);
+  o.line("::cursiv::TextOffset ", name,
+         "(::std::uint16_t state, const char* src,\n"
+         "    ::cursiv::TextOffset len, ::cursiv::TextOffset i) {\n"
+         "  (void)src;\n  (void)len;\n  switch (state) {");
   std::vector<std::uint8_t> used(dfa.states(), 0);
   for (const LexRelay& r : relays)
     for (const unsigned st : dfa.states_from(r.resume)) used[st] = 1;
@@ -532,19 +547,20 @@ void lex_emit_relay_runs(EmitOutput& o, const LexDfaEmitter& dfa,
       continue;
     const ByteSet stay = dfa.stay(st);
     if (!stay.any()) continue;
-    o.fmt("    case {}u: {{\n", st);
-    o.fmt(
-        "    static constexpr ::std::array<::std::uint64_t, 4> kStay{{"
-        "{{{}ull,{}ull,{}ull,{}ull}}}};\n",
-        stay.w[0], stay.w[1], stay.w[2], stay.w[3]);
+    o.line("    case ", st, "u: {");
+    o.line(
+        "    static constexpr ::std::array<::std::uint64_t, 4> kStay{"
+        "{",
+        stay.w[0], "ull,", stay.w[1], "ull,", stay.w[2], "ull,", stay.w[3],
+        "ull}};");
     runs.advance(o, stay, "i", "kStay");
-    o.raw("    return i;\n    }\n");
+    o.line("    return i;\n    }");
   }
-  o.raw("    default: return i;\n  }\n}\n");
+  o.line("    default: return i;\n  }\n}");
 }
 
 // The byte-run helpers a generated walk reads, from the shared runtime.
-inline void lex_emit_byte_runs(EmitOutput& o) {
+inline void lex_emit_byte_runs(TextBuilder& o) {
   o.line("using ::cursiv::eq8;");
   o.line("using ::cursiv::in_set;");
   o.line("using ::cursiv::kHi;");
@@ -566,7 +582,7 @@ inline constexpr std::string_view kLexWalkSignature =
 // (`LexDfaEmitter::state`), `walk_before` ahead of the function, the rows and
 // the end; `linkage` prefixes the definition.
 template <class Policy>
-void lex_emit_walk(EmitOutput& o, const LexDfaEmitter& dfa, Policy& policy,
+void lex_emit_walk(TextBuilder& o, const LexDfaEmitter& dfa, Policy& policy,
                    std::span<const std::uint16_t> starts, bool relays,
                    std::string_view linkage) {
   std::vector<unsigned> order;
@@ -582,8 +598,8 @@ void lex_emit_walk(EmitOutput& o, const LexDfaEmitter& dfa, Policy& policy,
       }
   }
   policy.walk_before(partial);
-  o.fmt("{}{} {{\n", linkage, kLexWalkSignature);
-  o.raw(R"(  const ::cursiv::TextOffset start = i;
+  o.line(linkage, kLexWalkSignature, " {");
+  o.write(R"(  const ::cursiv::TextOffset start = i;
   ::cursiv::TextOffset far = i;
   ::cursiv::LexMatch match{i, 0xFFFFu};
   [[maybe_unused]] auto& end = match.end;
@@ -598,11 +614,11 @@ void lex_emit_walk(EmitOutput& o, const LexDfaEmitter& dfa, Policy& policy,
   if (relays) o.line("  Relays relays;");
   policy.walk_entry();
   if (partial) o.line("  ::std::uint16_t st = 0;");
-  o.raw("  static const void* const kWEntry[] = {");
+  o.write("  static const void* const kWEntry[] = {");
   for (unsigned m = 0; m < starts.size(); ++m) {
-    if (m) o.raw(",");
-    if (m % 8 == 0) o.raw("\n      ");
-    o.fmt("&&W{}", starts[m]);
+    if (m) o.write(",");
+    if (m % 8 == 0) o.write("\n      ");
+    o.write("&&W", starts[m]);
   }
   o.line("};");
   o.line("  goto *kWEntry[mode];");

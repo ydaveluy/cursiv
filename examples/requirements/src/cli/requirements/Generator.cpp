@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
+#include "cursiv/text/TextBuilder.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "requirements/CliUtils.hpp"
@@ -15,6 +15,7 @@ namespace req {
 namespace {
 
 using namespace req::ast;
+using cursiv::TextBuilder;
 
 [[nodiscard]] std::string document_source_path(const cursiv::AstNode& node) {
   const cursiv::Document* const document = node.getDocument();
@@ -51,20 +52,19 @@ using namespace req::ast;
 std::string generate_summary_file_html_content(
     const ast::RequirementModel& model,
     std::span<const ast::TestModel* const> testModels) {
-  std::ostringstream out;
-  out << "<html>\n";
-  out << "<body>\n";
-  out << "<h1>Requirement coverage (demo generator)</h1>\n";
-  out << "<div>Source: " << html_escape(document_source_path(model))
-      << "</div>\n";
-  out << "<table border=\"1\">\n";
-  out << "<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>\n";
+  TextBuilder out;
+  out.line("<html>");
+  out.line("<body>");
+  out.line("<h1>Requirement coverage (demo generator)</h1>");
+  out.line("<div>Source: ", html_escape(document_source_path(model)), "</div>");
+  out.line(R"(<table border="1">)");
+  out.line("<TR><TH>Requirement ID</TH><TH>Testcase ID</TH></TR>");
   for (const auto& requirement : model.requirements) {
     if (!requirement) {
       continue;
     }
 
-    out << "<TR><TD>" << requirement->name << "</TD><TD>\n";
+    out.line("<TR><TD>", requirement->name, "</TD><TD>");
     for (const auto* testModel : testModels) {
       if (testModel == nullptr) {
         continue;
@@ -81,16 +81,16 @@ std::string generate_summary_file_html_content(
           continue;
         }
 
-        out << "<div>" << test->name << " (from "
-            << html_escape(document_source_path(*testModel)) << ")</div>\n";
+        out.line("<div>", test->name, " (from ",
+                 html_escape(document_source_path(*testModel)), ")</div>");
       }
     }
-    out << "</TD></TR>\n";
+    out.line("</TD></TR>");
   }
-  out << "</table>\n";
-  out << "</body>\n";
-  out << "</html>\n";
-  return out.str();
+  out.line("</table>");
+  out.line("</body>");
+  out.line("</html>");
+  return out.take();
 }
 
 std::string generate_summary(const ast::RequirementModel& model,
