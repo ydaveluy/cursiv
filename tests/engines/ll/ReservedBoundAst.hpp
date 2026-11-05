@@ -7,7 +7,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
 };
 struct Flag : cursiv::Extends<cursiv::AstNode> {
-  bool value = false;
+  boolean value = false;
 };
 struct Mark : cursiv::Extends<cursiv::AstNode> {
   string_view one;

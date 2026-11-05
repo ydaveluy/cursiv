@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -46,6 +47,39 @@ struct LargeGroup {
   }
 };
 
+// The document of each target. A short climb remembers nothing; a long one is
+// remembered, and the next one stops where it meets it, so a deep chain is
+// climbed once.
+class Homes {
+ public:
+  [[nodiscard]] const Document* of(const AstNode& node) {
+    const AstNode* at = &node;
+    std::size_t steps = 0;
+    const Document* home = nullptr;
+    for (;;) {
+      if (!_known.empty())
+        if (const auto hit = _known.find(at); hit != _known.end()) {
+          home = hit->second;
+          break;
+        }
+      if (at->parent == nullptr) {
+        home = ast_cast<Document>(at);
+        break;
+      }
+      at = at->parent;
+      ++steps;
+    }
+    if (steps > kShort)
+      for (const AstNode* p = &node; p != at; p = p->parent)
+        _known.emplace(p, home);
+    return home;
+  }
+
+ private:
+  static constexpr std::size_t kShort = 64;
+  std::unordered_map<const AstNode*, const Document*> _known;
+};
+
 }  // namespace
 
 std::vector<ReferenceDescription>
@@ -64,10 +98,11 @@ DefaultReferenceDescriptionProvider::createDescriptions(
   // invisible when asked from any other member of the set. Two targets built
   // on one CST record share their symbol and draw one row.
   LargeGroup large;
+  Homes homes;
   references->visitResolved(cst, [&](TextOffset begin, TextOffset end,
                                      const AstNode& target, bool multi) {
     throw_if_cancelled(cancelToken);
-    const Document* const home = target.getDocument();
+    const Document* const home = homes.of(target);
     const ReferenceDescription row{
         .sourceDocumentId = document.id,
         .sourceBegin = begin,

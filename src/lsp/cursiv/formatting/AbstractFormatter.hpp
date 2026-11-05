@@ -333,8 +333,8 @@ class AbstractFormatter : public Formatter {
         &cursiv::ast_type_tag<Node>,
         [method](const AbstractFormatter& self, FormattingBuilder& builder,
                  const AstNode* node) {
-          (static_cast<const FormatterT&>(self).*method)(
-              builder, static_cast<const Node*>(node));
+          (static_cast<const FormatterT&>(self).*method)(builder,
+                                                         ast_cast<Node>(node));
         });
   }
 

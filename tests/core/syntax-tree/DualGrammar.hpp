@@ -48,7 +48,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 };
 
 struct N : cursiv::Extends<cursiv::AstNode> {
-  std::uint64_t n = 0;
+  uint64 n = 0;
 };
 
 struct Decl : cursiv::Extends<cursiv::AstNode> {

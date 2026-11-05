@@ -35,7 +35,7 @@ template <class F, class Node>
 auto& ref_of(Node& owner, std::uint32_t index) noexcept {
   using Owner =
       cond_t<std::is_const_v<Node>, const typename F::owner, typename F::owner>;
-  auto& m = static_cast<Owner&>(owner).*F::ptr;
+  auto& m = detail::ast_cast_unchecked<Owner>(&owner)->*F::ptr;
   if constexpr (F::storage == FieldStorage::vector)
     return m[index];
   else if constexpr (F::storage == FieldStorage::optional)
@@ -79,7 +79,7 @@ struct narrow_table<Targets, TypeList<Ns...>> {
 
 template <class F>
 RefState ref_state_raw(const AstNode& o, std::uint32_t i) noexcept {
-  return std::atomic_ref<RefState>(ref_of<F>(o, i)._state)
+  return std::atomic_ref<RefState>(RefAccess::state(ref_of<F>(o, i)))
       .load(std::memory_order_acquire);
 }
 
@@ -101,7 +101,7 @@ consteval RefOps ref_ops_of() {
         .narrow_tags = narrow_table<L, Ns>::tags.data(),
         .narrow_of =
             [](const AstNode& o, std::uint32_t i) noexcept {
-              return ref_of<F>(o, i).narrow;
+              return RefAccess::narrow(ref_of<F>(o, i));
             },
         .force = [](const AstNode& o,
                     std::uint32_t i) { return ref_of<F>(o, i).resolve(); },
@@ -111,7 +111,7 @@ consteval RefOps ref_ops_of() {
             },
         .name_id =
             [](const AstNode& o, std::uint32_t i) noexcept {
-              return ref_of<F>(o, i).refNodeId;
+              return RefAccess::node_id(ref_of<F>(o, i));
             },
         .state =
             [](const AstNode& o, std::uint32_t i) noexcept {
@@ -121,30 +121,32 @@ consteval RefOps ref_ops_of() {
           if (ref_state_raw<F>(o, i) != RefState::Resolved) return 0;
           const auto& r = ref_of<F>(o, i);
           if constexpr (is_multi_ref_nature(F::nature))
-            return r.items.size();
+            return RefAccess::items(r).size();
           else
-            return r.target != nullptr ? 1u : 0u;
+            return RefAccess::target(r) != nullptr ? 1u : 0u;
         },
         .at = [](const AstNode& o, std::uint32_t i,
                  std::size_t k) noexcept -> AstNode* {
           if (ref_state_raw<F>(o, i) != RefState::Resolved) return nullptr;
           const auto& r = ref_of<F>(o, i);
           if constexpr (is_multi_ref_nature(F::nature))
-            return k < r.items.size() ? r.items[k].target : nullptr;
+            return k < RefAccess::items(r).size()
+                       ? RefAccess::items(r)[k].target
+                       : nullptr;
           else
-            return k == 0 ? r.target : nullptr;
+            return k == 0 ? RefAccess::target(r) : nullptr;
         },
         .reset =
             [](AstNode& o, std::uint32_t i) noexcept {
               auto& r = ref_of<F>(o, i);
               if constexpr (is_multi_ref_nature(F::nature))
-                r.items.clear();
+                RefAccess::items(r).clear();
               else {
-                r.target = nullptr;
-                r.which = 0;
+                RefAccess::target(r) = nullptr;
+                RefAccess::which(r) = 0;
               }
-              std::atomic_ref<RefState>(r._state).store(
-                  RefState::Unresolved, std::memory_order_release);
+              std::atomic_ref<RefState>(RefAccess::state(r))
+                  .store(RefState::Unresolved, std::memory_order_release);
             },
     };
     if constexpr (!is_multi_ref_nature(F::nature))
@@ -152,7 +154,7 @@ consteval RefOps ref_ops_of() {
         if (ref_state_raw<F>(o, i) != RefState::Resolved)
           return SingleRefRead{};
         const auto& r = ref_of<F>(o, i);
-        return SingleRefRead{r.refNodeId, r.target};
+        return SingleRefRead{RefAccess::node_id(r), RefAccess::target(r)};
       };
     return ops;
   }

@@ -269,7 +269,7 @@ void run() {
   cursiv::Document* const document =
       world.built("entity Person { name : String }\n");
   cursiv::AstNode* entity = nullptr;
-  for (cursiv::AstNode* node : document->parseResult.nodes)
+  for (cursiv::AstNode* node : document->parseResult.nodes())
     if (cursiv::ast_cast<ws::ast::Entity>(node) != nullptr) entity = node;
   CHECK(entity != nullptr);
   if (entity == nullptr) return;

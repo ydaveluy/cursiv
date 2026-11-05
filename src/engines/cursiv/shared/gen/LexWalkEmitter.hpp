@@ -8,13 +8,13 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/runtime/LexMatch.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
@@ -159,8 +159,8 @@ class LexDfaEmitter {
         unsigned e = b;
         while (e + 1 < 256 && in(e + 1)) ++e;
         if (!cond.empty()) cond += " || ";
-        cond += b == e ? std::format("b == {}", b)
-                       : std::format("(b >= {} && b <= {})", b, e);
+        cond += b == e ? concat("b == ", b)
+                       : concat("(b >= ", b, " && b <= ", e, ")");
         b = e + 1;
       }
       return cond;

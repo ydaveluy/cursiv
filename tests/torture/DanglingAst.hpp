@@ -10,7 +10,7 @@
 namespace tdang::ast {
 
 struct Stmt : cursiv::Extends<cursiv::AstNode> {
-  std::string_view cond;
+  string_view cond;
   Stmt* then_ = nullptr;
   Stmt* else_ = nullptr;
 };

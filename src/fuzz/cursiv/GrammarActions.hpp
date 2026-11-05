@@ -1,15 +1,19 @@
 // What a directive does to the tree, with the grammar erased: the node an
 // element creates, the member an assignment writes, and a built node's
 // value members read back as text. A write it cannot model is refused,
-// never guessed -- the caller weighs a `false` return as nothing.
+// never guessed -- the caller weighs `Write::not_modelled` as nothing.
 #pragma once
 
 #include <cstdint>
+#include <deque>
+#include <memory>
+#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
@@ -26,32 +30,56 @@ struct InfixOp {
   bool right = false;
 };
 
+// The walk's own tree: the nodes it made and the text its members view.
+class WalkTree {
+ public:
+  template <class T>
+  [[nodiscard]] AstNode* make() {
+    auto node = std::make_unique<T>();
+    AstNode* const base = detail::stamp_node(*node);
+    _nodes.push_back(std::move(node));
+    return base;
+  }
+  [[nodiscard]] std::string_view stash(std::string_view text) {
+    if (text.empty()) return {};
+    return _text.emplace_back(text);
+  }
+
+ private:
+  // In this order: a node's destructor may read the text its members view.
+  std::deque<std::string> _text;
+  std::vector<std::unique_ptr<AstNode>> _nodes;
+};
+
+// What the walk could say of a write. A conversion the engine refuses is
+// `modelled`: the engine writes nothing there, and neither does the walk.
+enum class Write : bool { not_modelled, modelled };
+
 struct GrammarActions {
   virtual ~GrammarActions() = default;
 
   // The node this element creates, or null when it creates none.
-  [[nodiscard]] virtual AstNode* make(ElementId, AstArena&) const = 0;
+  [[nodiscard]] virtual AstNode* make(ElementId, WalkTree&) const = 0;
   // The operand rule of a precedence table, and its operators; `kNoElement`
   // and an empty span for every element that is not one.
   [[nodiscard]] virtual ElementId primary(ElementId) const = 0;
   [[nodiscard]] virtual std::span<const InfixOp> operators(ElementId) const = 0;
   // Left operand, operator text and right operand, into a node the same
   // element made.
-  virtual bool fold(ElementId, ElementId, AstNode& node, AstNode* left,
-                    std::string_view op, AstNode* right) const = 0;
+  virtual Write fold(ElementId, ElementId, AstNode& node, AstNode* left,
+                     std::string_view op, AstNode* right) const = 0;
 
-  virtual bool write_node(ElementId, AstNode& owner, AstNode* child,
-                          AstArena&) const = 0;
+  virtual Write write_node(ElementId, AstNode& owner, AstNode* child) const = 0;
   // `payload` is the element that spelled the text: a directive spread
   // over a choice reaches one member through several rules, and the
   // conversion is the rule's, not the directive's.
-  virtual bool write_text(ElementId, ElementId payload, AstNode& owner,
-                          std::string_view text, AstArena&) const = 0;
+  virtual Write write_text(ElementId, ElementId payload, AstNode& owner,
+                           std::string_view text) const = 0;
 
-  // What a leaf denotes: its own converter applied, or the raw text. A
-  // data rule's value is its parts joined by what they mean, not by their
-  // bytes.
-  [[nodiscard]] virtual std::string_view denote(
+  // What a leaf denotes: its own converter applied, or the raw text; nothing
+  // when the converter refuses it. A data rule's value is its parts joined by
+  // what they mean, not by their bytes.
+  [[nodiscard]] virtual std::optional<std::string> denote(
       ElementId, std::string_view text) const = 0;
 
   // Every value member this node declares, in one order for every node of the

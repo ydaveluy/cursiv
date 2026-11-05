@@ -26,12 +26,12 @@ const Document* AstNode::getDocument() const noexcept {
   const AstNode* top = this;
   while (top->parent != nullptr) top = top->parent;
   // Its own tag proves the cast rather than assuming it.
-  return top->type == &ast_type_tag<Document>
-             ? static_cast<const Document*>(top)
-             : nullptr;
+  return ast_cast<Document>(top);
 }
 
-Document::~Document() = default;
+// The nodes first: a destructor may read a `string_view` of the text held here,
+// and that text goes before the parse result would.
+Document::~Document() { parseResult.destroy_nodes(); }
 
 bool Document::parseSucceeded() const noexcept { return parseResult.accepted; }
 
@@ -46,6 +46,11 @@ bool Document::parseRecovered() const noexcept {
 bool Document::hasLinkingErrors() const noexcept {
   const DocumentReferences* const references = parseResult.references.get();
   return references != nullptr && references->anyUnresolved();
+}
+
+std::string_view Document::keep_parts(
+    std::span<const std::string_view> parts) const {
+  return parseResult.cst().keep_text(parts);
 }
 
 const TextDocument& Document::textDocument() const noexcept {

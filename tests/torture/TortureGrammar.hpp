@@ -14,42 +14,42 @@ namespace ast {
 
 struct ExprNode : cursiv::Extends<cursiv::AstNode> {};
 struct NumLit : cursiv::Extends<ExprNode> {
-  std::string_view text;
+  string_view text;
 };
 struct Bin : cursiv::Extends<ExprNode> {
   ExprNode* left = nullptr;
-  std::string_view op;
+  string_view op;
   ExprNode* right = nullptr;
 };
 
 struct Item : cursiv::Extends<cursiv::AstNode> {};
 struct NumItem : cursiv::Extends<Item> {
-  std::string_view text;
+  string_view text;
 };
 struct StrItem : cursiv::Extends<Item> {
-  std::string_view text;
+  string_view text;
 };
 struct ListItem : cursiv::Extends<Item> {
-  cursiv::vector<Item*> items;
+  vector<Item*> items;
 };
 
 struct Member : cursiv::Extends<cursiv::AstNode> {};
 struct TypeDecl : cursiv::Extends<Member> {
-  std::string_view name;
+  string_view name;
   ExprNode* value = nullptr;
 };
 struct RawDecl : cursiv::Extends<Member> {
-  std::string_view name;
-  std::string_view body;
+  string_view name;
+  string_view body;
 };
 struct Section : cursiv::Extends<Member> {
-  std::string_view name;
-  cursiv::vector<Item*> items;
+  string_view name;
+  vector<Item*> items;
 };
 
 struct Program : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
-  cursiv::vector<Member*> members;
+  string_view name;
+  vector<Member*> members;
 };
 
 }  // namespace ast

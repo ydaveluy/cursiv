@@ -18,6 +18,8 @@
 
 namespace cursiv {
 
+class DefaultDocumentBuilder;
+
 class DocumentFactory {
  public:
   virtual ~DocumentFactory() noexcept = default;
@@ -29,12 +31,6 @@ class DocumentFactory {
   [[nodiscard]] virtual std::shared_ptr<Document> fromString(
       std::string text, std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) const = 0;
-
-  // A tree built in memory, not parsed: `model` owns it, the text is empty,
-  // and it stands at `Parsed`. With no tree at all, the builder parses it only
-  // once `attachTextDocument` takes it back to `Changed`.
-  [[nodiscard]] virtual std::shared_ptr<Document> fromModel(
-      ParseResult model, std::string_view uri) const = 0;
 
   // The file behind `uri`, read once. Throws when no language claims it or
   // nothing readable is there.
@@ -67,6 +63,9 @@ class DocumentFactory {
                                   std::int64_t version) const = 0;
 
  protected:
+  // The builder installs a file created outside the editor without its text.
+  friend class DefaultDocumentBuilder;
+
   // The one constructor behind every entry point: override it to hand out a
   // specialised document. The URI is already normalised.
   [[nodiscard]] virtual std::shared_ptr<Document> createDocument(

@@ -35,6 +35,8 @@ namespace cursiv {
 // which a separate header could not promise.
 class ReverseNodeRange;
 class CstBuilder;
+struct AstBuildCtx;
+struct Document;
 
 struct Grammar;
 
@@ -95,6 +97,31 @@ class Cst {
   }
 
  private:
+  // The nodes and their list live on the pool the records do: `ParseResult`
+  // alone reaches it, so nothing can hold it past a `reset`.
+  friend class ParseResult;
+  std::pmr::memory_resource* memory() const { return _pool.get(); }
+
+  // The builder keeps what it joins; anyone else goes through the document.
+  friend struct AstBuildCtx;
+  friend struct Document;
+  // Text a view of the tree names, its parts written in one piece: it lives as
+  // long as the tree. A null view means an unwritten member, even at length
+  // zero.
+  std::string_view keep_text(std::span<const std::string_view> parts) const {
+    std::size_t size = 0;
+    for (const std::string_view part : parts) size += part.size();
+    auto* const out = static_cast<char*>(
+        _pool->allocate(size == 0 ? 1 : size, alignof(char)));
+    char* at = out;
+    for (const std::string_view part : parts) {
+      if (part.empty()) continue;
+      std::char_traits<char>::copy(at, part.data(), part.size());
+      at += part.size();
+    }
+    return std::string_view(out, size);
+  }
+
   // Every field but the resource, back to a fresh tree's. Not `*this =
   // Cst{}`, which would allocate a pool for a dying object.
   void clear() noexcept {
@@ -148,11 +175,6 @@ class Cst {
   NodeId entry_root() const { return _entryRoot; }
   NodeId entry_begin() const { return _entryBegin; }
   NodeId entry_end() const { return _entryEnd; }
-
-  // Const tree, mutable resource: `ParseResult::cst()` hands out a `const
-  // Cst&` to make the use-after-free above unspellable, and the builder must
-  // still be told where the AST allocates.
-  std::pmr::memory_resource* memory() const { return _pool.get(); }
 
   const CstNode& operator[](NodeId id) const { return node(id); }
 

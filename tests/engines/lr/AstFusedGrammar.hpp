@@ -21,7 +21,7 @@ struct Node : cursiv::Extends<cursiv::AstNode> {
   Node* child = nullptr;
   vector<Node*> children;
   vector<string_view> texts;
-  bool flagged = false;
+  boolean flagged = false;
 };
 struct Wrap : cursiv::Extends<Node> {
   Node* inner = nullptr;

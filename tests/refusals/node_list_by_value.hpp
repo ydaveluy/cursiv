@@ -17,7 +17,10 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 }  // namespace byvalue
 
 struct G : Base {
-  struct Root : rule<create<byvalue::Doc>(ref<ID>)> {};
+  struct ItemRule
+      : rule<create<byvalue::Item>(assign<&byvalue::Item::name>(ref<ID>))> {};
+  struct Root : rule<create<byvalue::Doc>(
+                    many(append<&byvalue::Doc::items>(ref<ItemRule>)))> {};
   using entry = Root;
   using ignored = WS;
 };

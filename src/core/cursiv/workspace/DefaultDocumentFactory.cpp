@@ -5,12 +5,14 @@
 #include <string_view>
 #include <utility>
 
+#include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/FileSystemProvider.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 
@@ -19,6 +21,15 @@ namespace cursiv {
 const CoreServices& DefaultDocumentFactory::servicesFor(
     std::string_view uri, std::string_view languageId) const {
   return shared.serviceRegistry->getServices(uri, languageId);
+}
+
+void DefaultDocumentFactory::dropTree(Document& document) const {
+  // What the build derived goes first: the index rows and the references of
+  // other documents point into this tree. A document at `Changed` has none,
+  // which is every call the builder makes.
+  if (document.state.load() != DocumentState::Changed)
+    shared.documentBuilder->resetToState(document, DocumentState::Changed);
+  resetForRebuild(document);
 }
 
 void DefaultDocumentFactory::parse(Document& document,
@@ -60,22 +71,6 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromString(
       cancelToken);
 }
 
-std::shared_ptr<Document> DefaultDocumentFactory::fromModel(
-    ParseResult model, std::string_view uri) const {
-  const std::string canonical = normalize_uri(uri);
-  const CoreServices& services = servicesFor(canonical, {});
-  const std::shared_ptr<Document> document = createDocument(
-      TextDocument::create(canonical, services.languageMetaData.languageId, 0,
-                           {}),
-      canonical);
-  document->language = &services;
-  document->parseResult = std::move(model);
-  if (document->parseResult.value != nullptr)
-    document->parseResult.value->parent = document.get();
-  document->state = DocumentState::Parsed;
-  return document;
-}
-
 std::shared_ptr<Document> DefaultDocumentFactory::fromUri(
     std::string_view uri, const CancellationToken& cancelToken) const {
   throw_if_cancelled(cancelToken);
@@ -87,7 +82,7 @@ std::shared_ptr<Document> DefaultDocumentFactory::fromUri(
 Document& DefaultDocumentFactory::update(
     Document& document, const CancellationToken& cancelToken) const {
   throw_if_cancelled(cancelToken);
-  resetForRebuild(document);
+  dropTree(document);
   // The truth is the client's buffer while a tab is open, the disk otherwise;
   // a text nothing readable stands behind is kept as it is.
   if (!document.isOpen) {
@@ -99,7 +94,15 @@ Document& DefaultDocumentFactory::update(
             std::move(text));
       }
     } catch (const FileSystemError&) {
-      // nothing readable: keep the current text
+      // Nothing readable: keep the current text. A document with none is a file
+      // found and then lost, and the reader should know.
+      if (document.textDocument().getText().empty())
+        shared.observabilitySink->publish(
+            {.severity = ObservationSeverity::Warning,
+             .code = ObservationCode::WorkspaceDocumentReadFailed,
+             .message = "failure to read a new document",
+             .uri = document.uri,
+             .languageId = {}});
     }
   }
   const CoreServices& services =
@@ -120,7 +123,7 @@ Document& DefaultDocumentFactory::attachTextDocument(
     Document& document, TextDocument textDocument) const {
   // The tree goes before the bytes it slices: every view the previous parse
   // handed out points into the text about to be replaced.
-  resetForRebuild(document);
+  dropTree(document);
   textDocumentOf(document) = std::move(textDocument);
   // The new text carries the client's languageId, which is half of what the
   // language is resolved from.

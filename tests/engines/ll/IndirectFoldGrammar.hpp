@@ -6,7 +6,9 @@
 namespace tllindirect {
 
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
-struct Name : cursiv::Extends<Expression> { string_view text; };
+struct Name : cursiv::Extends<Expression> {
+  string text;
+};
 struct Number : cursiv::Extends<Expression> { string_view text; };
 struct Binary : cursiv::Extends<Expression> {
   Expression* left{};
@@ -16,8 +18,8 @@ struct Binary : cursiv::Extends<Expression> {
 struct Wrapped : cursiv::Extends<Expression> { Expression* value{}; };
 struct Glob : cursiv::Extends<Expression> {
   Expression* value{};
-  bool leading{};
-  bool trailing{};
+  boolean leading{};
+  boolean trailing{};
 };
 struct Document : cursiv::Extends<cursiv::AstNode> {
   vector<Expression*> values;

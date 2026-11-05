@@ -118,17 +118,6 @@ consteval bool bases_stated(TypeList<Ts...> all) {
   return (bases_stated_of<Ts>(all) && ...);
 }
 
-// Whether a member holds an owned text anywhere. Missing an owning variant
-// alternative is a wrong program that runs silently: the owning alternative
-// of `variant<double, std::string>` is dead, so `double` swallows everything
-// and the member keeps its default. Recursion goes through `strip_storage`,
-// so a nested holder is reached too.
-template <class V>
-inline constexpr bool holds_owned_text = is_owned_text<V>;
-template <class... As>
-inline constexpr bool holds_owned_text<std::variant<As...>> =
-    (holds_owned_text<typename strip_storage<As>::type> || ...);
-
 // A member's targets and its node alternatives index each other only if an
 // alternative names an AST type exactly when it holds a node: one that names a
 // type without holding a node shifts them apart from its position on.
@@ -146,7 +135,8 @@ struct alts_index_targets<std::variant<As...>>
 template <auto P, class Src>
 struct check_write {
   using tag = field_tag<P>;
-  using X = typename tag::held;
+  using X =
+      cond_t<writes_whole<tag, Src>, typename tag::member, typename tag::held>;
   static constexpr bool ok = admits<X, Src>();
   static constexpr FieldNature nature = tag::nature;
   // A pointer to any class is a node member, so "the pointee is off the
@@ -154,46 +144,40 @@ struct check_write {
   static constexpr bool pointee_ok =
       nature != FieldNature::node ||
       std::is_base_of_v<AstNode, std::remove_pointer_t<X>>;
-  // A bare `string_view` member refusing its payload is always the dangle:
-  // without a converter the law admits every text, so only a materialising
-  // converter reaches here -- the generic "no conversion" message below would
-  // say the opposite of the truth.
+  // A `string_view` member refusing its text: the value is not what the source
+  // spells, and the generic "no conversion" message below would mislead.
   static constexpr bool view_dangles =
       nature == FieldNature::value && std::is_same_v<X, AstNode::string_view> &&
       is_text_pay<Src> && !ok;
-  // A member that owns its text is refused whatever the payload is, so the
-  // message is about the member. Asked of the whole held type, a variant
-  // alternative owning bytes exactly as a bare member does.
-  static constexpr bool owns_text = holds_owned_text<X>;
+  static constexpr bool cuts_number = narrows<X, typename pay_value<Src>::type>;
+  // A value replacing what the member holds needs an assignment, of the value
+  // or of a member made from it: a whole answer and a plain value held directly
+  // do. A list's or an optional's element, and a variant's alternative, are
+  // built in place.
+  static constexpr bool replaceable =
+      !(std::is_same_v<typename pay_value<Src>::type, typename tag::member> ||
+        (tag::storage == FieldStorage::direct &&
+         nature == FieldNature::value)) ||
+      std::is_assignable_v<typename tag::member&,
+                           typename pay_value<Src>::type> ||
+      std::is_move_assignable_v<typename tag::member>;
+  static constexpr bool list_grows =
+      tag::storage != FieldStorage::vector ||
+      std::is_move_constructible_v<typename tag::held>;
   // Mixing in a reference alternative shifts the interpreter's positions
   // apart from the writer's, surfacing as `malformed_cst` on every document.
   static constexpr bool variant_alts_index_targets =
       nature != FieldNature::variant || alts_index_targets<X>::value;
 
   static consteval bool check() {
-    static_assert(!owns_text,
-                  "an AST member never owns its text: this one holds a "
-                  "string, directly or in a variant, and the tree points "
-                  "into the document -- make it AstNode::string_view. A "
-                  "value that must be built, such as a decoded literal or a "
-                  "case-folded name, is allocated by the converter in the "
-                  "resource it is given (`static std::string_view "
-                  "convert(std::string_view, std::pmr::memory_resource*)`), "
-                  "and reaches the member as a view that lives as long as "
-                  "the ParseResult");
     static_assert(!(is_ref_nature(nature) && !is_text_pay<Src>),
                   "a reference member takes text: a cross-reference stores "
                   "the name as written, from a terminal or a data rule, never "
                   "a node built by a rule");
     static_assert(!(is_ref_nature(nature) && is_text_pay<Src> && !ok),
-                  "a reference member holds its name as a string_view into "
-                  "the document, so its value must be a string_view: this "
-                  "one is another value (a string, a number, a class), which "
-                  "the builder keeps only as a temporary -- give the rule a "
-                  "converter that returns a string_view into the input, or "
-                  "into the resource the converter is given "
-                  "(`convert(std::string_view, "
-                  "std::pmr::memory_resource*)`)");
+                  "a reference member holds a name, so its value must be text: "
+                  "give the rule a converter that returns a string or a "
+                  "string_view");
     if constexpr (!pointee_ok)
       ::MemberNodeOutsideAst<P, std::remove_pointer_t<X>>();
     static_assert(!(nature == FieldNature::node && pointee_ok && !ok),
@@ -213,21 +197,32 @@ struct check_write {
                   "builder would pick the wrong alternative, or none -- give "
                   "the reference a member of its own");
     if constexpr (view_dangles)
-      ::BorrowedTextTemporary<P, typename pay_value<Src>::type>();
+      ::ViewOfOtherText<P, typename pay_value<Src>::type>();
     // An enum's default conversion matches text against its enumerator names,
     // so a plain text payload already admits; this fires for a node payload or
     // an unbuildable converter result. Whether a literal's spelling is an
     // enumerator is `check_lit_write`'s question.
+    static_assert(!cuts_number,
+                  "this rule gives a number this member cannot always hold: "
+                  "make the member wider, or give the rule the member's own "
+                  "type");
+    static_assert(replaceable,
+                  "this member's type cannot be assigned, so nothing can "
+                  "replace the value it starts with: hold it in `optional<T>` "
+                  "or `vector<T>`, which build it in place, or give the type "
+                  "an assignment");
+    static_assert(list_grows,
+                  "a list moves its elements as it grows, and this type cannot "
+                  "be moved: give it a move constructor, or use `optional<T>`");
     static_assert(
-        !(nature == FieldNature::value && !ok && !view_dangles && !owns_text),
+        !(nature == FieldNature::value && !ok && !view_dangles && !cuts_number),
         "no conversion from this value to the member type: the built-in "
         "conversions cover string_view, bool, arithmetic types and enums, and "
         "nothing else -- give the rule a converter that returns the member's "
         "type: `as<f>(...)` around the rule's body, or a "
         "`cursiv::default_converter<T>` specialisation declaring `static "
         "ConversionResult<T> convert(std::string_view)`, which every rule "
-        "naming T then uses. Declaring only `using result = T` is not "
-        "enough");
+        "naming T then uses");
     return true;
   }
 };
@@ -380,21 +375,29 @@ template <auto P, class E>
   requires transparent<E>
 struct dir_payload_ok<P, E> : dir_payload_ok<P, through_t<E>> {};
 
-// One directive per storage: the builder branches on the member's storage
-// alone, so `assign` on a vector would silently accumulate and `append` on a
-// scalar would silently overwrite. Not auto-repaired either -- that would
-// change what an accumulating grammar means -- so the directive is named.
-template <auto P, bool IsAppend>
-consteval bool dir_storage_ok() {
-  constexpr FieldStorage storage = field_tag<P>::storage;
+// One directive per storage: `assign` on a vector would silently accumulate and
+// `append` on a scalar would silently overwrite. Not auto-repaired either --
+// that would change what an accumulating grammar means -- so the directive is
+// named.
+// `=` on a list takes one thing, the whole list a rule answers.
+template <auto P, bool IsAppend, class... Srcs>
+consteval bool dir_storage_ok(TypeList<Srcs...>) {
+  using F = field_tag<P>;
+  constexpr FieldStorage storage = F::storage;
+  constexpr bool anyWhole = (writes_whole<F, Srcs> || ...);
+  constexpr bool allWhole =
+      sizeof...(Srcs) != 0 && (writes_whole<F, Srcs> && ...);
   static_assert(!(IsAppend && storage != FieldStorage::vector),
                 "`+=` appends, so it needs a `vector<T>` list member: on a "
                 "single-value member each match would overwrite the last -- "
                 "write `=`");
-  static_assert(!(!IsAppend && storage == FieldStorage::vector),
+  static_assert(!(IsAppend && anyWhole),
+                "`+=` adds one element, and this rule returns the whole list "
+                "-- write `=`");
+  static_assert(!(!IsAppend && storage == FieldStorage::vector && !allWhole),
                 "`=` sets the single value of a member, and this member is "
                 "a `vector<T>` list -- to add each match to the list, write "
-                "`+=`");
+                "`+=`; `=` takes only a rule that returns that whole list");
   return true;
 }
 
@@ -428,7 +431,7 @@ struct payloads_ok<E, TypeList<Ks...>>
     : std::bool_constant<(payloads_ok<Ks>::value && ...)> {};
 template <auto S, class E, bool IsAppend>
 inline constexpr bool spec_ok =
-    dir_storage_ok<spec_ptr<S>, IsAppend>() &&
+    dir_storage_ok<spec_ptr<S>, IsAppend>(typename payload_of<E>::type{}) &&
     dir_payload_ok<spec_ptr<S>, E>::check() &&
     dir_narrow_ok<spec_ptr<S>, spec_narrow_t<S>>() &&
     check_writes<spec_ptr<S>>(typename payload_of<E>::type{}) &&

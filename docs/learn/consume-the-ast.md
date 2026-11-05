@@ -47,13 +47,14 @@ also require `result.diagnostics.empty()`. An AST can exist even with
 diagnostics, and `result.cst().recovered()` tells whether the parser repaired
 the input. The parser alone does not resolve references or run validation.
 
-!!! warning "The tree borrows the text"
+!!! warning "A `string_view` borrows the text"
 
-    AST text can point into the input buffer or into the `ParseResult`. Keep
-    both alive while you read the tree. A `Document` owns both.
+    A `string_view` member points into the input buffer. Keep it alive while
+    you read the tree, and until the tree is gone if a node's destructor reads it.
+    A `Document` owns it.
 
-AST lists are `cursiv::vector<T*>`, not `std::vector`; see
-[AST vocabulary](../reference/ast.md#vectort-is-not-stdvectort).
+AST lists are `std::vector`; see
+[AST vocabulary](../reference/ast.md#child-nodes).
 
 ## Parse, link and validate
 

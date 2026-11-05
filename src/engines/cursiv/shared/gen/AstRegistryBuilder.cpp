@@ -1,13 +1,13 @@
 #include "cursiv/shared/gen/AstRegistryBuilder.hpp"
 
 #include <algorithm>
-#include <format>
 #include <map>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/TypeSpelling.hpp"
 
 namespace cursiv {
@@ -82,8 +82,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
       if (at == ruleAt.end())
         throw std::logic_error(
             "a conversion rule is absent from its grammar bindings");
-      spelling = out.sources.emplace_front(std::format(
-          "::cursiv::detail::{}<{}, {}>", alias, qualified, at->second));
+      spelling = out.sources.emplace_front(concat(
+          "::cursiv::detail::", alias, "<", qualified, ", ", at->second, ">"));
     }
     return spelling;
   };
@@ -143,8 +143,8 @@ AstRegistry build_ast_registry(std::span<const AstRowDesc* const> rows,
     const auto at = bindingAt.find(type);
     if (at == bindingAt.end())
       throw std::logic_error("an AST type is absent from its grammar bindings");
-    return std::format("::cursiv::detail::ast_bound_t<{}, {}>", qualified,
-                       at->second);
+    return concat("::cursiv::detail::ast_bound_t<", qualified, ", ", at->second,
+                  ">");
   };
   for (std::size_t t = 0; t < typeKeys.size(); ++t)
     out.types.emplace_back(t < built, source(typeKeys[t]));

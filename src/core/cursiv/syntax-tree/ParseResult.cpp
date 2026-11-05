@@ -17,25 +17,40 @@
 namespace cursiv {
 
 ParseResult::ParseResult()
-    : _cst(std::make_unique<Cst>()), nodes(_cst->memory()) {}
+    : _cst(std::make_unique<Cst>()),
+      _arena(_cst->memory()),
+      _nodes(_cst->memory()) {}
 
 ParseResult::ParseResult(Cst&& tree)
     : _cst(std::make_unique<Cst>(std::move(tree))),
-      nodes(_cst->memory()) {}
+      _arena(_cst->memory()),
+      _nodes(_cst->memory()) {}
 
 // Hand-written so the source reports itself empty, as an assignment leaves it:
 // `= default` would keep `value` over a tree it no longer owns.
 ParseResult::ParseResult(ParseResult&& src) noexcept { *this = std::move(src); }
 
-ParseResult::~ParseResult() = default;
+ParseResult::~ParseResult() { destroy_nodes(); }
+
+void ParseResult::destroy_detached(std::span<AstNode* const> gone) noexcept {
+  for (AstNode* const node : gone) node->~AstNode();
+}
+
+// No order is owed: a node's destructor frees what its members own, and a child
+// is a plain pointer. So no depth of tree recurses here.
+void ParseResult::destroy_nodes() noexcept {
+  destroy_detached(_nodes);
+  _nodes.clear();
+}
 
 // Self-move must be a no-op, hence the guard.
 ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
   if (this == &src) return *this;
-  std::destroy_at(&nodes);  // on this pool, which goes with the tree
+  destroy_nodes();
+  std::destroy_at(&_nodes);  // on this pool, which goes with the tree
   _cst = std::move(src._cst);
   _grammarOwner = std::move(src._grammarOwner);
-  arena = std::move(src.arena);
+  _arena = std::move(src._arena);
   value = src.value;
   references = std::move(src.references);
   diagnostics = std::move(src.diagnostics);
@@ -43,7 +58,7 @@ ParseResult& ParseResult::operator=(ParseResult&& src) noexcept {
   accepted = src.accepted;
   // Constructed, not assigned: an assignment would allocate on the pool
   // given up above.
-  std::construct_at(&nodes, std::move(src.nodes));
+  std::construct_at(&_nodes, std::move(src._nodes));
   src.value = nullptr;
   return *this;
 }
@@ -52,11 +67,11 @@ const Cst& ParseResult::cst() const noexcept { return *_cst; }
 
 void ParseResult::bind_grammar(const Grammar& grammar) noexcept {
   // The key is read off the nodes: written before the sort, never after.
-  assert(std::is_sorted(nodes.begin(), nodes.end(),
+  assert(std::is_sorted(_nodes.begin(), _nodes.end(),
                         [](const AstNode* a, const AstNode* b) {
                           return a->cstNodeId < b->cstNodeId;
                         }));
-  CstBuilder(*_cst).bind_model(grammar, nodes);
+  CstBuilder(*_cst).bind_model(grammar, _nodes);
 }
 
 void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept {

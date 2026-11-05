@@ -9,7 +9,7 @@ namespace treserved {
 
 namespace ast {
 struct Name : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
+  string text;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Name*> names;

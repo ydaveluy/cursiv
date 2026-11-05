@@ -34,7 +34,25 @@ struct AstCompare {
   [[nodiscard]] Result run(const AstNode& want, const AstNode& got,
                            std::span<const AstExcused> excused = {}) const {
     Result r;
-    node(want, got, "", excused, r);
+    std::vector<Frame> walk;
+    enter(want, got, walk, excused, r);
+    while (r.equal && !walk.empty()) {
+      Frame& top = walk.back();
+      if (top.next == top.a.size()) {
+        walk.pop_back();
+        continue;
+      }
+      const Child& ca = top.a[top.next];
+      const Child& cb = top.b[top.next];
+      if (ca.name != cb.name || ca.index != cb.index) {
+        // Not entered: the way down stops at the node that holds them.
+        const std::string at = path(std::span(walk).first(walk.size() - 1));
+        fail(r, at.empty() ? "/" : at, step(at, ca), step(at, cb));
+        break;
+      }
+      ++top.next;
+      enter(*ca.node, *cb.node, walk, excused, r);
+    }
     return r;
   }
 
@@ -49,6 +67,12 @@ struct AstCompare {
     std::string name;
     std::uint32_t index;
     const AstNode* node;
+  };
+
+  // A node whose children are being compared, and the next pair of them.
+  struct Frame {
+    std::vector<Child> a, b;
+    std::size_t next = 0;
   };
 
   [[nodiscard]] static bool skipped(std::span<const AstExcused> excused,
@@ -68,11 +92,16 @@ struct AstCompare {
     r.got = std::move(got);
   }
 
-  [[nodiscard]] static std::string step(const std::string& at, const Child& c) {
-    std::string out = at + "/" + c.name;
+  static void append_step(std::string& at, const Child& c) {
+    at += '/';
+    at += c.name;
     if (c.index != AstReflection::kNoIndex)
-      out += "[" + std::to_string(c.index) + "]";
-    return out;
+      at += "[" + std::to_string(c.index) + "]";
+  }
+
+  [[nodiscard]] static std::string step(std::string at, const Child& c) {
+    append_step(at, c);
+    return at;
   }
 
   [[nodiscard]] static std::string list(std::string cls,
@@ -117,10 +146,19 @@ struct AstCompare {
     xs.resize(at);
   }
 
-  void node(const AstNode& a, const AstNode& b, const std::string& at,
-            std::span<const AstExcused> excused, Result& r) const {
-    if (!r.equal) return;
+  // The way down to the node last entered: each frame stands just past its
+  // child on that way.
+  [[nodiscard]] static std::string path(std::span<const Frame> walk) {
+    std::string out;
+    for (const Frame& f : walk) append_step(out, f.a[f.next - 1]);
+    return out;
+  }
+
+  // Compares two nodes, and leaves their children on the walk.
+  void enter(const AstNode& a, const AstNode& b, std::vector<Frame>& walk,
+             std::span<const AstExcused> excused, Result& r) const {
     if (a.type != b.type) {
+      const std::string at = path(walk);
       fail(r, at.empty() ? "/" : at, name_of(a), name_of(b));
       return;
     }
@@ -131,7 +169,8 @@ struct AstCompare {
     // The two walks read one table in one order: a length that differs is the
     // table disagreeing with itself, not a tree.
     if (va.size() != vb.size()) {
-      fail(r, at, name_of(a) + ": " + std::to_string(va.size()) + " values",
+      fail(r, path(walk),
+           name_of(a) + ": " + std::to_string(va.size()) + " values",
            name_of(b) + ": " + std::to_string(vb.size()) + " values");
       return;
     }
@@ -143,7 +182,7 @@ struct AstCompare {
       }
       if (va[i].name != vb[i].name || va[i].index != vb[i].index ||
           va[i].text != vb[i].text)
-        fail(r, at + "/" + va[i].name, va[i].name + "=" + va[i].text,
+        fail(r, path(walk) + "/" + va[i].name, va[i].name + "=" + va[i].text,
              vb[i].name + "=" + vb[i].text);
     }
     if (!r.equal) return;
@@ -153,18 +192,12 @@ struct AstCompare {
     drop(excused, a, ca);
     drop(excused, a, cb);
     if (ca.size() != cb.size()) {
+      const std::string at = path(walk);
       fail(r, at.empty() ? "/" : at, list(name_of(a), ca),
            list(name_of(b), cb));
       return;
     }
-    for (std::size_t i = 0; i < ca.size(); ++i) {
-      if (ca[i].name != cb[i].name || ca[i].index != cb[i].index) {
-        fail(r, at.empty() ? "/" : at, step(at, ca[i]), step(at, cb[i]));
-        return;
-      }
-      node(*ca[i].node, *cb[i].node, step(at, ca[i]), excused, r);
-      if (!r.equal) return;
-    }
+    if (!ca.empty()) walk.push_back(Frame{std::move(ca), std::move(cb)});
   }
 };
 

@@ -6,7 +6,7 @@
 #pragma once
 
 #include <algorithm>
-#include <memory_resource>
+#include <string>
 #include <string_view>
 
 #include "cursiv/grammar/Conversion.hpp"
@@ -58,29 +58,21 @@ struct Post : cursiv::Extends<Node> {
   Node* inner{};
 };
 struct Val : cursiv::Extends<Node> {
-  std::string_view text;
+  string text;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   Node* value{};
 };
 
 template <char C>
-std::string_view wrapped(std::string_view text,
-                         std::pmr::memory_resource* memory) {
-  const auto room = cursiv::text_room(memory, text.size() + 3);
-  room[0] = C;
-  room[1] = '(';
-  std::copy(text.begin(), text.end(), room.begin() + 2);
-  room[room.size() - 1] = ')';
-  return std::string_view(room.data(), room.size());
+std::string wrapped(std::string_view text) {
+  return std::string{C, '('} + std::string(text) + ')';
 }
-inline constexpr auto wrapA = [](std::string_view text,
-                                 std::pmr::memory_resource* memory) {
-  return wrapped<'A'>(text, memory);
+inline constexpr auto wrapA = [](std::string_view text) {
+  return wrapped<'A'>(text);
 };
-inline constexpr auto wrapB = [](std::string_view text,
-                                 std::pmr::memory_resource* memory) {
-  return wrapped<'B'>(text, memory);
+inline constexpr auto wrapB = [](std::string_view text) {
+  return wrapped<'B'>(text);
 };
 
 struct Common : cursiv::GrammarSpec {

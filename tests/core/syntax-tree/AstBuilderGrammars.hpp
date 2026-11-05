@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
@@ -274,6 +273,10 @@ struct Wrap : cursiv::Extends<Inner> {
   Inner* child = nullptr;
   boolean flag = false;
 };
+struct Listed : cursiv::Extends<Inner> {
+  Inner* child = nullptr;
+  vector<string_view> items;
+};
 
 }  // namespace tab::wrapper
 
@@ -356,8 +359,8 @@ namespace tab::textlaw {
 struct N : cursiv::Extends<cursiv::AstNode> {
   string_view slice;
   string_view viewed;
-  string_view annotated;
-  string_view built;
+  int64 annotated = 0;
+  string built;
 };
 
 }  // namespace tab::textlaw
@@ -512,15 +515,12 @@ struct All : cursiv::GrammarSpec {
   };
   struct VocabNUM : terminal<as<vocab_num_conv>(some(d))> {};
   struct VocabNAME : terminal<some(cr<"a-z">)> {};
-  // A converter that materialises: uppercasing produces a name the document
-  // does not spell, so it allocates in the resource the builder hands it and
-  // answers a view of that -- which lives as long as the ParseResult.
-  static constexpr auto vocab_qname_conv = [](std::string_view t,
-                                              std::pmr::memory_resource* mem) {
-    const std::span<char> room = cursiv::text_room(mem, t.size());
-    for (std::size_t i = 0; i < t.size(); ++i)
-      room[i] = static_cast<char>(t[i] - 'a' + 'A');
-    return std::string_view(room.data(), room.size());
+  // A converter that builds its answer: uppercasing produces a name the
+  // document does not spell.
+  static constexpr auto vocab_qname_conv = [](std::string_view t) {
+    std::string out(t);
+    for (char& c : out) c = static_cast<char>(c - 'a' + 'A');
+    return out;
   };
   struct VocabQNAME : terminal<as<vocab_qname_conv>(some(cr<"a-z">))> {};
   struct VocabTgt
@@ -564,6 +564,14 @@ struct All : cursiv::GrammarSpec {
                            nest<wrapper::Wrap, &wrapper::Wrap::child>(kw<"!">) +
                            option(flag<&wrapper::Wrap::flag>(kw<"?">)))> {
   };
+
+  // Each wrapper holds a list of what its own `!` reads.
+  struct ListedRoot
+      : rule<create<wrapper::Inner>(
+            assign<&wrapper::Inner::name>(ref<WrapperID>) +
+            many(nest<wrapper::Listed, &wrapper::Listed::child>(
+                kw<"!"> +
+                many(append<&wrapper::Listed::items>(ref<WrapperID>)))))> {};
 
   struct AdoptID : terminal<some(cr<"a-z">)> {};
   struct AdoptItem : rule<assign<&wrapper::Inner::name>(ref<AdoptID>) +
@@ -619,15 +627,11 @@ struct All : cursiv::GrammarSpec {
   struct TextID : terminal<some(cr<"a-z">)> {};
   struct TextQUOTED
       : terminal<as<text_quoted_conv>(lit<"'"> + many(cr<"^'">) + lit<"'">)> {};
-  // Materialises its answer, in the resource the builder hands it: lowercasing
-  // spells bytes the document does not, and the view answered is a view of
-  // the tree's own memory.
-  static constexpr auto text_lower_conv = [](std::string_view t,
-                                             std::pmr::memory_resource* mem) {
-    const std::span<char> room = cursiv::text_room(mem, t.size());
-    for (std::size_t i = 0; i < t.size(); ++i)
-      room[i] = static_cast<char>(t[i] - 'A' + 'a');
-    return std::string_view(room.data(), room.size());
+  // Builds its answer: lowercasing spells bytes the document does not.
+  static constexpr auto text_lower_conv = [](std::string_view t) {
+    std::string out(t);
+    for (char& c : out) c = static_cast<char>(c - 'A' + 'a');
+    return out;
   };
   struct TextLOWER : terminal<as<text_lower_conv>(some(cr<"A-Z">))> {};
   // Not in the body: the shape the law refuses, declared here so the refusal
@@ -681,9 +685,9 @@ struct All : cursiv::GrammarSpec {
   };
 
   struct Entry
-      : rule<ref<hier::G::Root> | ref<WiringDoc> | ref<VocabRoot> | ref<NodealtRoot> |
-             ref<MoveRoot> | ref<HeldRoot> | ref<WholeRoot> | ref<SpellR> |
-             ref<NarrowRoot> | ref<DeferRoot> |
+      : rule<ref<hier::G::Root> | ref<WiringDoc> | ref<VocabRoot> |
+             ref<NodealtRoot> | ref<MoveRoot> | ref<HeldRoot> | ref<WholeRoot> |
+             ref<SpellR> | ref<NarrowRoot> | ref<DeferRoot> |
              (kw<"$enum"> + ref<enm::G::Root>) |
              (kw<"$exact"> + ref<exact::G::Root>) |
              (kw<"$annot"> + ref<annot::G::Root>) |
@@ -691,6 +695,7 @@ struct All : cursiv::GrammarSpec {
              (kw<"$region"> + ref<RegionRoot>) |
              (kw<"$annot2"> + ref<Annot2Root>) | (kw<"$nest"> + ref<NestRoot>) |
              (kw<"$wrapper"> + ref<WrapperRoot>) |
+             (kw<"$listed"> + ref<ListedRoot>) |
              (kw<"$adopt"> + ref<AdoptDoc>) | (kw<"$climb"> + ref<ClimbE>) |
              (kw<"$hoist"> + ref<HoistRoot>) | (kw<"$text"> + ref<TextRoot>) |
              (kw<"$own"> + ref<OwnRoot>) | (kw<"$rebind"> + ref<RebindRoot>) |

@@ -153,8 +153,8 @@ void stacked_wrappers_and_post_operand_flags_keep_their_meaning(const Reader& e)
   CHECK(current && current->type == &cursiv::ast_type_tag<tmaterialise::Flags> &&
         !current->on && seen.insert(current).second);
   if (current) part_span(result, current, parent, 12, 13);
-  CHECK(seen.size() == 21 && result.nodes.size() == 21);
-  for (const auto* node : result.nodes) CHECK(seen.contains(node));
+  CHECK(seen.size() == 21 && result.nodes().size() == 21);
+  for (const auto* node : result.nodes()) CHECK(seen.contains(node));
 }
 
 void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) {
@@ -167,7 +167,7 @@ void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) 
     CHECK(result.accepted && !result.cst().recovered() &&
           result.diagnostics.empty());
     CHECK(result.error == cursiv::AstBuildError::none);
-    CHECK(result.nodes.size() == 2 * depth + 1);
+    CHECK(result.nodes().size() == 2 * depth + 1);
     const auto* current = cursiv::ast_cast<tmaterialise::Expr>(result.value);
     const cursiv::AstNode* parent = nullptr;
     std::unordered_set<const cursiv::AstNode*> seen;
@@ -198,7 +198,7 @@ void recursive_call_arguments_close_before_the_callers_effects(const Reader& e) 
             (depth == 0 ? 0 : prefix.size() + 3 * depth));
       CHECK(result.cst()[last->cstNodeId].end == source.size());
     }
-    CHECK(seen.size() == result.nodes.size());
+    CHECK(seen.size() == result.nodes().size());
   }
 }
 
@@ -367,7 +367,7 @@ std::string tree(const Engine& e, std::string_view text, std::size_t& nodes) {
   nodes = 0;
   if (!r.accepted || !r.diagnostics.empty() || r.value == nullptr)
     return "<refused>";
-  nodes = r.nodes.size();
+  nodes = r.nodes().size();
   cursiv::test::ast_of(*e.reflection, *r.value, out);
   return out;
 }
@@ -554,11 +554,11 @@ void exact_prefixes(const Engine& e, std::string_view mode, const PrefixCase& c,
                                                  want.end - want.begin),
              "exact prefix text", i);
   }
-  verify(result.nodes.size() == c.nodes.size() + 1,
+  verify(result.nodes().size() == c.nodes.size() + 1,
          "exact allocation count, including the statement");
-  verify(seen.size() == result.nodes.size(),
+  verify(seen.size() == result.nodes().size(),
          "reachable count equals arena count");
-  for (const auto* node : result.nodes)
+  for (const auto* node : result.nodes())
     verify(seen.contains(node), "every arena allocation is reachable");
   CHECK(good);
 }

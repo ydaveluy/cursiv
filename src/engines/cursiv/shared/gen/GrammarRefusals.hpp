@@ -52,7 +52,7 @@ consteval bool NodeClass() {
           std::is_convertible_v<Node*, cursiv::AstNode*>,
       "this rule builds a class that reaches cursiv::AstNode through two "
       "bases, so it holds two `parent` links and no one node to point at -- "
-      "derive it through one base only");
+      "derive each path from the shared base with `VirtualExtends`");
   return true;
 }
 
@@ -94,16 +94,12 @@ consteval bool MemberNodeOutsideAst() {
 }
 
 template <auto Member, class Value>
-consteval bool BorrowedTextTemporary() {
+consteval bool ViewOfOtherText() {
   static_assert(
       cursiv::detail::dependent_false<Value>,
-      "a string_view member points into text, so its converter must return "
-      "a string_view: this converter returns another value, which the "
-      "builder keeps only as a temporary, so the view would point at freed "
-      "memory -- return a string_view into the input, or, when the value "
-      "must be built, allocate it in the resource the builder passes and "
-      "return a view of it (`static std::string_view convert(std::string_view, "
-      "std::pmr::memory_resource*)`), which lives as long as the ParseResult");
+      "a string_view member cannot hold this value: it is not text of the "
+      "document -- make the member the value's type, a string if a converter "
+      "builds text, or return a view of the input");
   return false;
 }
 

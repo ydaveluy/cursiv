@@ -12,11 +12,12 @@
 
 namespace cursiv::fuzzer {
 
+// Answers the documents and the writes the walk could not model.
 template <class G>
-void lane(const char* lang, const cursiv::Parser& parser,
-          const cursiv::AstReflection& reflection, unsigned docs,
-          std::uint64_t seed) {
-  run<G>(lang, parser, reflection, docs, seed);
+std::uint64_t lane(const char* lang, const cursiv::Parser& parser,
+                   const cursiv::AstReflection& reflection, unsigned docs,
+                   std::uint64_t seed) {
+  return run<G>(lang, parser, reflection, docs, seed);
 }
 
 }  // namespace cursiv::fuzzer

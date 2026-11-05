@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/utils/Cancellation.hpp"
@@ -144,6 +145,13 @@ class DefaultDocumentBuilder : public DocumentBuilder {
                                    const CancellationToken&) const;
 
  private:
+  // What points into the moved documents lets go of them: it goes back to
+  // `ComputedScopes`, to link again. `repair` takes a document with a broken
+  // reference along.
+  void letGoOf(const std::unordered_set<DocumentId>& moved, bool repair) const;
+  // One document's rungs, and nothing about the documents that read it.
+  void resetDocument(Document& document, DocumentState state) const;
+
   // The language of one document, or null when nothing claims its URI. A
   // document nothing claims is skipped rather than failed: it keeps its rung,
   // and a wait on it answers `Unreachable`.

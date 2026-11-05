@@ -9,7 +9,7 @@
 
 namespace tlldatatext {
 struct Value : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
+  string text;
 };
 struct Document : cursiv::Extends<cursiv::AstNode> {
   vector<Value*> values;
@@ -19,12 +19,8 @@ inline constexpr auto untick = [](std::string_view text) {
   ++untickCalls;
   return text.substr(1, text.size() - 2);
 };
-inline constexpr auto prefix = [](std::string_view text,
-                                  std::pmr::memory_resource* memory) {
-  const auto room = cursiv::text_room(memory, text.size() + 1);
-  room[0] = '#';
-  std::copy(text.begin(), text.end(), room.begin() + 1);
-  return std::string_view(room.data(), room.size());
+inline constexpr auto prefix = [](std::string_view text) {
+  return "#" + std::string(text);
 };
 inline constexpr auto refuseZ = [](std::string_view text) {
   using Result = cursiv::ConversionResult<std::string_view>;

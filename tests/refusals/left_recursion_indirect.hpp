@@ -12,7 +12,7 @@ namespace refuse {
 namespace cycle {
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Expression> {
-  string_view text;
+  string text;
 };
 struct Binary : cursiv::Extends<Expression> {
   Expression* left{};
@@ -21,7 +21,7 @@ struct Binary : cursiv::Extends<Expression> {
 };
 struct Glob : cursiv::Extends<Expression> {
   Expression* value{};
-  bool trailing{};
+  boolean trailing{};
 };
 struct Document : cursiv::Extends<cursiv::AstNode> {
   vector<Expression*> values;

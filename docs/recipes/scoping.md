@@ -45,7 +45,7 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
       const cursiv::Document& document,
       const cursiv::CancellationToken& token = cursiv::kNoCancel) const override {
     std::vector<cursiv::AstNodeDescription> exported;
-    for (cursiv::AstNode* node : document.parseResult.nodes) {
+    for (cursiv::AstNode* node : document.parseResult.nodes()) {
       cursiv::throw_if_cancelled(token);
       const auto* type = cursiv::ast_cast<const ast::Type>(node);
       if (type == nullptr || type->name.empty()) continue;
@@ -58,7 +58,7 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
           name = std::string(package->name) + "." + name;
       }
 
-      const auto stored = cursiv::copy_into(document.parseResult.cst().memory(), name);
+      const auto stored = document.keep_text(name);
       if (auto description = services.astNodeDescriptionProvider->createDescription(
               *node, stored, &document))
         exported.push_back(*description);
@@ -70,13 +70,13 @@ class QualifiedScopeComputation final : public cursiv::DefaultScopeComputation {
 }  // namespace dm
 ```
 
-A description does not copy its name, so `copy_into` stores the computed
-name in the document's memory, which is only freed by the next parse. Use it
-here, where each name is written once per parse. A service that allocates more
-often, such as a scope provider or a validator, owns a
-`std::pmr::memory_resource` per document and clears it when it needs to. Do not
-resolve references here: other documents may not have exported their symbols
-yet.
+A description does not copy its name, so `keep_text` stores the computed name
+with the document, which frees it at the next parse. It also takes the parts of a
+name, as in `keep_text(outer, ".", inner)`, and writes them in one piece. Each call
+adds to the document's memory, so call it only from a scope computation, which
+runs once per parse; resetting a document to `IndexedContent` or `Parsed` runs it
+again. Do not resolve references here: other documents may not have exported their
+symbols yet.
 
 ## Install the implementation
 

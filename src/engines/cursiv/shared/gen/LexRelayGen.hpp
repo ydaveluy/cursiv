@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/gen/bit_words.hpp"
@@ -201,7 +201,7 @@ std::string lex_relay_source(const LexRelayGen& r, Name&& name) {
   field("tier", r.tier, d.tier);
   field("asserts", r.predicate, kNoLexNode, "&lexical_predicate_");
   field("recognizes", r.recognition, kNoLexNode, "&lexical_recognizer_");
-  return std::format("{{{}}}", field.list());
+  return concat("{", field.list(), "}");
 }
 
 }  // namespace cursiv

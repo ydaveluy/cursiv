@@ -1,11 +1,12 @@
 #pragma once
 
+#include <cstddef>
+#include <string>
+#include <string_view>
+
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include <cstddef>
-#include <memory_resource>
-#include <string_view>
 // What a condition in a rule tests, on both engines: the text of the token the
 // lexer chooses among the terminals the parser can take where it stands; the
 // first terminals of the conditions there lengthen that token and rank
@@ -16,31 +17,24 @@ namespace tcondcontract {
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {};
 struct Sum : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
+  string name;
   Sum* left{};
   string_view op;
   Sum* right{};
 };
 struct Holder : cursiv::Extends<cursiv::AstNode> {
-  string_view name;
+  string name;
   Sum* sum{};
 };
 
-inline std::string_view tagged(std::string_view text, char tag,
-                               std::pmr::memory_resource* mem) {
-  const auto room = cursiv::text_room(mem, text.size() + 2);
-  room[0] = tag;
-  room[1] = ':';
-  for (std::size_t i = 0; i < text.size(); ++i) room[i + 2] = text[i];
-  return {room.data(), room.size()};
+inline std::string tagged(std::string_view text, char tag) {
+  return std::string{tag, ':'} + std::string(text);
 }
-inline constexpr auto id_text = [](std::string_view t,
-                                   std::pmr::memory_resource* mem) {
-  return tagged(t, 'I', mem);
+inline constexpr auto id_text = [](std::string_view t) {
+  return tagged(t, 'I');
 };
-inline constexpr auto name_text = [](std::string_view t,
-                                     std::pmr::memory_resource* mem) {
-  return tagged(t, 'N', mem);
+inline constexpr auto name_text = [](std::string_view t) {
+  return tagged(t, 'N');
 };
 
 struct Main : cursiv::GrammarSpec {

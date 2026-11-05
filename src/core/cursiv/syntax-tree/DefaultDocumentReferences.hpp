@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <memory_resource>
 #include <mutex>
 #include <string_view>
 
@@ -50,10 +49,6 @@ struct DefaultDocumentReferences : DocumentReferences {
                      std::uint8_t narrow) const;
 
   const AstMetaData& _f;
-  // Where a plural reference's targets live: reads resolve from any thread,
-  // so the carve is locked. Released with the references, never per site.
-  mutable std::mutex _targetsLock;
-  mutable std::pmr::monotonic_buffer_resource _targets;
 };
 
 }  // namespace cursiv

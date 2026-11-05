@@ -709,7 +709,7 @@ namespace right {
 struct ID : TerminalRule<lit<"right">> {};
 }  // namespace right
 struct Node : AstNode {
-  std::string_view ID;
+  string_view ID;
 };
 struct G : GrammarSpec {
   struct z : terminal<lit<"ignored">> {};
@@ -1085,7 +1085,7 @@ static_assert(
 namespace mk {
 
 struct Node : cursiv::AstNode {
-  std::string_view name;
+  string_view name;
 };
 
 struct G : GrammarSpec {
@@ -1201,7 +1201,7 @@ namespace nst {
 // bases through `ast_bases`, and a common base it cannot see is a common base
 // it answers `void` for.
 struct Inner : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
+  string_view name;
 };
 struct Wrap : cursiv::Extends<Inner> {
   Inner* inner = nullptr;
@@ -1246,10 +1246,10 @@ static_assert(std::same_as<M::body<G::ANR>,
 // owes nothing -- the alternative, not the rule, is the unit.
 
 struct Sub : cursiv::Extends<Inner> {
-  std::string_view extra;
+  string_view extra;
 };
 struct Apart : cursiv::Extends<cursiv::AstNode> {
-  std::string_view x;
+  string_view x;
 };
 
 struct Fam : GrammarSpec {
@@ -1412,7 +1412,7 @@ namespace hand {
 
 struct Base : cursiv::Extends<cursiv::AstNode> {};
 struct Leaf : cursiv::Extends<Base> {
-  std::string_view name;
+  string_view name;
 };
 struct Leafy : cursiv::Extends<Leaf> {};
 struct Paren : cursiv::Extends<Base> {
@@ -1490,7 +1490,7 @@ static_assert(std::same_as<Normalize<G>::body<G::RootWrapped>,
 namespace paths {
 
 struct Leaf : cursiv::Extends<cursiv::AstNode> {
-  std::string_view text;
+  string_view text;
 };
 
 struct Diamond : GrammarSpec {
@@ -1574,7 +1574,7 @@ static_assert(every_alt_heads<Normalize<Restated>::body<G::Plain>>);
 namespace api {
 
 struct Node : cursiv::AstNode {
-  std::string_view name;
+  string_view name;
 };
 
 struct Base : GrammarSpec {
@@ -1822,8 +1822,8 @@ void expect(const std::string& got, std::string_view want, const char* what) {
 
 namespace ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  bool many = false;
-  std::string_view name;
+  boolean many = false;
+  string_view name;
   Node* target = nullptr;
 };
 }  // namespace ast
@@ -1931,20 +1931,20 @@ struct G : cursiv::GrammarSpec {
 namespace Q3u {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};
 struct Num : cursiv::Extends<Expr> {
-  std::string_view text;
+  string_view text;
 };
 struct Bin : cursiv::Extends<Expr> {
   Expr* left = nullptr;
-  std::string_view op;
+  string_view op;
   Expr* right = nullptr;
 };
 struct Neg : cursiv::Extends<Expr> {
-  std::string_view op;
+  string_view op;
   Expr* operand = nullptr;
 };
 struct Fact : cursiv::Extends<Expr> {
   Expr* arg = nullptr;
-  std::string_view bang;
+  string_view bang;
 };
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};

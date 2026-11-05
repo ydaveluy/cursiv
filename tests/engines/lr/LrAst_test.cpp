@@ -88,9 +88,8 @@ void the_entrys_creation_is_the_root(const cursiv::Parser& p) {
   CHECK(clean(r));
   CHECK(cursiv::ast_cast<tadopt::ast::Doc>(r.value) != nullptr);
   bool sorted = true;
-  for (std::size_t k = 1; k < r.nodes.size(); ++k)
-    if (r.nodes[k]->cstNodeId < r.nodes[k - 1]->cstNodeId)
-      sorted = false;
+  for (std::size_t k = 1; k < r.nodes().size(); ++k)
+    if (r.nodes()[k]->cstNodeId < r.nodes()[k - 1]->cstNodeId) sorted = false;
   CHECK(sorted);
 }
 
@@ -189,7 +188,7 @@ void text_actions_run_once_per_declared_occurrence(const cursiv::Parser& p) {
     const auto* node = result.value_as<Node>();
     CHECK(node && node->texts.size() == expected.size());
     CHECK(tfused::conversions == expected.size());
-    CHECK(result.nodes.size() == 1);
+    CHECK(result.nodes().size() == 1);
     if (!node || node->texts.size() != expected.size()) return;
     std::size_t i = 0;
     for (const auto value : expected) CHECK(node->texts[i++] == value);
@@ -207,7 +206,7 @@ void text_actions_run_once_per_declared_occurrence(const cursiv::Parser& p) {
     CHECK(node);
     if (!node) continue;
     CHECK((node->child != nullptr) == (text == "$h + abc"));
-    CHECK(result.nodes.size() == (text == "$h + abc" ? 2u : 1u));
+    CHECK(result.nodes().size() == (text == "$h + abc" ? 2u : 1u));
     if (node->child)
       CHECK(node->child->parent == node && node->child->name == "abc");
   }
@@ -254,7 +253,7 @@ template <class Engine>
 std::string root_name(const Engine& engine, std::string_view text,
                       std::size_t& nodes) {
   const cursiv::ParseResult r = engine->parse(text);
-  nodes = r.nodes.size();
+  nodes = r.nodes().size();
   if (!r.accepted || !r.diagnostics.empty()) return "<refused>";
   const auto* const clade = r.value_as<tadopt::ast::Clade>();
   if (clade == nullptr) return "<not a clade>";
@@ -289,8 +288,8 @@ void run() {
     const auto* const doc = r.value_as<tadopt::ast::Doc>();
     CHECK(r.accepted && doc != nullptr && doc->clade != nullptr &&
           doc->clade->name == "A");
-    std::printf("inner: %zu node(s)\n", r.nodes.size());
-    CHECK(r.nodes.size() == 2);
+    std::printf("inner: %zu node(s)\n", r.nodes().size());
+    CHECK(r.nodes().size() == 2);
   }
 }
 
@@ -538,12 +537,12 @@ namespace ast {
 struct Node : AstNode {};
 struct Num : Node {
   using ast_bases = TypeList<Node>;
-  double value = 0;
+  float64 value = 0;
 };
 struct Bin : Node {
   using ast_bases = TypeList<Node>;
   Node* left = nullptr;
-  std::string op;
+  string op;
   Node* right = nullptr;
 };
 }  // namespace ast
@@ -657,7 +656,7 @@ void a_precedence_table() {
 namespace ast {
 struct Name : Node {
   using ast_bases = TypeList<Node>;
-  std::string name;
+  string name;
 };
 struct Wrap : Node {
   using ast_bases = TypeList<Node>;
@@ -883,7 +882,7 @@ bool join_keeps_everything() {
 namespace ast {
 struct Flags : Node {
   using ast_bases = TypeList<Node>;
-  bool on = false;
+  boolean on = false;
 };
 struct Box : Flags {
   using ast_bases = TypeList<Flags>;

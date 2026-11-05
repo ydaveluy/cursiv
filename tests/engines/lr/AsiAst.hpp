@@ -7,12 +7,12 @@ struct Stmt : cursiv::Extends<cursiv::AstNode> {
   string_view head;
   vector<Stmt*> args;
   vector<Stmt*> body;
-  bool ret = false;
-  bool empty = false;
-  bool inc = false;
-  bool go = false;
+  boolean ret = false;
+  boolean empty = false;
+  boolean inc = false;
+  boolean go = false;
   vector<Stmt*> divs;
-  bool obj = false;
+  boolean obj = false;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Stmt*> body;

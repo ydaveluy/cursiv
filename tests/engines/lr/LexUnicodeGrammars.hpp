@@ -13,8 +13,8 @@ namespace tunicode {
 namespace ast {
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  bool cond = false;
-  bool where = false;
+  boolean cond = false;
+  boolean where = false;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;

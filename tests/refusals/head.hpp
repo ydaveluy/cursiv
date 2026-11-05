@@ -11,7 +11,7 @@ namespace refuse {
 
 namespace ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  cursiv::AstNode::string_view name;
+  string_view name;
 };
 }  // namespace ast
 

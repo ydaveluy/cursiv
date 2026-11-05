@@ -54,8 +54,8 @@ The CLI loads only the named file unless you pass `--root <dir>`; see
 
 ### Can a member be a `std::string` or a `std::vector`?
 
-No. Use `string_view` for text and `cursiv::vector<T>` for lists; see
-[AST vocabulary](reference/ast.md).
+Yes. `string` and `vector<T>` are those types. Prefer `string_view` for text when
+you can; see [AST vocabulary](reference/ast.md).
 
 ### How do I test editor features?
 

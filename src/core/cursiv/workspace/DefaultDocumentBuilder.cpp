@@ -163,7 +163,7 @@ bool DefaultDocumentBuilder::resultsAreIncomplete(
 void DefaultDocumentBuilder::cleanUpDeleted(std::string_view uri) const {
   Documents& store = *_shared.documents;
   if (const std::shared_ptr<Document> d = store.getDocument(uri))
-    resetToState(*d, DocumentState::Changed);
+    resetDocument(*d, DocumentState::Changed);
   (void)store.deleteDocument(uri);
 }
 
@@ -478,24 +478,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // Cause (a) before any look at the moved set, and it plays on an empty one:
   // this is the whole repair path for a reference broken by a symbol that has
   // since appeared somewhere else.
-  const IndexManager& index = *_shared.indexManager;
-  for (const std::shared_ptr<Document>& doc : store.all()) {
-    Document* const d = doc.get();
-    if (moved.contains(d->id)) continue;
-    if (d->hasLinkingErrors() || index.isAffected(*d, moved))
-      resetToState(*d, DocumentState::ComputedScopes);
-    else if (!moved.empty() &&
-             d->state.load() < DocumentState::IndexedReferences) {
-      // Unindexed resolutions have no dependency row to protect their targets.
-      if (const CoreServices* language = languageOf(*d); language != nullptr) {
-        language->linker->unlink(*d);
-        if (d->state.load() == DocumentState::Linked)
-          d->state = DocumentState::ComputedScopes;
-        if (d->state.load() >= DocumentState::ComputedScopes)
-          bindReferences(*d, *language);
-      }
-    }
-  }
+  letGoOf(moved, true);
 
   // Then the moved ones, all the way down, and before the text is replaced or
   // the document destroyed: the index outlives the arena it describes.
@@ -504,7 +487,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   for (const std::string_view uri : changedUris)
     if (const std::shared_ptr<Document> d = store.getDocument(uri))
       if (!(d->isOpen && d->state == DocumentState::Parsed))
-        resetToState(*d, DocumentState::Changed);
+        resetDocument(*d, DocumentState::Changed);
   for (const std::string_view uri : deletedUris) cleanUpDeleted(uri);
 
   // The request lands on what moved. A document cause (a) reset lost its own
@@ -516,55 +499,23 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // `findChangedUris` has already dropped what no language claims. Deletion
   // followed by change recreates the same URI.
   //
-  // Read here, across the pool, and installed unparsed at `Changed`: the parse
-  // phase parses it in parallel and under the token. The read cannot wait for
-  // that phase: a file that can no longer be read is left out of the store,
-  // and past the settle the store is not changed.
-  std::vector<std::string_view> fresh;
-  for (const std::string_view uri : changedUris)
-    if (!store.hasDocument(uri)) fresh.push_back(uri);
-  std::vector<std::optional<std::string>> texts(fresh.size());
-  const FileSystemProvider& files = *_shared.fileSystemProvider;
-  _shared.taskScheduler->parallelFor(
-      kNoCancel, std::views::iota(std::size_t{0}, fresh.size()),
-      [&](std::size_t i) {
-        try {
-          texts[i] = files.readFile(normalize_uri(fresh[i]));
-        } catch (const FileSystemError&) {
-          // the text stays empty: the loop below reports the file as lost
-        }
-      });
+  // Installed empty at `Changed`: the parse phase reads it and parses it, in
+  // parallel and under the token.
   const DocumentFactory& factory = *_shared.documentFactory;
-  std::unordered_set<std::string_view> lost;
-  for (std::size_t i = 0; i < fresh.size(); ++i) {
-    if (store.hasDocument(fresh[i])) continue;  // another spelling installed it
-    if (!texts[i].has_value()) {
-      _shared.observabilitySink->publish(
-          {.severity = ObservationSeverity::Warning,
-           .code = ObservationCode::WorkspaceDocumentReadFailed,
-           .message = "failure to read a new document",
-           .uri = std::string(fresh[i]),
-           .languageId = {}});
-      lost.insert(fresh[i]);
-      continue;
-    }
-    std::shared_ptr<Document> d;
-    try {
-      d = factory.fromModel(ParseResult{}, fresh[i]);
-    } catch (const ServiceRegistryError&) {
-      continue;
-    }
-    factory.attachTextDocument(
-        *d, TextDocument::create(d->uri,
-                                 std::string(d->textDocument().languageId()),
-                                 0, std::move(*texts[i])));
-    store.addDocument(std::move(d));
-  }
   std::vector<Document*> requested;
-  std::vector<std::string_view> announced;
   for (const std::string_view uri : changedUris) {
-    if (lost.contains(uri)) continue;
-    announced.push_back(uri);
+    if (!store.hasDocument(uri)) {
+      const std::string canonical = normalize_uri(uri);
+      if (const CoreServices* const services =
+              _shared.serviceRegistry->findServices(canonical)) {
+        const std::shared_ptr<Document> created = factory.createDocument(
+            TextDocument::create(canonical,
+                                 services->languageMetaData.languageId, 0, {}),
+            canonical);
+        created->language = services;
+        store.addDocument(created);
+      }
+    }
     if (const std::shared_ptr<Document> d = store.getDocument(uri))
       requested.push_back(d.get());
   }
@@ -573,7 +524,7 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   // Announced once the store says it: a subscriber told of a deletion finds
   // the document gone unless it was recreated by the same update, and every
   // changed document stands at `Changed`.
-  emitUpdate(announced, deletedUris);
+  emitUpdate(changedUris, deletedUris);
 
   // The one interruption, after every state change: cut short above, a
   // superseded write would leave documents reset and others not.
@@ -598,8 +549,40 @@ bool DefaultDocumentBuilder::requestUnfinished(const Document& document) const {
   return at != _buildOptions.end() && !at->second.completed;
 }
 
+void DefaultDocumentBuilder::letGoOf(
+    const std::unordered_set<DocumentId>& moved, bool repair) const {
+  const IndexManager& index = *_shared.indexManager;
+  for (const std::shared_ptr<Document>& doc : _shared.documents->all()) {
+    Document* const d = doc.get();
+    if (moved.contains(d->id)) continue;
+    if ((repair && d->hasLinkingErrors()) || index.isAffected(*d, moved))
+      resetDocument(*d, DocumentState::ComputedScopes);
+    else if (!moved.empty() &&
+             d->state.load() < DocumentState::IndexedReferences) {
+      // Unindexed resolutions have no dependency row to protect their targets.
+      if (const CoreServices* language = languageOf(*d); language != nullptr) {
+        language->linker->unlink(*d);
+        if (d->state.load() == DocumentState::Linked)
+          d->state = DocumentState::ComputedScopes;
+        if (d->state.load() >= DocumentState::ComputedScopes)
+          bindReferences(*d, *language);
+      }
+    }
+  }
+}
+
 void DefaultDocumentBuilder::resetToState(Document& document,
                                           DocumentState state) const {
+  // `Changed` destroys the tree: a resolved reference into it is a pointer, so
+  // every document that read it lets go first.
+  if (state == DocumentState::Changed &&
+      document.state.load() != DocumentState::Changed)
+    letGoOf({document.id}, false);
+  resetDocument(document, state);
+}
+
+void DefaultDocumentBuilder::resetDocument(Document& document,
+                                           DocumentState state) const {
   // The contract `buildDocuments` owes the lock, checked where it can be
   // broken: past a settle an `Immediate` read may hold this very tree, and
   // dropping a parse is what invalidates every pointer into it.

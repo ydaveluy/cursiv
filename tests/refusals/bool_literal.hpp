@@ -7,7 +7,7 @@ namespace refuse {
 
 namespace ast {
 struct Flag : cursiv::Extends<cursiv::AstNode> {
-  bool enabled = false;
+  boolean enabled = false;
 };
 }  // namespace ast
 

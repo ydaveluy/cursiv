@@ -298,7 +298,7 @@ void print_diagnostics(const Document& document, std::string_view displayPath,
 // record; the class kept there is the wrapper's, whose parent sits elsewhere.
 static std::vector<std::string_view> ast_classes(const ParseResult& parsed) {
   std::vector<std::string_view> classes(parsed.cst().size());
-  for (const AstNode* const node : parsed.nodes) {
+  for (const AstNode* const node : parsed.nodes()) {
     if (node == nullptr || node->type == nullptr ||
         node->cstNodeId >= classes.size())
       continue;

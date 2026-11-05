@@ -7,13 +7,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/LexNfaPool.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
@@ -54,11 +54,12 @@ struct HeadMatcher {
   // follows.
   std::string source(std::string_view linkage, std::string_view name,
                      const Ranges& ranges, bool reach = false) const {
-    std::string out = std::format(
-        "{} bool {}(const char* p, ::cursiv::TextOffset n,\n"
-        "    ::cursiv::TextOffset rest{}) {{\n"
-        "  (void)p;\n  (void)n;\n  (void)rest;\n",
-        linkage, name, reach ? ", ::cursiv::TextOffset& seen" : "");
+    std::string out = concat(linkage, " bool ", name,
+                             "(const char* p, ::cursiv::TextOffset n,\n"
+                             "    ::cursiv::TextOffset rest",
+                             reach ? ", ::cursiv::TextOffset& seen" : "",
+                             ") {\n"
+                             "  (void)p;\n  (void)n;\n  (void)rest;\n");
     using Items = std::vector<std::pair<std::uint32_t, std::uint32_t>>;
     enum Kind { miss, accept, read, refuse };
     struct Row {
@@ -156,8 +157,8 @@ struct HeadMatcher {
     }
     out += "  [[maybe_unused]] static constexpr ::cursiv::ByteSet sets[] = {\n";
     for (const ByteSet& s : sets)
-      out += std::format("    {{{{{}ull, {}ull, {}ull, {}ull}}}},\n", s.w[0],
-                         s.w[1], s.w[2], s.w[3]);
+      out += concat("    {{", s.w[0], "ull, ", s.w[1], "ull, ", s.w[2], "ull, ",
+                    s.w[3], "ull}},\n");
     if (sets.empty()) out += "    {},\n";
     out += "  };\n";
     // Small tries stay direct, with flat labels instead of nesting one
@@ -165,64 +166,64 @@ struct HeadMatcher {
     if (rows.size() <= 16) {
       for (std::size_t i = 0; i < rows.size(); ++i) {
         const Row& r = rows[i];
-        out += i == 0 ? "  {\n" : std::format("  s{}: {{\n", i);
+        out += i == 0 ? "  {\n" : concat("  s", i, ": {\n");
         if (r.kind == accept) {
           if (reach && r.yes)
-            out += std::format(
-                "    if (seen <= {0}u)\n"
-                "      seen = rest > {0}u ? {0}u + 1u : rest;\n",
-                r.at);
+            out += concat("    if (seen <= ", r.at,
+                          "u)\n"
+                          "      seen = rest > ",
+                          r.at, "u ? ", r.at, "u + 1u : rest;\n");
           out += "    return true;\n";
         } else if (r.kind == miss) {
           out += "    return false;\n";
         } else if (r.kind == refuse) {
           const std::string c =
-              std::format("static_cast<unsigned char>(p[{}u])", r.at);
-          const auto bytes = std::format("sets[{}u].has({})", r.first, c);
-          const auto lead = std::format("sets[{}u].has({})", r.count, c);
-          out += std::format("    if (rest > {}u) {{\n", r.at);
+              concat("static_cast<unsigned char>(p[", r.at, "u])");
+          const auto bytes = concat("sets[", r.first, "u].has(", c, ")");
+          const auto lead = concat("sets[", r.count, "u].has(", c, ")");
+          out += concat("    if (rest > ", r.at, "u) {\n");
           if (reach) {
             out += "      const ::cursiv::TextOffset width = ";
-            out += sets[r.count].any()
-                       ? std::format(
-                             "{} ? "
+            out +=
+                sets[r.count].any()
+                    ? concat(lead,
+                             " ? "
                              "::std::min<::cursiv::TextOffset>(::cursiv::utf8_"
-                             "width(p[{}u]), rest - {}u) : 1u;\n",
-                             lead, r.at, r.at)
-                       : "1u;\n";
-            out += std::format(
-                "      if (seen < {0}u + width) seen = {0}u + width;\n", r.at);
+                             "width(p[",
+                             r.at, "u]), rest - ", r.at, "u) : 1u;\n")
+                    : "1u;\n";
+            out += concat("      if (seen < ", r.at, "u + width) seen = ", r.at,
+                          "u + width;\n");
           }
           std::string test = bytes;
           if (sets[r.count].any())
-            test += std::format(
-                " || ({} && ::cursiv::lex_scalar_in({}, p + {}u, rest - {}u))",
-                lead,
-                r.scalars == 0
-                    ? std::string(ranges.word)
-                    : std::format("{} + {}u, {}u", ranges.pool, r.scalars >> 16,
-                                  r.scalars & 0xFFFFu),
-                r.at, r.at);
-          out += std::format("      if ({}) goto s{};\n    }}", test, r.yes);
+            test += concat(" || (", lead, " && ::cursiv::lex_scalar_in(",
+                           r.scalars == 0
+                               ? std::string(ranges.word)
+                               : concat(ranges.pool, " + ", r.scalars >> 16,
+                                        "u, ", r.scalars & 0xFFFFu, "u"),
+                           ", p + ", r.at, "u, rest - ", r.at, "u))");
+          out += concat("      if (", test, ") goto s", r.yes, ";\n    }");
           if (reach)
             out += " else if (seen < rest) {\n      seen = rest;\n    }";
-          out += std::format("\n    goto s{};\n", r.no);
+          out += concat("\n    goto s", r.no, ";\n");
         } else {
-          out += std::format("    if (n <= {}u) {{\n", r.at);
+          out += concat("    if (n <= ", r.at, "u) {\n");
           if (reach && r.at != 0)
-            out += std::format("      if (seen < {0}u) seen = {0}u;\n", r.at);
+            out +=
+                concat("      if (seen < ", r.at, "u) seen = ", r.at, "u;\n");
           out += "      return false;\n    }\n";
-          out += std::format(
-              "    switch (static_cast<unsigned char>(p[{}u])) {{\n", r.at);
+          out += concat("    switch (static_cast<unsigned char>(p[", r.at,
+                        "u])) {\n");
           for (auto e = r.first; e < r.first + r.count; ++e) {
             for (unsigned b = 0; b < 256; ++b)
               if (sets[edges[e].set].has(static_cast<unsigned char>(b)))
-                out += std::format("      case {}u:\n", b);
-            out += std::format("        goto s{};\n", edges[e].next);
+                out += concat("      case ", b, "u:\n");
+            out += concat("        goto s", edges[e].next, ";\n");
           }
           out += "      default: break;\n    }\n";
           if (reach && r.at != 0)
-            out += std::format("    if (seen < {0}u) seen = {0}u;\n", r.at);
+            out += concat("    if (seen < ", r.at, "u) seen = ", r.at, "u;\n");
           out += "    return false;\n";
         }
         out += "  }\n";
@@ -237,13 +238,13 @@ struct HeadMatcher {
         "  struct Edge { ::std::uint32_t set, next; };\n"
         "  static constexpr Edge edges[] = {\n";
     for (const Edge& e : edges)
-      out += std::format("    {{{}u, {}u}},\n", e.set, e.next);
+      out += concat("    {", e.set, "u, ", e.next, "u},\n");
     if (edges.empty()) out += "    {},\n";
     out += "  };\n  static constexpr Row rows[] = {\n";
     for (const Row& r : rows)
-      out += std::format("    {{{}u, {}u, {}u, {}u, {}u, {}u, {}u}},\n", r.at,
-                         r.first, r.count, r.yes, r.no, r.scalars,
-                         static_cast<unsigned>(r.kind));
+      out += concat("    {", r.at, "u, ", r.first, "u, ", r.count, "u, ", r.yes,
+                    "u, ", r.no, "u, ", r.scalars, "u, ",
+                    static_cast<unsigned>(r.kind), "u},\n");
     out +=
         "  };\n  ::std::uint32_t state = 0;\n  for (;;) {\n"
         "    const auto& r = rows[state];\n"
@@ -271,17 +272,19 @@ struct HeadMatcher {
       if (decoded) {
         out += " || (sets[r.count].has(c) &&\n            ";
         if (ownScalars)
-          out += std::format(
+          out += concat(
               "(r.scalars != 0u\n"
-              "             ? ::cursiv::lex_scalar_in({} + (r.scalars >> 16), "
+              "             ? ::cursiv::lex_scalar_in(",
+              ranges.pool,
+              " + (r.scalars >> 16), "
               "r.scalars & 0xFFFFu, p + r.at, rest - r.at)\n"
-              "             : ::cursiv::lex_scalar_in({}, p + r.at, rest - "
-              "r.at))",
-              ranges.pool, ranges.word);
+              "             : ::cursiv::lex_scalar_in(",
+              ranges.word,
+              ", p + r.at, rest - "
+              "r.at))");
         else
-          out +=
-              std::format("::cursiv::lex_scalar_in({}, p + r.at, rest - r.at)",
-                          ranges.word);
+          out += concat("::cursiv::lex_scalar_in(", ranges.word,
+                        ", p + r.at, rest - r.at)");
         out += ")";
       }
       out += ";\n      }";
@@ -308,11 +311,11 @@ struct HeadMatcher {
 // The function `sig` answering for terminal `t` through its matcher `fn_<t>`.
 inline std::string lex_head_switch(const std::vector<HeadMatcher>& heads,
                                    std::string_view sig, std::string_view fn) {
-  std::string out = std::format("{} {{\n  switch (t) {{\n", sig);
+  std::string out = concat(sig, " {\n  switch (t) {\n");
   for (std::size_t t = 0; t < heads.size(); ++t)
     if (!heads[t].words.empty())
-      out += std::format("    case {}u:\n      return {}_{}(p, rest, rest);\n",
-                         t, fn, t);
+      out += concat("    case ", t, "u:\n      return ", fn, "_", t,
+                    "(p, rest, rest);\n");
   return out + "    default:\n      return false;\n  }\n}\n";
 }
 
@@ -328,24 +331,23 @@ inline std::string lex_head_source(const std::vector<HeadMatcher>& heads,
   std::string out;
   for (std::size_t t = 0; t < heads.size(); ++t)
     if (!heads[t].words.empty())
-      out +=
-          heads[t].source("CURSIV_NOINLINE inline",
-                          std::format("refuses_{}", t), ranges) +
-          heads[t].source("inline", std::format("reaches_{}", t), ranges, true);
+      out += heads[t].source("CURSIV_NOINLINE inline", concat("refuses_", t),
+                             ranges) +
+             heads[t].source("inline", concat("reaches_", t), ranges, true);
   out += lex_head_switch(heads, refuses, "refuses");
-  out += std::format(
-      "{} {{\n  ::cursiv::TextOffset seen = 0;\n  switch (m) {{\n", reach);
+  out +=
+      concat(reach, " {\n  ::cursiv::TextOffset seen = 0;\n  switch (m) {\n");
   std::vector<bool> done(modeHeads.size(), false);
   for (std::size_t m = 0; m < modeHeads.size(); ++m) {
     if (done[m] || modeHeads[m].none()) continue;
     for (std::size_t k = m; k < modeHeads.size(); ++k)
       if (!done[k] && modeHeads[k] == modeHeads[m]) {
-        out += std::format("    case {}u:\n", k);
+        out += concat("    case ", k, "u:\n");
         done[k] = true;
       }
     for (std::size_t t = 0; t < heads.size(); ++t)
       if (modeHeads[m].test(static_cast<unsigned>(t)))
-        out += std::format("      reaches_{}(p, rest, rest, seen);\n", t);
+        out += concat("      reaches_", t, "(p, rest, rest, seen);\n");
     out += "      break;\n";
   }
   out += "    default:\n      break;\n  }\n  return seen;\n}\n";
@@ -360,8 +362,8 @@ inline std::string lex_tail_source(const std::vector<HeadMatcher>& tails,
   std::string out;
   for (std::size_t t = 0; t < tails.size(); ++t)
     if (!tails[t].words.empty())
-      out += tails[t].source("CURSIV_NOINLINE inline",
-                             std::format("trails_{}", t), ranges);
+      out += tails[t].source("CURSIV_NOINLINE inline", concat("trails_", t),
+                             ranges);
   return out + lex_head_switch(tails, tail, "trails");
 }
 

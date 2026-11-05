@@ -56,12 +56,6 @@ struct AstReflection {
   // node where a reference is about to be written.
   [[nodiscard]] virtual AstNodePtr createNode(const AstTypeTag* type) const = 0;
 
-  // Whether every member that can be absent was written. A scalar has no
-  // absent state, so this does not pretend to check one; a reference is
-  // judged on its text and never on its target -- an unresolved name is a
-  // linking verdict about a member that was written.
-  [[nodiscard]] virtual bool isComplete(const AstNode& node) const = 0;
-
   // An unknown tag answers its name and nothing else, never a throw: asking
   // about a class this grammar does not name is a question, not a fault, and
   // the class knows what it is called.

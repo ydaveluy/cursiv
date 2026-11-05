@@ -14,10 +14,10 @@ namespace fdoc {
 namespace ast {
 struct Value : cursiv::AstNode {};
 struct Scalar : cursiv::Extends<Value> {
-  std::string_view text;
+  string_view text;
 };
 struct Member : cursiv::AstNode {
-  std::string_view name;
+  string_view name;
   Value* value = nullptr;
 };
 struct Object : cursiv::Extends<Value> {

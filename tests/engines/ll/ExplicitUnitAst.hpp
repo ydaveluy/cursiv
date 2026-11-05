@@ -7,7 +7,7 @@ struct Document : cursiv::Extends<cursiv::AstNode> {
   string_view padding;
 };
 struct Name : cursiv::Extends<cursiv::AstNode> {
-  string_view text;
+  string text;
 };
 struct Stmts : cursiv::Extends<cursiv::AstNode> {
   vector<Name*> stmts;

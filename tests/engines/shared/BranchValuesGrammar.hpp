@@ -19,7 +19,7 @@ namespace ast {
 enum class Size { none, small, large };
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  bool flag = false;
+  boolean flag = false;
   string_view other;
   Size size = Size::none;
   int32 count = 0;

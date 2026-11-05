@@ -7,19 +7,16 @@ namespace taudit {
 template <cursiv::str Name, std::size_t Limit = std::size_t(-1)>
 struct Node : cursiv::Extends<cursiv::AstNode> {
   string_view text = "unchanged";
-  bool flagged = false;
+  boolean flagged = false;
   Node* child = nullptr;
 };
 using Doc = Node<"value;\"<>9223372036854775808">;
 
 inline unsigned conversions = 0;
 struct Overloaded {
-  constexpr std::string_view operator()(std::string_view) const { return "wrong"; }
-  std::string_view operator()(std::string_view, std::pmr::memory_resource* mem) const {
+  std::string operator()(std::string_view) const {
     ++conversions;
-    char* s = static_cast<char*>(mem->allocate(1, alignof(char)));
-    *s = '0' + conversions;
-    return {s, 1};
+    return std::string(1, static_cast<char>('0' + conversions));
   }
 };
 

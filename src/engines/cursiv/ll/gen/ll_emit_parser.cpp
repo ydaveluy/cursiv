@@ -22,6 +22,7 @@
 #include "cursiv/ll/gen/ll_emit_table.hpp"
 #include "cursiv/ll/gen/ll_emit_walk.hpp"
 #include "cursiv/shared/gen/CommonArtifacts.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
 #include "cursiv/shared/table/LexNode.hpp"
@@ -212,9 +213,7 @@ struct Emit : EmitOutput {
     fmt(f, std::forward<A>(x)...);
     out += '\n';
   }
-  std::string name(std::string_view stem) {
-    return std::format("{}{}", stem, uniq++);
-  }
+  std::string name(std::string_view stem) { return concat(stem, uniq++); }
 
   const LlNode& at(std::uint16_t id) const { return a.cfg.nodes[id]; }
   std::uint16_t kid(const LlNode& n, unsigned i) const {
@@ -369,8 +368,8 @@ void Emit::call_site(std::uint16_t id) {
     put("::std::uint16_t {};", pos);
     put("{} = 0u;", pos);
     open("if (!c.give) {");
-    peek_choice(body.decision,
-                std::format("{}u", a.cfg.decisions[body.decision].mode), true);
+    peek_choice(body.decision, concat(a.cfg.decisions[body.decision].mode, "u"),
+                true);
     open("switch (c.la.sym) {");
     for (std::uint16_t i = 0; i < a.cfg.decisionBuild[body.decision].nalts; ++i)
       put("case {}u: {} = {}u; break;", at(kid(body, i)).sym, pos,
@@ -703,7 +702,7 @@ void Emit::decision(std::uint16_t id) {
   }
   const std::string none = name("none");
   const std::string k = name("k");
-  peek_choice(n.decision, std::format("{}u", dec.mode), true);
+  peek_choice(n.decision, concat(dec.mode, "u"), true);
   if (asks) {
     put("bool {};", none);
     put("{} = false;", none);
@@ -717,11 +716,10 @@ void Emit::decision(std::uint16_t id) {
   std::vector<std::string> entry(db.nalts);
   put("if (!kTable.holds(kTable.dec_first({}u), c.la.sym)) {{", n.decision);
   open();
-  const std::string fix =
-      std::format("::cursiv::ll_choice_fix<kTable>(c, {}u, {}u)",
-                  dec.mode, n.decision);
+  const std::string fix = concat("::cursiv::ll_choice_fix<kTable>(c, ",
+                                 dec.mode, "u, ", n.decision, "u)");
   if (direct) {
-    open(std::format("switch ({}) {{", fix));
+    open(concat("switch (", fix, ") {"));
     for (std::uint16_t i = 0; i < db.nalts; ++i) {
       if (byArm[i].empty()) continue;
       entry[i] = name("A");
@@ -754,18 +752,18 @@ void Emit::decision(std::uint16_t id) {
           "::cursiv::ll_predict<kTable>(c, {}u); break;",
           k, k, n.decision);
     close("}");
-    open(std::format("switch ({}) {{", k));
+    open(concat("switch (", k, ") {"));
   }
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     if (direct) {
       if (byArm[i].empty()) continue;
       std::string cases;
-      for (std::uint16_t t : byArm[i]) cases += std::format("case {}u: ", t);
+      for (std::uint16_t t : byArm[i]) cases += concat("case ", t, "u: ");
       if (!entry[i].empty()) cases += entry[i] + ": ";
       open(cases + "{");
     } else {
       entry[i] = name("R");
-      open(std::format("case {}u: {}: {{", i, entry[i]));
+      open(concat("case ", i, "u: ", entry[i], ": {"));
     }
     // One label, one terminal: the arm knows which token it holds. Several,
     // and it knows only that it holds one.
@@ -837,10 +835,10 @@ void Emit::arm(std::uint16_t id, std::uint16_t hand) {
   if (out.size() - from < kArmBytes || regionAt.live() || foldAt.live() ||
       (step && memo.steps >= kLastStep))
     return;
-  Arm moved{.tag = std::format("{}_{}", inRule, arms.size())};
+  Arm moved{.tag = concat(inRule, "_", arms.size())};
   if (!step) {
-    moved.body = std::format(
-        "CURSIV_NOINLINE void s{}(::cursiv::LlContext& c) {{\n", moved.tag);
+    moved.body = concat("CURSIV_NOINLINE void s", moved.tag,
+                        "(::cursiv::LlContext& c) {\n");
     moved.body.append(out, from);
     moved.body += "}\n\n";
     out.resize(from);
@@ -873,7 +871,7 @@ void Emit::term_choice(std::uint16_t id,
   const LlDecision& dec = a.cfg.decisions[n.decision];
   const LlDecisionBuild& db = a.cfg.decisionBuild[n.decision];
   const std::string k = name("k");
-  peek_choice(n.decision, std::format("{}u", dec.mode), true);
+  peek_choice(n.decision, concat(dec.mode, "u"), true);
   put("static constexpr ::cursiv::LlTermArm {}a[] = {{", k);
   for (std::uint16_t i = 0; i < db.nalts; ++i) {
     const std::uint16_t x = kid(n, i);
@@ -890,7 +888,7 @@ void Emit::term_choice(std::uint16_t id,
       n.decision);
   put("if ({} >= {}u) {} = 0xFFFFu;", k, db.nalts, k);
   close("}");
-  open(std::format("if ({} == 0xFFFFu) {{", k));
+  open(concat("if (", k, " == 0xFFFFu) {"));
   open("switch (c.la.sym) {");
   for (std::uint16_t i = 0; i < db.nalts; ++i)
     put("case {}u: {} = {}u; break;", byArm[i][0], k, i);
@@ -943,9 +941,9 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
       !trackFirst ? std::string{} : local(held, "bool", "first");
   if (trackFirst) put("{}{} = true;", held ? "" : "bool ", first);
   const std::string mode =
-      flat    ? std::format("{}u", head)
-      : split ? std::format("({} ? {}u : {}u)", first, head, dec.mode)
-              : std::format("{}u", dec.mode);
+      flat    ? concat(head, "u")
+      : split ? concat("(", first, " ? ", head, "u : ", dec.mode, "u)")
+              : concat(dec.mode, "u");
   if (!flat) open("for (;;) {");
   if (!flat && n.max != kEndless) put("if ({} == {}u) break;", i, n.max);
   const bool guarded = n.min != 0;
@@ -973,7 +971,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     open("switch (c.la.sym) {");
     std::string cases;
     for (const unsigned t : a.laSet[dec.set].members())
-      cases += std::format("case {}u: ", t);
+      cases += concat("case ", t, "u: ");
     if (!cases.empty()) put("{}go = true; break;", cases);
     line("default: break;");
     close("}");
@@ -989,7 +987,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
     // where a turn would have started. LEAVING IS ONLY AN ANSWER WHERE A RULE
     // ABOVE CAN CARRY ON FROM THE TOKEN -- otherwise it costs the author
     // every construct below, so the loop turns and its body repairs.
-    open(std::format("if ({} != 0) {{", k));
+    open(concat("if (", k, " != 0) {"));
     put("if ({} == ::cursiv::kNoRow && !mend &&", k);
     put("    !::cursiv::ll_loop_leaves<kTable>(c, {}u)) {{", n.decision);
     open();
@@ -1018,11 +1016,9 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   if (guarded) close("}");
   if (reread) {
     const std::string readMode =
-        flat || !readSplit
-            ? std::format("{}u", readHead)
-            : std::format("({} ? {}u : {}u)",
-                          counts ? std::format("{} == 0", i) : first,
-                          readHead, readNext);
+        flat || !readSplit ? concat(readHead, "u")
+                           : concat("(", counts ? concat(i, " == 0") : first,
+                                    " ? ", readHead, "u : ", readNext, "u)");
     put("::cursiv::ll_repeat_read<kTable>(c, {});", readMode);
   }
   if (flat) {
@@ -1046,7 +1042,7 @@ void Emit::repetition(std::uint16_t id, std::uint16_t body) {
   line("if (c.abandonDepth != ~::std::size_t{0}) break;");
   line("c.give = false;");
   put("if (c.at == {}{}) break;", at,
-      levels ? std::format(" && c.indent == {}", level) : std::string{});
+      levels ? concat(" && c.indent == ", level) : std::string{});
   if (counts) put("++{};", i);
   close("}");
   if (!held) close("}");
@@ -1194,9 +1190,9 @@ void Emit::climb(std::uint16_t r) {
   const auto grouping = [&](const LlClimbOp& op) {
     std::string stated;
     if (anyRight)
-      stated += std::format(" f.right = {};", op.assoc == Association::right);
+      stated += concat(" f.right = ", op.assoc == Association::right, ";");
     if (anyNon)
-      stated += std::format(" f.non = {};", op.assoc == Association::non);
+      stated += concat(" f.non = ", op.assoc == Association::non, ";");
     return stated;
   };
   line("f.least = c.arg;");
@@ -1215,7 +1211,7 @@ void Emit::climb(std::uint16_t r) {
   line("if (c.give) goto done;");
   open("for (;;) {");
   line("f.before = c.at;");
-  peek_choice(selectDec, std::format("{}u", cl.mode), true);
+  peek_choice(selectDec, concat(cl.mode, "u"), true);
   // Prediction can keep the first unfinished arm at the end of a document.
   // An infix has no operator there: consuming that zero-width EOF would
   // reset the repair budget and recursively invent another operand forever.
@@ -1231,7 +1227,7 @@ void Emit::climb(std::uint16_t r) {
     put("{} = ::cursiv::ll_climb_fix<kTable>(c, {}u, {}u);", into, cl.mode,
         selectDec);
     put("if ({} == ::cursiv::kLlClimbAgain) continue;", into);
-    open(std::format("switch ({}) {{", into));
+    open(concat("switch (", into, ") {"));
     for (std::uint16_t k = 0; k < cl.opCount; ++k) {
       const LlClimbOp& op = a.cfg.climbOps[cl.opBase + k];
       const auto leaf = a.cfg.atomic_operator(op.body);
@@ -1241,7 +1237,7 @@ void Emit::climb(std::uint16_t r) {
               grouping(op), k);
         continue;
       }
-      open(std::format("case {}u:", k));
+      open(concat("case ", k, "u:"));
       put("f.prec = {}u;", op.prec);
       if (const std::string stated = grouping(op); !stated.empty())
         line(std::string_view(stated).substr(1));
@@ -1294,7 +1290,7 @@ void Emit::climb(std::uint16_t r) {
       const LlDecision& choice = a.cfg.decisions[selectDec];
       std::string cases;
       for (const unsigned t : a.laSet[choice.set + k].members())
-        cases += std::format("case {}u: ", t);
+        cases += concat("case ", t, "u: ");
       put("{}f.prec = {}u;{} body = {}u; break;", cases, op.prec, grouping(op),
           k);
       continue;
@@ -1334,7 +1330,7 @@ void Emit::climb(std::uint16_t r) {
       const auto& op = a.cfg.climbOps[cl.opBase + k];
       const auto leaf = a.cfg.atomic_operator(op.body);
       if (!select && leaf != kNoRow) continue;
-      open(std::format("case {}u: {{", k));
+      open(concat("case ", k, "u: {"));
       if (leaf != kNoRow) {
         // Prediction chooses an operator arm but does not replace the token
         // held by the wider climb alphabet. Its terminal position reads the
@@ -1370,24 +1366,24 @@ std::string Emit::frame_of(std::string_view tag, std::size_t from) const {
       taken.begin() + static_cast<std::ptrdiff_t>(from), taken.end());
   std::ranges::sort(own);
   own.erase(std::ranges::unique(own).begin(), own.end());
-  std::string s = std::format("struct F{} {{\n  ::std::uint16_t pc;\n", tag);
+  std::string s = concat("struct F", tag, " {\n  ::std::uint16_t pc;\n");
   for (const std::size_t k : own)
-    s += std::format("  {} {};\n", fields[k].first, fields[k].second);
+    s += concat("  ", fields[k].first, " ", fields[k].second, ";\n");
   return s + "};\n";
 }
 
 std::string Emit::resume_switch(std::size_t resumed) const {
   std::string s = "  switch (f.pc) {\n";
   for (std::size_t i = resumed; i < labels.size(); ++i)
-    s += std::format("    case {0}u: goto L{0};\n", labels[i]);
+    s += concat("    case ", labels[i], "u: goto L", labels[i], ";\n");
   return s + "    default: break;\n  }\n";
 }
 
 std::string Emit::step_head(std::string_view tag, std::size_t resumed) const {
-  return std::format(
-      "::std::uint16_t s{0}(::cursiv::LlContext& c, void* frame) {{\n"
-      "  auto& f = *::std::launder(static_cast<F{0}*>(frame));\n{1}",
-      tag, resume_switch(resumed));
+  return concat("::std::uint16_t s", tag,
+                "(::cursiv::LlContext& c, void* frame) {\n"
+                "  auto& f = *::std::launder(static_cast<F",
+                tag, "*>(frame));\n", resume_switch(resumed));
 }
 
 // One rule, as a step: its frame holds what outlives a call, and the step
@@ -1408,7 +1404,7 @@ void Emit::rule(std::uint16_t r) {
     if (resumes != 0 || !fields.empty() || exits)
       throw std::logic_error("cursiv: a plain LL rule resumes");
     frame.clear();
-    out += std::format("void s{}(::cursiv::LlContext& c) {{\n", r);
+    out += concat("void s", r, "(::cursiv::LlContext& c) {\n");
     out += "  if (c.give) {\n    c.repaired.mark();\n    return;\n  }\n";
     out += body;
     out += "}\n\n";
@@ -1464,11 +1460,11 @@ std::string ll_emit_parser_decl(const std::string& ns) {
   s += "// GENERATED by the predictive engine -- do not edit.\n";
   s += "#pragma once\n\n";
   s += "namespace cursiv {\nstruct LlContext;\n}  // namespace cursiv\n\n";
-  s += std::format("namespace {} {{\n", ns);
+  s += concat("namespace ", ns, " {\n");
   s += "void parse_entry(::cursiv::LlContext&);\n";
   s +=
       "inline constexpr void (*kDrive)(::cursiv::LlContext&) = &parse_entry;\n";
-  s += std::format("}}  // namespace {}\n", ns);
+  s += concat("}  // namespace ", ns, "\n");
   return s;
 }
 
@@ -1484,7 +1480,7 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
     levels = levels || a.cfg.terms[t].laid == kLaidIndent ||
              a.cfg.terms[t].laid == kLaidDedent;
   Memos memo{.plain = ll_plain_depths(a.cfg), .steps = a.cfg.nrules};
-  std::string declarations = std::format("\nnamespace {} {{\n", ns);
+  std::string declarations = concat("\nnamespace ", ns, " {\n");
   std::vector<std::string> bodies;
   std::size_t bytes = 0;
   // The machine steps the rules that resume, and the entry whatever it is:
@@ -1496,17 +1492,15 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   // Each rule and arm is declared as a function, or as a step with its frame;
   // a step also takes the machine's case for its number and its frame's size.
   const auto declare = [&](std::string_view tag, const std::string& frame) {
-    declarations +=
-        frame.empty()
-            ? std::format("void s{}(::cursiv::LlContext&);\n", tag)
-            : std::format(
-                  "{}::std::uint16_t s{}(::cursiv::LlContext&, void*);\n",
-                  frame, tag);
+    declarations += frame.empty()
+                        ? concat("void s", tag, "(::cursiv::LlContext&);\n")
+                        : concat(frame, "::std::uint16_t s", tag,
+                                 "(::cursiv::LlContext&, void*);\n");
   };
   const auto step = [](std::string& steps, std::string& sizes,
                        std::uint32_t number, std::string_view tag) {
-    steps += std::format("    case {}u: return s{}(c, f);\n", number, tag);
-    sizes += std::format("sizeof(F{}), ", tag);
+    steps += concat("    case ", number, "u: return s", tag, "(c, f);\n");
+    sizes += concat("sizeof(F", tag, "), ");
   };
   for (std::uint16_t r = 1; r < a.cfg.nrules; ++r)
     if (a.liveRules[r]) {
@@ -1524,15 +1518,15 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
         bodies.push_back(std::move(arm.body));
       }
     }
-  declarations += std::format("}}  // namespace {}\n", ns);
+  declarations += concat("}  // namespace ", ns, "\n");
   std::string steps, sizes;
   const std::uint16_t entry = a.cfg.entryRule;
   for (std::uint16_t r = 0; r < a.cfg.nrules; ++r)
     if (stepped[r]) {
       step(steps, sizes, r, std::to_string(r));
     } else if (r == entry) {
-      steps += std::format(
-          "    case {}u: s{}(c); return ::cursiv::kLlDone;\n", r, r);
+      steps +=
+          concat("    case ", r, "u: s", r, "(c); return ::cursiv::kLlDone;\n");
       sizes += "sizeof(::std::uint16_t), ";
     } else {
       sizes += "0u, ";
@@ -1558,13 +1552,13 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
         "#include \"cursiv/ll/runtime/ll_repair.hpp\"\n";
     if (a.cfg.ngapConds != 0)
       source += "#include \"cursiv/ll/runtime/ll_conditions.hpp\"\n";
-    source += std::format("\nnamespace {} {{\n\n", ns);
+    source += concat("\nnamespace ", ns, " {\n\n");
     std::size_t used = 0;
     do {
       used += bodies[next].size();
       source += bodies[next++];
     } while (next < bodies.size() && (used < budget || u + 1 == kParserUnits));
-    source += std::format("}}  // namespace {}\n", ns);
+    source += concat("}  // namespace ", ns, "\n");
   }
   // Rules spread over several units share their cold paths: every unit
   // declares them, and the parser's own unit compiles them, once. The rules of
@@ -1577,15 +1571,15 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
           std::pair{"CONDITION_", a.cfg.ngapConds != 0},
           std::pair{"CLIMB_", a.cfg.nclimbs != 0}})
       if (wanted)
-        s += std::format("CURSIV_LL_{}COLD_PATHS({}, ::{}::kTable);\n", paths,
-                         how, ns);
+        s += concat("CURSIV_LL_", paths, "COLD_PATHS(", how, ", ::", ns,
+                    "::kTable);\n");
     return s;
   };
-  std::string header = std::format(
-      "{}#pragma once\n\n#include <cstdint>\n\n#include \"Parser.hpp\"\n"
-      "#include \"cursiv/syntax-tree/CstBuilder.hpp\"\n"
-      "#include \"cursiv/ll/runtime/LlSection.hpp\"\n",
-      banner);
+  std::string header =
+      concat(banner,
+             "#pragma once\n\n#include <cstdint>\n\n#include \"Parser.hpp\"\n"
+             "#include \"cursiv/syntax-tree/CstBuilder.hpp\"\n"
+             "#include \"cursiv/ll/runtime/LlSection.hpp\"\n");
   if (levels)
     header += "#include \"cursiv/shared/runtime/IndentLevel.hpp\"\n";
   if (shared)
@@ -1598,29 +1592,34 @@ std::vector<std::pair<std::string, std::string>> ll_emit_parser_files(
   files.emplace_back("ParserRules.hpp", std::move(header));
   files.emplace_back(
       "ParserStates.cpp",
-      std::format(
-          "{}#include <cstdint>\n\n#include \"ParserRules.hpp\"\n"
-          "#include \"cursiv/ll/runtime/LlContext.hpp\"\n"
-          "#include \"cursiv/ll/runtime/LlMachine.hpp\"\n"
-          "{}{}\n"
-          "namespace {} {{\n\n{}{}"
-          "\nnamespace {{\n"
-          "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
-          "[[maybe_unused]] void* f) {{\n  switch (r) {{\n{}"
-          "    default: return ::cursiv::kLlDone;\n  }}\n}}\n"
-          "constexpr ::std::uint32_t kFrameBytes[] = {{{}}};\n"
-          "}}  // namespace\n"
-          "void parse_entry(::cursiv::LlContext& c) {{\n{}"
-          "  ::cursiv::LlMachine machine;\n"
-          "  machine.run<&step>(c, {}u, kFrameBytes);\n"
-          "}}\n"
-          "}}  // namespace {}\n{}",
-          banner, ll_emit_walk_includes(a), table.includes, ns, table.functions,
-          ll_emit_walk(a), steps, sizes, "  c.stack.reserve(64);\n", entry, ns,
-          shared ? cold("") : std::string{}));
+      concat(banner,
+             "#include <cstdint>\n\n#include \"ParserRules.hpp\"\n"
+             "#include \"cursiv/ll/runtime/LlContext.hpp\"\n"
+             "#include \"cursiv/ll/runtime/LlMachine.hpp\"\n",
+             ll_emit_walk_includes(a), table.includes,
+             "\n"
+             "namespace ",
+             ns, " {\n\n", table.functions, ll_emit_walk(a),
+             "\nnamespace {\n"
+             "::std::uint16_t step(::std::uint16_t r, ::cursiv::LlContext& c, "
+             "[[maybe_unused]] void* f) {\n  switch (r) {\n",
+             steps,
+             "    default: return ::cursiv::kLlDone;\n  }\n}\n"
+             "constexpr ::std::uint32_t kFrameBytes[] = {",
+             sizes,
+             "};\n"
+             "}  // namespace\n"
+             "void parse_entry(::cursiv::LlContext& c) {\n"
+             "  c.stack.reserve(64);\n"
+             "  ::cursiv::LlMachine machine;\n"
+             "  machine.run<&step>(c, ",
+             entry,
+             "u, kFrameBytes);\n"
+             "}\n"
+             "}  // namespace ",
+             ns, "\n", shared ? cold("") : std::string{}));
   for (unsigned u = 0; u < kParserUnits; ++u)
-    files.emplace_back(std::format("ParserRules{}.cpp", u),
-                       std::move(sources[u]));
+    files.emplace_back(concat("ParserRules", u, ".cpp"), std::move(sources[u]));
   return files;
 }
 

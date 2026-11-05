@@ -4,6 +4,7 @@
 #include <optional>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -79,19 +80,12 @@ struct strip_storage<std::optional<X>> {
   using type = X;
   static constexpr FieldStorage storage = FieldStorage::optional;
 };
-template <class X>
-struct strip_storage<cursiv::vector<X>> {
-  using type = X;
-  static constexpr FieldStorage storage = FieldStorage::vector;
-};
-// Refused by name rather than falling through as an unrecognised value type,
-// where the diagnostic would be about a conversion nobody asked for.
 template <class X, class A>
 struct strip_storage<std::vector<X, A>> {
-  static_assert(sizeof(X) == 0,
-                "an AST list member must be `vector<T>` (cursiv::vector), not "
-                "std::vector: the list is stored in the tree's own memory. "
-                "Write `vector<T>`; AstNode brings the name into scope");
+  static_assert(!std::is_base_of_v<AstNode, X>,
+                "an AST list member holds nodes by pointer: write "
+                "`vector<Person*>`, not `vector<Person>`. A node is built in "
+                "the tree and is never copied into a list");
   using type = X;
   static constexpr FieldStorage storage = FieldStorage::vector;
 };
@@ -113,12 +107,45 @@ struct field_tag {
   static constexpr auto ptr = P;
   using owner = typename member_traits<decltype(P)>::class_type;
   using member = typename member_traits<decltype(P)>::type;
-  // `vector<X*>` and `optional<X*>` both hold an `X*`.
+  // `vector<X>` and `optional<X>` both hold an `X`.
   using held = typename strip_storage<member>::type;
   static constexpr FieldStorage storage = strip_storage<member>::storage;
   static constexpr FieldNature nature = nature_of<held>;
   static constexpr std::string_view name = member_identifier<P>();
 };
+
+// A list's or an optional's new element, built in place: it needs neither an
+// empty state nor an assignment.
+template <class M, class... Args>
+void add_held(M& member, Args&&... args) {
+  if constexpr (strip_storage<M>::storage == FieldStorage::vector)
+    member.emplace_back(std::forward<Args>(args)...);
+  else
+    member.emplace(std::forward<Args>(args)...);
+}
+
+// Puts a finished value into a member. A value of the member's own type
+// replaces it whole. Anything else makes what the member holds, the alternative
+// `A` of a variant.
+template <class A, class M, class V>
+void place(M& member, V&& value) {
+  using Held = typename strip_storage<M>::type;
+  using T = std::remove_cvref_t<V>;
+  if constexpr (std::is_same_v<T, M>) {
+    member = std::forward<V>(value);
+  } else if constexpr (strip_storage<M>::storage != FieldStorage::direct) {
+    if constexpr (is_variant_v<Held> && !std::is_same_v<T, Held>)
+      add_held(member, std::in_place_type<A>, std::forward<V>(value));
+    else
+      add_held(member, std::forward<V>(value));
+  } else if constexpr (is_variant_v<M>) {
+    member.template emplace<A>(std::forward<V>(value));
+  } else if constexpr (std::is_assignable_v<M&, V>) {
+    member = std::forward<V>(value);
+  } else {
+    member = M(std::forward<V>(value));
+  }
+}
 
 }  // namespace detail
 }  // namespace cursiv

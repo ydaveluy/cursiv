@@ -13,10 +13,10 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 // Where the AST nodes live: a bump over the resource the tree already owns,
-// so one release frees both. A node owns nothing and runs no destructor:
-// the arena is the pool's bump and nothing else.
+// so one release frees both. What a node's members own, the `ParseResult` frees
+// by running each node's destructor.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 class AstArena {
  public:
@@ -41,11 +41,6 @@ class AstArena {
   T* make() {
     static_assert(std::is_base_of_v<AstNode, T>,
                   "an AST node type must derive from cursiv::AstNode");
-    static_assert(std::is_trivially_destructible_v<T>,
-                  "an AST node must be trivially destructible: the tree is "
-                  "freed as one block and never runs a destructor, so a node "
-                  "member must not own memory. Use `vector<T>` for lists and "
-                  "`string_view` for text");
     // A default-constructed arena borrows nothing: `make` on it would
     // dereference null rather than say what is missing.
     assert(_mem != nullptr && "AstArena needs a memory resource before make()");
@@ -53,33 +48,8 @@ class AstArena {
     T* v = std::construct_at(static_cast<T*>(s));
     // The type tag is written at construction, here and in `new_ast_node`, so a
     // node built by hand carries the same identity a parsed one does.
-    AstNode* const base = v;
-    base->type = &ast_type_tag<T>;
+    stamp_node(*v);
     return v;
-  }
-
-  // `cursiv::vector` seats its storage here. It names no arena type: the two
-  // calls below are the whole contract, taken as a template parameter.
-
-  // Untyped storage from the same bump the nodes come out of.
-  void* carve_bytes(std::size_t size, std::size_t align) {
-    assert(_mem != nullptr &&
-           "AstArena needs a memory resource before a carve");
-    return carve(size, align);
-  }
-
-  // Grows the last carve without moving it, which is what makes a list member
-  // cost its exact bytes: the appends to one member form a contiguous run, so
-  // its block is still the top of the bump. False when something was carved in
-  // between, and the caller then copies once.
-  bool try_extend(void* p, std::size_t oldBytes, std::size_t newBytes) {
-    const auto* const q = static_cast<const char*>(p);
-    // The carve already reserved its padding, even at the end of the chunk.
-    if (align_up(q + oldBytes, kBumpAlign) != _cur) return false;
-    if (newBytes < oldBytes || std::cmp_greater(newBytes, _end - q)) return false;
-    _cur = align_up(q + newBytes, kBumpAlign);
-    if (_cur > _end) _cur = _end;
-    return true;
   }
 
   // Forgets every node: the arena stays usable but every node it built is
@@ -169,4 +139,4 @@ class AstArena {
   char* _end = nullptr;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

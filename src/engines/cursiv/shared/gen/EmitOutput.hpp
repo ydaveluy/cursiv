@@ -9,6 +9,8 @@
 #include <string_view>
 #include <utility>
 
+#include "cursiv/shared/gen/Concat.hpp"
+
 namespace cursiv {
 
 struct EmitOutput {
@@ -61,10 +63,10 @@ std::string join(const Items& items, std::string_view sep, Cell cell = {}) {
 template <class Items, class Cell = std::identity>
 std::string emit_table(std::string_view decl, const Items& items,
                        Cell cell = {}, std::string_view empty = {}) {
-  std::string out = std::format("{} = {{\n", decl);
-  for (const auto& item : items) out += std::format("    {},\n", cell(item));
+  std::string out = concat(decl, " = {\n");
+  for (const auto& item : items) out += concat("    ", cell(item), ",\n");
   if (std::ranges::empty(items) && !empty.empty())
-    out += std::format("    {},\n", empty);
+    out += concat("    ", empty, ",\n");
   return out + "};\n";
 }
 

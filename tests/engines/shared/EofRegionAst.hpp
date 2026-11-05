@@ -9,7 +9,7 @@ struct Island : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> words;
 };
 struct Document : cursiv::Extends<cursiv::AstNode> {
-  vector<std::variant<Island*, std::string_view>> parts;
+  vector<variant<Island*, string_view>> parts;
 };
 struct Empty : cursiv::Extends<cursiv::AstNode> {};
 struct ChainDocument : cursiv::Extends<cursiv::AstNode> {

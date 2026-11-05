@@ -20,9 +20,7 @@ struct Document;
 // so.
 template <class T>
 concept NamedAstNode =
-    std::derived_from<T, AstNode> && requires(const T& node) {
-      { node.name } -> std::same_as<const AstNode::string_view&>;
-    };
+    std::derived_from<T, AstNode> && detail::has_name_member<T>;
 
 // ...and the same question of a node whose class is not known here, answered
 // by the tag: whether a class declares a name is a fact about the class, so
@@ -35,9 +33,9 @@ class NameProvider {
  public:
   virtual ~NameProvider() noexcept = default;
 
-  // Absent when the node declares no name. A view and not a string: the AST
-  // borrows every identifier it holds, and copying one per call would be paid
-  // on the indexing path.
+  // Absent when the node declares no name. A view and not a string: the name is
+  // already held by the node or the document, and copying one per call would be
+  // paid on the indexing path.
   [[nodiscard]] virtual std::optional<std::string_view> getName(
       const AstNode& node) const = 0;
 

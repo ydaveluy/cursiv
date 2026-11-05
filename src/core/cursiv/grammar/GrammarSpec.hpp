@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <memory_resource>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -656,12 +655,11 @@ struct ConversionResult;
 
 // ...and the leaf list, declared for the same reason: the parts forms of a
 // converter are recognised in the one chain below, beside the text forms --
-// never by exclusion, which leaves a parts converter no optional-resource
-// pair. Only a reference to it is ever formed here; the definition is complete
-// everywhere these concepts are checked.
-// The parts a data rule joins, as values: each leaf through its own
-// converter. A parts converter sees what the join concatenates, never the raw
-// bytes -- the two would answer differently the moment a leaf converts.
+// never by exclusion. Only a reference to it is ever formed here; the
+// definition is complete everywhere these concepts are checked. The parts a
+// data rule joins, as values: each leaf through its own converter. A parts
+// converter sees what the join concatenates, never the raw bytes -- the two
+// would answer differently the moment a leaf converts.
 using Parts = std::span<const std::string_view>;
 
 // A terminal and a value rule name what their text becomes with `as<X>`
@@ -675,18 +673,6 @@ using Parts = std::span<const std::string_view>;
 // module interface: write `inline constexpr auto f = [](...){...};` and cite
 // `f`. (The closure in an NTTP is a g++ extension, CWG2542; this project is
 // g++-only and says so here.)
-
-// The resource parameter is spelled exactly: a pointer converts implicitly to
-// `bool` and `void*`, so a second parameter that also accepts an `int` or a
-// `void*` is not a resource.
-template <auto F, class A>
-concept resource_arg = requires(std::string_view t, A a) { F(t, a); } &&
-                       !requires(std::string_view t, int i) { F(t, i); } &&
-                       !requires(std::string_view t, void* v) { F(t, v); };
-template <auto F, class A>
-concept parts_resource_arg = requires(Parts p, A a) { F(p, a); } &&
-                             !requires(Parts p, int i) { F(p, i); } &&
-                             !requires(Parts p, void* v) { F(p, v); };
 
 namespace detail {
 
@@ -708,12 +694,6 @@ struct text_conv : made_conv {
   {
     return F(t);
   }
-  static constexpr decltype(auto) convert(std::string_view t,
-                                          std::pmr::memory_resource* m)
-    requires resource_arg<F, std::pmr::memory_resource*>
-  {
-    return F(t, m);
-  }
 };
 template <auto F>
 struct parts_conv : made_conv {
@@ -721,11 +701,6 @@ struct parts_conv : made_conv {
     requires requires { F(p); }
   {
     return F(p);
-  }
-  static constexpr decltype(auto) convert(Parts p, std::pmr::memory_resource* m)
-    requires parts_resource_arg<F, std::pmr::memory_resource*>
-  {
-    return F(p, m);
   }
 };
 // The constant a match denotes: `'is' 'not' | '!='` is one operator, and the
@@ -746,16 +721,15 @@ inline constexpr bool is_pass_conv = false;
 template <class T>
 inline constexpr bool is_pass_conv<pass_conv<T>> = true;
 
-// Whether a class declares a call operator of any shape: the probe's own is
-// then ambiguous in a class deriving from both.
-struct call_probe {
-  void operator()() const;
-};
+// Whether a class is a converter: it has one call operator of any shape, which
+// `as_conv` then judges, or it reads what a converter reads, as an overloaded
+// or generic one does.
 template <class T>
-struct call_probe_mix : T, call_probe {};
-template <class T>
-concept declares_call = std::is_class_v<T> && !std::is_final_v<T> &&
-                        !requires { &call_probe_mix<T>::operator(); };
+concept declares_call =
+    std::is_class_v<T> &&
+    (requires { &T::operator(); } || std::is_invocable_v<const T&> ||
+     std::is_invocable_v<const T&, std::string_view> ||
+     std::is_invocable_v<const T&, Parts>);
 template <class T>
 inline constexpr bool is_callable_constant =
     (std::is_pointer_v<T> && std::is_function_v<std::remove_pointer_t<T>>) ||
@@ -771,14 +745,11 @@ struct as_conv {
 template <auto X>
 struct as_conv<X, true> {
   static constexpr bool none = requires { X(); };
-  static constexpr bool text = requires(std::string_view t) { X(t); } ||
-                               resource_arg<X, std::pmr::memory_resource*>;
-  static constexpr bool parts = requires(Parts p) { X(p); } ||
-                                parts_resource_arg<X, std::pmr::memory_resource*>;
+  static constexpr bool text = requires(std::string_view t) { X(t); };
+  static constexpr bool parts = requires(Parts p) { X(p); };
   static_assert(none || text || parts,
                 "as<f>(e): f must take the text (std::string_view), the "
-                "parts (std::span<const std::string_view>) or no argument; "
-                "a second parameter may only be a std::pmr::memory_resource*");
+                "parts (std::span<const std::string_view>) or no argument");
   static_assert(int(none) + int(text) + int(parts) <= 1,
                 "as<f>(e): f accepts more than one kind of input (the text, "
                 "the parts or no argument), as a generic (auto) lambda does: "
@@ -915,78 +886,39 @@ template <class R>
 using conv_t = typename slot_conv<slot_t<R>>::type;
 
 // A converter is found by invocability, never by name: a rule may declare
-// several `convert` overloads -- the text form and the text-plus-resource
-// form are one such pair -- and `R::convert` is not an id-expression the
-// moment it does.
-//
-// The resource is optional and it wins. A converter that has to materialise
-// its answer takes the tree's memory resource, allocates there and hands
-// back a view of it; one that only slices its input takes text alone. When
-// both forms are viable the resource form is the one every reader deduces
-// from and the builder calls.
+// several `convert` overloads -- the text form and the parts form are one such
+// pair -- and `R::convert` is not an id-expression the moment it does.
 template <class R>
 concept ConvertsText = requires(std::string_view t) { R::convert(t); };
-//
-// And the second parameter is the resource, not something a resource pointer
-// merely converts to: a pointer converts implicitly to `bool` and `void*`, so
-// `convert(std::string_view, bool keepQuotes)` would pass for this form, win
-// over the text form and run with `keepQuotes = true`. A parameter that also
-// accepts an `int` or a `void*` is such an impostor, never a resource.
-template <class R>
-concept ConvertsTextMem =
-    requires(std::string_view t, std::pmr::memory_resource* m) {
-      R::convert(t, m);
-    } && !requires(std::string_view t, int i) { R::convert(t, i); } &&
-    !requires(std::string_view t, void* v) { R::convert(t, v); };
-// A data rule's converter reads the parts instead -- same optional resource,
-// same precedence within the pair. Asked by invocability like the others:
-// recognising the parts forms by exclusion would be an id-expression, which
-// breaks the moment a rule declares both parts overloads.
+// A data rule's converter reads the parts instead. Asked by invocability like
+// the others: recognising the parts form by exclusion would be an
+// id-expression.
 template <class R>
 concept ConvertsParts = requires(Parts p) { R::convert(p); };
-template <class R>
-concept ConvertsPartsMem =
-    requires(Parts p, std::pmr::memory_resource* m) { R::convert(p, m); } &&
-    !requires(Parts p, int i) { R::convert(p, i); } &&
-    !requires(Parts p, void* v) { R::convert(p, v); };
 // ...and the converter that reads nothing at all.
 template <class R>
 concept ConvertsNothing = requires { R::convert(); };
 template <class R>
-concept HasConverter = ConvertsText<R> || ConvertsTextMem<R> ||
-                       ConvertsParts<R> || ConvertsPartsMem<R> ||
-                       ConvertsNothing<R>;
+concept HasConverter =
+    ConvertsText<R> || ConvertsParts<R> || ConvertsNothing<R>;
 
-// The value the retained form answers, resource form first.
+// The value the retained form answers.
 template <class R>
 struct convert_result {
   using type = decltype(R::convert(std::string_view{}));
 };
 template <class R>
-  requires ConvertsTextMem<R>
-struct convert_result<R> {
-  using type = decltype(R::convert(std::string_view{},
-                                   std::declval<std::pmr::memory_resource*>()));
-};
-template <class R>
-  requires (!ConvertsTextMem<R> && !ConvertsText<R> && ConvertsNothing<R>)
+  requires(!ConvertsText<R> && ConvertsNothing<R>)
 struct convert_result<R> {
   using type = decltype(R::convert());
 };
 
-// ...and the same question of the parts form, in the priority order the
-// invocation itself uses: resource form first. Without this trait the Parts
+// ...and the same question of the parts form. Without this trait the Parts
 // branch would trust the annotation alone, and a `data<NUM, ..., int>` whose
 // `convert` returns `double` would truncate at the write, silently.
 template <class R>
 struct convert_parts_result {
   using type = decltype(R::convert(std::declval<Parts>()));
-};
-template <class R>
-  requires ConvertsPartsMem<R>
-struct convert_parts_result<R> {
-  using type = decltype(R::convert(std::declval<Parts>(),
-                                   std::declval<std::pmr::memory_resource*>()));
 };
 
 // A converter answering `ConversionResult<T>` produces a T -- the wrapper is
@@ -1782,12 +1714,12 @@ struct rule_type {
           !builds_node<std::remove_cv_t<decltype(R::body)>, TypeList<R>>,
           "as<X>(e) converts text, but this e builds an AST node: convert "
           "the text inside the node rule, not the rule itself");
-    if constexpr (ConvertsParts<Cv> || ConvertsPartsMem<Cv>) {
+    if constexpr (ConvertsParts<Cv>) {
       // A parts converter is not callable with text; its result is probed
       // against the forward-declared `Parts` instead.
       using Conv = unwrap_result_t<typename convert_parts_result<Cv>::type>;
       return std::type_identity<Conv>{};
-    } else if constexpr (ConvertsText<Cv> || ConvertsTextMem<Cv>) {
+    } else if constexpr (ConvertsText<Cv>) {
       // A `ConversionResult<T>` is a T that may also carry a positioned
       // failure, so the rule's type is T.
       using Conv = unwrap_result_t<typename convert_result<Cv>::type>;
@@ -1795,10 +1727,6 @@ struct rule_type {
     } else if constexpr (ConvertsNothing<Cv>) {
       using Conv = unwrap_result_t<decltype(Cv::convert())>;
       return std::type_identity<Conv>{};
-    } else if constexpr (requires { typename Cv::result; }) {
-      // A bare target: the slot names the type and the tree's own conversion
-      // produces it.
-      return std::type_identity<typename Cv::result>{};
     } else {
       // A slot nothing reaches: a target type no conversion answers.
       static_assert(slot_empty<R>,

@@ -5,7 +5,7 @@
 
 namespace tllescape {
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool guarded = false;
+  boolean guarded = false;
   string_view name;
   string_view label;
 };

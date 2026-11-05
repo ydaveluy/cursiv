@@ -130,15 +130,16 @@ consteval AstRowDesc make_row() {
                   DenotesText<Cv>) {
       d.textType = &kType<declared_of_t<typename Row::type>>;
       d.textOverride = !std::is_void_v<O>;
-      g.textInput = ConvertsParts<Cv> || ConvertsPartsMem<Cv> ? TextInput::parts
-                    : converts_input<Cv>                     ? TextInput::text
-                                                             : TextInput::none;
+      g.textInput = ConvertsParts<Cv>    ? TextInput::parts
+                    : converts_input<Cv> ? TextInput::text
+                                         : TextInput::none;
     }
     using Src = typename Row::source;
     if constexpr (is_terminal_rule<Src> || is_data_rule<Src>) {
       g.passes = is_pass_conv<converter_rule_t<Src>>;
       g.valued = !g.passes &&
-                 !std::is_same_v<rule_type_t<Src>, std::string_view>;
+                 !std::is_same_v<rule_type_t<Src>, std::string_view> &&
+                 !std::is_same_v<rule_type_t<Src>, std::string>;
       if (g.passes || g.valued)
         d.valueType = &kType<declared_of_t<typename Row::type>>;
     }
@@ -180,7 +181,7 @@ consteval AstRowDesc make_row() {
     g.convRank = conv_alt_rank<M, Src>();
     g.convJoins = joins_parts<typename Src::rule>;
     using Site = site_conv_t<D, O>;
-    g.convParts = ConvertsParts<Site> || ConvertsPartsMem<Site>;
+    g.convParts = ConvertsParts<Site>;
     g.convPasses = is_pass_conv<Site>;
     if constexpr (joins_parts<typename Src::rule>) {
       using Inside = dedupe_t<

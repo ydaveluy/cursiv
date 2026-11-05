@@ -56,7 +56,7 @@ void DefaultScopeComputation::addExportedSymbol(
 LocalSymbols DefaultScopeComputation::collectLocalSymbols(
     const Document& document, const CancellationToken& cancelToken) const {
   LocalSymbols symbols;
-  for (AstNode* const node : document.parseResult.nodes) {
+  for (AstNode* const node : document.parseResult.nodes()) {
     throw_if_cancelled(cancelToken);
     addLocalSymbol(*node, document, symbols);
   }

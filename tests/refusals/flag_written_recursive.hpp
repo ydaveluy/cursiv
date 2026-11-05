@@ -5,7 +5,7 @@
 namespace refuse {
 namespace ast {
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool on = false;
+  boolean on = false;
 };
 }  // namespace ast
 struct G : Base {

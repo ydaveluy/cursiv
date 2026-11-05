@@ -39,7 +39,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct Decl : cursiv::Extends<cursiv::AstNode> {
   Vis vis = Vis::Private;
   string_view name;
-  bool seen = false;
+  boolean seen = false;
 };
 struct Marked : cursiv::Extends<Expr> {
   Expr* left = nullptr;
@@ -413,7 +413,7 @@ struct Cast : cursiv::Extends<Expression> {
   Expression* body{};
 };
 struct Rc : cursiv::Extends<Expression> {
-  bool extra{};
+  boolean extra{};
 };
 struct Ns : cursiv::Extends<Expression> {
   Rc* child{};

@@ -19,7 +19,7 @@ struct Path : cursiv::Extends<Node> {
 };
 struct Array : cursiv::Extends<Node> {
   Node* inner{};
-  bool constant{};
+  boolean constant{};
 };
 struct Marked : cursiv::Extends<Node> {
   Node* inner{};

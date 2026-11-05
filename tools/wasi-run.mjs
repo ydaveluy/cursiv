@@ -90,8 +90,10 @@ function wasiFor(args, environment, hostModule) {
 // An application host exports createHost({ memory, args, runner, hostModule }).
 // `memory()` returns the current linear memory, including after memory.grow;
 // call it from imported functions rather than during host creation. The
-// optional async factory returns { imports, env }. Only the application owns
-// those imports and environment additions; the runner owns WASI and threads.
+// optional async factory returns { imports, env, instantiated }. Only the
+// application owns those imports and environment additions; the runner owns WASI
+// and threads. `instantiated(instance)` runs on each thread before any code of
+// the module does.
 async function applicationHost(hostModule, memory, args) {
   if (!hostModule) return {};
   const extension = await import(pathToFileURL(hostModule));
@@ -247,6 +249,7 @@ async function execute(module, memory, args, command, needsThreads, control,
           ...importObject[entry.module], [entry.name]: memory,
         };
   instance = await WebAssembly.instantiate(module, importObject);
+  await extension.instantiated?.(instance);
   if (command)
     return { code: wasi.start(withMemory(instance, memory)),
              memory: memory ?? instance.exports.memory };

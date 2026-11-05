@@ -11,7 +11,7 @@ namespace tcaretdepth {
 
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Expression> {
-  string_view text;
+  string text;
 };
 struct Statement : cursiv::Extends<cursiv::AstNode> {};
 struct Leaf : cursiv::Extends<Statement> {

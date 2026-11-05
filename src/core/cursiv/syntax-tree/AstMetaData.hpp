@@ -52,7 +52,6 @@ struct PropertyRow {
   std::size_t count = 0;
 };
 
-using WrittenFn = bool (*)(const AstNode&);
 using NewNodeFn = AstNodePtr (*)();
 using YieldFn = void (*)(
     const AstNode&,
@@ -78,7 +77,6 @@ struct AstMetaData {
   const detail::PropertyRow* propertyRows = nullptr;
   const AstTypeTag* const* referenceTags = nullptr;
   // One dispatch per known type, with inherited members selected at generation.
-  const detail::WrittenFn* complete = nullptr;
   const detail::YieldFn* memberVisitors = nullptr;
   // One per known type, null for a class no rule builds.
   const detail::NewNodeFn* newNodes = nullptr;

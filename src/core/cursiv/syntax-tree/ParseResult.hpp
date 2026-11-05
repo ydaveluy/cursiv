@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <memory_resource>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
+#include "cursiv/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 
 // What one parse left behind: the two trees, the arena that owns the AST, the
@@ -19,6 +21,7 @@
 namespace cursiv {
 
 struct Grammar;
+class AstReducer;
 
 // The tree is held by pointer so the result can move: nothing the result
 // owns stores a `Cst` address, but everything a caller derives from `cst()`
@@ -27,6 +30,18 @@ struct Grammar;
 class ParseResult {
   std::shared_ptr<const Grammar> _grammarOwner;
   std::unique_ptr<Cst> _cst;  // destroyed after the arena, before its grammar
+  // Where the nodes live, on the tree's pool. The builder is the one writer.
+  detail::AstArena _arena;
+  // Every node the builder created, sorted by `cstNodeId`, beside the records
+  // it indexes. See `nodes()`.
+  std::pmr::vector<AstNode*> _nodes;
+  friend struct Document;
+  void destroy_nodes() noexcept;
+  // Runs the destructors of `gone`; their memory stays with the pool.
+  static void destroy_detached(std::span<AstNode* const> gone) noexcept;
+  friend class AstReducer;
+  // For a test that builds a result by hand.
+  friend struct ParseResultAccess;
 
  public:
   ParseResult();
@@ -53,7 +68,6 @@ class ParseResult {
   void bind_translation(std::string_view document,
                         std::unique_ptr<const SourceTranslation> translation);
 
-  AstArena arena;
   AstNode* value = nullptr;
   // Held by pointer: this result moves, and every reference of the tree
   // stores the address of what answers it.
@@ -67,11 +81,11 @@ class ParseResult {
 
   explicit operator bool() const noexcept;
 
-  // The entry type is a static fact of the grammar, so no runtime test guards
-  // this cast.
+  // The root as a `T`, null when it is not one.
   template <class T>
   T* value_as() const {
-    return static_cast<T*>(value);
+    return ast_cast<T>(value) != nullptr ? detail::ast_cast_unchecked<T>(value)
+                                         : nullptr;
   }
 
   // Every node the builder created, sorted by `cstNodeId` -- which is
@@ -79,8 +93,7 @@ class ParseResult {
   // containing an offset is the innermost. `lower_bound` on the id turns a
   // description back into a node without walking the AST. An id is not a key:
   // `wrap` builds its wrapper at the record its content already sits on.
-  // On the tree's own pool, beside the records it indexes.
-  std::pmr::vector<AstNode*> nodes;
+  [[nodiscard]] OwnedNodes nodes() const noexcept { return _nodes; }
 };
 
 }  // namespace cursiv

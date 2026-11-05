@@ -10,8 +10,8 @@
 namespace tvirtual {
 
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  bool first = false;
-  bool second = false;
+  boolean first = false;
+  boolean second = false;
   Node* child = nullptr;
 };
 
@@ -35,8 +35,8 @@ struct G : cursiv::GrammarSpec {
 namespace treducecells {
 
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  bool first = false;
-  bool second = false;
+  boolean first = false;
+  boolean second = false;
 };
 
 struct G : cursiv::GrammarSpec {

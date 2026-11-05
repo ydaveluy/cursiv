@@ -3,13 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 
 namespace cursiv {
@@ -21,7 +21,7 @@ std::string gap_terms_expression(const Cfg& cfg, const DynSet& terms,
   std::string out;
   for (unsigned t = 0; t < cfg.nterms; ++t)
     if (terms.test(t))
-      out += std::format("{}{} == {}u", out.empty() ? "" : " || ", sym, t);
+      out += concat(out.empty() ? "" : " || ", sym, " == ", t, "u");
   return out.empty() ? "false" : "(" + out + ")";
 }
 

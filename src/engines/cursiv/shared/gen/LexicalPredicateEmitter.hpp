@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
-#include <format>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -14,6 +13,7 @@
 #include <vector>
 
 #include "cursiv/shared/gen/CLiteral.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
@@ -68,16 +68,14 @@ class LexicalPredicateEmitter {
   std::string declarations() const {
     std::string out;
     for (const auto root : _roots)
-      out += std::format(
-          "bool lexical_predicate_{}(const char*, ::cursiv::TextOffset,\n"
-          "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n",
-          root);
+      out += concat("bool lexical_predicate_", root,
+                    "(const char*, ::cursiv::TextOffset,\n"
+                    "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n");
     for (const auto root : _recognizers)
-      out += std::format(
-          "::cursiv::PredicateState lexical_recognizer_{}(const char*, "
-          "::cursiv::TextOffset,\n"
-          "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n",
-          root);
+      out += concat("::cursiv::PredicateState lexical_recognizer_", root,
+                    "(const char*, "
+                    "::cursiv::TextOffset,\n"
+                    "    ::cursiv::TextOffset, ::cursiv::TextOffset&);\n");
     return out;
   }
 
@@ -101,24 +99,23 @@ class LexicalPredicateEmitter {
       out += recursive_source();
     const auto started = [&](std::uint16_t root, std::string_view most) {
       return recursive(root)
-                 ? std::format(
-                       "lexical_recursive({}u, src, len, "
-                       "::cursiv::LexicalState{{::cursiv::LexicalCursor{{at}}}}"
-                       ", seen, captures)",
-                       root)
+                 ? concat("lexical_recursive(", root,
+                          "u, src, len, "
+                          "::cursiv::LexicalState{::cursiv::LexicalCursor{at}}"
+                          ", seen, captures)")
                  : call(root,
                         "::cursiv::LexicalState{::cursiv::LexicalCursor{at}}",
                         most);
     };
     for (const auto root : _roots) {
-      out += std::format(
-          "bool lexical_predicate_{}(const char* src, ::cursiv::TextOffset "
+      out += concat(
+          "bool lexical_predicate_", root,
+          "(const char* src, ::cursiv::TextOffset "
           "len,\n"
-          "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {{\n",
-          root);
+          "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {\n");
       if (fixed(root))
-        out += std::format("  return lexical_fixed_{}(src, len, at, seen);\n",
-                           same(root));
+        out += concat("  return lexical_fixed_", same(root),
+                      "(src, len, at, seen);\n");
       else {
         out += "  ::cursiv::LexicalCaptures captures;\n";
         out += "  return !" + started(root, "true") + ".empty();\n";
@@ -126,11 +123,11 @@ class LexicalPredicateEmitter {
       out += "}\n";
     }
     for (const auto root : _recognizers) {
-      out += std::format(
-          "::cursiv::PredicateState lexical_recognizer_{}(const char* src, "
+      out += concat(
+          "::cursiv::PredicateState lexical_recognizer_", root,
+          "(const char* src, "
           "::cursiv::TextOffset len,\n"
-          "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {{\n",
-          root);
+          "    ::cursiv::TextOffset at, ::cursiv::TextOffset& seen) {\n");
       out += "  ::cursiv::LexicalCaptures captures;\n";
       out += "  return ::cursiv::lexical_endpoints(" + started(root, "false") +
              ");\n";
@@ -256,13 +253,13 @@ class LexicalPredicateEmitter {
 
   std::string call(std::uint16_t id, std::string_view input,
                    std::string_view most = "false") const {
-    return std::format(
-        "lexical_node_{}{}(src, len, {}, seen, captures)", same(id),
-        (_used[id] & kFinal) != 0 ? std::format("<{}>", most) : "", input);
+    return concat("lexical_node_", same(id),
+                  (_used[id] & kFinal) != 0 ? concat("<", most, ">") : "",
+                  "(src, len, ", input, ", seen, captures)");
   }
 
   std::string test(std::uint16_t set, std::string_view at) const {
-    return std::format("{}.at({}u, src, {}, len)", _boundary, set, at);
+    return concat(_boundary, ".at(", set, "u, src, ", at, ", len)");
   }
 
   bool fixed(std::uint16_t id) const { return _width[id] != kVariableWidth; }
@@ -343,29 +340,30 @@ class LexicalPredicateEmitter {
         if (opening.has(static_cast<unsigned char>(b))) opens[b].push_back(at);
     }
     std::string out =
-        std::format("inline constexpr ::std::uint16_t lexical_list_{}[] = {{",
-                    id);
+        concat("inline constexpr ::std::uint16_t lexical_list_", id, "[] = {");
     for (std::size_t i = 0; i < words.size(); ++i)
-      out += std::format("{}{}u,", i % 16 == 0 ? "\n" : "", words[i]);
-    out += std::format(
-        "\n}};\ninline constexpr ::std::uint32_t lexical_opens_{}[] = {{", id);
+      out += concat(i % 16 == 0 ? "\n" : "", words[i], "u,");
+    out += concat("\n};\ninline constexpr ::std::uint32_t lexical_opens_", id,
+                  "[] = {");
     std::uint32_t n = 0;
     for (unsigned b = 0; b <= 256; ++b) {
-      out += std::format("{}{}u,", b % 16 == 0 ? "\n" : "", n);
+      out += concat(b % 16 == 0 ? "\n" : "", n, "u,");
       if (b < 256) n += static_cast<std::uint32_t>(opens[b].size());
     }
-    out += std::format(
-        "\n}};\ninline constexpr ::std::uint32_t lexical_order_{}[] = {{", id);
+    out += concat("\n};\ninline constexpr ::std::uint32_t lexical_order_", id,
+                  "[] = {");
     n = 0;
     for (const auto& list : opens)
       for (const auto at : list)
-        out += std::format("{}{}u,", n++ % 16 == 0 ? "\n" : "", at);
+        out += concat(n++ % 16 == 0 ? "\n" : "", at, "u,");
     if (n == 0) out += "0u";
-    return out + std::format(
-                     "\n}};\ninline constexpr ::cursiv::LexicalWords "
-                     "lexical_words_{0}{{lexical_list_{0}, {1}u, "
-                     "lexical_opens_{0}, lexical_order_{0}}};\n",
-                     id, words.size());
+    return out + concat(
+                     "\n};\ninline constexpr ::cursiv::LexicalWords "
+                     "lexical_words_",
+                     id, "{lexical_list_", id, ", ", words.size(),
+                     "u, "
+                     "lexical_opens_",
+                     id, ", lexical_order_", id, "};\n");
   }
 
   // The one reading that opens on an ASCII byte, where only one does.
@@ -386,16 +384,15 @@ class LexicalPredicateEmitter {
   std::string first_table(std::uint16_t id) const {
     const LexNode& e = _g.lex[id];
     const unsigned from = ascii_reading(id) >= 0 ? 0x80 : 0;
-    std::string out = std::format(
-        "inline constexpr ::std::uint32_t lexical_first_{}[{}] = {{", id,
-        256 - from);
+    std::string out = concat("inline constexpr ::std::uint32_t lexical_first_",
+                             id, "[", 256 - from, "] = {");
     for (unsigned b = from; b < 256; ++b) {
       std::uint32_t mask = 0;
       for (unsigned i = 0; i < e.b; ++i)
         if (first_bytes(_g.lexKid[e.a + i])
                 .first.has(static_cast<unsigned char>(b)))
           mask |= std::uint32_t{1} << i;
-      out += std::format("{}{}u,", b % 16 == 0 ? "\n" : "", mask);
+      out += concat(b % 16 == 0 ? "\n" : "", mask, "u,");
     }
     return out + "\n};\n";
   }
@@ -405,67 +402,73 @@ class LexicalPredicateEmitter {
   std::string dispatch(std::uint16_t id, std::string_view indent,
                        std::string_view take, std::string_view miss) const {
     const LexNode& e = _g.lex[id];
-    std::string out = std::format(
-        "{}const auto b = static_cast<unsigned char>(src[c.at]);\n", indent);
+    std::string out = concat(
+        indent, "const auto b = static_cast<unsigned char>(src[c.at]);\n");
     const int ascii = ascii_reading(id);
     if (ascii >= 0)
-      out += std::format(
-          "{0}if (b < 0x80) {{\n"
-          "{0}  auto p = c;\n"
-          "{0}  if (lexical_fixed_{1}(src, len, p.at, seen)) {{\n{2}{0}  }}\n"
-          "{0}  return {3};\n"
-          "{0}}}\n",
-          indent, same(_g.lexKid[e.a + static_cast<unsigned>(ascii)]), take,
-          miss);
-    out += std::format(
-        "{0}for (auto m = lexical_first_{1}[b{2}]; m != 0; m &= m - 1) {{\n"
-        "{0}  auto p = c;\n"
-        "{0}  bool read = false;\n"
-        "{0}  switch (::std::countr_zero(m)) {{\n",
-        indent, id, ascii >= 0 ? " & 0x7fu" : "");
+      out += concat(indent, "if (b < 0x80) {\n", indent, "  auto p = c;\n",
+                    indent, "  if (lexical_fixed_",
+                    same(_g.lexKid[e.a + static_cast<unsigned>(ascii)]),
+                    "(src, len, p.at, seen)) {\n", take, indent, "  }\n",
+                    indent, "  return ", miss, ";\n", indent, "}\n");
+    out += concat(indent, "for (auto m = lexical_first_", id, "[b",
+                  ascii >= 0 ? " & 0x7fu" : "", "]; m != 0; m &= m - 1) {\n",
+                  indent, "  auto p = c;\n", indent, "  bool read = false;\n",
+                  indent, "  switch (::std::countr_zero(m)) {\n");
     for (unsigned i = 0; i < e.b; ++i)
-      out += std::format(
-          "{}    case {}u: read = lexical_fixed_{}(src, len, p.at, seen); "
-          "break;\n",
-          indent, i, same(_g.lexKid[e.a + i]));
-    out += std::format("{0}    default: break;\n{0}  }}\n", indent);
-    out += std::format("{}  if (read) {{\n{}{}  }}\n{}}}\n", indent, take,
-                       indent, indent);
+      out += concat(indent, "    case ", i, "u: read = lexical_fixed_",
+                    same(_g.lexKid[e.a + i]),
+                    "(src, len, p.at, seen); "
+                    "break;\n");
+    out += concat(indent, "    default: break;\n", indent, "  }\n");
+    out +=
+        concat(indent, "  if (read) {\n", take, indent, "  }\n", indent, "}\n");
     return out;
   }
 
   std::string longest_step(std::string_view name, std::uint16_t kid,
                            std::string_view level) const {
-    return std::format(
-        "        auto {0} = {1};\n"
-        "        if (!{0}.empty()) {{\n"
-        "          auto q = {0}[0];\n"
-        "          for (::std::size_t x = 1; x < {0}.size(); ++x)\n"
-        "            if ({0}[x].at > q.at) q = {0}[x];\n"
-        "          if (q.at > p.at) {{\n"
-        "            p = q;\n            {2}depth;\n            continue;\n"
-        "          }}\n        }}\n",
-        name, call(kid, "::cursiv::LexicalState{p}"), level);
+    return concat("        auto ", name, " = ",
+                  call(kid, "::cursiv::LexicalState{p}"),
+                  ";\n"
+                  "        if (!",
+                  name,
+                  ".empty()) {\n"
+                  "          auto q = ",
+                  name,
+                  "[0];\n"
+                  "          for (::std::size_t x = 1; x < ",
+                  name,
+                  ".size(); ++x)\n"
+                  "            if (",
+                  name, "[x].at > q.at) q = ", name,
+                  "[x];\n"
+                  "          if (q.at > p.at) {\n"
+                  "            p = q;\n            ",
+                  level,
+                  "depth;\n            continue;\n"
+                  "          }\n        }\n");
   }
 
   static std::string echoed_capture(std::string_view indent,
                                     std::string_view cursor,
                                     std::string_view step, std::uint32_t slot,
                                     std::string_view hit) {
-    return std::format(
-        "{0}const auto* capture = captures.find({1}.captures, {3}u);\n"
-        "{0}if (capture == nullptr) continue;\n"
-        "{0}const auto width = capture->end - capture->begin;\n"
-        "{0}::cursiv::TextOffset {2} = 0;\n"
-        "{0}while ({2} < width) {{\n"
-        "{0}  seen = ::std::max(seen, {1}.at + {2} < len ? {1}.at + {2} + 1 : "
-        "len);\n"
-        "{0}  if ({1}.at + {2} >= len || src[{1}.at + {2}] != "
-        "src[capture->begin + {2}]) break;\n"
-        "{0}  ++{2};\n"
-        "{0}}}\n"
-        "{0}if ({2} == width) {{ {1}.at += width; {4} }}\n",
-        indent, cursor, step, slot, hit);
+    return concat(
+        indent, "const auto* capture = captures.find(", cursor, ".captures, ",
+        slot, "u);\n", indent, "if (capture == nullptr) continue;\n", indent,
+        "const auto width = capture->end - capture->begin;\n", indent,
+        "::cursiv::TextOffset ", step, " = 0;\n", indent, "while (", step,
+        " < width) {\n", indent, "  seen = ::std::max(seen, ", cursor, ".at + ",
+        step, " < len ? ", cursor, ".at + ", step,
+        " + 1 : "
+        "len);\n",
+        indent, "  if (", cursor, ".at + ", step, " >= len || src[", cursor,
+        ".at + ", step,
+        "] != "
+        "src[capture->begin + ",
+        step, "]) break;\n", indent, "  ++", step, ";\n", indent, "}\n", indent,
+        "if (", step, " == width) { ", cursor, ".at += width; ", hit, " }\n");
   }
 
   bool padded_final(const LexNode& e) const {
@@ -518,42 +521,47 @@ class LexicalPredicateEmitter {
 
   std::string direct(std::uint16_t id) const {
     const auto& e = _g.lex[id];
-    std::string out = std::format(
-        "inline bool lexical_fixed_{}(const char* src, ::cursiv::TextOffset "
-        "len,\n"
-        "    ::cursiv::TextOffset& at, ::cursiv::TextOffset& seen) {{\n",
-        id);
+    std::string out =
+        concat("inline bool lexical_fixed_", id,
+               "(const char* src, ::cursiv::TextOffset "
+               "len,\n"
+               "    ::cursiv::TextOffset& at, ::cursiv::TextOffset& seen) {\n");
     if (worded(id))
-      out += std::format(
-          "  return ::cursiv::lexical_{}({}, lexical_words_{}, src, len, at, "
-          "seen);\n",
-          e.kind == LexKind::alt ? "first_word" : "refused", _boundary, id);
+      out += concat("  return ::cursiv::lexical_",
+                    e.kind == LexKind::alt ? "first_word" : "refused", "(",
+                    _boundary, ", lexical_words_", id,
+                    ", src, len, at, "
+                    "seen);\n");
     else if (e.kind == LexKind::chars)
-      out += std::format(
+      out += concat(
           "  seen = ::std::max(seen, at < len ? at + 1 : len);\n"
-          "  if (at >= len || !{}) return false;\n  ++at;\n  return true;\n",
-          test(e.a, "at"));
+          "  if (at >= len || !",
+          test(e.a, "at"), ") return false;\n  ++at;\n  return true;\n");
     else if (e.kind == LexKind::seq) {
       for (unsigned i = 0; i < e.b; ++i)
-        out += std::format(
-            "  if (!lexical_fixed_{}(src, len, at, seen)) return false;\n",
-            same(_g.lexKid[e.a + i]));
+        out += concat("  if (!lexical_fixed_", same(_g.lexKid[e.a + i]),
+                      "(src, len, at, seen)) return false;\n");
       out += "  return true;\n";
     } else if (e.kind == LexKind::rep) {
       if (e.max != 0 && _g.lex[e.a].kind == LexKind::chars)
-        out += std::format(
+        out += concat(
             "  const auto begin = at;\n"
-            "  while (at < len && at - begin < {0}u) {{\n"
+            "  while (at < len && at - begin < ",
+            e.min,
+            "u) {\n"
             "    seen = ::std::max(seen, at + 1);\n"
-            "    if (!{1}) return false;\n    ++at;\n  }}\n"
-            "  return at - begin == {0}u;\n",
-            e.min, test(_g.lex[e.a].a, "at"));
+            "    if (!",
+            test(_g.lex[e.a].a, "at"),
+            ") return false;\n    ++at;\n  }\n"
+            "  return at - begin == ",
+            e.min, "u;\n");
       else if (e.max != 0)
-        out += std::format(
-            "  for (::std::uint32_t n = 0; n < {}u; ++n)\n"
-            "    if (!lexical_fixed_{}(src, len, at, seen)) return false;\n"
-            "  return true;\n",
-            e.min, same(e.a));
+        out += concat("  for (::std::uint32_t n = 0; n < ", e.min,
+                      "u; ++n)\n"
+                      "    if (!lexical_fixed_",
+                      same(e.a),
+                      "(src, len, at, seen)) return false;\n"
+                      "  return true;\n");
       else
         out += "  return true;\n";
     } else if (e.kind == LexKind::alt && dispatched(id)) {
@@ -566,40 +574,45 @@ class LexicalPredicateEmitter {
       out += "  return false;\n";
     } else if (e.kind == LexKind::alt) {
       for (unsigned i = 0; i < e.b; ++i)
-        out += std::format(
-            "  {{ auto probe = at;\n"
-            "    if (lexical_fixed_{}(src, len, probe, seen)) {{\n"
-            "      at = probe;\n      return true;\n    }}\n  }}\n",
-            same(_g.lexKid[e.a + i]));
+        out += concat(
+            "  { auto probe = at;\n"
+            "    if (lexical_fixed_",
+            same(_g.lexKid[e.a + i]),
+            "(src, len, probe, seen)) {\n"
+            "      at = probe;\n      return true;\n    }\n  }\n");
       out += "  return false;\n";
     } else if (e.kind == LexKind::positive || e.kind == LexKind::negative)
-      out += std::format(
-          "  auto probe = at;\n  return {}lexical_fixed_{}(src, len, probe, "
-          "seen);\n",
-          e.kind == LexKind::negative ? "!" : "", same(e.a));
+      out += concat("  auto probe = at;\n  return ",
+                    e.kind == LexKind::negative ? "!" : "", "lexical_fixed_",
+                    same(e.a),
+                    "(src, len, probe, "
+                    "seen);\n");
     else {
       out += "  auto probe = at;\n";
       for (unsigned i = 0; i < e.min; ++i)
-        out += std::format(
-            "  seen = ::std::max(seen, probe < len ? {}.reach({}u, src, probe, "
-            "len) : len);\n"
-            "  if (probe >= len || !{}) return true;\n  ++probe;\n",
-            _boundary, _g.lexKid[e.b + i], test(_g.lexKid[e.b + i], "probe"));
+        out += concat("  seen = ::std::max(seen, probe < len ? ", _boundary,
+                      ".reach(", _g.lexKid[e.b + i],
+                      "u, src, probe, "
+                      "len) : len);\n"
+                      "  if (probe >= len || !",
+                      test(_g.lexKid[e.b + i], "probe"),
+                      ") return true;\n  ++probe;\n");
       if (e.a == kNoSet)
         out += "  return false;\n";
       else
-        out += std::format(
+        out += concat(
             "  if (probe >= len) return false;\n"
-            "  seen = ::std::max(seen, {}.reach({}u, src, probe, len));\n"
-            "  return {}.at({}u, src, probe, len);\n",
-            _boundary, e.a, _boundary, e.a);
+            "  seen = ::std::max(seen, ",
+            _boundary, ".reach(", e.a,
+            "u, src, probe, len));\n"
+            "  return ",
+            _boundary, ".at(", e.a, "u, src, probe, len);\n");
     }
     return out + "}\n";
   }
 
   std::string request(std::uint16_t id, std::string_view in) const {
-    if (recursive(id))
-      return std::format("m.enter({}u, {}); return;\n", id, in);
+    if (recursive(id)) return concat("m.enter(", id, "u, ", in, "); return;\n");
     return "m.returned() = " + call(id, in) + "; return;\n";
   }
 
@@ -615,7 +628,7 @@ class LexicalPredicateEmitter {
         "    auto& f = m.frame();\n    switch (f.node) {\n";
     for (const auto id : _order) {
       if (!recursive(id) || (_used[id] & kNode) == 0) continue;
-      out += std::format("    case {}u: {{\n", id);
+      out += concat("    case ", id, "u: {\n");
       switch (const LexNode& e = _g.lex[id]; e.kind) {
         case LexKind::seq:
           out +=
@@ -625,7 +638,7 @@ class LexicalPredicateEmitter {
               "      } else { f.cur = ::std::move(f.in); f.stage = 1; }\n"
               "      switch (f.at++) {\n";
           for (unsigned i = 0; i < e.b; ++i)
-            out += std::format("      case {}u: ", i) +
+            out += concat("      case ", i, "u: ") +
                    request(_g.lexKid[e.a + i], "::std::move(f.cur)");
           out +=
               "      default: m.finish(::std::move(f.cur)); return;\n"
@@ -636,18 +649,18 @@ class LexicalPredicateEmitter {
               "      if (f.stage) f.out.unite(m.returned());\n"
               "      f.stage = 1;\n      switch (f.at++) {\n";
           for (unsigned i = 0; i < e.b; ++i)
-            out += std::format("      case {}u: ", i) +
+            out += concat("      case ", i, "u: ") +
                    request(_g.lexKid[e.a + i], "f.in");
           out +=
               "      default: m.finish(::std::move(f.out)); return;\n"
               "      }\n";
           break;
         case LexKind::rep:
-          out += std::format(
-              "      if (!f.stage) {{\n"
+          out += concat(
+              "      if (!f.stage) {\n"
               "        f.cur = ::std::move(f.in);\n"
-              "        f.stage = {}u;\n",
-              e.min == 0 ? 2 : 1);
+              "        f.stage = ",
+              e.min == 0 ? 2 : 1, "u;\n");
           if (e.min == 0) out += "        f.out = f.cur;\n";
           if (e.min != 0) {
             out +=
@@ -656,36 +669,38 @@ class LexicalPredicateEmitter {
                 "        if (next == f.cur) { m.finish(::std::move(next)); "
                 "return; }\n"
                 "        f.cur = ::std::move(next);\n";
-            out += std::format(
-                "        if (++f.round >= {}u) {{ f.out = f.cur; f.stage = 2; "
-                "}}\n",
-                e.min);
+            out += concat("        if (++f.round >= ", e.min,
+                          "u) { f.out = f.cur; f.stage = 2; "
+                          "}\n");
           }
           out +=
               "      } else {\n        ++f.round;\n"
               "        f.cur = m.returned().without(f.out);\n"
               "        f.out.unite(f.cur);\n      }\n";
-          out += std::format(
-              "      if (f.stage == 1 || (!f.cur.empty() && f.round < {}u)) "
-              "{{\n        ",
-              e.max);
+          out += concat(
+              "      if (f.stage == 1 || (!f.cur.empty() && f.round < ", e.max,
+              "u)) "
+              "{\n        ");
           out += request(e.a, "f.cur") +
                  "      }\n      m.finish(::std::move(f.out)); return;\n";
           break;
         case LexKind::call: {
           const std::uint16_t callee = lex_callee(_g, e);
-          out += std::format(
-              "      if (f.stage) {{\n"
-              "        m.remember({0}u, f.in[f.at].at, m.returned());\n"
+          out += concat(
+              "      if (f.stage) {\n"
+              "        m.remember(",
+              callee,
+              "u, f.in[f.at].at, m.returned());\n"
               "        f.out.unite(m.resume(f.in[f.at], m.returned()));\n"
-              "        ++f.at; f.stage = 0;\n      }}\n"
-              "      while (f.at < f.in.size()) {{\n"
+              "        ++f.at; f.stage = 0;\n      }\n"
+              "      while (f.at < f.in.size()) {\n"
               "        const auto c = f.in[f.at];\n"
-              "        const auto local = ::cursiv::LexicalCursor{{c.at}};\n"
-              "        if (const auto* cached = m.cached({0}u, c.at)) {{\n"
+              "        const auto local = ::cursiv::LexicalCursor{c.at};\n"
+              "        if (const auto* cached = m.cached(",
+              callee,
+              "u, c.at)) {\n"
               "          f.out.unite(m.resume(c, *cached)); ++f.at; continue;\n"
-              "        }}\n        f.stage = 1;\n        ",
-              callee);
+              "        }\n        f.stage = 1;\n        ");
           out += request(callee, "::cursiv::LexicalState{local}") +
                  "      }\n      m.finish(::std::move(f.out)); return;\n";
           break;
@@ -693,10 +708,10 @@ class LexicalPredicateEmitter {
         case LexKind::positive:
         case LexKind::negative:
           out += "      if (f.stage) {\n";
-          out += std::format(
-              "        if (m.returned().empty() == {}) "
-              "f.out.add(f.in[f.at]);\n",
-              e.kind == LexKind::negative ? "true" : "false");
+          out += concat("        if (m.returned().empty() == ",
+                        e.kind == LexKind::negative ? "true" : "false",
+                        ") "
+                        "f.out.add(f.in[f.at]);\n");
           out +=
               "        ++f.at;\n      }\n"
               "      if (f.at == f.in.size()) {\n"
@@ -708,11 +723,10 @@ class LexicalPredicateEmitter {
         case LexKind::through_same:
           out += "      if (!f.stage) {\n        f.stage = 1;\n        " +
                  request(e.a, "::std::move(f.in)") + "      }\n";
-          out += std::format(
-              "      m.finish(lexical_after_{}(src, len, "
-              "::std::move(m.returned()), seen, captures)); "
-              "return;\n",
-              id);
+          out += concat("      m.finish(lexical_after_", id,
+                        "(src, len, "
+                        "::std::move(m.returned()), seen, captures)); "
+                        "return;\n");
           break;
         default:
           throw std::logic_error("cursiv: unsupported recursive lexical node");
@@ -724,42 +738,46 @@ class LexicalPredicateEmitter {
 
   std::string node(std::uint16_t id, bool opened = false) const {
     const LexNode& e = _g.lex[id];
-    std::string out = std::format(
-        "{}inline ::cursiv::LexicalState lexical_{}_{}(\n"
-        "    const char* src, ::cursiv::TextOffset len,\n"
-        "    ::cursiv::LexicalState in, ::cursiv::TextOffset& seen,\n"
-        "    [[maybe_unused]] ::cursiv::LexicalCaptures& captures) {{\n",
-        (_used[id] & kFinal) != 0 ? "template <bool Final>\n" : "",
-        opened ? "after" : "node", id);
+    std::string out =
+        concat((_used[id] & kFinal) != 0 ? "template <bool Final>\n" : "",
+               "inline ::cursiv::LexicalState lexical_",
+               opened ? "after" : "node", "_", id,
+               "(\n"
+               "    const char* src, ::cursiv::TextOffset len,\n"
+               "    ::cursiv::LexicalState in, ::cursiv::TextOffset& seen,\n"
+               "    [[maybe_unused]] ::cursiv::LexicalCaptures& captures) {\n");
     if (e.kind == LexKind::rep && e.max == 0) return out + "  return in;\n}\n";
     if (e.kind == LexKind::seq && !fixed(id)) {
       for (unsigned i = 0; i < e.b; ++i)
-        out += std::format("  in = {};\n  if (in.empty()) return in;\n",
-                           call(_g.lexKid[e.a + i], "::std::move(in)",
-                                i + 1 == e.b ? "Final" : "false"));
+        out += concat("  in = ",
+                      call(_g.lexKid[e.a + i], "::std::move(in)",
+                           i + 1 == e.b ? "Final" : "false"),
+                      ";\n  if (in.empty()) return in;\n");
       return out + "  return in;\n}\n";
     }
     if (e.kind == LexKind::rep && !fixed(id) &&
         _g.lex[e.a].kind != LexKind::chars)
-      return out + std::format(
-                       "  return ::cursiv::gap_repeat<{}u, {}u>(in,\n"
-                       "      [&](const ::cursiv::LexicalState& cur) {{ "
-                       "return {}; }});\n}}\n",
-                       e.min, e.max, call(e.a, "cur"));
+      return out + concat("  return ::cursiv::gap_repeat<", e.min, "u, ", e.max,
+                          "u>(in,\n"
+                          "      [&](const ::cursiv::LexicalState& cur) { "
+                          "return ",
+                          call(e.a, "cur"), "; });\n}\n");
     if (worded(id) && !fixed(id))
-      return out + std::format(
-                       "  return ::cursiv::lexical_words<{}>({}, "
-                       "lexical_words_{}, src, len, in, seen);\n}}\n",
-                       (_used[id] & kFinal) != 0 ? "Final" : "false",
-                       _boundary, id);
+      return out + concat("  return ::cursiv::lexical_words<",
+                          (_used[id] & kFinal) != 0 ? "Final" : "false", ">(",
+                          _boundary,
+                          ", "
+                          "lexical_words_",
+                          id, ", src, len, in, seen);\n}\n");
     out += "  ::cursiv::LexicalState out;\n";
     if (fixed(id))
-      return std::format(
-          "{}  for (::std::size_t k = 0; k < in.size(); ++k) {{\n"
-          "    auto c = in[k];\n"
-          "    if (lexical_fixed_{}(src, len, c.at, seen)) out.add(c);\n"
-          "  }}\n  return out;\n}}\n",
-          out, id);
+      return concat(out,
+                    "  for (::std::size_t k = 0; k < in.size(); ++k) {\n"
+                    "    auto c = in[k];\n"
+                    "    if (lexical_fixed_",
+                    id,
+                    "(src, len, c.at, seen)) out.add(c);\n"
+                    "  }\n  return out;\n}\n");
     if (e.kind == LexKind::alt) {
       if (dispatched(id)) {
         out +=
@@ -773,13 +791,14 @@ class LexicalPredicateEmitter {
                         "out");
         out += "    return out;\n  }\n";
         for (unsigned i = 0; i < e.b; ++i)
-          out += std::format(
-              "  for (::std::size_t k = 0; k < in.size(); ++k) {{\n"
+          out += concat(
+              "  for (::std::size_t k = 0; k < in.size(); ++k) {\n"
               "    auto c = in[k];\n"
-              "    if (lexical_fixed_{}(src, len, c.at, seen)) out.add(c);\n"
-              "  }}\n"
-              "  if constexpr (Final) if (!out.empty()) return out;\n",
-              same(_g.lexKid[e.a + i]));
+              "    if (lexical_fixed_",
+              same(_g.lexKid[e.a + i]),
+              "(src, len, c.at, seen)) out.add(c);\n"
+              "  }\n"
+              "  if constexpr (Final) if (!out.empty()) return out;\n");
         return out + "  return out;\n}\n";
       }
       for (unsigned i = 0; i < e.b; ++i) {
@@ -798,41 +817,43 @@ class LexicalPredicateEmitter {
     if (!opened && (e.kind == LexKind::through_nested ||
                     e.kind == LexKind::through_same ||
                     e.kind == LexKind::through_lit))
-      out += std::format("    auto starts = {};\n",
-                         call(e.a, "::cursiv::LexicalState{c}"));
+      out += concat(
+          "    auto starts = ", call(e.a, "::cursiv::LexicalState{c}"), ";\n");
     switch (e.kind) {
       case LexKind::positive:
       case LexKind::negative:
-        out += std::format("    if ({}.empty() == {}) out.add(c);\n",
-                           call(e.a, "::cursiv::LexicalState{c}", "true"),
-                           e.kind == LexKind::negative ? "true" : "false");
+        out += concat(
+            "    if (", call(e.a, "::cursiv::LexicalState{c}", "true"),
+            ".empty() == ", e.kind == LexKind::negative ? "true" : "false",
+            ") out.add(c);\n");
         break;
       case LexKind::rep: {
         out += "    const auto begin = c.at;\n";
         if (e.min == 0) out += "    if constexpr (!Final) out.add(c);\n";
-        out += std::format(
-            "    while (c.at < len && c.at - begin < {}u) {{\n"
-            "      seen = ::std::max(seen, c.at + 1);\n"
-            "      if (!{}) break;\n      ++c.at;\n",
-            e.max, test(_g.lex[e.a].a, "c.at"));
-        const auto enough =
-            e.min == 0 ? std::string{}
-                       : std::format("if (c.at - begin >= {}u) ", e.min);
-        out += std::format(
-            "      if constexpr (!Final) {}out.add(c);\n    }}\n"
-            "    if constexpr (Final) {}out.add(c);\n",
-            enough, enough);
+        out += concat("    while (c.at < len && c.at - begin < ", e.max,
+                      "u) {\n"
+                      "      seen = ::std::max(seen, c.at + 1);\n"
+                      "      if (!",
+                      test(_g.lex[e.a].a, "c.at"), ") break;\n      ++c.at;\n");
+        const auto enough = e.min == 0
+                                ? std::string{}
+                                : concat("if (c.at - begin >= ", e.min, "u) ");
+        out += concat("      if constexpr (!Final) ", enough,
+                      "out.add(c);\n    }\n"
+                      "    if constexpr (Final) ",
+                      enough, "out.add(c);\n");
         break;
       }
       case LexKind::mark:
-        out += std::format("    auto ends = {};\n",
-                           call(e.a, "::cursiv::LexicalState{c}"));
-        out += std::format(
-            "    for (::std::size_t j = 0; j < ends.size(); ++j) {{\n"
+        out += concat(
+            "    auto ends = ", call(e.a, "::cursiv::LexicalState{c}"), ";\n");
+        out += concat(
+            "    for (::std::size_t j = 0; j < ends.size(); ++j) {\n"
             "      auto p = ends[j];\n"
-            "      p.captures = captures.bind(p.captures, {}u, c.at, p.at);\n"
-            "      out.add(p);\n    }}\n",
-            e.min);
+            "      p.captures = captures.bind(p.captures, ",
+            e.min,
+            "u, c.at, p.at);\n"
+            "      out.add(p);\n    }\n");
         break;
       case LexKind::same:
         out += echoed_capture("    ", "c", "j", e.min, "out.add(c);");
@@ -847,8 +868,8 @@ class LexicalPredicateEmitter {
         out +=
             "        seen = ::std::max(seen, p.at + 1);\n        ++p.at;\n"
             "      }\n";
-        out += std::format("      if (depth == 0{}) out.add(p);\n    }}\n",
-                           e.max ? " || p.at == len" : "");
+        out += concat("      if (depth == 0", e.max ? " || p.at == len" : "",
+                      ") out.add(p);\n    }\n");
         break;
       case LexKind::through_same:
         if (e.min == 2) {
@@ -862,26 +883,30 @@ class LexicalPredicateEmitter {
               "    for (::std::size_t j = 0; j < starts.size(); ++j) {\n"
               "      auto p = starts[j];\n"
               "      if (p.at == len) continue;\n";
-          out += std::format(
-              "      const auto* capture = captures.find(p.captures, {}u);\n"
-              "      if (capture == nullptr) {{ seen = ::std::max(seen, len); "
-              "continue; }}\n"
+          out += concat(
+              "      const auto* capture = captures.find(p.captures, ", e.max,
+              "u);\n"
+              "      if (capture == nullptr) { seen = ::std::max(seen, len); "
+              "continue; }\n"
               "      const char* hit = ::cursiv::lex_find_closer(\n"
-              "          {{src + p.at, len - p.at}},\n"
-              "          {{{}, {}u}}, {{src + capture->begin, capture->end - "
-              "capture->begin}},\n"
-              "          {{{}, {}u}}, [&](const char* q) {{\n"
+              "          {src + p.at, len - p.at},\n"
+              "          {",
+              c_literal(before), ", ", before.size(),
+              "u}, {src + capture->begin, capture->end - "
+              "capture->begin},\n"
+              "          {",
+              c_literal(after), ", ", after.size(),
+              "u}, [&](const char* q) {\n"
               "            return ::cursiv::lex_character_boundary(\n"
-              "                {{src + p.at, len - p.at}}, q);\n"
-              "          }});\n"
-              "      if (hit == nullptr) {{ seen = ::std::max(seen, len); "
-              "continue; }}\n"
-              "      p.at = static_cast<::cursiv::TextOffset>(hit - src) + "
-              "{}u + capture->end - capture->begin;\n"
+              "                {src + p.at, len - p.at}, q);\n"
+              "          });\n"
+              "      if (hit == nullptr) { seen = ::std::max(seen, len); "
+              "continue; }\n"
+              "      p.at = static_cast<::cursiv::TextOffset>(hit - src) + ",
+              before.size() + after.size(),
+              "u + capture->end - capture->begin;\n"
               "      seen = ::std::max(seen, p.at);\n"
-              "      out.add(p);\n    }}\n",
-              e.max, c_literal(before), before.size(), c_literal(after),
-              after.size(), before.size() + after.size());
+              "      out.add(p);\n    }\n");
           break;
         }
         out +=
@@ -922,23 +947,24 @@ class LexicalPredicateEmitter {
             "        seen = ::std::max(seen, p.at + 1);\n"
             "        switch (state) {\n";
         for (unsigned i = 0; i < e.min; ++i) {
-          out += std::format("          case {}u:\n", i);
+          out += concat("          case ", i, "u:\n");
           bool first = true;
           for (unsigned d = 0; d <= e.min; ++d) {
             const auto set = _g.lexKid[e.b + i * (e.min + 1) + d];
             if (set == kNoSet) continue;
-            out += std::format("            {}if ({}) state = {}u;\n",
-                               first ? "" : "else ", test(set, "p.at"), d);
+            out += concat("            ", first ? "" : "else ", "if (",
+                          test(set, "p.at"), ") state = ", d, "u;\n");
             first = false;
           }
           out += "            break;\n";
         }
-        out += std::format(
-            "        }}\n        ++p.at;\n        if (state == {}u) break;\n   "
-            "   }}\n",
-            e.min);
-        out += std::format("      if (state == {}u{}) out.add(p);\n    }}\n",
-                           e.min, e.max != 0 ? " || p.at == len" : "");
+        out +=
+            concat("        }\n        ++p.at;\n        if (state == ", e.min,
+                   "u) break;\n   "
+                   "   }\n");
+        out += concat("      if (state == ", e.min, "u",
+                      e.max != 0 ? " || p.at == len" : "",
+                      ") out.add(p);\n    }\n");
         break;
       default:
         break;

@@ -59,11 +59,11 @@ struct Dashed : cursiv::GrammarSpec {
 };
 
 struct Num : ast::Node {
-  std::string_view text;
+  string_view text;
 };
 struct Bin : ast::Node {
   ast::Node* left = nullptr;
-  std::string_view op;
+  string_view op;
   ast::Node* right = nullptr;
 };
 struct Calc : cursiv::GrammarSpec {

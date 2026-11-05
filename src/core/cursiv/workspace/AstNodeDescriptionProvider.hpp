@@ -25,6 +25,15 @@ class AstNodeDescriptionProvider {
   [[nodiscard]] virtual std::optional<AstNodeDescription> createDescription(
       AstNode& node, std::string_view name = {},
       const Document* document = nullptr) const = 0;
+  // A description keeps a view of its name: a temporary is refused where it is
+  // written rather than dangling silently. It wins the overload as an exact
+  // match.
+  template <detail::owning_text_rvalue S>
+  std::optional<AstNodeDescription> createDescription(
+      AstNode&, S&&, const Document* = nullptr) const {
+    detail::refuse_owning_bind<S>();
+    return std::nullopt;
+  }
 };
 
 }  // namespace cursiv

@@ -13,6 +13,7 @@ class DefaultAstNodeDescriptionProvider : public AstNodeDescriptionProvider,
  public:
   using DefaultCoreService::DefaultCoreService;
 
+  using AstNodeDescriptionProvider::createDescription;
   [[nodiscard]] std::optional<AstNodeDescription> createDescription(
       AstNode& node, std::string_view name = {},
       const Document* document = nullptr) const override;

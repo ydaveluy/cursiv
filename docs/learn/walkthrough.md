@@ -67,8 +67,8 @@ struct Model : cursiv::Extends<cursiv::AstNode> {
 }  // namespace recipe::ast
 ```
 
-`Extends<AstNode>` provides the field types `string_view`, `vector` and
-`reference`. `vector<T*>` holds child nodes. `reference<T>` holds a name that
+`Extends<AstNode>` provides the field types `string_view`, `string`, `vector`
+and `reference`. `vector<T*>` holds child nodes. `reference<T>` holds a name that
 resolves to a `T` after parsing. See [AST vocabulary](../reference/ast.md).
 
 ## 2. Define the grammar

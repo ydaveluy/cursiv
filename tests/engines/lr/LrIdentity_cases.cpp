@@ -205,7 +205,7 @@ struct Narrow : cursiv::Extends<Target> {};
 struct Site : cursiv::Extends<cursiv::AstNode> {};
 template <auto Kind>
 struct Owner : cursiv::Extends<Site> {
-  cursiv::reference<Target> to, other;
+  reference<Target> to, other;
 };
 // GCC spells both owners as Owner<1>; their completion sites stay distinct.
 using Doc = Owner<1>;

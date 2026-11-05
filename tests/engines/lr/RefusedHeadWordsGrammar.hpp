@@ -9,8 +9,8 @@
 namespace trefusedheads {
 
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool keyword = false;
-  bool bound = false;
+  boolean keyword = false;
+  boolean bound = false;
   string_view name;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {

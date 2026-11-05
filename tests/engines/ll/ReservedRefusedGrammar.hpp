@@ -5,8 +5,8 @@
 
 namespace tllrefused {
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool keyword = false;
-  bool dash = false;
+  boolean keyword = false;
+  boolean dash = false;
   string_view name;
   vector<Item*> kids;
 };

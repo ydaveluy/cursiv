@@ -180,8 +180,11 @@ test('application hosts extend imports and environment for commands and nested t
     throw new Error('Module arguments were consumed by the runner');
   if (!runner.endsWith('wasi-run.mjs') || !hostModule.endsWith('host #?% é.mjs'))
     throw new Error('Host context lost its resolved paths');
-  return { env: { GENERIC_HOST_VALUE: 'application' }, imports: { contract: {
+  let instantiated = null;
+  return { instantiated(instance) { instantiated = instance; },
+    env: { GENERIC_HOST_VALUE: 'application' }, imports: { contract: {
     check(pointer, size) {
+      if (instantiated?.exports === undefined) return 0;
       const bytes = new Uint8Array(memory().buffer, pointer, size);
       if (new TextDecoder().decode(bytes) !== 'memory from wasm') return 0;
       bytes[0] = 77;

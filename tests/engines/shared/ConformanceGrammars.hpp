@@ -27,7 +27,7 @@ struct Won : cursiv::Extends<cursiv::AstNode> {
 };
 struct Tally : cursiv::Extends<cursiv::AstNode> {
   vector<string_view> turns;
-  bool tail = false;
+  boolean tail = false;
 };
 struct Kept : cursiv::Extends<cursiv::AstNode> {
   string_view value = "kept";

@@ -10,7 +10,7 @@
 
 namespace tkwrelay {
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool keyword = false;
+  boolean keyword = false;
   string_view name;
   string_view arg;
 };

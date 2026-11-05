@@ -5,7 +5,7 @@
 
 namespace ttyporead {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  std::string_view value;
+  string_view value;
 };
 struct G : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};

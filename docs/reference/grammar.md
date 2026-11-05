@@ -391,17 +391,23 @@ struct STRING : terminal<as<unquote>(through(lit<"\"">, lit<"\"">))> {};
 
 | `X` | Value |
 |---|---|
-| A type `T` | `cursiv::default_converter<T>`, built in for `string_view`, `boolean`, sized integers, `float32`/`float64` and enumerations by enumerator name. For other types, specialize it with `static ConversionResult<T> convert(std::string_view text)`, which may also take `mem`. |
-| A function `f` | `f(text)` or `f(parts)`, either with `mem` after it, or `f()`. |
+| A type `T` | `cursiv::default_converter<T>`, built in for `string_view`, `boolean`, sized integers, `float32`/`float64` and enumerations by enumerator name. For other types, specialize it with `static ConversionResult<T> convert(std::string_view text)`. |
+| A function `f` | `f(text)`, `f(parts)` or `f()`. |
 | Another constant | The constant itself, such as an enumerator. |
 
 `text` is a `std::string_view`. `parts` is a
 `std::span<const std::string_view>` of a data rule's tokens and data-rule
-calls, such as `{"a", ".", "b"}` for `a.b`. `mem` is a
-`std::pmr::memory_resource*`. Give each parameter an explicit type: an `auto`
-parameter, as in a generic lambda, is refused. To return new text, allocate
-it with `copy_into(mem, text)` or `text_room(mem, n)`; it lives as long as the
-`ParseResult`.
+calls, such as `{"a", ".", "b"}` for `a.b`. Give each parameter an explicit
+type: an `auto` parameter, as in a generic lambda, is refused. A function can
+return any type its member can hold, such as a `std::string`, a `struct Uuid` or
+a class of your own. It can also return the member's own `vector<T>`, `optional<T>`
+or `variant<...>`, of values, written whole with `assign`. `parts` is valid only
+during the call.
+
+`as<T>` makes a `T` first and the member takes that value, as with a function:
+`as<std::int8_t>` on an `int64` member reports `128` as out of range. A number the
+member would cut short is refused: `as<std::int64_t>` on an `int8` member does not
+compile. An integer is accepted in a `float64` member.
 
 A converter returns a value or a `ConversionResult`. `::ok(v)` gives a value.
 `::err("message")` reports a diagnostic over the matched text; the member then

@@ -34,7 +34,7 @@
 namespace astgen {
 
 struct FlagNode : cursiv::Extends<cursiv::AstNode> {
-  bool on = false;
+  boolean on = false;
   FlagNode* inner = nullptr;
 };
 

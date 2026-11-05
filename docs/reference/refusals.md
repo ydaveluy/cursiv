@@ -318,19 +318,20 @@ condition builds nothing, and `through()` and `mark()` read inside one token.
 For example, `&assign<&T::name>(ref<ID>)` never writes. Put the directive
 around the whole part instead: `assign<&T::name>(through(lit<"<">, lit<">">))`.
 
-### An AST member that owns its text
+### A `string_view` member over a built string
 
-> an AST member never owns its text
+> a string_view member cannot hold this value
+
+A converter that returns a `std::string` builds its value, so the member must own
+it, unless the converter can return a slice of its input. `as<T>` with a type that
+is not text gives a value too, so the member takes that type:
 
 ```cpp
 struct Person : cursiv::Extends<cursiv::AstNode> {
-  std::string name;        // refused
-  string_view name;        // this
+  string_view name;        // refused
+  string name;             // this
 };
 ```
-
-A text member is a view into the source. Keep the source text and the
-`ParseResult` alive while you read the tree.
 
 ### A directive over a shape with no value
 
@@ -451,7 +452,7 @@ Write `struct Guest : cursiv::Extends<Person> {}`, not
 
 > this rule builds a class that reaches cursiv::AstNode through two bases
 
-A node has one `parent` link, so derive the class through one base only.
+A node has one `parent` link, so declare the shared base with `VirtualExtends`, or derive the class through one base only.
 
 ### A directive on the wrong storage
 
@@ -459,7 +460,9 @@ A node has one `parent` link, so derive the class through one base only.
 
 > `+=` appends, so it needs a `vector<T>` list member
 
-Use `assign` for a single value and `append` for a `vector<T>` list.
+Use `assign` for a single value and `append` for a `vector<T>` list. `assign`
+also fills a list from a rule that returns the whole `std::vector<T>`, which
+`append` refuses.
 
 ### A `flag` on a member that is not a bool
 
@@ -537,15 +540,36 @@ number member, a literal must spell a number; give any other a converter.
 
 The terminal's converter gives a type the member does not accept.
 
+### A number the member cannot always hold
+
+> this rule gives a number this member cannot always hold
+
+A converter or `as<T>` gives a number the member would cut short, such as an `int64`
+for an `int8` member or a `double` for an `int64` one. An integer in a `float64`
+member is fine. Make the member wider, or give the rule the member's own type.
+
+### A value that cannot be assigned
+
+> this member's type cannot be assigned
+
+A member held directly starts with a value, and a write replaces it, as does a
+converter that returns the whole member. Hold a type with no assignment in an
+`optional<T>` or a `vector<T>`, which build it in place.
+
+### A list of a type that cannot be moved
+
+> a list moves its elements as it grows
+
+Give the type a move constructor, or hold it in an `optional<T>`.
+
 ### A converter function with an unclear input
 
 > as<f>(e): f accepts more than one kind of input
 
 > as<f>(e): f must take the text …, the parts … or no argument
 
-A function given to `as` reads `std::string_view` text, the parts, or nothing,
-with an optional `std::pmr::memory_resource*` after them. Give a generic
-lambda's parameter a type.
+A function given to `as` reads `std::string_view` text, the parts, or nothing.
+Give a generic lambda's parameter a type.
 
 ### An `as` inside an `as`
 
@@ -587,13 +611,12 @@ not wrap a rule that builds a node.
 
 ## AST list storage
 
-```cpp
-vector<Person> persons;        // refused: a node is held by pointer
-vector<std::string> names;     // refused: elements must be trivially copyable
-std::vector<Person*> people;   // refused: use cursiv::vector
-```
+> an AST list member holds nodes by pointer
 
-Each message names the fix.
+```cpp
+vector<Person> persons;    // refused
+vector<Person*> persons;   // this
+```
 
 ## Lexical and layout errors
 

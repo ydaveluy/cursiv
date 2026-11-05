@@ -28,9 +28,6 @@ class DefaultDocumentFactory : public DocumentFactory,
       std::string text, std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) const override;
 
-  [[nodiscard]] std::shared_ptr<Document> fromModel(
-      ParseResult model, std::string_view uri) const override;
-
   [[nodiscard]] std::shared_ptr<Document> fromUri(
       std::string_view uri,
       const CancellationToken& cancelToken = kNoCancel) const override;
@@ -53,6 +50,10 @@ class DefaultDocumentFactory : public DocumentFactory,
 
   virtual void parse(Document& document, const CoreServices& services,
                      const CancellationToken& cancelToken) const;
+
+ private:
+  // Takes the document back to `Changed` with nothing left that names its tree.
+  void dropTree(Document& document) const;
 };
 
 }  // namespace cursiv

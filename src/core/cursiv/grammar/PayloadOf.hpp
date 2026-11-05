@@ -186,7 +186,8 @@ struct converter_rule {
       return std::type_identity<
           typename converter_rule<inherited_of_t<R>>::type>{};
     else if constexpr (is_data_rule<R> && slot_empty<R> &&
-                       !std::is_same_v<rule_type_t<R>, std::string_view>)
+                       !std::is_same_v<rule_type_t<R>, std::string_view> &&
+                       !std::is_same_v<rule_type_t<R>, std::string>)
       return std::type_identity<pass_conv<rule_type_t<R>>>{};
     else
       return std::type_identity<void>{};

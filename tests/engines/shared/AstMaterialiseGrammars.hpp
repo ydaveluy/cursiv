@@ -16,7 +16,7 @@ struct Var : cursiv::Extends<Expr> {
   string_view name;
 };
 struct Num : cursiv::Extends<Expr> {
-  std::int64_t value = 0;
+  int64 value = 0;
 };
 struct Prop : cursiv::Extends<Expr> {
   Expr* object = nullptr;
@@ -54,7 +54,7 @@ struct Target : cursiv::Extends<Expr> {
   Expr* property = nullptr;
 };
 struct Row : cursiv::Extends<cursiv::AstNode> {
-  vector<std::variant<std::monostate, std::int64_t, Row*>> items;
+  vector<variant<std::monostate, int64, Row*>> items;
 };
 using Atom = std::variant<std::string_view, Expr*>;
 struct Block : cursiv::Extends<cursiv::AstNode> {

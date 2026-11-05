@@ -56,10 +56,10 @@ inline NodeId payload_node(const Cst& c, NodeId id) {
 // from the list's end: it is in creation order, and a node is made before the
 // one it is wired to, so a parent is mostly answered before its children. A
 // chain longer than the list is a cycle, which no root ends.
-template <class Check>
+template <class Check, class Drop>
 void prune_orphans(std::pmr::vector<AstNode*>& nodes,
                    std::vector<RefHandle>& handles, const AstNode* root,
-                   Check check) {
+                   Check check, Drop drop) {
   const auto key = [](const AstNode* node) {
     return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(node));
   };
@@ -84,13 +84,17 @@ void prune_orphans(std::pmr::vector<AstNode*>& nodes,
   };
   std::vector<bool> kept(nodes.size());
   for (std::size_t i = nodes.size(); i-- > 0;) kept[i] = reached(nodes[i]);
-  std::size_t n = 0;
-  for (std::size_t i = 0; i < nodes.size(); ++i)
-    if (kept[i]) nodes[n++] = nodes[i];
-  nodes.resize(n);
+  // Answered before anything dies: the walk above reads their parents.
   for (RefHandle& handle : handles)
     if (handle.owner != nullptr && !reached(handle.owner))
       handle.owner = nullptr;
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < nodes.size(); ++i)
+    if (kept[i])
+      nodes[n++] = nodes[i];
+    else
+      drop(nodes[i]);
+  nodes.resize(n);
 }
 
 }  // namespace detail
@@ -105,7 +109,6 @@ class AstReducer {
     throw_if_cancelled(cancelToken);
     ParseResult out(std::move(tree));
     out.references = std::make_unique<DefaultDocumentReferences>(*actions.meta);
-    out.arena = AstArena(out.cst().memory());
     out.accepted = out.cst().accepted();
     const auto repairs = out.cst().diagnostics();
     out.diagnostics.assign(repairs.begin(), repairs.end());
@@ -133,7 +136,7 @@ class AstReducer {
     }
     // A node costs at least one record, so the tape's count bounds the list;
     // what is reserved past the need is never written, so never resident.
-    out.nodes.reserve(cst.size());
+    out._nodes.reserve(cst.size());
     if (actions.meta->referenceBound != 0)
       out.references->handles.reserve(cst.size() / 2u);
 
@@ -156,26 +159,37 @@ class AstReducer {
     } else if (!out.accepted) {
       out.error = AstBuildError::not_accepted;
     }
-    // The root's parent is the document's to set: a stale in-arena parent from
-    // a partial reduction would read as a real container.
+    // The root's parent is the document's to set: a stale parent from a partial
+    // reduction would read as a real container.
     if (out.value != nullptr) out.value->parent = nullptr;
     // Every node made is on the list, and one member at most takes it: where
     // none gave a node up, one node more than the members took is the root
     // alone, and every node reaches it.
     if (out.value != nullptr &&
-        (self._ctx.detached || out.nodes.size() != self._ctx.attached + 1u))
-      detail::prune_orphans(out.nodes, out.references->handles, out.value,
-                            [&self] { self._stop.poll(); });
+        (self._ctx.detached || out._nodes.size() != self._ctx.attached + 1u))
+      detail::prune_orphans(
+          out._nodes, out.references->handles, out.value,
+          [&self] { self._stop.poll(); },
+          [](AstNode* gone) noexcept { gone->~AstNode(); });
     // Nest wrappers are created out of scan order; without a nest or a
     // re-anchored node the list is sorted already.
-    if (actions.anyNest || self._moved) sort_by_record(out.nodes);
-    assert(std::is_sorted(out.nodes.begin(), out.nodes.end(), by_record) &&
+    if (actions.anyNest || self._moved) sort_by_record(out._nodes);
+    assert(std::is_sorted(out._nodes.begin(), out._nodes.end(), by_record) &&
            "the node list is read by search, so it is sorted");
     throw_if_cancelled(cancelToken);
     return out;
   }
 
-  ~AstReducer() { ::operator delete(_stack); }
+  // A stop or a failure may leave nodes not yet listed: the list owns them, and
+  // what it has no room for dies here.
+  ~AstReducer() {
+    try {
+      _ctx.list_made();
+    } catch (...) {
+      ParseResult::destroy_detached({_ctx.made, _ctx.madeCount});
+    }
+    ::operator delete(_stack);
+  }
   AstReducer(const AstReducer&) = delete;
   AstReducer& operator=(const AstReducer&) = delete;
 
@@ -293,6 +307,14 @@ class AstReducer {
     std::uint16_t alt = 0;
     if constexpr (Variant)
       if (p.value != nullptr) alt = _m.field_alt_of(_m.fields[field], p.type);
+    // A list's first element: the region says how many it will hold, so a list
+    // allocates once.
+    if constexpr (F::storage == detail::FieldStorage::vector) {
+      auto& member =
+          detail::ast_cast_unchecked<typename F::owner>(owner.value)->*F::ptr;
+      if (p.kind != ActKind::assign && member.capacity() == 0)
+        member.reserve(elements_from(p, field));
+    }
     write_into<F>(_ctx, p, owner.value, Cv, field, p.kind, alt);
   }
 
@@ -321,7 +343,10 @@ class AstReducer {
     return a->cstNodeId < b->cstNodeId;
   }
   static void sort_by_record(std::pmr::vector<AstNode*>& nodes) {
+    // The room first: a throw half way would lose nodes and repeat others, and
+    // what is reserved past the need is never written.
     std::vector<AstNode*> stray;
+    stray.reserve(nodes.size());
     std::size_t kept = 0;
     for (AstNode* const entry : nodes) {
       if (kept != 0 && entry->cstNodeId < nodes[kept - 1]->cstNodeId)
@@ -347,12 +372,11 @@ class AstReducer {
         _f(actions),
         _m(*actions.meta),
         _ctx{&out.cst(),
-             &out.arena,
-             out.cst().memory(),
+             &out._arena,
              &out.references->handles,
              out.references.get(),
              &out.diagnostics,
-             &out.nodes,
+             &out._nodes,
              &actions,
              AstBuildError::none,
              kNoNode,
@@ -360,6 +384,19 @@ class AstReducer {
              false,
              stamp},
         _stop(cancelToken) {}
+
+  // The writes of `field` from `p` up to the next nest, itself included: past
+  // it the region belongs to another node, and each node reads its own stretch
+  // once. Too few only grows the list. A pending a nest made stands alone, off
+  // the stack.
+  std::size_t elements_from(const Pending& p, std::uint16_t field) const {
+    const Pending* const end = _stack + _depth;
+    if (&p < _stack || &p >= end) return 1;
+    std::size_t count = 0;
+    for (const Pending* at = &p; at != end && at->kind != ActKind::nest; ++at)
+      if (at->field == field) ++count;
+    return count;
+  }
 
   // One pending nest, keyed by where the region it wraps begins.
   struct WrapAt {

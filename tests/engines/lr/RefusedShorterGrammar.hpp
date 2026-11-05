@@ -10,7 +10,7 @@ namespace trefusedshorter {
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view wide;
   string_view narrow;
-  bool bang = false;
+  boolean bang = false;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;

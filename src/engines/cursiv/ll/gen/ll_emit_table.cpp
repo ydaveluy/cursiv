@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <format>
 #include <map>
 #include <span>
 #include <string>
@@ -17,6 +16,7 @@
 #include "cursiv/ll/gen/LlFinalProgram.hpp"
 #include "cursiv/ll/gen/LlLexView.hpp"
 #include "cursiv/shared/gen/CLiteral.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
@@ -38,13 +38,13 @@ namespace {
 
 using Built = LlBuiltProgram;
 
-std::string u(std::uint64_t v) { return std::format("{}u", v); }
+std::string u(std::uint64_t v) { return concat(v, "u"); }
 std::string byte_set(const ByteSet& s) {
-  return std::format("{{{{{}u,{}u,{}u,{}u}}}}", s.w[0], s.w[1], s.w[2], s.w[3]);
+  return concat("{{", s.w[0], "u,", s.w[1], "u,", s.w[2], "u,", s.w[3], "u}}");
 }
 std::string range(const unicode::Range& r) {
-  return std::format("{{{}u,{}u}}", static_cast<std::uint32_t>(r.lo),
-                     static_cast<std::uint32_t>(r.hi));
+  return concat("{", static_cast<std::uint32_t>(r.lo), "u,",
+                static_cast<std::uint32_t>(r.hi), "u}");
 }
 
 struct Out : EmitOutput {
@@ -237,7 +237,7 @@ std::string staged_source(const Built& a) {
           "          &nextRead, &indent) || read.size() != 1 || "
           "nextRead.different || nextRead.over)\n"
           "    return ::cursiv::kNoRow;\n  sym = read.front();\n",
-          own != kNoRow ? std::format("{}u", own) : "look");
+          own != kNoRow ? concat(own, "u") : "look");
     }
     if (entry[at]) o.fmt("S{}:\n", at);
     if (state.alt != kNoRow) {
@@ -363,11 +363,11 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.omit("kSetDecode");
   o.array("::cursiv::TermInfo", "kTerms", std::span(g.terms.data(), g.nterms),
           [&](const TermInfo& x) {
-            return std::format(
-                "{{{}u,{}u,{}u,{},{},{},{}u,{}u,{},{},{}u,{}u,{}}}",
-                pool(x.nameOff), x.nameLen, x.element, x.trivia, x.recorded,
-                x.spelled, pool(x.textOff), x.textLen, x.delim, x.joins, x.laid,
-                x.cond, x.refuses);
+            return concat("{", pool(x.nameOff), "u,", x.nameLen, "u,",
+                          x.element, "u,", x.trivia, ",", x.recorded, ",",
+                          x.spelled, ",", pool(x.textOff), "u,", x.textLen,
+                          "u,", x.delim, ",", x.joins, ",", x.laid, "u,",
+                          x.cond, "u,", x.refuses, "}");
           });
   // A climb reads its operator's token, and the gap behind it, under its own
   // alphabet, and so does a caret that reads that token again.
@@ -385,12 +385,12 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
                 opMode[id] != kNoRow && a.nodeAfter[id] != 0xFFFFFFFFu
                     ? opMode[id]
                     : x.mode;
-            return std::format(
-                "{{{}u,{}u,{}u,{},{}u}}", x.row, mode,
-                x.kind == LlShape::term || x.kind == LlShape::implied ? x.sym
-                                                                      : kNoRow,
-                a.nodeHead[id] != 0,
-                plan.covers(static_cast<std::uint16_t>(id)));
+            return concat("{", x.row, "u,", mode, "u,",
+                          x.kind == LlShape::term || x.kind == LlShape::implied
+                              ? x.sym
+                              : kNoRow,
+                          "u,", a.nodeHead[id] != 0, ",",
+                          plan.covers(static_cast<std::uint16_t>(id)), "u}");
           });
   // A climb's choice of operator is the decision its select position makes.
   const auto again = [&](const LlDecision& x) {
@@ -398,12 +398,13 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     const std::uint16_t select = g.climbs[g.rules[x.rule].climb].selectNode;
     return g.nodes[select].decision == &x - g.decisions.data();
   };
-  o.array(
-      "::cursiv::LlTable::Decision", "kDecisions",
-      std::span(g.decisions.data(), g.ndecisions), [&](const LlDecision& x) {
-        return std::format("{{{},::cursiv::LlPredict({}),{}u,{}u}}", again(x),
-                           static_cast<unsigned>(x.how), x.mode, x.state);
-      });
+  o.array("::cursiv::LlTable::Decision", "kDecisions",
+          std::span(g.decisions.data(), g.ndecisions),
+          [&](const LlDecision& x) {
+            return concat("{", again(x), ",::cursiv::LlPredict(",
+                          static_cast<unsigned>(x.how), "),", x.mode, "u,",
+                          x.state, "u}");
+          });
   o.array("::std::uint8_t", "kCls", std::span(a.cls));
   o.array("::std::uint16_t", "kModeStart",
           std::span(a.modeStart.data(), a.nmodes));
@@ -442,7 +443,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint32_t", "kLexChoiceAt", a.lexChoiceAt.v);
   o.array("::cursiv::LlLexAccept", "kLexChoices", a.lexChoices,
           [](const LlLexAccept& x) {
-            return std::format("{{{}u,{}u,{}u}}", x.term, x.bound, x.tier);
+            return concat("{", x.term, "u,", x.bound, "u,", x.tier, "u}");
           });
   if (lexChecks) o.array("::std::uint8_t", "kLexChecks", a.lexChecks.v);
   if (!a.relays.empty()) {
@@ -469,15 +470,15 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   }
   o.array("::cursiv::LlAtnState", "kAtnStates",
           std::span(a.states.data(), a.nstates), [](const LlAtnState& x) {
-            return std::format("{{::cursiv::LlAtnKind({}),{}u,{}u,{}u,{}u}}",
-                               static_cast<unsigned>(x.kind), x.rule,
-                               x.decision, x.edge, x.nedges);
+            return concat("{::cursiv::LlAtnKind(",
+                          static_cast<unsigned>(x.kind), "),", x.rule, "u,",
+                          x.decision, "u,", x.edge, "u,", x.nedges, "u}");
           });
   o.array("::cursiv::LlAtnEdge", "kAtnEdges",
           std::span(a.edges.data(), a.nedges), [](const LlAtnEdge& x) {
-            return std::format("{{::cursiv::LlEdgeKind({}),{}u,{}u,{}u}}",
-                               static_cast<unsigned>(x.kind), x.label, x.target,
-                               x.follow);
+            return concat("{::cursiv::LlEdgeKind(",
+                          static_cast<unsigned>(x.kind), "),", x.label, "u,",
+                          x.target, "u,", x.follow, "u}");
           });
   o.array("::std::uint32_t", "kRuleStart", a.ruleStart);
   o.array("::std::uint32_t", "kCallerBase", a.callerBase);
@@ -534,7 +535,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
   o.array("::std::uint16_t", "kReturnNode", a.returnNode);
   if (fuseTable)
     o.array("::cursiv::LlFuse", "kFuse", a.fuse, [](const LlFuse& x) {
-      return std::format("{{{}u,{}u}}", x.from, x.to);
+      return concat("{", x.from, "u,", x.to, "u}");
     });
 
   if (!a.lookMode.empty()) o.array("::std::uint16_t", "kLookMode", a.lookMode);
@@ -585,8 +586,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     named[l] = g.gapLeaves[l].kind == GapLeafKind::head &&
                reads.any(g.gapLeaves[l].node);
     if (named[l])
-      fn.line(reads.source("inline", std::format("named_{}", l),
-                           g.gapLeaves[l].node));
+      fn.line(reads.source("inline", concat("named_", l), g.gapLeaves[l].node));
   }
   if (g.ngapConds != 0) {
     o.fmt("{};\n{};\n", conditionFn, namedFn);
@@ -615,8 +615,8 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
         case GapLeafKind::head:
         case GapLeafKind::phrase:
           if (partial)
-            return named[l] ? std::format("named_{}(token.sym)", l) : "1u";
-          return std::format("predicate_{}(src, len, token, gapFrom, seen)", l);
+            return named[l] ? concat("named_", l, "(token.sym)") : "1u";
+          return concat("predicate_", l, "(src, len, token, gapFrom, seen)");
       }
       return "false";
     };
@@ -642,7 +642,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.fmt("{};\n{};\n{};\n", headRefusesFn, headReachFn, termReachFn);
     fn.line(lex_head_source(
         a.termHeads, a.modeHeads, headRefusesFn, headReachFn,
-        {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
+        {concat(o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u"),
          o.ref("kScalarRanges")}));
     fn.fmt("{} {{\n", termReachFn);
     fn.line("  ::cursiv::TextOffset seen = 0;\n  switch (t) {");
@@ -660,7 +660,7 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.fmt("{};\n", tailRefusesFn);
     fn.line(lex_tail_source(
         a.termTails, tailRefusesFn,
-        {std::format("{}, {}u", o.ref("kWordRanges"), g.wordRanges.size()),
+        {concat(o.ref("kWordRanges"), ", ", g.wordRanges.size(), "u"),
          o.ref("kScalarRanges")}));
   }
   o.line("");

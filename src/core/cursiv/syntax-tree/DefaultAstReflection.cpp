@@ -27,13 +27,6 @@ DefaultAstReflection::DefaultAstReflection(const AstMetaData& meta) : _f(meta) {
   }
 }
 
-bool DefaultAstReflection::isComplete(const AstNode& node) const {
-  // A class this grammar does not know declares nothing here, and nothing is
-  // not missing -- the reference's verdict on the unknown.
-  const auto type = typeIndexOf(node.type);
-  return type == kNoType || _f.complete[type](node);
-}
-
 TypeMetaData DefaultAstReflection::getTypeMetaData(
     const AstTypeTag* type) const noexcept {
   const std::uint16_t i = typeIndexOf(type);

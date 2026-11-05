@@ -80,7 +80,7 @@ void a_parse_through_the_interface_builds_the_same_tree() {
   const cursiv::ParseResult direct =
       cursiv::AstReducer::build<dmg::kTable.stamp>(dmg::kAstActions,
                                                    std::move(cst));
-  CHECK(through.nodes.size() == direct.nodes.size());
+  CHECK(through.nodes().size() == direct.nodes().size());
   CHECK(through.cst().size() == direct.cst().size());
   CHECK(through.references != nullptr && direct.references != nullptr);
   CHECK(through.references->handles.size() == 1);
@@ -110,7 +110,7 @@ void a_parse_reads_only_the_borrowed_view() {
       CHECK(actual.cst().size() == reference.cst().size());
       CHECK(direct.size() == reference.cst().size());
       CHECK(actual.diagnostics.size() == reference.diagnostics.size());
-      CHECK(actual.nodes.size() == reference.nodes.size());
+      CHECK(actual.nodes().size() == reference.nodes().size());
       for (cursiv::NodeId i = 0;
            i < actual.cst().size() && i < reference.cst().size(); ++i)
         CHECK(std::memcmp(&actual.cst()[i], &reference.cst()[i],

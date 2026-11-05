@@ -562,10 +562,7 @@ void DefaultLanguageServer::didOpen(
       documents.addDocument(_shared.documentFactory->fromTextDocument(
           TextDocument::create(uri, item.languageId, item.version, item.text)));
     } else if (moved) {
-      // The document stays the same object; dropping to `Changed` purges
-      // the index rows in the same call that frees the tree -- the one
-      // order under which a row's borrowed name stays sound.
-      _shared.documentBuilder->resetToState(*existing, DocumentState::Changed);
+      // The document stays the same object.
       _shared.documentFactory->attachTextDocument(
           *existing, TextDocument::create(
                          uri, item.languageId,
@@ -613,8 +610,6 @@ void DefaultLanguageServer::didChange(
       updateVersion(*document, version);
       return false;
     }
-    // The rows go before the pool they name; see `didOpen`.
-    _shared.documentBuilder->resetToState(*document, DocumentState::Changed);
     _shared.documentFactory->attachTextDocument(*document, std::move(edited));
     return true;
   });

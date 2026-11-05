@@ -107,7 +107,8 @@ class DocumentBuilder {
       const noexcept = 0;
 
   // The prefix rule read backwards: going back to rung k undoes k+1, k+2, ...
-  // up to the top.
+  // up to the top. Back to `Changed`, the tree goes, and every document with a
+  // reference into it goes back to `ComputedScopes` first.
   virtual void resetToState(Document&, DocumentState) const = 0;
 
   // A wait is for a rung, not for a build. Without the liveness answer

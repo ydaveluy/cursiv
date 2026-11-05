@@ -115,7 +115,7 @@ void a_path_reads_back_the_node_it_names() {
       "datatype String\npackage p {\n entity E { a: String\n b: String }\n}\n");
 
   int checked = 0;
-  for (const cursiv::AstNode* const node : document->parseResult.nodes) {
+  for (const cursiv::AstNode* const node : document->parseResult.nodes()) {
     const std::string path = world.locator->getAstNodePath(*node);
     if (path.empty()) continue;  // the root names itself by the empty path
     ++checked;
@@ -418,6 +418,20 @@ void a_relinked_document_keeps_its_scopes() {
   CHECK(broken->hasLinkingErrors());
 }
 
+// What a document keeps is its own: written from its parts, in one piece.
+void a_document_keeps_text_from_its_parts() {
+  const World world;
+  const cursiv::Document* const document =
+      world.add("file:///kept.ws", "datatype T\n");
+  const std::string outer = "pkg";
+  const std::string_view kept =
+      document->keep_text(outer, ".", std::string_view("Type"));
+  CHECK(kept == "pkg.Type");
+  CHECK(kept.data() != outer.data());
+  const std::string_view empty = document->keep_text(std::string_view{});
+  CHECK(empty.empty() && empty.data() != nullptr);
+}
+
 using support::CountingParser;
 
 void factory_then_build_parses_once() {
@@ -483,7 +497,8 @@ void concurrent_linking_waits_for_a_candidates_own_reference() {
   });
   entered.wait();
   const auto deadline = std::chrono::steady_clock::now() + 2s;
-  const std::atomic_ref<cursiv::RefState> state(bb->superType._state);
+  const std::atomic_ref<cursiv::RefState> state(
+      cursiv::detail::RefAccess::state(bb->superType));
   while (state.load() != cursiv::detail::kRefObserved &&
          std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
@@ -542,7 +557,7 @@ struct HuntingScopes final : cursiv::DefaultScopeComputation {
                 entity->superType.refText, true, {}, *services.astReflection))
           if (const auto* parent = cursiv::ast_cast<ws::ast::Entity>(found->node))
             for (int k = 0; k < 8; ++k) {
-              (void)parent->superType.state();
+              (void)parent->superType.resolve();
               std::this_thread::yield();
             }
     return DefaultScopeComputation::collectLocalSymbols(document, token);
@@ -573,7 +588,7 @@ void a_reference_read_while_scoping_is_read_again() {
     for (int i = 0; i + 1 < kChain; ++i)
       if (cursiv::ast_cast<ws::ast::Entity>(
               chain[i]->parseResult.value_as<ws::ast::Workspace>()->elements[0])
-              ->superType.state() != cursiv::RefState::Resolved)
+              ->superType.resolve() != cursiv::RefState::Resolved)
         ++kept;
     CHECK(kept == 0);
     if (kept != 0) return;
@@ -1732,6 +1747,50 @@ void a_reset_to_computed_scopes_keeps_lazy_resolution() {
   (void)lock.read([&] { CHECK(referenced_type(*consumer) == original); });
 }
 
+// A tree that goes takes with it what points into it, by every door: a document
+// that read it holds no pointer past it, and reads again.
+template <class Drop>
+void a_dropped_tree_lets_go_of_what_read_it(Drop drop) {
+  World world;
+  auto& lock = *world.shared.workspaceLock;
+  auto* target = world.add("file:///target.ws", "datatype T");
+  auto* consumer = world.add("file:///use.ws", "entity E { f : T }");
+  // Broken, and it read nothing here: this is not its build.
+  auto* other = world.add("file:///other.ws", "entity O { f : Missing }");
+  cursiv::Document* documents[] = {target, consumer, other};
+  lock.write([&](const cursiv::CancellationToken& token) {
+    world.shared.documentBuilder->build(documents, {}, token);
+  });
+  CHECK(referenced_type(*consumer) != nullptr);
+  lock.write([&](const cursiv::CancellationToken&) { drop(world, *target); });
+  CHECK(other->state.load() == cursiv::DocumentState::Validated);
+  CHECK(consumer->state.load() == cursiv::DocumentState::ComputedScopes);
+  if (consumer->state.load() != cursiv::DocumentState::ComputedScopes) return;
+  (void)lock.read([&] { CHECK(referenced_type(*consumer) == nullptr); });
+}
+
+void every_door_lets_go_of_a_dropped_tree() {
+  a_dropped_tree_lets_go_of_what_read_it(
+      [](const World& world, cursiv::Document& target) {
+        world.shared.documentBuilder->resetToState(
+            target, cursiv::DocumentState::Changed);
+      });
+  a_dropped_tree_lets_go_of_what_read_it(
+      [](const World& world, const cursiv::Document& target) {
+        (void)world.shared.documents->invalidateDocument(target.uri);
+      });
+  a_dropped_tree_lets_go_of_what_read_it(
+      [](const World& world, cursiv::Document& target) {
+        world.shared.documentFactory->attachTextDocument(
+            target, cursiv::TextDocument::create(target.uri, "workspace", 2,
+                                                 "datatype Other"));
+      });
+  a_dropped_tree_lets_go_of_what_read_it(
+      [](const World& world, cursiv::Document& target) {
+        world.shared.documentFactory->update(target);
+      });
+}
+
 void a_build_from_linked_reindexes_its_resolutions(bool changedTarget) {
   World world;
   auto& builder = *world.shared.documentBuilder;
@@ -2173,36 +2232,74 @@ class HalfReadableFiles final : public FakeFiles {
   }
 };
 
-// A new file that can no longer be read when the update reaches it is left
-// out of the store and said, and the others are built; a subscriber is not
-// told of a change the store does not hold.
-void a_new_file_that_cannot_be_read_is_said_and_left_out() {
+// A new text takes the index rows of the old one with it, by either door: they
+// name the tree it replaces.
+void a_new_text_leaves_no_row_of_the_old_tree() {
+  const auto rows = [](const World& world) {
+    std::size_t count = 0;
+    (void)world.shared.indexManager->visitElements(
+        nullptr, {}, [&](const cursiv::AstNodeDescription& row) {
+          // Reads the bytes: under a sanitizer a row of a freed tree stops here.
+          count += row.name.empty() || row.name.front() != '\0' ? 1 : 0;
+          return true;
+        });
+    return count;
+  };
+  World world;
+  cursiv::Document* const d =
+      support::built(world.shared, "file:///rows.ws", "datatype Old\n");
+  CHECK(rows(world) == 1);
+  world.shared.documentFactory->attachTextDocument(
+      *d, cursiv::TextDocument::create("file:///rows.ws", "workspace", 2,
+                                       "datatype Fresh\n"));
+  CHECK(rows(world) == 0);
+  cursiv::Document* const e =
+      support::built(world.shared, "file:///more.ws", "datatype More\n");
+  CHECK(rows(world) == 1);
+  world.shared.documentFactory->update(*e);
+  CHECK(rows(world) == 0);
+}
+
+class CountingFiles final : public FakeFiles {
+ public:
+  mutable std::atomic<int> reads{0};
+  [[nodiscard]] std::string readFile(std::string_view uri) const override {
+    ++reads;
+    return FakeFiles::readFile(uri);
+  }
+};
+
+// A new file is read once, by the parse that needs it.
+void a_new_file_is_read_once() {
+  World world;
+  auto owned = std::make_unique<CountingFiles>();
+  const CountingFiles* const files = owned.get();
+  world.shared.fileSystemProvider = std::move(owned);
+  const std::string_view changed[] = {FakeFiles::kFolder};
+  world.shared.documentBuilder->update(changed, {});
+  CHECK(world.shared.documents->all().size() == 2);
+  CHECK(files->reads.load() == 2);
+}
+
+// A new file that can no longer be read when the update reaches it stays empty
+// and is said, and the others are built.
+void a_new_file_that_cannot_be_read_is_said_and_stays_empty() {
   World world;
   world.shared.fileSystemProvider = std::make_unique<HalfReadableFiles>();
   const support::CaptureSink* const capture =
       &support::capture_observations(world.shared);
-  struct Told final : cursiv::DocumentUpdateListener {
-    std::vector<std::string> changed;
-    void onUpdate(std::span<const std::string_view> c,
-                  std::span<const std::string_view>) override {
-      changed.assign(c.begin(), c.end());
-    }
-  } told;
-  world.shared.documentBuilder->addDocumentUpdateListener(told);
   const std::string_view changed[] = {FakeFiles::kFolder};
   world.shared.documentBuilder->update(changed, {});
-  world.shared.documentBuilder->removeDocumentUpdateListener(told);
 
   const auto a = world.shared.documents->getDocument(FakeFiles::kA);
   CHECK(a != nullptr && a->state.load() == cursiv::DocumentState::Validated);
-  CHECK(!world.shared.documents->hasDocument(FakeFiles::kB));
-  CHECK(world.shared.documents->all().size() == 1);
+  const auto b = world.shared.documents->getDocument(FakeFiles::kB);
+  CHECK(b != nullptr && b->textDocument().getText().empty());
   CHECK(capture->seen.size() == 1);
   CHECK(!capture->seen.empty() &&
         capture->seen[0].code ==
             cursiv::ObservationCode::WorkspaceDocumentReadFailed &&
         capture->seen[0].uri == FakeFiles::kB);
-  CHECK(told.changed == std::vector<std::string>{std::string(FakeFiles::kA)});
 }
 
 // A wait on one document is answered at that document's rung, not when the
@@ -2253,7 +2350,7 @@ struct LoadingScope final : cursiv::DefaultScopeProvider {
   const cursiv::AstNodeDescription* getScopeEntry(
       const cursiv::ReferenceInfo& context,
       std::string_view name) const override {
-    (void)services.shared.documents->getOrCreateDocument(
+    (void)services.shared().documents->getOrCreateDocument(
         "file:///lib/" + std::string(name) + ".ws");
     return DefaultScopeProvider::getScopeEntry(context, name);
   }
@@ -2297,6 +2394,7 @@ void run() {
   exports_keep_uri_order(true);
   an_update_honors_an_overridden_affected_check();
   a_relinked_document_keeps_its_scopes();
+  a_document_keeps_text_from_its_parts();
   a_new_homonym_retargets_without_reparsing(false, false);
   a_new_homonym_retargets_without_reparsing(true, false);
   a_new_homonym_retargets_without_reparsing(false, true);
@@ -2304,6 +2402,7 @@ void run() {
   cancelling_after_an_export_does_not_leave_stale_links(false);
   cancelling_after_an_export_does_not_leave_stale_links(true);
   a_reset_to_computed_scopes_keeps_lazy_resolution();
+  every_door_lets_go_of_a_dropped_tree();
   a_build_from_linked_reindexes_its_resolutions(false);
   a_build_from_linked_reindexes_its_resolutions(true);
   an_update_drops_unindexed_resolutions(cursiv::DocumentState::ComputedScopes,
@@ -2328,7 +2427,9 @@ void run() {
   a_reset_forgets_an_interrupted_request();
   an_update_finishes_an_interrupted_request();
   a_new_file_waits_unparsed_for_the_parse_phase();
-  a_new_file_that_cannot_be_read_is_said_and_left_out();
+  a_new_text_leaves_no_row_of_the_old_tree();
+  a_new_file_is_read_once();
+  a_new_file_that_cannot_be_read_is_said_and_stays_empty();
   a_document_wait_is_answered_at_its_own_rung();
 #if !defined(NDEBUG) && !defined(__wasi__) && !defined(_WIN32)
   the_store_refuses_a_load_from_a_build_phase();
@@ -2412,7 +2513,7 @@ void a_text_becomes_a_parsed_document() {
   CHECK(d->parseResult.value->parent == d.get());
   CHECK(d->parseResult.value->getDocument() == d.get());
   // From a node deeper in, too.
-  const cursiv::AstNode* deep = d->parseResult.nodes.back();
+  const cursiv::AstNode* deep = d->parseResult.nodes().back();
   CHECK(deep->getDocument() == d.get());
   // A node built by hand belongs to no document.
   const cursiv::AstNode loose;

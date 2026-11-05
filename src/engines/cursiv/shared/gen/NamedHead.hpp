@@ -5,12 +5,12 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <format>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/LexRecursion.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/table/ByteSet.hpp"
@@ -53,18 +53,17 @@ class NamedHead {
   // `unsigned name(::cursiv::SymbolId t)`, answering for each terminal.
   std::string source(std::string_view linkage, std::string_view name,
                      std::uint16_t root) const {
-    std::string out = std::format(
-        "{} unsigned {}(::cursiv::SymbolId t) {{\n  switch (t) {{\n", linkage,
-        name);
+    std::string out = concat(linkage, " unsigned ", name,
+                             "(::cursiv::SymbolId t) {\n  switch (t) {\n");
     const auto& answers = answers_of(root);
     for (const unsigned v : {0u, 2u}) {
       bool some = false;
       for (unsigned t = 1; t < _g.nterms; ++t)
         if (answers[t] == v) {
-          out += std::format("    case {}:\n", t);
+          out += concat("    case ", t, ":\n");
           some = true;
         }
-      if (some) out += std::format("      return {}u;\n", v);
+      if (some) out += concat("      return ", v, "u;\n");
     }
     out += "    default:\n      return 1u;\n  }\n}\n\n";
     return out;

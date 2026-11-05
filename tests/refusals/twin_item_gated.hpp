@@ -11,7 +11,7 @@ namespace refuse {
 
 namespace gated {
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  cursiv::AstNode::string_view a, b;
+  string_view a, b;
 };
 }  // namespace gated
 struct G : Base {

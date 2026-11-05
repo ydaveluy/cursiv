@@ -1,34 +1,35 @@
 // Everything a thunk may touch while a tree is reduced: the tape and the
-// layout its records are stamped in, the arena, the lists the result keeps,
-// and the table the thunks read.
+// layout its records are stamped in, the arena, the lists the result keeps, and
+// the table the thunks read.
 #pragma once
 
 #include <cstddef>
 #include <memory_resource>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "cursiv/shared/table/StampLayout.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/utils/macros.hpp"
-#include "cursiv/shared/table/StampLayout.hpp"
 
 namespace cursiv {
 
-class AstArena;
 struct AstActions;
 namespace detail {
+class AstArena;
 struct TextValues;
-}
+}  // namespace detail
 
 struct AstBuildCtx {
   const Cst* cst = nullptr;
-  AstArena* arena = nullptr;
-  std::pmr::memory_resource* mem = nullptr;
+  detail::AstArena* arena = nullptr;
   std::vector<RefHandle>* refs = nullptr;
   // What a reference will ask when it is read, planted at the write.
   const RefHome* home = nullptr;
@@ -54,7 +55,15 @@ struct AstBuildCtx {
   AstNode* made[kMadeRun]{};
 
   bool failed() const { return error != AstBuildError::none; }
-  // In creation order, which is the list's.
+  // Text a view of the tree names, which the tree keeps.
+  std::string_view keep_text(std::string_view text) const {
+    return cst->keep_text({&text, 1});
+  }
+  std::string_view keep_text(std::span<const std::string_view> parts) const {
+    return cst->keep_text(parts);
+  }
+  // In creation order, which is the list's. A node stays here if the list
+  // refuses it: the reducer's teardown answers for it.
   void list(AstNode* node) {
     made[madeCount] = node;
     if (++madeCount == kMadeRun) [[unlikely]]

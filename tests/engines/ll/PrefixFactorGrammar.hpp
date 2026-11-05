@@ -6,34 +6,36 @@
 namespace tllprefix {
 
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
-struct Name : cursiv::Extends<Expression> { string_view text; };
+struct Name : cursiv::Extends<Expression> {
+  string text;
+};
 struct Unary : cursiv::Extends<Expression> {
   Expression* value{};
-  bool enabled{};
+  boolean enabled{};
 };
 struct Wrapped : cursiv::Extends<Expression> { Expression* value{}; };
 struct Bag : cursiv::Extends<Expression> { vector<Expression*> values; };
 struct LeftTag : cursiv::Extends<Expression> {
   Expression* operand{};
-  bool enabled{};
+  boolean enabled{};
 };
 struct RightTag : cursiv::Extends<Expression> {
   vector<Expression*> parts;
-  bool enabled{};
+  boolean enabled{};
 };
 struct Let : cursiv::Extends<Expression> {
   Expression* value{};
 };
 struct RC : cursiv::Extends<Expression> {
-  bool y{};
+  boolean y{};
 };
 struct NS : cursiv::Extends<Expression> {
   RC* value{};
-  bool y{};
+  boolean y{};
 };
 struct NSAppend : cursiv::Extends<Expression> {
   vector<RC*> values;
-  bool y{};
+  boolean y{};
 };
 struct Document : cursiv::Extends<cursiv::AstNode> {
   vector<Expression*> values;

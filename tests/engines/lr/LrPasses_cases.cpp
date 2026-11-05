@@ -567,9 +567,9 @@ std::string verdict(std::string_view text) {
   if (!r.accepted) return "refused";
   if (r.error != cursiv::AstBuildError::none || r.value == nullptr)
     return "no tree";
-  for (const auto* node : r.nodes) {
+  for (const auto* node : r.nodes()) {
     const auto* ancestor = node;
-    std::size_t left = r.nodes.size();
+    std::size_t left = r.nodes().size();
     while (ancestor && ancestor != r.value && left != 0) {
       ancestor = ancestor->parent;
       --left;
@@ -642,7 +642,7 @@ void long_postfix_chain() {
   }
   const auto* name = cursiv::ast_cast<Name>(expr);
   CHECK(name != nullptr && name->name == "x" && name->parent == owner);
-  CHECK(std::is_sorted(r.nodes.begin(), r.nodes.end(),
+  CHECK(std::is_sorted(r.nodes().begin(), r.nodes().end(),
                        [](const auto* a, const auto* b) {
                          return a->cstNodeId < b->cstNodeId;
                        }));

@@ -1,7 +1,6 @@
 #include "statemachine/validation/StateMachineValidator.hpp"
 
 #include <algorithm>
-#include <memory_resource>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -38,8 +37,7 @@ void StateMachineValidator::checkUniqueStatesAndEvents(
     const cursiv::AstNode* node;
     bool reported;
   };
-  std::pmr::monotonic_buffer_resource arena;
-  std::pmr::unordered_map<std::string_view, First> seen(&arena);
+  std::unordered_map<std::string_view, First> seen;
   seen.reserve(model.states.size() + model.events.size());
   const auto visit = [&](const cursiv::AstNode& symbol, std::string_view name) {
     const auto [at, fresh] = seen.try_emplace(name, First{&symbol, false});

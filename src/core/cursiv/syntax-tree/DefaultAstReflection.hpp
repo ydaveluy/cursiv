@@ -50,8 +50,6 @@ struct DefaultAstReflection : AstReflection {
       _f.unknownMembers(node, yield);
   }
 
-  [[nodiscard]] bool isComplete(const AstNode& node) const override;
-
   [[nodiscard]] TypeMetaData getTypeMetaData(
       const AstTypeTag* type) const noexcept override;
 

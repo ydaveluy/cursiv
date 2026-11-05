@@ -67,6 +67,13 @@ namespace {
   });
 }
 
+// Whether `processParsingErrors` says this parse went wrong: the verdicts, or a
+// fault the parser wrote.
+[[nodiscard]] bool said_a_parse_error(const ParseResult& parsed) noexcept {
+  return !parsed.accepted || parsed.error != AstBuildError::none ||
+         said_a_fault(parsed);
+}
+
 }  // namespace
 
 void DefaultDocumentValidator::validateDocument(
@@ -82,7 +89,7 @@ void DefaultDocumentValidator::validateDocument(
   // The stops belong to built-in validation, so a filtered pass runs only
   // its selected checks.
   if (const bool stopOnParse = builtIn && options.stopAfterParsingErrors &&
-                               parseLeftRepairs(document, token);
+                               said_a_parse_error(document.parseResult);
       !stopOnParse) {
     const std::size_t beforeLinking = diagnostics.size();
     if (builtIn) processLinkingErrors(document, diagnostics, token);
@@ -123,20 +130,6 @@ void DefaultDocumentValidator::validateDocument(
     diagnostics.swap(ordered);
   }
   throw_if_cancelled(token);
-}
-
-bool DefaultDocumentValidator::parseLeftRepairs(
-    const Document& document, const CancellationToken& token) const {
-  const ParseResult& parsed = document.parseResult;
-  if (parsed.value == nullptr || !parsed.accepted || said_a_fault(parsed))
-    return true;
-  // The reflection's word, last: a clean-looking tree may still hold a node
-  // whose mandatory members were never written.
-  const AstReflection& reflection = *_core.astReflection;
-  return std::ranges::any_of(parsed.nodes, [&](const AstNode* node) {
-    throw_if_cancelled(token);
-    return !reflection.isComplete(*node);
-  });
 }
 
 // What the recovery inserted or replaced, as edit rows the code-action provider
@@ -190,8 +183,7 @@ void DefaultDocumentValidator::processParsingErrors(
   // what the parser repaired, and a failure it could not repair leaves it
   // empty -- so the verdict is the only witness left, and it has to speak.
   // Both verdicts: the parse's, and the build's, which had no reader at all.
-  if ((!parsed.accepted || parsed.error != AstBuildError::none) &&
-      !said_a_fault(parsed))
+  if (said_a_parse_error(parsed) && !said_a_fault(parsed))
     diagnostics.push_back(unrepairedParseError(document));
   // Not gated on the tree. What follows is what the parser wrote, and a repair
   // needs no node to be said: gating it on the AST lost every repair of a
@@ -445,7 +437,7 @@ void DefaultDocumentValidator::validateAstNodes(
   };
   if (asks) {
     if (root != nullptr) ask(*root);
-    for (const AstNode* const node : document.parseResult.nodes)
+    for (const AstNode* const node : document.parseResult.nodes())
       if (node != root) ask(*node);
   }
 
@@ -492,7 +484,7 @@ void DefaultDocumentValidator::validateAstNodes(
   // The walk stays that way on purpose. Document order is owed on the published
   // list, not on the traversal, and the list is a handful of diagnostics rather
   // than a tree of nodes -- `validateDocument` sorts it on the way out.
-  for (const AstNode* const node : document.parseResult.nodes)
+  for (const AstNode* const node : document.parseResult.nodes())
     if (node != root) check(*node);
 }
 

@@ -5,7 +5,7 @@
 namespace tpar::ast {
 struct Expr : cursiv::Extends<cursiv::AstNode> {};
 struct Num : cursiv::Extends<Expr> {
-  double value{};
+  float64 value{};
 };
 struct Name : cursiv::Extends<Expr> {
   string_view id;
@@ -29,7 +29,7 @@ struct Let : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   Expr* guard{};
   Expr* value{};
-  bool exported{};
+  boolean exported{};
 };
 struct Item : cursiv::Extends<cursiv::AstNode> {
   Expr* value{};
@@ -37,7 +37,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
 };
 struct Show : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
-  bool all{};
+  boolean all{};
 };
 struct Unit : cursiv::Extends<cursiv::AstNode> {
   vector<Let*> lets;

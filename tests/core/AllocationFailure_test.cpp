@@ -7,23 +7,30 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stop_token>
+#include <string>
 #include <thread>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/execution/TaskQueue.hpp"
 #include "cursiv/execution/WorkerPool.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/DefaultServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/syntax-tree/AstArena.hpp"
+#include "cursiv/shared/runtime/AstBuildCtx.hpp"
+#include "cursiv/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/syntax-tree/CstRun.hpp"
+#include "cursiv/syntax-tree/ParseResult.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/Published.hpp"
-#include "cursiv/Check.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
 namespace {
 std::atomic<int> failAfter{-1};
 std::atomic<std::thread::id> failThread;
 std::atomic<int> allocations{0};
+std::atomic<int> stopAfter{-1};
+std::stop_source* stopper = nullptr;
 void fail_allocation(int after) {
   failThread = std::this_thread::get_id();
   failAfter.store(after, std::memory_order_release);
@@ -38,6 +45,9 @@ void* operator new(std::size_t size) {
           std::this_thread::get_id() &&
       failAfter.fetch_sub(1, std::memory_order_relaxed) == 0)
     throw std::bad_alloc();
+  if (stopAfter.load(std::memory_order_relaxed) >= 0 &&
+      stopAfter.fetch_sub(1, std::memory_order_relaxed) == 0)
+    stopper->request_stop();
   if (void* p = std::malloc(size == 0 ? 1 : size)) {
     allocations.fetch_add(1, std::memory_order_relaxed);
     return p;
@@ -79,15 +89,61 @@ void reservation_sizes_do_not_wrap() {
     threw = true;
   }
   CHECK(threw && memory.requested > 64 * sizeof(cursiv::CstNode));
-  memory.requested = 0;
-  cursiv::AstArena arena(&memory);
-  threw = false;
-  try {
-    (void)arena.carve_bytes(std::numeric_limits<std::size_t>::max(), 8);
-  } catch (const std::bad_alloc&) {
-    threw = true;
+}
+
+// Every allocation of a parse refused in turn: what it built is gone, and a
+// sanitizer run says nothing died twice.
+void a_refused_allocation_frees_what_the_parse_built() {
+  const auto parser = ws::generated::Workspace::create_parser();
+  std::string text = "datatype D\n";
+  for (int i = 0; i < 40; ++i) text += "entity E { many a : D b : D }\n";
+  (void)parser->parse(text);
+  int at = 0;
+  for (;; ++at) {
+    const int before = allocations.load(std::memory_order_relaxed);
+    fail_allocation(at);
+    bool refused = false;
+    try {
+      const cursiv::ParseResult parsed = parser->parse(text);
+      CHECK(static_cast<bool>(parsed));
+    } catch (const std::bad_alloc&) {
+      refused = true;
+    }
+    failAfter.store(-1, std::memory_order_release);
+    CHECK(allocations.load(std::memory_order_relaxed) == before);
+    if (!refused) break;
   }
-  CHECK(threw && memory.requested == 0);
+  CHECK(at > 0);
+}
+
+// A stop asked at many points of a large parse, the tree's build included.
+void a_stopped_parse_frees_what_it_built() {
+  const auto parser = ws::generated::Workspace::create_parser();
+  std::string text = "datatype D\n";
+  for (int i = 0; i < 5000; ++i) text += "entity E { many a : D b : D }\n";
+  const int idle = allocations.load(std::memory_order_relaxed);
+  {
+    const cursiv::ParseResult parsed = parser->parse(text);
+    CHECK(static_cast<bool>(parsed) && !parsed.nodes().empty());
+  }
+  CHECK(allocations.load(std::memory_order_relaxed) == idle);
+  int stopped = 0;
+  for (int point = 0; point < 40; ++point) {
+    std::stop_source source;
+    stopper = &source;
+    stopAfter.store(point * 125, std::memory_order_relaxed);
+    const int before = allocations.load(std::memory_order_relaxed);
+    try {
+      const cursiv::ParseResult parsed =
+          parser->parse(text, source.get_token());
+    } catch (const cursiv::OperationCancelled&) {
+      ++stopped;
+    }
+    stopAfter.store(-1, std::memory_order_relaxed);
+    stopper = nullptr;
+    CHECK(allocations.load(std::memory_order_relaxed) == before);
+  }
+  CHECK(stopped != 0);
 }
 
 void a_failed_retirement_keeps_the_published_value_alive() {
@@ -199,6 +255,8 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
   cursiv::install_default_shared_core_services(shared);
   bool finished = false;
   for (int step = 0; step < 1000 && !finished; ++step) {
+    // Outlives the registry, which destroys what writes it.
+    bool destroyed = false;
     cursiv::DefaultServiceRegistry registry(shared);
     auto first = std::make_unique<cursiv::CoreServices>(shared);
     first->languageMetaData = {"first", {".q"}, {}};
@@ -207,7 +265,6 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
     cursiv::install_default_core_services(*first);
     registry.registerServices(std::move(first));
 
-    bool destroyed = false;
     auto tracked = std::make_unique<Tracked>(shared, destroyed);
     tracked->languageMetaData = {"tracked", {".q"}, {}};
     tracked->parser = ws::generated::Workspace::create_parser();
@@ -233,8 +290,36 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
 }
 }  // namespace
 
+// Parts the source does not hold side by side are written once, where they
+// stay: with room in the pool, a join asks for no memory of its own.
+void a_join_writes_its_parts_where_they_stay() {
+  const std::string left(2048, 'a');
+  const std::string right(2048, 'b');
+  cursiv::Cst tree("x");
+  cursiv::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  (void)ctx.keep_text(std::string_view("x"));  // the pool's first block
+  cursiv::detail::PartRun run;
+  run.push_back(left);
+  run.push_back(right);
+  std::string_view joined;
+  bool allocated = false;
+  fail_allocation(0);
+  try {
+    joined = cursiv::detail::join_parts(ctx, run);
+  } catch (const std::bad_alloc&) {
+    allocated = true;
+  }
+  failAfter.store(-1, std::memory_order_release);
+  CHECK(!allocated);
+  CHECK(joined == left + right);
+}
+
 int main() {
   reservation_sizes_do_not_wrap();
+  a_join_writes_its_parts_where_they_stay();
+  a_refused_allocation_frees_what_the_parse_built();
+  a_stopped_parse_frees_what_it_built();
   a_failed_retirement_keeps_the_published_value_alive();
   a_queue_allocation_failure_leaves_no_leak_or_lost_item();
   a_partial_submission_joins_before_unwinding();

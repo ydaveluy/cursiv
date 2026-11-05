@@ -28,8 +28,8 @@ enum class ObservationCode : std::uint8_t {
   ValidationCheckThrew,
   // A document-level preparation hook threw; same law, whole-document anchor.
   ValidationPreparationThrew,
-  // A file the scan or an update found and then could not read: left out of
-  // the store, the others read.
+  // A file the scan or an update found and then could not read: the scan leaves
+  // it out of the store, an update leaves it empty, and the others are read.
   WorkspaceDocumentReadFailed,
 };
 

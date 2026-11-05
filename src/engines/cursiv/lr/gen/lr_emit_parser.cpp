@@ -33,6 +33,7 @@
 #include "cursiv/lr/table/LrProgramRows.hpp"
 #include "cursiv/lr/table/LrReducePlan.hpp"
 #include "cursiv/shared/gen/CommonArtifacts.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/gen/GapConditionEmitter.hpp"
 #include "cursiv/shared/gen/GapEmitter.hpp"
@@ -149,7 +150,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
     return split() ? "" : lone;
   }
   void declare(std::string_view signature) {
-    if (split()) head += std::format("{};\n", signature);
+    if (split()) head += concat(signature, ";\n");
   }
   // Opens the definition of such a helper, `prefix` ahead of its signature,
   // and declares it.
@@ -184,7 +185,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
   }
   std::string jump(char kind, unsigned n) {
     jumpLog.push_back({kind, n});
-    return std::format("@J{}{};", kind, n);
+    return concat("@J", kind, n, ";");
   }
   // Entries are numbered in the order `enter` meets them.
   void enter(unsigned g, const Piece& p) {
@@ -192,7 +193,7 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
       const auto [kind, n] = jumpLog[i];
       const unsigned h = owner(kind, n);
       if (h == g) continue;
-      auto label = std::format("{}{}", kind, n);
+      auto label = concat(kind, n);
       const auto [at, fresh] = entryAt[h].try_emplace(
           label, static_cast<unsigned>(entries[h].size()));
       if (fresh) entries[h].push_back(std::move(label));
@@ -212,16 +213,16 @@ struct LrParserEmitter : LexWalkRungs<LrLexView> {
       at = static_cast<std::size_t>(stop - text.data()) + 1;
       const unsigned h = owner(kind, n);
       if (h == g)
-        r += std::format("goto {}{};", kind, n);
+        r += concat("goto ", kind, n, ";");
       else
-        r += std::format("CURSIV_MUSTTAIL return states_{}(c, {}u);", h,
-                         entryAt[h].at(std::format("{}{}", kind, n)));
+        r += concat("CURSIV_MUSTTAIL return states_", h, "(c, ",
+                    entryAt[h].at(concat(kind, n)), "u);");
     }
     r.append(text.substr(at));
     return r;
   }
   std::string leave(std::string_view exit) const {
-    return std::format("return ::cursiv::LrExit::{};", exit);
+    return concat("return ::cursiv::LrExit::", exit, ";");
   }
   // What one state probes at its entry, at most: past either cap the rest
   // fall through to the mode's lexer.
@@ -434,7 +435,7 @@ inline constexpr RowsTape kRowsTape{};
   void case_rows(Each&& each) {
     std::string row = "   ";
     each([&](unsigned v) {
-      const std::string label = std::format(" case {}:", v);
+      const std::string label = concat(" case ", v, ":");
       if (row.size() + label.size() > 80) {
         line(row);
         row = "   ";
@@ -758,22 +759,22 @@ inline constexpr RowsTape kRowsTape{};
     case_rows([&](auto&& put) {
       for (const auto st : knownEnds) put(st);
     });
-    raw(std::format(
-        R"(      for (unsigned k = kCandBase[st]; k < kCandBase[st + 1u]; ++k) {{
+    raw(concat(
+        R"(      for (unsigned k = kCandBase[st]; k < kCandBase[st + 1u]; ++k) {
         assert(n < cap);
-        if (n < cap) v[n++] = ::cursiv::Scan{{best.end, kCandPool[k]{}}};
-      }}
+        if (n < cap) v[n++] = ::cursiv::Scan{best.end, kCandPool[k])",
+        a.tiered() ? ", kTable.cold.accTier[k]" : "", R"(};
+      }
       return;
     default: goto full;
-    }}
-  }}
+    }
+  }
 full:
   n = 0;
   match_all(src, len, from, v, n, cap, first);
-}}
+}
 
-)",
-        a.tiered() ? ", kTable.cold.accTier[k]" : ""));
+)"));
   }
 
   void emit_multi_data() {
@@ -1054,7 +1055,7 @@ inline void pick_cand(::cursiv::LrContext& c, ::std::uint32_t s) {
     return spared;
   }
   std::string flag_test(unsigned m) const {
-    std::string test = std::format("kTable.flagged({}, c.la.sym)", m);
+    std::string test = concat("kTable.flagged(", m, ", c.la.sym)");
     if (ByteSet bytes{}; flag_bytes(m, bytes)) {
       test += std::format(
           " && (c.la.begin >= c.len || ::cursiv::in_set<::std::array<::std::"
@@ -1141,8 +1142,7 @@ inline void lengthen(::cursiv::LrContext& c) {
       if (mask == 0) continue;
       if (!test.empty()) test += " || ";
       if (std::has_single_bit(mask))
-        test +=
-            std::format("{} == {}u", term, w * 64u + std::countr_zero(mask));
+        test += concat(term, " == ", w * 64u + std::countr_zero(mask), "u");
       else
         test += std::format(
             "(({0} >> 6) == {1}u && (0x{2:x}ull >> ({0} & 63u)) & 1u)", term, w,
@@ -1154,10 +1154,10 @@ inline void lengthen(::cursiv::LrContext& c) {
   // Never inlined: a copy per lexing state makes the file compile twice as
   // slowly.
   void emit_lex_tail(unsigned m) {
-    define(std::format("CURSIV_NOINLINE {}", linkage("static ")),
-           std::format("void lex_tail_{}(::cursiv::LrContext& c, "
-                       "::cursiv::TextOffset p, ::std::uint16_t mode)",
-                       m));
+    define(concat("CURSIV_NOINLINE ", linkage("static ")),
+           concat("void lex_tail_", m,
+                  "(::cursiv::LrContext& c, "
+                  "::cursiv::TextOffset p, ::std::uint16_t mode)"));
     constexpr std::string_view mode = "mode",
                                start = "kTable.modeStart[mode]";
     raw(R"(  const char* const src = c.src;
@@ -1172,7 +1172,7 @@ again:
     line("    goto done;");
     line("  }");
     if (ByteSet ws{}; mode_ws(m, ws)) {
-      const std::string nm = std::format("kWs_{}", wsLead[m]);
+      const std::string nm = concat("kWs_", wsLead[m]);
       fmt("  {{\n    if (in_set<{}>("
           "static_cast<unsigned char>(src[p]))) {{\n",
           nm);
@@ -1343,8 +1343,8 @@ again:
 
   std::string guard_target(std::uint32_t guard,
                            std::string_view first = "") const {
-    return first.empty() ? std::format("guard_land(c, {}u)", guard - 1u)
-                         : std::format("guard_held({}, {}u)", first, guard - 1u);
+    return first.empty() ? concat("guard_land(c, ", guard - 1u, "u)")
+                         : concat("guard_held(", first, ", ", guard - 1u, "u)");
   }
   // Where a guard lands, by the gap where the span opened or by the tag of
   // the state it opened in: one helper each, which every site inlines.
@@ -1366,7 +1366,7 @@ again:
   }
 
   std::string reduce_allowed(unsigned prod) const {
-    return std::format("reduce_allowed(c, {}u)", prod);
+    return concat("reduce_allowed(c, ", prod, "u)");
   }
 
   std::vector<bool> landed{};
@@ -1631,7 +1631,7 @@ again:
           cell >> programs.countBits, run);
       for (std::size_t k = i; k < j; ++k)
         fmt("      case {}u: {}\n", k - i,
-            jumps[k - i].empty() ? std::format("goto AC{}_{};", s, k)
+            jumps[k - i].empty() ? concat("goto AC", s, "_", k, ";")
                                  : jumps[k - i]);
       fmt("      default: {}\n", leave("error"));
       line("      }");
@@ -1676,9 +1676,9 @@ again:
       fmt("      if (c.la.sym == 0xFFFFu && {}{}) {}\n",
           a.cfg.prods[sole].gap != 0 ? reduce_allowed(sole) : "true",
           a.may_land_nowhere(s, sole)
-              ? std::format(
-                    " && {} != ::cursiv::kInvalidSymbol",
-                    guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)))
+              ? concat(" && ",
+                       guard_target(a.goto_guard(s, a.cfg.prods[sole].lhs)),
+                       " != ::cursiv::kInvalidSymbol")
               : std::string{},
           jump('R', reduceOf[sole]));
     fmt("      {}\n  }}\n}}\n", leave("pause"));
@@ -1711,10 +1711,10 @@ again:
   std::set<unsigned> probeRuns{};
   void emit_probe_runs() {
     for (const unsigned run : probeRuns) {
-      define(std::format("CURSIV_NOINLINE {}", linkage("static ")),
-             std::format("::cursiv::TextOffset scan_run_{}(const char* src, "
-                         "::cursiv::TextOffset len, ::cursiv::TextOffset i)",
-                         run));
+      define(concat("CURSIV_NOINLINE ", linkage("static ")),
+             concat("::cursiv::TextOffset scan_run_", run,
+                    "(const char* src, "
+                    "::cursiv::TextOffset len, ::cursiv::TextOffset i)"));
       raw("  static constexpr ::std::array<::std::uint64_t, 4> kStay{");
       set64(dfa.stay(run));
       line("};");
@@ -1809,7 +1809,7 @@ again:
     line("  {");
     line("    ::cursiv::TextOffset p = c.committed;");
     if (ByteSet ws{}; mode_ws(m, ws))
-      emit_run_adv(ws, "p", std::format("kWs_{}", wsLead[m]), false);
+      emit_run_adv(ws, "p", concat("kWs_", wsLead[m]), false);
     // Its last byte may read on: the lexer takes the whole gap.
     if (ByteSet stop{}; mode_stop(m, stop))
       fmt("    if (p != c.committed && p < len && in_set<kStop_{}>("
@@ -1948,7 +1948,7 @@ again:
             emit_take(x, "      ");
             emit_land(to, "      ");
           },
-          std::format("goto X{};", curState));
+          concat("goto X", curState, ";"));
       return;
     }
     if (x.kind == LrActionKind::reduce) {
@@ -2002,9 +2002,9 @@ again:
       case GapLeafKind::has:
       case GapLeafKind::is:
         // A long gap is read once for every reading that asks it.
-        expression = std::format(
-            "::cursiv::lr_gap_ask({}, {}u, from, n, [&] {{ return {}; }})",
-            partial ? "gaps" : "&c.gaps", l, gapEmitter.expression(l));
+        expression = concat(
+            "::cursiv::lr_gap_ask(", partial ? "gaps" : "&c.gaps", ", ", l,
+            "u, from, n, [&] { return ", gapEmitter.expression(l), "; })");
         break;
       case GapLeafKind::end:
         expression = partial ? "(known && ::cursiv::gap_end(text.size(), la))"
@@ -2015,15 +2015,16 @@ again:
         break;
       case GapLeafKind::head:
       case GapLeafKind::phrase:
-        expression = std::format(
-            "predicate_{}({}, la, from)", l,
+        expression = concat(
+            "predicate_", l, "(",
             partial
                 ? "text.data(), static_cast<::cursiv::TextOffset>(text.size())"
-                : "c.src, c.len");
+                : "c.src, c.len",
+            ", la, from)");
         if (partial)
           return "(known ? 2u * " + expression + " : " +
                  (leaf.kind == GapLeafKind::head && named_heads(l)
-                      ? std::format("named_{}(la.sym)", l)
+                      ? concat("named_", l, "(la.sym)")
                       : std::string("1u")) +
                  ")";
         break;
@@ -2036,7 +2037,7 @@ again:
   void emit_named_heads() {
     for (unsigned l = 0; l < a.cfg.ngapLeaves; ++l)
       if (a.cfg.gapLeaves[l].kind == GapLeafKind::head && named_heads(l))
-        raw(namedHead.source("static", std::format("named_{}", l),
+        raw(namedHead.source("static", concat("named_", l),
                              a.cfg.gapLeaves[l].node));
   }
   void emit_caret_seen() {
@@ -2112,8 +2113,8 @@ again:
   // One helper per implied token, out of line: the refused path.
   void emit_imply() {
     for (unsigned q = 0; q < impliedTerms.size(); ++q) {
-      define(std::format("CURSIV_NOINLINE {}", linkage("static ")),
-             std::format("bool imply_{}(::cursiv::LrContext& c)", q));
+      define(concat("CURSIV_NOINLINE ", linkage("static ")),
+             concat("bool imply_", q, "(::cursiv::LrContext& c)"));
       fmt("  if (c.virt.pending != 0 || (c.virt.laid_at(c.la) & {3}u) != 0 ||\n"
           "      !drive_cond(c, {1}u, c.virt.from, c.la))\n"
           "    return false;\n"
@@ -2429,7 +2430,7 @@ again:
     for (unsigned s = 0; s < ns; ++s) {
       const unsigned g = groupOf[s];
       localOf[s] = static_cast<unsigned>(entries[g].size());
-      auto label = std::format("G{}", s);
+      auto label = concat("G", s);
       entryAt[g].try_emplace(label, localOf[s]);
       entries[g].push_back(std::move(label));
     }
@@ -2532,8 +2533,9 @@ again:
     // Saving nothing makes a jump between groups a bare jump; a lone group
     // has no such jump, and its code grows under it.
     const auto signature = [&](unsigned g) {
-      return std::format("CURSIV_NOINLINE {}::cursiv::LrExit states_{}(",
-                         split() ? "CURSIV_PRESERVE_NONE " : "static ", g);
+      return concat("CURSIV_NOINLINE ",
+                    split() ? "CURSIV_PRESERVE_NONE " : "static ",
+                    "::cursiv::LrExit states_", g, "(");
     };
     std::vector<std::string> held(kParserUnits);
     for (unsigned g = 0; g < ngroups; ++g) {
@@ -2554,7 +2556,7 @@ again:
 )";
       for (unsigned g = 0; g < ngroups; ++g)
         head += signature(g) + "::cursiv::LrContext&, ::std::uint32_t);\n";
-      head += std::format("\n}}  // namespace {}\n", ns);
+      head += concat("\n}  // namespace ", ns, "\n");
       for (unsigned u = 0; u < kParserUnits; ++u)
         if (!held[u].empty())
           units[u] = capture([&] {
@@ -2665,7 +2667,7 @@ again:
                                          "#pragma once\n" +
                                          (head.empty() ? "" : "\n") + head);
     for (unsigned u = 0; u < kParserUnits; ++u)
-      files.emplace_back(std::format("ParserGroups{}.cpp", u),
+      files.emplace_back(concat("ParserGroups", u, ".cpp"),
                          std::move(units[u]));
     return files;
   }

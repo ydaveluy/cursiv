@@ -153,7 +153,7 @@ void run() {
     const auto* e = exactly<ast::E>(result);
     CHECK(read(result) && e != nullptr && e->d != nullptr &&
           e->d->c != nullptr && e->d->c->n == "x");
-    CHECK(read(result) && result.nodes.size() == 3);
+    CHECK(read(result) && result.nodes().size() == 3);
   }
 
   const Pair adopted{g::Ll::create_parser(),
@@ -163,7 +163,7 @@ void run() {
     const auto* pair = exactly<ast::Pair>(result);
     CHECK(read(result) && pair != nullptr && pair->leaf != nullptr &&
           pair->leaf->name == "x");
-    CHECK(read(result) && result.nodes.size() == 2);
+    CHECK(read(result) && result.nodes().size() == 2);
   }
 
   const Pair chained{g::Ll::create_parser(),
@@ -330,8 +330,8 @@ void verify(const cursiv::Parser& parser) {
       std::fprintf(stderr, "%s: got %s; expected %s\n", source, actual.c_str(),
                    expected);
     CHECK(actual == expected);
-    CHECK(reached.size() == result.nodes.size());
-    for (const auto* node : result.nodes) CHECK(reached.contains(node));
+    CHECK(reached.size() == result.nodes().size());
+    for (const auto* node : result.nodes()) CHECK(reached.contains(node));
   }
   for (std::string_view source : {"", "+", "()", "a|", "(a", "a++"}) {
     const std::string input = "cyclic:" + std::string(source);

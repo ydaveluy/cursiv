@@ -24,8 +24,8 @@ class Parser {
   // something only through this. `getEntryRule()` lives on it.
   [[nodiscard]] virtual const Grammar& getGrammar() const noexcept = 0;
 
-  // The result borrows `text`: every string in the AST is a view into it, so
-  // the caller keeps the bytes alive at least as long as the result. A
+  // The result borrows `text`: every `string_view` in the AST is a view into
+  // it, so the caller keeps the bytes alive at least as long as the result. A
   // `Document` owns both, and in that order. Only the view's bytes are read:
   // no NUL terminator or padding is required, and embedded NULs are content.
   [[nodiscard]] virtual ParseResult parse(

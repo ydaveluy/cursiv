@@ -11,25 +11,25 @@ namespace trepair {
 namespace ast {
 struct Item : cursiv::Extends<cursiv::AstNode> {};
 struct Word : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct Group : cursiv::Extends<Item> {
-  cursiv::vector<Item*> items;
+  vector<Item*> items;
 };
 struct Index : cursiv::Extends<Item> {
-  cursiv::vector<Item*> items;
+  vector<Item*> items;
 };
 struct Decl : cursiv::Extends<cursiv::AstNode> {};
 struct Element : cursiv::Extends<Decl> {
-  std::string_view name;
-  cursiv::vector<Item*> items;
+  string_view name;
+  vector<Item*> items;
 };
 struct Section : cursiv::Extends<Decl> {
-  std::string_view name;
-  cursiv::vector<Item*> items;
+  string_view name;
+  vector<Item*> items;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Decl*> decls;
+  vector<Decl*> decls;
 };
 }  // namespace ast
 

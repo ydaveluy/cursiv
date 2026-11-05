@@ -4,6 +4,11 @@ function(cursiv_test name src)
       cursiv::engine::lr ${ARGN})
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME ${name} COMMAND ${name})
+  # Each pool of a wasm test starts a thread per worker, and one per host CPU
+  # would take most of a short test's time.
+  if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT CURSIV_WORKERS=4)
+  endif()
 endfunction()
 
 # A timeout in an optimised build's seconds: unoptimised code runs the same

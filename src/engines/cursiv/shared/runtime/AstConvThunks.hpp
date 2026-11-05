@@ -29,8 +29,8 @@
 
 namespace cursiv::detail {
 
-// One node factory per AST type. The arena stamps the tag and registers the
-// destructor, so a node built by hand carries identity too.
+// One node factory per AST type. The node is on the list from here, and the
+// result runs its destructor when it goes.
 template <class T>
 AstNode* make_node(AstBuildCtx& ctx, NodeId id) {
   AstNode* const base = ctx.arena->template make<T>();
@@ -94,19 +94,14 @@ inline std::string_view join_parts(AstBuildCtx& ctx, const PartRun& run) {
     return std::string_view{};
   }
   if (verbatim) return std::string_view(first, total);
-  auto* const buf = static_cast<char*>(ctx.mem->allocate(total, alignof(char)));
-  char* out = buf;
-  for (const std::string_view part : run)
-    out = std::copy(part.begin(), part.end(), out);
-  return std::string_view(buf, total);
+  return ctx.keep_text(
+      std::span<const std::string_view>(run.begin(), run.size()));
 }
 
 // Whether a converter is handed what it converts, its parts or its text; one
 // that is not reads nothing.
 template <class Cv>
-inline constexpr bool converts_input =
-    ConvertsPartsMem<Cv> || ConvertsParts<Cv> || ConvertsTextMem<Cv> ||
-    ConvertsText<Cv>;
+inline constexpr bool converts_input = ConvertsParts<Cv> || ConvertsText<Cv>;
 
 struct TextValues {
   // A converter that failed is never recorded: the evaluation stops there.
@@ -284,35 +279,30 @@ bool each_part(AstBuildCtx& ctx, NodeId id, PartRun& out) {
   return true;
 }
 
-// Materialised in the tree's arena and not on a frame: what a parts converter
-// receives outlives the call that builds it.
 template <bool Text = true, bool Base = false>
-CURSIV_COLD
-    CURSIV_NOINLINE inline std::optional<std::span<const std::string_view>>
-    parts_of(AstBuildCtx& ctx, NodeId id) {
+CURSIV_COLD CURSIV_NOINLINE inline std::optional<PartRun> parts_of(
+    AstBuildCtx& ctx, NodeId id) {
   PartRun run;
   if (!each_part<Text, Base>(ctx, id, run)) return std::nullopt;
-  if (run.size() == 0) return std::span<const std::string_view>{};
-  auto* const out = static_cast<std::string_view*>(ctx.mem->allocate(
-      run.size() * sizeof(std::string_view), alignof(std::string_view)));
-  for (std::size_t i = 0; i < run.size(); ++i) out[i] = run[i];
-  return std::span<const std::string_view>{out, run.size()};
+  return run;
 }
 
 // A terminal has one raw part: its Parts converter must not call that same
 // terminal's TextFn.
 template <bool Data, bool Text = true, bool Base = false>
-std::optional<std::span<const std::string_view>> payload_parts(AstBuildCtx& ctx,
-                                                               NodeId id) {
+std::optional<PartRun> payload_parts(AstBuildCtx& ctx, NodeId id) {
   if constexpr (Data) {
     return parts_of<Text, Base>(ctx, id);
   } else {
-    auto* const part = static_cast<std::string_view*>(
-        ctx.mem->allocate(sizeof(std::string_view), alignof(std::string_view)));
-    *part = ctx.cst->text(id);
-    return std::span<const std::string_view>{part, 1};
+    PartRun run;
+    run.push_back(ctx.cst->text(id));
+    return run;
   }
 }
+
+// What a parts converter reads: valid for the call.
+inline Parts as_parts(const PartRun& run) { return {run.begin(), run.size()}; }
+inline Parts as_parts(Parts parts) { return parts; }
 
 // Skips and insertions contribute no text. Rescans keep the author's span,
 // just as an assignment over that leaf does.
@@ -387,20 +377,14 @@ CURSIV_ALWAYS_INLINE inline bool convert_with(AstBuildCtx& ctx, NodeId id,
     return conversion_settled(ctx, id, std::forward<decltype(result)>(result),
                               sink);
   };
-  if constexpr (ConvertsPartsMem<CR> || ConvertsParts<CR>) {
+  if constexpr (ConvertsParts<CR>) {
     const auto p = parts();
     if (!p) return false;
-    if constexpr (ConvertsPartsMem<CR>)
-      return settle(CR::convert(*p, ctx.mem));
-    else
-      return settle(CR::convert(*p));
-  } else if constexpr (ConvertsTextMem<CR> || ConvertsText<CR>) {
+    return settle(CR::convert(as_parts(*p)));
+  } else if constexpr (ConvertsText<CR>) {
     const auto t = text();
     if (!t) return false;
-    if constexpr (ConvertsTextMem<CR>)
-      return settle(CR::convert(*t, ctx.mem));
-    else
-      return settle(CR::convert(*t));
+    return settle(CR::convert(*t));
   } else {
     return settle(CR::convert());
   }
@@ -415,7 +399,7 @@ inline constexpr char value_tag = 0;
 // what it converted to. A token a repair dropped may stand beside that record:
 // it holds no value, and the record still passes its own.
 template <class T>
-bool pass_value(AstBuildCtx& ctx, NodeId id, T& out) {
+bool pass_value(AstBuildCtx& ctx, NodeId id, std::optional<T>& out) {
   const Cst& cst = *ctx.cst;
   for (NodeId at = id;;) {
     const ValueSlot* const slot = ctx.actions->value_at(ctx.stamp.row(cst[at]));
@@ -442,8 +426,9 @@ bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out);
 template <class R>
 consteval ValueSlot value_slot() {
   using T = rule_type_t<R>;
-  return {&invoke_conv<converter_rule_t<R>, T, 0, is_data_rule<R>>,
-          &value_tag<T>};
+  return {
+      &invoke_conv<converter_rule_t<R>, std::optional<T>, 0, is_data_rule<R>>,
+      &value_tag<T>};
 }
 
 // What a payload converts to, on every path.
@@ -451,7 +436,7 @@ template <class CR, class M, std::size_t Alt, bool Data, bool Text,
           bool Guarded, bool Base>
 CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
                                                  void* out) {
-  using A = typename conv_alt_at<M, Alt>::type;
+  using A = typename conv_alt_at<typename strip_storage<M>::type, Alt>::type;
   M& slot = *static_cast<M*>(out);
 
   // The member keeps its default, and no second sentence is added.
@@ -462,41 +447,52 @@ CURSIV_ALWAYS_INLINE inline bool convert_payload(AstBuildCtx& ctx, NodeId id,
   // Always inline: the thunk is reached through a pointer, and a body left
   // out of line is a second call per converted value.
   const auto store = [&](auto&& value) CURSIV_ALWAYS_INLINE {
-    conv_store<M, A>(slot, std::forward<decltype(value)>(value));
+    // A view of a string the converter built: the tree keeps the bytes.
+    if constexpr (std::is_same_v<A, std::string_view> &&
+                  std::is_same_v<std::remove_cvref_t<decltype(value)>,
+                                 std::string>)
+      place<A>(slot, ctx.keep_text(value));
+    else
+      place<A>(slot, std::forward<decltype(value)>(value));
   };
 
   if constexpr (is_pass_conv<CR>) {
-    typename CR::type value{};
+    std::optional<typename CR::type> value;
     if (!pass_value(ctx, id, value)) return false;
-    store(std::move(value));
+    store(*std::move(value));
     return true;
   } else if constexpr (!std::is_void_v<CR>) {
-    // A converter that materialises allocates in the tree's resource, so its
-    // view lives as long as the ParseResult.
     return convert_with<CR>(
         ctx, id, [&] { return payload_parts<Data, Text, Base>(ctx, id); },
         [&] { return payload_text<Data, Text, Base>(ctx, id); }, store);
   } else {
     // `admits` refuses a payload with neither a converter nor a default
-    // conversion, so this branch is the latter.
-    static_assert(has_default_convert<A>,
-                  "a value member is vocabulary or written by a converter");
+    // conversion, so this branch is the latter, or a class made from the string
+    // a data rule passes on.
+    static_assert(
+        has_default_convert<A> || std::is_constructible_v<A, std::string>,
+        "a value member is vocabulary or written by a converter");
     const auto text = payload_text<Data, Text, Base>(ctx, id);
     if (!text) return false;
     // A text is its own value and the exact decimal path answers first: only
     // what they decline pays for the result's diagnostic.
-    if constexpr (std::is_same_v<A, std::string_view>) {
-      conv_store<M, A>(slot, *text);
+    if constexpr (std::is_same_v<A, std::string_view> ||
+                  std::is_same_v<A, std::string>) {
+      place<A>(slot, *text);
       return true;
-    }
-    if constexpr (std::is_same_v<A, double>) {
-      double fast = 0.0;
-      if (detail::fast_decimal(*text, fast)) {
-        conv_store<M, A>(slot, fast);
-        return true;
+    } else if constexpr (!has_default_convert<A>) {
+      place<A>(slot, std::string(*text));
+      return true;
+    } else {
+      if constexpr (std::is_same_v<A, double>) {
+        double fast = 0.0;
+        if (detail::fast_decimal(*text, fast)) {
+          place<A>(slot, fast);
+          return true;
+        }
       }
+      return conversion_settled(ctx, id, default_convert<A>(*text), store);
     }
-    return conversion_settled(ctx, id, default_convert<A>(*text), store);
   }
 }
 template <class CR, class M, std::size_t Alt, bool Data, bool Text,
@@ -506,16 +502,15 @@ CURSIV_NOINLINE bool convert_payload_slow(AstBuildCtx& ctx, NodeId id,
   return convert_payload<CR, M, Alt, Data, Text, Guarded, Base>(ctx, id, out);
 }
 
-// One symbol per (converter, member) pair. `out` points at the member's type,
-// `conv_target_t` on both sides. A data rule read as text is almost always one
+// One symbol per (converter, member) pair. `out` points at `conv_target_t`, on
+// both sides. A data rule read as text is almost always one
 // clean leaf: that leaf converts as a terminal does, joining nothing, and with
 // the rest out of line it costs no frame.
 template <class CR, class M, std::size_t Alt, bool Data, bool Text,
           bool Guarded, bool Base>
 bool invoke_conv(AstBuildCtx& ctx, NodeId id, void* out) {
   if constexpr (Data && (std::is_void_v<CR> ||
-                         (converts_input<CR> && !ConvertsParts<CR> &&
-                          !ConvertsPartsMem<CR>))) {
+                         (converts_input<CR> && !ConvertsParts<CR>))) {
     if (!ctx.repaired) [[likely]] {
       const CstNode& n = (*ctx.cst)[id];
       if (n.subtreeSize == 1 && !n.hidden && !n.recovered &&
@@ -551,7 +546,13 @@ std::optional<std::string_view> convert_text(AstBuildCtx& ctx, NodeId id,
   convert_with<Cv>(
       ctx, id, [&] { return std::optional<Parts>(Parts{&text, 1}); },
       [&] { return std::optional(text); },
-      [&](std::string_view value) { out = value; });
+      [&](auto&& value) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>,
+                                     std::string>)
+          out = ctx.keep_text(value);
+        else
+          out = std::string_view(value);
+      });
   return out;
 }
 
@@ -589,40 +590,37 @@ std::optional<std::string_view> denoted_chain(AstBuildCtx& ctx, NodeId id) {
   return value;
 }
 
-// Whether a converter answers a view of its own, either form: reading the raw
-// bytes for it would make a terminal mean one thing assigned and another
-// joined.
+// Whether a converter answers text, either form: reading the raw bytes for it
+// would make a terminal mean one thing assigned and another joined.
 template <class Cv>
 concept DenotesText = [] {
-  if constexpr (ConvertsPartsMem<Cv> || ConvertsParts<Cv>)
-    return std::is_same_v<
-        unwrap_result_t<typename convert_parts_result<Cv>::type>,
-        std::string_view>;
-  else if constexpr (ConvertsTextMem<Cv> || ConvertsText<Cv> ||
-                     ConvertsNothing<Cv>)
-    return std::is_same_v<unwrap_result_t<typename convert_result<Cv>::type>,
-                          std::string_view>;
+  if constexpr (ConvertsParts<Cv>)
+    return is_text_value<
+        unwrap_result_t<typename convert_parts_result<Cv>::type>>;
+  else if constexpr (ConvertsText<Cv> || ConvertsNothing<Cv>)
+    return is_text_value<unwrap_result_t<typename convert_result<Cv>::type>>;
   else
     return false;
 }();
 
 // A value the grammar states with `as<V>`. Any other converter that reads
 // nothing is called: a `constexpr` function may answer otherwise at run time.
-// Only a member it can be stored into plainly qualifies: a variant and a
-// reference stay with the call.
-template <class CR, class M>
+// Only a value stored plainly qualifies: a variant and a reference stay with
+// the call. `H` is what the member holds.
+template <class CR, class H>
 concept StatesValue =
-    detail::is_value_conv<CR> && !is_variant_v<M> &&
-    std::is_trivially_copyable_v<M> &&
-    std::is_same_v<std::remove_cvref_t<decltype(CR::convert())>, M>;
+    detail::is_value_conv<CR> && !is_variant_v<H> &&
+    std::is_trivially_copyable_v<H> &&
+    std::is_same_v<std::remove_cvref_t<decltype(CR::convert())>, H>;
 
 // One slot of the conversion registry: the thunk, and the value where the
 // grammar stated one.
 template <class CR, class M, std::size_t Alt, bool Data, bool Text = true>
 consteval ConvSlot conv_slot() {
+  using H = typename strip_storage<M>::type;
   ConvSlot s{&invoke_conv<CR, M, Alt, Data, Text>, nullptr};
-  if constexpr (Alt == 0 && !Data && StatesValue<CR, M>)
-    s.value = &kConvValue<CR, M>;
+  if constexpr (Alt == 0 && !Data && StatesValue<CR, H>)
+    s.value = &kConvValue<CR, H>;
   return s;
 }
 

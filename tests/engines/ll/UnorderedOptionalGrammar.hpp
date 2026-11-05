@@ -13,7 +13,7 @@ struct Child : cursiv::Extends<cursiv::AstNode> {
 struct Record : cursiv::Extends<cursiv::AstNode> {
   string_view first;
   string_view second;
-  bool flag{};
+  boolean flag{};
   vector<string_view> values;
   Child* child{};
 };

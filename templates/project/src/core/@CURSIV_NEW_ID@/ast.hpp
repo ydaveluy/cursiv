@@ -5,8 +5,9 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 // `cursiv::Extends<cursiv::AstNode>` provides the member types used below:
-// `string_view` holds text, `vector<T*>` holds child nodes, and `reference<T>`
-// holds a name that resolves to a `T` after parsing.
+// `string_view` holds matched text, `string` any other text, `T*` and `vector<T*>`
+// hold child nodes, and `reference<T>` holds a name that resolves to a `T` after
+// parsing.
 
 namespace @CURSIV_NEW_ID@::ast {
 

@@ -15,7 +15,7 @@ namespace ttree {
 namespace ast {
 struct Variable : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  std::int64_t value = 0;
+  int64 value = 0;
 };
 struct Module : cursiv::Extends<cursiv::AstNode> {
   vector<Variable*> variables;
@@ -28,7 +28,7 @@ struct Decl : cursiv::Extends<cursiv::AstNode> {
 struct Function : cursiv::Extends<Decl> {};
 struct Fn : cursiv::Extends<Decl> {};
 struct Var : cursiv::Extends<Decl> {
-  std::int64_t value = 0;
+  int64 value = 0;
 };
 
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
@@ -36,7 +36,7 @@ struct Name : cursiv::Extends<Expression> {
   string_view name;
 };
 struct Number : cursiv::Extends<Expression> {
-  std::int64_t value = 0;
+  int64 value = 0;
 };
 struct Index : cursiv::Extends<Expression> {
   Expression* array = nullptr;

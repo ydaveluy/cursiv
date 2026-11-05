@@ -14,7 +14,7 @@ namespace twords {
 namespace ast {
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  bool flag = false;
+  boolean flag = false;
   string_view size;
   reference<Item> target;
 };

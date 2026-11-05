@@ -45,7 +45,7 @@ namespace {
 
 struct Bin : cursiv::Extends<cursiv::AstNode> {
   Bin* left = nullptr;
-  cursiv::AstNode::string_view op;
+  string_view op;
   Bin* right = nullptr;
 };
 
@@ -91,7 +91,7 @@ namespace distribute {
 namespace {
 
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  double v = 0;
+  float64 v = 0;
 };
 
 constexpr auto ten = [](std::string_view t) {

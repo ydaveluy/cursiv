@@ -1,13 +1,14 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
+
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include <cstddef>
-#include <cstdint>
-#include <memory_resource>
-#include <span>
-#include <string_view>
 // A sequence of several elements that read, under `assign` or `append`, is an
 // unnamed data rule: the member takes its parts joined.
 
@@ -28,15 +29,11 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 };
 }  // namespace ast
 
-inline constexpr auto upper =
-    [](std::string_view text,
-       std::pmr::memory_resource* mem) -> std::string_view {
-  const auto room = cursiv::text_room(mem, text.size());
-  for (std::size_t i = 0; i < text.size(); ++i)
-    room[i] = text[i] >= 'a' && text[i] <= 'z'
-                  ? static_cast<char>(text[i] - 'a' + 'A')
-                  : text[i];
-  return {room.data(), text.size()};
+inline constexpr auto upper = [](std::string_view text) {
+  std::string out(text);
+  for (char& c : out)
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+  return out;
 };
 
 struct Base : cursiv::GrammarSpec {
@@ -328,34 +325,25 @@ namespace tdataparts {
 
 namespace ast {
 struct Name : cursiv::Extends<cursiv::AstNode> {
-  string_view parts;
-  string_view text;
+  string parts;
+  string text;
 };
 }  // namespace ast
 
-inline constexpr auto bars =
-    [](std::span<const std::string_view> parts,
-       std::pmr::memory_resource* mem) -> std::string_view {
-  std::size_t size = 0;
-  for (const auto part : parts) size += part.size() + 1;
-  const auto room = cursiv::text_room(mem, size);
-  std::size_t at = 0;
+inline constexpr auto bars = [](std::span<const std::string_view> parts) {
+  std::string out;
   for (std::size_t i = 0; i < parts.size(); ++i) {
-    if (i != 0) room[at++] = '|';
-    for (const char c : parts[i]) room[at++] = c;
+    if (i != 0) out += '|';
+    out += parts[i];
   }
-  return {room.data(), at};
+  return out;
 };
 
-inline constexpr auto upper =
-    [](std::string_view text,
-       std::pmr::memory_resource* mem) -> std::string_view {
-  const auto room = cursiv::text_room(mem, text.size());
-  for (std::size_t i = 0; i < text.size(); ++i)
-    room[i] = text[i] >= 'a' && text[i] <= 'z'
-                  ? static_cast<char>(text[i] - 'a' + 'A')
-                  : text[i];
-  return {room.data(), text.size()};
+inline constexpr auto upper = [](std::string_view text) {
+  std::string out(text);
+  for (char& c : out)
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+  return out;
 };
 
 struct Base : cursiv::GrammarSpec {

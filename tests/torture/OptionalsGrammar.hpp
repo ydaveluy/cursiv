@@ -14,46 +14,46 @@ namespace topt {
 namespace ast {
 
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  std::string_view v;
+  string_view v;
 };
 
 struct Opts : cursiv::Extends<cursiv::AstNode> {
-  std::string_view a01, a02, a03, a04, a05;
-  std::string_view a06, a07, a08, a09, a10;
-  std::string_view a11, a12, a13, a14, a15;
-  std::string_view a16, a17, a18, a19, a20;
-  cursiv::vector<Item*> items;
+  string_view a01, a02, a03, a04, a05;
+  string_view a06, a07, a08, a09, a10;
+  string_view a11, a12, a13, a14, a15;
+  string_view a16, a17, a18, a19, a20;
+  vector<Item*> items;
 };
 
 struct Storey : cursiv::Extends<cursiv::AstNode> {
-  std::string_view a01, a02, a03, a04;
+  string_view a01, a02, a03, a04;
 };
 
 struct Rec : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
-  std::string_view a1;
-  std::string_view a2;
-  std::string_view a3;
-  std::string_view a4;
-  std::string_view a5;
-  std::string_view a6;
-  std::string_view a7;
-  std::string_view a8;
-  std::string_view nested;
+  string_view name;
+  string_view a1;
+  string_view a2;
+  string_view a3;
+  string_view a4;
+  string_view a5;
+  string_view a6;
+  string_view a7;
+  string_view a8;
+  string_view nested;
 };
 
 struct Recs : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Rec*> items;
+  vector<Rec*> items;
 };
 
 struct VarDecl : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
-  std::string_view from;
-  std::string_view number;
+  string_view name;
+  string_view from;
+  string_view number;
 };
 
 struct Vars : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<VarDecl*> items;
+  vector<VarDecl*> items;
 };
 
 }  // namespace ast

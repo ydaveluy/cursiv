@@ -1,8 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <concepts>
 #include <cstdint>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cursiv/services/Diagnostic.hpp"
@@ -74,6 +77,19 @@ struct Document : AstNode {
 
   [[nodiscard]] const TextDocument& textDocument() const noexcept;
 
+  // Keeps a name a scope computation built, for a description that views it: it
+  // lives until the next parse. The parts are written in one piece, so
+  // `keep_text(outer, ".", inner)` needs no temporary. Every call adds to the
+  // document's memory, so call it from a scope computation, which the builder
+  // runs once per parse; a reset to `IndexedContent` or `Parsed` runs it again
+  // on the same parse. It is not locked: the caller holds the document's write.
+  template <std::convertible_to<std::string_view>... Parts>
+    requires(sizeof...(Parts) != 0)
+  std::string_view keep_text(const Parts&... parts) const {
+    const std::string_view views[]{std::string_view(parts)...};
+    return keep_parts(views);
+  }
+
   explicit Document(TextDocument textDocument, std::string uri = {});
   ~Document();
   Document(const Document&) = delete;
@@ -82,6 +98,7 @@ struct Document : AstNode {
   Document& operator=(Document&&) = delete;
 
  private:
+  std::string_view keep_parts(std::span<const std::string_view> parts) const;
   void resetForRebuild() noexcept;
 
   TextDocument _textDocument;

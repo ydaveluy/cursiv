@@ -64,7 +64,8 @@ namespace {
 // A call's place on the machine's stack is 32 bits: a stack past them is
 // refused, never wrapped round to a frame the parse does not stand on.
 std::uint16_t g_machine_calls = 0;
-std::uint16_t machine_step(std::uint16_t, cursiv::LlContext&, void*) {
+[[maybe_unused]] std::uint16_t machine_step(std::uint16_t, cursiv::LlContext&,
+                                            void*) {
   return ++g_machine_calls < 3 ? std::uint16_t{0} : cursiv::kLlDone;
 }
 

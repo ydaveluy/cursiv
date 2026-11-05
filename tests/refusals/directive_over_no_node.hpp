@@ -13,7 +13,7 @@ namespace refuse {
 
 namespace ast {
 struct Holder : cursiv::Extends<cursiv::AstNode> {
-  std::variant<std::monostate, std::int64_t, Node*> v;
+  variant<std::monostate, int64, Node*> v;
 };
 }  // namespace ast
 

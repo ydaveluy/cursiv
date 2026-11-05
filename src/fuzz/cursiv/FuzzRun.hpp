@@ -7,12 +7,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
-#include <memory_resource>
 #include <string>
 #include <string_view>
 
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
@@ -80,18 +78,17 @@ inline std::uint64_t tape_seal(const cursiv::Cst& c) {
 }
 
 template <class G>
-void run(const char* lang, const cursiv::Parser& parser,
-         const cursiv::AstReflection& reflection, unsigned docs,
-         std::uint64_t seed) {
+std::uint64_t run(const char* lang, const cursiv::Parser& parser,
+                  const cursiv::AstReflection& reflection, unsigned docs,
+                  std::uint64_t seed) {
   const GrammarCost cost(kDeclaredModel<G>, kActions<G>);
   Lane lane;
 
   for (unsigned i = 0; i < docs; ++i) {
     SeededSource src(seed + std::uint64_t{i} * 0x9e3779b97f4a7c15ull);
-    // The arena owns the walk's own tree and the bytes its values view; it
-    // dies with the document that was judged on it.
-    std::pmr::monotonic_buffer_resource pool;
-    cursiv::AstArena arena(&pool);
+    // Owns the walk's own tree and the bytes its values view; it dies with the
+    // document that was judged on it.
+    WalkTree arena;
     GrammarGenerator gen{kDeclaredModel<G>,
                          kLexicon<G>,
                          kActions<G>,
@@ -207,6 +204,9 @@ void run(const char* lang, const cursiv::Parser& parser,
                 (unsigned long long)lane.unmodelled);
     ++failures;
   }
+  std::uint64_t notModelled = lane.unmodelled;
+  for (const auto& [name, n] : lane.unwritten) notModelled += n;
+  return notModelled;
 }
 
 }  // namespace cursiv::fuzzer

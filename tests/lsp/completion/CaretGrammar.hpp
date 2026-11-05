@@ -20,47 +20,47 @@ struct Word : cursiv::Extends<Stmt> {};
 struct KwWord : cursiv::Extends<Word> {};
 struct IKwWord : cursiv::Extends<Word> {};
 struct Param : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
+  string_view name;
 };
 struct Fn : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
-  cursiv::vector<Param*> params;
+  string_view name;
+  vector<Param*> params;
   cursiv::AstNode* body = nullptr;
 };
 struct Call : cursiv::Extends<Stmt> {
-  std::string_view name;
-  cursiv::vector<Stmt*> args;
+  string_view name;
+  vector<Stmt*> args;
 };
 struct Sym : cursiv::Extends<Stmt> {
-  std::string_view name;
+  string_view name;
 };
 struct Alpha : cursiv::Extends<Sym> {};
 struct Beta : cursiv::Extends<Sym> {};
 struct Link : cursiv::Extends<Stmt> {
-  cursiv::reference<Sym> to;
+  reference<Sym> to;
 };
 // A SECOND CLASS SPELLING `to`: the member name alone no longer says which
 // reference a site writes, so only the class the grammar names can.
 struct Bond : cursiv::Extends<cursiv::AstNode> {
-  cursiv::reference<Beta> to;
-  std::string_view note;
+  reference<Beta> to;
+  string_view note;
 };
 struct Tie : cursiv::Extends<Stmt> {
   Bond* bond = nullptr;
 };
 struct Nest : cursiv::Extends<Stmt> {
-  cursiv::reference<Alpha> to;
+  reference<Alpha> to;
   Stmt* inner = nullptr;
 };
 // Each writes its own member: where a token may open either, both are read.
 struct SeesAlpha : cursiv::Extends<Stmt> {
-  std::string_view name;
-  cursiv::reference<Alpha> alpha;
-  std::string_view text;
+  string_view name;
+  reference<Alpha> alpha;
+  string_view text;
 };
 struct SeesBeta : cursiv::Extends<Stmt> {
-  std::string_view name;
-  cursiv::reference<Beta> beta;
+  string_view name;
+  reference<Beta> beta;
 };
 struct Instance : cursiv::Extends<Stmt> {
   Stmt* instance = nullptr;
@@ -72,10 +72,10 @@ struct Hold : cursiv::Extends<Stmt> {
   Held* inner = nullptr;
 };
 struct Block : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Stmt*> stmts;
+  vector<Stmt*> stmts;
 };
 struct File : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Fn*> fns;
+  vector<Fn*> fns;
 };
 }  // namespace ast
 

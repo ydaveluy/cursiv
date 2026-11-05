@@ -5,12 +5,12 @@
 
 namespace tllreserved {
 struct Item : cursiv::Extends<cursiv::AstNode> {
-  bool guarded = false;
+  boolean guarded = false;
   string_view name;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
-  bool ruled = false;
+  boolean ruled = false;
 };
 
 struct Base : cursiv::GrammarSpec {

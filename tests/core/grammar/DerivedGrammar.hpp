@@ -45,7 +45,7 @@ namespace ast {
 
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
-  double value = 0;
+  float64 value = 0;
 };
 
 struct Starred : cursiv::Extends<Item> {};

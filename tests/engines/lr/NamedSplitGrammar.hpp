@@ -13,58 +13,58 @@ namespace tnamedsplit {
 namespace ast {
 struct Item : cursiv::Extends<cursiv::AstNode> {};
 struct A0 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A1 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A2 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A3 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A4 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A5 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A6 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A7 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A8 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A9 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A10 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A11 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A12 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A13 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A14 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A15 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct A16 : cursiv::Extends<Item> {
-  std::string_view name;
+  string_view name;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Item*> items;
+  vector<Item*> items;
 };
 }  // namespace ast
 

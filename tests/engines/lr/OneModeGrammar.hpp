@@ -10,7 +10,7 @@ namespace tonemode {
 
 namespace ast {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  bool empty = false;
+  boolean empty = false;
 };
 }  // namespace ast
 

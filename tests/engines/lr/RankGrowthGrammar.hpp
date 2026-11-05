@@ -11,8 +11,8 @@
 namespace trankgrowth {
 
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  bool first = false;
-  bool second = false;
+  boolean first = false;
+  boolean second = false;
 };
 
 struct G : cursiv::GrammarSpec {

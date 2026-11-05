@@ -13,17 +13,17 @@ namespace tcomment {
 
 namespace ast {
 struct Element : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
+  string_view name;
 };
 struct DataType : cursiv::Extends<Element> {};
 struct Feature : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
+  string_view name;
 };
 struct Entity : cursiv::Extends<Element> {
-  cursiv::vector<Feature*> features;
+  vector<Feature*> features;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Element*> elements;
+  vector<Element*> elements;
 };
 }  // namespace ast
 

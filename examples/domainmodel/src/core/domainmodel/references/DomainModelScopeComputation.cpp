@@ -32,7 +32,7 @@ bool in_family(std::span<const cursiv::AstTypeTag* const> family,
 // purges the index rows pointing into it.
 std::string_view keep(const cursiv::Document& document,
                       const std::string& name) {
-  return cursiv::copy_into(document.parseResult.cst().memory(), name);
+  return document.keep_text(name);
 }
 
 }  // namespace
@@ -53,7 +53,7 @@ DomainModelScopeComputation::collectExportedSymbols(
 
   const std::span<const cursiv::AstTypeTag* const> types =
       _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
-  for (cursiv::AstNode* const node : document.parseResult.nodes) {
+  for (cursiv::AstNode* const node : document.parseResult.nodes()) {
     cursiv::throw_if_cancelled(cancelToken);
     if (in_family(types, node->type))
       addExportedSymbol(*node, exported, document);
@@ -93,7 +93,7 @@ cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
   if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::DomainModel>)
     return symbols;
 
-  symbols.reserve(document.parseResult.nodes.size() / 4);
+  symbols.reserve(document.parseResult.nodes().size() / 4);
   (void)processContainer(*root,
                          static_cast<const ast::DomainModel&>(*root).elements,
                          document, symbols, cancelToken);

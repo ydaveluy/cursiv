@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -14,6 +15,7 @@
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/VariantNodeAlt.hpp"
 #include "cursiv/utils/typelist.hpp"
 
 namespace cursiv::detail {
@@ -88,33 +90,81 @@ struct variant_cands<Src, TypeList<As...>> {
   static constexpr int count = static_cast<int>(tl_size<type>::value);
 };
 
-// No AST member owns its text: the tree borrows the document, and a
-// materialised value is allocated by the converter in the builder's resource.
-// A pmr string owns its bytes as a plain one does.
+// What a reference's name may come from: a `std::string` a converter built is
+// kept by the tree.
 template <class V>
-inline constexpr bool is_owned_text =
-    std::is_same_v<V, std::string> || std::is_same_v<V, std::pmr::string>;
+inline constexpr bool is_text_value =
+    std::is_same_v<V, std::string_view> || std::is_same_v<V, std::string>;
+
+// A `string_view` member takes any text the tree can name: the matched text,
+// what a converter answers as a view of it, and a data rule's parts, a slice of
+// the source where they are adjacent and kept by the tree where they are not. A
+// `std::string` a converter built takes a `string`, and `as<T>` with a type
+// that is not text gives a value, whatever member reads it. A view of the
+// converter's own local is not caught, and cannot be. A bare matcher names no
+// rule.
+template <class R>
+inline constexpr bool source_spells = [] {
+  if constexpr (std::is_void_v<R>)
+    return true;
+  else
+    return std::is_same_v<std::remove_cvref_t<typename text_value<R>::type>,
+                          std::string_view>;
+}();
+
+// A list or an optional a converter may answer whole: of values only, since a
+// node or a reference is the tree's to fill.
+template <class F>
+consteval bool takes_whole() {
+  if constexpr (F::storage == FieldStorage::direct)
+    return false;
+  else if constexpr (F::nature == FieldNature::value)
+    return true;
+  else if constexpr (F::nature == FieldNature::variant)
+    return tl_size<typename variant_node_alt<typename F::held>::type>::value ==
+           0;
+  else
+    return false;
+}
+// A payload answering the very type its member has: `=` writes it whole.
+template <class F, class Src>
+inline constexpr bool writes_whole =
+    takes_whole<F>() &&
+    std::is_same_v<typename pay_value<Src>::type, typename F::member>;
+
+// A number the member would cut short. An integer keeps its size in a floating
+// member, which is what a number literal of either form asks of one.
+template <class X, class V>
+inline constexpr bool narrows = [] {
+  if constexpr (std::is_enum_v<V>) {
+    return narrows<X, std::underlying_type_t<V>>;
+  } else if constexpr (std::is_arithmetic_v<X> && std::is_arithmetic_v<V>) {
+    using To = std::numeric_limits<X>;
+    using From = std::numeric_limits<V>;
+    if (!To::is_integer && From::is_integer) return false;
+    return From::digits > To::digits || (From::is_signed && !To::is_signed) ||
+           (To::is_integer && !From::is_integer);
+  } else {
+    return false;
+  }
+}();
 
 // X is the member's held type (storage already stripped), Src one payload
-// source: references take text whose value type is `string_view` and nothing
-// else; `T*` takes a node deriving from `T`; a variant takes it when exactly
-// one alternative accepts it, an exact match winning outright; a bare
-// `string_view` takes text the builder does not materialise; an owned string
-// takes nothing; everything else takes text convertible to the member's type.
+// source: references take text; a node slot takes a node deriving from its
+// class; a variant takes it when exactly one alternative accepts it, an exact
+// match winning outright, or when it is that variant, of values only;
+// everything else takes text convertible to the member's type.
 template <class X, class Src>
 consteval bool admits() {
-  if constexpr (is_owned_text<X>) {
-    return false;
-  } else if constexpr (is_reference_v<X> || is_multi_reference_v<X>) {
-    // Exact type, not convertibility: a `string_view` is constructible from a
-    // `std::string`, and a converter returning an owned temporary would leave
-    // the name pointing at freed bytes. A data rule's joined parts live in the
-    // arena, so an assembled name passes. A view of the converter's own local
-    // is not caught, and cannot be.
-    return is_text_pay<Src> &&
-           std::is_same_v<typename pay_value<Src>::type, AstNode::string_view>;
+  if constexpr (is_reference_v<X> || is_multi_reference_v<X>) {
+    // Text and nothing else. A view of the converter's own local is not caught,
+    // and cannot be.
+    return is_text_pay<Src> && is_text_value<typename pay_value<Src>::type>;
   } else if constexpr (is_variant_v<X>) {
-    return variant_cands<Src, typename variant_alts<X>::type>::count == 1;
+    return variant_cands<Src, typename variant_alts<X>::type>::count == 1 ||
+           (std::is_same_v<typename pay_value<Src>::type, X> &&
+            std::is_move_constructible_v<X> &&
+            tl_size<typename variant_node_alt<X>::type>::value == 0);
   } else if constexpr (nature_of<X> == FieldNature::node) {
     // The pointee owes the base too: the writer narrows an `AstNode*` to it and
     // wires `parent` through it.
@@ -126,22 +176,19 @@ consteval bool admits() {
   } else {
     if constexpr (is_text_pay<Src>) {
       using V = typename text_value<typename Src::rule>::type;
-      // `is_constructible_v<string_view, std::string>` holds, so a converter
-      // answering an owned string would leave the member pointing at bytes
-      // freed with the `ConversionResult`: read the effective return type, the
-      // converter's or the matched text.
       if constexpr (std::is_same_v<X, AstNode::string_view>)
-        return !text_value<typename Src::rule>::converted ||
-               std::is_same_v<typename pay_value<Src>::type,
-                              AstNode::string_view>;
-      else if constexpr (text_value<typename Src::rule>::converted)
+        return source_spells<typename Src::rule>;
+      else if constexpr (text_value<typename Src::rule>::converted ||
+                         std::is_same_v<std::remove_cvref_t<V>, std::string>)
+        // A value, a data rule's passed on as much as a converter's.
         // Constructible alone: the builder constructs, and for every non-array
         // type convertibility implies constructibility.
-        return std::is_constructible_v<X, V>;
+        return std::is_constructible_v<X, V> &&
+               !narrows<X, std::remove_cvref_t<V>>;
+      else if constexpr (std::is_same_v<X, AstNode::string>)
+        return source_spells<typename Src::rule>;
       else
-        // Without a converter the matched text reaches the member, whatever the
-        // rule is annotated with: a value member is vocabulary or
-        // converter-written.
+        // With no converter, the member converts the matched text itself.
         return has_default_convert<X>;
     } else {
       return false;

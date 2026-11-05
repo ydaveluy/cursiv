@@ -3,7 +3,7 @@
 // A terminal whose text converter asks for a resource, read two ways: as an
 // assignment of its own, and as one part of a data rule.
 
-#include <memory_resource>
+#include <string>
 #include <string_view>
 
 #include "cursiv/grammar/GrammarSpec.hpp"
@@ -11,20 +11,15 @@
 
 namespace tmemconv {
 
-// The quotes come off, and the answer is written into the resource so the
-// view outlives the call.
-inline constexpr auto strip = [](std::string_view t,
-                                 std::pmr::memory_resource* m) {
-  if (t.size() < 2) return t;
-  const std::string_view in = t.substr(1, t.size() - 2);
-  char* const p = static_cast<char*>(m->allocate(in.size(), alignof(char)));
-  for (std::size_t i = 0; i < in.size(); ++i) p[i] = in[i];
-  return std::string_view(p, in.size());
+// The quotes come off, and the answer owns its text.
+inline constexpr auto strip = [](std::string_view t) {
+  if (t.size() < 2) return std::string(t);
+  return std::string(t.substr(1, t.size() - 2));
 };
 
 namespace ast {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  string_view direct;
+  string direct;
   string_view joined;
 };
 }  // namespace ast

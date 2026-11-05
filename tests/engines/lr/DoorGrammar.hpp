@@ -392,20 +392,20 @@ namespace ttwin {
 namespace ast {
 struct Node : cursiv::Extends<cursiv::AstNode> {};
 struct A : cursiv::Extends<Node> {
-  std::string_view name;
+  string_view name;
 };
 struct B : cursiv::Extends<Node> {
-  std::string_view name;
+  string_view name;
 };
 struct Body : cursiv::Extends<Node> {
-  cursiv::vector<std::string_view> items;
+  vector<string_view> items;
 };
 struct RA : cursiv::Extends<Node> {
-  cursiv::vector<std::string_view> items;
+  vector<string_view> items;
   Body* body = nullptr;
 };
 struct RB : cursiv::Extends<Node> {
-  cursiv::vector<std::string_view> items;
+  vector<string_view> items;
   Body* body = nullptr;
 };
 }  // namespace ast

@@ -13,18 +13,17 @@
 #include <type_traits>
 #include <variant>
 
+#include "cursiv/DeclaredModel.hpp"
+#include "cursiv/GrammarActions.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/PayloadOf.hpp"
 #include "cursiv/grammar/expr.hpp"
-#include "cursiv/syntax-tree/AstArena.hpp"
+#include "cursiv/shared/runtime/ast_conv.hpp"
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
 #include "cursiv/utils/typelist.hpp"
-#include "cursiv/ArenaResource.hpp"
-#include "cursiv/DeclaredModel.hpp"
-#include "cursiv/GrammarActions.hpp"
 
 namespace cursiv::fuzzer {
 
@@ -41,7 +40,8 @@ template <class T>
 template <class X>
 struct Render {
   static bool run(const X& v, std::string& out) {
-    if constexpr (std::is_same_v<X, std::string_view>) {
+    if constexpr (std::is_same_v<X, std::string_view> ||
+                  std::is_same_v<X, std::string>) {
       out.assign(v);
       return true;
     } else if constexpr (std::is_same_v<X, bool>) {
@@ -98,62 +98,21 @@ struct only_one<TypeList<T>> {
   using type = T;
 };
 
-// The alternative a variant takes: the one whose type is what the payload
-// produced, nothing else -- a value never lands in a slot by conversion.
-template <class Held, class V, bool = detail::is_variant_v<Held>>
-struct alt_of {
-  using type = Held;
-};
-template <class... As, class V>
-struct alt_of<std::variant<As...>, V, true> {
-  using type = typename only_one<typename detail::tl_cat<detail::cond_t<
-      std::is_same_v<As, V>, TypeList<As>, TypeList<>>...>::type>::type;
-};
-
-// A converter that answers a positioned result may refuse; the engine writes
-// nothing then, and neither does this.
-template <class T>
-inline constexpr bool is_conv_result = false;
-template <class T>
-inline constexpr bool is_conv_result<ConversionResult<T>> = true;
-
 // The single alternative of a variant that holds a node.
 template <class Held>
 using node_alt_t =
     typename only_one<typename detail::variant_node_alt<Held>::type>::type;
 
-template <class Held, class A, class V>
-bool put(Held& slot, V&& v) {
-  if constexpr (detail::is_variant_v<Held>) {
-    if constexpr (std::is_void_v<A>) {
-      return false;
-    } else {
-      slot.template emplace<A>(A(std::forward<V>(v)));
-      return true;
-    }
-  } else if constexpr (requires { Held(std::forward<V>(v)); }) {
-    slot = Held(std::forward<V>(v));
-    return true;
-  } else {
-    return false;
-  }
-}
-
+// The engine's own write, where the payload names an alternative or needs none.
 template <class F, class A, class V>
-bool store(typename F::owner& o, AstArena& ar, V&& v) {
-  using Held = typename F::held;
-  if constexpr (F::storage == detail::FieldStorage::vector) {
-    Held slot{};
-    if (!put<Held, A>(slot, std::forward<V>(v))) return false;
-    (o.*F::ptr).push_back(ar, slot);
-    return true;
-  } else if constexpr (F::storage == detail::FieldStorage::optional) {
-    Held slot{};
-    if (!put<Held, A>(slot, std::forward<V>(v))) return false;
-    o.*F::ptr = slot;
-    return true;
+Write store(typename F::owner& o, V&& v) {
+  if constexpr (detail::is_variant_v<typename F::held> && std::is_void_v<A> &&
+                !std::is_same_v<std::remove_cvref_t<V>, typename F::held> &&
+                !std::is_same_v<std::remove_cvref_t<V>, typename F::member>) {
+    return Write::not_modelled;
   } else {
-    return put<Held, A>(o.*F::ptr, std::forward<V>(v));
+    detail::place<A>(o.*F::ptr, std::forward<V>(v));
+    return Write::modelled;
   }
 }
 
@@ -204,59 +163,76 @@ struct directive<Nest<T, P, E>> {
   using payload = E;
 };
 
-using DenoteFn = std::string_view (*)(std::string_view);
-using MakeFn = AstNode* (*)(AstArena&);
-using NodeFn = bool (*)(AstNode&, AstNode*, AstArena&);
-using TextFn = bool (*)(AstNode&, ElementId, std::string_view, AstArena&);
+using DenoteFn = std::optional<std::string> (*)(std::string_view);
+using MakeFn = AstNode* (*)(WalkTree&);
+using NodeFn = Write (*)(AstNode&, AstNode*);
+using TextFn = Write (*)(AstNode&, ElementId, std::string_view);
 
 template <class T>
-AstNode* make_node(AstArena& ar) {
-  return ar.make<T>();
+AstNode* make_node(WalkTree& ar) {
+  return ar.template make<T>();
+}
+
+// What a leaf's converter answers, asked as the engine asks: its parts, of
+// which a token has one, then its text, or nothing.
+template <class R>
+auto convert_leaf([[maybe_unused]] std::string_view raw) {
+  using Cv = detail::conv_t<R>;
+  if constexpr (detail::ConvertsParts<Cv>)
+    return Cv::convert(Parts{&raw, 1});
+  else if constexpr (detail::ConvertsText<Cv>)
+    return Cv::convert(raw);
+  else
+    return Cv::convert();
 }
 
 template <class R>
-std::string_view denote_of(std::string_view raw) {
-  return detail::conv_t<R>::convert(raw);
+std::optional<std::string> denote_of(std::string_view raw) {
+  auto result = convert_leaf<R>(raw);
+  if constexpr (detail::is_conversion_result<decltype(result)>) {
+    if (!result) return std::nullopt;
+    return std::string(*result.value);
+  } else {
+    return std::string(result);
+  }
 }
 
-// A converter that answers a view is what a leaf denotes; anything else
-// leaves the raw text standing.
+// A converter that answers text is what a leaf denotes, as the engine reads it:
+// a view or a string. Anything else leaves the raw text standing.
 template <class E>
 consteval DenoteFn denote_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; })
     if constexpr (is_terminal_rule<T> || is_data_rule<T>)
-      if constexpr (detail::ConvertsText<detail::conv_t<T>>)
-        if constexpr (std::is_same_v<std::remove_cvref_t<
-                                         decltype(detail::conv_t<T>::convert(
-                                             std::string_view{}))>,
-                                     std::string_view>)
+      if constexpr (detail::HasConverter<detail::conv_t<T>>)
+        if constexpr (detail::is_text_value<detail::unwrap_result_t<
+                          decltype(convert_leaf<T>(std::string_view{}))>>)
           return &denote_of<T>;
   return nullptr;
 }
 
 template <class E>
-bool write_node_of(AstNode& owner, AstNode* child, AstArena& ar) {
+Write write_node_of(AstNode& owner, AstNode* child) {
   using D = directive<E>;
   using F = detail::field_tag<D::ptr>;
-  if (!node_is<typename F::owner>(&owner)) return false;
-  auto& o = static_cast<typename F::owner&>(owner);
+  if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
+  auto& o = *detail::ast_cast_unchecked<typename F::owner>(&owner);
   using Held = typename F::held;
   if constexpr (F::nature == detail::FieldNature::node) {
     using T = std::remove_pointer_t<Held>;
-    if (!node_is<T>(child)) return false;
-    return store<F, Held>(o, ar, static_cast<Held>(child));
+    if (!node_is<T>(child)) return Write::not_modelled;
+    return store<F, Held>(o, detail::ast_cast_unchecked<T>(child));
   } else if constexpr (F::nature == detail::FieldNature::variant) {
     using A = node_alt_t<Held>;
     if constexpr (std::is_void_v<A>) {
-      return false;
+      return Write::not_modelled;
     } else {
       using T = std::remove_pointer_t<A>;
-      if (!node_is<T>(child)) return false;
-      return store<F, A>(o, ar, static_cast<A>(child));
+      if (!node_is<T>(child)) return Write::not_modelled;
+      return store<F, A>(o, detail::ast_cast_unchecked<T>(child));
     }
   } else {
-    return false;
+    return Write::not_modelled;
   }
 }
 
@@ -265,13 +241,13 @@ bool write_node_of(AstNode& owner, AstNode* child, AstArena& ar) {
 // so both trees agree -- refusing here would excuse a member the walk did
 // read.
 template <class F, class A, class Res>
-bool accept(typename F::owner& o, AstArena& ar, Res&& r) {
+Write accept(typename F::owner& o, Res&& r) {
   using R = std::remove_cvref_t<Res>;
-  if constexpr (is_conv_result<R>) {
-    if (!r) return true;
-    return store<F, A>(o, ar, std::move(*r.value));
+  if constexpr (detail::is_conversion_result<R>) {
+    if (!r) return Write::modelled;
+    return store<F, A>(o, std::move(*r.value));
   } else {
-    return store<F, A>(o, ar, std::forward<Res>(r));
+    return store<F, A>(o, std::forward<Res>(r));
   }
 }
 
@@ -304,38 +280,34 @@ struct pay_rule<C, R, true> {
 // One source of one directive: the value is what the rule produces, and
 // the member takes it through its own alternative when it is a variant.
 template <class C, class F, class S>
-bool one_text([[maybe_unused]] typename F::owner& o,
-              [[maybe_unused]] ElementId payload,
-              [[maybe_unused]] bool fallback,
-              [[maybe_unused]] std::string_view text,
-              [[maybe_unused]] AstArena& ar) {
+Write one_text([[maybe_unused]] typename F::owner& o,
+               [[maybe_unused]] ElementId payload,
+               [[maybe_unused]] bool fallback,
+               [[maybe_unused]] std::string_view text) {
   if constexpr (!detail::is_text_pay<S>) {
-    return false;
+    return Write::not_modelled;
   } else {
     using R = typename S::rule;
     constexpr ElementId kRow = payload_row<C, R>();
-    if (fallback ? kRow != kNoElement : kRow != payload) return false;
+    if (fallback ? kRow != kNoElement : kRow != payload)
+      return Write::not_modelled;
     // The name picks the source; the resolved rule converts it.
     using RR = typename pay_rule<C, R>::type;
-    using V = std::remove_cvref_t<typename detail::text_value<RR>::type>;
-    using A = typename alt_of<typename F::held, V>::type;
+    using A =
+        typename detail::conv_alt<typename F::held, detail::pay_text<RR>>::type;
     using CR = detail::converter_rule_t<RR>;
     if constexpr (!std::is_void_v<CR>) {
-      // The form the deduction retained, in the grammar's own order.
-      if constexpr (detail::ConvertsTextMem<CR>) {
-        ArenaResource res(ar);
-        return accept<F, A>(o, ar, CR::convert(text, &res));
-      } else if constexpr (detail::ConvertsText<CR>) {
-        return accept<F, A>(o, ar, CR::convert(text));
+      if constexpr (detail::ConvertsText<CR>) {
+        return accept<F, A>(o, CR::convert(text));
       } else {
         // A converter reading `Parts`, or a value a data rule passes on, is
         // not modelled.
-        return false;
+        return Write::not_modelled;
       }
     } else if constexpr (std::is_void_v<A> || !has_default_convert<A>) {
-      return false;
+      return Write::not_modelled;
     } else {
-      return accept<F, A>(o, ar, default_convert<A>(text));
+      return accept<F, A>(o, default_convert<A>(text));
     }
   }
 }
@@ -344,39 +316,42 @@ template <class C, class F, class L>
 struct text_sources;
 template <class C, class F, class... Ss>
 struct text_sources<C, F, TypeList<Ss...>> {
-  static bool run([[maybe_unused]] typename F::owner& o,
-                  [[maybe_unused]] ElementId payload,
-                  [[maybe_unused]] std::string_view text,
-                  [[maybe_unused]] AstArena& ar) {
+  static Write run([[maybe_unused]] typename F::owner& o,
+                   [[maybe_unused]] ElementId payload,
+                   [[maybe_unused]] std::string_view text) {
     bool done = false;
     // The rule that spelled it first, the bare matcher only if none did.
-    ((done = done || one_text<C, F, Ss>(o, payload, false, text, ar)), ...);
-    ((done = done || one_text<C, F, Ss>(o, payload, true, text, ar)), ...);
-    return done;
+    ((done = done ||
+             one_text<C, F, Ss>(o, payload, false, text) == Write::modelled),
+     ...);
+    ((done = done ||
+             one_text<C, F, Ss>(o, payload, true, text) == Write::modelled),
+     ...);
+    return done ? Write::modelled : Write::not_modelled;
   }
 };
 
 template <class C, class E>
-bool write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
-                   [[maybe_unused]] std::string_view text, AstArena& ar) {
+Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
+                    [[maybe_unused]] std::string_view text) {
   using D = directive<E>;
   using F = detail::field_tag<D::ptr>;
-  if (!node_is<typename F::owner>(&owner)) return false;
-  auto& o = static_cast<typename F::owner&>(owner);
+  if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
+  auto& o = *detail::ast_cast_unchecked<typename F::owner>(&owner);
 
   if constexpr (D::enable) {
-    return store<F, typename F::held>(o, ar, true);
+    return store<F, typename F::held>(o, true);
   } else if constexpr (detail::is_ref_nature(F::nature)) {
     // A reference is judged on its text: the name is what the document
     // spells, and resolving it is the linker's verdict, not the walk's.
     typename F::held slot{};
     slot.refText = text;
-    return store<F, typename F::held>(o, ar, slot);
+    return store<F, typename F::held>(o, slot);
   } else {
     return text_sources<
         C, F,
         typename detail::payload_of<typename D::payload>::type>::run(o, payload,
-                                                                     text, ar);
+                                                                     text);
   }
 }
 
@@ -493,37 +468,39 @@ struct level_alts_all<Lvls, std::index_sequence<Is...>>
 // operator is named by its row, not by its text: two spellings may denote one
 // constant, and a constant is what the member holds.
 template <class C, class R, class N, class... Ops>
-bool write_op(ElementId chosen, N& n, std::string_view text, TypeList<Ops...>) {
+Write write_op(ElementId chosen, N& n, std::string_view text,
+               TypeList<Ops...>) {
   bool done = false;
   (((!done && model::op_row<C, Ops> == chosen)
         ? (n.*R::op_pointer = op_value<Ops>(text), done = true)
         : false),
    ...);
-  return done;
+  return done ? Write::modelled : Write::not_modelled;
 }
 
 template <class C, class R>
-bool fold_of(ElementId op, AstNode& node, AstNode* lhs, std::string_view text,
-             AstNode* rhs) {
+Write fold_of(ElementId op, AstNode& node, AstNode* lhs, std::string_view text,
+              AstNode* rhs) {
   using N = typename R::node_type;
   using LT = std::remove_pointer_t<typename member_traits<
       std::remove_cv_t<decltype(R::left_pointer)>>::type>;
   using RT = std::remove_pointer_t<typename member_traits<
       std::remove_cv_t<decltype(R::right_pointer)>>::type>;
   if (!node_is<N>(&node) || !node_is<LT>(lhs) || !node_is<RT>(rhs))
-    return false;
-  N& n = static_cast<N&>(node);
-  n.*R::left_pointer = static_cast<LT*>(lhs);
+    return Write::not_modelled;
+  N& n = *detail::ast_cast_unchecked<N>(&node);
+  n.*R::left_pointer = detail::ast_cast_unchecked<LT>(lhs);
   using Alts = typename level_alts_all<
       typename R::levels,
       std::make_index_sequence<R::levels::size>>::type;
-  if (!write_op<C, R>(op, n, text, Alts{})) return false;
-  n.*R::right_pointer = static_cast<RT*>(rhs);
-  return true;
+  if (write_op<C, R>(op, n, text, Alts{}) == Write::not_modelled)
+    return Write::not_modelled;
+  n.*R::right_pointer = detail::ast_cast_unchecked<RT>(rhs);
+  return Write::modelled;
 }
 
-using FoldFn = bool (*)(ElementId, AstNode&, AstNode*, std::string_view,
-                        AstNode*);
+using FoldFn = Write (*)(ElementId, AstNode&, AstNode*, std::string_view,
+                         AstNode*);
 
 template <class C, class E>
 consteval ElementId primary_entry() {
@@ -662,7 +639,7 @@ void yield_field(const AstNode& n, ValueYield yield) {
     return;  // `AstReflection` walks the nodes
   } else {
     if (!node_is<typename F::owner>(&n)) return;
-    const auto& o = static_cast<const typename F::owner&>(n);
+    const auto& o = *ast_cast<const typename F::owner>(&n);
     constexpr std::uint32_t kNone = ~std::uint32_t{0};
     if constexpr (F::storage == detail::FieldStorage::vector) {
       std::uint32_t at = 0;
@@ -694,7 +671,7 @@ struct CursivActions final : GrammarActions {
   using Fields =
       typename fields_of<typename model::positions_for<C>::type>::type;
 
-  [[nodiscard]] AstNode* make(ElementId e, AstArena& ar) const override {
+  [[nodiscard]] AstNode* make(ElementId e, WalkTree& ar) const override {
     if (e >= Rows::kMake.size() || Rows::kMake[e] == nullptr) return nullptr;
     return Rows::kMake[e](ar);
   }
@@ -707,27 +684,30 @@ struct CursivActions final : GrammarActions {
     return e < Rows::kOps.size() ? Rows::kOps[e] : std::span<const InfixOp>{};
   }
 
-  bool fold(ElementId e, ElementId op, AstNode& node, AstNode* left,
-            std::string_view text, AstNode* right) const override {
-    if (e >= Rows::kFold.size() || Rows::kFold[e] == nullptr) return false;
+  Write fold(ElementId e, ElementId op, AstNode& node, AstNode* left,
+             std::string_view text, AstNode* right) const override {
+    if (e >= Rows::kFold.size() || Rows::kFold[e] == nullptr)
+      return Write::not_modelled;
     return Rows::kFold[e](op, node, left, text, right);
   }
 
-  bool write_node(ElementId e, AstNode& owner, AstNode* child,
-                  AstArena& ar) const override {
-    if (e >= Rows::kNode.size() || Rows::kNode[e] == nullptr) return false;
-    return Rows::kNode[e](owner, child, ar);
+  Write write_node(ElementId e, AstNode& owner, AstNode* child) const override {
+    if (e >= Rows::kNode.size() || Rows::kNode[e] == nullptr)
+      return Write::not_modelled;
+    return Rows::kNode[e](owner, child);
   }
 
-  bool write_text(ElementId e, ElementId payload, AstNode& owner,
-                  std::string_view text, AstArena& ar) const override {
-    if (e >= Rows::kText.size() || Rows::kText[e] == nullptr) return false;
-    return Rows::kText[e](owner, payload, text, ar);
+  Write write_text(ElementId e, ElementId payload, AstNode& owner,
+                   std::string_view text) const override {
+    if (e >= Rows::kText.size() || Rows::kText[e] == nullptr)
+      return Write::not_modelled;
+    return Rows::kText[e](owner, payload, text);
   }
 
-  [[nodiscard]] std::string_view denote(ElementId e,
-                                        std::string_view text) const override {
-    if (e >= Rows::kDenote.size() || Rows::kDenote[e] == nullptr) return text;
+  [[nodiscard]] std::optional<std::string> denote(
+      ElementId e, std::string_view text) const override {
+    if (e >= Rows::kDenote.size() || Rows::kDenote[e] == nullptr)
+      return std::string(text);
     return Rows::kDenote[e](text);
   }
 

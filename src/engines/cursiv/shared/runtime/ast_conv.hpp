@@ -21,12 +21,11 @@
 
 namespace cursiv::detail {
 
-// Where a text payload lands: a view for a reference, the member's held type
-// otherwise, a variant included. Naming the whole variant here is what lets the
-// writer stay per-member while the alternative stays per-element.
+// What a conversion writes: the member itself, where `place` puts the value, or
+// the text a reference binds.
 template <class F>
 using conv_target_t =
-    cond_t<is_ref_nature(F::nature), AstNode::string_view, typename F::held>;
+    cond_t<is_ref_nature(F::nature), AstNode::string_view, typename F::member>;
 
 // Whether that rule's payload is one the parts must be joined for. A bare
 // matcher names no rule, and `is_data_rule` has none to ask.
@@ -52,11 +51,18 @@ template <class M, class Src, bool = is_variant_v<M>>
 struct conv_alt {
   using type = M;
 };
-template <class M, class Src>
-struct conv_alt<M, Src, true> {
-  using type = tl_at_t<
-      0, typename variant_cands<Src, typename variant_alts<M>::type>::type>;
+template <class L>
+struct first_alt {
+  using type = void;
 };
+template <class A, class... As>
+struct first_alt<TypeList<A, As...>> {
+  using type = A;
+};
+template <class M, class Src>
+struct conv_alt<M, Src, true>
+    : first_alt<
+          typename variant_cands<Src, typename variant_alts<M>::type>::type> {};
 
 template <class M, std::size_t Alt, bool = is_variant_v<M>>
 struct conv_alt_at {
@@ -68,30 +74,21 @@ struct conv_alt_at<M, Alt, true> {
 };
 template <class M, class Src>
 consteval std::size_t conv_alt_rank() {
-  if constexpr (is_variant_v<M>)
-    return index_of<typename conv_alt<M, Src>::type,
-                    typename variant_alts<M>::type>::value;
+  using H = typename strip_storage<M>::type;
+  if constexpr (is_variant_v<H> &&
+                !std::is_void_v<typename conv_alt<H, Src>::type>)
+    return index_of<typename conv_alt<H, Src>::type,
+                    typename variant_alts<H>::type>::value;
   else
     return 0;
 }
 
-// Constructible, always: `admits` asks for exactly that, so a type assignable
-// from V but not constructible from it never reaches here.
-template <class M, class A, class V>
-void conv_store(M& slot, V&& value) {
-  if constexpr (is_variant_v<M>)
-    slot.template emplace<A>(A(std::forward<V>(value)));
-  else
-    slot = M(std::forward<V>(value));
-}
-
 // The converter one site runs, from the declarations an author wrote: the
-// override whose slot decides it (`slot_decl_t`) -- none where that slot names
-// a bare target -- or, where no override fills one, the declared rule's. The
-// rule a stage minted over them has no spelling.
+// override whose slot decides it (`slot_decl_t`) or, where no override fills
+// one, the declared rule's. The rule a stage minted over them has no spelling.
 template <class Declared, class Over>
 struct site_conv {
-  using type = cond_t<HasConverter<conv_t<Over>>, conv_t<Over>, void>;
+  using type = conv_t<Over>;
 };
 template <class Declared>
 struct site_conv<Declared, void> {
@@ -105,12 +102,14 @@ inline constexpr M kConvValue = CR::convert();
 
 // The list is `variant_node_alt`'s, in the order the field's `targets` were
 // folded in, so `alt` indexes both.
-template <class L, class X>
-bool emplace_node_alt(std::uint16_t alt, X& slot, AstNode* value) {
+template <class L, class M>
+bool emplace_node_alt(std::uint16_t alt, M& member, AstNode* value) {
   return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
     bool done = false;
-    ((Is == alt ? (void)(slot.template emplace<tl_at_t<Is, L>>(
-                             static_cast<tl_at_t<Is, L>>(value)),
+    ((Is == alt ? (void)(place<tl_at_t<Is, L>>(
+                             member,
+                             ast_cast_unchecked<
+                                 std::remove_pointer_t<tl_at_t<Is, L>>>(value)),
                          done = true)
                 : (void)0),
      ...);
@@ -118,28 +117,37 @@ bool emplace_node_alt(std::uint16_t alt, X& slot, AstNode* value) {
   }(std::make_index_sequence<tl_size<L>::value>{});
 }
 
-// A write to a single-valued member replaces the node it holds, which no
-// longer has a parent that holds it. Where the write goes through a
-// temporary, the caller detaches what the member held once the write stands.
-template <class X>
-CURSIV_ALWAYS_INLINE inline void detach_held(const X& slot,
-                                             const AstNode* owner,
-                                             bool& detached) {
-  if constexpr (std::is_pointer_v<X>) {
-    if (slot != nullptr && slot->parent == owner) {
-      slot->parent = nullptr;
-      detached = true;
-    }
+// The node a single-valued member holds; a list only grows.
+template <class M>
+CURSIV_ALWAYS_INLINE inline AstNode* node_held(const M& member) {
+  if constexpr (strip_storage<M>::storage == FieldStorage::vector) {
+    return nullptr;
+  } else if constexpr (strip_storage<M>::storage == FieldStorage::optional) {
+    return member.has_value() ? node_held(*member) : nullptr;
+  } else if constexpr (std::is_pointer_v<M>) {
+    return member;
+  } else if constexpr (tl_size<typename variant_node_alt<M>::type>::value ==
+                       0) {
+    return nullptr;
   } else {
+    AstNode* node = nullptr;
     std::visit(
-        [&](auto& held) {
+        [&](const auto& held) {
           if constexpr (ast_pointer_alt<std::remove_cvref_t<decltype(held)>>)
-            if (held != nullptr && held->parent == owner) {
-              held->parent = nullptr;
-              detached = true;
-            }
+            node = held;
         },
-        slot);
+        member);
+    return node;
+  }
+}
+
+// A write replaces the node a member held, which no longer has a parent that
+// holds it.
+CURSIV_ALWAYS_INLINE inline void let_go(AstNode* held, const AstNode* owner,
+                                        bool& detached) {
+  if (held != nullptr && held->parent == owner) {
+    held->parent = nullptr;
+    detached = true;
   }
 }
 

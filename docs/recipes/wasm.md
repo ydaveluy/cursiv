@@ -92,7 +92,7 @@ node tools/wasi-run.mjs --host-module /path/to/host.mjs server.wasm --stdio
 ```
 
 The module exports `createHost(context)`, which may be asynchronous and returns
-`{ imports, env }`. For example:
+`{ imports, env, instantiated }`, each optional. For example:
 
 ```js
 export function createHost({ memory }) {
@@ -113,6 +113,9 @@ Call `memory()` inside imported functions to obtain the current memory after
 any growth. The context also contains the WebAssembly `args` and the resolved
 `runner` and `hostModule` paths. Application environment entries supplement the
 host environment; `PWD` always reflects the actual working directory.
+
+`instantiated(instance)` runs on each thread, once the module is instantiated and
+before any of its code runs. A host can use it to load more code into that instance.
 
 `CURSIV_WASI_HOST_MODULE` selects the same module without a command-line flag.
 An explicit flag takes precedence. The selection reaches the command and its

@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,6 +18,7 @@
 #include "cursiv/lr/table/LrLowSizes.hpp"
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/lr/table/LrSizes.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
 #include "cursiv/shared/gen/HeadMatcher.hpp"
 #include "cursiv/shared/gen/LexRelayGen.hpp"
@@ -229,8 +229,7 @@ struct LrTableEmitter : EmitOutput {
     const LrLowSizes L = low_sizes();
     fmt("inline constexpr ::cursiv::LrLowSizes kLow{{{},{},{},{},{}{}}};\n",
         L.nameChars, L.sets, L.terms, L.prods, L.wordRanges,
-        L.scalarRanges != 0 ? std::format(",{}", L.scalarRanges)
-                            : std::string());
+        L.scalarRanges != 0 ? concat(",", L.scalarRanges) : std::string());
   }
 
   void emit_cold() {
@@ -422,19 +421,19 @@ struct LrTableEmitter : EmitOutput {
   void program_matrix(const LrProgramMatrix& matrix, std::string_view name,
                       std::string_view value, unsigned columns,
                       unsigned absent) {
-    const auto row = std::format("::std::uint{}_t", matrix.row_bits());
-    const auto index = std::format("::std::uint{}_t", matrix.index_bits());
+    const auto row = concat("::std::uint", matrix.row_bits(), "_t");
+    const auto index = concat("::std::uint", matrix.index_bits(), "_t");
     // A layer the matrix does not lay is an empty span.
     const auto layer = [&](std::string_view type, std::string_view part,
                            const std::vector<std::uint32_t>& cells) {
       if (cells.empty()) return std::string("{}");
-      std::string array = std::format("{}{}", name, part);
+      std::string array = concat(name, part);
       program_array(type, array, cells);
       return array;
     };
     const std::string rows = layer(row, "Rows", matrix.rows);
     const std::string blocks = layer(index, "Blocks", matrix.blocks);
-    program_array(value, std::format("{}Values", name), matrix.values);
+    program_array(value, concat(name, "Values"), matrix.values);
     fmt("inline constexpr ::cursiv::LrProgramRows<{}, {}, {}> {}{{\n"
         "    {}, {}, {}Values, {}u, {}u}};\n",
         row, index, value, name, rows, blocks, name, columns, absent);
@@ -442,19 +441,19 @@ struct LrTableEmitter : EmitOutput {
 
   void emit_programs() {
     const auto& p = programs;
-    const auto value = std::format("::std::uint{}_t", p.actions.value_bits());
+    const auto value = concat("::std::uint", p.actions.value_bits(), "_t");
     program_matrix(p.actions, "kActionMatrix", value, S.terms, 0);
     program_matrix(p.gotos, "kGotoPrograms", "::std::uint16_t", a.cfg.nnts,
                    0xffffu);
     const std::uint32_t most =
         p.ops.empty() ? 0 : *std::ranges::max_element(p.ops);
-    const auto op = std::format("::std::uint{}_t", LrProgramMatrix::bits(most));
+    const auto op = concat("::std::uint", LrProgramMatrix::bits(most), "_t");
     program_array(op, "kProgramOps", p.ops);
     fmt("inline constexpr ::cursiv::LrActionPrograms<{}, {}, {}, {}> "
         "kPrograms{{\n"
         "    kActionMatrix, kProgramOps, {}u}};\n",
-        std::format("::std::uint{}_t", p.actions.row_bits()),
-        std::format("::std::uint{}_t", p.actions.index_bits()), value, op,
+        concat("::std::uint", p.actions.row_bits(), "_t"),
+        concat("::std::uint", p.actions.index_bits(), "_t"), value, op,
         p.countBits);
   }
 

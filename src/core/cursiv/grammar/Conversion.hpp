@@ -6,9 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -47,36 +45,19 @@ inline constexpr bool from_chars_number =
 // the conversion: `requires { default_convert<M>(t); }` answers yes for
 // every M -- the call expression is always well formed and the refusal is a
 // static_assert inside the body -- so a trait is the only honest test. Text
-// is `string_view` and nothing else -- the tree borrows the document, so no
-// member owns its bytes and no default conversion materialises any.
+// is a `string_view` of the document, or a `std::string` owning a copy.
 template <class M>
 inline constexpr bool has_default_convert =
-    std::is_same_v<M, std::string_view> || std::is_same_v<M, bool> ||
-    from_chars_number<M> || std::is_enum_v<M>;
+    std::is_same_v<M, std::string_view> || std::is_same_v<M, std::string> ||
+    std::is_same_v<M, bool> || from_chars_number<M> || std::is_enum_v<M>;
 
-// The customisation point, in two forms and never both -- one converter per
-// rule:
-//   `using result = T;`  announces a target the tree's own `default_convert`
-//                        already reaches, which is the closed set above;
-//   `static ConversionResult<T> convert(std::string_view)`  is the
-//                        conversion, for a target of your own, and takes the
-//                        optional `std::pmr::memory_resource*` second
-//                        parameter exactly as a converter function does.
-// A specialisation announcing a `result` `default_convert` does not reach is
-// the named refusal on the member that reads it. Unspecialised it is the
-// named refusal in `rule_type`.
+// The customisation point, for a target of your own:
+//   `static ConversionResult<T> convert(std::string_view)`
+// The closed set above has one already. Unspecialised it is the named refusal
+// in `rule_type`.
 //
-// No `std::string` here, deliberately: an owning string materialises, and
-// the text law leaves no member to hold one. A rule that has to build its
-// answer takes the arena through a converter function that names the
-// resource.
 template <class T>
 struct default_converter;
-template <class T>
-  requires has_default_convert<T>
-struct default_converter<T> {
-  using result = T;
-};
 
 template <class T>
 struct ConversionResult {
@@ -209,6 +190,8 @@ template <class M>
 constexpr ConversionResult<M> default_convert(std::string_view text) {
   if constexpr (std::is_same_v<M, std::string_view>)
     return ConversionResult<M>::ok(text);
+  else if constexpr (std::is_same_v<M, std::string>)
+    return ConversionResult<M>::ok(std::string(text));
   else if constexpr (std::is_same_v<M, bool>) {
     const auto spells = [text](std::string_view expected) {
       return std::ranges::equal(text, expected, [](char t, char e) {
@@ -261,36 +244,12 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
                   "cursiv::default_converter<T>, or convert with as<f>(e)");
 }
 
-// The text law says a member holds a view. A converter whose value the
-// source does not literally spell -- a decoded literal, a case-folded name
-// -- allocates its bytes in the resource the builder hands it and answers a
-// view of them. That resource is the pool the CST and the AST share: its
-// deallocate is a no-op and its buffer is stable, so the view lives exactly
-// as long as the `ParseResult`.
-//
-// A view, not a string, and these two helpers exist so no converter has to
-// spell the cast and the alignment: an `std::pmr::string` would keep a short
-// result in its small-string buffer, on the converter's own stack frame
-// rather than in `mem`, and the member would view a dead local.
-
-// The bytes are already assembled: copy them across and answer the copy.
-inline std::string_view copy_into(std::pmr::memory_resource* mem,
-                                  std::string_view text) {
-  // A null data pointer means an unwritten AST member, even at length zero.
-  auto* const buf = static_cast<char*>(
-      mem->allocate(text.empty() ? 1 : text.size(), alignof(char)));
-  if (!text.empty())
-    std::char_traits<char>::copy(buf, text.data(), text.size());
-  return std::string_view(buf, text.size());
-}
-
-// The bytes have still to be written: `n` upper-bounds them, the caller fills
-// what it needs and answers a view of the prefix it actually wrote. One pass,
-// no intermediate string.
-inline std::span<char> text_room(std::pmr::memory_resource* mem,
-                                 std::size_t n) {
-  return std::span<char>(
-      static_cast<char*>(mem->allocate(n == 0 ? 1 : n, alignof(char))), n);
-}
+template <class T>
+  requires has_default_convert<T>
+struct default_converter<T> {
+  static constexpr ConversionResult<T> convert(std::string_view text) {
+    return default_convert<T>(text);
+  }
+};
 
 }  // namespace cursiv

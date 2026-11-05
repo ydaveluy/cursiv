@@ -13,7 +13,7 @@ namespace fmulti {
 
 namespace ast {
 struct Item : cursiv::AstNode {
-  std::string_view name;
+  string_view name;
 };
 struct Pick : cursiv::AstNode {
   multi_reference<Item> name;

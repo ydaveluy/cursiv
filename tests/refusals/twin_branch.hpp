@@ -9,7 +9,7 @@ namespace refuse {
 
 namespace two {
 struct Node : cursiv::Extends<cursiv::AstNode> {
-  cursiv::AstNode::string_view a, b;
+  string_view a, b;
 };
 }  // namespace two
 struct G : Base {

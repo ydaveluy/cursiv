@@ -7,7 +7,9 @@
 
 namespace tlllextie {
 struct Value : cursiv::Extends<cursiv::AstNode> {};
-struct Name : cursiv::Extends<Value> { string_view text; };
+struct Name : cursiv::Extends<Value> {
+  string text;
+};
 struct Number : cursiv::Extends<Value> { string_view text; };
 struct Doc : cursiv::Extends<cursiv::AstNode> { Value* value{}; };
 
@@ -38,7 +40,7 @@ struct Cell : cursiv::GrammarSpec {
 
 struct Member : cursiv::Extends<cursiv::AstNode> {};
 struct Ctor : cursiv::Extends<Member> {
-  bool isConst{};
+  boolean isConst{};
   string_view className;
 };
 struct Method : cursiv::Extends<Member> {

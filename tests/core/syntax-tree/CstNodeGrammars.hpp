@@ -38,9 +38,9 @@ struct LexBase : cursiv::GrammarSpec {
 namespace ast {
 struct Expr : cursiv::AstNode {
   Expr* left = nullptr;
-  std::string_view op;
+  string_view op;
   Expr* right = nullptr;
-  std::string_view value;
+  string_view value;
 };
 }  // namespace ast
 

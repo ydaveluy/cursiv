@@ -26,7 +26,7 @@ struct Group : cursiv::Extends<cursiv::AstNode> {};
 struct Pair : cursiv::Extends<Group> {};
 struct Triple : cursiv::Extends<Group> {};
 struct List : cursiv::Extends<cursiv::AstNode> {
-  cursiv::vector<Group*> groups;
+  vector<Group*> groups;
 };
 
 }  // namespace telect::ast

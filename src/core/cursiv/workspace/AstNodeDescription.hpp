@@ -18,8 +18,7 @@ namespace cursiv {
 
 struct AstNodeDescription {
   // A view, not a copy: the name is already written where the parse put it --
-  // in the document's text, or, when a converter materialised it, in the pool
-  // that text and tree share.
+  // in the document's text, or in the node that holds it as a `string`.
   //
   // Its lifetime is the parse result's, the same one `node` below already
   // depends on. The invariant that makes it sound is the reset's own order: a

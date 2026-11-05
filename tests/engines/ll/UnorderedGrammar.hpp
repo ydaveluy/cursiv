@@ -15,13 +15,13 @@ struct Name : cursiv::Extends<Expr> {
 struct Wrap : cursiv::Extends<Expr> {
   Expr* inner{};
   string_view op;
-  bool flag{};
+  boolean flag{};
   Child* child{};
 };
 struct Record : cursiv::Extends<cursiv::AstNode> {
   string_view first;
   string_view second;
-  bool flag{};
+  boolean flag{};
   vector<string_view> values;
   Child* child{};
   Expr* expression{};

@@ -35,7 +35,8 @@ void only_retained_owners_keep_active_reference_ranks() {
     handles.push_back({.owner = &node});
   }
   handles.push_back({.owner = nullptr});
-  cursiv::detail::prune_orphans(nodes, handles, &tree[0], [] {});
+  cursiv::detail::prune_orphans(
+      nodes, handles, &tree[0], [] {}, [](cursiv::AstNode*) {});
   CHECK(nodes.size() == 5u);
   CHECK(handles.size() == 12);
   for (unsigned i = 0; i < handles.size(); ++i)
@@ -170,7 +171,7 @@ void an_adoption_takes_the_node_its_body_built(bool node, bool ownRepair,
     const auto* r = cursiv::ast_cast<Root>(result.value);
     CHECK(r != nullptr && r->child != nullptr && r->child->parent == r);
     CHECK(result.value->parent == nullptr);
-    CHECK(result.nodes.size() == 2);
+    CHECK(result.nodes().size() == 2);
   }
   CHECK(writes == (good ? 1u : 0u));
 }
@@ -206,7 +207,7 @@ void repeated_node_writes_keep_source_order_and_skip_other_families() {
   if (r == nullptr || r->child == nullptr) return;
   CHECK(r->child->cstNodeId == second);
   CHECK(r->child->parent == r && r->parent == nullptr);
-  CHECK(result.nodes.size() == 2);
+  CHECK(result.nodes().size() == 2);
   CHECK(writes == 2);
 }
 
@@ -223,8 +224,8 @@ void a_node_no_member_takes_leaves_the_node_list() {
   CHECK(result.error == cursiv::AstBuildError::none);
   const auto* r = result.value_as<Root>();
   CHECK(r != nullptr && r->child != nullptr && r->child->cstNodeId == taken);
-  CHECK(result.nodes.size() == 2);
-  for (const cursiv::AstNode* node : result.nodes)
+  CHECK(result.nodes().size() == 2);
+  for (const cursiv::AstNode* node : result.nodes())
     CHECK(node == r || node->parent == r);
   CHECK(writes == 1);
 }
@@ -233,7 +234,7 @@ namespace nest {
 
 struct Expr : cursiv::Extends<cursiv::AstNode> {};
 struct Num : cursiv::Extends<Expr> {
-  bool flag = false;
+  boolean flag = false;
 };
 struct Call : cursiv::Extends<Expr> {
   Expr* callee = nullptr;
@@ -336,7 +337,7 @@ std::string reduce_turn(const cursiv::AstActions& actions, bool stateSays,
       cursiv::ast_cast<Num>(call != nullptr ? call->callee : r.value);
   std::string out = num == nullptr ? "?" : num->flag ? "Num!" : "Num";
   if (call != nullptr) out = "Call(" + out + ")";
-  return out + " nodes=" + std::to_string(r.nodes.size());
+  return out + " nodes=" + std::to_string(r.nodes().size());
 }
 
 }  // namespace nest
@@ -361,7 +362,7 @@ void a_turn_reads_the_same_by_state_or_by_row() {
 // `count` calls down to a flagged number, each the parent of its callee.
 void a_chain_of(const cursiv::ParseResult& r, unsigned count) {
   CHECK(r.error == cursiv::AstBuildError::none);
-  CHECK(r.nodes.size() == count + 1);
+  CHECK(r.nodes().size() == count + 1);
   unsigned depth = 0;
   const cursiv::AstNode* current = r.value;
   while (const auto* call = cursiv::ast_cast<nest::Call>(current)) {
@@ -437,7 +438,7 @@ void the_first_repair_below_the_consumer_decides_the_turn() {
     b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 0, 2);
     const auto r = reduce(std::move(c), b, top, nest::byState);
     CHECK(r.error == cursiv::AstBuildError::none);
-    CHECK(r.nodes.size() == (outerRepair ? 1u : 2u));
+    CHECK(r.nodes().size() == (outerRepair ? 1u : 2u));
     CHECK((cursiv::ast_cast<nest::Num>(r.value) != nullptr) == outerRepair);
     CHECK((cursiv::ast_cast<nest::Call>(r.value) != nullptr) == !outerRepair);
   }
@@ -462,7 +463,7 @@ void only_a_nest_outside_the_repair_changes_its_receiver() {
     b.note_repair(cursiv::DiagnosticKind::incomplete, cursiv::kNoElement, 1, 2);
     const auto r = reduce(std::move(c), b, top, nest::byState);
     CHECK(r.error == cursiv::AstBuildError::none);
-    CHECK(r.nodes.size() == (outside ? 2u : 3u));
+    CHECK(r.nodes().size() == (outside ? 2u : 3u));
     const auto* call = cursiv::ast_cast<nest::Call>(r.value);
     CHECK(call != nullptr);
     if (call == nullptr) continue;
@@ -554,7 +555,6 @@ void deep_conversions_keep_order_and_stop_at_constants() {
     root = builder.exit(open[i], 0, kStamp.make(1, 0));
   cursiv::AstBuildCtx ctx;
   ctx.cst = &tree;
-  ctx.mem = tree.memory();
   ctx.actions = &textActions;
   for (unsigned query = 0; query < 2; ++query) {
     converted.clear();
@@ -587,7 +587,6 @@ void a_failed_conversion_stops_before_later_siblings() {
   const auto root = builder.exit(all, 0, kStamp.make(1, 0));
   cursiv::AstBuildCtx ctx;
   ctx.cst = &tree;
-  ctx.mem = tree.memory();
   ctx.actions = &textActions;
   converted.clear();
   failedCalls = 0;
@@ -596,17 +595,16 @@ void a_failed_conversion_stops_before_later_siblings() {
   CHECK(ctx.textValues == nullptr);
 }
 
+// What a tree's pool asks of the resource above it.
 struct Meter : std::pmr::memory_resource {
-  std::pmr::memory_resource* upstream;
   std::size_t bytes = 0;
-  explicit Meter(std::pmr::memory_resource* resource) : upstream(resource) {}
   void* do_allocate(std::size_t size, std::size_t alignment) override {
     bytes += size;
-    return upstream->allocate(size, alignment);
+    return std::pmr::new_delete_resource()->allocate(size, alignment);
   }
   void do_deallocate(void* pointer, std::size_t size,
                      std::size_t alignment) override {
-    upstream->deallocate(pointer, size, alignment);
+    std::pmr::new_delete_resource()->deallocate(pointer, size, alignment);
   }
   bool do_is_equal(
       const std::pmr::memory_resource& other) const noexcept override {
@@ -619,7 +617,12 @@ void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
   std::string source;
   for (unsigned i = 0; i < depth; ++i) source += "a ";
   source += 'a';
+  // The pool takes the default resource as it is built.
+  Meter memory;
+  std::pmr::memory_resource* const previous =
+      std::pmr::set_default_resource(&memory);
   cursiv::Cst tree(source);
+  std::pmr::set_default_resource(previous);
   cursiv::CstBuilder builder(tree);
   std::vector<cursiv::CstBuilder::Open> open;
   for (unsigned i = 0; i <= depth; ++i) {
@@ -630,14 +633,15 @@ void raw_nested_text_is_joined_once_and_parts_keep_their_groups() {
   cursiv::NodeId root = 0;
   for (unsigned i = depth + 1; i-- > 0;)
     root = builder.exit(open[i], 2 * i, kStamp.make(0, 0));
-  Meter memory(tree.memory());
   cursiv::AstBuildCtx ctx;
   ctx.cst = &tree;
-  ctx.mem = &memory;
   ctx.actions = &textActions;
+  const std::size_t before = memory.bytes;
   const auto value = cursiv::detail::joined_parts<false>(ctx, root);
   CHECK(value && *value == std::string(depth + 1, 'a'));
-  CHECK(memory.bytes <= 2u * (depth + 1));
+  // One block of the pool at most; a join per level would ask for about
+  // depth * depth / 2 bytes in all.
+  CHECK(memory.bytes - before <= 256u * depth);
   const auto parts = cursiv::detail::parts_of<false>(ctx, root);
   CHECK(parts && parts->size() == 2);
   if (parts && parts->size() == 2) {
@@ -656,7 +660,6 @@ void invented_text_never_runs_its_converter() {
   const auto root = builder.exit(open, 0, kStamp.make(0, 0));
   cursiv::AstBuildCtx ctx;
   ctx.cst = &tree;
-  ctx.mem = tree.memory();
   ctx.actions = &textActions;
   converted.clear();
   const auto parts = cursiv::detail::parts_of(ctx, root);

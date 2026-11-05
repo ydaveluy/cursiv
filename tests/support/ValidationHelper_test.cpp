@@ -188,9 +188,9 @@ void the_findings_are_filtered_by_what_the_check_names() {
 
   // Filtering on the AST node itself, and on the member that was written.
   CHECK(passes([&] {
-    ct::expectIssue(
-        result, {.node = result.document->parseResult.nodes.front(),
-                 .property = "name"});
+    ct::expectIssue(result,
+                    {.node = result.document->parseResult.nodes().front(),
+                     .property = "name"});
   }));
 
   result.dispose();

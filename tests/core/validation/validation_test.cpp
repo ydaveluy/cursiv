@@ -55,6 +55,14 @@
 // selection, `built_in` reserved), what runs around the walk (the document
 // hooks), what a crashing check costs, and the built-in half end to end -- a
 // repair's quick fix really fixes, a broken reference names its member.
+namespace cursiv {
+struct ParseResultAccess {
+  static std::pmr::vector<AstNode*>& nodes(ParseResult& result) {
+    return result._nodes;
+  }
+};
+}  // namespace cursiv
+
 namespace document_validator {
 
 namespace {
@@ -313,7 +321,7 @@ void absent_categories_skip_the_node_walk() {
   CHECK(measured->optionsAsked == 0);
   CHECK(world.validator.everyNode == 0);
   (void)world.validate(*document);
-  CHECK(measured->optionsAsked == document->parseResult.nodes.size());
+  CHECK(measured->optionsAsked == document->parseResult.nodes().size());
   CHECK(world.validator.everyNode == 4);
 }
 
@@ -923,6 +931,8 @@ std::string repeated_pairs(std::size_t pairs) {
 }
 
 struct Fixture {
+  // These nodes are the fixture's: the result does not destroy them.
+  ~Fixture() { cursiv::ParseResultAccess::nodes(document.parseResult).clear(); }
   CountingGrammar grammar;
   cursiv::AstNode first;
   cursiv::AstNode second;
@@ -948,7 +958,7 @@ struct Fixture {
     root.parent = &document;
     cursiv::ParseResult parsed(std::move(cst));
     parsed.value = &root;
-    parsed.nodes = {&first, &second, &root};
+    cursiv::ParseResultAccess::nodes(parsed) = {&first, &second, &root};
     parsed.bind_grammar(grammar);
     document.parseResult = std::move(parsed);
   }

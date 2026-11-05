@@ -160,9 +160,9 @@ void an_early_read_is_read_again() {
   ws::ast::Feature& age = World::feature(*document);
   // Before any linker is planted, then with one planted below the rung.
   CHECK(age.type.get() == nullptr);
-  CHECK(age.type.state() == cursiv::RefState::Unresolved);
+  CHECK(age.type.resolve() == cursiv::RefState::Unresolved);
   world.ws->linker->link(*document);
-  CHECK(age.type.state() == cursiv::RefState::Unresolved);
+  CHECK(age.type.resolve() == cursiv::RefState::Unresolved);
 
   document->localSymbols =
       world.ws->scopeComputation->collectLocalSymbols(*document);
@@ -385,7 +385,7 @@ void a_cycle_is_told_apart_from_a_missing_name() {
 
   const auto& a = *static_cast<const ws::ast::Entity*>(
       document->parseResult.references->handles.front().owner);
-  CHECK(a.superType.state() == cursiv::RefState::ErrorCycle);
+  CHECK(a.superType.resolve() == cursiv::RefState::ErrorCycle);
 }
 
 // Every link of the loop says cycle, not just the one that noticed: a loop of
@@ -403,8 +403,8 @@ void every_link_of_a_loop_says_cycle() {
       *static_cast<const ws::ast::Entity*>(refs.handles.front().owner);
   const auto& b =
       *static_cast<const ws::ast::Entity*>(refs.handles.back().owner);
-  CHECK(a.superType.state() == cursiv::RefState::ErrorCycle);
-  CHECK(b.superType.state() == cursiv::RefState::ErrorCycle);
+  CHECK(a.superType.resolve() == cursiv::RefState::ErrorCycle);
+  CHECK(b.superType.resolve() == cursiv::RefState::ErrorCycle);
 }
 
 struct ThrowingProvider final : cursiv::DefaultScopeProvider {
@@ -433,7 +433,7 @@ void a_throwing_provider_fails_only_its_reference() {
       *static_cast<const ws::ast::Feature*>(refs.handles.front().owner);
   const auto& sound =
       *static_cast<const ws::ast::Feature*>(refs.handles.back().owner);
-  CHECK(boomed.type.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(boomed.type.resolve() == cursiv::RefState::ErrorNotFound);
   CHECK(sound.type.get() != nullptr);
 }
 
@@ -478,7 +478,7 @@ void a_throwing_provider_stays_on_its_reference() {
     threw = true;
   }
   CHECK(!threw);
-  CHECK(b.superType.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(b.superType.resolve() == cursiv::RefState::ErrorNotFound);
 }
 
 // Moves the site's document past `ComputedScopes` while it looks, as the
@@ -508,7 +508,7 @@ void an_early_failure_is_judged_where_the_read_began() {
   document->parseResult.references->linker = world.ws->linker.get();
   document->parseResult.references->document = document.get();
 
-  CHECK(World::feature(*document).type.state() ==
+  CHECK(World::feature(*document).type.resolve() ==
         cursiv::RefState::Unresolved);
 }
 
@@ -662,7 +662,7 @@ void a_homonym_of_another_class_is_skipped() {
   world.lang->linker->link(*document);
 
   Use& site = NsWorld::use(*document);
-  CHECK(site.what.state() == cursiv::RefState::Resolved);
+  CHECK(site.what.resolve() == cursiv::RefState::Resolved);
   CHECK(cursiv::ast_cast<Kind1>(site.what.get()) != nullptr);
 }
 
@@ -674,9 +674,9 @@ void a_name_only_another_class_holds_is_not_found() {
   world.lang->linker->link(*document);
 
   Use& site = NsWorld::use(*document);
-  CHECK(site.what.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(site.what.resolve() == cursiv::RefState::ErrorNotFound);
   CHECK(site.what.get() == nullptr);
-  CHECK(site.what.target == nullptr);
+  CHECK(cursiv::detail::RefAccess::target(site.what) == nullptr);
   CHECK(document->parseResult.references->anyUnresolved());
 }
 
@@ -687,9 +687,10 @@ void a_narrow_that_fits_still_resolves() {
   world.lang->linker->link(*document);
 
   Use& site = NsWorld::use(*document);
-  CHECK(site.what.state() == cursiv::RefState::Resolved);
+  CHECK(site.what.resolve() == cursiv::RefState::Resolved);
   CHECK(site.what.get() != nullptr);
-  CHECK(cursiv::ast_cast<Kind1>(site.what.target) != nullptr);
+  CHECK(cursiv::ast_cast<Kind1>(cursiv::detail::RefAccess::target(site.what)) !=
+        nullptr);
 }
 
 // A failed narrowing draws no edge: navigation follows what resolved.
@@ -712,17 +713,19 @@ void a_multi_site_looks_up_its_class_only() {
   const auto fits = world.scoped("two b one b use b all b");
   world.lang->linker->link(*fits);
   Use& skipped = NsWorld::use(*fits);
-  CHECK(skipped.all.state() == cursiv::RefState::Resolved);
-  CHECK(skipped.all.items.size() == 1);
-  CHECK(cursiv::ast_cast<Kind1>(skipped.all.items.front().target) != nullptr);
+  CHECK(skipped.all.resolve() == cursiv::RefState::Resolved);
+  CHECK(cursiv::detail::RefAccess::items(skipped.all).size() == 1);
+  CHECK(cursiv::ast_cast<Kind1>(
+            cursiv::detail::RefAccess::items(skipped.all).front().target) !=
+        nullptr);
 
   const NsWorld other;
   const auto missing = other.scoped("one a two b use a all b");
   other.lang->linker->link(*missing);
   Use& site = NsWorld::use(*missing);
-  CHECK(site.what.state() == cursiv::RefState::Resolved);
-  CHECK(site.all.state() == cursiv::RefState::ErrorNotFound);
-  CHECK(site.all.items.empty());
+  CHECK(site.what.resolve() == cursiv::RefState::Resolved);
+  CHECK(site.all.resolve() == cursiv::RefState::ErrorNotFound);
+  CHECK(cursiv::detail::RefAccess::items(site.all).empty());
 }
 
 // The sentence names the site's class, and one protected method rewords it.
@@ -799,8 +802,8 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
   const auto document = world.scoped("two b use b all b");
   world.lang->linker->link(*document);
   Use& use = NsWorld::use(*document);
-  CHECK(use.what.state() == cursiv::RefState::ErrorNotFound);
-  CHECK(use.all.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(use.what.resolve() == cursiv::RefState::ErrorNotFound);
+  CHECK(use.all.resolve() == cursiv::RefState::ErrorNotFound);
   CHECK(hooked->single == 1 && hooked->plural == 1 && hooked->errors == 2);
 
   cursiv::ReferenceInfo site{
@@ -809,15 +812,16 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
       .referenceText = "b",
       .property = "what",
       .index = std::nullopt,
-      .reference = world.lang->astReflection->referenceIndexOf(use.type, "what"),
-      .narrow = use.what.narrow};
+      .reference =
+          world.lang->astReflection->referenceIndexOf(use.type, "what"),
+      .narrow = cursiv::detail::RefAccess::narrow(use.what)};
   const auto single = world.lang->linker->getCandidate(site);
   CHECK(!single.has_value());
   if (!single.has_value())
     CHECK(single.error().message == "custom: Expecting Kind1 named 'b'.");
   site.reference = world.lang->astReflection->referenceIndexOf(use.type, "all");
   site.property = "all";
-  site.narrow = use.all.narrow;
+  site.narrow = cursiv::detail::RefAccess::narrow(use.all);
   const auto plural = world.lang->linker->getCandidates(site);
   CHECK(!plural.has_value());
   if (!plural.has_value())
@@ -923,7 +927,7 @@ struct Parsed {
 // Walks the AST for the first node whose name matches.
 const cursiv::AstNode* find_named(const cursiv::ParseResult& r,
                                   std::string_view name) {
-  for (const cursiv::AstNode* const node : r.nodes) {
+  for (const cursiv::AstNode* const node : r.nodes()) {
     const auto found = provider().getName(*node);
     if (found.has_value() && *found == name) return node;
   }
@@ -1323,10 +1327,10 @@ void a_throwing_provider_stays_on_its_multi_reference(bool failedFirst) {
       });
 
   CHECK(good->state.load() == cursiv::DocumentState::Validated);
-  CHECK(pick(*good).name.state() == cursiv::RefState::Resolved);
+  CHECK(pick(*good).name.resolve() == cursiv::RefState::Resolved);
   CHECK(pick(*good).name.size() == 1);
   CHECK(good->diagnostics.empty());
-  CHECK(pick(*bad).name.state() == cursiv::RefState::ErrorNotFound);
+  CHECK(pick(*bad).name.resolve() == cursiv::RefState::ErrorNotFound);
   CHECK(bad->diagnostics.size() == 1);
 }
 

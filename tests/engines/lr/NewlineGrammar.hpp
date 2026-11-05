@@ -4,7 +4,7 @@
 namespace tnl {
 namespace ast {
 struct Doc : cursiv::Extends<cursiv::AstNode> {
-  std::string_view name;
+  string_view name;
 };
 }  // namespace ast
 struct NlG : cursiv::GrammarSpec {

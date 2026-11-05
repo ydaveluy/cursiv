@@ -11,7 +11,7 @@
 namespace tlltextorder {
 struct Node : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Node> {
-  string_view text;
+  string text;
 };
 struct Mark : cursiv::Extends<Node> {
   Node* value{};

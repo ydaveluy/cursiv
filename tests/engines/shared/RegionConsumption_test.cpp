@@ -29,7 +29,7 @@ void accepts(const Reading& reading, std::string_view source,
     std::fprintf(stderr, "region consumption [%s]: expected clean %.*s\n",
                  reading.engine, int(source.size()), source.data());
   CHECK(clean(result));
-  CHECK(doc && !doc->parent && result.nodes.size() == 2);
+  CHECK(doc && !doc->parent && result.nodes().size() == 2);
   CHECK(doc && doc->block && doc->block->parent == doc);
   CHECK(doc && doc->block && doc->block->items.size() == count);
   CHECK(result.cst().text() == source);

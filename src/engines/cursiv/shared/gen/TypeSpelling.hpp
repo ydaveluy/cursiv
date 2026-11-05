@@ -4,14 +4,14 @@
 #pragma once
 
 #include <cstddef>
-#include <format>
 #include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "cursiv/utils/TypeName.hpp"
+#include "cursiv/shared/gen/Concat.hpp"
 #include "cursiv/shared/gen/EmitOutput.hpp"
+#include "cursiv/utils/TypeName.hpp"
 
 namespace cursiv {
 
@@ -116,8 +116,8 @@ inline std::string gen_widen(std::string text) {
       while (j < text.size() && (text[j] == 'l' || text[j] == 'L')) ++j;
     if (wide && (j == text.size() || !word(text[j]))) {
       if (negativeMinimum) {
-        const std::string minimum = std::format(
-            "(-9223372036854775807{} - 1)", j - digitEnd == 1 ? "l" : "ll");
+        const std::string minimum = concat(
+            "(-9223372036854775807", j - digitEnd == 1 ? "l" : "ll", " - 1)");
         text.replace(i - 1, j - i + 1, minimum);
         j = i - 1 + minimum.size();
       } else {

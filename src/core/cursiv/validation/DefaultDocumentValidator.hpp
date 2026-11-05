@@ -46,12 +46,6 @@ class DefaultDocumentValidator : public DocumentValidator {
   ~DefaultDocumentValidator() noexcept override = default;
 
  protected:
-  // Did the parse leave anything synthesized behind? The raw parse result
-  // first, then the reflection's word on the tree, which catches nodes a
-  // replaced parse closure synthesized without a sentence. Only asked when a
-  // stop option is on: the sweep is O(nodes).
-  [[nodiscard]] virtual bool parseLeftRepairs(const Document&,
-                                              const CancellationToken&) const;
   // The parser's diagnostics in the client's shape, each stamped with its code.
   // The conversion lives here because this file owns the codes.
   virtual void processParsingErrors(const Document&, std::vector<Diagnostic>&,

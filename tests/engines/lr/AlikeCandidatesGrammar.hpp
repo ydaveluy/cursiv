@@ -12,7 +12,7 @@ namespace talike {
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   string_view note;
-  bool value = false;
+  boolean value = false;
 };
 struct Doc : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;

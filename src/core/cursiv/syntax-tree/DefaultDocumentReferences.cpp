@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -154,8 +153,6 @@ void DefaultDocumentReferences::visitUnresolved(
 void DefaultDocumentReferences::reset() noexcept {
   for (const RefHandle& h : handles)
     if (h.owner != nullptr) _f.refOps[h.field].reset(*h.owner, h.index);
-  const std::lock_guard lock(_targetsLock);
-  _targets.release();
 }
 
 RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
@@ -182,13 +179,7 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
     if (which != kNoBranch) found_targets.push_back({entry->node, which});
   }
   if (found_targets.empty()) return RefState::ErrorNotFound;
-  const std::lock_guard lock(_targetsLock);
-  auto* const slice = static_cast<MultiRefItem*>(_targets.allocate(
-      found_targets.size() * sizeof(MultiRefItem), alignof(MultiRefItem)));
-  std::memcpy(slice, found_targets.data(),
-              found_targets.size() * sizeof(MultiRefItem));
-  out.data = slice;
-  out.count = static_cast<std::uint32_t>(found_targets.size());
+  out = std::move(found_targets);
   return RefState::Resolved;
 }
 

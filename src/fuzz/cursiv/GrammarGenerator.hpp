@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
@@ -14,7 +13,6 @@
 #include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
-#include "cursiv/syntax-tree/AstArena.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/DecisionSource.hpp"
 #include "cursiv/ElementKind.hpp"
@@ -41,11 +39,10 @@ struct GrammarGenerator {
   unsigned tokenBudget = 24;
   const GrammarGuide* guide = nullptr;
 
-  // The arena owns the tree and the bytes its value members view: a
-  // member borrowing the derivation's own text would dangle the moment it
-  // moves.
+  // `ar` owns the tree and the bytes its value members view: a member borrowing
+  // the derivation's own text would dangle the moment it moves.
   [[nodiscard]] GrammarDerivation generate(DecisionSource& src,
-                                           AstArena& ar) const {
+                                           WalkTree& ar) const {
     Walk w{&src, &ar, {}, 0};
     bool built = false;
     const ElementId entry = g.entryRule();
@@ -64,7 +61,7 @@ struct GrammarGenerator {
  private:
   struct Walk {
     DecisionSource* src;
-    AstArena* ar;
+    WalkTree* ar;
     GrammarDerivation d;
     unsigned depth = 0;
     bool ok = true;
@@ -146,7 +143,8 @@ struct GrammarGenerator {
         }
         if (assign != kNoElement) {
           AstNode* const to = f.node;
-          if (to == nullptr || !act.write_node(assign, *to, sub, *w.ar))
+          if (to == nullptr ||
+              act.write_node(assign, *to, sub) == Write::not_modelled)
             refuse(assign, to, w);
           else
             w.landed = true;
@@ -169,7 +167,7 @@ struct GrammarGenerator {
         f.adopted = nullptr;
         f.node = act.make(e, *w.ar);
         if (f.node == nullptr || inner == nullptr ||
-            !act.write_node(e, *f.node, inner, *w.ar))
+            act.write_node(e, *f.node, inner) == Write::not_modelled)
           refuse(e, f.node, w);
         for (const ElementId c : kids) walk(c, assign, f, w);
         return;
@@ -251,8 +249,15 @@ struct GrammarGenerator {
       std::string text = w.d.tokens[before].text;
       if (w.d.tokens.size() > before + 1) {
         text.clear();
-        for (std::size_t i = before; i < w.d.tokens.size(); ++i)
-          text += act.denote(w.d.tokens[i].elem, w.d.tokens[i].text);
+        for (std::size_t i = before; i < w.d.tokens.size(); ++i) {
+          const auto part = act.denote(w.d.tokens[i].elem, w.d.tokens[i].text);
+          if (!part) {
+            w.ok = false;  // an operator with no value: nothing to predict
+            break;
+          }
+          text += *part;
+        }
+        if (!w.ok) break;
       }
       texts.push_back(std::move(text));
       bool one = false;
@@ -289,7 +294,8 @@ struct GrammarGenerator {
                                  o.right ? o.prec : o.prec + 1u, w);
       AstNode* const node = act.make(e, *w.ar);
       if (node == nullptr || lhs == nullptr || rhs == nullptr ||
-          !act.fold(e, o.element, *node, lhs, stash(op, *w.ar), rhs)) {
+          act.fold(e, o.element, *node, lhs, w.ar->stash(op), rhs) ==
+              Write::not_modelled) {
         refuse(e, node, w);
         return nullptr;
       }
@@ -328,21 +334,15 @@ struct GrammarGenerator {
     if (rule == kNoElement) {
       value = w.d.tokens[first].text;
     } else {
-      for (std::size_t i = first; i < last; ++i)
-        value += act.denote(w.d.tokens[i].elem, w.d.tokens[i].text);
+      for (std::size_t i = first; i < last; ++i) {
+        const auto part = act.denote(w.d.tokens[i].elem, w.d.tokens[i].text);
+        if (!part) return;  // a converter refused: the engine writes nothing
+        value += *part;
+      }
     }
     const ElementId from = rule != kNoElement ? rule : w.d.tokens[first].elem;
-    if (!act.write_text(e, from, *to, stash(value, *w.ar), *w.ar))
+    if (act.write_text(e, from, *to, w.ar->stash(value)) == Write::not_modelled)
       refuse(e, to, w);
-  }
-
-  // The bytes a value member views, copied where the tree lives.
-  [[nodiscard]] static std::string_view stash(std::string_view t,
-                                              AstArena& ar) {
-    if (t.empty()) return {};
-    char* const p = static_cast<char*>(ar.carve_bytes(t.size(), alignof(char)));
-    std::memcpy(p, t.data(), t.size());
-    return {p, t.size()};
   }
 
   // The alternative: the cheapest once the budget is spent, so a

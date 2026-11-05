@@ -36,7 +36,7 @@ void accepts(const Reading& parser, std::string_view source,
     std::fprintf(stderr, "region boundary [%s]: expected clean %.*s\n",
                  parser.engine, int(source.size()), source.data());
   CHECK(clean(result));
-  CHECK(doc && !doc->parent && result.nodes.size() == 1);
+  CHECK(doc && !doc->parent && result.nodes().size() == 1);
   CHECK(doc && doc->items.size() == count);
   CHECK(result.cst().text() == source);
   if (doc)
@@ -121,7 +121,7 @@ void hidden_trivia_is_kept_only_outside_the_region(const Reading& parser) {
   const auto result = parser.parse(source);
   CHECK(clean(result));
   const auto* doc = result.value_as<Document>();
-  CHECK(doc && doc->items.size() == 2 && result.nodes.size() == 1);
+  CHECK(doc && doc->items.size() == 2 && result.nodes().size() == 1);
   CHECK(result.cst().text() == source);
   unsigned notes = 0;
   for (cursiv::NodeId id = 0; id < result.cst().size(); ++id) {
