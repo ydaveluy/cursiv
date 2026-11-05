@@ -125,12 +125,18 @@ void LocalSymbols::seal() {
     next += g.count;
   }
 
-  // 3. The counting sort.
+  // 3. The counting sort, by destination: each position learns which entry
+  // it takes, then the entries are copied in position order, so the new array
+  // is written once and never cleared first.
   for (std::uint32_t k = 0; k < containers; ++k)
     met[k].next = _groups[met[k].slot].begin;
-  std::vector<AstNodeDescription> grouped(count);
+  const auto from = std::make_unique_for_overwrite<std::uint32_t[]>(count);
   for (std::size_t i = 0; i < count; ++i)
-    grouped[met[metOf[i]].next++] = _entries[i];
+    from[met[metOf[i]].next++] = static_cast<std::uint32_t>(i);
+  std::vector<AstNodeDescription> grouped;
+  grouped.reserve(count);
+  for (std::size_t at = 0; at < count; ++at)
+    grouped.push_back(_entries[from[at]]);
   _entries = std::move(grouped);
 
   // 4. The name table.
