@@ -19,11 +19,14 @@ endfunction()
 # repacking the other is the drift this catches before anything is built.
 _step("repacking the scaffolder" ${CMAKE_COMMAND} -DOUT=${WORK}/packed.cmake
       -P ${GENERATE})
-execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files ${WORK}/packed.cmake
-                        ${SCAFFOLD} RESULT_VARIABLE _rc)
+execute_process(COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol
+                        ${WORK}/packed.cmake ${SCAFFOLD} RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
+  execute_process(COMMAND git diff --no-index -U0 -- ${SCAFFOLD} ${WORK}/packed.cmake
+                  OUTPUT_VARIABLE _diff ERROR_QUIET)
+  string(SUBSTRING "${_diff}" 0 2000 _diff)
   message(FATAL_ERROR "${SCAFFOLD} is behind templates/project: repack it with "
-                      "cmake -P cmake/GenerateScaffold.cmake")
+                      "cmake -P cmake/GenerateScaffold.cmake\n${_diff}")
 endif()
 
 # A name can be lexically valid yet reserve the generated namespace in C++.
@@ -48,7 +51,11 @@ _step("the configure" ${CMAKE_COMMAND} -S ${_project} -B ${_project}/build
 _step("the build" ${CMAKE_COMMAND} --build ${_project}/build)
 _step("the tests" ${CMAKE_CTEST_COMMAND} --test-dir ${_project}/build
       --output-on-failure)
-_step("the benchmark" ${_project}/build/src/no_bench
+set(_bench ${_project}/build/src/no_bench)
+if(EXISTS ${_bench}.exe)
+  string(APPEND _bench .exe)
+endif()
+_step("the benchmark" ${_bench}
       ${_project}/example/hello.no --iterations 1
       --json ${WORK}/benchmark.json)
 file(READ ${WORK}/benchmark.json _bench)

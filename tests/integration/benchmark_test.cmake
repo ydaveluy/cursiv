@@ -1,7 +1,14 @@
 cmake_minimum_required(VERSION 3.30)
 file(MAKE_DIRECTORY "${WORK}")
-# Quotes, commas and backslashes must round-trip in JSON and CSV.
-set(_input "${WORK}/a,\"b\\c.tiny")
+# Quotes, commas and backslashes must round-trip in JSON and CSV. A Windows file
+# name holds no quote and no backslash.
+if(BENCH MATCHES "[.]exe$")
+  set(_input "${WORK}/a,b.tiny")
+  set(_inCsv "\"a,b.tiny\"")
+else()
+  set(_input "${WORK}/a,\"b\\c.tiny")
+  set(_inCsv "\"a,\"\"b\\c.tiny\"")
+endif()
 file(WRITE "${_input}" "1 + 2 + 39")
 set(_other "${WORK}/other.tiny")
 file(WRITE "${_other}" "4 + 5")
@@ -104,7 +111,8 @@ if(NOT _count EQUAL 0)
   message(FATAL_ERROR "--no-lsp still ran LSP probes")
 endif()
 file(READ "${WORK}/files.csv" _csv)
-if(NOT _csv MATCHES "\"a,\"\"b\\\\c.tiny\"")
+string(FIND "${_csv}" "${_inCsv}" _quoted)
+if(_quoted EQUAL -1)
   message(FATAL_ERROR "CSV did not quote the input file name: ${_csv}")
 endif()
 
