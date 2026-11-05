@@ -92,7 +92,7 @@ cursiv_test(LlRepairGrowth_test engines/ll/LlRepairGrowth_test.cpp
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
   cursiv_test(LlCaretMemory_test engines/ll/LlCaretMemory_test.cpp
       repairgrowthllGenerated)
-  set_target_properties(LlCaretMemory_test PROPERTIES CURSIV_OWN_ALLOCATOR ON)
+  cursiv_own_allocator(LlCaretMemory_test)
 endif()
 cursiv_test(LlRescanBound_test engines/ll/LlRescanBound_test.cpp
     rescannarrowllGenerated rescanshadowllGenerated)

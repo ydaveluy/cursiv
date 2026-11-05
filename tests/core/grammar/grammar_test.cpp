@@ -2009,7 +2009,7 @@ void run() {
          "scalars");
   expect(cursiv::dump_expr<decltype(any)>(), ".", "every character");
   expect(cursiv::dump_expr<decltype(byte)>(), "\\C", "a byte");
-  expect(cursiv::dump_expr<decltype(eof)>(), "!.", "the end");
+  expect(cursiv::dump_expr<decltype(cursiv::eof)>(), "!.", "the end");
   expect(cursiv::dump_expr<decltype(!byte)>(), "!\\C", "no byte");
   expect(cursiv::dump_expr<decltype(~cr<"a">)>(), "\\p{^a}",
          "complemented scalars");

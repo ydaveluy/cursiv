@@ -104,13 +104,6 @@ jobs:
       - name: compilation cache statistics
         if: always()
         run: ccache --show-stats
-      - name: keep the module for the other hosts
-        if: matrix.preset == 'wasi-release'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wasi-language-server
-          path: build-wasi/examples/domainmodel/src/domainmodel_lsp
-          retention-days: 1
 
   # One module runs on every host, but the runner maps its files differently on
   # each: a whole session on the module the Linux job built, whose workspace scan
@@ -123,8 +116,6 @@ jobs:
         os: [windows-2025, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    # Not blocking until a run on a real runner has passed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,8 +138,6 @@ jobs:
   windows:
     runs-on: windows-2025
     timeout-minutes: 240
-    # Not blocking until a run on a real runner has passed.
-    continue-on-error: true
     defaults:
       run:
         shell: msys2 {0}
@@ -211,8 +200,6 @@ jobs:
   macos:
     runs-on: macos-26
     timeout-minutes: 240
-    # Not blocking until a run on a real runner has passed.
-    continue-on-error: true
     env:
       # This runner has 3 cores and 7 GB.
       CMAKE_BUILD_PARALLEL_LEVEL: "3"
@@ -315,6 +302,13 @@ jobs:
       - name: compilation cache statistics
         if: always()
         run: ccache --show-stats
+      - name: keep the module for the other hosts
+        if: matrix.preset == 'wasi-release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasi-language-server
+          path: build-wasi/examples/domainmodel/src/domainmodel_lsp
+          retention-days: 1
       - name: package extensions
         if: matrix.preset == 'wasi-release'
         run: |

@@ -28,7 +28,7 @@ cursiv_test(utils_test core/utils/utils_test.cpp cursiv::lsp wsCore)
 if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
   cursiv_test(AllocationFailure_test core/AllocationFailure_test.cpp wsCore)
   set_tests_properties(AllocationFailure_test PROPERTIES TIMEOUT 30)
-  set_target_properties(AllocationFailure_test PROPERTIES CURSIV_OWN_ALLOCATOR ON)
+  cursiv_own_allocator(AllocationFailure_test)
 endif()
 
 # The grammars a core lane parses with, one generated language each: a lane
