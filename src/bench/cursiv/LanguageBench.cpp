@@ -150,7 +150,7 @@ std::size_t parse_size(std::string_view text) {
                " [--rss]"
                " [--list] [--file PATH] [filter]\n"
                "       <language>_bench [options] file [file ...]\n");
-  std::exit(2);
+  throw detail::Stop{2};
 }
 
 const char* env(const char* name) { return std::getenv(name); }
@@ -347,7 +347,7 @@ std::string read_file(const std::string& path) {
   if (!in) {
     std::fprintf(stderr, "language_bench: cannot read '%s': %s\n",
                  printable(path).c_str(), std::strerror(errno));
-    std::exit(1);
+    throw detail::Stop{1};
   }
   std::ostringstream out;
   out << in.rdbuf();
@@ -359,7 +359,7 @@ void write_file(const std::string& path, std::string_view content) {
   if (!out) {
     std::fprintf(stderr, "language_bench: cannot write '%s': %s\n",
                  printable(path).c_str(), std::strerror(errno));
-    std::exit(1);
+    throw detail::Stop{1};
   }
   out.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
@@ -863,7 +863,7 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
 }  // namespace cursiv::bench
 
 int cursiv::bench::run(int argc, char** argv,
-                       std::span<const Language> languages) {
+                       std::span<const Language> languages) try {
   enter_host_directory();
   const Options o = options(argc, argv, languages);
   if (o.help) {
@@ -1028,4 +1028,6 @@ int cursiv::bench::run(int argc, char** argv,
       write_multi_csv(companion_csv_path(o.csvPath, "-multi"), multiRows);
   }
   return 0;
+} catch (const detail::Stop& stop) {
+  return stop.status;
 }

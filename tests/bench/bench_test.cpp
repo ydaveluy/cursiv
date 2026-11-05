@@ -209,6 +209,21 @@ void a_parser_without_references_counts_none() {
   }
 }
 
+// A run that cannot go on answers with its status, as `main` would return it:
+// leaving the process from inside left the workers of its services running into
+// the process's own teardown, which Windows does not always survive.
+void a_failed_run_returns_its_status() {
+  char program[] = "bench_test";
+  char missing[] = "bench_test-missing.ws";
+  char unknown[] = "--unknown";
+  char* readsNothing[] = {program, missing, nullptr};
+  char* misspelt[] = {program, unknown, nullptr};
+  CHECK((run_language<ws::WorkspaceSharedServices, register_language>(
+             2, readsNothing) == 1));
+  CHECK((run_language<ws::WorkspaceSharedServices, register_language>(
+             2, misspelt) == 2));
+}
+
 }  // namespace
 
 int main() {
@@ -217,5 +232,6 @@ int main() {
   keep_valid_repetition();
   every_sample_counts();
   a_parser_without_references_counts_none();
+  a_failed_run_returns_its_status();
   return cursiv::test::report("bench_test");
 }

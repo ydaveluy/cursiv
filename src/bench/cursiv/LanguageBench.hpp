@@ -317,10 +317,22 @@ inline double ms_since(std::chrono::steady_clock::time_point t0) {
       .count();
 }
 
+namespace detail {
+
+// A run that cannot go on, carried to its entry point with the status to end
+// on. Leaving from where it fails would skip the destructors of the services
+// built so far, and their worker threads would run on into the process's own
+// teardown, which Windows does not always survive.
+struct Stop {
+  int status;
+};
+
+}  // namespace detail
+
 [[noreturn]] inline void refused(const char* name, const char* what) {
   std::fprintf(stderr, "[bench] %s: the corpus was %s -- no figure\n", name,
                what);
-  std::exit(1);
+  throw detail::Stop{1};
 }
 
 // A string from the command line, the environment or the disk, made safe to
@@ -359,7 +371,7 @@ inline std::filesystem::path checked_path(const std::string& path) {
                  "language_bench: refusing '%s': not a regular file or a "
                  "directory\n",
                  printable(path).c_str());
-    std::exit(1);
+    throw detail::Stop{1};
   }
   return resolved;
 }
@@ -895,7 +907,7 @@ template <class Shared, bool (*register_)(SharedCoreServices&)>
 int run_language(int argc, char** argv,
                  std::string (*corpus)(std::size_t) = nullptr,
                  std::string (*multiFile)(std::size_t, std::size_t) = nullptr,
-                 Refs multiRefs = Refs::Intra) {
+                 Refs multiRefs = Refs::Intra) try {
   auto host = language_host<Shared, register_>();
   const auto& metadata = host->serviceRegistry->all().front()->languageMetaData;
   const char* extension = metadata.fileExtensions.empty()
@@ -905,6 +917,8 @@ int run_language(int argc, char** argv,
       metadata.languageId.c_str(), metadata.languageId.c_str(), extension,
       corpus, multiFile, multiRefs);
   return run(argc, argv, std::span<const Language>(&language, 1));
+} catch (const detail::Stop& stop) {
+  return stop.status;
 }
 
 }  // namespace cursiv::bench

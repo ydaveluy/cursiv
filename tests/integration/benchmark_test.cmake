@@ -13,8 +13,12 @@ file(WRITE "${_input}" "1 + 2 + 39")
 set(_other "${WORK}/other.tiny")
 file(WRITE "${_other}" "4 + 5")
 
+# A command takes seconds: one that hangs fails here, under its own name, before
+# the test's timeout hides which one it was.
+set(_timeout 120)
+
 function(run_bench executable)
-  execute_process(COMMAND "${executable}" ${ARGN}
+  execute_process(COMMAND "${executable}" ${ARGN} TIMEOUT ${_timeout}
       RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
   if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "benchmark failed (${_rc}): ${ARGN}\n${_out}\n${_err}")
@@ -23,8 +27,11 @@ function(run_bench executable)
 endfunction()
 
 function(refuse_bench)
-  execute_process(COMMAND "${BENCH}" ${ARGN}
+  execute_process(COMMAND "${BENCH}" ${ARGN} TIMEOUT ${_timeout}
       RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(_rc MATCHES "timeout")
+    message(FATAL_ERROR "benchmark hung: ${ARGN}")
+  endif()
   if(_rc EQUAL 0)
     message(FATAL_ERROR "benchmark accepted invalid arguments: ${ARGN}")
   endif()
