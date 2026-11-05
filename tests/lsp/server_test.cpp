@@ -1427,12 +1427,13 @@ void a_message_on_the_wire_is_well_formed() {
     });
   });
   s.initialize();
+  int id = 2;
   for (const auto& [sent, read] :
        {std::pair<std::string_view, std::string_view>{"[\"Mod\xE8le\"]",
                                                       "\"Mod\xEF\xBF\xBDle\""},
         {"[\"\xE2\x82 x\"]", "\"\xEF\xBF\xBD x\""},
         {"[\"caf\xC3\xA9\"]", "\"caf\xC3\xA9\""}}) {
-    s.request(2, "x/echo", sent);
+    s.request(id++, "x/echo", sent);
     const auto reply = s.answer().get();
     CHECK(lsp::json::stringify(reply.result.value_or(nullptr)) == read);
   }
