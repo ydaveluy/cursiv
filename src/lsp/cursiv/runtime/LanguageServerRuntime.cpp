@@ -94,7 +94,7 @@ class NotificationQueue {
  public:
   NotificationQueue(WorkspaceLock& lock, const WorkspaceManager* manager)
       : _lock(lock), _manager(manager) {
-    _worker = std::jthread([this](const std::stop_token& stop) { run(stop); });
+    _worker = std::jthread([this] { run(); });
   }
   NotificationQueue(const NotificationQueue&) = delete;
   NotificationQueue& operator=(const NotificationQueue&) = delete;
@@ -145,7 +145,6 @@ class NotificationQueue {
       _stopped = true;
       _tasks.clear();
     }
-    _worker.request_stop();
     _cv.notify_all();
     _lock.cancelWrite();
     if (_worker.joinable()) _worker.join();
@@ -158,13 +157,15 @@ class NotificationQueue {
            std::future_status::ready;
   }
 
-  void run(const std::stop_token& stop) {
+  void run() {
     for (;;) {
       std::function<void()> task;
       {
         std::unique_lock lock(_m);
-        _cv.wait(lock,
-                 [&]() { return stop.stop_requested() || !_tasks.empty(); });
+        // `_stopped` is published under the mutex: a stop told only by a flag
+        // set outside it could notify between this test and the wait, and the
+        // worker would sleep through it while `stop` joins.
+        _cv.wait(lock, [&]() { return _stopped || !_tasks.empty(); });
         if (_tasks.empty()) return;
         task = std::move(_tasks.front());
         _tasks.pop_front();
