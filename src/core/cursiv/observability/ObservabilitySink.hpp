@@ -31,6 +31,12 @@ enum class ObservationCode : std::uint8_t {
   // A file the scan or an update found and then could not read: the scan leaves
   // it out of the store, an update leaves it empty, and the others are read.
   WorkspaceDocumentReadFailed,
+  // A scope provider threw while a reference was resolved; the reference stays
+  // unresolved and the others are still linked.
+  ReferenceResolutionThrew,
+  // A language server notification's handler threw; the notification is lost
+  // and the session goes on.
+  NotificationThrew,
 };
 
 struct Observation {

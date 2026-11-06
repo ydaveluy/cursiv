@@ -14,17 +14,22 @@
 #include <condition_variable>
 #include <csignal>
 #include <deque>
+#include <exception>
+#include <format>
 #include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
@@ -250,6 +255,8 @@ struct Session {
   LanguageServer& server;
   NotificationQueue& queue;
   PendingRequests& pending;
+  // Read at each failure, never kept: a host may install another sink.
+  SharedCoreServices& shared;
   // False when the host gives no threads: every body runs on the read loop.
   bool pooled;
   bool shutdownRequested = false;
@@ -268,19 +275,52 @@ struct StopNotifications {
   ~StopNotifications() { queue.stop(); }
 };
 
+// A notification has no reply to carry its failure: the observability sink
+// is told instead, and the session goes on.
+void say_notification_threw(SharedCoreServices& shared, std::string_view method,
+                            const std::exception_ptr& failure) noexcept {
+  try {
+    std::string what = "unknown exception";
+    try {
+      std::rethrow_exception(failure);
+    } catch (const std::exception& thrown) {
+      what = thrown.what();
+    } catch (...) {  // NOLINT(bugprone-empty-catch): `what` already says it
+    }
+    shared.observabilitySink->publish(
+        {.severity = ObservationSeverity::Warning,
+         .code = ObservationCode::NotificationThrew,
+         .message = std::format("{} threw: {}", method, what),
+         .uri = {},
+         .languageId = {}});
+  } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to
+  }
+}
+
 // The prologue runs on the read loop; the body is queued. `supersedes` is a
-// document update, which cancels the write in flight.
+// document update, which cancels the write in flight. `method` names it to the
+// sink and outlives the session: a protocol name, or a custom handler's key.
 template <class Call>
-auto notification(Session& session, bool supersedes, Call call) {
-  return [&queue = session.queue, supersedes,
+auto notification(Session& session, std::string_view method, bool supersedes,
+                  Call call) {
+  return [&queue = session.queue, &shared = session.shared, method, supersedes,
           call = std::move(call)](auto&& params) {
     // Said here and not in the body: the writer takes the update later, and
     // a request dispatched behind it would be answered from the rung the
     // build before it published. A client's messages are served in the order
     // it sent them, and this is where that order is still known.
-    queue.post([call, params = std::forward<decltype(params)>(
-                          params)]() mutable { call(params); },
-               supersedes);
+    queue.post(
+        [&shared, method, call,
+         params = std::forward<decltype(params)>(params)]() mutable {
+          try {
+            call(params);
+          } catch (const OperationCancelled&) {
+            throw;
+          } catch (...) {
+            say_notification_threw(shared, method, std::current_exception());
+          }
+        },
+        supersedes);
   };
 }
 
@@ -355,7 +395,7 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   // registration all hang off this one notification, which is why it
   // is a hook and not a step of `initialize`.
   endpoint.onInitialized(notification(
-      session, false,
+      session, lsp::notifications::Initialized::Method, false,
       [&server](const lsp::InitializedParams&) { server.initialized(); }));
 
   // Every queued notification runs, then an empty build publishes every
@@ -433,17 +473,20 @@ void add_text_document_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
   endpoint.onTextDocumentDidOpen(notification(
-      session, true, [&server](const lsp::DidOpenTextDocumentParams& params) {
+      session, lsp::notifications::TextDocumentDidOpen::Method, true,
+      [&server](const lsp::DidOpenTextDocumentParams& params) {
         server.didOpen(params);
       }));
 
   endpoint.onTextDocumentDidChange(notification(
-      session, true, [&server](const lsp::DidChangeTextDocumentParams& params) {
+      session, lsp::notifications::TextDocumentDidChange::Method, true,
+      [&server](const lsp::DidChangeTextDocumentParams& params) {
         server.didChange(params);
       }));
 
   endpoint.onTextDocumentDidClose(notification(
-      session, true, [&server](const lsp::DidCloseTextDocumentParams& params) {
+      session, lsp::notifications::TextDocumentDidClose::Method, true,
+      [&server](const lsp::DidCloseTextDocumentParams& params) {
         server.didClose(params);
       }));
 
@@ -741,19 +784,22 @@ void add_workspace_handlers(Session& session) {
   lsp::ServerEndpoint& endpoint = session.endpoint;
   LanguageServer& server = session.server;
   endpoint.onWorkspaceDidChangeWatchedFiles(notification(
-      session, true, [&server](const lsp::DidChangeWatchedFilesParams& params) {
+      session, lsp::notifications::WorkspaceDidChangeWatchedFiles::Method, true,
+      [&server](const lsp::DidChangeWatchedFilesParams& params) {
         server.didChangeWatchedFiles(params);
       }));
 
-  endpoint.onWorkspaceDidChangeConfiguration(
-      notification(session, false,
-                   [&server](const lsp::DidChangeConfigurationParams& params) {
-                     server.didChangeConfiguration(params);
-                   }));
+  endpoint.onWorkspaceDidChangeConfiguration(notification(
+      session, lsp::notifications::WorkspaceDidChangeConfiguration::Method,
+      false, [&server](const lsp::DidChangeConfigurationParams& params) {
+        server.didChangeConfiguration(params);
+      }));
 
   endpoint.onWorkspaceDidChangeWorkspaceFolders(notification(
-      session, false,
-      [&server](const lsp::DidChangeWorkspaceFoldersParams& params) {
+      session,
+      std::string(
+          lsp::notifications::WorkspaceDidChangeWorkspaceFolders::Method),
+      false, [&server](const lsp::DidChangeWorkspaceFoldersParams& params) {
         server.didChangeWorkspaceFolders(params);
       }));
 
@@ -799,19 +845,22 @@ void add_file_operation_handlers(Session& session,
 
   if (options.didCreate.has_value())
     endpoint.onWorkspaceDidCreateFiles(notification(
-        session, false, [&server](const lsp::CreateFilesParams& params) {
+        session, lsp::notifications::WorkspaceDidCreateFiles::Method, false,
+        [&server](const lsp::CreateFilesParams& params) {
           server.didCreateFiles(params);
         }));
 
   if (options.didRename.has_value())
     endpoint.onWorkspaceDidRenameFiles(notification(
-        session, false, [&server](const lsp::RenameFilesParams& params) {
+        session, lsp::notifications::WorkspaceDidRenameFiles::Method, false,
+        [&server](const lsp::RenameFilesParams& params) {
           server.didRenameFiles(params);
         }));
 
   if (options.didDelete.has_value())
     endpoint.onWorkspaceDidDeleteFiles(notification(
-        session, false, [&server](const lsp::DeleteFilesParams& params) {
+        session, lsp::notifications::WorkspaceDidDeleteFiles::Method, false,
+        [&server](const lsp::DeleteFilesParams& params) {
           server.didDeleteFiles(params);
         }));
 
@@ -904,11 +953,10 @@ void add_custom_handlers(Session& session) {
         });
   }
   for (const auto& [method, handler] : custom.notifications) {
-    auto post =
-        notification(session, false,
-                     [handler = handler](lsp::json::Value& params) {
-                       handler(one_param(std::move(params)));
-                     });
+    auto post = notification(session, method, false,
+                             [handler = handler](lsp::json::Value& params) {
+                               handler(one_param(std::move(params)));
+                             });
     session.endpoint.onCustomNotification(
         method,
         [&session, post = std::move(post)](lsp::json::Value&& params) mutable {
@@ -987,7 +1035,7 @@ int start_language_server(SharedLspServices& shared, lsp::io::Stream& raw) {
   if (workers != 0)
     endpoint.messageHandler().setMaxResponseThreads(
         static_cast<unsigned>(std::max<std::size_t>(1, (workers + 1) / 2)));
-  Session session{endpoint, *shared.languageServer, queue, pending,
+  Session session{endpoint,    *shared.languageServer, queue, pending, shared,
                   workers != 0};
   const StopNotifications stopNotifications{queue};
   clientGuard.install(endpoint, [&queue](std::function<void()> reply) {

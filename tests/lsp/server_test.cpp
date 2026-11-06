@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "cursiv/grammar/ElementId.hpp"
+#include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreServices.hpp"
@@ -1565,8 +1566,26 @@ void a_message_on_the_wire_is_well_formed() {
 // do: refused or dropped outside the session, a session whose `initialize`
 // failed included, and given the one value the client sent.
 void custom_methods_reach_the_language() {
+  // A notification that throws is told to the sink; the session goes on.
+  struct FailedNotes final : cursiv::ObservabilitySink {
+    std::mutex m;
+    std::vector<std::string> said;
+    void publish(const cursiv::Observation& observation) noexcept override {
+      if (observation.code != cursiv::ObservationCode::NotificationThrew)
+        return;
+      try {
+        const std::scoped_lock lock(m);
+        said.push_back(observation.message);
+      } catch (...) {  // NOLINT(bugprone-empty-catch): the check reads `said`
+      }
+    }
+  };
+  FailedNotes* failed = nullptr;
   std::promise<std::string> heard;
   Session s([&](Server& server) {
+    auto sink = std::make_unique<FailedNotes>();
+    failed = sink.get();
+    server.shared.observabilitySink = std::move(sink);
     server.refuseFirstInitialize = true;
     server.onRequest("x/echo", [](const lsp::LSPAny& value,
                                   const cursiv::CancellationToken&) {
@@ -1574,6 +1593,9 @@ void custom_methods_reach_the_language() {
     });
     server.onNotification("x/note", [&](const lsp::LSPAny& value) {
       heard.set_value(lsp::json::stringify(value));
+    });
+    server.onNotification("x/fail", [](const lsp::LSPAny&) {
+      throw std::runtime_error("note failed");
     });
   });
   s.request(2, "x/echo", "[1]");
@@ -1611,8 +1633,13 @@ void custom_methods_reach_the_language() {
   const auto unknown = s.answer().get();
   CHECK(unknown.error.has_value() && unknown.error->code == -32601);
 
+  s.notify("x/fail", "[0]");
   s.notify("x/note", R"(["b"])");
   CHECK(heard.get_future().get() == R"("b")");
+  {
+    const std::scoped_lock lock(failed->m);
+    CHECK(failed->said == std::vector<std::string>{"x/fail threw: note failed"});
+  }
   s.notify("workspace/didChangeWorkspaceFolders",
            R"({"event":{"added":[{"uri":"file:///a","name":"a"}],"removed":[]}})");
   CHECK(s.server->foldersAdded.get_future().get() == "a");

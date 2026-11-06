@@ -61,6 +61,10 @@ std::string_view to_string(ObservationCode code) noexcept {
       return "ValidationPreparationThrew";
     case WorkspaceDocumentReadFailed:
       return "WorkspaceDocumentReadFailed";
+    case ReferenceResolutionThrew:
+      return "ReferenceResolutionThrew";
+    case NotificationThrew:
+      return "NotificationThrew";
   }
   return "?";
 }

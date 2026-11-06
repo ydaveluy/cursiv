@@ -4,13 +4,19 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <format>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/references/Linker.hpp"
 #include "cursiv/references/LinkingResult.hpp"
+#include "cursiv/services/CoreServices.hpp"
+#include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
@@ -25,16 +31,43 @@ namespace cursiv {
 
 namespace {
 
+// A throwing provider is the language's bug, not the document's: said to the
+// observability sink of the document's language, if it has one.
+void say_provider_threw(const Document* document, std::string_view name,
+                        const std::exception_ptr& failure) noexcept {
+  if (document == nullptr || document->language == nullptr) return;
+  const CoreServices& language = *document->language;
+  try {
+    std::string what = "unknown exception";
+    try {
+      std::rethrow_exception(failure);
+    } catch (const std::exception& thrown) {
+      what = thrown.what();
+    } catch (...) {  // NOLINT(bugprone-empty-catch): `what` already says it
+    }
+    language.shared().observabilitySink->publish(
+        {.severity = ObservationSeverity::Warning,
+         .code = ObservationCode::ReferenceResolutionThrew,
+         .message = std::format("resolving the reference to '{}' threw: {}",
+                                name, what),
+         .uri = document->uri,
+         .languageId = std::string(language.languageMetaData.languageId)});
+  } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to
+  }
+}
+
 // A provider that throws fails the reference it was asked for, as a lookup
 // that found nothing does: the empty answer is returned, and a provider that
 // read this reference goes on. Only cancellation leaves the read.
 template <class Lookup>
-auto contained(Lookup lookup) -> decltype(lookup()) {
+auto contained(const Document* document, std::string_view name, Lookup lookup)
+    -> decltype(lookup()) {
   try {
     return lookup();
   } catch (const OperationCancelled&) {
     throw;
   } catch (...) {
+    say_provider_threw(document, name, std::current_exception());
     return {};
   }
 }
@@ -65,9 +98,9 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
 
-  const AstNodeDescriptionOrError found = contained([&] {
-    return l->getCandidate(info(h, ops.text(*h.owner, h.index), narrow));
-  });
+  const auto name = ops.text(*h.owner, h.index);
+  const AstNodeDescriptionOrError found = contained(
+      at, name, [&] { return l->getCandidate(info(h, name, narrow)); });
   if (!found.has_value() || *found == nullptr) return failed();
 
   AstNode* const target = (*found)->node;
@@ -162,9 +195,11 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
 
   const std::uint8_t narrow =
       ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
-  const AstNodeDescriptionsOrError found = contained([&] {
-    return l->getCandidates(info(h, ops.text(*h.owner, h.index), narrow));
-  });
+  const Document* at = document.load(std::memory_order_acquire);
+  if (at == nullptr) at = h.owner->getDocument();
+  const auto name = ops.text(*h.owner, h.index);
+  const AstNodeDescriptionsOrError found = contained(
+      at, name, [&] { return l->getCandidates(info(h, name, narrow)); });
   if (!found.has_value()) return RefState::ErrorNotFound;
 
   const RefFilter filter{&ops, narrow};

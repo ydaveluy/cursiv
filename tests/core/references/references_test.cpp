@@ -430,13 +430,23 @@ struct ThrowingProvider final : cursiv::DefaultScopeProvider {
 };
 
 // A provider that throws fails the reference it was resolving; the rest of
-// the work list still links.
+// the work list still links, and the failure is told to the sink.
 void a_throwing_provider_fails_only_its_reference() {
   World world;
+  const support::CaptureSink& sunk =
+      support::capture_observations(world.shared);
   const auto document = world.scoped(
       "datatype String\nentity P { a : Boom }\nentity Q { b : String }\n");
   world.ws->scopeProvider = std::make_unique<ThrowingProvider>(*world.ws);
   world.ws->linker->link(*document);
+  CHECK(sunk.seen.size() == 1);
+  if (!sunk.seen.empty()) {
+    const cursiv::Observation& said = sunk.seen.front();
+    CHECK(said.code == cursiv::ObservationCode::ReferenceResolutionThrew);
+    CHECK(said.message ==
+          "resolving the reference to 'Boom' threw: provider exploded");
+    CHECK(said.uri == document->uri);
+  }
 
   const auto& refs = *document->parseResult.references;
   CHECK(refs.handles.size() == 2);
