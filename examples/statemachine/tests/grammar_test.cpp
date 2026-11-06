@@ -4,17 +4,24 @@
 // would let that pair through.
 
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/workspace/Document.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/ValidationResult.hpp"
 #include "statemachine/CoreServices.hpp"
+#include "statemachine/Generator.hpp"
 
 namespace {
 
@@ -136,6 +143,77 @@ void a_plain_name_says_nothing_about_keywords() {
                      "state Idle end\n"));
 }
 
+std::string read_file(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  CHECK(in.is_open());
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+const sm::ast::Statemachine& machine_of(const ct::ValidationResult& said) {
+  return static_cast<const sm::ast::Statemachine&>(
+      *said.document->parseResult.value);
+}
+
+// The program each shipped machine becomes, whole and byte for byte: generated
+// code rarely changes, and a change anywhere in it is one to read.
+void the_shipped_machines_generate_their_golden_programs() {
+  const std::filesystem::path root(CURSIV_EXAMPLE_DIR);
+  for (const std::string_view name : {"doors", "trafficlight"}) {
+    const World world;
+    const ct::ValidationResult said = world.validate(
+        read_file(root / "example" / (std::string(name) + ".statemachine")));
+    CHECK(said.document->parseResult.value != nullptr);
+    if (said.document->parseResult.value == nullptr) continue;
+    CHECK(
+        sm::generate_cpp_content(machine_of(said))
+        == read_file(root / "tests" / "golden" / (std::string(name) + ".cpp")));
+  }
+}
+
+// A program that cannot be made, or cannot be written, is an error -- and the
+// one written before stays whole.
+void a_failed_generation_is_an_error_and_keeps_the_old_output() {
+  const std::filesystem::path folder =
+      std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "generated";
+  std::filesystem::create_directories(folder);
+  const std::filesystem::path output = folder / "machine.cpp";
+  std::filesystem::remove(output);
+  std::ofstream(output) << "older\n";
+
+  const World world;
+  const ct::ValidationResult said =
+      world.validate("statemachine M\ninitialState Nowhere\n");
+  bool refused = false;
+  try {
+    (void)sm::generate_cpp(machine_of(said), "machine.statemachine",
+                           folder.string());
+  } catch (const std::runtime_error&) {
+    refused = true;
+  }
+  CHECK(refused);
+  CHECK(read_file(output) == "older\n");
+
+#if defined(__linux__)
+  // A disk that is full: the file opens, and the write fails.
+  std::filesystem::remove(output);
+  std::error_code linked;
+  std::filesystem::create_symlink("/dev/full", output, linked);
+  if (!linked) {
+    const ct::ValidationResult valid =
+        world.validate("statemachine M\ninitialState S\nstate S end\n");
+    bool failed = false;
+    try {
+      (void)sm::generate_cpp(machine_of(valid), "machine.statemachine",
+                             folder.string());
+    } catch (const std::runtime_error&) {
+      failed = true;
+    }
+    CHECK(failed);
+  }
+  std::filesystem::remove(output);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -148,5 +226,7 @@ int main() {
   a_capitalised_state_says_nothing();
   a_keyword_is_not_a_name();
   a_plain_name_says_nothing_about_keywords();
+  the_shipped_machines_generate_their_golden_programs();
+  a_failed_generation_is_an_error_and_keeps_the_old_output();
   return cursiv::test::report("statemachine_grammar_test");
 }

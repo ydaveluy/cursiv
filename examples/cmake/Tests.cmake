@@ -17,5 +17,10 @@ function(cursiv_example_tests name)
     endif()
     add_test(NAME ${_target} COMMAND ${_target})
   endforeach()
-  target_link_libraries(${name}_grammar_test PRIVATE cursiv::lsp)
+  # The grammar suite also drives the language's editor services and the
+  # command line's own commands, on files it writes in its build directory.
+  target_link_libraries(${name}_grammar_test PRIVATE cursiv::lsp ${name}Lsp
+      ${name}Cli)
+  target_compile_definitions(${name}_grammar_test PRIVATE
+      CURSIV_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 endfunction()

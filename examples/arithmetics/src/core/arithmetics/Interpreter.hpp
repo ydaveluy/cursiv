@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 #include "arithmetics/ast.hpp"
@@ -12,16 +14,42 @@
 
 namespace arith {
 
-using EvaluationResult = std::unordered_map<const ast::Evaluation*, double>;
+// Every evaluation of the module, `nullopt` for one with no value -- a zero
+// divisor, a recursive call -- rather than aborting the module: the others
+// are still answers.
+using EvaluationResult =
+    std::unordered_map<const ast::Evaluation*, std::optional<double>>;
 
-// Evaluations that throw -- a division by zero, a recursive call -- are left
-// out rather than aborting the module: the others are still answers.
 [[nodiscard]] EvaluationResult interpret_evaluations(const ast::Module& module);
 
-// One expression, standing on its own with no parameter bound. `nullopt` is
-// every failure, never an exception. `stepLimit` bounds visited nodes (0 is
-// unlimited), so a caller wanting only cheap answers pays a bounded cost.
-[[nodiscard]] std::optional<double> eval_expression(
-    const ast::Expression& expression, std::size_t stepLimit = 0);
+// A value written as JavaScript writes a number: the shortest digits that
+// read back as the same value, in plain decimal from 1e-6 up to 1e21 and with
+// an exponent beyond, `Infinity` and `NaN` by name.
+[[nodiscard]] std::string number_text(double value);
+
+// Answers for the expressions of one module, each standing on its own with no
+// parameter bound. It keeps the value of each definition without parameters
+// it computes, so `d2: d1 + d1` computes `d1` once and later unbounded
+// questions reuse it; a module changed since is asked through a new one. It
+// also keeps its working memory, so asking many questions of one interpreter
+// allocates little.
+class Interpreter {
+ public:
+  Interpreter();
+  ~Interpreter();
+  Interpreter(const Interpreter&) = delete;
+  Interpreter& operator=(const Interpreter&) = delete;
+
+  // `nullopt` is every failure, never an exception. `stepLimit` bounds the
+  // nodes this question visits (0 is unlimited), so a caller wanting only
+  // cheap answers pays a bounded cost. A bounded question reuses no value an
+  // earlier one computed: its answer depends on its own expression only.
+  [[nodiscard]] std::optional<double> evaluate(
+      const ast::Expression& expression, std::size_t stepLimit = 0);
+
+ private:
+  class Machine;
+  std::unique_ptr<Machine> _machine;
+};
 
 }  // namespace arith

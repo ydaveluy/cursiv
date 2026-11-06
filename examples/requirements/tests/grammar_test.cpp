@@ -3,8 +3,13 @@
 // files beside it, and whether a test's environment is legitimate is a fact
 // about the `.req` it names -- so the world here holds both, built together.
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,11 +31,14 @@
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/DocumentState.hpp"
 #include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/MemoryFileSystemProvider.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ValidationResult.hpp"
 #include "requirements/CoreModule.hpp"
+#include "requirements/Generator.hpp"
 #include "requirements/ast.hpp"
 #include "requirements/validation/RequirementsValidator.hpp"
 
@@ -163,6 +171,111 @@ void a_covered_and_numbered_pair_says_nothing() {
   ct::expectNoIssues(world.said("file:///w/a.tst"));
 }
 
+// A workspace on a disk the test writes: each write is announced as an editor
+// saving those files would announce it.
+struct Disk {
+  cursiv::MemoryFileSystemProvider* files = nullptr;
+  req::RequirementsCoreLanguage services = make(files);
+
+  static req::RequirementsCoreLanguage make(
+      cursiv::MemoryFileSystemProvider*& files) {
+    auto disk = std::make_unique<cursiv::MemoryFileSystemProvider>();
+    files = disk.get();
+    return req::create_core_services(std::move(disk));
+  }
+
+  void write(std::string_view uri, std::string text) {
+    files->addFile(uri, std::move(text));
+    const std::string_view changed[] = {uri};
+    services.shared->documentBuilder->update(changed, {});
+  }
+
+  void remove(std::string_view uri) {
+    const std::string_view deleted[] = {uri};
+    services.shared->documentBuilder->update({}, deleted);
+  }
+
+  [[nodiscard]] std::size_t said(std::string_view uri,
+                                 std::string_view message) const {
+    const auto document = services.shared->documents->getDocument(uri);
+    CHECK(document != nullptr);
+    if (document == nullptr) return 0;
+    return static_cast<std::size_t>(std::ranges::count_if(
+        document->diagnostics,
+        [&](const cursiv::Diagnostic& d) { return d.message == message; }));
+  }
+};
+
+// A `.req` names no `.tst`, so a test written, edited or deleted relinks no
+// requirement document: the coverage it reports follows all the same.
+void coverage_follows_the_tests_that_change() {
+  constexpr std::string_view kReq = "file:///w/a.req";
+  constexpr std::string_view kTst = "file:///w/a.tst";
+  constexpr std::string_view kUncovered =
+      "Requirement R1 not covered by a test.";
+  Disk disk;
+  disk.write(kReq, "req R1 \"covered later\"\n");
+  CHECK(disk.said(kReq, kUncovered) == 1);
+  disk.write(kTst, "tst T1 tests R1\n");
+  CHECK(disk.said(kReq, kUncovered) == 0);
+  disk.write(kTst, "tst T1 tests R2\n");
+  CHECK(disk.said(kReq, kUncovered) == 1);
+  disk.write(kTst, "tst T1 tests R1\n");
+  CHECK(disk.said(kReq, kUncovered) == 0);
+  disk.remove(kTst);
+  CHECK(disk.said(kReq, kUncovered) == 1);
+}
+
+// The same through `build`, as a first scan or a command line builds: a test
+// built after the `.req` it covers clears the warning, and the `.req` is
+// validated again by that build, not left without findings.
+void coverage_follows_a_test_built_later() {
+  constexpr std::string_view kUncovered =
+      "Requirement R1 not covered by a test.";
+  constexpr std::string_view kNever = "Requirement R2 not covered by a test.";
+  World world;
+  world.add("file:///w/a.req",
+            "req R1 \"covered later\"\nreq R2 \"never covered\"\n");
+  world.build();
+  CHECK(count(world.said("file:///w/a.req"), kUncovered) == 1);
+  CHECK(count(world.said("file:///w/a.req"), kNever) == 1);
+
+  world.add("file:///w/a.tst", "tst T1 tests R1\n");
+  cursiv::Document* const test = world.opened.back().get();
+  world.shared.documentBuilder->build(std::span(&test, 1));
+  const std::shared_ptr<cursiv::Document> requirements =
+      world.shared.documents->getDocument("file:///w/a.req");
+  CHECK(requirements->state.load() == cursiv::DocumentState::Validated);
+  CHECK(count(world.said("file:///w/a.req"), kUncovered) == 0);
+  CHECK(count(world.said("file:///w/a.req"), kNever) == 1);
+}
+
+std::string read_file(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  CHECK(in.is_open());
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// The summary the shipped pair becomes, whole and byte for byte: generated
+// output rarely changes, and a change anywhere in it is one to read.
+void the_shipped_pair_generates_its_golden_summary() {
+  const std::filesystem::path root(CURSIV_EXAMPLE_DIR);
+  World world;
+  world.add("file:///requirements.req",
+            read_file(root / "example" / "requirements.req"));
+  world.add("file:///tests.tst", read_file(root / "example" / "tests.tst"));
+  world.build();
+  const auto* const model = cursiv::ast_cast<const req::ast::RequirementModel>(
+      world.opened[0]->parseResult.value);
+  const auto* const tests = cursiv::ast_cast<const req::ast::TestModel>(
+      world.opened[1]->parseResult.value);
+  CHECK(model != nullptr && tests != nullptr);
+  if (model == nullptr || tests == nullptr) return;
+  const req::ast::TestModel* const testModels[] = {tests};
+  CHECK(req::generate_summary_file_html_content(*model, testModels)
+        == read_file(root / "tests" / "golden" / "requirements.html"));
+}
+
 #if !defined(__wasi__) || defined(_REENTRANT)
 void simultaneous_coverage_checks_scan_the_workspace_once() {
   struct CountingDocuments : cursiv::DefaultDocuments {
@@ -220,6 +333,9 @@ int main() {
   an_uncovered_requirement_is_the_workspace_speaking();
   a_test_says_what_it_lacks();
   a_covered_and_numbered_pair_says_nothing();
+  coverage_follows_the_tests_that_change();
+  coverage_follows_a_test_built_later();
+  the_shipped_pair_generates_its_golden_summary();
 #if !defined(__wasi__) || defined(_REENTRANT)
   simultaneous_coverage_checks_scan_the_workspace_once();
 #endif

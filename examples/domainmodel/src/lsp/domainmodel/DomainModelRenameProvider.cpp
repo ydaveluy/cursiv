@@ -31,28 +31,45 @@ std::string_view name_of(const cursiv::AstNode& node) {
 
 // The qualified name a declaration will answer to, with `renamed` spelled
 // `newName` -- functional rather than mutate-then-read, since an AST is not
-// written to answer a request.
+// written to answer a request. A climb, and the qualifier built once, however
+// deep the packages nest.
 std::string qualified_after_rename(const cursiv::AstNode& node,
                                    const cursiv::AstNode& renamed,
                                    std::string_view newName,
                                    const QualifiedNameProvider& names) {
-  const std::string own(&node == &renamed ? newName : name_of(node));
-  const auto* const package =
-      cursiv::ast_cast<const ast::PackageDeclaration>(node.parent);
-  if (package == nullptr) return own;
-  return names.getQualifiedName(
-      qualified_after_rename(*package, renamed, newName, names), own);
+  std::vector<std::string_view> packages;  // the innermost first
+  for (const auto* package =
+           cursiv::ast_cast<const ast::PackageDeclaration>(node.parent);
+       package != nullptr;
+       package =
+           cursiv::ast_cast<const ast::PackageDeclaration>(package->parent))
+    packages.push_back(package == &renamed ? newName : name_of(*package));
+  std::string qualifier;
+  for (auto package = packages.rbegin(); package != packages.rend();
+       ++package) {
+    if (!qualifier.empty()) qualifier += '.';
+    qualifier += *package;
+  }
+  return names.getQualifiedName(qualifier,
+                                &node == &renamed ? newName : name_of(node));
 }
 
-// The renamed declaration and everything under it: a package carries its
-// members' qualified names, so each of them has references to rewrite too.
+// The renamed declaration and everything under it, in source order: a package
+// carries its members' qualified names, so each of them has references to
+// rewrite too.
 void collect_subtree(const cursiv::AstNode& node,
                      std::vector<const cursiv::AstNode*>& out) {
-  out.push_back(&node);
-  if (const auto* const package =
-          cursiv::ast_cast<const ast::PackageDeclaration>(&node))
-    for (const ast::AbstractElement* const element : package->elements)
-      if (element != nullptr) collect_subtree(*element, out);
+  std::vector<const cursiv::AstNode*> pending{&node};
+  while (!pending.empty()) {
+    const cursiv::AstNode* const at = pending.back();
+    pending.pop_back();
+    out.push_back(at);
+    if (const auto* const package =
+            cursiv::ast_cast<const ast::PackageDeclaration>(at))
+      for (auto element = package->elements.rbegin();
+           element != package->elements.rend(); ++element)
+        if (*element != nullptr) pending.push_back(*element);
+  }
 }
 
 }  // namespace

@@ -1,8 +1,16 @@
 #pragma once
 
+#include <mutex>
+#include <span>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+
 #include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/DocumentState.hpp"
 #include "domainmodel/ast.hpp"
 
@@ -12,9 +20,14 @@
 
 namespace dm {
 
-class DomainModelValidator final : public cursiv::DefaultCoreService {
+class DomainModelValidator final : public cursiv::DefaultCoreService,
+                                   private cursiv::DocumentUpdateListener {
  public:
-  using cursiv::DefaultCoreService::DefaultCoreService;
+  explicit DomainModelValidator(const cursiv::CoreServices& services);
+  ~DomainModelValidator() noexcept override;
+
+  DomainModelValidator(const DomainModelValidator&) = delete;
+  DomainModelValidator& operator=(const DomainModelValidator&) = delete;
 
   void checkEntityNameStartsWithCapital(
       const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const;
@@ -46,6 +59,19 @@ class DomainModelValidator final : public cursiv::DefaultCoreService {
   // of keeping a whole climb.
   cursiv::DocumentCache<const ast::Entity*, Exit> _exits{
       shared, cursiv::DocumentState::Linked};
+
+  // The documents the climbs from each document went through. A change there
+  // can change a verdict here while relinking nothing here -- `A` extends `B`
+  // of another document, and `B`'s own parent is what changed -- so an update
+  // that moves one of them sends this document back to validation.
+  void onUpdate(std::span<const std::string_view> changed,
+                std::span<const std::string_view> deleted) override;
+  void noteClimb(cursiv::DocumentId from, cursiv::DocumentId through) const;
+
+  mutable std::mutex _climbedMutex;
+  mutable std::unordered_map<cursiv::DocumentId,
+                             std::unordered_set<cursiv::DocumentId>>
+      _climbed;
 };
 
 }  // namespace dm

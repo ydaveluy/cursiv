@@ -1,6 +1,7 @@
 // The arithmetics command line: the usual verdict, plus `eval FILE` -- which is
 // what this example is for, a language whose documents have a value.
 
+#include <iostream>
 #include <string_view>
 
 #include "arithmetics/Evaluator.hpp"
@@ -19,14 +20,15 @@ constexpr auto kRegister =
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc == 3 && std::string_view(argv[1]) == "eval") {
-    arith::ArithmeticsSharedCoreServices shared;
-    shared.fileSystemProvider =
-        std::make_unique<cursiv::LocalFileSystemProvider>();
-    cursiv::install_default_shared_core_services(shared);
-    if (!kRegister(shared)) return cursiv::kFatal;
-    return arith::eval_file(argv[2], shared);
-  }
+  if (argc == 3 && std::string_view(argv[1]) == "eval")
+    return cursiv::run_command([&] {
+      arith::ArithmeticsSharedCoreServices shared;
+      shared.fileSystemProvider =
+          std::make_unique<cursiv::LocalFileSystemProvider>();
+      cursiv::install_default_shared_core_services(shared);
+      if (!kRegister(shared)) return cursiv::kFatal;
+      return arith::eval_file(argv[2], shared, std::cout, std::cerr);
+    });
   return cursiv::run_cli<arith::ArithmeticsSharedCoreServices>(argc, argv,
                                                                kRegister);
 }

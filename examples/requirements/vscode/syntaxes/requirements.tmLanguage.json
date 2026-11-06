@@ -22,6 +22,17 @@
           "match": "\\\\."
         }
       ]
+    },
+    {
+      "name": "string.quoted.single.requirements-lang",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.requirements-lang",
+          "match": "\\\\."
+        }
+      ]
     }
   ],
   "repository": {

@@ -1,7 +1,6 @@
 // The statemachine command line: the usual verdict, plus `generate FILE` --
 // what this example is for, a model that becomes code.
 
-#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -47,11 +46,10 @@ int generate(const GenerateOptions& options) {
   cursiv::install_default_shared_core_services(shared);
   if (!kRegister(shared)) return cursiv::kFatal;
 
-  // The file's folder first: a model that names a declaration from the file
-  // beside it is not invalid, it is unscanned -- and a generator that refused
-  // it would refuse the example this one ships with.
-  cursiv::initialize_root(
-      std::filesystem::path(options.path).parent_path().string(), shared);
+  // The file alone, not its folder: the generated program declares only the
+  // states and events of this machine, so a name it took from a neighbour
+  // would be one the C++ never declares. Unscanned, such a name is an
+  // unresolved reference, said below.
   const cursiv::Document& document =
       cursiv::build_document_from_path(options.path, shared);
   if (cursiv::has_error_diagnostics(document)) {
@@ -82,7 +80,7 @@ int generate(const GenerateOptions& options) {
 int main(int argc, char** argv) {
   if (const std::optional<GenerateOptions> options =
           parse_generate_args(argc, argv))
-    return generate(*options);
+    return cursiv::run_command([&] { return generate(*options); });
   return cursiv::run_cli<sm::StateMachineSharedCoreServices>(argc, argv,
                                                              kRegister);
 }

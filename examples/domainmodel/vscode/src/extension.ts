@@ -24,6 +24,11 @@ function executableName(): string {
     return process.platform === 'win32' ? `${SERVER}.exe` : SERVER;
 }
 
+// `CURSIV_DOMAINMODEL_SERVER` names the server as the setting does.
+function serverVariable(): string {
+    return `CURSIV_${KEY.replace(/-/g, '_').toUpperCase()}_SERVER`;
+}
+
 function addCandidate(candidates: string[], value: string | undefined): void {
     const trimmed = value?.trim();
     if (trimmed) {
@@ -131,7 +136,7 @@ function resolveServerCommand(context: vscode.ExtensionContext): string | undefi
     const candidates: string[] = [];
 
     addCandidate(candidates, vscode.workspace.getConfiguration().get<string>(`cursiv.${KEY}.serverPath`));
-    addCandidate(candidates, process.env[`CURSIV_${KEY.replace(/-/g, '_').toUpperCase()}_SERVER`]);
+    addCandidate(candidates, process.env[serverVariable()]);
 
     // The launch configuration opens `examples/domainmodel/example`, so the
     // repository root is three levels above the workspace folder too.
@@ -157,9 +162,12 @@ function resolveServerCommand(context: vscode.ExtensionContext): string | undefi
 let client: LanguageClient | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    // The active preset first, then the packaged wasm; the setting overrides
-    // both, since a configured `serverPath` names a binary the author chose.
-    const configured = vscode.workspace.getConfiguration().get<string>(`cursiv.${KEY}.serverPath`)?.trim();
+    // The active preset first, then the packaged wasm; the setting and then
+    // the environment variable override both, since either names a binary
+    // the author chose.
+    const configured =
+        vscode.workspace.getConfiguration().get<string>(`cursiv.${KEY}.serverPath`)?.trim() ||
+        process.env[serverVariable()]?.trim();
     const found = configured
         ? undefined
         : presetCommand(context) ?? resolveWasmCommand(context);
@@ -196,8 +204,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     client = new LanguageClient(`cursiv-${KEY}`, `cursiv ${LABEL}`, serverOptions, clientOptions);
     await client.start();
-    // The MCP door onto the SAME session: whatever the editor holds unsaved,
-    // a model connected here reads it.
+    // The MCP door onto the same session: a model connected here reads what
+    // the editor holds unsaved.
     context.subscriptions.push(startMcpBridge(KEY, LABEL, client, outputChannel));
 }
 

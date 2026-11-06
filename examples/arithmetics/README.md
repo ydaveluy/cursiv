@@ -23,8 +23,9 @@ cmake --build --preset gcc-release --target arithmetics_cli --parallel
 ```
 
 The CLI checks syntax, references and validation rules. Add `--dump` to inspect
-the parsed syntax tree. The CLI validates expressions; it does not print their
-calculated values.
+the parsed syntax tree. Run `arithmetics_cli eval <file>` to print the value of
+each evaluation; one that has no value, such as a division by zero, is reported
+on stderr and the command exits with `1`.
 
 ## Read the implementation
 

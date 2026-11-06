@@ -23,6 +23,9 @@ if(CURSIV_NODE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME wasi_runner_test COMMAND ${CURSIV_NODE} --no-warnings --test
       ${CURSIV_SOURCE_ROOT}/tools/wasi-run.test.mjs)
   set_tests_properties(wasi_runner_test PROPERTIES TIMEOUT 300)
+  # The example extensions are copies that may differ only by their names.
+  add_test(NAME vscode_copies_test COMMAND ${CURSIV_NODE} --no-warnings --test
+      ${CURSIV_SOURCE_ROOT}/tools/vscode-copies.test.mjs)
 endif()
 # The online demo's worker, on the servers it publishes.
 if(CURSIV_NODE AND TARGET domainmodel_lsp AND CMAKE_SYSTEM_NAME STREQUAL "WASI")

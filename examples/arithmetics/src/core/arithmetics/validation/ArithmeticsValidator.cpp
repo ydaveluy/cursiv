@@ -48,22 +48,27 @@ struct NestedCall {
 // cycle into a path a reader can follow.
 using CallTree = std::unordered_map<const ast::FunctionCall*, NestedCall>;
 
-// The resolved calls a body writes, source order. Arguments are not descended
-// into: a cycle is made of the calls a body makes, not of what it passes.
-void select_calls(const ast::Definition& host,
-                  const ast::Expression* expression,
-                  std::vector<NestedCall>& out) {
-  expression = unwrap(expression);
-  if (expression == nullptr) return;
-  if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
-    const auto& call = static_cast<const ast::FunctionCall&>(*expression);
-    if (definition_of(call) != nullptr) out.push_back({&call, &host});
-    return;
-  }
-  if (expression->type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
-    const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
-    select_calls(host, binary.left, out);
-    select_calls(host, binary.right, out);
+// The resolved calls a body writes, source order, the arguments of a call
+// after it: an argument is evaluated before the body it is passed to, so a
+// call it makes is one its host makes. A walk on its own stack, so a body a
+// million terms long holds no native frame per term.
+void select_calls(const ast::Definition& host, std::vector<NestedCall>& out) {
+  std::vector<const ast::Expression*> pending{host.expr};
+  while (!pending.empty()) {
+    const ast::Expression* const expression = unwrap(pending.back());
+    pending.pop_back();
+    if (expression == nullptr) continue;
+    if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
+      const auto& call = static_cast<const ast::FunctionCall&>(*expression);
+      if (definition_of(call) != nullptr) out.push_back({&call, &host});
+      pending.insert(pending.end(), call.args.rbegin(), call.args.rend());
+    } else if (expression->type
+               == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+      const auto& binary =
+          static_cast<const ast::BinaryExpression&>(*expression);
+      pending.push_back(binary.right);
+      pending.push_back(binary.left);
+    }
   }
 }
 
@@ -106,7 +111,7 @@ std::string print_cycle(const std::vector<NestedCall>& back) {
 }
 
 // The value a sub-expression already stands for: its own if it is a literal,
-// the folded one if the walk below produced it.
+// the folded one if `fold` produced it.
 std::optional<double> known(
     const ast::Expression* expression,
     const std::unordered_map<const ast::Expression*, double>& folded) {
@@ -119,43 +124,49 @@ std::optional<double> known(
                                : std::optional<double>(found->second);
 }
 
-// A sub-expression that is already a number, bottom up. A parent that folds
-// takes its children's places: reporting both would offer the author two
-// rewrites for one span.
-void fold(const ast::Expression& expression,
+// A sub-expression that is already a number, bottom up: an operation is
+// reached once on the way down, and again once its operands are known. A
+// parent that folds takes its children's places: reporting both would offer
+// the author two rewrites for one span. A constant is kept short, eight
+// characters at most, so the rewrite stays a simplification.
+void fold(const ast::Expression& root,
           std::unordered_map<const ast::Expression*, double>& folded,
           std::vector<const ast::Expression*>& order) {
-  if (expression.type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
-    if (const ast::Expression* const inner =
-            static_cast<const ast::GroupedExpression&>(expression).expression)
-      fold(*inner, folded, order);
-    return;
+  std::vector<std::pair<const ast::Expression*, bool>> pending{{&root, false}};
+  while (!pending.empty()) {
+    const auto [node, operandsDone] = pending.back();
+    pending.pop_back();
+    const ast::Expression* const expression = unwrap(node);
+    if (expression == nullptr
+        || expression->type != &cursiv::ast_type_tag<ast::BinaryExpression>)
+      continue;
+    const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
+    if (binary.left == nullptr || binary.right == nullptr) continue;
+    if (!operandsDone) {
+      pending.emplace_back(expression, true);
+      pending.emplace_back(binary.right, false);
+      pending.emplace_back(binary.left, false);
+      continue;
+    }
+
+    const std::optional<double> left = known(binary.left, folded);
+    const std::optional<double> right = known(binary.right, folded);
+    if (!left.has_value() || !right.has_value()) continue;
+    double value = 0.0;
+    try {
+      value = apply_operator(binary.op)(*left, *right);
+    } catch (const std::runtime_error&) {
+      continue;  // a division by zero is the other check's to report
+    }
+    if (!std::isfinite(value) || number_text(value).size() > 8) continue;
+
+    if (folded.try_emplace(expression, value).second)
+      order.push_back(expression);
+    if (const ast::Expression* const child = unwrap(binary.left))
+      folded.erase(child);
+    if (const ast::Expression* const child = unwrap(binary.right))
+      folded.erase(child);
   }
-  if (expression.type != &cursiv::ast_type_tag<ast::BinaryExpression>) return;
-
-  const auto& binary = static_cast<const ast::BinaryExpression&>(expression);
-  if (binary.left == nullptr || binary.right == nullptr) return;
-  fold(*binary.left, folded, order);
-  fold(*binary.right, folded, order);
-
-  const std::optional<double> left = known(binary.left, folded);
-  const std::optional<double> right = known(binary.right, folded);
-  if (!left.has_value() || !right.has_value()) return;
-
-  double value = 0.0;
-  try {
-    value = apply_operator(binary.op)(*left, *right);
-  } catch (const std::runtime_error&) {
-    return;  // a division by zero is the other check's to report
-  }
-  if (!std::isfinite(value)) return;
-
-  if (folded.try_emplace(&expression, value).second)
-    order.push_back(&expression);
-  if (const ast::Expression* const child = unwrap(binary.left))
-    folded.erase(child);
-  if (const ast::Expression* const child = unwrap(binary.right))
-    folded.erase(child);
 }
 
 }  // namespace
@@ -163,11 +174,12 @@ void fold(const ast::Expression& expression,
 namespace {
 
 // The divisor is evaluated, not folded: a name standing for a number is a
-// number, so a call reaching a zero body is a division by zero too. Bounded
-// so the check prices O(divisions), never the whole call graph.
+// number, so a call reaching a zero body is a division by zero too. Bounded,
+// so the check costs one walk of the document plus a few steps per divisor,
+// never the whole call graph.
 constexpr std::size_t kDivisorStepLimit = 64;
 
-void say_if_zero(const ast::BinaryExpression& binary,
+void say_if_zero(const ast::BinaryExpression& binary, Interpreter& interpreter,
                  cursiv::ValidationAcceptor& accept) {
   if ((binary.op != ast::Operator::divide && binary.op != ast::Operator::modulo)
       || binary.right == nullptr)
@@ -175,34 +187,41 @@ void say_if_zero(const ast::BinaryExpression& binary,
   // An unbound name, a cycle, a spent budget: nullopt, not this check's
   // answer.
   const std::optional<double> divisor =
-      eval_expression(*binary.right, kDivisorStepLimit);
+      interpreter.evaluate(*binary.right, kDivisorStepLimit);
   if (!divisor.has_value() || *divisor != 0.0) return;
   accept.error(binary, "Division by zero is detected.")
       .property<&ast::BinaryExpression::right>();
 }
 
-void walk_divisions(const ast::Expression* expression,
+// Source order, on its own stack: an expression a million terms long holds no
+// native frame per term. `pending` is that stack, empty again on return, so
+// one serves every statement.
+void walk_divisions(const ast::Expression* root,
+                    std::vector<const ast::Expression*>& pending,
+                    Interpreter& interpreter,
                     cursiv::ValidationAcceptor& accept,
                     const cursiv::CancellationToken& token) {
-  if (expression == nullptr) return;
-  cursiv::throw_if_cancelled(token);
-  if (expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
-    walk_divisions(
-        static_cast<const ast::GroupedExpression&>(*expression).expression,
-        accept, token);
-    return;
+  pending.push_back(root);
+  while (!pending.empty()) {
+    const ast::Expression* const expression = pending.back();
+    pending.pop_back();
+    if (expression == nullptr) continue;
+    cursiv::throw_if_cancelled(token);
+    if (expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
+      pending.push_back(
+          static_cast<const ast::GroupedExpression&>(*expression).expression);
+    } else if (expression->type
+               == &cursiv::ast_type_tag<ast::BinaryExpression>) {
+      const auto& binary =
+          static_cast<const ast::BinaryExpression&>(*expression);
+      say_if_zero(binary, interpreter, accept);
+      pending.push_back(binary.right);
+      pending.push_back(binary.left);
+    } else if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
+      const auto& call = static_cast<const ast::FunctionCall&>(*expression);
+      pending.insert(pending.end(), call.args.rbegin(), call.args.rend());
+    }
   }
-  if (expression->type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
-    const auto& binary = static_cast<const ast::BinaryExpression&>(*expression);
-    say_if_zero(binary, accept);
-    walk_divisions(binary.left, accept, token);
-    walk_divisions(binary.right, accept, token);
-    return;
-  }
-  if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>)
-    for (const ast::Expression* const argument :
-         static_cast<const ast::FunctionCall&>(*expression).args)
-      walk_divisions(argument, accept, token);
 }
 
 }  // namespace
@@ -213,15 +232,18 @@ void ArithmeticsValidator::checkDivisionsByZero(
   const cursiv::AstNode* const root = document.parseResult.value;
   if (root == nullptr || root->type != &cursiv::ast_type_tag<ast::Module>)
     return;
+  // One interpreter for the pass, so the divisors share its working memory.
+  Interpreter interpreter;
+  std::vector<const ast::Expression*> pending;
   for (const ast::Statement* const statement :
        static_cast<const ast::Module&>(*root).statements) {
     if (statement == nullptr) continue;
     if (statement->type == &cursiv::ast_type_tag<ast::Evaluation>)
       walk_divisions(static_cast<const ast::Evaluation&>(*statement).expression,
-                     accept, token);
+                     pending, interpreter, accept, token);
     else if (statement->type == &cursiv::ast_type_tag<ast::Definition>)
       walk_divisions(static_cast<const ast::Definition&>(*statement).expr,
-                     accept, token);
+                     pending, interpreter, accept, token);
   }
 }
 
@@ -269,9 +291,18 @@ void ArithmeticsValidator::checkUniqueDefinitions(
 
 void ArithmeticsValidator::checkMatchingParameters(
     const ast::FunctionCall& call, cursiv::ValidationAcceptor& accept) const {
-  const ast::Definition* const definition = definition_of(call);
-  if (definition == nullptr || definition->args.size() == call.args.size())
+  const ast::AbstractDefinition* const target = call.func.get();
+  if (target == nullptr) return;
+  // A parameter stands for a number, so it takes no argument.
+  if (target->type == &cursiv::ast_type_tag<ast::DeclaredParameter>) {
+    if (!call.args.empty())
+      accept.error(
+          call, std::format("Parameter {} takes no arguments.", target->name));
     return;
+  }
+  if (target->type != &cursiv::ast_type_tag<ast::Definition>) return;
+  const auto* const definition = static_cast<const ast::Definition*>(target);
+  if (definition->args.size() == call.args.size()) return;
   accept.error(
       call,
       std::format("Function {} expects {} parameters, but {} were "
@@ -291,7 +322,7 @@ void ArithmeticsValidator::checkFunctionRecursion(
   const auto callsOf = [&expanded](const ast::Definition* host) {
     std::vector<NestedCall> calls;
     if (host != nullptr && expanded.insert(host).second)
-      select_calls(*host, host->expr, calls);
+      select_calls(*host, calls);
     return calls;
   };
 
@@ -302,7 +333,12 @@ void ArithmeticsValidator::checkFunctionRecursion(
     if (parent.host == target) cycles.push_back({parent});
     for (const NestedCall& child : callsOf(target)) {
       tree.insert_or_assign(child.call, parent);
-      std::vector<NestedCall> cycle = select_cycle(child, tree);
+      // A body not expanded yet hosts no call above, so the climb would find
+      // nothing: a chain written callers first stays one pass.
+      std::vector<NestedCall> cycle =
+          expanded.contains(definition_of(*child.call))
+              ? select_cycle(child, tree)
+              : std::vector<NestedCall>{};
       if (cycle.empty())
         open.push_back(child);
       else
@@ -357,11 +393,10 @@ void ArithmeticsValidator::checkNormalizable(
     cursiv::JsonValue::Object payload;
     payload["constant"] = cursiv::JsonValue(found->second);
     accept
-        .information(
-            *expression,
-            std::format("Expression could be normalized to constant {}",
-                        found->second),
-            kExpressionNormalizable)
+        .information(*expression,
+                     "Expression could be normalized to constant "
+                         + number_text(found->second),
+                     kExpressionNormalizable)
         .data(cursiv::JsonValue(std::move(payload)));
   }
 }

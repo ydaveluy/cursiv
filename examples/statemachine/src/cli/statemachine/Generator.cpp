@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -41,17 +42,14 @@ using cursiv::TextBuilder;
 [[nodiscard]] std::vector<const Transition*> distinct_event_transitions(
     const State& state) {
   std::vector<const Transition*> result;
-  std::vector<std::string_view> seenEvents;
+  std::unordered_set<std::string_view> seenEvents;
   for (const auto& transition : state.transitions) {
     if (!transition || !transition->event || !transition->state) {
       continue;
     }
-    const std::string_view eventName = transition->event->name;
-    if (std::ranges::find(seenEvents, eventName) != seenEvents.end()) {
-      continue;
+    if (seenEvents.insert(transition->event->name).second) {
+      result.push_back(transition);
     }
-    seenEvents.push_back(eventName);
-    result.push_back(transition);
   }
   return result;
 }
@@ -233,12 +231,20 @@ std::string generate_cpp(const ast::Statemachine& model,
   std::filesystem::create_directories(outputDirectory);
   const auto outputPath = std::filesystem::path(outputDirectory)
                           / (sanitize_file_stem(inputPath) + ".cpp");
+  // The content first: a model the generator refuses leaves an older output
+  // whole.
+  const std::string content = generate_cpp_content(model);
   std::ofstream out(outputPath, std::ios::binary);
   if (!out.is_open()) {
     throw std::runtime_error("Unable to open output file: "
                              + outputPath.string());
   }
-  out << generate_cpp_content(model);
+  out << content;
+  out.close();
+  if (!out) {
+    throw std::runtime_error("Unable to write output file: "
+                             + outputPath.string());
+  }
   return outputPath.string();
 }
 

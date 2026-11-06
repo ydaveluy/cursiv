@@ -1,10 +1,12 @@
 #include "arithmetics/ArithmeticsCodeActionProvider.hpp"
 
+#include <algorithm>
 #include <format>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "arithmetics/Interpreter.hpp"
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/JsonValue.hpp"
@@ -39,11 +41,18 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     const cursiv::JsonValue::Object& payload = diagnostic.data->object();
     const auto constant = payload.find("constant");
     if (constant == payload.end() || !constant->second.isNumber()) continue;
+    // Only a text the grammar reads back: a NUMBER has neither a sign nor
+    // an exponent, so `1 - 2` is told it is -1 but offered no rewrite.
+    const std::string written = number_text(constant->second.number());
+    if (written.empty() || !std::ranges::all_of(written, [](char c) {
+          return (c >= '0' && c <= '9') || c == '.';
+        }))
+      continue;
 
     lsp::TextEdit edit;
     edit.range = cursiv::to_lsp(
         text.rangeAt(diagnostic.range.begin, diagnostic.range.end));
-    edit.newText = std::format("{}", constant->second.number());
+    edit.newText = written;
 
     lsp::WorkspaceEdit workspaceEdit;
     lsp::Map<lsp::DocumentUri, lsp::Array<lsp::TextEdit>> changes;
@@ -57,7 +66,7 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     about.message = diagnostic.message;
 
     lsp::CodeAction action;
-    action.title = std::format("Normalize to {}", constant->second.number());
+    action.title = std::format("Replace with constant {}", written);
     action.kind = lsp::CodeActionKind::QuickFix;
     action.diagnostics = lsp::Array<lsp::Diagnostic>{std::move(about)};
     action.isPreferred = true;

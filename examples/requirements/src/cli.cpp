@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cursiv/cli.hpp"
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/LocalFileSystemProvider.hpp"
@@ -44,8 +45,11 @@ int generate(const GenerateOptions& options) {
   if (!req::register_core_services(shared)) return cursiv::kFatal;
 
   // The whole folder: a coverage summary is about the `.tst` files beside the
-  // `.req`, so a build of the one file alone would report nothing covered.
+  // `.req`, so a build of the one file alone would report nothing covered. A
+  // missing file is said before its folder is scanned for nothing.
   const std::string path = std::filesystem::absolute(options.path).string();
+  if (!std::filesystem::is_regular_file(path))
+    throw cursiv::UsageError(path + " is not a regular file");
   cursiv::initialize_root(std::filesystem::path(path).parent_path().string(),
                           shared);
   const cursiv::Document& document =
@@ -59,18 +63,36 @@ int generate(const GenerateOptions& options) {
     return cursiv::kDiagnostics;
   }
 
+  // The summary is made of this model and of every test model: an error in
+  // any of them is a summary that would say less than it seems to, so none
+  // is written. Another requirement model of the folder is not read.
   std::vector<const req::ast::TestModel*> tests;
+  std::vector<const cursiv::Document*> read{&document};
   for (const std::shared_ptr<cursiv::Document>& other : shared.documents->all())
     if (const auto* const test = cursiv::ast_cast<const req::ast::TestModel>(
-            other->parseResult.value))
+            other->parseResult.value)) {
       tests.push_back(test);
+      read.push_back(other.get());
+    }
+  bool errors = false;
+  for (const cursiv::Document* const one : read) {
+    if (!cursiv::has_error_diagnostics(*one)) continue;
+    if (!errors) std::cerr << "There are validation errors:\n";
+    errors = true;
+    cursiv::print_diagnostics(
+        *one, cursiv::file_uri_to_path(one->uri).value_or(one->uri), std::cerr);
+  }
+  if (errors) return cursiv::kDiagnostics;
 
   const std::optional<std::string_view> destination =
       options.destination.has_value()
           ? std::optional<std::string_view>(*options.destination)
           : std::nullopt;
-  std::cout << "Requirement coverage generated successfully: "
-            << req::generate_summary(*model, tests, path, destination) << '\n';
+  // Written first: a summary that cannot be written is not announced.
+  const std::string summary =
+      req::generate_summary(*model, tests, path, destination);
+  std::cout << "Requirement coverage generated successfully: " << summary
+            << '\n';
   return cursiv::kClean;
 }
 
@@ -79,7 +101,7 @@ int generate(const GenerateOptions& options) {
 int main(int argc, char** argv) {
   if (const std::optional<GenerateOptions> options =
           parse_generate_args(argc, argv))
-    return generate(*options);
+    return cursiv::run_command([&] { return generate(*options); });
   return cursiv::run_cli<req::RequirementsSharedCoreServices>(
       argc, argv, &req::register_core_services);
 }

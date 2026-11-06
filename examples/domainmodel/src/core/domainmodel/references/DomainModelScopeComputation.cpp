@@ -1,6 +1,7 @@
 #include "domainmodel/references/DomainModelScopeComputation.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
@@ -83,7 +84,7 @@ void DomainModelScopeComputation::addExportedSymbol(
 }
 
 // The other direction: the walk descends, and a nested package requalifies what
-// its children returned -- so a name is spelled at every storey it is visible
+// its children declared -- so a name is spelled at every storey it is visible
 // from, and `foo.bar.E2` resolves from the root as `E2` does from inside.
 cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
     const cursiv::Document& document,
@@ -94,16 +95,14 @@ cursiv::LocalSymbols DomainModelScopeComputation::collectLocalSymbols(
     return symbols;
 
   symbols.reserve(document.parseResult.nodes().size() / 4);
-  (void)processContainer(*root,
-                         static_cast<const ast::DomainModel&>(*root).elements,
-                         document, symbols, cancelToken);
+  processContainer(*root, static_cast<const ast::DomainModel&>(*root).elements,
+                   document, symbols, cancelToken);
   symbols.seal();
   return symbols;
 }
 
-std::vector<cursiv::AstNodeDescription>
-DomainModelScopeComputation::processContainer(
-    const cursiv::AstNode& container,
+void DomainModelScopeComputation::processContainer(
+    const cursiv::AstNode& root,
     std::span<ast::AbstractElement* const> elements,
     const cursiv::Document& document, cursiv::LocalSymbols& symbols,
     const cursiv::CancellationToken& cancelToken) const {
@@ -111,35 +110,54 @@ DomainModelScopeComputation::processContainer(
   const std::span<const cursiv::AstTypeTag* const> types =
       _dm.astReflection->getAllSubTypes(&cursiv::ast_type_tag<ast::Type>);
 
-  std::vector<cursiv::AstNodeDescription> declared;
-  declared.reserve(elements.size());
+  // One storey per open container, so packages nested a thousand deep hold
+  // no native frame each. A storey collects what it declares in element
+  // order, its nested packages' names at their places.
+  struct Storey {
+    const cursiv::AstNode* container;
+    std::span<ast::AbstractElement* const> elements;
+    std::size_t next = 0;
+    std::vector<cursiv::AstNodeDescription> declared;
+  };
+  std::vector<Storey> open;
+  open.push_back({&root, elements, 0, {}});
+  while (!open.empty()) {
+    if (Storey& storey = open.back(); storey.next < storey.elements.size()) {
+      ast::AbstractElement* const element = storey.elements[storey.next++];
+      cursiv::throw_if_cancelled(cancelToken);
+      if (element == nullptr) continue;
 
-  for (ast::AbstractElement* const element : elements) {
-    cursiv::throw_if_cancelled(cancelToken);
-    if (element == nullptr) continue;
-
-    if (in_family(types, element->type)) {
-      if (element->name.empty()) continue;
-      if (auto description = _dm.astNodeDescriptionProvider->createDescription(
-              *element, element->name, &document))
-        declared.push_back(*std::move(description));
+      if (in_family(types, element->type)) {
+        if (element->name.empty()) continue;
+        if (auto description =
+                _dm.astNodeDescriptionProvider->createDescription(
+                    *element, element->name, &document))
+          storey.declared.push_back(*std::move(description));
+        continue;
+      }
+      if (element->type == &cursiv::ast_type_tag<ast::PackageDeclaration>) {
+        const auto& package =
+            static_cast<const ast::PackageDeclaration&>(*element);
+        open.push_back({&package, package.elements, 0, {}});
+      }
       continue;
     }
-    if (element->type != &cursiv::ast_type_tag<ast::PackageDeclaration>)
-      continue;
 
-    const auto& package = static_cast<const ast::PackageDeclaration&>(*element);
-    for (cursiv::AstNodeDescription& nested : processContainer(
-             package, package.elements, document, symbols, cancelToken)) {
+    // A storey closes: its names are known at its level, and its package
+    // requalifies them for the storey below -- one dot per level.
+    Storey done = std::move(open.back());
+    open.pop_back();
+    for (const cursiv::AstNodeDescription& description : done.declared)
+      symbols.add(done.container, description);
+    if (open.empty()) break;
+    const std::string_view package =
+        static_cast<const ast::PackageDeclaration&>(*done.container).name;
+    for (cursiv::AstNodeDescription& nested : done.declared) {
       nested.name =
-          keep(document, names.getQualifiedName(package.name, nested.name));
-      declared.push_back(std::move(nested));
+          keep(document, names.getQualifiedName(package, nested.name));
+      open.back().declared.push_back(std::move(nested));
     }
   }
-
-  for (const cursiv::AstNodeDescription& description : declared)
-    symbols.add(&container, description);
-  return declared;
 }
 
 }  // namespace dm

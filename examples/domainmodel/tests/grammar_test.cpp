@@ -4,6 +4,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -16,6 +20,7 @@
 
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
@@ -30,6 +35,7 @@
 #include "cursiv/ValidationHelper.hpp"
 #include "cursiv/ValidationResult.hpp"
 #include "domainmodel/CoreServices.hpp"
+#include "domainmodel/Generator.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
 #include "domainmodel/validation/DomainModelValidator.hpp"
 
@@ -163,19 +169,41 @@ void a_cycle_closed_in_another_document_is_an_error_in_both() {
 
 // The same through a document the edit does not touch: `a` names nothing
 // that changed, but the climbs from `b` and `c` go through it. `E` is on no
-// loop, but its climb never ends either.
+// loop, but its climb never ends either. `a` names only `b`, which the edit
+// relinks and does not change: its verdict changes all the same, and again
+// when the loop is opened.
 void a_cycle_through_an_untouched_document_is_an_error() {
   Disk disk;
   disk.write({{std::string(kA), "entity A extends B {\n}\n"},
               {std::string(kB), "entity B extends C {\n}\n"},
               {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
   CHECK(disk.cycles(kB) == 0);
   CHECK(disk.cycles(kC) == 0);
   disk.write({{std::string(kC),
                "entity C extends A {\n}\n"
                "entity E extends C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
   CHECK(disk.cycles(kB) == 1);
   CHECK(disk.cycles(kC) == 2);
+  disk.write({{std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  CHECK(disk.cycles(kB) == 0);
+  CHECK(disk.cycles(kC) == 0);
+}
+
+// A loop closed two documents away: `a` names only `b`, and the edit is in
+// `c`, which `b` names.
+void a_cycle_closed_two_documents_away_is_an_error_at_the_start() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B extends C {\n}\n"},
+              {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  disk.write({{std::string(kC), "entity C extends C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
+  CHECK(disk.cycles(kB) == 1);
+  CHECK(disk.cycles(kC) == 1);
 }
 
 #if defined(__linux__)
@@ -249,7 +277,104 @@ void a_long_chain_written_head_first_fits_a_small_stack() {
     CHECK(job.cycles == (loops ? 1 : 0));
   }
 }
+
+struct Scopes {
+  const dm::DomainModelCoreServices* services = nullptr;
+  const cursiv::Document* document = nullptr;
+  std::size_t local = 0;
+  std::size_t exported = 0;
+};
+
+void* scope(void* arg) {
+  auto* job = static_cast<Scopes*>(arg);
+  job->local =
+      job->services->scopeComputation->collectLocalSymbols(*job->document)
+          .size();
+  job->exported =
+      job->services->scopeComputation->collectExportedSymbols(*job->document)
+          .size();
+  return nullptr;
+}
+
+// Packages nested deep: the scopes walk them and spell every qualifier with
+// no native frame per storey.
+void deep_packages_fit_a_small_stack() {
+  constexpr std::size_t kStoreys = 2000;
+  std::string text;
+  for (std::size_t i = 0; i < kStoreys; ++i)
+    text += "package p" + std::to_string(i) + " {\n";
+  text += "entity E {\n}\n";
+  for (std::size_t i = 0; i < kStoreys; ++i) text += "}\n";
+  const World world;
+  const ct::ValidationResult said = world.validate(text);
+  ct::expectNoIssues(said);
+
+  Scopes job{.services = &world.services.language,
+             .document = said.document.get()};
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, kCrampedStack);
+  pthread_t th;
+  const bool started = pthread_create(&th, &attr, &scope, &job) == 0;
+  pthread_attr_destroy(&attr);
+  CHECK(started);
+  if (!started) return;
+  pthread_join(th, nullptr);
+  // `E` at its storey and requalified at each one below, the root included.
+  CHECK(job.local == kStoreys + 1);
+  CHECK(job.exported == 1);
+}
 #endif
+
+std::string read_file(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  CHECK(in.is_open());
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// Every file under `root`, by its path below it.
+std::map<std::string, std::string> tree_of(const std::filesystem::path& root) {
+  std::map<std::string, std::string> files;
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(root))
+    if (entry.is_regular_file())
+      files[std::filesystem::relative(entry.path(), root).generic_string()] =
+          read_file(entry.path());
+  return files;
+}
+
+// The Java a model becomes, every file whole and byte for byte: generated
+// code rarely changes, and a change anywhere in it is one to read. The second
+// model names its types in another case than they are declared in, which the
+// language accepts and Java would not.
+void models_generate_their_golden_java() {
+  const std::filesystem::path root(CURSIV_EXAMPLE_DIR);
+  const std::filesystem::path out =
+      std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "generated";
+  const std::pair<std::string, std::string> models[] = {
+      {"blog", read_file(root / "example" / "blog.dmodel")},
+      {"cased",
+       "datatype String\n"
+       "package p {\n"
+       "    entity E {\n"
+       "        name: STRING\n"
+       "    }\n"
+       "}\n"
+       "entity F extends P.e {\n"
+       "    e: P.E\n"
+       "}\n"}};
+  for (const auto& [name, text] : models) {
+    const World world;
+    const ct::ValidationResult said = world.validate(text);
+    const auto* const model = cursiv::ast_cast<const dm::ast::DomainModel>(
+        said.document->parseResult.value);
+    CHECK(model != nullptr);
+    if (model == nullptr) continue;
+    std::filesystem::remove_all(out);
+    (void)dm::generate_java(*model, name + ".dmodel", out.string());
+    CHECK(tree_of(out / name) == tree_of(root / "tests" / "golden" / name));
+  }
+  std::filesystem::remove_all(out);
+}
 
 }  // namespace
 
@@ -292,8 +417,11 @@ int main() {
   a_chain_that_ends_says_nothing();
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();
+  a_cycle_closed_two_documents_away_is_an_error_at_the_start();
+  models_generate_their_golden_java();
 #if defined(__linux__)
   a_long_chain_written_head_first_fits_a_small_stack();
+  deep_packages_fit_a_small_stack();
 #endif
   a_token_that_opens_an_element_names_the_member_it_fills();
   return cursiv::test::report("domainmodel_grammar_test");

@@ -38,24 +38,43 @@ using cursiv::TextBuilder;
   return packagePath;
 }
 
-[[nodiscard]] std::string resolved_type_name(const Type& type) {
-  if (const auto* entity = cursiv::ast_cast<const Entity>(&type)) {
-    return std::string(entity->name);
-  }
-  if (const auto* dataType = cursiv::ast_cast<const DataType>(&type)) {
-    return std::string(dataType->name);
-  }
-  throw std::runtime_error("Unsupported domainmodel type.");
+[[nodiscard]] bool same_ignoring_case(std::string_view left,
+                                      std::string_view right) {
+  return std::ranges::equal(left, right, [](char a, char b) {
+    return std::tolower(static_cast<unsigned char>(a))
+           == std::tolower(static_cast<unsigned char>(b));
+  });
 }
 
-// The text the author wrote first, the resolved target second: a qualified
-// name is what the Java source should say, and resolution normalises it away.
+// The text the author wrote, spelled as the declarations it names spell
+// themselves: a qualified name is what the Java source should say, and the
+// language matches names whatever their case while Java does not. The text
+// is the end of the target's qualified name, one segment per dot.
+[[nodiscard]] std::string written_name(std::string_view written,
+                                       const AbstractElement& target) {
+  std::string qualified(target.name);
+  for (const cursiv::AstNode* at = target.parent; at != nullptr;
+       at = at->parent)
+    if (const auto* package = cursiv::ast_cast<const PackageDeclaration>(at))
+      qualified = std::string(package->name) + "." + qualified;
+  std::size_t start = qualified.size();
+  for (auto left = std::ranges::count(written, '.') + 1;
+       left > 0 && start != std::string::npos; --left)
+    start = start == 0 ? std::string::npos : qualified.rfind('.', start - 1);
+  const std::string_view tail = std::string_view(qualified).substr(
+      start == std::string::npos ? 0 : start + 1);
+  return same_ignoring_case(tail, written) ? std::string(tail)
+                                           : std::string(written);
+}
+
 [[nodiscard]] std::string referenced_type_name(const Feature& feature) {
+  const Type* const target = feature.type.get();
   if (!feature.type.refText.empty()) {
-    return std::string(feature.type.refText);
+    return target != nullptr ? written_name(feature.type.refText, *target)
+                             : std::string(feature.type.refText);
   }
-  if (const Type* const target = feature.type.get()) {
-    return resolved_type_name(*target);
+  if (target != nullptr) {
+    return std::string(target->name);
   }
   throw std::runtime_error("Cannot generate Java for unresolved feature type.");
 }
@@ -63,10 +82,12 @@ using cursiv::TextBuilder;
 // A `reference` written nowhere carries no text: that is how an entity with no
 // `extends` is spelled, and it is not an error.
 [[nodiscard]] std::string super_type_name(const Entity& entity) {
+  const Entity* const target = entity.superType.get();
   if (!entity.superType.refText.empty()) {
-    return std::string(entity.superType.refText);
+    return target != nullptr ? written_name(entity.superType.refText, *target)
+                             : std::string(entity.superType.refText);
   }
-  if (const Entity* const target = entity.superType.get()) {
+  if (target != nullptr) {
     return std::string(target->name);
   }
   return {};
@@ -139,19 +160,29 @@ void generate_abstract_elements(const std::filesystem::path& destination,
       // A dotted package becomes a directory path, as Java lays one out.
       std::string packagePath(package->name);
       std::ranges::replace(packagePath, '.', '/');
+      // `/` on every platform: the Java package is read off this path.
       generate_abstract_elements(
           destination, package->elements,
           (std::filesystem::path(filePath) / std::filesystem::path(packagePath))
-              .string());
+              .generic_string());
     } else if (const auto* entity = cursiv::ast_cast<const Entity>(element)) {
       const auto filePathValue =
           fullPath / (std::string(entity->name) + ".java");
+      // The content first: a model the generator refuses leaves an older
+      // output whole.
+      const std::string content =
+          generate_entity_file_content(*entity, packagePath);
       std::ofstream out(filePathValue, std::ios::binary);
       if (!out.is_open()) {
         throw std::runtime_error("Unable to open output file: "
                                  + filePathValue.string());
       }
-      out << generate_entity_file_content(*entity, packagePath);
+      out << content;
+      out.close();
+      if (!out) {
+        throw std::runtime_error("Unable to write output file: "
+                                 + filePathValue.string());
+      }
     }
   }
 }

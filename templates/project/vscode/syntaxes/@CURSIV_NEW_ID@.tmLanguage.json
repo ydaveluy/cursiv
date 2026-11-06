@@ -8,9 +8,6 @@
     },
     {
       "include": "#keywords"
-    },
-    {
-      "include": "#numbers"
     }
   ],
   "repository": {
@@ -29,11 +26,7 @@
     },
     "keywords": {
       "name": "keyword.control.@CURSIV_NEW_ID@",
-      "match": "\\b(person|age|greet)\\b"
-    },
-    "numbers": {
-      "name": "constant.numeric.@CURSIV_NEW_ID@",
-      "match": "\\b[0-9]+\\b"
+      "match": "\\b(person|Hello)\\b"
     }
   }
 }

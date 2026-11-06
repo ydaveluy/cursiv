@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/Documents.hpp"
@@ -24,9 +25,34 @@ bool has_digit(std::string_view value) {
 
 RequirementsValidator::RequirementsValidator(
     const cursiv::CoreServices& services)
-    : cursiv::DefaultCoreService(services),
-      _owner(shared),
-      _covered(shared) {}
+    : cursiv::DefaultCoreService(services), _owner(shared), _covered(shared) {
+  if (shared.documentBuilder != nullptr)
+    shared.documentBuilder->addDocumentUpdateListener(*this);
+}
+
+RequirementsValidator::~RequirementsValidator() noexcept {
+  if (shared.documentBuilder != nullptr)
+    shared.documentBuilder->removeDocumentUpdateListener(*this);
+}
+
+void RequirementsValidator::onUpdate(
+    std::span<const std::string_view> changed,
+    std::span<const std::string_view> deleted) {
+  const auto ofTests = [this](std::string_view uri) {
+    const cursiv::CoreServices* const language =
+        shared.serviceRegistry->findServices(uri);
+    return language != nullptr && language != &services;
+  };
+  if (std::ranges::none_of(changed, ofTests)
+      && std::ranges::none_of(deleted, ofTests))
+    return;
+  for (const std::shared_ptr<cursiv::Document>& document :
+       shared.documents->all())
+    if (document->language == &services
+        && document->state.load() == cursiv::DocumentState::Validated)
+      shared.documentBuilder->resetToState(
+          *document, cursiv::DocumentState::IndexedReferences);
+}
 
 void RequirementsValidator::checkRequirementNameContainsANumber(
     const ast::Requirement& requirement,

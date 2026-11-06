@@ -22,6 +22,17 @@
           "match": "\\\\."
         }
       ]
+    },
+    {
+      "name": "string.quoted.single.tests-lang",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.tests-lang",
+          "match": "\\\\."
+        }
+      ]
     }
   ],
   "repository": {

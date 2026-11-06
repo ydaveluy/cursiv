@@ -14,7 +14,7 @@
     },
     {
       "name": "constant.numeric.arithmetics",
-      "match": "[+-]?\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
+      "match": "\\b\\d+(\\.\\d*)?"
     }
   ],
   "repository": {

@@ -3,17 +3,36 @@
 // division by zero; and a call cycle is said at every call site it runs
 // through, carrying the path that names which call closes it.
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#if defined(__linux__)
+#include <pthread.h>
+#endif
 
 #include "arithmetics/CoreServices.hpp"
+#include "arithmetics/Evaluator.hpp"
+#include "arithmetics/Interpreter.hpp"
+#include "arithmetics/LspModule.hpp"
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
+#include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/cli.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/LocalFileSystemProvider.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/ExpectDiagnosticOptions.hpp"
 #include "cursiv/ValidationHelper.hpp"
@@ -209,6 +228,216 @@ void a_body_that_is_already_a_number_says_nothing() {
   ct::expectNoIssues(world.validate("module m\ndef t: 5;\n"));
 }
 
+// An argument is evaluated before the body it is passed to, so a call written
+// there is a call its host makes.
+void a_call_in_an_argument_closes_a_cycle() {
+  const World world;
+  const std::string text = "module m\ndef id(x): x;\ndef a: id(a);\n";
+  const ct::ValidationResult said = world.validate(text);
+  constexpr std::string_view kMessage = "Recursion is not allowed [a()]";
+  CHECK(count(said, kMessage) == 1);
+  ct::expectError(said, kMessage, at(text.rfind("a)"), 1));
+}
+
+// A parameter stands for a number: arguments written after it would take no
+// part in the value.
+void a_parameter_called_with_arguments_is_an_error() {
+  const World world;
+  const std::string text = "module m\ndef f(x): x(2);\nf(3);\n";
+  const ct::ValidationResult said = world.validate(text);
+  CHECK(said.diagnostics.size() == 1);
+  ct::expectError(said, "Parameter x takes no arguments.",
+                  at(text.find("x(2)"), 4));
+}
+
+// A constant is offered when it is short -- eight characters at most -- and
+// written as JavaScript writes a number; zero is a constant too.
+void a_short_constant_is_offered_as_written() {
+  const World world;
+  const auto offered = [&world](std::string_view body, std::string_view as) {
+    return count(
+        world.validate("module m\ndef t: " + std::string(body) + ";\n"),
+        "Expression could be normalized to constant " + std::string(as));
+  };
+  CHECK(offered("1 - 2", "-1") == 1);
+  CHECK(offered("50000 * 2", "100000") == 1);
+  CHECK(offered("1 - 1", "0") == 1);
+  ct::expectNoIssues(world.validate("module m\ndef t: 1 / 3;\n"));
+
+  // The whole expression, not its first operand.
+  const std::string text = "module m\ndef t: 2 * 3 - 10;\n";
+  const ct::ValidationResult said = world.validate(text);
+  CHECK(said.diagnostics.size() == 1);
+  ct::expectIssue(
+      said, {.message = "Expression could be normalized to constant -4",
+             .offset = static_cast<cursiv::TextOffset>(text.find("2 * 3")),
+             .length = 10});
+}
+
+// The rewrite writes only a text the grammar reads back: a NUMBER has neither
+// a sign nor an exponent, so `1 - 2` is told it is -1 and offered no edit.
+void the_quick_fix_writes_only_a_number_the_grammar_reads() {
+  const arith::ArithmeticsLanguage editor = arith::create_lsp_services();
+  const ct::ValidationResult said = ct::validationHelper(
+      editor.language, "module m\ndef a: 50000 * 2;\ndef b: 1 - 2;\n");
+  CHECK(said.diagnostics.size() == 2);
+  lsp::CodeActionParams params;
+  params.range.end.line = 3;
+  const std::vector<lsp::CodeAction> actions =
+      editor.language.codeActionProvider->getCodeActions(*said.document,
+                                                         params);
+  CHECK(actions.size() == 1);
+  if (!actions.empty())
+    CHECK(actions[0].title == "Replace with constant 100000");
+  if (actions.size() != 1 || !actions[0].edit.has_value()
+      || !actions[0].edit->changes.has_value())
+    return;
+  const auto& edits = actions[0].edit->changes->begin()->second;
+  CHECK(edits.size() == 1 && edits[0].newText == "100000");
+}
+
+// What a value prints as: the digits it needs and no more, as JavaScript
+// writes them.
+void a_value_is_written_as_javascript_writes_it() {
+  CHECK(arith::number_text(123456789.0 * 1000000000000.0)
+        == "123456789000000000000");
+  CHECK(arith::number_text(1e21) == "1e+21");
+  CHECK(arith::number_text(1e-7) == "1e-7");
+  CHECK(arith::number_text(0.000001) == "0.000001");
+  CHECK(arith::number_text(1.0 / 3.0) == "0.3333333333333333");
+  CHECK(arith::number_text(-2.5) == "-2.5");
+  CHECK(arith::number_text(1.5e300) == "1.5e+300");
+  CHECK(arith::number_text(-0.0) == "0");
+  CHECK(arith::number_text(std::numeric_limits<double>::infinity())
+        == "Infinity");
+}
+
+// The definitions without parameters are values: each is computed once, so a
+// chain that doubles at every storey costs one step per storey.
+void a_shared_constant_is_computed_once() {
+  const World world;
+  std::string text = "module m\ndef d0: 1;\n";
+  constexpr int kStoreys = 64;
+  for (int i = 1; i <= kStoreys; ++i)
+    text += "def d" + std::to_string(i) + ": d" + std::to_string(i - 1) + " + d"
+            + std::to_string(i - 1) + ";\n";
+  text += "d" + std::to_string(kStoreys) + ";\n";
+  const ct::ValidationResult said = world.validate(text);
+  ct::expectNoIssues(said);
+  const auto& module =
+      static_cast<const arith::ast::Module&>(*said.document->parseResult.value);
+  const arith::EvaluationResult results = arith::interpret_evaluations(module);
+  CHECK(results.size() == 1);
+  CHECK(results.begin()->second == 18446744073709551616.0);
+}
+
+#if defined(__linux__)
+// A worker's stack can be small -- half a mebibyte on macOS, one on WASI -- so
+// no walk holds a native frame per term or per call.
+#ifdef NDEBUG
+constexpr std::size_t kCrampedStack = 64 * 1024;
+#else
+constexpr std::size_t kCrampedStack = 256 * 1024;
+#endif
+
+struct Walk {
+  const arith::ArithmeticsValidator* validator = nullptr;
+  const cursiv::Document* document = nullptr;
+  std::size_t said = 0;
+  arith::EvaluationResult results;
+};
+
+void* walk(void* arg) {
+  auto* job = static_cast<Walk*>(arg);
+  std::vector<cursiv::Diagnostic> found;
+  const auto collect = [&found](cursiv::Diagnostic&& diagnostic) {
+    found.push_back(std::move(diagnostic));
+  };
+  cursiv::ValidationAcceptor accept(cursiv::ValidationAcceptor::Sink(collect),
+                                    *job->document, "arithmetics");
+  const auto& module =
+      static_cast<const arith::ast::Module&>(*job->document->parseResult.value);
+  job->validator->checkDivisionsByZero(*job->document, accept, {});
+  job->validator->checkFunctionRecursion(module, accept);
+  for (const arith::ast::Statement* const statement : module.statements)
+    if (statement->type == &cursiv::ast_type_tag<arith::ast::Definition>)
+      job->validator->checkNormalizable(
+          static_cast<const arith::ast::Definition&>(*statement), accept);
+  job->said = found.size();
+  job->results = arith::interpret_evaluations(module);
+  return nullptr;
+}
+
+// A sum of many terms is as deep a tree as it has terms, and a chain of
+// definitions is as deep a call stack as it has storeys.
+void a_deep_module_fits_a_small_stack() {
+  constexpr std::size_t kTerms = 20000;
+  constexpr std::size_t kStoreys = 5000;
+  std::string text = "module m\ndef sum: x";
+  for (std::size_t i = 0; i < kTerms; ++i) text += " + 1";
+  text += ";\ndef x: 0;\ndef d0: 0;\n";
+  for (std::size_t i = 1; i <= kStoreys; ++i)
+    text +=
+        "def d" + std::to_string(i) + ": d" + std::to_string(i - 1) + " + 1;\n";
+  text += "sum;\nd" + std::to_string(kStoreys) + ";\n";
+
+  const World world;
+  const ct::ValidationResult said = world.validate(text);
+  ct::expectNoIssues(said);
+
+  const arith::ArithmeticsValidator validator(world.services.language);
+  Walk job;
+  job.validator = &validator;
+  job.document = said.document.get();
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, kCrampedStack);
+  pthread_t th;
+  const bool started = pthread_create(&th, &attr, &walk, &job) == 0;
+  pthread_attr_destroy(&attr);
+  CHECK(started);
+  if (!started) return;
+  pthread_join(th, nullptr);
+  CHECK(job.said == 0);
+  std::vector<double> values;
+  for (const auto& [evaluation, value] : job.results)
+    values.push_back(value.value_or(-1.0));
+  std::ranges::sort(values);
+  CHECK(values
+        == std::vector<double>{static_cast<double>(kStoreys),
+                               static_cast<double>(kTerms)});
+}
+#endif
+
+// The evaluations a valid module asks for, each one said: a zero that a
+// parameter brings has no value, and that is an answer too, not a silence.
+void every_evaluation_is_said() {
+  const std::filesystem::path file =
+      std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "evaluations.calc";
+  std::ofstream(file) << "module m\n"
+                         "def f(x): 1 / x;\n"
+                         "f(0);\n"
+                         "f(2);\n"
+                         "3.14159 * 5 ^ 2;\n"
+                         "50000 * 2;\n";
+  arith::ArithmeticsSharedCoreServices shared;
+  shared.fileSystemProvider =
+      std::make_unique<cursiv::LocalFileSystemProvider>();
+  cursiv::install_default_shared_core_services(shared);
+  CHECK(cursiv::register_language<Services, Shared, arith::install_core_module>(
+      shared));
+  std::ostringstream out;
+  std::ostringstream err;
+  const int status = arith::eval_file(file.string(), shared, out, err);
+  CHECK(status == cursiv::kDiagnostics);
+  CHECK(out.str()
+        == "line 4: f(2) ===> 0.5\n"
+           "line 5: 3.14159 * 5 ^ 2 ===> 78.53975\n"
+           "line 6: 50000 * 2 ===> 100000\n");
+  CHECK(err.str() == "line 3: f(0) cannot be evaluated\n");
+  std::filesystem::remove(file);
+}
+
 // A statement whose end is written as a colon: every operator could as
 // cheaply stand there, whatever level it binds at, and either engine names
 // the same ones, in the order the grammar declares them.
@@ -242,5 +471,15 @@ int main() {
   only_the_widest_foldable_span_is_offered();
   a_body_that_is_already_a_number_says_nothing();
   a_misplaced_colon_names_every_operator();
+  a_call_in_an_argument_closes_a_cycle();
+  a_parameter_called_with_arguments_is_an_error();
+  a_short_constant_is_offered_as_written();
+  the_quick_fix_writes_only_a_number_the_grammar_reads();
+  a_value_is_written_as_javascript_writes_it();
+  a_shared_constant_is_computed_once();
+#if defined(__linux__)
+  a_deep_module_fits_a_small_stack();
+#endif
+  every_evaluation_is_said();
   return cursiv::test::report("arithmetics_grammar_test");
 }

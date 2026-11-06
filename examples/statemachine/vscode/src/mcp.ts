@@ -99,6 +99,13 @@ export function startMcpBridge(
     });
 
     const registration = new Promise<vscode.Disposable | undefined>((resolve) => {
+        // A port that cannot be opened costs the bridge, never the language:
+        // the failure is logged and the promise settles with nothing to
+        // dispose. Later errors are logged too.
+        server.on('error', (error: Error) => {
+            outputChannel.appendLine(`mcp: ${error.message}`);
+            resolve(undefined);
+        });
         server.listen(0, '127.0.0.1', () => {
             const address = server.address();
             if (address === null || typeof address === 'string') {
@@ -116,13 +123,18 @@ export function startMcpBridge(
             if (register === undefined || HttpDefinition === undefined) {
                 return resolve(undefined);
             }
-            resolve(register.call(api.lm, `cursiv.${key}.mcp`, {
-                provideMcpServerDefinitions: () => [
-                    new HttpDefinition(`cursiv ${label}`, vscode.Uri.parse(url), {
-                        Authorization: `Bearer ${token}`,
-                    }),
-                ],
-            }));
+            try {
+                resolve(register.call(api.lm, `cursiv.${key}.mcp`, {
+                    provideMcpServerDefinitions: () => [
+                        new HttpDefinition(`cursiv ${label}`, vscode.Uri.parse(url), {
+                            Authorization: `Bearer ${token}`,
+                        }),
+                    ],
+                }));
+            } catch (error) {
+                outputChannel.appendLine(`mcp: ${String((error as Error)?.message ?? error)}`);
+                resolve(undefined);
+            }
         });
     });
 

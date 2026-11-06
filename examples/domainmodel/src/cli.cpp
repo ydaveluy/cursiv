@@ -49,9 +49,12 @@ int generate(const GenerateOptions& options) {
 
   // The file's folder first: a model that names a declaration from the file
   // beside it is not invalid, it is unscanned -- and a generator that refused
-  // it would refuse the example this one ships with.
+  // it would refuse the example this one ships with. A missing file is said
+  // before its folder is scanned for nothing.
+  if (!std::filesystem::is_regular_file(options.path))
+    throw cursiv::UsageError(options.path + " is not a regular file");
   cursiv::initialize_root(
-      std::filesystem::path(options.path).parent_path().string(), shared);
+      std::filesystem::absolute(options.path).parent_path().string(), shared);
   const cursiv::Document& document =
       cursiv::build_document_from_path(options.path, shared);
   if (cursiv::has_error_diagnostics(document)) {
@@ -79,7 +82,7 @@ int generate(const GenerateOptions& options) {
 int main(int argc, char** argv) {
   if (const std::optional<GenerateOptions> options =
           parse_generate_args(argc, argv))
-    return generate(*options);
+    return cursiv::run_command([&] { return generate(*options); });
   return cursiv::run_cli<dm::DomainModelSharedCoreServices>(argc, argv,
                                                             kRegister);
 }
