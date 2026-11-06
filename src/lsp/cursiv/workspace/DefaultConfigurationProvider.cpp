@@ -73,10 +73,14 @@ std::vector<const cursiv::ValidationCategory*> validation_categories(
 DefaultConfigurationProvider::~DefaultConfigurationProvider() noexcept =
     default;
 
-void DefaultConfigurationProvider::updateSectionConfiguration(
+bool DefaultConfigurationProvider::updateSectionConfiguration(
     const std::string& section, lsp::LSPAny value) {
   const std::scoped_lock lock(_mutex);
+  const auto previous = _bySection.find(section);
+  const bool changed =
+      previous == _bySection.end() || previous->second.value != value;
   _bySection.insert_or_assign(section, Section{std::move(value), ++_revision});
+  return changed;
 }
 
 std::vector<std::string> DefaultConfigurationProvider::sections() const {
@@ -203,7 +207,9 @@ void DefaultConfigurationProvider::updateConfiguration(
   }
   if (!params.settings.isObject()) return;
   for (const auto& [section, value] : params.settings.object()) {
-    updateSectionConfiguration(section, value);
+    // A value sent again is no change, as for a pulled one: the language is
+    // not revalidated for it.
+    if (!updateSectionConfiguration(section, value)) continue;
     // Notify outside the cache lock: listeners may read the new settings.
     for (ConfigurationSectionListener* listener : _listeners)
       listener->onConfigurationSectionUpdate(section, value);

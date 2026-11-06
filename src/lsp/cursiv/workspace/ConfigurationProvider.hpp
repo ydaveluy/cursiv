@@ -18,7 +18,7 @@
 namespace cursiv {
 
 /**
- * Told when a notification or a configuration pull replaces a section.
+ * Told when a notification or a configuration pull changes a section's value.
  * What a section means stays the reader's business.
  */
 class ConfigurationSectionListener {

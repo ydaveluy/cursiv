@@ -47,8 +47,11 @@ class DefaultConfigurationProvider : public ConfigurationProvider {
   }
 
  protected:
-  // The cache alone; dispatch happens outside its lock.
-  void updateSectionConfiguration(const std::string& section, lsp::LSPAny value);
+  // The cache alone; dispatch happens outside its lock. Whether the value
+  // differs from the one held; the revision moves either way, so an older
+  // pull answer stays behind it.
+  bool updateSectionConfiguration(const std::string& section,
+                                  lsp::LSPAny value);
 
  private:
   // The language ids of every registered language, in registration order,
