@@ -109,7 +109,9 @@ std::optional<std::size_t> match_suffix_marker(std::string_view line,
 struct Token {
   enum class Type : std::uint8_t { Text, Tag, InlineTag, Break };
   Type type = Type::Text;
-  std::string content;
+  // A view into the comment, which outlives the parse: only the node a token
+  // ends up in copies it.
+  std::string_view content;
   DocCommentRange range;
 };
 
@@ -120,7 +122,7 @@ DocCommentPosition position(std::uint32_t line, std::size_t character) {
 // Matches a block `@tag` starting at `index` (after optional whitespace).
 struct BlockTagMatch {
   std::size_t fullLength = 0;  // consumed length from `index`
-  std::string value;           // "@name"
+  std::string_view value;      // "@name"
 };
 
 std::optional<BlockTagMatch> match_block_tag(std::string_view line,
@@ -138,7 +140,7 @@ std::optional<BlockTagMatch> match_block_tag(std::string_view line,
     }
   }
   return BlockTagMatch{cursor - index,
-                       std::string(line.substr(nameStart, cursor - nameStart))};
+                       line.substr(nameStart, cursor - nameStart)};
 }
 
 // One `{@tag ...}` occurrence inside a line fragment.
@@ -146,8 +148,8 @@ struct InlineTagMatch {
   std::size_t begin = 0;       // index of `{` in the fragment
   std::size_t fullLength = 0;  // length including `{` and `}`
   std::size_t whitespace = 0;  // whitespace between name and content
-  std::string name;            // "@name"
-  std::string content;         // content between name and `}` (may be empty)
+  std::string_view name;       // "@name"
+  std::string_view content;    // content between name and `}` (may be empty)
   bool hasContent = false;
 };
 
@@ -194,12 +196,11 @@ std::vector<InlineTagMatch> find_inline_tags(std::string_view fragment) {
     InlineTagMatch match;
     match.begin = pos;
     match.fullLength = (cursor + 1) - pos;
-    match.name = std::string(fragment.substr(nameStart, nameEnd - nameStart));
+    match.name = fragment.substr(nameStart, nameEnd - nameStart);
     match.whitespace = contentStart - wsStart;
     match.hasContent = cursor > contentStart;
-    match.content =
-        std::string(fragment.substr(contentStart, cursor - contentStart));
-    matches.push_back(std::move(match));
+    match.content = fragment.substr(contentStart, cursor - contentStart);
+    matches.push_back(match);
     pos = cursor + 1;
   }
   return matches;
@@ -211,7 +212,7 @@ void build_inline_tokens(std::string_view fragment, std::uint32_t lineIndex,
   const auto matches = find_inline_tags(fragment);
   if (matches.empty()) {
     tokens.push_back({Token::Type::Text,
-                      std::string(fragment),
+                      fragment,
                       {position(lineIndex, characterBase),
                        position(lineIndex, characterBase + fragment.size())}});
     return;
@@ -220,11 +221,10 @@ void build_inline_tokens(std::string_view fragment, std::uint32_t lineIndex,
   std::size_t lastIndex = 0;
   for (const auto& match : matches) {
     if (match.begin > lastIndex) {
-      tokens.push_back(
-          {Token::Type::Text,
-           std::string(fragment.substr(lastIndex, match.begin - lastIndex)),
-           {position(lineIndex, characterBase + lastIndex),
-            position(lineIndex, characterBase + match.begin)}});
+      tokens.push_back({Token::Type::Text,
+                        fragment.substr(lastIndex, match.begin - lastIndex),
+                        {position(lineIndex, characterBase + lastIndex),
+                         position(lineIndex, characterBase + match.begin)}});
     }
     std::size_t offset = match.begin + 1;  // skip '{'
     tokens.push_back(
@@ -250,7 +250,7 @@ void build_inline_tokens(std::string_view fragment, std::uint32_t lineIndex,
   }
   if (lastIndex < fragment.size()) {
     tokens.push_back({Token::Type::Text,
-                      std::string(fragment.substr(lastIndex)),
+                      fragment.substr(lastIndex),
                       {position(lineIndex, characterBase + lastIndex),
                        position(lineIndex, characterBase + fragment.size())}});
   }
@@ -341,7 +341,7 @@ DocCommentNode make_line(std::string text, DocCommentRange range) {
 
 DocCommentNode parse_line(ParseContext& context) {
   const auto& token = context.tokens[context.index++];
-  return make_line(token.content, token.range);
+  return make_line(std::string(token.content), token.range);
 }
 
 DocCommentNode parse_tag(ParseContext& context, bool inlineTag);
@@ -449,6 +449,22 @@ DocComment parse_comment(ParseContext& context) {
 
 std::string fill_newlines(std::string_view text) {
   return text.ends_with('\n') ? "\n" : "\n\n";
+}
+
+// The top-level elements a blank line apart -- a single newline where the text
+// so far already ends one -- trimmed as a whole.
+template <typename Render>
+std::string render_elements(const std::vector<DocCommentNode>& elements,
+                            Render&& render) {
+  std::string value;
+  for (const auto& element : elements) {
+    if (value.empty()) {
+      value = render(element);
+    } else {
+      value += fill_newlines(value) + render(element);
+    }
+  }
+  return std::string(trim(value));
 }
 
 // Concatenates inline children, inserting a newline when the next child starts
@@ -643,28 +659,16 @@ std::string DocCommentNode::toMarkdown(
 }
 
 std::string DocComment::toString() const {
-  std::string value;
-  for (const auto& element : elements) {
-    if (value.empty()) {
-      value = element.toString();
-    } else {
-      value += fill_newlines(value) + element.toString();
-    }
-  }
-  return std::string(trim(value));
+  return render_elements(elements, [](const DocCommentNode& element) {
+    return element.toString();
+  });
 }
 
 std::string DocComment::toMarkdown(
     const DocCommentRenderOptions& options) const {
-  std::string value;
-  for (const auto& element : elements) {
-    if (value.empty()) {
-      value = element.toMarkdown(options);
-    } else {
-      value += fill_newlines(value) + element.toMarkdown(options);
-    }
-  }
-  return std::string(trim(value));
+  return render_elements(elements, [&options](const DocCommentNode& element) {
+    return element.toMarkdown(options);
+  });
 }
 
 bool is_doc_comment(std::string_view comment,

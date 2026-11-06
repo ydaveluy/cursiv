@@ -14,7 +14,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "cursiv/execution/SpinLock.hpp"
+#include "cursiv/utils/Pause.hpp"
 
 namespace cursiv::detail {
 
@@ -337,6 +337,22 @@ class ConcurrentTable {
     const TableEpochs::Guard guard;
     if (const V* kept = claim(generation, key, value)) return *kept;
     return std::nullopt;
+  }
+
+  // What `key` holds, or else what `provider` answers, stored unless a value
+  // got there first, which is then the answer. The provider runs under no
+  // guard and no lock. A `clear` that passes while it runs keeps its answer
+  // out of the table; the caller still gets it.
+  template <class Provider>
+  [[nodiscard]] V findOrCompute(const K& key, Provider&& provider) {
+    if (std::optional<V> found = find(key)) return std::move(*found);
+    // Read after the miss and before the provider: a clear from here on
+    // keeps its answer out.
+    const std::uint64_t before = generation();
+    V computed = std::invoke(std::forward<Provider>(provider));
+    if (std::optional<V> kept = insert(before, key, computed))
+      return std::move(*kept);
+    return computed;
   }
 
   // Every entry, out of new readers' reach at once; freed once the old ones

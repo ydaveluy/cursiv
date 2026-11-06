@@ -318,9 +318,18 @@ class Cst {
     const Held held{lock};
     if (!published(_leafIndex)) {
       // Cleared, not appended to: a build cut short leaves the flag unpublished
-      // and this list half-written.
+      // and this list half-written. Room for every record, which natively
+      // never becomes resident past the leaves written; Wasm linear memory
+      // charges untouched room too, for as long as the tree lives, so there
+      // the leaves are counted first.
+      std::size_t room = size();
+      if constexpr (sizeof(void*) < 8) {
+        room = 0;
+        for (NodeId id = 0; id < size(); ++id)
+          room += node(id).subtreeSize == 1 ? 1 : 0;
+      }
       _leaves.clear();
-      _leaves.reserve(size());
+      _leaves.reserve(room);
       for (NodeId id = 0; id < size(); ++id)
         if (node(id).subtreeSize == 1) _leaves.push_back(id);
       publish(_leafIndex);

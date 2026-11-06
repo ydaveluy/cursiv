@@ -36,9 +36,10 @@ struct SharedCoreServices {
   std::unique_ptr<ObservabilitySink> observabilitySink;
   // The one pool a workspace shares, replaceable by the host, sized by
   // `CURSIV_WORKERS` or the hardware. Early for the same reason: every
-  // service that fans out on it is gone before it stops. One consumer today
-  // (the builder): a second fan-out on the same pool must first prove it
-  // cannot deadlock a run already inside it.
+  // service that fans out on it is gone before it stops. The builder fans
+  // out over documents, and the linker and the validator over one document's
+  // work from inside the builder's tasks: `TaskScheduler::parallelFor` may be
+  // called from a task.
   std::unique_ptr<TaskScheduler> taskScheduler;
   std::unique_ptr<Documents> documents;
   std::unique_ptr<DocumentFactory> documentFactory;

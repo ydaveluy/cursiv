@@ -173,9 +173,9 @@ void DefaultIndexManager::updateReferences(
                                       : references->importedNames.snapshot();
 
   const std::scoped_lock lock(_mutex);
-  // Before the tables change, as in `updateContent`.
-  _incoming.retire();
-  dropReferences(document.id);
+  // Before the tables change, as in `updateContent`: dropping a row retires
+  // the view, and a document that had none retires it here.
+  if (!dropReferences(document.id)) _incoming.retire();
   if (!names.empty()) {
     auto& imports = _importedNames[document.id];
     imports.reserve(names.size());

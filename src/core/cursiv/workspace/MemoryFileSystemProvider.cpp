@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +23,16 @@ namespace {
   std::string prefix = normalize_uri(uri);
   if (!prefix.empty() && prefix.back() != '/') prefix.push_back('/');
   return prefix;
+}
+
+// The text stored under `uri`, which both reads copy into what they return.
+[[nodiscard]] const std::string& stored(
+    const std::map<std::string, std::string, std::less<>>& files,
+    std::string_view uri) {
+  const auto it = files.find(normalize_uri(uri));
+  if (it == files.end())
+    throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
+  return it->second;
 }
 
 }  // namespace
@@ -49,15 +61,12 @@ bool MemoryFileSystemProvider::exists(std::string_view uri) const {
 
 std::vector<std::uint8_t> MemoryFileSystemProvider::readBinary(
     std::string_view uri) const {
-  const std::string text = readFile(uri);
+  const std::string& text = stored(_files, uri);
   return {text.begin(), text.end()};
 }
 
 std::string MemoryFileSystemProvider::readFile(std::string_view uri) const {
-  const auto it = _files.find(normalize_uri(uri));
-  if (it == _files.end())
-    throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
-  return it->second;
+  return stored(_files, uri);
 }
 
 std::vector<FileSystemNode> MemoryFileSystemProvider::readDirectory(

@@ -1,6 +1,7 @@
 #include "cursiv/services/JsonValue.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -76,7 +77,8 @@ void append_escaped_json_string(std::string& out, std::string_view text) {
 }
 
 std::string serialize_number(double value) {
-  if (!std::isfinite(value)) return "null";
+  assert(std::isfinite(value) &&
+         "JsonValue(double) stores a non-finite as null");
   std::ostringstream stream;
   // JSON requires a '.' separator and no digit grouping, so the global locale
   // must not reach the wire format.

@@ -63,14 +63,8 @@ class DocumentCache : private DocumentPhaseListener,
                       Provider&& provider) const {
     if (document == kNoDocument)
       return std::invoke(std::forward<Provider>(provider));
-    Values& values = valuesOf(document);
-    if (std::optional<V> found = values.find(key)) return std::move(*found);
-    // Read before the provider runs: a clear from here on keeps its value out.
-    const std::uint64_t generation = values.generation();
-    V computed = std::invoke(std::forward<Provider>(provider));
-    if (std::optional<V> kept = values.insert(generation, key, computed))
-      return std::move(*kept);
-    return computed;
+    return valuesOf(document).findOrCompute(key,
+                                            std::forward<Provider>(provider));
   }
 
   // What the cache holds for `key` now, if anything: nothing is computed. A

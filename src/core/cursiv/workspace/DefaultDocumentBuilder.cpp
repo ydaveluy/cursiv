@@ -57,14 +57,10 @@ std::vector<Document*> DefaultDocumentBuilder::pending(
     std::span<Document* const> all, DocumentState phaseEnd) const {
   std::vector<Document*> work;
   work.reserve(all.size());
-  // Deduplicated: the bodies run in parallel, and a caller's duplicate would
-  // be two of them writing one document's state.
-  std::unordered_set<const Document*> seen;
-  seen.reserve(all.size());
   for (Document* d : all)
     if (d->state.load() < phaseEnd && languageOf(*d) != nullptr &&
-        (phaseEnd != DocumentState::Validated || getBuildOptions(*d).validation) &&
-        seen.insert(d).second)
+        (phaseEnd != DocumentState::Validated ||
+         getBuildOptions(*d).validation))
       work.push_back(d);
   // The open ones first, stably: the documents someone is looking at reach
   // every rung, and so the client, before the rest of the store.
@@ -94,7 +90,7 @@ void DefaultDocumentBuilder::runPhase(std::span<Document* const> all,
     Document& d = *work[i];
     step.body(d, *languageOf(d), token);
     d.state = step.rung;
-    wakeDocumentWaiters();
+    wakeDocumentWaiters(d);
     if (!beforePublish) notifyDocumentPhase(d, step.rung, token);
   };
   const auto indices = std::views::iota(std::size_t{0}, work.size());
@@ -313,8 +309,14 @@ void DefaultDocumentBuilder::buildDocuments(
   const DocumentFactory& factory = *_shared.documentFactory;
 
   const auto held = _shared.documents->all();
-  std::vector<Document*> work(documents.begin(), documents.end());
-  std::unordered_set<Document*> scheduled(work.begin(), work.end());
+  // Each document once: the phases run their documents in parallel, and a
+  // caller's duplicate would be two bodies writing one document's state.
+  std::vector<Document*> work;
+  std::unordered_set<Document*> scheduled;
+  const auto schedule = [&](Document* d) {
+    if (scheduled.insert(d).second) work.push_back(d);
+  };
+  for (Document* const d : documents) schedule(d);
   const auto rebuild = [&](Document* d) {
     if (d->state.load() >= DocumentState::IndexedContent) {
       std::optional<BuildOptions> requested;
@@ -327,7 +329,7 @@ void DefaultDocumentBuilder::buildDocuments(
       resetToState(*d, DocumentState::ComputedScopes);
       if (requested) prepareBuild({&d, 1}, *requested);
     }
-    if (scheduled.insert(d).second) work.push_back(d);
+    schedule(d);
   };
   const std::unordered_set<DocumentId> none;
   for (const auto& heldDocument : held) {
@@ -767,10 +769,14 @@ std::uint64_t DefaultDocumentBuilder::beginAttempt() const {
   return ++_buildAttempt;
 }
 
-void DefaultDocumentBuilder::wakeDocumentWaiters() const {
+void DefaultDocumentBuilder::wakeDocumentWaiters(
+    const Document& document) const {
   if (_documentWaiters.load() == 0) return;
-  // Taken and dropped: a waiter between its test and its sleep holds it.
-  { const std::scoped_lock lock(_stateMutex); }
+  {
+    // Taken: a waiter between its test and its sleep holds it.
+    const std::scoped_lock lock(_stateMutex);
+    if (std::ranges::find(_awaited, document.id) == _awaited.end()) return;
+  }
   _stateCv.notify_all();
 }
 
@@ -836,11 +842,19 @@ WaitOutcome DefaultDocumentBuilder::waitUntil(
   if (token.stop_requested()) return WaitOutcome::Cancelled;
   // Counted before the first test of the predicate: a worker that reads no
   // waiter has stored its rung before this count, and the test sees it.
+  _awaited.push_back(id);
   _documentWaiters.fetch_add(1);
+  // Left with the lock held: the wait takes it back before returning.
   struct Leave {
+    std::vector<DocumentId>& awaited;
     std::atomic<std::uint32_t>& count;
-    ~Leave() { count.fetch_sub(1); }
-  } leave{_documentWaiters};
+    DocumentId id;
+    ~Leave() {
+      *std::ranges::find(awaited, id) = awaited.back();
+      awaited.pop_back();
+      count.fetch_sub(1);
+    }
+  } leave{_awaited, _documentWaiters, id};
   const std::uint64_t attempt = _buildAttempt;
   WaitOutcome outcome = WaitOutcome::Cancelled;
   const auto evaluate = [&]() {

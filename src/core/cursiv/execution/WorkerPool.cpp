@@ -10,8 +10,8 @@
 #include <thread>
 #include <vector>
 
-#include "cursiv/execution/SpinLock.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/Pause.hpp"
 
 namespace {
 

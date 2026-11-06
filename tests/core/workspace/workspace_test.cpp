@@ -3417,6 +3417,20 @@ void a_symbol_knows_what_points_at_it() {
             incoming.front().sourceEnd - incoming.front().sourceBegin) ==
         "String");
 
+  // A document indexed for the first time is seen by the next read: the view
+  // read above does not outlive it.
+  const cursiv::DocumentId home = string->documentId;
+  const cursiv::NodeId symbol = string->symbolId;
+  const auto other =
+      world.built("file:///b.ws", "entity Other { f : String }\n");
+  std::size_t now = 0;
+  (void)world.shared.indexManager->visitReferences(
+      home, symbol, [&now](const cursiv::ReferenceDescription&) {
+        ++now;
+        return true;
+      });
+  CHECK(now == 2);
+
   // A symbol nobody names has no incoming edge.
   CHECK(world.shared.indexManager->visitReferences(
       document->id, cursiv::kNoNode,

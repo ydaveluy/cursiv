@@ -8,7 +8,6 @@
 
 #include "cursiv/syntax-tree/AstField.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
-#include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 
@@ -90,7 +89,7 @@ struct AstMetaData {
 
   bool anyMultiReference = false;
 
-  // `subtypes` puts a type's own tag at rank 0, so no second array is needed.
+  // The tag of type `i`, null past the last type.
   constexpr const AstTypeTag* tag_of(std::uint16_t i) const {
     return i < typeCount ? types[i] : nullptr;
   }

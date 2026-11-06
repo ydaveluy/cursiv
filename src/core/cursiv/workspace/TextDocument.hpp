@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -67,8 +68,9 @@ class TextDocument {
       std::int64_t version);
 
   // What the edits leave behind, and nothing else: `document` is not changed.
-  // Applied last first, so an earlier edit's offsets still name the text it
-  // was written against.
+  // Every range names the document's text; edits may touch but never overlap
+  // (`std::invalid_argument`), and insertions at one point land in array
+  // order.
   [[nodiscard]] static std::string applyEdits(const TextDocument& document,
                                               std::span<const TextEdit> edits);
 
@@ -122,6 +124,11 @@ class TextDocument {
  private:
 
   void setText(std::string text);
+  // `[from, to)` replaced in the text itself, without a copy of the whole; a
+  // failure leaves the text as it was.
+  void replaceText(std::size_t from, std::size_t to, std::string_view text);
+  // Under the index's lock, after the text changed.
+  void dropLineIndex();
 
   [[nodiscard]] TextOffset size() const noexcept {
     return static_cast<TextOffset>(_text.size());

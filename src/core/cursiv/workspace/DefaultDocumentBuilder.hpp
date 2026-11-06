@@ -68,7 +68,9 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   // share no filtering. One predicate, not three: a hand-written predicate
   // per rung (one for linking, one for relinking, one for validating) would
   // mean a hand-written loop per rung; here a phase is rung-generic, so the
-  // rung is a parameter and the three collapse into this.
+  // rung is a parameter and the three collapse into this. `all` holds each
+  // document once, and an override must keep it so: two bodies on one
+  // document would run at the same time.
   [[nodiscard]] virtual std::vector<Document*> pending(
       std::span<Document* const> all, DocumentState phaseEnd) const;
 
@@ -192,7 +194,7 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   [[nodiscard]] std::uint64_t beginAttempt() const;
   // A document's rung is heard by whoever waits on that document, not only at
   // the end of the phase.
-  void wakeDocumentWaiters() const;
+  void wakeDocumentWaiters(const Document&) const;
   void publishWorkspaceState(DocumentState) const;
   void publishFailure(std::uint64_t attempt) const;
   [[nodiscard]] bool failedSince(std::uint64_t attempt) const noexcept {
@@ -220,6 +222,9 @@ class DefaultDocumentBuilder : public DocumentBuilder {
   // Raised under `_stateMutex` by a per-document wait: with none, a crossed
   // rung costs one load.
   mutable std::atomic<std::uint32_t> _documentWaiters = 0;
+  // The document of each such wait, under `_stateMutex`: a rung crossed by
+  // a document nobody waits on wakes nobody.
+  mutable std::vector<DocumentId> _awaited;
   // How many times each rung was published: a waiter woken by the publication
   // it awaits has been served, even if a later build already dropped
   // `_currentState` back.

@@ -157,9 +157,12 @@ bool DefaultWorkspaceLock::read(ReadAction action,
 
   {
     std::scoped_lock lock(_m);
-    --_readers;
+    // Only the last reader out changes what a waiter tests: a write waits for
+    // no reader, the destructor for no thread in the gate, and a gated read
+    // never waits on another read.
     --_inGate;
-    _cv.notify_all();
+    if (--_readers == 0) [[likely]]
+      _cv.notify_all();
   }
   if (failure != nullptr) std::rethrow_exception(failure);
   return true;

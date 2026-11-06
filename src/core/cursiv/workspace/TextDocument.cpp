@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -87,9 +86,7 @@ TextDocument& TextDocument::update(
     std::size_t from = document.offsetAt(c.range->start);
     std::size_t to = document.offsetAt(c.range->end);
     if (to < from) std::swap(from, to);
-    std::string next(document._text);
-    next.replace(from, to - from, c.text);
-    document.setText(std::move(next));
+    document.replaceText(from, to, c.text);
   }
   document._version = version;
   return document;
@@ -111,19 +108,23 @@ std::string TextDocument::applyEdits(const TextDocument& document,
     order.emplace_back(range.start, document.offsetAt(range.start),
                        document.offsetAt(range.end), e.newText);
   }
-  // Ascending stable sort, applied back to front: earlier offsets stay valid,
-  // and two insertions at the same point land in array order.
+  // Ascending stable sort: two insertions at the same point land in array
+  // order. The result is then laid down front to back, every byte once.
   std::ranges::stable_sort(
       order, [](const Edit& a, const Edit& b) { return a.start < b.start; });
-  std::string out(document._text);
-  std::size_t nextStart = out.size();
-  for (const Edit& e : std::views::reverse(order)) {
+  const std::string_view text = document._text;
+  std::string out;
+  out.reserve(text.size());
+  std::size_t kept = 0;
+  for (const Edit& e : order) {
     // Touching is legal; overlapping edits would corrupt the original offsets.
-    if (e.to > nextStart)
+    if (e.from < kept)
       throw std::invalid_argument("cursiv: overlapping text edits");
-    nextStart = e.from;
-    out.replace(e.from, e.to - e.from, e.text);
+    out.append(text.substr(kept, e.from - kept));
+    out.append(e.text);
+    kept = e.to;
   }
+  out.append(text.substr(kept));
   return out;
 }
 
@@ -194,6 +195,19 @@ void TextDocument::setText(std::string text) {
   // threads, and dropping the table is a write to it like any other.
   const std::scoped_lock lock(_lineIndexMutex);
   _text = std::move(text);
+  dropLineIndex();
+}
+
+void TextDocument::replaceText(std::size_t from, std::size_t to,
+                               std::string_view text) {
+  if (text.size() > kMaxDocument - (_text.size() - (to - from)))
+    throw std::overflow_error("cursiv: document exceeds 4 GiB");
+  const std::scoped_lock lock(_lineIndexMutex);
+  _text.replace(from, to - from, text);
+  dropLineIndex();
+}
+
+void TextDocument::dropLineIndex() {
   _lineStarts.clear();
   _asciiLines.clear();
   _wellFormedLines.clear();

@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstdint>
 #include <functional>
-#include <optional>
 #include <utility>
 
 #include "cursiv/utils/ConcurrentTable.hpp"
@@ -24,19 +22,15 @@ class SimpleCache {
   // A hit takes no lock and writes nothing shared, so a workspace-wide
   // question asked by every thread costs each a lookup and nothing more.
   // Returns a copy, never a reference into a table a `clear` may free.
+  //
+  // The provider runs outside any lock, so it may race another thread on the
+  // same absent key; the first value stored wins and the other is discarded,
+  // so a provider must be deterministic per key. A `clear` that ran while it
+  // did means this value describes a workspace that's gone: the caller gets
+  // it, the next reader does not.
   template <class Provider>
   [[nodiscard]] V get(const K& key, Provider&& provider) const {
-    if (std::optional<V> found = _values.find(key)) return std::move(*found);
-    const std::uint64_t generation = _values.generation();
-    // Runs outside any lock, so it may race another thread on the same
-    // absent key; the first value stored wins and the other is discarded, so
-    // a provider must be deterministic per key. A `clear` that ran while it
-    // did means this value describes a workspace that's gone: the caller gets
-    // it, the next reader does not.
-    V computed = std::invoke(std::forward<Provider>(provider));
-    if (std::optional<V> kept = _values.insert(generation, key, computed))
-      return std::move(*kept);
-    return computed;
+    return _values.findOrCompute(key, std::forward<Provider>(provider));
   }
 
   // Public because the listeners of `WorkspaceCache` call it directly;

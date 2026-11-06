@@ -46,15 +46,19 @@ std::vector<std::string_view> expected_spellings(const Grammar& grammar,
   std::vector<std::string_view> spellings;
   const auto add = [&](ElementId owed) {
     if (owed == kNoElement) return;
-    for (const std::string_view text : grammar.terminalSpellings(owed))
-      if (spellings.size() < limit &&
-          std::ranges::find(spellings, text) == spellings.end())
+    for (const std::string_view text : grammar.terminalSpellings(owed)) {
+      if (spellings.size() == limit) return;
+      if (std::ranges::find(spellings, text) == spellings.end())
         spellings.push_back(text);
+    }
   };
   if (limit == 0) return spellings;
   add(d.element);
   if (spellings.empty()) return spellings;
-  for (const ElementId owed : d.also) add(owed);
+  for (const ElementId owed : d.also) {
+    if (spellings.size() == limit) break;
+    add(owed);
+  }
   return spellings;
 }
 
