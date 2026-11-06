@@ -81,16 +81,18 @@ class TableEpochs {
   static void retire(void* object, void (*free)(void*), std::size_t bytes);
   static void collect() noexcept;
 
-  // Trivial, so reading it costs no initialisation check. The slot is given
-  // back at thread exit by a companion of `takeSlot`; a guard taken after
-  // that, from another thread-local destructor, holds a slot for its stay
-  // alone.
+  // Trivial, and declared `constinit`, so reading it costs no initialisation
+  // check. Defined once, in the source file: an inline thread-local variable
+  // gets an access routine in every object file, which Apple's linker refuses
+  // as a duplicate. The slot is given back at thread exit by a companion of
+  // `takeSlot`; a guard taken after that, from another thread-local
+  // destructor, holds a slot for its stay alone.
   struct Seat {
     std::atomic<std::uint64_t>* slot = nullptr;
     std::uint32_t depth = 0;
     bool exiting = false;
   };
-  static thread_local Seat seat;
+  static constinit thread_local Seat seat;
   static std::atomic<std::uint64_t> current;
   // Set once, before any reader, when the process can fence all its threads.
   static const bool asymmetric;
@@ -103,7 +105,6 @@ class TableEpochs {
   static void giveBack(Seat& s) noexcept;
 };
 
-inline thread_local TableEpochs::Seat TableEpochs::seat{};
 inline std::atomic<std::uint64_t> TableEpochs::current{0};
 
 // A hash table read without a lock and without a write: what a key maps to is

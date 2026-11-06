@@ -122,6 +122,7 @@ void collect_locked(State& s, std::vector<Retired>& due) noexcept {
 }  // namespace
 
 const bool TableEpochs::asymmetric = fenced;
+constinit thread_local TableEpochs::Seat TableEpochs::seat{};
 
 // Gives the thread's slot back as the thread ends, and marks it as ending: a
 // guard taken later, from another thread-local destructor, holds a slot for
