@@ -40,8 +40,6 @@ class ParseResult {
   // Runs the destructors of `gone`; their memory stays with the pool.
   static void destroy_detached(std::span<AstNode* const> gone) noexcept;
   friend class AstReducer;
-  // For a test that builds a result by hand.
-  friend struct ParseResultAccess;
 
  public:
   ParseResult();

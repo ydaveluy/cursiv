@@ -70,9 +70,6 @@ struct LlChoiceArms {
 };
 
 class LlEpisodeSim {
-  // The test of the walks over the frames lent asks them directly.
-  friend struct LlLentStandsProbe;
-
  public:
   // `pool` holds the stacks of the descent and the ones the episode makes. A
   // tracked episode keeps the rules each reading completed, and the readings
