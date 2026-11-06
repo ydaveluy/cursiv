@@ -7,6 +7,7 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -16,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/workspace/Document.hpp"
@@ -104,6 +106,85 @@ void the_markers_become_offsets() {
       ct::replaceIndices({.text = "x[!]y", .indexMarker = "[!]"});
   CHECK(custom.output == "xy");
   CHECK(custom.indices.size() == 1 && custom.indices[0] == 1);
+
+  // A range end with no open range, or a range left open, is a fault of the
+  // expectation, not a range from the start of the text or no range at all.
+  CHECK(!passes([] { (void)ct::replaceIndices({.text = "ab|>c"}); }));
+  CHECK(!passes([] { (void)ct::replaceIndices({.text = "a<|b<|c|>"}); }));
+
+  // So is a marker the check asks for and the text lacks: every helper says
+  // which one it wanted and how many the text holds, and reads nothing past
+  // them.
+  World world;
+  CHECK(!passes([&] {
+    (void)ct::expectHover(world.language, {.text = "datatype S<|>tring\n",
+                                           .index = 1,
+                                           .disposeAfterCheck = true});
+  }));
+  std::vector<std::pair<std::string, std::string>> reported;
+  ct::setExpectFunction([&reported](std::string_view actual,
+                                    std::string_view expected,
+                                    std::string_view) {
+    if (actual != expected) reported.emplace_back(expected, actual);
+  });
+  const auto saysMissing = [&reported](std::string_view asked,
+                                       std::string_view held) {
+    const bool said =
+        std::ranges::find(reported, std::pair<std::string, std::string>(
+                                        asked, held)) != reported.end();
+    reported.clear();
+    return said;
+  };
+  constexpr std::string_view kOne = "datatype <|S<|>tring|>\n";
+  constexpr std::string_view kUse =
+      "datatype <|String|>\nentity Person {\n  name: <|>String\n}\n";
+
+  (void)ct::expectHover(
+      world.language,
+      {.text = std::string(kOne), .index = 1, .disposeAfterCheck = true});
+  CHECK(saysMissing("index marker 1", "1 index marker"));
+  (void)ct::expectCompletion(
+      world.language,
+      ct::ExpectedCompletionItems{
+          .text = std::string(kOne), .index = 2, .disposeAfterCheck = true});
+  CHECK(saysMissing("index marker 2", "1 index marker"));
+  (void)ct::expectRename(world.language, {.text = std::string(kOne),
+                                          .index = 1,
+                                          .newName = "Text",
+                                          .disposeAfterCheck = true});
+  CHECK(saysMissing("index marker 1", "1 index marker"));
+  (void)ct::expectHighlight(
+      world.language,
+      {.text = std::string(kOne), .index = 1, .disposeAfterCheck = true});
+  CHECK(saysMissing("index marker 1", "1 index marker"));
+  (void)ct::expectHighlight(world.language, {.text = std::string(kOne),
+                                             .rangeIndex = std::size_t{1},
+                                             .disposeAfterCheck = true});
+  CHECK(saysMissing("range 1", "1 range"));
+  (void)ct::expectHighlight(world.language,
+                            {.text = std::string(kOne),
+                             .rangeIndex = std::vector<std::size_t>{3},
+                             .disposeAfterCheck = true});
+  CHECK(saysMissing("range 3", "1 range"));
+  (void)ct::expectGoToDefinition(world.language, {.text = std::string(kUse),
+                                                  .index = 1,
+                                                  .rangeIndex = std::size_t{0},
+                                                  .disposeAfterCheck = true});
+  CHECK(saysMissing("index marker 1", "1 index marker"));
+  (void)ct::expectGoToDefinition(world.language, {.text = std::string(kUse),
+                                                  .rangeIndex = std::size_t{1},
+                                                  .disposeAfterCheck = true});
+  CHECK(saysMissing("range 1", "1 range"));
+  (void)ct::expectGoToDefinition(world.language,
+                                 {.text = std::string(kUse),
+                                  .rangeIndex = std::vector<std::size_t>{2},
+                                  .disposeAfterCheck = true});
+  CHECK(saysMissing("range 2", "1 range"));
+  ct::expectSemanticToken(
+      ct::highlightHelper(world.language, "datatype String\n"),
+      {.rangeIndex = 0});
+  CHECK(saysMissing("range 0", "0 ranges"));
+  ct::setExpectFunction({});
 }
 
 // A helper-built document is in the store, named after the counter, and the
@@ -317,13 +398,18 @@ void the_outline_names_what_the_document_declares() {
                                 .disposeAfterCheck = true});
   }));
 
-  // ...and a list that is wrong is refused rather than tolerated.
-  CHECK(!passes([&] {
-    (void)ct::expectSymbols(
-        world.language, ct::ExpectedSymbolsList{.text = std::string(kModel),
-                                                .expectedSymbols = {"String"},
-                                                .disposeAfterCheck = true});
-  }));
+  // ...and a list that is wrong is refused rather than tolerated, even where
+  // its names joined spell the received ones.
+  for (const std::vector<std::string>& wrong :
+       {std::vector<std::string>{"String"},
+        std::vector<std::string>{"String, Person"},
+        std::vector<std::string>{"", "String", "Person"}})
+    CHECK(!passes([&] {
+      (void)ct::expectSymbols(
+          world.language, ct::ExpectedSymbolsList{.text = std::string(kModel),
+                                                  .expectedSymbols = wrong,
+                                                  .disposeAfterCheck = true});
+    }));
 }
 
 void the_multi_line_record_is_foldable() {
@@ -364,6 +450,15 @@ void the_caret_is_offered_what_may_stand_there() {
             .expectedItems = {"datatype"},
             .disposeAfterCheck = true});
   }));
+  // A list one item longer is refused, even an empty item.
+  CHECK(!passes([&] {
+    (void)ct::expectCompletion(
+        world.language,
+        ct::ExpectedCompletionItems{
+            .text = "entity Person { name: String }\ndatatyp<|>\n",
+            .expectedItems = {"", "datatype"},
+            .disposeAfterCheck = true});
+  }));
 }
 
 void the_prose_of_a_declaration_reaches_its_use() {
@@ -382,6 +477,18 @@ void the_prose_of_a_declaration_reaches_its_use() {
   CHECK(passes([&] {
     (void)ct::expectHover(world.language, {.text = std::string(kDocumented),
                                            .hoverMatches = ct::contains("text"),
+                                           .disposeAfterCheck = true});
+  }));
+
+  // No hover is not a hover whatever its text says.
+  constexpr std::string_view kBare = "datatype String\n<|>\n";
+  CHECK(passes([&] {
+    (void)ct::expectHover(world.language, {.text = std::string(kBare),
+                                           .disposeAfterCheck = true});
+  }));
+  CHECK(!passes([&] {
+    (void)ct::expectHover(world.language, {.text = std::string(kBare),
+                                           .hover = "<none>",
                                            .disposeAfterCheck = true});
   }));
 }
@@ -437,6 +544,12 @@ void the_workspace_query_reads_the_index() {
         world.shared, ct::ExpectedWorkspaceSymbolsList{
                           .query = "Person", .expectedSymbols = {"Person"}});
   }));
+  CHECK(!passes([&] {
+    ct::expectWorkspaceSymbols(
+        world.shared,
+        ct::ExpectedWorkspaceSymbolsList{.query = "Person",
+                                         .expectedSymbols = {"", "Person"}});
+  }));
 
   std::size_t count = 1;
   ct::expectWorkspaceSymbols(
@@ -460,6 +573,60 @@ void a_repair_is_offered_and_really_fixes() {
   CHECK(!result.diagnosticsAll.empty());
   CHECK(cursiv::data_code(result.diagnosticRelevant) == "parse-repaired");
   result.dispose();
+}
+
+// The language's own actions, their edits filed under another document; with
+// `alsoHere`, also under their own, while the other document gets an edit of
+// its own.
+struct Refiled final : cursiv::CodeActionProvider {
+  const cursiv::CodeActionProvider& inner;
+  bool alsoHere = false;
+
+  Refiled(const cursiv::CodeActionProvider& provider, bool here)
+      : inner(provider), alsoHere(here) {}
+
+  [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
+      const cursiv::Document& document, const lsp::CodeActionParams& params,
+      const cursiv::CancellationToken& cancel) const override {
+    std::vector<lsp::CodeAction> actions =
+        inner.getCodeActions(document, params, cancel);
+    const lsp::DocumentUri here = lsp::Uri::parse(document.uri);
+    const lsp::DocumentUri other = lsp::Uri::parse("file:///elsewhere.ws");
+    for (lsp::CodeAction& action : actions) {
+      if (!action.edit.has_value() || !action.edit->changes.has_value())
+        continue;
+      auto& changes = *action.edit->changes;
+      std::vector<lsp::TextEdit> own = changes[here];
+      changes.clear();
+      if (alsoHere) {
+        changes[here] = own;
+        own = {lsp::TextEdit{.range = {}, .newText = "datatype Elsewhere\n"}};
+      }
+      changes[other] = std::move(own);
+    }
+    return actions;
+  }
+};
+
+// Only the edits filed under the diagnosed document change its text.
+void a_repair_is_judged_on_its_own_document() {
+  constexpr std::string_view kBroken =
+      "datatype String\nentity A { x  String }\n";
+  constexpr std::string_view kFixed =
+      "datatype String\nentity A { x:  String }\n";
+  for (const bool alsoHere : {false, true}) {
+    World world;
+    const std::unique_ptr<const cursiv::CodeActionProvider> language =
+        std::move(world.language.codeActionProvider);
+    world.language.codeActionProvider =
+        std::make_unique<Refiled>(*language, alsoHere);
+    const bool fixed = passes([&] {
+      ct::CodeActionResult result = ct::testCodeAction(
+          world.language, std::string(kBroken), "parse-repaired", kFixed);
+      result.dispose();
+    });
+    CHECK(fixed == alsoHere);
+  }
 }
 
 void the_virtual_file_system_answers_like_a_disk() {
@@ -545,6 +712,7 @@ int main() {
   the_formatter_reaches_the_shape_the_language_wants();
   the_workspace_query_reads_the_index();
   a_repair_is_offered_and_really_fixes();
+  a_repair_is_judged_on_its_own_document();
   the_virtual_file_system_answers_like_a_disk();
   an_installed_hook_receives_the_verdict();
   a_disposable_runs_once();

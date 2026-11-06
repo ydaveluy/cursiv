@@ -14,8 +14,9 @@
 
 namespace cursiv::bench {
 
-// Resident bytes now, and the highest this process has held. Zero and invalid
-// where the platform does not answer -- the ladder keeps its other columns.
+// Resident bytes now, and the highest this process has held. Each figure is
+// zero and invalid where the platform does not answer it -- the ladder keeps
+// its other columns.
 struct RssSample {
   // Signed, so the stages sum to the total: a phase that gives more back
   // than it took has a figure of its own, and clamping it to zero would
@@ -23,12 +24,13 @@ struct RssSample {
   std::ptrdiff_t current = 0;
   std::size_t peak = 0;
   bool valid = false;
+  bool peakValid = false;
 };
 
 // Writing `5` to `clear_refs` resets the process high-water mark, the only
 // way a peak means this build's and not a previous language's -- spent once,
 // outside the timed window, never per phase. Where the write is refused, the
-// peak column silently reads as the whole process's.
+// peak is the whole process's, and the caller says so.
 inline bool rss_reset() noexcept {
 #ifdef __linux__
   std::FILE* const f = std::fopen("/proc/self/clear_refs", "w");
@@ -57,8 +59,10 @@ inline bool rss_reset() noexcept {
   if (page <= 0) return s;
   s.current =
       static_cast<std::ptrdiff_t>(resident) * static_cast<std::ptrdiff_t>(page);
-  if (rusage r{}; ::getrusage(RUSAGE_SELF, &r) == 0)
+  if (rusage r{}; ::getrusage(RUSAGE_SELF, &r) == 0) {
     s.peak = static_cast<std::size_t>(r.ru_maxrss) * 1024u;
+    s.peakValid = true;
+  }
   s.valid = true;
 #endif
   return s;
@@ -73,6 +77,7 @@ inline bool rss_reset() noexcept {
   s.current = to.current - from.current;
   s.peak = to.peak;
   s.valid = true;
+  s.peakValid = to.peakValid;
   return s;
 }
 

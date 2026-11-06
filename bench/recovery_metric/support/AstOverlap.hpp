@@ -130,8 +130,11 @@ struct AstOverlap {
               s.append(p);
               s += '#';
               s += std::to_string(i);
-              s += '=';
-              s.append(text);
+              // An unset member has no `=`: it never reads as an empty value.
+              if (k == fuzzer::ValueKind::text) {
+                s += '=';
+                s.append(text);
+              }
               s += '\x1f';
             });
       return owns.emplace(&n, std::move(s)).first->second;

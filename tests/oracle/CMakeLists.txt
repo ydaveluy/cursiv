@@ -82,7 +82,8 @@ endforeach()
 
 # The long run, asked for at configure (`-DCURSIV_RGRAM_COUNT=<n>
 # -DCURSIV_RGRAM_SEED=<first>`), built by `rgram-long` and run by
-# `ctest -L rgram-long`: there a grammar the generator refuses passes.
+# `ctest -L rgram-long`: there a grammar the generator refuses passes, and one
+# whose lane judges nothing is skipped.
 if(CURSIV_RGRAM_COUNT GREATER 0)
   add_custom_target(rgram-long)
   math(EXPR _last "${CURSIV_RGRAM_SEED} + ${CURSIV_RGRAM_COUNT} - 1")
@@ -94,6 +95,6 @@ if(CURSIV_RGRAM_COUNT GREATER 0)
     add_dependencies(rgram-long rgram${seed}_check)
     add_test(NAME rgram_long_${seed} COMMAND rgram${seed}_check --may-refuse)
     set_tests_properties(rgram_long_${seed} PROPERTIES
-        LABELS rgram-long TIMEOUT 120)
+        LABELS rgram-long TIMEOUT 120 SKIP_RETURN_CODE 77)
   endforeach()
 endif()

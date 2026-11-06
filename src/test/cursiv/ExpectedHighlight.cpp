@@ -34,11 +34,10 @@ Disposable expectHighlight(const LspServices& services,
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
   std::vector<lsp::DocumentHighlight> highlights;
-  if (services.documentHighlightProvider != nullptr)
+  const auto* const caret = detail::markerAt(marked.indices, input.index);
+  if (caret != nullptr && services.documentHighlightProvider != nullptr)
     highlights = services.documentHighlightProvider->getDocumentHighlight(
-        *document,
-        to_lsp(
-            document->textDocument().positionAt(marked.indices[input.index])),
+        *document, to_lsp(document->textDocument().positionAt(*caret)),
         kNoCancel);
 
   if (const auto* const many =
@@ -48,16 +47,18 @@ Disposable expectHighlight(const LspServices& services,
         "expected " + std::to_string(many->size()) +
             " highlights but received " + std::to_string(highlights.size()));
     for (std::size_t at = 0; at < many->size() && at < highlights.size(); ++at)
-      expectSameRange(highlights[at].range,
-                      markedRange(*document, marked.ranges[(*many)[at]]));
+      if (const auto* const range =
+              detail::markerAt(marked.ranges, (*many)[at]))
+        expectSameRange(highlights[at].range, markedRange(*document, *range));
   } else if (const auto* const one =
                  std::get_if<std::size_t>(&input.rangeIndex)) {
     expectedFunction(std::to_string(highlights.size()), "1",
                      "expected a single highlight but received " +
                          std::to_string(highlights.size()));
     if (!highlights.empty())
-      expectSameRange(highlights.front().range,
-                      markedRange(*document, marked.ranges[*one]));
+      if (const auto* const range = detail::markerAt(marked.ranges, *one))
+        expectSameRange(highlights.front().range,
+                        markedRange(*document, *range));
   } else {
     expectedFunction(
         std::to_string(highlights.size()), std::to_string(marked.ranges.size()),

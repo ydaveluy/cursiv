@@ -2,8 +2,6 @@
 
 #include <lsp/types.h>
 
-#include <cstddef>
-#include <span>
 #include <string>
 #include <variant>
 #include <vector>
@@ -14,19 +12,6 @@
 #include "cursiv/ExpectFunction.hpp"
 
 namespace cursiv::test {
-
-namespace {
-
-std::string joined(std::span<const std::string> names) {
-  std::string out;
-  for (const std::string& name : names) {
-    if (!out.empty()) out += ", ";
-    out += name;
-  }
-  return out;
-}
-
-}  // namespace
 
 void expectWorkspaceSymbols(const SharedLspServices& shared,
                             const ExpectedWorkspaceSymbols& input) {
@@ -49,15 +34,11 @@ void expectWorkspaceSymbols(const SharedLspServices& shared,
     actual.push_back(expected.symbolToString ? expected.symbolToString(symbol)
                                              : symbol.name);
 
-  if (actual.size() == expected.expectedSymbols.size())
-    for (std::size_t at = 0; at < actual.size(); ++at)
-      expectedFunction(actual[at], expected.expectedSymbols[at]);
-  else
-    expectedFunction(joined(actual), joined(expected.expectedSymbols),
-                     "expected " +
-                         std::to_string(expected.expectedSymbols.size()) +
-                         " but found " + std::to_string(symbols.size()) +
-                         " symbols in workspace");
+  detail::expectedItems(actual, expected.expectedSymbols,
+                        "expected " +
+                            std::to_string(expected.expectedSymbols.size()) +
+                            " but found " + std::to_string(symbols.size()) +
+                            " symbols in workspace");
 }
 
 }  // namespace cursiv::test

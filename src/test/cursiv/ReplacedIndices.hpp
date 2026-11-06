@@ -1,7 +1,9 @@
 // The markers taken back out of an expectation's text, and where they stood --
-// the offsets are into the text the parser is then handed, markers gone.
+// the offsets are into the text the parser is then handed, markers gone. A
+// range end with no open range, or a range left open, fails the expectation.
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,5 +22,18 @@ struct ReplacedIndices {
 };
 
 [[nodiscard]] ReplacedIndices replaceIndices(const ExpectedBase& base);
+
+namespace detail {
+
+// Marker `index` of a text, counted from 0. A text with fewer markers fails
+// the expectation, saying which marker was asked for and how many there are,
+// and answers null.
+[[nodiscard]] const TextOffset* markerAt(const std::vector<TextOffset>& indices,
+                                         std::size_t index);
+[[nodiscard]] const std::pair<TextOffset, TextOffset>* markerAt(
+    const std::vector<std::pair<TextOffset, TextOffset>>& ranges,
+    std::size_t index);
+
+}  // namespace detail
 
 }  // namespace cursiv::test

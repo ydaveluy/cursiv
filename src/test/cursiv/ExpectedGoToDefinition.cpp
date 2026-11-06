@@ -37,12 +37,12 @@ Disposable expectGoToDefinition(
       services, marked.output, expectedGoToDefinition.parseOptions);
 
   std::vector<lsp::LocationLink> links;
-  if (services.definitionProvider != nullptr)
+  const auto* const caret =
+      detail::markerAt(marked.indices, expectedGoToDefinition.index);
+  if (caret != nullptr && services.definitionProvider != nullptr)
     if (std::optional<std::vector<lsp::LocationLink>> found =
             services.definitionProvider->getDefinition(
-                *document,
-                to_lsp(document->textDocument().positionAt(
-                    marked.indices[expectedGoToDefinition.index])),
+                *document, to_lsp(document->textDocument().positionAt(*caret)),
                 kNoCancel))
       links = *std::move(found);
 
@@ -53,8 +53,10 @@ Disposable expectGoToDefinition(
                          " definitions but received " +
                          std::to_string(links.size()));
     for (std::size_t at = 0; at < many->size() && at < links.size(); ++at)
-      expectSameRange(links[at].targetSelectionRange,
-                      markedRange(*document, marked.ranges[(*many)[at]]));
+      if (const auto* const range =
+              detail::markerAt(marked.ranges, (*many)[at]))
+        expectSameRange(links[at].targetSelectionRange,
+                        markedRange(*document, *range));
   } else {
     const std::size_t index =
         std::get<std::size_t>(expectedGoToDefinition.rangeIndex);
@@ -62,8 +64,9 @@ Disposable expectGoToDefinition(
                      "expected a single definition but received " +
                          std::to_string(links.size()));
     if (!links.empty())
-      expectSameRange(links.front().targetSelectionRange,
-                      markedRange(*document, marked.ranges[index]));
+      if (const auto* const range = detail::markerAt(marked.ranges, index))
+        expectSameRange(links.front().targetSelectionRange,
+                        markedRange(*document, *range));
   }
 
   Disposable disposable = documentDisposable(services, document);

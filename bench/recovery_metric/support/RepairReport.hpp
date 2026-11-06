@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "recovery_metric/support/FaultClass.hpp"
 #include "recovery_metric/support/RepairTally.hpp"
 
@@ -30,17 +31,20 @@ struct RepairReport {
   std::uint64_t seed = 0;
   // How the cost column was counted, or why it is empty.
   std::string counter;
-  // How the parser was asked to repair.
-  std::string repair;
+  // How much the parser's repair search may spend.
+  RepairBudget budget;
   std::vector<std::string_view> ceilings;
   std::vector<Section> sections;
 
   void text(std::FILE* out) const {
     std::fprintf(out,
                  "recovery metric: up to %u documents per class, seed %#llx, "
-                 "cost %s%s%s\n",
+                 "cost %s, repair by search, budget %s + %s/byte up to %s, %s "
+                 "per search\n",
                  docs, static_cast<unsigned long long>(seed), counter.c_str(),
-                 repair.empty() ? "" : ", repair by ", repair.c_str());
+                 bound(budget.floor).c_str(), bound(budget.perByte).c_str(),
+                 bound(budget.perParse).c_str(),
+                 bound(budget.perSearch).c_str());
     std::fprintf(
         out,
         "  found/miss: faults a diagnostic answers one to one, in %% of "
@@ -117,6 +121,14 @@ struct RepairReport {
     std::fprintf(out, "{\"docs_per_class\":%u,\"seed\":%llu,\"counter\":", docs,
                  static_cast<unsigned long long>(seed));
     quoted(out, counter);
+    // An unbounded budget is `null`.
+    std::fprintf(out,
+                 ",\"repair\":{\"by\":\"search\",\"floor\":%s,"
+                 "\"per_byte\":%s,\"per_parse\":%s,\"per_search\":%s}",
+                 json_bound(budget.floor).c_str(),
+                 json_bound(budget.perByte).c_str(),
+                 json_bound(budget.perParse).c_str(),
+                 json_bound(budget.perSearch).c_str());
     std::fprintf(out, ",\"ceilings\":[");
     for (std::size_t i = 0; i < ceilings.size(); ++i) {
       if (i != 0) std::fputc(',', out);
@@ -176,6 +188,12 @@ struct RepairReport {
   }
 
  private:
+  [[nodiscard]] static std::string bound(std::uint64_t v) {
+    return v == ~std::uint64_t{0} ? "inf" : std::to_string(v);
+  }
+  [[nodiscard]] static std::string json_bound(std::uint64_t v) {
+    return v == ~std::uint64_t{0} ? "null" : std::to_string(v);
+  }
   [[nodiscard]] static double pct(std::uint64_t a, std::uint64_t b) {
     return b == 0 ? 0.0 : 100.0 * static_cast<double>(a) / static_cast<double>(b);
   }

@@ -60,7 +60,10 @@ DecodedSemanticTokensWithRanges highlightHelper(
 void expectSemanticToken(
     const DecodedSemanticTokensWithRanges& tokensWithRanges,
     const DecodedTokenOptions& options) {
-  const auto& [begin, end] = tokensWithRanges.ranges[options.rangeIndex];
+  const auto* const range =
+      detail::markerAt(tokensWithRanges.ranges, options.rangeIndex);
+  if (range == nullptr) return;
+  const auto& [begin, end] = *range;
   std::size_t found = 0;
   for (const DecodedSemanticToken& token : tokensWithRanges.tokens)
     if (token.tokenType == options.tokenType && token.offset == begin &&

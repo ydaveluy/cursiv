@@ -4,6 +4,8 @@
 #pragma once
 
 #include <functional>
+#include <span>
+#include <string>
 #include <string_view>
 
 namespace cursiv::test {
@@ -19,5 +21,16 @@ void setExpectFunction(ExpectFunction expectFunction);
 
 void expectedFunction(std::string_view actual, std::string_view expected,
                       std::string_view message = {});
+
+namespace detail {
+
+// Two lists, item by item. Lists of different lengths always fail, with
+// `lengthMessage`: each side is shown with its items quoted, so two different
+// lists never read the same.
+void expectedItems(std::span<const std::string> actual,
+                   std::span<const std::string> expected,
+                   std::string_view lengthMessage);
+
+}  // namespace detail
 
 }  // namespace cursiv::test

@@ -80,3 +80,12 @@ int main(int argc, char** argv) {
 
 A registration function may install several languages; see
 [Several languages](../recipes/multiple-languages.md).
+
+To add a command of your own, such as `generate`, run it with `run_command`.
+It gives the command the same exit codes: `2` for a `UsageError`, `3` for any
+other exception or a failed write to stdout.
+
+```cpp
+if (argc == 3 && std::string_view(argv[1]) == "generate")
+  return cursiv::run_command([&] { return generate(argv[2]); });
+```

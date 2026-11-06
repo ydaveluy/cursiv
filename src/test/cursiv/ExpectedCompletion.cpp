@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <string>
 #include <variant>
 #include <vector>
@@ -26,15 +25,6 @@
 namespace cursiv::test {
 
 namespace {
-
-std::string joined(std::span<const std::string> names) {
-  std::string out;
-  for (const std::string& name : names) {
-    if (!out.empty()) out += ", ";
-    out += name;
-  }
-  return out;
-}
 
 ExpectedBase baseOf(const ExpectedCompletion& input) {
   return std::visit(
@@ -68,11 +58,11 @@ Disposable expectCompletion(const LspServices& services,
       parseDocument(services, marked.output, base.parseOptions);
 
   lsp::CompletionList completions;
-  if (services.completionProvider != nullptr)
+  const auto* const caret =
+      detail::markerAt(marked.indices, indexOf(expectedCompletion));
+  if (caret != nullptr && services.completionProvider != nullptr)
     completions = services.completionProvider->getCompletion(
-        *document,
-        to_lsp(document->textDocument().positionAt(
-            marked.indices[indexOf(expectedCompletion)])),
+        *document, to_lsp(document->textDocument().positionAt(*caret)),
         kNoCancel);
 
   if (const auto* const callback =
@@ -89,15 +79,11 @@ Disposable expectCompletion(const LspServices& services,
       actual.push_back(expected.itemToString ? expected.itemToString(item)
                                              : item.label);
 
-    if (actual.size() == expected.expectedItems.size())
-      for (std::size_t at = 0; at < actual.size(); ++at)
-        expectedFunction(actual[at], expected.expectedItems[at]);
-    else
-      expectedFunction(joined(actual), joined(expected.expectedItems),
-                       "expected " +
-                           std::to_string(expected.expectedItems.size()) +
-                           " but received " + std::to_string(actual.size()) +
-                           " completion items");
+    detail::expectedItems(actual, expected.expectedItems,
+                          "expected " +
+                              std::to_string(expected.expectedItems.size()) +
+                              " but received " + std::to_string(actual.size()) +
+                              " completion items");
   }
 
   Disposable disposable = documentDisposable(services, document);

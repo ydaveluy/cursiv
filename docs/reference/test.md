@@ -46,7 +46,8 @@ property; every option you set must match.
 ## Check editor features
 
 Editor helpers take text with markers: `<|>` for the caret and `<|text|>` for
-an expected range.
+an expected range. A range marker without its partner, or an `index` or
+`rangeIndex` past the markers of the text, fails the check.
 
 | Helper | Checks |
 |---|---|

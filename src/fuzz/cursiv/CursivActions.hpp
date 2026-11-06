@@ -648,7 +648,7 @@ void yield_field(const AstNode& n, ValueYield yield) {
       if ((o.*F::ptr).has_value())
         yield_one<F>(F::name, kNone, *(o.*F::ptr), yield);
       else
-        yield(F::name, kNone, ValueKind::text, "(unset)");
+        yield(F::name, kNone, ValueKind::unset, {});
     } else {
       yield_one<F>(F::name, kNone, o.*F::ptr, yield);
     }

@@ -431,8 +431,12 @@ void print_rss_row(const Row& row) {
   }
   const RssSample& r = row.rss[kBuild];
   if (r.valid && row.bytes != 0) {
-    std::printf("\n  %-22s %12.1f MiB\n", "peak",
-                static_cast<double>(r.peak) / (1024.0 * 1024.0));
+    if (!r.peakValid)
+      std::printf("\n  %-22s %12s\n", "peak", "n/a");
+    else
+      std::printf("\n  %-22s %12.1f MiB%s\n", "peak",
+                  static_cast<double>(r.peak) / (1024.0 * 1024.0),
+                  row.rssPeakReset ? "" : "  (whole process, not reset)");
     std::printf(
         "  %-22s %12.2f\n", "resident / byte",
         static_cast<double>(r.current) / static_cast<double>(row.bytes));

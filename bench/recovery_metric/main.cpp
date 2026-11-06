@@ -4,7 +4,7 @@
 //
 //   recovery_metric [--docs N] [--seed S] [--reps R] [--only a,b]
 //                   [--json PATH] [--cpu N | --no-cost] [--trace]
-//                   [--budget FLOOR,PERBYTE,PERSEARCH]
+//                   [--budget FLOOR,PERBYTE,PERSEARCH,PERPARSE]
 
 #include <algorithm>
 #include <cstddef>
@@ -265,10 +265,6 @@ bool read_budget(std::string_view arg, cursiv::RepairBudget& b) {
   return !std::getline(ss, part);
 }
 
-std::string budget_text(std::uint64_t v) {
-  return v == ~std::uint64_t{0} ? "inf" : std::to_string(v);
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -308,10 +304,7 @@ int main(int argc, char** argv) {
 
   metric::RepairReport report;
   report.docs = o.docs;
-  report.repair = "search, budget " + budget_text(o.budget.floor) + " + " +
-                  budget_text(o.budget.perByte) + "/byte up to " +
-                  budget_text(o.budget.perParse) + ", " +
-                  budget_text(o.budget.perSearch) + " per search";
+  report.budget = o.budget;
   report.seed = o.seed;
   for (const std::string_view name : metric::kCeilings)
     report.ceilings.push_back(name);

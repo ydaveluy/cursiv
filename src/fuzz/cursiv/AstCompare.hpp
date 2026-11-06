@@ -111,6 +111,18 @@ struct AstCompare {
     return xs.empty() ? cls + " none" : cls;
   }
 
+  [[nodiscard]] static std::string shown(const Value& v) {
+    switch (v.kind) {
+      case ValueKind::unset:
+        return v.name + " unset";
+      case ValueKind::unreadable:
+        return v.name + " set";
+      case ValueKind::text:
+        break;
+    }
+    return v.name + "=" + v.text;
+  }
+
   [[nodiscard]] static std::string name_of(const AstNode& n) {
     return n.type != nullptr ? std::string(n.type->name) : std::string("?");
   }
@@ -175,15 +187,22 @@ struct AstCompare {
       return;
     }
     for (std::size_t i = 0; i < va.size(); ++i) {
-      if (va[i].kind == ValueKind::unreadable ||
-          vb[i].kind == ValueKind::unreadable) {
-        r.blind.push_back(va[i].name);
+      const Value& x = va[i];
+      const Value& y = vb[i];
+      // Whether an optional member holds a value reads even where the value
+      // does not.
+      const bool unset = x.kind == ValueKind::unset;
+      if (unset != (y.kind == ValueKind::unset)) {
+        fail(r, path(walk) + "/" + x.name, shown(x), shown(y));
         continue;
       }
-      if (va[i].name != vb[i].name || va[i].index != vb[i].index ||
-          va[i].text != vb[i].text)
-        fail(r, path(walk) + "/" + va[i].name, va[i].name + "=" + va[i].text,
-             vb[i].name + "=" + vb[i].text);
+      if (unset) continue;
+      if (x.kind == ValueKind::unreadable || y.kind == ValueKind::unreadable) {
+        r.blind.push_back(x.name);
+        continue;
+      }
+      if (x.name != y.name || x.index != y.index || x.text != y.text)
+        fail(r, path(walk) + "/" + x.name, shown(x), shown(y));
     }
     if (!r.equal) return;
 

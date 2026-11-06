@@ -123,7 +123,16 @@ int rgram_lane(unsigned seed, const Parser& parser,
               "tree, %u disagreements\n",
               seed, static_cast<int>(g.family.size()), g.family.data(),
               docs.size(), inLanguage, trees, bad);
-  return bad == 0 ? 0 : 1;
+  if (bad != 0) return 1;
+  // Agreement on nothing proves nothing: with no disagreement, every tree the
+  // oracle found was compared.
+  if (inLanguage == 0 || (g.features.ast && trees == 0)) {
+    std::printf("rgram %u: nothing judged, %s\n", seed,
+                inLanguage == 0 ? "no document is in the language"
+                                : "no document has one tree");
+    return kRgramUnjudged;
+  }
+  return 0;
 }
 
 }  // namespace cursiv

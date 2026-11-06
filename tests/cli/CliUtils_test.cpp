@@ -5,6 +5,7 @@
 #include <locale>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -197,6 +198,21 @@ void text_dump_escapes_control_bytes() {
   CHECK(out.str().find('\x1b') == std::string::npos);
 }
 
+// A long leaf is cut between two characters, never inside one.
+void text_dump_cuts_between_characters() {
+  const auto parser = ws::generated::Workspace::create_parser();
+  // The comment's sixtieth byte is the first of `é`.
+  const std::string comment = "/*" + std::string(57, 'a') + "\xc3\xa9*/";
+  cursiv::Document document(cursiv::TextDocument::create(
+      "file:///a.ws", "workspace", 0, "datatype " + comment + " String"));
+  document.parseResult = parser->parse(document.textDocument().getText());
+  std::ostringstream out;
+  cursiv::dump_cst(document, parser->getGrammar(), out);
+  CHECK(out.str().find("'/*" + std::string(57, 'a') + "...'") !=
+        std::string::npos);
+  CHECK(out.str().find('\xc3') == std::string::npos);
+}
+
 void json_replaces_invalid_utf8_without_changing_the_document() {
   const auto parser = ws::generated::Workspace::create_parser();
   const std::pair<std::string, std::string> cases[] = {
@@ -320,6 +336,49 @@ void failed_output_is_not_a_successful_command() {
   }
 }
 
+// A language's own command answers with the verdict's exit codes: its own
+// answer, misuse, or a fatal error -- a failed write among them.
+void a_command_answers_like_the_verdict() {
+  {
+    Capture capture;
+    CHECK(cursiv::run_command([] {
+            std::cout << "generated";
+            return cursiv::kDiagnostics;
+          }) == cursiv::kDiagnostics);
+    CHECK(capture.out.str() == "generated");
+    CHECK(capture.err.str().empty());
+  }
+  {
+    Capture capture;
+    CHECK(cursiv::run_command([]() -> int {
+            throw cursiv::UsageError("x.req is not a regular file");
+          }) == cursiv::kUsage);
+    CHECK(capture.err.str() == "x.req is not a regular file\n");
+  }
+  {
+    Capture capture;
+    CHECK(cursiv::run_command([]() -> int {
+            throw std::runtime_error("cannot create the directory");
+          }) == cursiv::kFatal);
+    CHECK(capture.err.str() == "fatal: cannot create the directory\n");
+  }
+  {
+    struct FailedFlush final : std::stringbuf {
+      int sync() override { return -1; }
+    };
+    Capture capture;
+    FailedFlush output;
+    std::cout.rdbuf(&output);
+    const int status = cursiv::run_command([] {
+      std::cout << "generated";
+      return cursiv::kClean;
+    });
+    std::cout.rdbuf(capture.out.rdbuf());
+    CHECK(status == cursiv::kFatal);
+    CHECK(capture.err.str().starts_with("fatal: cannot write CLI output"));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -330,10 +389,12 @@ int main() {
   json_ignores_stream_number_formatting();
   the_dump_names_the_ast_classes();
   text_dump_escapes_control_bytes();
+  text_dump_cuts_between_characters();
   json_replaces_invalid_utf8_without_changing_the_document();
   root_documents_are_reused_and_references_resolve();
   read_failures_are_usage_errors();
   the_factory_selects_the_grammar_used_for_reporting();
   failed_output_is_not_a_successful_command();
+  a_command_answers_like_the_verdict();
   return cursiv::test::report("cli_utils");
 }

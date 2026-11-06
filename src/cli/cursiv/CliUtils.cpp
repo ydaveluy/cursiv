@@ -79,16 +79,20 @@ void flush_output(std::ostream& out) {
 }
 
 // A leaf's text on one line: control characters are escaped, and a long
-// run is cut rather than wrapped.
+// run is cut rather than wrapped -- before the UTF-8 sequence the limit falls
+// inside, never through it.
 void quote_text(std::ostream& out, std::string_view text) {
   constexpr std::size_t kMaxQuoted = 60;
+  std::size_t shown = text.size();
+  if (shown > kMaxQuoted) {
+    shown = kMaxQuoted;
+    // A sequence has at most three continuation bytes.
+    while (shown > kMaxQuoted - 3 &&
+           (static_cast<unsigned char>(text[shown]) & 0xC0u) == 0x80u)
+      --shown;
+  }
   out << '\'';
-  std::size_t written = 0;
-  for (const char ch : text) {
-    if (written >= kMaxQuoted) {
-      out << "...";
-      break;
-    }
+  for (const char ch : text.substr(0, shown)) {
     switch (ch) {
       case '\n':
         out << "\\n";
@@ -113,8 +117,8 @@ void quote_text(std::ostream& out, std::string_view text) {
           out << ch;
       }
     }
-    ++written;
   }
+  if (shown < text.size()) out << "...";
   out << '\'';
 }
 
@@ -499,14 +503,28 @@ int report(const Document& document, const Grammar& grammar,
   return errors ? kDiagnostics : kClean;
 }
 
+int run_command(const std::function<int()>& command) {
+  enter_host_directory();
+  try {
+    const int status = command();
+    flush_output(std::cout);
+    return status;
+  } catch (const UsageError& error) {
+    std::cerr << error.what() << '\n';
+    return kUsage;
+  } catch (const std::exception& error) {
+    std::cerr << "fatal: " << error.what() << '\n';
+    return kFatal;
+  }
+}
+
 namespace detail {
 
 int run_cli_on(
     int argc, char** argv,
     const std::function<bool(SharedCoreServices&)>& registerLanguageServices,
     SharedCoreServices& shared) {
-  enter_host_directory();
-  try {
+  return run_command([&] {
     // A CLI reads the disk, and says so: without this, the shared default
     // would be the empty provider.
     if (shared.fileSystemProvider == nullptr)
@@ -532,7 +550,6 @@ int run_cli_on(
     // `--help` must not die of asking.
     if (invocation->help) {
       print_usage(program, registry, std::cout);
-      flush_output(std::cout);
       return kClean;
     }
 
@@ -546,13 +563,7 @@ int run_cli_on(
     return report(document, document.language->parser->getGrammar(),
                   invocation->path, invocation->dump, invocation->json,
                   std::cout, std::cerr);
-  } catch (const UsageError& error) {
-    std::cerr << error.what() << '\n';
-    return kUsage;
-  } catch (const std::exception& error) {
-    std::cerr << "fatal: " << error.what() << '\n';
-    return kFatal;
-  }
+  });
 }
 
 }  // namespace detail

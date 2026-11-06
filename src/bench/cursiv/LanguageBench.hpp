@@ -144,6 +144,9 @@ struct Row {
   // the OS for, the peak is the build's own ceiling. Comparable for one
   // language across binaries, never between languages of one run.
   RssSample rss[kStageCount] = {};
+  // Whether the high-water mark was brought down before that build: where it
+  // was not, the peak is the whole process's.
+  bool rssPeakReset = false;
   std::vector<ServiceMeasurement> lsp;
 };
 
@@ -611,7 +614,7 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
       perf.enable();
     }
     // Brought down so the peak is this build's, not the process's.
-    if (probe == Probe::Resident) rss_reset();
+    const bool peakReset = probe == Probe::Resident && rss_reset();
     clock.start(probe == Probe::Counters ? &perf : nullptr,
                 probe == Probe::Resident);
     builder.build(all);
@@ -645,6 +648,7 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
         row.rss[kValidate] = clock.held(DocumentState::IndexedReferences,
                                         DocumentState::Validated);
         row.rss[kBuild] = clock.held(DocumentState::Validated);
+        row.rssPeakReset = peakReset;
         break;
       case Probe::Clock:
         timed = true;

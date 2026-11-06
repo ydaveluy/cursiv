@@ -29,7 +29,7 @@ scaffolded projects accept the same option.
 | `cursiv::core` | parsing, syntax trees, linking and validation |
 | `cursiv::engine::ll`, `cursiv::engine::lr` | the parser runtime of each engine; `<ID>Generated` links its own |
 | `cursiv::lsp` | the language server and its providers |
-| `cursiv::cli` | `run_cli`, for a [command-line tool](cli.md) |
+| `cursiv::cli` | `run_cli` and `run_command`, for a [command-line tool](cli.md) |
 | `cursiv::mcp` | the MCP server and its default tools |
 | `cursiv::test` | the [test helpers](test.md) |
 | `cursiv::bench` | the benchmark driver |

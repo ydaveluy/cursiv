@@ -75,13 +75,16 @@ CodeActionResult testCodeAction(const LspServices& services, std::string input,
     if (!actions.empty()) {
       result.action = actions.front();
       const lsp::CodeAction& action = *result.action;
+      // Only the edits filed under this document change its text; an action
+      // may edit other documents as well.
       std::vector<TextEdit> converted;
       if (action.edit.has_value() && action.edit->changes.has_value())
         for (const auto& [uri, edits] : *action.edit->changes)
-          for (const lsp::TextEdit& edit : edits)
-            converted.emplace_back(from_lsp(edit.range), edit.newText);
+          if (uri.toString() == text.uri())
+            for (const lsp::TextEdit& edit : edits)
+              converted.emplace_back(from_lsp(edit.range), edit.newText);
       expectedFunction(converted.empty() ? "false" : "true", "true",
-                       "the code action carries no edit");
+                       "the code action carries no edit for this document");
       const std::string updated = TextDocument::applyEdits(text, converted);
       expectedFunction(updated, *outputAfterFix);
 

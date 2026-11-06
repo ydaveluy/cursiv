@@ -1,6 +1,7 @@
 // Exercises one code-action fix end to end: the input must carry exactly
 // one finding with the given code, and the single offered action (if any)
-// must produce the given output and clear the finding.
+// must produce the given output and clear the finding. Only the action's
+// edits to the input's own document are applied.
 #pragma once
 
 #include <lsp/types.h>

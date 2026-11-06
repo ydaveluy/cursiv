@@ -6,6 +6,9 @@
 #include <type_traits>
 
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
+#include "cursiv/CstInvariants.hpp"
 #include "cursiv/CursivLexicon.hpp"
 #include "cursiv/FuzzLane.hpp"
 #include "cursiv/Check.hpp"
@@ -51,9 +54,36 @@ void trees_compare_at_any_depth(const cursiv::Parser& parser,
   const auto word = parser.parse("1+2+\"a\"\"b\"");
   const auto other = compare.run(*left.value, *word.value);
   CHECK(!other.equal && other.where == "/right");
+
+  // An optional member left empty differs from one that holds a value, even
+  // one no reader can show.
+  const auto bare = parser.parse("held $a");
+  const auto filled = parser.parse("held $a $b");
+  CHECK(bare.value != nullptr && filled.value != nullptr);
+  const auto held = compare.run(*bare.value, *filled.value);
+  CHECK(!held.equal && held.where == "/first");
+  CHECK(compare.run(*bare.value, *parser.parse("held $b").value).equal);
+}
+
+// Each child's subtree stays inside its parent's: a parent one record too
+// short cuts its first child's subtree in two, though every span agrees.
+void a_subtree_holds_its_children_whole() {
+  const auto judged = [](cursiv::NodeCount last) {
+    cursiv::Cst cst("ab");
+    cursiv::CstBuilder b(cst);
+    b.stream().leaf(0, 1, 0);
+    b.stream().close(0, 1, 2, 0);
+    b.stream().leaf(1, 2, 0);
+    b.stream().close(0, 2, last, 0);
+    return cursiv::fuzzer::CstInvariants{}.run(cst, "ab");
+  };
+  CHECK(judged(4).ok);
+  const auto cut = judged(3);
+  CHECK(!cut.ok && cut.at == 1);
 }
 
 int main() {
+  a_subtree_holds_its_children_whole();
   namespace g = finfix::generated::InfixEntryG;
   const std::unique_ptr<cursiv::Parser> parser = g::create_parser();
   const std::unique_ptr<cursiv::AstReflection> reflection =

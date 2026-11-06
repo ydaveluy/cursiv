@@ -113,6 +113,14 @@ void dump_cst_json(const cursiv::Document& document,
                          std::string_view displayPath, bool dump, bool json,
                          std::ostream& out, std::ostream& err);
 
+/**
+ * Runs a command of the language's own, such as `generate`, with the exit
+ * codes of `run_cli`: `command`'s answer once stdout is flushed, `kUsage` for
+ * a `UsageError`, and `kFatal` for any other exception or a failed write.
+ * The error is printed on stderr.
+ */
+[[nodiscard]] int run_command(const std::function<int()>& command);
+
 namespace detail {
 
 // Non-templated so this compiles once; the template below only picks the

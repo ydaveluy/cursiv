@@ -56,12 +56,13 @@ Disposable expectRename(const LspServices& services,
                       .rangeEndMarker = input.rangeEndMarker});
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
-  const lsp::Position caret =
-      to_lsp(document->textDocument().positionAt(marked.indices[input.index]));
+  const auto* const marker = detail::markerAt(marked.indices, input.index);
 
   std::optional<lsp::Range> box;
   std::optional<lsp::WorkspaceEdit> edit;
-  if (services.renameProvider != nullptr) {
+  if (marker != nullptr && services.renameProvider != nullptr) {
+    const lsp::Position caret =
+        to_lsp(document->textDocument().positionAt(*marker));
     box = services.renameProvider->prepareRename(*document, caret, kNoCancel);
     edit = services.renameProvider->rename(*document, caret, input.newName,
                                            kNoCancel);

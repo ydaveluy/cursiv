@@ -19,8 +19,9 @@
 
 namespace cursiv::fuzzer {
 
-// A value read back: its text, or the fact that no reader reaches it.
-enum class ValueKind : std::uint8_t { text, unreadable };
+// A value read back: its text, the fact that no reader reaches it, or an
+// optional member that holds nothing.
+enum class ValueKind : std::uint8_t { text, unreadable, unset };
 
 // One operator of a precedence table: the element that spells it, the step it
 // sits on -- tightest binds hardest -- and which way a chain of equals groups.

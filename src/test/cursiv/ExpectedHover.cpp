@@ -33,11 +33,11 @@ Disposable expectHover(const LspServices& services,
       parseDocument(services, marked.output, expectedHover.parseOptions);
 
   std::optional<lsp::Hover> hover;
-  if (services.hoverProvider != nullptr)
+  const auto* const caret =
+      detail::markerAt(marked.indices, expectedHover.index);
+  if (caret != nullptr && services.hoverProvider != nullptr)
     hover = services.hoverProvider->getHoverContent(
-        *document,
-        to_lsp(document->textDocument().positionAt(
-            marked.indices[expectedHover.index])),
+        *document, to_lsp(document->textDocument().positionAt(*caret)),
         kNoCancel);
 
   // Only markup is prose: the deprecated `MarkedString` arms answer nothing.
@@ -51,9 +51,14 @@ Disposable expectHover(const LspServices& services,
     const std::string value = content.value_or(std::string{});
     expectedFunction(expectedHover.hoverMatches(value) ? "true" : "false",
                      "true", "hover '" + value + "' does not match");
-  } else {
-    expectedFunction(content.value_or("<none>"),
-                     expectedHover.hover.value_or("<none>"));
+  } else if (content.has_value() != expectedHover.hover.has_value()) {
+    // Presence first: no hover text can then pass for no hover.
+    expectedFunction(
+        content.has_value() ? "a hover" : "no hover",
+        expectedHover.hover.has_value() ? "a hover" : "no hover",
+        content.has_value() ? "the hover reads '" + *content + "'" : "");
+  } else if (content.has_value()) {
+    expectedFunction(*content, *expectedHover.hover);
   }
 
   Disposable disposable = documentDisposable(services, document);
