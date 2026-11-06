@@ -1,7 +1,10 @@
 #include "workspace/core/validation/WorkspaceValidator.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/workspace/Document.hpp"
@@ -13,6 +16,31 @@ namespace {
 bool starts_lower(std::string_view name) {
   return !name.empty() && name.front() >= 'a' && name.front() <= 'z';
 }
+
+// The entities a walk passed, to tell when it comes back to one: searched in
+// place while few, as most walks are, and hashed past that.
+class Passed {
+ public:
+  void add(const ast::Entity* entity) {
+    _list.push_back(entity);
+    if (!_set.empty())
+      _set.insert(entity);
+    else if (_list.size() == kFew)
+      _set.insert(_list.begin(), _list.end());
+  }
+  [[nodiscard]] bool contains(const ast::Entity* entity) const {
+    return _set.empty() ? std::ranges::find(_list, entity) != _list.end()
+                        : _set.contains(entity);
+  }
+  [[nodiscard]] const std::vector<const ast::Entity*>& all() const {
+    return _list;
+  }
+
+ private:
+  static constexpr std::size_t kFew = 32;
+  std::vector<const ast::Entity*> _list;
+  std::unordered_set<const ast::Entity*> _set;
+};
 
 }  // namespace
 
@@ -30,36 +58,53 @@ void WorkspaceValidator::checkDataTypeNameStartsWithCapital(
         .property<&ast::AbstractElement::name>();
 }
 
-// `seen` is the whole climb, not a single node: `super == &entity` alone
-// never stops on a loop `entity` is not part of (`A -> B -> C -> B`).
+// Up the chain to its end, to another document, to an entity already
+// answered, or back to an entity it passed: a loop, which `A -> B -> C -> B`
+// is without coming back to `A`. Every entity passed shares the answer.
 WorkspaceValidator::Exit WorkspaceValidator::exitOf(
-    const ast::Entity& entity, std::vector<const ast::Entity*>& seen) const {
+    const ast::Entity& entity) const {
   const cursiv::Document* const document = entity.getDocument();
   const cursiv::DocumentId id =
       document == nullptr ? cursiv::kNoDocument : document->id;
-  return _exits.get(id, &entity, [&]() -> Exit {
-    const auto* const super = entity.superType.get();
-    if (super == nullptr) return {.ends = true};
-    if (super->getDocument() != document) return {.next = super};
-    if (std::ranges::find(seen, super) != seen.end()) return {};
-    seen.push_back(&entity);
-    return exitOf(*super, seen);
+  return _exits.get(id, &entity, [&] {
+    // The entities past `entity`: most climbs pass none.
+    Passed passed;
+    Exit exit;
+    for (const ast::Entity* at = &entity;;) {
+      const ast::Entity* const super = at->superType.get();
+      if (super == nullptr) {
+        exit = {.ends = true};
+        break;
+      }
+      if (super->getDocument() != document) {
+        exit = {.next = super};
+        break;
+      }
+      if (super == &entity || passed.contains(super)) break;
+      if (const std::optional<Exit> known = _exits.get(id, super)) {
+        exit = *known;
+        break;
+      }
+      passed.add(super);
+      at = super;
+    }
+    for (const ast::Entity* at : passed.all())
+      (void)_exits.get(id, at, [&] { return exit; });
+    return exit;
   });
 }
 
 // From one document to the next: a climb that enters an entity twice loops.
 void WorkspaceValidator::checkEntityDoesNotExtendItself(
     const ast::Entity& entity, cursiv::ValidationAcceptor& accept) const {
-  std::vector<const ast::Entity*> entered{&entity};
-  std::vector<const ast::Entity*> seen;
+  Passed entered;
   for (const ast::Entity* at = &entity;;) {
-    seen.clear();
-    const Exit exit = exitOf(*at, seen);
+    const Exit exit = exitOf(*at);
     if (exit.ends) return;
-    if (exit.next == nullptr ||
-        std::ranges::find(entered, exit.next) != entered.end())
+    if (exit.next == nullptr || exit.next == &entity ||
+        entered.contains(exit.next))
       break;
-    entered.push_back(exit.next);
+    entered.add(exit.next);
     at = exit.next;
   }
   accept.error(entity, "Entity extends itself, directly or through a cycle.")

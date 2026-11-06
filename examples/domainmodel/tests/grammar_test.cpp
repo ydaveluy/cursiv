@@ -10,12 +10,18 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <pthread.h>
+#endif
+
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/MemoryFileSystemProvider.hpp"
@@ -25,6 +31,7 @@
 #include "cursiv/ValidationResult.hpp"
 #include "domainmodel/CoreServices.hpp"
 #include "domainmodel/generated/DomainModel/Module.hpp"
+#include "domainmodel/validation/DomainModelValidator.hpp"
 
 namespace {
 
@@ -171,6 +178,79 @@ void a_cycle_through_an_untouched_document_is_an_error() {
   CHECK(disk.cycles(kC) == 2);
 }
 
+#if defined(__linux__)
+// A worker's stack can be small -- half a mebibyte on macOS -- so a climb
+// holds no frame per storey.
+#ifdef NDEBUG
+constexpr std::size_t kCrampedStack = 64 * 1024;
+#else
+constexpr std::size_t kCrampedStack = 256 * 1024;
+#endif
+
+struct Climb {
+  const dm::DomainModelValidator* validator = nullptr;
+  const cursiv::Document* document = nullptr;
+  const dm::ast::Entity* head = nullptr;
+  std::size_t cycles = 0;
+};
+
+void* climb(void* arg) {
+  auto* job = static_cast<Climb*>(arg);
+  std::vector<cursiv::Diagnostic> found;
+  const auto collect = [&found](cursiv::Diagnostic&& diagnostic) {
+    found.push_back(std::move(diagnostic));
+  };
+  cursiv::ValidationAcceptor accept(cursiv::ValidationAcceptor::Sink(collect),
+                                    *job->document, "domainmodel");
+  job->validator->checkEntityDoesNotExtendItself(*job->head, accept);
+  job->cycles = static_cast<std::size_t>(std::ranges::count_if(
+      found, [](const cursiv::Diagnostic& d) { return d.message == kCycle; }));
+  return nullptr;
+}
+
+// A chain written head first, each entity extending the next: the climb from
+// the head passes every storey before it learns anything. Once it ends, once
+// it goes back to its middle, and then every storey is on a climb that never
+// ends. The validation fills its own validator's answers, so the climb from
+// the small stack runs on a fresh one.
+void a_long_chain_written_head_first_fits_a_small_stack() {
+  constexpr std::size_t kStoreys = 4000;
+  for (const bool loops : {false, true}) {
+    std::string text;
+    for (std::size_t i = 0; i < kStoreys; ++i) {
+      text += "entity E" + std::to_string(i);
+      if (i + 1 < kStoreys)
+        text += " extends E" + std::to_string(i + 1);
+      else if (loops)
+        text += " extends E" + std::to_string(kStoreys / 2);
+      text += " {\n}\n";
+    }
+    const World world;
+    const ct::ValidationResult said = world.validate(text);
+    CHECK(count(said, kCycle) == (loops ? kStoreys : 0));
+
+    const dm::DomainModelValidator fresh(world.services.language);
+    Climb job{.validator = &fresh, .document = said.document.get()};
+    for (const cursiv::AstNode* node : said.document->parseResult.nodes())
+      if (node->type == &cursiv::ast_type_tag<dm::ast::Entity>
+          && static_cast<const dm::ast::Entity*>(node)->name == "E0")
+        job.head = static_cast<const dm::ast::Entity*>(node);
+    CHECK(job.head != nullptr);
+    if (job.head == nullptr) continue;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, kCrampedStack);
+    pthread_t th;
+    const bool started = pthread_create(&th, &attr, &climb, &job) == 0;
+    pthread_attr_destroy(&attr);
+    CHECK(started);
+    if (!started) continue;
+    pthread_join(th, nullptr);
+    CHECK(job.cycles == (loops ? 1 : 0));
+  }
+}
+#endif
+
 }  // namespace
 
 // A token that opens a rule reached through a chain: the state has no shift
@@ -212,6 +292,9 @@ int main() {
   a_chain_that_ends_says_nothing();
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();
+#if defined(__linux__)
+  a_long_chain_written_head_first_fits_a_small_stack();
+#endif
   a_token_that_opens_an_element_names_the_member_it_fills();
   return cursiv::test::report("domainmodel_grammar_test");
 }

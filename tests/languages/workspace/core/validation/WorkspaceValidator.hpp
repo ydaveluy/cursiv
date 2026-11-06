@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include "cursiv/services/DefaultCoreService.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
@@ -34,10 +32,11 @@ class WorkspaceValidator final : public cursiv::DefaultCoreService {
     bool ends = false;
   };
 
-  // The climb from `entity` within its document. `seen` is the current climb,
-  // which is what tells a loop from a chain already answered.
-  [[nodiscard]] Exit exitOf(const ast::Entity& entity,
-                            std::vector<const ast::Entity*>& seen) const;
+  // The climb from `entity` within its document. It stores the answer of
+  // every entity it passes, so a later climb stops at the first one already
+  // answered: a document costs one pass whatever order its chains are
+  // written in, and a climb holds no frame per storey.
+  [[nodiscard]] Exit exitOf(const ast::Entity& entity) const;
 
   // `exitOf`, memoised -- unmemoised the check is quadratic over a document.
   // An answer reads its document and the entities its references resolve to,
