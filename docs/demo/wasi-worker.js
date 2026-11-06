@@ -69,25 +69,24 @@ function readFile(fd, iovs, n, nreadPtr) {
 function readDir(fd, buf, bufLen, cookie, usedPtr) {
   const d = fds.get(fd);
   if (!d || d.type !== DIR) return EBADF;
-  const view = dv(), mem = u8(), enc8 = new TextEncoder();
+  const mem = u8();
   let used = 0;
   const entries = [['.', DIR], ['..', DIR], ...d.entries];
-  for (let i = Number(cookie); i < entries.length; i++) {
+  // Each entry a header of 24 bytes then its name, cut off where the buffer ends.
+  for (let i = Number(cookie); i < entries.length && used < bufLen; i++) {
     const [name, type] = entries[i];
-    const bytes = enc8.encode(name);
-    const header = new Uint8Array(24), hv = new DataView(header.buffer);
-    hv.setBigUint64(0, BigInt(i + 1), true);
-    hv.setBigUint64(8, BigInt(i + 1), true);
-    hv.setUint32(16, bytes.length, true);
-    hv.setUint8(20, type);
-    const entry = new Uint8Array(24 + bytes.length);
-    entry.set(header); entry.set(bytes, 24);
-    const room = bufLen - used;
-    mem.set(entry.subarray(0, Math.min(room, entry.length)), buf + used);
-    used += Math.min(room, entry.length);
-    if (used >= bufLen) break;
+    const bytes = enc.encode(name);
+    const entry = new Uint8Array(24 + bytes.length), view = new DataView(entry.buffer);
+    view.setBigUint64(0, BigInt(i + 1), true);   // the next entry's cookie
+    view.setBigUint64(8, BigInt(i + 1), true);   // an inode
+    view.setUint32(16, bytes.length, true);
+    view.setUint8(20, type);
+    entry.set(bytes, 24);
+    const kept = Math.min(entry.length, bufLen - used);
+    mem.set(entry.subarray(0, kept), buf + used);
+    used += kept;
   }
-  view.setUint32(usedPtr, used, true);
+  dv().setUint32(usedPtr, used, true);
   return ESUCCESS;
 }
 
@@ -122,7 +121,7 @@ function sizes(strings, countPtr, sizePtr) {
 // 1 tail (bytes read), 2 closed. Counters wrap at 2^32, and the capacity is a
 // power of two, so a counter's low bits are its place in the ring.
 function readStdin(iovs, n, nreadPtr) {
-  const hdr = ctx.stdinHdr, mask = ctx.stdinBuf.length - 1;
+  const hdr = ctx.stdinHdr, ring = ctx.stdinBuf, mask = ring.length - 1;
   for (;;) {
     const head = Atomics.load(hdr, 0), tail = Atomics.load(hdr, 1);
     const avail = (head - tail) >>> 0;
@@ -134,8 +133,11 @@ function readStdin(iovs, n, nreadPtr) {
     let done = 0;
     const mem = u8();
     for (const [ptr, len] of iovecs(iovs, n)) {
-      let want = Math.min(len, avail - done);
-      for (let k = 0; k < want; k++) mem[ptr + k] = ctx.stdinBuf[(tail + done + k) & mask];
+      const want = Math.min(len, avail - done);
+      // Up to the ring's end, then on from its start.
+      const from = (tail + done) & mask, first = Math.min(want, ring.length - from);
+      mem.set(ring.subarray(from, from + first), ptr);
+      mem.set(ring.subarray(0, want - first), ptr + first);
       done += want;
       if (done === avail) break;
     }

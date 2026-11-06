@@ -324,6 +324,17 @@ void the_small_answers_are_what_a_message_is_built_from() {
   other["code"] = cursiv::JsonValue("y");
   CHECK(!ct::isDiagnosticDataEqual(cursiv::JsonValue(whole),
                                    cursiv::JsonValue(other)));
+  // At every depth, and only between two objects.
+  cursiv::JsonValue::Object inner;
+  inner["a"] = cursiv::JsonValue(1);
+  inner["b"] = cursiv::JsonValue(2);
+  whole["nested"] = cursiv::JsonValue(inner);
+  inner.erase("b");
+  part["nested"] = cursiv::JsonValue(inner);
+  CHECK(ct::isDiagnosticDataEqual(cursiv::JsonValue(whole),
+                                  cursiv::JsonValue(part)));
+  CHECK(!ct::isDiagnosticDataEqual(cursiv::JsonValue(whole),
+                                   cursiv::JsonValue("x")));
 }
 
 void the_caret_reaches_its_declaration() {

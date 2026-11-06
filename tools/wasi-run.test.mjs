@@ -156,14 +156,11 @@ test('imported memory preserves sharing and optional maximum', async () => {
   assert.equal(memory.grow(1), 1);
 });
 
-// The online demo reads the same descriptor with its own copy of the reader.
-const sameOnThePage = (bytes) => {
-  let answer;
-  try { answer = { limits: importedMemoryLimits(bytes) }; } catch (error) { answer = { error: error.name }; }
-  let page;
-  try { page = { limits: pageMemoryLimits(bytes) }; } catch (error) { page = { error: error.name }; }
-  assert.deepEqual(page, answer);
-};
+// The online demo cannot import this runner: it carries its own copy of the
+// reader, which must stay the same.
+test('the online demo reads the descriptor with the same code', () => {
+  assert.equal(pageMemoryLimits.toString(), importedMemoryLimits.toString());
+});
 
 test('tag/table/global imports before memory do not hide its descriptor', async () => {
   const bytes = memoryModule(3, 1, 16, [
@@ -177,10 +174,9 @@ test('tag/table/global imports before memory do not hide its descriptor', async 
   assert.equal(importedMemoryLimits(Buffer.from(header)), undefined);
   assert.throws(() => importedMemoryLimits(Buffer.from([...header, 2, 10])), /Truncated/);
   assert.throws(() => importedMemoryLimits(memoryModule(4)), /wasm32/);
-  for (const module of [bytes, memoryModule(), memoryModule(1, 2, 65536), memoryModule(4),
-                        Buffer.from(header), Buffer.from([...header, 2, 10]),
-                        memoryModule(3, 1, 16, [importEntry('env', 'table', 1, [0x63, 0x70, 0, 0])])])
-    sameOnThePage(module);
+  assert.deepEqual(importedMemoryLimits(
+    memoryModule(3, 1, 16, [importEntry('env', 'table', 1, [0x63, 0x70, 0, 0])])),
+    { initial: 1, maximum: 16, shared: true });
 });
 
 test('runner starts nonshared imported memory and permits memory.grow without maximum', () => {

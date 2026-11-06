@@ -4,10 +4,9 @@
 // Drives a cursiv MCP session over stdio (one JSON message per line):
 // initialize, tools/list, get-diagnostics, then every requested call. Exits 0
 // when the handshake completed, every call answered without error and the
-// server exited cleanly at the end of its input. Native binaries only.
+// server exited cleanly at the end of its input.
 
-import { spawn } from 'node:child_process';
-import { StringDecoder } from 'node:string_decoder';
+import { startSession } from './session-client.mjs';
 
 const argv = process.argv.slice(2);
 let folder = '.';
@@ -24,52 +23,9 @@ if (!serverPath) {
   process.exit(2);
 }
 
-const child = spawn(serverPath, ['--mcp', '--folder', folder],
-                    { stdio: ['pipe', 'pipe', 'inherit'] });
-
-// A StringDecoder, not chunk.toString: a character straddling a pipe-read
-// boundary would decode to U+FFFD in both halves.
-const decoder = new StringDecoder('utf8');
-let buffer = '';
-const received = [];
-child.stdout.on('data', (chunk) => {
-  buffer += decoder.write(chunk);
-  let nl;
-  while ((nl = buffer.indexOf('\n')) !== -1) {
-    const line = buffer.slice(0, nl);
-    buffer = buffer.slice(nl + 1);
-    if (line.trim()) received.push(JSON.parse(line));
-  }
-});
-
-const send = (message) =>
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
-
-const waitFor = (id, what, timeoutMs = 20000) =>
-  new Promise((resolve, reject) => {
-    const started = Date.now();
-    const poll = () => {
-      const found = received.find((m) => m.id === id);
-      if (found) return resolve(found);
-      if (child.exitCode !== null)
-        return reject(new Error(`server exited before answering ${what}`));
-      if (Date.now() - started > timeoutMs)
-        return reject(new Error(`timed out waiting for ${what}`));
-      setTimeout(poll, 20);
-    };
-    poll();
-  });
-
-// How the server ended: `code 0` is the one clean way. One still running two
-// seconds after the session is killed.
-function serverEnd() {
-  const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(said());
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
-    child.once('exit', () => { clearTimeout(timer); resolve(said()); });
-  });
-}
+const { child, send, waitFor, end: serverEnd } =
+  startSession(serverPath, ['--mcp', '--folder', folder], { lines: true });
+const answerTo = (id, what) => waitFor((m) => m.id === id, what);
 
 let failed = false;
 try {
@@ -80,18 +36,18 @@ try {
       clientInfo: { name: 'mcp-session', version: '0' },
     },
   });
-  const init = await waitFor(1, 'initialize');
+  const init = await answerTo(1, 'initialize');
   console.log(`server: ${init.result.serverInfo.name} ${init.result.serverInfo.version}` +
               ` (protocol ${init.result.protocolVersion})`);
   send({ method: 'notifications/initialized' });
 
   send({ id: 2, method: 'tools/list' });
-  const tools = await waitFor(2, 'tools/list');
+  const tools = await answerTo(2, 'tools/list');
   console.log('tools: ' + tools.result.tools.map((t) => t.name).join(', '));
 
   send({ id: 3, method: 'tools/call',
          params: { name: 'get-diagnostics', arguments: {} } });
-  const diagnostics = await waitFor(3, 'get-diagnostics');
+  const diagnostics = await answerTo(3, 'get-diagnostics');
   if (diagnostics.error) {
     throw new Error('get-diagnostics: ' + diagnostics.error.message);
   }
@@ -103,7 +59,7 @@ try {
   for (const [name, args] of calls) {
     send({ id, method: 'tools/call',
            params: { name, arguments: JSON.parse(args) } });
-    const answer = await waitFor(id, name);
+    const answer = await answerTo(id, name);
     console.log(`--- ${name} ---`);
     if (answer.error) {
       failed = true;

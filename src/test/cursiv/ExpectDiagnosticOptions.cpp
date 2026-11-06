@@ -2,6 +2,7 @@
 
 #include <lsp/types.h>
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <span>
@@ -52,15 +53,14 @@ std::optional<TextRange> anchorOf(const ValidationResult& result,
 }  // namespace
 
 bool isDiagnosticDataEqual(const JsonValue& lhs, const JsonValue& rhs) {
+  if (lhs.isObject() && rhs.isObject())
+    return std::ranges::all_of(rhs.object(), [&lhs](const auto& entry) {
+      const auto at = lhs.object().find(entry.first);
+      return at != lhs.object().end() &&
+             isDiagnosticDataEqual(at->second, entry.second);
+    });
   // The serialization is deterministic, which makes it the deep comparison.
-  if (lhs.toJsonString() == rhs.toJsonString()) return true;
-  if (!lhs.isObject() || !rhs.isObject()) return false;
-  for (const auto& [key, value] : rhs.object()) {
-    const auto at = lhs.object().find(key);
-    if (at == lhs.object().end() || !isDiagnosticDataEqual(at->second, value))
-      return false;
-  }
-  return true;
+  return lhs.toJsonString() == rhs.toJsonString();
 }
 
 std::vector<Diagnostic> filterByOptions(

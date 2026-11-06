@@ -235,6 +235,8 @@ function(_cursiv_generate_language test_only)
   else()
     set(_part ParserGroups)
   endif()
+  # One file per unit the generators write: as many as their `kParserUnits`,
+  # which changes together with this range.
   foreach(_unit RANGE 0 7)
     list(APPEND _parserUnits ${_part}${_unit}.cpp)
   endforeach()

@@ -26,16 +26,6 @@ namespace cursiv::test {
 
 namespace {
 
-ExpectedBase baseOf(const ExpectedCompletion& input) {
-  return std::visit(
-      [](const auto& arm) {
-        return ExpectedBase{arm.text,           arm.parseOptions,
-                            arm.indexMarker,    arm.rangeStartMarker,
-                            arm.rangeEndMarker, arm.disposeAfterCheck};
-      },
-      input);
-}
-
 std::size_t indexOf(const ExpectedCompletion& input) {
   if (const auto* const items = std::get_if<ExpectedCompletionItems>(&input))
     return items->index;
@@ -52,7 +42,7 @@ std::string rankOf(const lsp::CompletionItem& item) {
 
 Disposable expectCompletion(const LspServices& services,
                             const ExpectedCompletion& expectedCompletion) {
-  const ExpectedBase base = baseOf(expectedCompletion);
+  const ExpectedBase base = detail::baseOf(expectedCompletion);
   const ReplacedIndices marked = replaceIndices(base);
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, base.parseOptions);

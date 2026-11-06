@@ -29,11 +29,8 @@ namespace cursiv::test {
 Disposable expectFindReferences(
     const LspServices& services,
     const ExpectedFindReferences& expectedFindReferences) {
-  const ReplacedIndices marked = replaceIndices(
-      {.text = expectedFindReferences.text,
-       .indexMarker = expectedFindReferences.indexMarker,
-       .rangeStartMarker = expectedFindReferences.rangeStartMarker,
-       .rangeEndMarker = expectedFindReferences.rangeEndMarker});
+  const ReplacedIndices marked =
+      replaceIndices(detail::baseOf(expectedFindReferences));
   const std::shared_ptr<Document> document = parseDocument(
       services, marked.output, expectedFindReferences.parseOptions);
 

@@ -6,8 +6,8 @@
 // the buffer's, not the disk's. Exits 0 when both hold and the server then
 // exits cleanly.
 
-import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { startSession } from './session-client.mjs';
 
 const [serverPath, folderPath] = process.argv.slice(2);
 if (!serverPath || !folderPath) {
@@ -17,61 +17,15 @@ if (!serverPath || !folderPath) {
 const folder = path.resolve(folderPath);
 const folderUri = 'file://' + folder;
 
-const child = spawn(serverPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
-
-const send = (message) => {
-  const body = JSON.stringify({ jsonrpc: '2.0', ...message });
-  child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
-};
-
-let buffer = Buffer.alloc(0);
-const received = [];
-child.stdout.on('data', (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  for (;;) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
-    if (headerEnd === -1) return;
-    const header = buffer.subarray(0, headerEnd).toString('utf8');
-    const length = Number(/content-length:\s*(\d+)/i.exec(header)?.[1]);
-    if (buffer.length < headerEnd + 4 + length) return;
-    const body = buffer.subarray(headerEnd + 4, headerEnd + 4 + length);
-    buffer = buffer.subarray(headerEnd + 4 + length);
-    received.push(JSON.parse(body.toString('utf8')));
-  }
-});
-
-const waitFor = (id, what, timeoutMs = 20000) =>
-  new Promise((resolve, reject) => {
-    const started = Date.now();
-    const poll = () => {
-      const found = received.find((m) => m.id === id);
-      if (found) return resolve(found);
-      if (child.exitCode !== null)
-        return reject(new Error(`server exited before answering ${what}`));
-      if (Date.now() - started > timeoutMs)
-        return reject(new Error(`timed out waiting for ${what}`));
-      setTimeout(poll, 20);
-    };
-    poll();
-  });
+const { send, waitFor, end: serverEnd } = startSession(serverPath);
+const answerTo = (id, what) => waitFor((m) => m.id === id, what);
 
 const mcp = async (id, message) => {
   send({ id, method: 'cursiv/mcp', params: { jsonrpc: '2.0', ...message } });
-  const answer = await waitFor(id, message.method);
+  const answer = await answerTo(id, message.method);
   if (answer.error) throw new Error(`tunnel error: ${answer.error.message}`);
   return answer.result;
 };
-
-// How the server ended: `code 0` is the one clean way. One still running two
-// seconds after the session is killed.
-function serverEnd() {
-  const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(said());
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
-    child.once('exit', () => { clearTimeout(timer); resolve(said()); });
-  });
-}
 
 let failed = false;
 try {
@@ -84,7 +38,7 @@ try {
       workspaceFolders: [{ uri: folderUri, name: 'workspace' }],
     },
   });
-  const init = await waitFor(1, 'initialize');
+  const init = await answerTo(1, 'initialize');
   if (init.error) throw new Error(`initialize failed: ${init.error.message}`);
   send({ method: 'initialized', params: {} });
 
@@ -115,7 +69,7 @@ try {
   }
 
   send({ id: 9, method: 'shutdown' });
-  await waitFor(9, 'shutdown');
+  await answerTo(9, 'shutdown');
   send({ method: 'exit' });
 } catch (error) {
   console.error(String(error));

@@ -220,7 +220,7 @@ export function importedMemoryLimits(bytes) {
       if (kind === 0x02) {                          // 0x02 is a memory import
         const flags = leb();
         if (flags & ~0x03)
-          throw new Error('wasi-run supports wasm32 imported memory only');
+          throw new Error('only a wasm32 imported memory is supported');
         const initial = leb();
         return { initial, shared: Boolean(flags & 0x02),
           ...(flags & 0x01 ? { maximum: leb() } : {}) };

@@ -217,7 +217,7 @@ async function startSession(session, wantedDoc) {
     env: params.has('workers') ? { CURSIV_WORKERS: params.get('workers') } : {},
     // The example folder, scanned by the server as in an editor workspace.
     root: '/demo',
-    files: Object.fromEntries(session.documents.map((d) => [`/demo/${lang.id}/${d.name}`, enc.encode(texts[session.documents.indexOf(d)])])),
+    files: Object.fromEntries(session.documents.map((d, i) => [`/demo/${lang.id}/${d.name}`, enc.encode(texts[i])])),
     onLog: (text) => console.warn(`[${lang.id}]`, text.trimEnd()),
     onExit: (reason) => {
       if (session.disposed) return;

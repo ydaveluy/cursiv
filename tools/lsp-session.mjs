@@ -19,10 +19,10 @@
 // document passed. Exits 0 when the handshake completed, every document got a
 // diagnostics snapshot after its didOpen, and the server exited cleanly.
 
-import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import * as path from 'node:path';
+import { startSession } from './session-client.mjs';
 
 // As an editor spells it: on Windows a lower-case drive letter, its colon escaped.
 const fileUri = (file) => pathToFileURL(path.resolve(file)).toString()
@@ -92,14 +92,7 @@ if (renameCursor !== null && !/^\d+:\d+=.+$/.test(renameCursor)) {
     process.exit(2);
 }
 
-// A wasm module cannot be exec'd; it goes through the same runner ctest uses.
-const magic = (await import('node:fs')).readFileSync(serverPath).subarray(0, 4);
-const isWasm = magic.equals(Buffer.from([0x00, 0x61, 0x73, 0x6d]));
-const runner = fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
-const server = isWasm
-    ? spawn(process.execPath, ['--no-warnings', runner, serverPath],
-            { stdio: ['pipe', 'pipe', 'inherit'] })
-    : spawn(serverPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+const { child: server, received, send, waitFor, end: serverEnd } = startSession(serverPath);
 
 // One monotonic id per request, allocated where the request is sent: `waitFor`
 // answers by id over a list it never clears, so a shared id answers twice.
@@ -112,62 +105,6 @@ async function request(message, what) {
         throw new Error(`${what}: ${answer.error.code}: ${answer.error.message}`);
     }
     return answer;
-}
-
-function send(message) {
-    const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...message }), 'utf8');
-    server.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-    server.stdin.write(body);
-}
-
-// The framing is the protocol's own: a header block, a blank line, then exactly
-// Content-Length bytes. Anything else on the stream is a server bug and shows
-// up here as a parse failure rather than as a hang.
-const received = [];
-let buffer = Buffer.alloc(0);
-server.stdout.on('data', (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    for (;;) {
-        const headerEnd = buffer.indexOf('\r\n\r\n');
-        if (headerEnd < 0) return;
-        const headers = buffer.subarray(0, headerEnd).toString('ascii');
-        const match = /content-length:\s*(\d+)/i.exec(headers);
-        if (!match) {
-            console.error(`no Content-Length in header block: ${JSON.stringify(headers)}`);
-            process.exit(1);
-        }
-        const length = Number(match[1]);
-        const start = headerEnd + 4;
-        if (buffer.length < start + length) return;
-        received.push(JSON.parse(buffer.subarray(start, start + length).toString('utf8')));
-        buffer = buffer.subarray(start + length);
-    }
-});
-
-// The latest message that matches, among those received from index `since`:
-// a notification sent before the client's own last move answers nothing.
-function waitFor(predicate, what, { since = 0, timeoutMs = 10000 } = {}) {
-    const deadline = Date.now() + timeoutMs;
-    return new Promise((resolve, reject) => {
-        const poll = () => {
-            const found = received.slice(since).findLast(predicate);
-            if (found) return resolve(found);
-            if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${what}`));
-            setTimeout(poll, 20);
-        };
-        poll();
-    });
-}
-
-// How the server ended after `exit`: `code 0` is the one clean way. One still
-// running two seconds later is killed.
-function serverEnd() {
-    const said = () => server.exitCode !== null ? `code ${server.exitCode}` : `signal ${server.signalCode}`;
-    if (server.exitCode !== null || server.signalCode !== null) return Promise.resolve(said());
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => { server.kill(); resolve('still running after 2 s'); }, 2000);
-        server.once('exit', () => { clearTimeout(timer); resolve(said()); });
-    });
 }
 
 function report(name, published) {

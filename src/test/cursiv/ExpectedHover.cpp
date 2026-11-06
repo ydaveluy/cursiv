@@ -24,11 +24,7 @@ namespace cursiv::test {
 
 Disposable expectHover(const LspServices& services,
                        const ExpectedHover& expectedHover) {
-  const ReplacedIndices marked =
-      replaceIndices({.text = expectedHover.text,
-                      .indexMarker = expectedHover.indexMarker,
-                      .rangeStartMarker = expectedHover.rangeStartMarker,
-                      .rangeEndMarker = expectedHover.rangeEndMarker});
+  const ReplacedIndices marked = replaceIndices(detail::baseOf(expectedHover));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, expectedHover.parseOptions);
 

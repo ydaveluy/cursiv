@@ -26,11 +26,7 @@ namespace cursiv::test {
 
 Disposable expectHighlight(const LspServices& services,
                            const ExpectedHighlight& input) {
-  const ReplacedIndices marked =
-      replaceIndices({.text = input.text,
-                      .indexMarker = input.indexMarker,
-                      .rangeStartMarker = input.rangeStartMarker,
-                      .rangeEndMarker = input.rangeEndMarker});
+  const ReplacedIndices marked = replaceIndices(detail::baseOf(input));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
   std::vector<lsp::DocumentHighlight> highlights;

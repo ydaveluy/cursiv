@@ -1,6 +1,6 @@
-// The ribbon that decides nothing: every choice is the first. What a
-// layout fixpoint uses -- a separator it is forced to add must not eat the
-// caller's entropy -- and what a probe wanting one canonical spelling uses.
+// The ribbon that decides nothing: every choice is the first. The lexicon
+// spells its separator with it: one canonical spelling, worked out without
+// taking any entropy from the caller's source.
 #pragma once
 
 #include "cursiv/DecisionSource.hpp"

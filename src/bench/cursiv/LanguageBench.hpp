@@ -726,12 +726,14 @@ void ws_stages(int iterations, bool resident, std::size_t workers,
 inline void warm_pool(cursiv::TaskScheduler& scheduler, std::size_t workers) {
   if (workers == 0) return;
   const cursiv::CancellationToken token;
-  const std::vector range(64, 0);
+  // Two items per thread, the submitting one included, so that every round
+  // wakes the whole pool; a thread seen in any round has started.
+  const std::vector range(std::max<std::size_t>(64, 2 * (workers + 1)), 0);
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  std::mutex lock;
+  std::set<std::thread::id> seen;
   for (;;) {
-    std::mutex lock;
-    std::set<std::thread::id> seen;
     scheduler.parallelFor(token, range, [&](int) {
       const auto until =
           std::chrono::steady_clock::now() + std::chrono::microseconds(500);

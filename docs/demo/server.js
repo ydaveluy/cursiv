@@ -9,8 +9,8 @@ const modules = new Map();      // compiled modules, kept across restarts
 
 // The import section's memory entry: `flags` then `min` then, when the flags
 // say so, `max`, all LEB128. Bit 0 is "has maximum", bit 1 "shared". JS does
-// not reflect the maximum, and a shared memory must match it exactly. The same
-// reader as tools/wasi-run.mjs, whose tests hold the two to the same answers.
+// not reflect the maximum, and a shared memory must match it exactly. A copy
+// of the reader in tools/wasi-run.mjs, whose tests hold the two the same.
 export function importedMemoryLimits(bytes) {
   let at = 8;  // past the magic and the version
   let limit = bytes.length;
@@ -61,7 +61,7 @@ export function importedMemoryLimits(bytes) {
       if (kind === 0x02) {                          // 0x02 is a memory import
         const flags = leb();
         if (flags & ~0x03)
-          throw new Error('the demo supports wasm32 imported memory only');
+          throw new Error('only a wasm32 imported memory is supported');
         const initial = leb();
         return { initial, shared: Boolean(flags & 0x02),
           ...(flags & 0x01 ? { maximum: leb() } : {}) };
@@ -111,7 +111,14 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
                    env: { CURSIV_WORKERS: '0', ...env } };
 
   const listeners = new Set();
-  const waiting = new Map();    // request id -> [resolve, reject]
+  const waiting = new Map();    // request id -> { resolve, reject, cancel }
+  // The request's entry, gone from `waiting`, its cancel listener with it.
+  const settle = (id) => {
+    const entry = waiting.get(id);
+    waiting.delete(id);
+    entry?.cancel?.dispose();
+    return entry;
+  };
   const frames = new Map();
   const workers = [];
   let stopped = false;
@@ -119,8 +126,7 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
     if (stopped) return;
     stopped = true;
     workers.forEach((w) => w.terminate());
-    for (const [, fail] of waiting.values()) fail(new Error(reason));
-    waiting.clear();
+    for (const id of [...waiting.keys()]) settle(id).reject(new Error(reason));
     onExit(reason);
   };
   const dec = new TextDecoder();
@@ -194,7 +200,10 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
       const chunk = pending[0];
       const n = Math.min(free, chunk.length);
       if (n === 0) { retry = setTimeout(pump, 1); return; }
-      for (let k = 0; k < n; k++) stdinBuf[(head + k) & (STDIN_CAPACITY - 1)] = chunk[k];
+      // Up to the ring's end, then on from its start.
+      const at = head & (STDIN_CAPACITY - 1), first = Math.min(n, STDIN_CAPACITY - at);
+      stdinBuf.set(chunk.subarray(0, first), at);
+      stdinBuf.set(chunk.subarray(first, n), 0);
       Atomics.store(stdinHdr, 0, (head + n) | 0);
       Atomics.notify(stdinHdr, 0);
       if (n === chunk.length) pending.shift(); else pending[0] = chunk.subarray(n);
@@ -212,11 +221,10 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
   const notificationHandlers = new Map();
   listeners.add((m) => {
     if (m.id !== undefined && !m.method) {
-      const entry = waiting.get(m.id);
+      const entry = settle(m.id);
       if (!entry) return;
-      waiting.delete(m.id);
-      if (m.error) entry[1](Object.assign(new Error(m.error.message), m.error));
-      else entry[0](m.result);
+      if (m.error) entry.reject(Object.assign(new Error(m.error.message), m.error));
+      else entry.resolve(m.result);
     } else if (m.id !== undefined && m.method) {
       // Requests from the server: no settings, every registration accepted.
       send({ jsonrpc: '2.0', id: m.id,
@@ -232,8 +240,9 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
       return new Promise((resolve, reject) => {
         if (stopped) { reject(new Error('the server is not running')); return; }
         const id = nextId++;
-        waiting.set(id, [resolve, reject]);
-        token?.onCancellationRequested?.(() => send({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } }));
+        const cancel = token?.onCancellationRequested?.(
+          () => send({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } }));
+        waiting.set(id, { resolve, reject, cancel });
         send({ jsonrpc: '2.0', id, method, params });
       });
     },

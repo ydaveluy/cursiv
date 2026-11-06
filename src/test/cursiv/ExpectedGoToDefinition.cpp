@@ -28,11 +28,8 @@ namespace cursiv::test {
 Disposable expectGoToDefinition(
     const LspServices& services,
     const ExpectedGoToDefinition& expectedGoToDefinition) {
-  const ReplacedIndices marked = replaceIndices(
-      {.text = expectedGoToDefinition.text,
-       .indexMarker = expectedGoToDefinition.indexMarker,
-       .rangeStartMarker = expectedGoToDefinition.rangeStartMarker,
-       .rangeEndMarker = expectedGoToDefinition.rangeEndMarker});
+  const ReplacedIndices marked =
+      replaceIndices(detail::baseOf(expectedGoToDefinition));
   const std::shared_ptr<Document> document = parseDocument(
       services, marked.output, expectedGoToDefinition.parseOptions);
 

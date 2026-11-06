@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One pull request: actions released together, such as CodeQL's init and
+    # analyze, must move together.
+    groups:
+      actions:
+        patterns:
+          - "*"
   # The demo page and the example extensions, each folder's updates grouped in
   # one pull request a week. The project template is synced by hand, since its
   # packed copy is generated.
@@ -13,6 +19,13 @@ updates:
       - /examples/*/vscode
     schedule:
       interval: weekly
+    ignore:
+      # The oldest VS Code the extensions run on (`engines.vscode`): moved by
+      # hand with it, since newer types offer APIs that VS Code lacks.
+      - dependency-name: "@types/vscode"
+      # The Node of that VS Code's extension host: minor and patch updates only.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns:

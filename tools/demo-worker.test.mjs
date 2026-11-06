@@ -151,22 +151,26 @@ function workerScope(ctx) {
   return scope;
 }
 
-test('stdin reads on past 2 GiB in total', () => {
+test('stdin reads on past 2 GiB in total and across the ring\'s end', () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const stdinHdr = new Int32Array(new SharedArrayBuffer(12));
   const stdinBuf = new Uint8Array(new SharedArrayBuffer(16));
   const scope = workerScope({ memory, stdinHdr, stdinBuf });
-  // 2^31 + 4 bytes went through; 8 more wait where the page put them.
-  const total = 2 ** 31 + 4;
+  // 2^31 + 12 bytes went through; 8 more wait where the page put them, the
+  // last 4 back at the ring's start.
+  const total = 2 ** 31 + 12;
   for (let k = 0; k < 8; ++k) stdinBuf[(total + k) % 16] = k + 1;
   stdinHdr[1] = total | 0;
   stdinHdr[0] = (total + 8) | 0;
   const view = new DataView(memory.buffer);
-  view.setUint32(32, 64, true);   // one iovec: 16 bytes at 64
-  view.setUint32(36, 16, true);
-  assert.equal(scope.readStdin(32, 1, 0), 0);
+  view.setUint32(32, 64, true);   // two iovecs: 3 bytes at 64, 16 at 80
+  view.setUint32(36, 3, true);
+  view.setUint32(40, 80, true);
+  view.setUint32(44, 16, true);
+  assert.equal(scope.readStdin(32, 2, 0), 0);
   assert.equal(view.getUint32(0, true), 8);
-  assert.deepEqual([...new Uint8Array(memory.buffer, 64, 8)], [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual([...new Uint8Array(memory.buffer, 64, 3)], [1, 2, 3]);
+  assert.deepEqual([...new Uint8Array(memory.buffer, 80, 6)], [4, 5, 6, 7, 8, 0]);
   assert.equal(stdinHdr[1], (total + 8) | 0);
 });
 
@@ -187,6 +191,36 @@ test('a poll reports the clocks that are due, not the others', () => {
   assert.equal(view.getUint32(0, true), 1);
   assert.equal(view.getBigUint64(512, true), 1n);
   assert.equal(view.getUint16(512 + 8, true), 0);
+});
+
+test('a folder lists its entries from a cookie, cut off where the buffer ends', () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const files = { '/demo/a/x.txt': new Uint8Array(1), '/demo/a/b/y.txt': new Uint8Array(1) };
+  const scope = workerScope({ memory, root: '/demo', files, env: {} });
+  vm.runInContext('nextFd = 16', scope);
+  const mem = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
+  mem.set(Buffer.from('a'), 100);
+  assert.equal(scope.wasiImports().path_open(3, 0, 100, 1, 2, 0n, 0n, 0, 0), 0);
+  const fd = view.getUint32(0, true);
+  // The records from `cookie` on: the next cookie, an inode, the name's length,
+  // the type, then the name.
+  const records = (cookie) => [['.', 3], ['..', 3], ['x.txt', 4], ['b', 3]].slice(cookie)
+    .flatMap(([name, type], i) => {
+      const record = Buffer.alloc(24 + name.length);
+      record.writeBigUInt64LE(BigInt(cookie + i + 1), 0);
+      record.writeBigUInt64LE(BigInt(cookie + i + 1), 8);
+      record.writeUInt32LE(name.length, 16);
+      record[20] = type;
+      record.write(name, 24);
+      return [...record];
+    });
+  for (const [cookie, room] of [[0, 40], [2, 4096], [4, 4096], [0, 0]]) {
+    mem.fill(0xee, 1024, 1024 + 4096);
+    assert.equal(scope.readDir(fd, 1024, room, BigInt(cookie), 8), 0);
+    const expected = records(cookie).slice(0, room);
+    assert.equal(view.getUint32(8, true), expected.length);
+    assert.deepEqual([...mem.subarray(1024, 1024 + expected.length + 1)], [...expected, 0xee]);
+  }
 });
 
 // The page's side of the transport, over workers the test speaks for.
@@ -225,12 +259,37 @@ const settled = (promise) => Promise.race([
   promise.then((value) => ({ value }), (error) => ({ error })),
   new Promise((wake) => setTimeout(() => wake({ pending: true }), 500))]);
 
-test('the page writes stdin on past 2 GiB in total', async () => {
+test('the page writes stdin on past 2 GiB in total and across the ring\'s end', async () => {
   const { server, written, stdinHdr } = await pageSession('ring');
-  stdinHdr.fill((2 ** 31 + 4) | 0, 0, 2);
+  // 10 bytes short of a lap of the 1 MiB ring.
+  stdinHdr.fill((2 ** 31 + 2 ** 20 - 10) | 0, 0, 2);
   server.notify('initialized', {});
   assert.equal(written(), frame(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })));
   server.dispose();
+});
+
+test('a request is cancelled until its answer comes, not after', async () => {
+  const { server, written, reply } = await pageSession('cancel');
+  const listeners = new Set();
+  const token = { onCancellationRequested(fn) {
+    listeners.add(fn);
+    return { dispose: () => listeners.delete(fn) };
+  } };
+  const cancel = () => listeners.forEach((fn) => fn());
+  const cancelFrame = (id) =>
+    frame(JSON.stringify({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } }));
+  const answered = server.request('textDocument/hover', {}, token);
+  reply(frame('{"jsonrpc":"2.0","id":1,"result":null}'));
+  assert.deepEqual(await settled(answered), { value: null });
+  const before = written();
+  cancel();
+  assert.equal(written(), before, 'an answered request is not cancelled');
+  const pending = server.request('textDocument/hover', {}, token);
+  cancel();
+  assert.ok(written().endsWith(cancelFrame(2)));
+  server.dispose();
+  assert.ok((await settled(pending)).error);
+  assert.equal(listeners.size, 0, 'no request listens once the session stopped');
 });
 
 test('a frame with a long header still answers', async () => {

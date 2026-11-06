@@ -3,7 +3,7 @@
 // types -- `didChange` -- and asks, without waiting: the answer must be the
 // document it just wrote, not the one before. The two travel different paths
 // inside the server, and only the order they were sent in ties them.
-import { spawn } from 'node:child_process';
+import { startSession } from './session-client.mjs';
 
 const [serverPath, folder] = process.argv.slice(2);
 if (!serverPath || !folder) {
@@ -11,55 +11,9 @@ if (!serverPath || !folder) {
   process.exit(2);
 }
 
-const child = spawn(serverPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
-const send = (message) => {
-  const body = JSON.stringify({ jsonrpc: '2.0', ...message });
-  child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
-};
-
-let buffer = Buffer.alloc(0);
-const received = [];
-child.stdout.on('data', (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  for (;;) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
-    if (headerEnd === -1) return;
-    const header = buffer.subarray(0, headerEnd).toString('utf8');
-    const length = Number(/content-length:\s*(\d+)/i.exec(header)?.[1]);
-    if (buffer.length < headerEnd + 4 + length) return;
-    received.push(JSON.parse(
-        buffer.subarray(headerEnd + 4, headerEnd + 4 + length).toString('utf8')));
-    buffer = buffer.subarray(headerEnd + 4 + length);
-  }
-});
-
-const waitFor = (predicate, what, timeoutMs = 20000) =>
-  new Promise((resolve, reject) => {
-    const started = Date.now();
-    const poll = () => {
-      const found = received.find(predicate);
-      if (found) return resolve(found);
-      if (child.exitCode !== null)
-        return reject(new Error(`server exited before answering ${what}`));
-      if (Date.now() - started > timeoutMs)
-        return reject(new Error(`timed out waiting for ${what}`));
-      setTimeout(poll, 5);
-    };
-    poll();
-  });
+const { send, waitFor, end: serverEnd } = startSession(serverPath);
 
 const uri = `file://${folder}/order.dmodel`;
-
-// How the server ended: `code 0` is the one clean way. One still running two
-// seconds after the session is killed.
-function serverEnd() {
-  const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(said());
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
-    child.once('exit', () => { clearTimeout(timer); resolve(said()); });
-  });
-}
 
 let failed = false;
 try {

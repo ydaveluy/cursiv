@@ -49,11 +49,7 @@ std::vector<lsp::TextEdit> editsFor(const lsp::WorkspaceEdit& all,
 
 Disposable expectRename(const LspServices& services,
                         const ExpectedRename& input) {
-  const ReplacedIndices marked =
-      replaceIndices({.text = input.text,
-                      .indexMarker = input.indexMarker,
-                      .rangeStartMarker = input.rangeStartMarker,
-                      .rangeEndMarker = input.rangeEndMarker});
+  const ReplacedIndices marked = replaceIndices(detail::baseOf(input));
   const std::shared_ptr<Document> document =
       parseDocument(services, marked.output, input.parseOptions);
   const auto* const marker = detail::markerAt(marked.indices, input.index);

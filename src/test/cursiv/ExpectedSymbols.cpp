@@ -19,23 +19,9 @@
 
 namespace cursiv::test {
 
-namespace {
-
-ExpectedBase baseOf(const ExpectedSymbols& input) {
-  return std::visit(
-      [](const auto& arm) {
-        return ExpectedBase{arm.text,           arm.parseOptions,
-                            arm.indexMarker,    arm.rangeStartMarker,
-                            arm.rangeEndMarker, arm.disposeAfterCheck};
-      },
-      input);
-}
-
-}  // namespace
-
 Disposable expectSymbols(const LspServices& services,
                          const ExpectedSymbols& input) {
-  const ExpectedBase base = baseOf(input);
+  const ExpectedBase base = detail::baseOf(input);
   const std::shared_ptr<Document> document =
       parseDocument(services, base.text, base.parseOptions);
   std::vector<lsp::DocumentSymbol> symbols;
