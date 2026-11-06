@@ -48,21 +48,6 @@ template <class M>
 concept IsCheck = requires { typename check_traits<M>::node; } &&
                   std::is_base_of_v<AstNode, typename check_traits<M>::node>;
 
-// The class of any method pointer, check-shaped or not, so a mis-shaped one
-// reaches the laws below instead of failing deduction with no message.
-template <class M>
-struct method_class;
-template <class R, class V, class... A>
-struct method_class<R (V::*)(A...)> {
-  using type = V;
-};
-template <class R, class V, class... A>
-struct method_class<R (V::*)(A...) const> {
-  using type = V;
-};
-template <auto... Ms>
-using validator_of = typename method_class<decltype((Ms, ...))>::type;
-
 }  // namespace detail
 
 // One check, erased. The acceptor is non-const because that is the shape a

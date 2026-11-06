@@ -82,9 +82,4 @@ constexpr CharSet parse_charset(std::string_view Spec) {
 }
 }  // namespace detail
 
-template <str Spec>
-constexpr CharSet make_charset() {
-  return detail::parse_charset(Spec.view());
-}
-
 }  // namespace cursiv

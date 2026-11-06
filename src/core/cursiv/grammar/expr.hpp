@@ -408,11 +408,6 @@ struct UnaryLevel {
   static constexpr auto op_pointer = OpPtr;
   static constexpr auto operand_pointer = OperandPtr;
 };
-template <class T>
-concept Assoc = requires {
-  typename T::op_expr;
-  T::kGroup;
-};
 template <class L>
 inline constexpr bool is_unary_level =
     L::kGroup == Association::prefix || L::kGroup == Association::postfix;
@@ -901,10 +896,6 @@ constexpr bool cp_ascii_of(std::string_view spec) {
   const ClassRanges r = ClassRanges::of(spec);
   return r.r.empty() || r.r.back().hi < 0x80;
 }
-template <str Spec>
-consteval bool cp_ascii() {
-  return cp_ascii_of(Spec.view());
-}
 template <str Text>
 consteval bool class_strays() {
   return ClassRanges::of(Text.view()).strays;
@@ -959,18 +950,6 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
     }
   put(scalars);
   sink('}');
-}
-template <std::uint64_t M, bool N, str S>
-consteval auto cp_name() {
-  constexpr std::size_t n = [] {
-    std::size_t k = 1;
-    cp_name_emit(M, N, S.view(), [&k](char) { ++k; });
-    return k;
-  }();
-  char buf[n]{};
-  std::size_t at = 0;
-  cp_name_emit(M, N, S.view(), [&buf, &at](char c) { buf[at++] = c; });
-  return str<n>(buf);
 }
 // The scalars the properties `M` names.
 template <std::uint64_t M>

@@ -17,7 +17,6 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/utils/macros.hpp"
-#include "cursiv/utils/saturating.hpp"
 #include "cursiv/lr/runtime/LrCactus.hpp"
 #include "cursiv/lr/runtime/LrCactusClimb.hpp"
 #include "cursiv/lr/runtime/LrConfig.hpp"
@@ -38,6 +37,15 @@
 #include "cursiv/shared/table/Token.hpp"
 
 namespace cursiv {
+
+// The largest count where a product or a sum would wrap: a bound derived from
+// a grammar or a document is never smaller for being large.
+constexpr std::uint64_t saturating_add(std::uint64_t a, std::uint64_t b) {
+  return a > ~std::uint64_t{0} - b ? ~std::uint64_t{0} : a + b;
+}
+constexpr std::uint64_t saturating_mul(std::uint64_t a, std::uint64_t b) {
+  return a != 0 && b > ~std::uint64_t{0} / a ? ~std::uint64_t{0} : a * b;
+}
 
 // What a link is to the expected set: an arm the drive took is no gesture; a
 // gesture inserts its terminal, or nothing.
