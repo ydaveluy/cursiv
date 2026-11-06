@@ -769,7 +769,8 @@ rule's class or a class derived from it. An override inherits the rule's
 converter unless it states its own; without one, a data rule's new body must
 give a value of the same type.
 With `extends<A, B>`, you must restate anything that both parents declare or
-override.
+override. The override of a rule that both parents override cannot use
+`super`, and states its own converter when theirs differ.
 
 ## Where expressions are allowed
 

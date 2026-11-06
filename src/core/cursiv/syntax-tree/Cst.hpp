@@ -279,12 +279,13 @@ class Cst {
     _owned = owned;
   }
   // A parse of the translated text moves to the document's offsets and
-  // keeps the text its AST borrows.
+  // keeps the text its AST borrows, and the spans a replaced piece widens.
   void bind_translation(std::string_view document,
-                        std::unique_ptr<const SourceTranslation> translation) {
+                        std::unique_ptr<SourceTranslation> translation) {
     set_text(document);
-    if (size() != 0) translation->to_document({&_stream.at(0), size()});
-    translation->to_document(std::span(_diagnostics));
+    translation->bind(
+        size() != 0 ? std::span(&_stream.at(0), size()) : std::span<CstNode>{},
+        std::span(_diagnostics));
     _translation = std::move(translation);
   }
 

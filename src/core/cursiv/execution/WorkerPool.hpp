@@ -18,7 +18,7 @@
 // tasks until its own run is done, so a nested `run` call never blocks a
 // worker on itself.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 class WorkerPool {
  public:
@@ -33,9 +33,11 @@ class WorkerPool {
   [[nodiscard]] bool onWorkerThread() const noexcept;
 
   // Calls `body(index)` for every index below `count` and returns once every
-  // call has returned. `body` must not throw: a helper has no caller to unwind
-  // into, so the exception is the publisher's to catch inside the body.
-  void run(std::size_t count, cursiv::function_ref<void(std::size_t)> body);
+  // call has returned. A call that returns false ends the run: no index is
+  // handed out after it, and a part inside a slice leaves it at its first
+  // call that returns false. `body` must not throw: a helper has no caller to
+  // unwind into, so the exception is the publisher's to catch inside the body.
+  void run(std::size_t count, cursiv::function_ref<bool(std::size_t)> body);
 
  private:
   // The shared claim counter of one run, on the publisher's stack. It outlives
@@ -54,7 +56,7 @@ class WorkerPool {
   };
 
   struct Job {
-    cursiv::function_ref<void(std::size_t)> body;
+    cursiv::function_ref<bool(std::size_t)> body;
     std::size_t count;
     std::size_t parties;
     Cell* cell;
@@ -125,4 +127,4 @@ class WorkerPool {
   std::atomic<bool> _stopping{false};
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

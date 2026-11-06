@@ -49,6 +49,8 @@ void RecipeValidator::checkNoDuplicateUse(
   ^^^^^^^^^^^^^  without
 ```
 
+When the source does not write that member, the range stays as it was.
+
 `accept.warning`, `accept.information` and `accept.hint` work the same way.
 Each also accepts a `TextRange` instead of a node.
 

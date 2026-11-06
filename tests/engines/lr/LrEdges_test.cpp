@@ -19,7 +19,9 @@
 #include "cursiv/lr/runtime/LrContext.hpp"
 #include "cursiv/lr/runtime/LrParseStats.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/lr/runtime/LrSearch.hpp"
 #include "cursiv/lr/runtime/lr_rescan.hpp"
+#include "cursiv/lr/runtime/lr_search_bound.hpp"
 #include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/Check.hpp"
 #include "edges/generated/G/Module.hpp"
@@ -848,6 +850,41 @@ void the_engines_tell_a_cancelled_scan() {
   }
 }
 
+// The bound re-reads a byte as every state may: what the search re-reads in a
+// state of the section, which lexes its faults with the section's alphabet,
+// the bound re-reads too. `<` is the host's token, not the section's: in the
+// section `<aaaab` reads as `LONG` with its first byte misspelt.
+void the_bound_rereads_what_a_section_state_rereads() {
+  using namespace cursiv;
+  constexpr const auto& A = tsection::generated::Lr::kTable;
+  const std::string text = "<<aaaab>";
+  LrRoom room(text);
+  LrSearch s(static_cast<TextOffset>(text.size()),
+             {.floor = ~std::uint64_t{0},
+              .perByte = 0,
+              .perSearch = ~std::uint64_t{0},
+              .perParse = ~std::uint64_t{0}},
+             room.context.indentArena);
+  s.limit = ~std::uint64_t{0};
+  s.bounding = true;
+  const TextOffset at = 1;
+  const std::vector<Typo> bound = lr_search_misread<A>(room.context, s, at);
+  unsigned asked = 0;
+  for (std::uint32_t state = 0; state < A.mode.size(); ++state) {
+    std::uint64_t read = 0;
+    bool cut = false;
+    for (const Typo& y : lr_rescan_candidates<A>(room.context, state, at,
+                                                 kLrBoundReach, read, cut)) {
+      ++asked;
+      bool found = false;
+      for (const Typo& z : bound)
+        found = found || (z.term == y.term && z.end == y.end);
+      CHECK(found);
+    }
+  }
+  CHECK(asked != 0);
+}
+
 void both_engines_read_the_run_as_one_fault() {
   const auto ll = tsection::generated::Ll::create_parser();
   const auto lr = tsection::generated::Lr::create_parser();
@@ -868,6 +905,7 @@ void run() {
   a_whole_parse_of_the_run_is_linear({});
   a_whole_parse_of_the_run_is_linear({64, 0, 64, 64});
   the_engines_tell_a_cancelled_scan();
+  the_bound_rereads_what_a_section_state_rereads();
   both_engines_read_the_run_as_one_fault();
 }
 }  // namespace case_sectiontail

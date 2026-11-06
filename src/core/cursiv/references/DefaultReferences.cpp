@@ -1,9 +1,11 @@
 #include "cursiv/references/DefaultReferences.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -92,6 +94,15 @@ const CoreServices* language_of(const Document& document,
   return owner_of_leaf(cst, leaf.id);
 }
 
+// A row of one group: within it, the site and the symbol tell two apart.
+struct RowHash {
+  std::size_t operator()(const ReferenceDescription& row) const noexcept {
+    const auto site = static_cast<std::size_t>(row.sourceBegin);
+    const auto symbol = static_cast<std::size_t>(row.targetSymbolId);
+    return site ^ (symbol + 0x9e3779b9u + (site << 6u) + (site >> 2u));
+  }
+};
+
 // Where a declaration is written: its name when it has one, its own record
 // otherwise. A node declaring no name still has a site, and
 // `includeDeclaration` asked for it.
@@ -160,13 +171,16 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
         if (source == nullptr || source->parseResult.references == nullptr)
           return true;
         // The multi reference the description was made from, matched by the
-        // span its name occupies in the source document.
+        // whole span its name occupies in the source document: another one
+        // may start at the same offset.
         std::vector<const AstNode*> siblings;
         bool member = false;
         source->parseResult.references->visitResolved(
-            source->parseResult.cst(), [&](TextOffset begin, TextOffset,
+            source->parseResult.cst(), [&](TextOffset begin, TextOffset end,
                                            const AstNode& target, bool multi) {
-              if (!multi || begin != incoming.sourceBegin) return;
+              if (!multi || begin != incoming.sourceBegin ||
+                  end != incoming.sourceEnd)
+                return;
               siblings.push_back(&target);
               member = member || &target == &node;
             });
@@ -181,6 +195,8 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
 std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
     const AstNode& node, const CancellationToken& cancelToken) const {
   std::vector<ReferenceDescription> rows;
+  // Hashed, not scanned: a group may hold thousands of members.
+  std::unordered_set<ReferenceDescription, RowHash> drawn;
   const ServiceRegistry& registry = *shared.serviceRegistry;
   for (const AstNode* const member : getSelfNodes(node, cancelToken)) {
     throw_if_cancelled(cancelToken);
@@ -202,7 +218,7 @@ std::vector<ReferenceDescription> DefaultReferences::getSelfReferences(
                                    .local = true,
                                    .multiReference = false};
     // Two members built on one CST record are declared by one site.
-    if (std::ranges::find(rows, row) == rows.end()) rows.push_back(row);
+    if (drawn.insert(row).second) rows.push_back(row);
   }
   return rows;
 }

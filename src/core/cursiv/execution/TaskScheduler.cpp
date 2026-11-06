@@ -18,7 +18,8 @@
 namespace cursiv {
 
 TaskScheduler::TaskScheduler(std::size_t workerCount) {
-  if (workerCount > 0) _pool = std::make_unique<WorkerPool>(workerCount);
+  if (workerCount > 0)
+    _pool = std::make_unique<detail::WorkerPool>(workerCount);
 }
 
 TaskScheduler::~TaskScheduler() noexcept = default;
@@ -61,10 +62,10 @@ void TaskScheduler::parallelForIndexed(
   // Nothing escapes into the pool: a helper has no caller to unwind into, so
   // the catch is here and the pool never sees an exception.
   _pool->run(count, [&](std::size_t index) noexcept {
-    // Once cancelled or once a sibling failed, the slice still iterates but
-    // every item short-circuits on two relaxed loads.
+    // Once cancelled or once a sibling failed, the run stops: each part
+    // returns at its next item, and the rest is never handed out.
     if (token.stop_requested() || failed.load(std::memory_order_relaxed))
-      return;
+      return false;
     try {
       body(index);
     } catch (...) {
@@ -72,7 +73,9 @@ void TaskScheduler::parallelForIndexed(
       // read only after the join below -- which is the happens-before, so no
       // lock.
       if (!failed.exchange(true)) first = std::current_exception();
+      return false;
     }
+    return true;
   });
 
   if (first != nullptr) std::rethrow_exception(first);

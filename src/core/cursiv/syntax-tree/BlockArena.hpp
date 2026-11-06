@@ -8,11 +8,12 @@ namespace cursiv::detail {
 
 // Blocks grow from `first` bytes to a cap and then keep that size; a request
 // larger than half the cap gets a block of its own, rounded up to a power of
-// two. A document that keeps growing therefore finds, at each reparse, freed
-// blocks of the sizes it asks for again. Wasm linear memory never shrinks and
-// reuses a freed range only for a request that fits in it, so a pool whose
-// blocks keep doubling would leave each smaller one behind until the memory
-// limit is reached.
+// two when one can hold it. A request too large for a block's header beside
+// it throws `std::bad_alloc`. A document that keeps growing therefore finds, at
+// each reparse, freed blocks of the sizes it asks for again. Wasm linear memory
+// never shrinks and reuses a freed range only for a request that fits in it, so
+// a pool whose blocks keep doubling would leave each smaller one behind until
+// the memory limit is reached.
 class BlockArena final : public std::pmr::memory_resource {
  public:
   explicit BlockArena(std::size_t first, std::pmr::memory_resource* upstream =

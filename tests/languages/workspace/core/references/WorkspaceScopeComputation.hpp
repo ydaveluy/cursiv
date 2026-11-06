@@ -39,13 +39,13 @@ class WorkspaceScopeComputation final
                          const cursiv::Document& document) const override;
 
  private:
-  // One container's declarations, returned so the enclosing package can
-  // requalify them: a name climbs one dot per storey on the way out.
-  [[nodiscard]] std::vector<cursiv::AstNodeDescription> processContainer(
-      const cursiv::AstNode& container,
-      std::span<ast::AbstractElement* const> elements,
-      const cursiv::Document& document, cursiv::LocalSymbols& symbols,
-      const cursiv::CancellationToken& cancelToken) const;
+  // Each container's declarations, then requalified for the enclosing
+  // package: a name climbs one dot per storey on the way out.
+  void processContainer(const cursiv::AstNode& root,
+                        std::span<ast::AbstractElement* const> elements,
+                        const cursiv::Document& document,
+                        cursiv::LocalSymbols& symbols,
+                        const cursiv::CancellationToken& cancelToken) const;
 
   const WorkspaceCoreServices& _dm;
 };

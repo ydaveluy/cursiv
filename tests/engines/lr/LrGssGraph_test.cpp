@@ -276,6 +276,32 @@ void frozen_stacks_are_ranked_before_the_cap() {
   }
 }
 
+// The cap holds over every frozen reading together: two readings of 300
+// stacks each hand a search the 512 ranked first of the 600, and are cut.
+void the_cap_holds_over_every_frozen_reading() {
+  LrGssGraph g;
+  g.seed(Frames({0}), at(0, 0));
+  const Id root = open_next(g);
+  std::array<Id, 2> tops{LrGssGraph::none, LrGssGraph::none};
+  for (unsigned i = 0; i != 600; ++i) {
+    const Id arm = shift(g, root, 7, 1, i + 1, {i % 7});
+    tops[i / 300] = shift(g, arm, 8, 2, 600 + i / 300, {});
+  }
+  for (const Id top : tops) {
+    Reading frozen = g.reading(top);
+    frozen.la = {2, 2, 0};
+    g.freeze(top, frozen);
+  }
+  CHECK(!g.close());
+  const auto all = g.sources(600);
+  CHECK(all.size() == 600 && g.cut() == 0);
+  const auto capped = g.sources(512);
+  CHECK(capped.size() == 512 && g.cut() != 0);
+  for (unsigned i = 0; i != capped.size(); ++i)
+    CHECK(capped[i].vertices == all[i].vertices &&
+          capped[i].forests == all[i].forests);
+}
+
 // A packed stack holds exponentially many paths. The first two are selected
 // without enumerating all of them; equal ranks retain the first DFS paths.
 void frozen_stacks_share_prefixes_and_keep_equal_rank_order() {
@@ -593,6 +619,7 @@ int main() {
   a_reading_past_a_held_vertex_gives_the_text_back_at_it();
   laid_shifts_do_not_validate_or_expire_frozen_readings();
   frozen_stacks_are_ranked_before_the_cap();
+  the_cap_holds_over_every_frozen_reading();
   frozen_stacks_share_prefixes_and_keep_equal_rank_order();
   bounded_frozen_stacks_match_exhaustive_election();
   repeated_reductions_keep_their_nested_rank();

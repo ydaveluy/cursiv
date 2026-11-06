@@ -2,11 +2,13 @@
 // offset names a run for good, and growth copies nothing.
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <vector>
+
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv {
 
@@ -46,13 +48,16 @@ class LrGssRuns {
 
   // The offset of `n` values left for the caller to write, in one piece: the
   // rest of the chunk, or the chunks that follow, made where they are
-  // missing. A run past one chunk takes several, side by side.
+  // missing. A run past one chunk takes several, side by side. The graph
+  // keeps an offset in 32 bits: a run that would end past them throws
+  // `std::length_error`, and nothing is made for it.
   std::size_t reserve(std::size_t n) {
     std::size_t at = _end;
     if (n > kChunk || (at & kMask) + n > kChunk) at = (at + kMask) & ~kMask;
     if (n != 0) {
       const std::size_t need = ((at + n - 1) >> Shift) + 1;
       if (_slots.size() < need) {
+        if (need > kMostSlots) too_many();
         const std::size_t fresh = need - _slots.size();
         _owned.push_back(std::make_unique_for_overwrite<T[]>(fresh << Shift));
         T* base = _owned.back().get();
@@ -60,15 +65,22 @@ class LrGssRuns {
           _slots.push_back(base + (i << Shift));
       }
     }
-    assert(at + n <= 0xFFFFFFFFull);
     _end = at + n;
     _appended += n;
     return at;
   }
 
  private:
+  static_assert(Shift < 32);
   static constexpr std::size_t kChunk = std::size_t{1} << Shift;
   static constexpr std::size_t kMask = kChunk - 1;
+  // The chunks whose offsets all stay below 2^32 - 1.
+  static constexpr std::size_t kMostSlots =
+      (std::size_t{1} << (32 - Shift)) - 1;
+
+  [[noreturn]] CURSIV_COLD CURSIV_NOINLINE static void too_many() {
+    throw std::length_error("cursiv: GSS runs exceed their 32-bit offsets");
+  }
 
   std::vector<T*> _slots;
   std::vector<std::unique_ptr<T[]>> _owned;

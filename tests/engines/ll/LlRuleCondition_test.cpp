@@ -176,6 +176,7 @@ void check_terminal_conditions() {
            std::pair{"line foo = bar;", "<refused>"},
            std::pair{"pair ab;", " "},
            std::pair{"pair nb;", " "},
+           std::pair{"pair Xy;", "Xy "},
            std::pair{"pair x;", "<refused>"},
        }) {
     CHECK(items(*ll, text, "terms:") == want);
@@ -193,10 +194,13 @@ void check_terminal_conditions() {
     CHECK(!offers(*p, "no", "NAME", prefix));
     CHECK(offers(*p, "group {", "NAME", prefix));
   }
-  // Each word a reading admits is asked, and the two branches of `pair` each
-  // name the member they fill.
-  CHECK(members(*ll, "pair ", "NAME", "terms:") ==
-        std::vector<std::string_view>({"left", "right"}));
+  // Each word a reading admits is asked, and the branches of `pair` each name
+  // the member they fill, the one only a capital opens too.
+  for (const cursiv::Parser* p : {ll.get(), lr.get()}) {
+    auto found = members(*p, "pair ", "NAME", p == ll.get() ? "terms:" : "");
+    std::ranges::sort(found);
+    CHECK(found == std::vector<std::string_view>({"left", "right", "text"}));
+  }
   // A caret measures a phrase that opens on its gap from where the gap
   // begins: it reads on to the `;` standing where its last name would.
   {

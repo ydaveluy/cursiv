@@ -178,3 +178,6 @@ if (comment != cursiv::kNoNode) {
 | `getDocument()` | The containing document, or null for a detached tree |
 | `type` | The runtime type tag; `type->name` names the class |
 | `cstNodeId` | The concrete syntax tree (CST) node it was built from |
+
+A copy of a node takes its members but none of these: it has no type tag, so
+`ast_cast` refuses it. Assigning to a node keeps the node's own.

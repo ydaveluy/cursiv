@@ -176,6 +176,9 @@ void DefaultDocumentBuilder::markAsCompleted(
     record.revision = document.buildRevision;
     record.ran.clear();
   }
+  // All or none: past the reservation nothing allocates, so a refusal records
+  // no category of `ran`.
+  record.ran.reserve(record.ran.size() + ran.size());
   for (const ValidationCategory* category : ran)
     if (std::ranges::find(record.ran, category) == record.ran.end())
       record.ran.push_back(category);
@@ -279,8 +282,27 @@ void DefaultDocumentBuilder::build(std::span<Document* const> documents,
     std::vector<std::string_view> uris;
     uris.reserve(documents.size());
     for (const Document* const d : documents) uris.push_back(d->uri);
+
+    // A subscriber may send a document back down -- one whose results read
+    // what this build changes, through no reference the index sees. This
+    // build answers it too, as `update` does.
+    const std::vector<std::shared_ptr<Document>> held =
+        _shared.documents->all();
+    std::vector<DocumentState> before;
+    before.reserve(held.size());
+    for (const std::shared_ptr<Document>& d : held)
+      before.push_back(d->state.load());
     emitUpdate(uris, {});
-    buildDocuments(documents, token);
+    std::vector<Document*> work(documents.begin(), documents.end());
+    std::unordered_set<const Document*> requested;
+    for (std::size_t at = 0; at < held.size(); ++at) {
+      Document* const d = held[at].get();
+      if (d->state.load() >= before[at]) continue;
+      if (requested.empty())
+        requested.insert(documents.begin(), documents.end());
+      if (requested.insert(d).second) work.push_back(d);
+    }
+    buildDocuments(work, token);
   });
 }
 
@@ -710,9 +732,12 @@ void DefaultDocumentBuilder::validate(
   std::vector<Diagnostic> all = document.diagnostics;
   if (!missing.empty())
     language.documentValidator->validateDocument(document, all, missing, token);
-  document.diagnostics = std::move(all);
 
+  // Recorded before the diagnostics are published, which cannot fail: a
+  // record that throws publishes nothing, and the next build runs the same
+  // categories once, not twice.
   markAsCompleted(document, missing);
+  document.diagnostics = std::move(all);
 }
 
 // One call to `build` or `update` is one attempt, from its first step. The
@@ -788,9 +813,10 @@ WaitOutcome DefaultDocumentBuilder::waitUntil(
                               : WaitOutcome::Cancelled;
 }
 
-// A per-document wait always terminates: reached, cancelled, the build failed,
-// or the workspace passed the rung while the document lags -- excluded or
-// removed -- which is `Unreachable`.
+// A per-document wait ends with the next build that runs to the end or fails:
+// reached, cancelled, the build failed, or the workspace passed the rung while
+// the document lags -- excluded or removed -- which is `Unreachable`. A
+// cancelled build ends none: its successor does, or the waiter's token.
 WaitOutcome DefaultDocumentBuilder::waitUntil(
     DocumentState state, DocumentId id, const CancellationToken& token) const {
   // The store is a plain map a write mutates, so it is read under the lock --

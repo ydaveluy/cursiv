@@ -89,6 +89,17 @@ struct StampedGrammar final : Grammar {
     }
     return {};
   }
+  // A linear scan: a lookup asks it once, and only of a word it met written in
+  // another case.
+  bool spellingFolds(std::string_view keyword) const noexcept override {
+    for (std::uint16_t t = 0; t < _f->terminalCount; ++t) {
+      const auto& term = _f->terminals[t];
+      if (!term.folded) continue;
+      for (const std::string_view spelling : term.spellings)
+        if (folded_equal(spelling, keyword)) return true;
+    }
+    return false;
+  }
   std::string_view recordDoc(const CstNode& n) const noexcept override {
     const ElementId e = _stamp.row(n);
     return holds(e) ? _f->names[answer(e).doc] : std::string_view{};
@@ -110,9 +121,10 @@ struct StampedGrammar final : Grammar {
   }
 
   // The words a caret types for a terminal that spells none, to ask of it what
-  // only a word can answer. The last two only end a line.
-  static constexpr std::array<std::string_view, 9> samples{
-      "a", "name", "0", "1", "_", "\"\"", "''", "\n", "\r\n"};
+  // only a word can answer: a condition may turn on the case of a letter. The
+  // last two only end a line.
+  static constexpr std::array<std::string_view, 11> samples{
+      "a", "name", "A", "Name", "0", "1", "_", "\"\"", "''", "\n", "\r\n"};
   static constexpr std::size_t kSampleWords = samples.size() - 2;
 
   // The text from `from` to the caret `at`, the spelling, then the real text

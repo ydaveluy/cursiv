@@ -18,10 +18,12 @@
 #include <cstring>
 #include <functional>
 #include <latch>
+#include <limits>
 #include <map>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <new>
 #include <random>
 #include <set>
 #include <span>
@@ -1962,6 +1964,34 @@ void a_two_candidate_reference_answers_by_branch() {
   CHECK(r.get<A2>() == nullptr);
 }
 
+// A copy is another object: it takes the members' values and none of the
+// source's identity, so a tag copied into a base never lets a cast reach a
+// class the copy is not, and no link places the copy in the source's tree.
+// An assignment keeps the target's own.
+void a_copy_takes_no_identity() {
+  D source;
+  source.payload = 7;
+  source.type = &cursiv::ast_type_tag<D>;
+  const D copy = source;
+  CHECK(copy.payload == 7 && copy.type == nullptr);
+
+  A2 holder;
+  D2 d;
+  d.type = &cursiv::ast_type_tag<D2>;
+  d.parent = &holder;
+  d.cstNodeId = 3;
+  const C2 sliced = d;
+  CHECK(sliced.type == nullptr && sliced.parent == nullptr &&
+        sliced.cstNodeId == cursiv::kNoNode);
+  CHECK(cursiv::ast_cast<D2>(&sliced) == nullptr);
+  C2 other;
+  other.type = &cursiv::ast_type_tag<C2>;
+  static_cast<C2&>(d) = other;
+  CHECK(d.type == &cursiv::ast_type_tag<D2> && d.parent == &holder &&
+        d.cstNodeId == 3);
+  CHECK(cursiv::ast_cast<D2>(&d) == &d);
+}
+
 }  // namespace
 
 void run() {
@@ -1973,6 +2003,7 @@ void run() {
   the_closure_is_transitive();
   ast_cast_accepts_the_family_and_refuses_the_rest();
   a_two_candidate_reference_answers_by_branch();
+  a_copy_takes_no_identity();
 }
 
 }  // namespace ast_node
@@ -3608,6 +3639,19 @@ void a_fused_keyword_is_still_found() {
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "doc").size() == 1);
 }
 
+// A word the grammar reads in either case is that keyword in any case, written
+// or asked; a word read exactly is asked exactly.
+void a_folded_keyword_is_found_in_any_case(const cursiv::Parser& parser) {
+  const Parsed cased("EvEnTs aa", parser);
+  CHECK(cursiv::find_nodes_for_keyword(cased.root(), "events").size() == 1);
+  const auto upper = cursiv::find_node_for_keyword(cased.root(), "EVENTS");
+  CHECK(upper.has_value());
+  if (upper) CHECK(upper->text() == "EvEnTs");
+  const Parsed exact("state aa", parser);
+  CHECK(cursiv::find_nodes_for_keyword(exact.root(), "state").size() == 1);
+  CHECK(cursiv::find_nodes_for_keyword(exact.root(), "STATE").empty());
+}
+
 // The records strictly between two others, as maximal subtrees.
 void interior_nodes_walk_the_extent() {
   const Parsed p("doc item aa item bb item cc");
@@ -3917,6 +3961,8 @@ void run() {
   a_data_rule_that_spells_a_keyword_is_not_one();
   a_keyword_node_answers_for_its_own_keyword(engine());
   a_keyword_node_answers_for_its_own_keyword(ll_engine());
+  a_folded_keyword_is_found_in_any_case(engine());
+  a_folded_keyword_is_found_in_any_case(ll_engine());
 }
 
 }  // namespace cst_utils
@@ -4450,6 +4496,9 @@ class LinearMemory final : public std::pmr::memory_resource {
 
  private:
   void* do_allocate(std::size_t bytes, std::size_t align) override {
+    // Out of memory well before the address space is.
+    if (bytes > std::numeric_limits<std::size_t>::max() / 4)
+      throw std::bad_alloc();
     // The smallest freed range that holds it, else new memory at the top.
     auto range = bytes;
     if (const auto fit = _free.lower_bound(bytes); fit != _free.end()) {
@@ -4506,7 +4555,34 @@ void a_growing_document_reuses_its_blocks() {
   CHECK(memory.peak <= 2 * largest);
 }
 
-void run() { a_growing_document_reuses_its_blocks(); }
+// A request whose block header and alignment do not fit beside it in a
+// size_t is refused before any block is taken, and a large one is never
+// carved from the current block by a pointer sum that wraps around.
+void a_request_past_the_address_space_is_refused() {
+  LinearMemory memory;
+  cursiv::detail::BlockArena pool(std::size_t{64} << 10, &memory);
+  const auto refused = [&pool](std::size_t bytes) {
+    try {
+      (void)pool.allocate(bytes, 16);
+    } catch (const std::bad_alloc&) {
+      return true;
+    }
+    return false;
+  };
+  constexpr auto kMax = std::numeric_limits<std::size_t>::max();
+  CHECK(refused(kMax - 16));
+  (void)pool.allocate(64, 16);
+  CHECK(refused(kMax - 16));
+  // Past the largest power of two: asked as is, which the memory refuses.
+  CHECK(refused(kMax / 2 + 2));
+  // ...and the pool still carves what it can hold.
+  CHECK(reinterpret_cast<std::uintptr_t>(pool.allocate(64, 16)) % 16 == 0);
+}
+
+void run() {
+  a_growing_document_reuses_its_blocks();
+  a_request_past_the_address_space_is_refused();
+}
 
 }  // namespace block_arena
 

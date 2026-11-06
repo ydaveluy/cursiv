@@ -351,6 +351,15 @@ void line_splices(std::string_view source, cursiv::SourceTranslation& out) {
     out.replace(at, at + 2, "");
 }
 
+// A sigil that spells a keyword and the blank after it, one piece and two
+// tokens; another spells a declaration missing its name, which a repair
+// inserts inside the piece.
+void class_sigils(std::string_view source, cursiv::SourceTranslation& out) {
+  for (auto at = source.find_first_of("$%"); at != std::string_view::npos;
+       at = source.find_first_of("$%", at + 1))
+    out.replace(at, at + 1, source[at] == '$' ? "class " : "class ;");
+}
+
 std::string decoded(std::string_view text, cursiv::SourceTranslator translate) {
   cursiv::SourceTranslation t(text);
   translate(text, t);
@@ -362,12 +371,14 @@ struct Engine {
   std::unique_ptr<const cursiv::Parser> plain;
   std::unique_ptr<const cursiv::Parser> unicode;
   std::unique_ptr<const cursiv::Parser> splices;
+  std::unique_ptr<const cursiv::Parser> sigils;
 };
 
 template <class Make>
 Engine engine(Make make) {
   return {make(), cursiv::translating_parser(make(), unicode_escapes),
-          cursiv::translating_parser(make(), line_splices)};
+          cursiv::translating_parser(make(), line_splices),
+          cursiv::translating_parser(make(), class_sigils)};
 }
 
 std::vector<std::string> names(const cursiv::ParseResult& r) {
@@ -543,6 +554,23 @@ void line_splices_join_tokens_and_comments(const Engine& e) {
   CHECK(comment && names(comment) == std::vector<std::string>{"D"});
 }
 
+// A piece whose spelling holds several tokens widens each of them to the
+// whole piece in the document; completion still reads the spans the engine
+// wrote, so it answers as the decoded text does.
+void a_piece_spelling_several_tokens_completes_as_decoded(const Engine& e) {
+  const std::string text = "$A; $B; ";
+  const auto r = check_against_decoded(e, *e.sigils, class_sigils, text);
+  CHECK(r && names(r) == std::vector<std::string>{"A", "B"});
+  CHECK(leaf_at(r.cst(), 0).end == 1);
+  CHECK(!features(*e.sigils, r.cst(), TextOffset(text.size())).empty());
+  const auto repaired =
+      check_against_decoded(e, *e.sigils, class_sigils, "% $B; ");
+  CHECK(repaired.diagnostics.size() == 1);
+  if (repaired.diagnostics.size() == 1)
+    CHECK(repaired.diagnostics[0].begin == 0 &&
+          repaired.diagnostics[0].end == 1);
+}
+
 // Untouched text takes the plain parser's path: no translation, and the very
 // result the plain parser gives.
 void untouched_text_is_parsed_as_it_is(const Engine& e) {
@@ -603,6 +631,7 @@ void run_engine(const Engine& e) {
   completion_refuses_a_caret_inside_an_escape(e);
   a_name_span_maps_back_to_the_document(e);
   line_splices_join_tokens_and_comments(e);
+  a_piece_spelling_several_tokens_completes_as_decoded(e);
   untouched_text_is_parsed_as_it_is(e);
 }
 

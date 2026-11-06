@@ -52,7 +52,9 @@ class TextDocument {
   TextDocument& operator=(TextDocument&& o) noexcept;
 
   // Readonly identity, and the version the client stamped. Disk content is
-  // version 0, as it has no client to stamp it.
+  // version 0, as it has no client to stamp it. A text longer than
+  // `kMaxDocument` bytes, here or from `update`, throws
+  // `std::overflow_error`.
   [[nodiscard]] static TextDocument create(std::string uri,
                                            std::string languageId,
                                            std::int64_t version,

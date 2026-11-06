@@ -434,12 +434,30 @@ void a_cleared_run_store_starts_over() {
   CHECK(runs.append(3, 9u) == 0 && runs[2] == 9u);
 }
 
+// An offset is 32 bits wherever the graph keeps it: a run that would end past
+// them is refused before anything is made for it.
+void a_run_past_32_bit_offsets_is_refused() {
+  if constexpr (sizeof(std::size_t) > 4) {
+    cursiv::LrGssRuns<std::uint8_t, 20> runs;
+    bool refused = false;
+    try {
+      (void)runs.reserve(std::size_t{1} << 32);
+    } catch (const std::length_error&) {
+      refused = true;
+    }
+    CHECK(refused);
+    CHECK(runs.size() == 0);
+    CHECK(runs.append(3, std::uint8_t{9}) == 0 && runs[2] == 9);
+  }
+}
+
 }  // namespace
 
 void run() {
   every_run_stays_in_one_piece_whatever_its_length();
   a_run_filled_alike_reads_alike();
   a_cleared_run_store_starts_over();
+  a_run_past_32_bit_offsets_is_refused();
 }
 }  // namespace gss_runs
 

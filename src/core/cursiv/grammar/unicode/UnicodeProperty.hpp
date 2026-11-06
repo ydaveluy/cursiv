@@ -1,6 +1,6 @@
 // The Unicode properties a class of code points may name, written by
 // tools/gen_unicode_ranges.py from Python's unicodedata and the Unicode
-// Character Database: never edited.
+// Character Database, Unicode 16.0.0: never edited.
 #pragma once
 
 #include <string_view>

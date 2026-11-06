@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <span>
@@ -84,7 +85,7 @@ class DefaultValidationRegistry : public ValidationRegistry {
   // The slot holding `type`, or the empty one where it would go.
   [[nodiscard]] std::size_t slotOf(const AstTypeTag* type) const noexcept;
   [[nodiscard]] std::vector<Entry>& entriesOf(const AstTypeTag* type);
-  void rehash(std::size_t size);
+  void rehash(std::size_t size, std::uint64_t mul);
   void runMatched(const AstNode&, ValidationAcceptor&, ValidationCategories,
                   const CancellationToken&) const;
 

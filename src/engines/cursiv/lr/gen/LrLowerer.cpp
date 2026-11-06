@@ -1,6 +1,7 @@
 #include "cursiv/lr/gen/LrLowerer.hpp"
 
 #include <span>
+#include <stdexcept>
 
 #include "cursiv/lr/gen/lr_intern_name.hpp"
 #include "cursiv/lr/gen/lr_lower_define.hpp"
@@ -106,6 +107,9 @@ LrLowered LrLowerer::run() {
 }
 
 LrLowered lr_lower(GrammarImage& image, const LowerDesc& desc) {
+  if (desc.optionalGate > kOptionalGateMost)
+    throw std::invalid_argument(
+        "cursiv: the optional gate exceeds fifteen positions");
   return LrLowerer(image, desc).run();
 }
 

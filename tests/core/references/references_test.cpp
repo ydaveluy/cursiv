@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -35,6 +36,7 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/DefaultAstReflection.hpp"
+#include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
@@ -1059,6 +1061,69 @@ void navigation_uses_the_documents_language_id() {
   CHECK(references[2].sourceBegin == 17 && references[2].sourceEnd == 18);
 }
 
+// The document's own edges, and one more multi site that starts where the
+// first one does and ends further: another reference.
+struct WiderSiteReferences final : cursiv::DocumentReferences {
+  WiderSiteReferences(std::unique_ptr<cursiv::DocumentReferences> in,
+                      const cursiv::AstNode& foreign)
+      : inner(std::move(in)), other(&foreign) {}
+  std::unique_ptr<cursiv::DocumentReferences> inner;
+  const cursiv::AstNode* other;
+
+  Answer resolve(std::uint32_t rank) const override {
+    return inner->resolve(rank);
+  }
+  cursiv::RefState resolveAll(std::uint32_t rank,
+                              cursiv::MultiRefItems& out) const override {
+    return inner->resolveAll(rank, out);
+  }
+  void force(std::span<const cursiv::RefHandle> which,
+             const cursiv::CancellationToken& token) override {
+    inner->force(which, token);
+  }
+  void forceAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
+               const cursiv::CancellationToken& token) override {
+    inner->forceAt(cst, offset, token);
+  }
+  void visitResolved(const cursiv::Cst& cst,
+                     cursiv::ResolvedReferenceVisitor visitor) const override {
+    std::optional<cursiv::TextOffset> first;
+    inner->visitResolved(cst,
+                         [&](cursiv::TextOffset begin, cursiv::TextOffset end,
+                             const cursiv::AstNode& target, bool multi) {
+                           if (multi && !first) first = begin;
+                           visitor(begin, end, target, multi);
+                         });
+    if (first)
+      visitor(*first, static_cast<cursiv::TextOffset>(*first + 4), *other,
+              true);
+  }
+  void reset() noexcept override { inner->reset(); }
+  [[nodiscard]] bool anyUnresolved() const noexcept override {
+    return inner->anyUnresolved();
+  }
+  void visitUnresolved(
+      const cursiv::Cst& cst,
+      cursiv::UnresolvedReferenceVisitor visitor) const override {
+    inner->visitUnresolved(cst, visitor);
+  }
+};
+
+// A multi reference is told apart by the whole span of its name: another one
+// that starts at the same offset lends none of its targets to the group.
+void a_group_is_its_own_sites_targets() {
+  World world;
+  cursiv::Document* const document = world.built("SELECT t FROM t, t");
+  document->parseResult.references = std::make_unique<WiderSiteReferences>(
+      std::move(document->parseResult.references),
+      *document->parseResult.value);
+  const auto declaration =
+      world.mref->references->findDeclaration(*document, 14);
+  CHECK(declaration.targets.size() == 2);
+  CHECK(std::ranges::find(declaration.targets, document->parseResult.value) ==
+        declaration.targets.end());
+}
+
 void navigation_resolves_a_reference_at_computed_scopes() {
   linker::World world;
   cursiv::CancellationTokenSource lookupCancellation;
@@ -1428,6 +1493,7 @@ void run() {
   the_grammar_confesses_its_multi_reference();
   an_unresolved_reference_names_every_type_it_accepts();
   navigation_uses_the_documents_language_id();
+  a_group_is_its_own_sites_targets();
   navigation_resolves_a_reference_at_computed_scopes();
   a_declaration_stands_for_its_group(true);
   a_declaration_stands_for_its_group(false);

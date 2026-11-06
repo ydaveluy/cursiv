@@ -16,7 +16,9 @@
 
 namespace cursiv {
 
+namespace detail {
 class WorkerPool;
+}  // namespace detail
 
 class TaskScheduler {
  public:
@@ -60,7 +62,7 @@ class TaskScheduler {
   void parallelForIndexed(const CancellationToken& token, std::size_t count,
                           cursiv::function_ref<void(std::size_t)> body);
 
-  std::unique_ptr<WorkerPool> _pool;  // null when there are no workers
+  std::unique_ptr<detail::WorkerPool> _pool;  // null when there are no workers
 };
 
 template <class Range, class F>

@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include "cursiv/references/ScopeProvider.hpp"
@@ -43,7 +44,15 @@ JsonValue::Array near_names(const Document& document,
     std::size_t distance;
     bool elsewhere;
   };
+  const auto before = [](const Near& a, const Near& b) {
+    return std::tie(a.distance, a.elsewhere, a.name) <
+           std::tie(b.distance, b.elsewhere, b.name);
+  };
+  // Only the best are kept, nearest first: a scope may hold thousands of
+  // near names.
   std::vector<Near> near;
+  near.reserve(kMaxSuggestions + 1);
+  std::unordered_set<std::string_view> seen;
   (void)language.scopeProvider->visitScopeEntries(
       site, [&](const AstNodeDescription& entry) {
         if (entry.name.size() + limit < text.size() ||
@@ -56,17 +65,14 @@ JsonValue::Array near_names(const Document& document,
                 : edit_distance(entry.name, text, limit);
         if (distance > limit) return true;
         // An outer scope re-surfaces what an inner one already gave.
-        for (const Near& held : near)
-          if (held.name == entry.name) return true;
-        near.emplace_back(entry.name, distance,
-                          entry.documentId != document.id);
+        if (!seen.insert(entry.name).second) return true;
+        const Near candidate{entry.name, distance,
+                             entry.documentId != document.id};
+        near.insert(std::ranges::upper_bound(near, candidate, before),
+                    candidate);
+        if (near.size() > kMaxSuggestions) near.pop_back();
         return true;
       });
-  std::ranges::sort(near, [](const Near& a, const Near& b) {
-    return std::tie(a.distance, a.elsewhere, a.name) <
-           std::tie(b.distance, b.elsewhere, b.name);
-  });
-  if (near.size() > kMaxSuggestions) near.resize(kMaxSuggestions);
   for (const Near& n : near)
     rows.push_back(make_action_row(kReplaceEdit,
                                    std::format("Replace with '{}'", n.name),

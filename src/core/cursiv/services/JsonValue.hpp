@@ -12,7 +12,8 @@
 // An owned JSON value for the one core field that is JSON by contract,
 // `Diagnostic::data` -- a core service attaches a machine payload with no
 // protocol framework in the room. `toJsonString` is deterministic (sorted
-// keys, classic-locale numbers), so a payload can be pinned and diffed.
+// keys, classic-locale numbers), so a payload can be pinned and diffed, and
+// writes UTF-8: the ill-formed bytes of a string are written as U+FFFD.
 
 #include "cursiv/utils/TransparentStringHash.hpp"
 

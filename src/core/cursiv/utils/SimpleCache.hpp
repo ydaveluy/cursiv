@@ -12,7 +12,9 @@ namespace cursiv {
 // Concurrent key/value memoisation, safe to call from any thread. `get(key,
 // provider)` is the only door: a `set` or `erase` would let a caller put the
 // cache out of step with the workspace it describes. `V` must outlive the
-// entry -- a cached `string_view` dangles once `clear` runs.
+// entry -- a cached `string_view` dangles once `clear` runs. `Hash` and
+// `KeyEqual` are built anew for each call, so every instance must give the
+// same answer, and `Hash` must not throw.
 template <class K, class V, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class SimpleCache {

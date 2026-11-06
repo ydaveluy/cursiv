@@ -21,7 +21,8 @@ class Parser {
   virtual ~Parser() noexcept = default;
 
   // The door into the grammar model: an element id a result carries means
-  // something only through this. `getEntryRule()` lives on it.
+  // something only through this. The entry rule is the grammar's `entry`, fixed
+  // when the parser is generated.
   [[nodiscard]] virtual const Grammar& getGrammar() const noexcept = 0;
 
   // The result borrows `text`: every `string_view` in the AST is a view into

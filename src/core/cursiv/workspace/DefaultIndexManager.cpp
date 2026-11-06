@@ -138,13 +138,15 @@ void DefaultIndexManager::updateContent(const Document& document,
   for (const auto& entry : hashed)
     fresh->byShard[next[shardOf(entry.hash)]++] = entry;
   const std::scoped_lock lock(_mutex);
+  // What a reader already holds stays valid; the next one rebuilds, under this
+  // lock, so after the change. Retired first: a retirement that throws leaves
+  // the table as the view shows it. Only the export view: nothing here changes
+  // what points at what.
+  _exports.retire();
   if (const auto old = _exported.find(document.id); old != _exported.end())
     affectImporters(*old->second);
   affectImporters(*fresh);
   _exported.insert_or_assign(document.id, std::move(fresh));
-  // What a reader already holds stays valid; the next one rebuilds. Only the
-  // export view: nothing here changes what points at what.
-  _exports.retire();
 }
 
 void DefaultIndexManager::updateReferences(
@@ -171,6 +173,8 @@ void DefaultIndexManager::updateReferences(
                                       : references->importedNames.snapshot();
 
   const std::scoped_lock lock(_mutex);
+  // Before the tables change, as in `updateContent`.
+  _incoming.retire();
   dropReferences(document.id);
   if (!names.empty()) {
     auto& imports = _importedNames[document.id];
@@ -185,9 +189,8 @@ void DefaultIndexManager::updateReferences(
   }
   _references.insert_or_assign(document.id, std::move(referenced));
   _affected.erase(document.id);
-  // The linker is reading the export view while this phase runs; dropping it
-  // here would rebuild it once per document.
-  _incoming.retire();
+  // The export view stays: the linker is reading it while this phase runs, and
+  // dropping it here would rebuild it once per document.
 }
 
 bool DefaultIndexManager::removeContent(DocumentId document) {
@@ -210,16 +213,23 @@ bool DefaultIndexManager::remove(DocumentId document) {
   return content || references;
 }
 
+// Each view is retired before its table loses the row: a retirement that
+// throws leaves the row there, and the next removal tries again.
 bool DefaultIndexManager::dropContent(DocumentId document) {
-  if (const auto old = _exported.find(document); old != _exported.end())
+  const auto old = _exported.find(document);
+  if (old != _exported.end()) {
+    _exports.retire();
     affectImporters(*old->second);
+  }
   _affected.erase(document);
-  const bool had = _exported.erase(document) != 0;
-  if (had) _exports.retire();
-  return had;
+  if (old == _exported.end()) return false;
+  _exported.erase(old);
+  return true;
 }
 
 bool DefaultIndexManager::dropReferences(DocumentId document) {
+  const auto old = _references.find(document);
+  if (old != _references.end()) _incoming.retire();
   if (const auto imported = _importedNames.find(document);
       imported != _importedNames.end()) {
     for (const auto& entry : imported->second) {
@@ -235,9 +245,9 @@ bool DefaultIndexManager::dropReferences(DocumentId document) {
     }
     _importedNames.erase(imported);
   }
-  const bool had = _references.erase(document) != 0;
-  if (had) _incoming.retire();
-  return had;
+  if (old == _references.end()) return false;
+  _references.erase(old);
+  return true;
 }
 
 void DefaultIndexManager::affectImporters(const Exported& exports) {

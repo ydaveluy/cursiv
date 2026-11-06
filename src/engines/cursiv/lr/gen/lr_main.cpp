@@ -90,7 +90,8 @@ struct Args {
       return count_to(arg.substr(kGroupLines.size()),
                       std::numeric_limits<unsigned>::max(), groupLines);
     if (arg.starts_with(kOptionalGate))
-      return count_to(arg.substr(kOptionalGate.size()), 15, optionalGate, 0);
+      return count_to(arg.substr(kOptionalGate.size()),
+                      cursiv::kOptionalGateMost, optionalGate, 0);
     return false;
   }
 };

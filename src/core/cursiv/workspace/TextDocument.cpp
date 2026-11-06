@@ -186,6 +186,10 @@ Range TextDocument::rangeAt(TextOffset begin, TextOffset end) const {
 }
 
 void TextDocument::setText(std::string text) {
+  // Every offset into the text is a `TextOffset`: a longer one is refused
+  // before it replaces the current one.
+  if (text.size() > kMaxDocument)
+    throw std::overflow_error("cursiv: document exceeds 4 GiB");
   // Under the same lock the index is built with: a read action runs on many
   // threads, and dropping the table is a write to it like any other.
   const std::scoped_lock lock(_lineIndexMutex);

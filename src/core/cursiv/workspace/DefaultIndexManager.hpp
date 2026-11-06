@@ -178,7 +178,9 @@ class DefaultIndexManager : public IndexManager,
   std::unordered_set<DocumentId> _affected;
 
   // Null when the matching write dropped it; the first reader after that
-  // rebuilds it once under `_mutex` and publishes.
+  // rebuilds it once under `_mutex` and publishes. A write drops it before
+  // changing its table, so one that throws never leaves a view the table has
+  // moved past.
   // Published, not locked: the scope path asks for the export view once per
   // reference, and a `std::atomic<shared_ptr>` would serialise every worker on
   // its control block -- the same convoy a mutex makes, one line down.

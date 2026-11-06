@@ -73,7 +73,8 @@ struct LlTypoTape : TypoTape<T> {
                ? T.dfa_res_set(s)
                : LlTermRow{kNoReserve<T>.data(), T.termWords};
   }
-  // The typo walk's refusal hook has no statistics sink here.
+  // The walk's count of its stops: no statistics read it here, and the stops
+  // that leave the candidates incomplete set `cut` through the bounds.
   void refused() const {}
 };
 

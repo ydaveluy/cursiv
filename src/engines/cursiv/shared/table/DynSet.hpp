@@ -19,8 +19,8 @@ struct DynSet {
 
   std::uint64_t word(std::size_t k) const { return k < w.size() ? w[k] : 0; }
 
-  // The members, ascending: what a walk costs is how many there are, however
-  // far they may range.
+  // The members, ascending: a walk reads each of them and every word up to the
+  // highest one, empty words included.
   class Members {
    public:
     explicit Members(const DynSet& s) : _s(s) {}

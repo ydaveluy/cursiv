@@ -114,9 +114,12 @@ std::size_t DefaultValidationRegistry::slotOf(
   return at;
 }
 
-void DefaultValidationRegistry::rehash(std::size_t size) {
+// The multiplier changes with the table it places, once the table is
+// allocated: a refused allocation leaves both as they were.
+void DefaultValidationRegistry::rehash(std::size_t size, std::uint64_t mul) {
   std::vector<Row> old = std::exchange(_byType, std::vector<Row>(size));
   _typeMask = size - 1;
+  _mul = mul;
   for (Row& row : old)
     if (row.type != nullptr) _byType[slotOf(row.type)] = std::move(row);
 }
@@ -126,9 +129,12 @@ DefaultValidationRegistry::entriesOf(const AstTypeTag* type) {
   if (_typeCount != 0)
     if (Row& row = _byType[slotOf(type)]; row.type == type) return row.entries;
   if ((_typeCount + 1) * 4 > _byType.size())
-    rehash(std::max<std::size_t>(16, _byType.size() * 2));
+    rehash(std::max<std::size_t>(16, _byType.size() * 2), _mul);
   _byType[slotOf(type)].type = type;
   ++_typeCount;
+  // Off until the search below has run: a refused one leaves this tag where
+  // only the full probe finds it.
+  _homeDecides = false;
   const auto homed = [&] {
     for (std::size_t at = 0; at < _byType.size(); ++at)
       if (_byType[at].type != nullptr && homeOf(_byType[at].type) != at)
@@ -137,12 +143,11 @@ DefaultValidationRegistry::entriesOf(const AstTypeTag* type) {
   };
   // A collision tries other multipliers before a wider table: which tags
   // collide is the addresses', not the grammar's.
-  for (unsigned tries = 1; !homed() && tries <= 64; ++tries) {
-    _mul += 0x2545f4914f6cdd1dull << 1u;
+  for (unsigned tries = 1; !homed() && tries <= 64; ++tries)
     rehash(tries % 8 == 0 && _byType.size() < 16 * _typeCount
                ? _byType.size() * 2
-               : _byType.size());
-  }
+               : _byType.size(),
+           _mul + (0x2545f4914f6cdd1dull << 1u));
   _homeDecides = homed() && _everyNode.empty();
   return _byType[slotOf(type)].entries;
 }

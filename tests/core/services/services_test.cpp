@@ -325,6 +325,16 @@ void strings_escape_quotes_backslashes_and_control_characters() {
   CHECK(v.toJsonString({.pretty = false}) == expected);
 }
 
+// JSON text is UTF-8: a scalar is written as it stands, each maximal
+// ill-formed subpart as one U+FFFD, here a stray continuation byte, a lead
+// cut short and a lone surrogate.
+void strings_stay_utf8() {
+  const cursiv::JsonValue v(std::string("\xC3\xA9\x80|\xE2\x82|\xED\xA0\x80"));
+  CHECK(v.toJsonString({.pretty = false}) ==
+        "\"\xC3\xA9\xEF\xBF\xBD|\xEF\xBF\xBD|"
+        "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"");
+}
+
 void doubles_serialize_with_the_classic_locale() {
   const cursiv::JsonValue v(3.5);
   CHECK(v.toJsonString({.pretty = false}) == "3.5");
@@ -371,6 +381,7 @@ void run() {
   object_keys_serialize_sorted();
   pretty_and_compact_differ_only_in_layout();
   strings_escape_quotes_backslashes_and_control_characters();
+  strings_stay_utf8();
   doubles_serialize_with_the_classic_locale();
   non_finite_numbers_fall_back_to_null();
   assignment_can_extract_an_owned_child();
@@ -451,6 +462,28 @@ void an_incomplete_language_is_refused() {
   }
   CHECK(threw);
   CHECK(registry.all().empty());
+}
+
+// A language registers in the workspace it was built over: its services
+// already read that workspace's documents and index.
+void a_language_of_another_workspace_is_refused() {
+  cursiv::SharedCoreServices other;
+  cursiv::install_default_shared_core_services(other);
+  auto foreign = std::make_unique<cursiv::CoreServices>(other);
+  foreign->languageMetaData = {"ws", {".ws"}, {}};
+  foreign->parser = ws::generated::Workspace::create_parser();
+  foreign->astReflection = ws::generated::Workspace::create_ast_reflection();
+  cursiv::install_default_core_services(*foreign);
+  cursiv::DefaultServiceRegistry registry(shared);
+  bool threw = false;
+  try {
+    registry.registerServices(std::move(foreign));
+  } catch (const cursiv::ServiceRegistrationError&) {
+    threw = true;
+  }
+  CHECK(threw);
+  CHECK(registry.all().empty());
+  CHECK(!registry.hasServices("file:///a.ws"));
 }
 
 void a_uri_routes_by_extension() {
@@ -619,6 +652,7 @@ void run() {
   cursiv::install_default_shared_core_services(shared);
   an_incomplete_shared_container_is_refused();
   an_incomplete_language_is_refused();
+  a_language_of_another_workspace_is_refused();
   a_uri_routes_by_extension();
   extensions_meet_however_they_are_spelled();
   precedence_is_id_then_name_then_extension();
@@ -749,6 +783,14 @@ void an_observation_is_one_line() {
   CHECK(line.find("warning WorkspaceDirectoryReadFailed:") == 0);
   CHECK(line.find("uri=file:///w") != std::string::npos);
   CHECK(line.find("languageId=ws") != std::string::npos);
+  // A NUL would end the line where a C string stops, and an escape would
+  // steer the terminal: every control character is flattened.
+  cursiv::Observation controls;
+  controls.message = std::string("a\0b\x1b[2Jc", 8);
+  controls.uri = std::string("file:///\0w", 10);
+  const std::string flat = cursiv::format_observation(controls);
+  CHECK(flat.find("a b [2Jc") != std::string::npos);
+  CHECK(flat.ends_with("uri=file:/// w"));
 }
 
 // `publish` may run on any thread; the static mutex inside it is what keeps

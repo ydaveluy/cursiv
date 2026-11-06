@@ -37,9 +37,10 @@ const Piece* after(std::span<const Piece> pieces, TextOffset at) noexcept {
 // shift. For the others, ends never decrease along a run of records, so one
 // cursor walks the pieces (and steps back for spans that break the rule, as
 // repairs may); a begin is searched back from its end, rarely more than a few
-// pieces away.
-template <Side From, Side To, class Span>
-void move(std::span<const Piece> pieces, std::span<Span> spans) noexcept {
+// pieces away. `lost(i, span)` hears of a span whose bound lies strictly
+// inside a piece, before it moves: the way back cannot tell where it stood.
+template <Side From, Side To, class Span, class Lost>
+void move(std::span<const Piece> pieces, std::span<Span> spans, Lost&& lost) {
   const Piece* const first = pieces.data();
   const Piece* const last = first + pieces.size();
   const auto past = [](const Piece& p, TextOffset at) {
@@ -51,7 +52,11 @@ void move(std::span<const Piece> pieces, std::span<Span> spans) noexcept {
   TextOffset runBegin = 0;
   std::uint64_t runEnd = 0;
   TextOffset shift = 0;
-  for (Span& s : spans) {
+  const auto inside = [&](const Piece* p, TextOffset at) {
+    return p != last && (p->*From).begin < at;
+  };
+  for (std::size_t i = 0; i < spans.size(); ++i) {
+    Span& s = spans[i];
     if (s.begin >= runBegin && s.end < runEnd) {
       s.begin += shift;
       s.end += shift;
@@ -71,6 +76,8 @@ void move(std::span<const Piece> pieces, std::span<Span> spans) noexcept {
       }
       begin = probe;
     }
+    if (inside(begin, s.begin) || inside(next, s.end))
+      lost(i, TextRange{s.begin, s.end});
     s.begin = across<From, To>(pieces, begin, s.begin, false);
     s.end = across<From, To>(pieces, next, s.end, true);
     // An end at an empty piece's offset is past it, not in this run.
@@ -84,6 +91,20 @@ void move(std::span<const Piece> pieces, std::span<Span> spans) noexcept {
 
 constexpr Side kSource = &Piece::source;
 constexpr Side kText = &Piece::text;
+
+// The spans moved back to the text, then those a piece widened set again
+// from what was kept of them.
+template <class Kept, class Span>
+void move_back(std::span<const Piece> pieces, std::span<const Kept> kept,
+               std::span<Span> spans) noexcept {
+  move<kSource, kText>(pieces, spans, [](std::size_t, TextRange) {});
+  for (const Kept& k : kept) {
+    assert(k.index < spans.size() && "the spans of the bound tree");
+    if (k.index >= spans.size()) continue;
+    spans[k.index].begin = k.text.begin;
+    spans[k.index].end = k.text.end;
+  }
+}
 
 }  // namespace
 
@@ -131,19 +152,27 @@ std::optional<TextOffset> SourceTranslation::translated(
   return across<kSource, kText>(_pieces, next, offset, false);
 }
 
-void SourceTranslation::to_document(std::span<CstNode> records) const noexcept {
-  move<kText, kSource>(_pieces, records);
-}
 void SourceTranslation::to_document(
     std::span<ParseDiagnostic> diagnostics) const noexcept {
-  move<kText, kSource>(_pieces, diagnostics);
+  move<kText, kSource>(_pieces, diagnostics, [](std::size_t, TextRange) {});
+}
+void SourceTranslation::bind(std::span<CstNode> records,
+                             std::span<ParseDiagnostic> repairs) {
+  const auto keep = [](std::vector<Kept>& into) {
+    into.clear();
+    return [&into](std::size_t i, TextRange text) {
+      into.push_back({static_cast<std::uint32_t>(i), text});
+    };
+  };
+  move<kText, kSource>(_pieces, records, keep(_records));
+  move<kText, kSource>(_pieces, repairs, keep(_repairs));
 }
 void SourceTranslation::to_text(std::span<CstNode> records) const noexcept {
-  move<kSource, kText>(_pieces, records);
+  move_back(_pieces, std::span<const Kept>(_records), records);
 }
 void SourceTranslation::to_text(
-    std::span<ParseDiagnostic> diagnostics) const noexcept {
-  move<kSource, kText>(_pieces, diagnostics);
+    std::span<ParseDiagnostic> repairs) const noexcept {
+  move_back(_pieces, std::span<const Kept>(_repairs), repairs);
 }
 
 }  // namespace cursiv

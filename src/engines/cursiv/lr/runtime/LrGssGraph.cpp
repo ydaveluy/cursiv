@@ -948,7 +948,7 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     std::ranges::reverse(s.forests);
     return s;
   };
-  std::vector<Id> path, via, next;
+  std::vector<Id> path, via, next, cut;
   std::vector<Ranked> found;
   std::vector<Candidate> pending;
   // Whether `c` is kept among the best `room` stacks pending.
@@ -983,7 +983,7 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     }
     found.resize(begin);
     pending.clear();
-    note_cut(v);
+    cut.push_back(v);
     Source first = completion(v, r);
     const std::size_t depth = first.forests.size();
     (void)put({ranked(std::move(first)), depth}, cap);
@@ -1013,6 +1013,16 @@ std::vector<LrGssGraph::Source> LrGssGraph::sources(std::size_t cap) {
     }
   }
   merge_sort(found, earlier);
+  // The cap holds over every frozen reading together: the stacks ranked first
+  // stand, and the readings the others stood on are cut.
+  if (found.size() > cap) {
+    for (std::size_t k = cap; k < found.size(); ++k)
+      cut.push_back(found[k].source.vertices.back());
+    found.resize(cap);
+  }
+  std::ranges::sort(cut);
+  cut.erase(std::ranges::unique(cut).begin(), cut.end());
+  for (const Id v : cut) note_cut(v);
   out.reserve(found.size());
   for (Ranked& s : found) out.push_back(std::move(s.source));
   return out;

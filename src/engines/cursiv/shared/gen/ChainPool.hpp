@@ -151,8 +151,9 @@ struct ChainPool {
         return static_cast<std::uint16_t>(i);
     // A chain becomes an element id, which is sixteen bits: a count that
     // wrapped would hand two chains one id, and an AST written with the
-    // wrong actions.
-    if (nchains + 1u >= kNoElement || nacts + n > 0xFFFFu) {
+    // wrong actions. The new chain's id is the count, and the sentinel is
+    // no id.
+    if (nchains == kNoElement || nacts + n > 0xFFFFu) {
       capped = true;
       return kNoRow;
     }

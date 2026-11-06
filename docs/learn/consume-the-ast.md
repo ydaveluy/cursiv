@@ -140,8 +140,9 @@ language.shared->workspaceManager->initializeWorkspace(folders);
 ```
 
 `initializeWorkspace` loads the files of your language from the folder and
-its subfolders, then builds them all. For tests, `MemoryFileSystemProvider`
-supplies files from memory.
+its subfolders, then builds them all. It skips hidden entries, `node_modules`,
+`out` and symbolic links. For tests, `MemoryFileSystemProvider` supplies files
+from memory.
 
 ## Generate text
 

@@ -286,15 +286,28 @@ const std::vector<Typo>& lr_search_misread(const LrContext& c, LrSearch& s,
   if (at < c.len) {
     const TextOffset reach = lr_search_reach(s);
     const TextOffset end = lr_search_walk_end(c, s, at);
-    TextOffset halt = at;
-    const TextOffset plain =
-        lr_match_halt<A>(c.src, end, A.errMode, at, halt).end;
-    read += halt - at;
-    cut = end < c.len && halt >= end;
-    const TextOffset horizon = typo_horizon(at, plain, c.len, reach);
+    // A mode's head faults end where its own fault alphabet reads, as the
+    // search's re-readings in a state of that mode do: in a section, its
+    // grammar's.
+    std::uint16_t err = A.errMode;
+    TextOffset plain = at;
+    const auto plain_under = [&] {
+      TextOffset halt = at;
+      plain = lr_match_halt<A>(c.src, end, err, at, halt).end;
+      read += halt - at;
+      cut = cut || (end < c.len && halt >= end);
+    };
+    plain_under();
     for (unsigned m = 0; m < A.modeStart.size() && !cut; ++m) {
       auto want = A.derived.modeWant[m];
       if (want.none()) continue;
+      if (const std::uint16_t e = lr_err_mode<A>(static_cast<std::uint16_t>(m));
+          e != err) {
+        err = e;
+        plain_under();
+        if (cut) break;
+      }
+      const TextOffset horizon = typo_horizon(at, plain, c.len, reach);
       const TypoBounds bounds{.src = c.src,
                               .extent = horizon,
                               .docLen = c.len,
@@ -374,8 +387,13 @@ class LrSearchOwes {
   const std::size_t _base;
   std::uint32_t _ret = 0;
 
+  // The stop is read at every step: one whose tokens were read before reads
+  // no text, and so no walk reads it.
   std::uint32_t run_all() {
-    while (_st.size() > _base) step();
+    while (_st.size() > _base) {
+      _c.stop.poll();
+      step();
+    }
     return _ret;
   }
 

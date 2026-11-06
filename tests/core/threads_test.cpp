@@ -22,7 +22,9 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
+#include "cursiv/execution/WorkerPool.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/grammar/dump.hpp"
 #include "cursiv/references/ImportedNames.hpp"
@@ -31,7 +33,6 @@
 #include "cursiv/utils/Published.hpp"
 #include "cursiv/workspace/DefaultWorkspaceLock.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
-#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 
 // Pins the contract of the parallel-for, which is what a change of pool has to
@@ -175,6 +176,23 @@ void cancellation_short_circuits_the_rest() {
       if (calls.fetch_add(1) == 100) source.request_stop();
     });
   }));
+}
+
+// What a cancelled or failed run relies on: a body that says stop ends the
+// run. No item is handed out after it, and each part makes at most one more
+// call before it sees the stop, however many items are left.
+void a_stopped_run_hands_out_no_more_items() {
+  cursiv::detail::WorkerPool pool{kWorkers};
+  constexpr std::size_t kCount = 1'000'000;
+  std::atomic<std::size_t> calls{0};
+  std::atomic<bool> stopped{false};
+  pool.run(kCount, [&](std::size_t) noexcept {
+    ++calls;
+    if (stopped.load(std::memory_order_relaxed)) return false;
+    if (calls.load() > 100) stopped = true;
+    return !stopped.load(std::memory_order_relaxed);
+  });
+  CHECK(calls.load() < 200);
 }
 
 void inline_runs_report_cancellation_from_the_last_body() {
@@ -352,6 +370,7 @@ void run() {
   the_work_spreads_across_threads();
   the_first_exception_is_rethrown();
   cancellation_short_circuits_the_rest();
+  a_stopped_run_hands_out_no_more_items();
   inline_runs_report_cancellation_from_the_last_body();
   a_body_may_run_another_parallel_for();
   a_full_pool_of_cells_still_runs_every_body();

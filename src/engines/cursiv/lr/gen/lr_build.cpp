@@ -150,17 +150,8 @@ bool lr_leaves_first(const LrBuildCfg& g, const LrFirstSets& fs,
          (n == p.lhs && (n >= g.nts.size() || !g.nts[n].node));
 }
 
-// A pool grows sixteenfold: a pointer into one holds only until it grows.
-void lr_room(auto& pool, std::size_t want) {
-  if (pool.capacity() >= want) return;
-  std::size_t c = pool.capacity() < 16 ? 16 : pool.capacity();
-  while (c < want) c *= 16;
-  pool.reserve(c);
-}
-
-// Append a row under the same growth policy as every graph pool.
+// Append a row to a graph pool: a pointer into one holds only until it grows.
 void lr_append(auto& pool, const auto& row) {
-  lr_room(pool, pool.size() + row.size());
   pool.insert(pool.end(), row.begin(), row.end());
 }
 

@@ -6,7 +6,8 @@
 #include "cursiv/observability/ObservabilitySink.hpp"
 
 // The one-line rendering of an observation, exposed for the sink a host
-// writes. Newlines are flattened, so one observation is one line.
+// writes. Control characters are flattened to spaces, so one observation is
+// one line.
 
 namespace cursiv {
 

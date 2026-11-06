@@ -488,6 +488,21 @@ void recursive_adoption_has_a_finite_set_of_action_chains() {
   CHECK(built.writes.nchains < 32);
 }
 
+// A chain id is sixteen bits and the sentinel is none: 65 535 chains fit, the
+// next one names the cap.
+void the_chain_pool_holds_every_id_but_the_sentinel() {
+  cursiv::ChainPool writes;
+  constexpr unsigned kIds = cursiv::kNoRow;
+  bool fits = true;
+  for (unsigned i = 0; i < kIds; ++i) {
+    const auto act = static_cast<std::uint16_t>(i);
+    fits = fits && writes.intern_chain(&act, 1) == i;
+  }
+  CHECK(fits && !writes.capped && writes.nchains == kIds);
+  CHECK(writes.intern_chain(nullptr, 0, "past the cap") == cursiv::kNoRow);
+  CHECK(writes.capped);
+}
+
 void disabling_static_prediction_disables_every_static_automaton() {
   auto low = cursiv::LlLowering<Simple>::lower();
   const auto built = cursiv::ll_build_program(low, {.staticPredict = false});
@@ -816,6 +831,7 @@ int main() {
   externally_called_expressions_stay_complete();
   disabling_static_prediction_disables_every_static_automaton();
   recursive_adoption_has_a_finite_set_of_action_chains();
+  the_chain_pool_holds_every_id_but_the_sentinel();
   a_guard_only_disables_the_static_decisions_that_can_reach_it();
   classification_stops_before_a_guard_can_choose_an_arm();
   parser_files_have_a_stable_partition_contract();

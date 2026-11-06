@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,20 +55,38 @@ class SourceTranslation {
   // A document offset in the text; none strictly inside a replaced piece.
   [[nodiscard]] std::optional<TextOffset> translated(
       TextOffset offset) const noexcept;
-  // The spans a parse of the text wrote, moved to the document's offsets, or
-  // back to the text's.
-  void to_document(std::span<CstNode> records) const noexcept;
+  // The spans a parse of the text wrote, moved to the document's offsets.
   void to_document(std::span<ParseDiagnostic> diagnostics) const noexcept;
+  // The records and repairs of the tree this translation is bound to, back at
+  // the spans the parse wrote: a bound inside a piece widened on the way to
+  // the document, and several tokens of one piece share that widened span.
   void to_text(std::span<CstNode> records) const noexcept;
-  void to_text(std::span<ParseDiagnostic> diagnostics) const noexcept;
+  void to_text(std::span<ParseDiagnostic> repairs) const noexcept;
 
  private:
+  friend class Cst;
+
+  // A span of the bound tree with a bound strictly inside a piece, at the
+  // text's offsets.
+  struct Kept {
+    std::uint32_t index;
+    TextRange text;
+  };
+
+  // The tree's records and repairs moved to the document's offsets, keeping
+  // the spans that cannot find their way back.
+  void bind(std::span<CstNode> records, std::span<ParseDiagnostic> repairs);
+
   std::string_view _source;
   // How much of the source the pieces have consumed.
   TextOffset _kept = 0;
   std::string _text;
   std::vector<Piece> _pieces;
   std::vector<ParseDiagnostic> _errors;
+  // What `bind` kept: few, since only a piece that spells several tokens, or
+  // a token and trivia, holds a bound inside it.
+  std::vector<Kept> _records;
+  std::vector<Kept> _repairs;
 };
 
 // What a language writes: fill `out`, or leave it untouched when `source`

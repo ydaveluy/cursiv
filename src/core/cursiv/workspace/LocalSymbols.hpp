@@ -59,6 +59,7 @@ class LocalSymbols {
   // A hint and not a capacity: over-reserving for a document whose nodes are
   // mostly nameless is the one waste this shape can still commit.
   void reserve(std::size_t entries);
+  // `container` is never null: an entry is visible in the scope of a node.
   void add(const AstNode* container, AstNodeDescription description);
   // Precondition for every query below. Groups, indexes, and freezes.
   void seal();

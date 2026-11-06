@@ -124,7 +124,7 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
-  struct NAME : terminal<cr<"a-z"> + many(cr<"a-z0-9">)> {};
+  struct NAME : terminal<cr<"a-zA-Z"> + many(cr<"a-zA-Z0-9">)> {};
   struct NUM : terminal<some(d)> {};
   struct DOTTED : terminal<some(cr<"a-z">) + lit<"."> + some(cr<"a-z">)> {};
   struct NOTE : terminal<lit<"#"> + many(cr<"^\n;">)> {};
@@ -155,13 +155,16 @@ struct Base : cursiv::GrammarSpec {
                                   &(gap::has(lit<"\n">) + ref<NAME> + ref<EQ> +
                                     ref<NAME>)+assign<&Item::text>(ref<NAME>) +
                                   ref<EQ> + ref<NAME>)> {};
-  // The member a name fills turns on its first letter, which a terminal tests.
+  // The member a name fills turns on its first letter, which a terminal tests:
+  // a capital is a letter of its own.
   struct ANAME : terminal<&lit<"a"> + ref<NAME>> {};
   struct NNAME : terminal<&lit<"n"> + ref<NAME>> {};
+  struct CNAME : terminal<&cr<"A-Z"> + ref<NAME>> {};
   struct Pair
-      : rule<create<Item>(
-            kw<"pair"> + ((&ref<ANAME> + assign<&Item::left>(ref<NAME>)) |
-                          (&ref<NNAME> + assign<&Item::right>(ref<NAME>))))> {};
+      : rule<create<Item>(kw<"pair"> +
+                          ((&ref<ANAME> + assign<&Item::left>(ref<NAME>)) |
+                           (&ref<NNAME> + assign<&Item::right>(ref<NAME>)) |
+                           (&ref<CNAME> + assign<&Item::text>(ref<NAME>))))> {};
   struct Root : rule<create<Doc>(
                     many(append<&Doc::items>(ref<No> | ref<Is> | ref<Bare> |
                                              ref<Tie> | ref<Pick> | ref<Group> |

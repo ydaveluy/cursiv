@@ -5,9 +5,12 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include "cursiv/utils/macros.hpp"
 
 namespace cursiv {
 
@@ -23,8 +26,11 @@ class LrGssPool {
     return _chunks[i >> Shift][i & kMask];
   }
 
+  // The graph keeps an index in 32 bits: one past them throws
+  // `std::length_error`.
   std::size_t push_back(const T& value) {
     if ((_size >> Shift) == _chunks.size()) {
+      if (_chunks.size() == kMostChunks) too_many();
       std::unique_ptr<T[], Free> chunk(std::allocator<T>().allocate(kChunk));
       _chunks.push_back(std::move(chunk));
     }
@@ -39,8 +45,16 @@ class LrGssPool {
   }
 
  private:
+  static_assert(Shift < 32);
   static constexpr std::size_t kChunk = std::size_t{1} << Shift;
   static constexpr std::size_t kMask = kChunk - 1;
+  // The chunks whose indices all stay below 2^32 - 1, the graph's `none`.
+  static constexpr std::size_t kMostChunks =
+      (std::size_t{1} << (32 - Shift)) - 1;
+
+  [[noreturn]] CURSIV_COLD CURSIV_NOINLINE static void too_many() {
+    throw std::length_error("cursiv: GSS pool exceeds its 32-bit indices");
+  }
 
   struct Free {
     void operator()(T* chunk) const {

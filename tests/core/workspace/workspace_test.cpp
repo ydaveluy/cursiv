@@ -17,6 +17,7 @@
 #include <limits>
 #include <memory>
 #include <map>
+#include <new>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -49,6 +50,7 @@
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/workspace/AstNodeLocator.hpp"
+#include "cursiv/workspace/DefaultDocumentBuilder.hpp"
 #include "cursiv/workspace/DefaultDocumentFactory.hpp"
 #include "cursiv/workspace/DefaultDocuments.hpp"
 #include "cursiv/workspace/DefaultIndexManager.hpp"
@@ -1458,6 +1460,33 @@ void a_failed_build_answers_its_waiters() {
         cursiv::WaitOutcome::BuildFailed);
 }
 
+// A record of what ran that cannot be kept publishes none of its diagnostics:
+// the build that follows runs the categories again and says each finding once.
+void a_refused_record_publishes_no_diagnostic() {
+  struct RefusingBuilder final : cursiv::DefaultDocumentBuilder {
+    using DefaultDocumentBuilder::DefaultDocumentBuilder;
+    mutable std::atomic<bool> refuse{true};
+    void markAsCompleted(
+        const cursiv::Document& document,
+        std::span<const cursiv::ValidationCategory* const> ran) const override {
+      if (refuse.exchange(false)) throw std::bad_alloc();
+      DefaultDocumentBuilder::markAsCompleted(document, ran);
+    }
+  };
+  World world;
+  world.shared.documentBuilder =
+      std::make_unique<RefusingBuilder>(world.shared);
+  cursiv::Document* const a =
+      world.add("file:///a.ws", "entity E { f : Missing }\n");
+  cursiv::Document* const set[] = {a};
+  CHECK(support::throws<std::bad_alloc>(
+      [&] { world.shared.documentBuilder->build(set); }));
+  CHECK(a->diagnostics.empty());
+  world.shared.documentBuilder->build(set);
+  CHECK(a->state.load() == cursiv::DocumentState::Validated);
+  CHECK(a->diagnostics.size() == 1);
+}
+
 // A call cut short before its phases fails like one cut inside them: an
 // update listener throwing is one. A wait begun before the call and one begun
 // after it both learn that the rung will not come. A listener that cancels is
@@ -2443,6 +2472,7 @@ void run() {
   a_wait_can_precede_the_first_build();
   a_document_knows_its_links_are_broken();
   a_failed_build_answers_its_waiters();
+  a_refused_record_publishes_no_diagnostic();
   a_failed_update_listener_answers_the_waiters(false);
   a_failed_update_listener_answers_the_waiters(true);
   a_request_reads_beside_a_running_build();
@@ -3073,7 +3103,9 @@ void what_is_on_disk_reads_back() {
   CHECK(sawFile);
   CHECK(sawDir);
 
-  // A link to the parent is an entry, not a folder to traverse again.
+  // A link to the parent is an entry, not a folder to traverse again. A link
+  // is neither a file nor a folder, listed or asked alone: the scan and an
+  // event about it see the same entry.
   std::error_code symlinkError;
   std::filesystem::create_directory_symlink(dir, dir / "sub" / "loop", symlinkError);
   if (!symlinkError) {
@@ -3081,6 +3113,15 @@ void what_is_on_disk_reads_back() {
         cursiv::path_to_file_uri((dir / "sub").string()));
     CHECK(linked.size() == 1);
     CHECK(!linked.front().isDirectory && !linked.front().isFile);
+    const cursiv::FileSystemNode loop = fs.stat(linked.front().uri);
+    CHECK(!loop.isDirectory && !loop.isFile);
+  }
+  std::filesystem::create_symlink(dir / "a.txt", dir / "sub" / "b.ws",
+                                  symlinkError);
+  if (!symlinkError) {
+    const cursiv::FileSystemNode link =
+        fs.stat(cursiv::path_to_file_uri((dir / "sub" / "b.ws").string()));
+    CHECK(!link.isDirectory && !link.isFile);
   }
 
   std::filesystem::remove_all(dir);

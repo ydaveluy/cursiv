@@ -195,8 +195,12 @@ struct Document;
 
 struct AstNode {
   AstNode() = default;
-  AstNode(const AstNode&) = default;
-  AstNode& operator=(const AstNode&) = default;
+  // A copy is another object: it takes the members' values but none of the
+  // source's identity -- no tag, parent or CST node, as a node built by hand
+  // -- since a tag copied into a base would name a class the copy is not. An
+  // assignment likewise leaves the target its own.
+  AstNode(const AstNode&) noexcept {}
+  AstNode& operator=(const AstNode&) noexcept { return *this; }
   virtual ~AstNode() = default;
 
   AstNode* parent = nullptr;

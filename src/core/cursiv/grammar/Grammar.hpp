@@ -69,6 +69,9 @@ struct Grammar {
   // a keyword is its spelling. Empty where the text spells no literal.
   constexpr virtual std::string_view spellingDoc(
       std::string_view) const noexcept = 0;
+  // Whether the grammar reads that literal in any letter case: a reader that
+  // looks a keyword up by its spelling then takes every case of it.
+  constexpr virtual bool spellingFolds(std::string_view) const noexcept = 0;
   // The prose over the use a leaf read, for a word whose uses have different
   // prose. Empty for any other word, which `spellingDoc` answers.
   constexpr virtual std::string_view recordDoc(

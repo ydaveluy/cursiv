@@ -24,7 +24,6 @@ class ConcurrentTable;
 // Frees now the tables no reader can still hold: what a clear or a growth
 // retired otherwise waits for enough retirements, in number or in bytes. For
 // tests, which check what is freed when; any thread may call it at any time.
-// One that cannot list what is due, for want of memory, leaves it to the next.
 void collect_retired_tables() noexcept;
 
 // Process-wide epoch-based reclamation, the tables' own: nothing else reads
@@ -32,13 +31,24 @@ void collect_retired_tables() noexcept;
 // so reading writes nothing another thread touches; what a writer takes out
 // of reach is retired with the epoch of that moment and freed once every
 // reader has announced a later epoch, or none. One manager for every table,
-// so a thread holds one slot whatever it reads.
+// so a thread holds one slot whatever it reads. A thread that finds every
+// slot held reads all the same, and holds back every collection while it
+// does.
 class TableEpochs {
   template <class, class, class, class>
   friend class ConcurrentTable;
   friend void collect_retired_tables() noexcept;
 
   static constexpr std::uint64_t kIdle = ~std::uint64_t{0};
+
+  // What a retirement leaves for the collection, kept in what it retires:
+  // retiring asks for no memory, so what is out of reach is never lost.
+  struct Retired {
+    Retired* next = nullptr;
+    void* object = nullptr;
+    void (*free)(void*) = nullptr;
+    std::uint64_t epoch = 0;
+  };
 
   // A reader's stay. Only the outermost guard of a thread announces: a read
   // that reads through another costs nothing more.
@@ -47,8 +57,13 @@ class TableEpochs {
     Guard() noexcept {
       Seat& s = seat;
       if (s.depth++ != 0) return;
-      if (s.slot == nullptr) [[unlikely]]
+      if (s.slot == nullptr) [[unlikely]] {
         s.slot = takeSlot();
+        if (s.slot == nullptr) {
+          enterWithoutSlot();
+          return;
+        }
+      }
       // The epoch read with acquire: a reader that sees one `retire` moved
       // on to sees what that writer took out of reach. The announcement must
       // be seen by a writer's scan before this reader loads anything: where
@@ -65,6 +80,10 @@ class TableEpochs {
     ~Guard() {
       Seat& s = seat;
       if (--s.depth != 0) return;
+      if (s.slot == nullptr) [[unlikely]] {
+        leaveWithoutSlot();
+        return;
+      }
       s.slot->store(kIdle, std::memory_order_release);
       if (s.exiting) [[unlikely]]
         giveBack(s);
@@ -74,11 +93,12 @@ class TableEpochs {
   };
 
   // `object` is already out of every new reader's reach: it is freed once the
-  // readers that may still hold it have left. Writers retire rarely -- a
-  // table grown or emptied -- so this takes a lock, and collects once enough
-  // have come since the last collection, in number or in `bytes`, what
-  // `object` holds.
-  static void retire(void* object, void (*free)(void*), std::size_t bytes);
+  // readers that may still hold it have left. `record` lives in `object` and
+  // is used once. Writers retire rarely -- a table grown or emptied -- so
+  // this takes a lock, and collects once enough have come since the last
+  // collection, in number or in `bytes`, the room `object` takes.
+  static void retire(Retired& record, void* object, void (*free)(void*),
+                     std::size_t bytes) noexcept;
   static void collect() noexcept;
 
   // Trivial, and declared `constinit`, so reading it costs no initialisation
@@ -101,8 +121,15 @@ class TableEpochs {
   struct Release;
   static thread_local Release release;
 
-  static std::atomic<std::uint64_t>* takeSlot();
+  // The slots and the retired list; defined in the source file.
+  struct State;
+  static State& state() noexcept;
+
+  // Null when every slot is held.
+  static std::atomic<std::uint64_t>* takeSlot() noexcept;
   static void giveBack(Seat& s) noexcept;
+  static void enterWithoutSlot() noexcept;
+  static void leaveWithoutSlot() noexcept;
 };
 
 inline std::atomic<std::uint64_t> TableEpochs::current{0};
@@ -222,6 +249,8 @@ class ConcurrentTable {
     alignas(64) std::atomic<Table*> next{nullptr};
     std::atomic<std::size_t> claimed{0};
     std::atomic<std::size_t> copied{0};
+    // Written once, when a clear or a growth takes this table out.
+    TableEpochs::Retired retired;
 
     [[nodiscard]] static Table* make(std::uint64_t g, std::size_t groups) {
       const std::size_t counts =
@@ -318,13 +347,16 @@ class ConcurrentTable {
     // Guarded too: a growth may retire the current table while it is read.
     const TableEpochs::Guard guard;
     const std::scoped_lock lock(_writers);
-    const Table* current = _table.load(std::memory_order_relaxed);
+    // Sequentially consistent, as a read's: a growth may retire this table
+    // meanwhile, and the guard keeps it only for loads in that order.
+    const Table* current = _table.load(std::memory_order_seq_cst);
     const std::size_t groups = keepCapacity ? current->groups() : kMinGroups;
     // An exchange, not a store: a growth may publish its successor meanwhile,
     // and whichever table this takes out is the one whose entries go.
     Table* old = _table.exchange(Table::make(current->generation + 1, groups),
                                  std::memory_order_seq_cst);
-    TableEpochs::retire(old, &destroy_with_entries_erased, old->allocated());
+    TableEpochs::retire(old->retired, old, &destroy_with_entries_erased,
+                        old->allocated());
   }
 
   // Every value, in no particular order.
@@ -609,7 +641,7 @@ class ConcurrentTable {
     Table* expected = t;
     if (_table.compare_exchange_strong(expected, bigger,
                                        std::memory_order_seq_cst))
-      TableEpochs::retire(t, &destroy_table_erased, t->allocated());
+      TableEpochs::retire(t->retired, t, &destroy_table_erased, t->allocated());
   }
 
   static void destroy_table_erased(void* t) {

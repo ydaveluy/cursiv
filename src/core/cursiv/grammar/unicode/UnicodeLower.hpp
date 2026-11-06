@@ -1,6 +1,6 @@
 // What each scalar lowers to, and the casing properties final sigma reads,
-// written by tools/gen_unicode_ranges.py from Python's unicodedata: never
-// edited.
+// written by tools/gen_unicode_ranges.py from Python's unicodedata and the
+// Unicode Character Database, Unicode 16.0.0: never edited.
 #pragma once
 
 #include <cstdint>

@@ -31,7 +31,10 @@ inline constexpr unsigned kTypoValid = 2;  // valid bytes each fault owes
 // Edges explored at one disagreement, in the order the byte classes are
 // numbered: a state with more is read through the first and the rest are
 // declared given up. Which survive is the numbering's, not the grammar's, so
-// this bounds the search and describes no property of it.
+// this bounds the search and describes no property of it. Every walk gives up
+// the same edges, the search's and its bound's alike, whatever is left to
+// spend: what a walk finds is all any walk from there finds, and a memo may
+// keep it.
 inline constexpr unsigned kTypoEdges = 4;
 
 // One point of the re-reading search: where it stands, and what it has spent
@@ -135,9 +138,12 @@ inline std::span<const std::uint16_t> typo_successors(const std::uint32_t* base,
 // explored, never the first that fits. A reading is offered at
 // `repair_typo_cost` of its faults, and not at all where that is a different
 // word's price.
-// What a bound gives up goes through `refused()`, which an adapter must not
-// drop. The terminal and the frontier it must close on are ONE answer: asked
-// apart, the walk names a terminal that another one's guard let through.
+// What a bound gives up goes through `refused()`, an adapter's count of the
+// walk's stops. The stops a larger share would not make -- the horizon short
+// of the document, the bytes paid for spent -- also set `shortOf`: the
+// candidates found are then incomplete. The terminal and the frontier it must
+// close on are ONE answer: asked apart, the walk names a terminal that another
+// one's guard let through.
 //
 // `Ad` names one walk's table: `len` -- the horizon, the adapter's to set --
 // `byte`, `successors`, `next_byte`, `original`, `owed` (hands each terminal

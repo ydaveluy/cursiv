@@ -98,10 +98,16 @@ class UriTrie {
   }
 
  private:
+  struct Node;
+  // A subtree is freed one node at a time, through a list threaded on the
+  // parent links it no longer needs: a deep path costs no native stack.
+  struct FreeNode {
+    void operator()(Node* node) const noexcept;
+  };
   struct Node {
     std::string segment;
     Node* parent = nullptr;
-    std::unordered_map<std::string, std::unique_ptr<Node>> children;
+    std::unordered_map<std::string, std::unique_ptr<Node, FreeNode>> children;
     std::optional<T> element;
   };
 
@@ -137,14 +143,13 @@ class UriTrie {
           return nullptr;
         } else {
           if (!create) return nullptr;
-          child =
-              current->children
-                  .try_emplace(segment,
-                               std::make_unique<Node>(Node{.segment = segment,
-                                                           .parent = current,
-                                                           .children = {},
-                                                           .element = {}}))
-                  .first;
+          child = current->children
+                      .try_emplace(segment, std::unique_ptr<Node, FreeNode>(
+                                                new Node{.segment = segment,
+                                                         .parent = current,
+                                                         .children = {},
+                                                         .element = {}}))
+                      .first;
         }
       }
       current = child->second.get();
@@ -159,9 +164,23 @@ class UriTrie {
     return getNodeImpl(_root, uri, false);
   }
 
+  // Depth first, each node before its children, the levels still to visit
+  // kept on the heap: a deep path costs no native stack.
   static void appendValues(const Node& node, std::vector<T>& values) {
-    if (node.element.has_value()) values.push_back(*node.element);
-    for (const auto& [_, child] : node.children) appendValues(*child, values);
+    using Child = typename decltype(Node::children)::const_iterator;
+    std::vector<std::pair<Child, Child>> levels;
+    for (const Node* at = &node; at != nullptr;) {
+      if (at->element.has_value()) values.push_back(*at->element);
+      levels.emplace_back(at->children.begin(), at->children.end());
+      at = nullptr;
+      while (at == nullptr && !levels.empty()) {
+        auto& [next, end] = levels.back();
+        if (next == end)
+          levels.pop_back();
+        else
+          at = (next++)->second.get();
+      }
+    }
   }
 
   [[nodiscard]] static std::vector<T> collectValues(const Node& node) {
@@ -176,5 +195,21 @@ class UriTrie {
     for (auto& [_, child] : _root.children) child->parent = &_root;
   }
 };
+
+template <class T>
+void UriTrie<T>::FreeNode::operator()(Node* node) const noexcept {
+  node->parent = nullptr;
+  while (node != nullptr) {
+    Node* const done = node;
+    node = done->parent;
+    for (auto& [_, child] : done->children) {
+      Node* const next = child.release();
+      next->parent = node;
+      node = next;
+    }
+    // Its children are empty pointers now: nothing below it recurses.
+    delete done;
+  }
+}
 
 }  // namespace cursiv

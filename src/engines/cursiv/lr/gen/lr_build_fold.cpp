@@ -64,7 +64,7 @@ bool lr_fold_chains(LrBuildTable& A) {
     const std::uint32_t key = (std::uint32_t{r} << 16) | over;
     if (const auto it = fx.find(key); it != fx.end())
       return static_cast<ElementId>(A.writes.nchains + it->second);
-    if (A.writes.nchains + A.nfused + 1u >= kNoElement) {
+    if (A.writes.nchains + A.nfused >= kNoElement) {
       full = true;
       return over;
     }

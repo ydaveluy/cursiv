@@ -64,10 +64,13 @@ Bytes read_whole(std::string_view uri, std::ios::openmode mode) {
 
 }  // namespace
 
+// The entry itself, as `readDirectory` lists it: a symlink is neither a file
+// nor a folder, so an event about one selects what the scan selects.
 FileSystemNode LocalFileSystemProvider::stat(std::string_view uri) const {
   const std::filesystem::path path = local_path(uri);
   std::error_code ec;
-  const std::filesystem::file_status status = std::filesystem::status(path, ec);
+  const std::filesystem::file_status status =
+      std::filesystem::symlink_status(path, ec);
   if (ec)
     throw FileSystemError(
         std::format("cursiv: cannot stat '{}': {}", uri, ec.message()));

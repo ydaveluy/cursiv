@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -114,8 +115,7 @@ constexpr double kQuadratic = 4.6;
 constexpr double kCubic = 8.0;
 
 // The instructions one read retires per alternative the graph held -- per byte
-// where it opened none -- 0 where the machine counts none, or where the code
-// is not optimised and counts what inlining would remove.
+// where it opened none -- 0 where the sample is unreadable or multiplexed.
 template <const auto& T>
 double per_alternative(const cursiv::bench::PerfCounters& counters,
                        const std::string& text, const cursiv::LrDrive* drive) {
@@ -128,9 +128,6 @@ double per_alternative(const cursiv::bench::PerfCounters& counters,
   const cursiv::bench::PerfSample spent =
       cursiv::bench::perf_delta(from, counters.read());
   CHECK(ok && cst.diagnostics().empty());
-#ifndef NDEBUG
-  return 0;
-#endif
   if (!spent.valid || spent.scaled) return 0;
   return static_cast<double>(spent.instructions) /
          (stats.alternatives != 0 ? stats.alternatives : text.size());
@@ -149,8 +146,25 @@ std::array<double, 3> series(const cursiv::bench::PerfCounters& counters,
 }
 
 // Twice the text, an alternative costs what it did, within a third either way.
-void cost_stays_flat(const std::array<double, 3>& cost, double ratio = 1.3) {
-  if (cost[0] == 0 || cost[1] == 0 || cost[2] == 0) return;
+// A series it cannot judge is named, so a pass never stands for a check that
+// did not run.
+void cost_stays_flat(const char* grammar, const std::array<double, 3>& cost,
+                     double ratio = 1.3) {
+#ifndef NDEBUG
+  // Unoptimised code counts what inlining would remove.
+  std::printf(
+      "LrGrowth_test: %s: cost per alternative not checked, the build "
+      "is not optimised\n",
+      grammar);
+  return;
+#endif
+  if (cost[0] == 0 || cost[1] == 0 || cost[2] == 0) {
+    std::printf(
+        "LrGrowth_test: %s: cost per alternative not checked, a "
+        "sample was unreadable or multiplexed\n",
+        grammar);
+    return;
+  }
   CHECK(cost[1] <= ratio * cost[0] && cost[1] >= cost[0] / ratio);
   CHECK(cost[2] <= ratio * cost[1] && cost[2] >= cost[1] / ratio);
 }
@@ -289,7 +303,12 @@ void colliding_fingerprints_do_not_elect_a_derivation() {
 
 void an_alternative_costs_the_same_however_long_the_text() {
   const cursiv::bench::PerfCounters counters;
-  if (!counters.active()) return;
+  if (!counters.active()) {
+    std::printf(
+        "LrGrowth_test: cost per alternative not checked, no hardware "
+        "counter is readable\n");
+    return;
+  }
   const auto nested = [](unsigned n) {
     return "html " + repeat("<a>", n) + repeat("</a>", n);
   };
@@ -297,13 +316,13 @@ void an_alternative_costs_the_same_however_long_the_text() {
   const auto dots = [](unsigned n) { return "chain a" + repeat(".b", n); };
   const auto lines = [](unsigned n) { return ">h\n" + repeat("ACGT\n", n); };
   cost_stays_flat(
-      series<html::G::kTable>(counters, &html::G::kDrive, nested, 64));
+      "html", series<html::G::kTable>(counters, &html::G::kDrive, nested, 64));
   cost_stays_flat(
-      series<call::G::kTable>(counters, &call::G::kDrive, names, 200));
-  cost_stays_flat(
-      series<chain::G::kTable>(counters, &chain::G::kDrive, dots, 1024));
-  cost_stays_flat(
-      series<fasta::Lr::kTable>(counters, &fasta::Lr::kDrive, lines, 1000));
+      "call", series<call::G::kTable>(counters, &call::G::kDrive, names, 200));
+  cost_stays_flat("chain", series<chain::G::kTable>(counters, &chain::G::kDrive,
+                                                    dots, 1024));
+  cost_stays_flat("fasta", series<fasta::Lr::kTable>(
+                               counters, &fasta::Lr::kDrive, lines, 1000));
 }
 
 int main() {

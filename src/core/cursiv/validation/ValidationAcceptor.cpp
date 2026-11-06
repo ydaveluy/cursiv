@@ -65,8 +65,8 @@ TextRange ValidationAcceptor::spanOfName(std::string_view borrowed,
   return translation != nullptr ? translation->original(span) : span;
 }
 
-// Where a member was written; an anchor that missed still points at the
-// declaration rather than at nothing.
+// Where a member was written. An anchor that missed is `nullopt`, and the
+// builder keeps the range it had -- the node's own unless it was given one.
 std::optional<TextRange> ValidationAcceptor::featureSpan(
     const AstNode& node, std::string_view member,
     std::size_t index) const noexcept {
@@ -99,18 +99,21 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
                               : find_node_for_feature(view, name, index);
       if (at.has_value()) return TextRange{at->begin(), at->end()};
     } else {
-      auto nodes = keyword ? find_nodes_for_keyword(view, name)
-                           : find_nodes_for_feature(view, name);
-      _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
+      // A list that cannot be kept is no anchor: the check goes on with the
+      // range it has rather than ending the process.
+      try {
+        auto nodes = keyword ? find_nodes_for_keyword(view, name)
+                             : find_nodes_for_feature(view, name);
+        _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
+      } catch (...) {
+        return std::nullopt;
+      }
       found = _anchors.end() - 1;
     }
   }
-  if (found != _anchors.end() && !found->nodes.empty()) {
-    const auto& at = found->nodes[std::min(index, found->nodes.size() - 1)];
-    return TextRange{at.begin(), at.end()};
-  }
-  const CstNode& n = (*cst)[node.cstNodeId];
-  return TextRange{n.begin, n.end};
+  if (found == _anchors.end() || found->nodes.empty()) return std::nullopt;
+  const auto& at = found->nodes[std::min(index, found->nodes.size() - 1)];
+  return TextRange{at.begin(), at.end()};
 }
 
 void ValidationAcceptor::accept(const AstNode& node,

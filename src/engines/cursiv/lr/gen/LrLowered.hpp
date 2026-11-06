@@ -32,6 +32,8 @@ struct LrLowered {
   std::vector<InfixOp> infixOps{};
 };
 
+// A `desc.optionalGate` past `kOptionalGateMost` throws
+// `std::invalid_argument`.
 LrLowered lr_lower(GrammarImage& image, const LowerDesc& desc);
 
 }  // namespace cursiv

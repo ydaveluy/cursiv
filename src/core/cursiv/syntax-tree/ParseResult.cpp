@@ -80,8 +80,7 @@ void ParseResult::bind_grammar(std::shared_ptr<const Grammar> grammar) noexcept 
 }
 
 void ParseResult::bind_translation(
-    std::string_view document,
-    std::unique_ptr<const SourceTranslation> translation) {
+    std::string_view document, std::unique_ptr<SourceTranslation> translation) {
   translation->to_document(std::span(diagnostics));
   const auto errors = translation->errors();
   diagnostics.insert(diagnostics.end(), errors.begin(), errors.end());

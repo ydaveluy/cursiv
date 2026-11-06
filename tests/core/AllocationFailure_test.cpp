@@ -1,16 +1,20 @@
 // Pins what an allocation refused part-way leaves behind: a publication, a
-// queue, a pool's submission, a registration.
+// queue, a pool's submission, a registration, an index, a validation record.
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <barrier>
+#include <cstddef>
 #include <cstdlib>
+#include <iterator>
 #include <latch>
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "cursiv/Check.hpp"
 #include "cursiv/execution/TaskQueue.hpp"
@@ -25,6 +29,19 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/Published.hpp"
+#include "cursiv/validation/DefaultValidationRegistry.hpp"
+#include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/validation/ValidationCategory.hpp"
+#include "cursiv/workspace/AstNodeDescription.hpp"
+#include "cursiv/workspace/DefaultDocumentBuilder.hpp"
+#include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentBuilder.hpp"
+#include "cursiv/workspace/DocumentFactory.hpp"
+#include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/IndexManager.hpp"
+#include "cursiv/workspace/ReferenceDescription.hpp"
+#include "cursiv/workspace/TextDocument.hpp"
+#include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
 namespace {
@@ -169,8 +186,10 @@ void a_failed_retirement_keeps_the_published_value_alive() {
   CHECK(*published.read() == 2);
 }
 
-// A collection that cannot list what is due keeps it retired: the next one
-// frees it. Each round refuses a later allocation of that list.
+// Retiring a table and collecting it ask for no memory: a table emptied or
+// grown out while the next allocation is refused is not lost, and is freed
+// with the rest. A table's own room is allocated aligned, which this file
+// does not refuse; what it refuses is anything else.
 struct Counted {
   static inline int alive = 0;
   Counted() { ++alive; }
@@ -179,37 +198,31 @@ struct Counted {
   ~Counted() { --alive; }
 };
 
-void a_refused_collection_keeps_what_it_was_to_free() {
-  for (int refused = 0; refused < 4; ++refused) {
-    cursiv::detail::collect_retired_tables();
-    {
-      std::vector<
-          std::unique_ptr<cursiv::detail::ConcurrentTable<int, Counted>>>
-          tables;
-      for (int k = 0; k < 8; ++k) {
-        tables.push_back(
-            std::make_unique<cursiv::detail::ConcurrentTable<int, Counted>>());
-        Counted value;
-        CHECK(tables.back()
-                  ->insert(tables.back()->generation(), k, value)
-                  .has_value());
+void a_retirement_asks_for_no_memory() {
+  cursiv::detail::collect_retired_tables();
+  bool threw = false;
+  for (int round = 0; round < 64; ++round) {
+    cursiv::detail::ConcurrentTable<int, Counted> cleared;
+    Counted value;
+    CHECK(cleared.insert(cleared.generation(), round, value).has_value());
+    // A small pair is kept in its slot: filling this one allocates nothing
+    // but the room its growths take.
+    cursiv::detail::ConcurrentTable<int, int> grown;
+    fail_allocation(0);
+    try {
+      cleared.clear();
+      for (int k = 0; k < 64; ++k) {
+        int kept = k;
+        (void)grown.insert(grown.generation(), k, kept);
       }
-      // Cleared while a read stays, a `forEach` still running, so none is
-      // due before the collection.
-      cursiv::detail::ConcurrentTable<int, int> reader;
-      int one = 1;
-      CHECK(reader.insert(reader.generation(), 1, one).has_value());
-      reader.forEach([&](int) {
-        for (const auto& table : tables) table->clear();
-      });
+    } catch (const std::bad_alloc&) {
+      threw = true;
     }
-    CHECK(Counted::alive == 8);
-    fail_allocation(refused);
-    cursiv::detail::collect_retired_tables();
     failAfter = -1;
-    cursiv::detail::collect_retired_tables();
-    CHECK(Counted::alive == 0);
   }
+  CHECK(!threw);
+  cursiv::detail::collect_retired_tables();
+  CHECK(Counted::alive == 0);
 }
 
 void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
@@ -249,7 +262,7 @@ void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
 }
 
 void a_partial_submission_joins_before_unwinding() {
-  cursiv::WorkerPool pool(17);
+  cursiv::detail::WorkerPool pool(17);
   std::barrier entered(18);
   std::latch release(1);
   std::atomic<bool> elected{false};
@@ -267,6 +280,7 @@ void a_partial_submission_joins_before_unwinding() {
           caught = true;
         }
       }
+      return true;
     });
   };
   pool.run(18, [&](std::size_t) noexcept {
@@ -278,10 +292,14 @@ void a_partial_submission_joins_before_unwinding() {
     } else {
       release.wait();
     }
+    return true;
   });
   CHECK(caught);
   std::atomic<unsigned> calls{0};
-  pool.run(100, [&](std::size_t) noexcept { ++calls; });
+  pool.run(100, [&](std::size_t) noexcept {
+    ++calls;
+    return true;
+  });
   CHECK(calls == 100);
 }
 
@@ -329,7 +347,199 @@ void a_refused_allocation_leaves_no_route_to_a_freed_container() {
     if (destroyed) {
       CHECK(registry.findServices("file:///a.x", "tracked") != address);
       CHECK(registry.findServices("file:///a.q") != address);
+    } else {
+      // Routed by its id exactly when listed: the walk over every language
+      // and the lookup see the same set.
+      CHECK(
+          (registry.findServices("file:///a.x", "tracked") == address) ==
+          (std::ranges::find(registry.all(), address) != registry.all().end()));
     }
+  }
+  CHECK(finished);
+}
+
+// The workspace grammar as a language of `shared`, every other slot a default.
+const cursiv::CoreServices& add_workspace(cursiv::SharedCoreServices& shared) {
+  auto language = std::make_unique<cursiv::CoreServices>(shared);
+  language->languageMetaData = {"workspace", {".ws"}, {}};
+  language->parser = ws::generated::Workspace::create_parser();
+  language->astReflection = ws::generated::Workspace::create_ast_reflection();
+  cursiv::install_default_core_services(*language);
+  const cursiv::CoreServices& added = *language;
+  shared.serviceRegistry->registerServices(std::move(language));
+  return added;
+}
+
+// A removal refused part-way leaves each view of the index as its table says:
+// what the table dropped is gone from what readers see, and what the refusal
+// kept goes at the next try.
+void a_refused_removal_leaves_no_stale_view() {
+  bool finished = false;
+  for (int step = 0; step < 100 && !finished; ++step) {
+    cursiv::SharedCoreServices shared;
+    cursiv::install_default_shared_core_services(shared);
+    const cursiv::AstReflection& reflection =
+        *add_workspace(shared).astReflection;
+    const auto declared =
+        shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
+    const auto user = shared.documentFactory->fromString("entity E { a : D }\n",
+                                                         "file:///u.ws");
+    shared.documents->addDocument(declared);
+    shared.documents->addDocument(user);
+    cursiv::Document* const set[] = {declared.get(), user.get()};
+    shared.documentBuilder->build(set);
+    cursiv::IndexManager& index = *shared.indexManager;
+    const cursiv::AstNodeDescription* const d =
+        index.findByName("D", true, {}, reflection);
+    CHECK(d != nullptr);
+    if (d == nullptr) return;
+    const cursiv::NodeId symbol = d->symbolId;
+    const auto pointing = [&] {
+      int count = 0;
+      (void)index.visitReferences(declared->id, symbol,
+                                  [&](const cursiv::ReferenceDescription&) {
+                                    ++count;
+                                    return true;
+                                  });
+      return count;
+    };
+    // Both views published before the removal.
+    CHECK(index.findByName("E", true, {}, reflection) != nullptr);
+    CHECK(pointing() == 1);
+
+    bool refused = false;
+    fail_allocation(step);
+    try {
+      (void)index.remove(user->id);
+    } catch (const std::bad_alloc&) {
+      refused = true;
+    }
+    failAfter.store(-1, std::memory_order_release);
+    finished = !refused;
+    (void)index.remove(user->id);
+    CHECK(index.findByName("E", true, {}, reflection) == nullptr);
+    CHECK(pointing() == 0);
+  }
+  CHECK(finished);
+}
+
+// What ran is recorded whole or not at all: a refused record never says that
+// one category of a pass ran while the next did not.
+void a_refused_record_keeps_no_part_of_it() {
+  struct Recording final : cursiv::DefaultDocumentBuilder {
+    using DefaultDocumentBuilder::DefaultDocumentBuilder;
+    using DefaultDocumentBuilder::findMissingValidationCategories;
+    using DefaultDocumentBuilder::markAsCompleted;
+  };
+  static constexpr cursiv::ValidationCategory a{"a"};
+  static constexpr cursiv::ValidationCategory b{"b"};
+  static constexpr cursiv::ValidationCategory c{"c"};
+  const cursiv::ValidationCategory* const first[] = {&a};
+  const cursiv::ValidationCategory* const pass[] = {&b, &c};
+  cursiv::SharedCoreServices shared;
+  cursiv::install_default_shared_core_services(shared);
+  const cursiv::CoreServices& language = add_workspace(shared);
+  const auto document =
+      shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
+  bool finished = false;
+  for (int step = 0; step < 8 && !finished; ++step) {
+    const Recording builder(shared);
+    builder.markAsCompleted(*document, first);
+    bool refused = false;
+    fail_allocation(step);
+    try {
+      builder.markAsCompleted(*document, pass);
+    } catch (const std::bad_alloc&) {
+      refused = true;
+    }
+    failAfter.store(-1, std::memory_order_release);
+    finished = !refused;
+    CHECK(builder.findMissingValidationCategories(*document, language, pass)
+              .size() == (refused ? 2U : 0U));
+  }
+  CHECK(finished);
+}
+
+// A registration refused while the table looks for a better multiplier keeps
+// every check filed before it where a node finds it, and the same
+// registration tried again is found too.
+void a_refused_rehash_keeps_the_checks_reachable() {
+  cursiv::SharedCoreServices shared;
+  cursiv::install_default_shared_core_services(shared);
+  const cursiv::CoreServices& language = add_workspace(shared);
+  const auto document =
+      shared.documentFactory->fromString("datatype D\n", "file:///d.ws");
+  const auto discard = [](cursiv::Diagnostic&&) {};
+  cursiv::ValidationAcceptor accept(discard, *document, "test");
+  const cursiv::AstTypeTag* const tags[] = {
+      &cursiv::ast_type_tag<ws::ast::AbstractElement>,
+      &cursiv::ast_type_tag<ws::ast::Type>,
+      &cursiv::ast_type_tag<ws::ast::DataType>,
+      &cursiv::ast_type_tag<ws::ast::Feature>,
+      &cursiv::ast_type_tag<ws::ast::Entity>,
+      &cursiv::ast_type_tag<ws::ast::PackageDeclaration>,
+      &cursiv::ast_type_tag<ws::ast::Workspace>};
+  constexpr std::size_t kTags = std::size(tags);
+  bool finished = false;
+  for (int step = 0; step < 4000 && !finished; ++step) {
+    cursiv::DefaultValidationRegistry registry(language);
+    std::array<int, kTags> ran{};
+    const auto file = [&](std::size_t at) {
+      registry.registerCheck(
+          {.target = tags[at],
+           .exactTypeOnly = true,
+           .check = [&ran, at](
+                        const cursiv::AstNode&, cursiv::ValidationAcceptor&,
+                        const cursiv::CancellationToken&) { ++ran[at]; }},
+          &cursiv::fast);
+    };
+    std::size_t filed = 0;
+    bool refused = false;
+    fail_allocation(step);
+    try {
+      for (; filed < kTags; ++filed) file(filed);
+    } catch (const std::bad_alloc&) {
+      refused = true;
+    }
+    failAfter.store(-1, std::memory_order_release);
+    finished = !refused;
+    if (refused) file(filed++);
+    for (std::size_t i = 0; i < filed; ++i) {
+      cursiv::AstNode node;
+      node.type = tags[i];
+      registry.runChecks(node, accept, {}, cursiv::kNoCancel);
+      CHECK(ran[i] == 1);
+    }
+  }
+  CHECK(finished);
+}
+
+// An anchor whose list cannot be kept is no better anchor: the caller keeps
+// its range, and the check goes on.
+void a_refused_anchor_list_is_no_anchor() {
+  const auto parser = ws::generated::Workspace::create_parser();
+  cursiv::Document document(cursiv::TextDocument::create(
+      "file:///a.ws", "workspace", 0, "entity E { a : E }\n"));
+  document.parseResult = parser->parse(document.textDocument().getText());
+  const cursiv::AstNode* entity = nullptr;
+  for (const cursiv::AstNode* const node : document.parseResult.nodes())
+    if (node->type == &cursiv::ast_type_tag<ws::ast::Entity>) entity = node;
+  CHECK(entity != nullptr);
+  if (entity == nullptr) return;
+  const auto discard = [](cursiv::Diagnostic&&) {};
+  bool finished = false;
+  for (int step = 0; step < 16 && !finished; ++step) {
+    const cursiv::ValidationAcceptor accept(discard, document, "test");
+    fail_allocation(step);
+    // The second `entity`, clamped to the only one.
+    const std::optional<cursiv::TextRange> span =
+        accept.keywordSpan(*entity, "entity", 1);
+    finished = failAfter.load(std::memory_order_acquire) >= 0;
+    failAfter.store(-1, std::memory_order_release);
+    if (finished)
+      CHECK(span.has_value() && span->begin == 0 && span->end == 6);
+    else
+      CHECK(!span.has_value());
   }
   CHECK(finished);
 }
@@ -366,9 +576,13 @@ int main() {
   a_refused_allocation_frees_what_the_parse_built();
   a_stopped_parse_frees_what_it_built();
   a_failed_retirement_keeps_the_published_value_alive();
-  a_refused_collection_keeps_what_it_was_to_free();
+  a_retirement_asks_for_no_memory();
   a_queue_allocation_failure_leaves_no_leak_or_lost_item();
   a_partial_submission_joins_before_unwinding();
   a_refused_allocation_leaves_no_route_to_a_freed_container();
+  a_refused_removal_leaves_no_stale_view();
+  a_refused_record_keeps_no_part_of_it();
+  a_refused_rehash_keeps_the_checks_reachable();
+  a_refused_anchor_list_is_no_anchor();
   return cursiv::test::report("AllocationFailure_test");
 }

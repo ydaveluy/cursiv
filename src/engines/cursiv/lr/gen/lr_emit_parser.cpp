@@ -2791,6 +2791,8 @@ struct LrParserDecl : TextBuilder {
 std::vector<std::pair<std::string, std::string>> lr_emit_parser_files(
     const LrFinalTable& done, std::string_view ns, unsigned* probeCuts,
     unsigned groupLines) {
+  if (groupLines == 0)
+    throw std::invalid_argument("cursiv: a group of states holds no line");
   LrParserEmitter e{done};
   e.groupLines = groupLines;
   e.reserve(1u << 20);

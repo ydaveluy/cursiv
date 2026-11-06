@@ -13,6 +13,8 @@
 #include <variant>
 #include <vector>
 
+#include "cursiv/utils/Utf8.hpp"
+
 namespace cursiv {
 namespace {
 
@@ -23,8 +25,20 @@ void append_indent(std::string& out, std::size_t count) {
 void append_escaped_json_string(std::string& out, std::string_view text) {
   static constexpr char kHex[] = "0123456789ABCDEF";
   out.push_back('"');
-  for (const char ch : text) {
-    const auto c = static_cast<unsigned char>(ch);
+  for (std::size_t at = 0; at < text.size();) {
+    const auto c = static_cast<unsigned char>(text[at]);
+    if (c >= 0x80) {
+      // JSON text is UTF-8: a scalar is written as it stands, each maximal
+      // ill-formed subpart as one U+FFFD.
+      const Utf8Step step = utf8_step(text.data() + at, text.size() - at);
+      if (step.wellFormed)
+        out.append(text.substr(at, step.bytes));
+      else
+        out += "\xEF\xBF\xBD";
+      at += step.bytes;
+      continue;
+    }
+    ++at;
     switch (c) {
       case '\"':
         out += R"(\")";

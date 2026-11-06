@@ -44,6 +44,8 @@ void LocalSymbols::reserve(std::size_t entries) {
 
 void LocalSymbols::add(const AstNode* container,
                        AstNodeDescription description) {
+  // Null is the empty slot of every table `seal` builds.
+  assert(container != nullptr && "a local symbol needs a container");
   _entries.push_back(std::move(description));
   _containerOf.push_back(container);
 }

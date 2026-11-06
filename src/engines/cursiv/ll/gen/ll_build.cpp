@@ -383,7 +383,8 @@ void refuse_skipped_terminal(Built& b) {
 
 // A reading that asserts the end of input and reads a token after it is
 // impossible; a rule every reading of which is, or waits on one that is,
-// derives no finite text.
+// derives no finite text. Only a token the same sequence reads after its own
+// `eof` is told impossible: one read through a call or a group is not.
 void refuse_unproductive(Built& b, std::uint64_t* work) {
   const Cfg& c = b.cfg;
   std::vector<std::uint8_t> node(c.nnodes, 0), rule(c.nrules, 0);
@@ -1423,7 +1424,8 @@ DynSet viable_terms(const LlAtnView& atn, const std::vector<LlConfig>& cs) {
 
 // How many states one choice may explore before it is left to the parse: a
 // grammar whose readings do not close is one whose automaton would be filled
-// from the text anyway.
+// from the text anyway. The last state explored may still add one state per
+// terminal.
 constexpr std::size_t kExploreCap = 512;
 
 LlAtnView view_of(const Built& b) {

@@ -1,6 +1,6 @@
 // Code point ranges by Unicode property, written by
 // tools/gen_unicode_ranges.py from Python's unicodedata and the Unicode
-// Character Database: never edited.
+// Character Database, Unicode 16.0.0: never edited.
 #pragma once
 
 #include <span>

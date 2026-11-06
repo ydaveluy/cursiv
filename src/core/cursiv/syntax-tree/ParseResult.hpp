@@ -66,7 +66,7 @@ class ParseResult {
   // the diagnostics move to the document's offsets, and the translator's own
   // errors join them.
   void bind_translation(std::string_view document,
-                        std::unique_ptr<const SourceTranslation> translation);
+                        std::unique_ptr<SourceTranslation> translation);
 
   AstNode* value = nullptr;
   // Held by pointer: this result moves, and every reference of the tree

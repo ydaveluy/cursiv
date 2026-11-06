@@ -928,6 +928,18 @@ void anchors_land_where_the_grammar_wrote() {
       static_cast<cursiv::TextOffset>(kSource.find("entity"));
   CHECK(onKeyword->range.begin == keyword &&
         onKeyword->range.end == keyword + 6);
+
+  // The language reads `entity` in either case: the anchor lands on the word
+  // in any case it was written.
+  const cursiv::Document* const cased =
+      world.build("file:///b.ws", "datatype Text\nEnTiTy B {}\n");
+  const std::vector<cursiv::Diagnostic> casedDiagnostics =
+      world.validate(*cased);
+  const cursiv::Diagnostic* const onCased =
+      find_message(casedDiagnostics, "keyword seen");
+  CHECK(onCased != nullptr);
+  if (onCased != nullptr)
+    CHECK(onCased->range.begin == 14 && onCased->range.end == 20);
 }
 
 // A deletion resumes on a token already in the text: writing it again is no
@@ -1093,19 +1105,41 @@ void a_cycle_closed_in_another_document_is_an_error_in_both() {
 }
 
 // `a` names nothing that changed, but the climbs from `b` and `c` go through
-// it. `E` is on no loop, but its climb never ends either.
+// it. `E` is on no loop, but its climb never ends either. `a` names only `b`,
+// which the edit relinks and does not change: its verdict changes all the
+// same, and again when the loop is opened.
 void a_cycle_through_an_untouched_document_is_an_error() {
   Disk disk;
   disk.write({{std::string(kA), "entity A extends B {\n}\n"},
               {std::string(kB), "entity B extends C {\n}\n"},
               {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
   CHECK(disk.cycles(kB) == 0);
   CHECK(disk.cycles(kC) == 0);
   disk.write({{std::string(kC),
                "entity C extends A {\n}\n"
                "entity E extends C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
   CHECK(disk.cycles(kB) == 1);
   CHECK(disk.cycles(kC) == 2);
+  disk.write({{std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  CHECK(disk.cycles(kB) == 0);
+  CHECK(disk.cycles(kC) == 0);
+}
+
+// A loop closed two documents away: `a` names only `b`, and the edit is in
+// `c`, which `b` names.
+void a_cycle_closed_two_documents_away_is_an_error_at_the_start() {
+  Disk disk;
+  disk.write({{std::string(kA), "entity A extends B {\n}\n"},
+              {std::string(kB), "entity B extends C {\n}\n"},
+              {std::string(kC), "entity C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 0);
+  disk.write({{std::string(kC), "entity C extends C {\n}\n"}});
+  CHECK(disk.cycles(kA) == 1);
+  CHECK(disk.cycles(kB) == 1);
+  CHECK(disk.cycles(kC) == 1);
 }
 
 }  // namespace
@@ -1113,6 +1147,7 @@ void a_cycle_through_an_untouched_document_is_an_error() {
 void run() {
   a_cycle_closed_in_another_document_is_an_error_in_both();
   a_cycle_through_an_untouched_document_is_an_error();
+  a_cycle_closed_two_documents_away_is_an_error_at_the_start();
 }
 
 }  // namespace cross_document
@@ -1156,6 +1191,7 @@ struct CountingGrammar final : cursiv::Grammar {
   std::string_view spellingDoc(std::string_view) const noexcept override {
     return {};
   }
+  bool spellingFolds(std::string_view) const noexcept override { return false; }
   std::string_view recordDoc(const cursiv::CstNode&) const noexcept override {
     return {};
   }
@@ -1251,19 +1287,33 @@ void cached_anchors_keep_their_name_and_kind() {
 
 void switching_nodes_and_missing_anchors_preserve_ranges() {
   Fixture fixture(8);
-  const auto discard = [](cursiv::Diagnostic&&) {};
-  cursiv::ValidationAcceptor accept(discard, fixture.document, "anchors");
+  std::vector<cursiv::Diagnostic> diagnostics;
+  const auto collect = [&](cursiv::Diagnostic&& diagnostic) {
+    diagnostics.push_back(std::move(diagnostic));
+  };
+  cursiv::ValidationAcceptor accept(collect, fixture.document, "anchors");
   check_span(accept.featureSpan(fixture.first, "items", 1), 1, 2);
   check_span(accept.featureSpan(fixture.second, "items", 1), 17, 18);
   check_span(accept.featureSpan(fixture.first, "items", 1), 1, 2);
-  check_span(accept.featureSpan(fixture.first, "missing", 1), 0, 16);
+  CHECK(!accept.featureSpan(fixture.first, "missing", 1).has_value());
   const auto calls = fixture.grammar.writes;
-  check_span(accept.featureSpan(fixture.first, "missing", 5), 0, 16);
+  CHECK(!accept.featureSpan(fixture.first, "missing", 5).has_value());
   CHECK(fixture.grammar.writes == calls);
-  check_span(accept.keywordSpan(fixture.first, "missing", 5), 0, 16);
+  CHECK(!accept.keywordSpan(fixture.first, "missing", 5).has_value());
+  CHECK(!accept.keywordSpan(fixture.first, "missing", 0).has_value());
   cursiv::AstNode detached;
   CHECK(!accept.featureSpan(detached, "items", 1).has_value());
   CHECK(!accept.keywordSpan(detached, "x", 1).has_value());
+  // A missing anchor keeps the range the builder had: the node's own, or the
+  // one it was given.
+  accept.error(fixture.first, "on the node").keyword("missing");
+  accept.error(fixture.first, "chosen").range({3, 4}).keyword("missing");
+  accept.error(fixture.first, "chosen").range({3, 4}).keyword("missing", 2);
+  CHECK(diagnostics.size() == 3);
+  if (diagnostics.size() != 3) return;
+  CHECK(diagnostics[0].range.begin == 0 && diagnostics[0].range.end == 16);
+  CHECK(diagnostics[1].range.begin == 3 && diagnostics[1].range.end == 4);
+  CHECK(diagnostics[2].range.begin == 3 && diagnostics[2].range.end == 4);
 }
 
 void related_nodes_use_their_own_documents_cst() {

@@ -63,7 +63,7 @@ struct one_per_decl<R, TypeList<W, Ws...>, Decls> {
       cond_t<tl_has<D, Decls>::value, rest, tl_cat_t<TypeList<W>, rest>>;
 };
 
-// The one parent that overrides; two would leave the choice unmade.
+// The parents that override, one per declaration.
 template <class R, class L>
 struct choose_parent {
   using winners = TypeList<>;
@@ -73,13 +73,22 @@ struct choose_parent<R, TypeList<Ps...>> {
   using winners = typename one_per_decl<
       R, tl_cat_t<cond_t<overrides_rule<Ps, R>, TypeList<Ps>, TypeList<>>...>>::
       type;
-  static_assert(tl_size<winners>::value <= 1,
-                "two parent grammars override the same rule: override it "
-                "again in this grammar to choose one");
 };
 template <class R, class G>
 using winners_t =
     typename choose_parent<R, typename parents_of<G>::type>::winners;
+
+// The one parent whose rule stands where `G` does not restate it; two would
+// leave the choice unmade.
+template <class R, class G>
+struct standing_parent {
+  using type = winners_t<R, G>;
+  static_assert(tl_size<type>::value <= 1,
+                "two parent grammars override the same rule: override it "
+                "again in this grammar to choose one");
+};
+template <class R, class G>
+using standing_t = typename standing_parent<R, G>::type;
 
 // A set flattens as its operator does: `a | b | z` is one choice of three, so
 // a choice spliced into a choice joins it rather than nesting.
@@ -96,9 +105,9 @@ template <template <class...> class Sh, class... Es>
 using flat_of_t = typename flat_of<Sh, Es...>::type;
 
 // The splice, and the only walk that rebuilds a body: `super` becomes the
-// body the parents made effective, every other node is rebuilt over its
-// children. A `super` spelled outside an override body never reaches this
-// walk, and every other walk refuses it.
+// body the parents made effective, `B::type`, asked for only there; every
+// other node is rebuilt over its children. A `super` spelled outside an
+// override body never reaches this walk, and every other walk refuses it.
 template <class B, class E, class Kids = typename ExprShape<E>::kids>
 struct plug;
 template <class B, class E>
@@ -109,7 +118,7 @@ struct plug<B, E, TypeList<Ks...>> {
 };
 template <class B, class D>
 struct plug<B, SuperT<D>, TypeList<>> {
-  using type = B;
+  using type = typename B::type;
 };
 // A sequence and a choice rebuild through their own operator, which
 // flattens. An unordered group does not: a group spliced in as one of its
@@ -143,13 +152,22 @@ struct parent_body<R, TypeList<P>> {
 // Nothing restated here: what the parents made effective stands.
 template <class G, class R, bool Has>
 struct eff_body {
+  using type = typename parent_body<R, standing_t<R, G>>::type;
+};
+// What `super` stands for in `G`'s override: read only where one is spelled,
+// so a body without it needs no choice between two parents.
+template <class G, class R>
+struct super_body {
+  static_assert(tl_size<winners_t<R, G>>::value <= 1,
+                "two parent grammars override this rule, so `super` in the "
+                "override here names neither: write the body without it");
   using type = typename parent_body<R, winners_t<R, G>>::type;
 };
 // Restated: the override's body, with `super` spliced to what stood before.
 template <class G, class R>
 struct eff_body<G, R, true> {
   using type =
-      plug_t<typename parent_body<R, winners_t<R, G>>::type,
+      plug_t<super_body<G, R>,
              std::remove_cv_t<decltype(G::template override<R>::body)>>;
 };
 
@@ -158,7 +176,7 @@ struct override_decl_up;
 template <class P, class R>
 struct override_decl_up<TypeList<P>, R> : override_decl<P, R> {};
 template <class G, class R, bool Here>
-struct override_decl : override_decl_up<winners_t<R, G>, R> {};
+struct override_decl : override_decl_up<standing_t<R, G>, R> {};
 template <class G, class R>
 struct override_decl<G, R, true> {
   using type = typename G::template override<R>;
@@ -192,12 +210,23 @@ template <class R, class P>
 struct parent_rule<R, TypeList<P>> {
   using type = typename eff_rule<P, R>::type;
 };
+// Restated over several parents, it stands over the first one's, which must
+// then agree with the others on a slot the override leaves to them.
+template <class R, class P, class Q, class... Ps>
+struct parent_rule<R, TypeList<P, Q, Ps...>> {
+  using type = typename eff_rule<P, R>::type;
+};
+template <class R, class Ws>
+struct slots_agree;
 template <class G, class R>
 struct eff_rule<G, R, true> {
   using D = override_decl<G, R>;
-  using type = Overridden<
-      R, typename D::type, eff_body_t<G, R>{},
-      typename parent_rule<R, winners_t<R, typename D::owner>>::type>;
+  using W = winners_t<R, typename D::owner>;
+  static_assert(!slot_empty<typename D::type> || slots_agree<R, W>::value,
+                "two parent grammars give this rule different converters: "
+                "state one in the override here");
+  using type = Overridden<R, typename D::type, eff_body_t<G, R>{},
+                          typename parent_rule<R, W>::type>;
 };
 
 // The declaration whose slot a rule's converter comes from: the nearest
@@ -211,6 +240,15 @@ struct slot_decl_of<Overridden<R, O, B, I>>
     : cond_t<slot_empty<O>, slot_decl_of<I>, std::type_identity<O>> {};
 template <class R>
 using slot_decl_t = typename slot_decl_of<R>::type;
+
+template <class R, class Ws>
+struct slots_agree : std::true_type {};
+template <class R, class P, class... Ps>
+struct slots_agree<R, TypeList<P, Ps...>>
+    : std::bool_constant<(
+          std::is_same_v<slot_decl_t<typename eff_rule<P, R>::type>,
+                         slot_decl_t<typename eff_rule<Ps, R>::type>> &&
+          ...)> {};
 
 template <class X, bool Node = std::is_same_v<typename X::kind, node_kind>>
 struct declared_stage_body {

@@ -81,15 +81,19 @@ std::string spell_set(const ByteSet& bytes) {
   return out;
 }
 
-std::string spell(const LowerPools& c, std::uint16_t node) {
+// A run as the warning spells it, `...` for what it does not spell. Asked for
+// the run's identity instead, that part names its node: two runs spelt alike
+// are one run only where they read the same.
+std::string spell(const LowerPools& c, std::uint16_t node,
+                  bool identity = false) {
   const LexNode& e = c.lex[node];
   switch (e.kind) {
     case LexKind::token:
-      return spell(c, lex_token_body(c, e));
+      return spell(c, lex_token_body(c, e), identity);
     case LexKind::positive:
-      return "&" + spell(c, e.a);
+      return "&" + spell(c, e.a, identity);
     case LexKind::negative:
-      return "!" + spell(c, e.a);
+      return "!" + spell(c, e.a, identity);
     case LexKind::end_mark:
       return "eof";
     case LexKind::chars:
@@ -108,12 +112,12 @@ std::string spell(const LowerPools& c, std::uint16_t node) {
         const std::uint16_t kid = c.lexKid[e.a + i];
         if (c.lex[kid].kind == LexKind::skip) continue;
         if (parts++ != 0) out += e.kind == LexKind::seq ? " " : " | ";
-        out += spell(c, kid);
+        out += spell(c, kid, identity);
       }
       return "(" + out + ")";
     }
     case LexKind::rep: {
-      const std::string body = spell(c, e.a);
+      const std::string body = spell(c, e.a, identity);
       if (e.max != kEndless)
         return body + "{" + detail::decimal(e.min) + "," +
                detail::decimal(e.max) + "}";
@@ -122,7 +126,7 @@ std::string spell(const LowerPools& c, std::uint16_t node) {
                                   : "{" + detail::decimal(e.min) + ",}");
     }
     default:
-      return "...";
+      return identity ? "...#" + detail::decimal(node) : "...";
   }
 }
 
@@ -138,10 +142,11 @@ void find_unbounded_runs(const LowerPools& c, std::uint16_t cond,
     endless_runs(c, c.gapLeaves[v].node, true, runs);
     for (const auto [run, kept] : runs) {
       const UnboundedCondition u{rule, run, kept};
-      // Two copies of one spelling are one run to the author.
+      // Two copies of one spelling are one run to the author, a part the
+      // warning cannot spell named by its node.
       if (std::ranges::none_of(found, [&](const UnboundedCondition& f) {
             return f.rule == u.rule && f.kept == u.kept &&
-                   spell(c, f.run) == spell(c, run);
+                   spell(c, f.run, true) == spell(c, run, true);
           }))
         found.push_back(u);
     }

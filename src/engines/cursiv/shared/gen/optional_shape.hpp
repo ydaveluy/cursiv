@@ -3,11 +3,15 @@
 
 namespace cursiv {
 
+// The most a gate may be: one alternative distributes 2^n productions and a
+// production count is sixteen bits.
+inline constexpr unsigned kOptionalGateMost = 15;
+
 // An alternative holding no more than this distributes, one production per
 // subset; surplus positions use nullable auxiliaries.
 inline constexpr unsigned kOptionalGate = 7;
 
-static_assert(kOptionalGate <= 15,
+static_assert(kOptionalGate <= kOptionalGateMost,
               "the optional expansion gate must not exceed fifteen: one "
               "alternative distributes 2^n productions and a production count "
               "is sixteen bits");

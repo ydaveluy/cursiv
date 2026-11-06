@@ -55,7 +55,9 @@ class DocumentPhaseListener {
 // What the workspace just lost or gained, announced before the rebuild that
 // answers it. A subscriber holding anything derived from a document -- a
 // memo, an inverse table -- learns of a deletion here and nowhere else, a
-// deleted document reaching no phase to be announced at.
+// deleted document reaching no phase to be announced at. A subscriber may
+// send another document back down with `resetToState`, when its results read
+// what changed: the rebuild builds that document too.
 class DocumentUpdateListener {
  public:
   virtual ~DocumentUpdateListener() noexcept = default;
@@ -79,7 +81,9 @@ class DocumentBuilder {
   // The options are remembered per document: a document keeps what it was
   // built with, so one build can carry a different request per document and
   // a later `update` reuses each document's own. `categories` filters the
-  // validating phase by identity; empty runs every one.
+  // validating phase by identity; empty runs every one. A request a cancelled
+  // build left unfinished is kept until a build finishes it: that build runs
+  // the kept request, not its own options, which a later call asks again.
   //
   // The split is incremental: the builder remembers per document which
   // categories have run on the current revision, so a fast build followed by a
@@ -112,7 +116,9 @@ class DocumentBuilder {
   virtual void resetToState(Document&, DocumentState) const = 0;
 
   // A wait is for a rung, not for a build. Without the liveness answer
-  // (`Unreachable`), a request on an excluded document blocks forever.
+  // (`Unreachable`), a request on an excluded document blocks forever. A
+  // cancelled build answers nothing: the build after it does, so a caller
+  // that may see no further build passes a token of its own.
   [[nodiscard]] virtual WaitOutcome waitUntil(
       DocumentState, const CancellationToken& = {}) const = 0;
   [[nodiscard]] virtual WaitOutcome waitUntil(

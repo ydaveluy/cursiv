@@ -9,6 +9,7 @@
 #include <deque>
 #include <map>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -171,7 +172,7 @@ struct RuntimeGrammar {
   }
 
   template <class Lowered, class Lower>
-  Lowered lowered(Lower&& lower) {
+  Lowered lowered(Lower&& lower, std::uint32_t gate = kOptionalGate) {
     static constexpr std::string_view kWord =
         "abcdefghijklmnopqrstuvwxyz0123456789_";
     const ImageDesc* const none = put({.kind = ImageKind::epsilon});
@@ -190,7 +191,7 @@ struct RuntimeGrammar {
     desc.bound = grammar.bound;
     desc.indentOpen = none;
     desc.indentClose = none;
-    desc.optionalGate = kOptionalGate;
+    desc.optionalGate = gate;
     GrammarImage image;
     image.open(grammar);
     return lower(image, desc);
@@ -687,6 +688,26 @@ void an_action_is_asked_once_whether_it_may_be_refused() {
   CHECK(large.refusals <= 5 * small.refusals);
 }
 
+// One production per subset of an alternative's optional positions: a gate
+// past what the subsets' count holds is refused before any is written.
+void a_gate_past_its_bound_is_refused() {
+  RuntimeGrammar g;
+  auto* root = g.node("Root");
+  g.body(root, g.seq({g.opt(g.word("a")), g.opt(g.word("b")), g.word("end")}));
+  g.entry = root;
+  const auto low = g.lowered<LrLowered>(lr_lower, kOptionalGateMost);
+  CHECK(!low.fault && !low.cfg.lowerFail());
+  for (const std::uint32_t gate : {kOptionalGateMost + 1, 32u, 40u}) {
+    bool refused = false;
+    try {
+      (void)g.lowered<LrLowered>(lr_lower, gate);
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    CHECK(refused);
+  }
+}
+
 // Rules that each call the next: what the last hands back climbs the chain.
 RuntimeGrammar alias_chain(unsigned count) {
   RuntimeGrammar g;
@@ -1035,6 +1056,7 @@ int main() {
   states_with_one_tail_fuse();
   a_production_is_read_again_only_for_what_it_reads();
   an_action_is_asked_once_whether_it_may_be_refused();
+  a_gate_past_its_bound_is_refused();
   lookaheads_read_each_edge_once();
   a_set_walks_its_members_in_order();
   a_record_list_costs_its_length();

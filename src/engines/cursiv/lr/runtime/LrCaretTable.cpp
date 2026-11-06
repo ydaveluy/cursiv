@@ -2344,8 +2344,10 @@ void lr_next_features_at(const LrCaretTable& table,
              s.end == at - comment.begin;
     });
   };
-  // The sample words a terminal that spells none is read as under a mode.
+  // The sample words a terminal that spells none is read as under a mode, one
+  // bit each below the bit that marks the answer known.
   constexpr std::uint32_t kKnown = 0x80000000u;
+  static_assert(StampedGrammar::samples.size() < 32);
   const auto sampled_in = [&](std::uint16_t mode, SymbolId term) {
     std::atomic<std::uint32_t>* const kept =
         table.sampleReads != nullptr

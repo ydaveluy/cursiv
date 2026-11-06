@@ -123,6 +123,8 @@ class DefaultDocumentBuilder : public DocumentBuilder {
 
   // The categories that just ran, recorded against the revision they ran on --
   // which is what makes `Validated` mean "validated for what was asked so far".
+  // Called before their diagnostics are published: a throw publishes none, so
+  // an override records all of `ran` or none of it.
   virtual void markAsCompleted(
       const Document&, std::span<const ValidationCategory* const> ran) const;
 

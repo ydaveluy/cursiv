@@ -37,6 +37,10 @@ namespace cursiv {
 // document's references resolve to: a change to one of them relinks it. A
 // change further away rebuilds neither the document nor its entries, so a
 // value that reads past those belongs in a `WorkspaceCache`.
+//
+// A document read once keeps an empty table of under a kilobyte after it is
+// deleted, as the document store keeps a row for each URI it has seen.
+// `Hash` and `KeyEqual` are as `SimpleCache` takes them.
 template <class K, class V, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class DocumentCache : private DocumentPhaseListener,
@@ -93,7 +97,7 @@ class DocumentCache : private DocumentPhaseListener,
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
 
-  // A deleted document never comes back under its id: it keeps no room.
+  // A deleted document may never come back: it keeps no room.
   void clear(DocumentId document, bool keepCapacity) {
     if (const std::optional<Values*> values = _documents.find(document))
       (*values)->clear(keepCapacity);
@@ -150,9 +154,9 @@ class DocumentCache : private DocumentPhaseListener,
   std::optional<DocumentState> _state;
   const std::uint64_t _serial = next_serial();
 
-  // One table per document ever read, each about two hundred bytes when
-  // empty; a deleted document's stays, emptied. Kept where nothing moves
-  // them, and found by id.
+  // One table per document ever read, each under a kilobyte when empty; a
+  // deleted document's stays, emptied. Kept where nothing moves them, and
+  // found by id.
   mutable std::deque<Values> _owned;
   mutable std::mutex _creating;
   mutable detail::ConcurrentTable<DocumentId, Values*, DocumentHash> _documents;

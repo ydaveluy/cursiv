@@ -231,10 +231,10 @@ class LrGssGraph {
   bool close();
   std::vector<Id> elected();
 
-  // A frozen reading no rival read kRepairValidateShifts real tokens past, once per
-  // stack under it: `forests[i]` is what stands between `vertices[i]` and
-  // `vertices[i + 1]`, bottom up. In the order written first; at most `cap` per
-  // reading.
+  // A frozen reading no rival read kRepairValidateShifts real tokens past, once
+  // per stack under it: `forests[i]` is what stands between `vertices[i]` and
+  // `vertices[i + 1]`, bottom up. In the order written first; at most `cap` in
+  // all.
   struct Source {
     Reading reading;
     std::vector<Id> vertices;

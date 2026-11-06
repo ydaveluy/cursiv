@@ -438,6 +438,21 @@ void a_condition_that_reads_a_run_without_end_is_warned_of() {
                   "no length limit") != std::string::npos);
 }
 
+// Two runs the warning cannot spell in full are still two runs.
+struct Comments : cursiv::GrammarSpec {
+  struct X : terminal<lit<"x">> {};
+  struct Slash : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct Paren : terminal<through(lit<"(*">, lit<"*)">)> {};
+  struct Root : rule<create<Doc>(!(some(ref<Slash>) + lit<";">)+!(
+                    some(ref<Paren>) + lit<";">)+ref<X>)> {};
+  using entry = Root;
+};
+
+void runs_spelt_alike_are_told_apart_by_what_they_read() {
+  const auto comments = cursiv::LlLowering<Comments>::lower();
+  CHECK(comments.cfg.unbounded.size() == 2);
+}
+
 }  // namespace
 
 namespace gap_conditions {
@@ -484,6 +499,7 @@ void check_gap_conditions() {
 int main() {
   gap_conditions::check_gap_conditions();
   a_condition_that_reads_a_run_without_end_is_warned_of();
+  runs_spelt_alike_are_told_apart_by_what_they_read();
   predicates_survive_lowering_and_prevent_static_token_decisions();
   conditions_past_the_table_are_refused();
   predicates_and_implied_tokens_match_the_table_engine();

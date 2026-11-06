@@ -8,6 +8,30 @@ UnicodeLower.hpp: what `str.lower` maps each scalar to, and the casing
 properties final sigma reads."""
 import os, sys, unicodedata, urllib.request
 
+# The one Unicode version of every table: unicodedata must have it, and the
+# files read from the Unicode Character Database are of it. A new version is
+# a change of this line, and of the Python that runs the script.
+VERSION = '16.0.0'
+assert unicodedata.unidata_version == VERSION, (
+    f'unicodedata has Unicode {unicodedata.unidata_version}, not {VERSION}')
+
+def ucd(path):
+    url = f'https://www.unicode.org/Public/{VERSION}/ucd/{path}'
+    text = urllib.request.urlopen(url).read().decode('utf-8')
+    name = os.path.basename(path).removesuffix('.txt')
+    assert text.startswith(f'# {name}-{VERSION}.txt'), url
+    return text
+
+# The code points a UCD property file gives one of `values`.
+def listed(text, values):
+    out = []
+    for line in text.splitlines():
+        fields = [f.strip() for f in line.split('#')[0].split(';')]
+        if len(fields) == 2 and fields[1] in values:
+            lo, _, hi = fields[0].partition('..')
+            out.extend(range(int(lo, 16), int(hi or lo, 16) + 1))
+    return sorted(out)
+
 MAX = 0x10FFFF
 cats = {}
 for cp in range(MAX + 1):
@@ -39,26 +63,19 @@ props['XID_Continue'] = ranges(cp for cp in range(MAX + 1)
 props['White_Space'] = ranges(cp for cp in range(MAX + 1)
                               if chr(cp).isspace() and not 0x1C <= cp <= 0x1F)
 # Alphabetic, which unicodedata lacks: the letters, letter numbers and the
-# signs that spell a letter's sound, from the Unicode version unicodedata has.
-version = unicodedata.unidata_version
-url = f'https://www.unicode.org/Public/{version}/ucd/DerivedCoreProperties.txt'
-derived = urllib.request.urlopen(url).read().decode('utf-8')
-assert derived.startswith(f'# DerivedCoreProperties-{version}.txt'), url
-alphabetic = []
-for line in derived.splitlines():
-    fields = [f.strip() for f in line.split('#')[0].split(';')]
-    if len(fields) == 2 and fields[1] == 'Alphabetic':
-        lo, _, hi = fields[0].partition('..')
-        alphabetic.extend(range(int(lo, 16), int(hi or lo, 16) + 1))
-props['Alphabetic'] = ranges(sorted(alphabetic))
+# signs that spell a letter's sound.
+props['Alphabetic'] = ranges(listed(ucd('DerivedCoreProperties.txt'),
+                                    {'Alphabetic'}))
 
 here = os.path.dirname(__file__)
-unicode_dir = os.path.join(here, '..', 'src', 'core', 'cursiv', 'core', 'grammar',
+unicode_dir = os.path.join(here, '..', 'src', 'core', 'cursiv', 'grammar',
                            'unicode')
+# Beside the hand-written reader of the tables, or the layout has moved.
+assert os.path.isfile(os.path.join(unicode_dir, 'UnicodeRange.hpp')), unicode_dir
 out = [
     '// The Unicode properties a class of code points may name, written by',
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
-    '// Character Database: never edited.',
+    f'// Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <string_view>', '',
     'namespace cursiv::unicode {', '',
     '// The general categories, their majors, and the identifier, space and',
@@ -77,7 +94,7 @@ open(os.path.join(unicode_dir, 'UnicodeProperty.hpp'), 'w').write('\n'.join(out)
 out = [
     '// Code point ranges by Unicode property, written by',
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
-    '// Character Database: never edited.',
+    f'// Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <span>', '',
     '#include "cursiv/grammar/unicode/UnicodeProperty.hpp"',
     '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
@@ -115,15 +132,15 @@ cased = ranges(cp for cp in range(MAX + 1)
                if unicodedata.category(chr(cp)) in ('Lu', 'Ll', 'Lt')
                or chr(cp).lower() != chr(cp) or chr(cp).upper() != chr(cp))
 # Word_Break MidLetter, MidNumLet and Single_Quote, which unicodedata lacks.
-mid = {0x27, 0x2E, 0x3A, 0xB7, 0x387, 0x55F, 0x5F4, 0x2018, 0x2019, 0x2024,
-       0x2027, 0xFE13, 0xFE52, 0xFE55, 0xFF07, 0xFF0E, 0xFF1A}
+mid = set(listed(ucd('auxiliary/WordBreakProperty.txt'),
+                 {'MidLetter', 'MidNumLet', 'Single_Quote'}))
 ignorable = ranges(cp for cp in range(MAX + 1)
                    if cp in mid or unicodedata.category(chr(cp))
                    in ('Mn', 'Me', 'Cf', 'Lm', 'Sk'))
 out = [
     '// What each scalar lowers to, and the casing properties final sigma reads,',
-    '// written by tools/gen_unicode_ranges.py from Python\'s unicodedata: never',
-    '// edited.',
+    '// written by tools/gen_unicode_ranges.py from Python\'s unicodedata and the',
+    f'// Unicode Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <cstdint>', '',
     '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
     'namespace cursiv::unicode {', '',

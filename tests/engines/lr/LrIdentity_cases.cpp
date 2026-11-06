@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -739,6 +740,14 @@ void groups_spread_over_units() {
     defined += mine;
   }
   CHECK(defined == groups);
+  // A group holds at least one line.
+  bool refused = false;
+  try {
+    (void)cursiv::lr_emit_parser_files(done, "empty", nullptr, 0);
+  } catch (const std::invalid_argument&) {
+    refused = true;
+  }
+  CHECK(refused);
 }
 
 }  // namespace

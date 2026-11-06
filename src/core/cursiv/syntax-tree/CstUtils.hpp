@@ -30,11 +30,12 @@ struct AstNode;
 [[nodiscard]] std::optional<CstNodeView> find_node_for_feature(
     const CstNodeView& node, std::string_view feature, std::size_t index = 0);
 
-// Every visible record under `node` whose grammar element spells `keyword`, or
-// `node` alone when its record is that keyword. Hidden records are skipped: a
-// keyword inside a comment was not spelled, and a record that opens a node of
-// its own ends the search down that branch -- a rule about "my closing brace"
-// must never select a child's, even a child that is nothing but its keyword.
+// Every visible record under `node` whose grammar element spells `keyword`, in
+// any case where the grammar reads the literal in any case, or `node` alone
+// when its record is that keyword. Hidden records are skipped: a keyword inside
+// a comment was not spelled, and a record that opens a node of its own ends the
+// search down that branch -- a rule about "my closing brace" must never select
+// a child's, even a child that is nothing but its keyword.
 [[nodiscard]] std::vector<CstNodeView> find_nodes_for_keyword(
     const CstNodeView& node, std::string_view keyword);
 

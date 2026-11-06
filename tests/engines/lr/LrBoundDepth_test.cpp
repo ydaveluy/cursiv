@@ -21,8 +21,10 @@
 #include "cursiv/lr/runtime/LrSearch.hpp"
 #include "cursiv/lr/runtime/lr_search.hpp"
 #include "cursiv/lr/runtime/lr_search_bound.hpp"
+#include "cursiv/shared/runtime/CancellationPoll.hpp"
 #include "cursiv/shared/runtime/RepairBudget.hpp"
 #include "cursiv/shared/table/Token.hpp"
+#include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/lr/LrStand.hpp"
 
@@ -238,9 +240,34 @@ void the_walk_is_the_recursion_without_its_frames() {
 #endif
 }
 
+// A stop asked while the walk runs is read within one run of polls, the
+// tokens ahead of it already read.
+void a_stop_is_read_while_the_walk_runs() {
+  const std::string text = repeated("module m ", "1 ", 400);
+  Bound<ga::kTable> b(text, kAll);
+  const auto& tokens =
+      cursiv::lr_search_ahead<ga::kTable>(b.st.c, b.s, b.st.c.la.begin).tokens;
+  CHECK(!tokens.empty());
+  for (cursiv::TextOffset p = b.st.c.la.begin; p < text.size(); ++p)
+    (void)cursiv::lr_search_ahead<ga::kTable>(b.st.c, b.s, p);
+  cursiv::CancellationTokenSource source;
+  source.request_stop();
+  const cursiv::CancellationToken token = source.get_token();
+  b.st.c.stop = cursiv::CancellationPoll(token);
+  bool told = false;
+  try {
+    (void)cursiv::lr_search_owes<ga::kTable>(b.st.c, b.s, b.st.c.la.begin,
+                                             cursiv::kInvalidSymbol, 0);
+  } catch (const cursiv::OperationCancelled&) {
+    told = true;
+  }
+  CHECK(told);
+}
+
 }  // namespace
 
 int main() {
+  a_stop_is_read_while_the_walk_runs();
   the_walk_is_the_recursion_without_its_frames();
   return cursiv::test::report("LrBoundDepth_test");
 }

@@ -16,6 +16,7 @@
 #include "cursiv/syntax-tree/OwnedNodes.hpp"
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/text/word_scalar.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 
 namespace cursiv {
 
@@ -106,14 +107,36 @@ std::optional<CstNodeView> clamped(const std::vector<CstNodeView>& found,
   return found[std::min(index, found.size() - 1)];
 }
 
-// A visible leaf whose bytes are the keyword and that names no rule: a
-// literal the grammar spelled. The rule is asked last, of those leaves only.
-bool spells_keyword(const Cst& cst, const Grammar& grammar, NodeId id,
-                    std::string_view keyword) {
-  const CstNode& n = cst[id];
-  return n.subtreeSize == 1 && n.hidden == 0 && cst.text(id) == keyword &&
-         grammar.recordRule(n).empty();
-}
+// A visible leaf whose bytes are the keyword and that names no rule: a literal
+// the grammar spelled. A leaf that differs from it in case alone spells it
+// where the grammar reads the literal in any case, which is asked once, at the
+// first such leaf. The rule is asked last, of those leaves only.
+class SpellsKeyword {
+ public:
+  SpellsKeyword(const Cst& cst, const Grammar& grammar,
+                std::string_view keyword) noexcept
+      : _cst(&cst), _grammar(&grammar), _keyword(keyword) {}
+
+  bool operator()(NodeId id) const noexcept {
+    const CstNode& n = (*_cst)[id];
+    if (n.subtreeSize != 1 || n.hidden != 0) return false;
+    const std::string_view text = _cst->text(id);
+    if (text != _keyword && !(folded_equal(text, _keyword) && folds()))
+      return false;
+    return _grammar->recordRule(n).empty();
+  }
+
+ private:
+  bool folds() const noexcept {
+    if (!_folds) _folds = _grammar->spellingFolds(_keyword);
+    return *_folds;
+  }
+
+  const Cst* _cst;
+  const Grammar* _grammar;
+  std::string_view _keyword;
+  mutable std::optional<bool> _folds;
+};
 
 }  // namespace
 
@@ -147,11 +170,9 @@ std::vector<CstNodeView> find_nodes_for_keyword(const CstNodeView& node,
                                                 std::string_view keyword) {
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || keyword.empty()) return {};
-  const Cst& cst = *node.cst;
-  if (spells_keyword(cst, *grammar, node.id, keyword)) return {node};
-  return collect<false>(node, [&](NodeId id) {
-    return spells_keyword(cst, *grammar, id, keyword);
-  });
+  const SpellsKeyword spells(*node.cst, *grammar, keyword);
+  if (spells(node.id)) return {node};
+  return collect<false>(node, spells);
 }
 
 std::optional<CstNodeView> find_node_for_keyword(const CstNodeView& node,
@@ -160,11 +181,9 @@ std::optional<CstNodeView> find_node_for_keyword(const CstNodeView& node,
   if (index != 0) return clamped(find_nodes_for_keyword(node, keyword), index);
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || keyword.empty()) return std::nullopt;
-  const Cst& cst = *node.cst;
-  if (spells_keyword(cst, *grammar, node.id, keyword)) return node;
-  return first_of<false>(node, [&](NodeId id) {
-    return spells_keyword(cst, *grammar, id, keyword);
-  });
+  const SpellsKeyword spells(*node.cst, *grammar, keyword);
+  if (spells(node.id)) return node;
+  return first_of<false>(node, spells);
 }
 
 std::vector<CstNodeView> find_hidden_nodes(const CstNodeView& node,

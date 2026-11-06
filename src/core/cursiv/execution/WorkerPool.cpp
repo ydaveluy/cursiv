@@ -33,7 +33,7 @@ std::size_t bucket_count(std::size_t workers) noexcept {
 
 }  // namespace
 
-namespace cursiv {
+namespace cursiv::detail {
 
 WorkerPool::WorkerPool(std::size_t workers) : _idle(workers) {
   _workers.reserve(workers);
@@ -87,9 +87,13 @@ std::size_t WorkerPool::selfIndex() const noexcept {
 // Coarse slices claimed by compare-exchange while much of the range is left,
 // then a tight `fetch_add` of one at the tail. The two regimes are the point
 // -- a compare-exchange per item would cost the tail, a fixed slice would
-// strand whoever drew the last big cut.
+// strand whoever drew the last big cut. A body that says stop leaves its
+// slice and moves the claim counter to the end, so no part claims again.
 void WorkerPool::drain(Job& job) const noexcept {
   const std::size_t fineBelow = 4 * job.parties;
+  const auto stop = [&job] {
+    job.next.store(job.count, std::memory_order_relaxed);
+  };
   std::size_t first = job.next.load(std::memory_order_relaxed);
 
   while (first < job.count) {
@@ -98,7 +102,10 @@ void WorkerPool::drain(Job& job) const noexcept {
       for (;;) {
         first = job.next.fetch_add(1, std::memory_order_relaxed);
         if (first >= job.count) return;
-        job.body(first);
+        if (!job.body(first)) {
+          stop();
+          return;
+        }
       }
     }
     const std::size_t slice =
@@ -106,7 +113,11 @@ void WorkerPool::drain(Job& job) const noexcept {
     const std::size_t last = std::min(first + slice, job.count);
     if (job.next.compare_exchange_strong(first, last, std::memory_order_relaxed,
                                          std::memory_order_relaxed)) {
-      for (std::size_t index = first; index < last; ++index) job.body(index);
+      for (std::size_t index = first; index < last; ++index)
+        if (!job.body(index)) {
+          stop();
+          return;
+        }
       first = job.next.load(std::memory_order_relaxed);
     }
   }
@@ -266,20 +277,22 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
 }
 
 void WorkerPool::run(std::size_t count,
-                     cursiv::function_ref<void(std::size_t)> body) {
+                     cursiv::function_ref<bool(std::size_t)> body) {
   if (count == 0) return;
 
   // No more parts than items, and never more than the pool can run.
   const std::size_t parts = std::min(count, _workers.size() + 1);
   if (parts <= 1) {
-    for (std::size_t index = 0; index < count; ++index) body(index);
+    for (std::size_t index = 0; index < count && body(index); ++index) {
+    }
     return;
   }
 
   Cell* cell = claimCell();
   // Every cell in flight: run it alone rather than wait for one. Never wrong.
   if (cell == nullptr) {
-    for (std::size_t index = 0; index < count; ++index) body(index);
+    for (std::size_t index = 0; index < count && body(index); ++index) {
+    }
     return;
   }
   cell->pending.store(parts, std::memory_order_relaxed);
@@ -319,4 +332,4 @@ WorkerPool::Cell* WorkerPool::claimCell() noexcept {
   return nullptr;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

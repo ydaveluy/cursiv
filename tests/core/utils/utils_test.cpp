@@ -17,6 +17,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <pthread.h>
+#endif
+
 #include "cursiv/Check.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
@@ -206,11 +210,46 @@ void exact_prefix_and_subtree_erasure() {
   CHECK(all(trie, "file:///w").empty());
 }
 
+#if defined(__linux__)
+// A path far deeper than a cramped thread's stack could recurse through:
+// listing the values and freeing the nodes walk it on the heap.
+void* deep_path_on_a_cramped_stack(void* arg) {
+  auto* const listed = static_cast<std::size_t*>(arg);
+  std::string uri = "mem:///";
+  for (int i = 0; i < 100000; ++i) uri += "a/";
+  cursiv::UriTrie<int> trie;
+  trie.insert(uri + "x", 1);
+  trie.insert("mem:///a/y", 2);
+  *listed = trie.all().size() + trie.findAll("mem:///a").size();
+  trie.erase("mem:///a/a");
+  *listed += trie.all().size();
+  trie.insert(uri + "z", 3);
+  return nullptr;
+}
+
+void a_deep_path_needs_no_deep_stack() {
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, std::size_t{128} << 10);
+  std::size_t listed = 0;
+  pthread_t thread;
+  if (pthread_create(&thread, &attr, &deep_path_on_a_cramped_stack, &listed) ==
+      0) {
+    pthread_join(thread, nullptr);
+    CHECK(listed == 5);
+  }
+  pthread_attr_destroy(&attr);
+}
+#endif
+
 }  // namespace
 
 void run() {
   exact_prefix_and_subtree_erasure();
   moving_reparents_the_root_children();
+#if defined(__linux__)
+  a_deep_path_needs_no_deep_stack();
+#endif
 }
 
 }  // namespace uri_trie
@@ -340,66 +379,43 @@ void what_is_escaped_comes_back() {
 // Each URI and the one spelling it has, whatever the host.
 void a_uri_has_one_spelling() {
   const std::pair<std::string_view, std::string_view> spelled[] = {
-      {R"(file:///c%3A/Users/me/a.dsl)",
-       R"(file:///c%3A/Users/me/a.dsl)"},
-      {R"(file:///C:/Users/me/a.dsl)",
-       R"(file:///c%3A/Users/me/a.dsl)"},
-      {R"(file:///C%3a/x)",
-       R"(file:///c%3A/x)"},
-      {R"(file:///home/me/My%20File.dsl)",
-       R"(file:///home/me/My%20File.dsl)"},
-      {R"(file:///caf%C3%A9.dsl)",
-       R"(file:///caf%C3%A9.dsl)"},
-      {R"(file:///a+b/c%2Bd)",
-       R"(file:///a%2Bb/c%2Bd)"},
-      {R"(file:///a%2Fb)",
-       R"(file:///a/b)"},
-      {R"(file:///a%23b)",
-       R"(file:///a%23b)"},
-      {R"(file:///a%3Fb)",
-       R"(file:///a%3Fb)"},
-      {R"(file:///a%25b)",
-       R"(file:///a%25b)"},
+      {R"(file:///c%3A/Users/me/a.dsl)", R"(file:///c%3A/Users/me/a.dsl)"},
+      {R"(file:///C:/Users/me/a.dsl)", R"(file:///c%3A/Users/me/a.dsl)"},
+      {R"(file:///C%3a/x)", R"(file:///c%3A/x)"},
+      {R"(file:///home/me/My%20File.dsl)", R"(file:///home/me/My%20File.dsl)"},
+      {R"(file:///caf%C3%A9.dsl)", R"(file:///caf%C3%A9.dsl)"},
+      {R"(file:///a+b/c%2Bd)", R"(file:///a%2Bb/c%2Bd)"},
+      {R"(file:///a%2Fb)", R"(file:///a/b)"},
+      {R"(file:///a%23b)", R"(file:///a%23b)"},
+      {R"(file:///a%3Fb)", R"(file:///a%3Fb)"},
+      {R"(file:///a%25b)", R"(file:///a%25b)"},
       {R"(file:///!$&'()*,;=@[])",
        R"(file:///%21%24%26%27%28%29%2A%2C%3B%3D%40%5B%5D)"},
-      {R"(file:///a b)",
-       R"(file:///a%20b)"},
-      {R"(file:///a/b?x=1)",
-       R"(file:///a/b?x%3D1)"},
-      {R"(file:///a/b?a/b)",
-       R"(file:///a/b?a%2Fb)"},
-      {R"(file:///a/b#a/b)",
-       R"(file:///a/b#a%2Fb)"},
-      {R"(file:///a/b?)",
-       R"(file:///a/b)"},
-      {R"(file:///a/b#)",
-       R"(file:///a/b)"},
-      {R"(file://server/a/b)",
-       R"(file://server/a/b)"},
-      {R"(file://Host/a/b)",
-       R"(file://host/a/b)"},
-      {R"(file://wsl.localhost/a/b)",
-       R"(file://wsl.localhost/a/b)"},
+      {R"(file:///a b)", R"(file:///a%20b)"},
+      {R"(file:///a/b?x=1)", R"(file:///a/b?x%3D1)"},
+      {R"(file:///a/b?a/b)", R"(file:///a/b?a%2Fb)"},
+      {R"(file:///a/b#a/b)", R"(file:///a/b#a%2Fb)"},
+      {R"(file:///a/b?)", R"(file:///a/b)"},
+      {R"(file:///a/b#)", R"(file:///a/b)"},
+      {R"(file://server/a/b)", R"(file://server/a/b)"},
+      {R"(file://Host/a/b)", R"(file://host/a/b)"},
+      {R"(file://wsl.localhost/a/b)", R"(file://wsl.localhost/a/b)"},
+      {R"(file://localhost/a/b)", R"(file:///a/b)"},
+      {R"(file://LocalHost/C:/x)", R"(file:///c%3A/x)"},
+      {R"(file://local%68ost/a)", R"(file:///a)"},
       {R"(file://server/C:/Users/me/a.dsl)",
        R"(file://server/c%3A/Users/me/a.dsl)"},
-      {R"(http://Host/a/b)",
-       R"(http://host/a/b)"},
-      {R"(http://User:Pw@Host:80/a/b)",
-       R"(http://User:Pw@host:80/a/b)"},
-      {R"(http://User@Host/a/b)",
-       R"(http://User@host/a/b)"},
-      {R"(http://[::1]:8080/a/b)",
-       R"(http://[::1]:8080/a/b)"},
-      {R"(http://a%40b@c/a/b)",
-       R"(http://a@b%40c/a/b)"},
+      {R"(http://Host/a/b)", R"(http://host/a/b)"},
+      {R"(http://localhost/a/b)", R"(http://localhost/a/b)"},
+      {R"(http://User:Pw@Host:80/a/b)", R"(http://User:Pw@host:80/a/b)"},
+      {R"(http://User@Host/a/b)", R"(http://User@host/a/b)"},
+      {R"(http://[::1]:8080/a/b)", R"(http://[::1]:8080/a/b)"},
+      {R"(http://a%40b@c/a/b)", R"(http://a@b%40c/a/b)"},
       {R"(vscode-remote://wsl%2Bubuntu/a/b)",
        R"(vscode-remote://wsl%2Bubuntu/a/b)"},
-      {R"(untitled:Untitled-1)",
-       R"(untitled:Untitled-1)"},
-      {R"(untitled:C:/x)",
-       R"(untitled:c%3A/x)"},
-      {R"(mem:///a b)",
-       R"(mem:/a%20b)"},
+      {R"(untitled:Untitled-1)", R"(untitled:Untitled-1)"},
+      {R"(untitled:C:/x)", R"(untitled:c%3A/x)"},
+      {R"(mem:///a b)", R"(mem:/a%20b)"},
   };
   for (const auto& [uri, canonical] : spelled) {
     CHECK(cursiv::normalize_uri(uri) == canonical);
@@ -416,6 +432,8 @@ void a_uri_has_one_spelling() {
 void one_file_normalizes_to_one_string() {
   CHECK(cursiv::equals_uri("file:///a/b c", "file:///a/b%20c"));
   CHECK(!cursiv::equals_uri("file:///a/b", "file:///a/c"));
+  CHECK(cursiv::equals_uri("file://localhost/a/b", "file:///a/b"));
+  CHECK(cursiv::contains_uri("file:///a", "file://localhost/a/b"));
   // Not a file URI: left alone, and still comparable.
   CHECK(cursiv::normalize_uri("http://x/a") == "http://x/a");
   CHECK(cursiv::equals_uri("http://x/a", "http://x/a"));
@@ -1204,6 +1222,70 @@ void a_thread_gives_its_slot_back_even_from_a_late_guard() {
 }
 #endif
 
+#if !defined(__wasi__)
+// More threads alive than the process has slots: each still reads without
+// waiting for another to end. Those that find no slot hold back every
+// collection while they read, so what they read stays alive until they leave.
+void more_threads_than_slots_read_at_once() {
+  constexpr int kHolders = 1024;  // one per slot: none is left after them
+  constexpr int kLate = 4;
+  cursiv::detail::collect_retired_tables();
+  cursiv::detail::ConcurrentTable<int, int> table;
+  int one = 1;
+  (void)table.insert(table.generation(), 1, one);
+  cursiv::detail::ConcurrentTable<int, Live> held;
+  {
+    Live value;
+    CHECK(held.insert(held.generation(), 1, value).has_value());
+  }
+  std::atomic<int> read{0};
+  std::atomic<int> wrong{0};
+  std::atomic<int> inside{0};
+  std::atomic<bool> cleared{false};
+  std::atomic<bool> released{false};
+  const auto until = [](const auto& done) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!done() && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return done();
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(kHolders + kLate);
+  for (int t = 0; t < kHolders; ++t)
+    threads.emplace_back([&] {
+      if (table.find(1) != 1) ++wrong;
+      ++read;
+      while (!released.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+  const bool allRead = until([&] { return read.load() == kHolders; });
+  CHECK(allRead);
+  if (allRead)
+    for (int t = 0; t < kLate; ++t)
+      threads.emplace_back([&] {
+        held.forEach([&](const Live&) {
+          ++inside;
+          while (!cleared.load()) std::this_thread::yield();
+        });
+      });
+  const bool allInside =
+      allRead && until([&] { return inside.load() == kLate; });
+  CHECK(allInside);
+  if (allInside) {
+    held.clear();
+    cursiv::detail::collect_retired_tables();
+    CHECK(Live::count == 1);
+  }
+  cleared = true;
+  released = true;
+  for (auto& thread : threads) thread.join();
+  CHECK(wrong.load() == 0);
+  cursiv::detail::collect_retired_tables();
+  CHECK(Live::count == 0);
+}
+#endif
+
 void run() {
   a_hit_never_recomputes();
   filling_the_cache_is_linear();
@@ -1229,6 +1311,9 @@ void run() {
       [](int k) { return std::to_string(k); });
   a_thread_gives_its_slot_back_even_from_a_late_guard();
   a_clear_during_a_growth_frees_its_successor();
+#endif
+#if !defined(__wasi__)
+  more_threads_than_slots_read_at_once();
 #endif
   a_slot_is_filled_by_the_copy_constructor();
   a_slot_is_not_filled_from_a_temporary();

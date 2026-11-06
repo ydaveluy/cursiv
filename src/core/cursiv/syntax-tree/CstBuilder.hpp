@@ -115,7 +115,7 @@ class CstBuilder {
     _cst.bind_model(grammar, owned);
   }
   void bind_translation(std::string_view document,
-                        std::unique_ptr<const SourceTranslation> translation) {
+                        std::unique_ptr<SourceTranslation> translation) {
     _cst.bind_translation(document, std::move(translation));
   }
 

@@ -37,6 +37,12 @@ void DefaultServiceRegistry::registerServices(
     throw ServiceRegistrationError(
         std::format("cursiv: language '{}' is missing service '{}'",
                     meta.languageId, missing));
+  // Its services already read the workspace they were built over: routed
+  // here, they would index and resolve in another one.
+  if (&services->shared() != &shared)
+    throw ServiceRegistrationError(
+        std::format("cursiv: language '{}' was built for another workspace",
+                    meta.languageId));
 
   // Owned before any table names it: a throw below -- a table growing, a
   // collision's message -- leaves rows on a live container, never a freed one.
@@ -49,6 +55,9 @@ void DefaultServiceRegistry::registerServices(
   // consumer walks, and re-registering must not reshuffle it.
   const auto known = _byLanguageId.find(meta.languageId);
   const bool reRegistered = known != _byLanguageId.end();
+  // A new language's room in `_all` before any table names it: listed in the
+  // same step it becomes routable by its id, so the two never disagree.
+  if (!reRegistered) _all.reserve(_all.size() + 1);
   if (reRegistered) {
     const CoreServices* const old = known->second;
     std::erase_if(_byExtension,
@@ -60,6 +69,7 @@ void DefaultServiceRegistry::registerServices(
     // Keep its ownership until registry destruction; only routing is replaced.
   }
   _byLanguageId[meta.languageId] = language;
+  if (!reRegistered) _all.push_back(language);
   // The later registration owns a colliding key -- said, never silent: the
   // first language's documents would quietly resolve to the second's. The
   // message names the normalised key, which is what routes.
@@ -81,8 +91,6 @@ void DefaultServiceRegistry::registerServices(
       claim(_byExtension, std::move(key), "extension");
   for (const std::string& fileName : meta.fileNames)
     if (!fileName.empty()) claim(_byFileName, fileName, "file name");
-
-  if (!reRegistered) _all.push_back(language);
 }
 
 const CoreServices* DefaultServiceRegistry::lookup(

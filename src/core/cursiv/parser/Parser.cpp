@@ -67,8 +67,7 @@ class TranslatingParser final : public Parser {
     translation.finish();
     // On the heap before the parse: the AST borrows the text, and moving a
     // short string afterwards would move its bytes too.
-    auto owned =
-        std::make_unique<const SourceTranslation>(std::move(translation));
+    auto owned = std::make_unique<SourceTranslation>(std::move(translation));
     ParseResult result = _parser->parse(owned->text(), cancelToken);
     // A parser in between hid the inner translation from the wrap.
     if (result.cst().translation() != nullptr)

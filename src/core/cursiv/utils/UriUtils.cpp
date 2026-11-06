@@ -261,6 +261,7 @@ bool is_normal_uri(const UriParts& parts) {
     return false;
   const bool file = parts.scheme == "file";
   if (parts.slashes != (file || !parts.authority.empty())) return false;
+  if (file && parts.authority == "localhost") return false;
   if ((file || parts.scheme == "http" || parts.scheme == "https") &&
       !parts.path.starts_with('/'))
     return false;
@@ -309,8 +310,11 @@ std::string normalize_uri(std::string_view uri) {
   // the text alone, never on the host.
   const std::string scheme = lower_case(parts.scheme);
   std::string out = scheme + ':';
-  if (!parts.authority.empty() || scheme == "file") out += "//";
-  out += format_authority(percent_decode(parts.authority));
+  std::string authority = format_authority(percent_decode(parts.authority));
+  // A local file has no host: `localhost` names this machine.
+  if (scheme == "file" && authority == "localhost") authority.clear();
+  if (!authority.empty() || scheme == "file") out += "//";
+  out += authority;
   std::string path = percent_decode(parts.path);
   // These schemes have no relative form: their paths are rooted.
   if ((scheme == "file" || scheme == "http" || scheme == "https") &&

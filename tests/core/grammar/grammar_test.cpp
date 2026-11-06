@@ -1046,6 +1046,33 @@ static_assert(std::same_as<ResolveOverride<Slotted>::rule<Doc::ID>::slot,
                            TypeList<Tagged>>);
 static_assert(std::same_as<Plain::rule<Doc::ID>::slot, TypeList<>>);
 
+// Two sides that restate a rule apart meet where a grammar restates it once
+// more, as the refusal advises: a body with no `super` needs neither side's.
+struct Chosen : extends<CatSeqT, PreSeqT> {
+  template <class>
+  struct override;
+  template <class T>
+    requires std::same_as<T, Shapes::SeqT>
+  struct override<T> : terminal<lit<"a">> {};
+};
+
+static_assert(ResolveOverride<Chosen>::overrides<Shapes::SeqT>);
+static_assert(std::same_as<eff<Chosen, Shapes::SeqT>, base_body<Shapes::OneT>>);
+
+// ...and where one side states a converter and the other none, the
+// restatement states its own.
+struct Retagged : extends<Slotted, Wide> {
+  using ignored = Doc::WS;
+  template <class>
+  struct override;
+  template <class T>
+    requires std::same_as<T, Doc::ID>
+  struct override<T> : terminal<as<Tagged>(lit<"id">)> {};
+};
+
+static_assert(std::same_as<ResolveOverride<Retagged>::rule<Doc::ID>::slot,
+                           TypeList<Tagged>>);
+
 // The resolution is a push: a grammar is asked rule by rule, never for the
 // list of what it overrides. So a declaration for a rule outside the entry's
 // reach costs nothing and answers when asked.

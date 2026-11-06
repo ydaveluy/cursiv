@@ -9,8 +9,11 @@ namespace cursiv {
 
 // One writer, shared readers. Every pointer and view taken under a read stays
 // valid while it is held, unless the read is `Immediate` -- the door `settle`
-// opens. A read inside a write runs inline; a write under a read, or a wait
-// from a read action, both deadlock instead, silently. An escaping
+// opens. A read inside a write runs inline, on the writer's own thread only;
+// a write under a read, or a wait from a read action, both deadlock instead,
+// silently. So does a `Normal` read inside another read once a write is
+// waiting -- the write waits for the reader already in -- and one from a
+// worker of a write's build, which waits for that write. An escaping
 // `OperationCancelled` is absorbed; any other exception propagates after
 // exclusivity is released.
 class WorkspaceLock {

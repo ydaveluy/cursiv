@@ -37,7 +37,7 @@
 
 namespace cursiv {
 
-// Stacks under one frozen reading a search sets out from, at most.
+// Stacks a search sets out from, at most, over every frozen reading.
 inline constexpr std::size_t kLrGssStacks = 512;
 // The stack frames an episode's graph first holds.
 inline constexpr std::uint32_t kLrSeedWindow = 32;
@@ -398,12 +398,18 @@ class LrGss {
   }
 
   // Settles the shifts that start before `before`; whether a vertex was
-  // retired.
+  // retired. Where none starts before it, nothing is settled and nothing is
+  // weighed: each vertex opened at one place would weigh them all again.
   bool elected_stand(TextOffset before) {
     const Token lead = _shifts.front().token;
-    if (std::ranges::all_of(_shifts,
-                            [&](const Shift& s) { return s.token == lead; })) {
-      if (lead.begin < before) _shifts.clear();
+    bool alike = true, settles = false;
+    for (const Shift& s : _shifts) {
+      alike = alike && s.token == lead;
+      settles = settles || s.token.begin < before;
+    }
+    if (!settles) return false;
+    if (alike) {
+      _shifts.clear();
       return false;
     }
     // A tie reads its tokens again: each once, not once per rival.

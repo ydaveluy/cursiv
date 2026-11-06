@@ -44,7 +44,9 @@ struct AstNodeDescription {
   // Present only while the description's own build stands -- for a local
   // reference, resolving costs nothing. Not const: what follows this address is
   // the linker binding a reference to it, and a const pointer would only push
-  // the cast one storey down.
+  // the cast one storey down. The default references bind to this pointer and
+  // nothing else: a description without one resolves nothing, so an index or
+  // scope of its own fills it too.
   AstNode* node = nullptr;
 
   [[nodiscard]] bool valid() const noexcept {

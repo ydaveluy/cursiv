@@ -17,7 +17,8 @@ namespace cursiv {
 
 // Not `final`: the most-overridden service there is. A language that makes a
 // standard library or an import visible changes one thing -- what the workspace
-// declares once no container up the tree does -- which is the pair below.
+// declares once no container up the tree does -- which is the three reads of
+// the global scope below.
 class DefaultScopeProvider : public ScopeProvider,
                              protected DefaultCoreService {
  public:
@@ -48,10 +49,13 @@ class DefaultScopeProvider : public ScopeProvider,
 
   // The global scope, and it is what makes a workspace one: a name no container
   // up the tree declares is looked for in what every other document exported.
-  // Two hooks because a scope here is not an object but two ways of reading it
-  // -- one name, or all of them. The named reads above record the name before
-  // asking these, so a later export of it relinks the site; a provider that
-  // reads the index by another path extends `IndexManager::isAffected`.
+  // Three hooks because a scope here is not an object but three ways of reading
+  // it -- the first entry of one name for a single reference, every entry of it
+  // for a multi reference, all of them for completion. A policy changes the
+  // three together, or linking and completion disagree. The named reads above
+  // record the name before asking these, so a later export of it relinks the
+  // site; a provider that reads the index by another path extends
+  // `IndexManager::isAffected`.
   [[nodiscard]] virtual const AstNodeDescription* getGlobalScopeEntry(
       const ReferenceInfo& context, std::string_view name, AcceptSet accepts,
       const AstReflection& reflection, bool caseSensitive) const;
