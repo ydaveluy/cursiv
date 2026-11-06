@@ -54,7 +54,8 @@ struct ExpectDiagnosticOptions {
   std::optional<std::size_t> propertyIndex{};
 };
 
-// Deep equality of the two payloads, `rhs` read as a subset of `lhs`.
+// Deep equality of the two payloads, `rhs` read as a subset of `lhs`: the
+// members of an object it gives, the leading elements of an array.
 [[nodiscard]] bool isDiagnosticDataEqual(const JsonValue& lhs,
                                          const JsonValue& rhs);
 

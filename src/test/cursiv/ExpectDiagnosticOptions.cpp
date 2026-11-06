@@ -59,6 +59,16 @@ bool isDiagnosticDataEqual(const JsonValue& lhs, const JsonValue& rhs) {
       return at != lhs.object().end() &&
              isDiagnosticDataEqual(at->second, entry.second);
     });
+  // An array is read the same way, by position: each element `rhs` gives must
+  // match the one `lhs` holds at that place.
+  if (lhs.isArray() && rhs.isArray()) {
+    const JsonValue::Array& held = lhs.array();
+    const JsonValue::Array& asked = rhs.array();
+    if (asked.size() > held.size()) return false;
+    for (std::size_t i = 0; i < asked.size(); ++i)
+      if (!isDiagnosticDataEqual(held[i], asked[i])) return false;
+    return true;
+  }
   // The serialization is deterministic, which makes it the deep comparison.
   return lhs.toJsonString() == rhs.toJsonString();
 }

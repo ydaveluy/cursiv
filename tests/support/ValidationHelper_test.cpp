@@ -335,6 +335,21 @@ void the_small_answers_are_what_a_message_is_built_from() {
                                   cursiv::JsonValue(part)));
   CHECK(!ct::isDiagnosticDataEqual(cursiv::JsonValue(whole),
                                    cursiv::JsonValue("x")));
+  // An array by position: the leading elements, each read the same way.
+  cursiv::JsonValue::Object both;
+  both["a"] = cursiv::JsonValue(1);
+  both["b"] = cursiv::JsonValue(2);
+  const cursiv::JsonValue held(
+      cursiv::JsonValue::Array{cursiv::JsonValue(both), cursiv::JsonValue(3)});
+  CHECK(ct::isDiagnosticDataEqual(
+      held,
+      cursiv::JsonValue(cursiv::JsonValue::Array{cursiv::JsonValue(inner)})));
+  CHECK(!ct::isDiagnosticDataEqual(
+      held, cursiv::JsonValue(cursiv::JsonValue::Array{cursiv::JsonValue(3)})));
+  CHECK(!ct::isDiagnosticDataEqual(
+      held, cursiv::JsonValue(cursiv::JsonValue::Array{cursiv::JsonValue(both),
+                                                       cursiv::JsonValue(3),
+                                                       cursiv::JsonValue(4)})));
 }
 
 void the_caret_reaches_its_declaration() {
