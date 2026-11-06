@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
+#include <span>
 #include <vector>
 
 #include "cursiv/references/ImportedNames.hpp"
@@ -58,7 +60,10 @@ struct DocumentReferences : RefHome {
   // reaches; that is why the five live here and the linker stays erased.
   // Cancellation is polled inside the loop; an exception out of one provider
   // fails that one reference, never the list -- only cancellation propagates.
-  virtual void forceAll(const CancellationToken& cancelToken) = 0;
+  // `which` are handles of this table: all of them, or a run of them, as the
+  // linker splits a long list so several workers force one document.
+  virtual void force(std::span<const RefHandle> which,
+                     const CancellationToken& cancelToken) = 0;
 
   // The references whose name holds `offset` or ends there, forced the same
   // way: a caret asks for its own reference, not for the document's.

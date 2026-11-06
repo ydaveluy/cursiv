@@ -736,13 +736,6 @@ struct RefOps {
   void (*reset)(AstNode& owner, std::uint32_t index) noexcept = nullptr;
 };
 
-namespace detail {
-// `DocumentReferences::forceAll` as one phase: a wait anywhere under it is
-// cancelled with `token`.
-void force_all(std::span<const RefHandle> handles, const RefOps* ops,
-               const CancellationToken& token);
-}  // namespace detail
-
 // One reference site's type filter: the field's row plus the site's declared
 // narrowing.
 struct RefFilter {

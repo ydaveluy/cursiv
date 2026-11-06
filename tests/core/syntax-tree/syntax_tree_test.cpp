@@ -83,6 +83,7 @@
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/DefaultAstReflection.hpp"
+#include "cursiv/syntax-tree/DefaultDocumentReferences.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/utils/TypeName.hpp"
@@ -682,7 +683,7 @@ void assigning_again_keeps_one_reference_site() {
 
   // Both public visitors see the four surviving slots exactly once. Before
   // linking, forcing gives each slot the ordinary ErrorNotFound answer.
-  r.references->forceAll(cursiv::kNoCancel);
+  r.references->force(r.references->handles, cursiv::kNoCancel);
   std::vector<cursiv::TextOffset> unresolved;
   std::vector<std::uint32_t> listed;
   r.references->visitUnresolved(
@@ -3945,11 +3946,13 @@ struct Owner : AstNode {
 constexpr RefOps kForce{.force = [](const AstNode& o, std::uint32_t) {
   return static_cast<const Owner&>(o).ref->resolve();
 }};
+constexpr AstMetaData kForceMeta{.refOps = &kForce, .referenceFields = {}};
 void force(const Ref& ref, const CancellationToken& token) {
   Owner owner;
   owner.ref = &ref;
-  const RefHandle handle{&owner, 0, 0};
-  detail::force_all({&handle, 1}, &kForce, token);
+  DefaultDocumentReferences references(kForceMeta);
+  references.handles.push_back({&owner, 0, 0});
+  references.force(references.handles, token);
 }
 
 // What a stub hands back: the targets it gathered, named once at the end.

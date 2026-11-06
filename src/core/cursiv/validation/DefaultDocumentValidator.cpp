@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
@@ -42,6 +43,10 @@
 
 namespace cursiv {
 namespace {
+
+// The fewest nodes a worker checks at once: enough to outweigh the cost of
+// handing them out.
+constexpr std::size_t kCheckRun = 2048;
 
 // Naming no category runs everything; naming some runs the built-in half only
 // when `built_in` is among them, and the checks only when something else is.
@@ -484,8 +489,37 @@ void DefaultDocumentValidator::validateAstNodes(
   // The walk stays that way on purpose. Document order is owed on the published
   // list, not on the traversal, and the list is a handful of diagnostics rather
   // than a tree of nodes -- `validateDocument` sorts it on the way out.
-  for (const AstNode* const node : document.parseResult.nodes())
-    if (node != root) check(*node);
+  //
+  // A tree of one run, or of a language that refuses nodes, is walked on this
+  // thread: what such a language refuses is memoised along the way.
+  const OwnedNodes nodes = document.parseResult.nodes();
+  if (asks || nodes.size() < 2 * kCheckRun) {
+    for (const AstNode* const node : nodes)
+      if (node != root) check(*node);
+    return;
+  }
+  // A larger one is checked in runs spread over the pool. Each run keeps its
+  // findings in the slot its place gives it, handed on in run order, so the
+  // list is the one a single walk makes.
+  std::vector<std::vector<Diagnostic>> found(nodes.size() / kCheckRun);
+  _core.shared().taskScheduler->parallelFor(
+      token, nodes, kCheckRun, [&](OwnedNodes run) {
+        std::vector<Diagnostic>& kept =
+            found[static_cast<std::size_t>(run.data() - nodes.data()) /
+                  kCheckRun];
+        const auto keep = [&kept](Diagnostic&& diagnostic) {
+          kept.push_back(std::move(diagnostic));
+        };
+        ValidationAcceptor local(ValidationAcceptor::Sink(keep), document,
+                                 getSource());
+        for (const AstNode* const node : run) {
+          throw_if_cancelled(token);
+          if (node != root)
+            registry->runChecks(*node, local, categories, token);
+        }
+      });
+  for (std::vector<Diagnostic>& run : found)
+    for (Diagnostic& diagnostic : run) accept.accept(std::move(diagnostic));
 }
 
 void DefaultDocumentValidator::validateAstAfter(

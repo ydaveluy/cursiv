@@ -25,7 +25,9 @@ struct DefaultDocumentReferences : DocumentReferences {
 
   [[nodiscard]] Answer resolve(std::uint32_t rank) const override;
 
-  void forceAll(const CancellationToken& cancelToken) override;
+  // Defined with the resolution frames, since forcing opens a phase on them.
+  void force(std::span<const RefHandle> which,
+             const CancellationToken& cancelToken) override;
 
   void forceAt(const Cst& cst, TextOffset offset,
                const CancellationToken& cancelToken) override;

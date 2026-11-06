@@ -10,8 +10,10 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -302,6 +304,43 @@ void a_pool_serves_run_after_run() {
   CHECK(calls.load() == 20 * 500);
 }
 
+// A span goes out in runs of at least the minimum, each starting at a multiple
+// of it, the last taking the rest. Shorter than two runs, it goes whole to the
+// calling thread.
+void a_span_goes_out_in_runs_of_at_least_the_minimum() {
+  constexpr std::size_t kMin = 4;
+  for (const std::size_t workers : {std::size_t{0}, kWorkers}) {
+    cursiv::TaskScheduler tasks{workers};
+    for (const std::size_t size : {0, 1, 4, 7, 8, 11, 12, 1'000, 1'003}) {
+      const auto items = indices(size);
+      std::vector<std::atomic<int>> seen(size);
+      std::mutex lock;
+      std::vector<std::pair<std::size_t, std::size_t>> runs;
+      std::vector<std::thread::id> threads;
+      tasks.parallelFor(cursiv::kNoCancel, std::span(items), kMin,
+                        [&](std::span<const std::size_t> run) {
+                          for (const std::size_t i : run) seen[i].fetch_add(1);
+                          const std::scoped_lock held(lock);
+                          runs.emplace_back(run.front(), run.size());
+                          threads.push_back(std::this_thread::get_id());
+                        });
+      bool once = true;
+      for (const auto& count : seen) once = once && count.load() == 1;
+      CHECK(once);
+      CHECK(runs.size() ==
+            (size == 0 ? 0 : std::max(size / kMin, std::size_t{1})));
+      for (const auto& [first, length] : runs) {
+        CHECK(first % kMin == 0);
+        CHECK(length >= std::min(size, kMin));
+        CHECK(length < 2 * kMin);
+      }
+      if (size < 2 * kMin)
+        for (const std::thread::id thread : threads)
+          CHECK(thread == std::this_thread::get_id());
+    }
+  }
+}
+
 }  // namespace
 
 void run() {
@@ -320,6 +359,7 @@ void run() {
   a_list_runs_inline();
   an_exception_outranks_cancellation();
   a_pool_serves_run_after_run();
+  a_span_goes_out_in_runs_of_at_least_the_minimum();
 }
 
 }  // namespace task_scheduler

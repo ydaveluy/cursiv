@@ -578,7 +578,7 @@ void is_subtype_reads_subtype_first() {
   CHECK(!r.isSubtype(nullptr, type));
 }
 
-// Cancellation is the one exception `forceAll` does not isolate: it aborts
+// Cancellation is the one exception `force` does not isolate: it aborts
 // the list, where a provider's own failure loses one reference.
 struct CancellingProvider final : cursiv::DefaultScopeProvider {
   using DefaultScopeProvider::DefaultScopeProvider;

@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/references/LinkingError.hpp"
 #include "cursiv/references/LinkingResult.hpp"
@@ -29,6 +30,10 @@
 namespace cursiv {
 
 namespace {
+
+// The fewest references a worker forces at once: enough that handing them out
+// costs nothing next to the lookups they make.
+constexpr std::size_t kLinkRun = 4096;
 
 // What makes two candidates the same answer to a plural lookup.
 struct CandidateKey {
@@ -120,7 +125,13 @@ void DefaultLinker::link(Document& document,
   // Direct callers can still link a document without using the builder.
   if (references.linker != this) references.linker = this;
   if (references.document != &document) references.document = &document;
-  references.forceAll(cancelToken);
+  // A long list is forced in runs spread over the pool, so a large document
+  // does not link on one thread while the others wait for it.
+  const auto force = [&](std::span<const RefHandle> run) {
+    references.force(run, cancelToken);
+  };
+  shared.taskScheduler->parallelFor(cancelToken, std::span(references.handles),
+                                    kLinkRun, force);
 }
 
 // A document with no tree has nothing to drop, and it is reached: a reset to

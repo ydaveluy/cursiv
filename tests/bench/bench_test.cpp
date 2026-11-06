@@ -189,7 +189,7 @@ void a_parser_without_references_counts_none() {
     cursiv::bench::Row row;
     row.references = row.resolved = 99;
     cursiv::bench::ws_stages<ws::WorkspaceSharedServices>(
-        1, false, "workspace", ".ws", "datatype lowercase", row,
+        1, false, 0, "workspace", ".ws", "datatype lowercase", row,
         register_language);
     CHECK(row.references == 0);
     CHECK(row.resolved == 0);

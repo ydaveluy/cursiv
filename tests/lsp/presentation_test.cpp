@@ -907,8 +907,9 @@ struct CountingReferences final : cursiv::DocumentReferences {
                               cursiv::MultiRefItems& out) const override {
     return inner->resolveAll(rank, out);
   }
-  void forceAll(const cursiv::CancellationToken& token) override {
-    inner->forceAll(token);
+  void force(std::span<const cursiv::RefHandle> which,
+             const cursiv::CancellationToken& token) override {
+    inner->force(which, token);
   }
   void forceAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
                const cursiv::CancellationToken& token) override {

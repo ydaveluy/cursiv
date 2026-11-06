@@ -262,6 +262,9 @@ struct Options {
   bool stages = true;
   std::size_t multiBytes = 0;  // 0 -> kDefaultMultiBytes / kFullMultiBytes
   std::vector<std::size_t> workers;
+  // The pool a document built alone runs on: the machine's, as in a server,
+  // unless `--single-workers` says otherwise.
+  std::size_t singleWorkers = 0;
   // The resident lane, and it is a mode, not a column: resident bytes
   // answer only on an allocator that does not already hold what the build
   // needs, and this binary warms it well before the ladder. `--rss`
@@ -385,8 +388,8 @@ struct Language {
   std::string (*corpus)(std::size_t bytes);
   void (*parse)(const std::string& src);
   // Workspace callbacks are null on threadless cross builds.
-  void (*workspace)(int iterations, bool resident, const std::string& src,
-                    Row&);
+  void (*workspace)(int iterations, bool resident, std::size_t workers,
+                    const std::string& src, Row&);
 
   // Null on both when the language has no per-file generator: a workspace of N
   // copies of the same single-document corpus is N duplicate symbol sets, and
@@ -559,8 +562,9 @@ inline void dump_build(const std::string& name,
 // `resident` is `--rss`: one build, read for resident bytes alone. Otherwise
 // each repetition is a counted build, when the PMU answers, then a timed one.
 template <class Shared>
-void ws_stages(int iterations, bool resident, const char* languageId,
-               const char* extension, const std::string& src, Row& row,
+void ws_stages(int iterations, bool resident, std::size_t workers,
+               const char* languageId, const char* extension,
+               const std::string& src, Row& row,
                bool (*register_)(cursiv::SharedCoreServices&)) {
   using namespace cursiv;
   enum class Probe : std::uint8_t { Clock, Counters, Resident };
@@ -571,15 +575,21 @@ void ws_stages(int iterations, bool resident, const char* languageId,
   bool validated = false;
   PerfCounters perf;
   const int builds = resident ? 1 : perf.active() ? 2 * iterations : iterations;
+  // A document built alone spreads over the whole pool, as an edit does in a
+  // server. One pool serves every build of the row: raised and joined around
+  // each, it would leave the next on cold caches. A counted build runs on
+  // this thread alone, the one the counters read.
+  auto pool = std::make_unique<TaskScheduler>(workers);
+  auto alone = std::make_unique<TaskScheduler>(0);
 
   for (int n = 0; n < builds; ++n) {
     const Probe probe = resident                      ? Probe::Resident
                         : perf.active() && n % 2 == 0 ? Probe::Counters
                                                       : Probe::Clock;
     Shared shared;
-    // One document never fans out, and a pool raised and joined around each
-    // build leaves the next one on cold caches.
-    shared.taskScheduler = std::make_unique<TaskScheduler>(0);
+    std::unique_ptr<TaskScheduler>& scheduler =
+        probe == Probe::Counters ? alone : pool;
+    shared.taskScheduler = std::move(scheduler);
     install_default_shared_lsp_services(shared);
     if (!register_(shared)) refused(languageId, "not registered");
     const CoreServices& core = shared.serviceRegistry->getServices(
@@ -675,6 +685,8 @@ void ws_stages(int iterations, bool resident, const char* languageId,
       dump_build(std::string(languageId) + "-" + std::to_string(src.size()),
                  all);
     }
+    // Taken back before `shared` goes, for the row's next build.
+    scheduler = std::move(shared.taskScheduler);
   }
 
   if (!timed) return;
@@ -874,14 +886,14 @@ Language make_language(const char* name, const char* languageId,
                     nullptr,
                     multiRefs};
 #ifndef CURSIV_BENCH_PARSE_ONLY
-  language.workspace = +[](int iterations, bool resident,
+  language.workspace = +[](int iterations, bool resident, std::size_t workers,
                            const std::string& src, Row& row) {
     auto shared = language_host<Shared, register_>();
     const auto& meta = shared->serviceRegistry->all().front()->languageMetaData;
     const char* ext =
         meta.fileExtensions.empty() ? "" : meta.fileExtensions.front().c_str();
-    ws_stages<Shared>(iterations, resident, meta.languageId.c_str(), ext, src,
-                      row, register_);
+    ws_stages<Shared>(iterations, resident, workers, meta.languageId.c_str(),
+                      ext, src, row, register_);
   };
   if (multiFile != nullptr)
     language.multi =

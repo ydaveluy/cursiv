@@ -14,6 +14,8 @@
 //     --multi-bytes N        total bytes per shape (default 16M, 64M with
 //     --full)
 //     --workers 1,2,4,8      the scaling curve's points
+//     --single-workers N     the pool of a document built alone (default:
+//                            the machine's, as in a server; 0 = one thread)
 //     --rss                  one language, one cold build: what it makes
 //                            resident, phase by phase, and its peak
 //     --list                 what would run
@@ -147,6 +149,7 @@ std::size_t parse_size(std::string_view text) {
                "usage: language_bench [--full] [--sizes L] [--iterations N]"
                " [--json P] [--csv P] [--dump-corpus D] [--corpus D]"
                " [--multi|--no-multi] [--multi-bytes N] [--workers L]"
+               " [--single-workers N]"
                " [--rss]"
                " [--list] [--file PATH] [filter]\n"
                "       <language>_bench [options] file [file ...]\n");
@@ -158,6 +161,7 @@ const char* env(const char* name) { return std::getenv(name); }
 Options options(int argc, char** argv, std::span<const Language> languages) {
   Options o;
   std::vector<std::size_t> explicitSizes;
+  bool singleWorkersGiven = false;
   const bool fileInputs =
       languages.size() == 1 && languages.front().corpus == nullptr;
   if (fileInputs) o.multi = false;
@@ -203,7 +207,10 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
       o.multi = true;
     } else if (arg == "--multi-bytes")
       o.multiBytes = parse_size(value(i));
-    else if (arg == "--workers") {
+    else if (arg == "--single-workers") {
+      o.singleWorkers = static_cast<std::size_t>(std::stoull(value(i)));
+      singleWorkersGiven = true;
+    } else if (arg == "--workers") {
       std::stringstream in(value(i));
       std::string token;
       while (std::getline(in, token, ','))
@@ -283,6 +290,8 @@ Options options(int argc, char** argv, std::span<const Language> languages) {
 
   if (o.multiBytes == 0)
     o.multiBytes = o.full ? kFullMultiBytes : kDefaultMultiBytes;
+  if (!singleWorkersGiven)
+    o.singleWorkers = cursiv::TaskScheduler::defaultWorkerCount();
   if (o.workers.empty()) {
     // 0, 1, 2, 4, 8, and the machine -- the last being what
     // `TaskScheduler::defaultWorkerCount()` would have chosen, so the widest
@@ -955,7 +964,7 @@ int cursiv::bench::run(int argc, char** argv,
 
       if (!o.rss) language.parse(source);
       if (language.workspace != nullptr)
-        language.workspace(row.iterations, o.rss, source, row);
+        language.workspace(row.iterations, o.rss, o.singleWorkers, source, row);
       if (!o.rss && o.lsp && language.lsp != nullptr)
         language.lsp(row.iterations, source, row);
       if (o.rss)

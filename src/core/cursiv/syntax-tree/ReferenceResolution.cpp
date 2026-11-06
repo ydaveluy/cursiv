@@ -8,6 +8,8 @@
 #include <span>
 #include <stop_token>
 
+#include "cursiv/syntax-tree/DefaultDocumentReferences.hpp"
+
 namespace cursiv::detail {
 namespace {
 
@@ -239,16 +241,22 @@ RefState resolve_all_slow(RefState& state, const RefHome* home,
   }, [&]() noexcept { out.clear(); });
 }
 
-void force_all(std::span<const RefHandle> handles, const RefOps* ops,
-               const CancellationToken& token) {
-  if (handles.empty()) return;
-  Frame root{.cancelToken = &token};
-  const Filed filed(root);
-  for (const RefHandle& h : handles) {
-    throw_if_cancelled(token);
+}  // namespace cursiv::detail
+
+namespace cursiv {
+
+// Here, beside the frames: forcing is a phase, and its root frame is where a
+// wait anywhere under it finds `cancelToken`.
+void DefaultDocumentReferences::force(std::span<const RefHandle> which,
+                                      const CancellationToken& cancelToken) {
+  if (which.empty()) return;
+  detail::Frame root{.cancelToken = &cancelToken};
+  const detail::Filed filed(root);
+  for (const RefHandle& h : which) {
+    throw_if_cancelled(cancelToken);
     if (h.owner == nullptr) continue;
     try {
-      ops[h.field].force(*h.owner, h.index);
+      _f.refOps[h.field].force(*h.owner, h.index);
     } catch (const OperationCancelled&) {
       throw;
     } catch (...) {
@@ -258,4 +266,4 @@ void force_all(std::span<const RefHandle> handles, const RefOps* ops,
   }
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv

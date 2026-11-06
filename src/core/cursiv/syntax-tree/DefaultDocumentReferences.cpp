@@ -81,10 +81,6 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   return resolved;
 }
 
-void DefaultDocumentReferences::forceAll(const CancellationToken& cancelToken) {
-  detail::force_all(handles, _f.refOps, cancelToken);
-}
-
 void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
                                         const CancellationToken& cancelToken) {
   std::vector<RefHandle> at;
@@ -95,7 +91,7 @@ void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
         offset <= cst[named].end)
       at.push_back(h);
   }
-  detail::force_all(at, _f.refOps, cancelToken);
+  force(at, cancelToken);
 }
 
 void DefaultDocumentReferences::visitResolved(

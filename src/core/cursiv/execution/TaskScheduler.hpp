@@ -1,8 +1,11 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <ranges>
+#include <span>
 
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
@@ -38,6 +41,15 @@ class TaskScheduler {
   template <class Range, class F>
   void parallelFor(const CancellationToken& token, Range&& range, F&& task,
                    std::size_t minParallelCount = 2);
+
+  // As above, for many small pieces of work, where handing each to a worker
+  // would cost more than doing it: `task` takes a run of `items` instead, of
+  // at least `minRun` of them. Runs start at multiples of `minRun` and the
+  // last one takes the rest, so `items.size() / minRun` runs in all; a span
+  // shorter than two runs goes to `task` whole, on the calling thread.
+  template <class T, class F>
+  void parallelFor(const CancellationToken& token, std::span<T> items,
+                   std::size_t minRun, F&& task);
 
   // Used to skip a nested fan-out that would only oversubscribe a busy pool.
   [[nodiscard]] bool onWorkerThread() const noexcept;
@@ -78,6 +90,20 @@ void TaskScheduler::parallelFor(const CancellationToken& token, Range&& range,
     task(*current);
   }
   throw_if_cancelled(token);
+}
+
+template <class T, class F>
+void TaskScheduler::parallelFor(const CancellationToken& token,
+                                std::span<T> items, std::size_t minRun,
+                                F&& task) {
+  assert(minRun > 0 && "a run holds at least one item");
+  const std::size_t runs =
+      items.empty() ? 0 : std::max<std::size_t>(1, items.size() / minRun);
+  parallelFor(token, std::views::iota(std::size_t{0}, runs),
+              [&](std::size_t run) {
+                const std::span<T> rest = items.subspan(run * minRun);
+                task(run + 1 == runs ? rest : rest.first(minRun));
+              });
 }
 
 }  // namespace cursiv
