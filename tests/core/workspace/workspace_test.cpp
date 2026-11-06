@@ -2685,6 +2685,20 @@ void a_text_document_becomes_a_parsed_document() {
   CHECK(d != nullptr);
   CHECK(d->textDocument().version() == 7);
   CHECK(d->parseSucceeded() && d->hasAst());
+
+  // `create` parses nothing: the document waits at `Changed`, its language
+  // resolved and named, for `update` to parse it.
+  const auto waiting = world.factory.create(cursiv::TextDocument::create(
+      "FILE:/w/b%2Ews", {}, 3, std::string(kSource)));
+  CHECK(waiting->uri == "file:///w/b.ws");
+  CHECK(waiting->state.load() == cursiv::DocumentState::Changed);
+  CHECK(waiting->language != nullptr);
+  CHECK(waiting->textDocument().languageId() == "workspace");
+  CHECK(waiting->textDocument().version() == 3);
+  CHECK(!waiting->hasAst());
+  world.factory.update(*waiting);
+  CHECK(waiting->state.load() == cursiv::DocumentState::Parsed);
+  CHECK(waiting->parseSucceeded() && waiting->hasAst());
 }
 
 // Unlike `fromString`, `fromTextDocument` does not renormalize the
@@ -4819,6 +4833,86 @@ void ready_resolves_when_the_scan_throws() {
             std::chrono::seconds(0)) == std::future_status::ready);
 }
 
+#if !defined(__wasi__) || defined(_REENTRANT)
+// A folder's files are read and parsed on the pool, and still enter the store
+// in the order of the walk: the ids a scan reading them one by one gives.
+void the_scan_parses_a_folder_on_the_pool() {
+  struct Together final : cursiv::DefaultDocumentFactory {
+    using DefaultDocumentFactory::DefaultDocumentFactory;
+    mutable std::latch entered{2};
+    mutable std::atomic<unsigned> calls{0};
+    mutable std::atomic<bool> overlapped{true};
+
+   protected:
+    void parse(cursiv::Document& document, const cursiv::CoreServices& services,
+               const cursiv::CancellationToken& token) const override {
+      if (calls.fetch_add(1) < 2) entered.count_down();
+      // Two files must be parsed together. A timeout reports a serial scan
+      // without hanging.
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (!entered.try_wait() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+      if (!entered.try_wait()) overlapped = false;
+      DefaultDocumentFactory::parse(document, services, token);
+    }
+  };
+  World world;
+  world.shared.taskScheduler = std::make_unique<cursiv::TaskScheduler>(2);
+  auto factory = std::make_unique<Together>(world.shared);
+  const Together& observed = *factory;
+  world.shared.documentFactory = std::move(factory);
+  world.disk->addFile("file:///w/b.ws", "datatype B\n");
+  world.disk->addFile("file:///w/a.ws", "entity A { f : C }\n");
+  world.disk->addFile("file:///w/sub/c.ws", "datatype C\n");
+  const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
+  world.shared.workspaceManager->initializeWorkspace(folders);
+
+  CHECK(observed.calls == 3);
+  CHECK(observed.overlapped);
+  const cursiv::Documents& store = *world.shared.documents;
+  const std::vector<std::string> walked =
+      world.shared.workspaceManager->searchFolder("file:///w");
+  CHECK(walked.size() == 3);
+  for (std::size_t i = 0; i < walked.size(); ++i)
+    CHECK(store.getDocumentId(walked[i]) == static_cast<cursiv::DocumentId>(i));
+  const auto a = store.getDocument("file:///w/a.ws");
+  CHECK(a != nullptr && !a->hasLinkingErrors());
+  CHECK(a != nullptr && a->state.load() == cursiv::DocumentState::Validated);
+}
+#endif
+
+// A failure the scan does not step over stops it where the walk meets it, as
+// in a scan reading the files one by one: the files before it are in the
+// store, none after it, and `ready` resolves.
+void a_failure_stops_the_scan_where_the_walk_meets_it() {
+  struct Failing final : cursiv::DefaultDocumentFactory {
+    using DefaultDocumentFactory::DefaultDocumentFactory;
+
+   protected:
+    void parse(cursiv::Document& document, const cursiv::CoreServices& services,
+               const cursiv::CancellationToken& token) const override {
+      if (document.uri == "file:///w/b.ws")
+        throw std::runtime_error("the parser is gone");
+      DefaultDocumentFactory::parse(document, services, token);
+    }
+  };
+  World world;
+  world.shared.documentFactory = std::make_unique<Failing>(world.shared);
+  world.disk->addFile("file:///w/a.ws", "datatype A\n");
+  world.disk->addFile("file:///w/b.ws", "datatype B\n");
+  world.disk->addFile("file:///w/c.ws", "datatype C\n");
+  const cursiv::WorkspaceFolder folders[] = {{"file:///w", "w"}};
+  CHECK(support::throws<std::runtime_error>(
+      [&] { world.shared.workspaceManager->initializeWorkspace(folders); }));
+  const cursiv::Documents& store = *world.shared.documents;
+  CHECK(store.hasDocument("file:///w/a.ws"));
+  CHECK(!store.hasDocument("file:///w/b.ws"));
+  CHECK(!store.hasDocument("file:///w/c.ws"));
+  CHECK(world.shared.workspaceManager->ready().wait_for(
+            std::chrono::seconds(0)) == std::future_status::ready);
+}
+
 }  // namespace
 
 void run() {
@@ -4833,6 +4927,10 @@ void run() {
   a_scan_updates_existing_links_and_keeps_the_requested_options();
   the_initial_options_govern_the_first_build();
   ready_resolves_when_the_scan_throws();
+#if !defined(__wasi__) || defined(_REENTRANT)
+  the_scan_parses_a_folder_on_the_pool();
+#endif
+  a_failure_stops_the_scan_where_the_walk_meets_it();
 }
 
 }  // namespace workspace_manager

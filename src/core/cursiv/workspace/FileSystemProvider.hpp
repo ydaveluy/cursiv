@@ -7,7 +7,8 @@
 #include <vector>
 
 // How a workspace reads what it did not open. One synchronous form, since
-// nothing here awaits.
+// nothing here awaits. The scan and the build read files on the pool, several
+// at once.
 
 namespace cursiv {
 

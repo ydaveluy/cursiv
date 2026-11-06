@@ -48,14 +48,24 @@ void DefaultDocumentFactory::parse(Document& document,
   document.state = DocumentState::Parsed;
 }
 
-std::shared_ptr<Document> DefaultDocumentFactory::fromTextDocument(
-    TextDocument textDocument, const CancellationToken& cancelToken) const {
+std::shared_ptr<Document> DefaultDocumentFactory::create(
+    TextDocument textDocument) const {
   const std::string uri = normalize_uri(textDocument.uri());
   const CoreServices& services = servicesFor(uri, textDocument.languageId());
-  const std::shared_ptr<Document> document =
-      createDocument(std::move(textDocument), uri);
+  if (textDocument.languageId().empty())
+    textDocument = TextDocument::create(
+        std::string(textDocument.uri()), services.languageMetaData.languageId,
+        textDocument.version(), std::string(textDocument.getText()));
+  const auto document =
+      std::make_shared<Document>(std::move(textDocument), uri);
   document->language = &services;
-  parse(*document, services, cancelToken);
+  return document;
+}
+
+std::shared_ptr<Document> DefaultDocumentFactory::fromTextDocument(
+    TextDocument textDocument, const CancellationToken& cancelToken) const {
+  const std::shared_ptr<Document> document = create(std::move(textDocument));
+  parse(*document, *document->language, cancelToken);
   return document;
 }
 

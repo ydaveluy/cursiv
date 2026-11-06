@@ -15,14 +15,24 @@
 //
 // It creates and does not store: the store is `Documents`, and a factory that
 // installed into it would be the cycle both refuse.
+//
+// The scan calls `fromUri`, and the build `update`, on the pool: several
+// documents are read and parsed at once.
 
 namespace cursiv {
-
-class DefaultDocumentBuilder;
 
 class DocumentFactory {
  public:
   virtual ~DocumentFactory() noexcept = default;
+
+  // The document `textDocument` becomes -- its URI normalised, its language
+  // resolved, an empty `languageId` filled with that language's -- at
+  // `Changed`: nothing is parsed. A build parses it, in parallel and under its
+  // token, through `update`, which first reads the file again when the
+  // document is not open. Every entry point builds through it: override it to
+  // hand out a specialised document. Throws when no language claims the URI.
+  [[nodiscard]] virtual std::shared_ptr<Document> create(
+      TextDocument textDocument) const = 0;
 
   [[nodiscard]] virtual std::shared_ptr<Document> fromTextDocument(
       TextDocument textDocument,
@@ -63,14 +73,6 @@ class DocumentFactory {
                                   std::int64_t version) const = 0;
 
  protected:
-  // The builder installs a file created outside the editor without its text.
-  friend class DefaultDocumentBuilder;
-
-  // The one constructor behind every entry point: override it to hand out a
-  // specialised document. The URI is already normalised.
-  [[nodiscard]] virtual std::shared_ptr<Document> createDocument(
-      TextDocument textDocument, std::string_view uri) const;
-
   // The write surface of a document's rebuild, for implementations only: a
   // derived factory is not the `Document`'s friend, this base is.
   static void resetForRebuild(Document& document) noexcept {

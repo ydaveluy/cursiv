@@ -20,6 +20,9 @@ class DefaultDocumentFactory : public DocumentFactory,
  public:
   using DefaultSharedCoreService::DefaultSharedCoreService;
 
+  [[nodiscard]] std::shared_ptr<Document> create(
+      TextDocument textDocument) const override;
+
   [[nodiscard]] std::shared_ptr<Document> fromTextDocument(
       TextDocument textDocument,
       const CancellationToken& cancelToken = kNoCancel) const override;

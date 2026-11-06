@@ -49,6 +49,7 @@
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
@@ -756,10 +757,14 @@ void opening_uses_the_document_factorys_construction_hook() {
   struct Factory final : cursiv::DefaultDocumentFactory {
     using DefaultDocumentFactory::DefaultDocumentFactory;
     mutable const cursiv::Document* created = nullptr;
-    std::shared_ptr<cursiv::Document> createDocument(
-        cursiv::TextDocument text, std::string_view uri) const override {
+    std::shared_ptr<cursiv::Document> create(
+        cursiv::TextDocument text) const override {
+      std::string uri = cursiv::normalize_uri(text.uri());
+      const cursiv::CoreServices& services =
+          servicesFor(uri, text.languageId());
       auto document =
-          std::make_shared<CustomDocument>(std::move(text), std::string(uri));
+          std::make_shared<CustomDocument>(std::move(text), std::move(uri));
+      document->language = &services;
       created = document.get();
       return document;
     }
@@ -2610,6 +2615,10 @@ void pulled_and_pushed_values_are_announced() {
   change.settings = lsp::LSPAny(std::move(settings));
   provider.updateConfiguration(change);
   CHECK(listener.sections == (std::vector<std::string>{"workspace", "workspace"}));
+  // The same value pushed again changes nothing, and says nothing.
+  provider.updateConfiguration(change);
+  CHECK(listener.sections ==
+        (std::vector<std::string>{"workspace", "workspace"}));
   provider.removeConfigurationListener(listener);
 }
 

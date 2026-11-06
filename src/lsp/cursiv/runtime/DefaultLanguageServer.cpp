@@ -560,9 +560,10 @@ void DefaultLanguageServer::didOpen(
         existing->language != _shared.serviceRegistry->findServices(
                                   normalized, item.languageId.value());
     if (existing == nullptr) {
-      // Parsed once, here: the update keeps an open document's parse, and the
-      // build resumes at indexing.
-      documents.addDocument(_shared.documentFactory->fromTextDocument(
+      // Installed at `Changed`: the build parses the client's text, in
+      // parallel with the rest and under its token, so the next keystroke
+      // can cut it short.
+      documents.addDocument(_shared.documentFactory->create(
           TextDocument::create(uri, item.languageId, item.version, item.text)));
     } else if (moved) {
       // The document stays the same object.

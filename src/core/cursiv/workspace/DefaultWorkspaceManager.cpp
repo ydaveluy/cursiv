@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <span>
 #include <string>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/utils/Cancellation.hpp"
@@ -160,14 +162,33 @@ void DefaultWorkspaceManager::initializeWorkspace(
     // -- a scan that died on one permission bit would leave the workspace
     // unanalysed.
     //
+    // A folder's files are read and parsed on the pool, then added in the
+    // order of the walk: ids, warnings and the first failure come out as
+    // they would from reading the files one by one.
+    //
     // Uninterruptable, the token deliberately not passed down: this runs once,
     // so a scan cut short leaves documents nothing can name for the session.
     // What the token governs is the build below, which the next one resumes.
     for (const WorkspaceFolder& folder : folders) {
-      for (const std::string& uri : searchFolder(getRootFolder(folder))) {
+      const std::vector<std::string> uris = searchFolder(getRootFolder(folder));
+      std::vector<std::size_t> unheld;
+      for (std::size_t i = 0; i < uris.size(); ++i)
+        if (store.getDocument(uris[i]) == nullptr) unheld.push_back(i);
+      std::vector<std::shared_ptr<Document>> loaded(uris.size());
+      std::vector<std::exception_ptr> failures(uris.size());
+      shared.taskScheduler->parallelFor(kNoCancel, unheld, [&](std::size_t i) {
+        try {
+          loaded[i] = factory.fromUri(uris[i]);
+        } catch (...) {
+          failures[i] = std::current_exception();
+        }
+      });
+      for (std::size_t i = 0; i < uris.size(); ++i) {
+        const std::string& uri = uris[i];
         if (store.getDocument(uri) != nullptr) continue;
         try {
-          store.addDocument(factory.fromUri(uri));
+          if (failures[i] != nullptr) std::rethrow_exception(failures[i]);
+          store.addDocument(std::move(loaded[i]));
         } catch (const FileSystemError&) {
           shared.observabilitySink->publish(
               {.severity = ObservationSeverity::Warning,

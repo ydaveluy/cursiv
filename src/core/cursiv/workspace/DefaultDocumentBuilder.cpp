@@ -24,10 +24,8 @@
 #include "cursiv/references/ScopeComputation.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/Diagnostic.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
-#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
@@ -528,18 +526,9 @@ std::vector<Document*> DefaultDocumentBuilder::applyUpdate(
   const DocumentFactory& factory = *_shared.documentFactory;
   std::vector<Document*> requested;
   for (const std::string_view uri : changedUris) {
-    if (!store.hasDocument(uri)) {
-      const std::string canonical = normalize_uri(uri);
-      if (const CoreServices* const services =
-              _shared.serviceRegistry->findServices(canonical)) {
-        const std::shared_ptr<Document> created = factory.createDocument(
-            TextDocument::create(canonical,
-                                 services->languageMetaData.languageId, 0, {}),
-            canonical);
-        created->language = services;
-        store.addDocument(created);
-      }
-    }
+    if (!store.hasDocument(uri))
+      store.addDocument(
+          factory.create(TextDocument::create(std::string(uri), {}, 0, {})));
     if (const std::shared_ptr<Document> d = store.getDocument(uri))
       requested.push_back(d.get());
   }

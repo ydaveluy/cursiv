@@ -17,8 +17,9 @@
 //
 // The URIs are of any scheme, kept as `normalize_uri` spells them and looked up
 // the same way, and `readDirectory` treats the folder as a plain prefix -- the
-// whole of what a hierarchy is here. Not synchronized: one thread at a time
-// touches a given instance.
+// whole of what a hierarchy is here. Not synchronized: reads may run on
+// several threads at once, as the scan and the build run them, but `addFile`
+// must not run beside them.
 
 namespace cursiv {
 
