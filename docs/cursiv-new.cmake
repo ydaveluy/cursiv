@@ -939,15 +939,7 @@ _cursiv_new_emit([==[vscode/package.json]==] [==[{
     "@types/vscode": "~1.91.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "@vscode/vsce": "^3.9.2"
-  },
-  "overrides": {
-    "@vscode/vsce": {
-      "@azure/identity": "4.13.0"
-    },
-    "@azure/msal-node": {
-      "uuid": "^11.1.1"
-    }
+    "@vscode/vsce": "^4.1.0"
   }
 }
 ]==])
