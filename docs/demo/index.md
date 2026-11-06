@@ -16,7 +16,7 @@ definition, rename and formatting all come from it.
      worker adds them for this directory only and reloads the page once. -->
 <script src="coi-serviceworker.js"></script>
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" data-name="vs/editor/editor.main" href="vendor/monaco/vs/editor/editor.main.css">
+<link rel="stylesheet" href="vendor/monaco/monaco.css">
 <nav id="languages" class="segmented" role="tablist" aria-label="Example language"></nav>
 <div class="workspace">
   <div id="documents" class="doc-tabs" role="tablist" aria-label="Example documents"></div>
@@ -33,6 +33,5 @@ definition, rename and formatting all come from it.
     <span class="right"><span id="cursor">Ln 1, Col 1</span><span id="language-id"></span></span>
   </div>
 </div>
-<script src="vendor/monaco/vs/loader.js"></script>
 <script type="module" src="app.js"></script>
 </section>

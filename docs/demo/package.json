@@ -6,6 +6,9 @@
   "license": "MIT",
   "dependencies": {
     "coi-serviceworker": "0.1.7",
-    "monaco-editor": "0.52.2"
+    "monaco-editor": "0.57.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

@@ -20,15 +20,6 @@ function setStatus(phase, text) {
   $('restart').hidden = phase !== 'stopped';
 }
 
-function loadMonaco() {
-  return new Promise((resolve) => {
-    // An absolute URL: Monaco's editor worker starts from a blob URL, where a
-    // relative path would resolve from the site root.
-    window.require.config({ paths: { vs: new URL('vendor/monaco/vs', location.href).href } });
-    window.require(['vs/editor/editor.main'], () => resolve(window.monaco));
-  });
-}
-
 // A Material palette colour as opaque hex, painted over the page background:
 // Monaco themes take no CSS variables and no transparency.
 const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
@@ -290,8 +281,14 @@ async function startSession(session, wantedDoc) {
 }
 
 async function main() {
-  if (!window.require) {
-    // A documentation build without tools/build-demo.sh (a preview).
+  setStatus('loading', 'Loading the editor…');
+  // A documentation build without tools/build-demo.sh (a preview) has no
+  // editor bundle.
+  monaco = await import('./vendor/monaco/monaco.js').catch((error) => {
+    state.error = String(error?.message ?? error);
+    return null;
+  });
+  if (!monaco) {
     setStatus('unavailable', 'This build has no editor: tools/build-demo.sh adds it with the language servers.');
     return;
   }
@@ -302,8 +299,7 @@ async function main() {
       : 'This page needs cross-origin isolation: open it over https or on localhost, outside private browsing.');
     return;
   }
-  setStatus('loading', 'Loading the editor…');
-  [monaco, languages] = await Promise.all([loadMonaco(), fetch('languages.json').then((r) => r.json())]);
+  languages = await fetch('languages.json').then((r) => r.json());
   applyTheme();
   // The palette toggle of the site header switches the editor theme too.
   new MutationObserver(applyTheme).observe(document.body, { attributeFilter: ['data-md-color-scheme'] });

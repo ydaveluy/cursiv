@@ -7,9 +7,11 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 strict: true
-# The demo's npm manifest is build input, not part of the published page.
+# The demo's npm manifest and editor bundle entry are build input, not part
+# of the published page.
 exclude_docs: |
   demo/package*.json
+  demo/monaco.js
 
 theme:
   name: material
