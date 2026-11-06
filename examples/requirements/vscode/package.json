@@ -98,11 +98,11 @@
     "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
-    "@types/vscode": "~1.91.0",
+    "@types/node": "^26.6.6",
+    "@types/vscode": "~1.144.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "@vscode/vsce": "^3.9.2"
+    "@vscode/vsce": "^4.1.0"
   },
   "vsce": {
     "dependencies": false
