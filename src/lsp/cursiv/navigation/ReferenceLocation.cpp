@@ -3,32 +3,42 @@
 #include <lsp/types.h>
 
 #include <memory>
-#include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 #include "cursiv/workspace/Document.hpp"
+#include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/text/LspPosition.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
-std::optional<lsp::Location> reference_location(
-    const Documents& store, const ReferenceDescription& reference) {
-  // The URI survives its document, which is what `getDocumentUri` is for: an
-  // index row may name a file that has since been closed and must still be
-  // nameable.
-  const std::string uri = store.getDocumentUri(reference.sourceDocumentId);
-  if (uri.empty()) return std::nullopt;
-  const std::shared_ptr<Document> source =
-      store.getDocument(reference.sourceDocumentId);
-  if (source == nullptr) return std::nullopt;
-  lsp::Location location;
-  location.uri = lsp::Uri::parse(uri);
-  location.range = to_lsp(source->textDocument().rangeAt(reference.sourceBegin,
-                                                         reference.sourceEnd));
-  return location;
+std::vector<lsp::Location> reference_locations(
+    const Documents& store, std::span<const ReferenceDescription> references) {
+  std::vector<lsp::Location> locations;
+  locations.reserve(references.size());
+  DocumentId current = kNoDocument;
+  std::shared_ptr<Document> source;
+  lsp::Uri uri;
+  for (const ReferenceDescription& reference : references) {
+    if (reference.sourceDocumentId != current) {
+      current = reference.sourceDocumentId;
+      // The URI survives its document, which is what `getDocumentUri` is
+      // for: an index row may name a file that has since been closed.
+      const std::string name = store.getDocumentUri(current);
+      source = name.empty() ? nullptr : store.getDocument(current);
+      if (source != nullptr) uri = lsp::Uri::parse(name);
+    }
+    if (source == nullptr) continue;
+    locations.push_back(
+        lsp::Location{.uri = uri,
+                      .range = to_lsp(source->textDocument().rangeAt(
+                          reference.sourceBegin, reference.sourceEnd))});
+  }
+  return locations;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

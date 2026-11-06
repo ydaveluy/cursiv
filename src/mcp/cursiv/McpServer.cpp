@@ -187,14 +187,14 @@ std::optional<json::Value> McpServer::handle(
                               "tools/call names its tool");
       for (const ToolEntry& entry : _tools) {
         if (entry.tool.name != name->string()) continue;
-        json::Value arguments;
-        if (const json::Value* const a =
-                find_param(request->params, "arguments");
-            a != nullptr)
-          arguments = *a;
+        // Read in place: the request outlives the call.
+        const json::Value none;
+        const json::Value* const arguments =
+            find_param(request->params, "arguments");
         McpToolResult outcome;
         try {
-          outcome = entry.execute(arguments, token);
+          outcome =
+              entry.execute(arguments != nullptr ? *arguments : none, token);
         } catch (const std::exception& error) {
           outcome = {error.what(), true};
         }

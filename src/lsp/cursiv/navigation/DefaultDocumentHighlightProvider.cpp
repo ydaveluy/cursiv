@@ -10,7 +10,6 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
-#include "cursiv/navigation/NavigationProviderSupport.hpp"
 #include "cursiv/text/LspPosition.hpp"
 
 namespace cursiv {
@@ -37,8 +36,8 @@ DefaultDocumentHighlightProvider::getDocumentHighlight(
     return FindReferencesOptions{declared, document.id};
   };
   for (const ReferenceDescription& reference :
-       collect_references_per_declaration(*_core.references, found.targets,
-                                          options, token))
+       detail::collect_references_per_declaration(
+           *_core.references, found.targets, options, token))
     highlights.push_back(createDocumentHighlight(document, reference));
   return highlights;
 }

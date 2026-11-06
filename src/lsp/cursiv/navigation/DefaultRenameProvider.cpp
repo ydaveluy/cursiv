@@ -28,7 +28,6 @@
 #include "cursiv/workspace/Documents.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
-#include "cursiv/navigation/NavigationProviderSupport.hpp"
 #include "cursiv/navigation/ReferenceLocation.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "lsp/uri.h"
@@ -187,7 +186,7 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
     return std::nullopt;
 
   const std::vector<ReferenceDescription> rows =
-      collect_references_per_declaration(
+      detail::collect_references_per_declaration(
           references, found.targets,
           [](const AstNode&) {
             return FindReferencesOptions{true, kNoDocument};
@@ -216,15 +215,12 @@ std::optional<lsp::WorkspaceEdit> DefaultRenameProvider::rename(
   // The declaration and every reference, which is what `includeDeclaration`
   // buys: a rename that rewrote only the references would leave the workspace
   // pointing at a name nothing declares.
-  for (const ReferenceDescription& reference : rows) {
+  for (lsp::Location& location : detail::reference_locations(store, rows)) {
     throw_if_cancelled(token);
-    std::optional<lsp::Location> location =
-        reference_location(store, reference);
-    if (!location.has_value()) continue;
     lsp::TextEdit rewrite;
-    rewrite.range = location->range;
+    rewrite.range = location.range;
     rewrite.newText = std::string(newName);
-    changes[std::move(location->uri)].push_back(std::move(rewrite));
+    changes[std::move(location.uri)].push_back(std::move(rewrite));
   }
   if (changes.empty()) return std::nullopt;
   edit.changes = std::move(changes);

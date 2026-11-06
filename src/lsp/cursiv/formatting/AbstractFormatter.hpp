@@ -113,6 +113,13 @@ class NodeFormatter {
   [[nodiscard]] FormattingRegion keyword(std::string_view keyword,
                                          std::size_t index = 0) const {
     if (_cst == nullptr) return FormattingRegion(_cst, {}, _collector);
+    // The first one is found without listing the others.
+    if (index == 0) {
+      const std::optional<CstNodeView> first =
+          find_node_for_keyword(CstNodeView{_cst, _root}, keyword);
+      if (!first) return FormattingRegion(_cst, {}, _collector);
+      return FormattingRegion(_cst, {first->id}, _collector);
+    }
     std::vector<NodeId> found = keyword_nodes(*_cst, _root, keyword);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(_cst, {found[index]}, _collector);
@@ -178,8 +185,9 @@ class NodeFormatter {
 
   void appendKeywordNodes(std::vector<NodeId>& out,
                           std::string_view keyword) const {
-    const std::vector<NodeId> found = keyword_nodes(*_cst, _root, keyword);
-    out.insert(out.end(), found.begin(), found.end());
+    for (const CstNodeView& at :
+         find_nodes_for_keyword(CstNodeView{_cst, _root}, keyword))
+      out.push_back(at.id);
   }
 
   const Cst* _cst;

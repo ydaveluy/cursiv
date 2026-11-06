@@ -1,11 +1,13 @@
 #pragma once
 
+#include <span>
 #include <vector>
 
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 
@@ -70,5 +72,20 @@ class References {
       const AstNode& target, const FindReferencesOptions& options = {},
       const CancellationToken& cancelToken = kNoCancel) const = 0;
 };
+
+namespace detail {
+
+/**
+ * Every target's rows, once each and in (document, offset) order: a multi
+ * reference's targets overlap on the reference that reaches them all, and a
+ * rename must not edit one site twice.
+ */
+[[nodiscard]] std::vector<ReferenceDescription>
+collect_references_per_declaration(
+    const References& references, std::span<const AstNode* const> targets,
+    function_ref<FindReferencesOptions(const AstNode&)> options,
+    const CancellationToken& cancelToken);
+
+}  // namespace detail
 
 }  // namespace cursiv

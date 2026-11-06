@@ -26,6 +26,24 @@ void send_in_session(Send&& send) {
   }
 }
 
+// The reply handler of a request: `then` gets the result on the read loop
+// when there is no `defer`, otherwise where `defer` runs it, the result owned
+// until then.
+template <class Result>
+auto deliver(std::function<void(Result)> then,
+             const ServerEndpointLanguageClient::Defer& defer) {
+  return [then = std::move(then), defer](Result&& result) {
+    if (!then) return;
+    if (!defer) {
+      then(std::move(result));
+      return;
+    }
+    defer([then, result = std::move(result)]() mutable {
+      then(std::move(result));
+    });
+  };
+}
+
 // JSON-RPC parameters are an object or an array.
 lsp::LSPAny as_params(const lsp::LSPAny& value) {
   if (value.isObject()) return value;
@@ -64,18 +82,8 @@ void ServerEndpointLanguageClient::configuration(
     lsp::ConfigurationParams params,
     std::function<void(std::vector<lsp::LSPAny>)> then) {
   send_in_session([&] {
-    (void)_endpoint.workspaceConfiguration(
-        params, [then = std::move(then),
-                 defer = _defer](lsp::WorkspaceConfigurationResult&& result) {
-          if (!then) return;
-          if (!defer) {
-            then(std::move(result));
-            return;
-          }
-          defer([then, result = std::move(result)]() mutable {
-            then(std::move(result));
-          });
-        });
+    (void)_endpoint.workspaceConfiguration(params,
+                                           deliver(std::move(then), _defer));
   });
 }
 
@@ -94,17 +102,7 @@ void ServerEndpointLanguageClient::sendRequest(
     std::string_view method, const lsp::LSPAny& params,
     std::function<void(lsp::LSPAny)> then) {
   if (!_endpoint.isActive()) return;
-  const auto reply = [then = std::move(then),
-                      defer = _defer](lsp::json::Value&& result) {
-    if (!then) return;
-    if (!defer) {
-      then(std::move(result));
-      return;
-    }
-    defer([then, result = std::move(result)]() mutable {
-      then(std::move(result));
-    });
-  };
+  const auto reply = deliver(std::move(then), _defer);
   if (params.isNull())
     (void)_endpoint.customRequest(method, reply);
   else

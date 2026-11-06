@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -129,24 +128,17 @@ void append_diagnostics(std::string& out, const Document& document) {
   }
 }
 
-// Every site naming one of `targets`, declarations included, as the editor's
-// references and rename collect them: grouped by document, in text order,
-// and a site two targets share given once.
+// Every site naming one of `targets`, declarations included, collected as the
+// editor's references and rename collect them.
 std::vector<ReferenceDescription> references_to(
     const References& references, std::span<const AstNode* const> targets,
     const CancellationToken& token) {
-  std::vector<ReferenceDescription> rows;
-  for (const AstNode* const target : targets)
-    std::ranges::move(
-        references.findReferences(*target, {.includeDeclaration = true}, token),
-        std::back_inserter(rows));
-  const auto key = [](const ReferenceDescription& row) {
-    return std::tuple{row.sourceDocumentId, row.sourceBegin, row.sourceEnd};
-  };
-  std::ranges::sort(rows, {}, key);
-  const auto repeats = std::ranges::unique(rows, {}, key);
-  rows.erase(repeats.begin(), repeats.end());
-  return rows;
+  return detail::collect_references_per_declaration(
+      references, targets,
+      [](const AstNode&) {
+        return FindReferencesOptions{.includeDeclaration = true};
+      },
+      token);
 }
 
 constexpr std::string_view kCancelled = "the request was cancelled";
@@ -368,7 +360,8 @@ void DefaultMcpService::registerLanguagesTool(McpServer& server) const {
                      : "  (no grammar text served)";
           out += '\n';
         }
-        return McpToolResult{out.empty() ? "no language is registered" : out};
+        return McpToolResult{out.empty() ? "no language is registered"
+                                         : std::move(out)};
       });
 }
 
@@ -486,7 +479,8 @@ void DefaultMcpService::registerDiagnosticsTool(McpServer& server) const {
                   }
                 }))
           return std::move(*unread);
-        return McpToolResult{out.empty() ? "No diagnostics found." : out};
+        return McpToolResult{out.empty() ? "No diagnostics found."
+                                         : std::move(out)};
       });
 }
 
@@ -677,7 +671,8 @@ void DefaultMcpService::registerSymbolsTool(McpServer& server) const {
         // was never enumerated.
         if (matches > kMaxLines)
           out += "... more results elided (narrow with 'query')\n";
-        return McpToolResult{out.empty() ? "No symbols found." : out};
+        return McpToolResult{out.empty() ? "No symbols found."
+                                         : std::move(out)};
       });
 }
 
@@ -904,7 +899,7 @@ void DefaultMcpService::registerDocumentsTool(McpServer& server) const {
                 token))
           return McpToolResult{std::string(kCancelled), true};
         return McpToolResult{out.empty() ? "the workspace holds no document"
-                                         : out};
+                                         : std::move(out)};
       });
 }
 
