@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1117,6 +1118,17 @@ struct WiderSiteReferences final : cursiv::DocumentReferences {
       cursiv::UnresolvedReferenceVisitor visitor) const override {
     inner->visitUnresolved(cst, visitor);
   }
+  // The wider site too, where the whole visit draws it.
+  void visitAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
+               cursiv::ResolvedReferenceVisitor resolved,
+               cursiv::UnresolvedReferenceVisitor unresolved) const override {
+    inner->visitAt(cst, offset, resolved, unresolved);
+    visitResolved(cst, [&](cursiv::TextOffset begin, cursiv::TextOffset end,
+                           const cursiv::AstNode& target, bool multi) {
+      if (&target == other && begin <= offset && offset <= end)
+        resolved(begin, end, target, multi);
+    });
+  }
 };
 
 // A multi reference is told apart by the whole span of its name: another one
@@ -1497,6 +1509,86 @@ void two_nodes_on_one_record_are_two_targets() {
   }
 }
 
+// A caret's visit is the whole table's, kept to the names that hold the caret
+// or end at it, in the same order: at every offset, the end of the text
+// included, over resolved, failed, multi, qualified and repaired names.
+void a_caret_visits_what_holds_it(const cursiv::Document& document) {
+  using Seen = std::vector<
+      std::tuple<bool, cursiv::TextOffset, cursiv::TextOffset, const void*>>;
+  const cursiv::DocumentReferences& table = *document.parseResult.references;
+  const cursiv::Cst& cst = document.parseResult.cst();
+  std::size_t wrong = 0;
+  std::size_t held = 0;
+  for (cursiv::TextOffset offset = 0; offset <= cst.text().size(); ++offset) {
+    Seen whole;
+    Seen at;
+    const auto holds = [offset](cursiv::TextOffset begin,
+                                cursiv::TextOffset end) {
+      return begin <= offset && offset <= end;
+    };
+    table.visitResolved(cst,
+                        [&](cursiv::TextOffset begin, cursiv::TextOffset end,
+                            const cursiv::AstNode& target, bool) {
+                          if (holds(begin, end))
+                            whole.emplace_back(true, begin, end, &target);
+                        });
+    // A failure whose name is gone is drawn at 0..0 and holds no caret.
+    table.visitUnresolved(
+        cst, [&](cursiv::RefState, cursiv::TextOffset begin,
+                 cursiv::TextOffset end, const cursiv::ReferenceInfo& site) {
+          if (end != 0 && holds(begin, end))
+            whole.emplace_back(false, begin, end, site.container);
+        });
+    table.visitAt(
+        cst, offset,
+        [&](cursiv::TextOffset begin, cursiv::TextOffset end,
+            const cursiv::AstNode& target,
+            bool) { at.emplace_back(true, begin, end, &target); },
+        [&](cursiv::RefState, cursiv::TextOffset begin, cursiv::TextOffset end,
+            const cursiv::ReferenceInfo& site) {
+          at.emplace_back(false, begin, end, site.container);
+        });
+    if (at != whole) ++wrong;
+    if (!whole.empty()) ++held;
+  }
+  CHECK(wrong == 0);
+  CHECK(held != 0);
+}
+
+void every_caret_visits_what_holds_it() {
+  const World world;
+  // Two ranks on one name, as two members read from one word would be: both
+  // are visited, in rank order.
+  cursiv::Document* const twice = world.built("SELECT t FROM t, t");
+  auto& handles = twice->parseResult.references->handles;
+  handles.push_back(handles.front());
+  a_caret_visits_what_holds_it(*twice);
+  a_caret_visits_what_holds_it(
+      *support::built(world.shared, "file:///x.mref", "SELECT x FROM t, u"));
+
+  for (const char* const text :
+       {"package p { datatype T entity B { } }\n"
+        "entity E extends p . B { f : p . T g : Missing h : T }",
+        "entity E { f : T g : } datatype T entity F extends { h : T }"}) {
+    const linker::World workspace;
+    const auto document = workspace.scoped(text);
+    workspace.ws->linker->link(*document);
+    a_caret_visits_what_holds_it(*document);
+  }
+
+  support::World<> shared;
+  (void)support::add_language<cursiv::CoreServices>(
+      shared.shared, {"sharedrecord", {".srm"}, {}},
+      tsr::generated::SharedRecord::create_parser(),
+      tsr::generated::SharedRecord::create_ast_reflection(),
+      [](cursiv::CoreServices& language) {
+        language.scopeComputation = std::make_unique<ExportPair>(language);
+      });
+  a_caret_visits_what_holds_it(*shared.built("file:///same.srm", "same;same"));
+  a_caret_visits_what_holds_it(
+      *shared.built("file:///absent.srm", "same;absent"));
+}
+
 }  // namespace
 
 void run() {
@@ -1514,6 +1606,7 @@ void run() {
   a_throwing_provider_stays_on_its_multi_reference(false);
   a_throwing_provider_stays_on_its_multi_reference(true);
   two_nodes_on_one_record_are_two_targets();
+  every_caret_visits_what_holds_it();
 }
 
 }  // namespace references

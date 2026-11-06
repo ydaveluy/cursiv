@@ -929,6 +929,11 @@ struct CountingReferences final : cursiv::DocumentReferences {
     ++walks;
     inner->visitUnresolved(cst, visitor);
   }
+  void visitAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
+               cursiv::ResolvedReferenceVisitor resolved,
+               cursiv::UnresolvedReferenceVisitor unresolved) const override {
+    inner->visitAt(cst, offset, resolved, unresolved);
+  }
 };
 
 // One request over every linking error walks the document's references once,

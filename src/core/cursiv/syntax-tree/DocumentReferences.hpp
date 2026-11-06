@@ -57,7 +57,7 @@ struct DocumentReferences : RefHome {
 
   // Every virtual below needs the grammar -- reading, forcing or clearing a
   // reference goes through its `RefOps` row, which only a compiled grammar
-  // reaches; that is why the five live here and the linker stays erased.
+  // reaches; that is why they live here and the linker stays erased.
   // Cancellation is polled inside the loop; an exception out of one provider
   // fails that one reference, never the list -- only cancellation propagates.
   // `which` are handles of this table: all of them, or a run of them, as the
@@ -90,6 +90,13 @@ struct DocumentReferences : RefHome {
   // place it would be underlined at.
   virtual void visitUnresolved(const Cst& cst,
                                UnresolvedReferenceVisitor visitor) const = 0;
+
+  // The two visits above, each in its own order, kept to the references whose
+  // name holds `offset` or ends there -- the ones `forceAt` forces. A caret
+  // asks for its own reference, not for the document's.
+  virtual void visitAt(const Cst& cst, TextOffset offset,
+                       ResolvedReferenceVisitor resolved,
+                       UnresolvedReferenceVisitor unresolved) const = 0;
 };
 
 }  // namespace cursiv

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <string_view>
+#include <vector>
 
 #include "cursiv/syntax-tree/AstMetaData.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -40,6 +42,10 @@ struct DefaultDocumentReferences : DocumentReferences {
   void visitUnresolved(const Cst& cst,
                        UnresolvedReferenceVisitor visitor) const override;
 
+  void visitAt(const Cst& cst, TextOffset offset,
+               ResolvedReferenceVisitor resolved,
+               UnresolvedReferenceVisitor unresolved) const override;
+
   void reset() noexcept override;
 
   RefState resolveAll(std::uint32_t rank, MultiRefItems& out) const override;
@@ -50,7 +56,32 @@ struct DefaultDocumentReferences : DocumentReferences {
   ReferenceInfo info(const RefHandle& h, std::string_view text,
                      std::uint8_t narrow) const;
 
+  // One reference's share of `visitResolved` and `visitUnresolved`.
+  void visit_resolved(const Cst& cst, const RefHandle& h,
+                      ResolvedReferenceVisitor visitor) const;
+  void visit_unresolved(const Cst& cst, const RefHandle& h,
+                        UnresolvedReferenceVisitor visitor) const;
+
+  // The ranks whose name holds `offset` or ends there, in rank order.
+  [[nodiscard]] std::vector<std::uint32_t> ranks_at(const Cst& cst,
+                                                    TextOffset offset) const;
+  void index_names(const Cst& cst) const;
+
+  // A named reference by where its name begins, and the furthest end of the
+  // names up to it in this order: walking back from a caret, a reach before
+  // the caret says no earlier name can hold it.
+  struct NameAt {
+    TextOffset begin = 0;
+    TextOffset reach = 0;
+    std::uint32_t rank = 0;
+  };
+
   const AstMetaData& _f;
+  // Built on the first caret question: names never move once the table is
+  // built, and a table no caret asks pays nothing.
+  mutable std::vector<NameAt> _names;
+  mutable std::mutex _indexing;
+  mutable std::atomic<bool> _indexed{false};
 };
 
 }  // namespace cursiv

@@ -117,38 +117,37 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
 void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
                                         const CancellationToken& cancelToken) {
   std::vector<RefHandle> at;
-  for (const RefHandle& h : handles) {
-    if (h.owner == nullptr) continue;
-    const NodeId named = _f.refOps[h.field].name_id(*h.owner, h.index);
-    if (named != kNoNode && cst[named].begin <= offset &&
-        offset <= cst[named].end)
-      at.push_back(h);
-  }
+  for (const std::uint32_t rank : ranks_at(cst, offset))
+    at.push_back(handles[rank]);
   force(at, cancelToken);
 }
 
 void DefaultDocumentReferences::visitResolved(
     const Cst& cst, ResolvedReferenceVisitor visitor) const {
-  for (const RefHandle& h : handles) {
-    if (h.owner == nullptr) continue;
-    const RefOps& ops = _f.refOps[h.field];
-    // A single reference, the common site, is read in one call.
-    if (!ops.multi) {
-      const SingleRefRead read = ops.single(*h.owner, h.index);
-      if (read.target == nullptr || read.name == kNoNode) continue;
-      const CstNode& n = cst[read.name];
-      visitor(n.begin, n.end, *read.target, false);
-      continue;
-    }
-    const std::size_t count = ops.size(*h.owner, h.index);
-    if (count == 0) continue;
-    const NodeId named = ops.name_id(*h.owner, h.index);
-    if (named == kNoNode) continue;
-    const CstNode& n = cst[named];
-    for (std::size_t k = 0; k < count; ++k)
-      if (const AstNode* const target = ops.at(*h.owner, h.index, k))
-        visitor(n.begin, n.end, *target, ops.multi);
+  for (const RefHandle& h : handles) visit_resolved(cst, h, visitor);
+}
+
+void DefaultDocumentReferences::visit_resolved(
+    const Cst& cst, const RefHandle& h,
+    ResolvedReferenceVisitor visitor) const {
+  if (h.owner == nullptr) return;
+  const RefOps& ops = _f.refOps[h.field];
+  // A single reference, the common site, is read in one call.
+  if (!ops.multi) {
+    const SingleRefRead read = ops.single(*h.owner, h.index);
+    if (read.target == nullptr || read.name == kNoNode) return;
+    const CstNode& n = cst[read.name];
+    visitor(n.begin, n.end, *read.target, false);
+    return;
   }
+  const std::size_t count = ops.size(*h.owner, h.index);
+  if (count == 0) return;
+  const NodeId named = ops.name_id(*h.owner, h.index);
+  if (named == kNoNode) return;
+  const CstNode& n = cst[named];
+  for (std::size_t k = 0; k < count; ++k)
+    if (const AstNode* const target = ops.at(*h.owner, h.index, k))
+      visitor(n.begin, n.end, *target, ops.multi);
 }
 
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
@@ -160,23 +159,77 @@ bool DefaultDocumentReferences::anyUnresolved() const noexcept {
 
 void DefaultDocumentReferences::visitUnresolved(
     const Cst& cst, UnresolvedReferenceVisitor visitor) const {
-  for (const RefHandle& h : handles) {
-    if (h.owner == nullptr) continue;
-    const RefOps& ops = _f.refOps[h.field];
-    const RefState why = ops.state(*h.owner, h.index);
-    if (!has_error(why)) continue;
-    // Anchored on the name and not on the node that holds it: the word the
-    // editor underlines is the one the text was read from.
-    TextOffset begin = 0;
-    TextOffset end = 0;
-    if (const NodeId at = ops.name_id(*h.owner, h.index); at != kNoNode) {
-      begin = cst[at].begin;
-      end = cst[at].end;
-    }
-    const std::uint8_t narrow =
-        ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
-    visitor(why, begin, end, info(h, ops.text(*h.owner, h.index), narrow));
+  for (const RefHandle& h : handles) visit_unresolved(cst, h, visitor);
+}
+
+void DefaultDocumentReferences::visit_unresolved(
+    const Cst& cst, const RefHandle& h,
+    UnresolvedReferenceVisitor visitor) const {
+  if (h.owner == nullptr) return;
+  const RefOps& ops = _f.refOps[h.field];
+  const RefState why = ops.state(*h.owner, h.index);
+  if (!has_error(why)) return;
+  // Anchored on the name and not on the node that holds it: the word the
+  // editor underlines is the one the text was read from.
+  TextOffset begin = 0;
+  TextOffset end = 0;
+  if (const NodeId at = ops.name_id(*h.owner, h.index); at != kNoNode) {
+    begin = cst[at].begin;
+    end = cst[at].end;
   }
+  const std::uint8_t narrow =
+      ops.narrow_count != 0 ? ops.narrow_of(*h.owner, h.index) : kNoNarrow;
+  visitor(why, begin, end, info(h, ops.text(*h.owner, h.index), narrow));
+}
+
+void DefaultDocumentReferences::visitAt(
+    const Cst& cst, TextOffset offset, ResolvedReferenceVisitor resolved,
+    UnresolvedReferenceVisitor unresolved) const {
+  const std::vector<std::uint32_t> at = ranks_at(cst, offset);
+  for (const std::uint32_t rank : at)
+    visit_resolved(cst, handles[rank], resolved);
+  for (const std::uint32_t rank : at)
+    visit_unresolved(cst, handles[rank], unresolved);
+}
+
+std::vector<std::uint32_t> DefaultDocumentReferences::ranks_at(
+    const Cst& cst, TextOffset offset) const {
+  if (!_indexed.load(std::memory_order_acquire)) [[unlikely]]
+    index_names(cst);
+  std::vector<std::uint32_t> at;
+  // Every name that begins at or before the offset lies before `from`; the
+  // reach ends the walk back at the first one no earlier name can cross.
+  auto from = std::ranges::upper_bound(_names, offset, {}, &NameAt::begin);
+  while (from != _names.begin() && (--from)->reach >= offset) {
+    const RefHandle& h = handles[from->rank];
+    if (cst[_f.refOps[h.field].name_id(*h.owner, h.index)].end >= offset)
+      at.push_back(from->rank);
+  }
+  std::ranges::sort(at);
+  return at;
+}
+
+void DefaultDocumentReferences::index_names(const Cst& cst) const {
+  const std::scoped_lock lock(_indexing);
+  if (_indexed.load(std::memory_order_relaxed)) return;
+  // Cleared, not appended to: a build that threw left it half-written.
+  _names.clear();
+  _names.reserve(handles.size());
+  for (std::uint32_t rank = 0; rank < handles.size(); ++rank) {
+    const RefHandle& h = handles[rank];
+    if (h.owner == nullptr) continue;
+    const NodeId at = _f.refOps[h.field].name_id(*h.owner, h.index);
+    if (at != kNoNode) _names.push_back({cst[at].begin, cst[at].end, rank});
+  }
+  // Stable, so names that begin together keep the list's order.
+  std::ranges::stable_sort(_names, {}, &NameAt::begin);
+  // Each entry was made with its own end, and becomes the furthest end so far.
+  TextOffset reach = 0;
+  for (NameAt& name : _names) {
+    reach = std::max(reach, name.reach);
+    name.reach = reach;
+  }
+  _indexed.store(true, std::memory_order_release);
 }
 
 void DefaultDocumentReferences::reset() noexcept {

@@ -41,16 +41,20 @@ const CoreServices* language_of(const Document& document,
 
 // What a reference under the caret denotes: the span of its name and every
 // target it resolved to. A multi reference is visited once per target with one
-// span, so the targets of the winning span accumulate.
+// span, so the targets of the winning span accumulate. A name that denotes
+// nothing still holds the caret when nothing resolved does: span set, targets
+// empty. That is the site a user renames to fix a typo, so it must not lose the
+// word to whatever stands beside it.
 //
 // The narrowest enclosing span wins, not the first found: an answer that
 // depended on the work list's order would depend on the grammar's field
 // numbering.
-[[nodiscard]] Declaration resolved_at(const Document& document,
-                                      TextOffset offset) {
+[[nodiscard]] Declaration reference_at(const Document& document,
+                                       TextOffset offset) {
   Declaration found;
-  document.parseResult.references->visitResolved(
-      document.parseResult.cst(),
+  std::optional<TextRange> failed;
+  document.parseResult.references->visitAt(
+      document.parseResult.cst(), offset,
       [&](TextOffset begin, TextOffset end, const AstNode& target, bool) {
         if (offset < begin || offset >= end) return;
         if (found && found.span.end - found.span.begin <= end - begin) {
@@ -62,23 +66,13 @@ const CoreServices* language_of(const Document& document,
         found.span = TextRange{begin, end};
         found.targets.clear();
         found.targets.push_back(&target);
-      });
-  return found;
-}
-
-// A name that denotes nothing still holds the caret: span set, targets empty.
-// That is the site a user renames to fix a typo, so it must not lose the word
-// to whatever stands beside it.
-[[nodiscard]] std::optional<TextRange> unresolved_at(const Document& document,
-                                                     TextOffset offset) {
-  std::optional<TextRange> found;
-  document.parseResult.references->visitUnresolved(
-      document.parseResult.cst(),
+      },
       [&](RefState, TextOffset begin, TextOffset end, const ReferenceInfo&) {
         if (begin == end || offset < begin || offset >= end) return;
-        if (found && found->end - found->begin <= end - begin) return;
-        found = TextRange{begin, end};
+        if (failed && failed->end - failed->begin <= end - begin) return;
+        failed = TextRange{begin, end};
       });
+  if (!found && failed) found.span = *failed;
   return found;
 }
 
@@ -125,13 +119,9 @@ struct RowHash {
 Declaration DefaultReferences::at(const Document& document, TextOffset offset,
                                   const CancellationToken& cancelToken) const {
   throw_if_cancelled(cancelToken);
-  if (Declaration reference = resolved_at(document, offset); reference)
+  if (Declaration reference = reference_at(document, offset);
+      reference || reference.span.end > reference.span.begin)
     return reference;
-  if (const std::optional<TextRange> failed = unresolved_at(document, offset)) {
-    Declaration found;
-    found.span = *failed;
-    return found;
-  }
 
   // The caret is on a declaration only when it is on that declaration's name:
   // anywhere else inside it denotes nothing, as a space does.
@@ -175,15 +165,17 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
         // may start at the same offset.
         std::vector<const AstNode*> siblings;
         bool member = false;
-        source->parseResult.references->visitResolved(
-            source->parseResult.cst(), [&](TextOffset begin, TextOffset end,
-                                           const AstNode& target, bool multi) {
+        source->parseResult.references->visitAt(
+            source->parseResult.cst(), incoming.sourceBegin,
+            [&](TextOffset begin, TextOffset end, const AstNode& target,
+                bool multi) {
               if (!multi || begin != incoming.sourceBegin ||
                   end != incoming.sourceEnd)
                 return;
               siblings.push_back(&target);
               member = member || &target == &node;
-            });
+            },
+            [](RefState, TextOffset, TextOffset, const ReferenceInfo&) {});
         if (!member) return true;
         overloads = std::move(siblings);
         return false;
