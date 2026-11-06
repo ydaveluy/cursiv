@@ -10,6 +10,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "cursiv/Check.hpp"
 #include "cursiv/execution/TaskQueue.hpp"
@@ -22,6 +23,7 @@
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/Published.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
@@ -165,6 +167,49 @@ void a_failed_retirement_keeps_the_published_value_alive() {
   if (!life.expired()) CHECK(*published.read() == 1);
   published.publish(second);
   CHECK(*published.read() == 2);
+}
+
+// A collection that cannot list what is due keeps it retired: the next one
+// frees it. Each round refuses a later allocation of that list.
+struct Counted {
+  static inline int alive = 0;
+  Counted() { ++alive; }
+  Counted(const Counted&) { ++alive; }
+  Counted& operator=(const Counted&) = default;
+  ~Counted() { --alive; }
+};
+
+void a_refused_collection_keeps_what_it_was_to_free() {
+  for (int refused = 0; refused < 4; ++refused) {
+    cursiv::detail::collect_retired_tables();
+    {
+      std::vector<
+          std::unique_ptr<cursiv::detail::ConcurrentTable<int, Counted>>>
+          tables;
+      for (int k = 0; k < 8; ++k) {
+        tables.push_back(
+            std::make_unique<cursiv::detail::ConcurrentTable<int, Counted>>());
+        Counted value;
+        CHECK(tables.back()
+                  ->insert(tables.back()->generation(), k, value)
+                  .has_value());
+      }
+      // Cleared while a read stays, a `forEach` still running, so none is
+      // due before the collection.
+      cursiv::detail::ConcurrentTable<int, int> reader;
+      int one = 1;
+      CHECK(reader.insert(reader.generation(), 1, one).has_value());
+      reader.forEach([&](int) {
+        for (const auto& table : tables) table->clear();
+      });
+    }
+    CHECK(Counted::alive == 8);
+    fail_allocation(refused);
+    cursiv::detail::collect_retired_tables();
+    failAfter = -1;
+    cursiv::detail::collect_retired_tables();
+    CHECK(Counted::alive == 0);
+  }
 }
 
 void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
@@ -321,6 +366,7 @@ int main() {
   a_refused_allocation_frees_what_the_parse_built();
   a_stopped_parse_frees_what_it_built();
   a_failed_retirement_keeps_the_published_value_alive();
+  a_refused_collection_keeps_what_it_was_to_free();
   a_queue_allocation_failure_leaves_no_leak_or_lost_item();
   a_partial_submission_joins_before_unwinding();
   a_refused_allocation_leaves_no_route_to_a_freed_container();

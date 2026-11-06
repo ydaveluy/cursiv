@@ -1,18 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <atomic>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
-#include <unordered_map>
+#include <optional>
 #include <utility>
 
-#include "cursiv/utils/Published.hpp"
-#include "cursiv/utils/SharedMutex.hpp"
+#include "cursiv/utils/ConcurrentTable.hpp"
 
 namespace cursiv {
 
@@ -26,73 +19,31 @@ class SimpleCache {
  public:
   virtual ~SimpleCache() noexcept = default;
 
-  // A hit on a published entry takes no lock, cheaper than a reader-writer
-  // lock for one workspace-wide question per AST node. The table readers see
-  // is replaced once the entries added or read behind it have paid for the
-  // copy, so a fill is linear; until then such an entry is read under the
-  // lock. Returns a copy, never a reference into the table another thread may
-  // be rehashing.
+  // A hit takes no lock and writes nothing shared, so a workspace-wide
+  // question asked by every thread costs each a lookup and nothing more.
+  // Returns a copy, never a reference into a table a `clear` may free.
   template <class Provider>
   [[nodiscard]] V get(const K& key, Provider&& provider) const {
-    if (const auto table = _published.read(); table)
-      if (const auto at = table->find(key); at != table->end())
-        return at->second;
-    std::uint64_t seen = 0;
-    {
-      const std::shared_lock lock(_mutex);
-      if (const auto at = _live.find(key); at != _live.end()) {
-        V found = at->second;
-        publishIfOwed();
-        return found;
-      }
-      seen = _generation;
-    }
-    // Runs outside the lock, so it may race another thread on the same
-    // absent key; the loser's result is discarded for the first one
-    // published, so a provider must be deterministic per key.
+    if (std::optional<V> found = _values.find(key)) return std::move(*found);
+    const std::uint64_t generation = _values.generation();
+    // Runs outside any lock, so it may race another thread on the same
+    // absent key; the first value stored wins and the other is discarded, so
+    // a provider must be deterministic per key. A `clear` that ran while it
+    // did means this value describes a workspace that's gone: the caller gets
+    // it, the next reader does not.
     V computed = std::invoke(std::forward<Provider>(provider));
-
-    const std::unique_lock lock(_mutex);
-    // A `clear` that ran while the provider did means this value describes a
-    // workspace that's gone -- hand it back to the caller, but don't publish
-    // it, or the next reader gets an answer about the previous build.
-    if (_generation != seen) return computed;
-    if (const auto at = _live.find(key); at != _live.end()) return at->second;
-    V result = _live.try_emplace(key, std::move(computed)).first->second;
-    publishIfOwed();
-    return result;
+    if (std::optional<V> kept = _values.insert(generation, key, computed))
+      return std::move(*kept);
+    return computed;
   }
 
-  // Public because the listeners of the two derived caches call it directly;
-  // nothing outside asks.
-  virtual void clear() {
-    const std::unique_lock lock(_mutex);
-    ++_generation;
-    _live.clear();
-    _owed = 0;
-    _published.retire();
-  }
+  // Public because the listeners of `WorkspaceCache` call it directly;
+  // nothing outside asks. The table keeps its room: a cleared cache is
+  // filled again by the next build.
+  virtual void clear() { _values.clear(true); }
 
  private:
-  using Table = std::unordered_map<K, V, Hash, KeyEqual>;
-
-  // `_mutex` held, shared or not. Each entry added or read from `_live` pays
-  // for an eighth of the table: the copy is owed once they add up to it.
-  void publishIfOwed() const {
-    const std::size_t paid = _owed.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (paid < std::max<std::size_t>(1, _live.size() / 8)) return;
-    if (_owed.exchange(0, std::memory_order_relaxed) != 0)
-      _published.publish(std::make_shared<const Table>(_live));
-  }
-
-  mutable SharedMutex _mutex;
-  // Bumped by every removal. It is what lets a provider run outside the lock
-  // without a value outliving the workspace it describes.
-  mutable std::uint64_t _generation = 0;
-  // The writer's copy, and the immutable one readers see.
-  mutable Table _live;
-  mutable Published<Table> _published;
-  mutable std::atomic<std::size_t> _owed{0};
+  mutable detail::ConcurrentTable<K, V, Hash, KeyEqual> _values;
 };
 
 }  // namespace cursiv

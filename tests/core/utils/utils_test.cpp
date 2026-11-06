@@ -4,10 +4,10 @@
 
 #include <array>
 #include <chrono>
-#include <cstdio>
-#include <filesystem>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -17,13 +17,15 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/Check.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
 #include "cursiv/utils/EditDistance.hpp"
-#include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
+#include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/utils/SimpleCache.hpp"
 #include "cursiv/utils/UriTrie.hpp"
 #include "cursiv/utils/UriUtils.hpp"
@@ -32,7 +34,6 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
-#include "cursiv/Check.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 
@@ -548,6 +549,12 @@ void run() {
 // Pins the three caches: a hit never recomputes, and above all when an entry
 // dies -- per update, per rung, per document -- because a cache that outlives
 // its build answers from a world that no longer exists.
+// Every member compiled, in both storages: a member that only some keys use
+// would otherwise wait for a caller to break.
+template class cursiv::detail::ConcurrentTable<int, int>;
+template class cursiv::detail::ConcurrentTable<std::string, int>;
+template class cursiv::detail::ConcurrentTable<int, std::string>;
+
 namespace caching {
 
 namespace {
@@ -944,6 +951,259 @@ void a_document_cache_never_answers_from_before_a_finished_clear() {
 
 }  // namespace
 
+#if !defined(__wasi__) || defined(_REENTRANT)
+// The table under the caches: several threads insert the same keys in
+// different orders while it grows, so every key is raced for and copied
+// mid-insert. None is lost, none is stored twice, and each keeps the first
+// value -- a small pair in the slot itself or an entry apart.
+template <class V, class Make>
+void a_table_keeps_every_key_through_growth(Make make) {
+  constexpr int kThreads = 8;
+  constexpr int kKeys = 20000;
+  cursiv::detail::ConcurrentTable<int, V> table;
+  std::atomic<int> wrong{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; ++t)
+    threads.emplace_back([&, t] {
+      for (int k = 0; k < kKeys; ++k) {
+        const int key = (k * 7919 + t * 104729) % kKeys;
+        V value = make(key);
+        const std::optional<V> kept =
+            table.insert(table.generation(), key, value);
+        if (!kept || !(*kept == make(key))) ++wrong;
+      }
+    });
+  for (auto& thread : threads) thread.join();
+  CHECK(wrong.load() == 0);
+  std::size_t stored = 0;
+  table.forEach([&](const V&) { ++stored; });
+  CHECK(stored == kKeys);
+  int found = 0;
+  for (int k = 0; k < kKeys; ++k)
+    if (const std::optional<V> v = table.find(k); v && *v == make(k)) ++found;
+  CHECK(found == kKeys);
+}
+#endif
+
+// Copying a value into its slot picks the copy constructor, never one that
+// takes a non-const reference and may throw: a reserved slot is always
+// published, so a second insert of the key does not wait forever.
+struct PickyValue {
+  int payload = 0;
+  PickyValue() = default;
+  explicit PickyValue(int p) : payload(p) {}
+  PickyValue(const PickyValue&) = default;
+  PickyValue(PickyValue&&) = default;
+  PickyValue& operator=(const PickyValue&) = default;
+  PickyValue& operator=(PickyValue&&) = default;
+  template <class T>
+    requires std::is_same_v<T, PickyValue>
+  PickyValue(T&) {
+    throw std::runtime_error("picked");
+  }
+};
+
+void a_slot_is_filled_by_the_copy_constructor() {
+  cursiv::detail::ConcurrentTable<int, PickyValue> table;
+  PickyValue first(1);
+  PickyValue second(2);
+  CHECK(table.insert(table.generation(), 7, first)->payload == 1);
+  CHECK(table.insert(table.generation(), 7, second)->payload == 1);
+}
+
+// Nor one that takes the value as a temporary: the slot's members are built
+// from the arguments themselves, not moved in from a pair built first.
+struct MovedValue {
+  int payload = 0;
+  explicit MovedValue(int p) : payload(p) {}
+  MovedValue(const MovedValue&) = default;
+  MovedValue& operator=(const MovedValue&) = default;
+  template <class U>
+    requires std::is_same_v<std::remove_cvref_t<U>, MovedValue>
+  MovedValue(U&&) {
+    throw std::runtime_error("moved");
+  }
+};
+
+void a_slot_is_not_filled_from_a_temporary() {
+  cursiv::detail::ConcurrentTable<int, MovedValue> table;
+  MovedValue first(1);
+  MovedValue second(2);
+  CHECK(table.insert(table.generation(), 7, first)->payload == 1);
+  CHECK(table.insert(table.generation(), 7, second)->payload == 1);
+}
+
+// Keys of one hash fill one run of groups, and doubling would not part
+// them: the table probes on instead of growing without end.
+struct OneHash {
+  std::size_t operator()(int) const noexcept { return 42; }
+};
+
+void keys_of_one_hash_still_fit() {
+  cursiv::detail::ConcurrentTable<int, int, OneHash> table;
+  constexpr int kKeys = 2000;
+  for (int k = 0; k < kKeys; ++k) {
+    int value = k * 2;
+    CHECK(*table.insert(table.generation(), k, value) == k * 2);
+  }
+  int found = 0;
+  for (int k = 0; k < kKeys; ++k)
+    if (const std::optional<int> v = table.find(k); v && *v == k * 2) ++found;
+  CHECK(found == kKeys);
+}
+
+// What a clear retired is freed by a collection, without waiting for the
+// next retirement.
+struct Live {
+  static inline int count = 0;
+  Live() { ++count; }
+  Live(const Live&) { ++count; }
+  Live& operator=(const Live&) = default;
+  ~Live() { --count; }
+};
+
+void a_collection_frees_what_a_clear_retired() {
+  cursiv::detail::collect_retired_tables();
+  {
+    cursiv::detail::ConcurrentTable<int, Live> table;
+    {
+      Live value;
+      CHECK(table.insert(table.generation(), 1, value).has_value());
+    }
+    CHECK(Live::count == 1);
+    table.clear();
+    CHECK(Live::count == 1);
+    cursiv::detail::collect_retired_tables();
+    CHECK(Live::count == 0);
+  }
+}
+
+// A slot's tag spares a lookup the keys it cannot hold: about one key
+// compared per hit and almost none per miss, on a 32-bit target as well,
+// where the hash a standard `std::hash` gives is half as wide.
+struct CountingEqual {
+  static inline std::size_t compared = 0;
+  bool operator()(std::uintptr_t a, std::uintptr_t b) const noexcept {
+    ++compared;
+    return a == b;
+  }
+};
+
+void a_lookup_compares_about_one_key() {
+  constexpr std::size_t kKeys = 4096;
+  const auto key = [](std::size_t k) -> std::uintptr_t {
+    return 0x10000 + 48 * k;
+  };
+  cursiv::detail::ConcurrentTable<std::uintptr_t, int,
+                                  std::hash<std::uintptr_t>, CountingEqual>
+      table;
+  for (std::size_t k = 0; k < kKeys; ++k) {
+    int value = static_cast<int>(k);
+    CHECK(table.insert(table.generation(), key(k), value).has_value());
+  }
+  CountingEqual::compared = 0;
+  for (std::size_t k = 0; k < kKeys; ++k) CHECK(table.find(key(k)).has_value());
+  CHECK(CountingEqual::compared < kKeys * 11 / 10);
+  CountingEqual::compared = 0;
+  for (std::size_t k = 0; k < kKeys; ++k)
+    CHECK(!table.find(key(k) + 8).has_value());
+  CHECK(CountingEqual::compared < kKeys / 10);
+}
+
+// A reader that stays holds back only what was retired after it came: what
+// was retired before is freed meanwhile, and the rest once it leaves. A
+// `forEach` still running is such a reader.
+void a_guard_holds_back_only_what_follows_it() {
+  cursiv::detail::collect_retired_tables();
+  cursiv::detail::ConcurrentTable<int, Live> before;
+  cursiv::detail::ConcurrentTable<int, Live> after;
+  const auto fill = [](cursiv::detail::ConcurrentTable<int, Live>& table) {
+    Live value;
+    CHECK(table.insert(table.generation(), 1, value).has_value());
+  };
+  fill(before);
+  fill(after);
+  CHECK(Live::count == 2);
+  cursiv::detail::ConcurrentTable<int, int> reader;
+  int one = 1;
+  CHECK(reader.insert(reader.generation(), 1, one).has_value());
+  before.clear();
+  reader.forEach([&](int) {
+    after.clear();
+    cursiv::detail::collect_retired_tables();
+    CHECK(Live::count == 1);
+  });
+  cursiv::detail::collect_retired_tables();
+  CHECK(Live::count == 0);
+}
+
+// What holds a lot is collected soon, not after many retirements: a few
+// large tables would otherwise wait for dozens of small ones. The large
+// table's growths and clear are a dozen retirements, megabytes in all, and
+// the collection they bring frees the small table retired before them.
+void a_large_retirement_is_collected_soon() {
+  cursiv::detail::collect_retired_tables();
+  cursiv::detail::ConcurrentTable<int, Live> small;
+  {
+    Live value;
+    CHECK(small.insert(small.generation(), 1, value).has_value());
+  }
+  small.clear();
+  CHECK(Live::count == 1);
+  cursiv::detail::ConcurrentTable<int, std::uint64_t> large;
+  for (int k = 0; k < 200000; ++k) {
+    std::uint64_t value = 0;
+    (void)large.insert(large.generation(), k, value);
+  }
+  large.clear();
+  CHECK(Live::count == 0);
+}
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+// A clear that comes while a growth is under way takes out the table the
+// growth started from, and the successor it never published goes with it.
+// The sanitizers' leak check reads this one.
+void a_clear_during_a_growth_frees_its_successor() {
+  cursiv::detail::ConcurrentTable<int, int> table;
+  std::atomic<bool> done{false};
+  std::thread clearer([&] {
+    while (!done.load(std::memory_order_relaxed)) table.clear();
+  });
+  for (int round = 0; round < 2000; ++round)
+    for (int k = 0; k < 64; ++k) {
+      int value = k;
+      (void)table.insert(table.generation(), k, value);
+    }
+  done = true;
+  clearer.join();
+  cursiv::detail::collect_retired_tables();
+}
+#endif
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+// A thread gives its slot back as it ends, even when a thread-local object
+// destroyed after that still reads through a guard: more threads than slots,
+// one after the other, would otherwise run out.
+struct ReadsAtExit {
+  cursiv::detail::ConcurrentTable<int, int>* table = nullptr;
+  ~ReadsAtExit() {
+    if (table != nullptr) (void)table->find(1);
+  }
+};
+
+void a_thread_gives_its_slot_back_even_from_a_late_guard() {
+  cursiv::detail::ConcurrentTable<int, int> table;
+  int value = 1;
+  (void)table.insert(table.generation(), 1, value);
+  for (int i = 0; i < 2000; ++i)
+    std::thread([&] {
+      static thread_local ReadsAtExit late;
+      late.table = &table;
+      CHECK(table.find(1).has_value());
+    }).join();
+}
+#endif
+
 void run() {
   a_hit_never_recomputes();
   filling_the_cache_is_linear();
@@ -964,7 +1224,19 @@ void run() {
   a_document_cache_keeps_what_a_neighbours_clear_does_not_touch();
 #if !defined(__wasi__) || defined(_REENTRANT)
   a_document_cache_never_answers_from_before_a_finished_clear();
+  a_table_keeps_every_key_through_growth<int>([](int k) { return k * 3; });
+  a_table_keeps_every_key_through_growth<std::string>(
+      [](int k) { return std::to_string(k); });
+  a_thread_gives_its_slot_back_even_from_a_late_guard();
+  a_clear_during_a_growth_frees_its_successor();
 #endif
+  a_slot_is_filled_by_the_copy_constructor();
+  a_slot_is_not_filled_from_a_temporary();
+  keys_of_one_hash_still_fit();
+  a_lookup_compares_about_one_key();
+  a_collection_frees_what_a_clear_retired();
+  a_guard_holds_back_only_what_follows_it();
+  a_large_retirement_is_collected_soon();
 }
 
 }  // namespace caching

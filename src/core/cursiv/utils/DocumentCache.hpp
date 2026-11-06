@@ -1,21 +1,21 @@
 #pragma once
 
-#include <array>
+#include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
-#include <type_traits>
-#include <unordered_map>
 #include <utility>
 
-#include "cursiv/execution/SpinLock.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
+#include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -49,61 +49,39 @@ class DocumentCache : private DocumentPhaseListener,
   DocumentCache(const DocumentCache&) = delete;
   DocumentCache& operator=(const DocumentCache&) = delete;
 
-  // The provider runs outside the lock. A clear or a deletion of the
-  // document during computation, or a clear of the whole cache, keeps its
-  // result out of the cache, but still returns it to the caller.
+  // The provider runs outside any lock, and a hit takes none either: a
+  // reader writes nothing shared, so any number of threads read one document
+  // at once. A clear or a deletion of the document during computation, or a
+  // clear of the whole cache, keeps its result out of the cache, but still
+  // returns it to the caller.
   template <class Provider>
   [[nodiscard]] V get(DocumentId document, const K& key,
                       Provider&& provider) const {
     if (document == kNoDocument)
       return std::invoke(std::forward<Provider>(provider));
-    Shard& s = shardOf(document);
-    Entry* entry = nullptr;
-    std::uint64_t generation = 0;
-    std::uint64_t erasures = 0;
-    {
-      const std::scoped_lock lock(s.mutex);
-      // Created on a miss, so a clear of the document during computation
-      // finds an entry to mark.
-      entry = &s.entries[document];
-      if (const auto found = entry->values.find(key);
-          found != entry->values.end())
-        return found->second;
-      generation = entry->generation;
-      erasures = s.erasures;
-    }
+    Values& values = valuesOf(document);
+    if (std::optional<V> found = values.find(key)) return std::move(*found);
+    // Read before the provider runs: a clear from here on keeps its value out.
+    const std::uint64_t generation = values.generation();
     V computed = std::invoke(std::forward<Provider>(provider));
-    const std::scoped_lock lock(s.mutex);
-    // With no erasure in the stripe since the miss, `entry` is still the
-    // document's own.
-    if (s.erasures != erasures || entry->generation != generation)
-      return computed;
-    return entry->values.try_emplace(key, std::move(computed)).first->second;
+    if (std::optional<V> kept = values.insert(generation, key, computed))
+      return std::move(*kept);
+    return computed;
   }
 
-  void clear(DocumentId document) {
-    Shard& s = shardOf(document);
-    Values dropped;  // freed once the lock is released
-    const std::scoped_lock lock(s.mutex);
-    if (const auto at = s.entries.find(document); at != s.entries.end()) {
-      ++at->second.generation;
-      // A swap exchanges the hash and the equality too, which not every pair
-      // allows without throwing: theirs are freed under the lock.
-      if constexpr (std::is_nothrow_swappable_v<Hash> &&
-                    std::is_nothrow_swappable_v<KeyEqual>)
-        dropped.swap(at->second.values);
-      else
-        at->second.values.clear();
-    }
+  // What the cache holds for `key` now, if anything: nothing is computed. A
+  // walk that stores an answer for each step it passes reads its way to the
+  // first step already answered.
+  [[nodiscard]] std::optional<V> get(DocumentId document, const K& key) const {
+    if (document == kNoDocument) return std::nullopt;
+    return valuesOf(document).find(key);
   }
+
+  // Emptied for a rebuild, the document keeps the room its entries took.
+  void clear(DocumentId document) { clear(document, true); }
 
   void clear() {
-    for (Shard& s : _shards) {
-      Entries dropped;  // freed once the lock is released
-      const std::scoped_lock lock(s.mutex);
-      ++s.erasures;
-      dropped.swap(s.entries);
-    }
+    _documents.forEach([](Values* values) { values->clear(); });
   }
 
  private:
@@ -115,53 +93,69 @@ class DocumentCache : private DocumentPhaseListener,
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
 
-  // A deleted document never comes back under its id, so its entry goes
-  // rather than waiting empty for one. Without an entry, the document has no
-  // computation running either: each one starts by creating it.
-  void erase(DocumentId document) {
-    Shard& s = shardOf(document);
-    typename Entries::node_type dropped;  // freed once the lock is released
-    const std::scoped_lock lock(s.mutex);
-    dropped = s.entries.extract(document);
-    if (!dropped.empty()) ++s.erasures;
+  // A deleted document never comes back under its id: it keeps no room.
+  void clear(DocumentId document, bool keepCapacity) {
+    if (const std::optional<Values*> values = _documents.find(document))
+      (*values)->clear(keepCapacity);
+  }
+
+  using Values = detail::ConcurrentTable<K, V, Hash, KeyEqual>;
+  struct DocumentHash {
+    [[nodiscard]] std::size_t operator()(DocumentId document) const noexcept {
+      return static_cast<std::uint32_t>(document);
+    }
+  };
+
+  // Created on the first read of the document, and kept: a clear empties a
+  // document's table in place, so a computation never outlives the table it
+  // will store into.
+  [[nodiscard]] Values& valuesOf(DocumentId document) const {
+    // The document read last on this thread, by this cache: a validation
+    // reads one document thousands of times in a row. A table lives as long
+    // as its cache, so the pointer holds; the serial tells this cache from
+    // one built since at the same address.
+    thread_local Last last;
+    if (last.serial == _serial && last.document == document) [[likely]]
+      return *last.values;
+    Values& values = find_or_create(document);
+    last = Last{_serial, document, &values};
+    return values;
+  }
+  // A miss takes the lock, so two readers of a new document make one table.
+  [[nodiscard]] Values& find_or_create(DocumentId document) const {
+    if (const std::optional<Values*> found = _documents.find(document))
+      return **found;
+    const std::scoped_lock lock(_creating);
+    if (const std::optional<Values*> found = _documents.find(document))
+      return **found;
+    Values* created = &_owned.emplace_back();
+    [[maybe_unused]] const std::optional<Values*> kept =
+        _documents.insert(0, document, created);
+    assert(kept == created && "the document table is never cleared");
+    return *created;
+  }
+
+  struct Last {
+    std::uint64_t serial = 0;
+    DocumentId document = kNoDocument;
+    Values* values = nullptr;
+  };
+  [[nodiscard]] static std::uint64_t next_serial() noexcept {
+    static std::atomic<std::uint64_t> serials{0};
+    return serials.fetch_add(1, std::memory_order_relaxed) + 1;
   }
 
   SharedCoreServices& _shared;
   DocumentBuilder* _builder = nullptr;
   std::optional<DocumentState> _state;
+  const std::uint64_t _serial = next_serial();
 
-  // One document's values. `generation` counts its clears: a computation
-  // that started under an earlier count stores nothing.
-  using Values = std::unordered_map<K, V, Hash, KeyEqual>;
-  struct Entry {
-    std::uint64_t generation = 0;
-    Values values;
-  };
-  using Entries = std::unordered_map<DocumentId, Entry>;
-
-  // Striped by document: one lock for the whole map would serialise every
-  // document a parallel build reads at once. A document lives in exactly one
-  // stripe, so every per-document call takes one lock; only `clear()` walks
-  // them all. The lock is held for lookups and an insertion only, never while
-  // values are freed, so a spin lock suits it. Each stripe has lines of its
-  // own, or neighbouring documents read on different threads would contend
-  // through them. `erasures` counts the entries the stripe removed: an entry
-  // removed and then created again starts its generation over, so a
-  // computation that saw a removal stores nothing either. Erasures are rare,
-  // so they cost the stripe's other documents little.
-  static constexpr std::size_t kStripes = 64;
-  struct alignas(128) Shard {
-    mutable detail::SpinLock mutex;
-    std::uint64_t erasures = 0;
-    Entries entries;
-  };
-  [[nodiscard]] Shard& shardOf(DocumentId document) const {
-    return _shards[stripe(document)];
-  }
-  [[nodiscard]] static std::size_t stripe(DocumentId document) {
-    return static_cast<std::uint32_t>(document) % kStripes;
-  }
-  mutable std::array<Shard, kStripes> _shards;
+  // One table per document ever read, each about two hundred bytes when
+  // empty; a deleted document's stays, emptied. Kept where nothing moves
+  // them, and found by id.
+  mutable std::deque<Values> _owned;
+  mutable std::mutex _creating;
+  mutable detail::ConcurrentTable<DocumentId, Values*, DocumentHash> _documents;
 };
 
 template <class K, class V, class Hash, class KeyEqual>
@@ -206,7 +200,7 @@ void DocumentCache<K, V, Hash, KeyEqual>::onUpdate(
         clear(id);
   for (const std::string_view uri : deleted)
     if (const DocumentId id = store.getDocumentId(uri); id != kNoDocument)
-      erase(id);
+      clear(id, false);
 }
 
 }  // namespace cursiv
