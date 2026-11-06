@@ -1,7 +1,6 @@
 #pragma once
 
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -28,10 +27,12 @@ struct ParseDiagnostic;
 class ValidationAcceptor;
 class ValidationRegistry;
 
-// Not `final`, and its halves are protected and virtual: a language that words
-// a parse repair its own way, or that anchors a broken link elsewhere,
+// Not `final`, and its halves are protected and virtual: a language that
+// reports a parse error its own way, or that anchors a broken link elsewhere,
 // overrides one of `processParsingErrors`, `processLinkingErrors` or
-// `validateAst` and keeps the rest.
+// `validateAst` and keeps the rest. The words are not this class's: a parse
+// error reads as the `parserErrorMessageProvider` says, and a broken link as
+// the linker's `createLinkingError` does.
 class DefaultDocumentValidator : public DocumentValidator {
  public:
   explicit DefaultDocumentValidator(const CoreServices& core) noexcept
@@ -60,14 +61,10 @@ class DefaultDocumentValidator : public DocumentValidator {
   // The one diagnostic the parser could not write: what it refused without
   // repairing.
   [[nodiscard]] Diagnostic unrepairedParseError(const Document&) const;
+  // Each failed reference, in the linker's words: `Linker::createLinkingError`
+  // is where a language rewords it.
   virtual void processLinkingErrors(const Document&, std::vector<Diagnostic>&,
                                     const CancellationToken&) const;
-  // The linking sentence, one method for the two failures -- not found, cycle
-  // -- so a language rewords them in one place. `narrow` is the site's
-  // narrowing, `kNoNarrow` when it has none.
-  [[nodiscard]] virtual std::string linkingErrorMessage(
-      RefState why, std::uint16_t reference, std::uint8_t narrow,
-      std::string_view text) const;
   // The registry's checks over every node of the tree, in document order.
   // Builds the acceptor the three halves below write through -- it lives on
   // this frame, which is what makes its sink legal for the whole walk.

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -51,6 +53,10 @@ class DefaultValidationRegistry : public ValidationRegistry {
 
   void runChecks(const AstNode&, ValidationAcceptor&, ValidationCategories,
                  const CancellationToken&) const override;
+
+  void handleException(std::exception_ptr failure, std::string_view context,
+                       ValidationAcceptor& accept,
+                       const AstNode* node) const override;
 
   [[nodiscard]] std::size_t checkCount() const noexcept override {
     return _count;

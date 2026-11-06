@@ -64,14 +64,14 @@ void append_target_names(std::string& message, const AstReflection& reflection,
   }
 }
 
-}  // namespace
-
-// Appended, not formatted: written for every failed reference, twice -- by the
-// linker and by the validator.
-std::string unresolved_reference_message(const AstReflection& reflection,
-                                         std::uint16_t reference,
-                                         std::uint8_t narrow,
-                                         std::string_view text) {
+// It names what is expected -- the site's narrowing when it has one, every
+// type the member declares otherwise -- and the name read, so the reader
+// learns what the site wanted. Appended, not formatted: written for every
+// failed reference, twice -- for the linker's own error and for the
+// diagnostic.
+std::string not_found_message(const AstReflection& reflection,
+                              std::uint16_t reference, std::uint8_t narrow,
+                              std::string_view text) {
   constexpr std::string_view kHead = "Could not resolve reference to ";
   constexpr std::string_view kExpecting = "Expecting ";
   constexpr std::string_view kNamed = " named '";
@@ -90,8 +90,10 @@ std::string unresolved_reference_message(const AstReflection& reflection,
   return message;
 }
 
+}  // namespace
+
 LinkingError DefaultLinker::createLinkingError(
-    const ReferenceInfo& reference,
+    const ReferenceInfo& reference, RefState why,
     const AstNodeDescription* description) const {
   // A lookup that failed below `ComputedScopes` ran on a linker planted
   // before the scopes, as a direct `link` does: said at the sink, a single
@@ -109,10 +111,13 @@ LinkingError DefaultLinker::createLinkingError(
          .message = "reference resolution before scopes were computed",
          .uri = document->uri,
          .languageId = {}});
-  return {
-      unresolved_reference_message(*services.astReflection, reference.reference,
-                                   reference.narrow, reference.referenceText),
-      reference, description};
+  if (why == RefState::ErrorCycle)
+    return {std::format("Cyclic reference resolution detected for '{}'.",
+                        reference.referenceText),
+            reference, description};
+  return {not_found_message(*services.astReflection, reference.reference,
+                            reference.narrow, reference.referenceText),
+          reference, description};
 }
 
 void DefaultLinker::link(Document& document,

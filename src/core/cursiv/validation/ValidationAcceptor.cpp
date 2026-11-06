@@ -21,6 +21,7 @@ namespace cursiv {
 ValidationAcceptor::ValidationAcceptor(Sink sink, const Document& document,
                                        std::string_view source) noexcept
     : _sink(sink),
+      _document(&document),
       _cst((document.parseResult.value != nullptr) ? &document.parseResult.cst()
                                                    : nullptr),
       _text(document.textDocument().getText()),

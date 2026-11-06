@@ -17,6 +17,7 @@ namespace cursiv {
 
 struct SharedCoreServices;
 class Parser;
+class ParserErrorMessageProvider;
 struct AstReflection;
 class NameProvider;
 class AstNodeLocator;
@@ -68,6 +69,8 @@ struct CoreServices {
   // above a declaration.
   std::unique_ptr<const DocumentationProvider> documentationProvider;
   std::unique_ptr<const CommentProvider> commentProvider;
+  // The words of the syntax errors the parser reports as facts.
+  std::unique_ptr<const ParserErrorMessageProvider> parserErrorMessageProvider;
   std::unique_ptr<ValidationRegistry> validationRegistry;
   // The pass that runs the checks. A language's own validator -- the class
   // whose methods are checks -- is a slot of that language's container, not of

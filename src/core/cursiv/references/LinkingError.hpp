@@ -1,17 +1,15 @@
 #pragma once
 
-#include <cstdint>
 #include <string>
-#include <string_view>
 
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 
 // Why a reference did not resolve: the sentence, the site it was asked at, and
-// the description that was found and refused, when there was one.
+// the description that was found and refused, when there was one. The linker
+// writes it, in `Linker::createLinkingError`.
 
 namespace cursiv {
 
-struct AstReflection;
 struct AstNodeDescription;
 
 struct LinkingError {
@@ -21,14 +19,5 @@ struct LinkingError {
   // nothing carried the name at all.
   const AstNodeDescription* targetDescription = nullptr;
 };
-
-// The sentences, and the one place they are written. Both doors word a
-// failure through these: the linker's own error, and the diagnostic a
-// validator publishes. It names what is expected -- the site's narrowing when
-// it has one, every type the member declares otherwise -- and the name read, so
-// the reader learns what the site wanted.
-[[nodiscard]] std::string unresolved_reference_message(
-    const AstReflection& reflection, std::uint16_t reference,
-    std::uint8_t narrow, std::string_view text);
 
 }  // namespace cursiv

@@ -96,6 +96,7 @@ framework, the module generated from your grammar, or nothing.
 | `referenceDescriptionProvider` | Describe a reference for the index | Framework |
 | `documentationProvider` | Give the documentation shown by hover and completion | Framework |
 | `commentProvider` | Find the comment written above a node, by default in a hidden terminal named `ML_COMMENT` | Framework |
+| `parserErrorMessageProvider` | Word the syntax errors of a document | Framework |
 | `validationRegistry` | Register checks for AST types | Framework |
 | `documentValidator` | Report a document's parse errors and run its checks | Framework |
 

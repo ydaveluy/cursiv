@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 
 #include "cursiv/syntax-tree/AstNode.hpp"
@@ -195,6 +197,17 @@ class ValidationRegistry {
   virtual void runChecks(const AstNode& node, ValidationAcceptor&,
                          ValidationCategories,
                          const CancellationToken&) const = 0;
+
+  // What a check that threw becomes; a cancellation never comes here.
+  // `context` says what was running: "An error occurred during validation",
+  // or during its set-up or tear-down. `node` is what the check was given,
+  // null for a check of the whole document. By default, an error worded
+  // "`context`: what it threw" over the node, or the whole document, and a
+  // warning to the observability sink. An override may rethrow `failure`.
+  virtual void handleException(std::exception_ptr failure,
+                               std::string_view context,
+                               ValidationAcceptor& accept,
+                               const AstNode* node) const = 0;
 
   // Zero is a real answer a caller acts on: a language with no check has no AST
   // walk to pay for.

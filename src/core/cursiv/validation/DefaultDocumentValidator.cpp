@@ -18,9 +18,9 @@
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/grammar/Grammar.hpp"
-#include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/references/LinkingError.hpp"
+#include "cursiv/parser/ParserErrorMessageProvider.hpp"
+#include "cursiv/references/Linker.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/Diagnostic.hpp"
 #include "cursiv/services/JsonValue.hpp"
@@ -35,7 +35,6 @@
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
-#include "cursiv/validation/RepairMessage.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
@@ -198,6 +197,8 @@ void DefaultDocumentValidator::processParsingErrors(
   throw_if_cancelled(token);
   const std::string_view source = getSource();
   const std::string_view text = document.textDocument().getText();
+  const Grammar& grammar = _core.parser->getGrammar();
+  const ParserErrorMessageProvider& words = *_core.parserErrorMessageProvider;
   diagnostics.reserve(diagnostics.size() + parsed.diagnostics.size());
   for (const ParseDiagnostic& d : parsed.diagnostics) {
     throw_if_cancelled(token);
@@ -213,12 +214,7 @@ void DefaultDocumentValidator::processParsingErrors(
     diagnostic.severity = d.kind == DiagnosticKind::bounded
                               ? DiagnosticSeverity::Information
                               : DiagnosticSeverity::Error;
-    // What the parser itself said wins: a conversion error carries its own
-    // sentence, and only a repair is left to be spelled here.
-    if (!d.message.empty())
-      diagnostic.message = d.message;
-    else
-      diagnostic.message = repair_message(_core.parser->getGrammar(), d, text);
+    diagnostic.message = words.buildMessage(grammar, d, text);
     diagnostic.source = source;
     // The element the repair was owed is what a quick fix is built from.
     if (d.kind != DiagnosticKind::conversion_error)
@@ -235,6 +231,7 @@ Diagnostic DefaultDocumentValidator::unrepairedParseError(
     const Document& document) const {
   const std::string_view text = document.textDocument().getText();
   const Cst& cst = document.parseResult.cst();
+  const ParserErrorMessageProvider& words = *_core.parserErrorMessageProvider;
   Diagnostic d;
   d.severity = DiagnosticSeverity::Error;
   d.source = getSource();
@@ -246,27 +243,16 @@ Diagnostic DefaultDocumentValidator::unrepairedParseError(
     // The tree stands and no node could be made of it: the repairs left a
     // shape the grammar's classes do not describe.
     d.range = TextRange{0, static_cast<TextOffset>(text.size())};
-    d.message = "Syntax error: the document is too damaged to build a tree.";
+    d.message = words.buildNoTreeMessage(text);
   } else if (cst.has_entry() && cst.entry_root() != kNoNode) {
     d.range = TextRange{cst[cst.entry_root()].end,
                         static_cast<TextOffset>(text.size())};
-    d.message = "Extraneous input after the end of the document.";
+    d.message = words.buildNotAllInputParsedMessage(text, d.range.begin);
   } else {
     d.range = TextRange{0, static_cast<TextOffset>(text.size())};
-    d.message = "Syntax error: the document could not be parsed.";
+    d.message = words.buildUnparsedMessage(text);
   }
   return d;
-}
-
-std::string DefaultDocumentValidator::linkingErrorMessage(
-    RefState why, std::uint16_t reference, std::uint8_t narrow,
-    std::string_view text) const {
-  // The type the member wanted is the half a reader needs: "named 'String'"
-  // alone does not say what was expected.
-  if (why == RefState::ErrorCycle)
-    return std::format("Cyclic reference resolution detected for '{}'.", text);
-  return unresolved_reference_message(*_core.astReflection, reference, narrow,
-                                      text);
 }
 
 // Every message names the reference text: a linking error that says
@@ -290,7 +276,7 @@ void DefaultDocumentValidator::processLinkingErrors(
         Diagnostic d;
         d.range = TextRange{begin, end};
         d.severity = DiagnosticSeverity::Error;
-        d.message = linkingErrorMessage(why, site.reference, site.narrow, text);
+        d.message = _core.linker->createLinkingError(site, why).message;
         d.source = source;
         JsonValue::Object payload;
         payload.try_emplace(std::string(kDataCode), std::string(kLinkingError));
@@ -316,41 +302,23 @@ void DefaultDocumentValidator::processLinkingErrors(
 }
 
 // A document hook that throws costs itself, not the pass -- the same law as a
-// per-node check, the diagnostic anchored on the whole document because a
-// document check has no one node. Cancellation goes straight through.
+// per-node check, and the same door: the registry's `handleException`, with no
+// node, since a document check has none. Cancellation goes straight through.
 namespace {
-void run_document_check(const ValidationPreparationEntry& entry,
-                        const Document& document, ValidationAcceptor& accept,
+void run_document_check(const ValidationRegistry& registry,
+                        const ValidationPreparationEntry& entry,
+                        std::string_view context, const Document& document,
+                        ValidationAcceptor& accept,
                         ValidationCategories categories,
-                        const CancellationToken& token, ObservabilitySink* sink,
-                        std::string_view languageId) {
+                        const CancellationToken& token) {
   if (!runs_category(categories, entry.category)) return;
-  const auto failed = [&](std::string_view what) {
-    const std::string_view text = document.textDocument().getText();
-    Diagnostic diagnostic{TextRange{0, static_cast<TextOffset>(text.size())},
-                          DiagnosticSeverity::Error,
-                          std::format("An error occurred during validation: {}",
-                                      what),
-                          {},
-                          {}};
-    set_data_code(diagnostic, kValidationError);
-    accept.accept(std::move(diagnostic));
-    if (sink == nullptr) return;
-    sink->publish(
-        {.severity = ObservationSeverity::Warning,
-         .code = ObservationCode::ValidationPreparationThrew,
-         .message = std::format("a validation preparation threw: {}", what),
-         .uri = document.uri,
-         .languageId = std::string(languageId)});
-  };
   try {
     entry.check(document, accept, token);
   } catch (const OperationCancelled&) {
     throw;
-  } catch (const std::exception& failure) {
-    failed(failure.what());
   } catch (...) {
-    failed("unknown exception");
+    registry.handleException(std::current_exception(), context, accept,
+                             nullptr);
   }
 }
 }  // namespace
@@ -404,9 +372,9 @@ void DefaultDocumentValidator::validateAstBefore(
   if (registry == nullptr) return;
   for (const ValidationPreparationEntry& entry : registry->checksBefore()) {
     throw_if_cancelled(token);
-    run_document_check(entry, document, accept, categories, token,
-                       _core.shared().observabilitySink.get(),
-                       _core.languageMetaData.languageId);
+    run_document_check(*registry, entry,
+                       "An error occurred during set-up of the validation",
+                       document, accept, categories, token);
   }
 }
 
@@ -530,9 +498,9 @@ void DefaultDocumentValidator::validateAstAfter(
   if (registry == nullptr) return;
   for (const ValidationPreparationEntry& entry : registry->checksAfter()) {
     throw_if_cancelled(token);
-    run_document_check(entry, document, accept, categories, token,
-                       _core.shared().observabilitySink.get(),
-                       _core.languageMetaData.languageId);
+    run_document_check(*registry, entry,
+                       "An error occurred during tear-down of the validation",
+                       document, accept, categories, token);
   }
 }
 

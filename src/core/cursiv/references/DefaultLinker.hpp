@@ -26,16 +26,12 @@ class DefaultLinker : public Linker, protected DefaultCoreService {
   [[nodiscard]] AstNodeDescriptionsOrError getCandidates(
       const ReferenceInfo& reference) const override;
 
-  ~DefaultLinker() noexcept override = default;
+  // The default lookups pass no description.
+  [[nodiscard]] LinkingError createLinkingError(
+      const ReferenceInfo& reference, RefState why = RefState::ErrorNotFound,
+      const AstNodeDescription* description = nullptr) const override;
 
- protected:
-  // What a name that resolved to nothing is told to be. The one place the
-  // sentence is written, so a language rewords it once for both doors.
-  // `description` is what the name did reach, when the caller has one; the
-  // default doors pass none.
-  [[nodiscard]] virtual LinkingError createLinkingError(
-      const ReferenceInfo& reference,
-      const AstNodeDescription* description = nullptr) const;
+  ~DefaultLinker() noexcept override = default;
 };
 
 }  // namespace cursiv

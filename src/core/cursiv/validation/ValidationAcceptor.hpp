@@ -300,6 +300,9 @@ class ValidationAcceptor {
               std::string_view message, std::string_view code = {}) const;
   void accept(Diagnostic&& diagnostic) const;
 
+  // The document the diagnostics are about.
+  [[nodiscard]] const Document& document() const noexcept { return *_document; }
+
   // The CST span of a node, `{0, 0}` for one no CST node produced.
   [[nodiscard]] TextRange spanOf(const AstNode& node) const noexcept;
   // The span of a name that is a slice of the document (or of its translated
@@ -349,6 +352,7 @@ class ValidationAcceptor {
   }
 
   Sink _sink;
+  const Document* _document;
   const Cst* _cst = nullptr;
   std::string_view _text;
   std::string_view _source;

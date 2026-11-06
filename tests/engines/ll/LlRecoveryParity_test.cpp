@@ -12,10 +12,10 @@
 
 #include "conditionsll/generated/Ll/Module.hpp"
 #include "conditionslr/generated/Lr/Module.hpp"
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/validation/RepairMessage.hpp"
 #include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/ParityAst.hpp"
@@ -189,8 +189,10 @@ void a_deleted_token_answers_no_condition() {
   const auto& x = a.diagnostics.front();
   const auto& y = b.diagnostics.front();
   CHECK(x.kind == y.kind && x.begin == y.begin && x.end == y.end);
-  CHECK(cursiv::repair_message(e.ll->getGrammar(), x, text) ==
-        cursiv::repair_message(e.lr->getGrammar(), y, text));
+  CHECK(cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+            e.ll->getGrammar(), x, text) ==
+        cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+            e.lr->getGrammar(), y, text));
 }
 
 // A token no construct takes at the head of a statement, or in front of what
@@ -243,7 +245,8 @@ void a_missing_operator_names_every_level() {
     CHECK(parsed.diagnostics.size() == 1);
     if (parsed.diagnostics.size() != 1) continue;
     const cursiv::ParseDiagnostic& d = parsed.diagnostics.front();
-    CHECK(cursiv::repair_message(parser->getGrammar(), d, text) ==
+    CHECK(cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+              parser->getGrammar(), d, text) ==
           "Expecting one of '*', ',', '/', '+' but found '='.");
   }
   // The second operator is planned with the first: it names nothing more.

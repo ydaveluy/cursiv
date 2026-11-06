@@ -90,6 +90,36 @@ void RecipeValidator::checkNameNotReserved(
 
 Unresolved references need no check: the linker already reports them.
 
+## Reword the framework's errors
+
+The framework writes three kinds of errors itself. Each is worded by one
+service: derive from its default, override the method, and assign it in
+`install_core_module`.
+
+| Error | Service | Override |
+|---|---|---|
+| Syntax error | `parserErrorMessageProvider` (`cursiv::DefaultParserErrorMessageProvider`) | One `build...Message` per kind of error |
+| Unresolved reference | `linker` (`cursiv::DefaultLinker`) | `createLinkingError` |
+| A check that throws | `validationRegistry` (`cursiv::DefaultValidationRegistry`) | `handleException` |
+
+```cpp
+struct RecipeSyntaxMessages final
+    : cursiv::DefaultParserErrorMessageProvider {
+  std::string buildInsertedMessage(const cursiv::Grammar& grammar,
+                                   const cursiv::ParseDiagnostic& diagnostic,
+                                   std::string_view text) const override {
+    return "Missing text. " +
+           DefaultParserErrorMessageProvider::buildInsertedMessage(
+               grammar, diagnostic, text);
+  }
+};
+
+services.parserErrorMessageProvider = std::make_unique<RecipeSyntaxMessages>();
+```
+
+Replace `validationRegistry` before you register checks: they are stored in
+the registry.
+
 ## Test it
 
 ```cpp

@@ -6,7 +6,8 @@
 
 // What a name points at: `link` and `unlink` walk a document's work list,
 // `getCandidate` and `getCandidates` answer one site -- the second for a
-// reference that names several targets at once.
+// reference that names several targets at once -- and `createLinkingError`
+// says why a site failed.
 
 namespace cursiv {
 
@@ -34,6 +35,15 @@ class Linker {
   // Every visible candidate, for a reference that names several.
   [[nodiscard]] virtual AstNodeDescriptionsOrError getCandidates(
       const ReferenceInfo& reference) const = 0;
+
+  // What a reference that failed is told to be: `why` says how, a name found
+  // nowhere or a cycle. The one place the sentence is written, so a language
+  // rewords it once: the errors above and the diagnostic a validator
+  // publishes both read it. `description` is what the name did reach, when the
+  // caller has one.
+  [[nodiscard]] virtual LinkingError createLinkingError(
+      const ReferenceInfo& reference, RefState why = RefState::ErrorNotFound,
+      const AstNodeDescription* description = nullptr) const = 0;
 };
 
 }  // namespace cursiv

@@ -6,6 +6,7 @@
 #include "cursiv/documentation/DefaultCommentProvider.hpp"
 #include "cursiv/documentation/DefaultDocumentationProvider.hpp"
 #include "cursiv/grammar/GrammarSource.hpp"  // NOLINT(misc-include-cleaner)
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultLinker.hpp"
 #include "cursiv/references/DefaultNameProvider.hpp"
@@ -48,6 +49,8 @@ void CoreServices::visitServices(
   yield({"references", true, references != nullptr});
   yield({"documentationProvider", true, documentationProvider != nullptr});
   yield({"commentProvider", true, commentProvider != nullptr});
+  yield({"parserErrorMessageProvider", true,
+         parserErrorMessageProvider != nullptr});
   yield({"validationRegistry", true, validationRegistry != nullptr});
   yield({"documentValidator", true, documentValidator != nullptr});
 }
@@ -57,6 +60,9 @@ std::string_view CoreServices::firstMissingService() const {
 }
 
 void install_default_core_services(CoreServices& services) {
+  if (services.parserErrorMessageProvider == nullptr)
+    services.parserErrorMessageProvider =
+        std::make_unique<DefaultParserErrorMessageProvider>();
   if (services.astNodeLocator == nullptr)
     services.astNodeLocator = std::make_unique<DefaultAstNodeLocator>(services);
   if (services.astNodeDescriptionProvider == nullptr)

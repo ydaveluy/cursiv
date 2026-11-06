@@ -376,7 +376,8 @@ struct ChasingProvider final : cursiv::DefaultScopeProvider {
   }
 };
 
-// A provider reading through its own resolution says cycle, not "not found".
+// A provider reading through its own resolution says cycle, not "not found",
+// and so does the diagnostic, in the linker's words.
 void a_cycle_is_told_apart_from_a_missing_name() {
   World world;
   const auto document = world.scoped("entity A extends A { }\n");
@@ -386,6 +387,14 @@ void a_cycle_is_told_apart_from_a_missing_name() {
   const auto& a = *static_cast<const ws::ast::Entity*>(
       document->parseResult.references->handles.front().owner);
   CHECK(a.superType.resolve() == cursiv::RefState::ErrorCycle);
+
+  std::vector<cursiv::Diagnostic> diagnostics;
+  world.ws->documentValidator->validateDocument(
+      *document, diagnostics, cursiv::ValidationOptions{}, {});
+  bool said = false;
+  for (const cursiv::Diagnostic& d : diagnostics)
+    said = said || d.message == "Cyclic reference resolution detected for 'A'.";
+  CHECK(said);
 }
 
 // Every link of the loop says cycle, not just the one that noticed: a loop of
@@ -728,18 +737,18 @@ void a_multi_site_looks_up_its_class_only() {
   CHECK(cursiv::detail::RefAccess::items(site.all).empty());
 }
 
-// The sentence names the site's class, and one protected method rewords it.
-struct Reworded final : cursiv::DefaultDocumentValidator {
-  using DefaultDocumentValidator::DefaultDocumentValidator;
+// The sentence names the site's class, and the linker's one method rewords it
+// for the diagnostic too.
+struct Reworded final : cursiv::DefaultLinker {
+  using DefaultLinker::DefaultLinker;
 
- protected:
-  [[nodiscard]] std::string linkingErrorMessage(
-      cursiv::RefState why, std::uint16_t reference, std::uint8_t narrow,
-      std::string_view text) const override {
-    if (why == cursiv::RefState::ErrorNotFound)
-      return "not that kind: '" + std::string(text) + "'";
-    return cursiv::DefaultDocumentValidator::linkingErrorMessage(why, reference,
-                                                                 narrow, text);
+  [[nodiscard]] cursiv::LinkingError createLinkingError(
+      const cursiv::ReferenceInfo& site, cursiv::RefState why,
+      const cursiv::AstNodeDescription* description) const override {
+    cursiv::LinkingError error =
+        DefaultLinker::createLinkingError(site, why, description);
+    error.message = "not that kind: '" + std::string(site.referenceText) + "'";
+    return error;
   }
 };
 
@@ -760,7 +769,9 @@ void the_diagnostic_names_the_site_s_class() {
       *document, diagnostics, cursiv::ValidationOptions{}, {});
   CHECK(has(diagnostics, "Expecting Kind1 named 'b'."));
 
-  world.lang->documentValidator = std::make_unique<Reworded>(*world.lang);
+  world.lang->linker = std::make_unique<Reworded>(*world.lang);
+  world.lang->linker->unlink(*document);
+  world.lang->linker->link(*document);
   diagnostics.clear();
   world.lang->documentValidator->validateDocument(
       *document, diagnostics, cursiv::ValidationOptions{}, {});
@@ -785,13 +796,11 @@ void a_derived_linker_keeps_its_lookup_and_error_hooks() {
       ++plural;
       return DefaultLinker::getCandidates(site);
     }
-
-   protected:
     cursiv::LinkingError createLinkingError(
-        const cursiv::ReferenceInfo& site,
+        const cursiv::ReferenceInfo& site, cursiv::RefState why,
         const cursiv::AstNodeDescription* description) const override {
       ++errors;
-      auto error = DefaultLinker::createLinkingError(site, description);
+      auto error = DefaultLinker::createLinkingError(site, why, description);
       error.message = "custom: " + error.message;
       return error;
     }

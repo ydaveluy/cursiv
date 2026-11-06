@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -14,6 +15,7 @@
 
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
 #include "cursiv/services/CoreLanguage.hpp"
@@ -33,8 +35,8 @@
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/validation/DefaultCodeActionProtocol.hpp"
 #include "cursiv/validation/DefaultDocumentValidator.hpp"
+#include "cursiv/validation/DefaultValidationRegistry.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
-#include "cursiv/validation/RepairMessage.hpp"
 #include "cursiv/validation/SpellingActions.hpp"
 #include "cursiv/validation/ValidateSingleNodeOptions.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
@@ -499,6 +501,150 @@ void a_crashing_hook_costs_itself_not_the_pass() {
   CHECK(observed);
 }
 
+// A crash says what was running, then what it threw: a node check during the
+// validation, a document hook during its set-up or its tear-down.
+void a_crash_says_what_was_running() {
+  World world;
+  world.registry->registerBeforeDocument([](const cursiv::Document&,
+                                            cursiv::ValidationAcceptor&,
+                                            const cursiv::CancellationToken&) {
+    throw std::runtime_error("hook before");
+  });
+  world.registry->registerAfterDocument([](const cursiv::Document&,
+                                           cursiv::ValidationAcceptor&,
+                                           const cursiv::CancellationToken&) {
+    throw std::runtime_error("hook after");
+  });
+  world.registry->registerCheck(
+      Registry::makeValidationCheck<&TestValidator::onDataTypeCrash>(
+          world.validator));
+  const cursiv::Document* const document = world.build(
+      "file:///a.ws", std::string(kSource), cursiv::BuildOptions{false, {}});
+
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+  CHECK(find_message(diagnostics,
+                     "An error occurred during set-up of the validation: "
+                     "hook before") != nullptr);
+  CHECK(find_message(diagnostics,
+                     "An error occurred during tear-down of the validation: "
+                     "hook after") != nullptr);
+  CHECK(find_message(diagnostics,
+                     "An error occurred during validation: check crashed") !=
+        nullptr);
+}
+
+// One method says what a crash becomes, for a node check and a document hook
+// alike, and it may let the crash through.
+struct Rewording final : cursiv::DefaultValidationRegistry {
+  using DefaultValidationRegistry::DefaultValidationRegistry;
+
+  void handleException(std::exception_ptr failure, std::string_view context,
+                       cursiv::ValidationAcceptor& accept,
+                       const cursiv::AstNode* node) const override {
+    if (context.ends_with("tear-down of the validation"))
+      std::rethrow_exception(failure);
+    accept.accept(node != nullptr ? accept.spanOf(*node) : cursiv::TextRange{},
+                  cursiv::DiagnosticSeverity::Warning,
+                  node != nullptr ? "a check broke" : "a hook broke");
+  }
+};
+
+void a_registry_rewords_what_a_crash_becomes() {
+  World world;
+  world.language->validationRegistry =
+      std::make_unique<Rewording>(*world.language);
+  world.registry = world.language->validationRegistry.get();
+  world.registry->registerBeforeDocument([](const cursiv::Document&,
+                                            cursiv::ValidationAcceptor&,
+                                            const cursiv::CancellationToken&) {
+    throw std::runtime_error("hook before");
+  });
+  world.registry->registerCheck(
+      Registry::makeValidationCheck<&TestValidator::onDataTypeCrash>(
+          world.validator));
+  const cursiv::Document* const document = world.build(
+      "file:///a.ws", std::string(kSource), cursiv::BuildOptions{false, {}});
+
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+  CHECK(find_message(diagnostics, "a check broke") != nullptr);
+  CHECK(find_message(diagnostics, "a hook broke") != nullptr);
+  CHECK(find_code(diagnostics, cursiv::kValidationError) == nullptr);
+
+  world.registry->registerAfterDocument([](const cursiv::Document&,
+                                           cursiv::ValidationAcceptor&,
+                                           const cursiv::CancellationToken&) {
+    throw std::runtime_error("hook after");
+  });
+  bool letThrough = false;
+  try {
+    (void)world.validate(*document);
+  } catch (const std::runtime_error& failure) {
+    letThrough = std::string_view(failure.what()) == "hook after";
+  }
+  CHECK(letThrough);
+}
+
+// A language rewords the shapes of syntax error it wants, from the default's
+// words, and keeps the others' words; a parse it cannot repair too.
+struct Tagged final : cursiv::DefaultParserErrorMessageProvider {
+  [[nodiscard]] std::string buildDeletedMessage(
+      const cursiv::Grammar& grammar, const cursiv::ParseDiagnostic& diagnostic,
+      std::string_view text) const override {
+    return "skipped: " + DefaultParserErrorMessageProvider::buildDeletedMessage(
+                             grammar, diagnostic, text);
+  }
+  [[nodiscard]] std::string buildInsertedMessage(
+      const cursiv::Grammar& grammar, const cursiv::ParseDiagnostic& diagnostic,
+      std::string_view text) const override {
+    return "missing: " +
+           DefaultParserErrorMessageProvider::buildInsertedMessage(
+               grammar, diagnostic, text);
+  }
+  [[nodiscard]] std::string buildNotAllInputParsedMessage(
+      std::string_view, cursiv::TextOffset) const override {
+    return "left over";
+  }
+};
+
+void a_provider_rewords_the_shapes_it_overrides() {
+  World world;
+  world.language->parserErrorMessageProvider = std::make_unique<Tagged>();
+  const std::string text =
+      "datatype String\nentity { x : String }\n"
+      "entity B ] { }\n";
+  const cursiv::Document* const document =
+      world.build("file:///a.ws", text, cursiv::BuildOptions{false, {}});
+  const std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+
+  std::vector<std::string> expected;
+  std::size_t skipped = 0, missing = 0;
+  const cursiv::DefaultParserErrorMessageProvider plain;
+  const cursiv::Grammar& grammar = world.language->parser->getGrammar();
+  for (const cursiv::ParseDiagnostic& d : document->parseResult.diagnostics) {
+    std::string message = plain.buildMessage(grammar, d, text);
+    if (d.kind == cursiv::DiagnosticKind::deleted) {
+      message = "skipped: " + message;
+      ++skipped;
+    } else if (d.kind == cursiv::DiagnosticKind::inserted) {
+      message = "missing: " + message;
+      ++missing;
+    }
+    expected.push_back(std::move(message));
+  }
+  std::vector<std::string> published;
+  for (const cursiv::Diagnostic& d : diagnostics)
+    if (cursiv::data_code(d) == cursiv::kParseRepaired)
+      published.push_back(d.message);
+  CHECK(skipped > 0 && missing > 0);
+  CHECK(published == expected);
+
+  cursiv::Document* const broken = world.add("file:///b.ws", "!!");
+  broken->parseResult = world.language->parser->parse("!!");
+  broken->parseResult.accepted = false;
+  broken->parseResult.diagnostics.clear();
+  CHECK(find_message(world.validate(*broken), "left over") != nullptr);
+}
+
 // The two stops: after a repaired parse, after a broken link -- each keeps
 // the built-in half's verdicts and skips the checks.
 void the_two_stops_skip_the_checks() {
@@ -864,6 +1010,9 @@ void run() {
   hooks_run_around_the_walk_with_no_ast();
   a_crashing_check_costs_itself_not_the_pass();
   a_crashing_hook_costs_itself_not_the_pass();
+  a_crash_says_what_was_running();
+  a_registry_rewords_what_a_crash_becomes();
+  a_provider_rewords_the_shapes_it_overrides();
   the_two_stops_skip_the_checks();
   a_linking_error_names_its_member();
   a_misspelt_reference_offers_its_neighbours();
@@ -1167,7 +1316,7 @@ void run() {
 // Pins the `deleted`-repair messages: a stray byte that quotes to nothing must
 // still name the expectation, a deleted token that is the expectation is said
 // once, not twice, and a refused indentation is said as one.
-namespace repair_message {
+namespace parser_error_messages {
 
 namespace {
 
@@ -1178,7 +1327,8 @@ std::string message_for(const cursiv::Parser& engine, std::string_view text,
   const cursiv::ParseResult result = engine.parse(text);
   for (const cursiv::ParseDiagnostic& d : result.cst().diagnostics()) {
     if (kind && d.kind != *kind) continue;
-    return cursiv::repair_message(engine.getGrammar(), d, text);
+    return cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+        engine.getGrammar(), d, text);
   }
   return {};
 }
@@ -1191,7 +1341,8 @@ std::string deleted_over(std::string_view text, cursiv::TextOffset begin,
   d.kind = cursiv::DiagnosticKind::deleted;
   d.begin = begin;
   d.end = end;
-  return cursiv::repair_message(engine->getGrammar(), d, text);
+  return cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+      engine->getGrammar(), d, text);
 }
 
 void a_tight_region_deletion_still_names_the_expectation() {
@@ -1267,8 +1418,8 @@ void the_end_of_input_is_named_in_words() {
   cursiv::ParseDiagnostic d;
   d.kind = cursiv::DiagnosticKind::inserted;
   d.element = 0;
-  CHECK(cursiv::repair_message(engine->getGrammar(), d, "1;") ==
-        "Expecting end of input.");
+  CHECK(cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+            engine->getGrammar(), d, "1;") == "Expecting end of input.");
 }
 
 }  // namespace
@@ -1283,12 +1434,12 @@ void run() {
   the_end_of_input_is_named_in_words();
 }
 
-}  // namespace repair_message
+}  // namespace parser_error_messages
 
 int main() {
   document_validator::run();
   cross_document::run();
   validation_acceptor::run();
-  repair_message::run();
+  parser_error_messages::run();
   return cursiv::test::report("validation");
 }

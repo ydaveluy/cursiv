@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,8 @@
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
+#include "cursiv/text/TextOffset.hpp"
+#include "cursiv/text/TextRange.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
 #include "cursiv/validation/DocumentValidator.hpp"
@@ -40,37 +43,59 @@ namespace {
 //
 // A cancellation is not a failure and goes straight through: turning it into a
 // diagnostic would publish a crash on every document of a cancelled build.
-void run_one(const ValidationCheck& check, const AstNode& node,
-             ValidationAcceptor& accept, const CancellationToken& token,
-             const CoreServices& core) {
-  const auto failed = [&](std::string_view what) {
-    Diagnostic diagnostic{accept.spanOf(node), DiagnosticSeverity::Error,
-                          std::format("An error occurred during validation: {}",
-                                      what),
-                          {},
-                          {}};
-    set_data_code(diagnostic, kValidationError);
-    accept.accept(std::move(diagnostic));
-    const Document* const home = node.getDocument();
-    core.shared().observabilitySink->publish(
-        {.severity = ObservationSeverity::Warning,
-         .code = ObservationCode::ValidationCheckThrew,
-         .message = std::format("a validation check threw: {}", what),
-         .uri = home != nullptr ? home->uri : std::string(),
-         .languageId = std::string(core.languageMetaData.languageId)});
-  };
+void run_one(const ValidationRegistry& registry, const ValidationCheck& check,
+             const AstNode& node, ValidationAcceptor& accept,
+             const CancellationToken& token) {
   try {
     check(node, accept, token);
   } catch (const OperationCancelled&) {
     throw;
-  } catch (const std::exception& failure) {
-    failed(failure.what());
   } catch (...) {
-    failed("unknown exception");
+    registry.handleException(std::current_exception(),
+                             "An error occurred during validation", accept,
+                             &node);
   }
 }
 
 }  // namespace
+
+// What threw is read off `failure`; an exception that is no `std::exception`
+// says so.
+void DefaultValidationRegistry::handleException(std::exception_ptr failure,
+                                                std::string_view context,
+                                                ValidationAcceptor& accept,
+                                                const AstNode* node) const {
+  std::string what = "unknown exception";
+  try {
+    if (failure != nullptr) std::rethrow_exception(failure);
+  } catch (const std::exception& thrown) {
+    what = thrown.what();
+  } catch (...) {  // NOLINT(bugprone-empty-catch): `what` already says it
+  }
+  const Document& document = accept.document();
+  const TextRange span =
+      node != nullptr
+          ? accept.spanOf(*node)
+          : TextRange{0, static_cast<TextOffset>(
+                             document.textDocument().getText().size())};
+  Diagnostic diagnostic{span,
+                        DiagnosticSeverity::Error,
+                        std::format("{}: {}", context, what),
+                        {},
+                        {}};
+  set_data_code(diagnostic, kValidationError);
+  accept.accept(std::move(diagnostic));
+  _core.shared().observabilitySink->publish(
+      {.severity = ObservationSeverity::Warning,
+       .code = node != nullptr ? ObservationCode::ValidationCheckThrew
+                               : ObservationCode::ValidationPreparationThrew,
+       .message =
+           std::string(node != nullptr ? "a validation check threw: "
+                                       : "a validation preparation threw: ") +
+           what,
+       .uri = document.uri,
+       .languageId = std::string(_core.languageMetaData.languageId)});
+}
 
 // Multiplicative hashing: the product's upper half is the well-mixed one.
 std::size_t DefaultValidationRegistry::homeOf(
@@ -211,12 +236,12 @@ CURSIV_NOINLINE void DefaultValidationRegistry::runMatched(
     if (const Row& typed = _byType[slotOf(node.type)]; typed.type != nullptr)
       for (const Entry& entry : typed.entries)
         if (runs(categories, entry.category))
-          run_one(*entry.check, node, accept, token, _core);
+          run_one(*this, *entry.check, node, accept, token);
   // ...then the ones no type filters, after the typed ones: a published
   // diagnostic list is read by humans, so its order is part of the answer.
   for (const Entry& entry : _everyNode)
     if (runs(categories, entry.category))
-      run_one(*entry.check, node, accept, token, _core);
+      run_one(*this, *entry.check, node, accept, token);
 }
 
 }  // namespace cursiv

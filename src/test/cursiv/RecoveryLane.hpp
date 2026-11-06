@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "cursiv/grammar/Grammar.hpp"
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/validation/RepairMessage.hpp"
 #include "cursiv/Check.hpp"
 #include "cursiv/SkippedLeaf.hpp"
 
@@ -135,15 +135,15 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
     if (n.hidden) continue;
     p.tokens.emplace_back(text, n.begin, n.end - n.begin);
   }
+  const cursiv::DefaultParserErrorMessageProvider words;
   for (const cursiv::ParseDiagnostic& d : cst.diagnostics()) {
     // What an editor would name, navigated from the position the repair
     // reports -- a literal by its spelling, a rule by its name -- and then
     // the sentence itself, which is the only part an author ever reads.
-    p.diags.emplace_back(
-        std::string(kKind[static_cast<int>(d.kind)]) + ":" +
-        std::string(owed_name(grammar, d.element)) + "@" +
-        std::to_string(d.begin) + "<" +
-        cursiv::repair_message(grammar, d, text) + ">");
+    p.diags.emplace_back(std::string(kKind[static_cast<int>(d.kind)]) + ":" +
+                         std::string(owed_name(grammar, d.element)) + "@" +
+                         std::to_string(d.begin) + "<" +
+                         words.buildMessage(grammar, d, text) + ">");
   }
   return p;
 }

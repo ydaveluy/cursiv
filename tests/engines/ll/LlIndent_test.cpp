@@ -12,9 +12,9 @@
 #include <vector>
 
 #include "cursiv/grammar/NextFeature.hpp"
+#include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/validation/RepairMessage.hpp"
 #include "cursiv/ll/gen/LlLowering.hpp"
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
@@ -213,7 +213,8 @@ void an_indentation_error_says_so() {
       const auto result = p->parse(text);
       CHECK(result.diagnostics.size() == 1);
       for (const auto& d : result.diagnostics)
-        CHECK(cursiv::repair_message(p->getGrammar(), d, text) == message);
+        CHECK(cursiv::DefaultParserErrorMessageProvider{}.buildMessage(
+                  p->getGrammar(), d, text) == message);
     }
 }
 
