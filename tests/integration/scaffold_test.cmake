@@ -39,6 +39,19 @@ foreach(_name IN ITEMS Class Foo__Bar _Hidden)
   endif()
 endforeach()
 
+# An extension ends file names and is written into CMake and JSON as is.
+foreach(_ext IN ITEMS "." ".bad\"" ".x/../../outside" ".a;b" "rcp")
+  execute_process(COMMAND ${CMAKE_COMMAND} -DNAME=Ext "-DEXT=${_ext}"
+      -DDIR=${WORK}/ext -P ${SCAFFOLD}
+      RESULT_VARIABLE _rc OUTPUT_VARIABLE _log ERROR_VARIABLE _log)
+  if(_rc EQUAL 0 OR NOT _log MATCHES "EXT must be")
+    message(FATAL_ERROR "the scaffold accepted extension '${_ext}': ${_log}")
+  endif()
+endforeach()
+if(EXISTS ${WORK}/ext OR EXISTS ${WORK}/outside)
+  message(FATAL_ERROR "a refused extension still wrote files")
+endif()
+
 # No is a valid identifier even though CMake evaluates it as false.
 _step("the scaffolder" ${CMAKE_COMMAND} -DNAME=No -P ${SCAFFOLD})
 set(_project ${WORK}/no)

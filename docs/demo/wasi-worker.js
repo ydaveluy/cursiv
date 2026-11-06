@@ -119,9 +119,10 @@ function sizes(strings, countPtr, sizePtr) {
 }
 
 // stdin: a single-consumer ring buffer. Header words: 0 head (bytes written),
-// 1 tail (bytes read), 2 closed. Counters wrap at 2^32.
+// 1 tail (bytes read), 2 closed. Counters wrap at 2^32, and the capacity is a
+// power of two, so a counter's low bits are its place in the ring.
 function readStdin(iovs, n, nreadPtr) {
-  const hdr = ctx.stdinHdr, cap = ctx.stdinBuf.length;
+  const hdr = ctx.stdinHdr, mask = ctx.stdinBuf.length - 1;
   for (;;) {
     const head = Atomics.load(hdr, 0), tail = Atomics.load(hdr, 1);
     const avail = (head - tail) >>> 0;
@@ -134,7 +135,7 @@ function readStdin(iovs, n, nreadPtr) {
     const mem = u8();
     for (const [ptr, len] of iovecs(iovs, n)) {
       let want = Math.min(len, avail - done);
-      for (let k = 0; k < want; k++) mem[ptr + k] = ctx.stdinBuf[(tail + done + k) % cap];
+      for (let k = 0; k < want; k++) mem[ptr + k] = ctx.stdinBuf[(tail + done + k) & mask];
       done += want;
       if (done === avail) break;
     }
@@ -156,21 +157,27 @@ function writeOut(fd, iovs, n, nwrittenPtr) {
   return ESUCCESS;
 }
 
-// poll_oneoff: clock subscriptions only (sleeps, timed waits).
+// poll_oneoff: clock subscriptions only (sleeps, timed waits). It waits for
+// the earliest clock, then reports the clocks due by then, and every other
+// subscription as unsupported.
 function pollOneoff(inPtr, outPtr, nsubs, neventsPtr) {
   const view = dv();
-  let timeoutNs = Infinity;
+  const left = [];   // per clock subscription, the time left in ns
+  let wait = Infinity;
   for (let i = 0; i < nsubs; i++) {
     const s = inPtr + 48 * i;
-    if (view.getUint8(s + 8) === 0) {
-      let t = Number(view.getBigUint64(s + 24, true));
-      if (view.getUint16(s + 40, true) & 1) t = Math.max(0, t - nowNs(view.getUint32(s + 16, true)));
-      timeoutNs = Math.min(timeoutNs, t);
-    }
+    if (view.getUint8(s + 8) !== 0) continue;
+    let t = Number(view.getBigUint64(s + 24, true));
+    if (view.getUint16(s + 40, true) & 1) t = Math.max(0, t - nowNs(view.getUint32(s + 16, true)));
+    left[i] = t;
+    wait = Math.min(wait, t);
   }
-  if (timeoutNs !== Infinity) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, timeoutNs / 1e6);
+  const start = performance.now();
+  if (wait !== Infinity) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait / 1e6);
+  const waited = Math.max(wait, (performance.now() - start) * 1e6);
   let events = 0;
   for (let i = 0; i < nsubs; i++) {
+    if ((left[i] ?? 0) > waited) continue;      // a clock not due yet
     const s = inPtr + 48 * i, e = outPtr + 32 * events;
     view.setBigUint64(e, view.getBigUint64(s, true), true);
     view.setUint16(e + 8, view.getUint8(s + 8) === 0 ? ESUCCESS : ENOSYS, true);
@@ -286,11 +293,13 @@ function threadSpawn(startArg) {
   return -6;  // -EAGAIN
 }
 
-const instantiate = () => WebAssembly.instantiate(ctx.module, {
-  wasi_snapshot_preview1: wasiImports(),
-  wasi: { 'thread-spawn': threadSpawn },
-  env: { memory: ctx.memory },
-});
+// The shared memory goes where the module imports it from.
+function instantiate() {
+  const imports = { wasi_snapshot_preview1: wasiImports(), wasi: { 'thread-spawn': threadSpawn } };
+  for (const entry of WebAssembly.Module.imports(ctx.module))
+    if (entry.kind === 'memory') imports[entry.module] = { ...imports[entry.module], [entry.name]: ctx.memory };
+  return WebAssembly.instantiate(ctx.module, imports);
+}
 
 function report(error) {
   if (error === EXIT) return;
@@ -313,7 +322,8 @@ async function run(data) {
   postMessage({ type: 'ready' });
   for (;;) {
     Atomics.store(ctx.ctl, slot, 0);
-    while (Atomics.load(ctx.ctl, slot) !== 2) Atomics.wait(ctx.ctl, slot, Atomics.load(ctx.ctl, slot));
+    // Waits on the state it read: a spawn published since is not missed.
+    for (let state; (state = Atomics.load(ctx.ctl, slot)) !== 2;) Atomics.wait(ctx.ctl, slot, state);
     Atomics.store(ctx.ctl, slot, 3);
     const tid = ctx.spawnArgs[2 * data.slot], arg = ctx.spawnArgs[2 * data.slot + 1];
     try { instance.exports.wasi_thread_start(tid, arg); }

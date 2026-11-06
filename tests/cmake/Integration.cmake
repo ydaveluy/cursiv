@@ -98,4 +98,10 @@ if(NOT CMAKE_CROSSCOMPILING)
   set_tests_properties(refused_grammar_name_test PROPERTIES
       PASS_REGULAR_EXPRESSION
       "GRAMMAR lr_build.hpp is named like a source of the LR generator")
+  add_test(NAME refused_file_name_test COMMAND ${CMAKE_COMMAND}
+      -S ${CMAKE_CURRENT_SOURCE_DIR}/integration/refused_grammar_name
+      -B ${CMAKE_CURRENT_BINARY_DIR}/integration/refused_file_name
+      -DCURSIV_SOURCE_DIR=${CURSIV_SOURCE_ROOT} -DCASE=file-name)
+  set_tests_properties(refused_file_name_test PROPERTIES
+      PASS_REGULAR_EXPRESSION "FILE_NAMES entry `my,file` holds a comma")
 endif()

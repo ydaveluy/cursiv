@@ -11,29 +11,50 @@ const fromRange = (r) => ({
 });
 const doc = (model) => ({ textDocument: { uri: model.uri.toString() } });
 
+// Plain text through Markdown, as an editor shows it: every Markdown sign
+// escaped, runs of spaces kept, each line a paragraph.
+const escapeMarkdown = (text) => text.replace(/[\\`*_{}[\]()#+\-!~]/g, '\\$&')
+  .replace(/[ \t]+/g, (run) => '&nbsp;'.repeat(run.length)).replace(/>/g, '\\>').replace(/\n/g, '\n\n');
+
 const markdown = (contents) => {
   if (contents == null) return [];
   const one = (c) => typeof c === 'string' ? { value: c }
-    : c.kind ? { value: c.value }                               // MarkupContent
+    : c.kind === 'plaintext' ? { value: escapeMarkdown(c.value) }  // MarkupContent
+    : c.kind ? { value: c.value }
     : { value: '```' + (c.language ?? '') + '\n' + c.value + '\n```' };  // MarkedString
   return Array.isArray(contents) ? contents.map(one) : [one(contents)];
 };
+// A completion's documentation: a string is plain text, which Monaco shows as is.
+const documentation = (d) => d == null || typeof d === 'string' ? d
+  : d.kind === 'plaintext' ? d.value : { value: d.value };
 
 // LSP kinds are 1-based enums with the same names as Monaco's.
 const LSP_COMPLETION_KINDS = [, 'Text', 'Method', 'Function', 'Constructor', 'Field', 'Variable', 'Class',
   'Interface', 'Module', 'Property', 'Unit', 'Value', 'Enum', 'Keyword', 'Snippet', 'Color', 'File',
   'Reference', 'Folder', 'EnumMember', 'Constant', 'Struct', 'Event', 'Operator', 'TypeParameter'];
 
-export function workspaceEdit(monaco, edit) {
+// An edit made against a version of an open document applies only while the
+// editor holds that version. `null` when the document changed since, or when
+// the edit also creates, renames or deletes files, which this page cannot do.
+// `documentChanges`, when present, replace `changes`.
+export function workspaceEdit(monaco, edit, documents = []) {
   const edits = [];
-  const push = (uri, textEdits) => {
+  const push = (uri, textEdits, versionId) => {
     for (const e of textEdits)
-      edits.push({ resource: monaco.Uri.parse(uri), versionId: undefined,
+      edits.push({ resource: monaco.Uri.parse(uri), versionId,
                    textEdit: { range: toRange(monaco, e.range), text: e.newText } });
   };
-  for (const [uri, textEdits] of Object.entries(edit?.changes ?? {})) push(uri, textEdits);
-  for (const change of edit?.documentChanges ?? [])
-    if (change.textDocument) push(change.textDocument.uri, change.edits);
+  if (!edit?.documentChanges) {
+    for (const [uri, textEdits] of Object.entries(edit?.changes ?? {})) push(uri, textEdits);
+    return { edits };
+  }
+  for (const change of edit.documentChanges) {
+    if (!change.textDocument) return null;
+    const { uri, version } = change.textDocument;
+    const open = version == null ? undefined : documents.find((d) => d.uri === uri);
+    if (open && open.version !== version) return null;
+    push(uri, change.edits, open?.model.getVersionId());
+  }
   return { edits };
 }
 
@@ -77,10 +98,12 @@ export function registerLanguageFeatures(monaco, languageId, session, diagnostic
             label: item.label,
             kind: L.CompletionItemKind[LSP_COMPLETION_KINDS[item.kind] ?? 'Text'],
             detail: item.detail,
-            documentation: item.documentation && markdown(item.documentation)[0],
+            documentation: documentation(item.documentation),
             insertText: edit?.newText ?? item.insertText ?? item.label,
             insertTextRules: item.insertTextFormat === 2 ? L.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
             sortText: item.sortText, filterText: item.filterText, range,
+            additionalTextEdits: item.additionalTextEdits?.map((e) => ({ range: toRange(monaco, e.range), text: e.newText })),
+            command: item.command && { id: item.command.command, title: item.command.title, arguments: item.command.arguments },
           };
         }),
       };
@@ -126,7 +149,8 @@ export function registerLanguageFeatures(monaco, languageId, session, diagnostic
     },
     async provideRenameEdits(model, position, newName, token) {
       const edit = await call('textDocument/rename', { ...doc(model), position: fromPosition(position), newName }, token);
-      return edit ? workspaceEdit(monaco, edit) : { edits: [], rejectReason: 'The server did not rename this element.' };
+      if (!edit) return { edits: [], rejectReason: 'The server did not rename this element.' };
+      return workspaceEdit(monaco, edit, session()?.documents) ?? { edits: [], rejectReason: 'The document changed: rename again.' };
     },
   });
 
@@ -153,10 +177,10 @@ export function registerLanguageFeatures(monaco, languageId, session, diagnostic
       const before = (a, b) => a.line < b.line || (a.line === b.line && a.character <= b.character);
       const diagnostics = (diagnosticsOf(uri) ?? []).filter((d) => before(d.range.start, lsp.end) && before(lsp.start, d.range.end));
       const result = await call('textDocument/codeAction', { ...doc(model), range: lsp, context: { diagnostics } }, token);
-      const actions = (result ?? []).filter((a) => a.edit).map((a) => ({
-        title: a.title, kind: a.kind, isPreferred: a.isPreferred,
-        edit: workspaceEdit(monaco, a.edit),
-      }));
+      const actions = (result ?? []).filter((a) => a.edit).flatMap((a) => {
+        const edit = workspaceEdit(monaco, a.edit, session()?.documents);
+        return edit ? [{ title: a.title, kind: a.kind, isPreferred: a.isPreferred, edit }] : [];
+      });
       return { actions, dispose() {} };
     },
   });

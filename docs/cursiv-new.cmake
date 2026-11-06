@@ -43,8 +43,9 @@ endif()
 if(NOT DEFINED EXT)
   set(EXT ".${CURSIV_NEW_ID}")
 endif()
-if(NOT EXT MATCHES "^\\.")
-  message(FATAL_ERROR "EXT must start with '.' (got '${EXT}')")
+# EXT ends a file name and goes into the project's CMake and JSON as is.
+if(NOT EXT MATCHES "^\\.[A-Za-z0-9_]+$")
+  message(FATAL_ERROR "EXT must be a '.' then letters, digits or underscores (got '${EXT}')")
 endif()
 set(CURSIV_NEW_EXT "${EXT}")
 if(NOT DEFINED DIR)
@@ -1186,6 +1187,12 @@ export function startMcpBridge(
     });
 
     const registration = new Promise<vscode.Disposable | undefined>((resolve) => {
+        // If the port cannot be opened, log the error and run without the MCP
+        // server. Later server errors are logged too.
+        server.on('error', (error: Error) => {
+            outputChannel.appendLine(`mcp: ${error.message}`);
+            resolve(undefined);
+        });
         server.listen(0, '127.0.0.1', () => {
             const address = server.address();
             if (address === null || typeof address === 'string') {
@@ -1203,13 +1210,18 @@ export function startMcpBridge(
             if (register === undefined || HttpDefinition === undefined) {
                 return resolve(undefined);
             }
-            resolve(register.call(api.lm, `cursiv.${key}.mcp`, {
-                provideMcpServerDefinitions: () => [
-                    new HttpDefinition(`cursiv ${label}`, vscode.Uri.parse(url), {
-                        Authorization: `Bearer ${token}`,
-                    }),
-                ],
-            }));
+            try {
+                resolve(register.call(api.lm, `cursiv.${key}.mcp`, {
+                    provideMcpServerDefinitions: () => [
+                        new HttpDefinition(`cursiv ${label}`, vscode.Uri.parse(url), {
+                            Authorization: `Bearer ${token}`,
+                        }),
+                    ],
+                }));
+            } catch (error) {
+                outputChannel.appendLine(`mcp: ${String((error as Error)?.message ?? error)}`);
+                resolve(undefined);
+            }
         });
     });
 
@@ -1229,9 +1241,6 @@ _cursiv_new_emit([==[vscode/syntaxes/@CURSIV_NEW_ID@.tmLanguage.json]==] [==[{
     },
     {
       "include": "#keywords"
-    },
-    {
-      "include": "#numbers"
     }
   ],
   "repository": {
@@ -1250,11 +1259,7 @@ _cursiv_new_emit([==[vscode/syntaxes/@CURSIV_NEW_ID@.tmLanguage.json]==] [==[{
     },
     "keywords": {
       "name": "keyword.control.@CURSIV_NEW_ID@",
-      "match": "\\b(person|age|greet)\\b"
-    },
-    "numbers": {
-      "name": "constant.numeric.@CURSIV_NEW_ID@",
-      "match": "\\b[0-9]+\\b"
+      "match": "\\b(person|Hello)\\b"
     }
   }
 }

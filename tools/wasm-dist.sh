@@ -9,6 +9,8 @@ build=${1:-build-wasi}
 dist=${2:-dist}
 
 mkdir -p "$dist"
+# This build's modules only: one an earlier run left would ship beside them.
+rm -f "$dist"/*_lsp.wasm
 for notice in cursiv.LICENSE lsp-framework.LICENSE mimalloc.LICENSE; do
   source="$build/cursiv-licenses/$notice"
   [ -f "$source" ] || {
@@ -25,4 +27,4 @@ for bin in "$build"/examples/*/src/*_lsp; do
   cp "$bin" "$dist/$name"
   printf '%-24s %8d KiB\n' "$name" "$(($(stat -c%s "$dist/$name") / 1024))"
 done
-[ "$found" = 1 ] || { echo "no *_lsp modules under $build/examples"; exit 1; }
+[ "$found" = 1 ] || { echo "no *_lsp modules under $build/examples" >&2; exit 1; }

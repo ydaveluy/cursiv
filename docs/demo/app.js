@@ -179,10 +179,27 @@ async function openLanguage(id, wantedDoc) {
   const session = { lang, documents: [], server: null, capabilities: null, disposed: false };
   current = session;
   updateTabs();
+  // A failure belongs to its own session: a later one has replaced it, or
+  // this one stops, its server with it.
+  try {
+    await startSession(session, wantedDoc);
+  } catch (error) {
+    if (session.disposed) return;
+    session.server?.dispose();
+    state.error = String(error?.message ?? error);
+    setStatus('stopped', `The server could not start: ${state.error}`);
+  }
+}
 
+async function startSession(session, wantedDoc) {
+  const { lang } = session;
   // Every example document of the language, opened at once, in a folder the
   // server scans: references between them resolve as in a workspace.
-  const texts = await Promise.all(lang.documents.map(async (d) => (await fetch(d.path)).text()));
+  const texts = await Promise.all(lang.documents.map(async (d) => {
+    const response = await fetch(d.path);
+    if (!response.ok) throw new Error(`${d.path}: HTTP ${response.status}`);
+    return response.text();
+  }));
   if (session.disposed) return;
   session.documents = lang.documents.map((d, i) => {
     const uri = `file:///demo/${lang.id}/${d.name}`;
@@ -195,26 +212,19 @@ async function openLanguage(id, wantedDoc) {
 
   setStatus('starting', `Starting the ${lang.label.toLowerCase()} server…`);
   const t0 = performance.now();
-  let server;
-  try {
-    const enc = new TextEncoder();
-    server = await startServer(lang.server, {
-      env: params.has('workers') ? { CURSIV_WORKERS: params.get('workers') } : {},
-      // The example folder, scanned by the server as in an editor workspace.
-      root: '/demo',
-      files: Object.fromEntries(session.documents.map((d) => [`/demo/${lang.id}/${d.name}`, enc.encode(texts[session.documents.indexOf(d)])])),
-      onLog: (text) => console.warn(`[${lang.id}]`, text.trimEnd()),
-      onExit: (reason) => {
-        if (session.disposed) return;
-        setStatus('stopped', `Server stopped: ${reason}`);
-        state.error = reason;
-      },
-    });
-  } catch (error) {
-    state.error = String(error.message ?? error);
-    setStatus('stopped', `The server could not start: ${state.error}`);
-    return;
-  }
+  const enc = new TextEncoder();
+  const server = await startServer(lang.server, {
+    env: params.has('workers') ? { CURSIV_WORKERS: params.get('workers') } : {},
+    // The example folder, scanned by the server as in an editor workspace.
+    root: '/demo',
+    files: Object.fromEntries(session.documents.map((d) => [`/demo/${lang.id}/${d.name}`, enc.encode(texts[session.documents.indexOf(d)])])),
+    onLog: (text) => console.warn(`[${lang.id}]`, text.trimEnd()),
+    onExit: (reason) => {
+      if (session.disposed) return;
+      setStatus('stopped', `Server stopped: ${reason}`);
+      state.error = reason;
+    },
+  });
   if (session.disposed) { server.dispose(); return; }
   session.server = server;
 
@@ -256,8 +266,8 @@ async function openLanguage(id, wantedDoc) {
       },
       workspace: { workspaceFolders: true, configuration: false, workspaceEdit: { documentChanges: true } },
     },
-  }).catch((error) => { state.error = error.message; return null; });
-  if (!init || session.disposed) return;
+  });
+  if (session.disposed) return;
   session.capabilities = init.capabilities;
   server.notify('initialized', {});
 

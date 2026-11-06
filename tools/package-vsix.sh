@@ -15,6 +15,12 @@ cd "$root"
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
+# Each extension is packaged again from this build: its earlier packages, of
+# any version, are not kept. Other files in the folder are left alone.
+for ext in examples/*/vscode; do
+  name=$(node -e 'console.log(require(process.argv[1]).name)' "$root/$ext/package.json")
+  rm -f "$out/$name"-*.vsix
+done
 tools/wasm-dist.sh "$build" "$out/modules"
 
 staging=$(mktemp -d)
@@ -24,7 +30,7 @@ for ext in examples/*/vscode; do
   key=$(basename "$(dirname "$ext")")
   extension=$(cd "$ext" && pwd)
   module="$out/modules/${key}_lsp.wasm"
-  [ -f "$module" ] || { echo "no module for $key under $out/modules"; exit 1; }
+  [ -f "$module" ] || { echo "no module for $key under $out/modules" >&2; exit 1; }
 
   (
     cd "$extension"

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { guestArguments, guestPath, importedMemoryLimits, listDirectoriesByPath,
   preopensFor } from './wasi-run.mjs';
+import { importedMemoryLimits as pageMemoryLimits } from '../docs/demo/server.js';
 
 const runner = process.env.CURSIV_TEST_WASI_RUNNER ?? fileURLToPath(new URL('./wasi-run.mjs', import.meta.url));
 const argument = process.argv.indexOf('--sdk');
@@ -110,6 +111,9 @@ test('a host path reaches the module in its own spelling', () => {
   // The module's own name stands, and so does anything that names no file.
   assert.deepEqual(guestArguments('win32', ['m', '--flag', 'C:\\a'],
     (path) => path === 'C:\\a'), ['m', '--flag', '/c:/a']);
+  // An absolute drive path is a path whether or not it exists yet.
+  assert.deepEqual(guestArguments('win32', ['m', 'C:\\out\\new.txt', 'd:/b', 'new.txt'],
+    () => false), ['m', '/c:/out/new.txt', '/d:/b', 'new.txt']);
 });
 
 const u32 = value => {
@@ -152,6 +156,15 @@ test('imported memory preserves sharing and optional maximum', async () => {
   assert.equal(memory.grow(1), 1);
 });
 
+// The online demo reads the same descriptor with its own copy of the reader.
+const sameOnThePage = (bytes) => {
+  let answer;
+  try { answer = { limits: importedMemoryLimits(bytes) }; } catch (error) { answer = { error: error.name }; }
+  let page;
+  try { page = { limits: pageMemoryLimits(bytes) }; } catch (error) { page = { error: error.name }; }
+  assert.deepEqual(page, answer);
+};
+
 test('tag/table/global imports before memory do not hide its descriptor', async () => {
   const bytes = memoryModule(3, 1, 16, [
     importEntry('env', 'callback', 0, [0]),
@@ -164,6 +177,10 @@ test('tag/table/global imports before memory do not hide its descriptor', async 
   assert.equal(importedMemoryLimits(Buffer.from(header)), undefined);
   assert.throws(() => importedMemoryLimits(Buffer.from([...header, 2, 10])), /Truncated/);
   assert.throws(() => importedMemoryLimits(memoryModule(4)), /wasm32/);
+  for (const module of [bytes, memoryModule(), memoryModule(1, 2, 65536), memoryModule(4),
+                        Buffer.from(header), Buffer.from([...header, 2, 10]),
+                        memoryModule(3, 1, 16, [importEntry('env', 'table', 1, [0x63, 0x70, 0, 0])])])
+    sameOnThePage(module);
 });
 
 test('runner starts nonshared imported memory and permits memory.grow without maximum', () => {

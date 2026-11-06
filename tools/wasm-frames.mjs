@@ -4,7 +4,7 @@
 // fixed reservation, so a frame too large traps instead of growing it.
 //
 // Usage: node tools/wasm-frames.mjs <llvm-objdump> <limit-bytes> <module>...
-// Exits 77 (skipped) when no disassembler was found.
+// Exits 2 on a bad command line, 77 (skipped) when no disassembler was found.
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -12,11 +12,16 @@ import { createInterface } from 'node:readline';
 import * as path from 'node:path';
 
 const [objdump, limitArg, ...modules] = process.argv.slice(2);
+const limit = Number(limitArg);
+if (!/^[1-9]\d*$/.test(limitArg ?? '') || !Number.isSafeInteger(limit) || modules.length === 0) {
+    console.error('usage: wasm-frames.mjs <llvm-objdump> <limit-bytes> <module>...\n' +
+        '  <limit-bytes> is a positive integer, and at least one module is checked');
+    process.exit(2);
+}
 if (!objdump || objdump.endsWith('-NOTFOUND') || !existsSync(objdump)) {
     console.log('wasm-frames: no llvm-objdump found; the stack-frame lane is skipped');
     process.exit(77);
 }
-const limit = Number(limitArg);
 
 // The prologue that moves the stack pointer down by a constant: the same
 // global read, lowered, written back.

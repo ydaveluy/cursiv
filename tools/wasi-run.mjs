@@ -1,5 +1,3 @@
-// Expose the actual host working directory through PWD, including when the
-// caller changed cwd without updating its inherited environment.
 // Runs a wasi module on the host, threads included: ctest's emulator and the
 // VS Code extensions both start servers through it. Threads are read off the
 // module, not configured, and the provisional `wasi-threads` protocol stays
@@ -130,12 +128,14 @@ export function listDirectoriesByPath(imports, memoryOf, preopens) {
 }
 
 // The module reads `/`-separated paths: on Windows a command line that names a
-// host path goes to it in the module's own spelling. Whatever else it says, it
-// keeps.
+// host path goes to it in the module's own spelling. That is an absolute drive
+// path, which may not exist yet, or anything else naming an existing file.
+// Whatever else it says, it keeps.
 export function guestArguments(platform, args, exists = existsSync) {
   if (platform !== 'win32') return args;
   return args.map((arg, index) =>
-    index !== 0 && exists(arg) ? guestPath(platform, win32.resolve(arg)) : arg);
+    index !== 0 && (/^[A-Za-z]:[\\/]/.test(arg) || exists(arg))
+      ? guestPath(platform, win32.resolve(arg)) : arg);
 }
 
 function wasiFor(args, environment, hostModule, preopens) {
@@ -144,6 +144,8 @@ function wasiFor(args, environment, hostModule, preopens) {
     args: guestArguments(process.platform, args),
     env: { ...process.env, ...environment,
       ...(hostModule ? { CURSIV_WASI_HOST_MODULE: hostModule } : {}),
+      // The actual working directory, also when the caller changed it
+      // without updating its inherited environment.
       PWD: guestPath(process.platform, process.cwd()) },
     preopens,
     returnOnExit: true,

@@ -3,30 +3,79 @@
 // postMessage. The page needs cross-origin isolation for SharedArrayBuffer.
 
 const POOL = 4;                 // pre-started thread workers
-const STDIN_CAPACITY = 1 << 20;
+const STDIN_CAPACITY = 1 << 20; // a power of two: see readStdin in wasi-worker.js
+const HEADER_LIMIT = 4096;      // the most a frame's header may take
 const modules = new Map();      // compiled modules, kept across restarts
 
-// The import section's memory entry: JS does not reflect the maximum, and a
-// shared memory must match it exactly (same reader as tools/wasi-run.mjs).
-function importedMemoryLimits(bytes) {
-  let at = 8;
-  const leb = () => { let v = 0, s = 0, b; do { b = bytes[at++]; v |= (b & 0x7f) << s; s += 7; } while (b & 0x80); return v >>> 0; };
-  const skipName = () => { const n = leb(); at += n; };
+// The import section's memory entry: `flags` then `min` then, when the flags
+// say so, `max`, all LEB128. Bit 0 is "has maximum", bit 1 "shared". JS does
+// not reflect the maximum, and a shared memory must match it exactly. The same
+// reader as tools/wasi-run.mjs, whose tests hold the two to the same answers.
+export function importedMemoryLimits(bytes) {
+  let at = 8;  // past the magic and the version
+  let limit = bytes.length;
+  const byte = () => {
+    if (at >= limit) throw new Error('Truncated WebAssembly import section');
+    return bytes[at++];
+  };
+  const leb = () => {
+    let value = 0;
+    for (let shift = 0; shift <= 28; shift += 7) {
+      const part = byte();
+      if (shift === 28 && part > 0x0f)
+        throw new Error('Invalid WebAssembly u32 LEB128');
+      value += (part & 0x7f) * 2 ** shift;
+      if (!(part & 0x80)) return value;
+    }
+    throw new Error('Invalid WebAssembly u32 LEB128');
+  };
+  const skipLeb = () => {
+    for (let count = 0; count < 10; ++count)
+      if (!(byte() & 0x80)) return;
+    throw new Error('Invalid WebAssembly LEB128');
+  };
+  const name = () => {
+    const length = leb();
+    if (length > limit - at) throw new Error('Truncated WebAssembly import name');
+    at += length;
+  };
+  const valueType = () => {
+    const type = byte();
+    if (type === 0x63 || type === 0x64) skipLeb();  // typed reference + heap type
+  };
+  const skipLimits = () => {
+    const flags = leb();
+    skipLeb();
+    if (flags & 1) skipLeb();
+  };
   while (at < bytes.length) {
-    const id = bytes[at++], size = leb(), end = at + size;
-    if (id !== 2) { at = end; continue; }
+    const id = byte();
+    const size = leb();
+    const end = at + size;
+    if (end > bytes.length) throw new Error('Truncated WebAssembly section');
+    if (id !== 2) { at = end; continue; }          // 2 is the import section
+    limit = end;
     for (let i = leb(); i > 0; --i) {
-      skipName(); skipName();
-      const kind = bytes[at++];
-      if (kind === 0x02) { const flags = leb(), initial = leb(); return { initial, maximum: flags & 1 ? leb() : initial }; }
-      if (kind === 0x00) leb();
-      else if (kind === 0x01) { at++; const f = leb(); leb(); if (f & 1) leb(); }
-      else if (kind === 0x03) at += 2;
-      else at = end;
+      name(); name();
+      const kind = byte();
+      if (kind === 0x02) {                          // 0x02 is a memory import
+        const flags = leb();
+        if (flags & ~0x03)
+          throw new Error('the demo supports wasm32 imported memory only');
+        const initial = leb();
+        return { initial, shared: Boolean(flags & 0x02),
+          ...(flags & 0x01 ? { maximum: leb() } : {}) };
+      }
+      if (kind === 0x00) leb();                     // function: a type index
+      else if (kind === 0x01) { valueType(); skipLimits(); }
+      else if (kind === 0x03) { valueType(); byte(); } // global: type, mutability
+      else if (kind === 0x04) { byte(); leb(); }     // exception tag: attribute, type index
+      else throw new Error(`Unsupported WebAssembly import kind ${kind}`);
     }
     at = end;
+    limit = bytes.length;
   }
-  throw new Error('the module imports no memory');
+  return undefined;
 }
 
 async function loadModule(url) {
@@ -35,7 +84,11 @@ async function loadModule(url) {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      return { module: await WebAssembly.compile(bytes), limits: importedMemoryLimits(bytes), size: bytes.length };
+      const module = await WebAssembly.compile(bytes);
+      // Its threads run in workers, which only a shared memory reaches.
+      const limits = importedMemoryLimits(bytes);
+      if (!limits?.shared) throw new Error(`${url} imports no shared memory: the page runs threaded modules only`);
+      return { module, limits, size: bytes.length };
     })());
     modules.get(url).catch(() => modules.delete(url));
   }
@@ -47,7 +100,7 @@ async function loadModule(url) {
 export async function startServer(url, { env = {}, root = null, files = {}, onLog = () => {}, onExit = () => {} } = {}) {
   if (!crossOriginIsolated) throw new Error('the page is not cross-origin isolated');
   const { module, limits, size } = await loadModule(url);
-  const memory = new WebAssembly.Memory({ ...limits, shared: true });
+  const memory = new WebAssembly.Memory(limits);
 
   const ctl = new Int32Array(new SharedArrayBuffer(4 * (2 + POOL)));
   ctl[0] = 2; ctl[1] = -1; ctl.fill(3, 2);
@@ -94,33 +147,54 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
   await spawn({ role: 'main' });
 
   // The LSP base protocol, framed per worker: a message never spans threads.
+  // A frame the page cannot read ends the session.
   function feed(worker, chunk) {
-    let buf = frames.get(worker) ?? new Uint8Array(0);
-    const merged = new Uint8Array(buf.length + chunk.length);
-    merged.set(buf); merged.set(chunk, buf.length); buf = merged;
-    for (;;) {
-      const head = dec.decode(buf.subarray(0, Math.min(buf.length, 256)));
-      const sep = head.indexOf('\r\n\r\n');
-      if (sep < 0) break;
-      const len = Number(/Content-Length: *(\d+)/i.exec(head.slice(0, sep))[1]);
-      const start = sep + 4;
-      if (buf.length < start + len) break;
-      const message = JSON.parse(dec.decode(buf.subarray(start, start + len)));
-      buf = buf.slice(start + len);
-      for (const listener of listeners) listener(message);
+    const before = frames.get(worker);
+    let buf = chunk;
+    if (before?.length) {
+      buf = new Uint8Array(before.length + chunk.length);
+      buf.set(before); buf.set(chunk, before.length);
     }
-    frames.set(worker, buf);
+    const messages = [];
+    try {
+      for (;;) {
+        const sep = headerEnd(buf);
+        if (sep < 0) break;
+        const length = /^Content-Length: *(\d+)\s*$/im.exec(dec.decode(buf.subarray(0, sep)));
+        if (!length) throw new Error('no Content-Length');
+        const start = sep + 4, end = start + Number(length[1]);
+        if (buf.length < end) break;
+        messages.push(JSON.parse(dec.decode(buf.subarray(start, end))));
+        buf = buf.subarray(end);
+      }
+    } catch (error) {
+      stop(`the server sent a message the page cannot read: ${error.message}`);
+      return;
+    }
+    frames.set(worker, buf.slice());
+    for (const message of messages)
+      for (const listener of listeners) listener(message);
+  }
+  // Where the header's blank line ends, -1 while it has not come.
+  function headerEnd(buf) {
+    for (let i = 0; i + 3 < Math.min(buf.length, HEADER_LIMIT); i++)
+      if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) return i;
+    if (buf.length >= HEADER_LIMIT) throw new Error(`a header past ${HEADER_LIMIT} bytes`);
+    return -1;
   }
 
+  // What the ring has no room for yet, retried by one timer.
   const pending = [];
+  let retry = null;
   function pump() {
+    retry = null;
     while (pending.length && !stopped) {
       const head = Atomics.load(stdinHdr, 0), tail = Atomics.load(stdinHdr, 1);
       const free = STDIN_CAPACITY - ((head - tail) >>> 0);
       const chunk = pending[0];
       const n = Math.min(free, chunk.length);
-      if (n === 0) { setTimeout(pump, 1); return; }
-      for (let k = 0; k < n; k++) stdinBuf[(head + k) % STDIN_CAPACITY] = chunk[k];
+      if (n === 0) { retry = setTimeout(pump, 1); return; }
+      for (let k = 0; k < n; k++) stdinBuf[(head + k) & (STDIN_CAPACITY - 1)] = chunk[k];
       Atomics.store(stdinHdr, 0, (head + n) | 0);
       Atomics.notify(stdinHdr, 0);
       if (n === chunk.length) pending.shift(); else pending[0] = chunk.subarray(n);
@@ -131,7 +205,7 @@ export async function startServer(url, { env = {}, root = null, files = {}, onLo
     if (stopped) return;
     const body = enc.encode(JSON.stringify(message));
     pending.push(enc.encode(`Content-Length: ${body.length}\r\n\r\n`), body);
-    pump();
+    if (!retry) pump();
   }
 
   let nextId = 1;

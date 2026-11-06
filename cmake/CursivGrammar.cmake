@@ -111,18 +111,32 @@ function(cursiv_package_language name)
         "${_licenses}/mimalloc.LICENSE" COPYONLY)
 
     # Refresh the module, runner and notices packaged by the VS Code extension.
+    # The copies are outputs of the server's link, which runs again when one
+    # is missing or when the runner or a notice changed. The runner and
+    # notices are outputs of the first server packaged into a directory only.
+    set(_server "${PROJECT_SOURCE_DIR}/vscode/server")
+    set(_runtime "${CURSIV_SOURCE_ROOT}/tools/wasi-run.mjs"
+        "${_licenses}/cursiv.LICENSE"
+        "${_licenses}/lsp-framework.LICENSE"
+        "${_licenses}/mimalloc.LICENSE")
+    set(_copies "${_server}/${name}_lsp.wasm")
+    get_property(_packaged GLOBAL PROPERTY CURSIV_PACKAGED_SERVER_DIRS)
+    if(NOT _server IN_LIST _packaged)
+      set_property(GLOBAL APPEND PROPERTY CURSIV_PACKAGED_SERVER_DIRS "${_server}")
+      foreach(_file IN LISTS _runtime)
+        cmake_path(GET _file FILENAME _leaf)
+        list(APPEND _copies "${_server}/${_leaf}")
+      endforeach()
+    endif()
     add_custom_command(TARGET ${name}_lsp POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_SOURCE_DIR}/vscode/server"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_server}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:${name}_lsp> "${PROJECT_SOURCE_DIR}/vscode/server/${name}_lsp.wasm"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              "${CURSIV_SOURCE_ROOT}/tools/wasi-run.mjs"
-              "${_licenses}/cursiv.LICENSE"
-              "${_licenses}/lsp-framework.LICENSE"
-              "${_licenses}/mimalloc.LICENSE"
-              "${PROJECT_SOURCE_DIR}/vscode/server"
+              $<TARGET_FILE:${name}_lsp> "${_server}/${name}_lsp.wasm"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_runtime} "${_server}"
+      BYPRODUCTS ${_copies}
       COMMENT "${name}: refreshing vscode/server/${name}_lsp.wasm"
       VERBATIM)
+    set_property(TARGET ${name}_lsp APPEND PROPERTY LINK_DEPENDS ${_runtime})
   endif()
 endfunction()
 
@@ -141,6 +155,16 @@ function(_cursiv_generate_language test_only)
      OR "${ARG_NAMESPACE}" STREQUAL "")
     message(FATAL_ERROR "cursiv_generate_language: ID, GRAMMAR and NAMESPACE are required")
   endif()
+  # Each list reaches the generator as one quoted string of comma-separated
+  # entries, which an entry holding one of these would break.
+  foreach(_list IN ITEMS EXTENSIONS FILE_NAMES)
+    foreach(_entry IN LISTS ARG_${_list})
+      if(_entry MATCHES "[,\"\\]")
+        message(FATAL_ERROR "cursiv_generate_language: ${_list} entry `${_entry}` "
+            "holds a comma, a quote or a backslash, which this list cannot carry")
+      endif()
+    endforeach()
+  endforeach()
   if(test_only AND "${ARG_OUT}" STREQUAL "")
     set(ARG_OUT generated/${ARG_ID}/generated)
   endif()

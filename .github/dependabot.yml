@@ -4,3 +4,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The demo page and the example extensions, each folder's updates grouped in
+  # one pull request a week. The project template is synced by hand, since its
+  # packed copy is generated.
+  - package-ecosystem: npm
+    directories:
+      - /docs/demo
+      - /examples/*/vscode
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns:
+          - "*"
