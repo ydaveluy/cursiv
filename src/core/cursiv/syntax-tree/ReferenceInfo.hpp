@@ -16,7 +16,9 @@ namespace cursiv {
 // No reference member: a site that filters nothing.
 inline constexpr std::uint16_t kNoReference = 0xFFFFu;
 
+struct AstReflection;
 struct Document;
+struct NextFeature;
 
 struct ReferenceInfo {
   const AstNode* container = nullptr;
@@ -45,5 +47,20 @@ struct ReferenceInfo {
   // narrow.
   std::uint8_t narrow = kNoNarrow;
 };
+
+namespace detail {
+
+// The cross-reference `next` fills with `container` at the caret, if its
+// member holds one: what a completion and the MCP candidates both ask the
+// scope with, so the two answer alike. Where the caret opens the rule that
+// writes the member, or the member belongs to a class `container` is not, a
+// node of that class is made for the occasion, as a child of `container`,
+// and `entered` owns it: the answer's `container` holds as long as `entered`
+// does. No caret node answers no scope.
+[[nodiscard]] std::optional<ReferenceInfo> reference_at_caret(
+    const AstReflection& reflection, const Document& document,
+    AstNode* container, const NextFeature& next, AstNodePtr& entered);
+
+}  // namespace detail
 
 }  // namespace cursiv

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -25,11 +26,11 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
 #include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/ServiceRequirement.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/workspace/WorkspaceFolder.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
-#include "cursiv/runtime/ServiceRequirement.hpp"
 #include "cursiv/services/SharedLspServices.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
 
@@ -40,11 +41,12 @@ struct LspServices;
 /**
  * Publishes diagnostics from the build-phase hook: `Linked` clears
  * squiggles a rebuild invalidated, `Validated` publishes every document
- * whose block moved. Snapshots are owed by block identity, so a build
- * cancelled mid-way loses nothing -- the next drain settles the debt.
+ * validated since the last publication, clean or not. A build cancelled
+ * mid-way loses nothing: the next one publishes what it validated.
  */
 class DefaultLanguageServer : public LanguageServer,
                               private BuildPhaseListener,
+                              private DocumentPhaseListener,
                               private ConfigurationSectionListener {
  public:
   explicit DefaultLanguageServer(SharedLspServices& shared) noexcept
@@ -223,16 +225,19 @@ class DefaultLanguageServer : public LanguageServer,
                        std::span<const std::string_view> deleted,
                        cursiv::function_ref<bool()> mutate);
   // `Linked` clears what the rebuild invalidated, `Validated` publishes
-  // what moved; both sweep the store, not the built list, since a
-  // cancelled build's debt sits on documents no later phase carries.
+  // what `onDocumentPhase` recorded.
   void onBuildPhase(DocumentState, std::span<Document* const>,
                     const CancellationToken&) override;
+  // Records each validated document, on the worker that validated it: a
+  // cancelled build reaches no `Validated` phase, and the next build does not
+  // validate its documents again.
+  void onDocumentPhase(Document&, DocumentState,
+                       const CancellationToken&) override;
   void onConfigurationSectionUpdate(std::string_view,
                                     const lsp::LSPAny&) override;
   void clearStaleSnapshots();
-  void publishMovedSnapshots();
-  // One document's announcement, by the block-identity rule: `publish`
-  // only when the client's copy is not this one.
+  void publishValidated();
+  // `publish`, and remember how many diagnostics the client now shows.
   void announceDocument(const Document&);
   // Subscribes to the services installed when the session initializes.
   void hookServices();
@@ -247,16 +252,13 @@ class DefaultLanguageServer : public LanguageServer,
   static void stampVersion(lsp::CodeAction& action, const Document& document);
 
   SharedLspServices& _shared;
-  // What the client was last told, per document; absent = never
-  // announced. Revision alone cannot signal a change: every rung a build
-  // drains carries the same `buildRevision`, so `count` -- which moves
-  // only when the validator appends -- is what says a publication is
-  // owed.
-  struct Announced {
-    std::uint64_t revision = 0;
-    std::size_t count = 0;
-  };
-  std::unordered_map<DocumentId, Announced> _announced;
+  // How many diagnostics the client was last shown, per document; absent =
+  // never published.
+  std::unordered_map<DocumentId, std::size_t> _announced;
+  // The documents validated since the last `Validated` phase, written by the
+  // validating workers.
+  std::mutex _validatedMutex;
+  std::vector<DocumentId> _validated;
   // Whether the client reads a versioned edit: `documentChanges` carries
   // the version each edit was measured against, letting the client
   // refuse a fix clicked after a later keystroke. Asked at the handshake.

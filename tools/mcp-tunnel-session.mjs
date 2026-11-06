@@ -3,7 +3,8 @@
 // Drives the `cursiv/mcp` tunnel over a real LSP session: handshake, then an
 // MCP tools/call through the tunnel, then the acceptance criterion itself -- a
 // didOpen with unsaved text, and the diagnostics the MCP door answers must be
-// the buffer's, not the disk's. Exits 0 when both hold.
+// the buffer's, not the disk's. Exits 0 when both hold and the server then
+// exits cleanly.
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -61,6 +62,17 @@ const mcp = async (id, message) => {
   return answer.result;
 };
 
+// How the server ended: `code 0` is the one clean way. One still running two
+// seconds after the session is killed.
+function serverEnd() {
+  const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(said());
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
+    child.once('exit', () => { clearTimeout(timer); resolve(said()); });
+  });
+}
+
 let failed = false;
 try {
   send({
@@ -110,8 +122,9 @@ try {
   failed = true;
 }
 
-await new Promise((resolve) => {
-  const timer = setTimeout(() => { child.kill(); resolve(); }, 2000);
-  child.on('close', () => { clearTimeout(timer); resolve(); });
-});
+const end = await serverEnd();
+if (end !== 'code 0') {
+  failed = true;
+  console.error(`FAIL: the server ended with ${end}`);
+}
 process.exit(failed ? 1 : 0);

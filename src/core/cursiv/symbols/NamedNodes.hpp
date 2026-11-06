@@ -1,6 +1,7 @@
 // The nodes of a document that own a name node, and who owns whom: the
-// nearest named ancestor is the one nesting rule the outline and the
-// semantic colours must agree on, so it is computed here and read by both.
+// nearest named ancestor is the one nesting rule the outlines -- the editor's
+// and the MCP one -- and the semantic colours must agree on, so it is
+// computed here and read by all of them.
 #pragma once
 
 #include <cstddef>

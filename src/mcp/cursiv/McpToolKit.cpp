@@ -2,6 +2,9 @@
 
 #include <lsp/json/json.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -58,8 +61,28 @@ const json::Value* tool_argument(const json::Value& arguments,
   return arguments.isObject() ? arguments.object().find(key) : nullptr;
 }
 
+namespace {
+
+// A scheme is a letter, then letters, digits, '+', '-' or '.', then ':' --
+// `untitled:Note` and `file:/w/a` as much as `file:///w/a`. One letter is a
+// drive, as in `C:\w`, so a path.
+bool has_scheme(std::string_view text) {
+  const auto letter = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+  };
+  const std::size_t colon = text.find(':');
+  if (colon == std::string_view::npos || colon < 2 || !letter(text.front()))
+    return false;
+  return std::ranges::all_of(text.substr(1, colon - 1), [&](char c) {
+    return letter(c) || (c >= '0' && c <= '9') || c == '+' || c == '-' ||
+           c == '.';
+  });
+}
+
+}  // namespace
+
 std::string tool_file_uri(std::string_view file) {
-  if (file.find("://") != std::string_view::npos) return std::string(file);
+  if (has_scheme(file)) return std::string(file);
   return path_to_file_uri(file);
 }
 
@@ -86,36 +109,94 @@ void append_tool_position(std::string& out, const Document& document,
   out += std::to_string(position.character + 1);
 }
 
+namespace {
+
+McpToolResult cancelled() { return {"the request was cancelled", true}; }
+
+McpToolResult not_held(const std::string& uri) {
+  return {uri + " is not in the workspace; the 'documents' tool lists it",
+          true};
+}
+
+}  // namespace
+
+// `body` runs once, on a document standing at the rung -- and for a workspace
+// requirement, in a workspace standing there too. Every other end is an error
+// the model reads, never an empty answer the caller would word as "nothing
+// found".
 McpToolResult route_document_tool(
-    SharedCoreServices& shared, const std::string& uri, DocumentState rung,
-    const CancellationToken& token,
+    SharedCoreServices& shared, const std::string& uri,
+    ServiceRequirement requirement, const CancellationToken& token,
     cursiv::function_ref<void(const Document&, const CoreServices&,
                               std::string&)>
         body) {
+  const DocumentState rung = requirement.state;
+  const bool workspace =
+      requirement.type == ServiceRequirement::Type::Workspace;
   // The store is a write's to rehash: its lookup is a read like any other,
   // and over before the wait.
   DocumentId id = kNoDocument;
   if (!shared.workspaceLock->read(
-          [&] { id = shared.documents->getDocumentId(uri); }, token,
-          WorkspaceLock::ReadPriority::Immediate))
-    return {"the request was cancelled", true};
-  if (id == kNoDocument)
-    return {uri + " is not in the workspace; the 'documents' tool lists it",
-            true};
-  if (shared.documentBuilder->waitUntil(rung, id, token) !=
-      WaitOutcome::Reached)
-    return {"the document never reached the state this tool reads at", true};
-  std::string out;
-  (void)shared.workspaceLock->read(
-      [&] {
-        const std::shared_ptr<Document> document =
-            shared.documents->getDocument(id);
-        if (document == nullptr || document->state.load() < rung) return;
-        if (document->language == nullptr) return;
-        body(*document, *document->language, out);
-      },
-      token, WorkspaceLock::ReadPriority::Immediate);
-  return {std::move(out)};
+          [&] {
+            if (const std::shared_ptr<Document> document =
+                    shared.documents->getDocument(uri))
+              id = document->id;
+          },
+          token, WorkspaceLock::ReadPriority::Immediate))
+    return cancelled();
+  if (id == kNoDocument) return not_held(uri);
+  const DocumentBuilder& builder = *shared.documentBuilder;
+  for (;;) {
+    const WaitOutcome reached = workspace ? builder.waitUntil(rung, token)
+                                          : builder.waitUntil(rung, id, token);
+    if (reached == WaitOutcome::Cancelled) return cancelled();
+    if (reached != WaitOutcome::Reached)
+      return {"the document never reached the state this tool reads at", true};
+    enum class Admission : std::uint8_t { Behind, Ran, Gone, Lagging };
+    Admission admission = Admission::Behind;
+    std::string out;
+    // The wait's verdict is stale by the time of admission: a write may have
+    // reset the document, or removed it, in between. A document set back is
+    // awaited again; a workspace rung is read under a queued read, which no
+    // write runs beside, so the whole index stands for the whole answer.
+    if (!shared.workspaceLock->read(
+            [&] {
+              const std::shared_ptr<Document> document =
+                  shared.documents->getDocument(id);
+              if (document == nullptr) {
+                admission = Admission::Gone;
+                return;
+              }
+              if (document->language == nullptr) {
+                admission = Admission::Lagging;
+                return;
+              }
+              if (workspace && builder.currentState() < rung) return;
+              // Under a queued read the build is over: a document still
+              // below the workspace's rung was left out of it.
+              if (document->state.load() < rung) {
+                if (workspace) admission = Admission::Lagging;
+                return;
+              }
+              body(*document, *document->language, out);
+              admission = Admission::Ran;
+            },
+            token,
+            workspace ? WorkspaceLock::ReadPriority::Normal
+                      : WorkspaceLock::ReadPriority::Immediate))
+      return cancelled();
+    switch (admission) {
+      case Admission::Ran:
+        return {std::move(out)};
+      case Admission::Gone:
+        return not_held(uri);
+      case Admission::Lagging:
+        return {"the document never reached the state this tool reads at",
+                true};
+      case Admission::Behind:
+        break;
+    }
+  }
 }
 
 }  // namespace cursiv

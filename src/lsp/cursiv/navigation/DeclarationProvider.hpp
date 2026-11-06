@@ -18,8 +18,8 @@ class DeclarationProvider {
   virtual ~DeclarationProvider() noexcept = default;
 
   /**
-   * Called under the workspace read lock. `nullopt` is "nothing here",
-   * which the protocol distinguishes from an empty set.
+   * Called under the workspace read lock. `nullopt` and an empty list both
+   * say nothing is here; the client receives an empty list.
    */
   [[nodiscard]] virtual std::optional<std::vector<lsp::LocationLink>>
   getDeclaration(const Document& document, lsp::Position position,

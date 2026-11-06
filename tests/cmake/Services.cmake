@@ -11,7 +11,7 @@ cursiv_grammar(repairmsg core/validation/RepairMessageGrammar.hpp tmsg::MessageG
 cursiv_test(validation_test core/validation/validation_test.cpp cursiv::lsp wsCore repairmsgGenerated)
 
 cursiv_test(mcp_test mcp/mcp_test.cpp cursiv::lsp cursiv::mcp wsLsp
-    wordslrGenerated)
+    wordslrGenerated caretGenerated docgGenerated multirefGenerated)
 get_target_property(_wsGenDir wsGenerated CURSIV_GENERATED_DIR)
 target_compile_definitions(mcp_test PRIVATE
     CURSIV_WORKSPACE_LANG="${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace"

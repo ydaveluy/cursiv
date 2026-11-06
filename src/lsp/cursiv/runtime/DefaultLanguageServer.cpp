@@ -192,8 +192,10 @@ DefaultLanguageServer::~DefaultLanguageServer() noexcept {
   // Only if this is still the installed builder: a replaced one died
   // with its listener list, so there is nothing to unhook from.
   if (_hookedBuilder != nullptr &&
-      _shared.documentBuilder.get() == _hookedBuilder)
+      _shared.documentBuilder.get() == _hookedBuilder) {
     _hookedBuilder->removeBuildPhaseListener(*this);
+    _hookedBuilder->removeDocumentPhaseListener(*this);
+  }
   if (_hookedConfiguration != nullptr &&
       _shared.configurationProvider.get() == _hookedConfiguration)
     _hookedConfiguration->removeConfigurationListener(*this);
@@ -207,6 +209,7 @@ void DefaultLanguageServer::hookServices() {
   if (DocumentBuilder* const builder = _shared.documentBuilder.get();
       builder != _hookedBuilder) {
     builder->addBuildPhaseListener(*this);
+    builder->addDocumentPhaseListener(*this);
     _hookedBuilder = builder;
   }
   ConfigurationProvider* const configuration =
@@ -619,10 +622,11 @@ void DefaultLanguageServer::updateVersion(Document& document,
                                           std::int64_t version) {
   if (document.textDocument().version() == version) return;
   _shared.documentFactory->attachVersion(document, version);
-  // The bytes did not move, so the block stands; the client hears it again
-  // under the version it now knows the document by.
-  const auto it = _announced.find(document.id);
-  if (it != _announced.end() && it->second.count != 0) publish(document);
+  // The bytes did not move, so a validated verdict stands; the client hears
+  // it again under the version it now knows the document by. A document not
+  // validated yet is published by the build that follows.
+  if (document.state.load() == DocumentState::Validated)
+    announceDocument(document);
 }
 
 // Closing a tab is not deleting a file: wherever the file lives, its saved
@@ -823,10 +827,13 @@ std::optional<lsp::WorkspaceEdit> DefaultLanguageServer::willDeleteFiles(
 // `changes` carries what to edit; `documentChanges` adds the version it
 // was measured against. This restamps the first as the second for a
 // client that announced it can, so a stale click is refused rather
-// than applied at the wrong offsets.
+// than applied at the wrong offsets. An action that wrote its own
+// `documentChanges` keeps them: the client prefers them to `changes`.
 void DefaultLanguageServer::stampVersion(lsp::CodeAction& action,
                                          const Document& document) {
-  if (!action.edit.has_value() || !action.edit->changes.has_value()) return;
+  if (!action.edit.has_value() || !action.edit->changes.has_value() ||
+      action.edit->documentChanges.has_value())
+    return;
   const lsp::DocumentUri self = lsp::Uri::parse(document.uri);
   // The protocol mixes file creations and renames into this list; a quick
   // fix only ever edits text, so only that arm is ever built.
@@ -1390,7 +1397,15 @@ void DefaultLanguageServer::onBuildPhase(DocumentState reached,
   if (reached == DocumentState::Linked)
     clearStaleSnapshots();
   else if (reached == DocumentState::Validated)
-    publishMovedSnapshots();
+    publishValidated();
+}
+
+void DefaultLanguageServer::onDocumentPhase(Document& document,
+                                            DocumentState reached,
+                                            const CancellationToken&) {
+  if (reached != DocumentState::Validated) return;
+  const std::scoped_lock lock(_validatedMutex);
+  _validated.push_back(document.id);
 }
 
 // Clears squiggles measured against a text that may be gone, the
@@ -1406,33 +1421,35 @@ void DefaultLanguageServer::clearStaleSnapshots() {
       publishRemoval(_shared.documents->getDocumentUri(announced->first));
       continue;
     }
-    if (announced->second.count == 0) continue;  // nothing to clear
+    if (announced->second == 0) continue;   // nothing to clear
     if (!d->diagnostics.empty()) continue;  // verdict intact: not stale
     publish(*d);                            // the empty snapshot
-    announced->second = Announced{d->buildRevision, 0};
+    announced->second = 0;
   }
 }
 
-void DefaultLanguageServer::publishMovedSnapshots() {
-  for (const std::shared_ptr<Document>& d : _shared.documents->all())
-    announceDocument(*d);
+// Every document validated since the last drain, once, clean or not. One
+// gone, or set back by a later write, is skipped: its next validation records
+// it again.
+void DefaultLanguageServer::publishValidated() {
+  std::vector<DocumentId> validated;
+  {
+    const std::scoped_lock lock(_validatedMutex);
+    validated.swap(_validated);
+  }
+  std::ranges::sort(validated);
+  const auto repeated = std::ranges::unique(validated);
+  validated.erase(repeated.begin(), repeated.end());
+  for (const DocumentId id : validated) {
+    const std::shared_ptr<Document> d = _shared.documents->getDocument(id);
+    if (d != nullptr && d->state.load() == DocumentState::Validated)
+      announceDocument(*d);
+  }
 }
 
-// Clean is clean whatever the revision did: a document shown no squiggle
-// last time owes the client no second empty publication.
 void DefaultLanguageServer::announceDocument(const Document& document) {
-  const Announced now{document.buildRevision, document.diagnostics.size()};
-  if (const auto it = _announced.find(document.id); it != _announced.end()) {
-    const bool bothClean = it->second.count == 0 && now.count == 0;
-    const bool same =
-        it->second.revision == now.revision && it->second.count == now.count;
-    if (bothClean || same) {
-      it->second = now;
-      return;
-    }
-  }
   publish(document);
-  _announced[document.id] = now;
+  _announced[document.id] = document.diagnostics.size();
 }
 
 void DefaultLanguageServer::publish(const Document& document) const {

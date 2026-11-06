@@ -3,8 +3,10 @@
 #include <lsp/json/json.h>
 #include <lsp/jsonrpc/jsonrpc.h>
 
+#include <algorithm>
 #include <exception>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -65,11 +67,21 @@ McpServer::McpServer(std::string name, std::string version)
     : _name(std::move(name)), _version(std::move(version)) {}
 
 void McpServer::registerTool(McpTool tool, McpToolFunction execute) {
+  if (std::ranges::any_of(_tools, [&](const ToolEntry& entry) {
+        return entry.tool.name == tool.name;
+      }))
+    throw std::invalid_argument("cursiv: a tool named '" + tool.name +
+                                "' is already registered");
   _tools.emplace_back(std::move(tool), std::move(execute));
 }
 
 void McpServer::registerResource(McpResource resource,
                                  McpResourceFunction read) {
+  if (std::ranges::any_of(_resources, [&](const ResourceEntry& entry) {
+        return entry.resource.uri == resource.uri;
+      }))
+    throw std::invalid_argument("cursiv: a resource at '" + resource.uri +
+                                "' is already registered");
   _resources.emplace_back(std::move(resource), std::move(read));
 }
 

@@ -12,7 +12,10 @@ to assistants in VS Code.
 
 **Through stdio.** `<id>_lsp --mcp --folder <dir>` starts a separate MCP
 server on standard input and output. It reads the saved files in `<dir>`, or
-in the current directory without `--folder`.
+in the current directory without `--folder`, as they are when it starts:
+restart it to see later changes on disk.
+
+Request ids are strings or integers that fit in 32 bits.
 
 ## Available tools
 
@@ -24,14 +27,14 @@ in the current directory without `--folder`.
 | `documents` | the documents of the workspace |
 | `text-document-content` | one document's text |
 | `get-diagnostics` | workspace diagnostics, optionally restricted by directory |
-| `validate` | the diagnostics of a text, linked against the workspace and then discarded |
-| `document-symbols` | one document's outline |
+| `validate` | the diagnostics of a text, linked against the workspace and then discarded; every validation category runs |
+| `document-symbols` | one document's outline, nested as in the editor |
 | `symbols` | a name search across the workspace |
 | `references` | every place that refers to a declaration |
 | `hover` | the declaration, type and documentation at a position |
 | `rename` | the edits a rename would make, without checking the language's naming rules |
 | `expected-at` | what may be written at a position |
-| `scope-candidates` | the declarations a reference could resolve to |
+| `scope-candidates` | the declarations each reference at a position could resolve to |
 | `format` | the formatted document text; needs an installed formatter |
 
 None of these tools saves text or applies edits. Each grammar is also a text
@@ -42,8 +45,10 @@ resource at `cursiv://grammar/<languageId>`.
 `grammar` and `rule` take a `languageId`. `validate` takes the `text` and a
 `languageId` or a `file` name, whose extension or name selects the language.
 It needs one of the two even when only one language is registered. With both,
-`languageId` selects the language and `file` names the document. The other
-tools take the `file` path or URI of a document in the workspace.
+`languageId` selects the language and `file` names the document. While
+`validate` runs, its text is part of the workspace, so other requests can see
+its declarations. The other tools take the `file` path or URI of a document
+in the workspace.
 
 Positions use **1-based lines and columns**, with columns in UTF-16 code
 units; ranges exclude their end.
@@ -83,7 +88,17 @@ void install_mcp_service(cursiv::SharedLspServices& sharedServices) {
 }
 ```
 
+A tool about one document can call `route_document_tool` from
+`cursiv/McpToolKit.hpp`. It runs your function once the document reaches a
+`DocumentState`, or once the whole workspace does when you pass a
+`WorkspaceState` such as `WorkspaceState::IndexedReferences`, which a tool
+that reads references needs.
+
 Call `install_mcp_service` from the function that registers your languages
 (`register_lsp_services` in the scaffold), so it runs before the server
 starts. A core-only application derives from `DefaultMcpService`, which has
 the same tools except `format`.
+
+Each tool name and resource URI can be registered once: registering it again
+throws `std::invalid_argument`. To replace or remove a standard tool,
+override the method that registers it, such as `registerRenameTool`.

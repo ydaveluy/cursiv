@@ -98,3 +98,6 @@ options. See [Test your language](../learn/testing.md) for the test setup.
 To format comments, register `onHidden("SL_COMMENT", callback)` with the
 name of your comment terminal; the callback receives a `HiddenNodeFormatter`. The Domainmodel example's
 `DomainModelFormatter` formats both line and block comments.
+
+A comment on its own line takes the indentation of the rules around it. A
+space or a line break asked before a comment does not move it.

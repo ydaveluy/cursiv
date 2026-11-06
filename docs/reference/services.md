@@ -75,7 +75,7 @@ framework, the module generated from your grammar, or nothing.
 | `workspaceManager` | Load the documents of the workspace folders | Framework |
 | `fileSystemProvider` | Read files and folders | An empty file system; the CLI and the language server read the disk |
 | `workspaceLock` | Run workspace updates one at a time, and let requests read the workspace between them | Framework |
-| `taskScheduler` | Run builds in parallel; `CURSIV_WORKERS` sets the number of worker threads | Framework |
+| `taskScheduler` | Run builds in parallel; `CURSIV_WORKERS` sets the number of worker threads. With no worker thread, the language server answers one request at a time and cannot cancel the one it is answering | Framework |
 | `observabilitySink` | Report problems that are not document diagnostics, such as an unreadable file or a check that threw | Standard error |
 
 ### Language core services
@@ -118,30 +118,33 @@ framework, the module generated from your grammar, or nothing.
 ### Language LSP services
 
 The server advertises an editor feature only when its provider is installed.
+It calls a provider once the document has reached the state in the
+**Called at** column, or once every document has, where it says *workspace*.
+See [Document lifecycle](#document-lifecycle).
 
-| Service | Feature | Default |
-|---|---|---|
-| `completionProvider` | Completion | Framework |
-| `hoverProvider` | Hover | Framework |
-| `definitionProvider` | Go to definition | Framework |
-| `referencesProvider` | Find references | Framework |
-| `documentHighlightProvider` | Highlight related occurrences | Framework |
-| `renameProvider` | Rename | Framework |
-| `documentSymbolProvider` | Document outline | Framework |
-| `foldingRangeProvider` | Folding | Framework |
-| `selectionRangeProvider` | Expand selection | Framework |
-| `semanticTokenProvider` | Semantic highlighting, see [Editor integration](../learn/editor-integration.md) | None |
-| `codeActionProvider` | Quick fixes | Framework |
-| `formatter` | Formatting rules, see [Formatting](../recipes/formatting.md) | None |
-| `declarationProvider` | Go to declaration | None |
-| `typeDefinitionProvider` | Go to type definition | None |
-| `implementationProvider` | Go to implementation | None |
-| `callHierarchyProvider` | Call hierarchy | None |
-| `typeHierarchyProvider` | Type hierarchy | None |
-| `signatureHelpProvider` | Signature help | None |
-| `inlayHintProvider` | Inlay hints | None |
-| `documentLinkProvider` | Document links | None |
-| `codeLensProvider` | Code lenses | None |
+| Service | Feature | Called at | Default |
+|---|---|---|---|
+| `completionProvider` | Completion | `Linked` | Framework |
+| `hoverProvider` | Hover | `Linked` | Framework |
+| `definitionProvider` | Go to definition | `Linked` | Framework |
+| `referencesProvider` | Find references | `IndexedReferences`, workspace | Framework |
+| `documentHighlightProvider` | Highlight related occurrences | `IndexedReferences`, workspace | Framework |
+| `renameProvider` | Rename | `IndexedReferences`, workspace | Framework |
+| `documentSymbolProvider` | Document outline | `Parsed` | Framework |
+| `foldingRangeProvider` | Folding | `Parsed` | Framework |
+| `selectionRangeProvider` | Expand selection | `Parsed` | Framework |
+| `semanticTokenProvider` | Semantic highlighting, see [Editor integration](../learn/editor-integration.md) | `Linked` | None |
+| `codeActionProvider` | Quick fixes | `Validated` | Framework |
+| `formatter` | Formatting rules, see [Formatting](../recipes/formatting.md) | `Parsed` | None |
+| `declarationProvider` | Go to declaration | `Linked` | None |
+| `typeDefinitionProvider` | Go to type definition | `Linked` | None |
+| `implementationProvider` | Go to implementation | `IndexedReferences`, workspace | None |
+| `callHierarchyProvider` | Call hierarchy | `IndexedReferences`, workspace | None |
+| `typeHierarchyProvider` | Type hierarchy | `IndexedReferences`, workspace | None |
+| `signatureHelpProvider` | Signature help | `IndexedReferences` | None |
+| `inlayHintProvider` | Inlay hints | `IndexedReferences` | None |
+| `documentLinkProvider` | Document links | `Parsed` | None |
+| `codeLensProvider` | Code lenses | `IndexedReferences` | None |
 
 ## Customize completion
 

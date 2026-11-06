@@ -225,10 +225,24 @@ class PendingRequests {
   std::size_t _count = 0;
 };
 
-// However the body ends, it leaves.
-struct LeaveOnExit {
-  PendingRequests& requests;
-  ~LeaveOnExit() { requests.leave(); }
+// A request's place among the pending ones, held by the task that answers it:
+// given back however the task ends, run or dropped unrun by the endpoint.
+class PendingSeat {
+ public:
+  explicit PendingSeat(PendingRequests& requests) : _requests(&requests) {
+    requests.enter();
+  }
+  PendingSeat(PendingSeat&& other) noexcept
+      : _requests(std::exchange(other._requests, nullptr)) {}
+  PendingSeat(const PendingSeat&) = delete;
+  PendingSeat& operator=(const PendingSeat&) = delete;
+  PendingSeat& operator=(PendingSeat&&) = delete;
+  ~PendingSeat() {
+    if (_requests != nullptr) _requests->leave();
+  }
+
+ private:
+  PendingRequests* _requests;
 };
 
 struct Session {
@@ -238,7 +252,6 @@ struct Session {
   PendingRequests& pending;
   // False when the host gives no threads: every body runs on the read loop.
   bool pooled;
-  bool initialized = false;
   bool shutdownRequested = false;
   bool definitionLinks = false;
   bool declarationLinks = false;
@@ -305,13 +318,11 @@ auto request(Session& session, Call call) {
           serve<Result>(session.queue, behind, kNoCancel, call,
                         std::forward<decltype(params)>(params)));
     auto task = lsp::TaskFunction<Result>(
-        [&queue = session.queue, &requests = session.pending,
-         call, behind, token = lsp::RequestContext::get().stopToken(),
+        [&queue = session.queue, seat = PendingSeat(session.pending), call,
+         behind, token = lsp::RequestContext::get().stopToken(),
          params = std::forward<decltype(params)>(params)]() mutable {
-          const LeaveOnExit leave{requests};
           return serve<Result>(queue, behind, token, call, std::move(params));
         });
-    session.pending.enter();
     return lsp::RequestResult<Result>(std::move(task));
   };
 }
@@ -321,7 +332,6 @@ void add_lifecycle_handlers(Session& session, SharedCoreServices& shared) {
   LanguageServer& server = session.server;
   endpoint.onInitialize([&session,
                          &server](const lsp::InitializeParams& params) {
-    session.initialized = true;
     if (params.capabilities.textDocument.has_value()) {
       const auto& text = *params.capabilities.textDocument;
       session.definitionLinks =
@@ -902,7 +912,8 @@ void add_custom_handlers(Session& session) {
     session.endpoint.onCustomNotification(
         method,
         [&session, post = std::move(post)](lsp::json::Value&& params) mutable {
-          if (!session.initialized || session.shutdownRequested) return;
+          if (!session.endpoint.isInitialized() || session.shutdownRequested)
+            return;
           post(std::move(params));
         });
   }

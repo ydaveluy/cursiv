@@ -26,6 +26,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -64,6 +65,7 @@
 #include "cursiv/workspace/WorkspaceLock.hpp"
 #include "cursiv/workspace/WorkspaceManager.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
+#include "cursiv/actions/CodeActionProvider.hpp"
 #include "cursiv/completion/CompletionProvider.hpp"
 #include "cursiv/completion/CompletionProviderOptions.hpp"
 #include "cursiv/content/DefaultTextDocumentContentProvider.hpp"
@@ -579,7 +581,9 @@ void the_file_operations_are_the_handlers_own() {
 }
 
 // A tab opened on a broken text is diagnosed; the keystroke that repairs it
-// publishes the empty snapshot that clears the squiggle.
+// publishes the empty snapshot that clears the squiggle. Every later
+// validation publishes too, clean or not: the client can tell "still clean"
+// from "not validated yet".
 void an_edit_republishes_what_it_repaired() {
   const World world;
   (void)world.handshake();
@@ -592,6 +596,12 @@ void an_edit_republishes_what_it_repaired() {
   const lsp::PublishDiagnosticsParams* repaired = lastSnapshot(*world.client);
   CHECK(repaired != nullptr && repaired->diagnostics.empty());
   CHECK(repaired->version.has_value() && *repaired->version == 2);
+
+  const std::size_t before = world.client->published.size();
+  world.change(3, "datatype Other\n");
+  CHECK(world.client->published.size() == before + 1);
+  const lsp::PublishDiagnosticsParams* clean = lastSnapshot(*world.client);
+  CHECK(clean != nullptr && clean->diagnostics.empty() && clean->version == 3);
 }
 
 using support::CountingParser;
@@ -624,6 +634,70 @@ void opening_parses_once_and_unchanged_edits_keep_the_tree() {
   world.change(1, kRepaired);
   CHECK(document->textDocument().getText() == broken);
   CHECK(document->textDocument().version() == 2);
+}
+
+// Two actions over one text edit: one in `changes` alone, one that also wrote
+// its own `documentChanges` -- a file to create first, then the edit.
+struct ShapedActions final : cursiv::CodeActionProvider {
+  [[nodiscard]] std::vector<lsp::CodeAction> getCodeActions(
+      const cursiv::Document& document, const lsp::CodeActionParams&,
+      const cursiv::CancellationToken&) const override {
+    const lsp::DocumentUri uri = lsp::Uri::parse(document.uri);
+    const lsp::TextEdit x{.range = {}, .newText = std::string("x")};
+    std::vector<lsp::CodeAction> actions(2);
+    actions[0].title = "plain";
+    actions[0].edit.emplace().changes.emplace()[uri].push_back(x);
+    actions[1].title = "written";
+    lsp::WorkspaceEdit& written = actions[1].edit.emplace();
+    written.changes.emplace()[uri].push_back(x);
+    lsp::CreateFile created;
+    created.uri = lsp::Uri::parse("file:///w/new.ws");
+    lsp::TextDocumentEdit edit;
+    edit.textDocument.uri = uri;
+    edit.edits.emplace_back(x);
+    written.documentChanges.emplace().emplace_back(std::move(created));
+    written.documentChanges->emplace_back(std::move(edit));
+    return actions;
+  }
+};
+
+// For a client that reads `documentChanges`, an action's bare `changes` go out
+// there with the version they were measured against. An action that wrote its
+// own `documentChanges` keeps them as written, and its `changes` with them.
+void a_code_action_keeps_the_document_changes_it_wrote() {
+  World world;
+  world.ws->codeActionProvider = std::make_unique<const ShapedActions>();
+  lsp::InitializeParams params;
+  params.capabilities.workspace.emplace()
+      .workspaceEdit.emplace()
+      .documentChanges = true;
+  (void)world.handshake(params);
+  world.open(kRepaired);
+  lsp::CodeActionParams asked;
+  asked.textDocument.uri = lsp::Uri::parse(kUri);
+  const std::vector<lsp::CodeAction> actions = world.server().codeAction(asked);
+  CHECK(actions.size() == 2);
+  if (actions.size() != 2) return;
+
+  const lsp::WorkspaceEdit& plain = *actions[0].edit;
+  CHECK(!plain.changes.has_value());
+  CHECK(plain.documentChanges.has_value() &&
+        plain.documentChanges->size() == 1);
+  if (plain.documentChanges.has_value() && plain.documentChanges->size() == 1) {
+    const auto* versioned =
+        std::get_if<lsp::TextDocumentEdit>(&plain.documentChanges->front());
+    CHECK(versioned != nullptr && !versioned->textDocument.version.isNull() &&
+          versioned->textDocument.version.value() == 1);
+  }
+
+  const lsp::WorkspaceEdit& written = *actions[1].edit;
+  CHECK(written.changes.has_value());
+  CHECK(written.documentChanges.has_value() &&
+        written.documentChanges->size() == 2);
+  if (written.documentChanges.has_value() &&
+      written.documentChanges->size() == 2)
+    CHECK(std::holds_alternative<lsp::CreateFile>(
+        written.documentChanges->front()));
 }
 
 void requests_use_the_language_attached_to_an_untitled_document() {
@@ -1106,7 +1180,9 @@ void every_notification_writes_durably() {
 }
 
 // An open on bytes the scan already read installs nothing, and still builds:
-// the build is what carries a document a cut build left behind.
+// the build is what carries a document a cut build left behind. The client
+// hears the verdict after its open either way, clean or not, and a document
+// validated by a cut build is published by the next one.
 void an_open_on_known_bytes_still_builds() {
   const World world(true);
   world.disk->addFile(std::string(kUri), std::string(kRepaired));
@@ -1120,8 +1196,50 @@ void an_open_on_known_bytes_still_builds() {
   });
   CHECK(document->state.load() == cursiv::DocumentState::Changed);
 
+  std::size_t before = world.client->published.size();
   world.open(kRepaired);
   CHECK(document->state.load() == cursiv::DocumentState::Validated);
+  CHECK(world.client->published.size() == before + 1);
+  const lsp::PublishDiagnosticsParams* opened = lastSnapshot(*world.client);
+  CHECK(opened != nullptr && opened->diagnostics.empty() &&
+        opened->version == 1);
+
+  // Same bytes, a new version: nothing is rebuilt, the clean verdict is
+  // published under the version the client now knows.
+  before = world.client->published.size();
+  world.change(2, kRepaired);
+  CHECK(world.client->published.size() == before + 1);
+  const lsp::PublishDiagnosticsParams* restamped = lastSnapshot(*world.client);
+  CHECK(restamped != nullptr && restamped->diagnostics.empty() &&
+        restamped->version == 2);
+
+  struct CutValidation final : cursiv::DocumentPhaseListener {
+    cursiv::WorkspaceLock& lock;
+    bool cut = false;
+    explicit CutValidation(cursiv::WorkspaceLock& value) : lock(value) {}
+    void onDocumentPhase(cursiv::Document&, cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (reached == cursiv::DocumentState::Validated && !cut) {
+        cut = true;
+        lock.cancelWrite();
+      }
+    }
+  };
+  const World cutWorld(true);
+  constexpr std::string_view kScanned = "file:///w/b.ws";
+  cutWorld.disk->addFile(std::string(kScanned), "datatype Other\n");
+  CutValidation cut(*cutWorld.shared.workspaceLock);
+  cutWorld.shared.documentBuilder->addDocumentPhaseListener(cut);
+  (void)cutWorld.handshake(cutWorld.folderParams());
+  cutWorld.shared.documentBuilder->removeDocumentPhaseListener(cut);
+  CHECK(cut.cut);
+  CHECK(cutWorld.shared.documents->getDocument(kScanned)->state.load() ==
+        cursiv::DocumentState::Validated);
+  CHECK(lastSnapshotOf(*cutWorld.client, kScanned) == nullptr);
+  cutWorld.open(kRepaired);
+  const lsp::PublishDiagnosticsParams* owed =
+      lastSnapshotOf(*cutWorld.client, kScanned);
+  CHECK(owed != nullptr && owed->diagnostics.empty());
 }
 
 // A command runs with no lock held, so one that writes to the workspace
@@ -1192,6 +1310,7 @@ void run() {
   the_file_operations_are_the_handlers_own();
   an_edit_republishes_what_it_repaired();
   opening_parses_once_and_unchanged_edits_keep_the_tree();
+  a_code_action_keeps_the_document_changes_it_wrote();
   requests_use_the_language_attached_to_an_untitled_document();
   opening_can_override_the_language_of_an_existing_document();
   opening_uses_the_document_factorys_construction_hook();
@@ -1269,7 +1388,10 @@ struct Server final : cursiv::DefaultLanguageServer {
   std::atomic<bool> openCancelled{false};
   mutable std::atomic<unsigned> symbols{0};
   std::promise<std::string> foldersAdded;
+  bool refuseFirstInitialize = false;
   lsp::InitializeResult initialize(const lsp::InitializeParams&) override {
+    if (std::exchange(refuseFirstInitialize, false))
+      throw std::runtime_error("not now");
     return {};
   }
   void didChangeWorkspaceFolders(
@@ -1440,11 +1562,12 @@ void a_message_on_the_wire_is_well_formed() {
 }
 
 // Methods the protocol does not define reach the language as the standard ones
-// do: refused or dropped outside the session, and given the one value the
-// client sent.
+// do: refused or dropped outside the session, a session whose `initialize`
+// failed included, and given the one value the client sent.
 void custom_methods_reach_the_language() {
   std::promise<std::string> heard;
   Session s([&](Server& server) {
+    server.refuseFirstInitialize = true;
     server.onRequest("x/echo", [](const lsp::LSPAny& value,
                                   const cursiv::CancellationToken&) {
       return value;
@@ -1457,6 +1580,13 @@ void custom_methods_reach_the_language() {
   const auto refused = s.answer().get();
   CHECK(refused.error.has_value() && refused.error->code == -32002);
   s.notify("x/note", "[0]");
+  s.request(1, "initialize",
+            R"({"processId":null,"rootUri":null,"capabilities":{}})");
+  CHECK(s.answer().get().error.has_value());
+  s.notify("x/note", "[1]");
+  s.request(2, "x/echo", "[1]");
+  const auto stillRefused = s.answer().get();
+  CHECK(stillRefused.error.has_value() && stillRefused.error->code == -32002);
   s.initialize();
 
   const auto read = [&] {

@@ -2,31 +2,42 @@
 // the errors JSON-RPC owes -- and the default tools over a real workspace, with
 // and without the lsp storey's formatter.
 
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <lsp/json/json.h>
 #include <lsp/types.h>
 
+#include "cursiv/references/DefaultLinker.hpp"
+#include "cursiv/references/DefaultScopeComputation.hpp"
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
+#include "cursiv/validation/ValidationCategory.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
+#include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentState.hpp"
 #include "cursiv/workspace/Documents.hpp"
+#include "cursiv/workspace/ServiceRequirement.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
+#include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/mcp/LspMcpService.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
@@ -34,6 +45,10 @@
 #include "cursiv/McpServer.hpp"
 #include "cursiv/McpToolKit.hpp"
 #include "cursiv/Check.hpp"
+#include "caret/generated/Caret/Module.hpp"
+#include "doc/generated/DocG/Module.hpp"
+#include "multiref/generated/MultiG/Module.hpp"
+#include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "wordslr/generated/Lr/Module.hpp"
 #include "workspace/core/ast.hpp"
@@ -277,6 +292,28 @@ void a_resource_is_listed_and_read() {
   CHECK(code != nullptr && code->isInteger() && code->integer() == -32002);
 }
 
+// One entry per name: a second one would be listed and never called.
+void a_name_is_registered_once() {
+  cursiv::McpServer server = make();
+  const auto first = [](const json::Value&, const cursiv::CancellationToken&) {
+    return cursiv::McpToolResult{"first"};
+  };
+  const auto text = [] { return std::string("text"); };
+  server.registerTool({.name = "echo"}, first);
+  server.registerResource({.uri = "cursiv://x", .name = "x"}, text);
+  CHECK(support::throws<std::invalid_argument>(
+      [&] { server.registerTool({.name = "echo"}, first); }));
+  CHECK(support::throws<std::invalid_argument>([&] {
+    server.registerResource({.uri = "cursiv://x", .name = "y"}, text);
+  }));
+  const json::Value tools =
+      ask(server, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+  CHECK(find(*find(tools, "result"), "tools")->array().size() == 1);
+  const json::Value resources =
+      ask(server, R"({"jsonrpc":"2.0","id":2,"method":"resources/list"})");
+  CHECK(find(*find(resources, "result"), "resources")->array().size() == 1);
+}
+
 }  // namespace
 
 void run() {
@@ -293,6 +330,7 @@ void run() {
   malformed_json_is_a_parse_error();
   a_batch_is_refused();
   a_resource_is_listed_and_read();
+  a_name_is_registered_once();
 }
 
 }  // namespace mcp_server
@@ -320,11 +358,68 @@ struct GeneratedModule {
       &ws::generated::Workspace::create_grammar_source;
 };
 
+constexpr GeneratedModule kCaret{
+    &tcaret::generated::Caret::create_parser,
+    &tcaret::generated::Caret::create_ast_reflection,
+    &tcaret::generated::Caret::create_grammar_source};
+constexpr GeneratedModule kDoc{&fdoc::generated::DocG::create_parser,
+                               &fdoc::generated::DocG::create_ast_reflection,
+                               &fdoc::generated::DocG::create_grammar_source};
+constexpr GeneratedModule kMultiRef{
+    &fmulti::generated::MultiG::create_parser,
+    &fmulti::generated::MultiG::create_ast_reflection,
+    &fmulti::generated::MultiG::create_grammar_source};
+
+// The workspace's lock, with a hook around each read the test thread makes
+// outside a write: what puts a write, or a refusal, between a tool's wait and
+// its read. Reads are ranked from 1.
+struct HookedLock final : cursiv::WorkspaceLock {
+  explicit HookedLock(std::unique_ptr<cursiv::WorkspaceLock> wrapped)
+      : inner(std::move(wrapped)) {}
+
+  void write(WriteAction action, WriteMode mode) override {
+    const bool mine = std::this_thread::get_id() == owner;
+    if (mine) ++writing;
+    struct Leave {
+      bool mine;
+      int& writing;
+      ~Leave() {
+        if (mine) --writing;
+      }
+    } leave{mine, writing};
+    inner->write(action, mode);
+  }
+  [[nodiscard]] bool read(ReadAction action,
+                          const cursiv::CancellationToken& token,
+                          ReadPriority priority) override {
+    if (std::this_thread::get_id() != owner || writing != 0)
+      return inner->read(action, token, priority);
+    const int rank = ++reads;
+    // A refusal is what a cancelled wait answers.
+    if (before && !before(rank)) return false;
+    const bool admitted = inner->read(action, token, priority);
+    if (after) after(rank);
+    return admitted;
+  }
+  void settle() override { inner->settle(); }
+  [[nodiscard]] bool settled() const override { return inner->settled(); }
+  void cancelWrite() override { inner->cancelWrite(); }
+
+  std::unique_ptr<cursiv::WorkspaceLock> inner;
+  std::thread::id owner = std::this_thread::get_id();
+  int writing = 0;
+  int reads = 0;
+  std::function<bool(int)> before;
+  std::function<void(int)> after;
+};
+
 struct World : support::World<> {
   World() { addLanguage("workspace", {".ws"}); }
 
-  void addLanguage(std::string id, std::vector<std::string> extensions,
-                   std::string diagnostic = {}, GeneratedModule from = {}) {
+  void addLanguage(
+      std::string id, std::vector<std::string> extensions,
+      std::string diagnostic = {}, GeneratedModule from = {},
+      const std::function<void(cursiv::CoreServices&)>& tweak = {}) {
     (void)support::add_language<cursiv::CoreServices>(
         shared, {std::move(id), std::move(extensions), {}}, from.parser(),
         from.reflection(), [&](cursiv::CoreServices& language) {
@@ -337,7 +432,15 @@ struct World : support::World<> {
                   accept.accept(cursiv::TextRange{0, 0},
                                 cursiv::DiagnosticSeverity::Warning, message);
                 });
+          if (tweak) tweak(language);
         });
+  }
+
+  HookedLock& hook() {
+    auto hooked = std::make_unique<HookedLock>(std::move(shared.workspaceLock));
+    HookedLock& lock = *hooked;
+    shared.workspaceLock = std::move(hooked);
+    return lock;
   }
 
   void build(
@@ -517,18 +620,23 @@ void documents_list_the_store() {
   cursiv::McpServer server = make_server();
   const Answer answer = call_tool(server, "documents", "{}");
   CHECK(!answer.isError);
-  CHECK(contains(answer.text, "a.ws  on disk"));
+  CHECK(contains(answer.text, "a.ws  closed"));
   CHECK(contains(answer.text, "b.ws"));
   CHECK(contains(answer.text, "1 diagnostic(s)"));
 }
 
-// The asymmetry closer: what the workspace holds is readable, disk or not.
+// The asymmetry closer: what the workspace holds is readable, disk or not --
+// under a uri with no authority too.
 void text_document_content_serves_the_held_text() {
   World own;
   own.build({{kA, "datatype D\nentity A { x : D }\n"},
-             {"file:///w/a%23b%3Fc%25d.ws", "entity P { }\n"}});
+             {"file:///w/a%23b%3Fc%25d.ws", "entity P { }\n"},
+             {"untitled:Note.ws", "entity N { }\n"}});
   const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
   cursiv::McpServer server = std::move(*service.createServer());
+  const Answer untitled = call_tool(server, "text-document-content",
+                                    R"({"file":"untitled:Note.ws"})");
+  CHECK(!untitled.isError && untitled.text == "entity N { }\n");
   const Answer text = call_tool(server, "text-document-content",
                                 R"({"file":"file:///w/a.ws"})");
   CHECK(!text.isError);
@@ -849,6 +957,329 @@ void a_wrong_call_reports_inside_the_result() {
   CHECK(contains(stranger.text, "not in the workspace"));
 }
 
+// A tool whose read never happened says so, rather than answer an empty
+// finding: a refused read, a document removed or set back between the wait
+// and the read. `validate` reads inside the write that built its text.
+void a_tool_that_read_nothing_says_so() {
+  World own;
+  own.build({{kA, "datatype D\nentity A { x : D }\n"},
+             {kB, "datatype E\n"},
+             {kC, "datatype F\n"}});
+  HookedLock& lock = own.hook();
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  // A positional tool reads three times: the id, the wait's handle, then the
+  // admission.
+  const auto at_admission = [&](std::function<void()> meanwhile) {
+    lock.reads = 0;
+    lock.before = [meanwhile = std::move(meanwhile)](int rank) {
+      if (rank == 3) meanwhile();
+      return true;
+    };
+  };
+
+  lock.reads = 0;
+  lock.before = [](int rank) { return rank != 3; };
+  const Answer refused = call_tool(
+      *server, "hover", R"({"file":"file:///w/a.ws","line":2,"column":16})");
+  CHECK(refused.isError && contains(refused.text, "cancelled"));
+
+  // A workspace tool reads once.
+  for (const auto& [tool, arguments] :
+       {std::pair{"get-diagnostics", "{}"}, std::pair{"symbols", "{}"},
+        std::pair{"documents", "{}"},
+        std::pair{"text-document-content", R"({"file":"file:///w/a.ws"})"}}) {
+    lock.reads = 0;
+    lock.before = [](int rank) { return rank != 1; };
+    const Answer unread = call_tool(*server, tool, arguments);
+    CHECK(unread.isError && contains(unread.text, "cancelled"));
+  }
+
+  lock.reads = 0;
+  lock.before = [](int rank) { return rank != 3; };
+  const Answer broken = call_tool(
+      *server, "validate",
+      R"({"text":"entity E { v : Nope }\n","languageId":"workspace"})");
+  CHECK(!broken.isError && contains(broken.text, "[error at 1:"));
+
+  at_admission([&] {
+    own.shared.workspaceLock->write(
+        [&](const cursiv::CancellationToken& token) {
+          const std::string_view gone[] = {kB};
+          own.shared.documentBuilder->update({}, gone, token);
+        });
+  });
+  const Answer removed = call_tool(
+      *server, "hover", R"({"file":"file:///w/b.ws","line":1,"column":10})");
+  CHECK(removed.isError && contains(removed.text, "not in the workspace"));
+
+  at_admission([&] {
+    own.shared.workspaceLock->write([&](const cursiv::CancellationToken&) {
+      own.shared.documentBuilder->resetToState(
+          *own.shared.documents->getDocument(kC),
+          cursiv::DocumentState::Changed);
+    });
+  });
+  const Answer reset = call_tool(
+      *server, "hover", R"({"file":"file:///w/c.ws","line":1,"column":10})");
+  CHECK(reset.isError);
+  lock.before = {};
+}
+
+// `references` reads every document's index, so it waits for the whole
+// workspace: a document already indexed does not answer while another one
+// that names it is still linking.
+void references_wait_for_the_whole_workspace() {
+  World own;
+  own.build({{kA, "datatype D\n"}, {kB, "entity B { y : D }\n"}});
+  struct Hold final : cursiv::DocumentPhaseListener {
+    std::mutex mutex;
+    std::condition_variable moved;
+    bool holding = false;
+    bool released = false;
+    void onDocumentPhase(cursiv::Document& document,
+                         cursiv::DocumentState reached,
+                         const cursiv::CancellationToken&) override {
+      if (document.uri != kB || reached != cursiv::DocumentState::Linked)
+        return;
+      std::unique_lock lock(mutex);
+      holding = true;
+      moved.notify_all();
+      moved.wait(lock, [&] { return released; });
+    }
+    void release() {
+      {
+        const std::scoped_lock lock(mutex);
+        released = true;
+      }
+      moved.notify_all();
+    }
+  } hold;
+  HookedLock& lock = own.hook();
+  own.shared.documentBuilder->addDocumentPhaseListener(hold);
+  std::thread writer([&] {
+    own.shared.workspaceLock->write(
+        [&](const cursiv::CancellationToken& token) {
+          const std::string_view changed[] = {kA, kB};
+          own.shared.documentBuilder->update(changed, {}, token);
+        });
+  });
+  {
+    std::unique_lock wait(hold.mutex);
+    hold.moved.wait(wait, [&] { return hold.holding; });
+  }
+  // B is let go once the tool has read, or once it has waited a while: a
+  // tool that awaited `a.ws` alone has read by then, with B unindexed.
+  lock.reads = 0;
+  lock.after = [&](int rank) {
+    if (rank == 3) hold.release();
+  };
+  std::thread release([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    hold.release();
+  });
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer =
+      call_tool(*server, "references",
+                R"({"file":"file:///w/a.ws","line":1,"column":10})");
+  release.join();
+  writer.join();
+  lock.after = {};
+  own.shared.documentBuilder->removeDocumentPhaseListener(hold);
+  CHECK(!answer.isError);
+  CHECK(contains(answer.text, "b.ws:1:"));
+}
+
+// Every category runs, not only those an edit runs: the verdict is whole.
+void validate_runs_every_category() {
+  World own;
+  own.addLanguage(
+      "slowed", {".slowed"}, {}, {}, [](cursiv::CoreServices& language) {
+        language.validationRegistry->registerAfterDocument(
+            [](const cursiv::Document&, cursiv::ValidationAcceptor& accept,
+               const cursiv::CancellationToken&) {
+              accept.accept(cursiv::TextRange{0, 0},
+                            cursiv::DiagnosticSeverity::Warning,
+                            "slow check ran");
+            },
+            &cursiv::slow);
+      });
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer = call_tool(
+      *server, "validate", R"({"text":"datatype D\n","languageId":"slowed"})");
+  CHECK(!answer.isError && contains(answer.text, "slow check ran"));
+  CHECK(own.shared.documents->all().empty());
+}
+
+// A document keeps the language it was opened with, whatever its uri says:
+// the documentation of a declaration under a uri no extension routes is its
+// language's still.
+void hover_reads_the_language_the_document_was_opened_with() {
+  World own;
+  constexpr std::string_view kBare = "file:///w/bare";
+  own.shared.workspaceLock->write([&](const cursiv::CancellationToken& token) {
+    own.shared.documents->addDocument(
+        own.shared.documentFactory->fromTextDocument(
+            cursiv::TextDocument::create(
+                std::string(kBare), "workspace", 0,
+                "/** The data type. */\ndatatype D\nentity A { x : D }\n"),
+            token));
+    const std::string_view changed[] = {kBare};
+    own.shared.documentBuilder->update(changed, {}, token);
+  });
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer = call_tool(
+      *server, "hover", R"({"file":"file:///w/bare","line":3,"column":16})");
+  CHECK(!answer.isError && contains(answer.text, "The data type."));
+}
+
+// A description built by hand has no record: its document is named, a
+// position is not.
+void symbols_name_a_symbol_without_a_record() {
+  World own;
+  own.addLanguage(
+      "synthetic", {".syn"}, {}, {}, [](cursiv::CoreServices& language) {
+        struct Synthetic final : cursiv::DefaultScopeComputation {
+          using DefaultScopeComputation::DefaultScopeComputation;
+          [[nodiscard]] std::vector<cursiv::AstNodeDescription>
+          collectExportedSymbols(
+              const cursiv::Document& document,
+              const cursiv::CancellationToken& token) const override {
+            auto exported = DefaultScopeComputation::collectExportedSymbols(
+                document, token);
+            exported.push_back(
+                {.name = "Synthetic", .documentId = document.id});
+            return exported;
+          }
+        };
+        language.scopeComputation = std::make_unique<Synthetic>(language);
+      });
+  own.build({{"file:///w/s.syn", "datatype D\n"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer answer =
+      call_tool(*server, "symbols", R"({"query":"Synthetic"})");
+  CHECK(!answer.isError);
+  CHECK(answer.text == "Synthetic  file:///w/s.syn\n");
+}
+
+// One name binding two declarations: each site is listed once, as the
+// editor's references and rename list them.
+void a_site_two_targets_share_is_listed_once() {
+  World own;
+  own.addLanguage("multiref", {".mref"}, {}, kMultiRef);
+  own.build({{"file:///w/q.mref", "SELECT t FROM t, t"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const auto count = [](const std::string& text, std::string_view needle) {
+    std::size_t n = 0;
+    for (std::size_t at = text.find(needle); at != std::string::npos;
+         at = text.find(needle, at + 1))
+      ++n;
+    return n;
+  };
+  const Answer references =
+      call_tool(*server, "references",
+                R"({"file":"file:///w/q.mref","line":1,"column":8})");
+  CHECK(!references.isError && contains(references.text, "2 target(s)"));
+  CHECK(count(references.text, "q.mref:1:8\n") == 1);
+  CHECK(count(references.text, "q.mref:") == 3);
+  const Answer rename = call_tool(
+      *server, "rename",
+      R"({"file":"file:///w/q.mref","line":1,"column":8,"newName":"u"})");
+  CHECK(!rename.isError && count(rename.text, "q.mref:1:8-1:9") == 1);
+  CHECK(count(rename.text, "q.mref:") == 3);
+}
+
+// The outline nests each name under its nearest named ancestor, through
+// containers that have none, as the editor's does; past its depth it says
+// how much it leaves out.
+void document_symbols_climb_through_unnamed_containers() {
+  World own;
+  own.addLanguage("doc", {".doc"}, {}, kDoc);
+  std::string deep;
+  for (int i = 0; i < 20; ++i) deep += R"({"k": )";
+  deep += '1';
+  for (int i = 0; i < 20; ++i) deep += '}';
+  own.build({{"file:///w/n.doc", R"({"a": {"b": 1}, "c": [{"d": 2}]})"},
+             {"file:///w/deep.doc", deep}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const Answer nested =
+      call_tool(*server, "document-symbols", R"({"file":"file:///w/n.doc"})");
+  CHECK(!nested.isError);
+  CHECK(contains(nested.text, "\"a\" (Member)  1:2\n  \"b\" (Member)  1:8\n"));
+  CHECK(contains(nested.text, "\"c\" (Member)  1:17\n  \"d\" (Member)"));
+  const Answer cut = call_tool(*server, "document-symbols",
+                               R"({"file":"file:///w/deep.doc"})");
+  CHECK(!cut.isError);
+  CHECK(contains(cut.text, "... 3 nested declaration(s) not shown\n"));
+}
+
+// Every reference site the position admits is read, each through the class
+// the grammar names for it, as a completion reads them.
+void scope_candidates_read_every_site_through_its_own_class() {
+  World own;
+  own.addLanguage("caret", {".caret"}, {}, kCaret);
+  constexpr std::string_view kEither = "fn f() { alpha a; beta b; either  }";
+  constexpr std::string_view kNested =
+      "fn f() { alpha a; beta b; nest a { tie  } }";
+  own.build({{"file:///w/e.caret", kEither}, {"file:///w/n.caret", kNested}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  const auto at = [](std::string_view uri, std::string_view text,
+                     std::string_view after) {
+    return R"({"file":")" + std::string(uri) + R"(","line":1,"column":)" +
+           std::to_string(text.find(after) + after.size() + 1) + "}";
+  };
+  const Answer either = call_tool(*server, "scope-candidates",
+                                  at("file:///w/e.caret", kEither, "either "));
+  CHECK(!either.isError);
+  CHECK(contains(either.text, "candidates for member 'alpha':\na (Alpha)\n"));
+  CHECK(contains(either.text, "candidates for member 'beta':\nb (Beta)\n"));
+  const Answer tie = call_tool(*server, "scope-candidates",
+                               at("file:///w/n.caret", kNested, "tie "));
+  CHECK(!tie.isError);
+  CHECK(contains(tie.text, "b (Beta)"));
+  CHECK(!contains(tie.text, "a (Alpha)"));
+}
+
+// A removal that failed keeps its slot out of use: the next validation of
+// the same name gets an identity of its own, not the one still held. Last in
+// the lane: the slots are the process's.
+void validate_retires_a_slot_it_could_not_empty() {
+  World own;
+  bool armed = false;
+  own.addLanguage(
+      "fragile", {".fragile"}, {}, {}, [&](cursiv::CoreServices& language) {
+        struct Fragile final : cursiv::DefaultLinker {
+          Fragile(const cursiv::CoreServices& services, const bool& armed)
+              : DefaultLinker(services), _armed(armed) {}
+          void unlink(cursiv::Document& document) const override {
+            if (_armed) throw std::runtime_error("unlink failed");
+            DefaultLinker::unlink(document);
+          }
+          const bool& _armed;
+        };
+        language.linker = std::make_unique<Fragile>(language, armed);
+      });
+  // A broken link is repaired, and so let go of, by every removal.
+  own.build({{"file:///w/b.fragile", "entity B { y : Missing }\n"}});
+  const cursiv::DefaultMcpService service(own.shared, {"test-mcp", "0"});
+  auto server = service.createServer();
+  armed = true;
+  const Answer failed = call_tool(
+      *server, "validate", R"({"text":"datatype D\n","file":"kept.ws"})");
+  armed = false;
+  CHECK(failed.isError && contains(failed.text, "unlink failed"));
+  const Answer retry = call_tool(*server, "validate",
+                                 R"({"text":"datatype D\n","file":"kept.ws"})");
+  CHECK(!retry.isError && contains(retry.text, "No diagnostics"));
+}
+
 }  // namespace
 
 void run() {
@@ -877,6 +1308,15 @@ void run() {
   the_grammar_tool_serves_the_text();
   the_rule_tool_answers_the_closure();
   a_wrong_call_reports_inside_the_result();
+  a_tool_that_read_nothing_says_so();
+  references_wait_for_the_whole_workspace();
+  validate_runs_every_category();
+  hover_reads_the_language_the_document_was_opened_with();
+  symbols_name_a_symbol_without_a_record();
+  a_site_two_targets_share_is_listed_once();
+  document_symbols_climb_through_unnamed_containers();
+  scope_candidates_read_every_site_through_its_own_class();
+  validate_retires_a_slot_it_could_not_empty();
 }
 
 }  // namespace default_mcp_service
@@ -969,8 +1409,49 @@ void format_answers_the_shaped_text() {
   CHECK(isError != nullptr && isError->boolean());
 }
 
-// What a language project does: subclass, add its own door with the public
-// kit, and silence a default one by overriding its register method.
+// The formatter is asked as the editor asks it: the parameters name the
+// document they format.
+void format_names_the_document_to_the_formatter() {
+  struct Recording final : cursiv::Formatter {
+    std::string* seen;
+    explicit Recording(std::string* into) : seen(into) {}
+    [[nodiscard]] std::vector<lsp::TextEdit> formatDocument(
+        const cursiv::Document&, const lsp::DocumentFormattingParams& params,
+        const cursiv::CancellationToken&) const override {
+      *seen = params.textDocument.uri.toString();
+      return {};
+    }
+    [[nodiscard]] std::vector<lsp::TextEdit> formatDocumentRange(
+        const cursiv::Document&, const lsp::DocumentRangeFormattingParams&,
+        const cursiv::CancellationToken&) const override {
+      return {};
+    }
+  };
+  World own;
+  std::string seen;
+  own.services.language.formatter = std::make_unique<Recording>(&seen);
+  const cursiv::LspMcpService service(*own.services.shared,
+                                      {"test-lsp-mcp", "0"});
+  cursiv::McpServer server = std::move(*service.createServer());
+  const json::Value reply =
+      ask(server,
+          R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":)"
+          R"({"name":"format","arguments":{"file":"file:///w/messy.ws"}}})");
+  CHECK(reply.object().get("result").object().find("isError") == nullptr);
+  CHECK(seen == kUri);
+}
+
+// The `file` argument, as a uri.
+std::string file_argument(const json::Value& arguments) {
+  const json::Value* const file = cursiv::tool_argument(arguments, "file");
+  if (file == nullptr || !file->isString())
+    throw std::invalid_argument("'file' names the document");
+  return cursiv::tool_file_uri(file->string());
+}
+
+// What a language project does: subclass, add its own doors with the public
+// kit, and silence a default one by overriding its register method. A door
+// that reads every document's index waits for the whole workspace.
 struct BlogMcpService final : cursiv::LspMcpService {
   using cursiv::LspMcpService::LspMcpService;
 
@@ -983,25 +1464,40 @@ struct BlogMcpService final : cursiv::LspMcpService {
         cursiv::tool_property("string", "path or file:// uri of the document");
     json::Array required;
     required.emplace_back(json::String("file"));
+    const json::Value schema =
+        cursiv::tool_object_schema(std::move(properties), std::move(required));
     server->registerTool(
         {.name = "byte-count",
          .title = "Byte Count",
          .description = "how many bytes a document holds",
-         .inputSchema = cursiv::tool_object_schema(std::move(properties),
-                                                   std::move(required))},
+         .inputSchema = schema},
         [&shared = _shared](const json::Value& arguments,
                             const cursiv::CancellationToken& token) {
-          const json::Value* const file =
-              cursiv::tool_argument(arguments, "file");
-          if (file == nullptr || !file->isString())
-            throw std::invalid_argument("'file' names the document");
           return cursiv::route_document_tool(
-              shared, cursiv::tool_file_uri(file->string()),
-              cursiv::DocumentState::Parsed, token,
+              shared, file_argument(arguments), cursiv::DocumentState::Parsed,
+              token,
               [&](const cursiv::Document& document, const cursiv::CoreServices&,
                   std::string& out) {
                 out = std::to_string(document.textDocument().getText().size()) +
                       " byte(s)";
+              });
+        });
+    server->registerTool(
+        {.name = "workspace-indexed",
+         .title = "Workspace Indexed",
+         .description = "whether every document's references are indexed",
+         .inputSchema = schema},
+        [&shared = _shared](const json::Value& arguments,
+                            const cursiv::CancellationToken& token) {
+          return cursiv::route_document_tool(
+              shared, file_argument(arguments),
+              cursiv::WorkspaceState::IndexedReferences, token,
+              [&](const cursiv::Document&, const cursiv::CoreServices&,
+                  std::string& out) {
+                out = shared.documentBuilder->currentState() >=
+                              cursiv::DocumentState::IndexedReferences
+                          ? "indexed"
+                          : "not indexed";
               });
         });
     return server;
@@ -1034,6 +1530,19 @@ void a_language_extends_and_prunes_the_set() {
                                .get("text")
                                .string();
   CHECK(text == std::to_string(kMessy.size()) + " byte(s)");
+  const json::Value indexed = ask(
+      server,
+      R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":)"
+      R"({"name":"workspace-indexed","arguments":{"file":"file:///w/messy.ws"}}})");
+  CHECK(indexed.object()
+            .get("result")
+            .object()
+            .get("content")
+            .array()
+            .front()
+            .object()
+            .get("text")
+            .string() == "indexed");
 }
 
 }  // namespace
@@ -1041,6 +1550,7 @@ void a_language_extends_and_prunes_the_set() {
 void run() {
   the_lsp_service_extends_the_default_set();
   format_answers_the_shaped_text();
+  format_names_the_document_to_the_formatter();
   a_language_extends_and_prunes_the_set();
 }
 

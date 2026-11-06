@@ -16,8 +16,8 @@
 //   [--folding]                          the fold ranges, with their first line
 //
 // Cursor coordinates are the protocol's own zero-based UTF-16, on the last
-// document passed. Exits 0 when the handshake completed and every document
-// got a diagnostics snapshot.
+// document passed. Exits 0 when the handshake completed, every document got a
+// diagnostics snapshot after its didOpen, and the server exited cleanly.
 
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -144,16 +144,29 @@ server.stdout.on('data', (chunk) => {
     }
 });
 
-function waitFor(predicate, what, timeoutMs = 10000) {
+// The latest message that matches, among those received from index `since`:
+// a notification sent before the client's own last move answers nothing.
+function waitFor(predicate, what, { since = 0, timeoutMs = 10000 } = {}) {
     const deadline = Date.now() + timeoutMs;
     return new Promise((resolve, reject) => {
         const poll = () => {
-            const found = received.findLast(predicate);
+            const found = received.slice(since).findLast(predicate);
             if (found) return resolve(found);
             if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${what}`));
             setTimeout(poll, 20);
         };
         poll();
+    });
+}
+
+// How the server ended after `exit`: `code 0` is the one clean way. One still
+// running two seconds later is killed.
+function serverEnd() {
+    const said = () => server.exitCode !== null ? `code ${server.exitCode}` : `signal ${server.signalCode}`;
+    if (server.exitCode !== null || server.signalCode !== null) return Promise.resolve(said());
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => { server.kill(); resolve('still running after 2 s'); }, 2000);
+        server.once('exit', () => { clearTimeout(timer); resolve(said()); });
     });
 }
 
@@ -250,6 +263,9 @@ try {
         const uri = fileUri(documentPath);
         const text = await readFile(documentPath, 'utf8');
         documents.push({ uri, name: path.basename(documentPath) });
+        // A snapshot sent after the didOpen.
+        const isSnapshot = (m) => m.method === 'textDocument/publishDiagnostics' && m.params?.uri === uri;
+        const since = received.length;
         send({
             method: 'textDocument/didOpen',
             params: {
@@ -257,12 +273,11 @@ try {
             }
         });
         report(documents.at(-1).name, await waitFor(
-            (m) => m.method === 'textDocument/publishDiagnostics' && m.params?.uri === uri,
-            `a diagnostics snapshot for ${documents.at(-1).name}`));
+            isSnapshot, `a diagnostics snapshot for ${documents.at(-1).name} after its didOpen`, { since }));
     }
 
-    // The last snapshot per document, which is what the client is showing
-    // after every open: a document opened first is rebuilt when its
+    // The last snapshot per document so far, which is what the client is
+    // showing after every open: a document opened first is rebuilt when its
     // neighbour arrives.
     if (documents.length > 1) {
         console.log('after the whole workspace is open:');
@@ -430,9 +445,9 @@ try {
     await request({ method: 'shutdown' }, 'the shutdown result');
     send({ method: 'exit' });
 
-    const code = await new Promise((resolve) => server.on('exit', resolve));
-    console.log(`server exit code: ${code}`);
-    process.exit(code === 0 ? 0 : 1);
+    const end = await serverEnd();
+    console.log(`server exit: ${end}`);
+    process.exit(end === 'code 0' ? 0 : 1);
 } catch (error) {
     console.error(String(error.message ?? error));
     server.kill();

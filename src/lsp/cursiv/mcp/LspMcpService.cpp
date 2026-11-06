@@ -73,6 +73,7 @@ void LspMcpService::registerFormatTool(McpServer& server) const {
               if (formatter == nullptr) return;
               hasFormatter = true;
               lsp::DocumentFormattingParams params;
+              params.textDocument.uri = lsp::DocumentUri::parse(document.uri);
               params.options.tabSize = 2;
               params.options.insertSpaces = true;
               if (const json::Value* const tabSize =

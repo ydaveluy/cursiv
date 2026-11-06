@@ -39,6 +39,9 @@ struct TextSpan {
 struct PendingEdit {
   TextSpan span;
   std::string newText;
+  // The priority of the rule that wrote the edit: two rules on the two sides
+  // of one gap are told apart by it.
+  std::int32_t priority = 0;
 };
 
 struct FormatContext {
@@ -448,21 +451,26 @@ void emit_gap_edits(NodeId previous, NodeId node,
     context.indentation = checked_count(
         static_cast<std::int64_t>(context.indentation) + *move->tabs);
 
+  const auto push = [&](PendingEdit edit) {
+    edit.priority = action.options.priority;
+    sink.push(std::move(edit));
+  };
   if (move->characters.has_value()) {
     // The break ending a line comment must not be replaced by spaces.
     if (previous == kNoNode || context.cst[previous].hidden == 0)
-      sink.push(create_space_edit(gap, *move->characters, action.options));
+      push(create_space_edit(gap, *move->characters, action.options));
   } else if (move->lines.has_value()) {
-    sink.push(create_line_edit(gap, *move->lines, context, action.options));
+    push(create_line_edit(gap, *move->lines, context, action.options));
   } else if (move->tabs.has_value()) {
-    sink.push(create_tab_edit(gap, previous != kNoNode, context));
+    push(create_tab_edit(gap, previous != kNoNode, context));
   }
 }
 
-// The minimality, in one place. Overlapping edits collapse to the later one, an
-// exact-range duplicate collapses the same way (two rules over one zero-width
-// gap do not overlap by the `<` test), and then the pin: an edit whose new text
-// is the text it replaces is not an edit.
+// The minimality, in one place. Two edits over the same range are two rules
+// over one gap -- the append of the token before it and the prepend of the
+// token after it: the higher priority keeps it, the later one on a tie.
+// Otherwise overlapping edits collapse to the later one. Then the pin: an edit
+// whose new text is the text it replaces is not an edit.
 [[nodiscard]] std::vector<lsp::TextEdit> finalize_edits(
     const Document& document, std::vector<PendingEdit> edits, bool sorted) {
   if (!sorted)
@@ -472,13 +480,16 @@ void emit_gap_edits(NodeId previous, NodeId node,
         });
 
   std::vector<PendingEdit> filtered;
-  for (const PendingEdit& edit : edits) {
+  for (PendingEdit& edit : edits) {
+    if (!filtered.empty() && filtered.back().span.begin == edit.span.begin &&
+        filtered.back().span.end == edit.span.end) {
+      if (filtered.back().priority <= edit.priority)
+        filtered.back() = std::move(edit);
+      continue;
+    }
     while (!filtered.empty() && edit.span.begin < filtered.back().span.end)
       filtered.pop_back();
-    if (!filtered.empty() && filtered.back().span.begin == edit.span.begin &&
-        filtered.back().span.end == edit.span.end)
-      filtered.pop_back();
-    filtered.push_back(edit);
+    filtered.push_back(std::move(edit));
   }
 
   std::vector<lsp::TextEdit> result;

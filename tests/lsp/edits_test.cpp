@@ -24,6 +24,7 @@
 #include "cursiv/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/formatting/FormattingEngine.hpp"
+#include "cursiv/formatting/FormattingRules.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/Check.hpp"
@@ -626,6 +627,27 @@ struct ClampedIndexFormatter final : ws::WorkspaceFormatter {
   }
 };
 
+// Each gap claimed from both sides: `name`'s append and the colon's prepend,
+// `entity`'s append and the name's prepend. The rule of higher priority is
+// visited first in one pair and last in the other.
+struct SidePriorityFormatter final : ws::WorkspaceFormatter {
+  using WorkspaceFormatter::WorkspaceFormatter;
+  void formatEntity(cursiv::FormattingBuilder& builder,
+                    const ws::ast::Entity* entity) const override {
+    WorkspaceFormatter::formatEntity(builder, entity);
+    auto formatter = builder.getNodeFormatter(entity);
+    formatter.keyword("entity").append(spaces(1, {.priority = 5}));
+    formatter.property<&ws::ast::Entity::name>().prepend(spaces(3));
+  }
+  void formatFeature(cursiv::FormattingBuilder& builder,
+                     const ws::ast::Feature* feature) const override {
+    WorkspaceFormatter::formatFeature(builder, feature);
+    builder.getNodeFormatter(feature)
+        .property<&ws::ast::Feature::name>()
+        .append(spaces(2, {.priority = 5}));
+  }
+};
+
 struct LeadingSpaceFormatter final : ws::WorkspaceFormatter {
   using WorkspaceFormatter::WorkspaceFormatter;
   void formatWorkspace(cursiv::FormattingBuilder&,
@@ -712,6 +734,16 @@ void a_document_already_in_shape_answers_no_edit() {
   CHECK(format(world, *clean).empty());
 }
 
+// The language reads its words in either case, and a rule written for a word
+// shapes it in every case.
+void a_keyword_rule_shapes_every_case_of_the_word() {
+  World world;
+  const cursiv::Document* const messy =
+      world.built("ENTITY   Person{}\nDataType     String\n");
+  CHECK(applied(*messy, format(world, *messy)) ==
+        "ENTITY Person {}\nDataType String\n");
+}
+
 void a_rule_can_shape_the_gap_before_the_first_token() {
   World world;
   install<LeadingSpaceFormatter>(world);
@@ -772,7 +804,8 @@ void a_range_format_keeps_the_edits_on_its_lines() {
 }
 
 // A selection of several lines: the gap that only reaches its first line stays,
-// the gaps within it are formatted.
+// the gaps within it are formatted -- inside a construction that starts before
+// the selection too.
 void a_range_format_leaves_what_only_reaches_its_start() {
   World world;
   const cursiv::Document* const messy = world.built(std::string(kMessy));
@@ -782,6 +815,12 @@ void a_range_format_leaves_what_only_reaches_its_start() {
         "  age: String\n"
         "}\n"
         "datatype     String\n");
+  CHECK(applied(*messy, formatRange(world, *messy, {{2, 0}, {4, 5}})) ==
+        "entity   Person{\n"
+        "name   :String\n"
+        "     age: String\n"
+        "}\n"
+        "datatype String\n");
 }
 
 // The document's own rules apply to any selection, even one that runs past the
@@ -815,6 +854,22 @@ void a_fit_carries_no_options() {
                                         "}\n",
                               .after = "entity Person {\n"
                                        "  name: String\n"
+                                       "}\n",
+                              .options = options(),
+                              .disposeAfterCheck = true});
+}
+
+// A rule on the token before a gap and one on the token after it claim the same
+// gap: the higher priority holds it, whichever side it was written on.
+void a_gap_claimed_from_both_sides_keeps_the_higher_priority() {
+  World world;
+  install<SidePriorityFormatter>(world);
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "entity   Person {\n"
+                                        "  name:String\n"
+                                        "}\n",
+                              .after = "entity Person {\n"
+                                       "  name  : String\n"
                                        "}\n",
                               .options = options(),
                               .disposeAfterCheck = true});
@@ -1149,6 +1204,38 @@ void a_multiline_comment_is_reindented() {
   CHECK(format(world, *formatted).empty());
 }
 
+// Blanks right after the opening marker are no line of the comment: the shape
+// one pass gives is the one the next pass keeps, whitespace normalized or not.
+void a_doc_comment_reaches_its_shape_in_one_pass() {
+  World world;
+  constexpr std::string_view kShapedDoc =
+      "/**\n"
+      " * Text\n"
+      " */\n"
+      "entity Person {}\n";
+  (void)ct::expectFormatting(world.services.language,
+                             {.before = "/** \n"
+                                        " * Text\n"
+                                        " */\n"
+                                        "entity Person {}\n",
+                              .after = std::string(kShapedDoc),
+                              .options = options(),
+                              .disposeAfterCheck = true});
+  const cursiv::Document* const formatted =
+      world.built(std::string(kShapedDoc));
+  CHECK(format(world, *formatted).empty());
+
+  for (const bool normalize : {true, false})
+    for (const std::string_view text :
+         {"/** \n * Text\n */", "/**  Text\n */", "/**\t\n *  a  b\n */"}) {
+      const cursiv::MultilineCommentFormatOptions chosen{.normalizeWhitespace =
+                                                             normalize};
+      const std::string once =
+          cursiv::do_format_multiline_comment(text, chosen);
+      CHECK(cursiv::do_format_multiline_comment(once, chosen) == once);
+    }
+}
+
 // The terminator is the document's, not the platform's: a file written with
 // CRLF keeps CRLF in everything the engine inserts, a rewritten comment's own
 // line breaks included.
@@ -1189,6 +1276,7 @@ void run() {
   a_rule_on_a_container_is_ordered_before_it_is_answered();
   formatting_twice_is_formatting_once();
   a_document_already_in_shape_answers_no_edit();
+  a_keyword_rule_shapes_every_case_of_the_word();
   a_rule_can_shape_the_gap_before_the_first_token();
   indentation_counts_do_not_wrap();
   a_range_format_keeps_the_edits_on_its_lines();
@@ -1198,6 +1286,7 @@ void run() {
   a_document_with_a_parse_error_is_not_formatted();
   a_conversion_error_does_not_withhold_formatting();
   a_fit_carries_no_options();
+  a_gap_claimed_from_both_sides_keeps_the_higher_priority();
   a_multi_name_selection_keeps_the_order_given();
   a_rule_targets_the_records_it_holds();
   a_descendant_rule_wins_over_an_ancestor_rule();
@@ -1210,6 +1299,7 @@ void run() {
   an_append_level_stays_while_its_target_is_a_construction();
   a_property_index_clamps_to_the_last_occurrence();
   a_multiline_comment_is_reindented();
+  a_doc_comment_reaches_its_shape_in_one_pass();
   a_crlf_document_keeps_its_terminators();
 }
 

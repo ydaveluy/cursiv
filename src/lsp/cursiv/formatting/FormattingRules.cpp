@@ -248,8 +248,10 @@ std::string do_format_multiline_comment(
     const std::size_t lineEnd =
         terminator.has_value() ? terminator->position : body.size();
     const std::string_view line = body.substr(cursor, lineEnd - cursor);
+    // The first line follows the opening marker, so it carries no line prefix;
+    // its blanks are trimmed like every other line's.
     lines.emplace_back(firstLine
-                           ? std::string(line)
+                           ? std::string(trim_horizontal(line))
                            : std::string(strip_line_prefix(line, options)));
     firstLine = false;
     if (!terminator.has_value()) break;

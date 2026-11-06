@@ -49,6 +49,18 @@ const waitFor = (predicate, what, timeoutMs = 20000) =>
   });
 
 const uri = `file://${folder}/order.dmodel`;
+
+// How the server ended: `code 0` is the one clean way. One still running two
+// seconds after the session is killed.
+function serverEnd() {
+  const said = () => child.exitCode !== null ? `code ${child.exitCode}` : `signal ${child.signalCode}`;
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(said());
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { child.kill(); resolve('still running after 2 s'); }, 2000);
+    child.once('exit', () => { clearTimeout(timer); resolve(said()); });
+  });
+}
+
 let failed = false;
 try {
   send({ id: 1, method: 'initialize', params: {
@@ -85,8 +97,9 @@ try {
   console.error(String(error && error.message ? error.message : error));
 }
 
-await new Promise((resolve) => {
-  const timer = setTimeout(() => { child.kill(); resolve(); }, 2000);
-  child.on('exit', () => { clearTimeout(timer); resolve(); });
-});
+const end = await serverEnd();
+if (end !== 'code 0') {
+  failed = true;
+  console.error(`FAIL: the server ended with ${end}`);
+}
 process.exit(failed ? 1 : 0);

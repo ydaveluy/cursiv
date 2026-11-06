@@ -49,6 +49,11 @@ class McpServer {
  public:
   McpServer(std::string name, std::string version);
 
+  /**
+   * One entry per tool name and per resource uri: a second registration of
+   * either throws `std::invalid_argument`. A service replaces a default tool
+   * by overriding the method that registers it.
+   */
   void registerTool(McpTool tool, McpToolFunction execute);
   void registerResource(McpResource resource, McpResourceFunction read);
 
@@ -62,7 +67,8 @@ class McpServer {
   /**
    * Handles one JSON-RPC message and returns the response, or nothing for
    * a notification. Const: registrations all precede the first message, so
-   * concurrent requests read a registry nobody writes.
+   * concurrent requests read a registry nobody writes. A request id is a
+   * string or an integer that fits in 32 bits.
    */
   [[nodiscard]] std::optional<lsp::json::Value> handle(
       lsp::json::Value message, const CancellationToken& = {}) const;

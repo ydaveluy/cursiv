@@ -37,7 +37,8 @@ NamedNodes collect_named_nodes(const Document& document,
     const NodeId record = node->cstNodeId;
     if (record >= opens.size()) continue;
     if (opens[record] == kNone) opens[record] = at;
-    const std::optional<CstNodeView> nameNode = names.getNameNode(*node, &document);
+    const std::optional<CstNodeView> nameNode =
+        names.getNameNode(*node, &document);
     if (!nameNode.has_value()) continue;
     rankAt[at] = static_cast<std::uint32_t>(named.nodes.size());
     named.nodes.push_back(node);

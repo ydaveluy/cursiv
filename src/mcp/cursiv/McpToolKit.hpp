@@ -9,7 +9,7 @@
 #include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
-#include "cursiv/workspace/DocumentState.hpp"
+#include "cursiv/workspace/ServiceRequirement.hpp"
 #include "cursiv/McpServer.hpp"
 
 // The tool-authoring kit: what a service -- this tree's or a language's own
@@ -59,13 +59,18 @@ void append_tool_position(std::string& out, const Document& document,
                           TextOffset offset);
 
 /**
- * The document-tool spine: the rung awaited off the lock, the admission
- * re-asked inside, the language resolved from the uri. `body` appends to
- * the answer; the caller words what an empty one means.
+ * The document-tool spine: the requirement awaited off the lock, the
+ * admission re-asked inside, the language the document was opened with.
+ * A bare `DocumentState` waits for the document alone; a `WorkspaceState`
+ * waits for the whole workspace, as an answer read from every document's
+ * index (references, rename) must. `body` runs once, on the document at that
+ * rung, and appends to the answer; the caller words what an empty one means.
+ * A cancelled request, or a document that is gone or never gets there,
+ * answers an error and `body` does not run.
  */
 [[nodiscard]] McpToolResult route_document_tool(
-    SharedCoreServices& shared, const std::string& uri, DocumentState rung,
-    const CancellationToken& token,
+    SharedCoreServices& shared, const std::string& uri,
+    ServiceRequirement requirement, const CancellationToken& token,
     cursiv::function_ref<void(const Document&, const CoreServices&,
                               std::string&)> body);
 

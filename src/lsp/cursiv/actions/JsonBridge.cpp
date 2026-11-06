@@ -11,7 +11,8 @@
 namespace cursiv {
 
 // The framework's integer is 32-bit on the wire; a payload value outside it
-// travels as a decimal, which JSON cannot tell apart anyway.
+// travels as a decimal, exact up to 2^53 in magnitude. Past that the client
+// reads it rounded, as a JavaScript client reads any number.
 lsp::LSPAny to_lsp_any(const JsonValue& value) {
   if (value.isBoolean()) return lsp::LSPAny(value.boolean());
   if (value.isInteger()) {

@@ -18,8 +18,8 @@ class DefinitionProvider {
   virtual ~DefinitionProvider() noexcept = default;
 
   /**
-   * Called under the workspace read lock. `nullopt` is "nothing here",
-   * distinct from the empty set the protocol also allows. A
+   * Called under the workspace read lock. `nullopt` and an empty list both
+   * say nothing is here; the client receives an empty list. A
    * `LocationLink` carries the origin span plus a split target: the
    * declaration to preview and the name inside it to select.
    */
