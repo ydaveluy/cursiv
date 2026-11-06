@@ -60,45 +60,55 @@ struct Pending {
   }
 };
 
+// Who reads each element, and the order the analyses below visit them in. The
+// build leaves the shapes as lowered, so one graph serves every analysis.
 // Positions precede their containing groups. Rules occupy the same worklist
 // after the positions; a call reads its callee, and a rule reads its body.
-template <class Update>
-void settle_shapes(const Cfg& c, std::uint64_t* work, Update&& update) {
-  const std::uint32_t size = c.nnodes + c.nrules;
-  std::vector<std::vector<std::uint32_t>> users(size);
-  Pending pending(size);
-  for (std::uint32_t id = 0; id < c.nnodes; ++id) {
-    const LlNode& n = c.nodes[id];
-    if (n.kind == LlShape::call)
-      users[c.nnodes + n.sym].push_back(id);
-    else
-      for (const auto child : c.children(n)) users[child].push_back(id);
-  }
-  for (std::uint16_t r = 1; r < c.nrules; ++r) {
-    const LlRuleInfo& u = c.rules[r];
-    const auto id = c.nnodes + r;
-    if (u.climb != kNoRow) {
-      users[c.nnodes + c.climbs[u.climb].primary].push_back(id);
-    } else if (u.body != kNoRow) {
-      users[u.body].push_back(id);
+struct ShapeGraph {
+  std::vector<std::vector<std::uint32_t>> users;
+  std::vector<std::uint32_t> order;
+
+  explicit ShapeGraph(const Cfg& c) : users(c.nnodes + c.nrules) {
+    for (std::uint32_t id = 0; id < c.nnodes; ++id) {
+      const LlNode& n = c.nodes[id];
+      if (n.kind == LlShape::call)
+        users[c.nnodes + n.sym].push_back(id);
+      else
+        for (const auto child : c.children(n)) users[child].push_back(id);
     }
+    for (std::uint16_t r = 1; r < c.nrules; ++r) {
+      const LlRuleInfo& u = c.rules[r];
+      const auto id = c.nnodes + r;
+      if (u.climb != kNoRow) {
+        users[c.nnodes + c.climbs[u.climb].primary].push_back(id);
+      } else if (u.body != kNoRow) {
+        users[u.body].push_back(id);
+      }
+    }
+    // Each element comes after what it reads, as far as a cycle allows: a
+    // fact then reaches a reader whole, rather than once per element it passed
+    // through. Whatever the order, each fact only grows towards the one least
+    // fixpoint.
+    const auto cycles = StrongComponents<>::of(users);
+    order.resize(users.size());
+    std::iota(order.begin(), order.end(), 0u);
+    std::ranges::stable_sort(
+        order, std::ranges::greater{},
+        [&](std::uint32_t id) { return cycles.component[id]; });
+    // Rule zero has no body.
+    std::erase(order, c.nnodes);
   }
-  // Each element comes after what it reads, as far as a cycle allows: a fact
-  // then reaches a reader whole, rather than once per element it passed through.
-  // Whatever the order, each fact only grows towards the one least fixpoint.
-  const auto cycles = StrongComponents<>::of(users);
-  std::vector<std::uint32_t> order(size);
-  std::iota(order.begin(), order.end(), 0u);
-  std::ranges::stable_sort(order, std::ranges::greater{},
-                           [&](std::uint32_t id) { return cycles.component[id]; });
-  // Rule zero has no body.
-  for (const std::uint32_t id : order)
-    if (id != c.nnodes) pending.push(id);
+};
+
+template <class Update>
+void settle_shapes(const ShapeGraph& g, std::uint64_t* work, Update&& update) {
+  Pending pending(g.users.size());
+  for (const std::uint32_t id : g.order) pending.push(id);
   while (!pending.empty()) {
     const auto id = pending.pop();
     if (work) ++*work;
     if (update(id))
-      for (const auto user : users[id]) pending.push(user);
+      for (const auto user : g.users[id]) pending.push(user);
   }
 }
 
@@ -133,12 +143,14 @@ bool node_nullable(const Cfg& c, std::uint16_t id,
   return false;
 }
 
-std::vector<std::uint8_t> settle_nullable(
-    const Cfg& c, std::vector<std::uint8_t>& nullable,
-    bool endMarkNullable = false, std::uint64_t* work = nullptr) {
+std::vector<std::uint8_t> settle_nullable(const Cfg& c,
+                                          const ShapeGraph& shapes,
+                                          std::vector<std::uint8_t>& nullable,
+                                          bool endMarkNullable = false,
+                                          std::uint64_t* work = nullptr) {
   nullable.assign(c.nnodes, 0);
   std::vector<std::uint8_t> ruleNullable(c.nrules, 0);
-  settle_shapes(c, work, [&](std::uint32_t id) {
+  settle_shapes(shapes, work, [&](std::uint32_t id) {
     bool empty;
     std::uint8_t* value;
     if (id < c.nnodes) {
@@ -208,7 +220,8 @@ bool node_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
   return false;
 }
 
-void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
+void settle_first(const Cfg& c, const ShapeGraph& shapes,
+                  const std::vector<std::uint8_t>& nullable,
                   std::vector<DynSet>& first, std::vector<DynSet>& ruleFirst,
                   std::uint64_t* work = nullptr) {
   first.assign(c.nnodes, DynSet{});
@@ -224,7 +237,7 @@ void settle_first(const Cfg& c, const std::vector<std::uint8_t>& nullable,
       else
         impliedHeads[k].set(t);
     }
-  settle_shapes(c, work, [&](std::uint32_t id) {
+  settle_shapes(shapes, work, [&](std::uint32_t id) {
     if (id < c.nnodes)
       return node_first(c, nullable, first, ruleFirst, impliedHeads,
                         static_cast<std::uint16_t>(id));
@@ -385,7 +398,8 @@ void refuse_skipped_terminal(Built& b) {
 // impossible; a rule every reading of which is, or waits on one that is,
 // derives no finite text. Only a token the same sequence reads after its own
 // `eof` is told impossible: one read through a call or a group is not.
-void refuse_unproductive(Built& b, std::uint64_t* work) {
+void refuse_unproductive(Built& b, const ShapeGraph& shapes,
+                         std::uint64_t* work) {
   const Cfg& c = b.cfg;
   std::vector<std::uint8_t> node(c.nnodes, 0), rule(c.nrules, 0);
   const auto productive = [&](const LlNode& n) {
@@ -413,7 +427,7 @@ void refuse_unproductive(Built& b, std::uint64_t* work) {
         return true;
     }
   };
-  settle_shapes(c, work, [&](std::uint32_t id) {
+  settle_shapes(shapes, work, [&](std::uint32_t id) {
     bool p;
     std::uint8_t* value;
     if (id < c.nnodes) {
@@ -646,8 +660,8 @@ struct Gaps {
   // Whether a position may pass without peeking, may consume, and may end
   // on a token with no peek after it: least fixpoints, a rule reaching itself
   // before it consumes being refused.
-  void settle_shape(std::uint64_t* work) {
-    settle_shapes(b.cfg, work, [&](std::uint32_t id) {
+  void settle_shape(const ShapeGraph& shapes, std::uint64_t* work) {
+    settle_shapes(shapes, work, [&](std::uint32_t id) {
       bool moved = false;
       const auto raise = [&](std::vector<std::uint8_t>& v, std::size_t i,
                              bool x) {
@@ -842,7 +856,8 @@ struct Gaps {
   }
 };
 
-void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
+void settle_gaps(Built& b, const ShapeGraph& shapes,
+                 const LexAlphabet& alphabet, LlBuildWork* work) {
   const std::uint32_t nn = b.cfg.nnodes;
   const std::uint16_t nr = b.cfg.nrules;
   b.gapCfg.assign(nn, 0);
@@ -862,7 +877,7 @@ void settle_gaps(Built& b, const LexAlphabet& alphabet, LlBuildWork* work) {
       std::vector<std::uint8_t>(nr, 0);
   g.emptyReads.assign(nn, 0);
   g.ruleEmptyReads.assign(nr, 0);
-  g.settle_shape(work ? &work->gapShape : nullptr);
+  g.settle_shape(shapes, work ? &work->gapShape : nullptr);
   // The document opens and ends under the grammar's own configuration.
   const auto settle = [&](Gaps& x) {
     x.pre.assign(nn, DynSet{});
@@ -2242,19 +2257,21 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
   b.fault = low.fault;
   b.liveRules = reached_from(b.cfg, b.cfg.entryRule);
   refuse_skipped_terminal(b);
-  const auto ruleNullable = settle_nullable(
-      b.cfg, b.nullable, false, opt.work ? &opt.work->nullable : nullptr);
+  const ShapeGraph shapes(b.cfg);
+  const auto ruleNullable =
+      settle_nullable(b.cfg, shapes, b.nullable, false,
+                      opt.work ? &opt.work->nullable : nullptr);
   // EOF constrains FIRST but still makes no progress through the input.
   std::vector<std::uint8_t> empty;
-  settle_nullable(b.cfg, empty, true);
+  settle_nullable(b.cfg, shapes, empty, true);
   // A refused grammar owes the walks below nothing: a counted repetition of
   // a body that reads nothing nests as deep as its bound, and the refusal
   // must be told before anything follows that depth.
   if (b.fault) return b;
-  settle_first(b.cfg, b.nullable, b.first, b.ruleFirst,
+  settle_first(b.cfg, shapes, b.nullable, b.first, b.ruleFirst,
                opt.work ? &opt.work->first : nullptr);
   refuse_left_recursion(b, empty);
-  refuse_unproductive(b, opt.work ? &opt.work->productive : nullptr);
+  refuse_unproductive(b, shapes, opt.work ? &opt.work->productive : nullptr);
   refuse_precedence_clash(b);
   // Nor does one refused here: a left-cyclic rule has no fixpoint for the walks
   // below, and the follow pass would descend it for ever.
@@ -2268,7 +2285,7 @@ LlBuiltProgram ll_build_program(const LlLowered& low, LlBuildOptions opt) {
     return g.intern_name(text);
   });
   if (b.cfg.lowerFail()) return b;
-  settle_gaps(b, alphabet, opt.work);
+  settle_gaps(b, shapes, alphabet, opt.work);
   settle_decisions(b, opt);
   refuse_section_lookahead(b);
   settle_repair(b, opt.work ? &opt.work->repair : nullptr);

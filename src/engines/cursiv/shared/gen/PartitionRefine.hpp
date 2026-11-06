@@ -53,12 +53,10 @@ std::vector<std::uint32_t> partition_refine(const std::vector<std::uint32_t>& cl
   mid = first;
   std::vector<std::uint32_t> work(first.size()), touched, labels;
   for (std::uint32_t b = 0; b < work.size(); ++b) work[b] = b;
-  std::vector<char> queued(first.size(), 1);
   std::vector<std::vector<std::uint32_t>> byLabel(nlabels);
   while (!work.empty()) {
     const std::uint32_t a = work.back();
     work.pop_back();
-    queued[a] = 0;
     for (auto e = first[a]; e < last[a]; ++e)
       for (auto i = at[elem[e]]; i < at[elem[e] + 1]; ++i) {
         if (byLabel[in[i].label].empty()) labels.push_back(in[i].label);
@@ -95,7 +93,6 @@ std::vector<std::uint32_t> partition_refine(const std::vector<std::uint32_t>& cl
         }
         mid[b] = first[b];
         mid.push_back(first[part]);
-        queued.push_back(1);
         work.push_back(part);
         for (auto i = first[part]; i < last[part]; ++i) blk[elem[i]] = part;
         if (moves != nullptr) *moves += last[part] - first[part];

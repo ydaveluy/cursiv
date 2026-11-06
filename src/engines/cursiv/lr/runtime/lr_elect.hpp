@@ -42,10 +42,8 @@ std::uint32_t lr_elect_stands(std::uint32_t to, std::uint32_t symbol) {
 template <const auto& A>
 std::uint16_t lr_elect_twin(std::uint16_t prod,
                             std::span<const std::uint32_t> syms) {
-  const std::uint32_t first = A.cold.electTwinAt[prod];
-  const std::uint32_t end = A.cold.electTwinAt[prod + 1u];
-  for (std::uint32_t k = first; k != end; ++k) {
-    const std::uint16_t q = A.cold.electTwin[k];
+  for (std::uint16_t q = A.cold.electTwinFirst[prod]; q != kLrNoTwin;
+       q = A.cold.electTwinNext[q]) {
     bool reads = true;
     for (std::uint32_t i = A.cold.electRhsAt[q], j = 0;
          reads && i != A.cold.electRhsAt[q + 1u]; ++i, ++j) {
@@ -125,7 +123,7 @@ LrElectWords lr_elect_words(std::uint16_t prod,
                             std::span<const std::uint32_t> syms,
                             std::vector<std::uint32_t>& room,
                             std::vector<std::uint16_t>& at) {
-  if constexpr (A.cold.electTwin.size() != 0)
+  if constexpr (A.cold.electTwinFirst.size() != 0)
     prod = lr_elect_twin<A>(prod, syms);
   const std::uint32_t first = A.cold.electAt[prod];
   const std::uint32_t n = A.cold.electAt[prod + 1u] - first;

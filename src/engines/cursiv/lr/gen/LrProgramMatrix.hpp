@@ -5,7 +5,9 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace cursiv {
@@ -33,6 +35,9 @@ struct LrProgramMatrix {
  private:
   unsigned _columns = 0;
   std::map<std::array<std::uint64_t, 8>, std::uint32_t> _pool;
+  // The block of nothing but its absent value, once laid: that value and its
+  // index in `_pool`.
+  std::optional<std::pair<std::uint64_t, std::uint32_t>> _empty;
   std::map<std::vector<std::uint32_t>, std::uint32_t> _runs;
 };
 

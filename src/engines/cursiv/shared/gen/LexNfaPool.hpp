@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "cursiv/shared/gen/LexRelayGen.hpp"
@@ -113,8 +114,9 @@ struct LexNfaPool {
 
   // A guard waits until loops have their exits.
   int guard(std::uint16_t node, int out) {
-    for (const LexNfaGuard& gd : guards)
-      if (gd.node == node && gd.out == out) return gd.hole;
+    const auto [at, fresh] =
+        _guardOf.try_emplace({node, out}, static_cast<int>(s.size()));
+    if (!fresh) return at->second;
     const int h = push({.guard = static_cast<int>(guards.size())});
     guards.push_back({h, out, node, term});
     return h;
@@ -201,6 +203,9 @@ struct LexNfaPool {
 
   // The sinks minted so far, by what they accept.
   std::map<std::tuple<int, int, int, bool, bool>, int> _sinks;
+  // The holes of the guards minted so far, by the word refused and the
+  // continuation it narrows.
+  std::map<std::pair<std::uint16_t, int>, int> _guardOf;
   // One mark per state, stamped by the pass that reached it.
   mutable std::vector<std::uint32_t> _seen;
   mutable std::vector<int> _todo;

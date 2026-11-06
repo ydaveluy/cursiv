@@ -1381,7 +1381,7 @@ void wordless_aliases_need_no_election_paths() {
   lr_elect_runs(a);
   CHECK(a.electWord == std::vector<std::uint32_t>{900});
   CHECK(a.electChainKey.empty() && a.electChainWord.empty());
-  CHECK(a.electWatch.empty() && a.electTwin.empty());
+  CHECK(a.electWatch.empty() && a.electTwinFirst.empty());
 }
 
 void alias_decisions_keep_their_order_around_the_callee() {
@@ -1418,6 +1418,40 @@ void alias_decisions_keep_their_order_around_the_callee() {
   CHECK(chain(2, a.cfg.nterms + 4u) == std::vector<std::uint32_t>({31, 32}));
   CHECK(chain(4, 1).empty());
   CHECK(!a.electWatch.empty());
+}
+
+// Productions a fused state may name in one another's stead share one list of
+// twins: the table grows with the productions, not with their square.
+void twins_share_one_list() {
+  constexpr unsigned kTwins = 64;
+  LrBuildTable a;
+  auto& cfg = a.cfg;
+  // End of input alone: no terminal for `sizes()` to read.
+  cfg.nterms = 1;
+  cfg.nnts = static_cast<std::uint16_t>(kTwins + 2u);
+  cfg.nprods = static_cast<std::uint16_t>(kTwins);
+  a.electAt.push_back(0);
+  for (unsigned p = 0; p < kTwins; ++p) {
+    // `0: (p + 1) (kTwins + 1)`, alike but for its own decision.
+    cfg.prods[p] = {.lhs = 0, .at = cfg.nslots, .len = 2};
+    cfg.prodBuild[p] = {};
+    for (const unsigned nt : {p + 1u, kTwins + 1u}) {
+      cfg.slotSym[cfg.nslots] = nt_sym(static_cast<std::uint16_t>(nt));
+      cfg.slots[cfg.nslots] = {};
+      cfg.slotCfg[cfg.nslots++] = 0;
+    }
+    a.electWord.push_back(100u + p);
+    a.electPos.push_back(0);
+    a.electAt.push_back(static_cast<std::uint32_t>(a.electWord.size()));
+  }
+  lr_elect_runs(a);
+  CHECK(a.sizes().electTwins <= kTwins);
+  for (unsigned p = 0; p < kTwins; ++p) {
+    unsigned n = 0;
+    for (auto q = a.electTwinFirst[p]; q != kLrNoTwin; q = a.electTwinNext[q])
+      CHECK(q == n++);
+    CHECK(n == kTwins);
+  }
 }
 
 void lexical_pools_cannot_wrap() {
@@ -1501,6 +1535,7 @@ void run() {
   left_recursion_splitting_restores_each_siblings_path();
   wordless_aliases_need_no_election_paths();
   alias_decisions_keep_their_order_around_the_callee();
+  twins_share_one_list();
   lexical_pools_cannot_wrap();
   sets_are_interned_once();
   malformed_unicode_classes_are_refused();

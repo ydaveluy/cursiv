@@ -14,6 +14,8 @@ namespace cursiv {
 
 // A state fused from states that stood after two symbols.
 inline constexpr std::uint16_t kLrNoStateSym = 0xFFFFu;
+// The end of a production's twins.
+inline constexpr std::uint16_t kLrNoTwin = 0xFFFFu;
 // The word past every turn's: a loop that stops loses to one that goes on.
 inline constexpr std::uint32_t kLrExitWord = ~std::uint32_t{0};
 
@@ -83,10 +85,11 @@ struct LrColdTables {
   std::array<std::uint32_t, S.electChainWords> electChainWord{};
   std::array<std::uint16_t, S.electChainWords> electChainPos{};
   // A production fused states may name in another's stead: those it may stand
-  // for, `electTwin[electTwinAt[p], electTwinAt[p + 1])`, each found by its
-  // symbols, `electRhs[electRhsAt[q], electRhsAt[q + 1])`.
-  std::array<std::uint32_t, S.electTwins != 0 ? S.prods + 1 : 0> electTwinAt{};
-  std::array<std::uint16_t, S.electTwins> electTwin{};
+  // for, from `electTwinFirst[p]` on through `electTwinNext` to `kLrNoTwin`,
+  // each found by its symbols, `electRhs[electRhsAt[q], electRhsAt[q + 1])`.
+  // The productions that stand for one another share that list.
+  std::array<std::uint16_t, S.electTwins> electTwinFirst{};
+  std::array<std::uint16_t, S.electTwins> electTwinNext{};
   std::array<std::uint32_t, S.electTwins != 0 ? S.prods + 1 : 0> electRhsAt{};
   std::array<std::uint16_t, S.electRhsSyms> electRhs{};
 

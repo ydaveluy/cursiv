@@ -685,9 +685,21 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   const unsigned nN = g.nnts;
   const unsigned nP = g.nprods;
   const std::uint32_t n0 = A.nstates;
-  const auto shiftTerm = lr_shift_terms(A);
   std::vector<std::uint8_t> elig(nP, 0);
   for (unsigned p = 0; p < nP; ++p) elig[p] = lr_unit_passes(g, p);
+
+  // Which states hold an eligible cell, outside any conflict run.
+  std::vector<std::uint8_t> hasE(n0, 0);
+  for (std::uint32_t s = 0; s < n0; ++s) {
+    const LrAction* const row = A.actions.v.data() + A.actionBase.v[s];
+    lr_each_run(row, A.actionCount.v[s], [&](std::size_t i, std::size_t j) {
+      if (j - i == 1 && row[i].kind == LrActionKind::reduce && elig[row[i].arg])
+        hasE[s] = 1;
+    });
+  }
+  if (std::ranges::none_of(hasE, [](std::uint8_t x) { return x != 0; })) return;
+
+  const auto shiftTerm = lr_shift_terms(A);
   // Every composition reads the machine as built.
   const std::vector<LrAction> sAct = A.actions.v;
   const std::vector<std::uint32_t> sAb = A.actionBase.v;
@@ -696,237 +708,222 @@ void lr_unit_elimination(LrBuildTable& A, const LexModes& modes,
   const std::uint32_t* const ab = sAb.data();
   const std::uint16_t* const ac = sAc.data();
   LrGotoRows out = A.gotoRows;
+  // A substituted cell reads the same token where the successor's
+  // alphabet is within this one's, under the same configuration.
+  // The cells of a row mostly ask one pair of modes: the last answer stands.
+  std::uint16_t askedOver = kNoRow, askedOf = kNoRow;
+  bool coveredLast = false;
+  const auto wantWithin = [&](std::uint32_t u, std::uint32_t x) {
+    if (cfgS[u] != cfgS[x]) return false;
+    if (A.mode[x] != askedOver || A.mode[u] != askedOf) {
+      askedOver = A.mode[x];
+      askedOf = A.mode[u];
+      coveredLast = modes.covers(askedOver, askedOf);
+    }
+    return coveredLast;
+  };
 
-  // Which states hold an eligible cell, outside any conflict run.
-  std::vector<std::uint8_t> hasE(n0, 0);
-  for (std::uint32_t s = 0; s < n0; ++s) {
-    const LrAction* const row = sa + ab[s];
-    lr_each_run(row, ac[s], [&](std::size_t i, std::size_t j) {
-      if (j - i == 1 && row[i].kind == LrActionKind::reduce && elig[row[i].arg])
-        hasE[s] = 1;
-    });
-  }
-  if (std::ranges::any_of(hasE, [](std::uint8_t x) { return x != 0; })) {
-    // A substituted cell reads the same token where the successor's
-    // alphabet is within this one's, under the same configuration.
-    // The cells of a row mostly ask one pair of modes: the last answer stands.
-    std::uint16_t askedOver = kNoRow, askedOf = kNoRow;
-    bool coveredLast = false;
-    const auto wantWithin = [&](std::uint32_t u, std::uint32_t x) {
-      if (cfgS[u] != cfgS[x]) return false;
-      if (A.mode[x] != askedOver || A.mode[u] != askedOf) {
-        askedOver = A.mode[x];
-        askedOf = A.mode[u];
-        coveredLast = modes.covers(askedOver, askedOf);
-      }
-      return coveredLast;
-    };
+  // Index only the original edges, before any copy is appended. Columns
+  // ascend by nonterminal/source: targetOf's mint order numbers states.
+  const LrGotoColumns columns(out, nN);
+  using UpeEdge = LrGotoRows::Edge;
+  std::vector<std::uint32_t> work;
+  std::vector<std::uint32_t> gStamp(nN, 0), gPos(nN, 0);
+  std::uint32_t gGen = 0;
 
-    // Index only the original edges, before any copy is appended. Columns
-    // ascend by nonterminal/source: targetOf's mint order numbers states.
-    const LrGotoColumns columns(out, nN);
-    using UpeEdge = LrGotoRows::Edge;
-    std::vector<std::uint32_t> work;
-    std::vector<std::uint32_t> gStamp(nN, 0), gPos(nN, 0);
-    std::uint32_t gGen = 0;
+  // A guarded goto has no one successor to chase.
+  const auto gotoSnap = [&](std::uint32_t from, unsigned nt) {
+    const std::span<const UpeEdge> row = out[from];
+    if (from < n0) {
+      const auto it = std::ranges::lower_bound(row, nt, {}, &UpeEdge::nt);
+      return it != row.end() && it->nt == nt && it->guard == 0
+                 ? std::uint32_t{it->to}
+                 : 0xFFFFFFFFu;
+    }
+    for (const UpeEdge& e : row)
+      if (e.nt == nt) return e.guard == 0 ? std::uint32_t{e.to} : 0xFFFFFFFFu;
+    return 0xFFFFFFFFu;
+  };
 
-    // A guarded goto has no one successor to chase.
-    const auto gotoSnap = [&](std::uint32_t from, unsigned nt) {
-      const std::span<const UpeEdge> row = out[from];
-      if (from < n0) {
-        const auto it = std::ranges::lower_bound(row, nt, {}, &UpeEdge::nt);
-        return it != row.end() && it->nt == nt && it->guard == 0
-                   ? std::uint32_t{it->to}
-                   : 0xFFFFFFFFu;
-      }
-      for (const UpeEdge& e : row)
-        if (e.nt == nt) return e.guard == 0 ? std::uint32_t{e.to} : 0xFFFFFFFFu;
-      return 0xFFFFFFFFu;
-    };
-
-    // What a composition read of `F`'s gotos, and what it answered: any state
-    // whose gotos agree on those reads composes the same copy.
-    struct Memo {
-      std::vector<std::pair<std::uint16_t, std::uint32_t>> reads;
-      std::uint32_t id = 0;
-    };
-    std::vector<std::vector<Memo>> memo(n0);
+  // What a composition read of `F`'s gotos, and what it answered: any state
+  // whose gotos agree on those reads composes the same copy.
+  struct Memo {
     std::vector<std::pair<std::uint16_t, std::uint32_t>> reads;
-    std::vector<std::uint32_t> readAt(nN, 0);
-    std::uint32_t readGen = 0;
+    std::uint32_t id = 0;
+  };
+  std::vector<std::vector<Memo>> memo(n0);
+  std::vector<std::pair<std::uint16_t, std::uint32_t>> reads;
+  std::vector<std::uint32_t> readAt(nN, 0);
+  std::uint32_t readGen = 0;
 
-    // The copy of `X` whose substituted cells answer through the gotos of `F`.
-    const auto compose = [&](std::uint32_t F, std::uint32_t X) {
-      std::vector<LrAction> row;
-      const std::span<const UpeEdge> xOut = out[X];
-      std::vector<UpeEdge> gadd(xOut.begin(), xOut.end());
-      ++gGen;
-      const auto gSeat = [&](std::size_t i) {
-        const unsigned nt = gadd[i].nt;
-        if (gStamp[nt] == gGen) return;
-        gStamp[nt] = gGen;
-        gPos[nt] = static_cast<std::uint32_t>(i);
-      };
-      const auto gAt = [&](unsigned nt) {
-        return gStamp[nt] == gGen ? static_cast<int>(gPos[nt]) : -1;
-      };
-      for (std::size_t i = 0; i < gadd.size(); ++i) gSeat(i);
-      std::uint32_t subs = 0;
-      const LrAction* const xrow = sa + ab[X];
-      const unsigned xc = ac[X];
-      // A substituted cell owes what its successor owes.
-      DynSet owed;
-      lr_each_run(xrow, xc, [&](std::size_t i, std::size_t j) {
-        bool done = false;
-        if (j - i == 1 && xrow[i].kind == LrActionKind::reduce &&
-            elig[xrow[i].arg]) {
-          const std::uint16_t a = xrow[i].term;
-          unsigned pp = xrow[i].arg;
-          std::uint32_t fin = 0xFFFFFFFFu;
-          unsigned fb = 0, fe = 0;
-          for (unsigned d = 0; d < nN; ++d) {
-            const unsigned lhs = prods[pp].lhs;
-            const std::uint32_t u = gotoSnap(F, lhs);
-            if (readAt[lhs] != readGen) {
-              readAt[lhs] = readGen;
-              reads.emplace_back(static_cast<std::uint16_t>(lhs), u);
-            }
-            if (u == 0xFFFFFFFFu) break;
-            if (!wantWithin(u, X)) break;
-            const LrAction* const ur = sa + ab[u];
-            const auto [lo, alen] = lr_term_run(ur, ac[u], a);
-            if (alen == 0) {
-              // The narrower successor can re-lex this token: the reduce stays.
-              break;
-            }
-            const unsigned hi = lo + alen;
-            if (alen == 1 && ur[lo].kind == LrActionKind::reduce &&
-                elig[ur[lo].arg]) {
-              pp = ur[lo].arg;
-              continue;
-            }
-            fin = u;
-            fb = ab[u] + lo;
-            fe = ab[u] + hi;
+  // The copy of `X` whose substituted cells answer through the gotos of `F`.
+  const auto compose = [&](std::uint32_t F, std::uint32_t X) {
+    std::vector<LrAction> row;
+    const std::span<const UpeEdge> xOut = out[X];
+    std::vector<UpeEdge> gadd(xOut.begin(), xOut.end());
+    ++gGen;
+    const auto gSeat = [&](std::size_t i) {
+      const unsigned nt = gadd[i].nt;
+      if (gStamp[nt] == gGen) return;
+      gStamp[nt] = gGen;
+      gPos[nt] = static_cast<std::uint32_t>(i);
+    };
+    const auto gAt = [&](unsigned nt) {
+      return gStamp[nt] == gGen ? static_cast<int>(gPos[nt]) : -1;
+    };
+    for (std::size_t i = 0; i < gadd.size(); ++i) gSeat(i);
+    std::uint32_t subs = 0;
+    const LrAction* const xrow = sa + ab[X];
+    const unsigned xc = ac[X];
+    // A substituted cell owes what its successor owes.
+    DynSet owed;
+    lr_each_run(xrow, xc, [&](std::size_t i, std::size_t j) {
+      bool done = false;
+      if (j - i == 1 && xrow[i].kind == LrActionKind::reduce &&
+          elig[xrow[i].arg]) {
+        const std::uint16_t a = xrow[i].term;
+        unsigned pp = xrow[i].arg;
+        std::uint32_t fin = 0xFFFFFFFFu;
+        unsigned fb = 0, fe = 0;
+        for (unsigned d = 0; d < nN; ++d) {
+          const unsigned lhs = prods[pp].lhs;
+          const std::uint32_t u = gotoSnap(F, lhs);
+          if (readAt[lhs] != readGen) {
+            readAt[lhs] = readGen;
+            reads.emplace_back(static_cast<std::uint16_t>(lhs), u);
+          }
+          if (u == 0xFFFFFFFFu) break;
+          if (!wantWithin(u, X)) break;
+          const LrAction* const ur = sa + ab[u];
+          const auto [lo, alen] = lr_term_run(ur, ac[u], a);
+          if (alen == 0) {
+            // The narrower successor can re-lex this token: the reduce stays.
             break;
           }
-          if (fin != 0xFFFFFFFFu) {
-            // The successor's goto rows join, unless one disagrees with a
-            // seated row: then the cell stays a reduce.
-            bool clash = false;
-            for (const UpeEdge& e : out[fin]) {
-              const int at = gAt(e.nt);
-              if (at >= 0 &&
-                  (gadd[at].to != e.to || gadd[at].guard != e.guard)) {
-                clash = true;
-                break;
-              }
-            }
-            if (!clash) {
-              for (unsigned k = fb; k < fe; ++k) row.push_back(sa[k]);
-              if (A.closeRow[fin].test(a)) owed.set(a);
-              for (const UpeEdge& e : out[fin])
-                if (gAt(e.nt) < 0) {
-                  gadd.push_back(e);
-                  gSeat(gadd.size() - 1);
-                }
-              ++subs;
-              done = true;
+          const unsigned hi = lo + alen;
+          if (alen == 1 && ur[lo].kind == LrActionKind::reduce &&
+              elig[ur[lo].arg]) {
+            pp = ur[lo].arg;
+            continue;
+          }
+          fin = u;
+          fb = ab[u] + lo;
+          fe = ab[u] + hi;
+          break;
+        }
+        if (fin != 0xFFFFFFFFu) {
+          // The successor's goto rows join, unless one disagrees with a
+          // seated row: then the cell stays a reduce.
+          bool clash = false;
+          for (const UpeEdge& e : out[fin]) {
+            const int at = gAt(e.nt);
+            if (at >= 0 && (gadd[at].to != e.to || gadd[at].guard != e.guard)) {
+              clash = true;
+              break;
             }
           }
+          if (!clash) {
+            for (unsigned k = fb; k < fe; ++k) row.push_back(sa[k]);
+            if (A.closeRow[fin].test(a)) owed.set(a);
+            for (const UpeEdge& e : out[fin])
+              if (gAt(e.nt) < 0) {
+                gadd.push_back(e);
+                gSeat(gadd.size() - 1);
+              }
+            ++subs;
+            done = true;
+          }
         }
-        if (!done) {
-          for (std::size_t k = i; k < j; ++k) row.push_back(xrow[k]);
-          if (A.closeRow[X].test(xrow[i].term)) owed.set(xrow[i].term);
-        }
-      });
-      if (subs == 0) return X;
+      }
+      if (!done) {
+        for (std::size_t k = i; k < j; ++k) row.push_back(xrow[k]);
+        if (A.closeRow[X].test(xrow[i].term)) owed.set(xrow[i].term);
+      }
+    });
+    if (subs == 0) return X;
 
-      // A copy the state index cannot name is not minted; the memo answers
-      // later edges that ask for it, without counting it again.
-      if (A.nstates >= 0xFFFFu || row.size() >= 0xffffu) {
-        ++A.nunminted;
-        return X;
-      }
-      const std::uint32_t id =
-          lr_mint_state(A, {row, gadd, std::move(owed)}, X);
-      out.push_row(gadd);
-      work.push_back(id);
-      return id;
-    };
-
-    // One retargeted edge (F -> X): hop the whole-state pass-throughs, then
-    // compose a copy if eligible cells remain.
-    const auto targetOf = [&](std::uint32_t F, std::uint32_t X) {
-      for (unsigned d = 0; d < nN; ++d) {
-        if (X >= n0 || !hasE[X]) return X;
-        // A shifted state keeps its terminal identity: its cells are composed
-        // below instead.
-        if (shiftTerm[X] != kInvalidSymbol) break;
-        const LrAction* const row = sa + ab[X];
-        const unsigned c = ac[X];
-        int p = -1;
-        bool whole = c != 0;
-        for (unsigned i = 0; i < c && whole; ++i) {
-          if (row[i].kind != LrActionKind::reduce || !elig[row[i].arg] ||
-              (p >= 0 && row[i].arg != p))
-            whole = false;
-          else
-            p = row[i].arg;
-        }
-        if (!whole) break;
-        const std::uint32_t u = gotoSnap(F, prods[p].lhs);
-        if (u == 0xFFFFFFFFu || u == X) break;
-        if (!wantWithin(u, X)) break;
-        X = u;
-      }
-      if (X >= n0 || !hasE[X]) return X;
-      for (const Memo& m : memo[X]) {
-        if (!std::ranges::all_of(m.reads, [&](const auto& r) {
-              return gotoSnap(F, r.first) == r.second;
-            }))
-          continue;
-        return m.id;
-      }
-      reads.clear();
-      ++readGen;
-      const std::uint32_t id = compose(F, X);
-      memo[X].emplace_back(reads, id);
-      return id;
-    };
-
-    // Every edge, the minted states' as they come. `targetOf` mints and moves
-    // the arrays: each cell is named through the store.
-    const auto retarget_shifts = [&](std::uint32_t s) {
-      for (unsigned i = 0, c = A.actionCount[s]; i < c; ++i) {
-        const std::uint32_t k = A.actionBase[s] + i;
-        if (A.actions[k].kind != LrActionKind::shift) continue;
-        const auto to =
-            static_cast<std::uint16_t>(targetOf(s, A.actions[k].arg));
-        A.actions[k].arg = to;
-      }
-    };
-    for (std::uint32_t s = 0; s < n0; ++s) retarget_shifts(s);
-    for (unsigned nt = 0; nt < nN; ++nt)
-      for (const auto e : columns[nt]) {
-        if (e.guard != 0) continue;
-        const auto to = static_cast<std::uint16_t>(targetOf(e.from, e.to));
-        A.gotoRows.edges[e.index].to = to;
-      }
-    for (std::size_t wi = 0; wi < work.size(); ++wi) {
-      const std::uint32_t s = work[wi];
-      retarget_shifts(s);
-      const auto end = A.gotoRows.base[s + 1];
-      for (std::uint32_t j = A.gotoRows.base[s]; j < end; ++j) {
-        if (A.gotoRows.edges[j].guard != 0) continue;
-        const auto to =
-            static_cast<std::uint16_t>(targetOf(s, A.gotoRows.edges[j].to));
-        A.gotoRows.edges[j].to = to;
-      }
+    // A copy the state index cannot name is not minted; the memo answers
+    // later edges that ask for it, without counting it again.
+    if (A.nstates >= 0xFFFFu || row.size() >= 0xffffu) {
+      ++A.nunminted;
+      return X;
     }
-    // New rows must keep composition order until every edge is retargeted.
-    A.set_gotos(std::move(A.gotoRows));
+    const std::uint32_t id = lr_mint_state(A, {row, gadd, std::move(owed)}, X);
+    out.push_row(gadd);
+    work.push_back(id);
+    return id;
+  };
+
+  // One retargeted edge (F -> X): hop the whole-state pass-throughs, then
+  // compose a copy if eligible cells remain.
+  const auto targetOf = [&](std::uint32_t F, std::uint32_t X) {
+    for (unsigned d = 0; d < nN; ++d) {
+      if (X >= n0 || !hasE[X]) return X;
+      // A shifted state keeps its terminal identity: its cells are composed
+      // below instead.
+      if (shiftTerm[X] != kInvalidSymbol) break;
+      const LrAction* const row = sa + ab[X];
+      const unsigned c = ac[X];
+      int p = -1;
+      bool whole = c != 0;
+      for (unsigned i = 0; i < c && whole; ++i) {
+        if (row[i].kind != LrActionKind::reduce || !elig[row[i].arg] ||
+            (p >= 0 && row[i].arg != p))
+          whole = false;
+        else
+          p = row[i].arg;
+      }
+      if (!whole) break;
+      const std::uint32_t u = gotoSnap(F, prods[p].lhs);
+      if (u == 0xFFFFFFFFu || u == X) break;
+      if (!wantWithin(u, X)) break;
+      X = u;
+    }
+    if (X >= n0 || !hasE[X]) return X;
+    for (const Memo& m : memo[X]) {
+      if (!std::ranges::all_of(m.reads, [&](const auto& r) {
+            return gotoSnap(F, r.first) == r.second;
+          }))
+        continue;
+      return m.id;
+    }
+    reads.clear();
+    ++readGen;
+    const std::uint32_t id = compose(F, X);
+    memo[X].emplace_back(reads, id);
+    return id;
+  };
+
+  // Every edge, the minted states' as they come. `targetOf` mints and moves
+  // the arrays: each cell is named through the store.
+  const auto retarget_shifts = [&](std::uint32_t s) {
+    for (unsigned i = 0, c = A.actionCount[s]; i < c; ++i) {
+      const std::uint32_t k = A.actionBase[s] + i;
+      if (A.actions[k].kind != LrActionKind::shift) continue;
+      const auto to = static_cast<std::uint16_t>(targetOf(s, A.actions[k].arg));
+      A.actions[k].arg = to;
+    }
+  };
+  for (std::uint32_t s = 0; s < n0; ++s) retarget_shifts(s);
+  for (unsigned nt = 0; nt < nN; ++nt)
+    for (const auto e : columns[nt]) {
+      if (e.guard != 0) continue;
+      const auto to = static_cast<std::uint16_t>(targetOf(e.from, e.to));
+      A.gotoRows.edges[e.index].to = to;
+    }
+  for (std::size_t wi = 0; wi < work.size(); ++wi) {
+    const std::uint32_t s = work[wi];
+    retarget_shifts(s);
+    const auto end = A.gotoRows.base[s + 1];
+    for (std::uint32_t j = A.gotoRows.base[s]; j < end; ++j) {
+      if (A.gotoRows.edges[j].guard != 0) continue;
+      const auto to =
+          static_cast<std::uint16_t>(targetOf(s, A.gotoRows.edges[j].to));
+      A.gotoRows.edges[j].to = to;
+    }
   }
+  // New rows must keep composition order until every edge is retargeted.
+  A.set_gotos(std::move(A.gotoRows));
 }
 
 }  // namespace cursiv

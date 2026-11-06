@@ -17,6 +17,13 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
     block.fill(absent);
     std::copy_n(row.begin() + at, std::min<std::size_t>(8, row.size() - at),
                 block.begin());
+    // Most blocks of a sparse row hold nothing: that block is looked up once.
+    const bool empty = std::ranges::all_of(
+        block, [&](std::uint64_t v) { return v == absent; });
+    if (empty && _empty && _empty->first == absent) {
+      run.push_back(_empty->second);
+      continue;
+    }
     auto found = _pool.find(block);
     if (found == _pool.end()) {
       if (values.size() / 8 > std::numeric_limits<std::uint32_t>::max())
@@ -27,6 +34,7 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
               .first;
       values.insert(values.end(), block.begin(), block.end());
     }
+    if (empty) _empty.emplace(absent, found->second);
     run.push_back(found->second);
   }
   const auto [laid, fresh] =
@@ -38,6 +46,7 @@ void LrProgramMatrix::append(std::span<const std::uint64_t> row,
 void LrProgramMatrix::seal() {
   const std::size_t distinct = _runs.size();
   _pool = {};
+  _empty.reset();
   _runs = {};
   const std::size_t stride = (std::size_t{_columns} + 7) / 8;
   const std::size_t states = rows.size();

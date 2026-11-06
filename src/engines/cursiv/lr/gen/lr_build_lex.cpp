@@ -429,8 +429,7 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
     return sel;
   };
 
-  // A parser state's actions plus trivia. Only the diagnostic needs the
-  // individual state; candidate detection uses their union per mode.
+  // A parser state's actions plus trivia, for the diagnostic's witness.
   const auto reads = [&](unsigned state) {
     DynSet out = modes.trivia;
     out |= modes.joins;
@@ -592,30 +591,35 @@ std::vector<char> lr_multi_pass(LrBuildTable& A, const LexAlphabet& alpha,
     // What triggers is a state's actions meeting an acceptance other than
     // the one the priority answers.
     bool multi = false;
-    // What the mode's parser states read, unioned once.
-    DynSet modeAct, modeTakes = modes.joins | relayTerms;
-    for (const auto f : parserStates) {
-      modeAct |= reads(f);
+    // What the mode's parser states take, unioned once.
+    DynSet modeTakes = modes.joins | relayTerms;
+    for (const auto f : parserStates)
       for (const LrAction& action : A.action_row(f)) modeTakes.set(action.term);
-    }
     // Whether every parser state of the mode answers `t` as it answers
     // `win`, by reduces alone, and one answers it at all: which of the two is
-    // elected changes nothing the mode's states do.
+    // elected changes nothing the mode's states do. Rows are ordered on the
+    // terminal, so each answer is one run.
     std::map<std::pair<unsigned, unsigned>, bool> alike;
     const auto indifferent = [&](unsigned t, unsigned win) {
       const auto [at, fresh] = alike.try_emplace({t, win}, false);
       if (!fresh) return at->second;
       bool answered = false;
       for (const auto f : parserStates) {
-        std::vector<std::pair<LrActionKind, std::uint16_t>> mine, theirs;
-        for (const LrAction& x : A.action_row(f)) {
-          if (x.term == t) mine.emplace_back(x.kind, x.arg);
-          if (x.term == win) theirs.emplace_back(x.kind, x.arg);
+        const auto row = A.action_row(f);
+        const auto n = static_cast<unsigned>(row.size());
+        const auto [mine, count] =
+            lr_term_run(row.data(), n, static_cast<std::uint16_t>(t));
+        const auto [theirs, theirCount] =
+            lr_term_run(row.data(), n, static_cast<std::uint16_t>(win));
+        if (count != theirCount) return false;
+        for (unsigned k = 0; k < count; ++k) {
+          const LrAction& x = row[mine + k];
+          const LrAction& y = row[theirs + k];
+          if (x.kind != LrActionKind::reduce || y.kind != x.kind ||
+              y.arg != x.arg)
+            return false;
         }
-        if (mine != theirs) return false;
-        for (const auto& [kind, arg] : mine)
-          if (kind != LrActionKind::reduce) return false;
-        answered = answered || !mine.empty();
+        answered = answered || count != 0;
       }
       return at->second = answered;
     };

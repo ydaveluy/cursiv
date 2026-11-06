@@ -70,6 +70,17 @@ inline void ll_search_trim(LlSearch& s, const LlSearchLaid& m) {
   if (s.handed == m.handed) s.links.resize(m.links);
 }
 
+// The fields of a reading its future depends on, besides its places and its
+// levels: what `ll_search_future` folds and `ll_search_same_future` compares.
+// The flags share one word, each in bits of its own.
+inline std::array<std::uint64_t, 5> ll_search_scalars(const LlReading& r) {
+  return {r.ahead.p, r.gapFrom, r.tokens, r.ahead.head,
+          r.shifts | std::uint64_t{r.phase} << 8 |
+              std::uint64_t{r.fresh} << 16 | std::uint64_t{r.done} << 17 |
+              std::uint64_t{r.faults != 0} << 18 |
+              std::uint64_t{r.settled} << 19 | std::uint64_t{r.inHand} << 20};
+}
+
 // What a reading's future depends on, its owed run aside: two readings with
 // the same one gain the same increments of key, the one holding the owed run
 // perhaps more. Completed positions matter too: they decide whether another
@@ -91,13 +102,7 @@ LlSearch::Future ll_search_future(const LlSearch& s, const LlReading& r) {
     last = place;
     mix(place);
   }
-  mix(r.ahead.p);
-  mix(r.gapFrom);
-  mix(r.tokens);
-  mix(r.ahead.head);
-  mix(r.shifts | std::uint64_t{r.phase} << 8 | std::uint64_t{r.fresh} << 16 |
-      std::uint64_t{r.done} << 17 | std::uint64_t{r.faults != 0} << 18 |
-      std::uint64_t{r.settled} << 19 | std::uint64_t{r.inHand} << 20);
+  for (const std::uint64_t v : ll_search_scalars(r)) mix(v);
   if constexpr (kIndented<T>) {
     // The levels by content: readings that made a level apart number it
     // apart.
@@ -118,12 +123,7 @@ LlSearch::Future ll_search_future(const LlSearch& s, const LlReading& r) {
 template <const auto& T>
 bool ll_search_same_future(const LlSearch& s, const LlReading& a,
                            const LlReading& b) {
-  if (a.ahead.p != b.ahead.p || a.gapFrom != b.gapFrom ||
-      a.tokens != b.tokens || a.ahead.head != b.ahead.head ||
-      a.shifts != b.shifts || a.phase != b.phase || a.fresh != b.fresh ||
-      a.done != b.done || (a.faults != 0) != (b.faults != 0) ||
-      a.settled != b.settled || a.inHand != b.inHand)
-    return false;
+  if (ll_search_scalars(a) != ll_search_scalars(b)) return false;
   // The places in order, each run of one place read as one.
   const auto place = [&](std::uint32_t k) {
     const LlConfig& x = s.pool[k];

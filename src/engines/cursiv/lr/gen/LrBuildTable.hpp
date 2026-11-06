@@ -242,9 +242,10 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
   std::vector<std::uint32_t> electChainWord{};
   std::vector<std::uint16_t> electChainPos{};
   // Per production that fused states may name in another's stead, those it
-  // may stand for, and its own symbols to find it by.
-  std::vector<std::uint32_t> electTwinAt{};
-  std::vector<std::uint16_t> electTwin{};
+  // may stand for as a list shared by all of them, and its own symbols to
+  // find it by.
+  std::vector<std::uint16_t> electTwinFirst{};
+  std::vector<std::uint16_t> electTwinNext{};
   std::vector<std::uint32_t> electRhsAt{};
   std::vector<std::uint16_t> electRhs{};
 
@@ -416,7 +417,7 @@ struct LrBuildTable : LrTableFacts, ShapeOverflow, LrDerivedRows {
         .electWatches = static_cast<unsigned>(electWatch.size()),
         .electChains = static_cast<unsigned>(electChainKey.size()),
         .electChainWords = static_cast<unsigned>(electChainWord.size()),
-        .electTwins = static_cast<unsigned>(electTwin.size()),
+        .electTwins = static_cast<unsigned>(electTwinFirst.size()),
         .electRhsSyms = static_cast<unsigned>(electRhs.size()),
         .gotoClasses = nconflicts != 0 || multiCand};
   }

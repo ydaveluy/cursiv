@@ -1894,14 +1894,7 @@ class CaretReplay {
  public:
   CaretReplay(const LrCaretTable& table, const Cst& cst, CaretStacks& stacks,
               TextOffset horizon)
-      : _table(table),
-        _cst(cst),
-        _stacks(stacks),
-        _horizon(horizon) {
-    if (!cst.recovered()) return;
-    for (NodeId i = 0; i < cst.size(); ++i)
-      if (cst[i].recovered) _repairs.push_back(i);
-  }
+      : _table(table), _cst(cst), _stacks(stacks), _horizon(horizon) {}
 
   // The records under `prefix` in order, then the repairs `events` names. Out
   // of line: inlined, the caller's register pressure lands on every job.
@@ -1926,12 +1919,15 @@ class CaretReplay {
   };
 
   // No repair inside the record, nor on the token after it: the tape may
-  // close a record before the token a repair invents for it.
-  bool clean(NodeId id) const {
+  // close a record before the token a repair invents for it. The repairs are
+  // gathered only as far as the records asked about.
+  bool clean(NodeId id) {
+    if (!_cst.recovered()) return true;
+    for (; _gathered <= id; ++_gathered)
+      if (_cst[_gathered].recovered) _repairs.push_back(_gathered);
     const auto it = std::lower_bound(_repairs.begin(), _repairs.end(),
                                      _cst.subtree_begin(id));
-    if (it == _repairs.end()) return true;
-    if (*it <= id) return false;
+    if (it != _repairs.end() && *it <= id) return false;
     NodeId k = id + 1;
     while (k < _cst.size() && (_cst[k].subtreeSize != 1 || _cst[k].hidden))
       ++k;
@@ -2023,7 +2019,9 @@ class CaretReplay {
   const Cst& _cst;
   CaretStacks& _stacks;
   TextOffset _horizon;
+  // The repairs among the records before `_gathered`, in order.
   std::vector<NodeId> _repairs;
+  NodeId _gathered = 0;
   std::vector<Job> _jobs;
 };
 
@@ -2395,6 +2393,16 @@ void lr_next_features_at(const LrCaretTable& table,
   std::vector<std::uint32_t> emitted;
   for (const auto term : stacks.terminals(at)) {
     const std::size_t mine = out.size();
+    // The sample words the terminal reads under any mode, asked once.
+    std::uint32_t anyMode = 0;
+    const auto sampled = [&] {
+      if (anyMode == 0) {
+        anyMode = kKnown;
+        for (std::size_t m = 0; m < table.modeTight.size(); ++m)
+          anyMode |= sampled_in(static_cast<std::uint16_t>(m), term);
+      }
+      return anyMode & ~kKnown;
+    };
     // The candidate typed as one of its spellings, or as the sample words its
     // terminal reads where it has none.
     const auto offer = [&](std::string_view spelling) {
@@ -2407,9 +2415,7 @@ void lr_next_features_at(const LrCaretTable& table,
       // the token before the caret, a name can read as one word with it.
       const auto words_fit = [&](SymbolId reading, std::uint16_t mode,
                                  std::uint32_t passes) {
-        std::uint32_t read = 0;
-        for (std::size_t m = 0; m < table.modeTight.size(); ++m)
-          read |= sampled_in(static_cast<std::uint16_t>(m), term);
+        const std::uint32_t read = sampled();
         if (read == 0) return true;
         for (std::size_t i = 0; i < StampedGrammar::samples.size(); ++i)
           if (((read >> i) & 1u) != 0 &&
@@ -2468,10 +2474,7 @@ void lr_next_features_at(const LrCaretTable& table,
       };
       type(spelling);
       if (spelling.empty() && table.cond != nullptr && stacks.asked()) {
-        std::uint32_t read = 0;
-        for (std::size_t m = 0; m < table.modeTight.size(); ++m)
-          read |= sampled_in(static_cast<std::uint16_t>(m), term);
-        if (read != 0) {
+        if (const std::uint32_t read = sampled(); read != 0) {
           out.resize(mine);
           emitted.clear();
           stacks.keep_answers(true);

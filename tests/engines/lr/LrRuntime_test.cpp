@@ -1,6 +1,7 @@
 // The runtime's own state: contexts, stacks, the roof, and records read
 // through a narrow stamp.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -102,6 +103,33 @@ void gap_search_keeps_positions_at_word_boundaries() {
       CHECK(gap_matches<true>(text.data(), size, ab) == (text == "ab"));
     }
   }
+}
+
+// A union or a difference of spans is the span `set` lays for its positions,
+// with no zero word at either end: a repetition stops on equal spans.
+void gap_spans_unite_and_part_as_their_positions() {
+  using Span = GapPositions::Span;
+  const auto span = [](const std::vector<TextOffset>& at) {
+    Span s;
+    for (const TextOffset p : at) s.set(p);
+    return s;
+  };
+  const std::vector<std::vector<TextOffset>> sets = {
+      {},       {3},           {64},       {200},
+      {3, 200}, {64, 65, 127}, {128, 191}, {0, 63, 64, 128, 191},
+      {700}};
+  for (const auto& a : sets)
+    for (const auto& b : sets) {
+      std::vector<TextOffset> both = a, left;
+      for (const TextOffset p : b)
+        if (std::ranges::find(a, p) == a.end()) both.push_back(p);
+      for (const TextOffset p : a)
+        if (std::ranges::find(b, p) == b.end()) left.push_back(p);
+      Span u = span(a);
+      u.unite(span(b));
+      CHECK(u == span(both));
+      CHECK(span(a).without(span(b)) == span(left));
+    }
 }
 
 void scratch_arrays_preserve_values_without_running_initializers() {
@@ -309,6 +337,7 @@ void adjacency_skips_a_recovered_region_without_rows() {
 void run() {
   gap_repetitions_stop_when_no_later_round_can_change_the_answer();
   gap_search_keeps_positions_at_word_boundaries();
+  gap_spans_unite_and_part_as_their_positions();
   scratch_arrays_preserve_values_without_running_initializers();
   a_refused_empty_goto_leaves_the_token_to_the_fallback();
   a_lookahead_keeps_its_lexical_mode();

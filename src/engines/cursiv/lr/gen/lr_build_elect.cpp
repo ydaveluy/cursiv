@@ -259,19 +259,18 @@ void lr_elect_runs(LrBuildTable& A) {
   // States that read one reduction alike fuse, whatever their productions
   // decided: each production names those it may stand for, and their
   // symbols, so the one the children read is found again.
-  A.electTwinAt.assign(nP + 1u, 0);
-  A.electTwin.clear();
+  A.electTwinFirst.assign(nP, kLrNoTwin);
+  A.electTwinNext.assign(nP, kLrNoTwin);
   A.electRhsAt.assign(nP + 1u, 0);
   A.electRhs.clear();
   std::map<std::vector<std::uint32_t>, std::uint32_t> classOf;
-  std::vector<std::uint32_t> key, cls(nP);
+  std::vector<std::uint32_t> key;
   std::vector<std::vector<unsigned>> members;
   for (unsigned p = 0; p < nP; ++p) {
     lr_reduce_key(g, p, key);
     const auto [at, fresh] =
         classOf.try_emplace(key, static_cast<std::uint32_t>(members.size()));
     if (fresh) members.emplace_back();
-    cls[p] = at->second;
     members[at->second].push_back(p);
   }
   // Two productions an election cannot tell apart need not be found again.
@@ -285,19 +284,23 @@ void lr_elect_runs(LrBuildTable& A) {
                  A.electWatch.begin() + A.electWatchAt[p + 1]);
     return out;
   };
-  std::vector<std::uint8_t> uniform(members.size());
-  for (std::size_t c = 0; c < members.size(); ++c) {
-    const auto first = read(members[c].front());
-    uniform[c] = std::ranges::all_of(
-        members[c], [&](unsigned q) { return read(q) == first; });
+  // The members of a class are one list, in order, which each of them names.
+  bool twins = false;
+  for (const auto& group : members) {
+    const auto first = read(group.front());
+    if (std::ranges::all_of(group,
+                            [&](unsigned q) { return read(q) == first; }))
+      continue;
+    twins = true;
+    for (std::size_t i = 0; i < group.size(); ++i) {
+      A.electTwinFirst[group[i]] = static_cast<std::uint16_t>(group.front());
+      if (i + 1 < group.size())
+        A.electTwinNext[group[i]] = static_cast<std::uint16_t>(group[i + 1]);
+    }
   }
   for (unsigned p = 0; p < nP; ++p) {
-    A.electTwinAt[p] = static_cast<std::uint32_t>(A.electTwin.size());
     A.electRhsAt[p] = static_cast<std::uint32_t>(A.electRhs.size());
-    if (uniform[cls[p]]) continue;
-    const auto& group = members[cls[p]];
-    for (const unsigned q : group)
-      A.electTwin.push_back(static_cast<std::uint16_t>(q));
+    if (A.electTwinFirst[p] == kLrNoTwin) continue;
     const LrLowProd& q = g.prods[p];
     for (unsigned i = 0; i < q.len; ++i) {
       const std::uint16_t s = g.sym_at(q, i);
@@ -305,15 +308,15 @@ void lr_elect_runs(LrBuildTable& A) {
           is_term(s) ? s : g.nterms + nt_index(s)));
     }
   }
-  A.electTwinAt[nP] = static_cast<std::uint32_t>(A.electTwin.size());
   A.electRhsAt[nP] = static_cast<std::uint32_t>(A.electRhs.size());
-  if (A.electTwin.empty()) {
-    A.electTwinAt.clear();
+  if (!twins) {
+    A.electTwinFirst.clear();
+    A.electTwinNext.clear();
     A.electRhsAt.clear();
     A.electRhs.clear();
   }
   if (A.electWatch.empty()) A.electWatchAt.clear();
-  if (A.electWatch.empty() && A.electTwin.empty()) {
+  if (A.electWatch.empty() && !twins) {
     A.electChainAt.clear();
   } else {
     // Wordless aliases need their relation only if twins use it. In the

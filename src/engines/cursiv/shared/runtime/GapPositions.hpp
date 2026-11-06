@@ -57,14 +57,36 @@ struct GapPositions {
         for (auto b = w[i]; b != 0; b &= b - 1)
           f(static_cast<TextOffset>((base + i) * 64u + std::countr_zero(b)));
     }
+    // A word at a time. Like `set`, neither leaves a zero word at either end,
+    // so two spans of the same positions are equal.
     void unite(const Span& o) {
-      o.each([&](TextOffset p) { set(p); });
+      if (o.w.empty()) return;
+      if (w.empty()) {
+        *this = o;
+        return;
+      }
+      if (o.base < base) {
+        w.insert(w.begin(), base - o.base, 0);
+        base = o.base;
+      }
+      const std::size_t at = o.base - base;
+      if (at + o.w.size() > w.size()) w.resize(at + o.w.size(), 0);
+      for (std::size_t i = 0; i < o.w.size(); ++i) w[at + i] |= o.w[i];
     }
     Span without(const Span& o) const {
+      const auto left = [&](std::size_t i) {
+        const std::size_t k = base + i;
+        return k >= o.base && k - o.base < o.w.size() ? w[i] & ~o.w[k - o.base]
+                                                      : w[i];
+      };
+      std::size_t lo = 0, hi = w.size();
+      while (lo < hi && left(lo) == 0) ++lo;
+      while (hi > lo && left(hi - 1) == 0) --hi;
       Span r;
-      each([&](TextOffset p) {
-        if (!o.has(p)) r.set(p);
-      });
+      if (lo == hi) return r;
+      r.base = base + lo;
+      r.w.reserve(hi - lo);
+      for (std::size_t i = lo; i < hi; ++i) r.w.push_back(left(i));
       return r;
     }
     bool operator==(const Span&) const = default;

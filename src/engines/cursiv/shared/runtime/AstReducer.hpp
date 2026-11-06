@@ -343,18 +343,21 @@ class AstReducer {
     return a->cstNodeId < b->cstNodeId;
   }
   static void sort_by_record(std::pmr::vector<AstNode*>& nodes) {
-    // The room first: a throw half way would lose nodes and repeat others, and
-    // what is reserved past the need is never written.
+    // The sorted prefix stays where it is, and a sorted list allocates
+    // nothing. Then the room first: a throw half way would lose nodes and
+    // repeat others, and what is reserved past the need is never written.
+    const auto sorted =
+        std::is_sorted_until(nodes.begin(), nodes.end(), by_record);
+    if (sorted == nodes.end()) return;
     std::vector<AstNode*> stray;
-    stray.reserve(nodes.size());
-    std::size_t kept = 0;
-    for (AstNode* const entry : nodes) {
-      if (kept != 0 && entry->cstNodeId < nodes[kept - 1]->cstNodeId)
-        stray.push_back(entry);
+    stray.reserve(static_cast<std::size_t>(nodes.end() - sorted));
+    auto kept = static_cast<std::size_t>(sorted - nodes.begin());
+    for (auto at = sorted; at != nodes.end(); ++at) {
+      if ((*at)->cstNodeId < nodes[kept - 1]->cstNodeId)
+        stray.push_back(*at);
       else
-        nodes[kept++] = entry;
+        nodes[kept++] = *at;
     }
-    if (stray.empty()) return;
     nodes.resize(kept);
     std::sort(stray.begin(), stray.end(), by_record);
     nodes.insert(nodes.end(), stray.begin(), stray.end());

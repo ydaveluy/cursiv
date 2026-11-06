@@ -276,8 +276,8 @@ struct LrTableEmitter : TextBuilder {
       array("electChainPos", a.electChainPos);
     }
     if (S.electTwins != 0) {
-      array("electTwinAt", a.electTwinAt);
-      array("electTwin", a.electTwin);
+      array("electTwinFirst", a.electTwinFirst);
+      array("electTwinNext", a.electTwinNext);
       array("electRhsAt", a.electRhsAt);
       array("electRhs", a.electRhs);
     }
