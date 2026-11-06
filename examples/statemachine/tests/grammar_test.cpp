@@ -170,6 +170,33 @@ void the_shipped_machines_generate_their_golden_programs() {
   }
 }
 
+// Two transitions on one event make one handler, the first: a second override
+// of one method would not compile. Each state keeps its own handlers.
+void one_event_makes_one_handler_per_state() {
+  const World world;
+  const ct::ValidationResult said = world.validate(
+      "statemachine M events go stop initialState A\n"
+      "state A go => B go => A stop => A end\n"
+      "state B go => A end\n");
+  CHECK(said.document->parseResult.value != nullptr);
+  if (said.document->parseResult.value == nullptr) return;
+  const std::string program = sm::generate_cpp_content(machine_of(said));
+  const auto occurrences = [&program](std::string_view text) {
+    std::size_t found = 0;
+    for (auto at = program.find(text); at != std::string::npos;
+         at = program.find(text, at + text.size()))
+      ++found;
+    return found;
+  };
+  CHECK(occurrences("void go() override;") == 2);
+  CHECK(occurrences("void stop() override;") == 1);
+  CHECK(occurrences("void A::go() {\n    statemachine->transition_to(new B);")
+        == 1);
+  CHECK(occurrences("void A::go() {") == 1);
+  CHECK(occurrences("void B::go() {\n    statemachine->transition_to(new A);")
+        == 1);
+}
+
 // A program that cannot be made, or cannot be written, is an error -- and the
 // one written before stays whole.
 void a_failed_generation_is_an_error_and_keeps_the_old_output() {
@@ -178,7 +205,7 @@ void a_failed_generation_is_an_error_and_keeps_the_old_output() {
   std::filesystem::create_directories(folder);
   const std::filesystem::path output = folder / "machine.cpp";
   std::filesystem::remove(output);
-  std::ofstream(output) << "older\n";
+  std::ofstream(output, std::ios::binary) << "older\n";
 
   const World world;
   const ct::ValidationResult said =
@@ -227,6 +254,7 @@ int main() {
   a_keyword_is_not_a_name();
   a_plain_name_says_nothing_about_keywords();
   the_shipped_machines_generate_their_golden_programs();
+  one_event_makes_one_handler_per_state();
   a_failed_generation_is_an_error_and_keeps_the_old_output();
   return cursiv::test::report("statemachine_grammar_test");
 }

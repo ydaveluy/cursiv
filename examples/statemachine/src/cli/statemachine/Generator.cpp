@@ -1,6 +1,7 @@
 #include "statemachine/Generator.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -36,22 +37,30 @@ using cursiv::TextBuilder;
                                  : std::string("generated");
 }
 
-// One transition per distinct event name (first occurrence): both generator
-// passes use this, so two transitions on the same event still yield exactly
-// one method -- a redeclared override would not compile.
-[[nodiscard]] std::vector<const Transition*> distinct_event_transitions(
-    const State& state) {
-  std::vector<const Transition*> result;
-  std::unordered_set<std::string_view> seenEvents;
-  for (const auto& transition : state.transitions) {
-    if (!transition || !transition->event || !transition->state) {
+// One transition per distinct event name (first occurrence), so two
+// transitions on the same event still yield exactly one method -- a
+// redeclared override would not compile. Chosen once per state, in the order
+// of `model.states`, and read by both the declarations and the definitions.
+using Handlers = std::vector<std::vector<const Transition*>>;
+
+[[nodiscard]] Handlers distinct_event_transitions(const Statemachine& model) {
+  Handlers handlers(model.states.size());
+  for (std::size_t at = 0; at < model.states.size(); ++at) {
+    const State* const state = model.states[at];
+    if (!state) {
       continue;
     }
-    if (seenEvents.insert(transition->event->name).second) {
-      result.push_back(transition);
+    std::unordered_set<std::string_view> seenEvents;
+    for (const auto& transition : state->transitions) {
+      if (!transition || !transition->event || !transition->state) {
+        continue;
+      }
+      if (seenEvents.insert(transition->event->name).second) {
+        handlers[at].push_back(transition);
+      }
     }
   }
-  return result;
+  return handlers;
 }
 
 void write_state_base(TextBuilder& out, const Statemachine& model) {
@@ -125,9 +134,11 @@ void write_machine_class(TextBuilder& out, const Statemachine& model) {
   out.close("};");
 }
 
-void write_state_declarations(TextBuilder& out, const Statemachine& model) {
+void write_state_declarations(TextBuilder& out, const Statemachine& model,
+                              const Handlers& handlers) {
   bool first = true;
-  for (const auto& state : model.states) {
+  for (std::size_t at = 0; at < model.states.size(); ++at) {
+    const State* const state = model.states[at];
     if (!state) {
       continue;
     }
@@ -138,21 +149,23 @@ void write_state_declarations(TextBuilder& out, const Statemachine& model) {
     out.open("public:");
     out.line(R"(std::string get_name() override { return ")", state->name,
              R"("; })");
-    for (const auto* transition : distinct_event_transitions(*state)) {
+    for (const auto* transition : handlers[at]) {
       out.line("void ", transition->event->name, "() override;");
     }
     out.close("};");
   }
 }
 
-void write_state_definitions(TextBuilder& out, const Statemachine& model) {
-  for (const auto& state : model.states) {
+void write_state_definitions(TextBuilder& out, const Statemachine& model,
+                             const Handlers& handlers) {
+  for (std::size_t at = 0; at < model.states.size(); ++at) {
+    const State* const state = model.states[at];
     if (!state) {
       continue;
     }
     out.line();
     out.line("// ", state->name);
-    const auto transitions = distinct_event_transitions(*state);
+    const auto& transitions = handlers[at];
     for (std::size_t index = 0; index < transitions.size(); ++index) {
       const auto* transition = transitions[index];
       out.open("void ", state->name, "::", transition->event->name, "() {");
@@ -217,8 +230,9 @@ std::string generate_cpp_content(const ast::Statemachine& model) {
   out.line().line();
   write_machine_class(out, model);
   out.line().line();
-  write_state_declarations(out, model);
-  write_state_definitions(out, model);
+  const Handlers handlers = distinct_event_transitions(model);
+  write_state_declarations(out, model, handlers);
+  write_state_definitions(out, model, handlers);
   out.line();
   write_main(out, model);
   return out.take();

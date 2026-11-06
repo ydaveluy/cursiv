@@ -49,17 +49,22 @@ using cursiv::TextBuilder;
 // The text the author wrote, spelled as the declarations it names spell
 // themselves: a qualified name is what the Java source should say, and the
 // language matches names whatever their case while Java does not. The text
-// is the end of the target's qualified name, one segment per dot.
+// is the end of the target's qualified name, one segment per dot, so the
+// climb stops once it has them: a target deep in packages costs what the
+// text spells, not its whole nesting.
 [[nodiscard]] std::string written_name(std::string_view written,
                                        const AbstractElement& target) {
+  const auto segments = std::ranges::count(written, '.') + 1;
   std::string qualified(target.name);
-  for (const cursiv::AstNode* at = target.parent; at != nullptr;
-       at = at->parent)
-    if (const auto* package = cursiv::ast_cast<const PackageDeclaration>(at))
+  auto climbed = std::ranges::count(qualified, '.') + 1;
+  for (const cursiv::AstNode* at = target.parent;
+       at != nullptr && climbed < segments; at = at->parent)
+    if (const auto* package = cursiv::ast_cast<const PackageDeclaration>(at)) {
       qualified = std::string(package->name) + "." + qualified;
+      climbed += std::ranges::count(package->name, '.') + 1;
+    }
   std::size_t start = qualified.size();
-  for (auto left = std::ranges::count(written, '.') + 1;
-       left > 0 && start != std::string::npos; --left)
+  for (auto left = segments; left > 0 && start != std::string::npos; --left)
     start = start == 0 ? std::string::npos : qualified.rfind('.', start - 1);
   const std::string_view tail = std::string_view(qualified).substr(
       start == std::string::npos ? 0 : start + 1);

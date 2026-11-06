@@ -1,8 +1,10 @@
 #include "workspace/lsp/WorkspaceRenameProvider.hpp"
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -72,6 +74,12 @@ void collect_subtree(const cursiv::AstNode& node,
   }
 }
 
+// A site, by where its edit starts: two edits over one span share it.
+std::uint64_t site_of(const lsp::TextEdit& edit) {
+  return (std::uint64_t{edit.range.start.line} << 32) |
+         edit.range.start.character;
+}
+
 }  // namespace
 
 WorkspaceRenameProvider::WorkspaceRenameProvider(
@@ -104,6 +112,12 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
   // edits the base just made.
   if (!edit->changes.has_value()) edit->changes.emplace();
   auto& changes = *edit->changes;
+  // Each document's sites, to the row of the edit there. A document's rows
+  // are indexed when a reference first lands in them, so a site is found
+  // without scanning every edit of its document again.
+  std::unordered_map<const lsp::Array<lsp::TextEdit>*,
+                     std::unordered_map<std::uint64_t, std::size_t>>
+      sites;
 
   // A site written under a qualifier takes the new qualified name; a bare one
   // takes the bare name. Which of the two a site is, is what it spells.
@@ -142,15 +156,16 @@ std::optional<lsp::WorkspaceEdit> WorkspaceRenameProvider::rename(
       // that knows whether the site is qualified, so it replaces rather than
       // adds -- two edits over one span is a rename a client refuses.
       auto& rows = changes[lsp::DocumentUri::parse(std::string(source->uri))];
-      const auto at =
-          std::ranges::find_if(rows, [&rewrite](const lsp::TextEdit& other) {
-            return other.range.start.line == rewrite.range.start.line &&
-                   other.range.start.character == rewrite.range.start.character;
-          });
-      if (at != rows.end())
-        at->newText = std::move(rewrite.newText);
-      else
+      auto [index, fresh] = sites.try_emplace(&rows);
+      if (fresh)
+        for (std::size_t row = 0; row < rows.size(); ++row)
+          index->second.try_emplace(site_of(rows[row]), row);
+      if (const auto [at, added] =
+              index->second.try_emplace(site_of(rewrite), rows.size());
+          added)
         rows.push_back(std::move(rewrite));
+      else
+        rows[at->second].newText = std::move(rewrite.newText);
     }
   }
   return edit;

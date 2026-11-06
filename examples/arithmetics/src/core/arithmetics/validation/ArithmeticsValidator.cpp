@@ -247,46 +247,54 @@ void ArithmeticsValidator::checkDivisionsByZero(
   }
 }
 
+namespace {
+
+// Every holder of a shared name is an error. A name's first holder is said
+// when its first duplicate turns up, so a name held once costs one entry.
+class Duplicates {
+ public:
+  explicit Duplicates(std::size_t holders) { _first.reserve(holders); }
+
+  void visit(const ast::AbstractDefinition& holder,
+             cursiv::ValidationAcceptor& accept) {
+    if (holder.name.empty()) return;
+    const auto [at, fresh] = _first.try_emplace(holder.name, &holder);
+    if (fresh) return;
+    if (at->second != nullptr) say(*std::exchange(at->second, nullptr), accept);
+    say(holder, accept);
+  }
+
+ private:
+  static void say(const ast::AbstractDefinition& holder,
+                  cursiv::ValidationAcceptor& accept) {
+    accept
+        .error(holder,
+               std::format("Duplicate definition name: {}", holder.name))
+        .property<&ast::AbstractDefinition::name>();
+  }
+
+  // The first holder of each name, null once said.
+  std::unordered_map<std::string_view, const ast::AbstractDefinition*> _first;
+};
+
+}  // namespace
+
 void ArithmeticsValidator::checkUniqueParameters(
     const ast::Definition& definition,
     cursiv::ValidationAcceptor& accept) const {
-  std::unordered_map<std::string_view,
-                     std::vector<const ast::DeclaredParameter*>>
-      byName;
+  if (definition.args.size() < 2) return;
+  Duplicates duplicates(definition.args.size());
   for (const ast::DeclaredParameter* const arg : definition.args)
-    if (arg != nullptr && !arg->name.empty()) byName[arg->name].push_back(arg);
-
-  for (const auto& [name, params] : byName) {
-    if (params.size() <= 1) continue;
-    for (const ast::DeclaredParameter* const param : params)
-      accept.error(*param, std::format("Duplicate definition name: {}", name))
-          .property<&ast::AbstractDefinition::name>();
-  }
+    if (arg != nullptr) duplicates.visit(*arg, accept);
 }
 
 void ArithmeticsValidator::checkUniqueDefinitions(
     const ast::Module& module, cursiv::ValidationAcceptor& accept) const {
-  std::unordered_map<std::string_view, std::vector<const ast::Definition*>>
-      byName;
-  byName.reserve(module.statements.size());
-  for (const ast::Statement* const statement : module.statements) {
-    if (statement == nullptr
-        || statement->type != &cursiv::ast_type_tag<ast::Definition>)
-      continue;
-    const auto* const definition =
-        static_cast<const ast::Definition*>(statement);
-    if (!definition->name.empty())
-      byName[definition->name].push_back(definition);
-  }
-
-  for (const auto& [name, definitions] : byName) {
-    if (definitions.size() <= 1) continue;
-    for (const ast::Definition* const definition : definitions)
-      accept
-          .error(*definition,
-                 std::format("Duplicate definition name: {}", name))
-          .property<&ast::AbstractDefinition::name>();
-  }
+  Duplicates duplicates(module.statements.size());
+  for (const ast::Statement* const statement : module.statements)
+    if (statement != nullptr
+        && statement->type == &cursiv::ast_type_tag<ast::Definition>)
+      duplicates.visit(static_cast<const ast::Definition&>(*statement), accept);
 }
 
 void ArithmeticsValidator::checkMatchingParameters(

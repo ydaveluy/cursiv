@@ -1,6 +1,3 @@
-// The extension is bundled into ONE CommonJS file: `vscode` is injected by the
-// editor and stays external, the language client is bundled in, so the folder
-// VS Code loads needs no node_modules of its own.
 import { rmSync } from 'node:fs';
 import esbuild from 'esbuild';
 
@@ -11,17 +8,19 @@ if (!watch) {
   rmSync('out', { recursive: true, force: true });
 }
 
+// Bundle the extension and its dependencies into one file. VS Code provides
+// the `vscode` module itself.
 const context = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
   platform: 'node',
-  target: 'node20', // VS Code 1.91 supports native servers; WASI needs 1.101.
+  target: 'node20', // The Node.js version of VS Code 1.91.
   outfile: 'out/extension.js',
   external: ['vscode'],
   sourcemap: !production,
   minify: production,
-  logLevel: 'info'
+  logLevel: 'info',
 });
 
 if (watch) {

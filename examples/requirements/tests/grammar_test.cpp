@@ -25,6 +25,7 @@
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/text/TextOffset.hpp"
+#include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/validation/ValidationAcceptor.hpp"
 #include "cursiv/workspace/BuildOptions.hpp"
 #include "cursiv/workspace/DefaultDocuments.hpp"
@@ -155,6 +156,23 @@ void a_test_says_what_it_lacks() {
       "referenced requirement.";
   CHECK(count(said, kStrayEnvironment) == 1);
   ct::expectWarning(said, kStrayEnvironment, at(kTests.find("Linux"), 5));
+
+  // A long list says the same, at each stray entry.
+  World many;
+  many.add("file:///w/a.req", std::string(kRequirements));
+  std::string list = "tst T2 tests Req1 applicable for Win";
+  for (int entry = 0; entry < 10; ++entry)
+    list += entry % 3 == 0 ? ", Linux" : ", Win";
+  many.add("file:///w/a.tst", list + "\n");
+  many.build();
+  const ct::ValidationResult manySaid = many.said("file:///w/a.tst");
+  constexpr std::string_view kStrayInList =
+      "Test T2 references environment Linux which is not used by any "
+      "referenced requirement.";
+  CHECK(count(manySaid, kStrayInList) == 4);
+  for (std::size_t stray = list.find("Linux"); stray != std::string::npos;
+       stray = list.find("Linux", stray + 1))
+    ct::expectWarning(manySaid, kStrayInList, at(stray, 5));
 }
 
 // The numbered test naming an environment its requirement declares: nothing to
@@ -272,8 +290,21 @@ void the_shipped_pair_generates_its_golden_summary() {
   CHECK(model != nullptr && tests != nullptr);
   if (model == nullptr || tests == nullptr) return;
   const req::ast::TestModel* const testModels[] = {tests};
+  // The golden file spells the sources as a POSIX host does; each host writes
+  // its own path for them.
+  std::string expected =
+      read_file(root / "tests" / "golden" / "requirements.html");
+  for (const std::string_view uri :
+       {"file:///requirements.req", "file:///tests.tst"}) {
+    const std::string posix(uri.substr(std::string_view("file://").size()));
+    const std::string native =
+        cursiv::file_uri_to_path(uri).value_or(std::string(uri));
+    for (std::size_t at = expected.find(posix); at != std::string::npos;
+         at = expected.find(posix, at + native.size()))
+      expected.replace(at, posix.size(), native);
+  }
   CHECK(req::generate_summary_file_html_content(*model, testModels)
-        == read_file(root / "tests" / "golden" / "requirements.html"));
+        == expected);
 }
 
 #if !defined(__wasi__) || defined(_REENTRANT)

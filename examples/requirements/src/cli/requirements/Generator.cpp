@@ -1,5 +1,6 @@
 #include "requirements/Generator.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -63,16 +64,21 @@ std::string generate_summary_file_html_content(
 
   // Who covers what, in one pass over the tests and in their order: each
   // row then reads its own list instead of every test again. A test that
-  // names a requirement twice covers it once.
+  // names a requirement twice covers it once. Each test model's source is
+  // written once, not once per row it fills.
   struct Covering {
     const Test* test;
-    const TestModel* model;
+    std::size_t source;  // in `sources`
   };
+  std::vector<std::string> sources;
+  sources.reserve(testModels.size());
   std::unordered_map<const Requirement*, std::vector<Covering>> coveredBy;
   for (const auto* testModel : testModels) {
     if (testModel == nullptr) {
       continue;
     }
+    const std::size_t source = sources.size();
+    sources.push_back(html_escape(document_source_path(*testModel)));
     for (const auto& test : testModel->tests) {
       if (!test) {
         continue;
@@ -84,7 +90,7 @@ std::string generate_summary_file_html_content(
         }
         auto& covering = coveredBy[target];
         if (covering.empty() || covering.back().test != test) {
-          covering.push_back({test, testModel});
+          covering.push_back({test, source});
         }
       }
     }
@@ -98,9 +104,8 @@ std::string generate_summary_file_html_content(
     out.line("<TR><TD>", requirement->name, "</TD><TD>");
     if (const auto found = coveredBy.find(requirement);
         found != coveredBy.end()) {
-      for (const auto& [test, testModel] : found->second) {
-        out.line("<div>", test->name, " (from ",
-                 html_escape(document_source_path(*testModel)), ")</div>");
+      for (const auto& [test, source] : found->second) {
+        out.line("<div>", test->name, " (from ", sources[source], ")</div>");
       }
     }
     out.line("</TD></TR>");

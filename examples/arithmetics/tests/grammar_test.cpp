@@ -145,14 +145,17 @@ void a_call_that_returns_says_nothing() {
       "module m\ndef add(a, b): a + b;\ndef calc: add(2, 3);\n"));
 }
 
-void two_definitions_of_one_name_are_two_errors() {
+void every_definition_of_a_shared_name_is_an_error() {
   const World world;
-  const std::string text = "module m\ndef x: 1;\ndef x: 2;\n";
+  const std::string text =
+      "module m\ndef x: 1;\ndef y: 2;\ndef x: 3;\ndef x: 4;\n";
   const ct::ValidationResult said = world.validate(text);
   constexpr std::string_view kMessage = "Duplicate definition name: x";
-  CHECK(count(said, kMessage) == 2);
+  CHECK(count(said, kMessage) == 3);
+  CHECK(count(said, "Duplicate definition name: y") == 0);
   ct::expectError(said, kMessage, at(text.find("x: 1"), 1));
-  ct::expectError(said, kMessage, at(text.find("x: 2"), 1));
+  ct::expectError(said, kMessage, at(text.find("x: 3"), 1));
+  ct::expectError(said, kMessage, at(text.find("x: 4"), 1));
 }
 
 void two_definitions_of_two_names_say_nothing() {
@@ -461,7 +464,7 @@ int main() {
   a_mutual_cycle_is_said_at_each_of_its_call_sites();
   a_three_step_cycle_spells_every_step();
   a_call_that_returns_says_nothing();
-  two_definitions_of_one_name_are_two_errors();
+  every_definition_of_a_shared_name_is_an_error();
   two_definitions_of_two_names_say_nothing();
   two_parameters_of_one_name_are_two_errors();
   two_parameters_of_two_names_say_nothing();
