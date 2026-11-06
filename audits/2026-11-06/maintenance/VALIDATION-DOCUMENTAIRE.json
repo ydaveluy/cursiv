@@ -1,0 +1,139 @@
+{
+  "date": "2026-11-06",
+  "source_commit": "66c465bba3d2abd655e0e8fad3063f1fcfa9d599",
+  "source_clean": true,
+  "expected_scopes": 513,
+  "audited_scopes": 513,
+  "missing_scopes": [],
+  "duplicate_scopes": [],
+  "unique_findings": 158,
+  "duplicate_finding_keys": [],
+  "unresolved_finding_refs": [],
+  "invalid_evidence": [],
+  "checked_evidence_occurrences": 1915,
+  "distinct_source_files_cited": 517,
+  "checked_local_markdown_links": 693,
+  "remote_markdown_links_not_fetched": 2343,
+  "category_counts": {
+    "optimisation": 120,
+    "factorisation": 14,
+    "legacy": 5,
+    "simplification": 11,
+    "duplication": 5,
+    "mort": 3
+  },
+  "proof_counts": {
+    "candidat": 40,
+    "etabli": 118
+  },
+  "priority_counts": {
+    "P3": 54,
+    "P2": 104
+  },
+  "scope_verdicts": {
+    "constat": 229,
+    "sans_constat": 284
+  },
+  "project_execution": "aucune : pas de build, test, benchmark ou reproducer",
+  "validation_scope": "structure documentaire, lignes existantes et intégrité Git ; pas une validation fonctionnelle du code",
+  "local_audit_artifacts": {
+    "AUDIT-MAINTENABILITE-513.md": {
+      "sha256": "cf45cc27091b78882a0e528c2678680f852b919a02136d160b2969a39e2af3b6",
+      "bytes": 1338294,
+      "lines": 15291
+    },
+    "SYNTHESE-PASSATION-MAINTENABILITE.md": {
+      "sha256": "8ce87bf61dc385fa1904a38e4251e85bbac77126b213846d294bdf45e72c9106",
+      "bytes": 416058,
+      "lines": 4462
+    },
+    "scopes.json": {
+      "sha256": "236e9cdb975fe8552992080129bdebe65c48d2c4b68a86190660cb9d8091a6ef",
+      "bytes": 548568,
+      "lines": 11886
+    },
+    "resultats-consolides.json": {
+      "sha256": "0a7e37326961d9ac1a2886700a61861cd8711f8f05f618dad33befdca6630d48",
+      "bytes": 1044600,
+      "lines": 18767
+    },
+    "constats-consolides.json": {
+      "sha256": "8c151fbe14c37e1158edc7cfe8eedd2b09236157b89baf42c5fc05cc9b4174fc",
+      "bytes": 317304,
+      "lines": 5547
+    }
+  },
+  "original_input_results_sha256": {
+    "examples-cli.json": "30fbf074090c3924ebf193ac577bdd4e2bfd40c3526b7b371fce196f229799c4",
+    "ll-lex-cgr.json": "51b028afe604b61e00e18fa3c15e498ac529157ba64d53981644b95a7e1dcabf",
+    "lr-com.json": "5d58406aefc9b79451db24c39a276d73967103851acab7046e51fbe17172f4b9",
+    "protocols.json": "92ca9e31f6bc7b61f085936f297760c5438077a3f7136f655a1a999915687081",
+    "root-api.json": "f64911fa7f7307b69ff6789b5733bcdebd2444e324ca580a4f2a5bd04f48e829",
+    "root-ast-cst.json": "55c2b5073e148b9416ff27e0ca3ca23419a4b2e039cf8ab1f5789847eb494548",
+    "root-build.json": "afa14653cc00baccc901658d5ce8eb13eea80687f551c143b2c4d201ebfe5aed",
+    "root-grammar.json": "e7d111e1b17ae05b6866b276f66e79db9980069930146cb262b3c4f2c9b6efbb",
+    "root-host.json": "54b0e00fd1f5220aa1a1187d1e416b87499e40fa4f963351ce1a84f177cff2ec",
+    "root-public.json": "f8a21a2b40c2ff991b92a1ba3ec06a80efe6902b816e6cb387741f5df4915aba",
+    "root-text.json": "a71f1530d8e589a56e239ff0ab8f9face1709a7c5ce8615c52e6ac431c51bc35",
+    "workspace.json": "6a7e7529430ff03d7e0886199bd0c35e06470a6f177f7cbfe447659a98151dfb"
+  },
+  "original_input_results_note": "Empreintes des lots de travail non embarqués séparément ; leur contenu est livré dans resultats-consolides.json et constats-consolides.json.",
+  "publication": {
+    "repository": "https://github.com/ydaveluy/cursiv",
+    "branch": "audit",
+    "directory": "audits/2026-11-06/maintenance",
+    "parent_commit": "d3be10d0d0541c0a96bd67103d8612d902a1b984",
+    "editorial_changes": [
+      "Mentions de publication",
+      "Retrait du chemin local du checkout",
+      "Renvoi de la relecture API vers les fiches consolidées",
+      "Ajout du README de navigation"
+    ],
+    "audit_findings_changed": false,
+    "source_audit_manifest_sha256": "fe092b2b451ce69f9f4128e627ae21d5586f60688a45fe6a2458ee1969b93dd0",
+    "checked_published_local_markdown_links": 705,
+    "checked_evidence_occurrences": 1915
+  },
+  "artifacts": {
+    "AUDIT-MAINTENABILITE-513.md": {
+      "sha256": "d3c34ac7cf1763d33b50e166df3ce2be5759b96e9b01f42f587f3935efd8768c",
+      "bytes": 1338275,
+      "lines": 15291
+    },
+    "README.md": {
+      "sha256": "383bed3607576c24750df32243dfc40fadd90eb3c22de3173275f9cbc49e9942",
+      "bytes": 2505,
+      "lines": 25
+    },
+    "REVUE-SUPPRESSIONS-API.md": {
+      "sha256": "3d63daab113b664be3f38f3eaaaef9d64b2b7c91ba899f1a60e42fd6779742ef",
+      "bytes": 17384,
+      "lines": 120
+    },
+    "REVUE-SUPPRESSIONS-MOTEURS.md": {
+      "sha256": "8898f367921c9979ee449b8c44af95fa56fd03652f934956d8774d80d767b399",
+      "bytes": 8217,
+      "lines": 36
+    },
+    "SYNTHESE-PASSATION-MAINTENABILITE.md": {
+      "sha256": "4dc10a863145508406bfb1e5be02102e28cb8df52a44da55af8541e2059937cc",
+      "bytes": 416039,
+      "lines": 4462
+    },
+    "constats-consolides.json": {
+      "sha256": "8c151fbe14c37e1158edc7cfe8eedd2b09236157b89baf42c5fc05cc9b4174fc",
+      "bytes": 317304,
+      "lines": 5547
+    },
+    "resultats-consolides.json": {
+      "sha256": "0a7e37326961d9ac1a2886700a61861cd8711f8f05f618dad33befdca6630d48",
+      "bytes": 1044600,
+      "lines": 18767
+    },
+    "scopes.json": {
+      "sha256": "236e9cdb975fe8552992080129bdebe65c48d2c4b68a86190660cb9d8091a6ef",
+      "bytes": 548568,
+      "lines": 11886
+    }
+  }
+}
