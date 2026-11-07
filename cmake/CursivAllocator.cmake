@@ -35,11 +35,18 @@ endif()
 enable_language(C)
 include(FetchContent)
 set(_mimalloc_revision 56dc5eb80145f9a3ba7ca23d47c6a248b9d8586c) # v3.6.1
+set(_mimalloc_dir "cursiv_mimalloc-${_mimalloc_revision}")
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+  # A changed WASI patch gets fresh sources, never a tree an older one patched.
+  file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/patches/mimalloc-wasi.patch" _patch_hash)
+  string(SUBSTRING "${_patch_hash}" 0 12 _patch_hash)
+  string(APPEND _mimalloc_dir "-wasi-${_patch_hash}")
+endif()
 FetchContent_Declare(cursiv_mimalloc
     GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
     GIT_TAG ${_mimalloc_revision}
     # Keep version-specific WASI patches out of later dependency updates.
-    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/cursiv_mimalloc-${_mimalloc_revision}-src"
+    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/${_mimalloc_dir}-src"
     SOURCE_SUBDIR cursiv-source-only)
 FetchContent_MakeAvailable(cursiv_mimalloc)
 
@@ -56,8 +63,8 @@ set_target_properties(cursivAllocator PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
   # The upstream port lacks locks, thread exit and arena reuse for large
-  # alignments: the patch adds them. Verified on a populated tree too, so a
-  # changed patch never leaves an old port in use.
+  # alignments, and clears new memory that is already zero: the patch fixes
+  # them. A tree it already patched is left as it is.
   find_package(Git REQUIRED)
   set(_patch "${CMAKE_CURRENT_LIST_DIR}/patches/mimalloc-wasi.patch")
   execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check "${_patch}"

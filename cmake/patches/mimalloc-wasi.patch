@@ -26,7 +26,17 @@
  #if !defined(MI_PAGE_CACHE_OFFSET)
 --- a/src/prim/wasi/prim.c
 +++ b/src/prim/wasi/prim.c
-@@ -245,23 +245,21 @@
+@@ -123,7 +123,8 @@
+ int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool commit, bool allow_large, bool* is_large, bool* is_zero, void** addr) {
+   MI_UNUSED(allow_large); MI_UNUSED(commit); MI_UNUSED(hint_addr);
+   *is_large = false;
+-  *is_zero = false;
++  // memory.grow only adds pages, and new pages are zero.
++  *is_zero = true;
+   *addr = mi_prim_mem_grow(size, try_alignment);
+   return (*addr != NULL ? 0 : ENOMEM);
+ }
+@@ -245,23 +246,21 @@
  // Environment
  //----------------------------------------------------------------
 
@@ -64,7 +74,7 @@
  }
 
 
-@@ -278,6 +276,44 @@
+@@ -278,6 +277,44 @@
  // Thread init/done
  //----------------------------------------------------------------
 
@@ -109,7 +119,7 @@
  void _mi_prim_thread_init_auto_done(void) {
    // nothing
  }
-@@ -290,6 +326,8 @@
+@@ -290,6 +327,8 @@
    MI_UNUSED(theap);
  }
 

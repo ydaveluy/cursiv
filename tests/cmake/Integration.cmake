@@ -47,7 +47,9 @@ if(TARGET cursivAllocator)
   cursiv_test(Allocator_test integration/Allocator_test.cpp)
   target_include_directories(Allocator_test SYSTEM PRIVATE
       $<TARGET_PROPERTY:cursivAllocator,INCLUDE_DIRECTORIES>)
-  set_tests_properties(Allocator_test PROPERTIES TIMEOUT 60)
+  # A debug allocator reports what it finds wrong in its port, then goes on.
+  set_tests_properties(Allocator_test PROPERTIES TIMEOUT 60
+      FAIL_REGULAR_EXPRESSION "mimalloc: (warning|error)")
   if(NOT CMAKE_CROSSCOMPILING)
     FetchContent_GetProperties(cursiv_mimalloc SOURCE_DIR _allocator_source)
     add_test(NAME allocator_consumer_test COMMAND ${CMAKE_COMMAND}
