@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,17 +83,29 @@ double per_token(const cursiv::bench::PerfCounters& counters,
          static_cast<double>(text.size());
 }
 
+// A check it cannot run is named, so a pass never stands for a check that did
+// not run.
+void not_checked(const char* check, const char* why) {
+  std::printf("ConditionGrowth_test: %s not checked, %s\n", check, why);
+}
+
 // Each dash of the run is tested: were each test to read to the run's end, a
 // token would cost four times as much in four times the run.
 void a_run_costs_its_length(const cursiv::Parser& parser) {
   const cursiv::bench::PerfCounters counters;
-  if (!counters.active()) return;
+  if (!counters.active()) {
+    not_checked("cost per token", "no hardware counter is readable");
+    return;
+  }
   const auto dashes = [](unsigned n) { return repeat("-", n) + ";"; };
   (void)per_token(counters, parser, dashes(400));
   std::array<double, 3> cost{};
   for (unsigned i = 0; i < 3; ++i)
     cost[i] = per_token(counters, parser, dashes(400u << (2 * i)));
-  if (cost[0] == 0 || cost[1] == 0 || cost[2] == 0) return;
+  if (cost[0] == 0 || cost[1] == 0 || cost[2] == 0) {
+    not_checked("cost per token", "a sample was unreadable or multiplexed");
+    return;
+  }
   CHECK(cost[1] <= 1.5 * cost[0]);
   CHECK(cost[2] <= 1.5 * cost[1]);
 }
@@ -176,7 +189,10 @@ struct DashComma {
 // Rounds that leave several cursors cost no more as the run grows.
 void a_run_of_several_cursors_costs_its_length() {
   const cursiv::bench::PerfCounters counters;
-  if (!counters.active()) return;
+  if (!counters.active()) {
+    not_checked("cost per round", "no hardware counter is readable");
+    return;
+  }
   constexpr cursiv::PredicateRound round{&Dashes::start, &DashComma::step,
                                          false};
   const auto per_round = [&](unsigned n) {
@@ -197,7 +213,10 @@ void a_run_of_several_cursors_costs_its_length() {
   (void)per_round(2000);
   const double small = per_round(2000);
   const double large = per_round(8000);
-  if (small == 0 || large == 0) return;
+  if (small == 0 || large == 0) {
+    not_checked("cost per round", "a sample was unreadable or multiplexed");
+    return;
+  }
   CHECK(large <= 1.5 * small);
 }
 

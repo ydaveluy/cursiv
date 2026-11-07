@@ -2386,7 +2386,10 @@ void a_final_class_still_converts() {
 }
 
 // What a tree offers from the depth of a long chain costs its size, not its
-// size times its depth. A climb per node here takes seconds.
+// size times its depth: each walk costs less than building the document, which
+// is linear, where a climb per node costs as much as dozens of builds. Timed
+// against that build in the same run, so neither a slow nor a busy machine
+// decides.
 void a_deep_tree_is_climbed_once() {
   constexpr std::size_t kDepth = 48000;
   const auto word = [](std::size_t n) {
@@ -2403,19 +2406,20 @@ void a_deep_tree_is_climbed_once() {
       world.shared, {"conv", {".conv"}, {}},
       tconv::generated::G::create_parser(),
       tconv::generated::G::create_ast_reflection());
+  const auto start = std::chrono::steady_clock::now();
   const cursiv::Document* const document =
       world.built("file:///deep.conv", std::move(text));
+  const auto built = std::chrono::steady_clock::now() - start;
   CHECK(document->diagnostics.empty());
   const auto fastest = [](const auto& run) {
     auto best = std::chrono::steady_clock::duration::max();
-    for (int round = 0; round < 3; ++round) {
+    for (int round = 0; round < 5; ++round) {
       const auto begin = std::chrono::steady_clock::now();
       run();
       best = std::min(best, std::chrono::steady_clock::now() - begin);
     }
     return best;
   };
-  using namespace std::chrono_literals;
   std::size_t owners = 0;
   const auto symbols = fastest([&] {
     owners = cursiv::collect_named_nodes(*document, *language->nameProvider,
@@ -2423,7 +2427,7 @@ void a_deep_tree_is_climbed_once() {
                  .owners.size();
   });
   CHECK(owners == kDepth);
-  CHECK(symbols < 300ms);
+  CHECK(symbols < built);
   std::size_t rows = 0;
   const auto described = fastest([&] {
     rows = language->referenceDescriptionProvider
@@ -2431,7 +2435,7 @@ void a_deep_tree_is_climbed_once() {
                .size();
   });
   CHECK(rows == kDepth);
-  CHECK(described < 300ms);
+  CHECK(described < built);
 }
 
 // Diamonds on diamonds: a base reached by several paths is one base.
