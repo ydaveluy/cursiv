@@ -68,7 +68,7 @@ set(LSP_INSTALL OFF CACHE BOOL "")
 FetchContent_Declare(
     lsp_framework
     GIT_REPOSITORY https://github.com/ydaveluy/lsp-framework.git
-    GIT_TAG        b63cdf9f1db2167fea0cb1c9b51a1357a2a2472c
+    GIT_TAG        00162a2b96fc7474f2c76e270449b5e7f59c46b8
     GIT_SUBMODULES ""
     EXCLUDE_FROM_ALL)
 block(PROPAGATE lsp_framework_SOURCE_DIR lsp_framework_BINARY_DIR)
