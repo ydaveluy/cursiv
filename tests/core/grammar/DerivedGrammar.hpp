@@ -144,12 +144,26 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 inline constexpr auto drop_one = [](std::string_view t) { return t.substr(1); };
 inline constexpr auto drop_two = [](std::string_view t) { return t.substr(2); };
 
+// A case-sensitive grammar the base embeds: its keyword keeps its case.
+struct Exact : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Body : rule<kw<"raw">> {};
+  using entry = Body;
+  using ignored = WS;
+};
+
+// Case-insensitive, and the dialects inherit it: the keyword matches in any
+// case, the punctuation stays as it is, and the embedded grammar keeps its
+// own case.
 struct Base : cursiv::GrammarSpec {
+  static constexpr bool case_insensitive = true;
   struct WS : terminal<some(s)> {};
   struct WORD : terminal<as<drop_one>(lit<"@"> + some(cr<"a-z@">))> {};
   struct Path : rule<ref<WORD> + lit<"."> + ref<WORD>> {};
   struct DocRule
-      : rule<create<ast::Doc>(many(append<&ast::Doc::paths>(ref<Path>)))> {};
+      : rule<create<ast::Doc>(option(kw<"début"> + lit<":">) +
+                              many(append<&ast::Doc::paths>(ref<Path>)) +
+                              option(section<Exact>(lit<"[">, lit<"]">)))> {};
 
   using ignored = WS;
 };

@@ -14,6 +14,8 @@
 #include "cursiv/syntax-tree/MemberTraits.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/ClassRanges.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
@@ -781,26 +783,19 @@ consteval auto make_lit() {
     return Lit<S, CI, G>{};
 }
 
-// A case-insensitive keyword needs a case. `ikw<>` differs from `kw<>` in
-// exactly one thing -- the byte compare folds -- and folding is the identity
-// on every byte that is not a letter. A spelling with no `a-zA-Z` in it is
-// therefore `kw<>` written the long way: same language, one more template
-// argument, one more element row.
+// Whether a spelling holds a letter with another case: folding is the
+// identity on every other character.
 template <str S>
 consteval bool holds_a_letter() {
-  for (std::size_t i = 0; i < S.size(); ++i) {
-    const char c = S[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return true;
-  }
-  return false;
+  return has_cased_letter(S.view());
 }
 
+// A case-insensitive keyword. A spelling with no letter that has another
+// case, such as `{`, folds to itself: it is the keyword `kw<>` builds, so a
+// grammar may write every keyword `ikw<>`.
 template <str S>
 consteval auto make_ikw() {
-  static_assert(holds_a_letter<S>(),
-                "`ikw<S>` is a case-insensitive keyword, and this text has no "
-                "letter, so case changes nothing: write `kw<S>` instead");
-  return Lit<S, true, WordBound>{};
+  return Lit<S, holds_a_letter<S>(), WordBound>{};
 }
 
 }  // namespace detail

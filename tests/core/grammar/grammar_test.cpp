@@ -1808,12 +1808,22 @@ void an_operator_is_resolved_too() {
             "levels(left('*'), left('+'))") != std::string::npos);
 }
 
-// ...and the same law from the other side: an `ikw<>` must hold a letter, or
-// the case-insensitivity is a no-op and `kw<>` is the spelling.
+// ...and the same law from the other side: an `ikw<>` with no letter that
+// has another case is the `kw<>` of its spelling, the same node.
 static_assert(cursiv::detail::holds_a_letter<"if">());
 static_assert(cursiv::detail::holds_a_letter<"IF">());
 static_assert(!cursiv::detail::holds_a_letter<"==">());
 static_assert(!cursiv::detail::holds_a_letter<"5">());
+static_assert(std::same_as<std::remove_cvref_t<decltype(cursiv::ikw<"==">)>,
+                           std::remove_cvref_t<decltype(cursiv::kw<"==">)>>);
+static_assert(!std::same_as<std::remove_cvref_t<decltype(cursiv::ikw<"if">)>,
+                            std::remove_cvref_t<decltype(cursiv::kw<"if">)>>);
+// A letter is any character with another case, ASCII or not.
+static_assert(cursiv::detail::holds_a_letter<"ΣΟΦΊΑ">());
+static_assert(!cursiv::detail::holds_a_letter<"中文">());
+// Under a class not closed under case, every case of the last letter asks.
+static_assert(cursiv::detail::word_final_in("ÉTÉ", 0, false, "a-zé", true));
+static_assert(!cursiv::detail::word_final_in("ÉTÉ", 0, false, "a-zé", false));
 
 }  // namespace
 
@@ -2743,10 +2753,35 @@ void a_joined_part_runs_the_dialects_converter() {
         "ab.cd");
 }
 
+// A case-insensitive base makes its dialects case-insensitive: the keyword in
+// any case, beyond ASCII too, and the punctuation as it is.
+void a_dialect_inherits_case_insensitivity() {
+  const auto reads = [](const cursiv::Parser& p, std::string_view text) {
+    const cursiv::ParseResult r = p.parse(text);
+    return r.accepted && r.diagnostics.empty();
+  };
+  const std::unique_ptr<cursiv::Parser> parsers[] = {
+      ttext::generated::Dialect::create_parser(),
+      ttext::generated::DialectLl::create_parser()};
+  for (const auto& parser : parsers) {
+    CHECK(reads(*parser, "début: @@ab.@@cd"));
+    CHECK(reads(*parser, "DÉBUT: @@ab.@@cd"));
+    CHECK(reads(*parser, "Début : @@ab.@@cd"));
+    CHECK(!reads(*parser, "DÉBUTS: @@ab.@@cd"));
+    CHECK(!reads(*parser, "DEBUT: @@ab.@@cd"));
+    CHECK(reads(*parser, "@@ab.@@cd [raw]"));
+    CHECK(!reads(*parser, "@@ab.@@cd [RAW]"));
+    // The tree's readers fold the keyword too.
+    CHECK(parser->getGrammar().spellingFolds("début"));
+    CHECK(!parser->getGrammar().spellingFolds(":"));
+  }
+}
+
 }  // namespace
 
 void run() {
   a_dialect_reads_what_its_base_reads();
+  a_dialect_inherits_case_insensitivity();
   only_the_dialect_reads_its_own_spellings();
   a_dialect_adds_an_alternative_to_a_node_rule();
   a_refusal_asks_the_dialects_terminal();

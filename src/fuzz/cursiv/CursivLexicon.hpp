@@ -18,6 +18,7 @@
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 #include "cursiv/DecisionSource.hpp"
@@ -556,8 +557,18 @@ struct CursivLexicon final : GrammarLexicon {
 
  private:
   [[nodiscard]] static std::string folded(std::string_view s) {
-    std::string out(s);
-    for (char& c : out) c = to_lower(c);
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size();) {
+      std::size_t len = 0;
+      const char32_t cp = scalar_at(s.data() + i, s.size() - i, len);
+      if (len == 0) {
+        out += s[i++];
+        continue;
+      }
+      append_scalar(out, cursiv::detail::fold_scalar(cp));
+      i += len;
+    }
     return out;
   }
 

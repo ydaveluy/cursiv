@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-#include "cursiv/utils/ctstring.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 
 namespace cursiv {
 
@@ -120,9 +120,7 @@ bool same_token(const Token& a, const Token& b) {
   if (a.rule != b.rule) return false;
   if (a.rule != kNoImage) return true;
   if (!a.folded && !b.folded) return a.text == b.text;
-  return std::ranges::equal(a.text, b.text, [](char x, char y) {
-    return to_lower(x) == to_lower(y);
-  });
+  return folded_equal(a.text, b.text);
 }
 
 // The first string both operators spell.

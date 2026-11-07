@@ -39,7 +39,7 @@ Lowerer::Lowerer(GrammarImage& image, const LowerDesc& desc,
       _twins(image,
              [this](std::uint32_t rule) {
                return data_rule(rule) && !_im.rules[rule].foreign
-                          ? _im.node(*stage(rule).body)
+                          ? _im.node(*stage(rule).body, _im.folds(rule))
                           : kNoImage;
              }),
       _d(desc),
@@ -92,7 +92,7 @@ ImageId Lowerer::body_in(unsigned cfg, std::uint32_t rule) {
   const bool section = _cfgs[cfg].end != kNoImage;
   const std::uint64_t k = std::uint64_t{rule} << 1 | (section ? 1u : 0u);
   if (const auto it = _bodies.find(k); it != _bodies.end()) return it->second;
-  ImageId out = _im.node(*stage(rule).body);
+  ImageId out = _im.node(*stage(rule).body, _im.folds(rule));
   if (data_rule(rule) || node_rule(rule)) out = _twins.drop(out);
   if (section) out = ended(out);
   _bodies.emplace(k, out);
@@ -191,12 +191,12 @@ void Lowerer::note_docs() {
   for (const std::uint32_t rule : _ntRule) {
     const ImageStageDesc& st = stage(rule);
     if (st.kind != ImageRuleKind::infix) {
-      walk(_im.node(*st.body));
+      walk(_im.node(*st.body, _im.folds(rule)));
       continue;
     }
     for (std::uint32_t i = 0; i < st.levelCount; ++i)
       for (std::uint32_t j = 0; j < st.levels[i].count; ++j)
-        walk(_im.node(*st.levels[i].ops[j].op));
+        walk(_im.node(*st.levels[i].ops[j].op, _im.folds(rule)));
   }
 }
 
@@ -272,12 +272,12 @@ void Lowerer::open_configs() {
       if (!reads_under(home, rule)) continue;
       const ImageStageDesc& st = stage(rule);
       if (st.kind != ImageRuleKind::infix) {
-        walk(_im.node(*st.body), home);
+        walk(_im.node(*st.body, _im.folds(rule)), home);
         continue;
       }
       for (std::uint32_t i = 0; i < st.levelCount; ++i)
         for (std::uint32_t j = 0; j < st.levels[i].count; ++j)
-          walk(_im.node(*st.levels[i].ops[j].op), home);
+          walk(_im.node(*st.levels[i].ops[j].op, _im.folds(rule)), home);
     }
   };
   walk = [&](ImageId id, unsigned home) {
@@ -588,8 +588,8 @@ void Lowerer::define() {
   }
   // The brackets once the rules numbered what they read: a spelling no rule
   // reads is no terminal of its own.
-  delimit(_im.node(*_d.indentOpen), 1);
-  delimit(_im.node(*_d.indentClose), -1);
+  delimit(_im.node(*_d.indentOpen, _im.caseInsensitive), 1);
+  delimit(_im.node(*_d.indentClose, _im.caseInsensitive), -1);
   for (std::size_t i = 0; i < _roles.size(); ++i) inherit_role_term(i);
 }
 

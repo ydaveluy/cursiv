@@ -147,7 +147,7 @@ void LlLowerer::emit_climb(unsigned cfg, std::uint32_t rule,
   cl.leftRow = climb_chain(st.leftRow);
   cl.rightRow = climb_chain(st.rightRow);
   cl.opBase = _cfg.nclimbOps;
-  each_op(st, [&](ImageId op, const void* row, std::uint8_t prec,
+  each_op(rule, [&](ImageId op, const void* row, std::uint8_t prec,
                   Association group) { emit_op(cfg, op, row, prec, group); });
   cl.opCount = static_cast<std::uint16_t>(_cfg.nclimbOps - cl.opBase);
   if (cl.opCount != 0) {

@@ -82,14 +82,18 @@ struct Variants : cursiv::GrammarSpec {
 struct VariantsLl : Variants {};
 
 // A word boundary of code points: a no-break space ends the keyword, and the
-// comment that would go on behind it does not take the keyword with it.
+// comment that would go on behind it does not take the keyword with it. The
+// same holds of a keyword past ASCII, whose letters read through a choice of
+// their cases.
 struct Wide : cursiv::GrammarSpec {
   static constexpr auto word_boundary = uc::XID_Continue;
   struct WS : terminal<some(uc::Zs | cr<R"(\t\r\n)">)> {};
-  struct REMARK : terminal<ikw<"REM"> + many(cr<R"(^\r\n)">)> {};
-  struct ID : terminal<!ikw<"REM"> + cr<"a-zA-Z_"> + many(w)> {};
-  struct PartRule
-      : rule<create<Part>(assign<&Part::text>(ref<ID> | ikw<"REM">))> {};
+  struct REMARK
+      : terminal<(ikw<"REM"> | ikw<"ΣΧΌΛΙΟ">) + many(cr<R"(^\r\n)">)> {};
+  struct ID : terminal<!(ikw<"REM"> | ikw<"ΣΧΌΛΙΟ">) + cr<"a-zA-Z_"> +
+                       many(w)> {};
+  struct PartRule : rule<create<Part>(assign<&Part::text>(
+                        ref<ID> | ikw<"REM"> | ikw<"ΣΧΌΛΙΟ">))> {};
   struct RefRule : rule<create<Ref>(assign<&Ref::text>(ref<ID>))> {};
   struct AssignRule
       : rule<create<Assign>(

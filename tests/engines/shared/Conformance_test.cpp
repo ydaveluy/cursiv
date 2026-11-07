@@ -179,6 +179,12 @@ int main() {
   expect(mergedLookahead, "a.b: [@c.d e.f]", true);
   const Pair expectedKeyword{"expectedkeyword:"};
   won(expectedKeyword, "REM ; REM junk\nabc", "REM", "abc");
+  // ...beyond ASCII too, where `ÿ` and `Ÿ` start on different bytes.
+  const Pair foldedKeyword{"foldedkeyword:"};
+  won(foldedKeyword, "HAŸ ; haÿ junk\nabc", "HAŸ", "abc");
+  won(foldedKeyword, "Haÿ ; abc", "Haÿ", "abc");
+  expect(foldedKeyword, "haÿ ; HAŸ", false);
+  expect(foldedKeyword, "HAY ; abc", false);
 
   const Pair arms{"arms:"};
   tree<ast::Arms>(arms, "abc:", [](const ast::Arms& n) {

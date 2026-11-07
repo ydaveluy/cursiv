@@ -243,6 +243,10 @@ void run() {
   const Pair bare{"barehost:"};
   expect(bare, "[a]", true);
 
+  const Pair folded{"foldedhost:"};
+  expect(folded, "[ÉTÉ]", true);
+  expect(folded, "[Été]", true);
+
   const Pair absentClose{"absentclosehost:"};
   expect(absentClose, "[a]", true);
 

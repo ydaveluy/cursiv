@@ -150,7 +150,8 @@ class Lowerer {
   // Each operator of an infix rule, with its precedence, the first level
   // binding tightest, and its grouping.
   template <class Op>
-  void each_op(const ImageStageDesc& st, Op&& op) {
+  void each_op(std::uint32_t rule, Op&& op) {
+    const ImageStageDesc& st = stage(rule);
     for (std::uint32_t i = 0; i < st.levelCount; ++i) {
       const ImageStageLevelDesc& level = st.levels[i];
       const auto prec = static_cast<std::uint8_t>(st.levelCount - i);
@@ -160,7 +161,8 @@ class Lowerer {
                                     ? Association::non
                                     : Association::left;
       for (std::uint32_t j = 0; j < level.count; ++j)
-        op(_im.node(*level.ops[j].op), level.ops[j].row, prec, group);
+        op(_im.node(*level.ops[j].op, _im.folds(rule)), level.ops[j].row, prec,
+           group);
     }
   }
   void note_docs();

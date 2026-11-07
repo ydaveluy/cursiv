@@ -13,6 +13,7 @@
 #include "cursiv/grammar/unicode/UnicodeRanges.hpp"
 #include "cursiv/text/ClassItem.hpp"
 #include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ctstring.hpp"
 
 namespace cursiv::detail {
@@ -53,8 +54,8 @@ constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,
 }
 
 // The case a keyword was typed in has no say: `ikw<"if">` matches `IF` as
-// readily as `if`, so under a class not closed under case both cases of the
-// last letter are asked. The class and the identifiers' own must agree by
+// readily as `if`, so under a class not closed under case every case of the
+// last letter is asked. The class and the identifiers' own must agree by
 // hand: widening one without the other is a silent language change.
 constexpr bool word_final_in(std::string_view s, std::uint64_t m, bool n,
                              std::string_view spec, bool ci) {
@@ -62,14 +63,12 @@ constexpr bool word_final_in(std::string_view s, std::uint64_t m, bool n,
   const char32_t u = last_scalar(s);
   if (u == kNoScalar) return false;
   if (class_holds(m, n, spec, u)) return true;
-  if (ci && u < 0x80) {
-    const char lo = to_lower(static_cast<char>(u));
-    const char hi =
-        (lo >= 'a' && lo <= 'z') ? static_cast<char>(lo - 'a' + 'A') : lo;
-    return class_holds(m, n, spec, static_cast<unsigned char>(lo)) ||
-           class_holds(m, n, spec, static_cast<unsigned char>(hi));
-  }
-  return false;
+  bool held = false;
+  if (ci)
+    for_each_other_case(u, [&](char32_t other) {
+      held = held || class_holds(m, n, spec, other);
+    });
+  return held;
 }
 
 // The unit a class reads at the end of a spelling, and whether it holds one.

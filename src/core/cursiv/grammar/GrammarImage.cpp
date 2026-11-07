@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "cursiv/utils/CaseFold.hpp"
+
 namespace cursiv {
 
 std::span<const ImageId> GrammarImage::shape_kids(ImageId id) const {
@@ -36,15 +38,21 @@ void GrammarImage::open(const ImageGrammarDesc& g) {
   hiddenCount = g.hiddenCount;
   bound = {g.bound.props, g.bound.complement, g.bound.scalars, true};
   plain = {g.plain.props, g.plain.complement, g.plain.scalars, true};
+  caseInsensitive = g.caseInsensitive;
 }
 
-ImageId GrammarImage::node(const ImageDesc& d) {
-  if (const auto it = _nodes.find(&d); it != _nodes.end()) return it->second;
+ImageId GrammarImage::node(const ImageDesc& d, bool folded) {
+  auto& known = folded ? _foldedNodes : _nodes;
+  if (const auto it = known.find(&d); it != known.end()) return it->second;
   std::vector<ImageId> kid;
   kid.reserve(d.count);
-  for (std::uint32_t i = 0; i < d.count; ++i) kid.push_back(node(*d.kids[i]));
+  for (std::uint32_t i = 0; i < d.count; ++i)
+    kid.push_back(node(*d.kids[i], folded));
+  const bool folds = folded && d.kind == ImageKind::lit &&
+                     detail::has_cased_letter(d.text);
   ImageNode n{.kind = d.kind,
-              .flags = d.flags,
+              .flags = static_cast<std::uint8_t>(
+                  d.flags | (folds ? kLitFolded : 0)),
               .m = d.m,
               .n = d.n,
               .text = d.text,
@@ -60,7 +68,7 @@ ImageId GrammarImage::node(const ImageDesc& d) {
   kids.insert(kids.end(), kid.begin(), kid.end());
   nodes.push_back(n);
   const auto id = static_cast<ImageId>(nodes.size() - 1);
-  _nodes.emplace(&d, id);
+  known.emplace(&d, id);
   return id;
 }
 
@@ -118,18 +126,18 @@ std::uint32_t GrammarImage::rule(const ImageRuleDesc& d) {
   return id;
 }
 
-ImageFace GrammarImage::face(const ImageFaceDesc& d) {
+ImageFace GrammarImage::face(const ImageFaceDesc& d, bool folded) {
   ImageFace f;
   f.kind = d.kind;
   f.returns = d.returns;
-  if (d.body != nullptr) f.body = node(*d.body);
+  if (d.body != nullptr) f.body = node(*d.body, folded);
   if (d.primary != nullptr) f.primary = rule(*d.primary);
   for (int i = 0; i < 3; ++i) f.members[i] = d.members[i];
   f.levelsAt = static_cast<std::uint32_t>(levels.size());
   f.levelCount = d.levelCount;
   for (std::uint32_t i = 0; i < d.levelCount; ++i) {
     const ImageLevelDesc& level = d.levels[i];
-    const ImageId op = node(*level.op);
+    const ImageId op = node(*level.op, folded);
     levels.push_back(
         {level.group, op, level.node, {level.members[0], level.members[1]}});
   }
@@ -146,13 +154,19 @@ const ImageRule& GrammarImage::ready(std::uint32_t id) {
   if (!rules[id].completed) {
     rules[id].completed = true;
     const ImageRuleDesc& d = *rules[id].desc;
-    const ImageFace written = face(*d.written);
+    const bool folded = folds(id);
+    const ImageFace written = face(*d.written, folded);
     const ImageFace resolved =
-        d.resolved == d.written ? written : face(*d.resolved);
+        d.resolved == d.written ? written : face(*d.resolved, folded);
     rules[id].face[0] = written;
     rules[id].face[1] = resolved;
   }
   return rules[id];
+}
+
+bool GrammarImage::folds(std::uint32_t rule) const {
+  const ImageRuleDesc* home = rules[rule].desc->home;
+  return home != nullptr ? home->written->caseInsensitive : caseInsensitive;
 }
 
 }  // namespace cursiv

@@ -7,7 +7,9 @@
 
 namespace cursiv {
 
-// A `seq` whose `min` is one spells a single literal, its guard included.
+// A `seq` whose `min` is one spells a single literal, its guard included. An
+// `alt` whose `min` is one reads one letter of a case-insensitive literal: its
+// kids are the letter's cases, each a `chars` or a `seq` of them.
 // `rep` reads `a` from `min` to `max` times, the skip `b` before each time
 // past the first, `kNoLexNode` where none.
 // `through_lit` runs up to the first literal closer: `a` is the opener's

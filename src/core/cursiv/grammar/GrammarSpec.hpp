@@ -1918,6 +1918,11 @@ struct GrammarSpec {
   // `kw<>` in it is bounded by that instead; a token may still name its own
   // class.
   static constexpr auto word_boundary = w;
+  // Whether every literal and keyword ignores letter case, as `ikw<>` does: a
+  // case-insensitive language writes
+  // `static constexpr bool case_insensitive = true;`. A spelling with no
+  // letter, such as `{`, is the same either way.
+  static constexpr bool case_insensitive = false;
   // Between an opener and its closer the indentation says nothing: a
   // grammar with `indent`/`dedent` names its brackets here, literals or
   // terminals -- `static constexpr auto indent_open = lit<"("> | ref<LBRACK>;`.

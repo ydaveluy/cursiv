@@ -104,6 +104,7 @@ struct Visibility : rule<as<Vis::Public>(kw<"public">)
 | `using ignored = T;` or `list<T…>` | Trivia dropped from the CST. |
 | `using hidden = T;` or `list<T…>` | Trivia kept in the CST, so that comments can be attached to the next node. |
 | `static constexpr auto word_boundary = c;` | The characters that continue a word; `w` by default. |
+| `static constexpr bool case_insensitive = true;` | Every literal and keyword ignores letter case, as `ikw<>` does; `false` by default. See [Case-insensitive languages](../recipes/case-insensitive.md). |
 | `indent_open`, `indent_close`, `indent_newline` | [Indentation](#indentation) settings. |
 
 A trivia terminal must consume input, and belongs to `ignored` or `hidden`,
@@ -134,7 +135,7 @@ escapes and Unicode.
 | `lit<"…">` | these exact bytes, never empty; use it for punctuation, such as `lit<";">` |
 | `lit<"…", G>` | the literal, only if the guard `G` holds right after it: `lit<"=", !lit<"=">>` |
 | `kw<"…">` | the literal, unless the next character continues a word; use it for words, such as `kw<"if">` |
-| `ikw<"…">` | the same, ignoring ASCII letter case: `ikw<"if">` also matches `IF` |
+| `ikw<"…">` | the same, ignoring letter case: `ikw<"if">` also matches `IF` (see [Case-insensitive languages](../recipes/case-insensitive.md)) |
 | `eol` | CRLF, LF or CR; not the end of input, so write `eol | eof` to accept either |
 | `eof` | the end of input, after any trailing trivia |
 
@@ -744,8 +745,8 @@ includes the delimiters.
 assign<&Cell::formula>(section<calc::Formula>(lit<"<expr>">, lit<"</expr>">))
 ```
 
-Inside the section, `G` keeps its own trivia, keywords, `word_boundary` and
-rules, whatever the host grammar overrides. `G` sees only the section: its
+Inside the section, `G` keeps its own trivia, keywords, `word_boundary`,
+`case_insensitive` and rules, whatever the host grammar overrides. `G` sees only the section: its
 `eof` holds just before `close`. The section ends at the first token boundary
 where `close` matches; a missing `close` is an error. The tree holds the nodes
 of both languages.
@@ -760,7 +761,7 @@ entry.
 ### Derived grammars
 
 A `cursiv::extends<Base>` grammar may add rules, redeclare `entry`,
-`ignored`, `hidden` or `word_boundary`, and
+`ignored`, `hidden`, `word_boundary` or `case_insensitive`, and
 [override rules](../recipes/reuse-a-grammar.md#derive-a-dialect). Every call
 to an overridden rule uses the new body, in which `super` stands for the old
 one: `ref<Extra> | super` adds an alternative. An override keeps the rule's

@@ -15,7 +15,10 @@
 
 #include "cursiv/grammar/ExprShape.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
+#include "cursiv/grammar/InGrammar.hpp"
 #include "cursiv/grammar/expr.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/typelist.hpp"
 #include "cursiv/shared/gen/LeadGraph.hpp"
 #include "cursiv/shared/gen/optional_shape.hpp"
@@ -294,12 +297,20 @@ constexpr bool loop_keys_apart(const LoopKey& a, const LoopKey& b) {
   if (a.infix != nullptr && a.infix == b.infix && a.level != b.level)
     return true;
   if (!a.known || !b.known) return false;
-  const bool ci = a.ci || b.ci;
-  const std::size_t n = a.len < b.len ? a.len : b.len;
-  for (std::size_t i = 0; i < n; ++i) {
-    const char x = ci ? to_lower(a.text[i]) : a.text[i];
-    const char y = ci ? to_lower(b.text[i]) : b.text[i];
-    if (x != y) return true;
+  if (!a.ci && !b.ci) {
+    const std::size_t n = a.len < b.len ? a.len : b.len;
+    for (std::size_t i = 0; i < n; ++i)
+      if (a.text[i] != b.text[i]) return true;
+    return false;
+  }
+  // Letter by letter, folded: a letter and its other cases take as many
+  // bytes, so the two keys stay in step. A letter the key cuts, or bytes that
+  // are none, decide nothing.
+  for (std::size_t i = 0, la = 0, lb = 0; i < a.len && i < b.len; i += la) {
+    const char32_t x = scalar_at(a.text.data() + i, a.len - i, la);
+    const char32_t y = scalar_at(b.text.data() + i, b.len - i, lb);
+    if (la == 0 || lb == 0) return false;
+    if (fold_scalar(x) != fold_scalar(y)) return true;
   }
   return false;
 }
@@ -457,6 +468,11 @@ struct LoopTables<S, G, TypeList<Ms...>> {
           static_cast<std::int8_t>(index_of<typename A::lead, members>::value);
       t.unit[M][J] = A::unit;
       t.key[M][J] = recipe_key<typename A::recipe>::value;
+      // In a case-insensitive grammar every literal folds; a section's own
+      // literals already say whether theirs does.
+      if constexpr (std::is_void_v<
+                        typename home_of<tl_at_t<M, members>>::type>)
+        t.key[M][J].ci = t.key[M][J].ci || S::case_insensitive;
       if constexpr (J == 0)
         operator_key<typename S::template rule<tl_at_t<M, members>>>(
             t.key[M][J]);

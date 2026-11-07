@@ -79,7 +79,7 @@ void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
   const LrActs node{row_id(st.climbRow)};
   const LrLowerSlot left = infix_side(cfg, st.leftRow, nt_sym(lhs));
   const LrLowerSlot right = infix_side(cfg, st.rightRow, nt_sym(lhs));
-  each_op(st, [&](ImageId op, const void* row, std::uint8_t prec,
+  each_op(rule, [&](ImageId op, const void* row, std::uint8_t prec,
                   Association group) {
     emit_op(cfg, lhs, op, row, left, right, node, prec, group);
   });

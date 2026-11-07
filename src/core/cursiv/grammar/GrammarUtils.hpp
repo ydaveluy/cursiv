@@ -320,6 +320,20 @@ consteval auto bound_of() {
   }
 }
 
+// Whether a grammar declares its literals case-insensitive; no by default.
+template <class G>
+consteval bool case_of() {
+  if constexpr (requires { G::case_insensitive; }) {
+    return G::case_insensitive;
+  } else {
+    static_assert(tl_size<typename parents_of<G>::type>::value < 2,
+                  "two parent grammars declare different `case_insensitive` "
+                  "values: declare `case_insensitive` in this grammar to "
+                  "choose one");
+    return false;
+  }
+}
+
 }  // namespace detail::ov
 
 // Head of the chain: the rule a reference actually names here -- the declared
@@ -344,7 +358,22 @@ struct ResolveOverride {
   using ignored = typename detail::ov::as_rules<G, typename G::ignored>::type;
   using hidden = typename detail::ov::as_rules<G, typename G::hidden>::type;
   static constexpr auto word_boundary = detail::ov::bound_of<G>();
+  static constexpr bool case_insensitive = detail::ov::case_of<G>();
 };
+
+namespace detail {
+
+// Whether grammar G folds the case of literal `S`: G is case-insensitive and
+// `S` holds a letter with another case.
+template <class G, str S>
+consteval bool folds_case() {
+  if constexpr (ResolveOverride<G>::case_insensitive)
+    return holds_a_letter<S>();
+  else
+    return false;
+}
+
+}  // namespace detail
 
 // A node rule's creation is either spelled in every alternative or carried by
 // the rule's own element. Two shapes, one meaning; this leaves only the first.
@@ -787,6 +816,7 @@ struct MaterializeCreate {
   using ignored = typename detail::mat::mat_each<typename S::ignored>::type;
   using hidden = typename detail::mat::mat_each<typename S::hidden>::type;
   static constexpr auto word_boundary = S::word_boundary;
+  static constexpr bool case_insensitive = S::case_insensitive;
 };
 
 // The pipeline, as one name. A stage added here reaches every reader.

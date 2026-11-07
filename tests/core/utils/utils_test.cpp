@@ -78,10 +78,45 @@ void every_byte_is_compared_folded() {
   }
 }
 
+// Beyond ASCII, a letter matches each of its cases as long in UTF-8, and
+// nothing else.
+void every_case_of_a_letter_is_one_name() {
+  const auto same = [](std::string_view a, std::string_view b) {
+    CHECK(cursiv::folded_equal(a, b));
+    CHECK(cursiv::folded_equal(b, a));
+    CHECK(cursiv::folded_hash(a) == cursiv::folded_hash(b));
+  };
+  const auto apart = [](std::string_view a, std::string_view b) {
+    CHECK(!cursiv::folded_equal(a, b));
+    CHECK(!cursiv::folded_equal(b, a));
+  };
+  same("École", "éCOLE");
+  same("ΣΟΦΊΑ", "σοφία");
+  same("ΤΈΛΟΣ", "τέλοσ");  // a final sigma is a sigma
+  // Cases starting on different bytes, past the first eight.
+  same("ΣΣΣΣΣxyz", "σσσσςXYZ");
+  same("abcdefghΣ", "ABCDEFGHς");
+  same("\U00010400\U00010401abc", "\U00010428\U00010429ABC");
+  same("\xff\xfe" "A", "\xff\xfe" "a");  // bytes that are no letter stay
+  apart("abcdefgxΣ", "ABCDEFGHς");
+  apart("STRASSE", "straße");  // one letter never matches two
+  // Cases of another length in UTF-8 match only themselves.
+  apart("Straße", "STRAẞE");
+  apart("Ωmega", "\u2126MEGA");  // the Ohm sign
+  apart("\u212Aelvin", "kelvin");  // the Kelvin sign
+  apart("cla\u017F\u017F", "class");
+  apart("\u023A\u023Axyz", "\u2C65\u2C65XYZ");
+  apart("İstanbul", "istanbul");
+  apart("ı", "i");
+  apart("e\u0301", "é");  // no normalization
+  apart("\xff" "A", "\xfe" "a");
+}
+
 }  // namespace
 
 void run() {
   every_byte_is_compared_folded();
+  every_case_of_a_letter_is_one_name();
 }
 
 }  // namespace case_fold

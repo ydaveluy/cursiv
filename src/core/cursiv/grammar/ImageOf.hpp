@@ -367,6 +367,7 @@ consteval ImageFaceDesc grammar_face() {
   f.entry = &kRule<V, declared_of_t<section_entry_t<K>>>;
   f.bound = class_of_bound<
       std::remove_cvref_t<decltype(ResolveOverride<K>::word_boundary)>>::value;
+  f.caseInsensitive = ResolveOverride<K>::case_insensitive;
   return f;
 }
 
@@ -485,6 +486,7 @@ consteval ImageGrammarDesc grammar_of() {
   g.bound = class_of_bound<
       std::remove_cvref_t<decltype(ResolveOverride<G>::word_boundary)>>::value;
   g.plain = class_of_bound<std::remove_cvref_t<decltype(w)>>::value;
+  g.caseInsensitive = ResolveOverride<G>::case_insensitive;
   return g;
 }
 

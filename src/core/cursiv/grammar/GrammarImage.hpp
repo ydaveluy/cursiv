@@ -123,8 +123,9 @@ struct ImageFaceDesc {
   const ImageRuleDesc* const* hidden = nullptr;
   std::uint32_t hiddenCount = 0;
   const ImageRuleDesc* entry = nullptr;
-  // A grammar's word boundary, as a section reads it.
+  // A grammar's word boundary and letter case, as a section reads them.
   ImageClassDesc bound{};
+  bool caseInsensitive = false;
 };
 
 // What a lowering reads of a rule besides the faces: the rule the stage hands
@@ -182,6 +183,7 @@ struct ImageGrammarDesc {
   std::uint32_t hiddenCount = 0;
   ImageClassDesc bound{};
   ImageClassDesc plain{};
+  bool caseInsensitive = false;
 };
 
 struct ImageNode {
@@ -259,6 +261,7 @@ struct GrammarImage {
   std::uint32_t hiddenCount = 0;
   ImageClass bound;
   ImageClass plain;
+  bool caseInsensitive = false;
 
   const ImageStageDesc& stage(std::uint32_t rule) const {
     return *rules[rule].desc->stage;
@@ -271,13 +274,18 @@ struct GrammarImage {
   void open(const ImageGrammarDesc& grammar);
   // A node a rewrite makes, once for the same fields and kids.
   ImageId derive(const ImageNode& shape, std::span<const ImageId> kids);
-  ImageId node(const ImageDesc& desc);
+  // `folded` folds the case of every literal under the node that has a
+  // letter: the reading of a case-insensitive grammar.
+  ImageId node(const ImageDesc& desc, bool folded = false);
   std::uint32_t rule(const ImageRuleDesc& desc);
   const ImageRule& ready(std::uint32_t rule);
+  // Whether the grammar a rule belongs to is case-insensitive: the embedded
+  // one for a section's rule, else this one.
+  bool folds(std::uint32_t rule) const;
 
  private:
   std::uint32_t list(const ImageRuleDesc* const* rules, std::size_t count);
-  ImageFace face(const ImageFaceDesc& desc);
+  ImageFace face(const ImageFaceDesc& desc, bool folded);
 
   struct DerivedKey {
     ImageNode shape;
@@ -289,6 +297,7 @@ struct GrammarImage {
   };
 
   std::unordered_map<const ImageDesc*, ImageId> _nodes;
+  std::unordered_map<const ImageDesc*, ImageId> _foldedNodes;
   std::unordered_map<DerivedKey, ImageId, DerivedHash> _derived;
   std::unordered_map<const ImageRuleDesc*, std::uint32_t> _rules;
 };

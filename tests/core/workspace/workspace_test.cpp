@@ -889,9 +889,11 @@ void a_new_homonym_retargets_without_reparsing(bool fromDisk,
   world.shared.fileSystemProvider = std::move(files);
   auto& builder = *world.shared.documentBuilder;
   auto& lock = *world.shared.workspaceLock;
-  auto* b = world.add("file:///b.ws", "datatype Same");
-  auto* c = world.add("file:///c.ws", caseInsensitive ? "entity C { f : sAmE }"
-                                                     : "entity C { f : Same }");
+  auto* b = world.add("file:///b.ws",
+                      caseInsensitive ? "datatype Σοφία" : "datatype Same");
+  auto* c = world.add("file:///c.ws", caseInsensitive
+                                          ? "entity C { f : ςΟΦΊΑ }"
+                                          : "entity C { f : Same }");
   cursiv::Document* initial[] = {b, c};
   lock.write([&](const cursiv::CancellationToken& token) {
     builder.build(initial, {}, token);
@@ -925,7 +927,7 @@ void a_new_homonym_retargets_without_reparsing(bool fromDisk,
     CHECK(target != nullptr && target->getDocument() == expected);
   };
   const std::string declaration =
-      caseInsensitive ? "datatype SAME" : "datatype Same";
+      caseInsensitive ? "datatype ΣΟΦΊΑ" : "datatype Same";
   const auto a = add("file:///a.ws", declaration);
   CHECK(a != nullptr && b->id < a->id);
   checkTarget(a.get());
@@ -3627,6 +3629,41 @@ void two_languages_share_the_index() {
   CHECK(found->name == "String");
 }
 
+// Beyond ASCII, an insensitive name matches each case of each letter, in the
+// document and across the workspace, and never two letters for one.
+void insensitive_names_fold_every_letter() {
+  World world;
+  cursiv::CoreServices* const ci = &support::add_language<cursiv::CoreServices>(
+      world.shared, {"workspace-ci", {".wsci"}, {}},
+      ws::generated::Workspace::create_parser(),
+      ws::generated::Workspace::create_ast_reflection(),
+      [](cursiv::CoreServices& language) {
+        language.scopeProvider =
+            std::make_unique<ws::WorkspaceScopeProvider>(language);
+      });
+  const auto exporter = world.built(
+      "file:///lib.ws", "datatype École\ndatatype Ωmega\ndatatype kelvin\n");
+  const auto site = world.built("file:///use.ws",
+                                "datatype Σοφία\nentity E { a : École }\n");
+  (void)exporter;
+
+  const cursiv::ReferenceInfo context =
+      static_cast<const cursiv::DefaultAstReflection&>(*world.ws->astReflection)
+          .referenceInfo(site->parseResult.references->handles.front());
+  const auto found = [&](std::string_view name) -> std::string {
+    const cursiv::AstNodeDescription* const entry =
+        ci->scopeProvider->getScopeEntry(context, name);
+    return entry != nullptr ? std::string(entry->name) : std::string();
+  };
+  CHECK(found("ÉCOLE") == "École");
+  CHECK(found("ΩMEGA") == "Ωmega");
+  CHECK(found("ΣΟΦΊΑ") == "Σοφία");
+  CHECK(found("ςοφία") == "Σοφία");
+  // Cases of another length in UTF-8 match only themselves.
+  CHECK(found("\u2126MEGA").empty());   // the Ohm sign
+  CHECK(found("\u212Aelvin").empty());  // the Kelvin sign
+}
+
 // Only what resolved is described: a reference pointing nowhere makes no row,
 // so the inverse table never answers with an edge to nothing.
 void only_the_resolved_are_described() {
@@ -3742,6 +3779,7 @@ void run() {
   imported_names_follow_reference_removal_and_replacement();
   one_table_answers_both_policies();
   two_languages_share_the_index();
+  insensitive_names_fold_every_letter();
   only_the_resolved_are_described();
   large_reference_groups_keep_their_order_and_identity();
 }

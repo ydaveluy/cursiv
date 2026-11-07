@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -24,6 +25,8 @@
 #include "cursiv/shared/table/LexNode.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/text/TextBuilder.hpp"
+#include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 
 namespace cursiv {
 
@@ -329,10 +332,6 @@ class PredicateEmitter {
                       _g, _g.termBuild[_g.lex[_g.lexKid[skip.a + i]].a].lex)
                       .first;
     }
-    const auto folded = [](std::string_view a, std::string_view b) {
-      return std::ranges::equal(
-          a, b, [](char x, char y) { return to_lower(x) == to_lower(y); });
-    };
     std::vector<std::uint8_t> out(_g.nterms, 0);
     bool any = false;
     for (unsigned t = 1; t < _g.nterms; ++t) {
@@ -341,10 +340,17 @@ class PredicateEmitter {
       const std::string_view text = _g.term_text(static_cast<std::uint16_t>(t));
       ByteSet first;
       if (literal(t)) {
-        const char c = to_lower(text[0]);
-        first.add(static_cast<unsigned char>(c));
-        if (c >= 'a' && c <= 'z')
-          first.add(static_cast<unsigned char>(c - 'a' + 'A'));
+        // The first byte of the spelling, and of each other case of its
+        // first letter.
+        first.add(static_cast<unsigned char>(text[0]));
+        std::size_t len = 0;
+        const char32_t cp = scalar_at(text.data(), text.size(), len);
+        if (len != 0)
+          detail::for_each_other_case(cp, [&](char32_t other) {
+            std::string bytes;
+            append_scalar(bytes, other);
+            first.add(static_cast<unsigned char>(bytes.front()));
+          });
       } else {
         first = lex_first_bytes(_g, _g.termBuild[t].lex).first;
       }
@@ -353,8 +359,9 @@ class PredicateEmitter {
       for (const std::uint16_t k : heads) {
         const unsigned x = _g.lex[k].a;
         own = own || x == t;
-        other = other && literal(x) &&
-                !folded(_g.term_text(static_cast<std::uint16_t>(x)), text);
+        other =
+            other && literal(x) &&
+            !folded_equal(_g.term_text(static_cast<std::uint16_t>(x)), text);
       }
       if (own || other) {
         out[t] = own ? 2u : 1u;

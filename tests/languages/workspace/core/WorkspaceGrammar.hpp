@@ -21,8 +21,11 @@ struct Workspace : cursiv::GrammarSpec {
   struct SL_COMMENT : terminal<lit<"//"> + many(cr<R"(^\r\n)">)> {};
   struct ML_COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
 
-  // terminal ID: [A-Za-z_] [0-9A-Za-z_]*;
-  struct ID : terminal<cr<"a-zA-Z_"> + many(w)> {};
+  // terminal ID: [A-Za-z_] [0-9A-Za-z_]*; and, for names that ignore case,
+  // Latin and Greek letters beyond ASCII, `ẞ`, and the Ohm and Kelvin signs.
+  struct ID
+      : terminal<cr<R"(a-zA-Z_\u00C0-\u024F\u0370-\u03FF\u1E9E\u2126\u212A)"> +
+                 many(cr<R"(\w\u00C0-\u024F\u0370-\u03FF\u1E9E\u2126\u212A)">)> {};
 
   // QualifiedName returns string: ID ('.' ID)*;
   struct QualifiedName : rule<some(ref<ID>, lit<".">)> {};

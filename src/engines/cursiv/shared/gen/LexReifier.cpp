@@ -1,12 +1,15 @@
 #include "cursiv/shared/gen/LexReifier.hpp"
 
 #include <algorithm>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "cursiv/grammar/GrammarPrinter.hpp"
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/grammar/word_final_in.hpp"
 #include "cursiv/text/scalar_at.hpp"
+#include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/shared/gen/LexCodePoints.hpp"
 #include "cursiv/shared/gen/lex_intern_set.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
@@ -22,18 +25,67 @@ ByteSet byte_range(unsigned lo, unsigned hi) {
   return s;
 }
 
-// A case-insensitive literal is the same token graph with two bytes per
-// letter: folding is the identity on everything else.
-ByteSet case_set(char ch, bool ci) {
-  ByteSet bs;
-  bs.add(static_cast<unsigned char>(ch));
-  if (ci) {
-    if (ch >= 'a' && ch <= 'z')
-      bs.add(static_cast<unsigned char>(ch - 'a' + 'A'));
-    else if (ch >= 'A' && ch <= 'Z')
-      bs.add(static_cast<unsigned char>(ch - 'A' + 'a'));
+// The cases of one letter of a case-insensitive literal that share every
+// byte but the last: those bytes, and the set the last one reads in.
+struct CaseGroup {
+  std::string head;
+  ByteSet last;
+};
+
+// A letter's cases by group, its own first. An ASCII letter is one group of
+// two bytes; `é` and `É` are one group, `C3` then `A9` or `89`; the cases of
+// `σ` start on two bytes, so they are two groups.
+std::vector<CaseGroup> case_groups(char32_t cp) {
+  std::vector<char32_t> cases{cp};
+  detail::for_each_other_case(cp,
+                              [&](char32_t other) { cases.push_back(other); });
+  std::vector<CaseGroup> out;
+  for (const char32_t c : cases) {
+    std::string bytes;
+    append_scalar(bytes, c);
+    const auto last = static_cast<unsigned char>(bytes.back());
+    bytes.pop_back();
+    auto at = std::ranges::find(out, bytes, &CaseGroup::head);
+    if (at == out.end()) at = out.insert(out.end(), CaseGroup{bytes, {}});
+    at->last.add(last);
   }
-  return bs;
+  return out;
+}
+
+// Reads literal `n` unit by unit: `byte` hears the set each byte reads in,
+// and `choice` the groups of a letter of a case-insensitive literal whose
+// cases differ before their last byte. Folding is the identity on every
+// character with no other case.
+template <class Byte, class Choice>
+void lit_units(const ImageNode& n, Byte&& byte, Choice&& choice) {
+  const bool folded = (n.flags & kLitFolded) != 0;
+  for (std::size_t i = 0; i < n.text.size();) {
+    std::size_t len = 0;
+    const char32_t cp =
+        folded ? scalar_at(n.text.data() + i, n.text.size() - i, len) : 0;
+    if (len == 0) {
+      const auto b = static_cast<unsigned char>(n.text[i++]);
+      byte(byte_range(b, b));
+      continue;
+    }
+    i += len;
+    const std::vector<CaseGroup> groups = case_groups(cp);
+    if (groups.size() > 1) {
+      choice(groups);
+      continue;
+    }
+    for (const char b : groups.front().head)
+      byte(byte_range(static_cast<unsigned char>(b),
+                      static_cast<unsigned char>(b)));
+    byte(groups.front().last);
+  }
+}
+
+// Whether literal `n` reads a letter through a choice of its cases.
+bool lit_chooses(const ImageNode& n) {
+  bool chooses = false;
+  lit_units(n, [](const ByteSet&) {}, [&](const auto&) { chooses = true; });
+  return chooses;
 }
 
 ByteSet class_bytes(std::string_view spec) {
@@ -588,10 +640,24 @@ std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
   if (g.expression)
     words.push_back(push(LexNode{LexKind::positive, reify(g.node)}));
   std::vector<std::uint16_t> kids;
-  for (const char ch : n.text)
-    kids.push_back(push(
-        LexNode{LexKind::chars,
-                intern(case_set(ch, (n.flags & kLitFolded) != 0)), 0, 0, 0}));
+  const auto chars = [&](const ByteSet& set) {
+    return push(LexNode{LexKind::chars, intern(set), 0, 0, 0});
+  };
+  lit_units(
+      n, [&](const ByteSet& set) { kids.push_back(chars(set)); },
+      [&](const std::vector<CaseGroup>& groups) {
+        std::vector<std::uint16_t> arms;
+        for (const CaseGroup& c : groups) {
+          std::vector<std::uint16_t> bytes;
+          for (const char b : c.head)
+            bytes.push_back(chars(byte_range(static_cast<unsigned char>(b),
+                                             static_cast<unsigned char>(b))));
+          bytes.push_back(chars(c.last));
+          arms.push_back(bytes.size() == 1 ? bytes.front()
+                                           : group(LexKind::seq, bytes));
+        }
+        kids.push_back(group(LexKind::alt, arms, 1));
+      });
   if (guarded) kids.push_back(barred);
   kids.insert(kids.end(), words.begin(), words.end());
   return group(LexKind::seq, kids, 1);
@@ -600,11 +666,14 @@ std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
 std::uint16_t LexReifier::reify_not_lit(ImageId id) {
   const ImageNode n = at(id);
   const Guard g = guard_of(n);
-  if ((g.expression || g.words) && lit_guard(n, g, true) == kNoSet)
+  // A refusal reads one set per byte, which a choice of cases is not.
+  if (lit_chooses(n) ||
+      ((g.expression || g.words) && lit_guard(n, g, true) == kNoSet))
     return push(LexNode{LexKind::negative, reify_lit(id, true)});
   std::vector<std::uint16_t> classes;
-  for (const char ch : n.text)
-    classes.push_back(intern(case_set(ch, (n.flags & kLitFolded) != 0)));
+  lit_units(
+      n, [&](const ByteSet& set) { classes.push_back(intern(set)); },
+      [](const auto&) {});
   return refused(id, refusal(lit_guard(n, g, true), classes));
 }
 

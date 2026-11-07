@@ -73,9 +73,11 @@ struct scoped_guard<G, S, CI, WordBound> {
       std::remove_cvref_t<decltype(ResolveOverride<G>::word_boundary)>;
   using type = cond_t<word_final_in<S, bound, CI>(), Not<bound>, void>;
 };
+// ...and folds case where G is case-insensitive.
 template <class G, str S, bool CI, class Gd>
 struct scoped<G, Lit<S, CI, Gd>, TypeList<>> {
-  using type = Lit<S, CI, typename scoped_guard<G, S, CI, Gd>::type>;
+  static constexpr bool folded = CI || folds_case<G, S>();
+  using type = Lit<S, folded, typename scoped_guard<G, S, folded, Gd>::type>;
 };
 
 template <class G, class E>

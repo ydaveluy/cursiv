@@ -379,6 +379,22 @@ struct ExpectedKeyword : cursiv::GrammarSpec {
   using hidden = REMARK;
 };
 
+// The same beyond ASCII: `ÿ` and `Ÿ` start on different bytes, so the
+// keyword reads a choice of cases, and is still the keyword where expected.
+// `NAME` refuses it in any case.
+struct FoldedKeyword : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct REMARK
+      : terminal<ikw<"haÿ"> + some(cr<R"( \t)">) + many(cr<R"(^\r\n)">)> {};
+  struct NAME : terminal<!ikw<"haÿ"> + cr<"a-zA-Z"> + many(cr<"a-zA-ZÿŸ">)> {};
+  struct Root
+      : rule<create<ast::Won>(assign<&ast::Won::token>(ikw<"haÿ">) + lit<";"> +
+                              assign<&ast::Won::name>(ref<NAME>))> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = REMARK;
+};
+
 struct Separated : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<create<ast::List>(
@@ -595,6 +611,16 @@ struct Bare : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A case-insensitive grammar a case-sensitive host embeds folds its own
+// literals, and the host's stay as they are.
+struct FoldedBare : cursiv::GrammarSpec {
+  static constexpr bool case_insensitive = true;
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<kw<"été">> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 struct AbsentClose : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<lit<"a"> + !lit<"]"> + &eof> {};
@@ -771,6 +797,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"namedclosehost:"> + ref<NamedClose<AtClose>::Root>) |
              (lit<"namedendhost:"> + ref<NamedClose<AtEnd>::Root>) |
              (lit<"barehost:"> + ref<Hosted<Bare>::Root>) |
+             (lit<"foldedhost:"> + ref<Hosted<FoldedBare>::Root>) |
              (lit<"absentclosehost:"> + ref<Hosted<AbsentClose>::Root>) |
              (lit<"followedhost:"> + ref<Followed<Bare>::Root>) |
              (lit<"closedhead:"> + ref<ClosedHead::Root>) |
@@ -790,6 +817,9 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"expectedkeyword:"> +
               skip(ignore<ExpectedKeyword::WS>, hide<ExpectedKeyword::REMARK>,
                    ref<ExpectedKeyword::Root> + eof)) |
+             (lit<"foldedkeyword:"> +
+              skip(ignore<FoldedKeyword::WS>, hide<FoldedKeyword::REMARK>,
+                   ref<FoldedKeyword::Root> + eof)) |
              ref<tcondcontract::Suite::Root>> {};
   using entry = Root;
   using ignored = WS;

@@ -193,7 +193,12 @@ int main() {
   expect_cases(wideLl,
         {{"x.REM\u00a0= a;", "x.REM=a;#"},
          {"REM\u00a0note\nx.y = a;", "x.y=a;#REM\u00a0note|"},
-         {"x.y = a;\u00a0rem tail\nz = b;", "x.y=a;z=b;#rem tail|"}}, "");
+         {"x.y = a;\u00a0rem tail\nz = b;", "x.y=a;z=b;#rem tail|"},
+         {"x.σχόλιο = a;", "x.σχόλιο=a;#"},
+         {"x.ΣΧΌΛΙΟ\u00a0= a;", "x.ΣΧΌΛΙΟ=a;#"},
+         {"ΣΧΌΛΙΟ note\nx.y = a;", "x.y=a;#ΣΧΌΛΙΟ note|"},
+         {"x.y = a; σχόλιο tail\nz = b;", "x.y=a;z=b;#σχόλιο tail|"}},
+        "");
   no_break_spaces_are_blanks(*wideLl);
   const auto bareLl = g::BareLl::create_parser();
   for (const auto* parser : {&bareLl}) {
