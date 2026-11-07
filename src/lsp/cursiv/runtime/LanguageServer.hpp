@@ -55,14 +55,41 @@ class LanguageServer {
    */
   virtual void initialized() = 0;
 
+  // The document notifications -- these three and `didChangeWatchedFiles` --
+  // make their change in one write, on the calling thread. A request sent
+  // after one waits only for that write's change, not for the rest of its
+  // build: it is answered once the first build phase is announced and its
+  // own document has reached the state it reads.
   virtual void didOpen(const lsp::DidOpenTextDocumentParams&) = 0;
   virtual void didChange(const lsp::DidChangeTextDocumentParams&) = 0;
   virtual void didClose(const lsp::DidCloseTextDocumentParams&) = 0;
 
+  // A save, told to the `documentSaveHandler` and announced only where one is
+  // installed. `willSaveWaitUntil` answers the edits to make first; empty is
+  // "none".
+  virtual void willSave(const lsp::WillSaveTextDocumentParams&) = 0;
+  [[nodiscard]] virtual std::vector<lsp::TextEdit> willSaveWaitUntil(
+      const lsp::WillSaveTextDocumentParams&,
+      const CancellationToken& = {}) const = 0;
+  virtual void didSave(const lsp::DidSaveTextDocumentParams&) = 0;
+
+  // A notebook's cells are text documents: these open, change and close them
+  // as the three above do, all of a notification's cells in one write, and
+  // tell `notebookDocuments` first. Document notifications, but for `didSave`.
+  // Announced only where `notebookDocuments` is installed.
+  virtual void didOpenNotebookDocument(
+      const lsp::DidOpenNotebookDocumentParams&) = 0;
+  virtual void didChangeNotebookDocument(
+      const lsp::DidChangeNotebookDocumentParams&) = 0;
+  virtual void didSaveNotebookDocument(
+      const lsp::DidSaveNotebookDocumentParams&) = 0;
+  virtual void didCloseNotebookDocument(
+      const lsp::DidCloseNotebookDocumentParams&) = 0;
+
   /**
    * The world moved without the editor: a file written by a build, a
    * branch checked out, a file deleted from a terminal. Re-read through
-   * the file system provider, or dropped.
+   * the file system provider, or dropped. A document notification.
    */
   virtual void didChangeWatchedFiles(
       const lsp::DidChangeWatchedFilesParams&) = 0;
@@ -133,13 +160,17 @@ class LanguageServer {
   [[nodiscard]] virtual std::vector<lsp::DocumentHighlight> documentHighlight(
       const lsp::DocumentHighlightParams&,
       const CancellationToken& = {}) const = 0;
-  // `semanticTokens/full` and `/range`; `delta` is not implemented.
+  // `semanticTokens/full`, `/range` and `/full/delta`.
   [[nodiscard]] virtual lsp::SemanticTokens semanticTokensFull(
       const lsp::SemanticTokensParams&,
       const CancellationToken& = {}) const = 0;
   [[nodiscard]] virtual lsp::SemanticTokens semanticTokensRange(
       const lsp::SemanticTokensRangeParams&,
       const CancellationToken& = {}) const = 0;
+  [[nodiscard]] virtual lsp::OneOf<lsp::SemanticTokens,
+                                   lsp::SemanticTokensDelta>
+  semanticTokensFullDelta(const lsp::SemanticTokensDeltaParams&,
+                          const CancellationToken& = {}) const = 0;
 
   [[nodiscard]] virtual std::vector<lsp::InlayHint> inlayHint(
       const lsp::InlayHintParams&, const CancellationToken& = {}) const = 0;

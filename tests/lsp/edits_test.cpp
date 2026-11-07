@@ -107,8 +107,11 @@ using support::offers;
   const auto caret = static_cast<lsp::Uint>(text.size());
   const std::shared_ptr<cursiv::Document> document =
       ct::parseHelper(*world.ws, std::move(text));
-  return world.ws->completionProvider->getCompletion(
-      *document, lsp::Position{0, caret}, cursiv::kNoCancel);
+  lsp::CompletionParams params;
+  params.textDocument.uri = lsp::Uri::parse(document->uri);
+  params.position = lsp::Position{0, caret};
+  return world.ws->completionProvider->getCompletion(*document, params,
+                                                     cursiv::kNoCancel);
 }
 
 // The empty document offers the entry rule's first words, and nothing else.
@@ -451,7 +454,7 @@ void a_cancelled_request_gives_up() {
 
   CHECK(support::throws<cursiv::OperationCancelled>([&] {
     (void)world.ws->completionProvider->getCompletion(
-        *document, lsp::Position{}, source.get_token());
+        *document, lsp::CompletionParams{}, source.get_token());
   }));
 }
 

@@ -12,6 +12,7 @@
 namespace cursiv {
 
 class ConfigurationProvider;
+class DocumentSaveHandler;
 class ExecuteCommandHandler;
 class FileOperationHandler;
 class FuzzyMatcher;
@@ -19,6 +20,7 @@ class LanguageClient;
 class LanguageServer;
 class McpService;
 class NodeKindProvider;
+class NotebookDocuments;
 class TextDocumentContentProvider;
 class WorkspaceSymbolProvider;
 
@@ -39,6 +41,12 @@ struct SharedLspServices : virtual SharedCoreServices {
   // means crosses the languages, and a server that watches none is complete.
   // Not const -- the three `did` arms are told about a world that moved.
   std::unique_ptr<FileOperationHandler> fileOperationHandler;
+  // Shared and null by default: what a save means crosses the languages, and
+  // a server that hears of none is complete.
+  std::unique_ptr<DocumentSaveHandler> documentSaveHandler;
+  // Null by default: a server that syncs no notebook is complete. Installed,
+  // a notebook's cells are documents like any other.
+  std::unique_ptr<NotebookDocuments> notebookDocuments;
   // Shared and null by default: MCP is a second door onto the same workspace,
   // and a session that opens none is complete.
   std::unique_ptr<const McpService> mcpService;

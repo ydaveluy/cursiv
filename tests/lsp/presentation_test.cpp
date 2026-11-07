@@ -6,13 +6,16 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "cursiv/references/DefaultNameProvider.hpp"
@@ -38,6 +41,7 @@
 #include "cursiv/ranges/SelectionRangeProvider.hpp"
 #include "cursiv/runtime/LanguageClient.hpp"
 #include "cursiv/runtime/LanguageServer.hpp"
+#include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
 #include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/semantic/SignatureHelpProvider.hpp"
@@ -61,6 +65,52 @@ struct MintingWorld : support::LspWorkspace {
   cursiv::Document* built(std::string text) const {
     return WorkspaceWorld::built(
         "file:///w/a" + std::to_string(minted++) + ".ws", std::move(text));
+  }
+};
+
+// Counts the walks over a document's whole table of references, resolved or
+// failed; forwards the rest.
+struct CountingReferences final : cursiv::DocumentReferences {
+  explicit CountingReferences(std::unique_ptr<cursiv::DocumentReferences> in)
+      : inner(std::move(in)) {}
+  std::unique_ptr<cursiv::DocumentReferences> inner;
+  mutable int walks = 0;
+
+  Answer resolve(std::uint32_t rank) const override {
+    return inner->resolve(rank);
+  }
+  cursiv::RefState resolveAll(std::uint32_t rank,
+                              cursiv::MultiRefItems& out) const override {
+    return inner->resolveAll(rank, out);
+  }
+  void force(std::span<const cursiv::RefHandle> which,
+             const cursiv::CancellationToken& token) override {
+    inner->force(which, token);
+  }
+  void forceAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
+               const cursiv::CancellationToken& token) override {
+    inner->forceAt(cst, offset, token);
+  }
+  void visitResolved(const cursiv::Cst& cst,
+                     cursiv::ResolvedReferenceVisitor visitor) const override {
+    ++walks;
+    inner->visitResolved(cst, visitor);
+  }
+  void reset() noexcept override { inner->reset(); }
+  [[nodiscard]] bool anyUnresolved() const noexcept override {
+    return inner->anyUnresolved();
+  }
+  void visitUnresolved(
+      const cursiv::Cst& cst,
+      cursiv::UnresolvedReferenceVisitor visitor) const override {
+    ++walks;
+    inner->visitUnresolved(cst, visitor);
+  }
+  void visitIn(const cursiv::Cst& cst, cursiv::TextOffset begin,
+               cursiv::TextOffset end,
+               cursiv::ResolvedReferenceVisitor resolved,
+               cursiv::UnresolvedReferenceVisitor unresolved) const override {
+    inner->visitIn(cst, begin, end, resolved, unresolved);
   }
 };
 
@@ -421,7 +471,8 @@ void run() {
 // The colours, read back off the wire: one flat array of integers, five per
 // token, each a delta from the one before it. What is checked here is the
 // decoding -- the absolute spans it yields, their order and disjointness, and
-// that every type index names a row of the announced legend.
+// that every type index names a row of the legend -- a language's own legend
+// and modifiers, and the edits a delta sends.
 namespace semantic_token_provider {
 
 namespace {
@@ -475,10 +526,32 @@ struct Decoded {
 }
 
 [[nodiscard]] bool carries(const std::vector<ct::DecodedSemanticToken>& tokens,
-                           cursiv::SemanticTokenType type) {
+                           std::string_view type) {
   for (const ct::DecodedSemanticToken& token : tokens)
     if (token.tokenType == type) return true;
   return false;
+}
+
+[[nodiscard]] lsp::SemanticTokensParams whole(
+    const cursiv::Document& document) {
+  lsp::SemanticTokensParams params;
+  params.textDocument.uri = lsp::Uri::parse(document.uri);
+  return params;
+}
+
+[[nodiscard]] lsp::SemanticTokensRangeParams cut(
+    const cursiv::Document& document, const lsp::Range& range) {
+  lsp::SemanticTokensRangeParams params;
+  params.textDocument.uri = lsp::Uri::parse(document.uri);
+  params.range = range;
+  return params;
+}
+
+// The row of `name` in the protocol's legend, the grammar provider's own.
+[[nodiscard]] lsp::Uint row(std::string_view name) {
+  return static_cast<lsp::Uint>(
+      std::ranges::find(cursiv::kSemanticTokenTypes, name) -
+      cursiv::kSemanticTokenTypes.begin());
 }
 
 // 0: /* a comment */
@@ -510,18 +583,16 @@ void every_expected_category_is_coloured() {
                           "}\n");
   CHECK(!coloured.tokens.empty());
 
-  const cursiv::SemanticTokenType expected[] = {
-      cursiv::SemanticTokenType::Comment, cursiv::SemanticTokenType::Property,
-      cursiv::SemanticTokenType::Type, cursiv::SemanticTokenType::Property,
-      cursiv::SemanticTokenType::Variable};
+  const std::string_view expected[] = {"comment", "property", "type",
+                                       "property", "variable"};
   std::size_t marked = 0;
-  for (const cursiv::SemanticTokenType type : expected)
-    ct::expectSemanticToken(coloured,
-                            {.rangeIndex = marked++, .tokenType = type});
+  for (const std::string_view type : expected)
+    ct::expectSemanticToken(
+        coloured, {.rangeIndex = marked++, .tokenType = std::string(type)});
 
   // `datatype`/`entity` are words the grammar reserved; `{`/`:` are not.
-  CHECK(carries(coloured.tokens, cursiv::SemanticTokenType::Keyword));
-  CHECK(carries(coloured.tokens, cursiv::SemanticTokenType::Operator));
+  CHECK(carries(coloured.tokens, "keyword"));
+  CHECK(carries(coloured.tokens, "operator"));
 }
 
 // The encoding has no way to state a token before the one it follows, so the
@@ -532,8 +603,8 @@ void the_tokens_are_ordered_and_never_overlap() {
   const cursiv::Document* const document =
       world.built("file:///w/a.ws", std::string(kModel));
   const lsp::SemanticTokens raw =
-      world.ws->semanticTokenProvider->semanticHighlight(*document,
-                                                         cursiv::kNoCancel);
+      world.ws->semanticTokenProvider->semanticHighlight(
+          *document, whole(*document), cursiv::kNoCancel);
   // Five integers per token, exactly.
   CHECK(raw.data.size() % 5 == 0);
 
@@ -546,39 +617,58 @@ void the_tokens_are_ordered_and_never_overlap() {
                           current.start >= previous.start + previous.length);
     CHECK(ordered);
   }
-  // No modifiers are declared, so none is claimed.
+  // The grammar's colours claim no modifier.
   for (const Decoded& token : tokens) CHECK(token.modifiers == 0);
 }
 
 // A type index is an index into the announced legend: one that ran past it
-// would colour with a row the client never received.
+// would colour with a row the client never received. The legend is the
+// protocol's own by default, with `full` and `range` but no `delta`.
 void every_index_names_a_row_of_the_legend() {
   const World world;
   const cursiv::Document* const document =
       world.built("file:///w/a.ws", std::string(kModel));
-  const std::vector<Decoded> tokens =
-      decode(world.ws->semanticTokenProvider->semanticHighlight(
-          *document, cursiv::kNoCancel));
-  const std::size_t rows = cursiv::semantic_tokens_legend().tokenTypes.size();
-  CHECK(rows > 0);
-  for (const Decoded& token : tokens) CHECK(token.type < rows);
-  // ...and the legend declares no modifier, which is what the zero above says.
-  CHECK(cursiv::semantic_tokens_legend().tokenModifiers.empty());
+  const cursiv::SemanticTokenProvider& provider =
+      *world.ws->semanticTokenProvider;
+  const std::vector<Decoded> tokens = decode(provider.semanticHighlight(
+      *document, whole(*document), cursiv::kNoCancel));
+  const lsp::SemanticTokensOptions options = provider.semanticTokensOptions();
+  CHECK(std::ranges::equal(options.legend.tokenTypes,
+                           cursiv::kSemanticTokenTypes));
+  CHECK(std::ranges::equal(options.legend.tokenModifiers,
+                           cursiv::kSemanticTokenModifiers));
+  for (const Decoded& token : tokens)
+    CHECK(token.type < options.legend.tokenTypes.size());
+  const auto* const full =
+      options.full.has_value()
+          ? std::get_if<lsp::SemanticTokensFullDelta>(&*options.full)
+          : nullptr;
+  CHECK(full != nullptr && !full->delta.value_or(false));
+  CHECK(options.range.has_value());
+  // Nothing kept without `delta`: no answer names itself.
+  CHECK(!provider.semanticHighlight(*document, whole(*document))
+             .resultId.has_value());
 }
 
 // A range answers the tokens that touch it and nothing beyond, on the same
 // encoding: decoded, it is the full answer cut to the range, whether the range
-// takes whole lines, cuts through a word, or covers everything.
+// takes whole lines, cuts through a word, holds a declaration but not what it
+// owns, or covers everything.
 void a_range_is_the_full_answer_cut_to_it() {
   const World world;
-  const cursiv::Document* const document =
+  cursiv::Document* const document =
       world.built("file:///w/a.ws", std::string(kModel));
+  auto counting = std::make_unique<CountingReferences>(
+      std::move(document->parseResult.references));
+  const CountingReferences& walked = *counting;
+  document->parseResult.references = std::move(counting);
   const std::vector<Decoded> full =
       decode(world.ws->semanticTokenProvider->semanticHighlight(
-          *document, cursiv::kNoCancel));
+          *document, whole(*document), cursiv::kNoCancel));
   const lsp::Range ranges[] = {
       {{2, 0}, {4, 0}},
       {{3, 3}, {3, 5}},
+      {{2, 0}, {2, 9}},
       {{0, 0}, {5, 0}},
   };
   for (const lsp::Range& range : ranges) {
@@ -586,15 +676,18 @@ void a_range_is_the_full_answer_cut_to_it() {
     for (const Decoded& token : full)
       if (touches(token, range)) expected.push_back(token);
     CHECK(!expected.empty());
-    const std::vector<Decoded> cut =
+    const int walks = walked.walks;
+    const std::vector<Decoded> part =
         decode(world.ws->semanticTokenProvider->semanticHighlightRange(
-            *document, range, cursiv::kNoCancel));
-    CHECK(cut == expected);
+            *document, cut(*document, range), cursiv::kNoCancel));
+    CHECK(part == expected);
+    // Short of the whole document, only the references in the range are read.
+    if (&range != &ranges[3]) CHECK(walked.walks == walks);
   }
   // The word alone, cut through: coloured whole.
   const std::vector<Decoded> word =
       decode(world.ws->semanticTokenProvider->semanticHighlightRange(
-          *document, ranges[1], cursiv::kNoCancel));
+          *document, cut(*document, ranges[1]), cursiv::kNoCancel));
   CHECK(word.size() == 1 && word.front().line == 3 && word.front().start == 2 &&
         word.front().length == 4);
 }
@@ -602,15 +695,12 @@ void a_range_is_the_full_answer_cut_to_it() {
 // Columns count UTF-16 units even after non-ASCII comments. Newline spelling
 // does not affect the answer, and a multiline comment omits its empty line.
 void unicode_and_multiline_tokens_keep_their_positions() {
-  const auto type = [](cursiv::SemanticTokenType value) {
-    return static_cast<lsp::Uint>(value);
-  };
-  const auto comment = type(cursiv::SemanticTokenType::Comment);
-  const auto keyword = type(cursiv::SemanticTokenType::Keyword);
-  const auto property = type(cursiv::SemanticTokenType::Property);
-  const auto owner = type(cursiv::SemanticTokenType::Type);
-  const auto op = type(cursiv::SemanticTokenType::Operator);
-  const auto variable = type(cursiv::SemanticTokenType::Variable);
+  const auto comment = row("comment");
+  const auto keyword = row("keyword");
+  const auto property = row("property");
+  const auto owner = row("type");
+  const auto op = row("operator");
+  const auto variable = row("variable");
   const std::vector<Decoded> expected = {
       {0, 0, 10, comment},  {0, 11, 8, keyword}, {0, 20, 6, property},
       {1, 0, 8, comment},   {3, 0, 14, comment}, {3, 15, 6, keyword},
@@ -626,7 +716,7 @@ void unicode_and_multiline_tokens_keep_their_positions() {
                         eol + "  中文 😀 fin */ entity Person {" + eol +
                         "  /* é */ name : String" + eol + "}" + eol);
     const auto full = decode(world.ws->semanticTokenProvider->semanticHighlight(
-        *document, cursiv::kNoCancel));
+        *document, whole(*document), cursiv::kNoCancel));
     CHECK(full == expected);
     const lsp::Range ranges[] = {
         {{0, 4}, {0, 6}}, {{1, 1}, {3, 4}}, {{4, 11}, {4, 12}}};
@@ -634,8 +724,181 @@ void unicode_and_multiline_tokens_keep_their_positions() {
         {expected[0]}, {expected[3], expected[4]}, {expected[9]}};
     for (std::size_t i = 0; i < std::size(ranges); ++i)
       CHECK(decode(world.ws->semanticTokenProvider->semanticHighlightRange(
-                *document, ranges[i], cursiv::kNoCancel)) == cuts[i]);
+                *document, cut(*document, ranges[i]), cursiv::kNoCancel)) ==
+            cuts[i]);
   }
+}
+
+// A language's own legend: two of the protocol's types and one of its own,
+// and two modifiers. The grammar's colours keep the types the legend names, at
+// their index there, and drop the rest; a derived provider marks every
+// declaration through the acceptor.
+struct OwnLegend final : cursiv::GrammarSemanticTokenProvider {
+  using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
+
+  static constexpr std::array<std::string_view, 4> kTypes = {
+      "keyword", "property", "type", "label"};
+  static constexpr std::array<std::string_view, 2> kModifiers = {"readonly",
+                                                                 "declaration"};
+
+  [[nodiscard]] std::span<const std::string_view> tokenTypes() const override {
+    return kTypes;
+  }
+  [[nodiscard]] std::span<const std::string_view> tokenModifiers()
+      const override {
+    return kModifiers;
+  }
+
+ protected:
+  void computeHighlighting(
+      const cursiv::Document& document, cursiv::TextOffset begin,
+      cursiv::TextOffset end, cursiv::SemanticTokenAcceptor accept,
+      const cursiv::CancellationToken& token) const override {
+    const std::uint32_t declaration = tokenModifier("declaration");
+    const std::optional<std::uint32_t> keyword = tokenType("keyword");
+    GrammarSemanticTokenProvider::computeHighlighting(
+        document, begin, end,
+        [&](cursiv::SemanticToken coloured) {
+          if (coloured.type != keyword) coloured.modifiers |= declaration;
+          accept(coloured);
+        },
+        token);
+  }
+};
+
+void a_language_declares_its_own_types_and_modifiers() {
+  const World world;
+  const OwnLegend provider(*world.ws);
+  const lsp::SemanticTokensOptions options = provider.semanticTokensOptions();
+  CHECK(std::ranges::equal(options.legend.tokenTypes, OwnLegend::kTypes));
+  CHECK(
+      std::ranges::equal(options.legend.tokenModifiers, OwnLegend::kModifiers));
+  CHECK(provider.tokenType("label") == 3u);
+  CHECK(!provider.tokenType("comment").has_value());
+  CHECK(provider.tokenModifier("declaration") == 2u);
+  CHECK(provider.tokenModifier("static") == 0u);
+
+  const cursiv::Document* const document =
+      world.built("file:///w/a.ws", std::string(kModel));
+  // No comment, operator or reference: the legend does not name them.
+  const std::vector<Decoded> expected = {
+      {1, 0, 8, 0, 0}, {1, 9, 6, 1, 2}, {2, 0, 6, 0, 0},
+      {2, 7, 6, 2, 2}, {3, 2, 4, 1, 2},
+  };
+  CHECK(decode(provider.semanticHighlight(*document, whole(*document))) ==
+        expected);
+}
+
+// The grammar's colours, with `delta` on.
+struct DeltaColours final : cursiv::GrammarSemanticTokenProvider {
+  using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
+
+  [[nodiscard]] lsp::SemanticTokensOptions semanticTokensOptions()
+      const override {
+    lsp::SemanticTokensOptions options =
+        GrammarSemanticTokenProvider::semanticTokensOptions();
+    lsp::SemanticTokensFullDelta full;
+    full.delta = true;
+    options.full = std::move(full);
+    return options;
+  }
+};
+
+struct DeltaWorld : support::LspWorkspace {
+  DeltaWorld()
+      : WorkspaceWorld([](cursiv::LspServices& language) {
+          language.semanticTokenProvider =
+              std::make_unique<const DeltaColours>(language);
+        }) {}
+
+  [[nodiscard]] cursiv::LanguageServer& server() const {
+    return *shared.languageServer;
+  }
+};
+
+// `data` with `edits` applied, as the client applies them.
+[[nodiscard]] std::vector<lsp::Uint> applied(
+    std::vector<lsp::Uint> data, const lsp::SemanticTokensDelta& delta) {
+  for (auto it = delta.edits.rbegin(); it != delta.edits.rend(); ++it) {
+    const auto at = data.begin() + it->start;
+    data.erase(at, at + it->deleteCount);
+    if (it->data.has_value())
+      data.insert(data.begin() + it->start, it->data->begin(), it->data->end());
+  }
+  return data;
+}
+
+// With `delta` on, a full answer is named, and a delta from it sends the edit
+// that turns it into the tokens now: none for an unchanged document. An answer
+// the provider no longer holds -- another came since, or its document was
+// closed -- is replaced whole. A range answer is never named.
+void a_delta_sends_only_what_changed() {
+  constexpr std::string_view kA = "file:///w/a.ws";
+  constexpr std::string_view kB = "file:///w/b.ws";
+  const DeltaWorld world;
+  (void)world.server().initialize({});
+  support::open(world.server(), kA, "workspace", kModel);
+
+  lsp::SemanticTokensParams full;
+  full.textDocument.uri = lsp::Uri::parse(std::string(kA));
+  const lsp::SemanticTokens first = world.server().semanticTokensFull(full);
+  CHECK(first.resultId.has_value() && !first.data.empty());
+  if (!first.resultId.has_value()) return;
+
+  lsp::SemanticTokensDeltaParams since;
+  since.textDocument = full.textDocument;
+  since.previousResultId = *first.resultId;
+  const auto same = world.server().semanticTokensFullDelta(since);
+  const auto* const unchanged = std::get_if<lsp::SemanticTokensDelta>(&same);
+  CHECK(unchanged != nullptr && unchanged->edits.empty() &&
+        unchanged->resultId.has_value() &&
+        unchanged->resultId != first.resultId);
+  if (unchanged == nullptr || !unchanged->resultId.has_value()) return;
+
+  // One more feature, in the middle of the document.
+  support::change(world.server(), kA, 2,
+                  "/* a comment */\n"
+                  "datatype String\n"
+                  "entity Person {\n"
+                  "  name : String\n"
+                  "  nick : String\n"
+                  "}\n");
+  since.previousResultId = *unchanged->resultId;
+  const auto moved = world.server().semanticTokensFullDelta(since);
+  const auto* const edited = std::get_if<lsp::SemanticTokensDelta>(&moved);
+  CHECK(edited != nullptr && edited->edits.size() == 1);
+  if (edited == nullptr || edited->edits.empty()) return;
+  const std::vector<lsp::Uint> now =
+      world.server().semanticTokensFull(full).data;
+  CHECK(applied(first.data, *edited) == now);
+  CHECK(edited->edits.front().data.has_value() &&
+        edited->edits.front().data->size() < now.size());
+
+  // An older answer than the last one is not held.
+  const auto stale = world.server().semanticTokensFullDelta(since);
+  const auto* const replaced = std::get_if<lsp::SemanticTokens>(&stale);
+  CHECK(replaced != nullptr && replaced->data == now &&
+        replaced->resultId.has_value());
+  if (replaced == nullptr || !replaced->resultId.has_value()) return;
+
+  lsp::SemanticTokensRangeParams range;
+  range.textDocument = full.textDocument;
+  range.range = {{0, 0}, {2, 0}};
+  CHECK(!world.server().semanticTokensRange(range).resultId.has_value());
+
+  // Closed, the document leaves, and so does its last answer: reopened, it
+  // is coloured whole.
+  lsp::DidCloseTextDocumentParams closing;
+  closing.textDocument.uri = full.textDocument.uri;
+  world.server().didClose(closing);
+  support::open(world.server(), kB, "workspace", kModel);
+  lsp::SemanticTokensParams other;
+  other.textDocument.uri = lsp::Uri::parse(std::string(kB));
+  (void)world.server().semanticTokensFull(other);
+  support::open(world.server(), kA, "workspace", kModel);
+  since.previousResultId = *replaced->resultId;
+  const auto reopened = world.server().semanticTokensFullDelta(since);
+  CHECK(std::holds_alternative<lsp::SemanticTokens>(reopened));
 }
 
 // A document that never parsed is answered with an empty array, which the
@@ -644,8 +907,8 @@ void a_document_with_no_tree_is_coloured_with_nothing() {
   const World world;
   cursiv::Document* const document = world.built("file:///w/empty.ws", "");
   const lsp::SemanticTokens tokens =
-      world.ws->semanticTokenProvider->semanticHighlight(*document,
-                                                         cursiv::kNoCancel);
+      world.ws->semanticTokenProvider->semanticHighlight(
+          *document, whole(*document), cursiv::kNoCancel);
   CHECK(tokens.data.empty());
 }
 
@@ -657,6 +920,8 @@ void run() {
   every_index_names_a_row_of_the_legend();
   a_range_is_the_full_answer_cut_to_it();
   unicode_and_multiline_tokens_keep_their_positions();
+  a_language_declares_its_own_types_and_modifiers();
+  a_delta_sends_only_what_changed();
   a_document_with_no_tree_is_coloured_with_nothing();
 }
 
@@ -892,49 +1157,6 @@ void a_misspelt_reference_is_offered_its_neighbour() {
   }
   CHECK(offered);
 }
-
-// Counts the walks over a document's failed references; forwards the rest.
-struct CountingReferences final : cursiv::DocumentReferences {
-  explicit CountingReferences(std::unique_ptr<cursiv::DocumentReferences> in)
-      : inner(std::move(in)) {}
-  std::unique_ptr<cursiv::DocumentReferences> inner;
-  mutable int walks = 0;
-
-  Answer resolve(std::uint32_t rank) const override {
-    return inner->resolve(rank);
-  }
-  cursiv::RefState resolveAll(std::uint32_t rank,
-                              cursiv::MultiRefItems& out) const override {
-    return inner->resolveAll(rank, out);
-  }
-  void force(std::span<const cursiv::RefHandle> which,
-             const cursiv::CancellationToken& token) override {
-    inner->force(which, token);
-  }
-  void forceAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
-               const cursiv::CancellationToken& token) override {
-    inner->forceAt(cst, offset, token);
-  }
-  void visitResolved(const cursiv::Cst& cst,
-                     cursiv::ResolvedReferenceVisitor visitor) const override {
-    inner->visitResolved(cst, visitor);
-  }
-  void reset() noexcept override { inner->reset(); }
-  [[nodiscard]] bool anyUnresolved() const noexcept override {
-    return inner->anyUnresolved();
-  }
-  void visitUnresolved(
-      const cursiv::Cst& cst,
-      cursiv::UnresolvedReferenceVisitor visitor) const override {
-    ++walks;
-    inner->visitUnresolved(cst, visitor);
-  }
-  void visitAt(const cursiv::Cst& cst, cursiv::TextOffset offset,
-               cursiv::ResolvedReferenceVisitor resolved,
-               cursiv::UnresolvedReferenceVisitor unresolved) const override {
-    inner->visitAt(cst, offset, resolved, unresolved);
-  }
-};
 
 // One request over every linking error walks the document's references once,
 // however many errors it answers: the fixes are linear in the request.

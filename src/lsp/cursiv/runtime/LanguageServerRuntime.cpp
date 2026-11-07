@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -95,6 +96,10 @@ class LanguageClientGuard {
 // The workspace writer: notifications run here in arrival order, so the read
 // loop stays free for the cancellation, the shutdown and the exit a build may
 // need. Queuing a document update cancels the write in flight past the scan.
+//
+// A document update makes its change in one write, so it is settled -- its
+// change made, its build still running -- at the first build phase that write
+// announces on this queue's thread. Any other task is settled when it ends.
 class NotificationQueue {
  public:
   NotificationQueue(WorkspaceLock& lock, const WorkspaceManager* manager)
@@ -105,32 +110,48 @@ class NotificationQueue {
   NotificationQueue& operator=(const NotificationQueue&) = delete;
   ~NotificationQueue() { stop(); }
 
-  // What has been taken in, and what has been served: a request records the
+  // What has been taken in, and what has been settled: a request records the
   // first on the read loop, where the client's own order is still known, and
-  // waits for the second before it reads anything.
+  // waits for the second before it reads anything. Its own rung is then its
+  // only wait: the build of the edits before it goes on beside it.
   [[nodiscard]] std::uint64_t posted() const {
     const std::scoped_lock lock(_m);
     return _posted;
   }
 
-  void wait_served(std::uint64_t upTo, const CancellationToken& token) {
+  void wait_settled(std::uint64_t upTo, const CancellationToken& token) {
     std::unique_lock lock(_m);
-    // Requests normally find their predecessors served. Only a pending wait
+    // Requests normally find their predecessors settled. Only a pending wait
     // needs to register with the cancellation token.
-    if (!_stopped && _served < upTo)
-      _cv.wait(lock, token, [&]() { return _stopped || _served >= upTo; });
+    if (!_stopped && _settled < upTo)
+      _cv.wait(lock, token, [&]() { return _stopped || _settled >= upTo; });
     if (_stopped || token.stop_requested()) throw_request_cancelled();
   }
 
-  void post(std::function<void()> task, bool supersedes) {
+  // A build phase was announced: the running task is settled if it is a
+  // document update and the build is its own, on this queue's thread.
+  void settle_running() {
+    {
+      const std::scoped_lock lock(_m);
+      if (std::this_thread::get_id() != _workerId || !_running ||
+          !_runningUpdate || _settled > _served)
+        return;
+      _settled = _served + 1;
+    }
+    _cv.notify_all();
+  }
+
+  // `update` is a document update: it cancels the write in flight, and it is
+  // settled as soon as its build announces a phase.
+  void post(std::function<void()> task, bool update) {
     // Cancel before publishing: once queued, this task may already be the
     // latest writer, even before notify_all. Cancellation runs callbacks, so
     // it must also stay outside the queue mutex.
-    if (supersedes && scanned()) _lock.cancelWrite();
+    if (update && scanned()) _lock.cancelWrite();
     {
       const std::scoped_lock lock(_m);
       if (_stopped) return;
-      _tasks.push_back(std::move(task));
+      _tasks.push_back({std::move(task), update});
       ++_posted;
     }
     _cv.notify_all();
@@ -163,6 +184,10 @@ class NotificationQueue {
   }
 
   void run() {
+    {
+      const std::scoped_lock lock(_m);
+      _workerId = std::this_thread::get_id();
+    }
     for (;;) {
       std::function<void()> task;
       {
@@ -172,7 +197,8 @@ class NotificationQueue {
         // worker would sleep through it while `stop` joins.
         _cv.wait(lock, [&]() { return _stopped || !_tasks.empty(); });
         if (_tasks.empty()) return;
-        task = std::move(_tasks.front());
+        task = std::move(_tasks.front().run);
+        _runningUpdate = _tasks.front().update;
         _tasks.pop_front();
         _running = true;
       }
@@ -185,6 +211,9 @@ class NotificationQueue {
         const std::scoped_lock lock(_m);
         _running = false;
         ++_served;
+        // A task with no build phase -- one with no write, or one cut short
+        // before its build announced anything -- is settled here.
+        _settled = std::max(_settled, _served);
       }
       _cv.notify_all();
     }
@@ -193,13 +222,44 @@ class NotificationQueue {
   WorkspaceLock& _lock;
   const WorkspaceManager* _manager;
   mutable std::mutex _m;
+  struct Task {
+    std::function<void()> run;
+    bool update;
+  };
+  // `_served <= _settled <= _posted`: the running task may already be settled.
   std::uint64_t _posted = 0;
   std::uint64_t _served = 0;
+  std::uint64_t _settled = 0;
   std::condition_variable_any _cv;
-  std::deque<std::function<void()>> _tasks;
+  std::deque<Task> _tasks;
   bool _running = false;
+  bool _runningUpdate = false;
+  std::thread::id _workerId;
   bool _stopped = false;
   std::jthread _worker;
+};
+
+// Tells the queue when its running task's build announces a phase: every
+// phase is announced past the write's settle, on the thread that writes.
+// Registered for the session, before any notification runs.
+class SettleOnBuildPhase final : public BuildPhaseListener {
+ public:
+  SettleOnBuildPhase(DocumentBuilder& builder, NotificationQueue& queue)
+      : _builder(builder), _queue(queue) {
+    _builder.addBuildPhaseListener(*this);
+  }
+  SettleOnBuildPhase(const SettleOnBuildPhase&) = delete;
+  SettleOnBuildPhase& operator=(const SettleOnBuildPhase&) = delete;
+  ~SettleOnBuildPhase() override { _builder.removeBuildPhaseListener(*this); }
+
+  void onBuildPhase(DocumentState, std::span<Document* const>,
+                    const CancellationToken&) override {
+    _queue.settle_running();
+  }
+
+ private:
+  DocumentBuilder& _builder;
+  NotificationQueue& _queue;
 };
 
 // The requests handed to the endpoint's pool and not yet over: a clean
@@ -257,8 +317,6 @@ struct Session {
   PendingRequests& pending;
   // Read at each failure, never kept: a host may install another sink.
   SharedCoreServices& shared;
-  // False when the host gives no threads: every body runs on the read loop.
-  bool pooled;
   bool shutdownRequested = false;
   bool definitionLinks = false;
   bool declarationLinks = false;
@@ -297,13 +355,13 @@ void say_notification_threw(SharedCoreServices& shared, std::string_view method,
   }
 }
 
-// The prologue runs on the read loop; the body is queued. `supersedes` is a
+// The prologue runs on the read loop; the body is queued. `update` is a
 // document update, which cancels the write in flight. `method` names it to the
 // sink and outlives the session: a protocol name, or a custom handler's key.
 template <class Call>
-auto notification(Session& session, std::string_view method, bool supersedes,
+auto notification(Session& session, std::string_view method, bool update,
                   Call call) {
-  return [&queue = session.queue, &shared = session.shared, method, supersedes,
+  return [&queue = session.queue, &shared = session.shared, method, update,
           call = std::move(call)](auto&& params) {
     // Said here and not in the body: the writer takes the update later, and
     // a request dispatched behind it would be answered from the rung the
@@ -320,7 +378,7 @@ auto notification(Session& session, std::string_view method, bool supersedes,
             say_notification_threw(shared, method, std::current_exception());
           }
         },
-        supersedes);
+        update);
   };
 }
 
@@ -329,7 +387,7 @@ auto notification(Session& session, std::string_view method, bool supersedes,
 template <class Result, class Call, class Params>
 Result serve(NotificationQueue& queue, std::uint64_t behind,
              const CancellationToken& token, Call& call, Params&& params) {
-  queue.wait_served(behind, token);
+  queue.wait_settled(behind, token);
   Result result;
   try {
     result = call(std::forward<Params>(params), token);
@@ -353,10 +411,6 @@ auto request(Session& session, Call call) {
     // here is where the client's order still is: the body runs later, and
     // a document update served after it would answer the reading before.
     const std::uint64_t behind = session.queue.posted();
-    if (!session.pooled)
-      return lsp::RequestResult<Result>(
-          serve<Result>(session.queue, behind, kNoCancel, call,
-                        std::forward<decltype(params)>(params)));
     auto task = lsp::TaskFunction<Result>(
         [&queue = session.queue, seat = PendingSeat(session.pending), call,
          behind, token = lsp::RequestContext::get().stopToken(),
@@ -490,6 +544,54 @@ void add_text_document_handlers(Session& session) {
         server.didClose(params);
       }));
 
+  // A save moves no text: the two notifications are not document updates.
+  endpoint.onTextDocumentWillSave(notification(
+      session, lsp::notifications::TextDocumentWillSave::Method, false,
+      [&server](const lsp::WillSaveTextDocumentParams& params) {
+        server.willSave(params);
+      }));
+
+  endpoint.onTextDocumentDidSave(notification(
+      session, lsp::notifications::TextDocumentDidSave::Method, false,
+      [&server](const lsp::DidSaveTextDocumentParams& params) {
+        server.didSave(params);
+      }));
+
+  // The array arm, empty and not null: the client saves either way.
+  endpoint.onTextDocumentWillSaveWaitUntil(
+      request(session, [&server](const lsp::WillSaveTextDocumentParams& params,
+                                 const CancellationToken& token) {
+        lsp::TextDocumentWillSaveWaitUntilResult result;
+        result = server.willSaveWaitUntil(params, token);
+        return result;
+      }));
+
+  // A notebook's cells are documents, so the three notifications that move
+  // them are document updates.
+  endpoint.onNotebookDocumentDidOpen(notification(
+      session, lsp::notifications::NotebookDocumentDidOpen::Method, true,
+      [&server](const lsp::DidOpenNotebookDocumentParams& params) {
+        server.didOpenNotebookDocument(params);
+      }));
+
+  endpoint.onNotebookDocumentDidChange(notification(
+      session, lsp::notifications::NotebookDocumentDidChange::Method, true,
+      [&server](const lsp::DidChangeNotebookDocumentParams& params) {
+        server.didChangeNotebookDocument(params);
+      }));
+
+  endpoint.onNotebookDocumentDidSave(notification(
+      session, lsp::notifications::NotebookDocumentDidSave::Method, false,
+      [&server](const lsp::DidSaveNotebookDocumentParams& params) {
+        server.didSaveNotebookDocument(params);
+      }));
+
+  endpoint.onNotebookDocumentDidClose(notification(
+      session, lsp::notifications::NotebookDocumentDidClose::Method, true,
+      [&server](const lsp::DidCloseNotebookDocumentParams& params) {
+        server.didCloseNotebookDocument(params);
+      }));
+
   // The hierarchical arm of the answer for a client that reads it: the
   // outline this storey builds is a tree. Any other client gets the flat
   // `SymbolInformation` list.
@@ -591,6 +693,14 @@ void add_text_document_handlers(Session& session) {
                                  const CancellationToken& token) {
         lsp::TextDocumentSemanticTokensRangeResult result;
         result = server.semanticTokensRange(params, token);
+        return result;
+      }));
+
+  endpoint.onTextDocumentSemanticTokensFullDelta(
+      request(session, [&server](const lsp::SemanticTokensDeltaParams& params,
+                                 const CancellationToken& token) {
+        lsp::TextDocumentSemanticTokensFullDeltaResult result;
+        result.emplace(server.semanticTokensFullDelta(params, token));
         return result;
       }));
 
@@ -1026,17 +1136,19 @@ int start_language_server(SharedLspServices& shared, lsp::io::Stream& raw) {
   // requests that wait on the queue and leave `pending`.
   LanguageClientGuard clientGuard(shared);
   NotificationQueue queue(*shared.workspaceLock, shared.workspaceManager.get());
+  // Removed after the pool and the queue are joined: no build is left to
+  // announce a phase to it.
+  const SettleOnBuildPhase settles(*shared.documentBuilder, queue);
   PendingRequests pending;
   lsp::ServerEndpoint endpoint(stream);
-  // Zero workers is the host saying it has no threads to give: every request
-  // is then answered on the read loop. Otherwise half of them answer, which
-  // the endpoint cannot tell on its own: WASI reports a single core.
+  // Half as many threads as the builds have workers answer requests, which the
+  // endpoint cannot tell on its own: WASI reports a single core. At least one,
+  // even with no worker: the read loop never answers, so it always reads the
+  // next message.
   const std::size_t workers = TaskScheduler::defaultWorkerCount();
-  if (workers != 0)
-    endpoint.messageHandler().setMaxResponseThreads(
-        static_cast<unsigned>(std::max<std::size_t>(1, (workers + 1) / 2)));
-  Session session{endpoint,    *shared.languageServer, queue, pending, shared,
-                  workers != 0};
+  endpoint.messageHandler().setMaxResponseThreads(
+      static_cast<unsigned>(std::max<std::size_t>(1, (workers + 1) / 2)));
+  Session session{endpoint, *shared.languageServer, queue, pending, shared};
   const StopNotifications stopNotifications{queue};
   clientGuard.install(endpoint, [&queue](std::function<void()> reply) {
     queue.post(std::move(reply), false);

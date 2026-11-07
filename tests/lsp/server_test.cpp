@@ -14,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -68,8 +69,10 @@
 #include "cursiv/workspace/WorkspaceManager.hpp"
 #include "cursiv/lr/runtime/LrParser.hpp"
 #include "cursiv/actions/CodeActionProvider.hpp"
+#include "cursiv/completion/CompletionContext.hpp"
 #include "cursiv/completion/CompletionProvider.hpp"
 #include "cursiv/completion/CompletionProviderOptions.hpp"
+#include "cursiv/completion/DefaultCompletionProvider.hpp"
 #include "cursiv/content/DefaultTextDocumentContentProvider.hpp"
 #include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/runtime/DefaultLanguageServer.hpp"
@@ -77,6 +80,7 @@
 #include "cursiv/runtime/LanguageServer.hpp"
 #include "cursiv/runtime/LanguageServerMain.hpp"
 #include "cursiv/runtime/LanguageServerRuntime.hpp"
+#include "cursiv/semantic/AbstractSemanticTokenProvider.hpp"
 #include "cursiv/semantic/GrammarSemanticTokenProvider.hpp"
 #include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/services/AbstractExecuteCommandHandler.hpp"
@@ -86,8 +90,10 @@
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
 #include "cursiv/workspace/DefaultConfigurationProvider.hpp"
+#include "cursiv/workspace/DocumentSaveHandler.hpp"
 #include "cursiv/workspace/FileOperationHandler.hpp"
 #include "cursiv/workspace/LspDocumentBuilder.hpp"
+#include "cursiv/workspace/DefaultNotebookDocuments.hpp"
 #include "cursiv/Check.hpp"
 #include "doc/generated/DocG/Module.hpp"
 #include "doc/generated/DocG/Parser.hpp"
@@ -95,6 +101,7 @@
 #include "lsp/types.h"
 #include "lsp/uri.h"
 #include "support/OffersEveryKeyword.hpp"
+#include "support/Throws.hpp"
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
@@ -152,9 +159,24 @@ struct TriggeringCompletion final : cursiv::CompletionProvider {
   }
 
   [[nodiscard]] lsp::CompletionList getCompletion(
-      const cursiv::Document&, lsp::Position,
+      const cursiv::Document&, const lsp::CompletionParams&,
       const cursiv::CancellationToken&) const override {
     return {};
+  }
+};
+
+// Offers no keyword where the client asked on a trigger character: the
+// request's context reaches the hooks.
+struct QuietAfterTrigger final : cursiv::DefaultCompletionProvider {
+  using DefaultCompletionProvider::DefaultCompletionProvider;
+
+  [[nodiscard]] bool filterKeyword(const cursiv::CompletionContext& context,
+                                   std::string_view keyword) const override {
+    if (context.trigger.has_value() &&
+        context.trigger->triggerKind ==
+            lsp::CompletionTriggerKind::TriggerCharacter)
+      return false;
+    return DefaultCompletionProvider::filterKeyword(context, keyword);
   }
 };
 
@@ -208,6 +230,46 @@ struct RecordingFiles final : cursiv::FileOperationHandler {
         lsp::TextEdit{.range = {}, .newText = std::string("renamed")});
     edit.changes = std::move(changes);
     return edit;
+  }
+};
+
+// Records the two save notifications, and asks for a final line break before
+// a save: the edit is measured on the document the request names.
+struct RecordingSaves final : cursiv::DocumentSaveHandler {
+  cursiv::DocumentSaveOptions options;
+  std::vector<lsp::TextDocumentSaveReasonEnum> willSaved;
+  std::vector<std::string> saved;
+
+  [[nodiscard]] cursiv::DocumentSaveOptions saveOptions()
+      const noexcept override {
+    return options;
+  }
+  void willSaveDocument(
+      const lsp::WillSaveTextDocumentParams& params) override {
+    willSaved.push_back(params.reason);
+  }
+  void didSaveDocument(const lsp::DidSaveTextDocumentParams& params) override {
+    saved.push_back(params.textDocument.uri.toString());
+  }
+  [[nodiscard]] std::vector<lsp::TextEdit> willSaveDocumentWaitUntil(
+      const cursiv::Document& document, const lsp::WillSaveTextDocumentParams&,
+      const cursiv::CancellationToken&) const override {
+    const std::string_view text = document.textDocument().getText();
+    if (text.ends_with('\n')) return {};
+    const lsp::Position end = cursiv::to_lsp(document.textDocument().positionAt(
+        static_cast<cursiv::TextOffset>(text.size())));
+    return {lsp::TextEdit{.range = {end, end}, .newText = "\n"}};
+  }
+};
+
+// Records the notebook saves, after the state the base keeps.
+struct RecordingNotebooks final : cursiv::DefaultNotebookDocuments {
+  using DefaultNotebookDocuments::DefaultNotebookDocuments;
+  std::vector<std::string> saved;
+
+  void didSave(const lsp::DidSaveNotebookDocumentParams& params) override {
+    DefaultNotebookDocuments::didSave(params);
+    saved.push_back(params.notebookDocument.uri.toString());
   }
 };
 
@@ -332,15 +394,129 @@ void the_handshake_promises_only_what_is_installed() {
   // The workspace arm exists for the folders, and says nothing about files.
   CHECK(result.capabilities.workspace.has_value());
   CHECK(!result.capabilities.workspace->fileOperations.has_value());
+  // Saves and notebooks are heard of only through a handler.
+  const auto* const sync = result.capabilities.textDocumentSync.has_value()
+                               ? std::get_if<lsp::TextDocumentSyncOptions>(
+                                     &*result.capabilities.textDocumentSync)
+                               : nullptr;
+  CHECK(sync != nullptr && !sync->willSave.has_value() &&
+        !sync->willSaveWaitUntil.has_value() && !sync->save.has_value());
+  CHECK(!result.capabilities.notebookDocumentSync.has_value());
 }
 
-// A language that asks for colours has them announced, with what reads them.
+// The options a semantic token provider announces, whatever their arm.
+[[nodiscard]] const lsp::SemanticTokensOptions* colour_options(
+    const lsp::InitializeResult& result) {
+  const auto& announced = result.capabilities.semanticTokensProvider;
+  return announced.has_value()
+             ? std::get_if<lsp::SemanticTokensOptions>(&*announced)
+             : nullptr;
+}
+
+[[nodiscard]] bool announces_delta(const lsp::SemanticTokensOptions& options) {
+  const auto* const full =
+      options.full.has_value()
+          ? std::get_if<lsp::SemanticTokensFullDelta>(&*options.full)
+          : nullptr;
+  return full != nullptr && full->delta.value_or(false);
+}
+
+// The grammar's colours with a legend of their own, the protocol's types
+// with `extra` appended, and `delta` as asked.
+struct LegendColours final : cursiv::GrammarSemanticTokenProvider {
+  LegendColours(const cursiv::CoreServices& core,
+                std::vector<std::string_view> extra, bool delta)
+      : GrammarSemanticTokenProvider(core),
+        _types(cursiv::kSemanticTokenTypes.begin(),
+               cursiv::kSemanticTokenTypes.end()),
+        _delta(delta) {
+    _types.insert(_types.end(), extra.begin(), extra.end());
+  }
+
+  [[nodiscard]] std::span<const std::string_view> tokenTypes() const override {
+    return _types;
+  }
+
+  [[nodiscard]] lsp::SemanticTokensOptions semanticTokensOptions()
+      const override {
+    lsp::SemanticTokensOptions options =
+        GrammarSemanticTokenProvider::semanticTokensOptions();
+    lsp::SemanticTokensFullDelta full;
+    full.delta = _delta;
+    options.full = std::move(full);
+    return options;
+  }
+
+ private:
+  std::vector<std::string_view> _types;
+  bool _delta;
+};
+
+// A second language of the workspace grammar, coloured by `colours`.
+void add_coloured_language(
+    World& world, std::string id,
+    std::function<std::unique_ptr<const cursiv::SemanticTokenProvider>(
+        const cursiv::LspServices&)>
+        colours) {
+  (void)support::add_language<cursiv::LspServices>(
+      world.shared, {id, {"." + id}, {}},
+      ws::generated::Workspace::create_parser(),
+      ws::generated::Workspace::create_ast_reflection(),
+      [&](cursiv::LspServices& second) {
+        second.semanticTokenProvider = colours(second);
+      });
+}
+
+// A language that asks for colours has them announced, with what reads them:
+// the protocol's own legend, `full` and `range`, and no `delta`.
 void the_handshake_announces_the_colours_a_language_installs() {
   World world;
   world.ws->semanticTokenProvider =
       std::make_unique<const cursiv::GrammarSemanticTokenProvider>(*world.ws);
   const lsp::InitializeResult result = world.handshake();
-  CHECK(result.capabilities.semanticTokensProvider.has_value());
+  const lsp::SemanticTokensOptions* const options = colour_options(result);
+  CHECK(options != nullptr);
+  if (options == nullptr) return;
+  CHECK(std::ranges::equal(options->legend.tokenTypes,
+                           cursiv::kSemanticTokenTypes));
+  CHECK(std::ranges::equal(options->legend.tokenModifiers,
+                           cursiv::kSemanticTokenModifiers));
+  CHECK(options->full.has_value() && !announces_delta(*options));
+  CHECK(options->range.has_value());
+}
+
+// The session announces one legend: the languages' merged index by index, a
+// type one language appends included. `delta` is announced only when every
+// language answers it.
+void the_colour_legends_merge_over_the_languages() {
+  for (const bool delta : {false, true}) {
+    World world;
+    world.ws->semanticTokenProvider = std::make_unique<const LegendColours>(
+        *world.ws, std::vector<std::string_view>{}, true);
+    add_coloured_language(world, "second", [&](const cursiv::LspServices& l) {
+      return std::make_unique<const LegendColours>(
+          l, std::vector<std::string_view>{"label"}, delta);
+    });
+    const lsp::InitializeResult result = world.handshake();
+    const lsp::SemanticTokensOptions* const options = colour_options(result);
+    CHECK(options != nullptr);
+    if (options == nullptr) continue;
+    CHECK(options->legend.tokenTypes.size() ==
+              cursiv::kSemanticTokenTypes.size() + 1 &&
+          options->legend.tokenTypes.back() == "label");
+    CHECK(announces_delta(*options) == delta);
+  }
+
+  // Two names at one index cannot share the session's legend.
+  World world;
+  world.ws->semanticTokenProvider = std::make_unique<const LegendColours>(
+      *world.ws, std::vector<std::string_view>{"label"}, false);
+  add_coloured_language(world, "second", [](const cursiv::LspServices& l) {
+    return std::make_unique<const LegendColours>(
+        l, std::vector<std::string_view>{"tag"}, false);
+  });
+  CHECK(support::throws<std::invalid_argument>(
+      [&] { (void)world.server().initialize({}); }));
 }
 
 // What a provider claims reaches the client verbatim: a character absent from
@@ -360,6 +536,31 @@ void the_completion_triggers_are_the_providers_own() {
         announced.allCommitCharacters->front() == ";");
   // Never promised: no provider of this storey answers a resolve request.
   CHECK(!announced.resolveProvider.has_value());
+}
+
+// The request reaches the provider whole: a list asked on a trigger character
+// is not the list asked by hand, and the hooks tell the two apart.
+void the_completion_context_reaches_the_hooks() {
+  World world;
+  world.ws->completionProvider = std::make_unique<QuietAfterTrigger>(*world.ws);
+  (void)world.handshake();
+  world.open("");
+  lsp::CompletionParams query;
+  query.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  CHECK(support::offers(world.server().completion(query), "entity"));
+
+  lsp::CompletionContext invoked;
+  invoked.triggerKind =
+      lsp::CompletionTriggerKindEnum(lsp::CompletionTriggerKind::Invoked);
+  query.context = invoked;
+  CHECK(support::offers(world.server().completion(query), "entity"));
+
+  lsp::CompletionContext typed;
+  typed.triggerKind = lsp::CompletionTriggerKindEnum(
+      lsp::CompletionTriggerKind::TriggerCharacter);
+  typed.triggerCharacter = std::string(".");
+  query.context = std::move(typed);
+  CHECK(!support::offers(world.server().completion(query), "entity"));
 }
 
 // The provider builds the edit the client declared it applies: both ranges
@@ -580,6 +781,195 @@ void the_file_operations_are_the_handlers_own() {
   const World bare;
   CHECK(!bare.server().willRenameFiles(params, cursiv::kNoCancel).has_value());
   bare.server().didRenameFiles(params);
+}
+
+// The handler's options are the announcement: each save notification it names
+// is promised and reaches it, and the edits asked before a save are measured
+// on the open document. A document nobody opened is not asked about.
+void the_save_notifications_reach_the_handler() {
+  World world;
+  auto saves = std::make_unique<RecordingSaves>();
+  RecordingSaves& handler = *saves;
+  handler.options = {
+      .willSave = true, .willSaveWaitUntil = true, .didSave = true};
+  world.shared.documentSaveHandler = std::move(saves);
+  const lsp::InitializeResult result = world.handshake();
+  const auto* const sync = std::get_if<lsp::TextDocumentSyncOptions>(
+      &*result.capabilities.textDocumentSync);
+  CHECK(sync != nullptr && sync->willSave == true &&
+        sync->willSaveWaitUntil == true && sync->save.has_value());
+
+  world.open("datatype String");
+  lsp::WillSaveTextDocumentParams will;
+  will.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  will.reason =
+      lsp::TextDocumentSaveReasonEnum(lsp::TextDocumentSaveReason::Manual);
+  world.server().willSave(will);
+  CHECK(handler.willSaved.size() == 1 &&
+        handler.willSaved.front() == lsp::TextDocumentSaveReason::Manual);
+  const std::vector<lsp::TextEdit> edits =
+      world.server().willSaveWaitUntil(will);
+  CHECK(edits.size() == 1 && edits.front().newText == "\n" &&
+        edits.front().range.start.line == 0 &&
+        edits.front().range.start.character == 15);
+  lsp::WillSaveTextDocumentParams elsewhere = will;
+  elsewhere.textDocument.uri = lsp::Uri::parse("file:///w/unopened.ws");
+  CHECK(world.server().willSaveWaitUntil(elsewhere).empty());
+
+  lsp::DidSaveTextDocumentParams did;
+  did.textDocument.uri = will.textDocument.uri;
+  world.server().didSave(did);
+  CHECK(handler.saved == std::vector<std::string>{std::string(kUri)});
+
+  // Only the notifications the options name are promised.
+  World other;
+  auto only = std::make_unique<RecordingSaves>();
+  only->options = {.didSave = true};
+  other.shared.documentSaveHandler = std::move(only);
+  const lsp::InitializeResult announced = other.handshake();
+  const auto* const saveOnly = std::get_if<lsp::TextDocumentSyncOptions>(
+      &*announced.capabilities.textDocumentSync);
+  CHECK(saveOnly != nullptr && saveOnly->save.has_value() &&
+        !saveOnly->willSave.has_value() &&
+        !saveOnly->willSaveWaitUntil.has_value());
+}
+
+[[nodiscard]] lsp::NotebookCell code_cell(std::string_view uri) {
+  lsp::NotebookCell cell;
+  cell.kind = lsp::NotebookCellKindEnum(lsp::NotebookCellKind::Code);
+  cell.document = lsp::Uri::parse(std::string(uri));
+  return cell;
+}
+
+[[nodiscard]] lsp::TextDocumentItem cell_text(std::string_view uri,
+                                              std::string_view text) {
+  lsp::TextDocumentItem item;
+  item.uri = lsp::Uri::parse(std::string(uri));
+  item.languageId = std::string("workspace");
+  item.version = 1;
+  item.text = std::string(text);
+  return item;
+}
+
+// A notebook's cells are documents like any other: opened with it, built and
+// linked to each other, then moved by its changes and closed with it -- each
+// notification in one write. The notebook's own state follows the client's.
+void a_notebook_syncs_its_cells_as_documents() {
+  constexpr std::string_view kNotebook = "file:///w/book.wsnb";
+  constexpr std::string_view kFirst = "vscode-notebook-cell:/w/book.wsnb#a";
+  constexpr std::string_view kSecond = "vscode-notebook-cell:/w/book.wsnb#b";
+  constexpr std::string_view kThird = "vscode-notebook-cell:/w/book.wsnb#c";
+  World world;
+  lsp::NotebookDocumentSyncOptions options;
+  lsp::NotebookDocumentFilterWithNotebook filter;
+  filter.notebook = std::string("workspace-notebook");
+  filter.cells =
+      lsp::Array<lsp::NotebookCellLanguage>{{.language = "workspace"}};
+  options.notebookSelector.emplace_back(std::move(filter));
+  options.save = true;
+  auto notebooks = std::make_unique<RecordingNotebooks>(options);
+  RecordingNotebooks& model = *notebooks;
+  world.shared.notebookDocuments = std::move(notebooks);
+  const lsp::InitializeResult result = world.handshake();
+  const auto* const announced =
+      result.capabilities.notebookDocumentSync.has_value()
+          ? std::get_if<lsp::NotebookDocumentSyncOptions>(
+                &*result.capabilities.notebookDocumentSync)
+          : nullptr;
+  CHECK(announced != nullptr && announced->save == true &&
+        announced->notebookSelector.size() == 1);
+  const cursiv::Documents& documents = *world.shared.documents;
+  const auto clean = [&](std::string_view uri) {
+    const auto* const published = lastSnapshotOf(*world.client, uri);
+    return published != nullptr && published->diagnostics.empty();
+  };
+
+  lsp::DidOpenNotebookDocumentParams open;
+  open.notebookDocument.uri = lsp::Uri::parse(std::string(kNotebook));
+  open.notebookDocument.notebookType = "workspace-notebook";
+  open.notebookDocument.version = 1;
+  open.notebookDocument.cells = {code_cell(kFirst), code_cell(kSecond)};
+  open.cellTextDocuments = {
+      cell_text(kFirst, "datatype String\n"),
+      cell_text(kSecond, "entity Person {\n  name : String\n}\n")};
+  const std::size_t writes = world.lock->modes.size();
+  world.server().didOpenNotebookDocument(open);
+  CHECK(world.lock->modes.size() == writes + 1);
+  const std::shared_ptr<cursiv::Document> second =
+      documents.getDocument(kSecond);
+  CHECK(second != nullptr && second->isOpen && second->language == world.ws);
+  CHECK(documents.getDocument(kFirst) != nullptr);
+  CHECK(clean(kFirst) && clean(kSecond));
+  const auto holder = model.findNotebookDocumentForCell(kSecond);
+  CHECK(holder.has_value() && holder->uri.toString() == kNotebook);
+  CHECK(model.getNotebookCell(kFirst).has_value());
+
+  // The first cell replaced by a third, and the second edited to name what
+  // the third declares.
+  lsp::DidChangeNotebookDocumentParams change;
+  change.notebookDocument.uri = open.notebookDocument.uri;
+  change.notebookDocument.version = 2;
+  lsp::NotebookDocumentCellChangeStructure structure;
+  structure.array.start = 0;
+  structure.array.deleteCount = 1;
+  structure.array.cells = lsp::Array<lsp::NotebookCell>{code_cell(kThird)};
+  structure.didOpen =
+      lsp::Array<lsp::TextDocumentItem>{cell_text(kThird, "datatype Text\n")};
+  structure.didClose = lsp::Array<lsp::TextDocumentIdentifier>{
+      lsp::TextDocumentIdentifier{.uri = lsp::Uri::parse(std::string(kFirst))}};
+  lsp::NotebookDocumentCellContentChanges edit;
+  edit.document.uri = lsp::Uri::parse(std::string(kSecond));
+  edit.document.version = 2;
+  lsp::TextDocumentContentChangeWholeDocument whole;
+  whole.text = "entity Person {\n  name : Text\n}\n";
+  edit.changes.emplace_back(std::move(whole));
+  lsp::NotebookDocumentCellChanges cells;
+  cells.structure = std::move(structure);
+  cells.textContent =
+      lsp::Array<lsp::NotebookDocumentCellContentChanges>{std::move(edit)};
+  change.change.cells = std::move(cells);
+  world.server().didChangeNotebookDocument(change);
+  CHECK(world.lock->modes.size() == writes + 2);
+  CHECK(documents.getDocument(kFirst) == nullptr);
+  CHECK(documents.getDocument(kThird) != nullptr);
+  CHECK(second->textDocument().getText() ==
+        "entity Person {\n  name : Text\n}\n");
+  CHECK(clean(kSecond) && clean(kFirst));
+  const auto changed = model.getNotebookDocument(kNotebook);
+  CHECK(changed.has_value() && changed->version == 2 &&
+        changed->cells.size() == 2 &&
+        changed->cells.front().document.toString() == kThird);
+  CHECK(!model.getNotebookCell(kFirst).has_value());
+
+  // Metadata alone moves no cell, and still builds: as a document update, it
+  // cut the build in flight.
+  lsp::DidChangeNotebookDocumentParams relabel;
+  relabel.notebookDocument.uri = open.notebookDocument.uri;
+  relabel.notebookDocument.version = 3;
+  relabel.change.metadata = lsp::LSPObject{};
+  world.server().didChangeNotebookDocument(relabel);
+  CHECK(world.lock->modes.size() == writes + 3);
+  const auto relabelled = model.getNotebookDocument(kNotebook);
+  CHECK(relabelled.has_value() && relabelled->version == 3 &&
+        relabelled->metadata.has_value() && relabelled->cells.size() == 2);
+
+  lsp::DidSaveNotebookDocumentParams save;
+  save.notebookDocument.uri = open.notebookDocument.uri;
+  world.server().didSaveNotebookDocument(save);
+  CHECK(model.saved == std::vector<std::string>{std::string(kNotebook)});
+
+  lsp::DidCloseNotebookDocumentParams close;
+  close.notebookDocument.uri = open.notebookDocument.uri;
+  close.cellTextDocuments = {
+      lsp::TextDocumentIdentifier{.uri = lsp::Uri::parse(std::string(kThird))},
+      lsp::TextDocumentIdentifier{.uri =
+                                      lsp::Uri::parse(std::string(kSecond))}};
+  world.server().didCloseNotebookDocument(close);
+  CHECK(world.lock->modes.size() == writes + 4);
+  CHECK(documents.getDocument(kSecond) == nullptr &&
+        documents.getDocument(kThird) == nullptr);
+  CHECK(!model.getNotebookDocument(kNotebook).has_value() &&
+        !model.findNotebookDocumentForCell(kSecond).has_value());
 }
 
 // A tab opened on a broken text is diagnosed; the keystroke that repairs it
@@ -808,6 +1198,52 @@ void a_reference_request_does_not_wait_on_a_built_document() {
   const std::vector<lsp::Location> locations =
       world.server().references(params, cursiv::kNoCancel);
   CHECK(!locations.empty());
+}
+
+// A workspace request reads beside the validation of the edit before it: the
+// references of the edited text are answered while a check still runs.
+void references_do_not_wait_for_validation() {
+  std::latch validating{1};
+  std::latch release{1};
+  std::atomic<bool> first{true};
+  const World world;
+  world.ws->validationRegistry->registerAfterDocument(
+      [&](const cursiv::Document& document, cursiv::ValidationAcceptor&,
+          const cursiv::CancellationToken&) {
+        if (!document.textDocument().getText().starts_with("\n") ||
+            !first.exchange(false))
+          return;
+        validating.count_down();
+        release.wait();
+      },
+      &cursiv::fast);
+  (void)world.handshake();
+  world.open(kRepaired);
+  // One line down: a row read from the text before the edit would show it.
+  auto edit = std::async(std::launch::async, [&] {
+    world.change(2, "\n" + std::string(kRepaired));
+  });
+  validating.wait();
+
+  lsp::ReferenceParams params;
+  params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  params.position = {2, 15};  // the `Missing` written inside the entity
+  params.context.includeDeclaration = true;
+  auto asked = std::async(std::launch::async, [&] {
+    return world.server().references(params, cursiv::kNoCancel);
+  });
+  const bool answered =
+      asked.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  CHECK(answered);
+  release.count_down();
+  edit.get();
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> starts;
+  for (const lsp::Location& location : asked.get())
+    starts.emplace_back(location.range.start.line,
+                        location.range.start.character);
+  std::ranges::sort(starts);
+  CHECK((starts == std::vector<std::pair<std::uint32_t, std::uint32_t>>{
+                       {1, 9}, {2, 15}}));
 }
 
 // A URI no language claims answers empty rather than waiting for a rung no
@@ -1307,7 +1743,9 @@ void run() {
   the_installed_defaults_leave_no_slot_owed();
   the_handshake_promises_only_what_is_installed();
   the_handshake_announces_the_colours_a_language_installs();
+  the_colour_legends_merge_over_the_languages();
   the_completion_triggers_are_the_providers_own();
+  the_completion_context_reaches_the_hooks();
   completion_edits_follow_insert_replace_support();
   prose_follows_the_clients_preferred_format();
   virtual_content_waits_for_the_workspace_scan(false);
@@ -1322,6 +1760,7 @@ void run() {
   opening_uses_the_document_factorys_construction_hook();
   a_query_finds_the_declarations_of_the_workspace();
   a_reference_request_does_not_wait_on_a_built_document();
+  references_do_not_wait_for_validation();
   a_request_on_an_unknown_document_answers_empty();
   a_command_is_promised_and_answered_only_with_its_handler();
   a_scanned_document_publishes_without_a_tab();
@@ -1335,6 +1774,8 @@ void run() {
   an_open_on_known_bytes_still_builds();
   a_command_may_write_to_the_workspace();
   the_watcher_follows_the_clients_capability();
+  the_save_notifications_reach_the_handler();
+  a_notebook_syncs_its_cells_as_documents();
 }
 
 }  // namespace language_server
@@ -1376,11 +1817,18 @@ struct Stream final : lsp::io::Stream {
 struct StopLock final : cursiv::DefaultWorkspaceLock {
   std::latch stopped{1};
   std::atomic<bool> notified{false};
+  std::atomic<int> cancels{0};
   std::function<void()> beforeCancel;
   void cancelWrite() noexcept override {
     if (beforeCancel) beforeCancel();
     cursiv::DefaultWorkspaceLock::cancelWrite();
+    ++cancels;
+    cancels.notify_all();
     if (!notified.exchange(true)) stopped.count_down();
+  }
+  void awaitCancels(int count) {
+    for (int seen = cancels.load(); seen < count; seen = cancels.load())
+      cancels.wait(seen);
   }
 };
 struct Server final : cursiv::DefaultLanguageServer {
@@ -1815,24 +2263,57 @@ void answers_take_the_shapes_the_client_reads() {
   }
 }
 
+// Sets `CURSIV_WORKERS` for the sessions started in its scope, then gives the
+// host's value back.
+class WorkersSetting {
+ public:
+  explicit WorkersSetting(const char* value) {
+    if (const char* const host = std::getenv(kName); host != nullptr)
+      _host = host;
+    set(value);
+  }
+  WorkersSetting(const WorkersSetting&) = delete;
+  WorkersSetting& operator=(const WorkersSetting&) = delete;
+  ~WorkersSetting() { set(_host ? _host->c_str() : nullptr); }
+
+ private:
+  static constexpr const char* kName = "CURSIV_WORKERS";
+  static void set(const char* value) {
+#ifdef _WIN32
+    (void)_putenv_s(kName, value != nullptr ? value : "");
+#else
+    if (value != nullptr)
+      (void)setenv(kName, value, 1);
+    else
+      (void)unsetenv(kName);
+#endif
+  }
+  std::optional<std::string> _host;
+};
+
+// With no worker thread too: the read loop still reads the cancellation of a
+// request that waits for an earlier notification.
 void cancellation_does_not_wait_for_an_earlier_notification() {
-  Session s;
-  s.initialize();
-  s.open();
-  s.request(2, "textDocument/documentSymbol",
-            R"({"textDocument":{"uri":"untitled:one"}})");
-  s.notify("$/cancelRequest", R"({"id":2})");
-  auto pending = s.answer();
-  const bool cancelled = pending.wait_for(2s) == std::future_status::ready;
-  CHECK(cancelled);
-  // Always release on failure, so the old implementation reports rather
-  // than hanging the test process.
-  s.server->release.count_down();
-  const auto reply = pending.get();
-  CHECK(reply.error.has_value() && reply.error->code == -32800);
-  CHECK(s.server->symbols == 0);
-  s.notify("exit");
-  CHECK(s.running.get() == 1);
+  for (const char* workers : {"1", "0"}) {
+    const WorkersSetting setting(workers);
+    Session s;
+    s.initialize();
+    s.open();
+    s.request(2, "textDocument/documentSymbol",
+              R"({"textDocument":{"uri":"untitled:one"}})");
+    s.notify("$/cancelRequest", R"({"id":2})");
+    auto pending = s.answer();
+    const bool cancelled = pending.wait_for(2s) == std::future_status::ready;
+    CHECK(cancelled);
+    // Always release on failure, so the old implementation reports rather
+    // than hanging the test process.
+    s.server->release.count_down();
+    const auto reply = pending.get();
+    CHECK(reply.error.has_value() && reply.error->code == -32800);
+    CHECK(s.server->symbols == 0);
+    s.notify("exit");
+    CHECK(s.running.get() == 1);
+  }
 }
 
 void exit_cancels_a_request_behind_a_dropped_notification() {
@@ -1889,6 +2370,118 @@ void a_notification_does_not_cancel_its_own_write() {
   s.notify("exit");
   CHECK(s.running.get() == 1);
 }
+
+constexpr std::string_view kEdit =
+    R"({"textDocument":{"uri":"untitled:one","version":2},"contentChanges":[{"text":"y"}]})";
+constexpr std::string_view kOutline =
+    R"({"textDocument":{"uri":"untitled:one"}})";
+
+// A request waits for the edits sent before it, not for their build: the
+// outline is answered while the edit's validation is still running.
+void a_request_does_not_wait_for_the_validation_before_it() {
+  struct HeldValidation final : cursiv::BuildPhaseListener {
+    std::latch validating{1};
+    std::latch release{1};
+    std::atomic<bool> first{true};
+    void onBuildPhase(cursiv::DocumentState reached,
+                      std::span<cursiv::Document* const>,
+                      const cursiv::CancellationToken&) override {
+      if (reached != cursiv::DocumentState::Validated || !first.exchange(false))
+        return;
+      validating.count_down();
+      release.wait();
+    }
+  } held;
+  Session s([&](Server& server) {
+    server.shared.documentBuilder->addBuildPhaseListener(held);
+  });
+  s.initialize();
+  s.notify("textDocument/didChange", kEdit);
+  s.request(2, "textDocument/documentSymbol", kOutline);
+  held.validating.wait();
+  auto pending = s.answer();
+  const bool answered = pending.wait_for(2s) == std::future_status::ready;
+  CHECK(answered);
+  held.release.count_down();
+  CHECK(!pending.get().error.has_value());
+  CHECK(s.server->symbols == 1);
+  s.notify("exit");
+  CHECK(s.running.get() == 1);
+}
+
+// Any other notification may write more than once: a request behind it waits
+// for all of it, even once its first build has gone past its mutation.
+void a_custom_notification_holds_the_requests_behind_it() {
+  std::latch building{1};
+  std::latch release{1};
+  Session s([&](Server& server) {
+    server.onNotification("x/rebuild", [&](const lsp::LSPAny&) {
+      server.shared.workspaceLock->write(
+          [&](const cursiv::CancellationToken& token) {
+            server.shared.documentBuilder->build({}, {}, token);
+          });
+      building.count_down();
+      release.wait();
+    });
+  });
+  s.initialize();
+  s.notify("x/rebuild", "[0]");
+  s.request(2, "textDocument/documentSymbol", kOutline);
+  building.wait();
+  auto pending = s.answer();
+  const bool held = pending.wait_for(200ms) == std::future_status::timeout;
+  CHECK(held);
+  release.count_down();
+  CHECK(!pending.get().error.has_value());
+  s.notify("exit");
+  CHECK(s.running.get() == 1);
+}
+
+// An edit cut short by the next one before its build announced anything
+// releases the requests behind it when it ends, not at the next edit's build.
+void a_cut_edit_releases_the_requests_behind_it() {
+  struct HeldUpdates final : cursiv::DocumentUpdateListener {
+    std::latch first{1};
+    std::latch second{1};
+    std::latch releaseFirst{1};
+    std::latch releaseSecond{1};
+    std::atomic<int> seen{0};
+    void onUpdate(std::span<const std::string_view>,
+                  std::span<const std::string_view>) override {
+      const int update = seen++;
+      if (update == 0) {
+        first.count_down();
+        releaseFirst.wait();
+      } else if (update == 1) {
+        second.count_down();
+        releaseSecond.wait();
+      }
+    }
+  } held;
+  Session s;
+  s.initialize();
+  // Scanned: an edit queued from here cancels the write in flight.
+  s.shared.workspaceManager->initializeWorkspace({});
+  s.shared.documentBuilder->addDocumentUpdateListener(held);
+  s.notify("textDocument/didChange", kEdit);
+  held.first.wait();
+  s.request(2, "textDocument/documentSymbol", kOutline);
+  s.notify(
+      "textDocument/didChange",
+      R"({"textDocument":{"uri":"untitled:one","version":3},"contentChanges":[{"text":"z"}]})");
+  // Each edit cancels the write in flight as it is queued: the second one
+  // cuts the first, which stops at its settle, before any build phase.
+  s.lock->awaitCancels(2);
+  held.releaseFirst.count_down();
+  held.second.wait();
+  auto pending = s.answer();
+  const bool answered = pending.wait_for(2s) == std::future_status::ready;
+  CHECK(answered);
+  held.releaseSecond.count_down();
+  CHECK(!pending.get().error.has_value());
+  s.notify("exit");
+  CHECK(s.running.get() == 1);
+}
 }  // namespace
 
 void run() {
@@ -1900,6 +2493,9 @@ void run() {
   exit_cancels_a_request_behind_a_dropped_notification();
   a_client_gone_mid_request_ends_the_session();
   a_notification_does_not_cancel_its_own_write();
+  a_request_does_not_wait_for_the_validation_before_it();
+  a_custom_notification_holds_the_requests_behind_it();
+  a_cut_edit_releases_the_requests_behind_it();
 }
 
 }  // namespace language_server_runtime
@@ -2064,9 +2660,13 @@ const std::string kDocs[] = {
   return out;
 }
 
-[[nodiscard]] lsp::Position at(const cursiv::Document& document,
-                               cursiv::TextOffset offset) {
-  return cursiv::to_lsp(document.textDocument().positionAt(offset));
+// A completion request at `offset`.
+[[nodiscard]] lsp::CompletionParams at(const cursiv::Document& document,
+                                       cursiv::TextOffset offset) {
+  lsp::CompletionParams params;
+  params.textDocument.uri = lsp::Uri::parse(document.uri);
+  params.position = cursiv::to_lsp(document.textDocument().positionAt(offset));
+  return params;
 }
 
 // The colours are the same colours, byte for byte on the wire.
@@ -2078,10 +2678,10 @@ void the_colours_are_the_same_colours() {
     CHECK(a->hasAst());
     CHECK(b->hasAst());
     const lsp::SemanticTokens x =
-        one.doc->semanticTokenProvider->semanticHighlight(*a,
+        one.doc->semanticTokenProvider->semanticHighlight(*a, {},
                                                           cursiv::kNoCancel);
     const lsp::SemanticTokens y =
-        two.doc->semanticTokenProvider->semanticHighlight(*b,
+        two.doc->semanticTokenProvider->semanticHighlight(*b, {},
                                                           cursiv::kNoCancel);
     CHECK(!x.data.empty());
     CHECK(x.data == y.data);

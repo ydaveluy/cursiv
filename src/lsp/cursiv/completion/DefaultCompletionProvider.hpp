@@ -38,15 +38,15 @@ class DefaultCompletionProvider : public CompletionProvider {
       delete;
 
   [[nodiscard]] lsp::CompletionList getCompletion(
-      const Document& document, lsp::Position position,
+      const Document& document, const lsp::CompletionParams& params,
       const CancellationToken& cancelToken = {}) const override;
 
  protected:
-  // The ways of reading a caret, in the order they are tried: the data rule it
-  // writes in, the token ending at it, what follows that token, and the token
-  // holding it. `visit` returns whether to try the next.
+  // The ways of reading the request's caret, in the order they are tried: the
+  // data rule it writes in, the token ending at it, what follows that token,
+  // and the token holding it. `visit` returns whether to try the next.
   virtual void buildContexts(
-      const Document& document, lsp::Position position,
+      const Document& document, const lsp::CompletionParams& params,
       const CancellationToken& cancelToken,
       function_ref<bool(const CompletionContext&)> visit) const;
 

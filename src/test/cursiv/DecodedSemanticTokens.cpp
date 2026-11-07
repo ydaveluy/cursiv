@@ -32,8 +32,13 @@ DecodedSemanticTokensWithRanges highlightHelper(
   const ReplacedIndices replaced = replaceIndices({.text = std::move(text)});
   const std::shared_ptr<Document> document =
       parseHelper(services, replaced.output, options);
+  lsp::SemanticTokensParams params;
+  params.textDocument.uri = lsp::Uri::parse(document->uri);
+  const SemanticTokenProvider& provider = *services.semanticTokenProvider;
   const lsp::SemanticTokens encoded =
-      services.semanticTokenProvider->semanticHighlight(*document, kNoCancel);
+      provider.semanticHighlight(*document, params, kNoCancel);
+  const lsp::Array<lsp::String> types =
+      provider.semanticTokensOptions().legend.tokenTypes;
 
   DecodedSemanticTokensWithRanges out;
   out.ranges = replaced.ranges;
@@ -49,10 +54,11 @@ DecodedSemanticTokensWithRanges highlightHelper(
     const TextOffset begin = textDocument.offsetAt(Position{line, character});
     const TextOffset end =
         textDocument.offsetAt(Position{line, character + length});
-    out.tokens.emplace_back(
-        begin, static_cast<SemanticTokenType>(encoded.data[at + 3]),
-        static_cast<std::uint32_t>(encoded.data[at + 4]),
-        textDocument.getText().substr(begin, end - begin));
+    const auto type = static_cast<std::size_t>(encoded.data[at + 3]);
+    out.tokens.emplace_back(begin,
+                            type < types.size() ? types[type] : std::string(),
+                            static_cast<std::uint32_t>(encoded.data[at + 4]),
+                            textDocument.getText().substr(begin, end - begin));
   }
   return out;
 }

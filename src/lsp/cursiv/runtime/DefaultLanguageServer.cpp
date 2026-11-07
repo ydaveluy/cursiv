@@ -13,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -68,7 +69,9 @@
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/workspace/ConfigurationProvider.hpp"
+#include "cursiv/workspace/DocumentSaveHandler.hpp"
 #include "cursiv/workspace/FileOperationHandler.hpp"
+#include "cursiv/workspace/NotebookDocuments.hpp"
 #include "lsp/types.h"
 
 namespace cursiv {
@@ -165,6 +168,60 @@ void merge_on_type_options(
   const std::optional<lsp::DocumentOnTypeFormattingOptions> options =
       formatter.formatOnTypeOptions();
   return options.has_value() && names_trigger(*options, ch);
+}
+
+// Whether a request arm is announced: `true`, or its options.
+template <class Options>
+[[nodiscard]] bool announced(
+    const std::optional<lsp::OneOf<lsp::Bool, Options>>& arm) {
+  if (!arm.has_value()) return false;
+  if (const auto* const flag = std::get_if<lsp::Bool>(&*arm)) return *flag;
+  return true;
+}
+
+[[nodiscard]] bool announces_delta(
+    const std::optional<lsp::OneOf<lsp::Bool, lsp::SemanticTokensFullDelta>>&
+        full) {
+  if (!full.has_value()) return false;
+  const auto* const options = std::get_if<lsp::SemanticTokensFullDelta>(&*full);
+  return options != nullptr && options->delta.value_or(false);
+}
+
+// `names` laid over `into` index by index. The session has one legend, so two
+// languages may not give one index two names.
+void merge_legend(lsp::Array<lsp::String>& into,
+                  const lsp::Array<lsp::String>& names, std::string_view what) {
+  for (std::size_t at = 0; at < names.size(); ++at) {
+    if (at == into.size())
+      into.push_back(names[at]);
+    else if (into[at] != names[at])
+      throw std::invalid_argument("cursiv: two languages name semantic token " +
+                                  std::string(what) + " " + std::to_string(at) +
+                                  " '" + into[at] + "' and '" + names[at] +
+                                  "'");
+  }
+}
+
+// The session's semantic tokens: one legend over every language's, and each
+// request announced only where every language answers it.
+void merge_semantic_tokens_options(
+    std::optional<lsp::SemanticTokensOptions>& into,
+    const lsp::SemanticTokensOptions& options) {
+  if (!into.has_value()) {
+    into = options;
+    return;
+  }
+  merge_legend(into->legend.tokenTypes, options.legend.tokenTypes, "type");
+  merge_legend(into->legend.tokenModifiers, options.legend.tokenModifiers,
+               "modifier");
+  if (announced(into->full) && announced(options.full)) {
+    lsp::SemanticTokensFullDelta full;
+    full.delta = announces_delta(into->full) && announces_delta(options.full);
+    into->full = std::move(full);
+  } else {
+    into->full.reset();
+  }
+  if (!announced(into->range) || !announced(options.range)) into->range.reset();
 }
 
 // Whether the first known kind a client lists, its preferred one, is
@@ -273,13 +330,22 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   lsp::InitializeResult result;
   // The options arm, not the bare enum: the numeric form omits
   // `openClose`, and a spec-compliant client would then never send
-  // `didOpen`. The save arms stay unset -- no handler here answers them
-  // -- and `Incremental` is what `Document::applyEdits` needs.
+  // `didOpen`. `Incremental` is what `Document::applyEdits` needs, and the
+  // save arms are the handler's.
   lsp::TextDocumentSyncOptions sync;
   sync.openClose = true;
   sync.change =
       lsp::TextDocumentSyncKindEnum(lsp::TextDocumentSyncKind::Incremental);
+  if (const DocumentSaveHandler* saves = _shared.documentSaveHandler.get()) {
+    const DocumentSaveOptions options = saves->saveOptions();
+    if (options.willSave) sync.willSave = true;
+    if (options.willSaveWaitUntil) sync.willSaveWaitUntil = true;
+    if (options.didSave) sync.save = true;
+  }
   result.capabilities.textDocumentSync = sync;
+  if (const NotebookDocuments* notebooks = _shared.notebookDocuments.get())
+    result.capabilities.notebookDocumentSync =
+        notebooks->notebookDocumentSyncOptions();
   lsp::ServerInfo info;
   info.name = "cursiv";
   result.serverInfo = std::move(info);
@@ -292,6 +358,7 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
   bool hasCompletion = false;
   std::set<std::string> completionTriggers;
   std::set<std::string> completionCommits;
+  std::optional<lsp::SemanticTokensOptions> semanticTokens;
   for (const CoreServices* language : _shared.serviceRegistry->all()) {
     const auto* services = dynamic_cast<const LspServices*>(language);
     if (services == nullptr) continue;
@@ -353,15 +420,11 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
       result.capabilities.renameProvider = rename;
     }
     // The legend travels with the capability: a token's fourth integer
-    // indexes `legend.tokenTypes`, unreadable without it. `full` and
-    // `range`; no `delta` arm.
-    if (services->semanticTokenProvider != nullptr) {
-      lsp::SemanticTokensOptions options;
-      options.legend = semantic_tokens_legend();
-      options.range = true;
-      options.full = true;
-      result.capabilities.semanticTokensProvider = std::move(options);
-    }
+    // indexes `legend.tokenTypes`, unreadable without it.
+    if (const SemanticTokenProvider* colours =
+            services->semanticTokenProvider.get())
+      merge_semantic_tokens_options(semanticTokens,
+                                    colours->semanticTokensOptions());
     if (services->foldingRangeProvider != nullptr)
       result.capabilities.foldingRangeProvider = true;
     if (services->selectionRangeProvider != nullptr)
@@ -395,6 +458,8 @@ lsp::InitializeResult DefaultLanguageServer::initialize(
             std::move(*onType));
     }
   }
+  if (semanticTokens.has_value())
+    result.capabilities.semanticTokensProvider = std::move(*semanticTokens);
   if (hasSignatureHelp) {
     lsp::SignatureHelpOptions options;
     if (!signatureTriggers.empty())
@@ -543,80 +608,94 @@ DefaultLanguageServer::textDocumentContent(
   return result;
 }
 
-// Bytes identical to what the scan already read are not re-installed; the
-// build still runs, and carries what a cut build left behind.
 void DefaultLanguageServer::didOpen(
     const lsp::DidOpenTextDocumentParams& params) {
-  const lsp::TextDocumentItem& item = params.textDocument;
-  const std::string uri = item.uri.toString();
-  const std::string_view changed[] = {uri};
-  Documents& documents = *_shared.documents;
-  writeAndPublish(changed, {}, [&]() {
-    const std::shared_ptr<Document> existing = documents.getDocument(uri);
-    // The language is asked about the uri the document was bound with.
-    const std::string normalized = normalize_uri(uri);
-    const bool moved =
-        existing == nullptr || existing->textDocument().getText() != item.text ||
-        existing->language != _shared.serviceRegistry->findServices(
-                                  normalized, item.languageId.value());
-    if (existing == nullptr) {
-      // Installed at `Changed`: the build parses the client's text, in
-      // parallel with the rest and under its token, so the next keystroke
-      // can cut it short.
-      documents.addDocument(_shared.documentFactory->create(
-          TextDocument::create(uri, item.languageId, item.version, item.text)));
-    } else if (moved) {
-      // The document stays the same object.
-      _shared.documentFactory->attachTextDocument(
-          *existing, TextDocument::create(
-                         uri, item.languageId,
-                         static_cast<std::int64_t>(item.version), item.text));
-    }
-    if (const std::shared_ptr<Document> open = documents.getDocument(uri)) {
-      open->isOpen = true;
-      // The client's number over the scan's zero, whether or not the bytes
-      // moved: it is what a diagnostic and a stamped edit report back.
-      if (!moved)
-        updateVersion(*open, static_cast<std::int64_t>(item.version));
-    }
-    return moved;
+  writeAndPublish(
+      [&](TextChanges& changes) { openText(params.textDocument, changes); });
+}
+
+void DefaultLanguageServer::didChange(
+    const lsp::DidChangeTextDocumentParams& params) {
+  writeAndPublish([&](TextChanges& changes) {
+    changeText(params.textDocument, params.contentChanges, changes);
   });
+}
+
+void DefaultLanguageServer::didClose(
+    const lsp::DidCloseTextDocumentParams& params) {
+  writeAndPublish([&](TextChanges& changes) {
+    closeText(params.textDocument.uri.toString(), changes);
+  });
+}
+
+// Bytes identical to what the scan already read are not re-installed; the
+// build still runs, and carries what a cut build left behind.
+void DefaultLanguageServer::openText(const lsp::TextDocumentItem& item,
+                                     TextChanges& changes) {
+  std::string uri = item.uri.toString();
+  Documents& documents = *_shared.documents;
+  const std::shared_ptr<Document> existing = documents.getDocument(uri);
+  // The language is asked about the uri the document was bound with.
+  const std::string normalized = normalize_uri(uri);
+  const bool moved =
+      existing == nullptr || existing->textDocument().getText() != item.text ||
+      existing->language != _shared.serviceRegistry->findServices(
+                                normalized, item.languageId.value());
+  if (existing == nullptr) {
+    // Installed at `Changed`: the build parses the client's text, in
+    // parallel with the rest and under its token, so the next keystroke
+    // can cut it short.
+    documents.addDocument(_shared.documentFactory->create(
+        TextDocument::create(uri, item.languageId, item.version, item.text)));
+  } else if (moved) {
+    // The document stays the same object.
+    _shared.documentFactory->attachTextDocument(
+        *existing, TextDocument::create(uri, item.languageId,
+                                        static_cast<std::int64_t>(item.version),
+                                        item.text));
+  }
+  if (const std::shared_ptr<Document> open = documents.getDocument(uri)) {
+    open->isOpen = true;
+    // The client's number over the scan's zero, whether or not the bytes
+    // moved: it is what a diagnostic and a stamped edit report back.
+    if (!moved) updateVersion(*open, static_cast<std::int64_t>(item.version));
+  }
+  if (!moved) return;
+  std::erase(changes.deleted, uri);
+  changes.changed.push_back(std::move(uri));
 }
 
 // The tree is dropped before the bytes move, on the same document object, so
 // index rows are refreshed by the build rather than left dangling. A stale
 // version, an empty list, or a byte-identical result moves nothing.
-void DefaultLanguageServer::didChange(
-    const lsp::DidChangeTextDocumentParams& params) {
-  const std::string uri = params.textDocument.uri.toString();
-  const auto version = static_cast<std::int64_t>(params.textDocument.version);
-  const std::string_view changed[] = {uri};
-  writeAndPublish(changed, {}, [&]() {
-    const Documents& documents = *_shared.documents;
-    const std::shared_ptr<Document> document = documents.getDocument(uri);
-    // A change on a URI nothing opened is not this server's to guess at.
-    if (document == nullptr) return false;
-    if (version < document->textDocument().version())
-      return false;
-    if (params.contentChanges.empty()) {
-      updateVersion(*document, version);
-      return false;
-    }
-    // A range outside the text is clamped, not rejected -- the
-    // core's `offsetAt` is total. Edits apply to a copy of the
-    // text; replacing the document would destroy what the index
-    // still describes.
-    TextDocument edited = TextDocument::create(
-        uri, std::string(document->textDocument().languageId()), version,
-        std::string(document->textDocument().getText()));
-    TextDocument::update(edited, from_lsp(params.contentChanges), version);
-    if (edited.getText() == document->textDocument().getText()) {
-      updateVersion(*document, version);
-      return false;
-    }
-    _shared.documentFactory->attachTextDocument(*document, std::move(edited));
-    return true;
-  });
+void DefaultLanguageServer::changeText(
+    const lsp::VersionedTextDocumentIdentifier& identifier,
+    std::span<const lsp::TextDocumentContentChangeEvent> edits,
+    TextChanges& changes) {
+  std::string uri = identifier.uri.toString();
+  const auto version = static_cast<std::int64_t>(identifier.version);
+  const std::shared_ptr<Document> document =
+      _shared.documents->getDocument(uri);
+  // A change on a URI nothing opened is not this server's to guess at.
+  if (document == nullptr) return;
+  if (version < document->textDocument().version()) return;
+  if (edits.empty()) {
+    updateVersion(*document, version);
+    return;
+  }
+  // A range outside the text is clamped, not rejected -- the core's
+  // `offsetAt` is total. Edits apply to a copy of the text; replacing the
+  // document would destroy what the index still describes.
+  TextDocument edited = TextDocument::create(
+      uri, std::string(document->textDocument().languageId()), version,
+      std::string(document->textDocument().getText()));
+  TextDocument::update(edited, from_lsp(edits), version);
+  if (edited.getText() == document->textDocument().getText()) {
+    updateVersion(*document, version);
+    return;
+  }
+  _shared.documentFactory->attachTextDocument(*document, std::move(edited));
+  changes.changed.push_back(std::move(uri));
 }
 
 void DefaultLanguageServer::updateVersion(Document& document,
@@ -633,31 +712,111 @@ void DefaultLanguageServer::updateVersion(Document& document,
 // Closing a tab is not deleting a file: wherever the file lives, its saved
 // content replaces the buffer and the document stays, its verdict republished
 // by the rebuild. Only a URI with nothing saved behind it leaves -- an
-// `untitled:` buffer among them -- and the client is told so.
-void DefaultLanguageServer::didClose(
-    const lsp::DidCloseTextDocumentParams& params) {
+// `untitled:` buffer or a notebook cell among them -- and the client is told
+// so.
+void DefaultLanguageServer::closeText(std::string_view uri,
+                                      TextChanges& changes) {
+  const std::shared_ptr<Document> closing = _shared.documents->getDocument(uri);
+  if (closing == nullptr) return;
+  closing->isOpen = false;
+  if (has_saved_content(*_shared.fileSystemProvider,
+                        _shared.textDocumentContentProvider.get(),
+                        closing->uri)) {
+    changes.changed.emplace_back(uri);
+    return;
+  }
+  std::erase(changes.changed, uri);
+  changes.deleted.emplace_back(uri);
+}
+
+// The handler is told with no lock held, as for the file operations: one that
+// decides to read or write takes the lock itself.
+void DefaultLanguageServer::willSave(
+    const lsp::WillSaveTextDocumentParams& params) {
+  if (DocumentSaveHandler* saves = _shared.documentSaveHandler.get())
+    saves->willSaveDocument(params);
+}
+
+void DefaultLanguageServer::didSave(
+    const lsp::DidSaveTextDocumentParams& params) {
+  if (DocumentSaveHandler* saves = _shared.documentSaveHandler.get())
+    saves->didSaveDocument(params);
+}
+
+// A read action, like the file operations' `will` arms: the client applies the
+// edits, then saves.
+std::vector<lsp::TextEdit> DefaultLanguageServer::willSaveWaitUntil(
+    const lsp::WillSaveTextDocumentParams& params,
+    const CancellationToken& token) const {
+  std::vector<lsp::TextEdit> edits;
+  const DocumentSaveHandler* saves = _shared.documentSaveHandler.get();
+  if (saves == nullptr) return edits;
   const std::string uri = params.textDocument.uri.toString();
-  const FileSystemProvider& files = *_shared.fileSystemProvider;
-  const DocumentBuilder& builder = *_shared.documentBuilder;
-  const Documents& documents = *_shared.documents;
-  const std::string_view moved[] = {std::string_view(uri)};
-  _shared.workspaceLock->write(
-      [&](const CancellationToken& token) {
-        const std::shared_ptr<Document> closing = documents.getDocument(uri);
-        const bool onDisk =
-            closing != nullptr &&
-            has_saved_content(files, _shared.textDocumentContentProvider.get(),
-                              closing->uri);
-        if (closing != nullptr) closing->isOpen = false;
-        if (closing == nullptr) {
-          builder.update({}, {}, token);
-        } else if (onDisk) {
-          builder.update(moved, {}, token);
-        } else {
-          builder.update({}, moved, token);
-        }
+  (void)_shared.workspaceLock->read(
+      [&]() {
+        const std::shared_ptr<Document> document =
+            _shared.documents->getDocument(uri);
+        if (document != nullptr && document->isOpen)
+          edits = saves->willSaveDocumentWaitUntil(*document, params, token);
       },
-      WorkspaceLock::WriteMode::Durable);
+      token);
+  return edits;
+}
+
+// The notebook hears first, so a build of its cells sees it as the client
+// has it; then every cell the notification names moves in one write. The
+// write runs even when no cell moves, or no notebook service is installed:
+// queued as a document update, the notification cut the build in flight, and
+// its build carries what that one left behind.
+void DefaultLanguageServer::didOpenNotebookDocument(
+    const lsp::DidOpenNotebookDocumentParams& params) {
+  NotebookDocuments* notebooks = _shared.notebookDocuments.get();
+  if (notebooks != nullptr) notebooks->didOpen(params);
+  writeAndPublish([&](TextChanges& changes) {
+    if (notebooks == nullptr) return;
+    for (const lsp::TextDocumentItem& cell : params.cellTextDocuments)
+      openText(cell, changes);
+  });
+}
+
+void DefaultLanguageServer::didChangeNotebookDocument(
+    const lsp::DidChangeNotebookDocumentParams& params) {
+  NotebookDocuments* notebooks = _shared.notebookDocuments.get();
+  if (notebooks != nullptr) notebooks->didChange(params);
+  writeAndPublish([&](TextChanges& changes) {
+    if (notebooks == nullptr || !params.change.cells.has_value()) return;
+    const lsp::NotebookDocumentCellChanges& cells = *params.change.cells;
+    if (cells.structure.has_value()) {
+      if (cells.structure->didOpen.has_value())
+        for (const lsp::TextDocumentItem& cell : *cells.structure->didOpen)
+          openText(cell, changes);
+      if (cells.structure->didClose.has_value())
+        for (const lsp::TextDocumentIdentifier& cell :
+             *cells.structure->didClose)
+          closeText(cell.uri.toString(), changes);
+    }
+    if (cells.textContent.has_value())
+      for (const lsp::NotebookDocumentCellContentChanges& cell :
+           *cells.textContent)
+        changeText(cell.document, cell.changes, changes);
+  });
+}
+
+void DefaultLanguageServer::didSaveNotebookDocument(
+    const lsp::DidSaveNotebookDocumentParams& params) {
+  if (NotebookDocuments* notebooks = _shared.notebookDocuments.get())
+    notebooks->didSave(params);
+}
+
+void DefaultLanguageServer::didCloseNotebookDocument(
+    const lsp::DidCloseNotebookDocumentParams& params) {
+  NotebookDocuments* notebooks = _shared.notebookDocuments.get();
+  if (notebooks != nullptr) notebooks->didClose(params);
+  writeAndPublish([&](TextChanges& changes) {
+    if (notebooks == nullptr) return;
+    for (const lsp::TextDocumentIdentifier& cell : params.cellTextDocuments)
+      closeText(cell.uri.toString(), changes);
+  });
 }
 
 // The store catches up through one build. What this decides is only what
@@ -892,41 +1051,60 @@ void DefaultLanguageServer::routeDocument(
     const CancellationToken& token, Call call) const {
   const bool workspace = rung.type == ServiceRequirement::Type::Workspace;
   if (!awaitScan(token)) return;
-  // A workspace rung is the whole build's, and its read is gated: `Immediate`
-  // is admitted at the settle, where documents the write reset are still
-  // climbing and their index rows are gone.
+  // False when a later write reset the document after the wait: it is then
+  // awaited again. Below a workspace rung the workspace has reached, the
+  // document was left out of the build, which answers empty.
+  const auto answer = [&]() {
+    const std::shared_ptr<Document> document =
+        _shared.documents->getDocument(uri);
+    if (document == nullptr) return true;
+    if (document->state.load() < rung.state) return workspace;
+    // The factory fixed the language from both URI and languageId. It may
+    // be core-only, in which case this document has no LSP provider.
+    const auto* services = dynamic_cast<const LspServices*>(document->language);
+    if (services == nullptr) return true;
+    const Service* const provider = (services->*slot).get();
+    if (provider == nullptr) return true;
+    call(*provider, *document);
+    return true;
+  };
   if (workspace) {
-    if (_shared.documentBuilder->waitUntil(rung.state, token) !=
-        WaitOutcome::Reached)
-      return;
-  } else if (!awaitRung(uri, rung.state, token)) {
+    (void)readAtWorkspaceState(rung.state, token, [&] { (void)answer(); });
     return;
   }
-  // The wait above is the precondition an `Immediate` read owes, so
-  // this request no longer queues behind a build past its mutation. The
-  // rung is checked again inside the lock, because the wait's verdict
-  // is stale by the time of admission -- a write may have settled a
-  // fresh document in between. Once admitted the answer is stable:
-  // phases only climb, and the next write waits for this reader to
-  // leave.
-  (void)_shared.workspaceLock->read(
-      [&]() {
-        const std::shared_ptr<Document> document =
-            _shared.documents->getDocument(uri);
-        if (document == nullptr) return;
-        if (document->state.load() < rung.state) return;
-        // The factory fixed the language from both URI and languageId. It may
-        // be core-only, in which case this document has no LSP provider.
-        const auto* services = dynamic_cast<const LspServices*>(
-            document->language);
-        if (services == nullptr) return;
-        const Service* const provider = (services->*slot).get();
-        if (provider == nullptr) return;
-        call(*provider, *document);
-      },
-      token,
-      workspace ? WorkspaceLock::ReadPriority::Normal
-                : WorkspaceLock::ReadPriority::Immediate);
+  // The wait is the precondition an `Immediate` read owes, so this request
+  // reads beside the rest of the build instead of queuing behind it. The
+  // rung is checked again inside the lock, because the wait's verdict is
+  // stale by the time of admission. Once admitted the answer is stable:
+  // phases only climb, and the next write waits for this reader to leave.
+  for (bool answered = false; !answered;) {
+    if (!awaitRung(uri, rung.state, token)) return;
+    if (!_shared.workspaceLock->read([&] { answered = answer(); }, token,
+                                     WorkspaceLock::ReadPriority::Immediate))
+      return;
+  }
+}
+
+// A workspace rung is the whole build's: the builder's state, not a
+// document's, says every index row is back. It is checked again inside the
+// lock, because a write that began a build lowered it before its settle,
+// which is where the `Immediate` read is admitted; the rung is then awaited
+// again.
+bool DefaultLanguageServer::readAtWorkspaceState(
+    DocumentState state, const CancellationToken& token,
+    cursiv::function_ref<void()> read) const {
+  const DocumentBuilder& builder = *_shared.documentBuilder;
+  for (bool lowered = true; lowered;) {
+    if (builder.waitUntil(state, token) != WaitOutcome::Reached) return false;
+    if (!_shared.workspaceLock->read(
+            [&] {
+              lowered = builder.currentState() < state;
+              if (!lowered) read();
+            },
+            token, WorkspaceLock::ReadPriority::Immediate))
+      return false;
+  }
+  return true;
 }
 
 std::vector<lsp::DocumentSymbol> DefaultLanguageServer::documentSymbol(
@@ -1062,7 +1240,7 @@ lsp::SemanticTokens DefaultLanguageServer::semanticTokensFull(
   routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
                 &LspServices::semanticTokenProvider, token,
                 [&](const SemanticTokenProvider& provider, const Document& d) {
-                  tokens = provider.semanticHighlight(d, token);
+                  tokens = provider.semanticHighlight(d, params, token);
                 });
   return tokens;
 }
@@ -1074,8 +1252,21 @@ lsp::SemanticTokens DefaultLanguageServer::semanticTokensRange(
   routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
                 &LspServices::semanticTokenProvider, token,
                 [&](const SemanticTokenProvider& provider, const Document& d) {
-                  tokens =
-                      provider.semanticHighlightRange(d, params.range, token);
+                  tokens = provider.semanticHighlightRange(d, params, token);
+                });
+  return tokens;
+}
+
+// A document nothing colours answers the empty tokens whole, as `full` does.
+lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta>
+DefaultLanguageServer::semanticTokensFullDelta(
+    const lsp::SemanticTokensDeltaParams& params,
+    const CancellationToken& token) const {
+  lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta> tokens;
+  routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
+                &LspServices::semanticTokenProvider, token,
+                [&](const SemanticTokenProvider& provider, const Document& d) {
+                  tokens = provider.semanticHighlightDelta(d, params, token);
                 });
   return tokens;
 }
@@ -1138,7 +1329,7 @@ lsp::CompletionList DefaultLanguageServer::completion(
   routeDocument(params.textDocument.uri.toString(), DocumentState::Linked,
                 &LspServices::completionProvider, token,
                 [&](const CompletionProvider& provider, const Document& d) {
-                  list = provider.getCompletion(d, params.position, token);
+                  list = provider.getCompletion(d, params, token);
                 });
   if (!_markdownCompletion)
     for (lsp::CompletionItem& item : list.items)
@@ -1331,15 +1522,9 @@ std::vector<lsp::WorkspaceSymbol> DefaultLanguageServer::workspaceSymbol(
     const CancellationToken& token) const {
   std::vector<lsp::WorkspaceSymbol> symbols;
   if (!awaitScan(token)) return symbols;
-  if (_shared.documentBuilder->waitUntil(DocumentState::IndexedContent,
-                                         token) != WaitOutcome::Reached)
-    return symbols;
-  (void)_shared.workspaceLock->read(
-      [&]() {
-        symbols =
-            _shared.workspaceSymbolProvider->getSymbols(params.query, token);
-      },
-      token);
+  (void)readAtWorkspaceState(DocumentState::IndexedContent, token, [&] {
+    symbols = _shared.workspaceSymbolProvider->getSymbols(params.query, token);
+  });
   return symbols;
 }
 
@@ -1347,15 +1532,9 @@ lsp::WorkspaceSymbol DefaultLanguageServer::workspaceSymbolResolve(
     const lsp::WorkspaceSymbol& symbol, const CancellationToken& token) const {
   lsp::WorkspaceSymbol resolved = symbol;
   if (!awaitScan(token)) return resolved;
-  if (_shared.documentBuilder->waitUntil(DocumentState::IndexedContent,
-                                         token) != WaitOutcome::Reached)
-    return resolved;
-  (void)_shared.workspaceLock->read(
-      [&]() {
-        resolved =
-            _shared.workspaceSymbolProvider->resolveSymbol(symbol, token);
-      },
-      token);
+  (void)readAtWorkspaceState(DocumentState::IndexedContent, token, [&] {
+    resolved = _shared.workspaceSymbolProvider->resolveSymbol(symbol, token);
+  });
   return resolved;
 }
 
@@ -1376,17 +1555,17 @@ std::optional<lsp::LSPAny> DefaultLanguageServer::executeCommand(
 // build's drains. The build runs even when nothing moved: it carries what a
 // cut build left behind.
 void DefaultLanguageServer::writeAndPublish(
-    std::span<const std::string_view> changed,
-    std::span<const std::string_view> deleted,
-    cursiv::function_ref<bool()> mutate) {
+    cursiv::function_ref<void(TextChanges&)> mutate) {
   const DocumentBuilder& builder = *_shared.documentBuilder;
   _shared.workspaceLock->write(
       [&](const CancellationToken& token) {
-        const bool moved = mutate();
-        if (moved)
-          builder.update(changed, deleted, token);
-        else
-          builder.update({}, {}, token);
+        TextChanges changes;
+        mutate(changes);
+        const std::vector<std::string_view> changed(changes.changed.begin(),
+                                                    changes.changed.end());
+        const std::vector<std::string_view> deleted(changes.deleted.begin(),
+                                                    changes.deleted.end());
+        builder.update(changed, deleted, token);
       },
       WorkspaceLock::WriteMode::Durable);
 }

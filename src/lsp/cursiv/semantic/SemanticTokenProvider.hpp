@@ -1,54 +1,57 @@
 // Semantic colouring for `textDocument/semanticTokens`: one flat array of
 // unsigned integers, five per token, each stated as a delta from the one
-// before it. `full` and `range`; no `delta`, which would need a cache.
+// before it. `full`, `range`, and `full/delta`, which sends only the edits
+// from the client's last answer.
 #pragma once
 
 #include <lsp/types.h>
-
-#include <cstdint>
 
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/Document.hpp"
 
 namespace cursiv {
 
-// The legend is the server's, not a language's: one array announced at the
-// handshake indexes every document of every language, so an enumerator's
-// value is its index into `semantic_tokens_legend().tokenTypes`.
-enum class SemanticTokenType : std::uint32_t {
-  Keyword = 0,   // a guarded literal: a word the grammar reserved
-  Type = 1,      // a declaration that owns other declarations
-  Variable = 2,  // a reference: a name standing for a declaration elsewhere
-  Property = 3,  // a declaration that owns none: a member of its owner
-  Number = 4,    // a leaf whose text opens like a number
-  String = 5,    // a leaf whose text opens with a quote
-  Comment = 6,   // a record of the grammar's `hidden` list
-  Operator = 7,  // an unguarded literal: punctuation
-};
-
-/**
- * The one legend, announced at `initialize` and indexed by every token.
- */
-[[nodiscard]] const lsp::SemanticTokensLegend& semantic_tokens_legend();
-
 class SemanticTokenProvider {
  public:
   virtual ~SemanticTokenProvider() noexcept = default;
 
   /**
-   * Computes every semantic token of `document`. Precondition: called under
-   * the workspace read lock. An empty `data` means the document never
+   * The legend a token's type index and modifier bits refer to, and the
+   * requests answered. The server announces one legend for all its
+   * languages: theirs are merged index by index, and two languages naming a
+   * different type or modifier at the same index cannot share a server.
+   * `delta` and `range` are announced only where every language answers them.
+   */
+  [[nodiscard]] virtual lsp::SemanticTokensOptions semanticTokensOptions()
+      const = 0;
+
+  /**
+   * Every semantic token of the request's document. Precondition: called
+   * under the workspace read lock. An empty `data` means the document never
    * parsed -- the client reads it as no colouring.
    */
   [[nodiscard]] virtual lsp::SemanticTokens semanticHighlight(
-      const Document& document, const CancellationToken& = {}) const = 0;
+      const Document& document, const lsp::SemanticTokensParams& params,
+      const CancellationToken& = {}) const = 0;
 
   /**
-   * The tokens that touch `range`, encoded and preconditioned the same way.
+   * The tokens that touch the request's range, encoded and preconditioned
+   * the same way.
    */
   [[nodiscard]] virtual lsp::SemanticTokens semanticHighlightRange(
-      const Document& document, lsp::Range range,
+      const Document& document, const lsp::SemanticTokensRangeParams& params,
       const CancellationToken& = {}) const = 0;
+
+  /**
+   * The edits that turn the answer `previousResultId` names into the
+   * document's tokens now, or those tokens whole when that answer is not the
+   * last one given for the document. Preconditioned the same way.
+   */
+  [[nodiscard]] virtual lsp::OneOf<lsp::SemanticTokens,
+                                   lsp::SemanticTokensDelta>
+  semanticHighlightDelta(const Document& document,
+                         const lsp::SemanticTokensDeltaParams& params,
+                         const CancellationToken& = {}) const = 0;
 };
 
 }  // namespace cursiv

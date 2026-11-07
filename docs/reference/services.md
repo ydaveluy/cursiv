@@ -75,7 +75,7 @@ framework, the module generated from your grammar, or nothing.
 | `workspaceManager` | Load the documents of the workspace folders | Framework |
 | `fileSystemProvider` | Read files and folders | An empty file system; the CLI and the language server read the disk |
 | `workspaceLock` | Run workspace updates one at a time, and let requests read the workspace between them | Framework |
-| `taskScheduler` | Run builds in parallel; `CURSIV_WORKERS` sets the number of worker threads. With no worker thread, the language server answers one request at a time and cannot cancel the one it is answering | Framework |
+| `taskScheduler` | Run builds in parallel; `CURSIV_WORKERS` sets the number of worker threads | Framework |
 | `observabilitySink` | Report problems that are not document diagnostics, such as an unreadable file or a check that threw | Standard error |
 
 ### Language core services
@@ -113,6 +113,8 @@ framework, the module generated from your grammar, or nothing.
 | `mcpService` | Serve the [MCP tools](mcp.md) | Installed by the language server |
 | `executeCommandHandler` | Run the commands a client requests | None |
 | `fileOperationHandler` | React when files are created, renamed or deleted | None |
+| `documentSaveHandler` | React when the client saves a document, see [Saves and notebooks](#saves-and-notebooks) | None |
+| `notebookDocuments` | Sync notebooks, whose cells become documents, see [Saves and notebooks](#saves-and-notebooks) | None |
 | `textDocumentContentProvider` | Give the text of virtual documents | None |
 
 ### Language LSP services
@@ -121,6 +123,14 @@ The server advertises an editor feature only when its provider is installed.
 It calls a provider once the document has reached the state in the
 **Called at** column, or once every document has, where it says *workspace*.
 See [Document lifecycle](#document-lifecycle).
+
+A request sees every edit sent before it. After `didOpen`, `didChange`,
+`didClose`, `didChangeWatchedFiles`, or a notebook's `didOpen`, `didChange` or
+`didClose`, it waits until the change is applied and the state in **Called at**
+is reached, not for the rest of the build, such as validation. After any other
+notification, it waits until that notification is handled. A provider runs
+beside the rest of the build, so one called before `Validated` must not read
+diagnostics.
 
 | Service | Feature | Called at | Default |
 |---|---|---|---|
@@ -133,7 +143,7 @@ See [Document lifecycle](#document-lifecycle).
 | `documentSymbolProvider` | Document outline | `Parsed` | Framework |
 | `foldingRangeProvider` | Folding | `Parsed` | Framework |
 | `selectionRangeProvider` | Expand selection | `Parsed` | Framework |
-| `semanticTokenProvider` | Semantic highlighting, see [Editor integration](../learn/editor-integration.md) | `Linked` | None |
+| `semanticTokenProvider` | Semantic highlighting, see [Customize semantic tokens](#customize-semantic-tokens) | `Linked` | None |
 | `codeActionProvider` | Quick fixes | `Validated` | Framework |
 | `formatter` | Formatting rules, see [Formatting](../recipes/formatting.md) | `Parsed` | None |
 | `declarationProvider` | Go to declaration | `Linked` | None |
@@ -164,6 +174,11 @@ Derive from `DefaultCompletionProvider` and override what your language changes:
 | `fillCompletionItem`, `buildCompletionTextEdit` | How a value becomes an item and what it replaces |
 | `buildContexts`, `findFeaturesAt`, `findDataTypeRuleStart`, `backtrackToAnyToken`, `performCurrentTokenCompletion`, `performNextTokenCompletion` | How the caret is read |
 
+`getCompletion` receives the request's `CompletionParams`. Every hook that
+takes a `context` reads how the client asked in `context.trigger`: its
+`triggerKind`, and the `triggerCharacter` typed. It is empty when the client
+does not say.
+
 Pass a value to `accept(context, value)`. A value with no `textEdit` must match
 what is typed. It gets its label from `label`, `node` or `nodeDescription`.
 `context.node()` gives the node at the caret, or null at the very start of a
@@ -177,6 +192,94 @@ Keywords are always offered, and at most 1000 names per answer: what the author
 types next asks again. A terminal offers nothing, whatever it reads. To offer a
 choice of words, write it as a data rule. A terminal with `as<V>` on each
 alternative is one.
+
+## Customize semantic tokens
+
+`GrammarSemanticTokenProvider` colours keywords, operators, numbers, strings,
+comments, declarations and references from the grammar, with no modifier. To
+colour differently, derive from it or from `AbstractSemanticTokenProvider` and
+override:
+
+| Hook | Decides |
+|---|---|
+| `computeHighlighting` | The tokens of a document: each passed to `accept` with its text offsets, type and modifiers |
+| `tokenTypes`, `tokenModifiers` | The names the token types and modifiers stand for; by default the protocol's standard ones, `kSemanticTokenTypes` and `kSemanticTokenModifiers` |
+| `semanticTokensOptions` | The legend and requests the server announces |
+
+A token's `type` is an index into `tokenTypes()` and its `modifiers` hold one
+bit per index of `tokenModifiers()`: `tokenType("keyword")` and
+`tokenModifier("readonly")` give them by name. Tokens may come in any order;
+where two overlap, the one that starts first wins.
+
+```cpp
+// Marks every declaration the grammar colours as `type` or `property`.
+class MyTokens : public cursiv::GrammarSemanticTokenProvider {
+ public:
+  using GrammarSemanticTokenProvider::GrammarSemanticTokenProvider;
+
+ protected:
+  void computeHighlighting(const cursiv::Document& document,
+                           cursiv::TextOffset begin, cursiv::TextOffset end,
+                           cursiv::SemanticTokenAcceptor accept,
+                           const cursiv::CancellationToken& token)
+      const override {
+    const auto declared = tokenModifier("declaration");
+    const auto type = tokenType("type");
+    const auto property = tokenType("property");
+    GrammarSemanticTokenProvider::computeHighlighting(
+        document, begin, end,
+        [&](cursiv::SemanticToken coloured) {
+          if (coloured.type == type || coloured.type == property)
+            coloured.modifiers |= declared;
+          accept(coloured);
+        },
+        token);
+  }
+};
+```
+
+The server announces one legend for all its languages. Keep the standard names
+at their index and add your own after them: `initialize` fails if two languages
+give one index different names.
+
+Every answer is computed for the whole document, so a delta saves only the
+transfer, and none is announced by default. To announce it, set `full` to
+`SemanticTokensFullDelta{.delta = true}` in `semanticTokensOptions`. Each open
+document then keeps its last answer, and the client receives only the changes
+from it. The server announces a delta only if every language does.
+
+## Saves and notebooks
+
+To hear of saves, install a `documentSaveHandler` among the shared services.
+Its `saveOptions()` says which notifications the client sends, and only those
+are announced:
+
+| Option | Hook | Called |
+|---|---|---|
+| `willSave` | `willSaveDocument` | Before the save, with no lock held |
+| `willSaveWaitUntil` | `willSaveDocumentWaitUntil` | Before the save, for an open document, under the read lock. The client applies the returned edits, then saves |
+| `didSave` | `didSaveDocument` | After the save, with no lock held |
+
+To sync notebooks, install `notebookDocuments` with the notebook types and cell
+languages the client sends:
+
+```cpp
+lsp::NotebookDocumentSyncOptions options;
+lsp::NotebookDocumentFilterWithNotebook filter;
+filter.notebook = std::string("mylang-notebook");
+filter.cells = lsp::Array<lsp::NotebookCellLanguage>{{.language = "mylang"}};
+options.notebookSelector.push_back(std::move(filter));
+shared.notebookDocuments =
+    std::make_unique<cursiv::DefaultNotebookDocuments>(std::move(options));
+```
+
+Each cell is then an open document of its language: it is built and validated,
+answers requests like any other document, and leaves when its notebook closes.
+`getNotebookDocument`, `getNotebookCell` and `findNotebookDocumentForCell`
+give a notebook and its cells as the client last sent them. To react to a
+notebook notification, derive from `DefaultNotebookDocuments` and override
+`didOpen`, `didChange`, `didSave` or `didClose`, calling its version first.
+They run before the cells change.
 
 ## Add your own protocol methods
 
@@ -192,7 +295,8 @@ shared.languageServer->onNotification(
 ```
 
 A handler receives the value the client sent, or null if it sent none. Requests
-can be cancelled, and notifications run in the order they arrive.
+can be cancelled, and notifications run in the order they arrive. A request sent
+after your notification waits until its handler returns.
 
 To write to the client, call `shared.languageClient->sendNotification` or
 `sendRequest` during a session.

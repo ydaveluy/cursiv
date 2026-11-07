@@ -16,7 +16,7 @@
 
 // The caret a completion is asked at, as the hooks see it: the token being
 // written -- `tokenOffset`..`tokenEndOffset`, both `offset` when none is --
-// what may stand there, and the caret itself.
+// what may stand there, the caret itself, and how the client asked.
 
 namespace cursiv {
 
@@ -27,6 +27,7 @@ struct CompletionContext {
                     TextOffset nodeOffset, TextOffset offset,
                     lsp::Position position, std::string_view identifier,
                     lsp::Range insertRange, lsp::Range replaceRange,
+                    const std::optional<lsp::CompletionContext>& trigger,
                     const CancellationToken& cancelToken)
       : document(document),
         textDocument(document.textDocument()),
@@ -38,6 +39,7 @@ struct CompletionContext {
         identifier(identifier),
         insertRange(insertRange),
         replaceRange(replaceRange),
+        trigger(trigger),
         cancelToken(cancelToken),
         _nodeOffset(nodeOffset) {}
 
@@ -54,6 +56,9 @@ struct CompletionContext {
   // the caret, or the whole token.
   lsp::Range insertRange;
   lsp::Range replaceRange;
+  // How the client asked, as its request says: `triggerKind`, and the
+  // `triggerCharacter` typed. Absent when the client does not say.
+  const std::optional<lsp::CompletionContext>& trigger;
   const CancellationToken& cancelToken;
 
   // The node of the leaf at the last token begun before the caret, or at the

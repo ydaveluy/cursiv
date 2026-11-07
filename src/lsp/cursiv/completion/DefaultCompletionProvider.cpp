@@ -121,7 +121,7 @@ AstNode* CompletionContext::node() const {
 }
 
 lsp::CompletionList DefaultCompletionProvider::getCompletion(
-    const Document& document, lsp::Position position,
+    const Document& document, const lsp::CompletionParams& params,
     const CancellationToken& cancelToken) const {
   throw_if_cancelled(cancelToken);
   lsp::CompletionList list;
@@ -133,7 +133,7 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
       items.push_back(std::move(static_cast<lsp::CompletionItem&>(value)));
     return items.size() < kMaxItems;
   };
-  buildContexts(document, position, cancelToken,
+  buildContexts(document, params, cancelToken,
                 [&](const CompletionContext& context) {
                   for (const NextFeature& next : context.features) {
                     throw_if_cancelled(cancelToken);
@@ -146,9 +146,10 @@ lsp::CompletionList DefaultCompletionProvider::getCompletion(
 }
 
 void DefaultCompletionProvider::buildContexts(
-    const Document& document, lsp::Position position,
+    const Document& document, const lsp::CompletionParams& params,
     const CancellationToken& cancelToken,
     function_ref<bool(const CompletionContext&)> visit) const {
+  const lsp::Position position = params.position;
   const TextDocument& lines = document.textDocument();
   const std::string_view text = lines.getText();
   const TextOffset offset = std::min(lines.offsetAt(from_lsp(position)),
@@ -169,9 +170,10 @@ void DefaultCompletionProvider::buildContexts(
     findFeaturesAt(document, begin, end, features);
     const TextOffset from = std::max(begin, lineStart);
     const CompletionContext context(
-        document, features, begin, end, nodeOffset, offset, position, identifier,
-        to_lsp(lines.rangeAt(from, offset)),
-        to_lsp(lines.rangeAt(from, std::min(end, lineEnd))), cancelToken);
+        document, features, begin, end, nodeOffset, offset, position,
+        identifier, to_lsp(lines.rangeAt(from, offset)),
+        to_lsp(lines.rangeAt(from, std::min(end, lineEnd))), params.context,
+        cancelToken);
     return visit(context);
   };
   const auto typed_from = [&](TextOffset begin) {

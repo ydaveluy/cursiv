@@ -60,6 +60,9 @@ services.semanticTokenProvider =
     std::make_unique<const cursiv::GrammarSemanticTokenProvider>(services);
 ```
 
+To choose your own colours and modifiers, see
+[Customize semantic tokens](../reference/services.md#customize-semantic-tokens).
+
 ## Default editor features
 
 Completion, hover, go-to-definition, find references, highlights, rename,

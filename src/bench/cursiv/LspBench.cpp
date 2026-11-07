@@ -129,18 +129,24 @@ void lsp_stages(int iterations, SharedLspServices& shared,
          return services.selectionRangeProvider->getSelectionRanges(document,
                                                                     carets);
        });
+  lsp::SemanticTokensParams colours;
+  colours.textDocument.uri = lsp::Uri::parse(document.uri);
+  lsp::SemanticTokensRangeParams coloursRange;
+  coloursRange.textDocument = colours.textDocument;
+  coloursRange.range = range;
   once("semanticTokens/full", services.semanticTokenProvider != nullptr,
        [&](std::size_t) {
-         return services.semanticTokenProvider->semanticHighlight(document);
+         return services.semanticTokenProvider->semanticHighlight(document,
+                                                                  colours);
        });
   once("semanticTokens/range", services.semanticTokenProvider != nullptr,
        [&](std::size_t) {
-         return services.semanticTokenProvider->semanticHighlightRange(document,
-                                                                       range);
+         return services.semanticTokenProvider->semanticHighlightRange(
+             document, coloursRange);
        });
 
   lsp::DocumentFormattingParams format;
-  format.textDocument.uri = lsp::Uri::parse(document.uri);
+  format.textDocument = colours.textDocument;
   format.options.tabSize = 2;
   format.options.insertSpaces = true;
   lsp::DocumentRangeFormattingParams formatRange;
@@ -164,10 +170,16 @@ void lsp_stages(int iterations, SharedLspServices& shared,
   once("onTypeFormatting", onType.has_value(), [&](std::size_t) {
     return services.formatter->formatDocumentOnType(document, typeFormat);
   });
-  sweep(
-      "completion", services.completionProvider != nullptr, [&](std::size_t i) {
-        return services.completionProvider->getCompletion(document, carets[i]);
-      });
+  std::vector<lsp::CompletionParams> completions(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    completions[i].textDocument = format.textDocument;
+    completions[i].position = carets[i];
+  }
+  sweep("completion", services.completionProvider != nullptr,
+        [&](std::size_t i) {
+          return services.completionProvider->getCompletion(document,
+                                                            completions[i]);
+        });
   sweep("hover", services.hoverProvider != nullptr, [&](std::size_t i) {
     return services.hoverProvider->getHoverContent(document, carets[i]);
   });

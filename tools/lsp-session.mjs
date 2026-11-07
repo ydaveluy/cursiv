@@ -12,7 +12,8 @@
 //   [--rename-at <line>:<char>=<name>]   prepareRename, then the WorkspaceEdit
 //                                        printed file by file
 //   [--hover-at <line>:<char>]           hover, with the text under its range
-//   [--semantic-tokens]                  the delta array decoded back to words
+//   [--semantic-tokens]                  the delta array decoded back to words,
+//                                        then the `full/delta` answer
 //   [--folding]                          the fold ranges, with their first line
 //
 // Cursor coordinates are the protocol's own zero-based UTF-16, on the last
@@ -337,6 +338,17 @@ try {
         for (const t of tokens)
             console.log(`  ${String(t.line + 1).padStart(3)}:${String(t.character + 1).padStart(3)} ` +
                 `${t.type.padEnd(9)} ${JSON.stringify(t.text)}`);
+
+        // A server that keeps no answer, as one without `delta` does, sends the
+        // tokens whole: the same integers as the full request.
+        const delta = await request({
+            method: 'textDocument/semanticTokens/full/delta',
+            params: { textDocument: { uri: last.uri }, previousResultId: answer.result?.resultId ?? '' }
+        }, 'the semanticTokens delta result');
+        const whole = JSON.stringify(delta.result?.data) === JSON.stringify(data);
+        console.log(`semanticTokens/full/delta on ${last.name}: ` +
+            (whole ? 'the tokens whole' : JSON.stringify(delta.result)));
+        if (!whole && !delta.result?.edits) throw new Error('the delta result is neither tokens nor edits');
     }
 
     // Each pair is a block the editor can collapse; `kind` is present only

@@ -1,5 +1,5 @@
-// Decodes the delta-encoded semantic tokens back into absolute offsets, so
-// a check can assert on one token near a marked range.
+// Decodes the delta-encoded semantic tokens back into absolute offsets and
+// legend names, so a check can assert on one token near a marked range.
 #pragma once
 
 #include <cstddef>
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "cursiv/text/TextOffset.hpp"
-#include "cursiv/semantic/SemanticTokenProvider.hpp"
 #include "cursiv/ParseHelperOptions.hpp"
 
 namespace cursiv {
@@ -21,7 +20,8 @@ namespace cursiv::test {
 
 struct DecodedSemanticToken {
   TextOffset offset = 0;
-  SemanticTokenType tokenType = SemanticTokenType::Keyword;
+  // The legend's name for the token's type.
+  std::string tokenType{};
   std::uint32_t tokenModifiers = 0;
   // A slice of the document's own text: valid while the workspace holds it.
   std::string_view text{};
@@ -34,7 +34,7 @@ struct DecodedSemanticTokensWithRanges {
 
 struct DecodedTokenOptions {
   std::size_t rangeIndex = 0;
-  SemanticTokenType tokenType = SemanticTokenType::Keyword;
+  std::string tokenType{};
 };
 
 // `text` carries the markers; what is parsed is the text without them.

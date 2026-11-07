@@ -60,7 +60,7 @@ an expected range. A range marker without its partner, or an `index` or
 | `expectSymbols` | The document outline |
 | `expectWorkspaceSymbols` | Workspace symbol search |
 | `expectFoldings` | Foldable ranges |
-| `expectSemanticToken` | Semantic highlighting |
+| `expectSemanticToken` | Semantic highlighting: one token of a type, named as in the legend (`"keyword"`), over a marked range |
 | `expectFormatting` | Formatted text |
 
 For example, with `cursiv/ExpectedHover.hpp` and the Recipe LSP

@@ -39,7 +39,6 @@
 #include "cursiv/syntax-tree/DocumentReferences.hpp"
 #include "cursiv/syntax-tree/ReferenceInfo.hpp"
 #include "cursiv/validation/ValidationRegistry.hpp"
-#include "cursiv/workspace/DefaultDocumentBuilder.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"

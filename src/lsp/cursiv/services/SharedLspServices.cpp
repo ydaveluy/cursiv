@@ -15,8 +15,10 @@
 #include "cursiv/symbols/DefaultNodeKindProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/symbols/DefaultWorkspaceSymbolProvider.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/workspace/DefaultConfigurationProvider.hpp"  // NOLINT(misc-include-cleaner)
+#include "cursiv/workspace/DocumentSaveHandler.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/workspace/FileOperationHandler.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/workspace/LspDocumentBuilder.hpp"
+#include "cursiv/workspace/NotebookDocuments.hpp"  // NOLINT(misc-include-cleaner)
 #include "cursiv/McpService.hpp"  // NOLINT(misc-include-cleaner)
 
 namespace cursiv {
@@ -38,6 +40,10 @@ void SharedLspServices::visitServices(
   // A host installs one; without it the six file-operation routes are neither
   // announced nor registered.
   yield({"fileOperationHandler", false, fileOperationHandler != nullptr});
+  // Without these, the save notifications and notebook synchronization are
+  // not announced.
+  yield({"documentSaveHandler", false, documentSaveHandler != nullptr});
+  yield({"notebookDocuments", false, notebookDocuments != nullptr});
   yield({"mcpService", false, mcpService != nullptr});
   yield({"languageServer", true, languageServer != nullptr});
   // Owed only inside a session, so never a hole a completeness check reports.

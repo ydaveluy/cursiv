@@ -90,10 +90,11 @@ int run_completion(const CompletionQuery& query,
     return 1;
   }
 
-  lsp::Position position;
-  position.line = query.line;
-  position.character = query.character;
-  const lsp::CompletionList list = provider->getCompletion(*document, position);
+  lsp::CompletionParams params;
+  params.textDocument.uri = lsp::Uri::parse(uri);
+  params.position.line = query.line;
+  params.position.character = query.character;
+  const lsp::CompletionList list = provider->getCompletion(*document, params);
   std::cout << file.filename().string() << ':' << query.line << ':'
             << query.character << "  " << list.items.size() << " item(s)"
             << (list.isIncomplete ? " (incomplete)" : "") << '\n';

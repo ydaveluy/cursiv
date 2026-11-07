@@ -50,10 +50,13 @@ Disposable expectCompletion(const LspServices& services,
   lsp::CompletionList completions;
   const auto* const caret =
       detail::markerAt(marked.indices, indexOf(expectedCompletion));
-  if (caret != nullptr && services.completionProvider != nullptr)
-    completions = services.completionProvider->getCompletion(
-        *document, to_lsp(document->textDocument().positionAt(*caret)),
-        kNoCancel);
+  if (caret != nullptr && services.completionProvider != nullptr) {
+    lsp::CompletionParams params;
+    params.textDocument.uri = lsp::Uri::parse(document->uri);
+    params.position = to_lsp(document->textDocument().positionAt(*caret));
+    completions = services.completionProvider->getCompletion(*document, params,
+                                                             kNoCancel);
+  }
 
   if (const auto* const callback =
           std::get_if<ExpectedCompletionCallback>(&expectedCompletion)) {

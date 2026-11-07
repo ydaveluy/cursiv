@@ -67,6 +67,19 @@ class DefaultLanguageServer : public LanguageServer,
   void didOpen(const lsp::DidOpenTextDocumentParams&) override;
   void didChange(const lsp::DidChangeTextDocumentParams&) override;
   void didClose(const lsp::DidCloseTextDocumentParams&) override;
+  void willSave(const lsp::WillSaveTextDocumentParams&) override;
+  [[nodiscard]] std::vector<lsp::TextEdit> willSaveWaitUntil(
+      const lsp::WillSaveTextDocumentParams&,
+      const CancellationToken& = {}) const override;
+  void didSave(const lsp::DidSaveTextDocumentParams&) override;
+  void didOpenNotebookDocument(
+      const lsp::DidOpenNotebookDocumentParams&) override;
+  void didChangeNotebookDocument(
+      const lsp::DidChangeNotebookDocumentParams&) override;
+  void didSaveNotebookDocument(
+      const lsp::DidSaveNotebookDocumentParams&) override;
+  void didCloseNotebookDocument(
+      const lsp::DidCloseNotebookDocumentParams&) override;
   void didChangeWatchedFiles(const lsp::DidChangeWatchedFilesParams&) override;
   void didChangeConfiguration(
       const lsp::DidChangeConfigurationParams&) override;
@@ -125,6 +138,9 @@ class DefaultLanguageServer : public LanguageServer,
   [[nodiscard]] lsp::SemanticTokens semanticTokensRange(
       const lsp::SemanticTokensRangeParams&,
       const CancellationToken& = {}) const override;
+  [[nodiscard]] lsp::OneOf<lsp::SemanticTokens, lsp::SemanticTokensDelta>
+  semanticTokensFullDelta(const lsp::SemanticTokensDeltaParams&,
+                          const CancellationToken& = {}) const override;
 
   [[nodiscard]] std::vector<lsp::InlayHint> inlayHint(
       const lsp::InlayHintParams&,
@@ -201,6 +217,18 @@ class DefaultLanguageServer : public LanguageServer,
  private:
   void updateVersion(Document& document, std::int64_t version);
 
+  // What a write's text half moved: rebuilt, or gone from the store.
+  struct TextChanges {
+    std::vector<std::string> changed;
+    std::vector<std::string> deleted;
+  };
+  // The text half of an open, a change and a close, made inside the write.
+  void openText(const lsp::TextDocumentItem& item, TextChanges& changes);
+  void changeText(const lsp::VersionedTextDocumentIdentifier& document,
+                  std::span<const lsp::TextDocumentContentChangeEvent> edits,
+                  TextChanges& changes);
+  void closeText(std::string_view uri, TextChanges& changes);
+
   // The route every request about one document shares: rung, lock,
   // document, slot, call. The URI is explicit because a hierarchy
   // expansion names its document through the item it was handed, not a
@@ -218,12 +246,15 @@ class DefaultLanguageServer : public LanguageServer,
                                bool required = false) const;
   [[nodiscard]] bool awaitRung(std::string_view uri, DocumentState,
                                const CancellationToken&) const;
+  // Runs `read` once every document has reached the state, beside the rest
+  // of the build. False means it did not run -- cancelled, or the build
+  // failed.
+  bool readAtWorkspaceState(DocumentState, const CancellationToken&,
+                            cursiv::function_ref<void()> read) const;
 
-  // `mutate` runs under exclusivity and reports whether anything moved; a
-  // build follows either way, over `changed`/`deleted` through `update`.
-  void writeAndPublish(std::span<const std::string_view> changed,
-                       std::span<const std::string_view> deleted,
-                       cursiv::function_ref<bool()> mutate);
+  // `mutate` runs under exclusivity and lists what it moved; a build follows
+  // either way, over those lists through `update`.
+  void writeAndPublish(cursiv::function_ref<void(TextChanges&)> mutate);
   // `Linked` clears what the rebuild invalidated, `Validated` publishes
   // what `onDocumentPhase` recorded.
   void onBuildPhase(DocumentState, std::span<Document* const>,

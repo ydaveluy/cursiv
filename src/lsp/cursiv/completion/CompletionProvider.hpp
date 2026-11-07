@@ -24,12 +24,14 @@ class CompletionProvider {
   }
 
   /**
-   * Precondition: called under the workspace read lock. An empty list is an
-   * answer, not an error; `isIncomplete` is always true, since the next
-   * keystroke may shift which grammar position the caret is in.
+   * The request whole: its position, and its `context` when the client says
+   * how it asked -- invoked, typed a trigger character, or asked again for an
+   * incomplete list. Precondition: called under the workspace read lock. An
+   * empty list is an answer, not an error; `isIncomplete` is always true,
+   * since the next keystroke may shift which grammar position the caret is in.
    */
   [[nodiscard]] virtual lsp::CompletionList getCompletion(
-      const Document& document, lsp::Position position,
+      const Document& document, const lsp::CompletionParams& params,
       const CancellationToken& = {}) const = 0;
 };
 

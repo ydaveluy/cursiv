@@ -530,15 +530,12 @@ void a_reference_is_coloured_as_one() {
   CHECK(!highlighted.tokens.empty());
   CHECK(highlighted.ranges.size() == 1);
   CHECK(passes([&] {
-    ct::expectSemanticToken(highlighted,
-                            {.tokenType = cursiv::SemanticTokenType::Variable});
+    ct::expectSemanticToken(highlighted, {.tokenType = "variable"});
   }));
 
   // ...and it is not a keyword, which is what makes the check a check.
-  CHECK(!passes([&] {
-    ct::expectSemanticToken(highlighted,
-                            {.tokenType = cursiv::SemanticTokenType::Keyword});
-  }));
+  CHECK(!passes(
+      [&] { ct::expectSemanticToken(highlighted, {.tokenType = "keyword"}); }));
 }
 
 void the_formatter_reaches_the_shape_the_language_wants() {
