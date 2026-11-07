@@ -34,8 +34,7 @@ class WorkerPool {
 
   // Calls `body(index)` for every index below `count` and returns once every
   // call has returned. A call that returns false ends the run: no index is
-  // handed out after it, and a part inside a slice leaves it at its first
-  // call that returns false. `body` must not throw: a helper has no caller to
+  // handed out after it. `body` must not throw: a helper has no caller to
   // unwind into, so the exception is the publisher's to catch inside the body.
   void run(std::size_t count, cursiv::function_ref<bool(std::size_t)> body);
 
@@ -58,7 +57,6 @@ class WorkerPool {
   struct Job {
     cursiv::function_ref<bool(std::size_t)> body;
     std::size_t count;
-    std::size_t parties;
     Cell* cell;
     // On its own line: every part hammers the claim counter for the whole run.
     alignas(128) std::atomic<std::size_t> next{0};
@@ -94,7 +92,7 @@ class WorkerPool {
     TaskQueue<Task*> queue;
   };
 
-  // Coarse slices while the range is long, then one at a time at the tail.
+  // Claims and runs one index at a time until none is left.
   void drain(Job& job) const noexcept;
   void runTask(Task& task) const noexcept;
   // Null when nothing was found. `self` is the worker index, or the worker

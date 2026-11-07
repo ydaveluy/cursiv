@@ -129,24 +129,26 @@ void the_call_returns_after_the_last_body() {
 }
 
 // The work spreads as a rendezvous, not a high-water mark, so a peak-of-one
-// is the truth on a loaded machine, not a defect. The first body blocks
-// until a second thread arrives, forcing that outcome; the deadline just
-// keeps a pool that cannot deliver from hanging.
+// is the truth on a loaded machine, not a defect. The first item blocks
+// until the second starts, which only another thread can do: a part holds
+// no item beyond the one it runs, so heavy items at the start of a range
+// never wait behind each other. The first item reads the answer itself: once
+// the run is over, the second has always started. The deadline just keeps a
+// pool that cannot deliver from hanging.
 void the_work_spreads_across_threads() {
   cursiv::TaskScheduler tasks{kWorkers};
   const auto range = indices(1'000);
-  std::atomic<int> entered{0};
+  std::atomic<bool> second{false};
   std::atomic<bool> together{false};
 
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  tasks.parallelFor(cursiv::kNoCancel, range, [&](std::size_t) {
-    if (entered.fetch_add(1) != 0) {
-      together.store(true);
-      return;
-    }
-    while (!together.load() && std::chrono::steady_clock::now() < deadline)
+  tasks.parallelFor(cursiv::kNoCancel, range, [&](std::size_t index) {
+    if (index == 1) second.store(true);
+    if (index != 0) return;
+    while (!second.load() && std::chrono::steady_clock::now() < deadline)
       std::this_thread::yield();
+    together.store(second.load());
   });
 
   CHECK(together.load());

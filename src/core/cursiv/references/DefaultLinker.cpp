@@ -32,8 +32,9 @@ namespace cursiv {
 namespace {
 
 // The fewest references a worker forces at once: enough that handing them out
-// costs nothing next to the lookups they make.
-constexpr std::size_t kLinkRun = 4096;
+// costs nothing next to the lookups they make, few enough that a document of a
+// few thousand references already spreads over the pool.
+constexpr std::size_t kLinkRun = 1024;
 
 // What makes two candidates the same answer to a plural lookup.
 struct CandidateKey {

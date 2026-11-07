@@ -84,41 +84,17 @@ std::size_t WorkerPool::selfIndex() const noexcept {
   return _workers.size();
 }
 
-// Coarse slices claimed by compare-exchange while much of the range is left,
-// then a tight `fetch_add` of one at the tail. The two regimes are the point
-// -- a compare-exchange per item would cost the tail, a fixed slice would
-// strand whoever drew the last big cut. A body that says stop leaves its
-// slice and moves the claim counter to the end, so no part claims again.
+// One item per claim: an item is worth a document or a run of thousands of
+// references, so the claim costs little beside it, and a part never holds back
+// heavy items another part could take. A body that says stop moves the claim
+// counter to the end, so no part claims again.
 void WorkerPool::drain(Job& job) const noexcept {
-  const std::size_t fineBelow = 4 * job.parties;
-  const auto stop = [&job] {
-    job.next.store(job.count, std::memory_order_relaxed);
-  };
-  std::size_t first = job.next.load(std::memory_order_relaxed);
-
-  while (first < job.count) {
-    const std::size_t left = job.count - first;
-    if (left < fineBelow) {
-      for (;;) {
-        first = job.next.fetch_add(1, std::memory_order_relaxed);
-        if (first >= job.count) return;
-        if (!job.body(first)) {
-          stop();
-          return;
-        }
-      }
-    }
-    const std::size_t slice =
-        std::max<std::size_t>(1, left / (2 * job.parties));
-    const std::size_t last = std::min(first + slice, job.count);
-    if (job.next.compare_exchange_strong(first, last, std::memory_order_relaxed,
-                                         std::memory_order_relaxed)) {
-      for (std::size_t index = first; index < last; ++index)
-        if (!job.body(index)) {
-          stop();
-          return;
-        }
-      first = job.next.load(std::memory_order_relaxed);
+  for (;;) {
+    const std::size_t index = job.next.fetch_add(1, std::memory_order_relaxed);
+    if (index >= job.count) return;
+    if (!job.body(index)) {
+      job.next.store(job.count, std::memory_order_relaxed);
+      return;
     }
   }
 }
@@ -260,7 +236,7 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
       continue;
     }
     // Nothing left to steal. A short spin first, since what remains is
-    // usually one slice; then a non-worker sleeps -- spinning would cost a
+    // usually one item; then a non-worker sleeps -- spinning would cost a
     // core the running parts need -- while a worker keeps yielding, since it
     // may not hold a thread those parts need.
     if (++misses < kCorunSpins) {
@@ -298,7 +274,7 @@ void WorkerPool::run(std::size_t count,
   cell->pending.store(parts, std::memory_order_relaxed);
 
   const std::size_t self = selfIndex();
-  Job job{.body = body, .count = count, .parties = parts, .cell = cell};
+  Job job{.body = body, .count = count, .cell = cell};
   Task task{&job};
   try {
     submit(task, self, parts - 1);

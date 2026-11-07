@@ -44,8 +44,8 @@ namespace cursiv {
 namespace {
 
 // The fewest nodes a worker checks at once: enough to outweigh the cost of
-// handing them out.
-constexpr std::size_t kCheckRun = 2048;
+// handing them out, few enough that a medium document spreads over the pool.
+constexpr std::size_t kCheckRun = 512;
 
 // Naming no category runs everything; naming some runs the built-in half only
 // when `built_in` is among them, and the checks only when something else is.
