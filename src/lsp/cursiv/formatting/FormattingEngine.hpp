@@ -61,18 +61,35 @@ class FormattingActions final : public FormattingCollector {
 [[nodiscard]] std::string indentation_text(
     std::int32_t indentation, const lsp::FormattingOptions& options);
 
-// Whether a range format touches `span`, by lines: `span` holds the selection,
-// lies within it, or runs from inside it past its end. A span that only covers
-// the start of the selection is left alone.
-[[nodiscard]] constexpr bool inside_range(const lsp::Range& span,
-                                          const lsp::Range& selection) noexcept {
-  return (span.start.line <= selection.start.line &&
-          span.end.line >= selection.end.line) ||
-         (span.start.line >= selection.start.line &&
-          span.end.line <= selection.end.line) ||
-         (span.start.line <= selection.end.line &&
-          span.end.line >= selection.end.line);
-}
+// The lines of a range format, held as the offsets where they start, so a test
+// on lines is a comparison of offsets: no span is converted to a position to
+// find out the range leaves it out.
+class RangeLines {
+ public:
+  RangeLines(const TextDocument& text, const lsp::Range& range);
+
+  // Whether `[begin, end]` has a line among the range's lines.
+  [[nodiscard]] bool overlaps(TextOffset begin, TextOffset end) const noexcept {
+    return end >= _first && begin < _afterLast;
+  }
+
+  // Whether a range format keeps an edit over `[begin, end]`, by lines: it
+  // holds the range's lines, lies within them, or runs from inside them past
+  // their end. An edit that only covers the start of the range is left out.
+  [[nodiscard]] bool keeps(TextOffset begin, TextOffset end) const noexcept {
+    return (begin < _afterFirst && end >= _last) ||
+           (begin >= _first && end < _afterLast) ||
+           (begin < _afterLast && end >= _last);
+  }
+
+ private:
+  // Where the range's first line starts, then the line after it, its last
+  // line and the line after that; past the text for a line it does not have.
+  std::uint64_t _first;
+  std::uint64_t _afterFirst;
+  std::uint64_t _last;
+  std::uint64_t _afterLast;
+};
 
 // Runs the walk and materialises the edits. `visitHidden` runs on every hidden
 // record before its edits are computed, with the indentation in force and the
@@ -81,7 +98,7 @@ class FormattingActions final : public FormattingCollector {
 [[nodiscard]] std::vector<lsp::TextEdit> run_formatting(
     const Document& document, const Cst& cst,
     const lsp::FormattingOptions& options,
-    const std::optional<lsp::Range>& range, FormattingActions& actions,
+    const std::optional<RangeLines>& range, FormattingActions& actions,
     cursiv::function_ref<void(NodeId, std::int32_t, std::string_view)>
         visitHidden,
     const CancellationToken& token);

@@ -103,10 +103,6 @@ constexpr std::uint32_t kMaxTabSize = 64;
                        range.start.line);
 }
 
-[[nodiscard]] bool edit_inside_range(const PendingEdit& edit,
-                                     const std::optional<lsp::Range>& range) {
-  return !range.has_value() || inside_range(edit.span.range(), *range);
-}
 
 // The order a client's edit list is owed. One definition, because the sink
 // watches for it and `finalize_edits` restores it.
@@ -122,11 +118,12 @@ constexpr std::uint32_t kMaxTabSize = 64;
 class EditSink {
  public:
   EditSink(std::vector<PendingEdit>& out,
-           const std::optional<lsp::Range>& range) noexcept
+           const std::optional<RangeLines>& range) noexcept
       : _out(out), _range(range) {}
 
   void push(PendingEdit edit) {
-    if (!edit_inside_range(edit, _range)) return;
+    if (_range.has_value() && !_range->keeps(edit.span.begin, edit.span.end))
+      return;
     if (!_out.empty() && span_before(edit.span, _out.back().span))
       _sorted = false;
     _out.push_back(std::move(edit));
@@ -136,7 +133,7 @@ class EditSink {
 
  private:
   std::vector<PendingEdit>& _out;
-  const std::optional<lsp::Range>& _range;
+  const std::optional<RangeLines>& _range;
   bool _sorted = true;
 };
 
@@ -579,10 +576,22 @@ const std::string* FormattingActions::replacement(NodeId node) const {
   return it == _replacements.end() ? nullptr : &it->second;
 }
 
+RangeLines::RangeLines(const TextDocument& text, const lsp::Range& range) {
+  const std::uint32_t lines = text.lineCount();
+  const auto start = [&](std::uint32_t line) -> std::uint64_t {
+    if (line >= lines) return std::uint64_t{text.getText().size()} + 1;
+    return text.offsetAt(Position{line, 0});
+  };
+  _first = start(range.start.line);
+  _afterFirst = start(range.start.line + 1);
+  _last = start(range.end.line);
+  _afterLast = start(range.end.line + 1);
+}
+
 std::vector<lsp::TextEdit> run_formatting(
     const Document& document, const Cst& cst,
     const lsp::FormattingOptions& options,
-    const std::optional<lsp::Range>& range, FormattingActions& actions,
+    const std::optional<RangeLines>& range, FormattingActions& actions,
     cursiv::function_ref<void(NodeId, std::int32_t, std::string_view)>
         visitHidden,
     const CancellationToken& token) {

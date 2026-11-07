@@ -117,6 +117,8 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
   // constructions both claim, the inner one's rule is registered last and
   // wins the tie. The root is always formatted, and a subtree whose lines miss
   // the range's lines is not entered; the engine then keeps the edits by line.
+  std::optional<RangeLines> lines;
+  if (range.has_value()) lines.emplace(document.textDocument(), *range);
   std::vector<const AstNode*> pending{parsed.value};
   std::vector<const AstNode*> children;
   while (!pending.empty()) {
@@ -126,13 +128,9 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
     if (node == nullptr) continue;
     const NodeId id = node->cstNodeId;
     const bool placed = id != kNoNode && id < cst.size();
-    if (placed && range.has_value() && node != parsed.value) {
-      const auto lines =
-          document.textDocument().rangeAt(cst[id].begin, cst[id].end);
-      if (lines.end.line < range->start.line ||
-          lines.start.line > range->end.line)
-        continue;
-    }
+    if (placed && lines.has_value() && node != parsed.value &&
+        !lines->overlaps(cst[id].begin, cst[id].end))
+      continue;
     if (placed) format(builder, node);
     children.clear();
     reflection.visitMembers(*node, [&children](std::string_view, std::uint32_t,
@@ -148,7 +146,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
                                actions);
     formatHidden(hidden);
   };
-  return run_formatting(document, cst, options, range, actions, visitHidden,
+  return run_formatting(document, cst, options, lines, actions, visitHidden,
                         token);
 }
 
