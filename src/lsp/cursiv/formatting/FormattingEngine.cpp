@@ -35,7 +35,6 @@ struct TextSpan {
   TextOffset begin = 0;
   TextOffset end = 0;
   mutable std::optional<lsp::Range> lines;
-  // Read only while `lines` is empty: null for a span built with its lines.
   const TextDocument* text = nullptr;
 
   [[nodiscard]] const lsp::Range& range() const {
@@ -44,12 +43,15 @@ struct TextSpan {
   }
 };
 
+// An edit in bytes. Most are dropped as no-ops, so only a kept one is given
+// lines and columns, when it is published.
 struct PendingEdit {
-  TextSpan span;
-  std::string newText;
+  TextOffset begin = 0;
+  TextOffset end = 0;
   // The priority of the rule that wrote the edit: two rules on the two sides
   // of one gap are told apart by it.
   std::int32_t priority = 0;
+  std::string newText;
 };
 
 struct FormatContext {
@@ -106,8 +108,8 @@ constexpr std::uint32_t kMaxTabSize = 64;
 
 // The order a client's edit list is owed. One definition, because the sink
 // watches for it and `finalize_edits` restores it.
-[[nodiscard]] bool span_before(const TextSpan& left,
-                               const TextSpan& right) noexcept {
+[[nodiscard]] bool edit_before(const PendingEdit& left,
+                               const PendingEdit& right) noexcept {
   return left.begin != right.begin ? left.begin < right.begin
                                    : left.end < right.end;
 }
@@ -121,11 +123,9 @@ class EditSink {
            const std::optional<RangeLines>& range) noexcept
       : _out(out), _range(range) {}
 
-  void push(PendingEdit edit) {
-    if (_range.has_value() && !_range->keeps(edit.span.begin, edit.span.end))
-      return;
-    if (!_out.empty() && span_before(edit.span, _out.back().span))
-      _sorted = false;
+  void push(PendingEdit&& edit) {
+    if (_range.has_value() && !_range->keeps(edit.begin, edit.end)) return;
+    if (!_out.empty() && edit_before(edit, _out.back())) _sorted = false;
     _out.push_back(std::move(edit));
   }
 
@@ -239,7 +239,8 @@ struct MarginPiece {
                       gap.range().start.character);
     spaces = fit_into_options(spaces, existing, options);
   }
-  return PendingEdit{.span = gap,
+  return PendingEdit{.begin = gap.begin,
+                     .end = gap.end,
                      .newText = std::string(
                          static_cast<std::size_t>(std::max(spaces, 0)), ' ')};
 }
@@ -260,7 +261,8 @@ struct MarginPiece {
     lines = fit_into_options(lines, line_count(gap.range()), options);
   std::string newText = repeat_newlines(lines, context.newlineStyle);
   newText += indentation_text(context.indentation, context.options);
-  return PendingEdit{.span = gap, .newText = std::move(newText)};
+  return PendingEdit{
+      .begin = gap.begin, .end = gap.end, .newText = std::move(newText)};
 }
 
 [[nodiscard]] PendingEdit create_tab_edit(const TextSpan& gap, bool hasPrevious,
@@ -269,7 +271,8 @@ struct MarginPiece {
       std::max(line_count(gap.range()), hasPrevious ? 1 : 0);
   std::string newText = repeat_newlines(lines, context.newlineStyle);
   newText += indentation_text(context.indentation, context.options);
-  return PendingEdit{.span = gap, .newText = std::move(newText)};
+  return PendingEdit{
+      .begin = gap.begin, .end = gap.end, .newText = std::move(newText)};
 }
 
 // A replacement comment, shifted as a block: the first line keeps whatever the
@@ -320,17 +323,6 @@ struct MarginPiece {
   return result;
 }
 
-// A stretch of one line from its column 0 whose end column is a count of
-// ASCII whitespace bytes, so it needs no conversion.
-[[nodiscard]] TextSpan line_head(std::uint32_t line, TextOffset begin,
-                                 TextOffset end, std::uint32_t endColumn) {
-  return TextSpan{.begin = begin,
-                  .end = end,
-                  .lines = lsp::Range{lsp::Position{line, 0},
-                                      lsp::Position{line, endColumn}},
-                  .text = nullptr};
-}
-
 // Only a comment's margin is rewritten, to `level` units, never the gap in
 // front of it; a trailing comment keeps its column, the author's alignment.
 void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
@@ -362,13 +354,10 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
       if (lineStart == node.begin)
         foldedIndent = indentation_text(level, context.options);
       else
-        sink.push(PendingEdit{
-            .span = TextSpan{.begin = lineStart,
-                             .end = node.begin,
-                             .lines = lsp::Range{lsp::Position{startLine, 0},
-                                                 gap.range().end},
-                             .text = nullptr},
-            .newText = indentation_text(level, context.options)});
+        sink.push(
+            PendingEdit{.begin = lineStart,
+                        .end = node.begin,
+                        .newText = indentation_text(level, context.options)});
     }
     std::string text =
         previousOnSameLine
@@ -376,13 +365,7 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
             : reindent_text(*replacement, expected, context.options);
     if (!foldedIndent.empty()) text.insert(0, foldedIndent);
     sink.push(PendingEdit{
-        .span = TextSpan{.begin = node.begin,
-                         .end = node.end,
-                         .lines =
-                             lsp::Range{gap.range().end,
-                                        to_lsp(document.positionAt(node.end))},
-                         .text = nullptr},
-        .newText = std::move(text)});
+        .begin = node.begin, .end = node.end, .newText = std::move(text)});
     return;
   }
 
@@ -403,9 +386,10 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
     const std::uint32_t at = startLine + lineIndex;
     const TextOffset lineOffset = document.offsetAt(Position{at, 0});
     if (increase > 0) {
-      sink.push(PendingEdit{
-          .span = line_head(at, lineOffset, lineOffset, 0),
-          .newText = whitespace_text(increase, context.options)});
+      sink.push(
+          PendingEdit{.begin = lineOffset,
+                      .end = lineOffset,
+                      .newText = whitespace_text(increase, context.options)});
     } else {
       // The first line's whitespace lives before the record, in the margin;
       // every later line's lives in the record's own text. The units come off
@@ -434,10 +418,9 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
         break;
       }
       if (removable > 0)
-        sink.push(PendingEdit{
-            .span =
-                line_head(at, lineOffset, lineOffset + removable, removable),
-            .newText = std::move(kept)});
+        sink.push(PendingEdit{.begin = lineOffset,
+                              .end = lineOffset + removable,
+                              .newText = std::move(kept)});
     }
     if (!terminator.has_value()) break;
     ++lineIndex;
@@ -463,7 +446,7 @@ void emit_gap_edits(NodeId previous, NodeId node,
     context.indentation = checked_count(
         static_cast<std::int64_t>(context.indentation) + *move->tabs);
 
-  const auto push = [&](PendingEdit edit) {
+  const auto push = [&](PendingEdit&& edit) {
     edit.priority = action.options.priority;
     sink.push(std::move(edit));
   };
@@ -481,41 +464,41 @@ void emit_gap_edits(NodeId previous, NodeId node,
 // The minimality, in one place. Two edits over the same range are two rules
 // over one gap -- the append of the token before it and the prepend of the
 // token after it: the higher priority keeps it, the later one on a tie.
-// Otherwise overlapping edits collapse to the later one. Then the pin: an edit
+// Otherwise overlapping edits collapse to the later one. The edits kept so far
+// are the front of the list, so it is filtered in place. Then the pin: an edit
 // whose new text is the text it replaces is not an edit.
 [[nodiscard]] std::vector<lsp::TextEdit> finalize_edits(
     const Document& document, std::vector<PendingEdit> edits, bool sorted) {
-  if (!sorted)
-    std::ranges::stable_sort(
-        edits, [](const PendingEdit& left, const PendingEdit& right) {
-          return span_before(left.span, right.span);
-        });
+  if (!sorted) std::ranges::stable_sort(edits, edit_before);
 
-  std::vector<PendingEdit> filtered;
-  for (PendingEdit& edit : edits) {
-    if (!filtered.empty() && filtered.back().span.begin == edit.span.begin &&
-        filtered.back().span.end == edit.span.end) {
-      if (filtered.back().priority <= edit.priority)
-        filtered.back() = std::move(edit);
+  std::size_t kept = 0;
+  for (std::size_t at = 0; at < edits.size(); ++at) {
+    PendingEdit& edit = edits[at];
+    if (kept > 0 && edits[kept - 1].begin == edit.begin &&
+        edits[kept - 1].end == edit.end) {
+      if (edits[kept - 1].priority <= edit.priority)
+        edits[kept - 1] = std::move(edit);
       continue;
     }
-    while (!filtered.empty() && edit.span.begin < filtered.back().span.end)
-      filtered.pop_back();
-    filtered.push_back(std::move(edit));
+    while (kept > 0 && edit.begin < edits[kept - 1].end) --kept;
+    if (kept != at) edits[kept] = std::move(edit);
+    ++kept;
   }
+  edits.resize(kept);
 
   std::vector<lsp::TextEdit> result;
-  result.reserve(filtered.size());
-  const std::string_view text = document.textDocument().getText();
-  for (const PendingEdit& edit : filtered) {
+  result.reserve(edits.size());
+  const TextDocument& lines = document.textDocument();
+  const std::string_view text = lines.getText();
+  for (PendingEdit& edit : edits) {
     // Compared as-is: stripping '\r' here would make a CRLF document's lines
     // differ from the CRLF just produced, turning an already-formatted file
     // into a full-file diff of no-op edits.
-    if (edit.newText ==
-        text.substr(edit.span.begin, edit.span.end - edit.span.begin))
+    if (edit.newText == text.substr(edit.begin, edit.end - edit.begin))
       continue;
     result.push_back(
-        lsp::TextEdit{.range = edit.span.range(), .newText = edit.newText});
+        lsp::TextEdit{.range = to_lsp(lines.rangeAt(edit.begin, edit.end)),
+                      .newText = std::move(edit.newText)});
   }
   return result;
 }

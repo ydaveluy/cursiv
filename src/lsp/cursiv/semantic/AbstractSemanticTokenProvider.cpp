@@ -198,13 +198,19 @@ std::vector<lsp::Uint> AbstractSemanticTokenProvider::encode(
           tokens.push_back(accepted);
       },
       token);
-  // `stable_sort` keeps tokens of one span in the order they were accepted,
-  // so the answer is reproducible and the first one wins.
-  std::ranges::stable_sort(tokens,
-                           [](const SemanticToken& a, const SemanticToken& b) {
-                             if (a.begin != b.begin) return a.begin < b.begin;
-                             return a.end > b.end;
-                           });
+  // A stable order keeps tokens of one span in the order they were accepted,
+  // so the answer is reproducible and the first one wins. The tokens often end
+  // with a run already in order, such as the leaves walked last: only what
+  // precedes that run is sorted, then merged into it, for the same order.
+  const auto before = [](const SemanticToken& a, const SemanticToken& b) {
+    if (a.begin != b.begin) return a.begin < b.begin;
+    return a.end > b.end;
+  };
+  auto tail = tokens.end();
+  if (tail != tokens.begin()) --tail;
+  while (tail != tokens.begin() && !before(*tail, *(tail - 1))) --tail;
+  std::ranges::stable_sort(tokens.begin(), tail, before);
+  std::ranges::inplace_merge(tokens.begin(), tail, tokens.end(), before);
 
   std::vector<lsp::Uint> data;
   if (tokens.empty()) return data;
