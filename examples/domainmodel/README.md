@@ -27,14 +27,20 @@ cmake --build --preset gcc-release --target domainmodel_cli --parallel
 Add `--dump` to inspect the syntax tree. `example/broken.dmodel` shows an
 unresolved supertype.
 
+`domainmodel_cli generate FILE` writes one Java class per entity, in the
+folders its packages name; `-d DIR` chooses where. The generator only shows
+how to turn a model into code: the validation does not check Java's reserved
+words or name collisions, so a valid model can still give Java that does not
+compile, for example a feature named `class`.
+
 ## Read the implementation
 
-- [Grammar](src/domainmodel/DomainModelGrammar.hpp): declarations and
+- [Grammar](src/core/domainmodel/DomainModelGrammar.hpp): declarations and
   qualified names such as `package.Type`.
-- [AST](src/domainmodel/ast.hpp): entities, features and packages.
-- [Scoping](src/domainmodel/references/): symbols visible within and
+- [AST](src/core/domainmodel/ast.hpp): entities, features and packages.
+- [Scoping](src/core/domainmodel/references/): symbols visible within and
   across packages.
-- [Formatter](src/domainmodel/): spacing and indentation rules.
+- [Formatter](src/lsp/domainmodel/): spacing and indentation rules.
 
 The [scoping recipe](../../docs/recipes/scoping.md) explains a small version of
 the qualified-name implementation.

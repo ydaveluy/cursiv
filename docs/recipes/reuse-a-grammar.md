@@ -1,8 +1,8 @@
 # Reuse a grammar
 
-You can reuse an existing grammar in two ways: derive a dialect that
-replaces some of its rules, or embed it inside the documents of another
-language.
+You can reuse an existing grammar in two ways: derive a grammar that
+replaces some of its rules or parses only a fragment, or embed it inside the
+documents of another language.
 
 ## Derive a dialect
 
@@ -83,6 +83,44 @@ struct Config : cursiv::extends<Common> {
   using entry = Root;
 };
 ```
+
+### Parse a fragment
+
+A parser reads its grammar's `entry`, which is fixed when the parser is
+generated. To parse a smaller piece, such as one expression typed in a REPL,
+derive a grammar that names that rule as its entry:
+
+```cpp title="src/core/arithmetics/ExpressionGrammar.hpp"
+namespace arith {
+
+struct ArithExpression : cursiv::extends<Arith> {
+  using entry = Arith::Expression;
+};
+
+}  // namespace arith
+```
+
+Generate it as a language of its own, without `EXTENSIONS` so that it claims
+no files, and link `arithexprGenerated` where you call it:
+
+```cmake title="src/CMakeLists.txt"
+cursiv_generate_language(ID         arithexpr
+    GRAMMAR    arithmetics/ExpressionGrammar.hpp
+    NAMESPACE  arith::ArithExpression
+    BASE       arithmetics
+    OUT        arithmetics/generated)
+```
+
+```cpp
+#include "arithmetics/generated/ArithExpression/Module.hpp"
+
+const auto parser = arith::generated::ArithExpression::create_parser();
+const cursiv::ParseResult result = parser->parse("1 + 2 * 3");
+const auto* expression = cursiv::ast_cast<arith::ast::Expression>(result.value);
+```
+
+The fragment's parser holds only the rules its entry reaches. Generate one
+grammar for each entry you need.
 
 ### Rule constraints
 

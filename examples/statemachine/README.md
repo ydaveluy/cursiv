@@ -37,12 +37,18 @@ cmake --build --preset gcc-release --target statemachine_cli --parallel
 Add `--dump` to inspect the syntax tree. `example/broken.statemachine` shows a
 misspelled keyword and an incomplete state declaration.
 
+`statemachine_cli generate FILE` writes a C++ program that runs the machine;
+`-d DIR` chooses where. The generator only shows how to turn a model into
+code: the validation does not check C++'s reserved words or name collisions,
+so a valid model can still give C++ that does not compile, for example an
+event named `delete`.
+
 ## Read the implementation
 
-- [Grammar](src/statemachine/StateMachineGrammar.hpp): `ikw` for keywords,
+- [Grammar](src/core/statemachine/StateMachineGrammar.hpp): `ikw` for keywords,
   `.doc` for hover text, and rules that assign names and references.
-- [AST](src/statemachine/ast.hpp): states, events, commands and transitions.
-- [Services](src/statemachine/): validation and reference resolution.
+- [AST](src/core/statemachine/ast.hpp): states, events, commands and transitions.
+- [Services](src/core/statemachine/): validation and reference resolution.
 
 ## Try it in VS Code
 
