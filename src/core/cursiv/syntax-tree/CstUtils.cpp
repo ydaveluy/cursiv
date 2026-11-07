@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -20,52 +21,56 @@
 
 namespace cursiv {
 
-namespace {
-
-// Which records opened a node, read in lockstep with the walk: the ids it
-// asks strictly decrease, so a boundary is found by stepping down.
-class OwnedCursor {
- public:
-  OwnedCursor(OwnedNodes owned, NodeId root) noexcept
-      : _first(owned.data()),
-        _at(std::upper_bound(owned.data(), owned.data() + owned.size(), root,
-                             [](NodeId want, const AstNode* row) {
-                               return want < row->cstNodeId;
-                             })) {}
-
-  bool opens(NodeId id) noexcept {
-    while (_at != _first && (*(_at - 1))->cstNodeId > id) --_at;
-    return _at != _first && (*(_at - 1))->cstNodeId == id;
+// The one reader of `Cst::carries_node`, which a walk asks of every record
+// it passes.
+namespace detail {
+struct CstWalk {
+  static bool carries_node(const Cst& cst, NodeId id) {
+    return cst.carries_node(id);
   }
-
- private:
-  AstNode* const* _first;
-  AstNode* const* _at;
 };
+}  // namespace detail
+
+void Cst::index_nodes() const {
+  build_once(_nodeIndex, [this] {
+    _nodeRecords.assign((std::size_t{size()} + 63) / 64, 0);
+    for (const AstNode* const node : _owned)
+      if (const NodeId id = node->cstNodeId; id < size())
+        _nodeRecords[id / 64] |= std::uint64_t{1} << (id % 64);
+  });
+}
+
+namespace {
 
 // Backwards, which is how the run reads: postorder gives a parent's children
 // in reverse, so the walk follows them there and a list is reversed once.
 // A member's writer is asked before the boundary -- the span that wrote a
 // member may open the node it holds -- and anything else after it: a keyword
-// that is a nested node's only record is that node's.
+// that is a nested node's only record is that node's. A childless record is
+// passed the same way whether it opens a node or not, so that is asked of it
+// only where it matches.
 template <bool kWriterFirst, class Match, class Take>
 void walk(const Cst& cst, NodeId root, const Match& matches, const Take& take) {
   if (root == kNoNode || root >= cst.size()) return;
-  OwnedCursor owned(cst.owned(), root);
+  const auto opens = [&cst](NodeId id) {
+    return detail::CstWalk::carries_node(cst, id);
+  };
   const NodeId begin = cst.subtree_begin(root);
   for (NodeId cursor = root; cursor > begin;) {
     const NodeId child = cursor - 1;
+    const NodeId past = cst.subtree_begin(child);
+    const bool childless = past == child;
     if constexpr (!kWriterFirst) {
-      if (owned.opens(child)) {
-        cursor = cst.subtree_begin(child);
+      if (!childless && opens(child)) {
+        cursor = past;
         continue;
       }
     }
-    if (matches(child)) {
+    if (matches(child) && (kWriterFirst || !childless || !opens(child))) {
       take(child);
-      cursor = cst.subtree_begin(child);
-    } else if (kWriterFirst && owned.opens(child)) {
-      cursor = cst.subtree_begin(child);
+      cursor = past;
+    } else if (kWriterFirst && !childless && opens(child)) {
+      cursor = past;
     } else {
       // The preceding record is the last child, or the previous sibling
       // when this record is childless. No recursive stack is needed.

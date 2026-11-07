@@ -62,9 +62,7 @@ class NodeFormatter {
   // The record a node was built from -- the construction's own, or any node
   // already in hand.
   [[nodiscard]] FormattingRegion node(const AstNode& node) const {
-    if (node.cstNodeId == kNoNode)
-      return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(_cst, {node.cstNodeId}, _collector);
+    return FormattingRegion(node.cstNodeId, _cst, _collector);
   }
 
   [[nodiscard]] FormattingRegion nodes(
@@ -93,7 +91,7 @@ class NodeFormatter {
         CstNodeView{_cst, _root}, cursiv::detail::member_identifier<Feature>(),
         index);
     if (!at.has_value()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(_cst, {at->id}, _collector);
+    return FormattingRegion(at->id, _cst, _collector);
   }
 
   // Every record that writes any of the given members, member by member in
@@ -118,11 +116,11 @@ class NodeFormatter {
       const std::optional<CstNodeView> first =
           find_node_for_keyword(CstNodeView{_cst, _root}, keyword);
       if (!first) return FormattingRegion(_cst, {}, _collector);
-      return FormattingRegion(_cst, {first->id}, _collector);
+      return FormattingRegion(first->id, _cst, _collector);
     }
     std::vector<NodeId> found = keyword_nodes(*_cst, _root, keyword);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(_cst, {found[index]}, _collector);
+    return FormattingRegion(found[index], _cst, _collector);
   }
 
   template <class... Keywords>
@@ -144,7 +142,7 @@ class NodeFormatter {
     if (_cst == nullptr) return FormattingRegion(_cst, {}, _collector);
     std::vector<NodeId> found = hidden_nodes(*_cst, _root, ruleName);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(_cst, {found[index]}, _collector);
+    return FormattingRegion(found[index], _cst, _collector);
   }
 
   [[nodiscard]] FormattingRegion hiddens(std::string_view ruleName) const {

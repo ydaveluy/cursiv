@@ -26,8 +26,8 @@
 
 // The concrete syntax tree: a postorder run of 16-byte records, out of a
 // std::pmr resource shared with the AST, read at the index that is its node
-// id. The one mutation a `const Cst&` performs is the leaf index a caret
-// question lazily builds; every other read is pure.
+// id. The only mutations a `const Cst&` performs are the two indexes the
+// first question of their kind lazily builds; every other read is pure.
 
 namespace cursiv {
 
@@ -37,6 +37,10 @@ namespace cursiv {
 class ReverseNodeRange;
 class CstBuilder;
 struct AstBuildCtx;
+
+namespace detail {
+struct CstWalk;
+}
 struct Document;
 
 struct Grammar;
@@ -71,6 +75,8 @@ class Cst {
     _owned = other._owned;
     _leaves = std::move(other._leaves);
     _leafIndex = other._leafIndex;
+    _nodeRecords = std::move(other._nodeRecords);
+    _nodeIndex = other._nodeIndex;
     _translation = std::move(other._translation);
     other.clear();
     return *this;
@@ -136,6 +142,8 @@ class Cst {
     _owned = {};
     _leaves.clear();
     _leafIndex = 0;
+    _nodeRecords.clear();
+    _nodeIndex = 0;
     _translation.reset();
   }
 
@@ -263,6 +271,8 @@ class Cst {
     _leaves.clear();
     _enginesTape = true;
     _leafIndex = 0;
+    _nodeRecords.clear();
+    _nodeIndex = 0;
   }
 
   void bind_entry(NodeId begin, NodeId end, NodeId root) {
@@ -277,6 +287,8 @@ class Cst {
   void bind_model(const Grammar& grammar, OwnedNodes owned) {
     _grammar = std::addressof(grammar);
     _owned = owned;
+    _nodeRecords.clear();
+    _nodeIndex = 0;
   }
   // A parse of the translated text moves to the document's offsets and
   // keeps the text its AST borrows, and the spans a replaced piece widens.
@@ -303,25 +315,10 @@ class Cst {
   }
   // The index a second caret question finds ready.
   CURSIV_NOINLINE void index_leaves() const {
-    // Released from a destructor: the build allocates, and a byte held past a
-    // throw blocks every later caret question.
-    struct Held {
-      std::atomic_ref<std::uint8_t> lock;
-      ~Held() {
-        lock.store(0, std::memory_order_release);
-        lock.notify_all();
-      }
-    };
-    std::atomic_ref lock(_leafLock);
-    while (lock.exchange(1, std::memory_order_acquire) != 0)
-      lock.wait(1, std::memory_order_relaxed);
-    const Held held{lock};
-    if (!published(_leafIndex)) {
-      // Cleared, not appended to: a build cut short leaves the flag unpublished
-      // and this list half-written. Room for every record, which natively
-      // never becomes resident past the leaves written; Wasm linear memory
-      // charges untouched room too, for as long as the tree lives, so there
-      // the leaves are counted first.
+    build_once(_leafIndex, [this] {
+      // Room for every record, which natively never becomes resident past the
+      // leaves written; Wasm linear memory charges untouched room too, for as
+      // long as the tree lives, so there the leaves are counted first.
       std::size_t room = size();
       if constexpr (sizeof(void*) < 8) {
         room = 0;
@@ -332,7 +329,46 @@ class Cst {
       _leaves.reserve(room);
       for (NodeId id = 0; id < size(); ++id)
         if (node(id).subtreeSize == 1) _leaves.push_back(id);
-      publish(_leafIndex);
+    });
+  }
+
+  // The walks of `CstUtils`, which ask `carries_node` of every record they
+  // pass: a construction's search must stop at a nested node's record.
+  friend struct detail::CstWalk;
+
+  // Whether a node of `owned()` was built from the record: one bit a record,
+  // so a walk asks it at no search.
+  [[nodiscard]] bool carries_node(NodeId id) const {
+    if (!published(_nodeIndex)) [[unlikely]]
+      index_nodes();
+    return ((_nodeRecords[id / 64] >> (id % 64)) & 1U) != 0;
+  }
+  // Defined in `CstUtils.cpp`, where `AstNode` is complete and the walks that
+  // read it live.
+  CURSIV_NOINLINE void index_nodes() const;
+
+  // Builds an index once and publishes it. One lock for every index, held
+  // only while one is built, so a second reader waits instead of building it
+  // beside the first. The list is cleared by `build`, not appended to: a build
+  // cut short leaves the flag unpublished and the list half-written.
+  template <class Build>
+  void build_once(std::uint8_t& flag, Build&& build) const {
+    // Released from a destructor: a build allocates, and a byte held past a
+    // throw blocks every later question.
+    struct Held {
+      std::atomic_ref<std::uint8_t> lock;
+      ~Held() {
+        lock.store(0, std::memory_order_release);
+        lock.notify_all();
+      }
+    };
+    std::atomic_ref lock(_indexLock);
+    while (lock.exchange(1, std::memory_order_acquire) != 0)
+      lock.wait(1, std::memory_order_relaxed);
+    const Held held{lock};
+    if (!published(flag)) {
+      build();
+      publish(flag);
     }
   }
 
@@ -370,9 +406,12 @@ class Cst {
   mutable std::vector<NodeId> _leaves;
   // Whether the leaf index a reader depends on is already visible to it.
   mutable std::uint8_t _leafIndex = 0;
-  // Held only while the leaf index is built, so a second reader waits instead
-  // of building it beside the first. Neither moved nor reset.
-  mutable std::uint8_t _leafLock = 0;
+  // Built on the first walk of `CstUtils` and never after: bit `id` says a
+  // node of `_owned` was built from record `id`.
+  mutable std::vector<std::uint64_t> _nodeRecords;
+  mutable std::uint8_t _nodeIndex = 0;
+  // Held only while an index is built. Neither moved nor reset.
+  mutable std::uint8_t _indexLock = 0;
   // The translated text the AST borrows, and its map to the document.
   std::unique_ptr<const SourceTranslation> _translation;
 };

@@ -50,6 +50,9 @@ struct FormattingAction {
   std::vector<FormattingMove> moves;
 };
 
+template <class NodeT>
+class NodeFormatter;
+
 class FormattingCollector {
  public:
   virtual ~FormattingCollector() noexcept = default;
@@ -69,9 +72,10 @@ class FormattingRegion {
                    FormattingCollector* collector)
       : _cst(cst), _nodes(std::move(nodes)), _collector(collector) {}
 
-  [[nodiscard]] bool empty() const noexcept { return _nodes.empty(); }
+  [[nodiscard]] bool empty() const noexcept { return nodes().empty(); }
   // The selected records, in document order.
   [[nodiscard]] std::span<const NodeId> nodes() const noexcept {
+    if (_one != kNoNode) return {&_one, 1};
     return _nodes;
   }
   [[nodiscard]] const Cst* cst() const noexcept { return _cst; }
@@ -88,10 +92,22 @@ class FormattingRegion {
                                        std::ptrdiff_t end) const;
 
  private:
+  template <class NodeT>
+  friend class NodeFormatter;
+
+  // One record, held in place: what most rules select, at no allocation.
+  // `kNoNode` selects nothing. The record comes first so a `{}` meant for the
+  // list never reads as a record.
+  FormattingRegion(NodeId node, const Cst* cst,
+                   FormattingCollector* collector) noexcept
+      : _cst(cst), _one(node), _collector(collector) {}
+
   [[nodiscard]] std::size_t normalizeIndex(std::ptrdiff_t index) const noexcept;
 
   const Cst* _cst = nullptr;
+  // The selection: one record in `_one`, or a list in `_nodes`.
   std::vector<NodeId> _nodes;
+  NodeId _one = kNoNode;
   FormattingCollector* _collector = nullptr;
 };
 
