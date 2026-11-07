@@ -91,10 +91,12 @@ struct DocumentReferences : RefHome {
   virtual void visitUnresolved(const Cst& cst,
                                UnresolvedReferenceVisitor visitor) const = 0;
 
-  // The two visits above, each in its own order, kept to the references whose
-  // name holds `offset` or ends there -- the ones `forceAt` forces. A caret
-  // asks for its own reference, not for the document's.
-  virtual void visitAt(const Cst& cst, TextOffset offset,
+  // The two visits above, each in rank order, kept to the references whose
+  // name touches `[begin, end]`: it begins at or before `end` and ends at or
+  // after `begin`. A caret is `[offset, offset]`, the references `forceAt`
+  // forces; a range of the editor asks for its own references, not for the
+  // document's.
+  virtual void visitIn(const Cst& cst, TextOffset begin, TextOffset end,
                        ResolvedReferenceVisitor resolved,
                        UnresolvedReferenceVisitor unresolved) const = 0;
 };

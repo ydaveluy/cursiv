@@ -29,11 +29,19 @@ namespace cursiv {
 
 namespace {
 
-// A stretch of the document in both units, converted once.
+// A stretch of the document in bytes, and in lines and columns once asked:
+// most gaps are compared as bytes and never published, so most never are.
 struct TextSpan {
   TextOffset begin = 0;
   TextOffset end = 0;
-  lsp::Range range;
+  mutable std::optional<lsp::Range> lines;
+  // Read only while `lines` is empty: null for a span built with its lines.
+  const TextDocument* text = nullptr;
+
+  [[nodiscard]] const lsp::Range& range() const {
+    if (!lines.has_value()) lines = to_lsp(text->rangeAt(begin, end));
+    return *lines;
+  }
 };
 
 struct PendingEdit {
@@ -77,7 +85,8 @@ constexpr std::uint32_t kMaxTabSize = 64;
                                TextOffset end) {
   return TextSpan{.begin = begin,
                   .end = end,
-                  .range = to_lsp(document.textDocument().rangeAt(begin, end))};
+                  .lines = std::nullopt,
+                  .text = &document.textDocument()};
 }
 
 // The gap before `node`: from the end of `previous`, or from the start of the
@@ -94,9 +103,9 @@ constexpr std::uint32_t kMaxTabSize = 64;
                        range.start.line);
 }
 
-[[nodiscard]] bool edit_inside_range(
-    const PendingEdit& edit, const std::optional<lsp::Range>& range) noexcept {
-  return !range.has_value() || inside_range(edit.span.range, *range);
+[[nodiscard]] bool edit_inside_range(const PendingEdit& edit,
+                                     const std::optional<lsp::Range>& range) {
+  return !range.has_value() || inside_range(edit.span.range(), *range);
 }
 
 // The order a client's edit list is owed. One definition, because the sink
@@ -201,11 +210,11 @@ struct MarginPiece {
 // keeps a construction on one line while it is written on one, and does not
 // pull a construction the author spread over three back onto one.
 [[nodiscard]] const FormattingMove* find_fitting_move(
-    const lsp::Range& range, const FormattingAction& action) {
+    const TextSpan& gap, const FormattingAction& action) {
   if (action.moves.empty()) return nullptr;
   if (action.moves.size() == 1u) return &action.moves.front();
 
-  const std::int32_t existingLines = line_count(range);
+  const std::int32_t existingLines = line_count(gap.range());
   for (const FormattingMove& move : action.moves) {
     if (move.lines.has_value() && existingLines <= *move.lines) return &move;
     if (!move.lines.has_value() && existingLines == 0) return &move;
@@ -215,7 +224,7 @@ struct MarginPiece {
 
 // The indentation delta a rule's fitting move carries; none for a move
 // without tabs, or no rule.
-[[nodiscard]] std::int32_t tabs_of(const lsp::Range& gap,
+[[nodiscard]] std::int32_t tabs_of(const TextSpan& gap,
                                    const FormattingAction* action) {
   if (action == nullptr) return 0;
   const FormattingMove* const move = find_fitting_move(gap, *action);
@@ -225,10 +234,12 @@ struct MarginPiece {
 [[nodiscard]] PendingEdit create_space_edit(
     const TextSpan& gap, std::int32_t spaces,
     const FormattingActionOptions& options) {
-  if (gap.range.start.line == gap.range.end.line) {
+  // What the gap holds counts only for a rule that may keep it.
+  if ((options.allowMore || options.allowLess) &&
+      gap.range().start.line == gap.range().end.line) {
     const auto existing =
-        checked_count(static_cast<std::int64_t>(gap.range.end.character) -
-                      gap.range.start.character);
+        checked_count(static_cast<std::int64_t>(gap.range().end.character) -
+                      gap.range().start.character);
     spaces = fit_into_options(spaces, existing, options);
   }
   return PendingEdit{.span = gap,
@@ -248,7 +259,8 @@ struct MarginPiece {
 [[nodiscard]] PendingEdit create_line_edit(
     const TextSpan& gap, std::int32_t lines, const FormatContext& context,
     const FormattingActionOptions& options) {
-  lines = fit_into_options(lines, line_count(gap.range), options);
+  if (options.allowMore || options.allowLess)
+    lines = fit_into_options(lines, line_count(gap.range()), options);
   std::string newText = repeat_newlines(lines, context.newlineStyle);
   newText += indentation_text(context.indentation, context.options);
   return PendingEdit{.span = gap, .newText = std::move(newText)};
@@ -257,7 +269,7 @@ struct MarginPiece {
 [[nodiscard]] PendingEdit create_tab_edit(const TextSpan& gap, bool hasPrevious,
                                           const FormatContext& context) {
   const std::int32_t lines =
-      std::max(line_count(gap.range), hasPrevious ? 1 : 0);
+      std::max(line_count(gap.range()), hasPrevious ? 1 : 0);
   std::string newText = repeat_newlines(lines, context.newlineStyle);
   newText += indentation_text(context.indentation, context.options);
   return PendingEdit{.span = gap, .newText = std::move(newText)};
@@ -317,8 +329,9 @@ struct MarginPiece {
                                  TextOffset end, std::uint32_t endColumn) {
   return TextSpan{.begin = begin,
                   .end = end,
-                  .range = lsp::Range{lsp::Position{line, 0},
-                                      lsp::Position{line, endColumn}}};
+                  .lines = lsp::Range{lsp::Position{line, 0},
+                                      lsp::Position{line, endColumn}},
+                  .text = nullptr};
 }
 
 // Only a comment's margin is rewritten, to `level` units, never the gap in
@@ -328,9 +341,9 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
                        const FormatContext& context, EditSink& sink) {
   const CstNode& node = context.cst[hidden];
   const TextDocument& document = context.document.textDocument();
-  const std::uint32_t startLine = gap.range.end.line;
+  const std::uint32_t startLine = gap.range().end.line;
   const bool previousOnSameLine =
-      previous != kNoNode && gap.range.start.line == startLine;
+      previous != kNoNode && gap.range().start.line == startLine;
 
   const TextOffset lineStart = document.offsetAt(Position{startLine, 0});
   const std::string_view margin =
@@ -355,8 +368,9 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
         sink.push(PendingEdit{
             .span = TextSpan{.begin = lineStart,
                              .end = node.begin,
-                             .range = lsp::Range{lsp::Position{startLine, 0},
-                                                 gap.range.end}},
+                             .lines = lsp::Range{lsp::Position{startLine, 0},
+                                                 gap.range().end},
+                             .text = nullptr},
             .newText = indentation_text(level, context.options)});
     }
     std::string text =
@@ -367,9 +381,10 @@ void emit_hidden_edits(NodeId previous, NodeId hidden, const TextSpan& gap,
     sink.push(PendingEdit{
         .span = TextSpan{.begin = node.begin,
                          .end = node.end,
-                         .range =
-                             lsp::Range{gap.range.end,
-                                        to_lsp(document.positionAt(node.end))}},
+                         .lines =
+                             lsp::Range{gap.range().end,
+                                        to_lsp(document.positionAt(node.end))},
+                         .text = nullptr},
         .newText = std::move(text)});
     return;
   }
@@ -444,7 +459,7 @@ void emit_gap_edits(NodeId previous, NodeId node,
     return;
 
   const TextSpan gap = gap_before(context, previous, node);
-  const FormattingMove* move = find_fitting_move(gap.range, action);
+  const FormattingMove* move = find_fitting_move(gap, action);
   if (move == nullptr) return;
 
   if (move->tabs.has_value())
@@ -503,7 +518,7 @@ void emit_gap_edits(NodeId previous, NodeId node,
         text.substr(edit.span.begin, edit.span.end - edit.span.begin))
       continue;
     result.push_back(
-        lsp::TextEdit{.range = edit.span.range, .newText = edit.newText});
+        lsp::TextEdit{.range = edit.span.range(), .newText = edit.newText});
   }
   return result;
 }
@@ -633,12 +648,12 @@ std::vector<lsp::TextEdit> run_formatting(
       const auto level = [&](const FormattingAction* own) {
         if (own != nullptr)
           return checked_count(static_cast<std::int64_t>(context.indentation) +
-                               tabs_of(gap.range, own));
+                               tabs_of(gap, own));
         if (pendingAppend.target == id)
           return checked_count(
               static_cast<std::int64_t>(pendingAppend.indentation) +
-              tabs_of(gap.range, actions.find(pendingAppend.source,
-                                              FormattingMode::Append)));
+              tabs_of(gap, actions.find(pendingAppend.source,
+                                        FormattingMode::Append)));
         return context.indentation;
       };
       // The margin the comment is about to get, which is what

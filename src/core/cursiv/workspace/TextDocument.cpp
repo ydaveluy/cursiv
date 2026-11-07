@@ -182,8 +182,11 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
 }
 
 Range TextDocument::rangeAt(TextOffset begin, TextOffset end) const {
-  const Position from = positionAt(begin);
-  return {from, end < begin ? from : positionAt(end)};
+  // The end is mostly on the line of the start or the next one, which the
+  // cursor reaches without a second search.
+  Cursor cursor(*this, begin);
+  const Position from = cursor.positionAt(begin);
+  return {from, end < begin ? from : cursor.positionAt(end)};
 }
 
 void TextDocument::setText(std::string text) {

@@ -42,7 +42,7 @@ struct DefaultDocumentReferences : DocumentReferences {
   void visitUnresolved(const Cst& cst,
                        UnresolvedReferenceVisitor visitor) const override;
 
-  void visitAt(const Cst& cst, TextOffset offset,
+  void visitIn(const Cst& cst, TextOffset begin, TextOffset end,
                ResolvedReferenceVisitor resolved,
                UnresolvedReferenceVisitor unresolved) const override;
 
@@ -62,14 +62,15 @@ struct DefaultDocumentReferences : DocumentReferences {
   void visit_unresolved(const Cst& cst, const RefHandle& h,
                         UnresolvedReferenceVisitor visitor) const;
 
-  // The ranks whose name holds `offset` or ends there, in rank order.
-  [[nodiscard]] std::vector<std::uint32_t> ranks_at(const Cst& cst,
-                                                    TextOffset offset) const;
+  // The ranks whose name touches `[begin, end]`, in rank order.
+  [[nodiscard]] std::vector<std::uint32_t> ranks_in(const Cst& cst,
+                                                    TextOffset begin,
+                                                    TextOffset end) const;
   void index_names(const Cst& cst) const;
 
   // A named reference by where its name begins, and the furthest end of the
-  // names up to it in this order: walking back from a caret, a reach before
-  // the caret says no earlier name can hold it.
+  // names up to it in this order: walking back from the end of a window, a
+  // reach before its start says no earlier name can touch it.
   struct NameAt {
     TextOffset begin = 0;
     TextOffset reach = 0;
@@ -77,8 +78,8 @@ struct DefaultDocumentReferences : DocumentReferences {
   };
 
   const AstMetaData& _f;
-  // Built on the first caret question: names never move once the table is
-  // built, and a table no caret asks pays nothing.
+  // Built on the first question about a caret or a range: names never move
+  // once the table is built, and a table no one asks pays nothing.
   mutable std::vector<NameAt> _names;
   mutable std::mutex _indexing;
   mutable std::atomic<bool> _indexed{false};

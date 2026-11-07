@@ -107,6 +107,10 @@ std::optional<lsp::FoldingRange> DefaultFoldingRangeProvider::toFoldingRange(
     std::optional<lsp::FoldingRangeKindEnum> kind) const {
   const TextDocument& text = document.textDocument();
   const Position start = text.positionAt(node.begin());
+  // Most records end before the line two below their start: that line's
+  // offset tells it without the record's end position.
+  if (node.end() < text.offsetAt(Position{start.line + 2, 0}))
+    return std::nullopt;
   Position end = text.positionAt(node.end());
   if (end.line < start.line + 2) return std::nullopt;
   // The closer stays visible: the fold stops at the end of the line before.

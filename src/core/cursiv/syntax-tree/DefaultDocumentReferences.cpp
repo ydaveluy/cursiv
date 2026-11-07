@@ -117,7 +117,7 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
 void DefaultDocumentReferences::forceAt(const Cst& cst, TextOffset offset,
                                         const CancellationToken& cancelToken) {
   std::vector<RefHandle> at;
-  for (const std::uint32_t rank : ranks_at(cst, offset))
+  for (const std::uint32_t rank : ranks_in(cst, offset, offset))
     at.push_back(handles[rank]);
   force(at, cancelToken);
 }
@@ -182,27 +182,28 @@ void DefaultDocumentReferences::visit_unresolved(
   visitor(why, begin, end, info(h, ops.text(*h.owner, h.index), narrow));
 }
 
-void DefaultDocumentReferences::visitAt(
-    const Cst& cst, TextOffset offset, ResolvedReferenceVisitor resolved,
+void DefaultDocumentReferences::visitIn(
+    const Cst& cst, TextOffset begin, TextOffset end,
+    ResolvedReferenceVisitor resolved,
     UnresolvedReferenceVisitor unresolved) const {
-  const std::vector<std::uint32_t> at = ranks_at(cst, offset);
+  const std::vector<std::uint32_t> at = ranks_in(cst, begin, end);
   for (const std::uint32_t rank : at)
     visit_resolved(cst, handles[rank], resolved);
   for (const std::uint32_t rank : at)
     visit_unresolved(cst, handles[rank], unresolved);
 }
 
-std::vector<std::uint32_t> DefaultDocumentReferences::ranks_at(
-    const Cst& cst, TextOffset offset) const {
+std::vector<std::uint32_t> DefaultDocumentReferences::ranks_in(
+    const Cst& cst, TextOffset begin, TextOffset end) const {
   if (!_indexed.load(std::memory_order_acquire)) [[unlikely]]
     index_names(cst);
   std::vector<std::uint32_t> at;
-  // Every name that begins at or before the offset lies before `from`; the
-  // reach ends the walk back at the first one no earlier name can cross.
-  auto from = std::ranges::upper_bound(_names, offset, {}, &NameAt::begin);
-  while (from != _names.begin() && (--from)->reach >= offset) {
+  // Every name that begins at or before `end` lies before `from`. Walking
+  // back, a reach before `begin` says no earlier name ends inside the window.
+  auto from = std::ranges::upper_bound(_names, end, {}, &NameAt::begin);
+  while (from != _names.begin() && (--from)->reach >= begin) {
     const RefHandle& h = handles[from->rank];
-    if (cst[_f.refOps[h.field].name_id(*h.owner, h.index)].end >= offset)
+    if (cst[_f.refOps[h.field].name_id(*h.owner, h.index)].end >= begin)
       at.push_back(from->rank);
   }
   std::ranges::sort(at);

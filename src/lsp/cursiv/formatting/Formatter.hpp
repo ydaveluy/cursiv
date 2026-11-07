@@ -26,11 +26,13 @@ class Formatter {
       const Document& document, const lsp::DocumentFormattingParams& params,
       const CancellationToken& = {}) const = 0;
 
-  // The same rules restricted to the lines of a range: an edit is kept when
-  // its lines lie within the range's lines or cover the range's last line. An
-  // edit that starts before the range and ends before its last line is left
-  // out. The range's columns do not narrow it, and a kept gap is rewritten
-  // whole, so an edit may reach past the range.
+  // The same rules restricted to the lines of a range. Every construction with
+  // a line in the range gives its rules, one that starts before the range too,
+  // so every selected line is formatted. An edit is kept when its lines lie
+  // within the range's lines or cover the range's last line; an edit that
+  // starts before the range and ends before its last line is left out. The
+  // range's columns do not narrow it, and a kept gap is rewritten whole, so an
+  // edit may reach past the range.
   [[nodiscard]] virtual std::vector<lsp::TextEdit> formatDocumentRange(
       const Document& document,
       const lsp::DocumentRangeFormattingParams& params,

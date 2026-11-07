@@ -53,8 +53,8 @@ const CoreServices* language_of(const Document& document,
                                        TextOffset offset) {
   Declaration found;
   std::optional<TextRange> failed;
-  document.parseResult.references->visitAt(
-      document.parseResult.cst(), offset,
+  document.parseResult.references->visitIn(
+      document.parseResult.cst(), offset, offset,
       [&](TextOffset begin, TextOffset end, const AstNode& target, bool) {
         if (offset < begin || offset >= end) return;
         if (found && found.span.end - found.span.begin <= end - begin) {
@@ -165,8 +165,9 @@ std::vector<const AstNode*> DefaultReferences::getSelfNodes(
         // may start at the same offset.
         std::vector<const AstNode*> siblings;
         bool member = false;
-        source->parseResult.references->visitAt(
+        source->parseResult.references->visitIn(
             source->parseResult.cst(), incoming.sourceBegin,
+            incoming.sourceBegin,
             [&](TextOffset begin, TextOffset end, const AstNode& target,
                 bool multi) {
               if (!multi || begin != incoming.sourceBegin ||
