@@ -47,7 +47,8 @@ theme:
 
 plugins:
   - search
-  # Self-host the theme's web fonts: the cross-origin isolated demo page
+  # Self-host the theme's web fonts: once a visitor opens the demo, its
+  # service worker makes every page cross-origin isolated, and such a page
   # loads no third-party assets. No page draws Mermaid diagrams.
   - privacy:
       assets_exclude:

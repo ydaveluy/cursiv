@@ -22,8 +22,11 @@ cp "$demo"/package.json "$demo"/package-lock.json "$demo"/monaco.js "$work/"
 (cd "$work" && npm ci --ignore-scripts --no-audit --no-fund --silent)
 npm=$work/node_modules
 
-# A service worker must be a file of its own.
-cp "$npm/coi-serviceworker/coi-serviceworker.js" "$out/"
+# A service worker must be a file of its own, and it serves only the URLs
+# under its directory: at the site root, it also serves the theme's search
+# worker, which the cross-origin isolated page can start only with the
+# headers it adds.
+cp "$npm/coi-serviceworker/coi-serviceworker.js" "$out/.."
 mkdir -p "$out/licenses"
 
 # Monaco: the editor of docs/demo/monaco.js and its worker, with the CSS and

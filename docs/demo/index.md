@@ -13,8 +13,16 @@ definition, rename and formatting all come from it.
 <section class="cursiv-demo" data-search-exclude>
 <!-- The language servers need SharedArrayBuffer, hence cross-origin
      isolation. GitHub Pages cannot send COOP/COEP headers: this service
-     worker adds them for this directory only and reloads the page once. -->
-<script src="coi-serviceworker.js"></script>
+     worker adds them and reloads the page once. It sits at the site root
+     and serves every page: the site search runs in a worker outside this
+     directory, which needs the headers too. A worker that an earlier
+     version of the site registered for this directory is removed first. -->
+<script>
+  window.coi = {
+    shouldDeregister: () => navigator.serviceWorker.controller.scriptURL !== document.currentScript.src,
+  };
+</script>
+<script src="../coi-serviceworker.js"></script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="vendor/monaco/monaco.css">
 <nav id="languages" class="segmented" role="tablist" aria-label="Example language"></nav>
