@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <vector>
@@ -103,7 +105,12 @@ void lsp_stages(int iterations, SharedLspServices& shared,
                 const LspServices& services, const Document& document,
                 Row& row) {
   const auto carets = positions(document);
-  const lsp::Range range{lsp::Position{0, 0}, carets.back()};
+  // What an editor asks a range request for: the lines a screen shows, here
+  // eighty from the middle of the document.
+  const std::uint32_t lines = document.textDocument().lineCount();
+  const std::uint32_t top = lines > 80 ? (lines - 80) / 2 : 0;
+  const lsp::Range range{lsp::Position{top, 0},
+                         lsp::Position{std::min(lines, top + 80), 0}};
   const auto n = carets.size();
   const auto once = [&](const char* name, bool installed, auto action) {
     measure(row, name, installed, iterations, 1, action);
@@ -239,7 +246,7 @@ void lsp_stages(int iterations, SharedLspServices& shared,
        });
   lsp::CodeActionParams actions;
   actions.textDocument.uri = lsp::Uri::parse(document.uri);
-  actions.range = range;
+  actions.range = lsp::Range{lsp::Position{0, 0}, carets.back()};
   for (const Diagnostic& diagnostic : document.diagnostics) {
     lsp::Diagnostic converted;
     converted.range = to_lsp(document.textDocument().rangeAt(
