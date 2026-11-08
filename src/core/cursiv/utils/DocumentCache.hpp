@@ -11,11 +11,13 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
+#include "cursiv/utils/ConcurrentValue.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentId.hpp"
@@ -38,13 +40,23 @@ namespace cursiv {
 // change further away rebuilds neither the document nor its entries, so a
 // value that reads past those belongs in a `WorkspaceCache`.
 //
-// A document read once keeps an empty table of under a kilobyte after it is
-// deleted, as the document store keeps a row for each URI it has seen.
+// A document read once keeps a small empty partition after deletion: a value
+// slot, or a table of under a kilobyte for keyed entries. The document store
+// itself keeps a row for each URI it has seen.
 // `Hash` and `KeyEqual` are as `SimpleCache` takes them.
-template <class K, class V, class Hash = std::hash<K>,
+//
+// DocumentCache<Value> stores one answer per document, without a secondary key:
+// get(document, provider) returns a copy, get(document) only looks it up,
+// and withValue(document, provider, consumer) borrows it through the consumer
+// call, retaining it even while a clear retires it. References, pointers or
+// views into that slot must not outlive the consumer. DocumentCache<Key, Value>
+// keeps the keyed interface.
+template <class K, class V = void, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class DocumentCache : private DocumentPhaseListener,
                       private DocumentUpdateListener {
+  using Value = std::conditional_t<std::is_void_v<V>, K, V>;
+
  public:
   explicit DocumentCache(SharedCoreServices& sharedServices,
                          std::optional<DocumentState> state = std::nullopt);
@@ -59,8 +71,10 @@ class DocumentCache : private DocumentPhaseListener,
   // clear of the whole cache, keeps its result out of the cache, but still
   // returns it to the caller.
   template <class Provider>
-  [[nodiscard]] V get(DocumentId document, const K& key,
-                      Provider&& provider) const {
+  [[nodiscard]] Value get(DocumentId document, const K& key,
+                          Provider&& provider) const
+    requires(!std::is_void_v<V>)
+  {
     if (document == kNoDocument)
       return std::invoke(std::forward<Provider>(provider));
     return valuesOf(document).findOrCompute(key,
@@ -70,9 +84,42 @@ class DocumentCache : private DocumentPhaseListener,
   // What the cache holds for `key` now, if anything: nothing is computed. A
   // walk that stores an answer for each step it passes reads its way to the
   // first step already answered.
-  [[nodiscard]] std::optional<V> get(DocumentId document, const K& key) const {
+  [[nodiscard]] std::optional<Value> get(DocumentId document,
+                                         const K& key) const
+    requires(!std::is_void_v<V>)
+  {
     if (document == kNoDocument) return std::nullopt;
     return valuesOf(document).find(key);
+  }
+
+  template <class Provider>
+  [[nodiscard]] Value get(DocumentId document, Provider&& provider) const
+    requires(std::is_void_v<V>)
+  {
+    if (document == kNoDocument)
+      return std::invoke(std::forward<Provider>(provider));
+    return valuesOf(document).get(std::forward<Provider>(provider));
+  }
+
+  [[nodiscard]] std::optional<Value> get(DocumentId document) const
+    requires(std::is_void_v<V>)
+  {
+    if (document == kNoDocument) return std::nullopt;
+    return valuesOf(document).find();
+  }
+
+  template <class Provider, class Consumer>
+  void withValue(DocumentId document, Provider&& provider,
+                 Consumer&& consumer) const
+    requires(std::is_void_v<V>)
+  {
+    if (document == kNoDocument) {
+      const Value computed = std::invoke(std::forward<Provider>(provider));
+      std::invoke(std::forward<Consumer>(consumer), computed);
+      return;
+    }
+    valuesOf(document).withValue(std::forward<Provider>(provider),
+                                 std::forward<Consumer>(consumer));
   }
 
   // Emptied for a rebuild, the document keeps the room its entries took.
@@ -93,11 +140,17 @@ class DocumentCache : private DocumentPhaseListener,
 
   // A deleted document may never come back: it keeps no room.
   void clear(DocumentId document, bool keepCapacity) {
-    if (const std::optional<Values*> values = _documents.find(document))
-      (*values)->clear(keepCapacity);
+    if (const std::optional<Values*> values = _documents.find(document)) {
+      if constexpr (std::is_void_v<V>)
+        (*values)->clear();
+      else
+        (*values)->clear(keepCapacity);
+    }
   }
 
-  using Values = detail::ConcurrentTable<K, V, Hash, KeyEqual>;
+  using Values = std::conditional_t<
+      std::is_void_v<V>, detail::ConcurrentValue<Value>,
+      detail::ConcurrentTable<K, V, Hash, KeyEqual>>;
   struct DocumentHash {
     [[nodiscard]] std::size_t operator()(DocumentId document) const noexcept {
       return static_cast<std::uint32_t>(document);
@@ -148,9 +201,8 @@ class DocumentCache : private DocumentPhaseListener,
   std::optional<DocumentState> _state;
   const std::uint64_t _serial = next_serial();
 
-  // One table per document ever read, each under a kilobyte when empty; a
-  // deleted document's stays, emptied. Kept where nothing moves them, and
-  // found by id.
+  // One stable partition per document ever read; a deleted document's stays
+  // empty. Kept where nothing moves them, and found by id.
   mutable std::deque<Values> _owned;
   mutable std::mutex _creating;
   mutable detail::ConcurrentTable<DocumentId, Values*, DocumentHash> _documents;

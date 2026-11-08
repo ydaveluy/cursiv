@@ -710,6 +710,340 @@ void a_failed_provider_can_be_retried() {
   CHECK(cache.get(1, [] { return 42; }) == 42);
 }
 
+
+// A value memo has no key, and nullptr is a computed answer rather than a
+// miss. Consumers borrow the owning value without a copy/reference count.
+void a_value_cache_keeps_null_and_borrows_without_copying() {
+  cursiv::SimpleCache<const int*> empty;
+  int computed = 0;
+  const auto null = [&]() -> const int* { ++computed; return nullptr; };
+  CHECK(empty.get(null) == nullptr);
+  empty.withValue(null, [&](const int* value) { CHECK(value == nullptr); });
+  CHECK(computed == 1);
+  empty.clear();
+  CHECK(empty.get(null) == nullptr);
+  CHECK(computed == 2);
+
+  cursiv::SimpleCache<std::shared_ptr<int>> owned;
+  (void)owned.get([] { return std::make_shared<int>(42); });
+  owned.withValue([] { return std::make_shared<int>(0); },
+                  [&](const std::shared_ptr<int>& value) {
+                    CHECK(*value == 42);
+                    CHECK(value.use_count() == 1);
+                  });
+}
+
+void value_providers_and_consumers_can_reenter() {
+  cursiv::SimpleCache<int> cache;
+  CHECK(cache.get([&] { return cache.get([] { return 5; }) + 1; }) == 5);
+  cache.withValue([] { return 0; }, [&](const int& value) {
+    CHECK(value == 5);
+    cache.clear();
+    CHECK(cache.get([] { return 7; }) == 7);
+    CHECK(value == 5);  // retired while this consumer still holds its guard
+  });
+  CHECK(cache.get([] { return 0; }) == 7);
+  CHECK(support::throws<std::runtime_error>([&] {
+    cache.withValue([] { return 0; }, [](const int&) {
+      throw std::runtime_error("consumer");
+    });
+  }));
+  CHECK(cache.get([] { return 0; }) == 7);
+
+  cache.clear();
+  CHECK(support::throws<std::runtime_error>([&] {
+    (void)cache.get([]() -> int { throw std::runtime_error("provider"); });
+  }));
+  CHECK(cache.get([] { return 42; }) == 42);
+}
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+void value_providers_do_not_wait_and_clear_rejects_stale_publication() {
+  cursiv::SimpleCache<int> cache;
+  std::barrier entered(4);
+  std::atomic<int> calls{0};
+  std::atomic<int> wrong{0};
+  std::vector<std::thread> threads;
+  for (int i = 0; i < 4; ++i)
+    threads.emplace_back([&] {
+      const int value = cache.get([&] {
+        ++calls;
+        entered.arrive_and_wait();
+        return 42;
+      });
+      if (value != 42) ++wrong;
+    });
+  for (auto& thread : threads) thread.join();
+  CHECK(calls.load() == 4);
+  CHECK(wrong.load() == 0);
+
+  cache.clear();
+  std::barrier computing(2), resume(2);
+  int previous = 0;
+  std::thread provider([&] {
+    previous = cache.get([&] {
+      computing.arrive_and_wait();
+      resume.arrive_and_wait();
+      return 1;
+    });
+  });
+  computing.arrive_and_wait();
+  cache.clear();
+  CHECK(cache.get([] { return 2; }) == 2);
+  resume.arrive_and_wait();
+  provider.join();
+  CHECK(previous == 1);
+  CHECK(cache.get([] { return 3; }) == 2);
+}
+
+void a_value_consumer_keeps_its_answer_alive_during_clear() {
+  cursiv::SimpleCache<std::shared_ptr<int>> cache;
+  (void)cache.get([] { return std::make_shared<int>(41); });
+  std::weak_ptr<int> previous;
+  std::barrier reading(2), resume(2);
+  int read = 0;
+  std::thread consumer([&] {
+    cache.withValue([] { return std::make_shared<int>(0); },
+                    [&](const std::shared_ptr<int>& value) {
+                      previous = value;
+                      reading.arrive_and_wait();
+                      resume.arrive_and_wait();
+                      read = *value;
+                    });
+  });
+  reading.arrive_and_wait();
+  cache.clear();
+  support::collect_retired_tables();
+  CHECK(!previous.expired());
+  CHECK(*cache.get([] { return std::make_shared<int>(42); }) == 42);
+  resume.arrive_and_wait();
+  consumer.join();
+  CHECK(read == 41);
+  support::collect_retired_tables();
+  CHECK(previous.expired());
+}
+#endif
+
+// Retirement may collect an older owning value. Its destructor runs with no
+// cache lock held, so it may ask the cache another question of its own.
+void a_retired_value_can_reenter_the_cache_when_destroyed() {
+  cursiv::SimpleCache<std::shared_ptr<int>> cache;
+  int released = 0, observed = 0;
+  (void)cache.get([&] {
+    return std::shared_ptr<int>(new int(41), [&](int* value) {
+      delete value;
+      ++released;
+      observed = *cache.get([] { return std::make_shared<int>(7); });
+    });
+  });
+  cache.clear();
+  for (int i = 0; i < 64; ++i) cache.clear();
+  support::collect_retired_tables();
+  CHECK(released == 1);
+  CHECK(observed == 7);
+}
+
+void a_workspace_value_uses_the_same_invalidation_lifecycle() {
+  World world;
+  cursiv::Document* const document = world.add("file:///a.ws", "datatype A\n");
+  cursiv::Document* const set[] = {document};
+  world.shared.documentBuilder->build(set);
+  cursiv::WorkspaceCache<int> announced(world.shared);
+  cursiv::WorkspaceCache<int> linked(world.shared,
+                                          cursiv::DocumentState::Linked);
+  int first = 0, second = 0;
+  const auto a = [&] { return ++first; };
+  const auto b = [&] { return ++second; };
+  CHECK(announced.get(a) == 1);
+  CHECK(linked.get(b) == 1);
+  world.shared.documentBuilder->build({});
+  CHECK(announced.get(a) == 2);
+  CHECK(linked.get(b) == 2);
+  const std::string_view changed[] = {"file:///a.ws"};
+  world.shared.documentBuilder->update(changed, {});
+  CHECK(announced.get(a) == 3);
+  CHECK(linked.get(b) == 3);
+  world.shared.documentBuilder->update({}, changed);
+  CHECK(announced.get(a) == 4);
+  CHECK(linked.get(b) == 4);
+}
+
+// Value-only caches do not ask their answer to be hashable. In particular,
+// constructing the default std::hash for this ordinary aggregate is disabled.
+struct UnhashedValue {
+  int number;
+};
+static_assert(!std::is_default_constructible_v<std::hash<UnhashedValue>>);
+
+void single_value_caches_do_not_require_hashable_values() {
+  World world;
+  cursiv::SimpleCache<UnhashedValue> simple;
+  cursiv::WorkspaceCache<UnhashedValue> workspace(world.shared);
+  const auto provider = [] { return UnhashedValue{42}; };
+  CHECK(simple.get(provider).number == 42);
+  simple.withValue(provider,
+                   [](const UnhashedValue& value) { CHECK(value.number == 42); });
+  CHECK(workspace.get(provider).number == 42);
+  workspace.withValue(
+      provider, [](const UnhashedValue& value) { CHECK(value.number == 42); });
+}
+
+// Each document owns one answer. Looking without a provider never computes,
+// and kNoDocument always computes an uncached local answer, including borrows.
+void a_document_value_is_partitioned_and_can_be_read_without_computing() {
+  World world;
+  cursiv::DocumentCache<UnhashedValue> cache(world.shared);
+  const cursiv::DocumentId a{1}, b{2};
+  int computed = 0;
+  const auto provider = [&] { return UnhashedValue{++computed}; };
+  CHECK(!cache.get(a).has_value());
+  CHECK(!cache.get(cursiv::kNoDocument).has_value());
+  CHECK(cache.get(a, provider).number == 1);
+  cache.withValue(a, provider, [](const UnhashedValue& value) {
+    CHECK(value.number == 1);
+  });
+  CHECK(cache.get(b, provider).number == 2);
+  CHECK(cache.get(a)->number == 1);
+  CHECK(computed == 2);
+  cache.clear(a);
+  CHECK(!cache.get(a).has_value());
+  CHECK(cache.get(b)->number == 2);
+  cache.withValue(a, provider, [](const UnhashedValue& value) {
+    CHECK(value.number == 3);
+  });
+  cache.clear();
+  CHECK(!cache.get(a).has_value());
+  CHECK(!cache.get(b).has_value());
+  CHECK(cache.get(a, provider).number == 4);
+  CHECK(cache.get(cursiv::kNoDocument, provider).number == 5);
+  CHECK(cache.get(cursiv::kNoDocument, provider).number == 6);
+  cache.withValue(cursiv::kNoDocument, provider,
+                  [&](const UnhashedValue& value) {
+                    CHECK(value.number == 7);
+                    CHECK(!cache.get(cursiv::kNoDocument).has_value());
+                  });
+  cache.clear(cursiv::kNoDocument);
+  CHECK(cache.get(a)->number == 4);
+  CHECK(computed == 7);
+
+  cursiv::DocumentCache<const int*> nullable(world.shared);
+  CHECK(nullable.get(a, []() -> const int* { return nullptr; }) == nullptr);
+  const auto found = nullable.get(a);
+  CHECK(found.has_value());
+  CHECK(*found == nullptr);
+
+  cursiv::DocumentCache<std::shared_ptr<int>> owned(world.shared);
+  (void)owned.get(a, [] { return std::make_shared<int>(42); });
+  owned.withValue(a, [] { return std::make_shared<int>(0); },
+                  [](const std::shared_ptr<int>& value) {
+                    CHECK(*value == 42);
+                    CHECK(value.use_count() == 1);
+                  });
+}
+
+// Changes clear an unstaged answer at the announcement, but a staged one
+// remains available until its chosen rung. Deletions clear either immediately;
+// the other document keeps its answer throughout.
+void document_values_follow_updates_rungs_and_deletions() {
+  for (const cursiv::DocumentState rung :
+       {cursiv::DocumentState::Linked,
+        cursiv::DocumentState::IndexedReferences}) {
+    World world;
+    cursiv::Document* const a = world.add("file:///a.ws", "datatype A\n");
+    cursiv::Document* const b = world.add("file:///b.ws", "datatype B\n");
+    cursiv::Document* const documents[] = {a, b};
+    world.shared.documentBuilder->build(documents);
+    const cursiv::DocumentId own = a->id, other = b->id;
+    cursiv::DocumentCache<int> plain(world.shared);
+    cursiv::DocumentCache<int> staged(world.shared, rung);
+    CHECK(plain.get(own, [] { return 11; }) == 11);
+    CHECK(plain.get(other, [] { return 12; }) == 12);
+    CHECK(staged.get(own, [] { return 21; }) == 21);
+    CHECK(staged.get(other, [] { return 22; }) == 22);
+
+    struct Observer : cursiv::DocumentPhaseListener {
+      cursiv::DocumentCache<int>& plain;
+      cursiv::DocumentCache<int>& staged;
+      const cursiv::DocumentId own;
+      const cursiv::DocumentState rung;
+      int before = 0, reached = 0;
+      Observer(cursiv::DocumentCache<int>& p, cursiv::DocumentCache<int>& s,
+               cursiv::DocumentId d, cursiv::DocumentState r)
+          : plain(p), staged(s), own(d), rung(r) {}
+      void onDocumentPhase(cursiv::Document& document,
+                           cursiv::DocumentState state,
+                           const cursiv::CancellationToken&) override {
+        if (document.id != own) return;
+        if (state == static_cast<cursiv::DocumentState>(
+                         static_cast<unsigned>(rung) - 1)) {
+          CHECK(!plain.get(own).has_value());
+          CHECK(staged.get(own) == 21);
+          ++before;
+        }
+        if (state == rung) {
+          CHECK(!staged.get(own).has_value());
+          ++reached;
+        }
+      }
+    } observer(plain, staged, own, rung);
+    world.shared.documentBuilder->addDocumentPhaseListener(observer);
+    const std::string_view changed[] = {"file:///a.ws"};
+    world.shared.documentBuilder->update(changed, {});
+    CHECK(observer.before == 1);
+    CHECK(observer.reached == 1);
+    CHECK(!plain.get(own).has_value());
+    CHECK(!staged.get(own).has_value());
+    CHECK(plain.get(other) == 12);
+    CHECK(staged.get(other) == 22);
+    CHECK(plain.get(own, [] { return 13; }) == 13);
+    CHECK(staged.get(own, [] { return 23; }) == 23);
+    world.shared.documentBuilder->update({}, changed);
+    world.shared.documentBuilder->removeDocumentPhaseListener(observer);
+    CHECK(!plain.get(own).has_value());
+    CHECK(!staged.get(own).has_value());
+    CHECK(plain.get(other) == 12);
+    CHECK(staged.get(other) == 22);
+    CHECK(observer.reached == 1);  // a deleted document crosses no rung
+  }
+}
+
+#if !defined(__wasi__) || defined(_REENTRANT)
+// One partition's clear must not reject another's pending provider. Clearing
+// the provider's own partition does reject its publication, while still
+// returning its computed value to that caller.
+void document_value_providers_are_invalidated_only_by_their_partition() {
+  World world;
+  cursiv::DocumentCache<int> cache(world.shared);
+  const cursiv::DocumentId a{1}, b{2};
+  CHECK(cache.get(b, [] { return 20; }) == 20);
+  std::barrier computing(2), resume(2);
+  for (int round = 1; round <= 2; ++round) {
+    cache.clear(a);
+    int previous = 0;
+    std::thread provider([&] {
+      previous = cache.get(a, [&] {
+        computing.arrive_and_wait();
+        resume.arrive_and_wait();
+        return round;
+      });
+    });
+    computing.arrive_and_wait();
+    cache.clear(round == 1 ? b : a);
+    resume.arrive_and_wait();
+    provider.join();
+    CHECK(previous == round);
+    if (round == 1) {
+      CHECK(cache.get(a) == 1);
+      CHECK(!cache.get(b).has_value());
+      CHECK(cache.get(b, [] { return 21; }) == 21);
+    } else {
+      CHECK(!cache.get(a).has_value());
+      CHECK(cache.get(b) == 21);
+    }
+  }
+}
+#endif
+
 void a_failed_subscription_leaves_no_listener() {
   struct ThrowingBuilder : cursiv::DefaultDocumentBuilder {
     using cursiv::DefaultDocumentBuilder::DefaultDocumentBuilder;
@@ -741,9 +1075,17 @@ void a_failed_subscription_leaves_no_listener() {
     cursiv::WorkspaceCache<int, int> cache(shared);
   }));
   CHECK(tracked->buildListeners == 0);
+  CHECK(support::throws<std::runtime_error>([&] {
+    cursiv::WorkspaceCache<int> cache(shared);
+  }));
+  CHECK(tracked->buildListeners == 0);
 
   CHECK(support::throws<std::runtime_error>([&] {
     cursiv::DocumentCache<int, int> cache(shared, cursiv::DocumentState::Linked);
+  }));
+  CHECK(tracked->documentListeners == 0);
+  CHECK(support::throws<std::runtime_error>([&] {
+    cursiv::DocumentCache<int> cache(shared, cursiv::DocumentState::Linked);
   }));
   CHECK(tracked->documentListeners == 0);
 }
@@ -1305,6 +1647,18 @@ void run() {
   an_evicted_provider_does_not_replace_the_new_generation();
 #endif
   a_failed_provider_can_be_retried();
+  a_value_cache_keeps_null_and_borrows_without_copying();
+  value_providers_and_consumers_can_reenter();
+  a_retired_value_can_reenter_the_cache_when_destroyed();
+  a_workspace_value_uses_the_same_invalidation_lifecycle();
+  single_value_caches_do_not_require_hashable_values();
+  a_document_value_is_partitioned_and_can_be_read_without_computing();
+  document_values_follow_updates_rungs_and_deletions();
+#if !defined(__wasi__) || defined(_REENTRANT)
+  document_value_providers_are_invalidated_only_by_their_partition();
+  value_providers_do_not_wait_and_clear_rejects_stale_publication();
+  a_value_consumer_keeps_its_answer_alive_during_clear();
+#endif
   a_failed_subscription_leaves_no_listener();
   a_stateless_workspace_cache_empties_on_any_update();
   a_staged_workspace_cache_empties_at_its_rung();

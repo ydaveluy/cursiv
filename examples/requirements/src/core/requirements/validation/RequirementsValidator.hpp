@@ -47,13 +47,10 @@ class RequirementsValidator final : public cursiv::DefaultCoreService,
   void onUpdate(std::span<const std::string_view> changed,
                 std::span<const std::string_view> deleted) override;
 
-  // One key: the answer is the whole workspace's, and every `.req` of a build
-  // asks it. `_owner` holds it and `_covered` hands it out bare: a hit on the
-  // owner would count a reference on one shared line, per requirement, from
-  // every worker. Both empty on the announcements that open a build, so no
-  // check holds the pointer across one.
-  cursiv::WorkspaceCache<int, std::shared_ptr<const Covered>> _owner;
-  cursiv::WorkspaceCache<int, const Covered*> _covered;
+  // Coverage is one workspace-wide answer. A consumer borrows the owning
+  // value under the cache's guard, so hits change no shared reference count
+  // and an update cannot release the answer while the check is using it.
+  cursiv::WorkspaceCache<std::shared_ptr<const Covered>> _covered;
   mutable std::mutex _coverageMutex;
 };
 

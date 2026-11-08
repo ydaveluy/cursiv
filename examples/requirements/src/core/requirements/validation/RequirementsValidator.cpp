@@ -35,7 +35,7 @@ std::string requirement_message(std::string_view prefix, std::string_view name,
 
 RequirementsValidator::RequirementsValidator(
     const cursiv::CoreServices& services)
-    : cursiv::DefaultCoreService(services), _owner(shared), _covered(shared) {
+    : cursiv::DefaultCoreService(services), _covered(shared) {
   if (shared.documentBuilder != nullptr)
     shared.documentBuilder->addDocumentUpdateListener(*this);
 }
@@ -97,13 +97,18 @@ RequirementsValidator::computeCoverage() const {
 void RequirementsValidator::checkRequirementIsCoveredByATest(
     const ast::Requirement& requirement,
     cursiv::ValidationAcceptor& accept) const {
-  const Covered* const covered = _covered.get(0, [&]() -> const Covered* {
-    // Only misses wait; this scan never calls back into the validator.
-    const std::lock_guard lock(_coverageMutex);
-    return _owner.get(0, [this] { return computeCoverage(); }).get();
-  });
-
-  if (covered != nullptr && !covered->contains(&requirement))
+  bool uncovered = false;
+  _covered.withValue(
+      [this] {
+        // Concurrent misses share the scan. The nested get rechecks after
+        // taking the mutex; neither cache provider holds the cache's lock.
+        const std::lock_guard lock(_coverageMutex);
+        return _covered.get([this] { return computeCoverage(); });
+      },
+      [&](const std::shared_ptr<const Covered>& covered) {
+        uncovered = covered != nullptr && !covered->contains(&requirement);
+      });
+  if (uncovered)
     accept.warning(requirement,
                    requirement_message("Requirement ", requirement.name,
                                        " not covered by a test."));

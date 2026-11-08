@@ -23,7 +23,13 @@ struct Document;
 // the announcement, ahead of the rebuild: an answer computed while the
 // workspace is half built stays until the next update, so a provider that
 // reads a document's state names the rung it needs.
-template <class K, class V, class Hash = std::hash<K>,
+//
+// Use WorkspaceCache<V> for a single workspace-wide answer, without a
+// key. get(provider) returns a copy; withValue(provider, consumer) lends a
+// const reference until the consumer returns, retaining it even if another
+// thread clears the cache. References, pointers or views into the cache's slot
+// must not outlive the consumer.
+template <class K, class V = void, class Hash = std::hash<K>,
           class KeyEqual = std::equal_to<K>>
 class WorkspaceCache : public SimpleCache<K, V, Hash, KeyEqual>,
                        private BuildPhaseListener,

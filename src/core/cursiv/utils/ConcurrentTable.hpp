@@ -21,6 +21,9 @@ namespace cursiv::detail {
 template <class K, class V, class Hash, class KeyEqual>
 class ConcurrentTable;
 
+template <class V>
+class ConcurrentValue;
+
 // Process-wide epoch-based reclamation, the tables' own: nothing else reads
 // it. A reader announces the epoch it entered in a slot of its own thread,
 // so reading writes nothing another thread touches; what a writer takes out
@@ -32,6 +35,8 @@ class ConcurrentTable;
 class TableEpochs {
   template <class, class, class, class>
   friend class ConcurrentTable;
+  template <class>
+  friend class ConcurrentValue;
 
   static constexpr std::uint64_t kIdle = ~std::uint64_t{0};
 
