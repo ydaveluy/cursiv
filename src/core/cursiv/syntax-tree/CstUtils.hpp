@@ -8,45 +8,58 @@
 #include "cursiv/syntax-tree/CstLeaf.hpp"
 #include "cursiv/syntax-tree/CstNodeView.hpp"
 
-// Where a member was written, and where a keyword was spelled, asked by name.
-// The tree names the grammar that stamped it and the records that opened a
-// node, so a question is asked of a node and nothing else -- which is what
-// lets a formatter and a diagnostic anchor be written once for the tree.
+// Where a member was written, and where a keyword was spelled, asked by name
+// of an AST node. The search runs over the records of its document's tree,
+// which names the grammar that stamped it and the records that opened a node
+// -- which is what lets a formatter and a diagnostic anchor be written once for
+// the tree.
+//
+// `document` is the node's own. Passing it spares the climb to the root, whose
+// parent it is: a caller asking about many nodes passes it. A node no document
+// holds answers nothing.
 
 namespace cursiv {
 
 struct AstNode;
+struct Document;
 
-// The direct children of `node` that the grammar says write `feature`, in
-// document order. A record that opens a node of its own ends the search down
-// that branch: a nested declaration answers for itself, never for its
-// parent. Empty for a tree that names no grammar.
+// The records of `node`'s own construction that the grammar says write
+// `feature`, in document order. A record that opens a node of its own ends the
+// search down that branch: a nested declaration answers for itself, never for
+// its parent. Empty for a tree that names no grammar.
 [[nodiscard]] std::vector<CstNodeView> find_nodes_for_feature(
-    const CstNodeView& node, std::string_view feature);
+    const AstNode& node, std::string_view feature,
+    const Document* document = nullptr);
 
 // The `index`-th in source order, clamped to the last one written -- a list
 // member is what the index is for. Nothing only when the member was never
 // written at all.
 [[nodiscard]] std::optional<CstNodeView> find_node_for_feature(
-    const CstNodeView& node, std::string_view feature, std::size_t index = 0);
+    const AstNode& node, std::string_view feature, std::size_t index = 0,
+    const Document* document = nullptr);
 
-// Every visible record under `node` whose grammar element spells `keyword`, in
-// any case where the grammar reads the literal in any case, or `node` alone
-// when its record is that keyword. Hidden records are skipped: a keyword inside
-// a comment was not spelled, and a record that opens a node of its own ends the
-// search down that branch -- a rule about "my closing brace" must never select
-// a child's, even a child that is nothing but its keyword.
+// Every visible record of `node`'s own construction whose grammar element
+// spells `keyword`, in any case where the grammar reads the literal in any
+// case, or `node`'s own record alone when it is that keyword. Hidden records
+// are skipped: a keyword inside a comment was not spelled, and a record that
+// opens a node of its own ends the search down that branch -- a rule about "my
+// closing brace" must never select a child's, even a child that is nothing but
+// its keyword.
 [[nodiscard]] std::vector<CstNodeView> find_nodes_for_keyword(
-    const CstNodeView& node, std::string_view keyword);
+    const AstNode& node, std::string_view keyword,
+    const Document* document = nullptr);
 
 [[nodiscard]] std::optional<CstNodeView> find_node_for_keyword(
-    const CstNodeView& node, std::string_view keyword, std::size_t index = 0);
+    const AstNode& node, std::string_view keyword, std::size_t index = 0,
+    const Document* document = nullptr);
 
-// Every hidden record under `node` whose rule is `ruleName` -- a comment class
-// is what this is for. Same rule down a branch: a record that opens a node of
-// its own answers for itself, so a container never selects a nested one's.
+// Every hidden record of `node`'s own construction whose rule is `ruleName` --
+// a comment class is what this is for. Same rule down a branch: a record that
+// opens a node of its own answers for itself, so a container never selects a
+// nested one's.
 [[nodiscard]] std::vector<CstNodeView> find_hidden_nodes(
-    const CstNodeView& node, std::string_view ruleName);
+    const AstNode& node, std::string_view ruleName,
+    const Document* document = nullptr);
 
 // The siblings between the branches containing the endpoints in their
 // nearest common composite, in document order.

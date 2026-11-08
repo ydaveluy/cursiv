@@ -3565,21 +3565,32 @@ const cursiv::Parser& engine() {
   return support::parser_of<&tdual::generated::Lr::create_parser>();
 }
 
-const cursiv::Parser& ll_engine() {
-  return support::parser_of<&tdual::generated::Ll::create_parser>();
+enum class Engine : std::uint8_t { lr, ll };
+
+// A document of the dual grammar, parsed by one engine: a lookup climbs from
+// a node to it for the tree it searches. Both engines build the same classes,
+// so one reflection serves.
+cursiv::Document* dual_document(support::World<>& world, std::string_view text,
+                                Engine engine) {
+  support::add_language<cursiv::CoreServices>(
+      world.shared, {"dual", {".dual"}, {}},
+      engine == Engine::ll ? tdual::generated::Ll::create_parser()
+                           : tdual::generated::Lr::create_parser(),
+      tdual::generated::Lr::create_ast_reflection());
+  return support::add(world.shared, "file:///lookup.dual", std::string(text));
 }
 
 struct Parsed {
-  cursiv::ParseResult r;
-  explicit Parsed(std::string_view text,
-                  const cursiv::Parser& parser = engine())
-      : r(parser.parse(text)) {
+  support::World<> world;
+  cursiv::Document* document;
+  cursiv::ParseResult& r;
+  explicit Parsed(std::string_view text, Engine engine = Engine::lr)
+      : document(dual_document(world, text, engine)), r(document->parseResult) {
     CHECK(r.accepted);
     CHECK(static_cast<bool>(r));
   }
-  [[nodiscard]] cursiv::CstNodeView root() const {
-    return {&r.cst(), r.cst().entry_root()};
-  }
+  [[nodiscard]] const cursiv::AstNode& root() const { return *r.value; }
+  [[nodiscard]] const Doc& doc() const { return *static_cast<Doc*>(r.value); }
 };
 
 // The record that wrote a member, by name; the walk stops at an owned child.
@@ -3589,31 +3600,27 @@ void a_feature_is_found_and_an_owned_child_is_a_boundary() {
   // root, the walk must not answer with a grandchild's member.
   CHECK(cursiv::find_nodes_for_feature(p.root(), "name").empty());
   // Asked of the Item itself, it answers.
-  const cursiv::CstNodeView item{
-      &p.r.cst(), p.r.value != nullptr
-                      ? static_cast<Doc*>(p.r.value)->items[0]->cstNodeId
-                      : cursiv::kNoNode};
   const std::vector<cursiv::CstNodeView> names =
-      cursiv::find_nodes_for_feature(item, "name");
+      cursiv::find_nodes_for_feature(*p.doc().items[0], "name");
   CHECK(names.size() == 1);
   if (!names.empty()) CHECK(names[0].text() == "aa");
 }
 
 // A node whose one record is its keyword answers for that keyword, and its
 // parent, for which that record is a boundary, does not.
-void a_keyword_node_answers_for_its_own_keyword(const cursiv::Parser& parser) {
-  const Parsed p("doc mark item aa", parser);
+void a_keyword_node_answers_for_its_own_keyword(Engine engine) {
+  const Parsed p("doc mark item aa", engine);
   const auto* doc = static_cast<Doc*>(p.r.value);
   CHECK(doc != nullptr && doc->mark.has_value());
   if (doc == nullptr || !doc->mark.has_value()) return;
-  const cursiv::CstNodeView mark{&p.r.cst(), (*doc->mark)->cstNodeId};
+  const cursiv::AstNode& mark = **doc->mark;
   const std::vector<cursiv::CstNodeView> own =
       cursiv::find_nodes_for_keyword(mark, "mark");
   CHECK(own.size() == 1);
-  if (!own.empty()) CHECK(own[0].id == mark.id);
+  if (!own.empty()) CHECK(own[0].id == mark.cstNodeId);
   const auto one = cursiv::find_node_for_keyword(mark, "mark");
   CHECK(one.has_value());
-  if (one) CHECK(one->id == mark.id);
+  if (one) CHECK(one->id == mark.cstNodeId);
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "mark").empty());
   CHECK(!cursiv::find_node_for_keyword(p.root(), "mark").has_value());
   CHECK(cursiv::find_nodes_for_keyword(p.root(), "item").size() == 1);
@@ -3645,13 +3652,13 @@ void a_fused_keyword_is_still_found() {
 
 // A word the grammar reads in either case is that keyword in any case, written
 // or asked; a word read exactly is asked exactly.
-void a_folded_keyword_is_found_in_any_case(const cursiv::Parser& parser) {
-  const Parsed cased("EvEnTs aa", parser);
+void a_folded_keyword_is_found_in_any_case(Engine engine) {
+  const Parsed cased("EvEnTs aa", engine);
   CHECK(cursiv::find_nodes_for_keyword(cased.root(), "events").size() == 1);
   const auto upper = cursiv::find_node_for_keyword(cased.root(), "EVENTS");
   CHECK(upper.has_value());
   if (upper) CHECK(upper->text() == "EvEnTs");
-  const Parsed exact("state aa", parser);
+  const Parsed exact("state aa", engine);
   CHECK(cursiv::find_nodes_for_keyword(exact.root(), "state").size() == 1);
   CHECK(cursiv::find_nodes_for_keyword(exact.root(), "STATE").empty());
 }
@@ -3732,7 +3739,7 @@ void find_hidden_nodes_and_leaf_and_owner_answer_a_caret() {
 // opened a node; a tape built by hand names neither and answers nothing.
 void the_tree_names_the_grammar_that_stamped_it() {
   const Parsed p("doc item aa");
-  CHECK(p.r.cst().grammar() == &engine().getGrammar());
+  CHECK(p.r.cst().grammar() == &p.document->language->parser->getGrammar());
   CHECK(p.r.cst().owned().data() == p.r.nodes().data());
   CHECK(p.r.cst().owned().size() == p.r.nodes().size());
 
@@ -3744,11 +3751,12 @@ void the_tree_names_the_grammar_that_stamped_it() {
     builder.exit(all, 0, cursiv::kNoElement);
   }
   CHECK(bare.grammar() == nullptr);
-  const cursiv::CstNodeView root{&bare, bare.entry_root()};
+  cursiv::AstNode root;
+  root.cstNodeId = bare.entry_root();
   CHECK(cursiv::find_nodes_for_feature(root, "name").empty());
-  CHECK(!cursiv::find_node_for_feature(root, "name").has_value());
+  CHECK(!cursiv::find_node_for_feature(root, "name"));
   CHECK(cursiv::find_nodes_for_keyword(root, "doc").empty());
-  CHECK(!cursiv::find_node_for_keyword(root, "doc").has_value());
+  CHECK(!cursiv::find_node_for_keyword(root, "doc"));
   CHECK(cursiv::find_hidden_nodes(root, "NOTE").empty());
 }
 
@@ -3762,18 +3770,17 @@ void the_map_follows_the_result_through_a_move() {
 
   cursiv::ParseResult moved = std::move(p.r);
   CHECK(!static_cast<bool>(p.r) && p.r.value == nullptr);
-  const cursiv::CstNodeView root{&moved.cst(), moved.cst().entry_root()};
+  CHECK(moved.cst().owned().data() == moved.nodes().data());
+
+  // Held by another document, it answers as it did. Its root's parent is still
+  // the first one, so the holder is named rather than climbed to.
+  Parsed other("doc item cc");
+  other.r = std::move(moved);
   const std::vector<cursiv::CstNodeView> after =
-      cursiv::find_nodes_for_keyword(root, "item");
+      cursiv::find_nodes_for_keyword(other.root(), "item", other.document);
   CHECK(after.size() == 2);
   if (before.size() == 2 && after.size() == 2)
     CHECK(before[0].id == after[0].id && before[1].id == after[1].id);
-  CHECK(moved.cst().owned().data() == moved.nodes().data());
-
-  Parsed other("doc item cc");
-  other.r = std::move(moved);
-  const cursiv::CstNodeView again{&other.r.cst(), other.r.cst().entry_root()};
-  CHECK(cursiv::find_nodes_for_keyword(again, "item").size() == 2);
   CHECK(other.r.cst().owned().data() == other.r.nodes().data());
 }
 
@@ -3798,7 +3805,7 @@ void index_zero_answers_what_the_list_answers() {
 
   // `name` is the member the Item's own record fills: the node answers for
   // itself, in both spellings.
-  const cursiv::CstNodeView item{&p.r.cst(), doc->items[1]->cstNodeId};
+  const cursiv::AstNode& item = *doc->items[1];
   const std::vector<cursiv::CstNodeView> names =
       cursiv::find_nodes_for_feature(item, "name");
   const auto name = cursiv::find_node_for_feature(item, "name");
@@ -3827,7 +3834,7 @@ void every_index_clamps_to_the_list() {
   }
   const auto* doc = static_cast<Doc*>(p.r.value);
   if (doc == nullptr || doc->items.empty()) return;
-  const cursiv::CstNodeView item{&p.r.cst(), doc->items[0]->cstNodeId};
+  const cursiv::AstNode& item = *doc->items[0];
   const std::vector<cursiv::CstNodeView> names =
       cursiv::find_nodes_for_feature(item, "name");
   CHECK(names.size() == 1);
@@ -3836,8 +3843,8 @@ void every_index_clamps_to_the_list() {
   if (past && !names.empty()) CHECK(past->id == names.front().id);
 }
 
-// A map deep enough for a bisection to differ from a cursor: every answer
-// equals the same walk with a binary search for the boundary.
+// A tree with a long member list: every answer equals the same walk that asks
+// the owned nodes' records, by binary search, where a construction ends.
 void the_cursor_answers_what_a_search_answers() {
   std::string text = "doc mark";
   for (int i = 0; i < 200; ++i) text += " item aa";
@@ -3900,14 +3907,15 @@ void the_cursor_answers_what_a_search_answers() {
       if (got[i].id != want[i]) return false;
     return true;
   };
-  for (const cursiv::NodeId root :
-       {cst.entry_root(), (*doc->mark)->cstNodeId, doc->items[0]->cstNodeId,
-        doc->items[100]->cstNodeId, doc->items[199]->cstNodeId}) {
-    const cursiv::CstNodeView node{&cst, root};
+  for (const cursiv::AstNode* const node :
+       std::initializer_list<const cursiv::AstNode*>{
+           p.r.value, *doc->mark, doc->items[0], doc->items[100],
+           doc->items[199]}) {
+    const cursiv::NodeId root = node->cstNodeId;
     for (const std::string_view word : {"item", "mark"})
-      CHECK(same(cursiv::find_nodes_for_keyword(node, word),
+      CHECK(same(cursiv::find_nodes_for_keyword(*node, word),
                  keywordAt(root, word)));
-    CHECK(same(cursiv::find_nodes_for_feature(node, "name"),
+    CHECK(same(cursiv::find_nodes_for_feature(*node, "name"),
                withOwn(root, reference(root, name, true))));
   }
 }
@@ -3923,8 +3931,7 @@ void a_data_rule_that_spells_a_keyword_is_not_one() {
   CHECK(doc != nullptr && doc->items.size() == 1);
   if (doc != nullptr && doc->items.size() == 1) {
     CHECK(doc->items[0]->name == "item");
-    const cursiv::CstNodeView item{&p.r.cst(), doc->items[0]->cstNodeId};
-    CHECK(cursiv::find_nodes_for_keyword(item, "item").empty());
+    CHECK(cursiv::find_nodes_for_keyword(*doc->items[0], "item").empty());
   }
 }
 
@@ -3944,7 +3951,14 @@ void deep_concrete_regions_need_no_recursive_stack() {
   for (cursiv::NodeCount depth = 0; depth < 100000; ++depth)
     builder.stream().close(0, 6, cst.size() + 1, 0);
   builder.bind_model(engine().getGrammar(), {});
-  const auto found = cursiv::find_hidden_nodes({&cst, cst.size() - 1}, "NOTE");
+  // A document holds the hand-built tree, which owns no node: nothing stops
+  // the walk.
+  cursiv::Document holder(
+      cursiv::TextDocument::create("file:///deep", "deep", 0, "# note"));
+  holder.parseResult = cursiv::ParseResult(std::move(cst));
+  cursiv::AstNode root;
+  root.cstNodeId = holder.parseResult.cst().size() - 1;
+  const auto found = cursiv::find_hidden_nodes(root, "NOTE", &holder);
   CHECK(found.size() == 1 && found.front().id == 0);
   CHECK(found.front().text() == "# note");
 }
@@ -3963,10 +3977,10 @@ void run() {
   every_index_clamps_to_the_list();
   the_cursor_answers_what_a_search_answers();
   a_data_rule_that_spells_a_keyword_is_not_one();
-  a_keyword_node_answers_for_its_own_keyword(engine());
-  a_keyword_node_answers_for_its_own_keyword(ll_engine());
-  a_folded_keyword_is_found_in_any_case(engine());
-  a_folded_keyword_is_found_in_any_case(ll_engine());
+  a_keyword_node_answers_for_its_own_keyword(Engine::lr);
+  a_keyword_node_answers_for_its_own_keyword(Engine::ll);
+  a_folded_keyword_is_found_in_any_case(Engine::lr);
+  a_folded_keyword_is_found_in_any_case(Engine::ll);
 }
 
 }  // namespace cst_utils

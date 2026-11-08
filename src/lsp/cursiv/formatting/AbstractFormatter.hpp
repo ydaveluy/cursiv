@@ -36,16 +36,6 @@
 
 namespace cursiv {
 
-// Every visible descendant, not just a direct child: a `{` written inside a
-// group is not a child of the construction that owns it.
-[[nodiscard]] std::vector<NodeId> keyword_nodes(const Cst& cst, NodeId root,
-                                                std::string_view keyword);
-
-// Every hidden record of a construction, in document order. A record that
-// opens a node of its own answers for itself, as it does for a keyword.
-[[nodiscard]] std::vector<NodeId> hidden_nodes(const Cst& cst, NodeId root,
-                                               std::string_view ruleName);
-
 // Which records write this member, as a consteval bitset over the element
 // table. Level-invariant by construction: a collapsed grammar relabels the
 // payload's record, and the field column travels with it.
@@ -55,9 +45,12 @@ using feature_owner = typename cursiv::detail::field_tag<Ptr>::owner;
 template <class NodeT>
 class NodeFormatter {
  public:
-  NodeFormatter(const Cst* cst, NodeId root,
+  NodeFormatter(const Document& document, const AstNode* node,
                 FormattingCollector* collector) noexcept
-      : _cst(cst), _root(root), _collector(collector) {}
+      : _cst(&document.parseResult.cst()),
+        _document(&document),
+        _node(node),
+        _collector(collector) {}
 
   // The record a node was built from -- the construction's own, or any node
   // already in hand.
@@ -82,14 +75,15 @@ class NodeFormatter {
   }
 
   // The `index`-th record writing `Feature`, clamped to the last one written.
+  // By name, through the reified grammar: the same door a member-anchored
+  // diagnostic uses, so the two can never disagree about where a member was
+  // written.
   template <auto Feature>
     requires std::derived_from<NodeT, feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
-    if (_cst == nullptr || _root == kNoNode)
-      return FormattingRegion(_cst, {}, _collector);
+    if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     const std::optional<CstNodeView> at = find_node_for_feature(
-        CstNodeView{_cst, _root}, cursiv::detail::member_identifier<Feature>(),
-        index);
+        *_node, cursiv::detail::member_identifier<Feature>(), index, _document);
     if (!at.has_value()) return FormattingRegion(_cst, {}, _collector);
     return FormattingRegion(at->id, _cst, _collector);
   }
@@ -101,26 +95,34 @@ class NodeFormatter {
              (std::derived_from<NodeT, feature_owner<Features>> && ...))
   [[nodiscard]] FormattingRegion properties() const {
     std::vector<NodeId> found;
-    (appendFeatureNodes<Features>(found), ...);
+    if (searchable())
+      (appendIds(found,
+                 find_nodes_for_feature(
+                     *_node, cursiv::detail::member_identifier<Features>(),
+                     _document)),
+       ...);
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
   // The `index`-th occurrence of `keyword` among this construction's own
-  // literals. An index past the end selects nothing -- a rule about a word that
-  // is not there must not silently land on another one.
+  // literals: every visible descendant, not just a direct child -- a `{`
+  // written inside a group is not a child of the construction that owns it.
+  // An index past the end selects nothing -- a rule about a word that is not
+  // there must not silently land on another one.
   [[nodiscard]] FormattingRegion keyword(std::string_view keyword,
                                          std::size_t index = 0) const {
-    if (_cst == nullptr) return FormattingRegion(_cst, {}, _collector);
+    if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     // The first one is found without listing the others.
     if (index == 0) {
       const std::optional<CstNodeView> first =
-          find_node_for_keyword(CstNodeView{_cst, _root}, keyword);
+          find_node_for_keyword(*_node, keyword, 0, _document);
       if (!first) return FormattingRegion(_cst, {}, _collector);
       return FormattingRegion(first->id, _cst, _collector);
     }
-    std::vector<NodeId> found = keyword_nodes(*_cst, _root, keyword);
+    const std::vector<CstNodeView> found =
+        find_nodes_for_keyword(*_node, keyword, _document);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(found[index], _cst, _collector);
+    return FormattingRegion(found[index].id, _cst, _collector);
   }
 
   template <class... Keywords>
@@ -128,27 +130,33 @@ class NodeFormatter {
              (std::convertible_to<Keywords, std::string_view> && ...))
   [[nodiscard]] FormattingRegion keywords(Keywords&&... keywords) const {
     std::vector<NodeId> found;
-    if (_cst != nullptr)
-      (appendKeywordNodes(found,
-                          std::string_view(std::forward<Keywords>(keywords))),
+    if (searchable())
+      (appendIds(found,
+                 find_nodes_for_keyword(
+                     *_node, std::string_view(std::forward<Keywords>(keywords)),
+                     _document)),
        ...);
     return FormattingRegion(_cst, std::move(found), _collector);
   }
 
   // The hidden records this construction encloses, by the terminal rule that
-  // produced them -- `hidden("SL_COMMENT")` is the grammar's own name.
+  // produced them -- `hidden("SL_COMMENT")` is the grammar's own name -- in
+  // document order. A record that opens a node of its own answers for itself,
+  // as it does for a keyword.
   [[nodiscard]] FormattingRegion hidden(std::string_view ruleName,
                                         std::size_t index = 0) const {
-    if (_cst == nullptr) return FormattingRegion(_cst, {}, _collector);
-    std::vector<NodeId> found = hidden_nodes(*_cst, _root, ruleName);
+    if (!searchable()) return FormattingRegion(_cst, {}, _collector);
+    const std::vector<CstNodeView> found =
+        find_hidden_nodes(*_node, ruleName, _document);
     if (index >= found.size()) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(found[index], _cst, _collector);
+    return FormattingRegion(found[index].id, _cst, _collector);
   }
 
   [[nodiscard]] FormattingRegion hiddens(std::string_view ruleName) const {
-    if (_cst == nullptr) return FormattingRegion(_cst, {}, _collector);
-    return FormattingRegion(_cst, hidden_nodes(*_cst, _root, ruleName),
-                            _collector);
+    std::vector<NodeId> found;
+    if (searchable())
+      appendIds(found, find_hidden_nodes(*_node, ruleName, _document));
+    return FormattingRegion(_cst, std::move(found), _collector);
   }
 
   [[nodiscard]] FormattingRegion cst(std::span<const NodeId> nodes) const {
@@ -169,46 +177,38 @@ class NodeFormatter {
   }
 
  private:
-  // By name, through the reified grammar: the same door a member-anchored
-  // diagnostic uses, so the two can never disagree about where a member was
-  // written.
-  template <auto Feature>
-  void appendFeatureNodes(std::vector<NodeId>& out) const {
-    if (_cst == nullptr || _root == kNoNode) return;
-    for (const CstNodeView& at :
-         find_nodes_for_feature(CstNodeView{_cst, _root},
-                                cursiv::detail::member_identifier<Feature>()))
-      out.push_back(at.id);
-  }
+  // A node to search from: a builder may be handed none.
+  [[nodiscard]] bool searchable() const noexcept { return _node != nullptr; }
 
-  void appendKeywordNodes(std::vector<NodeId>& out,
-                          std::string_view keyword) const {
-    for (const CstNodeView& at :
-         find_nodes_for_keyword(CstNodeView{_cst, _root}, keyword))
-      out.push_back(at.id);
+  // A search's records, as the ids a region holds, after what `out` has.
+  static void appendIds(std::vector<NodeId>& out,
+                        const std::vector<CstNodeView>& found) {
+    for (const CstNodeView& at : found) out.push_back(at.id);
   }
 
   const Cst* _cst;
-  NodeId _root;
+  // The node's own, handed to every search so none climbs to it.
+  const Document* _document;
+  const AstNode* _node;
   FormattingCollector* _collector;
 };
 
 // The one argument a rule method receives besides its node.
 class FormattingBuilder {
  public:
-  FormattingBuilder(const Cst& cst, FormattingCollector& collector) noexcept
-      : _cst(&cst), _collector(&collector) {}
+  FormattingBuilder(const Document& document,
+                    FormattingCollector& collector) noexcept
+      : _document(&document), _collector(&collector) {}
 
   template <class NodeT>
     requires std::derived_from<std::remove_cv_t<NodeT>, AstNode>
   [[nodiscard]] NodeFormatter<std::remove_cv_t<NodeT>> getNodeFormatter(
       const NodeT* node) const {
-    return NodeFormatter<std::remove_cv_t<NodeT>>(
-        _cst, node == nullptr ? kNoNode : node->cstNodeId, _collector);
+    return NodeFormatter<std::remove_cv_t<NodeT>>(*_document, node, _collector);
   }
 
  private:
-  const Cst* _cst;
+  const Document* _document;
   FormattingCollector* _collector;
 };
 

@@ -13,8 +13,6 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
-#include "cursiv/syntax-tree/CstNodeView.hpp"
-#include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/utils/Cancellation.hpp"
@@ -23,24 +21,6 @@
 #include "cursiv/formatting/FormattingEngine.hpp"
 
 namespace cursiv {
-
-std::vector<NodeId> keyword_nodes(const Cst& cst, NodeId root,
-                                  std::string_view keyword) {
-  std::vector<NodeId> matches;
-  for (const CstNodeView& at :
-       find_nodes_for_keyword(CstNodeView{&cst, root}, keyword))
-    matches.push_back(at.id);
-  return matches;
-}
-
-std::vector<NodeId> hidden_nodes(const Cst& cst, NodeId root,
-                                 std::string_view ruleName) {
-  std::vector<NodeId> matches;
-  for (const CstNodeView& at :
-       find_hidden_nodes(CstNodeView{&cst, root}, ruleName))
-    matches.push_back(at.id);
-  return matches;
-}
 
 std::vector<lsp::TextEdit> AbstractFormatter::formatDocument(
     const Document& document, const lsp::DocumentFormattingParams& params,
@@ -111,7 +91,7 @@ std::vector<lsp::TextEdit> AbstractFormatter::doDocumentFormat(
   FormattingActions actions(cst.size());
   const AstReflection& reflection = *_core.astReflection;
   if (cst.grammar() == nullptr) return {};
-  FormattingBuilder builder(cst, actions);
+  FormattingBuilder builder(document, actions);
 
   // Root first, each node before its descendants: on a boundary two
   // constructions both claim, the inner one's rule is registered last and

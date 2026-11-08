@@ -82,8 +82,14 @@ std::optional<TextRange> ValidationAcceptor::keywordSpan(
 std::optional<TextRange> ValidationAcceptor::anchorSpan(
     const AstNode& node, std::string_view name, std::size_t index,
     bool keyword) const noexcept {
-  const Cst* const cst = cstOf(node);
-  if (cst == nullptr) return std::nullopt;
+  if (node.cstNodeId == kNoNode) return std::nullopt;
+  // The node's own document, or the one validated for a node no document
+  // holds yet; climbed once, and handed to the search.
+  const Document* const home = node.getDocument();
+  const Document* const document =
+      home != nullptr ? home : (_cst != nullptr ? _document : nullptr);
+  if (document == nullptr) return std::nullopt;
+  const Cst* const cst = &document->parseResult.cst();
   if (_anchorCst != cst || _anchorNode != node.cstNodeId) {
     _anchors.clear();
     _anchorCst = cst;
@@ -93,17 +99,17 @@ std::optional<TextRange> ValidationAcceptor::anchorSpan(
     return anchor.keyword == keyword && anchor.name == name;
   });
   if (found == _anchors.end()) {
-    const CstNodeView view{cst, node.cstNodeId};
     if (index == 0) {
-      const auto at = keyword ? find_node_for_keyword(view, name, index)
-                              : find_node_for_feature(view, name, index);
+      const auto at = keyword
+                          ? find_node_for_keyword(node, name, index, document)
+                          : find_node_for_feature(node, name, index, document);
       if (at.has_value()) return TextRange{at->begin(), at->end()};
     } else {
       // A list that cannot be kept is no anchor: the check goes on with the
       // range it has rather than ending the process.
       try {
-        auto nodes = keyword ? find_nodes_for_keyword(view, name)
-                             : find_nodes_for_feature(view, name);
+        auto nodes = keyword ? find_nodes_for_keyword(node, name, document)
+                             : find_nodes_for_feature(node, name, document);
         _anchors.emplace_back(std::string(name), keyword, std::move(nodes));
       } catch (...) {
         return std::nullopt;

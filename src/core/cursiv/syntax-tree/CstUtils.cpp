@@ -18,6 +18,7 @@
 #include "cursiv/text/scalar_at.hpp"
 #include "cursiv/text/word_scalar.hpp"
 #include "cursiv/utils/CaseFold.hpp"
+#include "cursiv/workspace/Document.hpp"
 
 namespace cursiv {
 
@@ -143,10 +144,19 @@ class SpellsKeyword {
   mutable std::optional<bool> _folds;
 };
 
-}  // namespace
+// The record `node` was built from, in its document's tree: where a search
+// starts. Nothing for a node no document holds, or one whose record that tree
+// does not have.
+CstNodeView record_of(const AstNode& node, const Document* document) {
+  if (document == nullptr) document = node.getDocument();
+  if (document == nullptr) return {};
+  const Cst& cst = document->parseResult.cst();
+  if (node.cstNodeId >= cst.size()) return {};
+  return CstNodeView{&cst, node.cstNodeId};
+}
 
-std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView& node,
-                                                std::string_view feature) {
+std::vector<CstNodeView> writers_of(const CstNodeView& node,
+                                    std::string_view feature) {
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || feature.empty()) return {};
   const Cst& cst = *node.cst;
@@ -159,10 +169,10 @@ std::vector<CstNodeView> find_nodes_for_feature(const CstNodeView& node,
   return found;
 }
 
-std::optional<CstNodeView> find_node_for_feature(const CstNodeView& node,
-                                                 std::string_view feature,
-                                                 std::size_t index) {
-  if (index != 0) return clamped(find_nodes_for_feature(node, feature), index);
+std::optional<CstNodeView> writer_of(const CstNodeView& node,
+                                     std::string_view feature,
+                                     std::size_t index) {
+  if (index != 0) return clamped(writers_of(node, feature), index);
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || feature.empty()) return std::nullopt;
   const Cst& cst = *node.cst;
@@ -171,8 +181,8 @@ std::optional<CstNodeView> find_node_for_feature(const CstNodeView& node,
       node, [&](NodeId id) { return grammar->recordWrites(cst[id], feature); });
 }
 
-std::vector<CstNodeView> find_nodes_for_keyword(const CstNodeView& node,
-                                                std::string_view keyword) {
+std::vector<CstNodeView> spellings_of(const CstNodeView& node,
+                                      std::string_view keyword) {
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || keyword.empty()) return {};
   const SpellsKeyword spells(*node.cst, *grammar, keyword);
@@ -180,10 +190,10 @@ std::vector<CstNodeView> find_nodes_for_keyword(const CstNodeView& node,
   return collect<false>(node, spells);
 }
 
-std::optional<CstNodeView> find_node_for_keyword(const CstNodeView& node,
-                                                 std::string_view keyword,
-                                                 std::size_t index) {
-  if (index != 0) return clamped(find_nodes_for_keyword(node, keyword), index);
+std::optional<CstNodeView> spelling_of(const CstNodeView& node,
+                                       std::string_view keyword,
+                                       std::size_t index) {
+  if (index != 0) return clamped(spellings_of(node, keyword), index);
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || keyword.empty()) return std::nullopt;
   const SpellsKeyword spells(*node.cst, *grammar, keyword);
@@ -191,8 +201,8 @@ std::optional<CstNodeView> find_node_for_keyword(const CstNodeView& node,
   return first_of<false>(node, spells);
 }
 
-std::vector<CstNodeView> find_hidden_nodes(const CstNodeView& node,
-                                           std::string_view ruleName) {
+std::vector<CstNodeView> hidden_of(const CstNodeView& node,
+                                   std::string_view ruleName) {
   const Grammar* const grammar = grammar_of(node);
   if (grammar == nullptr || ruleName.empty()) return {};
   const Cst& cst = *node.cst;
@@ -200,6 +210,40 @@ std::vector<CstNodeView> find_hidden_nodes(const CstNodeView& node,
     const CstNode& n = cst[id];
     return n.hidden != 0 && grammar->recordRule(n) == ruleName;
   });
+}
+
+}  // namespace
+
+std::vector<CstNodeView> find_nodes_for_feature(const AstNode& node,
+                                                std::string_view feature,
+                                                const Document* document) {
+  return writers_of(record_of(node, document), feature);
+}
+
+std::optional<CstNodeView> find_node_for_feature(const AstNode& node,
+                                                 std::string_view feature,
+                                                 std::size_t index,
+                                                 const Document* document) {
+  return writer_of(record_of(node, document), feature, index);
+}
+
+std::vector<CstNodeView> find_nodes_for_keyword(const AstNode& node,
+                                                std::string_view keyword,
+                                                const Document* document) {
+  return spellings_of(record_of(node, document), keyword);
+}
+
+std::optional<CstNodeView> find_node_for_keyword(const AstNode& node,
+                                                 std::string_view keyword,
+                                                 std::size_t index,
+                                                 const Document* document) {
+  return spelling_of(record_of(node, document), keyword, index);
+}
+
+std::vector<CstNodeView> find_hidden_nodes(const AstNode& node,
+                                           std::string_view ruleName,
+                                           const Document* document) {
+  return hidden_of(record_of(node, document), ruleName);
 }
 
 CstLeaf find_leaf_before_offset(const Cst& cst, TextOffset offset) {

@@ -28,10 +28,7 @@ std::optional<CstNodeView> DefaultNameProvider::getNameNode(
   // the span alone cannot say whose name a member is: a class that declares
   // none has no name node, whatever the record below it wrote.
   if (!is_named(node)) return std::nullopt;
-  if (document == nullptr) document = node.getDocument();
-  if (document == nullptr || node.cstNodeId == kNoNode) return std::nullopt;
-  return find_node_for_feature(
-      CstNodeView{&document->parseResult.cst(), node.cstNodeId}, kNameFeature);
+  return find_node_for_feature(node, kNameFeature, 0, document);
 }
 
 }  // namespace cursiv

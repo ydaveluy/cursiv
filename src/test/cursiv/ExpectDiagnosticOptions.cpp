@@ -44,8 +44,7 @@ std::optional<TextRange> anchorOf(const ValidationResult& result,
     return TextRange{own.begin, own.end};
   }
   const std::optional<CstNodeView> at = find_node_for_feature(
-      CstNodeView{&cst, node.cstNodeId}, *options.property,
-      options.propertyIndex.value_or(0));
+      node, *options.property, options.propertyIndex.value_or(0), &document);
   if (!at.has_value()) return std::nullopt;
   return TextRange{at->begin(), at->end()};
 }
