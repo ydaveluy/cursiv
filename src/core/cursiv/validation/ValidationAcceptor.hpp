@@ -52,6 +52,19 @@ class ValidationDiagnosticBuilderBase {
                                   DiagnosticSeverity severity,
                                   std::string_view message, TextRange span);
 
+  // An owned message can hand its buffer to the diagnostic. Constraining the
+  // overload to rvalue strings keeps borrowed text and brace calls unchanged.
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilderBase(const ValidationAcceptor& acceptor,
+                                  DiagnosticSeverity severity,
+                                  Message&& message, const AstNode& node);
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilderBase(const ValidationAcceptor& acceptor,
+                                  DiagnosticSeverity severity,
+                                  Message&& message, TextRange span);
+
   ValidationDiagnosticBuilderBase(const ValidationDiagnosticBuilderBase&) =
       delete;
   ValidationDiagnosticBuilderBase& operator=(
@@ -63,14 +76,7 @@ class ValidationDiagnosticBuilderBase {
       ValidationDiagnosticBuilderBase&& other) noexcept
       : _acceptor(other._acceptor),
         _node(other._node),
-        _severity(other._severity),
-        _message(std::move(other._message)),
-        _code(std::move(other._code)),
-        _codeDescription(std::move(other._codeDescription)),
-        _tags(std::move(other._tags)),
-        _relatedInformation(std::move(other._relatedInformation)),
-        _data(std::move(other._data)),
-        _range(other._range),
+        _diagnostic(std::move(other._diagnostic)),
         _pending(other._pending) {
     other._acceptor = nullptr;
     other._pending = false;
@@ -81,14 +87,7 @@ class ValidationDiagnosticBuilderBase {
     emitNoexcept();
     _acceptor = other._acceptor;
     _node = other._node;
-    _severity = other._severity;
-    _message = std::move(other._message);
-    _code = std::move(other._code);
-    _codeDescription = std::move(other._codeDescription);
-    _tags = std::move(other._tags);
-    _relatedInformation = std::move(other._relatedInformation);
-    _data = std::move(other._data);
-    _range = other._range;
+    _diagnostic = std::move(other._diagnostic);
     _pending = other._pending;
     other._acceptor = nullptr;
     other._pending = false;
@@ -101,26 +100,26 @@ class ValidationDiagnosticBuilderBase {
 
   // Absolute document offsets, the pair every diagnostic is published as.
   Derived& range(TextRange span) noexcept {
-    _range = span;
+    _diagnostic.range = span;
     return derived();
   }
 
   // LSP's `integer | string` code, with an optional human link beside it.
   Derived& code(std::string_view value,
                 std::optional<std::string_view> description = std::nullopt) {
-    _code = DiagnosticCode(value);
+    _diagnostic.code = DiagnosticCode(value);
     setCodeDescription(description);
     return derived();
   }
   Derived& code(std::int64_t value,
                 std::optional<std::string_view> description = std::nullopt) {
-    _code = DiagnosticCode(value);
+    _diagnostic.code = DiagnosticCode(value);
     setCodeDescription(description);
     return derived();
   }
 
   Derived& tags(std::initializer_list<DiagnosticTag> tags) {
-    _tags.assign(tags.begin(), tags.end());
+    _diagnostic.tags.assign(tags.begin(), tags.end());
     return derived();
   }
 
@@ -128,28 +127,28 @@ class ValidationDiagnosticBuilderBase {
   // rows one by one or in bulk. `uri` empty means this same document.
   Derived& relatedInformation(TextRange span, std::string_view message,
                               std::string_view uri = {}) {
-    _relatedInformation.emplace_back(std::string(uri), std::string(message),
-                                     span);
+    _diagnostic.relatedInformation.emplace_back(
+        std::string(uri), std::string(message), span);
     return derived();
   }
   Derived& relatedInformation(const AstNode& node, std::string_view message,
                               std::string_view uri = {});
   Derived& relatedInformation(
       std::initializer_list<DiagnosticRelatedInformation> entries) {
-    _relatedInformation.insert(_relatedInformation.end(), entries.begin(),
-                               entries.end());
+    _diagnostic.relatedInformation.insert(_diagnostic.relatedInformation.end(),
+                                          entries.begin(), entries.end());
     return derived();
   }
   Derived& relatedInformation(
       std::span<const DiagnosticRelatedInformation> entries) {
-    _relatedInformation.insert(_relatedInformation.end(), entries.begin(),
-                               entries.end());
+    _diagnostic.relatedInformation.insert(_diagnostic.relatedInformation.end(),
+                                          entries.begin(), entries.end());
     return derived();
   }
 
   // The machine payload round-tripped into `codeAction`.
   Derived& data(JsonValue value) {
-    _data = std::move(value);
+    _diagnostic.data = std::move(value);
     return derived();
   }
 
@@ -163,16 +162,16 @@ class ValidationDiagnosticBuilderBase {
   [[nodiscard]] const ValidationAcceptor* acceptor() const noexcept {
     return _acceptor;
   }
-  void setRange(TextRange span) noexcept { _range = span; }
+  void setRange(TextRange span) noexcept { _diagnostic.range = span; }
 
  private:
   Derived& derived() noexcept { return static_cast<Derived&>(*this); }
 
   void setCodeDescription(std::optional<std::string_view> description) {
     if (description.has_value())
-      _codeDescription = std::string(*description);
+      _diagnostic.codeDescription = std::string(*description);
     else
-      _codeDescription = std::nullopt;
+      _diagnostic.codeDescription = std::nullopt;
   }
 
   void emit();
@@ -186,14 +185,8 @@ class ValidationDiagnosticBuilderBase {
 
   const ValidationAcceptor* _acceptor = nullptr;
   const AstNode* _node = nullptr;
-  DiagnosticSeverity _severity = DiagnosticSeverity::Error;
-  std::string _message;
-  std::optional<DiagnosticCode> _code;
-  std::optional<std::string> _codeDescription;
-  std::vector<DiagnosticTag> _tags;
-  std::vector<DiagnosticRelatedInformation> _relatedInformation;
-  std::optional<JsonValue> _data;
-  TextRange _range{};
+  // Build the published value in place, so emission only hands it to the sink.
+  Diagnostic _diagnostic;
   bool _pending = true;
 };
 }  // namespace detail
@@ -269,6 +262,36 @@ class ValidationAcceptor {
     return make(node, DiagnosticSeverity::Hint, message, code);
   }
 
+  // Computed messages transfer ownership; borrowed messages keep the arms above.
+  template <class Node, class Message>
+    requires std::derived_from<Node, AstNode> &&
+             std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> error(const Node& node,
+      Message&& message, std::string_view code = {}) const {
+    return make(node, DiagnosticSeverity::Error, std::move(message), code);
+  }
+  template <class Node, class Message>
+    requires std::derived_from<Node, AstNode> &&
+             std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> warning(const Node& node,
+      Message&& message, std::string_view code = {}) const {
+    return make(node, DiagnosticSeverity::Warning, std::move(message), code);
+  }
+  template <class Node, class Message>
+    requires std::derived_from<Node, AstNode> &&
+             std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> information(const Node& node,
+      Message&& message, std::string_view code = {}) const {
+    return make(node, DiagnosticSeverity::Information, std::move(message), code);
+  }
+  template <class Node, class Message>
+    requires std::derived_from<Node, AstNode> &&
+             std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> hint(const Node& node,
+      Message&& message, std::string_view code = {}) const {
+    return make(node, DiagnosticSeverity::Hint, std::move(message), code);
+  }
+
   // ...and over a span the check computed itself. No node, so no
   // `.property`/`.keyword`; everything else chains.
   ValidationDiagnosticBuilder<AstNode> error(TextRange span,
@@ -290,6 +313,31 @@ class ValidationAcceptor {
                                             std::string_view message,
                                             std::string_view code = {}) const {
     return make(span, DiagnosticSeverity::Hint, message, code);
+  }
+
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> error(TextRange span,
+      Message&& message, std::string_view code = {}) const {
+    return make(span, DiagnosticSeverity::Error, std::move(message), code);
+  }
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> warning(TextRange span,
+      Message&& message, std::string_view code = {}) const {
+    return make(span, DiagnosticSeverity::Warning, std::move(message), code);
+  }
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> information(TextRange span,
+      Message&& message, std::string_view code = {}) const {
+    return make(span, DiagnosticSeverity::Information, std::move(message), code);
+  }
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> hint(TextRange span,
+      Message&& message, std::string_view code = {}) const {
+    return make(span, DiagnosticSeverity::Hint, std::move(message), code);
   }
 
   // The immediate arms: what the runtime itself calls, and the funnel every
@@ -351,6 +399,29 @@ class ValidationAcceptor {
     return builder;
   }
 
+  template <class Node, class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<Node> make(const Node& node,
+                                         DiagnosticSeverity severity,
+                                         Message&& message,
+                                         std::string_view code) const {
+    ValidationDiagnosticBuilder<Node> builder(*this, severity,
+                                               std::move(message), node);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+  template <class Message>
+    requires std::same_as<Message, std::string>
+  ValidationDiagnosticBuilder<AstNode> make(TextRange span,
+                                            DiagnosticSeverity severity,
+                                            Message&& message,
+                                            std::string_view code) const {
+    ValidationDiagnosticBuilder<AstNode> builder(*this, severity,
+                                                  std::move(message), span);
+    if (!code.empty()) builder.code(code);
+    return builder;
+  }
+
   Sink _sink;
   const Document* _document;
   const Cst* _cst = nullptr;
@@ -373,9 +444,7 @@ inline detail::ValidationDiagnosticBuilderBase<Derived>::
                                     const AstNode& node)
     : _acceptor(&acceptor),
       _node(&node),
-      _severity(severity),
-      _message(message),
-      _range(acceptor.spanOf(node)) {}
+      _diagnostic{acceptor.spanOf(node), severity, std::string(message), {}} {}
 
 template <class Derived>
 inline detail::ValidationDiagnosticBuilderBase<Derived>::
@@ -383,9 +452,28 @@ inline detail::ValidationDiagnosticBuilderBase<Derived>::
                                     DiagnosticSeverity severity,
                                     std::string_view message, TextRange span)
     : _acceptor(&acceptor),
-      _severity(severity),
-      _message(message),
-      _range(span) {}
+      _diagnostic{span, severity, std::string(message), {}} {}
+
+template <class Derived>
+template <class Message>
+  requires std::same_as<Message, std::string>
+inline detail::ValidationDiagnosticBuilderBase<Derived>::
+    ValidationDiagnosticBuilderBase(const ValidationAcceptor& acceptor,
+                                    DiagnosticSeverity severity,
+                                    Message&& message, const AstNode& node)
+    : _acceptor(&acceptor),
+      _node(&node),
+      _diagnostic{acceptor.spanOf(node), severity, std::move(message), {}} {}
+
+template <class Derived>
+template <class Message>
+  requires std::same_as<Message, std::string>
+inline detail::ValidationDiagnosticBuilderBase<Derived>::
+    ValidationDiagnosticBuilderBase(const ValidationAcceptor& acceptor,
+                                    DiagnosticSeverity severity,
+                                    Message&& message, TextRange span)
+    : _acceptor(&acceptor),
+      _diagnostic{span, severity, std::move(message), {}} {}
 
 template <class Derived>
 inline Derived&
@@ -403,7 +491,7 @@ inline Derived& detail::ValidationDiagnosticBuilderBase<Derived>::keyword(
     if (const std::optional<TextRange> found =
             _acceptor->keywordSpan(*_node, keyword, index);
         found.has_value())
-      _range = *found;
+      _diagnostic.range = *found;
   return derived();
 }
 
@@ -411,17 +499,9 @@ template <class Derived>
 inline void detail::ValidationDiagnosticBuilderBase<Derived>::emit() {
   if (!_pending || _acceptor == nullptr) return;
   _pending = false;
-  Diagnostic diagnostic{
-      TextRange{_range.begin, std::max(_range.begin, _range.end)},
-      _severity,
-      std::move(_message),
-      {},
-      std::move(_code),
-      std::move(_codeDescription),
-      std::move(_tags),
-      std::move(_relatedInformation),
-      std::move(_data)};
-  _acceptor->accept(std::move(diagnostic));
+  _diagnostic.range.end =
+      std::max(_diagnostic.range.begin, _diagnostic.range.end);
+  _acceptor->accept(std::move(_diagnostic));
 }
 
 template <class Node>

@@ -407,6 +407,47 @@ void a_token_that_opens_an_element_names_the_member_it_fills() {
   CHECK(named == opens);
 }
 
+// Descriptions keep their names after the caller's strings disappear and
+// additional names make the document's pool grow.
+void qualified_names_borrow_the_documents_own_text() {
+  const World world;
+  const ct::ValidationResult said =
+      world.validate("package p { package q { entity E {} } }");
+  ct::expectNoIssues(said);
+  const auto* const model = cursiv::ast_cast<const dm::ast::DomainModel>(
+      said.document->parseResult.value);
+  CHECK(model != nullptr && model->elements.size() == 1);
+  if (model == nullptr || model->elements.size() != 1) return;
+  const auto* const outer = cursiv::ast_cast<const dm::ast::PackageDeclaration>(
+      model->elements.front());
+  CHECK(outer != nullptr && outer->elements.size() == 1);
+  if (outer == nullptr || outer->elements.size() != 1) return;
+  const auto* const inner = cursiv::ast_cast<const dm::ast::PackageDeclaration>(
+      outer->elements.front());
+  CHECK(inner != nullptr);
+  if (inner == nullptr) return;
+
+  const auto& names = *world.services.language.qualifiedNameProvider;
+  const auto& document = *said.document;
+  std::string_view flat, single, nested;
+  {
+    std::string qualifier("a\0b", 3), own("E\0F", 3);
+    flat = names.keepQualifiedName(document, std::string_view(qualifier), own);
+    single = names.keepQualifiedName(document, *outer, own);
+    nested = names.keepQualifiedName(document, *inner, own);
+    std::fill(qualifier.begin(), qualifier.end(), 'x');
+    std::fill(own.begin(), own.end(), 'y');
+  }
+  const auto empty = names.keepQualifiedName(
+      document, std::string_view{}, std::string_view{});
+  CHECK(empty.empty() && empty.data() != nullptr);
+  for (int i = 0; i < 32; ++i)
+    (void)document.keep_text(std::string(4096, 'x'));
+  CHECK(flat == std::string_view("a\0b.E\0F", 7));
+  CHECK(single == std::string_view("p.E\0F", 5));
+  CHECK(nested == std::string_view("p.q.E\0F", 7));
+}
+
 int main() {
   cursiv::test::count_expectations();
   a_lowercase_entity_is_a_warning_on_its_name();
@@ -419,6 +460,7 @@ int main() {
   a_cycle_through_an_untouched_document_is_an_error();
   a_cycle_closed_two_documents_away_is_an_error_at_the_start();
   models_generate_their_golden_java();
+  qualified_names_borrow_the_documents_own_text();
 #if defined(__linux__)
   a_long_chain_written_head_first_fits_a_small_stack();
   deep_packages_fit_a_small_stack();

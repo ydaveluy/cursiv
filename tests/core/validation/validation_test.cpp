@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/observability/ObservabilitySink.hpp"
 #include "cursiv/parser/DefaultParserErrorMessageProvider.hpp"
@@ -1005,6 +1006,54 @@ void the_answer_comes_back_in_document_order() {
   CHECK(order == owed);
 }
 
+// A large walk crosses task-run boundaries. Equal-position diagnostics keep
+// their per-node emission order whether there are workers or not, while node
+// anchors must remain independent of the acceptor's cached last node.
+void large_walk_keeps_its_diagnostics_without_workers() {
+  struct Check {
+    void onEntity(const ws::ast::Entity& node,
+                  cursiv::ValidationAcceptor& accept) const {
+      accept.warning(cursiv::TextRange{10, 11},
+                     "first " + std::string(node.name)).code("order");
+      accept.warning(cursiv::TextRange{10, 11},
+                     "second " + std::string(node.name)).code("order");
+      accept.hint(node, "name " + std::string(node.name))
+          .property<&ws::ast::AbstractElement::name>();
+    }
+  } check;
+  std::string text = "datatype String\n";
+  for (std::size_t i = 0; i < 1024; ++i)
+    text += "entity E" + std::to_string(i) + " { x : String }\n";
+  std::vector<cursiv::Diagnostic> serial;
+  for (const std::size_t workers : {0u, 1u, 4u}) {
+    World world;
+    world.shared.taskScheduler =
+        std::make_unique<cursiv::TaskScheduler>(workers);
+    world.registry->registerCheck(
+        Registry::makeValidationCheck<&Check::onEntity>(check));
+    const cursiv::Document* const document = world.build(
+        "file:///large.ws", text, cursiv::BuildOptions{false, {}});
+    CHECK(document->parseResult.nodes().size() > 1024);
+    std::vector<cursiv::Diagnostic> diagnostics = world.validate(*document);
+    CHECK(diagnostics.size() == 3 * 1024);
+    if (workers == 0) {
+      serial = std::move(diagnostics);
+      continue;
+    }
+    CHECK(diagnostics.size() == serial.size());
+    if (diagnostics.size() != serial.size()) return;
+    for (std::size_t i = 0; i < serial.size(); ++i) {
+      CHECK(diagnostics[i].message == serial[i].message);
+      CHECK(diagnostics[i].range.begin == serial[i].range.begin);
+      CHECK(diagnostics[i].range.end == serial[i].range.end);
+      CHECK(diagnostics[i].severity == serial[i].severity);
+      CHECK(diagnostics[i].source ==
+            world.language->languageMetaData.languageId);
+      CHECK(diagnostics[i].code == serial[i].code);
+    }
+  }
+}
+
 }  // namespace
 
 void run() {
@@ -1035,6 +1084,7 @@ void run() {
   a_repairs_quick_fix_really_fixes();
   a_deletion_offers_no_quick_fix();
   the_answer_comes_back_in_document_order();
+  large_walk_keeps_its_diagnostics_without_workers();
 }
 
 }  // namespace document_validator
@@ -1346,6 +1396,114 @@ void anchor_caches_distinguish_documents_with_the_same_node_ids() {
   CHECK(target.grammar.writes > 0);
 }
 
+void moved_builder_keeps_its_owned_message_and_emits_once() {
+  Fixture fixture(2);
+  std::vector<cursiv::Diagnostic> diagnostics;
+  const auto collect = [&](cursiv::Diagnostic&& diagnostic) {
+    diagnostics.push_back(std::move(diagnostic));
+  };
+  cursiv::ValidationAcceptor accept(collect, fixture.document, "owned");
+  const std::string expected(80, 'm');
+  {
+    auto pending = [&] {
+      std::string message = expected;
+      return accept.warning(fixture.first, std::move(message));
+    }();
+    {
+      auto moved = std::move(pending);
+      moved.range({2, 4}).code("moved");
+      CHECK(diagnostics.empty());
+    }
+    CHECK(diagnostics.size() == 1);
+  }
+  CHECK(diagnostics.size() == 1);
+  if (diagnostics.size() != 1) return;
+  CHECK(diagnostics.front().message == expected);
+  CHECK(diagnostics.front().severity == cursiv::DiagnosticSeverity::Warning);
+  CHECK(diagnostics.front().range.begin == 2);
+  CHECK(diagnostics.front().range.end == 4);
+  CHECK(diagnostics.front().code == "moved");
+  CHECK(diagnostics.front().source == "owned");
+}
+
+void assigning_an_enriched_builder_emits_each_pending_value_once() {
+  Fixture fixture(2);
+  std::vector<cursiv::Diagnostic> diagnostics;
+  const auto collect = [&](cursiv::Diagnostic&& diagnostic) {
+    diagnostics.push_back(std::move(diagnostic));
+  };
+  cursiv::ValidationAcceptor accept(collect, fixture.document, "moves");
+  const std::string message(80, 'm');
+  const std::string description(80, 'd');
+  const std::string related(80, 'r');
+  const std::string payload(80, 'p');
+  {
+    auto pending = accept.warning(cursiv::TextRange{6, 4}, std::string(message));
+    pending.code("enriched", std::string_view(description))
+        .tags({cursiv::DiagnosticTag::Unnecessary,
+               cursiv::DiagnosticTag::Deprecated})
+        .relatedInformation(cursiv::TextRange{1, 3}, related, "file:///related")
+        .data(cursiv::JsonValue(payload));
+    auto previous = accept.error(cursiv::TextRange{1, 2}, "previous");
+    previous.code(std::int64_t{7});
+    previous = std::move(pending);
+    CHECK(diagnostics.size() == 1);
+    if (diagnostics.size() != 1) return;
+    CHECK(diagnostics.front().message == "previous");
+    CHECK(diagnostics.front().code == std::int64_t{7});
+    auto moved = std::move(previous);
+    auto& same = moved;
+    moved = std::move(same);
+    CHECK(diagnostics.size() == 1);
+  }
+  CHECK(diagnostics.size() == 2);
+  if (diagnostics.size() != 2) return;
+  const auto& next = diagnostics.back();
+  CHECK(next.message == message);
+  CHECK(next.severity == cursiv::DiagnosticSeverity::Warning);
+  CHECK(next.range.begin == 6 && next.range.end == 6);
+  CHECK(next.source == "moves");
+  CHECK(next.code == "enriched");
+  CHECK(next.codeDescription == description);
+  const std::vector<cursiv::DiagnosticTag> tags{
+      cursiv::DiagnosticTag::Unnecessary, cursiv::DiagnosticTag::Deprecated};
+  CHECK(next.tags == tags);
+  CHECK(next.relatedInformation.size() == 1);
+  if (next.relatedInformation.size() == 1) {
+    const auto& other = next.relatedInformation.front();
+    CHECK(other.uri == "file:///related");
+    CHECK(other.message == related);
+    CHECK(other.range.begin == 1 && other.range.end == 3);
+  }
+  CHECK(next.data.has_value() && next.data->isString());
+  if (next.data.has_value() && next.data->isString())
+    CHECK(next.data->string() == payload);
+}
+
+void throwing_sinks_are_not_retried_after_builder_moves() {
+  Fixture fixture(2);
+  unsigned emitted = 0;
+  const auto fail = [&](cursiv::Diagnostic&&) {
+    ++emitted;
+    throw std::runtime_error("sink failed");
+  };
+  cursiv::ValidationAcceptor accept(fail, fixture.document, "throwing");
+  {
+    auto pending = accept.warning(fixture.first, "new");
+    auto previous = accept.error(fixture.first, "previous");
+    previous = std::move(pending);
+    CHECK(emitted == 1);
+  }
+  CHECK(emitted == 2);
+  try {
+    auto pending = accept.hint(fixture.first, "during unwinding");
+    throw std::runtime_error("check failed");
+  } catch (const std::runtime_error& failure) {
+    CHECK(std::string_view(failure.what()) == "check failed");
+  }
+  CHECK(emitted == 3);
+}
+
 }  // namespace
 
 void run() {
@@ -1354,6 +1512,9 @@ void run() {
   switching_nodes_and_missing_anchors_preserve_ranges();
   related_nodes_use_their_own_documents_cst();
   anchor_caches_distinguish_documents_with_the_same_node_ids();
+  moved_builder_keeps_its_owned_message_and_emits_once();
+  assigning_an_enriched_builder_emits_each_pending_value_once();
+  throwing_sinks_are_not_retried_after_builder_moves();
 }
 
 }  // namespace validation_acceptor

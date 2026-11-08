@@ -458,16 +458,14 @@ inline constexpr RowsTape kRowsTape{};
     line("inline void flush(::cursiv::engine::LrContext& c) {");
     line("  ::cursiv::engine::lr_flush<", recorded, stamp_more(), ">(c, ",
          termElem, ");\n}\n");
-    line("inline void records(::cursiv::engine::LrContext& c) {");
-    line("  ::cursiv::engine::lr_record_trivia<", recorded, stamp_more(),
-         ">(c, ", termElem, ");\n}\n");
     write(
         R"(CURSIV_ALWAYS_INLINE inline void shift(::cursiv::engine::LrContext& c,
                                        ::std::uint32_t tgt, ::std::uint16_t row,
                                        ::cursiv::TextOffset b,
                                        ::cursiv::TextOffset e) {
 )");
-    line("  records(c);");
+    line("  ::cursiv::engine::lr_record_trivia<", recorded, stamp_more(),
+         ">(c, ", termElem, ");");
     line(
         "  ::cursiv::engine::lr_push_leaf<kTable.stamp, false>("
         "c, tgt, ::cursiv::ElementId(row), b, e);");
@@ -557,6 +555,13 @@ inline constexpr RowsTape kRowsTape{};
     std::vector<std::uint32_t> fk(slots, 0);
     std::vector<std::uint16_t> fv(slots, 0);
     lr_fused_hash(a.fused.data(), a.nfused, slots, mul, fk.data(), fv.data());
+    bool collisionFree = true;
+    for (const std::uint32_t key : fk)
+      if (key != kLrNoFusedKey &&
+          fk[(key * mul) >> lr_fused_shift(slots)] != key) {
+        collisionFree = false;
+        break;
+      }
     array("inline constexpr ::std::uint32_t kFusedKey[]", slots,
           [&](std::size_t i) { write(fk[i]); });
     array("inline constexpr ::std::uint16_t kFusedVal[]", slots,
@@ -570,7 +575,8 @@ inline constexpr RowsTape kRowsTape{};
         "inline ::cursiv::ElementId folds(::cursiv::ElementId held, "
         "::cursiv::ElementId over)"
         " {\n"
-        "  return ::cursiv::engine::lr_fused_probe(kFusedKey, kFusedVal, "
+        "  return ::cursiv::engine::lr_fused_probe", collisionFree ? "<true>" : "",
+        "(kFusedKey, kFusedVal, "
         "kFusedMul,"
         " ",
         lr_fused_shift(slots), "u, ", slots - 1u,

@@ -412,6 +412,53 @@ void a_deep_module_fits_a_small_stack() {
 }
 #endif
 
+// Calls keep their arguments below the body's operands, including sibling
+// calls made while an outer binary expression already has a value waiting.
+void calls_keep_parameters_and_pending_operands() {
+  const World world;
+  const ct::ValidationResult said = world.validate(
+      "module m\n"
+      "def id(x): x;\n"
+      "def pack(a, b): a * 10 + b;\n"
+      "def body(x, y): pack(y, id(x)) + x + pack(id(y), x);\n"
+      "def z: 5;\n"
+      "def wrap(x): z + pack(x, id(z));\n"
+      "def bad(x): 1 / (x - x);\n"
+      "body(2, 3);\n"
+      "pack(id(2), id(3));\n"
+      "id(id(4));\n"
+      "10 + body(2, 3) * 2;\n"
+      "wrap(4);\n"
+      "body(2, 3) / (1 - 1);\n"
+      "pack(bad(1), id(9));\n"
+      "1 + z * 2;\n"
+      "body(7, 8);\n");
+  const auto* const module = cursiv::ast_cast<const arith::ast::Module>(
+      said.document->parseResult.value);
+  CHECK(module != nullptr);
+  if (module == nullptr) return;
+  arith::Interpreter interpreter;
+  std::vector<std::optional<double>> values;
+  const arith::ast::Expression* first = nullptr;
+  for (const arith::ast::Statement* statement : module->statements) {
+    const auto* const evaluation =
+        cursiv::ast_cast<const arith::ast::Evaluation>(statement);
+    if (evaluation == nullptr) continue;
+    CHECK(evaluation->expression != nullptr);
+    if (evaluation->expression == nullptr) return;
+    if (first == nullptr) first = evaluation->expression;
+    values.push_back(interpreter.evaluate(*evaluation->expression));
+  }
+  CHECK((values == std::vector<std::optional<double>>{
+                       66.0, 23.0, 4.0, 142.0, 50.0, std::nullopt,
+                       std::nullopt, 11.0, 181.0}));
+  CHECK(first != nullptr);
+  if (first != nullptr) {
+    CHECK(!interpreter.evaluate(*first, 1).has_value());
+    CHECK(interpreter.evaluate(*first, 512) == 66.0);
+  }
+}
+
 // The evaluations a valid module asks for, each one said: a zero that a
 // parameter brings has no value, and that is an answer too, not a silence.
 void every_evaluation_is_said() {
@@ -484,5 +531,6 @@ int main() {
   a_deep_module_fits_a_small_stack();
 #endif
   every_evaluation_is_said();
+  calls_keep_parameters_and_pending_operands();
   return cursiv::test::report("arithmetics_grammar_test");
 }

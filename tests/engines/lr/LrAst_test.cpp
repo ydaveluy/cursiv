@@ -18,6 +18,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
+#include "cursiv/lr/table/LrFusedRow.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/lr/AdoptEntryGrammar.hpp"
 #include "engines/lr/AstFusedGrammar.hpp"
@@ -918,6 +919,36 @@ void a_run_of_actions_has_no_cap() {
   // both engines; the independent join above still checks forty actions.
 }
 
+// A collision-free table needs one slot, but a matching hash still needs the
+// whole key. The fallback must find entries displaced by real collisions.
+void fused_lookup_checks_the_whole_key() {
+  const auto check = []<bool CollisionFree>(
+                         const std::array<LrFusedRow, 3>& rows) {
+    constexpr unsigned slots = 8;
+    constexpr std::uint32_t mul = 0x20000000u;  // slot is the low three bits
+    constexpr ElementId first = 100;
+    std::array<std::uint32_t, slots> keys{};
+    std::array<std::uint16_t, slots> values{};
+    lr_fused_hash(rows.data(), rows.size(), slots, mul, keys.data(),
+                   values.data());
+    constexpr std::array<ElementId, 5> held{0, 1, 4, 9, kNoElement};
+    constexpr std::array<ElementId, 5> over{0, 2, 5, 6, kNoElement};
+    for (const ElementId h : held)
+      for (const ElementId o : over) {
+        ElementId expected = kNoElement;
+        for (unsigned i = 0; i < rows.size(); ++i)
+          if (rows[i].node == h && rows[i].site == o)
+            expected = static_cast<ElementId>(first + i);
+        CHECK(lr_fused_probe<CollisionFree>(
+                  keys.data(), values.data(), mul, lr_fused_shift(slots),
+                  slots - 1, first, h, o) == expected);
+      }
+  };
+  // Zero is a valid key. Only the pair of sentinels denotes an empty slot.
+  check.operator()<true>({{{0, 0}, {4, 5}, {9, 6}}});
+  check.operator()<false>({{{1, 2}, {4, 2}, {9, 2}}});
+}
+
 }  // namespace
 
 void run() {
@@ -931,6 +962,7 @@ void run() {
   two_auxiliaries_that_say_the_same_thing();
   a_regions_boundaries();
   a_run_of_actions_has_no_cap();
+  fused_lookup_checks_the_whole_key();
 }
 
 }  // namespace lowering

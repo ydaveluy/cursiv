@@ -203,7 +203,7 @@ class AstReducer {
   // region gets to it.
   CURSIV_ALWAYS_INLINE Pending node_write(NodeId id, std::uint16_t field,
                                           std::uint8_t nar, ActKind kind) {
-    const Pending got = take_node_for(field, id);
+    const Made got = take_node_for(field, id);
     return effect(id, got.type, field, kind, got.value, nar);
   }
 
@@ -225,7 +225,7 @@ class AstReducer {
   template <bool Nest>
   Made adopt(std::uint16_t type, NodeId id) {
     const std::size_t first = suffix_begin(id);
-    Pending owner = take_node_if(
+    Made owner = take_node_if(
         first, [this, type](std::uint16_t vt) { return _m.derives(type, vt); });
     // The class a close names is the rule's result, which a nest still
     // pending in the region may be what builds: then the node the body made
@@ -600,22 +600,22 @@ class AstReducer {
   // The first creation at or after `first` that `accept` takes. Taken and not
   // erased: `consume` relies on the order, and every reader tests `value`.
   template <class Accept>
-  Pending take_node_if(std::size_t first, Accept accept) {
+  Made take_node_if(std::size_t first, Accept accept) {
     Pending* const stack = _stack;
     const std::size_t last = _depth;
     for (std::size_t i = first; i < last; ++i) {
       Pending& p = stack[i];
       if (p.value == nullptr || p.kind != ActKind::create || !accept(p.type))
         continue;
-      const Pending taken = p;
+      const Made taken{p.value, p.type};
       p.value = nullptr;
       return taken;
     }
-    return Pending{};
+    return Made{};
   }
 
   // The node a member takes: any of the families it names, one bit each.
-  Pending take_node_for(std::uint16_t field, NodeId root) {
+  Made take_node_for(std::uint16_t field, NodeId root) {
     const std::uint64_t* const bits =
         _f.takeBits + std::size_t{field} * _m.typeWords;
     return take_node_if(suffix_begin(root), [bits](std::uint16_t vt) {

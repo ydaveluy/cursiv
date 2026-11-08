@@ -61,12 +61,19 @@ constexpr void lr_fused_hash(const LrFusedRow* fused, unsigned nfused,
 }
 
 // Emptiness is tested first: `kNoElement` on both halves is the empty marker.
+template <bool CollisionFree = false>
 CURSIV_ALWAYS_INLINE constexpr ElementId lr_fused_probe(
     const std::uint32_t* key, const std::uint16_t* val, std::uint32_t mul,
     unsigned shift, unsigned mask, ElementId first, ElementId held,
     ElementId over) {
   const std::uint32_t k = lr_fused_key(held, over);
   unsigned h = (k * mul) >> shift;
+  // When the generator placed every key at its first slot, a different key
+  // cannot be displaced farther down the run: one comparison proves a miss.
+  if constexpr (CollisionFree) {
+    if (k == kLrNoFusedKey || key[h] != k) return kNoElement;
+    return static_cast<ElementId>(first + val[h]);
+  }
   for (;;) {
     const std::uint32_t at = key[h];
     if (at == kLrNoFusedKey) return kNoElement;

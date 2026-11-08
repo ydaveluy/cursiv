@@ -627,10 +627,17 @@ concept StatesValue =
 template <class CR, class M, std::size_t Alt, bool Data, bool Text = true>
 consteval ConvSlot conv_slot() {
   using H = typename strip_storage<M>::type;
-  ConvSlot s{&invoke_conv<CR, M, Alt, Data, Text>, nullptr};
-  if constexpr (Alt == 0 && !Data && StatesValue<CR, H>)
-    s.value = &kConvValue<CR, H>;
-  return s;
+  // No conversion, joining or ownership change: the writer can take the
+  // record text itself without an erased call and its output object.
+  if constexpr (std::is_void_v<CR> && Alt == 0 && !Data &&
+                std::is_same_v<H, std::string_view>) {
+    return {};
+  } else {
+    ConvSlot s{&invoke_conv<CR, M, Alt, Data, Text>, nullptr};
+    if constexpr (Alt == 0 && !Data && StatesValue<CR, H>)
+      s.value = &kConvValue<CR, H>;
+    return s;
+  }
 }
 
 // A write whose payload passes on what its record holds, at a record whose

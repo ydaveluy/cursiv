@@ -15,6 +15,13 @@ namespace dm {
 // packages nest.
 std::string QualifiedNameProvider::qualifierOf(
     const cursiv::Document&, const ast::PackageDeclaration& package) const {
+  // A single component needs no reversed collection.
+  if (package.type == &cursiv::ast_type_tag<ast::PackageDeclaration>
+      && (package.parent == nullptr
+          || package.parent->type
+                 != &cursiv::ast_type_tag<ast::PackageDeclaration>))
+    return std::string(package.name);
+
   std::vector<std::string_view> names;
   std::size_t size = 0;
   for (const cursiv::AstNode* at = &package;
@@ -36,13 +43,43 @@ std::string QualifiedNameProvider::qualifierOf(
 std::string QualifiedNameProvider::getQualifiedName(
     const cursiv::Document& document, const ast::PackageDeclaration& qualifier,
     std::string_view name) const {
-  return getQualifiedName(qualifierOf(document, qualifier), name);
+  std::string qualified = qualifierOf(document, qualifier);
+  if (!qualified.empty()) {
+    qualified.reserve(qualified.size() + name.size() + 1);
+    qualified.push_back('.');
+  }
+  qualified.append(name);
+  return qualified;
 }
 
 std::string QualifiedNameProvider::getQualifiedName(
     std::string_view qualifier, std::string_view name) const {
   if (qualifier.empty()) return std::string(name);
-  return std::string(qualifier) + "." + std::string(name);
+  std::string qualified;
+  qualified.reserve(qualifier.size() + name.size() + 1);
+  qualified.append(qualifier);
+  qualified.push_back('.');
+  qualified.append(name);
+  return qualified;
+}
+
+std::string_view QualifiedNameProvider::keepQualifiedName(
+    const cursiv::Document& document, const ast::PackageDeclaration& qualifier,
+    std::string_view name) const {
+  if (qualifier.type == &cursiv::ast_type_tag<ast::PackageDeclaration>
+      && (qualifier.parent == nullptr
+          || qualifier.parent->type
+                 != &cursiv::ast_type_tag<ast::PackageDeclaration>))
+    return keepQualifiedName(document, qualifier.name, name);
+  // The temporary qualifier remains alive while keep_text copies its parts.
+  return keepQualifiedName(document, qualifierOf(document, qualifier), name);
+}
+
+std::string_view QualifiedNameProvider::keepQualifiedName(
+    const cursiv::Document& document, std::string_view qualifier,
+    std::string_view name) const {
+  if (qualifier.empty()) return document.keep_text(name);
+  return document.keep_text(qualifier, ".", name);
 }
 
 }  // namespace dm

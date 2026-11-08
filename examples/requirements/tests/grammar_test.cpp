@@ -10,6 +10,7 @@
 #include <iterator>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -244,6 +245,75 @@ void coverage_follows_the_tests_that_change() {
   CHECK(disk.said(kReq, kUncovered) == 1);
 }
 
+// The test stays unchanged while a `.req` is reparsed: coverage must follow
+// the new requirement nodes, including a renamed target the old test misses.
+void coverage_follows_a_requirements_only_update() {
+  constexpr std::string_view kReq = "file:///w/a.req";
+  constexpr std::string_view kTst = "file:///w/a.tst";
+  constexpr std::string_view kR1 = "Requirement R1 not covered by a test.";
+  constexpr std::string_view kR2 = "Requirement R2 not covered by a test.";
+  Disk disk;
+  disk.write(kReq, "req R1 \"original\"\n");
+  disk.write(kTst, "tst T1 tests R1\n");
+  CHECK(disk.said(kReq, kR1) == 0);
+  disk.write(kReq, "req R1 \"reparsed requirement\"\n");
+  CHECK(disk.said(kReq, kR1) == 0);
+  disk.write(kReq, "req R2 \"renamed\"\n");
+  CHECK(disk.said(kReq, kR2) == 1);
+  disk.write(kReq, "req R1 \"restored\"\n");
+  CHECK(disk.said(kReq, kR1) == 0);
+}
+
+// A failed scan publishes no answer. The next check retries instead of using
+// an incomplete coverage set or treating the failed attempt as a cached empty.
+void a_failed_coverage_scan_can_be_retried() {
+  struct FailingDocuments : cursiv::DefaultDocuments {
+    using cursiv::DefaultDocuments::DefaultDocuments;
+    mutable bool failNext = false;
+    mutable int scans = 0;
+    bool counting = false;
+
+    std::vector<std::shared_ptr<cursiv::Document>> all() const override {
+      if (counting) {
+        ++scans;
+        if (std::exchange(failNext, false))
+          throw std::runtime_error("coverage scan failed");
+      }
+      return cursiv::DefaultDocuments::all();
+    }
+  };
+  World world;
+  auto store = std::make_unique<FailingDocuments>(world.shared);
+  auto& counted = *store;
+  world.shared.documents = std::move(store);
+  world.add("file:///w/a.req", "req R1 \"covered\"\n");
+  world.add("file:///w/a.tst", "tst T1 tests R1\n");
+  cursiv::BuildOptions options;
+  options.validation = false;
+  world.build(options);
+  const auto& document = *world.opened.front();
+  const auto& requirement = *static_cast<const req::ast::RequirementModel*>(
+                                 document.parseResult.value)
+                                 ->requirements[0];
+  int diagnostics = 0;
+  const auto sink = [&](cursiv::Diagnostic&&) { ++diagnostics; };
+  cursiv::ValidationAcceptor accept(sink, document, "requirements");
+  counted.counting = true;
+  counted.failNext = true;
+  bool failed = false;
+  try {
+    world.services.requirements.requirementsValidator
+        ->checkRequirementIsCoveredByATest(requirement, accept);
+  } catch (const std::runtime_error&) {
+    failed = true;
+  }
+  CHECK(failed);
+  world.services.requirements.requirementsValidator
+      ->checkRequirementIsCoveredByATest(requirement, accept);
+  CHECK(counted.scans == 2);
+  CHECK(diagnostics == 0);
+}
+
 // The same through `build`, as a first scan or a command line builds: a test
 // built after the `.req` it covers clears the warning, and the `.req` is
 // validated again by that build, not left without findings.
@@ -339,20 +409,31 @@ void simultaneous_coverage_checks_scan_the_workspace_once() {
                                  ->requirements[0];
   counted.counting = true;
 
-  std::barrier start(4);
-  std::atomic<int> diagnostics{0};
-  std::vector<std::thread> validators;
-  for (int i = 0; i < 4; ++i)
-    validators.emplace_back([&] {
-      const auto sink = [&](cursiv::Diagnostic&&) { ++diagnostics; };
-      cursiv::ValidationAcceptor accept(sink, document, "requirements");
-      start.arrive_and_wait();
-      world.services.requirements.requirementsValidator
-          ->checkRequirementIsCoveredByATest(requirement, accept);
-    });
-  for (auto& validator : validators) validator.join();
-  CHECK(counted.scans.load() == 1);
-  CHECK(diagnostics.load() == 0);
+  const auto checkTogether = [&] {
+    std::barrier start(4);
+    std::atomic<int> diagnostics{0};
+    std::vector<std::thread> validators;
+    for (int i = 0; i < 4; ++i)
+      validators.emplace_back([&] {
+        const auto sink = [&](cursiv::Diagnostic&&) { ++diagnostics; };
+        cursiv::ValidationAcceptor accept(sink, document, "requirements");
+        start.arrive_and_wait();
+        world.services.requirements.requirementsValidator
+            ->checkRequirementIsCoveredByATest(requirement, accept);
+      });
+    for (auto& validator : validators) validator.join();
+    CHECK(counted.scans.load() == 1);
+    CHECK(diagnostics.load() == 0);
+  };
+  checkTogether();
+
+  // An empty build still announces a new workspace generation. It keeps the
+  // trees intact but invalidates a workspace answer, just as a changed URI does.
+  counted.counting = false;
+  world.shared.documentBuilder->build({}, options);
+  counted.scans.store(0);
+  counted.counting = true;
+  checkTogether();
 }
 #endif
 
@@ -365,6 +446,8 @@ int main() {
   a_test_says_what_it_lacks();
   a_covered_and_numbered_pair_says_nothing();
   coverage_follows_the_tests_that_change();
+  coverage_follows_a_requirements_only_update();
+  a_failed_coverage_scan_can_be_retried();
   coverage_follows_a_test_built_later();
   the_shipped_pair_generates_its_golden_summary();
 #if !defined(__wasi__) || defined(_REENTRANT)

@@ -21,6 +21,16 @@ bool has_digit(std::string_view value) {
       value, [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
+std::string requirement_message(std::string_view prefix, std::string_view name,
+                                std::string_view suffix) {
+  std::string message;
+  message.reserve(prefix.size() + name.size() + suffix.size());
+  message.append(prefix);
+  message.append(name);
+  message.append(suffix);
+  return message;
+}
+
 }  // namespace
 
 RequirementsValidator::RequirementsValidator(
@@ -59,9 +69,9 @@ void RequirementsValidator::checkRequirementNameContainsANumber(
     cursiv::ValidationAcceptor& accept) const {
   if (!has_digit(requirement.name))
     accept
-        .warning(requirement, "Requirement name "
-                                  + std::string(requirement.name)
-                                  + " should contain a number.")
+        .warning(requirement,
+                 requirement_message("Requirement name ", requirement.name,
+                                     " should contain a number."))
         .property<&ast::Requirement::name>();
 }
 
@@ -94,8 +104,9 @@ void RequirementsValidator::checkRequirementIsCoveredByATest(
   });
 
   if (covered != nullptr && !covered->contains(&requirement))
-    accept.warning(requirement, "Requirement " + std::string(requirement.name)
-                                    + " not covered by a test.");
+    accept.warning(requirement,
+                   requirement_message("Requirement ", requirement.name,
+                                       " not covered by a test."));
 }
 
 }  // namespace req

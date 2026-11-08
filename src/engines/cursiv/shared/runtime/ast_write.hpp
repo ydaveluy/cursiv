@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -37,6 +38,16 @@ CURSIV_ALWAYS_INLINE inline bool run_conv(AstBuildCtx& ctx, NodeId id,
         if (const CstNode& n = (*ctx.cst)[id]; n.recovered && n.begin == n.end)
           return false;
       place<H>(member, *static_cast<const H*>(c.value));
+      return true;
+    }
+  if constexpr (std::is_same_v<H, std::string_view>)
+    if (c.fn == nullptr) {
+      // This slot denotes raw text, including a genuinely empty match. A
+      // zero-width record invented by a repair still writes nothing.
+      if (ctx.repaired)
+        if (const CstNode& n = (*ctx.cst)[id]; n.recovered && n.begin == n.end)
+          return false;
+      place<H>(member, ctx.cst->text(id));
       return true;
     }
   return c.fn(ctx, id, &member);
@@ -75,7 +86,7 @@ CURSIV_ALWAYS_INLINE inline void write_into(AstBuildCtx& ctx, const Pending& p,
            "payload always carries a conversion");
     // Borrowed: the input and the tree's kept text both outlive its reader.
     AstNode::string_view text;
-    if (!conv->fn(ctx, p.text, &text)) return;
+    if (!run_conv(ctx, p.text, *conv, text)) return;
     X& slot = [&]() CURSIV_ALWAYS_INLINE -> X& {
       if constexpr (F::storage == FieldStorage::direct)
         return member;

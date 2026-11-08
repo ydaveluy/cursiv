@@ -201,25 +201,31 @@ void walk_divisions(const ast::Expression* root,
                     Interpreter& interpreter,
                     cursiv::ValidationAcceptor& accept,
                     const cursiv::CancellationToken& token) {
-  pending.push_back(root);
-  while (!pending.empty()) {
-    const ast::Expression* const expression = pending.back();
-    pending.pop_back();
-    if (expression == nullptr) continue;
+  const ast::Expression* expression = root;
+  for (;;) {
+    while (expression == nullptr) {
+      if (pending.empty()) return;
+      expression = pending.back();
+      pending.pop_back();
+    }
     cursiv::throw_if_cancelled(token);
     if (expression->type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
-      pending.push_back(
-          static_cast<const ast::GroupedExpression&>(*expression).expression);
+      expression =
+          static_cast<const ast::GroupedExpression&>(*expression).expression;
     } else if (expression->type
                == &cursiv::ast_type_tag<ast::BinaryExpression>) {
       const auto& binary =
           static_cast<const ast::BinaryExpression&>(*expression);
       say_if_zero(binary, interpreter, accept);
       pending.push_back(binary.right);
-      pending.push_back(binary.left);
+      expression = binary.left;
     } else if (expression->type == &cursiv::ast_type_tag<ast::FunctionCall>) {
       const auto& call = static_cast<const ast::FunctionCall&>(*expression);
-      pending.insert(pending.end(), call.args.rbegin(), call.args.rend());
+      expression = call.args.empty() ? nullptr : call.args.front();
+      if (call.args.size() > 1)
+        pending.insert(pending.end(), call.args.rbegin(), call.args.rend() - 1);
+    } else {
+      expression = nullptr;
     }
   }
 }

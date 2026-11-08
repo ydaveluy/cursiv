@@ -41,88 +41,90 @@ class Interpreter::Machine {
     if (remaining != nullptr) _constants.clear();
     _tasks.clear();
     _values.clear();
-    _arguments.clear();
     _frames.clear();
     _active.clear();
-    _tasks.push_back({Kind::evaluate, &expression});
-    while (!_tasks.empty()) {
-      const Task task = _tasks.back();
+    Task task{Kind::evaluate, &expression};
+    for (;;) {
+      switch (task.kind) {
+        case Kind::evaluate:
+          task = evaluate(static_cast<const ast::Expression&>(*task.node));
+          break;
+        case Kind::apply:
+          if (!apply(static_cast<const ast::BinaryExpression&>(*task.node)))
+            return std::nullopt;
+          task = {Kind::done, nullptr};
+          break;
+        case Kind::call:
+          task = enter(static_cast<const ast::Definition&>(*task.node));
+          break;
+        case Kind::leave:
+          leave(static_cast<const ast::Definition&>(*task.node));
+          task = {Kind::done, nullptr};
+          break;
+        default:
+          return std::nullopt;
+      }
+      if (task.kind == Kind::failed) return std::nullopt;
+      if (task.kind != Kind::done) continue;
+      if (_tasks.empty()) return _values.back();
+      task = _tasks.back();
       _tasks.pop_back();
-      if (!step(task)) return std::nullopt;
     }
-    return _values.back();
   }
 
  private:
-  enum class Kind : std::uint8_t { evaluate, apply, call, leave };
+  enum class Kind : std::uint8_t { evaluate, apply, call, leave, done, failed };
   struct Task {
     Kind kind;
     const cursiv::AstNode* node;
   };
-  // A call being evaluated: its parameters are bound to the values in
-  // `_arguments` from `first` on, in the order they are declared.
+  // A call being evaluated: its parameters occupy `_values` from `first`
+  // on, in declaration order, below every temporary its body pushes.
   struct Frame {
     const ast::Definition* definition;
     std::size_t first;
   };
 
-  bool step(const Task& task) {
-    switch (task.kind) {
-      case Kind::evaluate:
-        return evaluate(static_cast<const ast::Expression&>(*task.node));
-      case Kind::apply:
-        return apply(static_cast<const ast::BinaryExpression&>(*task.node));
-      case Kind::call:
-        enter(static_cast<const ast::Definition&>(*task.node));
-        return true;
-      case Kind::leave:
-        leave(static_cast<const ast::Definition&>(*task.node));
-        return true;
-    }
-    return false;
-  }
-
-  bool evaluate(const ast::Expression& expression) {
+  Task evaluate(const ast::Expression& expression) {
     if (_remaining != nullptr) {
-      if (*_remaining == 0) return false;
+      if (*_remaining == 0) return {Kind::failed, nullptr};
       --*_remaining;
     }
 
     if (expression.type == &cursiv::ast_type_tag<ast::NumberLiteral>) {
       _values.push_back(
           static_cast<const ast::NumberLiteral&>(expression).value);
-      return true;
+      return {Kind::done, nullptr};
     }
 
     if (expression.type == &cursiv::ast_type_tag<ast::GroupedExpression>) {
       const ast::Expression* const inner =
           static_cast<const ast::GroupedExpression&>(expression).expression;
-      if (inner == nullptr) return false;
-      _tasks.push_back({Kind::evaluate, inner});
-      return true;
+      if (inner == nullptr) return {Kind::failed, nullptr};
+      return {Kind::evaluate, inner};
     }
 
     if (expression.type == &cursiv::ast_type_tag<ast::BinaryExpression>) {
       const auto& binary =
           static_cast<const ast::BinaryExpression&>(expression);
-      if (binary.left == nullptr || binary.right == nullptr) return false;
+      if (binary.left == nullptr || binary.right == nullptr)
+        return {Kind::failed, nullptr};
       // Popped in reverse: the left operand first, then the right, then the
       // operator over both.
-      _tasks.push_back({Kind::apply, &binary});
-      _tasks.push_back({Kind::evaluate, binary.right});
-      _tasks.push_back({Kind::evaluate, binary.left});
-      return true;
+      _tasks.emplace_back(Kind::apply, &binary);
+      _tasks.emplace_back(Kind::evaluate, binary.right);
+      return {Kind::evaluate, binary.left};
     }
 
     if (expression.type == &cursiv::ast_type_tag<ast::FunctionCall>)
       return call(static_cast<const ast::FunctionCall&>(expression));
 
-    return false;
+    return {Kind::failed, nullptr};
   }
 
-  bool call(const ast::FunctionCall& call) {
+  Task call(const ast::FunctionCall& call) {
     const ast::AbstractDefinition* const target = call.func.get();
-    if (target == nullptr) return false;
+    if (target == nullptr) return {Kind::failed, nullptr};
 
     // A parameter used as a value: the name stands for what the enclosing
     // call bound, and it takes no argument.
@@ -131,74 +133,82 @@ class Interpreter::Machine {
       const auto& parameters = frame.definition->args;
       for (std::size_t at = 0; at < parameters.size(); ++at)
         if (parameters[at] == target) {
-          if (!call.args.empty()) return false;
-          _values.push_back(_arguments[frame.first + at]);
-          return true;
+          if (!call.args.empty()) return {Kind::failed, nullptr};
+          const double value = _values[frame.first + at];
+          _values.push_back(value);
+          return {Kind::done, nullptr};
         }
     }
 
-    if (target->type != &cursiv::ast_type_tag<ast::Definition>) return false;
+    if (target->type != &cursiv::ast_type_tag<ast::Definition>)
+      return {Kind::failed, nullptr};
     const auto& definition = static_cast<const ast::Definition&>(*target);
-    if (definition.args.size() != call.args.size()) return false;
-    if (_active.contains(&definition)) return false;
-    if (definition.expr == nullptr) return false;
+    if (definition.args.size() != call.args.size())
+      return {Kind::failed, nullptr};
+    if (_active.contains(&definition)) return {Kind::failed, nullptr};
+    if (definition.expr == nullptr) return {Kind::failed, nullptr};
 
     if (const auto known = _constants.find(&definition);
         known != _constants.end()) {
       _values.push_back(known->second);
-      return true;
+      return {Kind::done, nullptr};
     }
 
     // The arguments are evaluated in the caller's frame, the body in the
     // callee's: a parameter of the same name does not leak between the two.
-    _tasks.push_back({Kind::call, &definition});
-    for (std::size_t at = call.args.size(); at-- > 0;) {
+    if (call.args.empty()) return enter(definition);
+    _tasks.emplace_back(Kind::call, &definition);
+    for (std::size_t at = call.args.size(); at-- > 1;) {
       if (definition.args[at] == nullptr || call.args[at] == nullptr)
-        return false;
-      _tasks.push_back({Kind::evaluate, call.args[at]});
+        return {Kind::failed, nullptr};
+      _tasks.emplace_back(Kind::evaluate, call.args[at]);
     }
-    return true;
+    if (definition.args.front() == nullptr || call.args.front() == nullptr)
+      return {Kind::failed, nullptr};
+    return {Kind::evaluate, call.args.front()};
   }
 
   // The arguments are on the value stack, the first deepest.
-  void enter(const ast::Definition& definition) {
+  Task enter(const ast::Definition& definition) {
     const std::size_t count = definition.args.size();
     const std::size_t first = _values.size() - count;
-    _frames.push_back({&definition, _arguments.size()});
-    _arguments.insert(_arguments.end(), _values.begin() + first, _values.end());
-    _values.resize(first);
+    _frames.push_back({&definition, first});
     _active.insert(&definition);
-    _tasks.push_back({Kind::leave, &definition});
-    _tasks.push_back({Kind::evaluate, definition.expr});
+    _tasks.emplace_back(Kind::leave, &definition);
+    return {Kind::evaluate, definition.expr};
   }
 
   void leave(const ast::Definition& definition) {
-    _arguments.resize(_frames.back().first);
+    const std::size_t first = _frames.back().first;
+    const double result = _values.back();
+    _values[first] = result;
+    _values.erase(_values.begin() + first + 1, _values.end());
     _frames.pop_back();
     _active.erase(&definition);
     if (definition.args.empty())
-      _constants.emplace(&definition, _values.back());
+      _constants.emplace(&definition, result);
   }
 
   bool apply(const ast::BinaryExpression& binary) {
     const double right = _values.back();
     _values.pop_back();
     const double left = _values.back();
-    _values.pop_back();
     // The operator table throws on a zero divisor; on this path that is an
     // answerless question, not an unwind.
     if ((binary.op == ast::Operator::divide
          || binary.op == ast::Operator::modulo)
-        && right == 0.0)
+        && right == 0.0) {
+      _values.pop_back();
       return false;
-    _values.push_back(apply_operator(binary.op)(left, right));
+    }
+    // The left operand's slot now holds the result; the stack only shrinks.
+    _values.back() = apply_operator(binary.op)(left, right);
     return true;
   }
 
   std::size_t* _remaining = nullptr;
   std::vector<Task> _tasks;
   std::vector<double> _values;
-  std::vector<double> _arguments;
   std::vector<Frame> _frames;
   // The definitions whose bodies are being evaluated, so a cycle answers
   // nothing instead of running for ever.

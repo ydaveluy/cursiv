@@ -459,12 +459,25 @@ void DefaultDocumentValidator::validateAstNodes(
   // list, not on the traversal, and the list is a handful of diagnostics rather
   // than a tree of nodes -- `validateDocument` sorts it on the way out.
   //
-  // A tree of one run, or of a language that refuses nodes, is walked on this
-  // thread: what such a language refuses is memoised along the way.
+  // Node options share the ancestry memo. Small trees also use this walk.
   const OwnedNodes nodes = document.parseResult.nodes();
   if (asks || nodes.size() < 2 * kCheckRun) {
     for (const AstNode* const node : nodes)
       if (node != root) check(*node);
+    return;
+  }
+  // Larger runs need no node options. The same loop writes directly without
+  // workers, or into each worker's collector before the findings are joined.
+  const auto checkRun = [&](OwnedNodes run, ValidationAcceptor& target) {
+    for (const AstNode* const node : run) {
+      throw_if_cancelled(token);
+      if (node != root)
+        registry->runChecks(*node, target, categories, token);
+    }
+  };
+  if (_core.shared().taskScheduler->workerCount() == 0) {
+    checkRun(nodes, accept);
+    throw_if_cancelled(token);
     return;
   }
   // A larger one is checked in runs spread over the pool. Each run keeps its
@@ -481,11 +494,7 @@ void DefaultDocumentValidator::validateAstNodes(
         };
         ValidationAcceptor local(ValidationAcceptor::Sink(keep), document,
                                  getSource());
-        for (const AstNode* const node : run) {
-          throw_if_cancelled(token);
-          if (node != root)
-            registry->runChecks(*node, local, categories, token);
-        }
+        checkRun(run, local);
       });
   for (std::vector<Diagnostic>& run : found)
     for (Diagnostic& diagnostic : run) accept.accept(std::move(diagnostic));

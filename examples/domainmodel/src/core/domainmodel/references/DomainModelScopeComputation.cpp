@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <utility>
 
@@ -26,14 +25,6 @@ namespace {
 bool in_family(std::span<const cursiv::AstTypeTag* const> family,
                const cursiv::AstTypeTag* tag) noexcept {
   return std::ranges::find(family, tag) != family.end();
-}
-
-// A computed name lives in the document's pool, never on this stack: a
-// description borrows its name, and the pool is freed by the same reset that
-// purges the index rows pointing into it.
-std::string_view keep(const cursiv::Document& document,
-                      const std::string& name) {
-  return document.keep_text(name);
 }
 
 }  // namespace
@@ -75,9 +66,8 @@ void DomainModelScopeComputation::addExportedSymbol(
   const std::optional<std::string_view> own =
       services.nameProvider->getName(node);
   if (!own.has_value() || own->empty()) return;
-  const std::string_view qualified = keep(
-      document,
-      _dm.qualifiedNameProvider->getQualifiedName(document, *package, *own));
+  const std::string_view qualified =
+      _dm.qualifiedNameProvider->keepQualifiedName(document, *package, *own);
   if (auto description = _dm.astNodeDescriptionProvider->createDescription(
           node, qualified, &document))
     exported.push_back(*std::move(description));
@@ -153,8 +143,7 @@ void DomainModelScopeComputation::processContainer(
     const std::string_view package =
         static_cast<const ast::PackageDeclaration&>(*done.container).name;
     for (cursiv::AstNodeDescription& nested : done.declared) {
-      nested.name =
-          keep(document, names.getQualifiedName(package, nested.name));
+      nested.name = names.keepQualifiedName(document, package, nested.name);
       open.back().declared.push_back(std::move(nested));
     }
   }

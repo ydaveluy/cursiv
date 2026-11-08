@@ -477,6 +477,197 @@ void only_a_nest_outside_the_repair_changes_its_receiver() {
   }
 }
 
+namespace raw_text_cases {
+
+template <bool Text>
+void raw_text_writes_keep_the_storage_contract() {
+  for (const bool repaired : {false, true})
+    for (const bool recovered : {false, true})
+      for (const bool empty : {false, true}) {
+        cursiv::Cst tree("abc");
+        cursiv::CstBuilder builder(tree);
+        builder.bind_stream();
+        const auto id = builder.leaf(0, empty ? 0 : 3, kStamp.make(0, 0));
+        builder.stream().at(id).recovered = recovered;
+        cursiv::engine::AstBuildCtx ctx;
+        ctx.cst = &tree;
+        ctx.repaired = repaired;
+        std::vector<cursiv::ParseDiagnostic> diagnostics;
+        ctx.diags = &diagnostics;
+        constexpr auto directSlot =
+            cursiv::engine::conv_slot<void, std::string_view, 0, false, Text>();
+        constexpr auto optionalSlot = cursiv::engine::conv_slot<
+            void, std::optional<std::string_view>, 0, false, Text>();
+        constexpr auto vectorSlot = cursiv::engine::conv_slot<
+            void, std::vector<std::string_view>, 0, false, Text>();
+        std::string_view direct = "before";
+        std::optional<std::string_view> optional;
+        std::optional<std::string_view> held = "before";
+        std::vector<std::string_view> list{"before"};
+        const bool present = !repaired || !recovered || !empty;
+        CHECK(cursiv::engine::run_conv(ctx, id, directSlot, direct) == present);
+        CHECK(cursiv::engine::run_conv(ctx, id, optionalSlot, optional) == present);
+        CHECK(cursiv::engine::run_conv(ctx, id, optionalSlot, held) == present);
+        CHECK(cursiv::engine::run_conv(ctx, id, vectorSlot, list) == present);
+        CHECK(direct == (present ? tree.text(id) : "before"));
+        CHECK(optional.has_value() == present);
+        CHECK(held && *held == (present ? tree.text(id) : "before"));
+        CHECK(list.size() == (present ? 2u : 1u));
+        CHECK(list.front() == "before");
+        if (present) {
+          CHECK(direct.data() == tree.text(id).data());
+          CHECK(optional && *optional == tree.text(id));
+          CHECK(optional && optional->data() == direct.data());
+          CHECK(list.back() == tree.text(id));
+          CHECK(list.back().data() == direct.data());
+        }
+        CHECK(diagnostics.empty());
+      }
+}
+
+struct Target : cursiv::Extends<cursiv::AstNode> {};
+struct Names : cursiv::Extends<cursiv::AstNode> {
+  cursiv::reference<Target> one;
+  optional<cursiv::reference<Target>> maybe;
+  vector<cursiv::reference<Target>> many;
+};
+
+void an_inserted_name_leaves_references_and_handles_untouched() {
+  cursiv::Cst tree("abc");
+  cursiv::CstBuilder builder(tree);
+  builder.bind_stream();
+  const auto missing = builder.leaf(0, 0, kStamp.make(0, 0));
+  builder.stream().at(missing).recovered = true;
+  const auto written = builder.leaf(0, 3, kStamp.make(0, 0));
+  const cursiv::AstMetaData meta{};
+  cursiv::DefaultDocumentReferences references(meta);
+  cursiv::engine::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.refs = &references.handles;
+  ctx.home = &references;
+  ctx.repaired = true;
+  std::vector<cursiv::ParseDiagnostic> diagnostics;
+  ctx.diags = &diagnostics;
+  constexpr auto slot =
+      cursiv::engine::conv_slot<void, std::string_view, 0, false>();
+  Names names;
+  cursiv::detail::RefAccess::bind(
+      names.one, cursiv::kNoNode, std::string_view("before"));
+  const auto write = [&](cursiv::NodeId id) {
+    const cursiv::engine::Pending p{.root = id,
+                                     .text = id,
+                                     .kind = cursiv::ActKind::assign,
+                                     .narrow = 3};
+    cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
+        ctx, p, &names, &slot, 0, p.kind, 0);
+    cursiv::engine::write_into<cursiv::detail::field_tag<&Names::maybe>>(
+        ctx, p, &names, &slot, 1, p.kind, 0);
+    cursiv::engine::write_into<cursiv::detail::field_tag<&Names::many>>(
+        ctx, p, &names, &slot, 2, p.kind, 0);
+  };
+  write(missing);
+  CHECK(names.one.refText == "before");
+  CHECK(!names.maybe && names.many.empty());
+  CHECK(references.handles.empty());
+  write(written);
+  CHECK(names.one.refText == "abc");
+  CHECK(names.maybe && names.maybe->refText == "abc");
+  CHECK(names.many.size() == 1 && names.many[0].refText == "abc");
+  CHECK(references.handles.size() == 3);
+  for (std::size_t i = 0; i < references.handles.size(); ++i) {
+    CHECK(references.handles[i].owner == &names);
+    CHECK(references.handles[i].field == i);
+    CHECK(references.handles[i].index == 0);
+  }
+  CHECK(cursiv::detail::RefAccess::node_id(names.one) == written);
+  CHECK(cursiv::detail::RefAccess::narrow(names.one) == 3);
+  write(missing);
+  CHECK(names.one.refText == "abc");
+  CHECK(names.maybe && names.maybe->refText == "abc");
+  CHECK(names.many.size() == 1 && names.many[0].refText == "abc");
+  CHECK(references.handles.size() == 3);
+  CHECK(diagnostics.empty());
+
+  // A genuinely empty match is still a written name, unlike an insertion.
+  builder.stream().at(missing).recovered = false;
+  Names empty;
+  const cursiv::engine::Pending p{.root = missing,
+                                   .text = missing,
+                                   .kind = cursiv::ActKind::assign};
+  cursiv::engine::write_into<cursiv::detail::field_tag<&Names::one>>(
+      ctx, p, &empty, &slot, 0, p.kind, 0);
+  CHECK(empty.one.refText.empty());
+  CHECK(empty.one.refText.data() == tree.text(missing).data());
+  CHECK(references.handles.size() == 4);
+  CHECK(references.handles.back().owner == &empty);
+}
+
+unsigned customCalls = 0;
+struct Custom {
+  static std::string_view convert(std::string_view text) {
+    ++customCalls;
+    return text.substr(1);
+  }
+};
+
+void custom_and_constant_conversions_keep_their_meaning() {
+  cursiv::Cst tree("abc");
+  cursiv::CstBuilder builder(tree);
+  builder.bind_stream();
+  const auto id = builder.leaf(0, 3, kStamp.make(0, 0));
+  cursiv::engine::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  constexpr auto custom =
+      cursiv::engine::conv_slot<Custom, std::string_view, 0, false>();
+  constexpr auto constant = cursiv::engine::conv_slot<
+      cursiv::detail::value_conv<true>, bool, 0, false>();
+  std::string_view text = "before";
+  bool flag = false;
+  customCalls = 0;
+  CHECK(cursiv::engine::run_conv(ctx, id, custom, text));
+  CHECK(text == "bc" && customCalls == 1);
+  CHECK(cursiv::engine::run_conv(ctx, id, constant, flag));
+  CHECK(flag);
+  builder.stream().at(id).end = 0;
+  builder.stream().at(id).recovered = true;
+  ctx.repaired = true;
+  text = "before";
+  flag = false;
+  CHECK(!cursiv::engine::run_conv(ctx, id, custom, text));
+  CHECK(!cursiv::engine::run_conv(ctx, id, constant, flag));
+  CHECK(text == "before" && customCalls == 1 && !flag);
+}
+
+void a_data_rule_still_joins_its_visible_parts() {
+  cursiv::Cst tree("a b");
+  cursiv::CstBuilder builder(tree);
+  builder.bind_stream();
+  const auto opened = builder.enter();
+  builder.leaf(0, 1, kStamp.make(0, 0));
+  builder.hidden(1, 2, 0);
+  builder.leaf(2, 3, kStamp.make(0, 0));
+  const auto id = builder.exit(opened, 0, kStamp.make(0, 0));
+  const cursiv::engine::AstActions actions{};
+  cursiv::engine::AstBuildCtx ctx;
+  ctx.cst = &tree;
+  ctx.actions = &actions;
+  constexpr auto slot =
+      cursiv::engine::conv_slot<void, std::string_view, 0, true, false>();
+  std::string_view value;
+  CHECK(cursiv::engine::run_conv(ctx, id, slot, value));
+  CHECK(value == "ab");
+}
+
+void run() {
+  raw_text_writes_keep_the_storage_contract<true>();
+  raw_text_writes_keep_the_storage_contract<false>();
+  an_inserted_name_leaves_references_and_handles_untouched();
+  custom_and_constant_conversions_keep_their_meaning();
+  a_data_rule_still_joins_its_visible_parts();
+}
+
+}  // namespace raw_text_cases
+
 namespace text_cases {
 
 std::vector<cursiv::NodeId> converted;
@@ -686,6 +877,7 @@ void run() {
 }  // namespace
 
 int main() {
+  raw_text_cases::run();
   text_cases::run();
   only_retained_owners_keep_active_reference_ranks();
   for (bool own : {false, true})

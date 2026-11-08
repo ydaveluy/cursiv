@@ -24,6 +24,16 @@ class QualifiedNameProvider {
   [[nodiscard]] std::string getQualifiedName(std::string_view qualifier,
                                              std::string_view name) const;
 
+  // Scope names borrow their bytes until the document's next parse. Write
+  // directly to its pool instead of creating a string to copy there.
+  [[nodiscard]] std::string_view keepQualifiedName(
+      const cursiv::Document& document,
+      const ast::PackageDeclaration& qualifier, std::string_view name) const;
+
+  [[nodiscard]] std::string_view keepQualifiedName(
+      const cursiv::Document& document, std::string_view qualifier,
+      std::string_view name) const;
+
  private:
   // The climb, recomputed every call -- NOT memoised: measurement found a
   // `DocumentCache` lookup slower than just climbing, since the chain is one

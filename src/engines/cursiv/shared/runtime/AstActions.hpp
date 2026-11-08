@@ -25,7 +25,9 @@ struct Pending;
 // nothing and the raw spelling stands.
 using TextFn = std::optional<std::string_view> (*)(AstBuildCtx&, NodeId);
 // One conversion, as the table holds it. `value` stands where the grammar
-// stated the value, and the write is then a store; `fn` answers every slot.
+// stated the value, and the write is then a store. With neither pointer, the
+// slot passes the raw record text straight to a string-view member. Every
+// other conversion keeps its thunk.
 struct ConvSlot {
   bool (*fn)(AstBuildCtx&, NodeId, void*) = nullptr;
   const void* value = nullptr;

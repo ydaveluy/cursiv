@@ -3921,6 +3921,56 @@ void each_container_owns_its_own() {
   CHECK(symbols.forContainer(a).empty());
 }
 
+// Both a run per container and interleaved declarations answer the same
+// public scopes. Reusing the table after clear also exercises retained room.
+void grouping_keeps_each_containers_declarations_and_homonyms() {
+  constexpr std::size_t groups = 37;
+  constexpr std::string_view names[] = {"Alpha", "ALPHA", "β", "other"};
+  std::vector<cursiv::AstNode> containers(groups + 1);
+  cursiv::LocalSymbols symbols;
+  symbols.reserve(groups * std::size(names) * 2);
+  for (const bool grouped : {true, false, true}) {
+    symbols.clear();
+    const auto add = [&](std::size_t group, std::size_t position) {
+      symbols.add(&containers[group],
+                  named(std::string(names[position]),
+                        static_cast<cursiv::NodeId>(group * std::size(names) +
+                                                    position)));
+    };
+    if (grouped) {
+      for (std::size_t group = 0; group < groups; ++group)
+        for (std::size_t position = 0; position < std::size(names); ++position)
+          add(group, position);
+    } else {
+      for (std::size_t position = 0; position < std::size(names); ++position)
+        for (std::size_t group = 0; group < groups; ++group) add(group, position);
+    }
+    symbols.seal();
+    CHECK(symbols.size() == groups * std::size(names));
+    for (std::size_t group = 0; group < groups; ++group) {
+      const auto entries = symbols.forContainer(&containers[group]);
+      CHECK(entries.size() == std::size(names));
+      if (entries.size() != std::size(names)) continue;
+      for (std::size_t position = 0; position < std::size(names); ++position) {
+        CHECK(entries[position].name == names[position]);
+        CHECK(entries[position].symbolId == group * std::size(names) + position);
+      }
+      const auto alpha = by_name(symbols, &containers[group], "alpha");
+      CHECK(alpha.size() == 2);
+      if (alpha.size() == 2) {
+        CHECK(alpha[0]->symbolId == group * std::size(names));
+        CHECK(alpha[1]->symbolId == group * std::size(names) + 1);
+      }
+      const auto beta = by_name(symbols, &containers[group], "Β");
+      CHECK(beta.size() == 1);
+      if (beta.size() == 1)
+        CHECK(beta[0]->symbolId == group * std::size(names) + 2);
+    }
+    CHECK(symbols.forContainer(&containers.back()).empty());
+    CHECK(by_name(symbols, &containers.back(), "alpha").empty());
+  }
+}
+
 // `find` answers the folded class whole: two spellings of one name share a
 // chain, in declaration order, and an exact reader filters for itself.
 void find_folds_the_case_and_keeps_the_order() {
@@ -4022,6 +4072,7 @@ void run() {
   a_name_declared_twice_keeps_both_in_order();
   the_index_survives_growth();
   each_container_owns_its_own();
+  grouping_keeps_each_containers_declarations_and_homonyms();
   find_folds_the_case_and_keeps_the_order();
   a_callback_cannot_change_the_lookup_spelling();
   a_query_keeps_its_policy_across_containers();

@@ -17,11 +17,13 @@ inline const CancellationToken kNoCancel{};
 class OperationCancelled : public std::runtime_error {
  public:
   OperationCancelled();
+
+  [[noreturn]] static void raise();
 };
 
 inline void throw_if_cancelled(const CancellationToken& token) {
   if (token.stop_requested()) [[unlikely]]
-    throw OperationCancelled();
+    OperationCancelled::raise();
 }
 
 }  // namespace cursiv
