@@ -41,6 +41,10 @@ cmake --build --preset wasi-release --target mylang_lsp
 The parser generator is still built and run natively on your machine. The
 WASI presets use their own build directories, apart from the native ones.
 
+LTO is disabled for WASI, including explicit CMake IPO requests, because the
+current SDK does not preserve C++ exception handlers with LTO. Native builds
+keep their own IPO setting.
+
 ## Use your own toolchain
 
 The SDK is only the default. To use another compiler, write a toolchain file

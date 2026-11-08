@@ -5,6 +5,24 @@ set(CMAKE_SYSTEM_NAME WASI)
 set(CMAKE_SYSTEM_VERSION 1)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
 
+# The current WASI SDK drops C++ exception handlers under LTO. Disable IPO,
+# including configuration-specific requests, until that path is validated.
+get_cmake_property(_cursiv_wasi_ipo_settings VARIABLES)
+list(FILTER _cursiv_wasi_ipo_settings INCLUDE
+     REGEX "^CMAKE_INTERPROCEDURAL_OPTIMIZATION($|_)")
+list(APPEND _cursiv_wasi_ipo_settings CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+list(REMOVE_DUPLICATES _cursiv_wasi_ipo_settings)
+foreach(_cursiv_wasi_ipo IN LISTS _cursiv_wasi_ipo_settings)
+  if(${_cursiv_wasi_ipo})
+    message(STATUS
+        "cursiv: disabling ${_cursiv_wasi_ipo} for WASI: "
+        "LTO breaks C++ exceptions in the current SDK")
+  endif()
+  set(${_cursiv_wasi_ipo} OFF CACHE BOOL
+      "Enable interprocedural optimization" FORCE)
+  set(${_cursiv_wasi_ipo} OFF)
+endforeach()
+
 # Carried into try_compile, which re-runs the toolchain in a scope the cache
 # does not reach.
 list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
