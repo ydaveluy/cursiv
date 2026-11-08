@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,6 +18,7 @@
 #include "core/parser/TranslationGrammar.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
+#include "cursiv/syntax-tree/CstUtils.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/SourceTranslation.hpp"
 #include "cursiv/text/scalar_at.hpp"
@@ -540,6 +542,32 @@ void a_name_span_maps_back_to_the_document(const Engine& e) {
   CHECK(b.begin == 22 && b.end == 25);
 }
 
+// A keyword is found by the text the parser read: written with an escape, or
+// inside a piece that spells several tokens.
+void a_keyword_anchor_reads_the_parsed_spelling(const Engine& e) {
+  const auto anchor = [](const cursiv::Parser& parser, std::string text) {
+    cursiv::Document document(
+        cursiv::TextDocument::create("file:///t", "t", 0, std::move(text)));
+    document.parseResult = parser.parse(document.textDocument().getText());
+    const auto* unit = document.parseResult.value_as<ttrans::Unit>();
+    CHECK(unit != nullptr && unit->decls.size() == 1);
+    std::optional<TextRange> found;
+    if (unit == nullptr || unit->decls.size() != 1) return found;
+    if (const auto keyword = cursiv::find_node_for_keyword(
+            *unit->decls[0], "class", 0, &document)) {
+      CHECK(keyword->cst->spelling(keyword->id) == "class");
+      found = TextRange{keyword->begin(), keyword->end()};
+    }
+    return found;
+  };
+  const auto plain = anchor(*e.plain, "class A;");
+  CHECK(plain && plain->begin == 0 && plain->end == 5);
+  const auto escaped = anchor(*e.unicode, "cl\\u0061ss A;");
+  CHECK(escaped && escaped->begin == 0 && escaped->end == 10);
+  const auto sigil = anchor(*e.sigils, "$A;");
+  CHECK(sigil && sigil->begin == 0 && sigil->end == 1);
+}
+
 void line_splices_join_tokens_and_comments(const Engine& e) {
   const auto keyword = check_against_decoded(e, *e.splices, line_splices,
                                              "cla\\\nss A;");
@@ -630,6 +658,7 @@ void run_engine(const Engine& e) {
   a_repair_after_an_escape_is_reported_in_the_document(e);
   completion_refuses_a_caret_inside_an_escape(e);
   a_name_span_maps_back_to_the_document(e);
+  a_keyword_anchor_reads_the_parsed_spelling(e);
   line_splices_join_tokens_and_comments(e);
   a_piece_spelling_several_tokens_completes_as_decoded(e);
   untouched_text_is_parsed_as_it_is(e);

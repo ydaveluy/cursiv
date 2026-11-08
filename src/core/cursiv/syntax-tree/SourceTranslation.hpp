@@ -76,6 +76,10 @@ class SourceTranslation {
   // The tree's records and repairs moved to the document's offsets, keeping
   // the spans that cannot find their way back.
   void bind(std::span<CstNode> records, std::span<ParseDiagnostic> repairs);
+  // Record `index` of the bound tree, at `span` in the document, back at the
+  // span the parse wrote.
+  [[nodiscard]] TextRange text_of(std::uint32_t index,
+                                  TextRange span) const noexcept;
 
   std::string_view _source;
   // How much of the source the pieces have consumed.

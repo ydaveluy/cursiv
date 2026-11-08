@@ -190,6 +190,14 @@ class Cst {
   std::string_view text(const CstNode& n) const noexcept {
     return std::string_view(_text.data() + n.begin, n.end - n.begin);
   }
+  // The text the parser read for `id`: `text(id)`, or in a translated
+  // document the translated text the node was parsed from.
+  std::string_view spelling(NodeId id) const noexcept {
+    const CstNode& n = node(id);
+    if (_translation == nullptr) return text(n);
+    const TextRange at = _translation->text_of(id, {n.begin, n.end});
+    return _translation->text().substr(at.begin, at.end - at.begin);
+  }
 
   // Postorder makes the last child constant-time; a forward sibling cannot be
   // computed from one subtree size. Source order is the caller's job:

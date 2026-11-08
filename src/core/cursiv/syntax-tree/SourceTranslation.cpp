@@ -167,6 +167,16 @@ void SourceTranslation::bind(std::span<CstNode> records,
   move<kText, kSource>(_pieces, records, keep(_records));
   move<kText, kSource>(_pieces, repairs, keep(_repairs));
 }
+TextRange SourceTranslation::text_of(std::uint32_t index,
+                                     TextRange span) const noexcept {
+  const auto kept = std::partition_point(
+      _records.begin(), _records.end(),
+      [index](const Kept& k) { return k.index < index; });
+  if (kept != _records.end() && kept->index == index) return kept->text;
+  move<kSource, kText>(_pieces, std::span(&span, 1),
+                       [](std::size_t, TextRange) {});
+  return span;
+}
 void SourceTranslation::to_text(std::span<CstNode> records) const noexcept {
   move_back(_pieces, std::span<const Kept>(_records), records);
 }

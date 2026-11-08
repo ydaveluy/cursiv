@@ -113,8 +113,8 @@ std::optional<CstNodeView> clamped(const std::vector<CstNodeView>& found,
   return found[std::min(index, found.size() - 1)];
 }
 
-// A visible leaf whose bytes are the keyword and that names no rule: a literal
-// the grammar spelled. A leaf that differs from it in case alone spells it
+// A visible leaf that spells the keyword and names no rule: a literal the
+// grammar spelled. A leaf that differs from it in case alone spells it
 // where the grammar reads the literal in any case, which is asked once, at the
 // first such leaf. The rule is asked last, of those leaves only.
 class SpellsKeyword {
@@ -126,7 +126,7 @@ class SpellsKeyword {
   bool operator()(NodeId id) const noexcept {
     const CstNode& n = (*_cst)[id];
     if (n.subtreeSize != 1 || n.hidden != 0) return false;
-    const std::string_view text = _cst->text(id);
+    const std::string_view text = _cst->spelling(id);
     if (text != _keyword && !(folded_equal(text, _keyword) && folds()))
       return false;
     return _grammar->recordRule(n).empty();

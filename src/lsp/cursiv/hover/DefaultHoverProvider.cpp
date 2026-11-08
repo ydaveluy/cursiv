@@ -58,7 +58,7 @@ std::optional<lsp::Hover> DefaultHoverProvider::getHoverContent(
     if (leaf == kNoNode) return std::nullopt;
     const Grammar& grammar = _core.parser->getGrammar();
     std::string_view doc = grammar.recordDoc(cst[leaf]);
-    if (doc.empty()) doc = grammar.spellingDoc(cst.text(leaf));
+    if (doc.empty()) doc = grammar.spellingDoc(cst.spelling(leaf));
     if (doc.empty()) return std::nullopt;
     const CstNode& node = cst[leaf];
     lsp::Hover hover;
