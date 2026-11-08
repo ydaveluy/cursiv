@@ -5,13 +5,16 @@
 #include <cstdint>
 #include <vector>
 
-// Taken from Taskflow (taskflow/core/atomic_notifier.hpp), MIT licence:
+#include "cursiv/utils/AtomicWait.hpp"
+
+// From Taskflow (taskflow/core/atomic_notifier.hpp), MIT licence:
 //   Copyright (c) 2018-2024 Dr. Tsung-Wei Huang, University of Wisconsin.
-// The algorithm is unchanged; only the spelling follows this tree.
 
 // Parks a worker without losing a wake-up. One 64-bit word packs an epoch
 // above and a waiter count below; a notify moves the epoch, so a worker
-// already announced never sleeps past a wake-up it missed the timing of.
+// already announced never sleeps past a wake-up it missed the timing of. A
+// worker sleeps on that word through `detail::wait_while_equal`, which blocks
+// on every target.
 
 namespace cursiv {
 
@@ -53,7 +56,7 @@ class AtomicNotifier {
          (state & kWaiterMask) != 0;)
       if (_state.compare_exchange_weak(state, state + kEpochInc,
                                        std::memory_order_acquire)) {
-        _state.notify_all();
+        detail::wake_all(_state);
         break;
       }
   }
@@ -75,7 +78,7 @@ class AtomicNotifier {
   void commitWait(const Waiter& waiter) noexcept {
     std::uint64_t prev = _state.load(std::memory_order_acquire);
     while (static_cast<std::uint32_t>(prev >> kEpochShift) == waiter.epoch) {
-      _state.wait(prev, std::memory_order_acquire);
+      detail::wait_while_equal(_state, prev, std::memory_order_acquire);
       prev = _state.load(std::memory_order_acquire);
     }
     // Seq_cst rather than relaxed: correctness would allow the looser order,
@@ -92,7 +95,7 @@ class AtomicNotifier {
          (state & kWaiterMask) != 0;)
       if (_state.compare_exchange_weak(state, state + kEpochInc,
                                        std::memory_order_acquire)) {
-        _state.notify_one();
+        detail::wake_one(_state);
         return true;
       }
     return false;

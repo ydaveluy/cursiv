@@ -6,9 +6,8 @@
 #include <memory>
 #include <vector>
 
-// Taken from Taskflow (taskflow/core/tsq.hpp), MIT licence:
+// From Taskflow (taskflow/core/tsq.hpp), MIT licence:
 //   Copyright (c) 2018-2024 Dr. Tsung-Wei Huang, University of Wisconsin.
-// The algorithm is unchanged; only the spelling follows this tree.
 
 // Chase-Lev work-stealing deque: the owner pushes and pops at the bottom
 // lock-free; a thief steals from the top, and a compare-exchange arbitrates

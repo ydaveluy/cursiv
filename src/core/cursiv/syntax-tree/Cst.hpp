@@ -7,6 +7,7 @@
 #include <iterator>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -353,19 +354,7 @@ class Cst {
   // cut short leaves the flag unpublished and the list half-written.
   template <class Build>
   void build_once(std::uint8_t& flag, Build&& build) const {
-    // Released from a destructor: a build allocates, and a byte held past a
-    // throw blocks every later question.
-    struct Held {
-      std::atomic_ref<std::uint8_t> lock;
-      ~Held() {
-        lock.store(0, std::memory_order_release);
-        lock.notify_all();
-      }
-    };
-    std::atomic_ref lock(_indexLock);
-    while (lock.exchange(1, std::memory_order_acquire) != 0)
-      lock.wait(1, std::memory_order_relaxed);
-    const Held held{lock};
+    const std::lock_guard lock(_indexLock);
     if (!published(flag)) {
       build();
       publish(flag);
@@ -411,7 +400,7 @@ class Cst {
   mutable std::vector<std::uint64_t> _nodeRecords;
   mutable std::uint8_t _nodeIndex = 0;
   // Held only while an index is built. Neither moved nor reset.
-  mutable std::uint8_t _indexLock = 0;
+  mutable std::mutex _indexLock;
   // The translated text the AST borrows, and its map to the document.
   std::unique_ptr<const SourceTranslation> _translation;
 };

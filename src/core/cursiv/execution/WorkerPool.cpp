@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -102,12 +103,21 @@ void WorkerPool::drain(Job& job) const noexcept {
 // The cell is read before the work, and that ordering is the whole safety: the
 // publisher's stack dies the moment the count reaches zero, so the job must not
 // be touched after the decrement -- while the cell, owned by the pool, may.
+//
+// The last part looks at `asleep` after its decrement, and a sleeping
+// publisher sets it before its last look at the count: both sequentially
+// consistent, so one of the two sees the other. A cell already taken by the
+// next run can show that run's publisher asleep, which then wakes for nothing
+// and sleeps again.
 void WorkerPool::runTask(Task& task) const noexcept {
   Job& job = *task.job;
   Cell& cell = *job.cell;
   drain(job);
-  if (cell.pending.fetch_sub(1, std::memory_order_acq_rel) == 1)
-    cell.pending.notify_all();
+  if (cell.pending.fetch_sub(1, std::memory_order_seq_cst) == 1 &&
+      cell.asleep.load(std::memory_order_seq_cst)) {
+    const std::lock_guard lock(cell.mutex);
+    cell.done.notify_one();
+  }
 }
 
 WorkerPool::Task* WorkerPool::steal(std::size_t victim) noexcept {
@@ -222,7 +232,7 @@ void WorkerPool::submit(Task& task, std::size_t self, std::size_t parts) {
 void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
   const std::size_t victims = victimCount();
   const bool isWorker = self < _workers.size();
-  const Cell& cell = *job.cell;
+  Cell& cell = *job.cell;
   std::size_t misses = 0;
   while (cell.pending.load(std::memory_order_acquire) != 0) {
     Task* task = isWorker ? _workers[self]->queue.pop() : nullptr;
@@ -247,8 +257,14 @@ void WorkerPool::corun(const Job& job, std::size_t self) noexcept {
       std::this_thread::yield();
       continue;
     }
-    const std::size_t left = cell.pending.load(std::memory_order_acquire);
-    if (left != 0) cell.pending.wait(left, std::memory_order_acquire);
+    // The count is read again under the mutex, which the last part takes to
+    // signal: a part that empties it either shows here or wakes the sleep.
+    std::unique_lock lock(cell.mutex);
+    cell.asleep.store(true, std::memory_order_seq_cst);
+    cell.done.wait(lock, [&] {
+      return cell.pending.load(std::memory_order_seq_cst) == 0;
+    });
+    cell.asleep.store(false, std::memory_order_relaxed);
   }
 }
 

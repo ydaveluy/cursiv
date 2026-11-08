@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -46,12 +47,17 @@ class WorkerPool {
   static constexpr std::size_t kCells = 64;
 
   // The count of parts still running, and it belongs to the pool: a publisher
-  // that is not a worker sleeps on it, so the part that empties it has to
-  // signal -- and signalling a counter on the publisher's stack would touch it
-  // after that publisher was free to return. A cell outlives every run.
+  // that is not a worker sleeps until it reaches zero, so the part that empties
+  // it has to signal -- and signalling through the publisher's stack would
+  // touch it after that publisher was free to return. A cell outlives every
+  // run. `asleep` says the publisher sleeps on `done`, so the last part takes
+  // the mutex only then.
   struct alignas(128) Cell {
     std::atomic<std::size_t> pending{0};
     std::atomic<bool> taken{false};
+    std::atomic<bool> asleep{false};
+    std::mutex mutex;
+    std::condition_variable done;
   };
 
   struct Job {
