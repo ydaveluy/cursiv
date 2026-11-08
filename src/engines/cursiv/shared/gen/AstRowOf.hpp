@@ -209,8 +209,8 @@ AstRegistry ast_registry(std::string_view grammar = detail::raw_type_name<G>()) 
   // Grammar law: the entry rule produces a node, which is what lets the
   // builder's `result()` read the bottom of the stack instead of searching it.
   // A terminal or data-rule entry would push nothing.
-  static_assert(is_node_rule<typename Normalize<G>::entry> ||
-                    is_infix_rule<typename Normalize<G>::entry>,
+  static_assert(detail::is_node_rule<typename Normalize<G>::entry> ||
+                    detail::is_infix_rule<typename Normalize<G>::entry>,
                 "the entry rule of this grammar builds no AST node: it is a "
                 "terminal or a data rule -- make `entry` a rule that builds "
                 "the root node");

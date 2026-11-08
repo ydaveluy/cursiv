@@ -4,7 +4,7 @@
 
 #include "cursiv/utils/CaseFold.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 std::span<const ImageId> GrammarImage::shape_kids(ImageId id) const {
   const ImageNode& n = nodes[id];
@@ -169,4 +169,4 @@ bool GrammarImage::folds(std::uint32_t rule) const {
   return home != nullptr ? home->written->caseInsensitive : caseInsensitive;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

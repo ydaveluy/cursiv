@@ -11,7 +11,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/ElementKind.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // A repetition with no upper bound.
 inline constexpr std::uint16_t kModelUnbounded = 0xFFFFu;
@@ -41,4 +41,4 @@ struct GrammarModel {
   [[nodiscard]] virtual std::uint16_t maxOf(ElementId) const noexcept = 0;
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

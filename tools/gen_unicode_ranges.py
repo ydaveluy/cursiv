@@ -85,11 +85,13 @@ out = [
 ]
 for name in props:
     out.append(f'  {name},')
-out += ['  count', '};', '', '// For a dump alone: what a property is called.',
+out += ['  count', '};', '', 'namespace detail {', '',
+        '// For a dump alone: what a property is called.',
         'inline constexpr std::string_view kNames[] = {']
 for name in props:
     out.append(f'    "{name}",')
-out += ['};', '', '}  // namespace cursiv::unicode', '']
+out += ['};', '', '}  // namespace detail', '', '}  // namespace cursiv::unicode',
+        '']
 open(os.path.join(unicode_dir, 'UnicodeProperty.hpp'), 'w').write('\n'.join(out))
 
 out = [
@@ -99,7 +101,7 @@ out = [
     '#pragma once', '', '#include <span>', '',
     '#include "cursiv/grammar/unicode/UnicodeProperty.hpp"',
     '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
-    'namespace cursiv::unicode {', '',
+    'namespace cursiv::unicode::detail {', '',
 ]
 for name, rs in props.items():
     body = ','.join(f'{{{lo:#x},{hi:#x}}}' for lo, hi in rs)
@@ -107,7 +109,7 @@ for name, rs in props.items():
 out += ['', 'inline constexpr std::span<const Range> kTables[] = {']
 for name in props:
     out.append(f'    k{name},')
-out += ['};', '', '}  // namespace cursiv::unicode', '']
+out += ['};', '', '}  // namespace cursiv::unicode::detail', '']
 path = os.path.join(unicode_dir, 'UnicodeRanges.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, sum(len(r) for r in props.values()), 'ranges')
@@ -148,13 +150,14 @@ out = [
     '// From `first` to `last`, every `stride`-th scalar lowers by `delta`.',
     'struct LowerRun {', '  char32_t first;', '  char32_t last;',
     '  std::int32_t delta;', '  std::uint8_t stride;', '};', '',
+    'namespace detail {', '',
 ]
 body = ','.join(f'{{{f:#x},{l:#x},{d},{st or 1}}}' for f, l, d, st in runs)
 out.append(f'inline constexpr LowerRun kLower[] = {{{body}}};')
 for name, rs in (('Cased', cased), ('CaseIgnorable', ignorable)):
     body = ','.join(f'{{{lo:#x},{hi:#x}}}' for lo, hi in rs)
     out.append(f'inline constexpr Range k{name}[] = {{{body}}};')
-out += ['', '}  // namespace cursiv::unicode', '']
+out += ['', '}  // namespace detail', '', '}  // namespace cursiv::unicode', '']
 path = os.path.join(unicode_dir, 'UnicodeLower.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, len(runs), 'runs')
@@ -205,7 +208,7 @@ out = [
     '// tools/gen_unicode_ranges.py from the Unicode Character Database,',
     f'// Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <cstdint>', '',
-    'namespace cursiv::unicode {', '',
+    'namespace cursiv::unicode::detail {', '',
     '// The statuses C and S of CaseFolding.txt, except that a scalar folds only',
     '// to a case as long in UTF-8. A scalar from `kFoldEnd` folds to itself;',
     '// below, it folds to itself plus',
@@ -217,7 +220,7 @@ out = [
     ','.join('{' + ','.join(str(i) for i in b) + '}' for b in blocks) + '};',
     'inline constexpr std::int32_t kFoldDelta[] = {' +
     ','.join(str(d) for d in deltas) + '};',
-    '', '}  // namespace cursiv::unicode', '']
+    '', '}  // namespace cursiv::unicode::detail', '']
 path = os.path.join(unicode_dir, 'UnicodeFold.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, len(fold), 'scalars', len(blocks), 'blocks',

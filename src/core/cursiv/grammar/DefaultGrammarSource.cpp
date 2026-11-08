@@ -41,7 +41,7 @@ std::string DefaultGrammarSource::ruleClosure(std::string_view name) const {
   return out;
 }
 
-const GrammarSourceRule* DefaultGrammarSource::find(
+const detail::GrammarSourceRule* DefaultGrammarSource::find(
     std::string_view name) const {
   for (const auto& rule : _data.rules)
     if (rule.name == name) return &rule;

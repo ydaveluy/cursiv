@@ -270,7 +270,8 @@ bool ends_a_word(std::string_view text, const CstLeaf& leaf) {
          (static_cast<unsigned char>(text[last]) & 0xC0u) == 0x80u)
     --last;
   std::size_t len = 0;
-  return word_scalar(scalar_at(text.data() + last, text.size() - last, len));
+  return detail::word_scalar(
+      detail::scalar_at(text.data() + last, text.size() - last, len));
 }
 
 }  // namespace

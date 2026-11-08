@@ -252,7 +252,7 @@ int run(int argc, char** argv) try {
       "[--stamp-row-bits=1..16] [--group-lines=N] [--optional-gate=0..15]",
       [&](std::string_view arg) { return args.take(arg); });
   if (dir == nullptr) return exit_status(GenCode::usage);
-  cursiv::GrammarImage image = cursiv::grammar_image<View>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<View>();
   if (cursiv::refuse_self_bounded_arms(CURSIV_GEN_NAME, image))
     return exit_status(GenCode::refused);
   auto desc = cursiv::kLrLower<G>;

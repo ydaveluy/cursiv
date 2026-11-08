@@ -37,7 +37,7 @@ class WalkTree {
   template <class T>
   [[nodiscard]] AstNode* make() {
     auto node = std::make_unique<T>();
-    AstNode* const base = detail::stamp_node(*node);
+    AstNode* const base = cursiv::detail::stamp_node(*node);
     _nodes.push_back(std::move(node));
     return base;
   }

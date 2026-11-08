@@ -31,7 +31,8 @@ void append_escaped_json_string(std::string& out, std::string_view text) {
     if (c >= 0x80) {
       // JSON text is UTF-8: a scalar is written as it stands, each maximal
       // ill-formed subpart as one U+FFFD.
-      const Utf8Step step = utf8_step(text.data() + at, text.size() - at);
+      const detail::Utf8Step step =
+          detail::utf8_step(text.data() + at, text.size() - at);
       if (step.wellFormed)
         out.append(text.substr(at, step.bytes));
       else

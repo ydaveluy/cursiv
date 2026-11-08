@@ -338,7 +338,7 @@ void unicode_escapes(std::string_view source, cursiv::SourceTranslation& out) {
       value = value * 16 + hex(source[p]);
     std::string spelling;
     if (digits == 4)
-      cursiv::append_scalar(spelling, value);
+      cursiv::detail::append_scalar(spelling, value);
     else
       out.error(at, p, "malformed escape");
     out.replace(at, p, spelling);

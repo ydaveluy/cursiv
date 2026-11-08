@@ -344,11 +344,11 @@ class PredicateEmitter {
         // first letter.
         first.add(static_cast<unsigned char>(text[0]));
         std::size_t len = 0;
-        const char32_t cp = scalar_at(text.data(), text.size(), len);
+        const char32_t cp = detail::scalar_at(text.data(), text.size(), len);
         if (len != 0)
           detail::for_each_other_case(cp, [&](char32_t other) {
             std::string bytes;
-            append_scalar(bytes, other);
+            detail::append_scalar(bytes, other);
             first.add(static_cast<unsigned char>(bytes.front()));
           });
       } else {

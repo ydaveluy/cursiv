@@ -65,7 +65,7 @@ struct LexBoundary {
       if (d != kNoSet && sets[d].has(b)) {
         // A continuation byte decodes for a bound that looks back.
         const auto width =
-            static_cast<TextOffset>(b < 0xC0 ? 3 : utf8_width(src[i]));
+            static_cast<TextOffset>(b < 0xC0 ? 3 : detail::utf8_width(src[i]));
         return width < len - i ? i + width : len;
       }
     }

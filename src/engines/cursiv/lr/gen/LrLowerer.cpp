@@ -41,32 +41,33 @@ void LrLowerer::declare_rules() {
   const std::uint16_t first = _cfg.nnts;
   name_rules(_cfg.nts, _cfg.nnts);
   for (std::uint16_t n = first; n < _cfg.nnts; ++n)
-    _cfg.nts[n].node =
-        stage(_ntRule[(n - first) % _ntRule.size()]).kind != ImageRuleKind::data;
+    _cfg.nts[n].node = stage(_ntRule[(n - first) % _ntRule.size()]).kind !=
+                       detail::ImageRuleKind::data;
 }
 
-ImageId LrLowerer::ended(ImageId id) {
+detail::ImageId LrLowerer::ended(detail::ImageId id) {
   if (const auto it = _ended.find(id); it != _ended.end()) return it->second;
-  const ImageNode n = at(id);
-  ImageId out = id;
-  if (n.kind == ImageKind::eof ||
-      (n.kind == ImageKind::andOf && at(kid(n, 0)).kind == ImageKind::eof)) {
+  const detail::ImageNode n = at(id);
+  detail::ImageId out = id;
+  if (n.kind == detail::ImageKind::eof ||
+      (n.kind == detail::ImageKind::andOf &&
+       at(kid(n, 0)).kind == detail::ImageKind::eof)) {
     out = section_end();
-  } else if (n.kind == ImageKind::implied) {
-    const ImageId tok = kid(n, 0);
-    const ImageId cond = ended(kid(n, 1));
+  } else if (n.kind == detail::ImageKind::implied) {
+    const detail::ImageId tok = kid(n, 0);
+    const detail::ImageId cond = ended(kid(n, 1));
     if (cond != kid(n, 1)) {
-      const ImageId both[] = {tok, cond};
+      const detail::ImageId both[] = {tok, cond};
       out = _im.derive(n, both);
     }
   } else {
     switch (n.kind) {
-      case ImageKind::lit:
-      case ImageKind::gapHas:
-      case ImageKind::gapIs:
+      case detail::ImageKind::lit:
+      case detail::ImageKind::gapHas:
+      case detail::ImageKind::gapIs:
         break;
       default:
-        out = map_kids(id, [&](ImageId k) { return ended(k); });
+        out = map_kids(id, [&](detail::ImageId k) { return ended(k); });
     }
   }
   _ended.emplace(id, out);
@@ -106,7 +107,7 @@ LrLowered LrLowerer::run() {
   return std::move(_o);
 }
 
-LrLowered lr_lower(GrammarImage& image, const LowerDesc& desc) {
+LrLowered lr_lower(detail::GrammarImage& image, const LowerDesc& desc) {
   if (desc.optionalGate > kOptionalGateMost)
     throw std::invalid_argument(
         "cursiv: the optional gate exceeds fifteen positions");

@@ -391,7 +391,8 @@ void write_json_string(std::ostream& out, std::string_view text) {
     const char ch = text[index];
     const auto byte = static_cast<unsigned char>(ch);
     if (byte >= 0x80u) {
-      const Utf8Step step = utf8_step(text.data() + index, text.size() - index);
+      const detail::Utf8Step step =
+          detail::utf8_step(text.data() + index, text.size() - index);
       if (!step.wellFormed) {
         writePlain(index);
         out << "\\ufffd";

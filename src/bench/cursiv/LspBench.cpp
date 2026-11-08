@@ -30,7 +30,7 @@
 #include "cursiv/symbols/WorkspaceSymbolProvider.hpp"
 #include "cursiv/text/LspPosition.hpp"
 
-namespace cursiv::bench {
+namespace cursiv::bench::detail {
 namespace {
 
 template <class T>
@@ -269,4 +269,4 @@ void lsp_stages(int iterations, SharedLspServices& shared,
         });
 }
 
-}  // namespace cursiv::bench
+}  // namespace cursiv::bench::detail

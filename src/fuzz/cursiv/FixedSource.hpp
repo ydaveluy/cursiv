@@ -5,10 +5,10 @@
 
 #include "cursiv/DecisionSource.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 struct FixedSource final : DecisionSource {
   unsigned choose(DecisionKind, unsigned) override { return 0; }
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

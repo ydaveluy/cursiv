@@ -6,9 +6,9 @@ namespace cursiv {
 
 std::vector<NestedRunWarning> nested_run_warnings(WarningFound& found) {
   return walk_warnings<NestedRunWarning>(
-      found, [](WarningFound& w, ImageId id) {
-        const ImageNode& n = w.image().nodes[id];
-        return n.kind == ImageKind::repeat && n.n > 1 &&
+      found, [](WarningFound& w, detail::ImageId id) {
+        const detail::ImageNode& n = w.image().nodes[id];
+        return n.kind == detail::ImageKind::repeat && n.n > 1 &&
                w.reads().run(w.image().kids[n.first]);
       });
 }

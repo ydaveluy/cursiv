@@ -13,7 +13,7 @@
 #include "cursiv/GrammarActions.hpp"
 #include "cursiv/GrammarModel.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 inline constexpr unsigned kGrammarUnreachable = 1u << 20;
 
@@ -79,4 +79,4 @@ struct GrammarCost {
   }
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

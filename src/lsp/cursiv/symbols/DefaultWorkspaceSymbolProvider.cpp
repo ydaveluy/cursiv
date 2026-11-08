@@ -27,7 +27,7 @@ namespace cursiv {
 std::vector<lsp::WorkspaceSymbol> DefaultWorkspaceSymbolProvider::getSymbols(
     std::string_view query, const CancellationToken& cancelToken) const {
   std::vector<lsp::WorkspaceSymbol> found;
-  const std::string normalized = lower_case(query);
+  const std::string normalized = detail::lower_case(query);
   (void)_shared.indexManager->visitElements(
       nullptr, {}, [&](const AstNodeDescription& description) {
         throw_if_cancelled(cancelToken);

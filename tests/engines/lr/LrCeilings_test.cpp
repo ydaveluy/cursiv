@@ -551,7 +551,7 @@ void a_wide_nullable_closure_keeps_candidate_order() {
   table.expectItems = items;
   table.expectPool = pool;
   const std::string_view spellings[] = {"x", "y"};
-  const cursiv::GrammarTerminal words[] = {
+  const cursiv::detail::GrammarTerminal words[] = {
       {}, {{}, {}, false, {spellings, 1}}, {{}, {}, false, {spellings + 1, 1}}};
   const cursiv::GrammarMetaData meta{.terminals = words, .terminalCount = 3};
   const cursiv::StampedGrammar grammar(meta, table.stamp);

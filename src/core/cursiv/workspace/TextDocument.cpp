@@ -174,7 +174,7 @@ TextOffset TextDocument::offsetAt(const Position& position) const {
       at += 8;
     }
   while (at < end && units < position.character) {
-    const Utf8Step step = utf8_step(p + at, _text.size() - at);
+    const detail::Utf8Step step = detail::utf8_step(p + at, _text.size() - at);
     units += step.units;
     at = static_cast<TextOffset>(at + step.bytes);
   }
@@ -231,7 +231,7 @@ std::uint32_t TextDocument::advanceUtf16(TextOffset& from, TextOffset to,
       at += 8;
     }
   while (at < to) {
-    const Utf8Step step = utf8_step(p + at, _text.size() - at);
+    const detail::Utf8Step step = detail::utf8_step(p + at, _text.size() - at);
     units += step.units;
     at = static_cast<TextOffset>(at + step.bytes);
   }
@@ -277,7 +277,7 @@ void TextDocument::ensureLineIndex() const {
     const std::uint64_t bit = std::uint64_t{1} << (line % 64);
     const TextOffset start = _lineStarts.back();
     if (high == 0) _asciiLines.back() |= bit;
-    if (high == 0 || utf8_well_formed({p + start, end - start}))
+    if (high == 0 || detail::utf8_well_formed({p + start, end - start}))
       _wellFormedLines.back() |= bit;
     high = 0;
   };

@@ -51,11 +51,12 @@ struct GrammarSpec;
 template <class G, class X>
 struct InGrammar;
 
+namespace detail {
+
 // A grammar is named whole: `section<G>` reads G's entry as G alone reads it.
 template <class R>
 inline constexpr bool is_grammar = std::is_base_of_v<GrammarSpec, R>;
 
-namespace detail {
 template <class R>
 struct named_rule {
   using type = R;
@@ -65,13 +66,11 @@ template <class R>
 struct named_rule<R> {
   using type = InGrammar<R, typename R::entry>;
 };
-}  // namespace detail
 
 // The rule a reference reads.
 template <class R>
-using named_rule_t = typename detail::named_rule<R>::type;
+using named_rule_t = typename named_rule<R>::type;
 
-namespace detail {
 template <class E>
 inline constexpr bool is_as = false;
 template <class C, class E>
@@ -104,21 +103,20 @@ template <class C, class E>
 struct as_resolved<As<C, E>, true> {
   using type = Ref<Rule<E{}, C>>;
 };
-}  // namespace detail
 
 // One token, lexed: the separator never runs inside. The optional slot names
 // what the token's text becomes.
 template <auto Body, class... Opts>
 struct TerminalRule {
-  static_assert(detail::body_not_a_rule<Body>::ok);
-  static_assert(!detail::holds_as<std::remove_cv_t<decltype(Body)>>,
+  static_assert(body_not_a_rule<Body>::ok);
+  static_assert(!holds_as<std::remove_cv_t<decltype(Body)>>,
                 "inside a terminal, as<X>(e) must wrap the whole body or "
                 "each of its alternatives: write terminal<as<X>(...)> or "
                 "terminal<as<A>(...) | as<B>(...)>");
-  static_assert(!detail::holds_commit<std::remove_cv_t<decltype(Body)>>,
+  static_assert(!holds_commit<std::remove_cv_t<decltype(Body)>>,
                 "a commit is allowed in a rule, not in a terminal: inside a "
                 "terminal, use option, many, some or repeat without commit");
-  using kind = detail::terminal_kind;
+  using kind = terminal_kind;
   using slot = TypeList<Opts...>;
   static constexpr auto body = Body;
 };
@@ -128,18 +126,15 @@ struct TerminalRule {
 // node rule, and a slot makes it a value rule outright.
 template <auto Body, class... Opts>
 struct Rule {
-  static_assert(detail::body_not_a_rule<Body>::ok);
-  static_assert(!detail::stray_commit<
-                    detail::as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
+  static_assert(body_not_a_rule<Body>::ok);
+  static_assert(!stray_commit<as_resolved_t<std::remove_cv_t<decltype(Body)>>>,
                 "commit(prefix, body) must be the direct item of option, "
                 "many, some or repeat, as in many(commit(a, b))");
-  using kind = detail::node_kind;
+  using kind = node_kind;
   using slot = TypeList<Opts...>;
-  static constexpr auto body = detail::commit_free_t<
-      detail::as_resolved_t<std::remove_cv_t<decltype(Body)>>>{};
+  static constexpr auto body =
+      commit_free_t<as_resolved_t<std::remove_cv_t<decltype(Body)>>>{};
 };
-
-namespace detail {
 
 // The operators of a table's levels of one kind, as alternatives: `prefix`,
 // `postfix`, or `left` for every binary level.
@@ -318,8 +313,6 @@ struct infix_body {
   using type = typename cat_list<tl_cat_t<TypeList<operand>, turns>>::type;
 };
 
-}  // namespace detail
-
 // A chain of binary operators is a grammar spelled badly either way:
 // left-recursive spelled directly, one near-identical rule per level spelled
 // as a cascade. So it is a rule kind: the primary rule for the operands, the
@@ -329,19 +322,16 @@ struct infix_body {
 template <class Primary, auto LeftPtr, auto OpPtr, auto RightPtr, auto Lvls,
           class Node>
 struct InfixRule {
-  using kind = detail::infix_kind;
+  using kind = infix_kind;
   using slot = TypeList<>;
   using primary = Primary;
   using node_type = Node;
-  using levels = detail::inline_operators_t<std::remove_cv_t<decltype(Lvls)>>;
+  using levels = inline_operators_t<std::remove_cv_t<decltype(Lvls)>>;
   static constexpr auto left_pointer = LeftPtr;
   static constexpr auto op_pointer = OpPtr;
   static constexpr auto right_pointer = RightPtr;
-  static constexpr auto body =
-      typename detail::infix_body<Primary, levels>::type{};
+  static constexpr auto body = typename infix_body<Primary, levels>::type{};
 };
-
-namespace detail {
 
 // The rule `infix<>` spells: three member pointers after the levels, or none
 // for `T::left`, `T::op` and `T::right`.
@@ -359,8 +349,6 @@ template <class Primary, class T, auto Lvls, auto Left, auto Op, auto Right>
 struct infix_of<Primary, T, Lvls, Left, Op, Right> {
   using type = InfixRule<Primary, Left, Op, Right, Lvls, T>;
 };
-
-}  // namespace detail
 
 template <class R>
 concept AnyRule = requires {
@@ -421,8 +409,6 @@ template <class R>
 inline constexpr bool is_inline_terminal = false;
 template <auto Body, class... Opts>
 inline constexpr bool is_inline_terminal<TerminalRule<Body, Opts...>> = true;
-
-namespace detail {
 
 // The deductions below walk a rule's body and descend into the rules it
 // names, carrying the path of rules they are inside so that a cycle stops.
@@ -541,8 +527,6 @@ template <class Seen, class R>
 using deduction_path_t =
     tl_cat_t<typename path_into<deduction_calls, Seen, R>::type, TypeList<R>>;
 
-}  // namespace detail
-
 // The genre of a `rule<>`, deduced. `terminal<>` names its own; `rule<>`
 // covers value and node, and what tells them apart is whether the body
 // commits a node: a create, a nest, a directive, or a reference to a rule
@@ -555,10 +539,10 @@ using deduction_path_t =
 template <class R, class Seen, bool OnPath>
 struct rule_builds_node_of;
 
-template <class E, class Seen, class Kids = typename detail::ExprShape<E>::kids>
+template <class E, class Seen, class Kids = typename ExprShape<E>::kids>
 inline constexpr bool builds_node = false;
 template <class E, class Seen, class... Ks>
-  requires detail::grouping<E>
+  requires grouping<E>
 inline constexpr bool builds_node<E, Seen, TypeList<Ks...>> =
     (builds_node<Ks, Seen> || ...);
 template <class T, class E, class Seen>
@@ -576,7 +560,7 @@ inline constexpr bool builds_node<Flag<P, E>, Seen> = true;
 template <class R, class Seen>
 inline constexpr bool builds_node<Ref<R>, Seen> =
     rule_builds_node_of<named_rule_t<R>, Seen,
-                        detail::tl_has<named_rule_t<R>, Seen>::value>::value;
+                        tl_has<named_rule_t<R>, Seen>::value>::value;
 
 template <class R>
 inline constexpr bool slot_empty = std::is_same_v<typename R::slot, TypeList<>>;
@@ -589,15 +573,14 @@ struct rule_builds_node_of<R, Seen, true> : std::false_type {};
 // Only a `rule<>` with no slot is answered by its body: the walk, and the
 // path it carries, are formed for that rule alone.
 template <class R, class Seen,
-          bool Walks = std::is_same_v<typename R::kind, detail::node_kind> &&
-                       slot_empty<R>>
+          bool Walks =
+              std::is_same_v<typename R::kind, node_kind> && slot_empty<R>>
 struct body_builds_node
-    : std::bool_constant<std::is_same_v<typename R::kind, detail::infix_kind>> {
-};
+    : std::bool_constant<std::is_same_v<typename R::kind, infix_kind>> {};
 template <class R, class Seen>
 struct body_builds_node<R, Seen, true>
     : std::bool_constant<builds_node<std::remove_cv_t<decltype(R::body)>,
-                                     detail::deduction_path_t<Seen, R>>> {};
+                                     deduction_path_t<Seen, R>>> {};
 template <class R, class Seen>
 struct rule_builds_node_of<R, Seen, false> : body_builds_node<R, Seen> {};
 
@@ -609,19 +592,17 @@ inline constexpr bool kind_is_node =
 // composes its text from the parts.
 template <class R>
 inline constexpr bool is_data_rule =
-    std::is_same_v<typename R::kind, detail::node_kind> && !kind_is_node<R>;
+    std::is_same_v<typename R::kind, node_kind> && !kind_is_node<R>;
 template <class R>
 inline constexpr bool is_node_rule =
-    std::is_same_v<typename R::kind, detail::node_kind> && kind_is_node<R>;
+    std::is_same_v<typename R::kind, node_kind> && kind_is_node<R>;
 template <class R>
 inline constexpr bool is_infix_rule =
-    std::is_same_v<typename R::kind, detail::infix_kind>;
+    std::is_same_v<typename R::kind, infix_kind>;
 
-namespace detail {
 template <class... Es>
 struct sequence_builds_node<Seq<Es...>>
     : std::bool_constant<builds_node<Seq<Es...>, TypeList<>>> {};
-}  // namespace detail
 
 // A rule's body, and the only read of one. An infix rule's is the synthesized
 // `primary (ops primary)*`.
@@ -641,6 +622,8 @@ struct shed_root_create<Create<T, E>> {
 };
 template <class R>
 using rule_body_t = typename shed_root_create<declared_body_t<R>>::type;
+
+}  // namespace detail
 
 // A value rule answers its slot: the converter's result, the target the slot
 // names, else the text. A node rule answers its body: the type a root create
@@ -1761,10 +1744,10 @@ struct rule_type<R, node_kind, Seen> {
       type;
 };
 
-}  // namespace detail
-
 template <AnyRule R>
-using rule_type_t = typename detail::rule_type<R>::type;
+using rule_type_t = typename rule_type<R>::type;
+
+}  // namespace detail
 
 // Everything a grammar spells, re-exposed as members so a derived grammar
 // writes `terminal<cr<"a-z"> + many(w)>` unqualified. A generated grammar needs
@@ -1812,11 +1795,11 @@ struct GrammarSpec {
   static constexpr auto ikw = cursiv::ikw<S>;
   template <str Spec>
   static constexpr auto cr = cursiv::cr<Spec>;
-  static constexpr AnyChar any{};
+  static constexpr detail::AnyChar any{};
   static constexpr Byte byte{};
   template <class R>
   static constexpr Ref<R> ref{};
-  static constexpr Super super{};
+  static constexpr detail::Super super{};
 
   // Directives.
   template <class T>
@@ -1830,13 +1813,13 @@ struct GrammarSpec {
     return cursiv::as<X>(e);
   }
   template <auto P, class N>
-  static constexpr XRef<P, N> xref{};
+  static constexpr detail::XRef<P, N> xref{};
   template <auto S>
-  static constexpr AssignFn<S> assign{};
+  static constexpr detail::AssignFn<S> assign{};
   template <auto S>
-  static constexpr AppendFn<S> append{};
+  static constexpr detail::AppendFn<S> append{};
   template <auto P>
-  static constexpr FlagFn<P> flag{};
+  static constexpr detail::FlagFn<P> flag{};
   template <class T, auto P, Expr E>
   static constexpr auto nest(E e) {
     return cursiv::nest<T, P>(e);
@@ -1880,21 +1863,21 @@ struct GrammarSpec {
   static constexpr auto postfix(E op) {
     return cursiv::postfix<T>(op);
   }
-  static constexpr LevelsFn levels{};
-  static constexpr SkipFn skip{};
-  static constexpr TightFn tight{};
+  static constexpr detail::LevelsFn levels{};
+  static constexpr detail::SkipFn skip{};
+  static constexpr detail::TightFn tight{};
   template <class... Rs>
-  static constexpr IgnoreTag<Rs...> ignore{};
+  static constexpr detail::IgnoreTag<Rs...> ignore{};
   template <class... Rs>
-  static constexpr HideTag<Rs...> hide{};
-  static constexpr SomeFn some{};
-  static constexpr ManyFn many{};
-  static constexpr OptionFn option{};
-  static constexpr UnorderedFn unordered{};
+  static constexpr detail::HideTag<Rs...> hide{};
+  static constexpr detail::SomeFn some{};
+  static constexpr detail::ManyFn many{};
+  static constexpr detail::OptionFn option{};
+  static constexpr detail::UnorderedFn unordered{};
   template <std::size_t Min, std::size_t Max = Min>
-  static constexpr RepeatFn<Min, Max> repeat{};
+  static constexpr detail::RepeatFn<Min, Max> repeat{};
   template <class Tag>
-  static constexpr MarkFn<Tag> mark{};
+  static constexpr detail::MarkFn<Tag> mark{};
   template <class Tag>
   static constexpr Same<Tag> same{};
   static constexpr Indent indent{};

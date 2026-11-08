@@ -13,26 +13,25 @@
 #include "cursiv/grammar/unicode/UnicodeRange.hpp"
 #include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
-
-namespace detail {
+namespace cursiv::detail {
 
 inline char32_t lower_scalar(char32_t cp) noexcept {
-  const auto* run = std::ranges::upper_bound(unicode::kLower, cp, {},
+  const auto* run = std::ranges::upper_bound(unicode::detail::kLower, cp, {},
                                              &unicode::LowerRun::first);
-  if (run == std::begin(unicode::kLower)) return cp;
+  if (run == std::begin(unicode::detail::kLower)) return cp;
   --run;
   if (cp > run->last || (cp - run->first) % run->stride != 0) return cp;
   return static_cast<char32_t>(static_cast<std::int32_t>(cp) + run->delta);
 }
 
 inline bool cased(char32_t cp) noexcept {
-  return unicode::within(unicode::kCased, std::size(unicode::kCased), cp);
+  return unicode::within(unicode::detail::kCased,
+                         std::size(unicode::detail::kCased), cp);
 }
 
 inline bool case_ignorable(char32_t cp) noexcept {
-  return unicode::within(unicode::kCaseIgnorable,
-                         std::size(unicode::kCaseIgnorable), cp);
+  return unicode::within(unicode::detail::kCaseIgnorable,
+                         std::size(unicode::detail::kCaseIgnorable), cp);
 }
 
 // Whether the sigma at `[begin, end)` follows a cased letter and precedes
@@ -63,8 +62,6 @@ inline bool final_sigma(std::string_view s, std::size_t begin,
   return true;
 }
 
-}  // namespace detail
-
 // A byte that starts no well-formed sequence is kept as it is.
 inline std::string lower_case(std::string_view text) {
   std::string out;
@@ -79,12 +76,12 @@ inline std::string lower_case(std::string_view text) {
     if (cp == 0x130)
       out += "i\xCC\x87";
     else if (cp == 0x3A3)
-      append_scalar(out, detail::final_sigma(text, i, i + len) ? 0x3C2 : 0x3C3);
+      append_scalar(out, final_sigma(text, i, i + len) ? 0x3C2 : 0x3C3);
     else
-      append_scalar(out, detail::lower_scalar(cp));
+      append_scalar(out, lower_scalar(cp));
     i += len;
   }
   return out;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

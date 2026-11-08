@@ -141,19 +141,21 @@ void writes_follow_the_current_node_across_nests_and_turns() {
 void twin_cycles_read_each_lazy_rule_body_once() {
   for (const unsigned count : {100u, 800u}) {
     for (const bool cycle : {false, true}) {
-      cursiv::GrammarImage image;
-      image.nodes = {{.kind = cursiv::ImageKind::ref, .a = 0},
-                     {.kind = cursiv::ImageKind::lit, .text = "x"},
-                     {.kind = cursiv::ImageKind::choice, .count = 2}};
+      cursiv::detail::GrammarImage image;
+      image.nodes = {{.kind = cursiv::detail::ImageKind::ref, .a = 0},
+                     {.kind = cursiv::detail::ImageKind::lit, .text = "x"},
+                     {.kind = cursiv::detail::ImageKind::choice, .count = 2}};
       image.kids = {0, 1};
       std::vector<unsigned> queries(count + 2);
       cursiv::TwinReader reader(image, [&](unsigned rule) {
         ++queries[rule];
         // Reading a body grows the image, as the real lazy pipeline does.
-        if (rule == count && !cycle) return cursiv::ImageId{1};
+        if (rule == count && !cycle) return cursiv::detail::ImageId{1};
         const unsigned next = rule < count ? rule + 1 : 0;
-        const auto id = static_cast<cursiv::ImageId>(image.nodes.size());
-        image.nodes.push_back({.kind = cursiv::ImageKind::ref, .a = next});
+        const auto id =
+            static_cast<cursiv::detail::ImageId>(image.nodes.size());
+        image.nodes.push_back(
+            {.kind = cursiv::detail::ImageKind::ref, .a = next});
         return id;
       });
       const auto got = reader.drop(2);
@@ -163,13 +165,17 @@ void twin_cycles_read_each_lazy_rule_body_once() {
 
       // A later rule enters an already settled closure. It cannot be part
       // of that closure's cycles, and no earlier body needs reading again.
-      const auto ref = static_cast<cursiv::ImageId>(image.nodes.size());
-      image.nodes.push_back({.kind = cursiv::ImageKind::ref, .a = count + 1});
-      const auto choice = static_cast<cursiv::ImageId>(image.nodes.size());
-      const auto first = static_cast<cursiv::ImageId>(image.kids.size());
-      image.kids.insert(image.kids.end(), {ref, 0});
+      const auto ref = static_cast<cursiv::detail::ImageId>(image.nodes.size());
       image.nodes.push_back(
-          {.kind = cursiv::ImageKind::choice, .first = first, .count = 2});
+          {.kind = cursiv::detail::ImageKind::ref, .a = count + 1});
+      const auto choice =
+          static_cast<cursiv::detail::ImageId>(image.nodes.size());
+      const auto first =
+          static_cast<cursiv::detail::ImageId>(image.kids.size());
+      image.kids.insert(image.kids.end(), {ref, 0});
+      image.nodes.push_back({.kind = cursiv::detail::ImageKind::choice,
+                             .first = first,
+                             .count = 2});
       CHECK(reader.drop(choice) == ref);
       CHECK(std::ranges::all_of(queries, [](unsigned n) { return n == 1; }));
     }

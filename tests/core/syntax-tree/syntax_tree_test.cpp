@@ -1036,7 +1036,8 @@ static_assert(cursiv::detail::text_value<DerivedHex>::converted);
 // `std::size_t` and not `uint64_t`: the converter answers `t.size() * 1000`,
 // so the rule's type follows the width of the target, not a spelling that only
 // matches it on a 64-bit one.
-static_assert(std::is_same_v<cursiv::rule_type_t<DerivedHex>, std::size_t>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<DerivedHex>, std::size_t>);
 // ...so the conversion entry keeps the rule: erasing it is only free for a
 // converter-less rule answering string_view.
 static_assert(!cursiv::detail::erased_src<
@@ -1062,7 +1063,8 @@ void an_override_runs_the_converter_it_inherited(const cursiv::Parser& parser,
 // type's own conversion reads the text.
 using DecimalHex =
     typename cursiv::ResolveOverride<tdual::D2>::template rule<Base::DEC>;
-static_assert(std::is_same_v<cursiv::rule_type_t<DecimalHex>, std::uint64_t>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<DecimalHex>, std::uint64_t>);
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<DecimalHex>,
                              cursiv::default_converter<std::uint64_t>>);
 
@@ -1082,7 +1084,8 @@ void an_override_naming_a_target_converts_to_it(const cursiv::Parser& parser,
 // stood over -- the middle grammar's, not the base's.
 using ChainHex =
     typename cursiv::ResolveOverride<tdual::D2>::template rule<Base::TEN>;
-static_assert(std::is_same_v<cursiv::rule_type_t<ChainHex>, std::uint32_t>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<ChainHex>, std::uint32_t>);
 static_assert(std::is_same_v<cursiv::detail::converter_rule_t<ChainHex>,
                              cursiv::detail::text_conv<tdual::D1::tens_conv>>);
 
@@ -1654,7 +1657,7 @@ void a_narrowed_site_stamps_and_filters() {
   CHECK(ops.branch(kTag<Kind1>) != cursiv::kNoBranch);
   CHECK(ops.branch(kTag<Kind2>) != cursiv::kNoBranch);
   // ...the site's filter accepts one.
-  const cursiv::RefFilter narrowed{
+  const cursiv::detail::RefFilter narrowed{
       &ops, cursiv::detail::RefAccess::narrow(site->broad)};
   CHECK(narrowed.branch(kTag<Kind1>) != cursiv::kNoBranch);
   CHECK(narrowed.branch(kTag<Kind2>) == cursiv::kNoBranch);
@@ -1771,8 +1774,8 @@ static_assert(std::is_base_of_v<cursiv::AstNode, N>);
 // is four bytes and the number would differ while saying the same thing. What
 // a pin catches is a field added.
 static_assert(sizeof(void*) != 8 || sizeof(cursiv::RefHandle) == 16);
-static_assert(!cursiv::has_error(cursiv::RefState::Resolved) &&
-              cursiv::has_error(cursiv::RefState::ErrorNotFound));
+static_assert(!cursiv::detail::has_error(cursiv::RefState::Resolved) &&
+              cursiv::detail::has_error(cursiv::RefState::ErrorNotFound));
 
 // A diagnostic positions by range, and by nothing else: whoever reads one
 // holds the tree already -- `ParseResult` owns it -- so the type carries no
@@ -4434,7 +4437,7 @@ void threads_around_a_ring_all_see_the_cycle() {
     for (const Ref& r : graph.refs) CHECK(!detail::ref_running(raw(r)));
     for (const Ref& r : graph.refs) {
       const RefState s = r.resolve();
-      CHECK(cancel ? has_error(s) : s == RefState::ErrorCycle);
+      CHECK(cancel ? cursiv::detail::has_error(s) : s == RefState::ErrorCycle);
     }
   }
 }

@@ -23,7 +23,7 @@ class Dead {
   explicit Dead(WarningFound& w) : _w(w), _im(w.image()) {}
 
   void rule(std::uint32_t rule) {
-    const ImageId body = _w.body(rule);
+    const detail::ImageId body = _w.body(rule);
     if (!eof_in(body)) return;
     _rule = _w.name(rule);
     walk(body, Arm{});
@@ -32,27 +32,31 @@ class Dead {
   std::vector<DeadBranch> found;
 
  private:
-  const ImageNode& node(ImageId id) const { return _im.nodes[id]; }
-  ImageId kid(const ImageNode& n, std::uint32_t i) const {
+  const detail::ImageNode& node(detail::ImageId id) const {
+    return _im.nodes[id];
+  }
+  detail::ImageId kid(const detail::ImageNode& n, std::uint32_t i) const {
     return _im.kids[n.first + i];
   }
 
-  bool is_eof(ImageId id) const { return node(id).kind == ImageKind::eof; }
+  bool is_eof(detail::ImageId id) const {
+    return node(id).kind == detail::ImageKind::eof;
+  }
 
   // Conditions consume no token in their containing sequence.
-  bool is_cond(ImageId id) const {
-    const ImageNode& n = node(id);
+  bool is_cond(detail::ImageId id) const {
+    const detail::ImageNode& n = node(id);
     switch (n.kind) {
-      case ImageKind::andOf:
-      case ImageKind::notOf:
-      case ImageKind::gapHas:
-      case ImageKind::gapIs:
+      case detail::ImageKind::andOf:
+      case detail::ImageKind::notOf:
+      case detail::ImageKind::gapHas:
+      case detail::ImageKind::gapIs:
         return true;
-      case ImageKind::choice:
-      case ImageKind::seq: {
+      case detail::ImageKind::choice:
+      case detail::ImageKind::seq: {
         bool any = false;
         for (std::uint32_t i = 0; i < n.count; ++i) {
-          const ImageId k = kid(n, i);
+          const detail::ImageId k = kid(n, i);
           const bool condition = is_cond(k);
           if (!condition && !is_eof(k)) return false;
           any = any || condition;
@@ -65,17 +69,17 @@ class Dead {
   }
 
   // One for a branch that is `eof` bare, two for one under a directive.
-  unsigned end_arm(ImageId id) const {
-    const ImageNode& n = node(id);
+  unsigned end_arm(detail::ImageId id) const {
+    const detail::ImageNode& n = node(id);
     switch (n.kind) {
-      case ImageKind::assign:
-      case ImageKind::append:
-      case ImageKind::flag:
-      case ImageKind::create:
-      case ImageKind::nest:
+      case detail::ImageKind::assign:
+      case detail::ImageKind::append:
+      case detail::ImageKind::flag:
+      case detail::ImageKind::create:
+      case detail::ImageKind::nest:
         return end_arm(kid(n, 0)) ? 2u : 0u;
-      case ImageKind::skip:
-      case ImageKind::doc:
+      case detail::ImageKind::skip:
+      case detail::ImageKind::doc:
         return end_arm(kid(n, 0));
       default:
         return is_eof(id) ? 1u : 0u;
@@ -83,16 +87,16 @@ class Dead {
   }
 
   // A write over a creation stands on a rule of its own.
-  bool creates(ImageId id) const {
-    const ImageNode& n = node(id);
+  bool creates(detail::ImageId id) const {
+    const detail::ImageNode& n = node(id);
     switch (n.kind) {
-      case ImageKind::create:
+      case detail::ImageKind::create:
         return true;
-      case ImageKind::nest:
-      case ImageKind::skip:
-      case ImageKind::doc:
+      case detail::ImageKind::nest:
+      case detail::ImageKind::skip:
+      case detail::ImageKind::doc:
         return creates(kid(n, 0));
-      case ImageKind::repeat:
+      case detail::ImageKind::repeat:
         return n.n == 1 && creates(kid(n, 0));
       default:
         return false;
@@ -101,44 +105,44 @@ class Dead {
 
   // `Written`: a directive stands over the element, and spreads over a
   // choice.
-  Read read(ImageId id, bool written) {
-    const ImageNode n = node(id);
+  Read read(detail::ImageId id, bool written) {
+    const detail::ImageNode n = node(id);
     switch (n.kind) {
-      case ImageKind::eof:
+      case detail::ImageKind::eof:
         return Read::end;
-      case ImageKind::ref:
-        return _im.ready(n.a).face[1].kind == ImageRuleKind::terminal
+      case detail::ImageKind::ref:
+        return _im.ready(n.a).face[1].kind == detail::ImageRuleKind::terminal
                    ? Read::token
                    : Read::other;
-      case ImageKind::lit:
-      case ImageKind::cpset:
-      case ImageKind::byte:
-      case ImageKind::through:
-      case ImageKind::indent:
-      case ImageKind::dedent:
-      case ImageKind::implied:
-      case ImageKind::embed:
+      case detail::ImageKind::lit:
+      case detail::ImageKind::cpset:
+      case detail::ImageKind::byte:
+      case detail::ImageKind::through:
+      case detail::ImageKind::indent:
+      case detail::ImageKind::dedent:
+      case detail::ImageKind::implied:
+      case detail::ImageKind::embed:
         return Read::token;
-      case ImageKind::epsilon:
+      case detail::ImageKind::epsilon:
         return Read::none;
-      case ImageKind::doc:
-      case ImageKind::skip:
+      case detail::ImageKind::doc:
+      case detail::ImageKind::skip:
         return read(kid(n, 0), written);
-      case ImageKind::create:
-      case ImageKind::nest:
+      case detail::ImageKind::create:
+      case detail::ImageKind::nest:
         return read(kid(n, 0), true);
-      case ImageKind::assign:
-      case ImageKind::append:
-      case ImageKind::flag:
+      case detail::ImageKind::assign:
+      case detail::ImageKind::append:
+      case detail::ImageKind::flag:
         return creates(kid(n, 0)) ? Read::other : read(kid(n, 0), true);
-      case ImageKind::repeat: {
+      case detail::ImageKind::repeat: {
         const Read k = read(kid(n, 0), written);
         if (n.n != 1) return Read::other;
         if (n.m != 0) return k;
         if (k == Read::token) return Read::option;
         return k == Read::option || k == Read::none ? k : Read::other;
       }
-      case ImageKind::choice: {
+      case detail::ImageKind::choice: {
         unsigned ends = 0;
         bool wrote = written;
         for (std::uint32_t i = 0; i < n.count; ++i) {
@@ -154,23 +158,24 @@ class Dead {
   }
 
   // The choice an `either` element stands for, under what keeps it one.
-  ImageId choice_of(ImageId id) const {
-    if (const ImageNode& n = node(id);
-        n.kind == ImageKind::skip || n.kind == ImageKind::doc ||
-        (n.kind == ImageKind::repeat && n.m == 1 && n.n == 1))
+  detail::ImageId choice_of(detail::ImageId id) const {
+    if (const detail::ImageNode& n = node(id);
+        n.kind == detail::ImageKind::skip || n.kind == detail::ImageKind::doc ||
+        (n.kind == detail::ImageKind::repeat && n.m == 1 && n.n == 1))
       return choice_of(kid(n, 0));
     return id;
   }
 
   // Whether `eof` stands as a position anywhere under the expression: a
   // condition holds none, and a rule called is walked on its own.
-  bool eof_in(ImageId id) {
+  bool eof_in(detail::ImageId id) {
     if (_eof.size() <= id) _eof.resize(_im.nodes.size(), 0);
     if (_eof[id] != 0) return _eof[id] == 2;
-    const ImageNode& n = node(id);
-    bool holds = n.kind == ImageKind::eof;
-    if (!holds && n.kind != ImageKind::notOf && n.kind != ImageKind::andOf)
-      for (const ImageId k : _im.shape_kids(id))
+    const detail::ImageNode& n = node(id);
+    bool holds = n.kind == detail::ImageKind::eof;
+    if (!holds && n.kind != detail::ImageKind::notOf &&
+        n.kind != detail::ImageKind::andOf)
+      for (const detail::ImageId k : _im.shape_kids(id))
         if (eof_in(k)) {
           holds = true;
           break;
@@ -179,7 +184,7 @@ class Dead {
     return holds;
   }
 
-  std::vector<Arm> arms_of(const ImageNode& choice) const {
+  std::vector<Arm> arms_of(const detail::ImageNode& choice) const {
     const std::vector<std::uint16_t> places = printed_places(_im, choice);
     std::vector<Arm> arms;
     for (const std::uint16_t at : places) arms.push_back({at, places.back()});
@@ -193,44 +198,44 @@ class Dead {
       found.push_back(std::move(d));
   }
 
-  void walk_kid(ImageId id, Arm a) {
+  void walk_kid(detail::ImageId id, Arm a) {
     if (eof_in(id)) walk(id, a);
   }
 
-  void walk(ImageId id, Arm a) {
-    const ImageNode n = node(id);
+  void walk(detail::ImageId id, Arm a) {
+    const detail::ImageNode n = node(id);
     switch (n.kind) {
       // A directive, prose or region over a branch is still that branch.
-      case ImageKind::assign:
-      case ImageKind::append:
-      case ImageKind::flag:
-      case ImageKind::create:
-      case ImageKind::nest:
-      case ImageKind::doc:
-      case ImageKind::skip:
+      case detail::ImageKind::assign:
+      case detail::ImageKind::append:
+      case detail::ImageKind::flag:
+      case detail::ImageKind::create:
+      case detail::ImageKind::nest:
+      case detail::ImageKind::doc:
+      case detail::ImageKind::skip:
         walk_kid(kid(n, 0), a);
         return;
-      case ImageKind::choice: {
+      case detail::ImageKind::choice: {
         const std::vector<Arm> arms = arms_of(n);
         for (std::uint32_t i = 0; i < n.count; ++i)
           walk_kid(kid(n, i), arms[i]);
         return;
       }
-      case ImageKind::seq:
+      case detail::ImageKind::seq:
         walk_seq(id, a);
         return;
       default: {
-        const std::vector<ImageId> kids(_im.shape_kids(id).begin(),
-                                        _im.shape_kids(id).end());
-        for (const ImageId k : kids) walk_kid(k, Arm{});
+        const std::vector<detail::ImageId> kids(_im.shape_kids(id).begin(),
+                                                _im.shape_kids(id).end());
+        for (const detail::ImageId k : kids) walk_kid(k, Arm{});
       }
     }
   }
 
   // A sequence drops each reading that keeps a token past an end assertion:
   // an `eof`, or the `eof` branch of an `either`.
-  void walk_seq(ImageId id, Arm a) {
-    const ImageNode n = node(id);
+  void walk_seq(detail::ImageId id, Arm a) {
+    const detail::ImageNode n = node(id);
     std::vector<Read> reads;
     for (std::uint32_t i = 0; i < n.count; ++i)
       reads.push_back(read(kid(n, i), false));
@@ -246,12 +251,12 @@ class Dead {
       add(_w.spell(id), {}, a, _w.spell(kid(n, token_after[end])));
     } else {
       for (std::uint32_t i = 0; i < count; ++i) {
-        const ImageId k = kid(n, i);
+        const detail::ImageId k = kid(n, i);
         if (reads[i] == Read::option && end < i) {
           add(_w.spell(k), {}, {}, {});
         } else if (reads[i] == Read::either && token_after[i] < count) {
-          const ImageId c = choice_of(k);
-          const ImageNode choice = node(c);
+          const detail::ImageId c = choice_of(k);
+          const detail::ImageNode choice = node(c);
           std::uint32_t at = 0;
           while (at < choice.count && end_arm(kid(choice, at)) == 0) ++at;
           add(_w.spell(kid(choice, at)), _w.spell(c), arms_of(choice)[at],
@@ -263,7 +268,7 @@ class Dead {
   }
 
   WarningFound& _w;
-  GrammarImage& _im;
+  detail::GrammarImage& _im;
   std::string _rule;
   std::vector<std::uint8_t> _eof;
 };

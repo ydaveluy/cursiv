@@ -62,10 +62,6 @@ void visit_member(
   }
 }
 
-}  // namespace cursiv::detail
-
-namespace cursiv {
-
 // The generator selects applicable fields in the classes' declaration order. A
 // known type therefore needs one dispatch, without testing each member's owner
 // again.
@@ -82,7 +78,7 @@ struct AstMemberAccess<T, TypeList<Fs...>> {
       function_ref<void(std::string_view, std::uint32_t, AstNode&)> yield) {
     (void)node;
     (void)yield;
-    (detail::visit_member<Fs>(node, yield), ...);
+    (visit_member<Fs>(node, yield), ...);
   }
   // A manually constructed subtype may carry a tag absent from the grammar.
   // Keep its inherited children visible, once each, in the same order.
@@ -90,15 +86,15 @@ struct AstMemberAccess<T, TypeList<Fs...>> {
       const AstNode& node,
       function_ref<void(std::string_view, std::uint32_t, AstNode&)> yield) {
     const auto one = [&]<class F>() {
-      if constexpr (F::nature == detail::FieldNature::node ||
-                    F::nature == detail::FieldNature::variant)
+      if constexpr (F::nature == FieldNature::node ||
+                    F::nature == FieldNature::variant)
         if (node.type != nullptr &&
             node.type->derivesFrom(&ast_type_tag<typename F::owner>))
-          detail::visit_member<F>(node, yield);
+          visit_member<F>(node, yield);
     };
     (void)one;
     (one.template operator()<Fs>(), ...);
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

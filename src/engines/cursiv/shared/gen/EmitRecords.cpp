@@ -178,7 +178,7 @@ namespace grammar_detail {
 
   std::size_t row = 0;
   out.write(emit_table(
-      "constexpr ::cursiv::GrammarTerminal kTerminals[]", terminals,
+      "constexpr ::cursiv::detail::GrammarTerminal kTerminals[]", terminals,
       [&](const TerminalGen& t) {
         std::string cell = concat("{", record_text(t.name), ", ",
                                   record_text(t.doc), ", ", t.folded);

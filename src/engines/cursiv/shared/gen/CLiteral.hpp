@@ -30,8 +30,9 @@ inline std::string c_literal(std::string_view s) {
     }
     std::size_t len = 0;
     if (const char32_t scalar =
-            c >= 0x80 ? scalar_at(s.data() + i, s.size() - i, len) : kNoScalar;
-        scalar != kNoScalar) {
+            c >= 0x80 ? detail::scalar_at(s.data() + i, s.size() - i, len)
+                      : detail::kNoScalar;
+        scalar != detail::kNoScalar) {
       // A bidirectional control is escaped: a compiler warns of one in a
       // source file, and a reader cannot see what it does to the text around
       // it.

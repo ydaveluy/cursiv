@@ -45,10 +45,10 @@ struct AstNode;
 
 namespace detail {
 struct RefAccess;
-}
 
 inline constexpr std::ptrdiff_t kNoOffset =
     std::numeric_limits<std::ptrdiff_t>::max();
+}  // namespace detail
 
 // The runtime identity of one AST class, and the identity is the address:
 // `&ast_type_tag<T>` is one inline variable per T, unique in the process. Never
@@ -356,7 +356,9 @@ enum class RefState : std::uint8_t {
   ErrorCycle
 };
 
+namespace detail {
 constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
+}  // namespace detail
 
 // A scope provider may read references, so resolution re-enters this protocol.
 // Each resolution in flight is filed under its thread: a read that would wait
@@ -683,6 +685,8 @@ static_assert(sizeof(void*) != 8 || sizeof(RefHandle) == 16);
 // per field, indexed by `RefHandle::field`; a non-reference field is null.
 inline constexpr std::uint8_t kNoBranch = 0xFF;
 
+namespace detail {
+
 // The one shape a type filter has: a tag in, the candidate index it satisfies
 // out, `kNoBranch` for none.
 using RefBranchFn = std::uint8_t (*)(const AstTypeTag*) noexcept;
@@ -694,17 +698,19 @@ struct SingleRefRead {
   AstNode* target = nullptr;
 };
 
+}  // namespace detail
+
 struct RefOps {
   bool multi = false;
   // The index in `Ts...` a candidate satisfies, or `kNoBranch`. A subtype
   // answers the first branch that accepts it.
-  RefBranchFn branch = nullptr;
+  detail::RefBranchFn branch = nullptr;
 
   // One entry per narrow type declared on this member, in first-occurrence
   // order; the reference carries the index. An entry answers what `branch`
   // answers, since a narrow type derives from exactly one candidate, so there
   // is no second notion of "which candidate".
-  const RefBranchFn* narrows = nullptr;
+  const detail::RefBranchFn* narrows = nullptr;
   std::uint8_t narrow_count = 0;
   // The narrow types themselves, same order: what a failed lookup names as
   // "expected".
@@ -734,11 +740,13 @@ struct RefOps {
                  std::size_t which) noexcept = nullptr;
   // What `name_id`, `size` and `at` answer together, in one read of the
   // member. Null for a multi reference.
-  SingleRefRead (*single)(const AstNode& owner,
-                          std::uint32_t index) noexcept = nullptr;
+  detail::SingleRefRead (*single)(const AstNode& owner,
+                                  std::uint32_t index) noexcept = nullptr;
 
   void (*reset)(AstNode& owner, std::uint32_t index) noexcept = nullptr;
 };
+
+namespace detail {
 
 // One reference site's type filter: the field's row plus the site's declared
 // narrowing.
@@ -754,6 +762,8 @@ struct RefFilter {
                                       : ops->branch(t);
   }
 };
+
+}  // namespace detail
 
 // This class or a subtype: the tag carries the closure of its bases, and the
 // test walks it -- an `Entity` is the `Type` it extends. The downward family

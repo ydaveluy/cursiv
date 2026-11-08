@@ -57,7 +57,7 @@ consteval auto infix_op_src_of() {
   } else {
     using Read = Resolve<R>;
     if constexpr (std::is_void_v<detail::converter_rule_t<Read>> &&
-                  !is_data_rule<Read> &&
+                  !detail::is_data_rule<Read> &&
                   !detail::is_variant_v<typename member_traits<
                       std::remove_cv_t<decltype(P)>>::type>)
       return std::type_identity<void>{};

@@ -7,7 +7,7 @@
 // How wide a UTF-8 sequence its lead byte announces. One rule, one place: what
 // advances a cursor and what counts a column must agree.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // The lead's own three bits of length. Anything that leads nothing -- a
 // continuation byte, 0xF8 and above -- is one byte, which is the only answer
@@ -73,4 +73,4 @@ struct Utf8Step {
   return true;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

@@ -12,6 +12,8 @@ namespace cursiv {
 
 struct AstMetaData;
 
+namespace detail {
+
 // A terminal is told by its name and spelled by its words, each handed over
 // whole: a literal has no name and one word, a terminal that reads a choice of
 // words has both, and one whose text is matched has a name alone.
@@ -21,6 +23,8 @@ struct GrammarTerminal {
   bool folded = false;
   std::span<const std::string_view> spellings{};
 };
+
+}  // namespace detail
 
 struct GrammarMetaData {
   using AskFn = bool (*)(std::string_view);
@@ -55,7 +59,7 @@ struct GrammarMetaData {
   const std::uint8_t* narrows = nullptr;
   std::uint32_t recordCount = 0;
 
-  const GrammarTerminal* terminals = nullptr;
+  const detail::GrammarTerminal* terminals = nullptr;
   std::uint16_t terminalCount = 0;
 };
 }  // namespace cursiv

@@ -7,8 +7,8 @@
 
 namespace cursiv {
 
-std::uint16_t LlLowerer::lay_repeat(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_repeat(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const auto bound = [](std::uint64_t v) {
     return static_cast<std::uint32_t>(std::min<std::uint64_t>(v, kEndless - 1));
   };
@@ -17,16 +17,16 @@ std::uint16_t LlLowerer::lay_repeat(unsigned cfg, ImageId e) {
                                 n.n == kUnbounded ? kEndless : bound(n.n)}));
 }
 
-std::uint16_t LlLowerer::lay_create(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_create(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const std::uint16_t inner = lay(cfg, kid(n, 0));
   const std::uint16_t wrapper = wrap(cfg, inner);
   _p.e[wrapper].made.push_back(row_id(n.row));
   return wrapper;
 }
 
-std::uint16_t LlLowerer::lay_nest(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_nest(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const std::uint16_t body = lay(cfg, kid(n, 0));
   if (_p.e[body].kind == Shape::none || _p.e[body].kind == Shape::end)
     _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
@@ -37,20 +37,20 @@ std::uint16_t LlLowerer::lay_nest(unsigned cfg, ImageId e) {
   return gather(cfg, Shape::seq, {checkpoint, body});
 }
 
-std::uint16_t LlLowerer::lay_closed(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_closed(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const bool step = (n.flags & 1) != 0;
   const bool hands = (n.flags & 2) != 0;
-  const ImageId inner = kid(n, 0);
+  const detail::ImageId inner = kid(n, 0);
   const std::uint16_t child = lay(cfg, inner);
-  const ImageStageDesc& st = stage(n.a);
-  const bool data = st.kind == ImageRuleKind::data;
-  if (data && at(inner).kind == ImageKind::closed && _p.e[child].layered &&
-      _p.e[child].foldStep == step) {
+  const detail::ImageStageDesc& st = stage(n.a);
+  const bool data = st.kind == detail::ImageRuleKind::data;
+  if (data && at(inner).kind == detail::ImageKind::closed &&
+      _p.e[child].layered && _p.e[child].foldStep == step) {
     _p.e[child].made.push_back(row_id(st.convertRow));
     return child;
   }
-  if (!data && !(hands && st.kind == ImageRuleKind::node)) return child;
+  if (!data && !(hands && st.kind == detail::ImageRuleKind::node)) return child;
   const std::uint16_t wrapper = wrap(cfg, child);
   Node& w = _p.e[wrapper];
   w.foldStep = step;
@@ -59,8 +59,8 @@ std::uint16_t LlLowerer::lay_closed(unsigned cfg, ImageId e) {
   return wrapper;
 }
 
-std::uint16_t LlLowerer::lay_write(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_write(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   std::uint16_t at_ = lay(cfg, kid(n, 0));
   std::uint16_t parent = kNoRow;
   std::uint16_t site = at_;
@@ -80,8 +80,8 @@ std::uint16_t LlLowerer::lay_write(unsigned cfg, ImageId e) {
   return at_;
 }
 
-std::uint16_t LlLowerer::lay_flag(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_flag(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   std::uint16_t at_ = lay(cfg, kid(n, 0));
   // The absent arm is a position of its own: its record stands before the
   // gap, as an implied token does.
@@ -94,47 +94,47 @@ std::uint16_t LlLowerer::lay_flag(unsigned cfg, ImageId e) {
   return at_;
 }
 
-std::uint16_t LlLowerer::lay_condition(unsigned cfg, ImageId e) {
+std::uint16_t LlLowerer::lay_condition(unsigned cfg, detail::ImageId e) {
   const std::uint16_t k = gap_cond(cfg, e);
   return mark(cfg, _p.push(Node{Shape::condition, k}));
 }
 
-std::uint16_t LlLowerer::lay_implied(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay_implied(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   check_implied_token(cfg, kid(n, 0));
   const std::uint16_t sym = _p.e[lay(cfg, kid(n, 0))].sym;
   const std::uint16_t k = gap_cond(cfg, kid(n, 1));
   return mark(cfg, _p.push(Node{Shape::implied, sym, 0, k}));
 }
 
-std::uint16_t LlLowerer::lay(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+std::uint16_t LlLowerer::lay(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   switch (n.kind) {
-    case ImageKind::eof: {
-      if (_cfgs[cfg].end == kNoImage)
+    case detail::ImageKind::eof: {
+      if (_cfgs[cfg].end == detail::kNoImage)
         return mark(cfg, _p.push(Node{Shape::end}));
       const std::uint16_t close = lay(cfg, _cfgs[cfg].end);
       return mark(cfg, _p.push(Node{Shape::end, _p.e[close].sym}));
     }
-    case ImageKind::unordered: {
+    case detail::ImageKind::unordered: {
       const std::uint16_t node = lay_unordered(cfg, e);
       _p.e[node].unorderedTurns = buries(e);
       return node;
     }
-    case ImageKind::skip:
+    case detail::ImageKind::skip:
       return lay(region_of(cfg, n), kid(n, 0));
-    case ImageKind::create:
+    case detail::ImageKind::create:
       return lay_create(cfg, e);
-    case ImageKind::nest:
+    case detail::ImageKind::nest:
       return lay_nest(cfg, e);
-    case ImageKind::closed:
+    case detail::ImageKind::closed:
       return lay_closed(cfg, e);
-    case ImageKind::turns: {
+    case detail::ImageKind::turns: {
       const std::uint16_t node = lay(cfg, kid(n, 0));
       _p.e[node].leftFold = true;
       return node;
     }
-    case ImageKind::notOf:
+    case detail::ImageKind::notOf:
       return lay_condition(cfg, e);
     default:
       return lay_shared(cfg, e, n);

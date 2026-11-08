@@ -5,7 +5,7 @@
 // What an element is, as a closed vocabulary: the kind `GrammarModel`
 // answers with for each position of a declared grammar.
 
-namespace cursiv {
+namespace cursiv::fuzzer::detail {
 
 enum class ElementKind : std::uint8_t {
   // Rules. A rule call is not a kind of its own: it resolves to the rule
@@ -40,4 +40,4 @@ enum class ElementKind : std::uint8_t {
   error,
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::fuzzer::detail

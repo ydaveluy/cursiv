@@ -48,8 +48,8 @@ constexpr bool class_holds(std::uint64_t m, bool n, std::string_view spec,
   for (unsigned i = 0;
        !in && i < static_cast<unsigned>(unicode::Property::count); ++i)
     if ((m >> i) & 1)
-      in = unicode::within(unicode::kTables[i].data(),
-                           unicode::kTables[i].size(), cp);
+      in = unicode::within(unicode::detail::kTables[i].data(),
+                           unicode::detail::kTables[i].size(), cp);
   return in != n;
 }
 

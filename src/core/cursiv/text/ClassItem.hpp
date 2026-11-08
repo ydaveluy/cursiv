@@ -9,7 +9,7 @@
 
 #include "cursiv/text/scalar_at.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 enum class ClassFault : unsigned char {
   none,
@@ -199,4 +199,4 @@ constexpr ClassFault for_class_ranges(std::string_view s, Sink sink) {
   return ClassFault::none;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

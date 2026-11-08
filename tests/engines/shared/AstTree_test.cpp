@@ -271,11 +271,15 @@ namespace cyclic_adopt_cases {
 using namespace tcyclicadopt;
 
 static_assert(
-    std::is_same_v<cursiv::rule_type_t<Grammar::Expression>, Element>);
-static_assert(std::is_same_v<cursiv::rule_type_t<Grammar::Sequence>, Element>);
-static_assert(std::is_same_v<cursiv::rule_type_t<Grammar::Token>, Element>);
-static_assert(std::is_same_v<cursiv::rule_type_t<Grammar::Primary>, Element>);
-static_assert(std::is_same_v<cursiv::rule_type_t<Grammar::Parent>, Element>);
+    std::is_same_v<cursiv::detail::rule_type_t<Grammar::Expression>, Element>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<Grammar::Sequence>, Element>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<Grammar::Token>, Element>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<Grammar::Primary>, Element>);
+static_assert(
+    std::is_same_v<cursiv::detail::rule_type_t<Grammar::Parent>, Element>);
 static_assert(!cursiv::Normalize<Grammar>::owed<Grammar::Expression>);
 
 namespace {

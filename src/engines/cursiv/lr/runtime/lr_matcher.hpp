@@ -85,7 +85,7 @@ inline TextOffset lr_else_reach(std::uint16_t s, const char* src, TextOffset i,
        ++k)
     if (A.derived.lexElseRows[k].scalar != 0 &&
         A.derived.lexElseRows[k].bytes.has(b)) {
-      const auto n = static_cast<TextOffset>(utf8_width(src[i]));
+      const auto n = static_cast<TextOffset>(detail::utf8_width(src[i]));
       return i + n < len ? i + n : len;
     }
   return i + 1;

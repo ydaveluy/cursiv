@@ -1098,7 +1098,7 @@ class WellFormedStream final : public lsp::io::Stream {
       return;
     }
     const std::string_view content(buffer, size);
-    if (utf8_well_formed(content)) {
+    if (detail::utf8_well_formed(content)) {
       _inner.write(_header.data(), _header.size());
       _inner.write(buffer, size);
       return;
@@ -1106,7 +1106,7 @@ class WellFormedStream final : public lsp::io::Stream {
     std::string repaired;
     repaired.reserve(size + 16);
     for (std::size_t at = 0; at < size;) {
-      const Utf8Step step = utf8_step(buffer + at, size - at);
+      const detail::Utf8Step step = detail::utf8_step(buffer + at, size - at);
       if (step.wellFormed)
         repaired.append(buffer + at, step.bytes);
       else

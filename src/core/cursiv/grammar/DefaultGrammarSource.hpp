@@ -13,7 +13,8 @@ namespace cursiv {
 
 class DefaultGrammarSource : public GrammarSource {
  public:
-  explicit DefaultGrammarSource(const GrammarSourceData& data) : _data(data) {}
+  explicit DefaultGrammarSource(const detail::GrammarSourceData& data)
+      : _data(data) {}
   DefaultGrammarSource(const DefaultGrammarSource&) = delete;
   DefaultGrammarSource& operator=(const DefaultGrammarSource&) = delete;
 
@@ -23,9 +24,10 @@ class DefaultGrammarSource : public GrammarSource {
   [[nodiscard]] std::string ruleClosure(std::string_view name) const override;
 
  private:
-  GrammarSourceData _data;
+  detail::GrammarSourceData _data;
 
-  [[nodiscard]] const GrammarSourceRule* find(std::string_view name) const;
+  [[nodiscard]] const detail::GrammarSourceRule* find(
+      std::string_view name) const;
 };
 
 }  // namespace cursiv

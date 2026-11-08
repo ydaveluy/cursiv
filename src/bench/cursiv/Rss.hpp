@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-namespace cursiv::bench {
+namespace cursiv::bench::detail {
 
 // Resident bytes now, and the highest this process has held. Each figure is
 // zero and invalid where the platform does not answer it -- the ladder keeps
@@ -81,4 +81,4 @@ inline bool rss_reset() noexcept {
   return s;
 }
 
-}  // namespace cursiv::bench
+}  // namespace cursiv::bench::detail

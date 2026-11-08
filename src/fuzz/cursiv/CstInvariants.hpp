@@ -11,7 +11,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/text/TextOffset.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 struct CstInvariants {
   struct Result {
@@ -62,4 +62,4 @@ struct CstInvariants {
   }
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

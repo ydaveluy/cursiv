@@ -26,13 +26,13 @@
 #include "cursiv/execution/TaskScheduler.hpp"
 #include "cursiv/execution/WorkerPool.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
-#include "cursiv/grammar/dump.hpp"
 #include "cursiv/references/ImportedNames.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/Published.hpp"
 #include "cursiv/workspace/DefaultWorkspaceLock.hpp"
 #include "cursiv/workspace/WorkspaceLock.hpp"
+#include "support/GrammarDump.hpp"
 #include "support/Throws.hpp"
 
 // Pins the contract of the parallel-for, which is what a change of pool has to
@@ -1024,10 +1024,10 @@ void concurrent_dumps_read_the_same_grammar() {
     for (std::size_t t = 0; t < kThreads; ++t)
       threads.emplace_back([&, t] {
         start.arrive_and_wait();
-        for (int n = 0; n < 10; ++n) dumps[t] = cursiv::dump_declared<Chain>();
+        for (int n = 0; n < 10; ++n) dumps[t] = support::dump_declared<Chain>();
       });
   }
-  const std::string expected = cursiv::dump_declared<Chain>();
+  const std::string expected = support::dump_declared<Chain>();
   CHECK(expected.find("item") != std::string::npos);
   for (const std::string& dump : dumps) CHECK(dump == expected);
 }

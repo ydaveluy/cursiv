@@ -107,7 +107,8 @@ DocumentReferences::Answer DefaultDocumentReferences::resolve(
   if (target == nullptr) return failed();
   // A target the site cannot hold is not an answer: the scope decided it was
   // visible, the site -- its narrowing included -- decides it fits.
-  const std::uint8_t which = RefFilter{&ops, narrow}.branch(target->type);
+  const std::uint8_t which =
+      detail::RefFilter{&ops, narrow}.branch(target->type);
   if (which == kNoBranch) return failed();
   // Named: a braced return zeroes the padding through the stack first.
   const Answer resolved{target, RefState::Resolved, which};
@@ -134,7 +135,7 @@ void DefaultDocumentReferences::visit_resolved(
   const RefOps& ops = _f.refOps[h.field];
   // A single reference, the common site, is read in one call.
   if (!ops.multi) {
-    const SingleRefRead read = ops.single(*h.owner, h.index);
+    const detail::SingleRefRead read = ops.single(*h.owner, h.index);
     if (read.target == nullptr || read.name == kNoNode) return;
     const CstNode& n = cst[read.name];
     visitor(n.begin, n.end, *read.target, false);
@@ -153,7 +154,7 @@ void DefaultDocumentReferences::visit_resolved(
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
   return std::ranges::any_of(handles, [&](const RefHandle& h) {
     return h.owner != nullptr &&
-           has_error(_f.refOps[h.field].state(*h.owner, h.index));
+           detail::has_error(_f.refOps[h.field].state(*h.owner, h.index));
   });
 }
 
@@ -168,7 +169,7 @@ void DefaultDocumentReferences::visit_unresolved(
   if (h.owner == nullptr) return;
   const RefOps& ops = _f.refOps[h.field];
   const RefState why = ops.state(*h.owner, h.index);
-  if (!has_error(why)) return;
+  if (!detail::has_error(why)) return;
   // Anchored on the name and not on the node that holds it: the word the
   // editor underlines is the one the text was read from.
   TextOffset begin = 0;
@@ -256,7 +257,7 @@ RefState DefaultDocumentReferences::resolveAll(std::uint32_t rank,
       at, name, [&] { return l->getCandidates(info(h, name, narrow)); });
   if (!found.has_value()) return RefState::ErrorNotFound;
 
-  const RefFilter filter{&ops, narrow};
+  const detail::RefFilter filter{&ops, narrow};
   std::vector<MultiRefItem> found_targets;
   for (const AstNodeDescription* const entry : *found) {
     if (entry == nullptr || entry->node == nullptr) continue;

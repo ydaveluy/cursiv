@@ -25,25 +25,27 @@ class LexReifier {
  public:
   LexReifier(Lowerer& lowerer, ByteSet& wordBytes);
 
-  ImageId resolve(unsigned cfg, ImageId node,
-                  std::span<const std::uint32_t> path = {});
-  std::uint16_t reify(ImageId resolved, bool tail = true);
+  detail::ImageId resolve(unsigned cfg, detail::ImageId node,
+                          std::span<const std::uint32_t> path = {});
+  std::uint16_t reify(detail::ImageId resolved, bool tail = true);
 
-  ImageId terminal_body(std::uint32_t rule, ImageId body);
-  ImageId canon(ImageId node);
-  ImageId token_of(unsigned cfg, ImageId lit, const ImageClassDesc& bound);
+  detail::ImageId terminal_body(std::uint32_t rule, detail::ImageId body);
+  detail::ImageId canon(detail::ImageId node);
+  detail::ImageId token_of(unsigned cfg, detail::ImageId lit,
+                           const detail::ImageClassDesc& bound);
 
-  void declare_word(const ImageClassDesc& bound);
-  void declare_section_word(const ImageClassDesc& bound);
+  void declare_word(const detail::ImageClassDesc& bound);
+  void declare_section_word(const detail::ImageClassDesc& bound);
 
-  ImageId make(ImageKind kind, std::span<const ImageId> kids = {},
-               std::uint8_t flags = 0, std::uint32_t a = kNoImage,
-               std::uint64_t m = 0, std::uint64_t n = 0,
-               std::string_view text = {});
-  ImageId make_not(ImageId k) {
-    return make(ImageKind::notOf, std::span(&k, 1));
+  detail::ImageId make(detail::ImageKind kind,
+                       std::span<const detail::ImageId> kids = {},
+                       std::uint8_t flags = 0,
+                       std::uint32_t a = detail::kNoImage, std::uint64_t m = 0,
+                       std::uint64_t n = 0, std::string_view text = {});
+  detail::ImageId make_not(detail::ImageId k) {
+    return make(detail::ImageKind::notOf, std::span(&k, 1));
   }
-  ImageId make_class(const ImageClassDesc& cls);
+  detail::ImageId make_class(const detail::ImageClassDesc& cls);
 
   std::uint16_t push(LexNode node) { return _c.push_lex(node); }
   std::uint16_t push_kid(std::uint16_t kid) { return _c.push_lex_kid(kid); }
@@ -58,91 +60,96 @@ class LexReifier {
     bool single = false;
     bool expression = false;
     ByteSet bytes{};
-    ImageId node = kNoImage;
-    ImageId cp = kNoImage;
-    std::vector<ImageId> refused{};
+    detail::ImageId node = detail::kNoImage;
+    detail::ImageId cp = detail::kNoImage;
+    std::vector<detail::ImageId> refused{};
   };
 
   struct EndCloser {
-    ImageId type = kNoImage;
+    detail::ImageId type = detail::kNoImage;
     bool eof = false;
   };
 
   struct Echo {
     bool echoes = false;
     const void* tag = nullptr;
-    ImageId before = kNoImage;
-    ImageId pad = kNoImage;
-    ImageId after = kNoImage;
+    detail::ImageId before = detail::kNoImage;
+    detail::ImageId pad = detail::kNoImage;
+    detail::ImageId after = detail::kNoImage;
   };
 
   using Path = std::vector<std::uint32_t>;
 
-  const ImageNode& at(ImageId id) const { return _im.nodes[id]; }
-  ImageId kid(const ImageNode& n, std::uint32_t i) const {
+  const detail::ImageNode& at(detail::ImageId id) const {
+    return _im.nodes[id];
+  }
+  detail::ImageId kid(const detail::ImageNode& n, std::uint32_t i) const {
     return _im.kids[n.first + i];
   }
-  ImageId rebuilt(ImageId id, const std::vector<ImageId>& kids);
-  ImageId lit_with(const ImageNode& lit, ImageId guard);
+  detail::ImageId rebuilt(detail::ImageId id,
+                          const std::vector<detail::ImageId>& kids);
+  detail::ImageId lit_with(const detail::ImageNode& lit, detail::ImageId guard);
 
-  ImageId resolve_in(unsigned cfg, ImageId id, Path& path);
-  ImageId resolve_rule(unsigned cfg, std::uint32_t rule, Path& path);
-  ImageId resolve_seq(unsigned cfg, ImageId id, Path& path);
-  bool has_captures(ImageId id) const;
-  bool consumes(ImageId id) const;
-  bool eof_lit(ImageId id) const;
-  ImageId without_eof(ImageId lit);
+  detail::ImageId resolve_in(unsigned cfg, detail::ImageId id, Path& path);
+  detail::ImageId resolve_rule(unsigned cfg, std::uint32_t rule, Path& path);
+  detail::ImageId resolve_seq(unsigned cfg, detail::ImageId id, Path& path);
+  bool has_captures(detail::ImageId id) const;
+  bool consumes(detail::ImageId id) const;
+  bool eof_lit(detail::ImageId id) const;
+  detail::ImageId without_eof(detail::ImageId lit);
 
-  bool nested_item(std::uint32_t rule, ImageId open, ImageId close,
-                   ImageId item);
-  bool nested_unambiguous(ImageId open, ImageId close);
-  bool nested_literals(ImageId id, std::vector<std::string_view>& out) const;
-  EndCloser end_closer(ImageId close);
-  Echo echo_closer(ImageId close) const;
-  bool echo_pad(ImageId id) const;
+  bool nested_item(std::uint32_t rule, detail::ImageId open,
+                   detail::ImageId close, detail::ImageId item);
+  bool nested_unambiguous(detail::ImageId open, detail::ImageId close);
+  bool nested_literals(detail::ImageId id,
+                       std::vector<std::string_view>& out) const;
+  EndCloser end_closer(detail::ImageId close);
+  Echo echo_closer(detail::ImageId close) const;
+  bool echo_pad(detail::ImageId id) const;
 
-  Guard guard_of(const ImageNode& lit) const;
-  Guard classify(ImageId guard) const;
-  bool refusable(ImageId id) const;
+  Guard guard_of(const detail::ImageNode& lit) const;
+  Guard classify(detail::ImageId guard) const;
+  bool refusable(detail::ImageId id) const;
   std::uint16_t word_set();
   std::uint16_t guard_set(const Guard& g, bool tail);
-  std::uint16_t lit_guard(const ImageNode& lit, const Guard& g, bool tail);
+  std::uint16_t lit_guard(const detail::ImageNode& lit, const Guard& g,
+                          bool tail);
   std::uint16_t class_guard(std::uint16_t guard);
 
   std::uint16_t refusal(std::uint16_t bound,
                         std::span<const std::uint16_t> classes,
                         std::uint32_t scalar = 0);
-  std::uint16_t reify_lit(ImageId id, bool tail);
-  std::uint16_t reify_not_of(ImageId id);
-  std::uint16_t reify_not_lit(ImageId lit);
-  std::uint16_t reify_not_class(ImageId cls);
-  std::uint16_t reify_class(ImageId cls);
+  std::uint16_t reify_lit(detail::ImageId id, bool tail);
+  std::uint16_t reify_not_of(detail::ImageId id);
+  std::uint16_t reify_not_lit(detail::ImageId lit);
+  std::uint16_t reify_not_class(detail::ImageId cls);
+  std::uint16_t reify_class(detail::ImageId cls);
   std::uint16_t reify_eof();
-  std::uint16_t reify_through(ImageId id, bool tail);
-  std::uint16_t reify_through_lit(ImageId open, std::string_view close,
+  std::uint16_t reify_through(detail::ImageId id, bool tail);
+  std::uint16_t reify_through_lit(detail::ImageId open, std::string_view close,
                                   bool eof);
-  std::uint16_t reify_nested(ImageId id);
-  std::uint16_t reify_mark(ImageId id, bool tail);
-  std::uint16_t reify_ref(ImageId id);
+  std::uint16_t reify_nested(detail::ImageId id);
+  std::uint16_t reify_mark(detail::ImageId id, bool tail);
+  std::uint16_t reify_ref(detail::ImageId id);
   void refusals(const Guard& g, std::vector<std::uint16_t>& out);
-  void class_refusals(ImageId cls, std::vector<std::uint16_t>& out);
-  std::uint16_t refused(ImageId word, std::uint16_t node);
-  std::uint16_t echo_side(ImageId side) {
-    return side == kNoImage ? kNoLexNode : reify(side);
+  void class_refusals(detail::ImageId cls, std::vector<std::uint16_t>& out);
+  std::uint16_t refused(detail::ImageId word, std::uint16_t node);
+  std::uint16_t echo_side(detail::ImageId side) {
+    return side == detail::kNoImage ? kNoLexNode : reify(side);
   }
-  bool mark_run(ImageId id) const;
+  bool mark_run(detail::ImageId id) const;
 
   Lowerer& _lowerer;
-  GrammarImage& _im;
+  detail::GrammarImage& _im;
   LowerPools& _c;
   ByteSet& _wordBytes;
-  std::map<std::tuple<ImageKind, std::uint8_t, std::uint32_t, std::uint64_t,
-                      std::uint64_t, std::string, std::string, const void*,
-                      std::vector<ImageId>>,
-           ImageId>
+  std::map<std::tuple<detail::ImageKind, std::uint8_t, std::uint32_t,
+                      std::uint64_t, std::uint64_t, std::string, std::string,
+                      const void*, std::vector<detail::ImageId>>,
+           detail::ImageId>
       _classes;
-  std::map<ImageId, ImageId> _canon;
-  std::map<ImageId, std::uint16_t> _codePoints;
+  std::map<detail::ImageId, detail::ImageId> _canon;
+  std::map<detail::ImageId, std::uint16_t> _codePoints;
 };
 
 }  // namespace cursiv

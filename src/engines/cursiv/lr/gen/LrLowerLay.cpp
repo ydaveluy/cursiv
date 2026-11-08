@@ -8,14 +8,14 @@ namespace cursiv {
 
 // An embed's close, read under the section it ends: the boundary after it is
 // the caller's.
-LrShapeId LrLowerer::lay_close(unsigned cfg, unsigned in, ImageId e) {
+LrShapeId LrLowerer::lay_close(unsigned cfg, unsigned in, detail::ImageId e) {
   const LrShapeId close = lay(in, e);
   _p.e[close].trail = static_cast<std::uint8_t>(cfg + 1u);
   return close;
 }
 
-LrShapeId LrLowerer::lay_repeat(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_repeat(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   if (n.m > 0xffffu || (n.n != kUnbounded && n.n > 0xffffu)) {
     lower_refuse(_cfg, LowerFail::productionTooWide);
     return _p.push(LrLowerNode{LrShape::none});
@@ -108,8 +108,8 @@ void LrLowerer::ambient(LrShapeId at, bool open, std::uint8_t edge) {
   }
 }
 
-LrShapeId LrLowerer::lay_skip(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_skip(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const unsigned in = region_of(cfg, n);
   const LrShapeId node = lay(in, kid(n, 0));
   if (in != cfg) {
@@ -120,10 +120,10 @@ LrShapeId LrLowerer::lay_skip(unsigned cfg, ImageId e) {
   return node;
 }
 
-LrShapeId LrLowerer::lay_made(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_made(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const LrShapeId node = lay(cfg, kid(n, 0));
-  if (n.kind == ImageKind::nest) {
+  if (n.kind == detail::ImageKind::nest) {
     if (_p.e[node].kind == LrShape::none || _p.e[node].kind == LrShape::end) {
       _o.fault.raise(GrammarFaultCode::directiveOnNoPosition, _p.owner);
       return node;
@@ -161,15 +161,15 @@ LrShapeId LrLowerer::once_site(LrShapeId at) const {
   return at;
 }
 
-LrShapeId LrLowerer::lay_write(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_write(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   const LrShapeId node = capture_created(lay(cfg, kid(n, 0)));
   _p.e[once_site(node)].row.push_back(row_id(n.row));
   return node;
 }
 
-LrShapeId LrLowerer::lay_flag(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_flag(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   LrShapeId node = capture_created(lay(cfg, kid(n, 0)));
   // A flag over a repetition that may read nothing sets on the empty path
   // too: the row stands on a sequence around it, not on the item.
@@ -179,20 +179,21 @@ LrShapeId LrLowerer::lay_flag(unsigned cfg, ImageId e) {
   return node;
 }
 
-LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   switch (n.kind) {
-    case ImageKind::eof:
+    case detail::ImageKind::eof:
       return mark(cfg, _p.push(LrLowerNode{LrShape::end}));
-    case ImageKind::unordered:
+    case detail::ImageKind::unordered:
       return lay_unordered(cfg, e);
-    case ImageKind::skip:
+    case detail::ImageKind::skip:
       return lay_skip(cfg, e);
-    case ImageKind::create:
-    case ImageKind::nest:
+    case detail::ImageKind::create:
+    case detail::ImageKind::nest:
       return lay_made(cfg, e);
-    case ImageKind::notOf: {
-      if (const ImageNode k = at(kid(n, 0)); k.kind == ImageKind::trigger) {
+    case detail::ImageKind::notOf: {
+      if (const detail::ImageNode k = at(kid(n, 0));
+          k.kind == detail::ImageKind::trigger) {
         const Cut cut = cut_prefix(kid(k, 0));
         if (cut.ok && cut.guards.empty()) return lay_stop(cfg, e, cut);
       }
@@ -203,7 +204,7 @@ LrShapeId LrLowerer::lay(unsigned cfg, ImageId e) {
   }
 }
 
-LrShapeId LrLowerer::lay_condition(unsigned cfg, ImageId e) {
+LrShapeId LrLowerer::lay_condition(unsigned cfg, detail::ImageId e) {
   const std::uint16_t k = gap_cond(cfg, e);
   if (_p.gapNt.size() <= k) _p.gapNt.resize(k + 1u, 0);
   if (_p.gapNt[k] == 0) {
@@ -227,8 +228,8 @@ std::uint16_t LrLowerer::stop_rule(DynSet terms, std::uint8_t trail) {
   return aux;
 }
 
-LrShapeId LrLowerer::lay_stop(unsigned cfg, ImageId e, const Cut& cut) {
-  const ImageId trigger = kid(at(e), 0);
+LrShapeId LrLowerer::lay_stop(unsigned cfg, detail::ImageId e, const Cut& cut) {
+  const detail::ImageId trigger = kid(at(e), 0);
   const auto [at_, fresh] = _p.stopCut.try_emplace(
       key(Key::stop, cfg, trigger),
       static_cast<std::uint16_t>(_p.stopNt.size()));
@@ -246,8 +247,8 @@ std::uint16_t LrLowerer::closing_stop(std::uint16_t cut, std::uint8_t trail) {
   return at->second;
 }
 
-LrShapeId LrLowerer::lay_implied(unsigned cfg, ImageId e) {
-  const ImageNode n = at(e);
+LrShapeId LrLowerer::lay_implied(unsigned cfg, detail::ImageId e) {
+  const detail::ImageNode n = at(e);
   check_implied_token(cfg, kid(n, 0));
   const std::uint16_t k = gap_cond(cfg, kid(n, 1));
   return push_sym(implied_term(e, k), cfg);

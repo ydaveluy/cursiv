@@ -10,7 +10,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/AstExcused.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 struct GrammarToken {
   ElementId elem = kNoElement;  // the literal or terminal rule it spells
@@ -33,4 +33,4 @@ struct GrammarDerivation {
   std::vector<AstExcused> unwritten;
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

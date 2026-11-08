@@ -41,18 +41,18 @@ using namespace cursiv;
 using cursiv::test::failures;
 
 struct RuntimeGrammar {
-  std::deque<ImageDesc> nodes;
-  std::deque<std::vector<const ImageDesc*>> kids;
+  std::deque<cursiv::detail::ImageDesc> nodes;
+  std::deque<std::vector<const cursiv::detail::ImageDesc*>> kids;
   std::deque<std::string> texts;
-  std::deque<ImageRuleDesc> rules;
-  std::deque<ImageFaceDesc> faces;
-  std::deque<ImageStageDesc> stages;
+  std::deque<cursiv::detail::ImageRuleDesc> rules;
+  std::deque<cursiv::detail::ImageFaceDesc> faces;
+  std::deque<cursiv::detail::ImageStageDesc> stages;
   std::deque<AstRowDesc> rows;
   std::deque<AstTypeDesc> types;
   std::deque<AstFieldDesc> fields;
   std::vector<const AstRowDesc*> rowList;
-  std::vector<const ImageRuleDesc*> terms, nts, ignored;
-  const ImageRuleDesc* entry = nullptr;
+  std::vector<const cursiv::detail::ImageRuleDesc*> terms, nts, ignored;
+  const cursiv::detail::ImageRuleDesc* entry = nullptr;
   const AstRowDesc* conversion = nullptr;
 
   RuntimeGrammar() { ignored.push_back(terminal("WS", some(set(" \t\r\n")))); }
@@ -60,51 +60,64 @@ struct RuntimeGrammar {
   std::string_view text(std::string s) {
     return texts.emplace_back(std::move(s));
   }
-  const ImageDesc* put(ImageDesc d) { return &nodes.emplace_back(d); }
-  const ImageDesc* word(std::string s) {
-    return put({.kind = ImageKind::lit,
-                .flags = kLitGuardWord,
+  const cursiv::detail::ImageDesc* put(cursiv::detail::ImageDesc d) {
+    return &nodes.emplace_back(d);
+  }
+  const cursiv::detail::ImageDesc* word(std::string s) {
+    return put({.kind = cursiv::detail::ImageKind::lit,
+                .flags = cursiv::detail::kLitGuardWord,
                 .text = text(std::move(s))});
   }
-  const ImageDesc* token(std::string s) {
-    return put({.kind = ImageKind::lit, .text = text(std::move(s))});
+  const cursiv::detail::ImageDesc* token(std::string s) {
+    return put(
+        {.kind = cursiv::detail::ImageKind::lit, .text = text(std::move(s))});
   }
-  const ImageDesc* set(std::string s) {
-    return put({.kind = ImageKind::cpset, .text = text(std::move(s))});
+  const cursiv::detail::ImageDesc* set(std::string s) {
+    return put(
+        {.kind = cursiv::detail::ImageKind::cpset, .text = text(std::move(s))});
   }
-  const ImageDesc* group(ImageKind k, std::vector<const ImageDesc*> v) {
+  const cursiv::detail::ImageDesc* group(
+      cursiv::detail::ImageKind k,
+      std::vector<const cursiv::detail::ImageDesc*> v) {
     const auto& at = kids.emplace_back(std::move(v));
     return put({.kind = k,
                 .count = static_cast<std::uint32_t>(at.size()),
                 .kids = at.data()});
   }
-  const ImageDesc* seq(std::vector<const ImageDesc*> v) {
-    return group(ImageKind::seq, std::move(v));
+  const cursiv::detail::ImageDesc* seq(
+      std::vector<const cursiv::detail::ImageDesc*> v) {
+    return group(cursiv::detail::ImageKind::seq, std::move(v));
   }
-  const ImageDesc* alt(std::vector<const ImageDesc*> v) {
-    return group(ImageKind::choice, std::move(v));
+  const cursiv::detail::ImageDesc* alt(
+      std::vector<const cursiv::detail::ImageDesc*> v) {
+    return group(cursiv::detail::ImageKind::choice, std::move(v));
   }
-  const ImageDesc* repeat(std::uint64_t m, std::uint64_t n, const ImageDesc* k) {
+  const cursiv::detail::ImageDesc* repeat(std::uint64_t m, std::uint64_t n,
+                                          const cursiv::detail::ImageDesc* k) {
     const auto& at = kids.emplace_back(std::vector{k});
-    return put({.kind = ImageKind::repeat,
+    return put({.kind = cursiv::detail::ImageKind::repeat,
                 .count = 1,
                 .kids = at.data(),
                 .m = m,
                 .n = n});
   }
-  const ImageDesc* opt(const ImageDesc* k) { return repeat(0, 1, k); }
-  const ImageDesc* many(const ImageDesc* k) {
+  const cursiv::detail::ImageDesc* opt(const cursiv::detail::ImageDesc* k) {
+    return repeat(0, 1, k);
+  }
+  const cursiv::detail::ImageDesc* many(const cursiv::detail::ImageDesc* k) {
     return repeat(0, kUnbounded, k);
   }
-  const ImageDesc* some(const ImageDesc* k) {
+  const cursiv::detail::ImageDesc* some(const cursiv::detail::ImageDesc* k) {
     return repeat(1, kUnbounded, k);
   }
-  const ImageDesc* call(const ImageRuleDesc* r) {
-    return put({.kind = ImageKind::ref, .rule = r});
+  const cursiv::detail::ImageDesc* call(
+      const cursiv::detail::ImageRuleDesc* r) {
+    return put({.kind = cursiv::detail::ImageKind::ref, .rule = r});
   }
 
   // `k`, written to a member of its own.
-  const ImageDesc* member(std::string name, const ImageDesc* k) {
+  const cursiv::detail::ImageDesc* member(std::string name,
+                                          const cursiv::detail::ImageDesc* k) {
     AstFieldDesc& f = fields.emplace_back();
     f.name = text(std::move(name));
     f.offset = +[]() -> std::ptrdiff_t { return 0; };
@@ -115,17 +128,19 @@ struct RuntimeGrammar {
     row.field = &f;
     rowList.push_back(&row);
     const auto& at = kids.emplace_back(std::vector{k});
-    return put({.kind = ImageKind::assign,
+    return put({.kind = cursiv::detail::ImageKind::assign,
                 .count = 1,
                 .kids = at.data(),
                 .row = &row});
   }
 
-  ImageRuleDesc* declare(std::string name, ImageRuleKind kind) {
-    ImageFaceDesc& f = faces.emplace_back();
+  cursiv::detail::ImageRuleDesc* declare(std::string name,
+                                         cursiv::detail::ImageRuleKind kind) {
+    cursiv::detail::ImageFaceDesc& f = faces.emplace_back();
     f.kind = kind;
-    if (kind != ImageRuleKind::terminal) f.returns = text(name + "T");
-    ImageStageDesc& s = stages.emplace_back();
+    if (kind != cursiv::detail::ImageRuleKind::terminal)
+      f.returns = text(name + "T");
+    cursiv::detail::ImageStageDesc& s = stages.emplace_back();
     s.kind = kind;
     if (conversion == nullptr) {
       AstRowDesc& row = rows.emplace_back();
@@ -134,26 +149,30 @@ struct RuntimeGrammar {
       conversion = &row;
     }
     s.convertRow = conversion;
-    ImageRuleDesc& r = rules.emplace_back();
+    cursiv::detail::ImageRuleDesc& r = rules.emplace_back();
     r.name = text(name);
     r.qualified = text("G::" + name);
     r.stage = &s;
     r.written = &f;
     r.resolved = &f;
-    (kind == ImageRuleKind::terminal ? terms : nts).push_back(&r);
+    (kind == cursiv::detail::ImageRuleKind::terminal ? terms : nts)
+        .push_back(&r);
     return &r;
   }
-  void body(ImageRuleDesc* r, const ImageDesc* b) {
-    const_cast<ImageFaceDesc*>(r->written)->body = b;
-    const_cast<ImageStageDesc*>(r->stage)->body = b;
+  void body(cursiv::detail::ImageRuleDesc* r,
+            const cursiv::detail::ImageDesc* b) {
+    const_cast<cursiv::detail::ImageFaceDesc*>(r->written)->body = b;
+    const_cast<cursiv::detail::ImageStageDesc*>(r->stage)->body = b;
   }
-  ImageRuleDesc* terminal(std::string name, const ImageDesc* b) {
-    ImageRuleDesc* r = declare(std::move(name), ImageRuleKind::terminal);
+  cursiv::detail::ImageRuleDesc* terminal(std::string name,
+                                          const cursiv::detail::ImageDesc* b) {
+    cursiv::detail::ImageRuleDesc* r =
+        declare(std::move(name), cursiv::detail::ImageRuleKind::terminal);
     body(r, b);
     return r;
   }
-  ImageRuleDesc* data(std::string name) {
-    return declare(std::move(name), ImageRuleKind::data);
+  cursiv::detail::ImageRuleDesc* data(std::string name) {
+    return declare(std::move(name), cursiv::detail::ImageRuleKind::data);
   }
   const AstRowDesc* closing() {
     AstRowDesc& row = rows.emplace_back();
@@ -164,9 +183,11 @@ struct RuntimeGrammar {
     return &row;
   }
   // A rule with a class of its own, or the class of `shared`.
-  ImageRuleDesc* node(std::string name, const AstRowDesc* shared = nullptr) {
-    ImageRuleDesc* r = declare(std::move(name), ImageRuleKind::node);
-    const_cast<ImageStageDesc*>(r->stage)->closeRow =
+  cursiv::detail::ImageRuleDesc* node(std::string name,
+                                      const AstRowDesc* shared = nullptr) {
+    cursiv::detail::ImageRuleDesc* r =
+        declare(std::move(name), cursiv::detail::ImageRuleKind::node);
+    const_cast<cursiv::detail::ImageStageDesc*>(r->stage)->closeRow =
         shared != nullptr ? shared : closing();
     return r;
   }
@@ -175,8 +196,9 @@ struct RuntimeGrammar {
   Lowered lowered(Lower&& lower, std::uint32_t gate = kOptionalGate) {
     static constexpr std::string_view kWord =
         "abcdefghijklmnopqrstuvwxyz0123456789_";
-    const ImageDesc* const none = put({.kind = ImageKind::epsilon});
-    ImageGrammarDesc grammar;
+    const cursiv::detail::ImageDesc* const none =
+        put({.kind = cursiv::detail::ImageKind::epsilon});
+    cursiv::detail::ImageGrammarDesc grammar;
     grammar.name = "Runtime";
     grammar.entry = entry;
     grammar.ignore = ignored.data();
@@ -192,7 +214,7 @@ struct RuntimeGrammar {
     desc.indentOpen = none;
     desc.indentClose = none;
     desc.optionalGate = gate;
-    GrammarImage image;
+    cursiv::detail::GrammarImage image;
     image.open(grammar);
     return lower(image, desc);
   }
@@ -231,7 +253,7 @@ LlBuildWork ll_blocks(unsigned count) {
   RuntimeGrammar g;
   auto* root = g.node("Root");
   auto* statement = g.data("Statement");
-  std::vector<const ImageDesc*> arms;
+  std::vector<const cursiv::detail::ImageDesc*> arms;
   for (unsigned i = 0; i < count; ++i) {
     auto* r = g.node(spelled("R", i));
     g.body(r, g.seq({g.word(spelled("kw", i)), g.token("{"),
@@ -258,11 +280,12 @@ void a_record_list_costs_its_length() {
 void a_pair_is_joined_once() {
   const auto joins = [](unsigned count) {
     RuntimeGrammar g;
-    std::vector<ImageRuleDesc*> at(count);
+    std::vector<cursiv::detail::ImageRuleDesc*> at(count);
     const AstRowDesc* const shared = g.closing();
     for (unsigned i = 0; i < count; ++i) {
       at[i] = g.data(spelled("A", i));
-      const_cast<ImageStageDesc*>(at[i]->stage)->convertRow = shared;
+      const_cast<cursiv::detail::ImageStageDesc*>(at[i]->stage)->convertRow =
+          shared;
     }
     for (unsigned i = 0; i < count; ++i) {
       auto* own = g.node(spelled("N", i));
@@ -302,10 +325,10 @@ void a_list_keeps_each_id_once() {
 RuntimeGrammar callers(unsigned count, bool nullable) {
   RuntimeGrammar g;
   auto* shared = g.data("Shared");
-  const ImageDesc* const reads = g.word("x");
+  const cursiv::detail::ImageDesc* const reads = g.word("x");
   g.body(shared, nullable ? g.opt(reads) : reads);
   auto* root = g.node("Root");
-  std::vector<const ImageDesc*> arms;
+  std::vector<const cursiv::detail::ImageDesc*> arms;
   for (unsigned i = 0; i < count; ++i) {
     auto* r = g.node(spelled("R", i));
     g.body(r, g.seq({g.word(spelled("op", i)), g.call(shared),
@@ -470,7 +493,7 @@ void a_mode_covers_what_it_lexes() {
 std::uint64_t lr_expects(unsigned count) {
   RuntimeGrammar g;
   auto* root = g.node("Root");
-  std::vector<const ImageDesc*> arms;
+  std::vector<const cursiv::detail::ImageDesc*> arms;
   for (unsigned i = 0; i < count; ++i) arms.push_back(g.word(spelled("kw", i)));
   g.body(root, g.many(g.seq({g.alt(arms), g.token(";")})));
   g.entry = root;
@@ -509,9 +532,9 @@ void a_set_walks_its_members_in_order() {
 // next, and a closing parenthesis comes back to the top.
 RuntimeGrammar ladder(unsigned levels) {
   RuntimeGrammar g;
-  const ImageDesc* const name =
+  const cursiv::detail::ImageDesc* const name =
       g.call(g.terminal("Name", g.some(g.set("abcdefghijklmnopqrstuvwxyz"))));
-  std::vector<ImageRuleDesc*> level(levels);
+  std::vector<cursiv::detail::ImageRuleDesc*> level(levels);
   for (unsigned i = 0; i < levels; ++i) level[i] = g.data(spelled("E", i));
   for (unsigned i = 0; i + 1 < levels; ++i)
     g.body(level[i],
@@ -545,7 +568,7 @@ void lookaheads_read_each_edge_once() {
 void a_component_reads_each_of_its_edges_once() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
-    std::vector<ImageRuleDesc*> at(count);
+    std::vector<cursiv::detail::ImageRuleDesc*> at(count);
     for (unsigned i = 0; i < count; ++i) at[i] = g.data(spelled("A", i));
     for (unsigned i = 0; i + 1 < count; ++i)
       g.body(at[i], g.seq({g.word(spelled("kw", i)), g.call(at[i + 1])}));
@@ -568,10 +591,10 @@ void a_component_reads_each_of_its_edges_once() {
 void a_reduction_reads_what_its_transitions_answer() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
-    const ImageDesc* const name =
+    const cursiv::detail::ImageDesc* const name =
         g.call(g.terminal("Name", g.some(g.set("abcdefghijklmnopqrstuvwxyz"))));
     auto* expr = g.data("Expr");
-    std::vector<const ImageDesc*> arms{name};
+    std::vector<const cursiv::detail::ImageDesc*> arms{name};
     for (unsigned i = 0; i < count; ++i)
       arms.push_back(g.seq({name, g.token(spelled("+", i)), g.call(expr)}));
     g.body(expr, g.alt(arms));
@@ -593,11 +616,12 @@ void a_reduction_reads_what_its_transitions_answer() {
 void a_repair_walks_each_list_of_states_once() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
-    const ImageDesc* const name =
+    const cursiv::detail::ImageDesc* const name =
         g.call(g.terminal("Name", g.some(g.set("abcdefghijklmnopqrstuvwxyz"))));
     auto* low = g.data("Low");
     auto* high = g.data("High");
-    std::vector<const ImageDesc*> lows{g.call(high)}, highs{name};
+    std::vector<const cursiv::detail::ImageDesc*> lows{g.call(high)},
+        highs{name};
     for (unsigned i = 0; i < count; ++i) {
       lows.push_back(g.seq({g.call(low), g.token(spelled("+", i)), g.call(high)}));
       highs.push_back(g.seq({g.call(high), g.token(spelled("*", i)), name}));
@@ -637,7 +661,7 @@ void a_repair_reads_on_where_a_rule_returns() {
   auto* either = g.data("Either");
   auto* tail = g.data("Tail");
   auto* root = g.node("Root");
-  const ImageDesc* const past = g.word("q");
+  const cursiv::detail::ImageDesc* const past = g.word("q");
   g.body(tail, past);
   g.body(root, g.seq({past, g.call(either), g.call(tail)}));
   g.body(either, g.alt({g.call(ending("X", "p", "z")),
@@ -674,7 +698,7 @@ void an_action_is_asked_once_whether_it_may_be_refused() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
     auto* root = g.node("Root");
-    std::vector<const ImageDesc*> parts;
+    std::vector<const cursiv::detail::ImageDesc*> parts;
     for (unsigned i = 0; i < count; ++i)
       parts.push_back(g.opt(g.word(spelled("kw", i))));
     parts.push_back(g.word("end"));
@@ -711,7 +735,7 @@ void a_gate_past_its_bound_is_refused() {
 // Rules that each call the next: what the last hands back climbs the chain.
 RuntimeGrammar alias_chain(unsigned count) {
   RuntimeGrammar g;
-  std::vector<ImageRuleDesc*> alias(count);
+  std::vector<cursiv::detail::ImageRuleDesc*> alias(count);
   for (unsigned i = 0; i < count; ++i) alias[i] = g.data(spelled("A", i));
   for (unsigned i = 0; i + 1 < count; ++i) g.body(alias[i], g.call(alias[i + 1]));
   g.body(alias[count - 1], g.word("x"));
@@ -740,7 +764,7 @@ void states_with_one_tail_fuse() {
   const auto states = [](unsigned count) {
     RuntimeGrammar g;
     auto* root = g.node("Root");
-    std::vector<const ImageDesc*> arms;
+    std::vector<const cursiv::detail::ImageDesc*> arms;
     for (unsigned i = 0; i < count; ++i)
       arms.push_back(
           g.seq({g.word(spelled("kw", i)), g.word("then"), g.word("end")}));
@@ -755,7 +779,7 @@ void states_with_one_tail_fuse() {
   RuntimeGrammar g;
   const AstRowDesc* const shared = g.closing();
   auto* root = g.node("Root", shared);
-  std::vector<const ImageDesc*> parts;
+  std::vector<const cursiv::detail::ImageDesc*> parts;
   for (unsigned i = 0; i < 10; ++i) {
     auto* item = g.node(spelled("A", i), shared);
     g.body(item, g.word(spelled("kw", i)));
@@ -773,7 +797,7 @@ void a_state_is_read_again_only_when_it_lands_on_one_that_moved() {
   const auto work = [](unsigned count) {
     RuntimeGrammar g;
     auto* root = g.node("Root");
-    std::vector<const ImageDesc*> parts(count, g.word("x"));
+    std::vector<const cursiv::detail::ImageDesc*> parts(count, g.word("x"));
     parts.push_back(g.word("end"));
     g.body(root, g.seq(parts));
     g.entry = root;
@@ -859,7 +883,7 @@ void what_a_rule_owes_climbs_its_readers() {
   for (const bool backward : {false, true}) {
     constexpr unsigned kCount = 12;
     RuntimeGrammar g;
-    std::vector<ImageRuleDesc*> at(kCount);
+    std::vector<cursiv::detail::ImageRuleDesc*> at(kCount);
     for (unsigned k = 0; k < kCount; ++k) {
       const unsigned i = backward ? kCount - 1 - k : k;
       at[i] = g.data(spelled("A", i));
@@ -940,15 +964,18 @@ bool flags_a_mode(bool answersBoth, bool wrapped = false) {
   g.body(one, g.call(pre));
   auto* two = g.data("Two");
   g.body(two, g.call(pre));
-  const ImageDesc* const firstReads = g.call(wrapped ? one : pre);
-  const ImageDesc* const secondReads = g.call(wrapped ? two : pre);
+  const cursiv::detail::ImageDesc* const firstReads =
+      g.call(wrapped ? one : pre);
+  const cursiv::detail::ImageDesc* const secondReads =
+      g.call(wrapped ? two : pre);
   auto* root = g.node("Root");
-  const ImageDesc* const ab = g.token("ab");
-  const ImageDesc* const abc = g.token("abc");
-  const ImageDesc* const c = g.token("c");
-  const ImageDesc* const first = g.token("a");
-  const ImageDesc* const second = g.token("b");
-  const ImageDesc* const elsewhere = answersBoth ? g.token("z") : abc;
+  const cursiv::detail::ImageDesc* const ab = g.token("ab");
+  const cursiv::detail::ImageDesc* const abc = g.token("abc");
+  const cursiv::detail::ImageDesc* const c = g.token("c");
+  const cursiv::detail::ImageDesc* const first = g.token("a");
+  const cursiv::detail::ImageDesc* const second = g.token("b");
+  const cursiv::detail::ImageDesc* const elsewhere =
+      answersBoth ? g.token("z") : abc;
   g.body(root, g.alt({g.seq({first, firstReads, ab, c}),
                       answersBoth ? g.seq({second, secondReads, abc})
                                   : g.seq({second, secondReads, ab, c}),
@@ -980,9 +1007,9 @@ void a_cell_forks_in_the_order_of_its_arms() {
     auto* q = g.node("Q");
     g.body(q, g.word("t"));
     auto* root = g.node("Root");
-    const ImageDesc* const end = g.word("end");
-    const ImageDesc* const toP = g.seq({g.call(p), end});
-    const ImageDesc* const toQ = g.seq({g.call(q), end});
+    const cursiv::detail::ImageDesc* const end = g.word("end");
+    const cursiv::detail::ImageDesc* const toP = g.seq({g.call(p), end});
+    const cursiv::detail::ImageDesc* const toQ = g.seq({g.call(q), end});
     g.body(root, swapped ? g.alt({toQ, toP}) : g.alt({toP, toQ}));
     g.entry = root;
     const auto low = g.lowered<LrLowered>(lr_lower);
@@ -1007,7 +1034,7 @@ void a_cell_forks_in_the_order_of_its_arms() {
 // what each may begin with grows along the chain.
 LlBuildWork ll_growing_firsts(unsigned count, bool backward) {
   RuntimeGrammar g;
-  std::vector<ImageRuleDesc*> at(count);
+  std::vector<cursiv::detail::ImageRuleDesc*> at(count);
   for (unsigned k = 0; k < count; ++k) {
     const unsigned i = backward ? count - 1 - k : k;
     at[i] = g.data(spelled("A", i));

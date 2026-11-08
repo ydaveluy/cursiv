@@ -19,7 +19,7 @@ struct SelfBoundedArm {
 };
 
 // Each arm once per rule, in the order the rules were reached.
-std::vector<SelfBoundedArm> self_bounded_arms(GrammarImage& image);
+std::vector<SelfBoundedArm> self_bounded_arms(detail::GrammarImage& image);
 
 std::string self_bounded_arm_text(const SelfBoundedArm& a);
 

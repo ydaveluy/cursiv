@@ -49,6 +49,8 @@
 
 namespace cursiv::bench {
 
+namespace detail {
+
 // The stages, in the order the builder runs them -- each an interval of one
 // cold build, read at a phase drain through `onBuildPhase`:
 //
@@ -173,10 +175,14 @@ constexpr const char* shape_name(Shape shape) {
   return "";
 }
 
+}  // namespace detail
+
 // How the reference graph of a shape's corpus is wired. Both regimes drive
 // the link phase for real -- an intra-document reference through local
 // scopes is still work -- but a curve averaging them would describe neither.
 enum class Refs : std::uint8_t { Intra, Cross };
+
+namespace detail {
 
 constexpr const char* refs_name(Refs r) {
   return r == Refs::Cross ? "cross" : "intra";
@@ -322,8 +328,6 @@ inline double ms_since(std::chrono::steady_clock::time_point t0) {
       .count();
 }
 
-namespace detail {
-
 // A run that cannot go on, carried to its entry point with the status to end
 // on. Leaving from where it fails would skip the destructors of the services
 // built so far, and their worker threads would run on into the process's own
@@ -332,12 +336,10 @@ struct Stop {
   int status;
 };
 
-}  // namespace detail
-
 [[noreturn]] inline void refused(const char* name, const char* what) {
   std::fprintf(stderr, "[bench] %s: the corpus was %s -- no figure\n", name,
                what);
-  throw detail::Stop{1};
+  throw Stop{1};
 }
 
 // A string from the command line, the environment or the disk, made safe to
@@ -376,10 +378,12 @@ inline std::filesystem::path checked_path(const std::string& path) {
                  "language_bench: refusing '%s': not a regular file or a "
                  "directory\n",
                  printable(path).c_str());
-    throw detail::Stop{1};
+    throw Stop{1};
   }
   return resolved;
 }
+
+}  // namespace detail
 
 // A descriptor for one language, used by single-language executables and
 // by the example driver. All callbacks use the language server registration.
@@ -391,21 +395,23 @@ struct Language {
   void (*parse)(const std::string& src);
   // Workspace callbacks are null on threadless cross builds.
   void (*workspace)(int iterations, bool resident, std::size_t workers,
-                    const std::string& src, Row&);
+                    const std::string& src, detail::Row&);
 
   // Null on both when the language has no per-file generator: a workspace of N
   // copies of the same single-document corpus is N duplicate symbol sets, and
   // that is not a workspace.
   std::string (*multiFile)(std::size_t fileIndex, std::size_t bytes);
   void (*multi)(int iterations, const std::vector<std::string>& files,
-                const std::vector<std::size_t>& workers, MultiRow&);
+                const std::vector<std::size_t>& workers, detail::MultiRow&);
   Refs multiRefs;
-  void (*lsp)(int iterations, const std::string& src, Row&) = nullptr;
+  void (*lsp)(int iterations, const std::string& src, detail::Row&) = nullptr;
 };
 
 // The same driver serves cursiv's examples and an embedded consumer. A null
 // corpus callback means that the caller supplies files on the command line.
 int run(int argc, char** argv, std::span<const Language> languages);
+
+namespace detail {
 
 // Check that the input parses without recovery before the timed build. The
 // instruction-count mode repeats the parser API without timing workspace work.
@@ -866,6 +872,8 @@ void measure_lsp(int iterations, const std::string& src, Row& row) {
     refused(meta.languageId.c_str(), "cancelled during the LSP probes");
 }
 
+}  // namespace detail
+
 // Metadata strings must outlive the descriptor. The registration hook is the
 // language server's hook, including its custom providers and validation checks.
 template <class Shared, bool (*register_)(SharedCoreServices&)>
@@ -880,11 +888,12 @@ Language make_language(const char* name, const char* languageId,
                     extension,
                     corpus,
                     +[](const std::string& src) {
-                      auto shared = language_host<Shared, register_>();
+                      auto shared = detail::language_host<Shared, register_>();
                       const CoreServices& core =
                           *shared->serviceRegistry->all().front();
-                      parse_probe(core.languageMetaData.languageId.c_str(),
-                                  *core.parser, src);
+                      detail::parse_probe(
+                          core.languageMetaData.languageId.c_str(),
+                          *core.parser, src);
                     },
                     nullptr,
                     multiFile,
@@ -892,28 +901,29 @@ Language make_language(const char* name, const char* languageId,
                     multiRefs};
 #ifndef CURSIV_BENCH_PARSE_ONLY
   language.workspace = +[](int iterations, bool resident, std::size_t workers,
-                           const std::string& src, Row& row) {
-    auto shared = language_host<Shared, register_>();
+                           const std::string& src, detail::Row& row) {
+    auto shared = detail::language_host<Shared, register_>();
     const auto& meta = shared->serviceRegistry->all().front()->languageMetaData;
     const char* ext =
         meta.fileExtensions.empty() ? "" : meta.fileExtensions.front().c_str();
-    ws_stages<Shared>(iterations, resident, workers, meta.languageId.c_str(),
-                      ext, src, row, register_);
+    detail::ws_stages<Shared>(iterations, resident, workers,
+                              meta.languageId.c_str(), ext, src, row,
+                              register_);
   };
   if (multiFile != nullptr)
     language.multi =
         +[](int iterations, const std::vector<std::string>& files,
-            const std::vector<std::size_t>& workers, MultiRow& row) {
-          auto shared = language_host<Shared, register_>();
+            const std::vector<std::size_t>& workers, detail::MultiRow& row) {
+          auto shared = detail::language_host<Shared, register_>();
           const auto& meta =
               shared->serviceRegistry->all().front()->languageMetaData;
           const char* ext = meta.fileExtensions.empty()
                                 ? ""
                                 : meta.fileExtensions.front().c_str();
-          multi_stages<Shared>(iterations, meta.languageId.c_str(), ext, files,
-                               workers, row, register_);
+          detail::multi_stages<Shared>(iterations, meta.languageId.c_str(), ext,
+                                       files, workers, row, register_);
         };
-  language.lsp = &measure_lsp<Shared, register_>;
+  language.lsp = &detail::measure_lsp<Shared, register_>;
 #endif
   return language;
 }
@@ -925,7 +935,7 @@ int run_language(int argc, char** argv,
                  std::string (*corpus)(std::size_t) = nullptr,
                  std::string (*multiFile)(std::size_t, std::size_t) = nullptr,
                  Refs multiRefs = Refs::Intra) try {
-  auto host = language_host<Shared, register_>();
+  auto host = detail::language_host<Shared, register_>();
   const auto& metadata = host->serviceRegistry->all().front()->languageMetaData;
   const char* extension = metadata.fileExtensions.empty()
                               ? ""

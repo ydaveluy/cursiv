@@ -23,11 +23,11 @@ struct ClassRanges {
     ClassRanges out;
     out.r.reserve(spec.size() / 4 + 1);
     for (std::size_t i = 0; i < spec.size();) {
-      const ClassItem it = class_item_at(spec, i);
-      if (it.fault != ClassFault::none) break;
+      const detail::ClassItem it = detail::class_item_at(spec, i);
+      if (it.fault != detail::ClassFault::none) break;
       if (it.klass != 0) {
         out.strays = out.strays || (it.klass & 0x20) == 0;
-        class_escape_ranges(it.klass, [&out](char32_t lo, char32_t hi) {
+        detail::class_escape_ranges(it.klass, [&out](char32_t lo, char32_t hi) {
           out.r.push_back({lo, hi});
         });
       } else {

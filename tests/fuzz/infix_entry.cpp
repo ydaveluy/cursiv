@@ -18,7 +18,7 @@
 // A run the end of the text also closes is spelled with its closers alone.
 template <class E>
 using ClosedBy =
-    typename cursiv::fuzzer::closed_by<std::remove_cvref_t<E>>::type;
+    typename cursiv::fuzzer::detail::closed_by<std::remove_cvref_t<E>>::type;
 template <class E>
 using Plain = std::remove_cvref_t<E>;
 static_assert(std::is_same_v<ClosedBy<decltype(cursiv::lit<"*/"> | cursiv::eof)>,
@@ -38,7 +38,7 @@ static_assert(
 void trees_compare_at_any_depth(const cursiv::Parser& parser,
                                 const cursiv::AstReflection& reflection) {
   const cursiv::fuzzer::AstCompare compare{
-      reflection, cursiv::fuzzer::kActions<finfix::InfixEntryG>};
+      reflection, cursiv::fuzzer::detail::kActions<finfix::InfixEntryG>};
   std::string text = "1";
   for (int i = 0; i < 100000; ++i) text += "+1";
   const auto a = parser.parse(text);
@@ -75,7 +75,7 @@ void a_subtree_holds_its_children_whole() {
     b.stream().close(0, 1, 2, 0);
     b.stream().leaf(1, 2, 0);
     b.stream().close(0, 2, last, 0);
-    return cursiv::fuzzer::CstInvariants{}.run(cst, "ab");
+    return cursiv::fuzzer::detail::CstInvariants{}.run(cst, "ab");
   };
   CHECK(judged(4).ok);
   const auto cut = judged(3);

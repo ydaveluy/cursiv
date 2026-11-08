@@ -35,7 +35,7 @@ struct LexCodePoints {
   // Ascending, the markers past the scalars.
   std::vector<unicode::Range> ranges;
 
-  static constexpr char32_t kStray = kNoScalar;
+  static constexpr char32_t kStray = detail::kNoScalar;
   static constexpr bool marker(const unicode::Range& r) {
     return r.lo > 0x10FFFF;
   }
@@ -51,8 +51,8 @@ struct LexCodePoints {
     for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count);
          ++i)
       if ((props >> i) & 1)
-        out.ranges.insert(out.ranges.end(), unicode::kTables[i].begin(),
-                          unicode::kTables[i].end());
+        out.ranges.insert(out.ranges.end(), unicode::detail::kTables[i].begin(),
+                          unicode::detail::kTables[i].end());
     if (!spec.empty()) out.add_spec(spec);
     out.normalize();
     if (complement) out.complement();
@@ -236,9 +236,9 @@ struct LexCodePoints {
 
  private:
   void add_spec(std::string_view spec) {
-    const ClassFault fault = for_class_ranges(
+    const detail::ClassFault fault = detail::for_class_ranges(
         spec, [this](char32_t lo, char32_t hi) { ranges.push_back({lo, hi}); });
-    if (fault != ClassFault::none)
+    if (fault != detail::ClassFault::none)
       throw std::invalid_argument(
           "a character class is malformed: it has a lone or unknown "
           "escape, a class escape at one end of a range, a reversed range, a "
@@ -312,7 +312,7 @@ struct LexCodePoints {
         }
       if (cut) continue;
       std::string la, lb;
-      append_scalar(la, a);
+      detail::append_scalar(la, a);
       const auto n = static_cast<unsigned>(la.size());
       for (unsigned i = 1; i < n && !cut; ++i) {
         const char32_t max = (char32_t{1} << (6 * i)) - 1;
@@ -328,7 +328,7 @@ struct LexCodePoints {
         }
       }
       if (cut) continue;
-      append_scalar(lb, b);
+      detail::append_scalar(lb, b);
       Seq s;
       s.len = n;
       for (unsigned k = 0; k < n; ++k) {

@@ -11,7 +11,9 @@
 
 namespace cursiv {
 
+namespace detail {
 struct GrammarImage;
+}  // namespace detail
 struct LowerDesc;
 
 struct LlLowered {
@@ -23,6 +25,6 @@ struct LlLowered {
   GrammarFault fault{};
 };
 
-LlLowered ll_lower(GrammarImage& image, const LowerDesc& desc);
+LlLowered ll_lower(detail::GrammarImage& image, const LowerDesc& desc);
 
 }  // namespace cursiv

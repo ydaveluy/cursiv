@@ -13,7 +13,7 @@ namespace cursiv {
 constexpr bool lex_scalar_in(const unicode::Range* r, std::size_t n,
                              const char* p, std::size_t avail) {
   std::size_t len = 0;
-  return unicode::within(r, n, scalar_at(p, avail, len));
+  return unicode::within(r, n, detail::scalar_at(p, avail, len));
 }
 
 // Whether a list holds only `kBackScalar + k`: no scalar of its own to test.
@@ -32,7 +32,9 @@ constexpr bool lex_scalar_begun(const unicode::Range* r, std::size_t n,
       continue;
     std::size_t width = 0;
     if (unicode::within(r, n, kBackScalar + static_cast<char32_t>(k)) &&
-        scalar_at(src + i - k, len - (i - k), width) != kNoScalar && width > k)
+        detail::scalar_at(src + i - k, len - (i - k), width) !=
+            detail::kNoScalar &&
+        width > k)
       return true;
   }
   return false;

@@ -27,7 +27,7 @@
 #include "cursiv/GrammarLexicon.hpp"
 #include "cursiv/GrammarModel.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // Rule calls a terminal may nest before the walk gives up, and the extra
 // rounds a repetition takes.
@@ -240,7 +240,7 @@ struct SpellOf<C, CpSet<M, N, S>, D> {
     cx.clear();
     for (char32_t cp = 0x80; cp <= 0x10FFFF; ++cp)
       if (cursiv::detail::word_class<CpSet<M, N, S>>::has(cp)) {
-        append_scalar(out, cp);
+        cursiv::detail::append_scalar(out, cp);
         return true;
       }
     return false;
@@ -265,7 +265,7 @@ struct SpellOf<C, Byte, D> {
 };
 
 template <class C, unsigned D>
-struct SpellOf<C, AnyChar, D> : SpellOf<C, Byte, D> {};
+struct SpellOf<C, cursiv::detail::AnyChar, D> : SpellOf<C, Byte, D> {};
 
 template <class C, unsigned D>
 struct SpellOf<C, Epsilon, D> {
@@ -561,12 +561,13 @@ struct CursivLexicon final : GrammarLexicon {
     out.reserve(s.size());
     for (std::size_t i = 0; i < s.size();) {
       std::size_t len = 0;
-      const char32_t cp = scalar_at(s.data() + i, s.size() - i, len);
+      const char32_t cp =
+          cursiv::detail::scalar_at(s.data() + i, s.size() - i, len);
       if (len == 0) {
         out += s[i++];
         continue;
       }
-      append_scalar(out, cursiv::detail::fold_scalar(cp));
+      cursiv::detail::append_scalar(out, cursiv::detail::fold_scalar(cp));
       i += len;
     }
     return out;
@@ -577,4 +578,4 @@ struct CursivLexicon final : GrammarLexicon {
   std::vector<std::string> _reserved;
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

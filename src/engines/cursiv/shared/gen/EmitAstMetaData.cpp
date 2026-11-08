@@ -50,7 +50,7 @@ std::string emit_ast_members(const AstRegistry& registry,
   TextBuilder out;
   const auto access = [&](std::string_view name, std::string_view type,
                           std::span<const std::size_t> members) {
-    out.line("using ", name, " = ::cursiv::AstMemberAccess<", type,
+    out.line("using ", name, " = ::cursiv::detail::AstMemberAccess<", type,
              ", ::cursiv::TypeList<",
              joined(members, ", ", [&](std::size_t f) { return tags[f]; }),
              ">>;");

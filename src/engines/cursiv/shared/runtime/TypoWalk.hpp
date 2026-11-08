@@ -161,7 +161,7 @@ CURSIV_ALWAYS_INLINE inline void typo_each(Ad ad, std::uint16_t start,
   // A wrong letter is a code point, never half of one.
   const auto past_letter = [&](TextOffset at) {
     const auto width = static_cast<TextOffset>(
-        utf8_width(static_cast<char>(ad.byte(at))));
+        detail::utf8_width(static_cast<char>(ad.byte(at))));
     return width < len - at ? at + width : len;
   };
 

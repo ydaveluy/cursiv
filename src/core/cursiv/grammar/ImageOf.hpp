@@ -493,17 +493,13 @@ consteval ImageGrammarDesc grammar_of() {
 template <class V>
 inline constexpr ImageGrammarDesc kGrammar = grammar_of<V>();
 
-}  // namespace cursiv::detail
-
-namespace cursiv {
-
 // A new image of the grammar, owned by the caller: an image fills itself as it
 // is read, so no two callers share one.
 template <class V>
 GrammarImage grammar_image() {
   GrammarImage image;
-  image.open(detail::kGrammar<V>);
+  image.open(kGrammar<V>);
   return image;
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

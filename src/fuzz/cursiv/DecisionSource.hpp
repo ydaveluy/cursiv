@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // Three kinds and no more. The set is the fuzzer's wire format, so it
 // stays minimal and stable; a source that weighs them differently reads
@@ -31,4 +31,4 @@ struct DecisionSource {
   [[nodiscard]] virtual bool exhausted() const { return false; }
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

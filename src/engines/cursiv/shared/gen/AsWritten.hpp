@@ -18,8 +18,8 @@ template <class... Rs>
 struct AsWritten<TypeList<Rs...>> {
   static std::string of(std::string_view name) {
     std::string out;
-    ((out.empty() && detail::type_name<declared_of_t<Rs>>() == name
-          ? out = "\n    " + dump_rule<declared_of_t<Rs>>()
+    ((out.empty() && detail::type_name<detail::declared_of_t<Rs>>() == name
+          ? out = "\n    " + dump_rule<detail::declared_of_t<Rs>>()
           : out),
      ...);
     return out;

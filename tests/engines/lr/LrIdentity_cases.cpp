@@ -260,7 +260,8 @@ struct Sites : cursiv::GrammarSpec {
 
 template <class R>
 std::uint16_t symbol_named(const cursiv::LrBuildCfg& c) {
-  const auto name = cursiv::detail::type_name<cursiv::declared_of_t<R>>();
+  const auto name =
+      cursiv::detail::type_name<cursiv::detail::declared_of_t<R>>();
   for (std::uint16_t t = 0; t < c.nterms; ++t)
     if (c.term_name(t) == name) return t;
   for (std::uint16_t n = 0; n < c.nnts; ++n)

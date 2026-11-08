@@ -10,21 +10,24 @@ namespace cursiv {
 
 std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
   std::vector<WordLitWarning> out;
-  GrammarImage& image = found.image();
-  const ImageClass bound = image.bound;
+  detail::GrammarImage& image = found.image();
+  const detail::ImageClass bound = image.bound;
   if (!bound.known) return out;
-  const auto walk = [&](std::uint32_t rule, std::span<const ImageId> roots) {
-    found.each_node(roots, [&](ImageId id) {
-      const ImageNode n = image.nodes[id];
+  const auto walk = [&](std::uint32_t rule,
+                        std::span<const detail::ImageId> roots) {
+    found.each_node(roots, [&](detail::ImageId id) {
+      const detail::ImageNode n = image.nodes[id];
       // A condition tests the text without reading it, and `through` reads
       // one token whatever its parts spell.
-      if (n.kind == ImageKind::andOf || n.kind == ImageKind::notOf ||
-          n.kind == ImageKind::through)
+      if (n.kind == detail::ImageKind::andOf ||
+          n.kind == detail::ImageKind::notOf ||
+          n.kind == detail::ImageKind::through)
         return false;
-      if (n.kind != ImageKind::lit) return true;
-      if ((n.flags & (kLitGuardWord | kLitGuardExpr)) != 0 ||
+      if (n.kind != detail::ImageKind::lit) return true;
+      if ((n.flags & (detail::kLitGuardWord | detail::kLitGuardExpr)) != 0 ||
           !detail::word_final_in(n.text, bound.props, bound.complement,
-                                 bound.scalars, (n.flags & kLitFolded) != 0))
+                                 bound.scalars,
+                                 (n.flags & detail::kLitFolded) != 0))
         return false;
       if (WordLitWarning w{found.name(rule), found.spell(id),
                            std::string(n.text)};
@@ -34,12 +37,12 @@ std::vector<WordLitWarning> word_lit_warnings(WarningFound& found) {
     });
   };
   for (const std::uint32_t rule : found.rules()) {
-    const ImageId body = found.body(rule);
+    const detail::ImageId body = found.body(rule);
     walk(rule, {&body, 1});
   }
-  std::vector<ImageId> ops;
+  std::vector<detail::ImageId> ops;
   for (const std::uint32_t rule : found.tables()) {
-    const ImageFace f = image.ready(rule).face[1];
+    const detail::ImageFace f = image.ready(rule).face[1];
     ops.clear();
     for (std::uint32_t i = 0; i < f.levelCount; ++i)
       ops.push_back(image.levels[f.levelsAt + i].op);

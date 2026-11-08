@@ -9,7 +9,7 @@
 
 #include "cursiv/grammar/ElementId.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 struct GrammarGuide {
   virtual ~GrammarGuide() = default;
@@ -24,4 +24,4 @@ struct GrammarGuide {
                                     std::size_t emitted) const = 0;
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

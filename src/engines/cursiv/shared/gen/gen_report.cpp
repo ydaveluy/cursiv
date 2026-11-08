@@ -35,11 +35,12 @@ struct FlagWarning {
 };
 
 std::vector<FlagWarning> flag_warnings(WarningFound& found) {
-  return walk_warnings<FlagWarning>(found, [](WarningFound& w, ImageId id) {
-    const ImageNode& n = w.image().nodes[id];
-    return n.kind == ImageKind::flag &&
-           w.reads().nothing(w.image().kids[n.first]);
-  });
+  return walk_warnings<FlagWarning>(
+      found, [](WarningFound& w, detail::ImageId id) {
+        const detail::ImageNode& n = w.image().nodes[id];
+        return n.kind == detail::ImageKind::flag &&
+               w.reads().nothing(w.image().kids[n.first]);
+      });
 }
 
 std::string flag_warning_text(const FlagWarning& w) {
@@ -51,7 +52,8 @@ std::string flag_warning_text(const FlagWarning& w) {
 
 }  // namespace
 
-void report_grammar_warnings(std::string_view grammar, GrammarImage& image) {
+void report_grammar_warnings(std::string_view grammar,
+                             detail::GrammarImage& image) {
   WarningFound found(image);
   warn_each(grammar, dead_branches(found), dead_branch_text);
   warn_each(grammar, twin_branches(found), twin_branch_text);
@@ -60,7 +62,8 @@ void report_grammar_warnings(std::string_view grammar, GrammarImage& image) {
   warn_each(grammar, word_lit_warnings(found), word_lit_warning_text);
 }
 
-bool refuse_self_bounded_arms(std::string_view grammar, GrammarImage& image) {
+bool refuse_self_bounded_arms(std::string_view grammar,
+                              detail::GrammarImage& image) {
   const auto found = self_bounded_arms(image);
   for (const SelfBoundedArm& a : found)
     std::fprintf(stderr, "%.*s: refused (selfBoundedArm)\ncursiv: %s\n",

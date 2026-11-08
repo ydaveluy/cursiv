@@ -48,7 +48,9 @@ namespace )",
   for (const auto& rule : dump.rules)
     for (const auto target : rule.dependencies) out.line("    ", target, "u,");
   out.line("    0u,\n};");
-  out.line("inline constexpr ::cursiv::GrammarSourceRule kGrammarRules[] = {");
+  out.line(
+      "inline constexpr ::cursiv::detail::GrammarSourceRule kGrammarRules[] = "
+      "{");
   std::size_t at = 0;
   for (const auto& rule : dump.rules) {
     out.line("    {", c_literal(rule.name), ", kGrammarText.substr(",
@@ -59,7 +61,8 @@ namespace )",
     at += rule.dependencies.size();
   }
   out.line(
-      "};\ninline constexpr ::cursiv::GrammarSourceData kGrammarSource{\n"
+      "};\ninline constexpr ::cursiv::detail::GrammarSourceData "
+      "kGrammarSource{\n"
       "    kGrammarWrappedText, kGrammarRules};");
   out.line("\n}  // namespace ", ns);
   return out.take();

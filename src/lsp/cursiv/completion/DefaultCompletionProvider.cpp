@@ -70,7 +70,8 @@ namespace {
 }
 
 [[nodiscard]] bool is_letter(char32_t scalar) noexcept {
-  return unicode::within(unicode::kL, std::size(unicode::kL), scalar);
+  return unicode::within(unicode::detail::kL, std::size(unicode::detail::kL),
+                         scalar);
 }
 
 // The names one answer offers at most; its keywords always come. A reference
@@ -224,7 +225,8 @@ bool DefaultCompletionProvider::performCurrentTokenCompletion(
     const Document&, std::string_view text, TextOffset, TextOffset) const {
   for (std::size_t at = 0; at < text.size();) {
     std::size_t len = 0;
-    if (word_scalar(scalar_at(text.data() + at, text.size() - at, len)))
+    if (detail::word_scalar(
+            detail::scalar_at(text.data() + at, text.size() - at, len)))
       return true;
     at += std::max<std::size_t>(len, 1);
   }
@@ -238,7 +240,8 @@ bool DefaultCompletionProvider::performNextTokenCompletion(
   while (last > 0 && (static_cast<unsigned char>(text[last]) & 0xC0u) == 0x80u)
     --last;
   std::size_t len = 0;
-  return !is_letter(scalar_at(text.data() + last, text.size() - last, len));
+  return !is_letter(
+      detail::scalar_at(text.data() + last, text.size() - last, len));
 }
 
 std::optional<std::pair<TextOffset, TextOffset>>
@@ -248,9 +251,9 @@ DefaultCompletionProvider::findDataTypeRuleStart(const Cst& cst,
   const std::string_view text = cst.text();
   // The leaf at the caret, or the one behind it where no word goes on there.
   std::size_t len = 0;
-  const bool word =
-      offset < text.size() &&
-      word_scalar(scalar_at(text.data() + offset, text.size() - offset, len));
+  const bool word = offset < text.size() &&
+                    detail::word_scalar(detail::scalar_at(
+                        text.data() + offset, text.size() - offset, len));
   const TextOffset at = word || offset == 0 ? offset : offset - 1;
   const NodeCount rank = cst.leaves_before(at);
   if (rank >= cst.leaf_count()) return std::nullopt;
@@ -465,7 +468,8 @@ bool DefaultCompletionProvider::filterKeyword(const CompletionContext&,
                                               std::string_view keyword) const {
   for (std::size_t at = 0; at < keyword.size();) {
     std::size_t len = 0;
-    if (is_letter(scalar_at(keyword.data() + at, keyword.size() - at, len)))
+    if (is_letter(
+            detail::scalar_at(keyword.data() + at, keyword.size() - at, len)))
       return true;
     at += std::max<std::size_t>(len, 1);
   }

@@ -52,6 +52,8 @@ enum class Property : unsigned {
   count
 };
 
+namespace detail {
+
 // For a dump alone: what a property is called.
 inline constexpr std::string_view kNames[] = {
     "L",
@@ -94,5 +96,7 @@ inline constexpr std::string_view kNames[] = {
     "White_Space",
     "Alphabetic",
 };
+
+}  // namespace detail
 
 }  // namespace cursiv::unicode

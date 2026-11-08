@@ -42,7 +42,7 @@ std::vector<CaseGroup> case_groups(char32_t cp) {
   std::vector<CaseGroup> out;
   for (const char32_t c : cases) {
     std::string bytes;
-    append_scalar(bytes, c);
+    detail::append_scalar(bytes, c);
     const auto last = static_cast<unsigned char>(bytes.back());
     bytes.pop_back();
     auto at = std::ranges::find(out, bytes, &CaseGroup::head);
@@ -57,12 +57,13 @@ std::vector<CaseGroup> case_groups(char32_t cp) {
 // cases differ before their last byte. Folding is the identity on every
 // character with no other case.
 template <class Byte, class Choice>
-void lit_units(const ImageNode& n, Byte&& byte, Choice&& choice) {
-  const bool folded = (n.flags & kLitFolded) != 0;
+void lit_units(const detail::ImageNode& n, Byte&& byte, Choice&& choice) {
+  const bool folded = (n.flags & detail::kLitFolded) != 0;
   for (std::size_t i = 0; i < n.text.size();) {
     std::size_t len = 0;
     const char32_t cp =
-        folded ? scalar_at(n.text.data() + i, n.text.size() - i, len) : 0;
+        folded ? detail::scalar_at(n.text.data() + i, n.text.size() - i, len)
+               : 0;
     if (len == 0) {
       const auto b = static_cast<unsigned char>(n.text[i++]);
       byte(byte_range(b, b));
@@ -82,7 +83,7 @@ void lit_units(const ImageNode& n, Byte&& byte, Choice&& choice) {
 }
 
 // Whether literal `n` reads a letter through a choice of its cases.
-bool lit_chooses(const ImageNode& n) {
+bool lit_chooses(const detail::ImageNode& n) {
   bool chooses = false;
   lit_units(n, [](const ByteSet&) {}, [&](const auto&) { chooses = true; });
   return chooses;
@@ -92,18 +93,18 @@ ByteSet class_bytes(std::string_view spec) {
   return bytes_of(detail::parse_charset(spec));
 }
 
-LexCodePoints cps_of(const ImageNode& n) {
-  return LexCodePoints::of(n.m, (n.flags & kCpNot) != 0, n.text);
+LexCodePoints cps_of(const detail::ImageNode& n) {
+  return LexCodePoints::of(n.m, (n.flags & detail::kCpNot) != 0, n.text);
 }
 
-bool ascii_class(const ImageNode& n) {
+bool ascii_class(const detail::ImageNode& n) {
   return n.m == 0 && detail::cp_ascii_of(n.text);
 }
 
 bool one_character(std::string_view s) {
   std::size_t len = 0;
-  const char32_t cp = scalar_at(s.data(), s.size(), len);
-  return s.size() == 1 || (cp != kNoScalar && len == s.size());
+  const char32_t cp = detail::scalar_at(s.data(), s.size(), len);
+  return s.size() == 1 || (cp != detail::kNoScalar && len == s.size());
 }
 
 }  // namespace
@@ -136,42 +137,47 @@ std::uint16_t LexReifier::refusal(std::uint16_t bound,
                       static_cast<std::uint32_t>(classes.size()), scalar});
 }
 
-ImageId LexReifier::make(ImageKind kind, std::span<const ImageId> kids,
-                         std::uint8_t flags, std::uint32_t a, std::uint64_t m,
-                         std::uint64_t n, std::string_view text) {
-  const ImageNode shape{
+detail::ImageId LexReifier::make(detail::ImageKind kind,
+                                 std::span<const detail::ImageId> kids,
+                                 std::uint8_t flags, std::uint32_t a,
+                                 std::uint64_t m, std::uint64_t n,
+                                 std::string_view text) {
+  const detail::ImageNode shape{
       .kind = kind, .flags = flags, .a = a, .m = m, .n = n, .text = text};
   return _im.derive(shape, kids);
 }
 
-ImageId LexReifier::make_class(const ImageClassDesc& cls) {
-  return make(ImageKind::cpset, {},
-              static_cast<std::uint8_t>(cls.complement ? kCpNot : 0), kNoImage,
-              cls.props, 0, cls.scalars);
+detail::ImageId LexReifier::make_class(const detail::ImageClassDesc& cls) {
+  return make(detail::ImageKind::cpset, {},
+              static_cast<std::uint8_t>(cls.complement ? detail::kCpNot : 0),
+              detail::kNoImage, cls.props, 0, cls.scalars);
 }
 
-ImageId LexReifier::rebuilt(ImageId id, const std::vector<ImageId>& kids) {
+detail::ImageId LexReifier::rebuilt(detail::ImageId id,
+                                    const std::vector<detail::ImageId>& kids) {
   if (std::ranges::equal(_im.shape_kids(id), kids)) return id;
-  return _im.derive(ImageNode{at(id)}, kids);
+  return _im.derive(detail::ImageNode{at(id)}, kids);
 }
 
-ImageId LexReifier::lit_with(const ImageNode& lit, ImageId guard) {
-  ImageNode shape = lit;
+detail::ImageId LexReifier::lit_with(const detail::ImageNode& lit,
+                                     detail::ImageId guard) {
+  detail::ImageNode shape = lit;
   shape.flags = static_cast<std::uint8_t>(
-      (lit.flags & kLitFolded) | (guard != kNoImage ? kLitGuardExpr : 0));
-  const ImageId kids[] = {guard};
-  return _im.derive(shape, std::span(kids, guard != kNoImage ? 1 : 0));
+      (lit.flags & detail::kLitFolded) |
+      (guard != detail::kNoImage ? detail::kLitGuardExpr : 0));
+  const detail::ImageId kids[] = {guard};
+  return _im.derive(shape, std::span(kids, guard != detail::kNoImage ? 1 : 0));
 }
 
-ImageId LexReifier::canon(ImageId id) {
+detail::ImageId LexReifier::canon(detail::ImageId id) {
   if (const auto it = _canon.find(id); it != _canon.end()) return it->second;
-  const ImageNode n = at(id);
-  std::vector<ImageId> ks;
+  const detail::ImageNode n = at(id);
+  std::vector<detail::ImageId> ks;
   for (std::uint32_t i = 0; i < n.count; ++i) ks.push_back(canon(kid(n, i)));
   std::uint32_t a = n.a;
   std::string lists;
-  if (n.kind == ImageKind::skip) {
-    a = kNoImage;
+  if (n.kind == detail::ImageKind::skip) {
+    a = detail::kNoImage;
     for (std::uint64_t i = 0; i < n.m + n.n; ++i) {
       const std::uint32_t r = _im.ruleLists[n.a + i];
       lists.append(reinterpret_cast<const char*>(&r), sizeof r);
@@ -187,50 +193,52 @@ ImageId LexReifier::canon(ImageId id) {
   return at->second;
 }
 
-ImageId LexReifier::resolve(unsigned cfg, ImageId id,
-                            std::span<const std::uint32_t> path) {
+detail::ImageId LexReifier::resolve(unsigned cfg, detail::ImageId id,
+                                    std::span<const std::uint32_t> path) {
   Path p(path.begin(), path.end());
   return resolve_in(cfg, id, p);
 }
 
-ImageId LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule, Path& path) {
+detail::ImageId LexReifier::resolve_rule(unsigned cfg, std::uint32_t rule,
+                                         Path& path) {
   const auto call = [&] {
     const auto at = _lowerer._termIdx.find(rule);
     const std::uint32_t term =
-        at == _lowerer._termIdx.end() ? kNoImage : at->second;
-    if (term == kNoImage)
+        at == _lowerer._termIdx.end() ? detail::kNoImage : at->second;
+    if (term == detail::kNoImage)
       refuse_lowering("cursiv: a lexical call names an unreached terminal");
-    return make(ImageKind::call, {}, 0, kNoImage, 1u + term);
+    return make(detail::ImageKind::call, {}, 0, detail::kNoImage, 1u + term);
   };
   if (std::ranges::find(path, rule) != path.end()) return call();
-  const ImageId body = terminal_body(rule, _lowerer.body_in(cfg, rule));
+  const detail::ImageId body = terminal_body(rule, _lowerer.body_in(cfg, rule));
   path.push_back(rule);
-  const ImageId resolved = resolve_in(cfg, body, path);
+  const detail::ImageId resolved = resolve_in(cfg, body, path);
   path.pop_back();
   return has_captures(resolved) ? call() : resolved;
 }
 
-ImageId LexReifier::resolve_in(unsigned cfg, ImageId id, Path& path) {
-  switch (const ImageNode n = at(id); n.kind) {
-    case ImageKind::ref:
-      if (n.a != kNoImage && _lowerer.terminal_rule(n.a))
+detail::ImageId LexReifier::resolve_in(unsigned cfg, detail::ImageId id,
+                                       Path& path) {
+  switch (const detail::ImageNode n = at(id); n.kind) {
+    case detail::ImageKind::ref:
+      if (n.a != detail::kNoImage && _lowerer.terminal_rule(n.a))
         return resolve_rule(cfg, n.a, path);
       return id;
-    case ImageKind::lit: {
-      if ((n.flags & kLitGuardExpr) == 0) return id;
-      const ImageId g = kid(n, 0);
-      const ImageId r = resolve_in(cfg, g, path);
+    case detail::ImageKind::lit: {
+      if ((n.flags & detail::kLitGuardExpr) == 0) return id;
+      const detail::ImageId g = kid(n, 0);
+      const detail::ImageId r = resolve_in(cfg, g, path);
       return r == g ? id : lit_with(n, r);
     }
-    case ImageKind::notOf:
-      if (at(kid(n, 0)).kind == ImageKind::byte)
-        return make(ImageKind::eof);
+    case detail::ImageKind::notOf:
+      if (at(kid(n, 0)).kind == detail::ImageKind::byte)
+        return make(detail::ImageKind::eof);
       break;
-    case ImageKind::seq:
+    case detail::ImageKind::seq:
       return resolve_seq(cfg, id, path);
-    case ImageKind::sectionClose: {
-      const ImageId end = _lowerer._cfgs[cfg].end;
-      if (end == kNoImage)
+    case detail::ImageKind::sectionClose: {
+      const detail::ImageId end = _lowerer._cfgs[cfg].end;
+      if (end == detail::kNoImage)
         refuse_lowering("cursiv: a section's close is read outside any section");
       return resolve_in(cfg, end, path);
     }
@@ -238,132 +246,137 @@ ImageId LexReifier::resolve_in(unsigned cfg, ImageId id, Path& path) {
       break;
   }
   const auto shape = _im.shape_kids(id);
-  std::vector<ImageId> ks(shape.begin(), shape.end());
-  for (ImageId& k : ks) k = resolve_in(cfg, k, path);
+  std::vector<detail::ImageId> ks(shape.begin(), shape.end());
+  for (detail::ImageId& k : ks) k = resolve_in(cfg, k, path);
   return rebuilt(id, ks);
 }
 
-bool LexReifier::consumes(ImageId id) const {
-  const ImageNode& n = at(id);
+bool LexReifier::consumes(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
   switch (n.kind) {
-    case ImageKind::lit:
-    case ImageKind::cpset:
-    case ImageKind::byte:
+    case detail::ImageKind::lit:
+    case detail::ImageKind::cpset:
+    case detail::ImageKind::byte:
       return true;
-    case ImageKind::seq:
-      return std::ranges::any_of(_lowerer.kids_of(n),
-                                 [&](ImageId k) { return consumes(k); });
-    case ImageKind::choice:
-      return std::ranges::all_of(_lowerer.kids_of(n),
-                                 [&](ImageId k) { return consumes(k); });
-    case ImageKind::repeat:
+    case detail::ImageKind::seq:
+      return std::ranges::any_of(
+          _lowerer.kids_of(n), [&](detail::ImageId k) { return consumes(k); });
+    case detail::ImageKind::choice:
+      return std::ranges::all_of(
+          _lowerer.kids_of(n), [&](detail::ImageId k) { return consumes(k); });
+    case detail::ImageKind::repeat:
       return n.m > 0 && consumes(kid(n, 0));
     default:
       return false;
   }
 }
 
-bool LexReifier::eof_lit(ImageId id) const {
-  const ImageNode& n = at(id);
-  if (n.kind != ImageKind::lit || (n.flags & kLitGuardExpr) == 0) return false;
-  const ImageNode& g = at(kid(n, 0));
-  if (g.kind != ImageKind::notOf) return false;
-  const ImageNode& k = at(kid(g, 0));
-  if (k.kind == ImageKind::eof) return true;
-  return k.kind == ImageKind::choice &&
-         std::ranges::any_of(_lowerer.kids_of(k), [&](ImageId c) {
-           return at(c).kind == ImageKind::eof;
+bool LexReifier::eof_lit(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
+  if (n.kind != detail::ImageKind::lit ||
+      (n.flags & detail::kLitGuardExpr) == 0)
+    return false;
+  const detail::ImageNode& g = at(kid(n, 0));
+  if (g.kind != detail::ImageKind::notOf) return false;
+  const detail::ImageNode& k = at(kid(g, 0));
+  if (k.kind == detail::ImageKind::eof) return true;
+  return k.kind == detail::ImageKind::choice &&
+         std::ranges::any_of(_lowerer.kids_of(k), [&](detail::ImageId c) {
+           return at(c).kind == detail::ImageKind::eof;
          });
 }
 
-ImageId LexReifier::without_eof(ImageId id) {
-  const ImageNode n = at(id);
-  if ((n.flags & kLitGuardExpr) == 0) return id;
-  const ImageNode g = at(kid(n, 0));
-  if (g.kind != ImageKind::notOf) return id;
-  const ImageNode k = at(kid(g, 0));
-  if (k.kind == ImageKind::eof) return lit_with(n, kNoImage);
-  if (k.kind != ImageKind::choice) return id;
-  std::vector<ImageId> rest;
-  for (const ImageId l : _lowerer.kids_of(k))
-    if (at(l).kind != ImageKind::eof) rest.push_back(l);
-  ImageId guard = kNoImage;
+detail::ImageId LexReifier::without_eof(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
+  if ((n.flags & detail::kLitGuardExpr) == 0) return id;
+  const detail::ImageNode g = at(kid(n, 0));
+  if (g.kind != detail::ImageKind::notOf) return id;
+  const detail::ImageNode k = at(kid(g, 0));
+  if (k.kind == detail::ImageKind::eof) return lit_with(n, detail::kNoImage);
+  if (k.kind != detail::ImageKind::choice) return id;
+  std::vector<detail::ImageId> rest;
+  for (const detail::ImageId l : _lowerer.kids_of(k))
+    if (at(l).kind != detail::ImageKind::eof) rest.push_back(l);
+  detail::ImageId guard = detail::kNoImage;
   if (rest.size() == 1)
     guard = make_not(rest.front());
   else if (rest.size() > 1)
-    guard = make_not(make(ImageKind::choice, rest));
-  if (guard != kNoImage && canon(guard) == canon(kid(n, 0))) return id;
+    guard = make_not(make(detail::ImageKind::choice, rest));
+  if (guard != detail::kNoImage && canon(guard) == canon(kid(n, 0))) return id;
   return lit_with(n, guard);
 }
 
-ImageId LexReifier::resolve_seq(unsigned cfg, ImageId id, Path& path) {
-  const ImageNode n = at(id);
-  std::vector<ImageId> es;
-  for (const ImageId k : _lowerer.kids_of(n))
+detail::ImageId LexReifier::resolve_seq(unsigned cfg, detail::ImageId id,
+                                        Path& path) {
+  const detail::ImageNode n = at(id);
+  std::vector<detail::ImageId> es;
+  for (const detail::ImageId k : _lowerer.kids_of(n))
     es.push_back(resolve_in(cfg, k, path));
-  if (std::ranges::any_of(es, [&](ImageId e) { return eof_lit(e); })) {
-    const auto last = std::find_if(es.rbegin(), es.rend(),
-                                   [&](ImageId e) { return consumes(e); });
+  if (std::ranges::any_of(es, [&](detail::ImageId e) { return eof_lit(e); })) {
+    const auto last = std::find_if(
+        es.rbegin(), es.rend(), [&](detail::ImageId e) { return consumes(e); });
     if (last != es.rend())
       for (auto i = es.begin(); i != last.base() - 1; ++i)
-        if (at(*i).kind == ImageKind::lit) *i = without_eof(*i);
+        if (at(*i).kind == detail::ImageKind::lit) *i = without_eof(*i);
   }
   return rebuilt(id, es);
 }
 
-bool LexReifier::has_captures(ImageId id) const {
-  const ImageNode& n = at(id);
+bool LexReifier::has_captures(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
   switch (n.kind) {
-    case ImageKind::mark:
-    case ImageKind::same:
+    case detail::ImageKind::mark:
+    case detail::ImageKind::same:
       return true;
-    case ImageKind::lit:
-      return (n.flags & kLitGuardExpr) != 0 && has_captures(kid(n, 0));
+    case detail::ImageKind::lit:
+      return (n.flags & detail::kLitGuardExpr) != 0 && has_captures(kid(n, 0));
     default:
-      for (const ImageId k : _im.shape_kids(id))
+      for (const detail::ImageId k : _im.shape_kids(id))
         if (has_captures(k)) return true;
       return false;
   }
 }
 
-LexReifier::EndCloser LexReifier::end_closer(ImageId close) {
-  const ImageNode n = at(close);
-  if (n.kind != ImageKind::choice) return {close, false};
-  const std::vector<ImageId> ks = _lowerer.kids_of(n);
-  if (ks.size() < 2 || at(ks.back()).kind != ImageKind::eof)
+LexReifier::EndCloser LexReifier::end_closer(detail::ImageId close) {
+  const detail::ImageNode n = at(close);
+  if (n.kind != detail::ImageKind::choice) return {close, false};
+  const std::vector<detail::ImageId> ks = _lowerer.kids_of(n);
+  if (ks.size() < 2 || at(ks.back()).kind != detail::ImageKind::eof)
     return {close, false};
   if (ks.size() == 2) return {ks[0], true};
-  std::vector<ImageId> joined;
+  std::vector<detail::ImageId> joined;
   for (std::size_t i = 0; i + 1 < ks.size(); ++i) {
-    if (at(ks[i]).kind == ImageKind::choice)
-      for (const ImageId k : _lowerer.kids_of(at(ks[i]))) joined.push_back(k);
+    if (at(ks[i]).kind == detail::ImageKind::choice)
+      for (const detail::ImageId k : _lowerer.kids_of(at(ks[i])))
+        joined.push_back(k);
     else
       joined.push_back(ks[i]);
   }
-  return {make(ImageKind::choice, joined), true};
+  return {make(detail::ImageKind::choice, joined), true};
 }
 
 // The native search finds a delimiter by its first byte anywhere in the text,
 // where `any` tests delimiters only at the start of a character. A literal
 // that starts with a UTF-8 continuation byte may stand inside a character, so
 // it keeps the general reading.
-bool LexReifier::nested_literals(ImageId id,
+bool LexReifier::nested_literals(detail::ImageId id,
                                  std::vector<std::string_view>& out) const {
-  const ImageNode& n = at(id);
-  if (n.kind == ImageKind::lit) {
+  const detail::ImageNode& n = at(id);
+  if (n.kind == detail::ImageKind::lit) {
     if (n.flags != 0 ||
         (static_cast<unsigned char>(n.text[0]) & 0xC0u) == 0x80u)
       return false;
     out.push_back(n.text);
     return true;
   }
-  if (n.kind != ImageKind::choice || n.count < 2) return false;
+  if (n.kind != detail::ImageKind::choice || n.count < 2) return false;
   for (std::uint32_t i = 0; i < n.count; ++i)
     if (!nested_literals(kid(n, i), out)) return false;
   return true;
 }
 
-bool LexReifier::nested_unambiguous(ImageId open, ImageId close) {
+bool LexReifier::nested_unambiguous(detail::ImageId open,
+                                    detail::ImageId close) {
   std::vector<std::string_view> all;
   if (!nested_literals(open, all)) return false;
   const std::size_t openCount = all.size();
@@ -378,94 +391,101 @@ bool LexReifier::nested_unambiguous(ImageId open, ImageId close) {
   return true;
 }
 
-bool LexReifier::nested_item(std::uint32_t rule, ImageId open, ImageId close,
-                             ImageId item) {
-  const ImageId endClose = end_closer(close).type;
-  const auto same = [&](ImageId a, ImageId b) { return canon(a) == canon(b); };
-  const auto closes = [&](ImageId a) {
+bool LexReifier::nested_item(std::uint32_t rule, detail::ImageId open,
+                             detail::ImageId close, detail::ImageId item) {
+  const detail::ImageId endClose = end_closer(close).type;
+  const auto same = [&](detail::ImageId a, detail::ImageId b) {
+    return canon(a) == canon(b);
+  };
+  const auto closes = [&](detail::ImageId a) {
     return same(a, close) || same(a, endClose);
   };
-  const auto calls = [&](ImageId r) {
-    const ImageNode& n = at(r);
-    return n.kind == ImageKind::ref && n.a == rule;
+  const auto calls = [&](detail::ImageId r) {
+    const detail::ImageNode& n = at(r);
+    return n.kind == detail::ImageKind::ref && n.a == rule;
   };
-  const auto refuses = [&](ImageId r, ImageId& a) {
-    const ImageNode& n = at(r);
-    if (n.kind != ImageKind::notOf) return false;
+  const auto refuses = [&](detail::ImageId r, detail::ImageId& a) {
+    const detail::ImageNode& n = at(r);
+    if (n.kind != detail::ImageKind::notOf) return false;
     a = kid(n, 0);
     return true;
   };
-  const auto any_char = [&](ImageId r) {
-    const ImageNode& n = at(r);
-    return n.kind == ImageKind::cpset && n.m == 0 &&
-           (n.flags & kCpNot) != 0 && n.text.empty();
+  const auto any_char = [&](detail::ImageId r) {
+    const detail::ImageNode& n = at(r);
+    return n.kind == detail::ImageKind::cpset && n.m == 0 &&
+           (n.flags & detail::kCpNot) != 0 && n.text.empty();
   };
-  const auto both = [&](ImageId seq) {
-    const ImageNode& n = at(seq);
-    ImageId a = kNoImage;
-    ImageId b = kNoImage;
-    if (n.kind != ImageKind::seq || n.count != 3 || !refuses(kid(n, 0), a) ||
-        !refuses(kid(n, 1), b) || !any_char(kid(n, 2)))
+  const auto both = [&](detail::ImageId seq) {
+    const detail::ImageNode& n = at(seq);
+    detail::ImageId a = detail::kNoImage;
+    detail::ImageId b = detail::kNoImage;
+    if (n.kind != detail::ImageKind::seq || n.count != 3 ||
+        !refuses(kid(n, 0), a) || !refuses(kid(n, 1), b) ||
+        !any_char(kid(n, 2)))
       return false;
     return (same(a, open) && closes(b)) || (same(b, open) && closes(a));
   };
-  const ImageNode& n = at(item);
-  if (n.kind == ImageKind::choice && n.count == 2) {
-    const ImageId x = kid(n, 0);
-    const ImageId y = kid(n, 1);
+  const detail::ImageNode& n = at(item);
+  if (n.kind == detail::ImageKind::choice && n.count == 2) {
+    const detail::ImageId x = kid(n, 0);
+    const detail::ImageId y = kid(n, 1);
     if (calls(x)) return both(y);
     if (calls(y)) return both(x);
     return false;
   }
-  if (n.kind == ImageKind::seq && n.count == 2) {
-    ImageId a = kNoImage;
+  if (n.kind == detail::ImageKind::seq && n.count == 2) {
+    detail::ImageId a = detail::kNoImage;
     if (!refuses(kid(n, 0), a)) return false;
-    const ImageNode& c = at(kid(n, 1));
-    if (c.kind != ImageKind::choice || c.count != 2 || !calls(kid(c, 0)))
+    const detail::ImageNode& c = at(kid(n, 1));
+    if (c.kind != detail::ImageKind::choice || c.count != 2 ||
+        !calls(kid(c, 0)))
       return false;
-    const ImageNode& s = at(kid(c, 1));
-    if (ImageId o = kNoImage; s.kind != ImageKind::seq || s.count != 2 ||
-                              !refuses(kid(s, 0), o) || !same(o, open) ||
-                              !any_char(kid(s, 1)))
+    const detail::ImageNode& s = at(kid(c, 1));
+    if (detail::ImageId o = detail::kNoImage;
+        s.kind != detail::ImageKind::seq || s.count != 2 ||
+        !refuses(kid(s, 0), o) || !same(o, open) || !any_char(kid(s, 1)))
       return false;
     return closes(a);
   }
   return false;
 }
 
-ImageId LexReifier::terminal_body(std::uint32_t rule, ImageId body) {
-  const ImageNode& b = at(body);
-  if (b.kind != ImageKind::seq || b.count != 3) return body;
-  const ImageNode& rep = at(kid(b, 1));
-  if (rep.kind != ImageKind::repeat || rep.m != 0 || rep.n != kUnbounded)
+detail::ImageId LexReifier::terminal_body(std::uint32_t rule,
+                                          detail::ImageId body) {
+  const detail::ImageNode& b = at(body);
+  if (b.kind != detail::ImageKind::seq || b.count != 3) return body;
+  const detail::ImageNode& rep = at(kid(b, 1));
+  if (rep.kind != detail::ImageKind::repeat || rep.m != 0 ||
+      rep.n != kUnbounded)
     return body;
-  const ImageId open = kid(b, 0);
-  const ImageId close = kid(b, 2);
+  const detail::ImageId open = kid(b, 0);
+  const detail::ImageId close = kid(b, 2);
   if (!nested_item(rule, open, close, kid(rep, 0)) ||
       !nested_unambiguous(open, close))
     return body;
-  const ImageId ends[] = {open, close};
-  return make(ImageKind::throughNested, ends);
+  const detail::ImageId ends[] = {open, close};
+  return make(detail::ImageKind::throughNested, ends);
 }
 
 // The key of a literal's token. A keyword's is the literal refusing its word
 // boundary, complement included: it is one token with the literal that spells
 // that guard, and another with the literal that refuses the class it leaves
 // out.
-ImageId LexReifier::token_of(unsigned cfg, ImageId id,
-                             const ImageClassDesc& bound) {
-  const ImageNode n = at(id);
-  if (n.flags & kLitGuardWord) {
+detail::ImageId LexReifier::token_of(unsigned cfg, detail::ImageId id,
+                                     const detail::ImageClassDesc& bound) {
+  const detail::ImageNode n = at(id);
+  if (n.flags & detail::kLitGuardWord) {
     const bool ends = detail::word_final_in(
         n.text, bound.props, bound.complement, bound.scalars,
-        (n.flags & kLitFolded) != 0);
-    return lit_with(n, ends ? make_not(make_class(bound)) : kNoImage);
+        (n.flags & detail::kLitFolded) != 0);
+    return lit_with(n, ends ? make_not(make_class(bound)) : detail::kNoImage);
   }
-  if (n.flags & kLitGuardExpr) return lit_with(n, resolve(cfg, kid(n, 0)));
+  if (n.flags & detail::kLitGuardExpr)
+    return lit_with(n, resolve(cfg, kid(n, 0)));
   return id;
 }
 
-void LexReifier::declare_word(const ImageClassDesc& bound) {
+void LexReifier::declare_word(const detail::ImageClassDesc& bound) {
   const LexCodePoints cps =
       LexCodePoints::of(bound.props, bound.complement, bound.scalars);
   _wordBytes = cps.bytes();
@@ -476,7 +496,7 @@ void LexReifier::declare_word(const ImageClassDesc& bound) {
   _c.wordLeads = wide.leads();
 }
 
-void LexReifier::declare_section_word(const ImageClassDesc& bound) {
+void LexReifier::declare_section_word(const detail::ImageClassDesc& bound) {
   const LexCodePoints cps =
       LexCodePoints::of(bound.props, bound.complement, bound.scalars);
   if (_wordBytes == cps.bytes() && _c.wordRanges.v == cps.wide()) return;
@@ -486,41 +506,41 @@ void LexReifier::declare_section_word(const ImageClassDesc& bound) {
                           : lex_intern_cps_bound(_c, cps.bytes(), cps)});
 }
 
-bool LexReifier::refusable(ImageId id) const {
-  const ImageNode& n = at(id);
-  if (n.kind == ImageKind::cpset)
-    return (n.flags & kCpNot) == 0 || ascii_class(n);
-  if (n.kind == ImageKind::lit) {
+bool LexReifier::refusable(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
+  if (n.kind == detail::ImageKind::cpset)
+    return (n.flags & detail::kCpNot) == 0 || ascii_class(n);
+  if (n.kind == detail::ImageKind::lit) {
     const Guard g = guard_of(n);
     return !g.expression && !g.words;
   }
   return false;
 }
 
-LexReifier::Guard LexReifier::classify(ImageId id) const {
+LexReifier::Guard LexReifier::classify(detail::ImageId id) const {
   Guard out;
   out.node = id;
-  const ImageNode& n = at(id);
-  if (n.kind != ImageKind::notOf) {
+  const detail::ImageNode& n = at(id);
+  if (n.kind != detail::ImageKind::notOf) {
     out.expression = true;
     return out;
   }
-  const ImageId k = kid(n, 0);
-  const ImageNode& kn = at(k);
-  if (kn.kind == ImageKind::lit) {
+  const detail::ImageId k = kid(n, 0);
+  const detail::ImageNode& kn = at(k);
+  if (kn.kind == detail::ImageKind::lit) {
     const Guard inner = guard_of(kn);
     out.expression = inner.expression || inner.words;
     out.words = !out.expression;
     if (out.words) out.refused = {k};
     return out;
   }
-  if (kn.kind == ImageKind::cpset) {
+  if (kn.kind == detail::ImageKind::cpset) {
     out.cp = k;
     if (ascii_class(kn)) {
       out.single = true;
       out.bytes = class_bytes(kn.text);
-      if (kn.flags & kCpNot) out.bytes = lex_not(out.bytes);
-    } else if (kn.flags & kCpNot) {
+      if (kn.flags & detail::kCpNot) out.bytes = lex_not(out.bytes);
+    } else if (kn.flags & detail::kCpNot) {
       out.expression = true;
     } else {
       out.words = true;
@@ -528,9 +548,10 @@ LexReifier::Guard LexReifier::classify(ImageId id) const {
     }
     return out;
   }
-  if (kn.kind == ImageKind::choice) {
-    const std::vector<ImageId> ks = _lowerer.kids_of(kn);
-    if (std::ranges::all_of(ks, [&](ImageId e) { return refusable(e); })) {
+  if (kn.kind == detail::ImageKind::choice) {
+    const std::vector<detail::ImageId> ks = _lowerer.kids_of(kn);
+    if (std::ranges::all_of(ks,
+                            [&](detail::ImageId e) { return refusable(e); })) {
       out.words = true;
       out.refused = ks;
       return out;
@@ -540,13 +561,13 @@ LexReifier::Guard LexReifier::classify(ImageId id) const {
   return out;
 }
 
-LexReifier::Guard LexReifier::guard_of(const ImageNode& lit) const {
-  if (lit.flags & kLitGuardWord) {
+LexReifier::Guard LexReifier::guard_of(const detail::ImageNode& lit) const {
+  if (lit.flags & detail::kLitGuardWord) {
     Guard g;
     g.word = true;
     return g;
   }
-  if (lit.flags & kLitGuardExpr) return classify(kid(lit, 0));
+  if (lit.flags & detail::kLitGuardExpr) return classify(kid(lit, 0));
   return {};
 }
 
@@ -560,7 +581,7 @@ std::uint16_t LexReifier::guard_set(const Guard& g, bool tail) {
   const bool scalars = _c.wordRanges.size() != 0;
   if (g.word) return word_set();
   if (g.words) {
-    if (g.cp == kNoImage) return kNoSet;
+    if (g.cp == detail::kNoImage) return kNoSet;
     const LexCodePoints cps = cps_of(at(g.cp));
     const ByteSet bytes = cps.bytes();
     const auto wide = cps.wide();
@@ -575,12 +596,12 @@ std::uint16_t LexReifier::guard_set(const Guard& g, bool tail) {
   return kNoSet;
 }
 
-std::uint16_t LexReifier::lit_guard(const ImageNode& lit, const Guard& g,
-                                    bool tail) {
-  const ImageClassDesc& bound = _lowerer._d.bound;
+std::uint16_t LexReifier::lit_guard(const detail::ImageNode& lit,
+                                    const Guard& g, bool tail) {
+  const detail::ImageClassDesc& bound = _lowerer._d.bound;
   return g.word && !detail::word_final_in(lit.text, bound.props,
                                           bound.complement, bound.scalars,
-                                          (lit.flags & kLitFolded) != 0)
+                                          (lit.flags & detail::kLitFolded) != 0)
              ? kNoSet
              : guard_set(g, tail);
 }
@@ -593,19 +614,19 @@ std::uint16_t LexReifier::class_guard(std::uint16_t guard) {
   return refusal(kNoSet, std::span(&guard, 1));
 }
 
-std::uint16_t LexReifier::refused(ImageId word, std::uint16_t node) {
+std::uint16_t LexReifier::refused(detail::ImageId word, std::uint16_t node) {
   _c.lexSpelled[node] = GrammarPrinter(_im, ImageView::written).spell(word);
   return node;
 }
 
-void LexReifier::class_refusals(ImageId id,
+void LexReifier::class_refusals(detail::ImageId id,
                                 std::vector<std::uint16_t>& out) {
-  const ImageNode n = at(id);
+  const detail::ImageNode n = at(id);
   const auto one = [&](const ByteSet& set) {
     const std::uint16_t cls = intern(set);
     out.push_back(refused(id, refusal(kNoSet, std::span(&cls, 1))));
   };
-  if (n.flags & kCpNot) {
+  if (n.flags & detail::kCpNot) {
     one(lex_not(class_bytes(n.text)));
     return;
   }
@@ -621,16 +642,16 @@ void LexReifier::class_refusals(ImageId id,
 }
 
 void LexReifier::refusals(const Guard& g, std::vector<std::uint16_t>& out) {
-  for (const ImageId w : g.refused) {
-    if (at(w).kind == ImageKind::cpset)
+  for (const detail::ImageId w : g.refused) {
+    if (at(w).kind == detail::ImageKind::cpset)
       class_refusals(w, out);
     else
       out.push_back(reify_not_lit(w));
   }
 }
 
-std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_lit(detail::ImageId id, bool tail) {
+  const detail::ImageNode n = at(id);
   const Guard g = guard_of(n);
   const std::uint16_t guard = lit_guard(n, g, tail);
   const bool guarded = guard != kNoSet;
@@ -663,8 +684,8 @@ std::uint16_t LexReifier::reify_lit(ImageId id, bool tail) {
   return group(LexKind::seq, kids, 1);
 }
 
-std::uint16_t LexReifier::reify_not_lit(ImageId id) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_not_lit(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
   const Guard g = guard_of(n);
   // A refusal reads one set per byte, which a choice of cases is not.
   if (lit_chooses(n) ||
@@ -677,12 +698,13 @@ std::uint16_t LexReifier::reify_not_lit(ImageId id) {
   return refused(id, refusal(lit_guard(n, g, true), classes));
 }
 
-std::uint16_t LexReifier::reify_not_class(ImageId id) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_not_class(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
   if (!refusable(id)) {
-    const ImageId plain = make(ImageKind::cpset, {},
-                               static_cast<std::uint8_t>(n.flags & ~kCpNot),
-                               kNoImage, n.m, 0, n.text);
+    const detail::ImageId plain =
+        make(detail::ImageKind::cpset, {},
+             static_cast<std::uint8_t>(n.flags & ~detail::kCpNot),
+             detail::kNoImage, n.m, 0, n.text);
     const std::uint16_t arms[] = {reify_class(plain), reify_eof()};
     return push(LexNode{LexKind::positive, group(LexKind::alt, arms)});
   }
@@ -691,16 +713,16 @@ std::uint16_t LexReifier::reify_not_class(ImageId id) {
   return nodes.size() == 1 ? nodes.front() : group(LexKind::seq, nodes);
 }
 
-std::uint16_t LexReifier::reify_not_of(ImageId id) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_not_of(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
   switch (n.kind) {
-    case ImageKind::lit:
+    case detail::ImageKind::lit:
       return reify_not_lit(id);
-    case ImageKind::cpset:
+    case detail::ImageKind::cpset:
       return reify_not_class(id);
-    case ImageKind::choice: {
+    case detail::ImageKind::choice: {
       std::vector<std::uint16_t> arms;
-      for (const ImageId k : _lowerer.kids_of(n))
+      for (const detail::ImageId k : _lowerer.kids_of(n))
         arms.push_back(reify_not_of(k));
       return group(LexKind::seq, arms);
     }
@@ -714,8 +736,8 @@ std::uint16_t LexReifier::reify_eof() {
   return refusal(kNoSet, std::span(&any, 1));
 }
 
-std::uint16_t LexReifier::reify_class(ImageId id) {
-  const ImageId key = canon(id);
+std::uint16_t LexReifier::reify_class(detail::ImageId id) {
+  const detail::ImageId key = canon(id);
   if (const auto found = _codePoints.find(key); found != _codePoints.end())
     return found->second;
   const LexCodePoints cps = cps_of(at(id));
@@ -747,15 +769,17 @@ std::uint16_t LexReifier::reify_class(ImageId id) {
   return root;
 }
 
-bool LexReifier::mark_run(ImageId id) const {
-  const ImageNode& n = at(id);
-  const ImageNode& k = n.kind == ImageKind::repeat ? at(kid(n, 0)) : n;
-  if (k.kind == ImageKind::cpset) return true;
-  return k.kind == ImageKind::lit && k.flags == 0 && one_character(k.text);
+bool LexReifier::mark_run(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
+  const detail::ImageNode& k =
+      n.kind == detail::ImageKind::repeat ? at(kid(n, 0)) : n;
+  if (k.kind == detail::ImageKind::cpset) return true;
+  return k.kind == detail::ImageKind::lit && k.flags == 0 &&
+         one_character(k.text);
 }
 
-std::uint16_t LexReifier::reify_mark(ImageId id, bool tail) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_mark(detail::ImageId id, bool tail) {
+  const detail::ImageNode n = at(id);
   if (!mark_run(kid(n, 0)))
     refuse_lowering(
         "`mark<>` takes one character class or one-character literal, "
@@ -767,8 +791,8 @@ std::uint16_t LexReifier::reify_mark(ImageId id, bool tail) {
       _c.intern_tag(*static_cast<const detail::Tag*>(n.tag)), 0});
 }
 
-std::uint16_t LexReifier::reify_ref(ImageId id) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_ref(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
   const std::uint16_t node = push(LexNode{LexKind::seq, _c.nlexKid, 0, 0, 0});
   if (!_c.lowerFail()) {
     _c.lexSpelled[node] = std::string(_im.rules[n.a].name);
@@ -778,26 +802,28 @@ std::uint16_t LexReifier::reify_ref(ImageId id) {
   return node;
 }
 
-bool LexReifier::echo_pad(ImageId id) const {
-  const ImageNode& n = at(id);
-  return n.kind == ImageKind::repeat && n.m == 0 && n.n == kUnbounded &&
-         at(kid(n, 0)).kind == ImageKind::cpset;
+bool LexReifier::echo_pad(detail::ImageId id) const {
+  const detail::ImageNode& n = at(id);
+  return n.kind == detail::ImageKind::repeat && n.m == 0 && n.n == kUnbounded &&
+         at(kid(n, 0)).kind == detail::ImageKind::cpset;
 }
 
-LexReifier::Echo LexReifier::echo_closer(ImageId close) const {
-  const ImageNode& n = at(close);
-  if (n.kind != ImageKind::seq) return {};
-  const std::vector<ImageId> ks = _lowerer.kids_of(n);
-  const auto plain = [&](ImageId id) {
-    const ImageNode& l = at(id);
-    return l.kind == ImageKind::lit && (l.flags & kLitFolded) == 0;
+LexReifier::Echo LexReifier::echo_closer(detail::ImageId close) const {
+  const detail::ImageNode& n = at(close);
+  if (n.kind != detail::ImageKind::seq) return {};
+  const std::vector<detail::ImageId> ks = _lowerer.kids_of(n);
+  const auto plain = [&](detail::ImageId id) {
+    const detail::ImageNode& l = at(id);
+    return l.kind == detail::ImageKind::lit &&
+           (l.flags & detail::kLitFolded) == 0;
   };
-  const auto bare = [&](ImageId id) {
-    return id == kNoImage ||
-           (plain(id) && (at(id).flags & (kLitGuardWord | kLitGuardExpr)) == 0);
+  const auto bare = [&](detail::ImageId id) {
+    return id == detail::kNoImage ||
+           (plain(id) && (at(id).flags & (detail::kLitGuardWord |
+                                          detail::kLitGuardExpr)) == 0);
   };
-  const auto spelled = [&](ImageId id) {
-    return id == kNoImage ? 0 : at(id).text.size();
+  const auto spelled = [&](detail::ImageId id) {
+    return id == detail::kNoImage ? 0 : at(id).text.size();
   };
   std::size_t i = 0;
   Echo e;
@@ -805,7 +831,7 @@ LexReifier::Echo LexReifier::echo_closer(ImageId close) const {
     e.before = ks[i++];
     if (i < ks.size() && echo_pad(ks[i])) e.pad = ks[i++];
   }
-  if (i == ks.size() || at(ks[i]).kind != ImageKind::same) return {};
+  if (i == ks.size() || at(ks[i]).kind != detail::ImageKind::same) return {};
   e.tag = at(ks[i++]).tag;
   if (i < ks.size() && plain(ks[i])) e.after = ks[i++];
   if (i != ks.size()) return {};
@@ -814,9 +840,8 @@ LexReifier::Echo LexReifier::echo_closer(ImageId close) const {
   return e;
 }
 
-std::uint16_t LexReifier::reify_through_lit(ImageId open,
-                                            std::string_view close,
-                                            bool eof) {
+std::uint16_t LexReifier::reify_through_lit(detail::ImageId open,
+                                            std::string_view close, bool eof) {
   const std::size_t n = close.size();
   const std::uint16_t openNode = reify(open, false);
   const std::uint16_t end = eof ? class_guard(intern(kAllBytes)) : kNoLexNode;
@@ -846,10 +871,10 @@ std::uint16_t LexReifier::reify_through_lit(ImageId open,
                       static_cast<std::uint32_t>(n), eof ? 1u : 0u});
 }
 
-std::uint16_t LexReifier::reify_through(ImageId id, bool tail) {
-  const ImageNode n = at(id);
-  const ImageId open = kid(n, 0);
-  const ImageId close = kid(n, 1);
+std::uint16_t LexReifier::reify_through(detail::ImageId id, bool tail) {
+  const detail::ImageNode n = at(id);
+  const detail::ImageId open = kid(n, 0);
+  const detail::ImageId close = kid(n, 1);
   if (const Echo echo = echo_closer(close); echo.echoes) {
     const std::uint16_t openNode = reify(open, false);
     const std::uint16_t before = echo_side(echo.before);
@@ -864,24 +889,25 @@ std::uint16_t LexReifier::reify_through(ImageId id, bool tail) {
         _c.intern_tag(*static_cast<const detail::Tag*>(echo.tag))});
   }
   const EndCloser end = end_closer(close);
-  if (const ImageNode& closer = at(end.type);
-      closer.kind == ImageKind::lit && closer.flags == 0 &&
+  if (const detail::ImageNode& closer = at(end.type);
+      closer.kind == detail::ImageKind::lit && closer.flags == 0 &&
       !closer.text.empty() &&
       (static_cast<unsigned char>(closer.text[0]) & 0xC0) != 0x80)
     return reify_through_lit(open, closer.text, end.eof);
-  const ImageId notClose = make_not(close);
-  const ImageId anyChar =
-      make(ImageKind::cpset, {}, static_cast<std::uint8_t>(kCpNot));
-  const ImageId item[] = {notClose, anyChar};
-  const ImageId itemSeq = make(ImageKind::seq, item);
-  const ImageId rep = make(ImageKind::repeat, std::span(&itemSeq, 1), 0,
-                           kNoImage, 0, kUnbounded);
-  const ImageId parts[] = {open, rep, close};
-  return reify(make(ImageKind::seq, parts), tail);
+  const detail::ImageId notClose = make_not(close);
+  const detail::ImageId anyChar = make(
+      detail::ImageKind::cpset, {}, static_cast<std::uint8_t>(detail::kCpNot));
+  const detail::ImageId item[] = {notClose, anyChar};
+  const detail::ImageId itemSeq = make(detail::ImageKind::seq, item);
+  const detail::ImageId rep =
+      make(detail::ImageKind::repeat, std::span(&itemSeq, 1), 0,
+           detail::kNoImage, 0, kUnbounded);
+  const detail::ImageId parts[] = {open, rep, close};
+  return reify(make(detail::ImageKind::seq, parts), tail);
 }
 
-std::uint16_t LexReifier::reify_nested(ImageId id) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify_nested(detail::ImageId id) {
+  const detail::ImageNode n = at(id);
   const EndCloser end = end_closer(kid(n, 1));
   const std::uint16_t open = reify(kid(n, 0), false);
   const std::uint16_t close = reify(end.type, false);
@@ -892,55 +918,55 @@ std::uint16_t LexReifier::reify_nested(ImageId id) {
                       end.eof ? 1u : 0u});
 }
 
-std::uint16_t LexReifier::reify(ImageId id, bool tail) {
-  const ImageNode n = at(id);
+std::uint16_t LexReifier::reify(detail::ImageId id, bool tail) {
+  const detail::ImageNode n = at(id);
   switch (n.kind) {
-    case ImageKind::call:
+    case detail::ImageKind::call:
       return push(LexNode{LexKind::call, kNoLexNode,
                           static_cast<std::uint16_t>(n.m)});
-    case ImageKind::ref:
+    case detail::ImageKind::ref:
       return reify_ref(id);
-    case ImageKind::lit:
+    case detail::ImageKind::lit:
       return reify_lit(id, tail);
-    case ImageKind::notOf:
+    case detail::ImageKind::notOf:
       return reify_not_of(kid(n, 0));
-    case ImageKind::andOf:
+    case detail::ImageKind::andOf:
       return push(LexNode{LexKind::positive, reify(kid(n, 0))});
-    case ImageKind::eof:
+    case detail::ImageKind::eof:
       return reify_eof();
-    case ImageKind::indent:
+    case detail::ImageKind::indent:
       return push(LexNode{LexKind::indent, 0, 0, 0, 0});
-    case ImageKind::dedent:
+    case detail::ImageKind::dedent:
       return push(LexNode{LexKind::dedent, 0, 0, 0, 0});
-    case ImageKind::byte:
+    case detail::ImageKind::byte:
       return push(LexNode{LexKind::chars, intern(kAllBytes), 0, 0, 0});
-    case ImageKind::cpset:
+    case detail::ImageKind::cpset:
       return reify_class(id);
-    case ImageKind::seq:
-    case ImageKind::choice: {
-      const bool choice = n.kind == ImageKind::choice;
+    case detail::ImageKind::seq:
+    case detail::ImageKind::choice: {
+      const bool choice = n.kind == detail::ImageKind::choice;
       const auto kids = _lowerer.kids_of(n);
       std::vector<std::uint16_t> arms;
       for (std::size_t i = 0; i < kids.size(); ++i)
         arms.push_back(reify(kids[i], tail && (choice || i + 1 == kids.size())));
       return group(choice ? LexKind::alt : LexKind::seq, arms);
     }
-    case ImageKind::mark:
+    case detail::ImageKind::mark:
       return reify_mark(id, tail);
-    case ImageKind::same:
+    case detail::ImageKind::same:
       return push(LexNode{
           LexKind::same, 0, 0,
           _c.intern_tag(*static_cast<const detail::Tag*>(n.tag)),
           0});
-    case ImageKind::through:
+    case detail::ImageKind::through:
       return reify_through(id, tail);
-    case ImageKind::throughNested:
+    case detail::ImageKind::throughNested:
       return reify_nested(id);
-    case ImageKind::commit:
+    case detail::ImageKind::commit:
       refuse_lowering(
           "a commit is allowed in a rule, not in a terminal or a gap condition "
           "-- use the plain repetition forms there");
-    case ImageKind::repeat: {
+    case detail::ImageKind::repeat: {
       if (n.m >= kEndless || (n.n != kUnbounded && n.n >= kEndless))
         throw LowerRefused(LowerFail::tokenGraphTooLarge);
       const std::uint16_t kidNode = reify(kid(n, 0), false);
@@ -950,11 +976,11 @@ std::uint16_t LexReifier::reify(ImageId id, bool tail) {
                               ? kEndless
                               : static_cast<std::uint32_t>(n.n)});
     }
-    case ImageKind::embed:
+    case detail::ImageKind::embed:
       refuse_lowering(
           "`section<G>(open, close)` is allowed in a rule, not in a terminal: a "
           "terminal is one token, and a section parses a grammar");
-    case ImageKind::doc:
+    case detail::ImageKind::doc:
       refuse_lowering(
           "a `doc` goes on a literal a rule reads, not inside a terminal or a "
           "guard: those are part of one token -- document the token where a "

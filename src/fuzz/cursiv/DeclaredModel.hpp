@@ -22,7 +22,7 @@
 #include "cursiv/ElementKind.hpp"
 #include "cursiv/GrammarModel.hpp"
 
-namespace cursiv::fuzzer::model {
+namespace cursiv::fuzzer::detail::model {
 
 using cursiv::detail::alts_list;
 using cursiv::detail::cond_t;
@@ -82,9 +82,10 @@ struct primary_of<true, S, R> {
 };
 
 template <class S, class R>
-struct rule_edges : tl_cat<typename refs<typename S::template body<R>>::type,
-                           typename primary_of<is_infix_rule<R>, S, R>::type> {
-};
+struct rule_edges
+    : tl_cat<
+          typename refs<typename S::template body<R>>::type,
+          typename primary_of<cursiv::detail::is_infix_rule<R>, S, R>::type> {};
 
 // Closed in rounds: every rule's edges are read once, the round scanning
 // the frontier alone.
@@ -162,7 +163,7 @@ struct local_impl<Epsilon> {
   using type = TypeList<>;
 };
 template <class D>
-struct local_impl<SuperT<D>> {
+struct local_impl<cursiv::detail::SuperT<D>> {
   using type = TypeList<>;
 };
 // One position, not three: the run is lexed inside the token, so the
@@ -216,7 +217,8 @@ struct local_impl<Ref<R>> {
 // body is walked. The climb's operators are positions of their own, named
 // by the level table rather than by the synthesised body.
 template <class R>
-inline constexpr bool atomic_rule = is_terminal_rule<R> || is_infix_rule<R>;
+inline constexpr bool atomic_rule =
+    is_terminal_rule<R> || cursiv::detail::is_infix_rule<R>;
 
 // An operator may be spelled, or it may call a terminal or a data rule. A
 // call is no position of its own -- the rule it names carries it, as
@@ -227,7 +229,7 @@ struct op_position {
 };
 template <class R>
 struct op_position<Ref<R>> {
-  using type = declared_of_t<R>;
+  using type = cursiv::detail::declared_of_t<R>;
 };
 template <class L>
 struct ops_of;
@@ -257,7 +259,8 @@ template <class S, class R>
 struct rule_positions<false, S, R> : local<typename S::template body<R>> {};
 template <class S, class R>
 struct positions_of
-    : tl_cat<TypeList<R>, typename infix_ops<is_infix_rule<R>, R>::type,
+    : tl_cat<TypeList<R>,
+             typename infix_ops<cursiv::detail::is_infix_rule<R>, R>::type,
              typename rule_positions<atomic_rule<R>, S, R>::type> {};
 template <class S, class L>
 struct positions_all;
@@ -287,7 +290,7 @@ struct shape_kind<Byte> {
   static constexpr ElementKind value = ElementKind::any_character;
 };
 template <>
-struct shape_kind<AnyChar> {
+struct shape_kind<cursiv::detail::AnyChar> {
   static constexpr ElementKind value = ElementKind::any_character;
 };
 template <class O, class Cl>
@@ -353,9 +356,9 @@ consteval ElementKind kind_of() {
   if constexpr (requires { typename T::kind; }) {
     if constexpr (is_terminal_rule<T>)
       return ElementKind::terminal_rule;
-    else if constexpr (is_infix_rule<T>)
+    else if constexpr (cursiv::detail::is_infix_rule<T>)
       return ElementKind::infix_rule;
-    else if constexpr (is_data_rule<T>)
+    else if constexpr (cursiv::detail::is_data_rule<T>)
       return ElementKind::data_type_rule;
     else
       return ElementKind::parser_rule;
@@ -379,7 +382,7 @@ consteval std::string_view name_of() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
     if constexpr (is_terminal_rule<T>)
-      return cursiv::detail::type_name<declared_of_t<T>>();
+      return cursiv::detail::type_name<cursiv::detail::declared_of_t<T>>();
   }
   return {};
 }
@@ -391,12 +394,12 @@ struct feature_of {
 template <auto Sp, class E>
 struct feature_of<Assign<Sp, E>> {
   static constexpr std::string_view value =
-      cursiv::detail::member_identifier<spec_ptr<Sp>>();
+      cursiv::detail::member_identifier<cursiv::detail::spec_ptr<Sp>>();
 };
 template <auto Sp, class E>
 struct feature_of<Append<Sp, E>> {
   static constexpr std::string_view value =
-      cursiv::detail::member_identifier<spec_ptr<Sp>>();
+      cursiv::detail::member_identifier<cursiv::detail::spec_ptr<Sp>>();
 };
 template <auto P, class E>
 struct feature_of<Flag<P, E>> {
@@ -591,9 +594,9 @@ inline constexpr ElementId op_row = row_of<G, E>;
 template <class G, class R>
 inline constexpr ElementId op_row<G, Ref<R>> = call_row<G, R>;
 
-}  // namespace cursiv::fuzzer::model
+}  // namespace cursiv::fuzzer::detail::model
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // One instance per grammar, and it holds no engine: every answer is a
 // slice of a table the grammar's own types produced.
@@ -651,4 +654,4 @@ struct DeclaredModel final : GrammarModel {
 template <class G>
 inline constexpr DeclaredModel<G> kDeclaredModel{};
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

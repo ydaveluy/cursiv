@@ -101,36 +101,38 @@ void cumulative_intervals() {
 }
 
 void keep_valid_repetition() {
-  Row row;
-  std::array<PerfSample, kStageCount> first{};
-  for (std::size_t stage = 0; stage < kStageCount; ++stage)
+  detail::Row row;
+  std::array<PerfSample, detail::kStageCount> first{};
+  for (std::size_t stage = 0; stage < detail::kStageCount; ++stage)
     static_cast<PerfReading&>(first[stage]) = reading(100, 100, 100 + stage);
   row.record_perf(10.0, first);
 
-  std::array<PerfSample, kStageCount> absent{};
+  std::array<PerfSample, detail::kStageCount> absent{};
   row.record_perf(5.0, absent);
   CHECK(row.perfBuildMs == 10.0);
-  CHECK(row.perf[kBuild].valid);
-  CHECK(row.perf[kBuild].instructions == first[kBuild].instructions);
+  CHECK(row.perf[detail::kBuild].valid);
+  CHECK(row.perf[detail::kBuild].instructions ==
+        first[detail::kBuild].instructions);
 
   auto next = first;
   for (auto& sample : next) sample.instructions += 200;
   row.record_perf(12.0, next);
   CHECK(row.perfBuildMs == 10.0);
-  CHECK(row.perf[kBuild].instructions == first[kBuild].instructions);
+  CHECK(row.perf[detail::kBuild].instructions ==
+        first[detail::kBuild].instructions);
 
   row.record_perf(8.0, next);
   CHECK(row.perfBuildMs == 8.0);
-  for (std::size_t stage = 0; stage < kStageCount; ++stage)
+  for (std::size_t stage = 0; stage < detail::kStageCount; ++stage)
     CHECK(row.perf[stage].instructions == next[stage].instructions);
 }
 
 void every_sample_counts() {
-  ServiceMeasurement single;
+  detail::ServiceMeasurement single;
   CHECK(single.samples == 0);
-  CHECK(single.min == kAbsent);
-  CHECK(single.ms == kAbsent);
-  CHECK(single.worst == kAbsent);
+  CHECK(single.min == detail::kAbsent);
+  CHECK(single.ms == detail::kAbsent);
+  CHECK(single.worst == detail::kAbsent);
 
   single.record(9.0);
   CHECK(single.samples == 1);
@@ -139,7 +141,7 @@ void every_sample_counts() {
   CHECK(single.worst == 9.0);
 
   // Include every repetition of every probe, even slower calls and zeroes.
-  ServiceMeasurement sweep;
+  detail::ServiceMeasurement sweep;
   for (const double elapsed : {3.0, 9.0, 6.0, 30.0, 12.0, 24.0})
     sweep.record(elapsed);
   CHECK(sweep.samples == 6);
@@ -186,20 +188,20 @@ bool register_language(cursiv::SharedCoreServices& shared) {
 
 void a_parser_without_references_counts_none() {
   {
-    cursiv::bench::Row row;
+    cursiv::bench::detail::Row row;
     row.references = row.resolved = 99;
-    cursiv::bench::ws_stages<ws::WorkspaceSharedServices>(
+    cursiv::bench::detail::ws_stages<ws::WorkspaceSharedServices>(
         1, false, 0, "workspace", ".ws", "datatype lowercase", row,
         register_language);
     CHECK(row.references == 0);
     CHECK(row.resolved == 0);
     CHECK(row.diagnostics == 1);
-    CHECK(row.ms[cursiv::bench::kIndex] >= 0);
+    CHECK(row.ms[cursiv::bench::detail::kIndex] >= 0);
   }
   {
-    cursiv::bench::MultiRow row;
+    cursiv::bench::detail::MultiRow row;
     row.references = row.resolved = 99;
-    cursiv::bench::multi_stages<ws::WorkspaceSharedServices>(
+    cursiv::bench::detail::multi_stages<ws::WorkspaceSharedServices>(
         1, "workspace", ".ws", {"datatype Text", "datatype lowercase"}, {0},
         row, register_language);
     CHECK(row.references == 0);

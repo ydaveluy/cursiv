@@ -4,7 +4,7 @@
 #include <span>
 #include <string_view>
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // Immutable generated source and direct dependency ranks. All views outlive
 // the service; no rule identity is recovered by parsing its display text.
@@ -19,4 +19,4 @@ struct GrammarSourceData {
   std::span<const GrammarSourceRule> rules;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

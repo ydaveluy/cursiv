@@ -10,7 +10,7 @@
 #include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/DecisionSource.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // How a character set is spent. `low` and `high` are the set's own
 // boundaries, which is where a lexer's off-by-one lives.
@@ -39,4 +39,4 @@ struct GrammarLexicon {
   [[nodiscard]] virtual bool devours(ElementId) const = 0;
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

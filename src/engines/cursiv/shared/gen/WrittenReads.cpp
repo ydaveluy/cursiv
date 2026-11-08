@@ -26,43 +26,44 @@ WrittenReads::Slot& WrittenReads::slot(std::uint32_t rule) {
 // or another grammar.
 bool WrittenReads::reads_into(std::uint32_t rule) {
   if (_image.rules[rule].grammar) return false;
-  const ImageRuleKind kind = _image.ready(rule).face[1].kind;
-  return kind != ImageRuleKind::terminal && kind != ImageRuleKind::infix &&
-         kind != ImageRuleKind::grammar;
+  const detail::ImageRuleKind kind = _image.ready(rule).face[1].kind;
+  return kind != detail::ImageRuleKind::terminal &&
+         kind != detail::ImageRuleKind::infix &&
+         kind != detail::ImageRuleKind::grammar;
 }
 
-bool WrittenReads::nothing_of(ImageId id) {
-  const ImageNode n = _image.nodes[id];
+bool WrittenReads::nothing_of(detail::ImageId id) {
+  const detail::ImageNode n = _image.nodes[id];
   const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
   if (over_operand(n.kind)) return nothing_of(kid(0));
   switch (n.kind) {
-    case ImageKind::epsilon:
-    case ImageKind::eof:
-    case ImageKind::notOf:
-    case ImageKind::andOf:
-    case ImageKind::gapHas:
-    case ImageKind::gapIs:
-    case ImageKind::implied:
+    case detail::ImageKind::epsilon:
+    case detail::ImageKind::eof:
+    case detail::ImageKind::notOf:
+    case detail::ImageKind::andOf:
+    case detail::ImageKind::gapHas:
+    case detail::ImageKind::gapIs:
+    case detail::ImageKind::implied:
       return true;
-    case ImageKind::seq:
-    case ImageKind::unordered:
+    case detail::ImageKind::seq:
+    case detail::ImageKind::unordered:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (!nothing_of(kid(i))) return false;
       return true;
-    case ImageKind::choice:
+    case detail::ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (nothing_of(kid(i))) return true;
       return false;
-    case ImageKind::repeat:
+    case detail::ImageKind::repeat:
       return n.m == 0 || nothing_of(kid(0));
-    case ImageKind::ref: {
+    case detail::ImageKind::ref: {
       // An operator table reads nothing where its operand does, through every
       // table it stands on. A cycle of tables reads something: others refuse it.
       std::uint32_t rule = n.a;
       for (std::size_t hop = 0;
            hop < _image.rules.size() && !_image.rules[rule].grammar; ++hop) {
-        const ImageFace& face = _image.ready(rule).face[1];
-        if (face.kind != ImageRuleKind::infix) break;
+        const detail::ImageFace& face = _image.ready(rule).face[1];
+        if (face.kind != detail::ImageRuleKind::infix) break;
         rule = face.primary;
       }
       return reads_into(rule) ? slot(rule).nothing : false;
@@ -72,20 +73,21 @@ bool WrittenReads::nothing_of(ImageId id) {
   }
 }
 
-bool WrittenReads::run_of(ImageId id) {
-  const ImageNode n = _image.nodes[id];
+bool WrittenReads::run_of(detail::ImageId id) {
+  const detail::ImageNode n = _image.nodes[id];
   const auto kid = [&](std::uint32_t i) { return _image.kids[n.first + i]; };
-  if (over_operand(n.kind) || n.kind == ImageKind::embed) return run_of(kid(0));
+  if (over_operand(n.kind) || n.kind == detail::ImageKind::embed)
+    return run_of(kid(0));
   switch (n.kind) {
-    case ImageKind::repeat:
+    case detail::ImageKind::repeat:
       return n.m < n.n && n.n > 1;
-    case ImageKind::choice:
+    case detail::ImageKind::choice:
       for (std::uint32_t i = 0; i < n.count; ++i)
         if (run_of(kid(i))) return true;
       return false;
     // A run among parts that read nothing; the first part that is neither
     // ends it.
-    case ImageKind::seq: {
+    case detail::ImageKind::seq: {
       bool run = false;
       for (std::uint32_t i = 0; i < n.count; ++i) {
         if (run_of(kid(i))) {
@@ -96,7 +98,7 @@ bool WrittenReads::run_of(ImageId id) {
       }
       return run;
     }
-    case ImageKind::ref:
+    case detail::ImageKind::ref:
       return reads_into(n.a) ? slot(n.a).run : false;
     default:
       return false;
@@ -105,7 +107,7 @@ bool WrittenReads::run_of(ImageId id) {
 
 bool WrittenReads::solve(std::uint32_t at) {
   const std::uint32_t rule = _slots[at].rule;
-  const ImageId body = _image.ready(rule).face[1].body;
+  const detail::ImageId body = _image.ready(rule).face[1].body;
   _solving = at;
   const bool nothing = nothing_of(body);
   const bool run = run_of(body);
@@ -137,11 +139,11 @@ bool WrittenReads::answer(Ask ask) {
   }
 }
 
-bool WrittenReads::nothing(ImageId node) {
+bool WrittenReads::nothing(detail::ImageId node) {
   return answer([&] { return nothing_of(node); });
 }
 
-bool WrittenReads::run(ImageId node) {
+bool WrittenReads::run(detail::ImageId node) {
   return answer([&] { return run_of(node); });
 }
 

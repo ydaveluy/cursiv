@@ -197,6 +197,7 @@ struct InGrammar : detail::in_grammar_rule<G, X> {
       "declares no `indent_open`, `indent_close` or `indent_newline`");
 };
 
+namespace detail {
 template <class G, class X>
 inline constexpr std::string_view anonymous_rule_label<InGrammar<G, X>> =
     anonymous_rule_label<X>;
@@ -204,7 +205,6 @@ template <class G, class X>
 inline constexpr bool is_inline_terminal<InGrammar<G, X>> =
     is_inline_terminal<X>;
 
-namespace detail {
 template <class G, class E = named_rule_t<G>>
 struct section_entry {
   static_assert(!is_terminal_rule<E>,

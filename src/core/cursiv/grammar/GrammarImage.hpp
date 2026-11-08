@@ -13,7 +13,7 @@
 // is told by the address of its descriptor, so two spellings of one type are
 // one node.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 using ImageId = std::uint32_t;
 inline constexpr ImageId kNoImage = ~ImageId{0};
@@ -302,4 +302,4 @@ struct GrammarImage {
   std::unordered_map<const ImageRuleDesc*, std::uint32_t> _rules;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

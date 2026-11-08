@@ -13,13 +13,13 @@ LrLowerSlot LrLowerer::infix_side(unsigned cfg, const void* row,
       .sym = sym, .cfg = static_cast<std::uint8_t>(cfg), .row = {row_id(row)}};
 }
 
-void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
+void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, detail::ImageId op,
                         const void* opRow, const LrLowerSlot& left,
                         const LrLowerSlot& right, const LrActs& node,
                         std::uint8_t prec, Association group) {
   const std::uint32_t opRule = op_rule_of(op);
   const bool buildsNode =
-      opRule != kNoImage && (node_rule(opRule) || infix_rule(opRule));
+      opRule != detail::kNoImage && (node_rule(opRule) || infix_rule(opRule));
   const LrShapeId laid = lay(cfg, op);
   std::vector kids{laid};
   if (_p.e[laid].kind == LrShape::seq && _p.e[laid].made.empty())
@@ -71,7 +71,7 @@ void LrLowerer::emit_op(unsigned cfg, std::uint16_t lhs, ImageId op,
 
 void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
                              std::uint16_t lhs) {
-  const ImageStageDesc& st = stage(rule);
+  const detail::ImageStageDesc& st = stage(rule);
   if (st.levelCount > 255) {
     _o.fault.raise(GrammarFaultCode::tooManyPrecedences, lhs);
     return;
@@ -79,8 +79,8 @@ void LrLowerer::define_infix(unsigned cfg, std::uint32_t rule,
   const LrActs node{row_id(st.climbRow)};
   const LrLowerSlot left = infix_side(cfg, st.leftRow, nt_sym(lhs));
   const LrLowerSlot right = infix_side(cfg, st.rightRow, nt_sym(lhs));
-  each_op(rule, [&](ImageId op, const void* row, std::uint8_t prec,
-                  Association group) {
+  each_op(rule, [&](detail::ImageId op, const void* row, std::uint8_t prec,
+                    Association group) {
     emit_op(cfg, lhs, op, row, left, right, node, prec, group);
   });
   const std::uint32_t primary = _im.rule(*st.primary);
@@ -94,8 +94,8 @@ void LrLowerer::define_one(unsigned cfg, std::uint32_t rule, std::uint16_t lhs,
                            std::uint8_t tail) {
   _p.owner = lhs;
   _p.home = static_cast<std::uint8_t>(_cfgs[cfg].home);
-  const ImageStageDesc& st = stage(rule);
-  if (st.kind == ImageRuleKind::infix) {
+  const detail::ImageStageDesc& st = stage(rule);
+  if (st.kind == detail::ImageRuleKind::infix) {
     define_infix(cfg, rule, lhs);
     return;
   }

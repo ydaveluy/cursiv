@@ -4,6 +4,7 @@
 // and nothing here reads a table.
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -27,7 +28,7 @@
 #include "cursiv/TapeSeal.hpp"
 #include "cursiv/Check.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 // One instance per compiled grammar, for the whole program.
 template <class G>
@@ -43,12 +44,6 @@ inline void show(std::string_view text) {
       std::putchar(c);
     else
       std::printf("\\x%02x", static_cast<unsigned char>(c));
-}
-
-[[nodiscard]] inline unsigned popcount(unsigned v) {
-  unsigned n = 0;
-  for (; v != 0; v >>= 1) n += v & 1u;
-  return n;
 }
 
 struct Lane {
@@ -162,10 +157,10 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
   }
 
   std::printf(
-      "fuzz %-14s %5llu docs (%llu complete, %llu bytes) | render styles %u/4  "
+      "fuzz %-14s %5llu docs (%llu complete, %llu bytes) | render styles %d/4  "
       "caps=%llu unrendered=%llu\n",
       lang, (unsigned long long)lane.docs, (unsigned long long)lane.complete,
-      (unsigned long long)lane.bytes, popcount(lane.styles),
+      (unsigned long long)lane.bytes, std::popcount(lane.styles),
       (unsigned long long)lane.capHits, (unsigned long long)lane.unrendered);
   std::printf(
       "     ORACLE: %llu trees judged against the grammar's directives, %llu "
@@ -209,4 +204,4 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
   return notModelled;
 }
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

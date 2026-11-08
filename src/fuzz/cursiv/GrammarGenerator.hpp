@@ -23,7 +23,7 @@
 #include "cursiv/GrammarLexicon.hpp"
 #include "cursiv/GrammarModel.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 inline constexpr unsigned kGrammarDepthCap = 64;
 inline constexpr unsigned kGrammarRepCap =
@@ -445,4 +445,4 @@ struct GrammarGenerator {
   }
 };
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

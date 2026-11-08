@@ -9,7 +9,7 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 
-namespace cursiv::fuzzer {
+namespace cursiv::fuzzer::detail {
 
 struct TapeSeal {
   std::uint64_t digest = 0xcbf29ce484222325ull;
@@ -34,4 +34,4 @@ inline void seal_records(const Cst& c, TapeSeal& s) {
   }
 }
 
-}  // namespace cursiv::fuzzer
+}  // namespace cursiv::fuzzer::detail

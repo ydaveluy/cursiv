@@ -28,7 +28,7 @@ class Utf16Cursor {
   [[nodiscard]] char16_t next() noexcept {
     if (_low != 0) return std::exchange(_low, char16_t{0});
     std::size_t len = 0;
-    char32_t value = scalar_at(_text.data(), _text.size(), len);
+    char32_t value = detail::scalar_at(_text.data(), _text.size(), len);
     if (len == 0) {
       value = U'\uFFFD';
       len = 1;

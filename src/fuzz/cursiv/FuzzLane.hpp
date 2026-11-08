@@ -17,7 +17,7 @@ template <class G>
 std::uint64_t lane(const char* lang, const cursiv::Parser& parser,
                    const cursiv::AstReflection& reflection, unsigned docs,
                    std::uint64_t seed) {
-  return run<G>(lang, parser, reflection, docs, seed);
+  return detail::run<G>(lang, parser, reflection, docs, seed);
 }
 
 }  // namespace cursiv::fuzzer

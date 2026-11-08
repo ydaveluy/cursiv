@@ -274,7 +274,7 @@ bool lowers() {
 
 template <class G>
 std::vector<cursiv::DeadBranch> dead() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WarningFound ctx(image);
   return cursiv::dead_branches(ctx);
 }
@@ -366,19 +366,19 @@ struct G : cursiv::GrammarSpec {
 };
 
 template <class R>
-cursiv::ImageId call(cursiv::GrammarImage& image) {
+cursiv::detail::ImageId call(cursiv::detail::GrammarImage& image) {
   return image.node(cursiv::detail::kNode<G, cursiv::Ref<R>>);
 }
 
 template <class R>
 bool nothing() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WrittenReads f(image);
   return f.nothing(call<R>(image));
 }
 template <class R>
 bool run() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WrittenReads f(image);
   return f.run(call<R>(image));
 }
@@ -403,7 +403,7 @@ void run() {
   CHECK(!run<G::Held>());
   CHECK(!run<G::Maybe>());
 
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WrittenReads f(image);
   CHECK(f.run(call<G::Lead>(image)));
   CHECK(f.nothing(call<G::Ring2>(image)));
@@ -583,7 +583,7 @@ struct Ranked : Base {
 
 template <class G>
 std::vector<cursiv::SelfBoundedArm> found() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   return cursiv::self_bounded_arms(image);
 }
 
@@ -753,7 +753,7 @@ struct Recursive : Base {
 
 template <class G>
 std::vector<cursiv::NestedRunWarning> found() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WarningFound ctx(image);
   return cursiv::nested_run_warnings(ctx);
 }
@@ -867,7 +867,7 @@ struct Bounded : Base {
 
 template <class G>
 std::vector<cursiv::WordLitWarning> found() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WarningFound ctx(image);
   return cursiv::word_lit_warnings(ctx);
 }
@@ -978,7 +978,7 @@ struct Spelled : Base {
 
 template <class G>
 std::vector<std::string> texts() {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WarningFound found(image);
   std::vector<std::string> out;
   for (const auto& t : cursiv::twin_branches(found))
@@ -989,7 +989,7 @@ std::vector<std::string> texts() {
 // The rule's body as the reader leaves it, spelled.
 template <class G>
 std::string read(std::string_view rule) {
-  cursiv::GrammarImage image = cursiv::grammar_image<G>();
+  cursiv::detail::GrammarImage image = cursiv::detail::grammar_image<G>();
   cursiv::WarningFound found(image);
   cursiv::TwinReader reader = cursiv::TwinReader::resolved(image);
   for (const std::uint32_t r : found.rules())

@@ -68,7 +68,7 @@
 #include "cursiv/LanguageBench.hpp"
 #include "cursiv/execution/TaskScheduler.hpp"
 
-namespace cursiv::bench {
+namespace cursiv::bench::detail {
 
 void parse_probe(const char* name, const cursiv::Parser& engine,
                  const std::string& src) {
@@ -153,7 +153,7 @@ std::size_t parse_size(std::string_view text) {
                " [--rss]"
                " [--list] [--file PATH] [filter]\n"
                "       <language>_bench [options] file [file ...]\n");
-  throw detail::Stop{2};
+  throw Stop{2};
 }
 
 const char* env(const char* name) { return std::getenv(name); }
@@ -356,7 +356,7 @@ std::string read_file(const std::string& path) {
   if (!in) {
     std::fprintf(stderr, "language_bench: cannot read '%s': %s\n",
                  printable(path).c_str(), std::strerror(errno));
-    throw detail::Stop{1};
+    throw Stop{1};
   }
   std::ostringstream out;
   out << in.rdbuf();
@@ -368,7 +368,7 @@ void write_file(const std::string& path, std::string_view content) {
   if (!out) {
     std::fprintf(stderr, "language_bench: cannot write '%s': %s\n",
                  printable(path).c_str(), std::strerror(errno));
-    throw detail::Stop{1};
+    throw Stop{1};
   }
   out.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
@@ -873,12 +873,12 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
 }
 
 }  // namespace
-}  // namespace cursiv::bench
+}  // namespace cursiv::bench::detail
 
 int cursiv::bench::run(int argc, char** argv,
                        std::span<const Language> languages) try {
   cursiv::detail::enter_host_directory();
-  const Options o = options(argc, argv, languages);
+  const detail::Options o = detail::options(argc, argv, languages);
   if (o.help) {
     std::printf(
         "usage: %s [options] %s\n"
@@ -904,62 +904,65 @@ int cursiv::bench::run(int argc, char** argv,
             : "[filter]");
     return 0;
   }
-  print_binary_age();
+  detail::print_binary_age();
 
   if (o.list) {
     for (const Language& language : languages) {
-      if (!selected(o, language.name)) continue;
+      if (!detail::selected(o, language.name)) continue;
       std::printf("%-14s id=%-18s ext=%s\n", language.name, language.languageId,
                   language.extension);
     }
     if (o.files.empty()) {
       const bool generated =
           std::ranges::any_of(languages, [&](const Language& language) {
-            return selected(o, language.name) && language.corpus != nullptr;
+            return detail::selected(o, language.name) &&
+                   language.corpus != nullptr;
           });
       if (generated || !o.corpusDir.empty())
         for (const std::size_t bytes : o.sizes)
-          std::printf("  size %-8s (%zu B, %d iterations)\n",
-                      size_label(bytes).c_str(), bytes,
-                      o.iterations > 0 ? o.iterations : iterations_for(bytes));
+          std::printf(
+              "  size %-8s (%zu B, %d iterations)\n",
+              detail::size_label(bytes).c_str(), bytes,
+              o.iterations > 0 ? o.iterations : detail::iterations_for(bytes));
       else
         std::printf("  input: file [file ...]\n");
     } else {
       for (const std::string& path : o.files)
-        std::printf("  file %s\n", printable(path).c_str());
+        std::printf("  file %s\n", detail::printable(path).c_str());
     }
     if (o.multi) {
       std::printf("  multi budget %s, workers",
-                  size_label(o.multiBytes).c_str());
+                  detail::size_label(o.multiBytes).c_str());
       for (const std::size_t w : o.workers) std::printf(" %zu", w);
       std::printf("\n");
-      for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const auto shape = static_cast<Shape>(s);
-        std::printf("    %-12s %zu files\n", shape_name(shape),
-                    shape_files(shape, o.multiBytes).size());
+      for (std::size_t s = 0;
+           s < static_cast<std::size_t>(detail::Shape::Count); ++s) {
+        const auto shape = static_cast<detail::Shape>(s);
+        std::printf("    %-12s %zu files\n", detail::shape_name(shape),
+                    detail::shape_files(shape, o.multiBytes).size());
       }
     }
     return 0;
   }
 
-  if (!o.dumpDir.empty()) return dump_corpus(o, languages);
+  if (!o.dumpDir.empty()) return detail::dump_corpus(o, languages);
 
   // Instruction-count mode repeats only the parser API, excluding workspace
   // builds and LSP probes from the process-wide count.
   const bool irMode = std::getenv("CURSIV_IR_STAGE") != nullptr;
 
-  std::vector<Row> rows;
+  std::vector<detail::Row> rows;
   for (const Language& language : languages) {
-    if (!selected(o, language.name) || (!o.stages && !irMode)) continue;
+    if (!detail::selected(o, language.name) || (!o.stages && !irMode)) continue;
     const auto measure = [&](std::string label, const std::string& source,
                              std::string origin) {
-      Row row;
+      detail::Row row;
       row.language = language.name;
       row.label = std::move(label);
       row.source = std::move(origin);
       row.bytes = source.size();
       row.iterations =
-          o.iterations > 0 ? o.iterations : iterations_for(row.bytes);
+          o.iterations > 0 ? o.iterations : detail::iterations_for(row.bytes);
 
       if (irMode) {
         language.parse(source);
@@ -972,26 +975,27 @@ int cursiv::bench::run(int argc, char** argv,
       if (!o.rss && o.lsp && language.lsp != nullptr)
         language.lsp(row.iterations, source, row);
       if (o.rss)
-        print_rss_row(row);
+        detail::print_rss_row(row);
       else
-        print_row(row);
+        detail::print_row(row);
       std::fflush(stdout);
       rows.push_back(std::move(row));
     };
     if (!o.files.empty()) {
       for (const std::string& path : o.files)
         measure(std::filesystem::path(path).filename().string(),
-                read_file(path), "disk:" + path);
+                detail::read_file(path), "disk:" + path);
     } else {
       for (const std::size_t bytes : o.sizes) {
-        const std::string label = size_label(bytes);
+        const std::string label = detail::size_label(bytes);
         const std::string source =
-            o.corpusDir.empty() ? language.corpus(bytes)
-                                : read_file(corpus_path(o, language, label));
+            o.corpusDir.empty()
+                ? language.corpus(bytes)
+                : detail::read_file(detail::corpus_path(o, language, label));
         measure(label, source,
                 o.corpusDir.empty()
                     ? "generated"
-                    : "disk:" + corpus_path(o, language, label));
+                    : "disk:" + detail::corpus_path(o, language, label));
       }
     }
   }
@@ -999,9 +1003,9 @@ int cursiv::bench::run(int argc, char** argv,
   // The multi-document lane runs after the stage ladder: it is the
   // expensive half, and an interrupted run should still publish the
   // cheap rows. Never in Ir mode: the instruction counter is process-wide.
-  std::vector<MultiRow> multiRows;
+  std::vector<detail::MultiRow> multiRows;
   if (o.multi && !irMode) {
-    if (const std::size_t cpus = usable_cpus(); cpus != 0) {
+    if (const std::size_t cpus = detail::usable_cpus(); cpus != 0) {
       const std::size_t widest = std::ranges::max(o.workers) + 1;
       if (widest > cpus)
         std::printf(
@@ -1010,35 +1014,40 @@ int cursiv::bench::run(int argc, char** argv,
             cpus, widest);
     }
     for (const Language& language : languages) {
-      if (!selected(o, language.name) || language.multi == nullptr) continue;
-      for (std::size_t s = 0; s < static_cast<std::size_t>(Shape::Count); ++s) {
-        const auto shape = static_cast<Shape>(s);
-        const std::vector<std::string> files = multi_texts(o, language, shape);
-        MultiRow row;
+      if (!detail::selected(o, language.name) || language.multi == nullptr)
+        continue;
+      for (std::size_t s = 0;
+           s < static_cast<std::size_t>(detail::Shape::Count); ++s) {
+        const auto shape = static_cast<detail::Shape>(s);
+        const std::vector<std::string> files =
+            detail::multi_texts(o, language, shape);
+        detail::MultiRow row;
         row.language = language.name;
-        row.shape = shape_name(shape);
+        row.shape = detail::shape_name(shape);
         row.refs = language.multiRefs;
         row.files = files.size();
         for (const std::string& text : files) row.bytes += text.size();
         row.iterations =
-            o.iterations > 0 ? o.iterations : iterations_for(row.bytes);
+            o.iterations > 0 ? o.iterations : detail::iterations_for(row.bytes);
         language.multi(row.iterations, files, o.workers, row);
-        print_multi(row);
+        detail::print_multi(row);
         std::fflush(stdout);
         multiRows.push_back(std::move(row));
       }
     }
   }
 
-  if (!o.jsonPath.empty()) write_json(o.jsonPath, rows, multiRows);
+  if (!o.jsonPath.empty()) detail::write_json(o.jsonPath, rows, multiRows);
   if (!o.csvPath.empty()) {
-    write_csv(o.csvPath, rows);
-    if (std::ranges::any_of(rows,
-                            [](const Row& row) { return !row.lsp.empty(); })) {
-      write_lsp_csv(companion_csv_path(o.csvPath, "-lsp"), rows);
+    detail::write_csv(o.csvPath, rows);
+    if (std::ranges::any_of(
+            rows, [](const detail::Row& row) { return !row.lsp.empty(); })) {
+      detail::write_lsp_csv(detail::companion_csv_path(o.csvPath, "-lsp"),
+                            rows);
     }
     if (!multiRows.empty())
-      write_multi_csv(companion_csv_path(o.csvPath, "-multi"), multiRows);
+      detail::write_multi_csv(detail::companion_csv_path(o.csvPath, "-multi"),
+                              multiRows);
   }
   return 0;
 } catch (const detail::Stop& stop) {

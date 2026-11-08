@@ -23,7 +23,7 @@ class WarningFound;
 // earlier branches that read all it reads; under the sequence `at`, optional
 // item `arm` and the earlier item of its run that reads the same.
 struct TwinFound {
-  ImageId at = kNoImage;
+  detail::ImageId at = detail::kNoImage;
   std::uint32_t arm = 0;
   std::vector<std::uint32_t> over;
   bool item = false;
@@ -38,52 +38,53 @@ class TwinReader {
  public:
   // The body a call to `rule` reads in place, where the rule is a data rule of
   // the grammar itself; `kNoImage` for any other rule.
-  using DataBody = std::function<ImageId(std::uint32_t rule)>;
+  using DataBody = std::function<detail::ImageId(std::uint32_t rule)>;
 
-  TwinReader(GrammarImage& image, DataBody dataBody);
+  TwinReader(detail::GrammarImage& image, DataBody dataBody);
   // A reader of the rules as the pipeline resolved them, as warnings read
   // them.
-  static TwinReader resolved(GrammarImage& image);
+  static TwinReader resolved(detail::GrammarImage& image);
 
   // `body` without the twins it holds. Each twin of the body as written is
   // added to `found` where given, the first time a node is read.
-  ImageId drop(ImageId body, std::vector<TwinFound>* found = nullptr);
+  detail::ImageId drop(detail::ImageId body,
+                       std::vector<TwinFound>* found = nullptr);
 
  private:
   // A position of a sequence as read: its shape, its node and, for an
   // optional item, the operand it reads when taken.
   struct Item {
     std::uint32_t key = 0;
-    ImageId node = kNoImage;
-    ImageId operand = kNoImage;
+    detail::ImageId node = detail::kNoImage;
+    detail::ImageId operand = detail::kNoImage;
   };
   using Reading = std::vector<std::uint32_t>;
 
-  ImageId kid(ImageId id, std::uint32_t i) const {
+  detail::ImageId kid(detail::ImageId id, std::uint32_t i) const {
     return _im.kids[_im.nodes[id].first + i];
   }
-  std::vector<ImageId> kids(ImageId id) const;
+  std::vector<detail::ImageId> kids(detail::ImageId id) const;
   std::uint32_t intern(std::vector<std::uint64_t> shape);
   std::uint32_t text(std::string_view s);
-  std::uint32_t key(ImageId id);
-  std::uint32_t shape(ImageId id);
-  std::vector<std::uint32_t> branch_keys(ImageId choice);
-  ImageId expanded(std::uint32_t rule);
+  std::uint32_t key(detail::ImageId id);
+  std::uint32_t shape(detail::ImageId id);
+  std::vector<std::uint32_t> branch_keys(detail::ImageId choice);
+  detail::ImageId expanded(std::uint32_t rule);
   const std::vector<Item>* called(std::uint32_t rule);
   void analyse_calls(std::uint32_t rule);
-  void flatten(ImageId id, std::vector<Item>& out);
+  void flatten(detail::ImageId id, std::vector<Item>& out);
   bool reads(const std::vector<Item>& items) const;
   std::vector<Reading> readings(const std::vector<Item>& items);
-  bool optional(ImageId id) const;
-  bool folds(ImageId id);
-  bool alike(ImageId a, ImageId b);
+  bool optional(detail::ImageId id) const;
+  bool folds(detail::ImageId id);
+  bool alike(detail::ImageId a, detail::ImageId b);
 
-  ImageId drop_node(ImageId id);
-  ImageId drop_choice(ImageId id);
-  ImageId drop_sequence(ImageId id);
-  ImageId first_present(const std::vector<ImageId>& run);
+  detail::ImageId drop_node(detail::ImageId id);
+  detail::ImageId drop_choice(detail::ImageId id);
+  detail::ImageId drop_sequence(detail::ImageId id);
+  detail::ImageId first_present(const std::vector<detail::ImageId>& run);
 
-  GrammarImage& _im;
+  detail::GrammarImage& _im;
   DataBody _dataBody;
   std::vector<TwinFound>* _found = nullptr;
   std::map<std::vector<std::uint64_t>, std::uint32_t> _shapes;
@@ -91,14 +92,14 @@ class TwinReader {
   // Each node's key plus one, zero until read.
   std::vector<std::uint32_t> _keys;
   struct DataRule {
-    ImageId body = kNoImage;
+    detail::ImageId body = detail::kNoImage;
     bool cyclic = false;
   };
   std::unordered_map<std::uint32_t, DataRule> _dataRules;
   std::vector<bool> _analysedNodes;
   std::unordered_map<std::uint32_t, std::vector<Item>> _calls;
-  std::unordered_map<ImageId, bool> _folds;
-  std::unordered_map<ImageId, ImageId> _dropped;
+  std::unordered_map<detail::ImageId, bool> _folds;
+  std::unordered_map<detail::ImageId, detail::ImageId> _dropped;
   // The runs read by their first item present that enclose the one in hand.
   unsigned _runs = 0;
 };

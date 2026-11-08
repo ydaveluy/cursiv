@@ -114,18 +114,6 @@ struct Doc : GrammarNode {
   }
 };
 
-// The doc a grammar element carries, empty for everything that carries none.
-// One reader for the whole pipeline: the element table's doc column and the
-// doc comment the dump writes before the element both ask here.
-template <class E>
-struct doc_of {
-  static constexpr std::string_view value{};
-};
-template <class E, str T>
-struct doc_of<Doc<E, T>> {
-  static constexpr std::string_view value = T.view();
-};
-
 // A class of characters: the Unicode properties it names, one bit each over
 // `unicode::Property`, the scalars spelled beside them in canonical form
 // (`"\\xc0-\\xff"`, `"$_"`), and whether the whole is complemented. A
@@ -134,8 +122,10 @@ struct doc_of<Doc<E, T>> {
 template <std::uint64_t Props, bool Not, str Spec>
 struct CpSet : GrammarNode {};
 
+namespace detail {
 // One character: a scalar, or the byte where none starts.
 using AnyChar = CpSet<0, true, "">;
+}  // namespace detail
 
 // One raw byte, whatever it is.
 struct Byte : GrammarNode {};
@@ -179,7 +169,7 @@ template <class... Es>
 struct Seq : GrammarNode {
   static_assert(sizeof...(Es) >= 2,
                 "Seq needs at least two elements: build sequences with "
-                "operator+ or cat_seq");
+                "operator+");
 };
 
 // The choice, spelled `a | b`, is ordered: the arm written first wins a tie.
@@ -232,12 +222,12 @@ struct Ref : GrammarNode {};
 template <class C, class E>
 struct As : GrammarNode {};
 
+namespace detail {
 template <auto Body, class... Opts>
 struct Rule;
-namespace detail {
 template <template <auto, class> class Directive, auto S, class E>
 struct directive_operand;
-}
+}  // namespace detail
 
 // `E` is `Seq<open, Ref<G>, close>`: `G`'s entry between two tokens of the
 // caller. A directive over the section is written on the `Ref<G>`.
@@ -248,10 +238,12 @@ struct Embed : GrammarNode {};
 // parent's effective body over it, so no walk below ever meets one. Spelled
 // as a template so each walk's refusal stays dependent and fires on use,
 // not on the specialization's own definition.
+namespace detail {
 template <class = void>
 struct SuperT : GrammarNode {};
 using Super = SuperT<>;
-inline constexpr Super super{};
+}  // namespace detail
+inline constexpr detail::Super super{};
 
 // The empty payload of a bare `create<T>`: matches nothing, consumes nothing,
 // never fails. It is what makes the empty alternative spellable.
@@ -275,6 +267,8 @@ struct Create<T, Epsilon> : GrammarNode {
   }
 };
 
+namespace detail {
+
 template <class E>
 inline constexpr bool is_create = false;
 template <class T, class E>
@@ -297,8 +291,11 @@ inline constexpr bool is_nest = false;
 // is every reader.
 template <auto P, class N>
 struct XRef {};
+
+}  // namespace detail
+
 template <auto P, class N>
-inline constexpr XRef<P, N> xref{};
+inline constexpr detail::XRef<P, N> xref{};
 
 namespace detail {
 template <class T, auto S>
@@ -313,26 +310,26 @@ struct spec_of<XRef<P, N>, S> {
 };
 template <auto S>
 using spec_t = spec_of<std::remove_cv_t<decltype(S)>, S>;
-}  // namespace detail
 
 template <auto S>
-inline constexpr auto spec_ptr = detail::spec_t<S>::ptr;
+inline constexpr auto spec_ptr = spec_t<S>::ptr;
 template <auto S>
-using spec_narrow_t = typename detail::spec_t<S>::narrow;
+using spec_narrow_t = typename spec_t<S>::narrow;
 template <auto S>
 using spec_class_t =
     typename member_traits<std::remove_cv_t<decltype(spec_ptr<S>)>>::class_type;
+}  // namespace detail
 
 // The member receives the match.
 template <auto S, class E>
 struct Assign : GrammarNode {
-  using node_type = spec_class_t<S>;
+  using node_type = detail::spec_class_t<S>;
 };
 
 // The container member receives one element per match.
 template <auto S, class E>
 struct Append : GrammarNode {
-  using node_type = spec_class_t<S>;
+  using node_type = detail::spec_class_t<S>;
 };
 
 // `?=`: the bool member is set to true when E matched.
@@ -353,17 +350,22 @@ struct Nest : GrammarNode {
       "nest<T, &C::f>: the member must belong to T (or a base of T)");
 };
 
+namespace detail {
+
 template <class T, auto Ptr, class E>
 inline constexpr bool is_nest<Nest<T, Ptr, E>> = true;
+
+template <class... Rs>
+struct IgnoreTag {};
+template <class... Rs>
+struct HideTag {};
+
+}  // namespace detail
 
 // A skip-configuration region: inside E the skipper runs these rules --
 // between E's elements only, the entry boundary belongs to the caller. The
 // configuration holds through the rules E calls (dynamic scope), until an
 // inner skip() declares its own.
-template <class... Rs>
-struct IgnoreTag {};
-template <class... Rs>
-struct HideTag {};
 template <class I, class H, class E>
 struct Skip : GrammarNode {};
 
@@ -410,9 +412,11 @@ struct UnaryLevel {
   static constexpr auto op_pointer = OpPtr;
   static constexpr auto operand_pointer = OperandPtr;
 };
+namespace detail {
 template <class L>
 inline constexpr bool is_unary_level =
     L::kGroup == Association::prefix || L::kGroup == Association::postfix;
+}  // namespace detail
 template <class... Ls>
 struct Levels {
   static constexpr std::size_t size = sizeof...(Ls);
@@ -482,31 +486,30 @@ template <class... Ls>
 struct levels_of<TypeList<Ls...>> {
   using type = Levels<Ls...>;
 };
-}  // namespace detail
 
 // A function object, so the cursiv::GrammarSpec base can re-expose it.
 struct LevelsFn {
   template <class... Ts>
   constexpr auto operator()(Ts...) const {
-    using Ls = detail::tl_cat_t<typename detail::sole_level<Ts>::type...>;
-    static_assert(
-        sizeof...(Ts) > 0 && detail::tl_size<Ls>::value == sizeof...(Ts),
-        "levels(...) takes only precedence levels, tightest-binding "
-        "first: each one is `left(op)`, `right(op)`, `nonassoc(op)`, "
-        "`prefix<...>(op)` or `postfix<...>(op)`");
+    using Ls = tl_cat_t<typename sole_level<Ts>::type...>;
+    static_assert(sizeof...(Ts) > 0 && tl_size<Ls>::value == sizeof...(Ts),
+                  "levels(...) takes only precedence levels, tightest-binding "
+                  "first: each one is `left(op)`, `right(op)`, `nonassoc(op)`, "
+                  "`prefix<...>(op)` or `postfix<...>(op)`");
     // Past the refusal, the table of the levels that are levels: the line
     // that states the mistake stays the only one.
-    return typename detail::levels_of<Ls>::type{};
+    return typename levels_of<Ls>::type{};
   }
 };
-inline constexpr LevelsFn levels{};
+}  // namespace detail
+inline constexpr detail::LevelsFn levels{};
+
+namespace detail {
 
 // One declaration for the whole file; the specialisations are at the bottom,
 // after the algebra they fold through.
 template <class... Es>
 struct cat_seq;
-
-namespace detail {
 
 // A list under construction; not a grammar shape, so Seq and the choices can
 // assert their arity at class scope.
@@ -724,8 +727,6 @@ struct normalize_seq<Seq<Es...>> {
   using type = Seq<Es...>;
 };
 
-}  // namespace detail
-
 // Folds a list of expressions into one shape; a single element is the
 // shape. The primary is declared before the creation algebra, which folds
 // through it.
@@ -741,10 +742,12 @@ struct cat_seq<A, Epsilon> {
 };
 template <class A, class B, class... Rest>
 struct cat_seq<A, B, Rest...>
-    : detail::normalize_seq<typename detail::SeqCat<
-          A, typename cat_seq<B, Rest...>::type>::type> {};
+    : normalize_seq<
+          typename SeqCat<A, typename cat_seq<B, Rest...>::type>::type> {};
 template <class... Es>
 using cat_seq_t = typename cat_seq<Es...>::type;
+
+}  // namespace detail
 
 template <Expr A, Expr B>
 constexpr auto operator+(A, B) {
@@ -941,7 +944,7 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
     if ((props >> i) & 1) {
       if (!first) sink('|');
       first = false;
-      put(unicode::kNames[i]);
+      put(unicode::detail::kNames[i]);
     }
   put(scalars);
   sink('}');
@@ -952,8 +955,8 @@ consteval ClassRanges props_ranges() {
   ClassRanges out;
   for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
     if ((M >> i) & 1)
-      out.r.insert(out.r.end(), unicode::kTables[i].begin(),
-                   unicode::kTables[i].end());
+      out.r.insert(out.r.end(), unicode::detail::kTables[i].begin(),
+                   unicode::detail::kTables[i].end());
   out.merge();
   return out;
 }
@@ -1078,7 +1081,7 @@ struct uc {
   static constexpr of<unicode::Property::White_Space> White_Space{};
   static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
 };
-inline constexpr AnyChar any{};
+inline constexpr detail::AnyChar any{};
 inline constexpr Byte byte{};
 template <class R>
 inline constexpr Ref<R> ref{};
@@ -1140,6 +1143,7 @@ using committed_list = Commit<
 // members. The separated forms spell `a (sep a)*`; no dedicated node comes of
 // them.
 
+namespace detail {
 struct SomeFn {
   template <Expr E>
   constexpr auto operator()(E) const {
@@ -1147,24 +1151,26 @@ struct SomeFn {
   }
   template <Expr E, Expr Sep>
   constexpr auto operator()(E e, Sep sep) const {
-    static_assert(detail::list_item_stands<std::remove_cvref_t<E>,
-                                           std::remove_cvref_t<Sep>>,
-                  "a create<> or nest<> cannot be the item of a separated "
-                  "list, since it would take in the whole list: declare the "
-                  "item as a rule and use ref<> to it");
+    static_assert(
+        list_item_stands<std::remove_cvref_t<E>, std::remove_cvref_t<Sep>>,
+        "a create<> or nest<> cannot be the item of a separated "
+        "list, since it would take in the whole list: declare the "
+        "item as a rule and use ref<> to it");
     return e + Repeat<0, kUnbounded, std::remove_cvref_t<decltype(sep + e)>>{};
   }
   template <class P, class B, Expr Sep>
   constexpr auto operator()(Commit<P, B>, Sep) const {
-    static_assert(detail::list_item_stands<P, B, std::remove_cvref_t<Sep>>,
+    static_assert(list_item_stands<P, B, std::remove_cvref_t<Sep>>,
                   "a create<> or nest<> cannot be the item of a separated "
                   "list, since it would take in the whole list: declare the "
                   "item as a rule and use ref<> to it");
-    return P{} + B{} + detail::committed_tail<P, B, std::remove_cvref_t<Sep>>{};
+    return P{} + B{} + committed_tail<P, B, std::remove_cvref_t<Sep>>{};
   }
 };
-inline constexpr SomeFn some{};
+}  // namespace detail
+inline constexpr detail::SomeFn some{};
 
+namespace detail {
 struct ManyFn {
   template <Expr E>
   constexpr auto operator()(E) const {
@@ -1176,40 +1182,42 @@ struct ManyFn {
   }
   template <class P, class B, Expr Sep>
   constexpr auto operator()(Commit<P, B>, Sep) const {
-    static_assert(detail::list_item_stands<P, B, std::remove_cvref_t<Sep>>,
+    static_assert(list_item_stands<P, B, std::remove_cvref_t<Sep>>,
                   "a create<> or nest<> cannot be the item of a separated "
                   "list, since it would take in the whole list: declare the "
                   "item as a rule and use ref<> to it");
-    return Repeat<0, 1,
-                  detail::committed_list<P, B, std::remove_cvref_t<Sep>>>{};
+    return Repeat<0, 1, committed_list<P, B, std::remove_cvref_t<Sep>>>{};
   }
 };
-inline constexpr ManyFn many{};
+}  // namespace detail
+inline constexpr detail::ManyFn many{};
 
 template <Expr P, Expr B>
 constexpr auto commit(P, B) {
   return Commit<std::remove_cvref_t<P>, std::remove_cvref_t<B>>{};
 }
 
+namespace detail {
 struct OptionFn {
   template <Expr E>
   constexpr auto operator()(E) const {
     return Repeat<0, 1, std::remove_cvref_t<E>>{};
   }
 };
-inline constexpr OptionFn option{};
+}  // namespace detail
+inline constexpr detail::OptionFn option{};
 
 // The unordered group: each item once, in any order. An item is whole, so a
 // group given as an item stays one: `unordered(unordered(a, b), c)` reads `c`
 // before or after both of `a` and `b`, never between them. Every item reads
 // input; the generators refuse one that may match nothing.
+namespace detail {
 struct UnorderedFn {
   template <Expr... Es>
   constexpr auto operator()(Es...) const {
     return Unordered<std::remove_cvref_t<Es>...>{};
   }
 };
-inline constexpr UnorderedFn unordered{};
 
 template <std::size_t Min, std::size_t Max = Min>
 struct RepeatFn {
@@ -1218,8 +1226,6 @@ struct RepeatFn {
     return Repeat<Min, Max, std::remove_cvref_t<E>>{};
   }
 };
-template <std::size_t Min, std::size_t Max = Min>
-inline constexpr RepeatFn<Min, Max> repeat{};
 
 template <class Tag>
 struct MarkFn {
@@ -1228,8 +1234,13 @@ struct MarkFn {
     return {};
   }
 };
+}  // namespace detail
+
+inline constexpr detail::UnorderedFn unordered{};
+template <std::size_t Min, std::size_t Max = Min>
+inline constexpr detail::RepeatFn<Min, Max> repeat{};
 template <class Tag>
-inline constexpr MarkFn<Tag> mark{};
+inline constexpr detail::MarkFn<Tag> mark{};
 template <class Tag>
 inline constexpr Same<Tag> same{};
 inline constexpr Indent indent{};
@@ -1249,29 +1260,24 @@ constexpr auto section(O, C) {
 template <class T>
 inline constexpr Create<T, Epsilon> create{};
 
+namespace detail {
 template <auto S>
 struct AssignFn {
   template <Expr E>
-  constexpr typename detail::directive_operand<Assign, S,
-                                               std::remove_cvref_t<E>>::type
+  constexpr typename directive_operand<Assign, S, std::remove_cvref_t<E>>::type
   operator()(E) const {
     return {};
   }
 };
-template <auto S>
-inline constexpr AssignFn<S> assign{};
 
 template <auto S>
 struct AppendFn {
   template <Expr E>
-  constexpr typename detail::directive_operand<Append, S,
-                                               std::remove_cvref_t<E>>::type
+  constexpr typename directive_operand<Append, S, std::remove_cvref_t<E>>::type
   operator()(E) const {
     return {};
   }
 };
-template <auto S>
-inline constexpr AppendFn<S> append{};
 
 template <auto Ptr>
 struct FlagFn {
@@ -1280,15 +1286,7 @@ struct FlagFn {
     return {};
   }
 };
-template <auto Ptr>
-inline constexpr FlagFn<Ptr> flag{};
 
-// The tags of `skip()` are verbs, what the region does to each terminal; the
-// grammar's own settings, `ignored` and `hidden`, are participles.
-template <class... Rs>
-inline constexpr IgnoreTag<Rs...> ignore{};
-template <class... Rs>
-inline constexpr HideTag<Rs...> hide{};
 // The tags exist for the call site only; the node stores plain lists.
 struct SkipFn {
   template <class... Is, class... Hs, Expr E0, Expr... Es>
@@ -1297,14 +1295,32 @@ struct SkipFn {
     return Skip<TypeList<Is...>, TypeList<Hs...>, cat_seq_t<E0, Es...>>{};
   }
 };
-inline constexpr SkipFn skip{};
+}  // namespace detail
+
+template <auto S>
+inline constexpr detail::AssignFn<S> assign{};
+template <auto S>
+inline constexpr detail::AppendFn<S> append{};
+template <auto Ptr>
+inline constexpr detail::FlagFn<Ptr> flag{};
+
+// The tags of `skip()` are verbs, what the region does to each terminal; the
+// grammar's own settings, `ignored` and `hidden`, are participles.
+template <class... Rs>
+inline constexpr detail::IgnoreTag<Rs...> ignore{};
+template <class... Rs>
+inline constexpr detail::HideTag<Rs...> hide{};
+inline constexpr detail::SkipFn skip{};
+
+namespace detail {
 struct TightFn {
   template <Expr E>
   constexpr auto operator()(E e) const {
     return skip(ignore<>, hide<>, e);
   }
 };
-inline constexpr TightFn tight{};
+}  // namespace detail
+inline constexpr detail::TightFn tight{};
 
 // Two spellings, one node. `nest<T, &T::f>` names the wrapper, `nest<&T::f>`
 // lets the member name it -- a pointer to member already says which class it

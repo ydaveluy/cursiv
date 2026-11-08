@@ -22,11 +22,12 @@ namespace detail {
 
 // The scalar `cp` folds to: its lower case, mostly.
 [[nodiscard]] constexpr char32_t fold_scalar(char32_t cp) noexcept {
-  if (cp >= unicode::kFoldEnd) return cp;
-  const std::uint8_t block = unicode::kFoldPage[cp >> 6u];
+  if (cp >= unicode::detail::kFoldEnd) return cp;
+  const std::uint8_t block = unicode::detail::kFoldPage[cp >> 6u];
   return static_cast<char32_t>(
       static_cast<std::int32_t>(cp) +
-      unicode::kFoldDelta[unicode::kFoldBlock[block][cp & 63u]]);
+      unicode::detail::kFoldDelta[unicode::detail::kFoldBlock[block]
+                                                             [cp & 63u]]);
 }
 
 // Calls `each` with every other scalar that folds as `cp` does -- its other
@@ -40,12 +41,14 @@ constexpr void for_each_other_case(char32_t cp, Each&& each) {
   }
   const char32_t to = fold_scalar(cp);
   if (to != cp) each(to);
-  for (std::size_t page = 2; page < std::size(unicode::kFoldPage); ++page) {
-    const std::uint8_t block = unicode::kFoldPage[page];
+  for (std::size_t page = 2; page < std::size(unicode::detail::kFoldPage);
+       ++page) {
+    const std::uint8_t block = unicode::detail::kFoldPage[page];
     if (block == 0) continue;
     for (std::size_t i = 0; i < 64; ++i) {
       const auto x = static_cast<char32_t>(page * 64 + i);
-      if (unicode::kFoldBlock[block][i] != 0 && x != cp && fold_scalar(x) == to)
+      if (unicode::detail::kFoldBlock[block][i] != 0 && x != cp &&
+          fold_scalar(x) == to)
         each(x);
     }
   }

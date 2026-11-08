@@ -47,6 +47,7 @@
 #include "sentword/generated/Word/Module.hpp"
 #include "spelldashed/generated/Dashed/Module.hpp"
 #include "spellplain/generated/Plain/Module.hpp"
+#include "support/GrammarDump.hpp"
 #include "support/World.hpp"
 
 // Pins the expression layer: NTTP usability, operator+ flattening, create
@@ -76,10 +77,10 @@ static_assert(std::is_same_v<std::remove_const_t<decltype(W)>,
                              std::remove_const_t<decltype(cr<R"(\W)">)>>);
 static_assert(std::is_same_v<std::remove_const_t<decltype(D)>,
                              std::remove_const_t<decltype(cr<R"(\D)">)>>);
-static_assert(std::is_same_v<decltype(s | S), AnyChar>);
-static_assert(std::is_same_v<decltype(w | W), AnyChar>);
-static_assert(std::is_same_v<decltype(W | w), AnyChar>);
-static_assert(std::is_same_v<decltype(d | D), AnyChar>);
+static_assert(std::is_same_v<decltype(s | S), cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(w | W), cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(W | w), cursiv::detail::AnyChar>);
+static_assert(std::is_same_v<decltype(d | D), cursiv::detail::AnyChar>);
 static_assert(std::is_same_v<decltype(~S), std::remove_const_t<decltype(s)>>);
 static_assert(std::is_same_v<decltype(GrammarSpec::S), decltype(S)>);
 static_assert(std::is_same_v<decltype(GrammarSpec::W), decltype(W)>);
@@ -436,6 +437,7 @@ static_assert(std::is_same_v<decltype(tight(lit<"a">)),
 // tokens stay its own, and the rule it calls may still be incomplete.
 enum class Kind { one, two };
 struct Late;
+using detail::Rule;
 struct Phrase : Rule<lit<"p">> {};
 using detail::parts_conv;
 using detail::text_conv;
@@ -457,8 +459,9 @@ static_assert(
                           as<Kind::two>(kw<"is"> + kw<"not">)>::body)>,
         Seq<Lit<"x">, Ref<Rule<kw<"is"> + kw<"not">, value_conv<Kind::two>>>>>);
 static_assert(
-    std::is_same_v<
-        rule_type_t<Rule<kw<"is"> + kw<"not">, value_conv<Kind::two>>>, Kind>);
+    std::is_same_v<cursiv::detail::rule_type_t<
+                       Rule<kw<"is"> + kw<"not">, value_conv<Kind::two>>>,
+                   Kind>);
 inline constexpr auto first_char = [](std::string_view t) { return t[0]; };
 inline constexpr auto part_count = [](Parts p) { return p.size(); };
 inline constexpr auto seven = [] { return 7; };
@@ -475,13 +478,15 @@ static_assert(std::is_same_v<decltype(as<true>(lit<"x">)),
                              As<value_conv<true>, Lit<"x">>>);
 // Around a whole body, the conversion is the rule's own.
 static_assert(std::is_same_v<GrammarSpec::terminal<as<double>(some(d))>,
-                             TerminalRule<some(d), double>>);
+                             cursiv::detail::TerminalRule<some(d), double>>);
 static_assert(std::is_same_v<GrammarSpec::rule<as<Kind::one>(kw<"plus">)>,
                              Rule<kw<"plus">, value_conv<Kind::one>>>);
 static_assert(std::is_same_v<GrammarSpec::rule<as<part_count>(some(d))>,
                              Rule<some(d), parts_conv<part_count>>>);
 static_assert(
-    std::is_same_v<rule_type_t<GrammarSpec::rule<as<seven>(some(d))>>, int>);
+    std::is_same_v<
+        cursiv::detail::rule_type_t<GrammarSpec::rule<as<seven>(some(d))>>,
+        int>);
 
 // `infix<Primary, T, Levels>` climbs over `T::left`, `T::op` and `T::right`
 // and builds a `T`, even where a base of `T` declares the members. Naming the
@@ -701,10 +706,10 @@ void run() {
 namespace source_test {
 using namespace cursiv;
 namespace left {
-struct ID : TerminalRule<lit<"left">> {};
+struct ID : cursiv::detail::TerminalRule<lit<"left">> {};
 }  // namespace left
 namespace right {
-struct ID : TerminalRule<lit<"right">> {};
+struct ID : cursiv::detail::TerminalRule<lit<"right">> {};
 }  // namespace right
 struct Node : AstNode {
   string_view ID;
@@ -732,7 +737,7 @@ struct Overridden : extends<G> {
 struct Source {
   GrammarDump dump;
   std::string wrapped;
-  std::vector<GrammarSourceRule> rules;
+  std::vector<cursiv::detail::GrammarSourceRule> rules;
   explicit Source(GrammarDump value)
       : dump(std::move(value)), wrapped(dump_wrapped(dump.text)) {
     for (const auto& rule : dump.rules)
@@ -748,7 +753,7 @@ struct Source {
 void exact_dependencies_and_cycles() {
   Source fixture(dump_compiled_indexed<G>());
   const auto source = fixture.service();
-  CHECK(source.grammarText() == dump_wrapped(dump_compiled<G>()));
+  CHECK(source.grammarText() == dump_wrapped(support::dump_compiled<G>()));
   CHECK(source.ruleNames().front() == "Root");
   CHECK(source.ruleText("missing").empty());
   CHECK(source.ruleClosure("missing").empty());
@@ -1248,7 +1253,7 @@ using R = ResolveOverride<G>;
 
 // The head is the class declaring the members written, an `Inner`; the rule
 // returns the wrapper, a `Wrap`.
-static_assert(std::same_as<rule_type_t<R::rule<G::AN>>, Wrap>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<R::rule<G::AN>>, Wrap>);
 static_assert(std::same_as<M::body<G::AN>,
                            Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
                                Nest<Wrap, &Wrap::inner, Lit<"!">>>>);
@@ -1257,7 +1262,8 @@ static_assert(std::same_as<M::body<G::AN>,
 // not stop there on its own -- a spelled create absorbs the repetition whole,
 // and being at the root it is then shed -- so this is where the shape would
 // be lost without asking the question.
-static_assert(std::same_as<rule_type_t<R::rule<G::ANR>>, Inner>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::ANR>>, Inner>);
 static_assert(std::same_as<M::body<G::ANR>,
                            Seq<Create<Inner, Assign<&Inner::name, Ref<G::ID>>>,
                                Repeat<0, static_cast<std::size_t>(-1),
@@ -1292,7 +1298,7 @@ using FM = Normalize<Fam>;
 
 // The rule answers what both branches are: the class the writes name, and the
 // one the callee builds -- their common base, which here is the first.
-static_assert(std::same_as<rule_type_t<Fam::ARule>, Inner>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Fam::ARule>, Inner>);
 
 // One branch owes, the other does not. `ref<BRule>` is a head: `Inner` bases
 // `Sub`, so the rule adopts what the callee built -- wrapping it would put a
@@ -1306,7 +1312,8 @@ static_assert(detail::mat::look_heads<FM::body<Fam::ARule>>);
 
 // A branch that leaves the family: the rule can only answer the base both
 // share, and a reference to a class it bases is a head all the same.
-static_assert(std::same_as<rule_type_t<Fam::Mixed>, cursiv::AstNode>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<Fam::Mixed>, cursiv::AstNode>);
 static_assert(!FM::owed<Fam::Mixed>);
 
 // `ref<A> + many(nest<&B::a>(...))` where A builds a node: the left-nested
@@ -1325,7 +1332,7 @@ using CM = Normalize<Chain>;
 
 // The rule answers what both paths are: the node the callee built, and the
 // wrapper the chain leaves -- their common base.
-static_assert(std::same_as<rule_type_t<Chain::Post>, Inner>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Chain::Post>, Inner>);
 
 // Nothing is owed, and the body is untouched.
 static_assert(!CM::owed<Chain::Post>);
@@ -1419,7 +1426,7 @@ struct Split : GrammarSpec {
 
 using SM = Normalize<Split>;
 
-static_assert(std::same_as<rule_type_t<Split::Deep>, Inner>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Split::Deep>, Inner>);
 static_assert(
     std::same_as<SM::body<Split::Deep>,
                  Choice<Create<Inner, Lit<"b">>,
@@ -1490,17 +1497,28 @@ struct G : GrammarSpec {
 };
 using R = ResolveOverride<G>;
 
-static_assert(std::same_as<rule_type_t<R::rule<G::Many>>, Base>);
-static_assert(std::same_as<rule_type_t<R::rule<G::Some>>, Call>);
-static_assert(std::same_as<rule_type_t<R::rule<G::SomeOr>>, Base>);
-static_assert(std::same_as<rule_type_t<R::rule<G::Wrapped>>, Mid>);
-static_assert(std::same_as<rule_type_t<R::rule<G::AdoptedWrapped>>, Mid>);
-static_assert(std::same_as<rule_type_t<R::rule<G::RootWrapped>>, Mid>);
-static_assert(std::same_as<rule_type_t<R::rule<G::AdoptMany>>, Base>);
-static_assert(std::same_as<rule_type_t<R::rule<G::AdoptSome>>, Call>);
-static_assert(std::same_as<rule_type_t<R::rule<G::WroteMany>>, Base>);
-static_assert(std::same_as<rule_type_t<R::rule<G::Named>>, Leaf>);
-static_assert(std::same_as<rule_type_t<R::rule<G::Stated>>, Leafy>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::Many>>, Base>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::Some>>, Call>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::SomeOr>>, Base>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::Wrapped>>, Mid>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::AdoptedWrapped>>, Mid>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::RootWrapped>>, Mid>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::AdoptMany>>, Base>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::AdoptSome>>, Call>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::WroteMany>>, Base>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::Named>>, Leaf>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<R::rule<G::Stated>>, Leafy>);
 // Its head is still the class it creates.
 static_assert(std::same_as<Normalize<G>::body<G::RootWrapped>,
                            Seq<Create<Leaf, Assign<&Leaf::name, Ref<G::ID>>>,
@@ -1531,8 +1549,8 @@ struct Diamond : GrammarSpec {
   struct R<I, true> : rule<create<Leaf>(assign<&Leaf::text>(lit<"x">))> {};
   using entry = R<0>;
 };
-static_assert(std::same_as<rule_type_t<Diamond::R<0>>, Leaf>);
-static_assert(is_node_rule<Diamond::A<3>>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Diamond::R<0>>, Leaf>);
+static_assert(cursiv::detail::is_node_rule<Diamond::A<3>>);
 
 struct Clique : GrammarSpec {
   template <int I>
@@ -1543,8 +1561,10 @@ struct Clique : GrammarSpec {
   struct C : rule<lit<"c"> + call<I + 1> + call<I + 2> + call<I + 3>> {};
   using entry = C<0>;
 };
-static_assert(is_data_rule<Clique::C<0>> && is_data_rule<Clique::C<3>>);
-static_assert(std::same_as<rule_type_t<Clique::C<1>>, std::string_view>);
+static_assert(cursiv::detail::is_data_rule<Clique::C<0>> &&
+              cursiv::detail::is_data_rule<Clique::C<3>>);
+static_assert(
+    std::same_as<cursiv::detail::rule_type_t<Clique::C<1>>, std::string_view>);
 
 struct Ring : GrammarSpec {
   template <int I, bool Last = (I == 3)>
@@ -1554,8 +1574,8 @@ struct Ring : GrammarSpec {
                            (lit<"("> + ref<L<0>> + lit<")">)> {};
   using entry = L<0>;
 };
-static_assert(std::same_as<rule_type_t<Ring::L<1>>, Leaf>);
-static_assert(std::same_as<rule_type_t<Ring::L<2>>, Leaf>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<1>>, Leaf>);
+static_assert(std::same_as<cursiv::detail::rule_type_t<Ring::L<2>>, Leaf>);
 
 }  // namespace paths
 
@@ -1671,7 +1691,8 @@ static_assert(std::same_as<M0::entry::kind, Base::Root::kind>);
 // sheds one -- it reads a declared body, where a root create only states a
 // type a deduction cannot reach. A stage means it, so a stage's body is read
 // through the stage.
-static_assert(!std::same_as<rule_body_t<M0::entry>, M0::body<Base::Root>>);
+static_assert(!std::same_as<cursiv::detail::rule_body_t<M0::entry>,
+                            M0::body<Base::Root>>);
 
 // The skipper's rules are terminals: they build no node and owe nothing, so
 // they come through as themselves.
@@ -1749,16 +1770,16 @@ bool parses(const cursiv::Parser& engine, std::string_view text) {
 
 void the_word_final_rule() {
   // '[' is in no usual boundary, so the keyword carries no guard...
-  CHECK(cursiv::dump_compiled<tspell::Default>().find("'[' NAME") !=
+  CHECK(support::dump_compiled<tspell::Default>().find("'[' NAME") !=
         std::string::npos);
   // ...nor where the declared class is digits, which '[' is not...
-  CHECK(cursiv::dump_compiled<tspell::Digits>().find("'[' NAME") !=
+  CHECK(support::dump_compiled<tspell::Digits>().find("'[' NAME") !=
         std::string::npos);
   // ...and it gains one exactly where the class admits it.
-  CHECK(cursiv::dump_compiled<tspell::Bracketed>().find("\"[\"\\b[[a-z]") !=
+  CHECK(support::dump_compiled<tspell::Bracketed>().find("\"[\"\\b[[a-z]") !=
         std::string::npos);
   // A `declared<>` view shows the request, not the answer: `kw<>` asked.
-  CHECK(cursiv::dump_declared<tspell::Default>().find("\"[\" NAME") !=
+  CHECK(support::dump_declared<tspell::Default>().find("\"[\" NAME") !=
         std::string::npos);
 }
 
@@ -1788,12 +1809,12 @@ struct Kept : cursiv::GrammarSpec {
 void the_hub_fuses_what_cannot_fire() {
   // Two spellings of '(' that no reading can tell apart are one matcher, and
   // the dump is where the fusion shows.
-  CHECK(cursiv::dump_compiled<Fused>().find("'(' '(' \"if\"") !=
+  CHECK(support::dump_compiled<Fused>().find("'(' '(' \"if\"") !=
         std::string::npos);
   // ...and a boundary that admits '(' tells them apart, so the `kw` keeps its
   // guard and no fusion happens. Same three elements, two answers: the
   // discipline is what decides, never the spelling.
-  CHECK(cursiv::dump_compiled<Kept>().find("'(' '(' \"if\"") ==
+  CHECK(support::dump_compiled<Kept>().find("'(' '(' \"if\"") ==
         std::string::npos);
 }
 
@@ -1802,7 +1823,7 @@ void the_hub_fuses_what_cannot_fire() {
 // a guard the grammar dropped and stop matching `2*3`.
 
 void an_operator_is_resolved_too() {
-  CHECK(cursiv::dump_compiled<tspell::Calc>().find(
+  CHECK(support::dump_compiled<tspell::Calc>().find(
             "levels(left('*'), left('+'))") != std::string::npos);
 }
 
@@ -1837,7 +1858,7 @@ void run() {
 // Outside the anonymous namespace, so its qualified name is stable across
 // compilers when it collides with Dg::ID in one closure.
 namespace dumpcol {
-struct ID : cursiv::TerminalRule<cursiv::some(cursiv::cr<"0-9">)> {};
+struct ID : cursiv::detail::TerminalRule<cursiv::some(cursiv::cr<"0-9">)> {};
 }  // namespace dumpcol
 
 // Pins the rendering: every shape's spelling, bracketing by precedence, the
@@ -1887,8 +1908,9 @@ struct D2 : cursiv::extends<Dg> {
 }  // namespace
 
 namespace {
-struct R3 : cursiv::Rule<cursiv::create<ast::Node> + cursiv::ref<Dg::ID> +
-                         cursiv::ref<dumpcol::ID>> {};
+struct R3 : cursiv::GrammarSpec::rule<cursiv::create<ast::Node> +
+                                      cursiv::ref<Dg::ID> +
+                                      cursiv::ref<dumpcol::ID>> {};
 
 // data rule, converter-typed terminal, no-skipper grammar.
 struct Q : cursiv::GrammarSpec {
@@ -2002,7 +2024,7 @@ static_assert(std::is_same_v<
               decltype(GrammarSpec::postfix<&Fact::arg, &Fact::bang>(lit<"!">)),
               Levels<UnaryLevel<Association::postfix, Fact, &Fact::bang,
                                 &Fact::arg, Lit<"!">>>>);
-static_assert(std::is_same_v<cursiv::rule_type_t<G::Expr>, Expr>);
+static_assert(std::is_same_v<cursiv::detail::rule_type_t<G::Expr>, Expr>);
 }  // namespace Q3u
 
 // Overridden rules the compiled view meets twice: as a mint (the entry, the
@@ -2037,49 +2059,49 @@ struct SkipDerived : cursiv::extends<SkipBase> {
 }  // namespace Q5
 
 void run() {
-  expect(cursiv::dump_expr<decltype(kw<"let"> + lit<"x"> + ikw<"or">)>(),
+  expect(support::dump_expr<decltype(kw<"let"> + lit<"x"> + ikw<"or">)>(),
          R"("let" 'x' "or"~)", "tokens");
-  expect(cursiv::dump_expr<decltype(cr<"a-zA-Z_">)>(), "[A-Z_a-z]", "class");
-  expect(cursiv::dump_expr<decltype(cr<"À-ÿ">)>(), "\\p{\\xc0-\\xff}",
+  expect(support::dump_expr<decltype(cr<"a-zA-Z_">)>(), "[A-Z_a-z]", "class");
+  expect(support::dump_expr<decltype(cr<"À-ÿ">)>(), "\\p{\\xc0-\\xff}",
          "scalars");
-  expect(cursiv::dump_expr<decltype(any)>(), ".", "every character");
-  expect(cursiv::dump_expr<decltype(byte)>(), "\\C", "a byte");
-  expect(cursiv::dump_expr<decltype(cursiv::eof)>(), "!.", "the end");
-  expect(cursiv::dump_expr<decltype(!byte)>(), "!\\C", "no byte");
-  expect(cursiv::dump_expr<decltype(~cr<"a">)>(), "\\p{^a}",
+  expect(support::dump_expr<decltype(any)>(), ".", "every character");
+  expect(support::dump_expr<decltype(byte)>(), "\\C", "a byte");
+  expect(support::dump_expr<decltype(cursiv::eof)>(), "!.", "the end");
+  expect(support::dump_expr<decltype(!byte)>(), "!\\C", "no byte");
+  expect(support::dump_expr<decltype(~cr<"a">)>(), "\\p{^a}",
          "complemented scalars");
-  expect(cursiv::dump_expr<decltype(uc::L | uc::Nd)>(), "\\p{L|Nd}",
+  expect(support::dump_expr<decltype(uc::L | uc::Nd)>(), "\\p{L|Nd}",
          "properties");
-  expect(cursiv::dump_expr<decltype((kw<"a"> | kw<"b">)+kw<"c">)>(),
+  expect(support::dump_expr<decltype((kw<"a"> | kw<"b">)+kw<"c">)>(),
          R"(("a" | "b") "c")", "brackets");
-  expect(cursiv::dump_expr<decltype(many(kw<"a">))>(), "\"a\"*", "many");
+  expect(support::dump_expr<decltype(many(kw<"a">))>(), "\"a\"*", "many");
   // A raw expression view has no grammar, so a `kw<>` that names no class of
   // its own prints its guard as spelled -- the resolution belongs to the hub,
   // and `compiled<>` is where it shows.
-  expect(cursiv::dump_expr<decltype(some(kw<"a">, kw<",">))>(),
+  expect(support::dump_expr<decltype(some(kw<"a">, kw<",">))>(),
          R"("a" ("," "a")*)", "separated");
-  expect(cursiv::dump_expr<decltype(repeat<2, 5>(kw<"a">))>(), "\"a\"{2,5}",
+  expect(support::dump_expr<decltype(repeat<2, 5>(kw<"a">))>(), "\"a\"{2,5}",
          "bounded");
-  expect(cursiv::dump_expr<decltype(!kw<"a"> + any)>(), "!\"a\" .",
+  expect(support::dump_expr<decltype(!kw<"a"> + any)>(), "!\"a\" .",
          "lookahead");
-  expect(cursiv::dump_expr<decltype(unordered(kw<"x">, kw<"y">))>(),
+  expect(support::dump_expr<decltype(unordered(kw<"x">, kw<"y">))>(),
          R"(unordered("x", "y"))", "unordered");
   // A group given as an item prints as one, and a choice needs no brackets
   // between the commas.
-  expect(cursiv::dump_expr<decltype(unordered(unordered(kw<"x">, kw<"y">),
-                                              kw<"z"> | kw<"w">))>(),
+  expect(support::dump_expr<decltype(unordered(unordered(kw<"x">, kw<"y">),
+                                               kw<"z"> | kw<"w">))>(),
          R"(unordered(unordered("x", "y"), "z" | "w"))", "nested unordered");
-  expect(cursiv::dump_expr<decltype(assign<&ast::Node::name>(ref<Dg::ID>))>(),
+  expect(support::dump_expr<decltype(assign<&ast::Node::name>(ref<Dg::ID>))>(),
          "name=ID", "assign");
-  expect(cursiv::dump_expr<decltype(flag<&ast::Node::many>(kw<"many">))>(),
+  expect(support::dump_expr<decltype(flag<&ast::Node::many>(kw<"many">))>(),
          "many?=\"many\"", "flag");
-  expect(cursiv::dump_expr<decltype(create<ast::Node>(kw<"n"> + any))>(),
+  expect(support::dump_expr<decltype(create<ast::Node>(kw<"n"> + any))>(),
          "{Node} \"n\" .", "region");
-  expect(cursiv::dump_expr<decltype(nest<ast::Node, &ast::Node::target>(
+  expect(support::dump_expr<decltype(nest<ast::Node, &ast::Node::target>(
              kw<".">))>(),
          "{Node.target=} \".\"", "nest");
 
-  expect(cursiv::dump_declared<Q4::G>(),
+  expect(support::dump_declared<Q4::G>(),
          "grammar G skip WS;\n"
          "entry data Root: $0 $1;\n"
          "terminal WS: \\s+;\n"
@@ -2087,7 +2109,7 @@ void run() {
          "data $1: \"(\" \")\";",
          "inline rules named");
 
-  expect(cursiv::dump_declared<Dg>(),
+  expect(support::dump_declared<Dg>(),
          "grammar Dg skip WS;\n"
          "entry Item returns Node: \"item\" name=ID;\n"
          "terminal WS: \\s+;\n"
@@ -2096,7 +2118,7 @@ void run() {
 
   // The compiled view shows the resolved grammar: the override's body under
   // the same rule name.
-  expect(cursiv::dump_compiled<D2>(),
+  expect(support::dump_compiled<D2>(),
          "grammar D2 skip WS;\n"
          "entry Item returns Node: \"item\" name=ID;\n"
          "terminal WS: \\s+;\n"
@@ -2106,45 +2128,45 @@ void run() {
   // rule() and closure(): one rule, and a rule with everything it reaches.
   expect(cursiv::dump_rule<Dg::ID>(), "terminal ID: [a-z] [0-9A-Z_a-z]*;",
          "rule");
-  expect(cursiv::dump_closure<Dg::Item>(),
+  expect(support::dump_closure<Dg::Item>(),
          "Item returns Node: \"item\" name=ID;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;",
          "closure");
 
   // The positive lookahead.
-  expect(cursiv::dump_expr<decltype(&lit<"a">)>(), "&'a'", "and");
+  expect(support::dump_expr<decltype(&lit<"a">)>(), "&'a'", "and");
 
   // Prefix and postfix bind apart: a directive moved across a repetition is a
   // visible diff.
-  expect(cursiv::dump_expr<decltype(assign<&ast::Node::name>(
+  expect(support::dump_expr<decltype(assign<&ast::Node::name>(
              many(ref<Dg::ID>)))>(),
          "name=ID*", "label of many");
-  expect(cursiv::dump_expr<decltype(many(
+  expect(support::dump_expr<decltype(many(
              assign<&ast::Node::name>(ref<Dg::ID>)))>(),
          "(name=ID)*", "many of label");
-  expect(cursiv::dump_expr<decltype(!many(kw<"a">))>(), "!\"a\"*",
+  expect(support::dump_expr<decltype(!many(kw<"a">))>(), "!\"a\"*",
          "not of many");
-  expect(cursiv::dump_expr<decltype(many(!kw<"a"> + any))>(), "(!\"a\" .)*",
+  expect(support::dump_expr<decltype(many(!kw<"a"> + any))>(), "(!\"a\" .)*",
          "many of lookahead");
 
   // Three shapes that print as the source that builds them.
-  expect(cursiv::dump_expr<decltype(implied(lit<";">, gap::line) |
-                                    lit<"}">)>(),
-         "implied(';', gap::line) | '}'", "implied in a wider choice");
-  expect(cursiv::dump_expr<decltype(some(many(lit<"a">)))>(), "('a'*)+",
+  expect(
+      support::dump_expr<decltype(implied(lit<";">, gap::line) | lit<"}">)>(),
+      "implied(';', gap::line) | '}'", "implied in a wider choice");
+  expect(support::dump_expr<decltype(some(many(lit<"a">)))>(), "('a'*)+",
          "repetition of a repetition");
-  expect(cursiv::dump_expr<detail::commit_free_t<decltype(
-             many(commit(lit<"a">, lit<"b">)) + lit<"c">)>>(),
+  expect(support::dump_expr<detail::commit_free_t<
+             decltype(many(commit(lit<"a">, lit<"b">)) + lit<"c">)>>(),
          "('a' 'b')* !'a' 'c'", "commit");
-  expect(cursiv::dump_expr<decltype(mark<Open>(some(lit<"=">)) +
-                                    same<Close>)>(),
-         "mark<Open>('='+) same<Close>", "tagged runs");
+  expect(
+      support::dump_expr<decltype(mark<Open>(some(lit<"=">)) + same<Close>)>(),
+      "mark<Open>('='+) same<Close>", "tagged runs");
 
   // An infix rule prints its declaration, not the synthesized chain -- and
   // the node it builds with the three members it writes, which nothing else
   // in the dump says.
   {
-    const std::string g = cursiv::dump_declared<Q3::G>();
+    const std::string g = support::dump_declared<Q3::G>();
     expect(g.find("infix Expr returns Bin(left, op, right) on Num: "
                   "levels(left(\"*\" | \"/\"), left(\"+\" | \"-\"), "
                   "nonassoc(\"<\"));") != std::string::npos
@@ -2166,7 +2188,7 @@ void run() {
         "levels(postfix<Fact(bang, arg)>('!'), prefix<Neg(op, operand)>('-'), "
         "left('*'));",
         "infix rule with unary levels");
-    const std::string c = cursiv::dump_closure<Q3::G::Expr>();
+    const std::string c = support::dump_closure<Q3::G::Expr>();
     expect(c.find("terminal Num: [0-9]+;") != std::string::npos ? "y" : c.c_str(),
            "y",
            "infix closure reaches the primary");
@@ -2174,13 +2196,13 @@ void run() {
 
   // A skip() region prints as written, inline where it stands.
   {
-    const std::string g = cursiv::dump_declared<Q2::G>();
+    const std::string g = support::dump_declared<Q2::G>();
     expect(g.find(R"("map" tight(ID ':' ID) "end")") !=
                    std::string::npos
                ? "y"
                : g.c_str(),
            "y", "skip region inline");
-    const std::string tagged = cursiv::dump_declared<Q6::G>();
+    const std::string tagged = support::dump_declared<Q6::G>();
     expect(
         tagged.find(R"("map" skip(ignore<WS>, hide<NOTE>, ID ':' ID) "end")") !=
                 std::string::npos
@@ -2190,13 +2212,13 @@ void run() {
   }
 
   // A nest does not absorb its sequence: composite payloads are bracketed.
-  expect(
-      cursiv::dump_expr<decltype(lit<"a"> + nest<ast::Node, &ast::Node::target>(
-                                                lit<"b"> + lit<"c">))>(),
-      "'a' {Node.target=} ('b' 'c')", "nest bounded");
+  expect(support::dump_expr<decltype(lit<"a"> +
+                                     nest<ast::Node, &ast::Node::target>(
+                                         lit<"b"> + lit<"c">))>(),
+         "'a' {Node.target=} ('b' 'c')", "nest bounded");
 
   // Two rules named ID in one closure: the second keeps its qualified name.
-  expect(cursiv::dump_closure<R3>(),
+  expect(support::dump_closure<R3>(),
          "R3 returns Node: ID dumpcol::ID;\n"
          "terminal ID: [a-z] [0-9A-Z_a-z]*;\n"
          "terminal dumpcol::ID: [0-9]+;",
@@ -2204,7 +2226,7 @@ void run() {
 
   // data header, a converter-typed terminal, a skipperless grammar head --
   // and a ConversionResult converter, whose rule returns the value.
-  expect(cursiv::dump_declared<Q>(),
+  expect(support::dump_declared<Q>(),
          "grammar Q;\n"
          "entry R returns Node: name=QN REAL;\n"
          "data QN: NUM (',' NUM)*;\n"
@@ -2214,12 +2236,12 @@ void run() {
 
   // An overridden rule is one rule, under its own name, whether the view
   // meets it as a mint or by the name a body spells.
-  expect(cursiv::dump_compiled<Q5::SelfDerived>(),
+  expect(support::dump_compiled<Q5::SelfDerived>(),
          "grammar SelfDerived;\n"
          "entry data List: ID (';' List)?;\n"
          "terminal ID: [a-z]+;",
          "overridden entry");
-  expect(cursiv::dump_compiled<Q5::SkipDerived>(),
+  expect(support::dump_compiled<Q5::SkipDerived>(),
          "grammar SkipDerived skip WS;\n"
          "entry data Top: ID tight(WS ID);\n"
          "terminal WS: [\\t\\n\\r ]+;\n"
@@ -2249,16 +2271,18 @@ namespace derived_nodes {
 
 void a_derived_node_keeps_the_length_of_each_text() {
   static constexpr char kText[] = "Longer";
-  cursiv::GrammarImage image;
-  const cursiv::ImageDesc token{.kind = cursiv::ImageKind::lit, .text = "x"};
-  const cursiv::ImageId kid = image.node(token);
-  const cursiv::ImageNode shorter{.kind = cursiv::ImageKind::assign,
-                                  .text = "value",
-                                  .text2 = std::string_view(kText, 4)};
-  cursiv::ImageNode longer = shorter;
+  cursiv::detail::GrammarImage image;
+  const cursiv::detail::ImageDesc token{.kind = cursiv::detail::ImageKind::lit,
+                                        .text = "x"};
+  const cursiv::detail::ImageId kid = image.node(token);
+  const cursiv::detail::ImageNode shorter{
+      .kind = cursiv::detail::ImageKind::assign,
+      .text = "value",
+      .text2 = std::string_view(kText, 4)};
+  cursiv::detail::ImageNode longer = shorter;
   longer.text2 = std::string_view(kText, 6);
-  const cursiv::ImageId a = image.derive(shorter, std::span(&kid, 1));
-  const cursiv::ImageId b = image.derive(longer, std::span(&kid, 1));
+  const cursiv::detail::ImageId a = image.derive(shorter, std::span(&kid, 1));
+  const cursiv::detail::ImageId b = image.derive(longer, std::span(&kid, 1));
   CHECK(a != b);
   CHECK(image.nodes[a].text2 == "Long");
   CHECK(image.nodes[b].text2 == "Longer");

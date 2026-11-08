@@ -98,8 +98,8 @@ static_assert(std::is_same_v<decltype(~~cr<"a">), CR<"a">>);
 static_assert(std::is_same_v<decltype(~~cr<R"(\D)">), CR<R"(\D)">>);
 
 // Joining letters to a complement removes them from the excluded scalars.
-static_assert(std::is_same_v<decltype(~cr<"a"> | uc::L), AnyChar>);
-static_assert(std::is_same_v<decltype(uc::L | ~cr<"a">), AnyChar>);
+static_assert(std::is_same_v<decltype(~cr<"a"> | uc::L), detail::AnyChar>);
+static_assert(std::is_same_v<decltype(uc::L | ~cr<"a">), detail::AnyChar>);
 static_assert(std::is_same_v<decltype(~cr<"a!"> | uc::L), CpSet<0, true, "!">>);
 static_assert(std::is_same_v<decltype(uc::L | ~cr<"a!">), CpSet<0, true, "!">>);
 
@@ -220,8 +220,9 @@ static_assert(!detail::word_class<Other>::has(U'A'));
 static_assert(!detail::word_class<Other>::has(0xD800));
 
 // What the compile-time refusals of `cr<>` stand on.
+using detail::ClassFault;
 constexpr ClassFault fault(std::string_view spec) {
-  return for_class_ranges(spec, [](char32_t, char32_t) {});
+  return detail::for_class_ranges(spec, [](char32_t, char32_t) {});
 }
 static_assert(fault(R"(a\)") == ClassFault::lone_backslash);
 static_assert(fault(R"(\q)") == ClassFault::unknown_escape);
@@ -269,16 +270,16 @@ bool same_ranges(const LexCodePoints& c,
 // As a client's `toLowerCase` lowers: each scalar by its full mapping, and a
 // capital sigma by whether it closes a word.
 void a_text_lowers_as_a_client_lowers_it() {
-  CHECK(cursiv::lower_case("MixedCASE_9") == "mixedcase_9");
-  CHECK(cursiv::lower_case("ÉCOLE Ŀ") == "école ŀ");
-  CHECK(cursiv::lower_case("İ") == "i̇");
-  CHECK(cursiv::lower_case("ΟΔΟΣ ΣΑ") == "οδος σα");
-  CHECK(cursiv::lower_case("ΑΣ'") == "ας'");
-  CHECK(cursiv::lower_case("Σ") == "σ");
-  CHECK(cursiv::lower_case("\U00010400") == "\U00010428");
-  CHECK(cursiv::lower_case(std::string("A\xFF"
-                                       "B")) == std::string("a\xFF"
-                                                            "b"));
+  CHECK(cursiv::detail::lower_case("MixedCASE_9") == "mixedcase_9");
+  CHECK(cursiv::detail::lower_case("ÉCOLE Ŀ") == "école ŀ");
+  CHECK(cursiv::detail::lower_case("İ") == "i̇");
+  CHECK(cursiv::detail::lower_case("ΟΔΟΣ ΣΑ") == "οδος σα");
+  CHECK(cursiv::detail::lower_case("ΑΣ'") == "ας'");
+  CHECK(cursiv::detail::lower_case("Σ") == "σ");
+  CHECK(cursiv::detail::lower_case("\U00010400") == "\U00010428");
+  CHECK(cursiv::detail::lower_case(std::string("A\xFF"
+                                               "B")) == std::string("a\xFF"
+                                                                    "b"));
 }
 
 }  // namespace

@@ -27,6 +27,8 @@
 
 namespace cursiv::fuzzer {
 
+namespace detail {
+
 template <class T>
 [[nodiscard]] inline bool node_is(const AstNode* n) {
   return n != nullptr && n->type != nullptr &&
@@ -76,7 +78,7 @@ struct Render<std::variant<As...>> {
     std::visit(
         [&](const auto& alt) {
           using A = std::remove_cvref_t<decltype(alt)>;
-          if constexpr (detail::ast_pointer_alt<A>) {
+          if constexpr (cursiv::detail::ast_pointer_alt<A>) {
             ok = false;  // a node in a variant: no reader reaches it
           } else {
             std::string s;
@@ -100,18 +102,19 @@ struct only_one<TypeList<T>> {
 
 // The single alternative of a variant that holds a node.
 template <class Held>
-using node_alt_t =
-    typename only_one<typename detail::variant_node_alt<Held>::type>::type;
+using node_alt_t = typename only_one<
+    typename cursiv::detail::variant_node_alt<Held>::type>::type;
 
 // The engine's own write, where the payload names an alternative or needs none.
 template <class F, class A, class V>
 Write store(typename F::owner& o, V&& v) {
-  if constexpr (detail::is_variant_v<typename F::held> && std::is_void_v<A> &&
+  if constexpr (cursiv::detail::is_variant_v<typename F::held> &&
+                std::is_void_v<A> &&
                 !std::is_same_v<std::remove_cvref_t<V>, typename F::held> &&
                 !std::is_same_v<std::remove_cvref_t<V>, typename F::member>) {
     return Write::not_modelled;
   } else {
-    detail::place<A>(o.*F::ptr, std::forward<V>(v));
+    cursiv::detail::place<A>(o.*F::ptr, std::forward<V>(v));
     return Write::modelled;
   }
 }
@@ -138,14 +141,14 @@ template <auto Sp, class E>
 struct directive<Assign<Sp, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = false;
-  static constexpr auto ptr = spec_ptr<Sp>;
+  static constexpr auto ptr = cursiv::detail::spec_ptr<Sp>;
   using payload = E;
 };
 template <auto Sp, class E>
 struct directive<Append<Sp, E>> {
   static constexpr bool is_one = true;
   static constexpr bool enable = false;
-  static constexpr auto ptr = spec_ptr<Sp>;
+  static constexpr auto ptr = cursiv::detail::spec_ptr<Sp>;
   using payload = E;
 };
 template <auto P, class E>
@@ -177,10 +180,10 @@ AstNode* make_node(WalkTree& ar) {
 // which a token has one, then its text, or nothing.
 template <class R>
 auto convert_leaf([[maybe_unused]] std::string_view raw) {
-  using Cv = detail::conv_t<R>;
-  if constexpr (detail::ConvertsParts<Cv>)
+  using Cv = cursiv::detail::conv_t<R>;
+  if constexpr (cursiv::detail::ConvertsParts<Cv>)
     return Cv::convert(Parts{&raw, 1});
-  else if constexpr (detail::ConvertsText<Cv>)
+  else if constexpr (cursiv::detail::ConvertsText<Cv>)
     return Cv::convert(raw);
   else
     return Cv::convert();
@@ -189,7 +192,7 @@ auto convert_leaf([[maybe_unused]] std::string_view raw) {
 template <class R>
 std::optional<std::string> denote_of(std::string_view raw) {
   auto result = convert_leaf<R>(raw);
-  if constexpr (detail::is_conversion_result<decltype(result)>) {
+  if constexpr (cursiv::detail::is_conversion_result<decltype(result)>) {
     if (!result) return std::nullopt;
     return std::string(*result.value);
   } else {
@@ -203,10 +206,11 @@ template <class E>
 consteval DenoteFn denote_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; })
-    if constexpr (is_terminal_rule<T> || is_data_rule<T>)
-      if constexpr (detail::HasConverter<detail::conv_t<T>>)
-        if constexpr (detail::is_text_value<detail::unwrap_result_t<
-                          decltype(convert_leaf<T>(std::string_view{}))>>)
+    if constexpr (is_terminal_rule<T> || cursiv::detail::is_data_rule<T>)
+      if constexpr (cursiv::detail::HasConverter<cursiv::detail::conv_t<T>>)
+        if constexpr (cursiv::detail::is_text_value<
+                          cursiv::detail::unwrap_result_t<
+                              decltype(convert_leaf<T>(std::string_view{}))>>)
           return &denote_of<T>;
   return nullptr;
 }
@@ -214,22 +218,22 @@ consteval DenoteFn denote_entry() {
 template <class E>
 Write write_node_of(AstNode& owner, AstNode* child) {
   using D = directive<E>;
-  using F = detail::field_tag<D::ptr>;
+  using F = cursiv::detail::field_tag<D::ptr>;
   if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
-  auto& o = *detail::ast_cast_unchecked<typename F::owner>(&owner);
+  auto& o = *cursiv::detail::ast_cast_unchecked<typename F::owner>(&owner);
   using Held = typename F::held;
-  if constexpr (F::nature == detail::FieldNature::node) {
+  if constexpr (F::nature == cursiv::detail::FieldNature::node) {
     using T = std::remove_pointer_t<Held>;
     if (!node_is<T>(child)) return Write::not_modelled;
-    return store<F, Held>(o, detail::ast_cast_unchecked<T>(child));
-  } else if constexpr (F::nature == detail::FieldNature::variant) {
+    return store<F, Held>(o, cursiv::detail::ast_cast_unchecked<T>(child));
+  } else if constexpr (F::nature == cursiv::detail::FieldNature::variant) {
     using A = node_alt_t<Held>;
     if constexpr (std::is_void_v<A>) {
       return Write::not_modelled;
     } else {
       using T = std::remove_pointer_t<A>;
       if (!node_is<T>(child)) return Write::not_modelled;
-      return store<F, A>(o, detail::ast_cast_unchecked<T>(child));
+      return store<F, A>(o, cursiv::detail::ast_cast_unchecked<T>(child));
     }
   } else {
     return Write::not_modelled;
@@ -243,7 +247,7 @@ Write write_node_of(AstNode& owner, AstNode* child) {
 template <class F, class A, class Res>
 Write accept(typename F::owner& o, Res&& r) {
   using R = std::remove_cvref_t<Res>;
-  if constexpr (detail::is_conversion_result<R>) {
+  if constexpr (cursiv::detail::is_conversion_result<R>) {
     if (!r) return Write::modelled;
     return store<F, A>(o, std::move(*r.value));
   } else {
@@ -284,7 +288,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
                [[maybe_unused]] ElementId payload,
                [[maybe_unused]] bool fallback,
                [[maybe_unused]] std::string_view text) {
-  if constexpr (!detail::is_text_pay<S>) {
+  if constexpr (!cursiv::detail::is_text_pay<S>) {
     return Write::not_modelled;
   } else {
     using R = typename S::rule;
@@ -294,10 +298,11 @@ Write one_text([[maybe_unused]] typename F::owner& o,
     // The name picks the source; the resolved rule converts it.
     using RR = typename pay_rule<C, R>::type;
     using A =
-        typename detail::conv_alt<typename F::held, detail::pay_text<RR>>::type;
-    using CR = detail::converter_rule_t<RR>;
+        typename cursiv::detail::conv_alt<typename F::held,
+                                          cursiv::detail::pay_text<RR>>::type;
+    using CR = cursiv::detail::converter_rule_t<RR>;
     if constexpr (!std::is_void_v<CR>) {
-      if constexpr (detail::ConvertsText<CR>) {
+      if constexpr (cursiv::detail::ConvertsText<CR>) {
         return accept<F, A>(o, CR::convert(text));
       } else {
         // A converter reading `Parts`, or a value a data rule passes on, is
@@ -307,7 +312,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
     } else if constexpr (std::is_void_v<A> || !has_default_convert<A>) {
       return Write::not_modelled;
     } else {
-      return accept<F, A>(o, detail::default_convert<A>(text));
+      return accept<F, A>(o, cursiv::detail::default_convert<A>(text));
     }
   }
 }
@@ -335,23 +340,22 @@ template <class C, class E>
 Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
                     [[maybe_unused]] std::string_view text) {
   using D = directive<E>;
-  using F = detail::field_tag<D::ptr>;
+  using F = cursiv::detail::field_tag<D::ptr>;
   if (!node_is<typename F::owner>(&owner)) return Write::not_modelled;
-  auto& o = *detail::ast_cast_unchecked<typename F::owner>(&owner);
+  auto& o = *cursiv::detail::ast_cast_unchecked<typename F::owner>(&owner);
 
   if constexpr (D::enable) {
     return store<F, typename F::held>(o, true);
-  } else if constexpr (detail::is_ref_nature(F::nature)) {
+  } else if constexpr (cursiv::detail::is_ref_nature(F::nature)) {
     // A reference is judged on its text: the name is what the document
     // spells, and resolving it is the linker's verdict, not the walk's.
     typename F::held slot{};
     slot.refText = text;
     return store<F, typename F::held>(o, slot);
   } else {
-    return text_sources<
-        C, F,
-        typename detail::payload_of<typename D::payload>::type>::run(o, payload,
-                                                                     text);
+    return text_sources<C, F,
+                        typename cursiv::detail::payload_of<
+                            typename D::payload>::type>::run(o, payload, text);
   }
 }
 
@@ -363,8 +367,9 @@ inline constexpr bool root_creates = false;
 template <class T, class E>
 inline constexpr bool root_creates<Create<T, E>> = true;
 template <class C, class R>
-inline constexpr bool rule_creates = root_creates<
-    cursiv::declared_body_t<typename cursiv::Normalize<C>::template rule<R>>>;
+inline constexpr bool rule_creates =
+    root_creates<cursiv::detail::declared_body_t<
+        typename cursiv::Normalize<C>::template rule<R>>>;
 
 template <class C, class E>
 consteval MakeFn make_entry() {
@@ -375,10 +380,10 @@ consteval MakeFn make_entry() {
   } else if constexpr (requires { typename T::kind; }) {
     // A climb builds one node per fold; a rule whose alternatives build no
     // head node carries the creation, its own element making it.
-    if constexpr (is_infix_rule<T>)
+    if constexpr (cursiv::detail::is_infix_rule<T>)
       return &make_node<typename T::node_type>;
-    else if constexpr (is_node_rule<T> && rule_creates<C, T>)
-      return &make_node<rule_type_t<T>>;
+    else if constexpr (cursiv::detail::is_node_rule<T> && rule_creates<C, T>)
+      return &make_node<cursiv::detail::rule_type_t<T>>;
     else
       return nullptr;
   } else {
@@ -408,9 +413,9 @@ struct ops_of_level<C, TypeList<As...>, Prec, Right> {
 // guard is the lowering's reading of them, not the author's. The chains
 // written are binary: a unary level offers none.
 template <class Lvls, std::size_t I, class L = typename Lvls::template at<I>>
-using level_alts_t =
-    detail::cond_t<is_unary_level<L>, TypeList<>,
-                   typename detail::alts_list<typename L::op_expr>::type>;
+using level_alts_t = cursiv::detail::cond_t<
+    cursiv::detail::is_unary_level<L>, TypeList<>,
+    typename cursiv::detail::alts_list<typename L::op_expr>::type>;
 
 template <class C, class R, class Is>
 struct infix_ops;
@@ -444,10 +449,10 @@ template <class Op>
 constexpr auto op_value(std::string_view text) {
   using Rule = typename model::op_position<Op>::type;
   if constexpr (requires { typename Rule::slot; }) {
-    using Conv = detail::conv_t<Rule>;
-    if constexpr (detail::ConvertsNothing<Conv>)
+    using Conv = cursiv::detail::conv_t<Rule>;
+    if constexpr (cursiv::detail::ConvertsNothing<Conv>)
       return Conv::convert();
-    else if constexpr (detail::ConvertsText<Conv>)
+    else if constexpr (cursiv::detail::ConvertsText<Conv>)
       return Conv::convert(text);
     else
       return text;
@@ -462,7 +467,7 @@ template <class Lvls, class Is>
 struct level_alts_all;
 template <class Lvls, std::size_t... Is>
 struct level_alts_all<Lvls, std::index_sequence<Is...>>
-    : detail::tl_cat<level_alts_t<Lvls, Is>...> {};
+    : cursiv::detail::tl_cat<level_alts_t<Lvls, Is>...> {};
 
 // The three writes a fold commits, spelled from the rule's own pointers. The
 // operator is named by its row, not by its text: two spellings may denote one
@@ -488,14 +493,14 @@ Write fold_of(ElementId op, AstNode& node, AstNode* lhs, std::string_view text,
       std::remove_cv_t<decltype(R::right_pointer)>>::type>;
   if (!node_is<N>(&node) || !node_is<LT>(lhs) || !node_is<RT>(rhs))
     return Write::not_modelled;
-  N& n = *detail::ast_cast_unchecked<N>(&node);
-  n.*R::left_pointer = detail::ast_cast_unchecked<LT>(lhs);
+  N& n = *cursiv::detail::ast_cast_unchecked<N>(&node);
+  n.*R::left_pointer = cursiv::detail::ast_cast_unchecked<LT>(lhs);
   using Alts = typename level_alts_all<
       typename R::levels,
       std::make_index_sequence<R::levels::size>>::type;
   if (write_op<C, R>(op, n, text, Alts{}) == Write::not_modelled)
     return Write::not_modelled;
-  n.*R::right_pointer = detail::ast_cast_unchecked<RT>(rhs);
+  n.*R::right_pointer = cursiv::detail::ast_cast_unchecked<RT>(rhs);
   return Write::modelled;
 }
 
@@ -506,7 +511,7 @@ template <class C, class E>
 consteval ElementId primary_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_infix_rule<T>) return primary_row<C, T>();
+    if constexpr (cursiv::detail::is_infix_rule<T>) return primary_row<C, T>();
   }
   return kNoElement;
 }
@@ -515,7 +520,7 @@ template <class C, class E>
 consteval std::span<const InfixOp> ops_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_infix_rule<T>)
+    if constexpr (cursiv::detail::is_infix_rule<T>)
       return std::span<const InfixOp>(infix_ops_t<C, T>::kOps);
   }
   return {};
@@ -525,7 +530,7 @@ template <class C, class E>
 consteval FoldFn fold_entry() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (is_infix_rule<T>) return &fold_of<C, T>;
+    if constexpr (cursiv::detail::is_infix_rule<T>) return &fold_of<C, T>;
   }
   return nullptr;
 }
@@ -577,35 +582,37 @@ struct field_of {
 };
 template <auto Sp, class E>
 struct field_of<Assign<Sp, E>> {
-  using type = TypeList<detail::field_tag<spec_ptr<Sp>>>;
+  using type =
+      TypeList<cursiv::detail::field_tag<cursiv::detail::spec_ptr<Sp>>>;
 };
 template <auto Sp, class E>
 struct field_of<Append<Sp, E>> {
-  using type = TypeList<detail::field_tag<spec_ptr<Sp>>>;
+  using type =
+      TypeList<cursiv::detail::field_tag<cursiv::detail::spec_ptr<Sp>>>;
 };
 template <auto P, class E>
 struct field_of<Flag<P, E>> {
-  using type = TypeList<detail::field_tag<P>>;
+  using type = TypeList<cursiv::detail::field_tag<P>>;
 };
 template <class T, auto P, class E>
 struct field_of<Nest<T, P, E>> {
-  using type = TypeList<detail::field_tag<P>>;
+  using type = TypeList<cursiv::detail::field_tag<P>>;
 };
 
 // A climb's three members are named by the rule, not by a directive.
 template <class E>
-  requires requires { typename E::kind; } && is_infix_rule<E>
+  requires requires { typename E::kind; } && cursiv::detail::is_infix_rule<E>
 struct field_of<E> {
-  using type = TypeList<detail::field_tag<E::left_pointer>,
-                        detail::field_tag<E::op_pointer>,
-                        detail::field_tag<E::right_pointer>>;
+  using type = TypeList<cursiv::detail::field_tag<E::left_pointer>,
+                        cursiv::detail::field_tag<E::op_pointer>,
+                        cursiv::detail::field_tag<E::right_pointer>>;
 };
 
 template <class L>
 struct fields_of;
 template <class... Es>
 struct fields_of<TypeList<Es...>>
-    : detail::dedupe<detail::tl_cat_t<
+    : cursiv::detail::dedupe<cursiv::detail::tl_cat_t<
           typename field_of<std::remove_cvref_t<Es>>::type...>> {};
 
 // Always empty: distributing a directive over a choice is the lowering's
@@ -619,8 +626,8 @@ using ValueYield = cursiv::function_ref<void(std::string_view, std::uint32_t,
 template <class F, class X>
 void yield_one(std::string_view name, std::uint32_t index, const X& v,
                ValueYield yield) {
-  if constexpr (detail::is_ref_nature(F::nature)) {
-    if constexpr (F::nature == detail::FieldNature::reference)
+  if constexpr (cursiv::detail::is_ref_nature(F::nature)) {
+    if constexpr (F::nature == cursiv::detail::FieldNature::reference)
       yield(name, index, ValueKind::text, v.refText);
     else
       yield(name, index, ValueKind::unreadable, {});
@@ -635,16 +642,16 @@ void yield_one(std::string_view name, std::uint32_t index, const X& v,
 
 template <class F>
 void yield_field(const AstNode& n, ValueYield yield) {
-  if constexpr (F::nature == detail::FieldNature::node) {
+  if constexpr (F::nature == cursiv::detail::FieldNature::node) {
     return;  // `AstReflection` walks the nodes
   } else {
     if (!node_is<typename F::owner>(&n)) return;
     const auto& o = *ast_cast<const typename F::owner>(&n);
     constexpr std::uint32_t kNone = ~std::uint32_t{0};
-    if constexpr (F::storage == detail::FieldStorage::vector) {
+    if constexpr (F::storage == cursiv::detail::FieldStorage::vector) {
       std::uint32_t at = 0;
       for (const auto& v : o.*F::ptr) yield_one<F>(F::name, at++, v, yield);
-    } else if constexpr (F::storage == detail::FieldStorage::optional) {
+    } else if constexpr (F::storage == cursiv::detail::FieldStorage::optional) {
       if ((o.*F::ptr).has_value())
         yield_one<F>(F::name, kNone, *(o.*F::ptr), yield);
       else
@@ -664,12 +671,15 @@ struct value_walk<TypeList<Fs...>> {
   }
 };
 
+}  // namespace detail
+
 template <class C>
 struct CursivActions final : GrammarActions {
   using Rows =
-      act_rows<C, typename model::positions_for<C>::type, spread_rows>;
-  using Fields =
-      typename fields_of<typename model::positions_for<C>::type>::type;
+      detail::act_rows<C, typename detail::model::positions_for<C>::type,
+                       detail::spread_rows>;
+  using Fields = typename detail::fields_of<
+      typename detail::model::positions_for<C>::type>::type;
 
   [[nodiscard]] AstNode* make(ElementId e, WalkTree& ar) const override {
     if (e >= Rows::kMake.size() || Rows::kMake[e] == nullptr) return nullptr;
@@ -711,8 +721,8 @@ struct CursivActions final : GrammarActions {
     return Rows::kDenote[e](text);
   }
 
-  void visitValues(const AstNode& n, ValueYield yield) const override {
-    value_walk<Fields>::run(n, yield);
+  void visitValues(const AstNode& n, detail::ValueYield yield) const override {
+    detail::value_walk<Fields>::run(n, yield);
   }
 };
 

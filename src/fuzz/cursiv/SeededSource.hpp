@@ -8,10 +8,10 @@
 
 namespace cursiv::fuzzer {
 
-struct SeededSource final : DecisionSource {
+struct SeededSource final : detail::DecisionSource {
   explicit SeededSource(std::uint64_t seed) : _s(seed | 1u) {}
 
-  unsigned choose(DecisionKind, unsigned n) override {
+  unsigned choose(detail::DecisionKind, unsigned n) override {
     return n <= 1 ? 0u : static_cast<unsigned>(next() % n);
   }
 
