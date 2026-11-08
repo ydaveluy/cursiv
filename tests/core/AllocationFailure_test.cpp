@@ -41,6 +41,7 @@
 #include "cursiv/workspace/IndexManager.hpp"
 #include "cursiv/workspace/ReferenceDescription.hpp"
 #include "cursiv/workspace/TextDocument.hpp"
+#include "support/RetiredTables.hpp"
 #include "workspace/core/ast.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
 
@@ -199,7 +200,7 @@ struct Counted {
 };
 
 void a_retirement_asks_for_no_memory() {
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   bool threw = false;
   for (int round = 0; round < 64; ++round) {
     cursiv::detail::ConcurrentTable<int, Counted> cleared;
@@ -221,7 +222,7 @@ void a_retirement_asks_for_no_memory() {
     failAfter = -1;
   }
   CHECK(!threw);
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   CHECK(Counted::alive == 0);
 }
 
@@ -231,7 +232,7 @@ void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
     bool threw = false;
     fail_allocation(fail);
     try {
-      cursiv::TaskQueue<int*> queue(0);
+      cursiv::detail::TaskQueue<int*> queue(0);
     } catch (const std::bad_alloc&) {
       threw = true;
     }
@@ -240,7 +241,7 @@ void a_queue_allocation_failure_leaves_no_leak_or_lost_item() {
     CHECK(allocations.load() == before);
   }
   for (int fail = 0; fail < 2; ++fail) {
-    cursiv::TaskQueue<int*> queue(0);
+    cursiv::detail::TaskQueue<int*> queue(0);
     int a = 1, b = 2;
     queue.push(&a);
     const int before = allocations.load();

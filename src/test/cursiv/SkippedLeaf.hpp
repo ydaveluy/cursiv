@@ -6,7 +6,7 @@
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/shared/runtime/StampedGrammar.hpp"
 
-namespace cursiv::test {
+namespace cursiv::test::detail {
 
 inline bool skipped_leaf(const cursiv::Grammar& grammar,
                          const cursiv::CstNode& n) {
@@ -14,4 +14,4 @@ inline bool skipped_leaf(const cursiv::Grammar& grammar,
   return n.recovered && stamped != nullptr && stamped->stamp().state(n) == 0;
 }
 
-}  // namespace cursiv::test
+}  // namespace cursiv::test::detail

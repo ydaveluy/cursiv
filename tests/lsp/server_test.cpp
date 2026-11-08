@@ -996,6 +996,28 @@ void an_edit_republishes_what_it_repaired() {
   CHECK(clean != nullptr && clean->diagnostics.empty() && clean->version == 3);
 }
 
+// A change is the whole text or a ranged edit, and one notification may carry
+// both: they apply in order, the edit's range read in the protocol's units.
+void a_change_applies_whole_texts_and_ranged_edits_in_order() {
+  const World world;
+  (void)world.handshake();
+  world.open("datatype A\n");
+  lsp::DidChangeTextDocumentParams params;
+  params.textDocument.uri = lsp::Uri::parse(std::string(kUri));
+  params.textDocument.version = 2;
+  lsp::TextDocumentContentChangeWholeDocument whole;
+  whole.text = "datatype All\ndatatype Two\n";
+  params.contentChanges.emplace_back(std::move(whole));
+  lsp::TextDocumentContentChangePartial ranged;
+  ranged.range = lsp::Range{{0, 9}, {1, 12}};
+  ranged.text = "Every";
+  params.contentChanges.emplace_back(std::move(ranged));
+  world.server().didChange(params);
+  const auto document = world.shared.documents->getDocument(kUri);
+  CHECK(document != nullptr &&
+        document->textDocument().getText() == "datatype Every\n");
+}
+
 using support::CountingParser;
 
 void opening_parses_once_and_unchanged_edits_keep_the_tree() {
@@ -1753,6 +1775,7 @@ void run() {
   a_closed_virtual_document_stays();
   the_file_operations_are_the_handlers_own();
   an_edit_republishes_what_it_repaired();
+  a_change_applies_whole_texts_and_ranged_edits_in_order();
   opening_parses_once_and_unchanged_edits_keep_the_tree();
   a_code_action_keeps_the_document_changes_it_wrote();
   requests_use_the_language_attached_to_an_untitled_document();
@@ -2865,8 +2888,7 @@ void run() {
 }  // namespace lsp_services
 
 // Pins the one type frontier of the tree: cursiv::Position/Range crossing into
-// the protocol's types and back, and a didChange's variant becoming the
-// core's own event.
+// the protocol's types and back.
 namespace position {
 
 namespace {
@@ -2883,34 +2905,10 @@ void a_position_round_trips() {
   CHECK(back == r);
 }
 
-// The protocol's whole-document/ranged variant becomes the core's optional
-// range, texts copied.
-void a_change_event_crosses_the_frontier() {
-  std::vector<lsp::TextDocumentContentChangeEvent> changes;
-  lsp::TextDocumentContentChangePartial ranged;
-  ranged.range = lsp::Range{{1, 2}, {3, 4}};
-  ranged.text = "mid";
-  changes.emplace_back(std::move(ranged));
-  lsp::TextDocumentContentChangeWholeDocument whole;
-  whole.text = "all";
-  changes.emplace_back(std::move(whole));
-
-  const std::vector<cursiv::TextDocumentContentChangeEvent> converted =
-      cursiv::from_lsp(changes);
-  CHECK(converted.size() == 2);
-  CHECK(converted[0].range.has_value());
-  CHECK(converted[0].range->start == cursiv::Position{1, 2});
-  CHECK(converted[0].range->end == cursiv::Position{3, 4});
-  CHECK(converted[0].text == "mid");
-  CHECK(!converted[1].range.has_value());
-  CHECK(converted[1].text == "all");
-}
-
 }  // namespace
 
 void run() {
   a_position_round_trips();
-  a_change_event_crosses_the_frontier();
 }
 
 }  // namespace position
@@ -3229,8 +3227,8 @@ void validation_categories_reads_both_spellings() {
   const cursiv::ValidationRegistry& registry = *world.registry;
 
   const auto parse = [&](std::string_view json) {
-    return cursiv::validation_categories(lsp::json::parse(std::string(json)),
-                                         registry);
+    return cursiv::detail::validation_categories(
+        lsp::json::parse(std::string(json)), registry);
   };
 
   const auto flat = parse(R"(["fast", "slow", "fast"])");

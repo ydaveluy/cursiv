@@ -20,7 +20,6 @@
 #include "cursiv/lr/runtime/lr_matcher.hpp"
 #include "cursiv/shared/runtime/LexFailedWalks.hpp"
 #include "cursiv/shared/runtime/LexReading.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "cycle/generated/G/Module.hpp"
 #include "cycle/generated/G/Parser.hpp"
@@ -34,6 +33,7 @@
 #include "nested/generated/G/Table.hpp"
 #include "shadowll/generated/Ll/Module.hpp"
 #include "shadowlr/generated/Lr/Module.hpp"
+#include "support/AstText.hpp"
 
 // Cells and positions no look-ahead settles, split rather than guessed.
 
@@ -67,8 +67,8 @@ void one_tree(const char* what, const Twin& t, std::string_view text) {
   CHECK(a.value != nullptr && b.value != nullptr);
   if (a.value == nullptr || b.value == nullptr) return;
   std::string x, y;
-  cursiv::test::ast_of(*t.llR, *a.value, x);
-  cursiv::test::ast_of(*t.lrR, *b.value, y);
+  support::ast_of(*t.llR, *a.value, x);
+  support::ast_of(*t.lrR, *b.value, y);
   if (x != y)
     std::printf("  %s %.*s\n    ll %s\n    lr %s\n", what,
                 static_cast<int>(text.size()), text.data(), x.c_str(),
@@ -394,7 +394,7 @@ void sweep(const char* what, const cursiv::Parser& p, const std::string& head,
                       d.end, t.substr(d.begin, d.end - d.begin).c_str());
         if (refl != nullptr && r.value != nullptr) {
           std::string a;
-          cursiv::test::ast_of(*refl, *r.value, a);
+          support::ast_of(*refl, *r.value, a);
           std::printf("      ast %s\n", a.c_str());
         }
         ++bad;

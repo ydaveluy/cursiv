@@ -12,11 +12,11 @@
 #include "cursiv/lr/gen/LrLowering.hpp"
 #include "cursiv/shared/gen/GrammarFault.hpp"
 #include "cursiv/shared/gen/LowerVerdicts.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/UnorderedGrammar.hpp"
 #include "engines/ll/UnorderedOptionalGrammar.hpp"
 #include "engines/ll/UnorderedTurnsGrammar.hpp"
+#include "support/AstText.hpp"
 #include "unorderedll/generated/Ll/Module.hpp"
 #include "unorderedlr/generated/Lr/Module.hpp"
 #include "unorderedoptll/generated/Ll/Module.hpp"
@@ -275,14 +275,14 @@ void alike(const cursiv::Parser& ll, const cursiv::Parser& lr,
   CHECK(a.accepted == b.accepted);
   CHECK(a.diagnostics.size() == b.diagnostics.size());
   std::string x, y;
-  if (a.value) cursiv::test::ast_of(llAst, *a.value, x);
-  if (b.value) cursiv::test::ast_of(lrAst, *b.value, y);
+  if (a.value) support::ast_of(llAst, *a.value, x);
+  if (b.value) support::ast_of(lrAst, *b.value, y);
   if (x != y)
     std::fprintf(stderr, "%.*s\n  LL %s\n  LR %s\n",
                  static_cast<int>(text.size()), text.data(), x.c_str(),
                  y.c_str());
   CHECK(x == y);
-  CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
+  CHECK(support::records(a.cst()) == support::records(b.cst()));
 }
 
 void records_alike() {
@@ -328,7 +328,7 @@ std::string tree_of(const cursiv::Parser& parser,
                     const cursiv::AstReflection& ast, std::string_view text) {
   const auto result = parser.parse(text);
   std::string out;
-  if (result.value) cursiv::test::ast_of(ast, *result.value, out);
+  if (result.value) support::ast_of(ast, *result.value, out);
   return out;
 }
 

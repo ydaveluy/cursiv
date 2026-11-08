@@ -63,6 +63,10 @@ an expected range. A range marker without its partner, or an `index` or
 | `expectSemanticToken` | Semantic highlighting: one token of a type, named as in the legend (`"keyword"`), over a marked range |
 | `expectFormatting` | Formatted text |
 
+`expectSemanticToken` reads the tokens that `highlightHelper` returns. Its
+`DecodedTokenOptions` name the marked range (`rangeIndex`) and the expected
+`tokenType`.
+
 For example, with `cursiv/ExpectedHover.hpp` and the Recipe LSP
 `services` created as in [Check editor features](../learn/testing.md#check-editor-features):
 
@@ -73,6 +77,17 @@ For example, with `cursiv/ExpectedHover.hpp` and the Recipe LSP
      .hover = "The gram unit.",
      .disposeAfterCheck = true});
 ```
+
+## Build requests and compare results
+
+| Helper | Header | Result |
+|---|---|---|
+| `textDocumentParams(document)` | `cursiv/TextDocumentParams.hpp` | The document's `TextDocumentIdentifier` |
+| `textDocumentPositionParams(document, offset)` | `cursiv/TextDocumentParams.hpp` | The document and the position at a byte offset |
+| `referenceParams(document, offset, includeDeclaration)` | `cursiv/TextDocumentParams.hpp` | The parameters of a references request |
+| `isRangeEqual(a, b)`, `rangeToString(range)` | `cursiv/RangeUtils.hpp` | Compare or print an `lsp::Range` |
+| `isDiagnosticDataEqual(data, expected)` | `cursiv/ExpectDiagnosticOptions.hpp` | Whether `data` holds every value of `expected` |
+| `printDiagnostics(diagnostics)` | `cursiv/ExpectDiagnosticOptions.hpp` | One line per diagnostic, with byte offsets |
 
 ## Clean up documents
 

@@ -6,7 +6,7 @@
 #include <system_error>
 #endif
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // Stands where the caller stands. A WASI module starts at its root whatever the
 // host's directory is, so a path its command line names relative to that
@@ -21,4 +21,4 @@ inline void enter_host_directory() {
 #endif
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

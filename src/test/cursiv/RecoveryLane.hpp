@@ -46,6 +46,8 @@ inline std::string document(std::string_view name) {
                    std::string(name));
 }
 
+namespace detail {
+
 inline std::string shared_reference_path() {
   return std::string(CURSIV_RECOVERY_CORPUS) + "/REFERENCE.txt";
 }
@@ -72,6 +74,8 @@ inline std::string reference_path() {
   return std::filesystem::exists(own) ? own : shared_reference_path();
 }
 
+}  // namespace detail
+
 // The tokens a tree carries: the visible leaves, trivia and error spans
 // left out -- what the document still says after the repair.
 struct Proj {
@@ -90,6 +94,8 @@ struct Proj {
   // The builder made a tree of it.
   bool value = false;
 };
+
+namespace detail {
 
 inline constexpr std::string_view kKind[] = {"ins", "del", "rep", "eof",
                                              "conv", "bnd"};
@@ -148,15 +154,19 @@ inline Proj project(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
   return p;
 }
 
+}  // namespace detail
+
 // Through the erased door, like every other lane: the language's own module is
 // where its engine is compiled, and a lane that named the grammar would build
 // the state chain a second time.
 inline Proj project(const cursiv::Parser& engine, const std::string& text) {
   const cursiv::ParseResult result = engine.parse(text);
-  Proj p = project(engine.getGrammar(), result.cst(), text);
+  Proj p = detail::project(engine.getGrammar(), result.cst(), text);
   p.value = result.value != nullptr;
   return p;
 }
+
+namespace detail {
 
 // How many tokens of the repaired tree the valid tree does not have, as a
 // multiset -- the invention count.
@@ -191,6 +201,8 @@ inline std::string signature(const Proj& p, std::size_t validTokens, int inv) {
   return s;
 }
 
+}  // namespace detail
+
 // The lane's state: rows collected, then compared to (or written into) the
 // language's reference file.
 struct Lane {
@@ -208,12 +220,12 @@ struct Lane {
     // answer moved forked the reference under the engine that owns the corpus
     // and left the shared one to rot; an engine that needs a reference of its
     // own is one whose file already stands beside it.
-    const std::string path = reference_path();
+    const std::string path = detail::reference_path();
     if (write) {
       // An engine's own file stands only while its repairs differ: once they
       // read like the shared file again, the copy goes.
-      if (path != shared_reference_path() &&
-          cursiv::test::read_file(shared_reference_path()) == text) {
+      if (path != detail::shared_reference_path() &&
+          cursiv::test::read_file(detail::shared_reference_path()) == text) {
         std::filesystem::remove(path);
         return;
       }
@@ -260,7 +272,7 @@ inline void language(Lane& lane, const cursiv::Parser& engine,
     ++failures;
     return;
   }
-  lane.row(validName, signature(valid, valid.tokens.size(), 0));
+  lane.row(validName, detail::signature(valid, valid.tokens.size(), 0));
   for (const std::string& name : broken) {
     const std::string text = document(name);
     if (text.empty()) {
@@ -270,8 +282,8 @@ inline void language(Lane& lane, const cursiv::Parser& engine,
       continue;
     }
     const Proj p = project(engine, text);
-    const int inv = invented(p.tokens, valid.tokens);
-    lane.row(name, signature(p, valid.tokens.size(), inv));
+    const int inv = detail::invented(p.tokens, valid.tokens);
+    lane.row(name, detail::signature(p, valid.tokens.size(), inv));
     if (!p.monotone) {
       std::printf("FAIL %s/%s: a record's end decreases along the tape\n",
                   lane.lang.c_str(), name.c_str());

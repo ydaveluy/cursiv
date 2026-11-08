@@ -46,7 +46,7 @@ Disposable expectSymbols(const LspServices& services,
                               " symbols in document");
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (base.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

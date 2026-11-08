@@ -16,11 +16,11 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/ParityAst.hpp"
 #include "parityll/generated/Ll/Module.hpp"
 #include "paritylr/generated/Lr/Module.hpp"
+#include "support/AstText.hpp"
 
 namespace {
 
@@ -66,8 +66,8 @@ void agree(const Engines& e, std::string_view text, bool repaired = true) {
   CHECK(alike);
   if (a.value == nullptr || b.value == nullptr) return;
   std::string x, y;
-  cursiv::test::ast_of(*e.llr, *a.value, x);
-  cursiv::test::ast_of(*e.lrr, *b.value, y);
+  support::ast_of(*e.llr, *a.value, x);
+  support::ast_of(*e.lrr, *b.value, y);
   if (x != y)
     std::fprintf(stderr, "tree parity [%.*s]\n  LL: %s\n  LR: %s\n",
                  static_cast<int>(text.size()), text.data(), x.c_str(),

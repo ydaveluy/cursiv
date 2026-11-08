@@ -1020,7 +1020,8 @@ void the_validated_alternative_is_the_written_one() {
 // through to the base's, so the converter lookup must fall through with it:
 // an override replacing only the body would otherwise answer the base's
 // converted type while `HasConverter` says none exists, and
-// `default_convert` would run on text only the base's converter can read.
+// the default conversion would run on text only the base's converter can
+// read.
 namespace over {
 
 using N = tdual::N;
@@ -2106,26 +2107,26 @@ const cursiv::Parser& separated() {
 }
 
 void defaults() {
-  auto i = cursiv::default_convert<std::int32_t>("123");
+  auto i = cursiv::default_converter<std::int32_t>::convert("123");
   CHECK(i && *i.value == 123);
-  auto o = cursiv::default_convert<std::int8_t>("999");  // overflow
+  auto o = cursiv::default_converter<std::int8_t>::convert("999");  // overflow
   CHECK(!o && !o.error.message.empty());
-  auto f = cursiv::default_convert<double>("2.5");
+  auto f = cursiv::default_converter<double>::convert("2.5");
   CHECK(f && *f.value == 2.5);
-  auto b = cursiv::default_convert<bool>("true");
+  auto b = cursiv::default_converter<bool>::convert("true");
   CHECK(b && *b.value);
-  auto b2 = cursiv::default_convert<bool>("false");
+  auto b2 = cursiv::default_converter<bool>::convert("false");
   CHECK(b2 && !*b2.value);
-  auto upper = cursiv::default_convert<bool>("TRUE");
+  auto upper = cursiv::default_converter<bool>::convert("TRUE");
   CHECK(upper && *upper.value);
-  auto mixed = cursiv::default_convert<bool>("FaLsE");
+  auto mixed = cursiv::default_converter<bool>::convert("FaLsE");
   CHECK(mixed && !*mixed.value);
-  auto bx =
-      cursiv::default_convert<bool>("nope");  // only true/false are pinned
+  // Only true and false are read.
+  auto bx = cursiv::default_converter<bool>::convert("nope");
   CHECK(!bx && !bx.error.message.empty());
-  auto sv = cursiv::default_convert<std::string_view>("xyz");
+  auto sv = cursiv::default_converter<std::string_view>::convert("xyz");
   CHECK(sv && *sv.value == "xyz");
-  auto bad = cursiv::default_convert<std::int32_t>("abc");
+  auto bad = cursiv::default_converter<std::int32_t>::convert("abc");
   CHECK(!bad && !bad.error.message.empty());
 }
 
@@ -2422,8 +2423,8 @@ void a_deep_tree_is_climbed_once() {
   };
   std::size_t owners = 0;
   const auto symbols = fastest([&] {
-    owners = cursiv::collect_named_nodes(*document, *language->nameProvider,
-                                         cursiv::kNoCancel)
+    owners = cursiv::detail::collect_named_nodes(
+                 *document, *language->nameProvider, cursiv::kNoCancel)
                  .owners.size();
   });
   CHECK(owners == kDepth);
@@ -2554,7 +2555,7 @@ void floating_conversion_ignores_host_rounding() {
     for (const auto& [text, expected] :
          {std::pair{"0.1", 0.1}, std::pair{"-0.1", -0.1},
           std::pair{"00000000000000000000.1", 0.1}, std::pair{"42", 42.0}}) {
-      const auto converted = cursiv::default_convert<double>(text);
+      const auto converted = cursiv::default_converter<double>::convert(text);
       CHECK(converted && *converted.value == expected);
     }
   }
@@ -2564,16 +2565,16 @@ void floating_conversion_ignores_host_rounding() {
 // default converter strips at most one so an optional-sign grammar's "+5"
 // converts like "5" instead of failing, without accepting "++5".
 void leading_plus() {
-  auto plus = cursiv::default_convert<std::int32_t>("+5");
+  auto plus = cursiv::default_converter<std::int32_t>::convert("+5");
   CHECK(plus && *plus.value == 5);
-  auto plusplus = cursiv::default_convert<std::int32_t>("++5");
+  auto plusplus = cursiv::default_converter<std::int32_t>::convert("++5");
   CHECK(!plusplus && !plusplus.error.message.empty());
-  CHECK(!cursiv::default_convert<std::int32_t>("+-5"));
-  CHECK(!cursiv::default_convert<float>("+-2.5"));
-  CHECK(!cursiv::default_convert<double>("+-2.5"));
-  auto minus = cursiv::default_convert<std::int32_t>("-5");
+  CHECK(!cursiv::default_converter<std::int32_t>::convert("+-5"));
+  CHECK(!cursiv::default_converter<float>::convert("+-2.5"));
+  CHECK(!cursiv::default_converter<double>::convert("+-2.5"));
+  auto minus = cursiv::default_converter<std::int32_t>::convert("-5");
   CHECK(minus && *minus.value == -5);  // untouched
-  auto plusf = cursiv::default_convert<double>("+2.5");
+  auto plusf = cursiv::default_converter<double>::convert("+2.5");
   CHECK(plusf && *plusf.value == 2.5);
 }
 
@@ -2605,11 +2606,11 @@ void char_like_excluded() {
 using Vis = tab::enm::Vis;
 
 void enum_defaults() {
-  auto p = cursiv::default_convert<Vis>("priv");
+  auto p = cursiv::default_converter<Vis>::convert("priv");
   CHECK(p && *p.value == Vis::priv);
-  auto q = cursiv::default_convert<Vis>("pub");
+  auto q = cursiv::default_converter<Vis>::convert("pub");
   CHECK(q && *q.value == Vis::pub);
-  auto bad = cursiv::default_convert<Vis>("nope");
+  auto bad = cursiv::default_converter<Vis>::convert("nope");
   CHECK(!bad && bad.error.message.find("enumerator") != std::string::npos);
   static_assert(cursiv::has_default_convert<Vis>);
 }
@@ -2620,13 +2621,13 @@ enum class Sign { negative = -3, zero = 0, positive = 3 };
 enum class Perm : unsigned { none = 0, read = 1, write = 64, exec = 256 };
 
 void enumerators_outside_the_first_run() {
-  auto n = cursiv::default_convert<Sign>("negative");
+  auto n = cursiv::default_converter<Sign>::convert("negative");
   CHECK(n && *n.value == Sign::negative);
-  auto z = cursiv::default_convert<Sign>("zero");
+  auto z = cursiv::default_converter<Sign>::convert("zero");
   CHECK(z && *z.value == Sign::zero);
-  auto w = cursiv::default_convert<Perm>("write");
+  auto w = cursiv::default_converter<Perm>::convert("write");
   CHECK(w && *w.value == Perm::write);
-  auto x = cursiv::default_convert<Perm>("exec");
+  auto x = cursiv::default_converter<Perm>::convert("exec");
   CHECK(x && *x.value == Perm::exec);
   // The window is bounded, and what falls outside has no spellable name.
   static_assert(cursiv::detail::kEnumProbeMin < 0 &&
@@ -2926,17 +2927,17 @@ void clinger_is_from_chars() {
   CHECK(took_fast > cases / 4);  // the path must actually be taken
 
   // And the same claim through the public door the grammars use.
-  auto a = cursiv::default_convert<double>("42");
+  auto a = cursiv::default_converter<double>::convert("42");
   CHECK(a && *a.value == 42.0);
-  auto b = cursiv::default_convert<double>("1e999");
+  auto b = cursiv::default_converter<double>::convert("1e999");
   CHECK(!b && !b.error.message.empty());
-  auto c = cursiv::default_convert<double>("0.1");
+  auto c = cursiv::default_converter<double>::convert("0.1");
   CHECK(c && bits_of(*c.value) == bits_of(0.1));
-  auto e = cursiv::default_convert<double>("1.2.3");
+  auto e = cursiv::default_converter<double>::convert("1.2.3");
   CHECK(!e && !e.error.message.empty());
   // float keeps the library call -- decimal -> double -> float would round
   // twice, so the fast path is not offered for it.
-  auto f = cursiv::default_convert<float>("0.1");
+  auto f = cursiv::default_converter<float>::convert("0.1");
   CHECK(f && *f.value == 0.1f);
 }
 }  // namespace

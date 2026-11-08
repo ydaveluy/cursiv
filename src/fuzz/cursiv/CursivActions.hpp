@@ -307,7 +307,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
     } else if constexpr (std::is_void_v<A> || !has_default_convert<A>) {
       return Write::not_modelled;
     } else {
-      return accept<F, A>(o, default_convert<A>(text));
+      return accept<F, A>(o, detail::default_convert<A>(text));
     }
   }
 }

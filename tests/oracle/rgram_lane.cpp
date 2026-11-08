@@ -17,9 +17,9 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/AstText.hpp"
 #include "oracle/RgramCfg.hpp"
 #include "oracle/RgramGrammar.hpp"
+#include "support/AstText.hpp"
 
 namespace cursiv {
 namespace {
@@ -112,7 +112,7 @@ int rgram_lane(unsigned seed, const Parser& parser,
     }
     if (!clean || o.tree.empty()) continue;
     std::string got;
-    test::ast_of(reflection, *r.value, got);
+    support::ast_of(reflection, *r.value, got);
     if (bare(got) == bare(o.tree)) continue;
     ++bad;
     std::printf("rgram %u: document %zu \"%s\": the parser builds\n  %s\n"

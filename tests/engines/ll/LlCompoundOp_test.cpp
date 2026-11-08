@@ -9,9 +9,9 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/ll/runtime/ll_search.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/CompoundOpGrammar.hpp"
+#include "support/AstText.hpp"
 
 // A deletion leaves the positions unchanged but asks their guards at another
 // token. The discarded child's node slot may also be reused by that deletion.
@@ -76,8 +76,8 @@ int main() {
     if (cleanA && cleanB) {
       CHECK(a.value != nullptr && b.value != nullptr);
       std::string x, y;
-      cursiv::test::ast_of(*reflection, *a.value, x);
-      cursiv::test::ast_of(*reflection, *b.value, y);
+      support::ast_of(*reflection, *a.value, x);
+      support::ast_of(*reflection, *b.value, y);
       CHECK(x == y);
     }
   }
@@ -149,8 +149,8 @@ int main() {
               a.diagnostics[i].begin == b.diagnostics[i].begin &&
               a.diagnostics[i].end == b.diagnostics[i].end;
     std::string x, y;
-    if (a.value != nullptr) cursiv::test::ast_of(reflection, *a.value, x);
-    if (b.value != nullptr) cursiv::test::ast_of(reflection, *b.value, y);
+    if (a.value != nullptr) support::ast_of(reflection, *a.value, x);
+    if (b.value != nullptr) support::ast_of(reflection, *b.value, y);
     if (!alike || x != y)
       std::printf("repair parity LL=%zu LR=%zu: %.*s\n", a.diagnostics.size(),
                   b.diagnostics.size(), static_cast<int>(text.size()),

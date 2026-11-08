@@ -1176,7 +1176,7 @@ int start_language_server(SharedLspServices& shared, lsp::io::Stream& raw) {
   return session.shutdownRequested ? 0 : 1;
 }
 
-int run_language_server_stdio(SharedLspServices& shared) {
+int detail::run_language_server_stdio(SharedLspServices& shared) {
   return start_language_server(shared, lsp::io::standardIO());
 }
 

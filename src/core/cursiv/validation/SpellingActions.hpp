@@ -12,7 +12,7 @@
 // when a client asks for one diagnostic's fixes, never by the validation --
 // one lookup walks the whole scope, the global index included.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // The rows of each diagnostic, in its order: one replacement row each, the
 // nearest first, three at most; none for a diagnostic that is not a not-found
@@ -23,4 +23,4 @@ namespace cursiv {
 [[nodiscard]] std::vector<JsonValue::Array> spelling_actions(
     const Document& document, std::span<const Diagnostic* const> diagnostics);
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

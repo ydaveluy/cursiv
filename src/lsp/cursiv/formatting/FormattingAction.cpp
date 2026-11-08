@@ -62,7 +62,7 @@ std::string HiddenNodeFormatter::indentation(std::int32_t delta) const {
       static_cast<std::int64_t>(_baseIndentation) + delta, 0);
   if (level > std::numeric_limits<std::int32_t>::max())
     throw std::length_error("formatting count exceeds addressable range");
-  return indentation_text(static_cast<std::int32_t>(level), *_options);
+  return detail::indentation_text(static_cast<std::int32_t>(level), *_options);
 }
 
 void HiddenNodeFormatter::replace(std::string text) const {

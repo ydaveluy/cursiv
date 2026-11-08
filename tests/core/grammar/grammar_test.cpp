@@ -626,9 +626,7 @@ static_assert(spelled(cr<"€">) == "\\u20ac");
 static_assert(spelled(cr<"😀">) == "\\u{1f600}");
 static_assert(spelled(cr<R"(\u{80}-\u{10FFFF})">) == "\\x80-\\u{10ffff}");
 
-// Case folding is a compile-time table; ikw is the case-insensitive keyword.
-static_assert(cursiv::to_lower('A') == 'a' && cursiv::to_lower('z') == 'z' &&
-              cursiv::to_lower('_') == '_');
+// ikw is the case-insensitive keyword.
 static_assert(std::is_same_v<std::remove_cv_t<decltype(ikw<"and">)>,
                              Lit<"and", true, detail::WordBound>>);
 

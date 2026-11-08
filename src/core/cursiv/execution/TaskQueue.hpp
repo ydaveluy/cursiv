@@ -14,7 +14,7 @@
 // the last item. Old arrays are kept, not freed, since a thief may still be
 // reading one after a resize; only the owner's destruction is safe to reclaim.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 template <class T>
 class TaskQueue {
@@ -134,4 +134,4 @@ class TaskQueue {
   std::vector<Array*> _garbage;  // owner only
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

@@ -21,9 +21,9 @@ constexpr std::uint32_t kNone = 0xFFFFFFFFU;
 
 }  // namespace
 
-NamedNodes collect_named_nodes(const Document& document,
-                               const NameProvider& names,
-                               const CancellationToken& token) {
+detail::NamedNodes detail::collect_named_nodes(const Document& document,
+                                               const NameProvider& names,
+                                               const CancellationToken& token) {
   const auto& all = document.parseResult.nodes();
   NamedNodes named;
   // A record is not a key: `wrap` builds its wrapper at the record its content

@@ -4,8 +4,8 @@
 #include <string_view>
 
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
+#include "support/AstText.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"
 
@@ -43,7 +43,7 @@ std::string read(const cursiv::Parser& parser, const cursiv::AstReflection& r,
   if (!result.accepted || !result.diagnostics.empty() || !result.value)
     return "refused";
   std::string out;
-  cursiv::test::ast_of(r, *result.value, out);
+  support::ast_of(r, *result.value, out);
   return out;
 }
 

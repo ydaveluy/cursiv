@@ -39,7 +39,6 @@
 #include "cursiv/shared/runtime/LexReading.hpp"
 #include "cursiv/shared/runtime/Scan.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/lr/AlikeCandidatesGrammar.hpp"
 #include "engines/lr/AuditGrammar.hpp"
@@ -57,6 +56,7 @@
 #include "guard/generated/G/Table.hpp"
 #include "guardtrivia/generated/G/Module.hpp"
 #include "guardtrivia/generated/G/Table.hpp"
+#include "support/AstText.hpp"
 
 #include "lraudit/generated/G/Module.hpp"
 #include "lraudit/generated/G/Table.hpp"

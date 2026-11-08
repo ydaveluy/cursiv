@@ -20,11 +20,15 @@ namespace cursiv::test {
 
 [[nodiscard]] std::string rangeToString(const lsp::Range& range);
 
+namespace detail {
+
 [[nodiscard]] lsp::Range markedRange(
     const Document& document, const std::pair<TextOffset, TextOffset>& span);
 
 // The check three providers make on a span they answered with, and the sentence
 // it fails by.
 void expectSameRange(const lsp::Range& actual, const lsp::Range& expected);
+
+}  // namespace detail
 
 }  // namespace cursiv::test

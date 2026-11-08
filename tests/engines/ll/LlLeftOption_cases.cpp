@@ -7,11 +7,11 @@
 
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/LeftOptionGrammar.hpp"
 #include "leftoptionll/generated/Ll/Module.hpp"
 #include "leftoptionlr/generated/Lr/Module.hpp"
+#include "support/AstText.hpp"
 
 namespace left_option_cases {
 namespace {
@@ -50,9 +50,9 @@ Reading read(const cursiv::Parser& parser, const cursiv::AstReflection& r,
   }
   out.text = doc->value == nullptr;
   out.value = out.text ? std::string(doc->text) : show(doc->value);
-  out.records = cursiv::test::records(result.cst());
-  cursiv::test::ast_of(r, *result.value, out.tree);
-  cursiv::test::spans_of(r, result.cst(), *result.value, out.tree);
+  out.records = support::records(result.cst());
+  support::ast_of(r, *result.value, out.tree);
+  support::spans_of(r, result.cst(), *result.value, out.tree);
   return out;
 }
 

@@ -1,18 +1,15 @@
 #pragma once
 
 #include <string>
-#include <string_view>
 
 #include "cursiv/observability/ObservabilitySink.hpp"
 
-// The one-line rendering of an observation, exposed for the sink a host
+// The one-line rendering of an observation, the one the standard error sink
 // writes. Control characters are flattened to spaces, so one observation is
 // one line.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 [[nodiscard]] std::string format_observation(const Observation&);
-[[nodiscard]] std::string_view to_string(ObservationSeverity) noexcept;
-[[nodiscard]] std::string_view to_string(ObservationCode) noexcept;
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

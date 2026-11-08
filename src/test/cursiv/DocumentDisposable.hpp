@@ -12,9 +12,9 @@ struct CoreServices;
 struct Document;
 }  // namespace cursiv
 
-namespace cursiv::test {
+namespace cursiv::test::detail {
 
 [[nodiscard]] Disposable documentDisposable(const CoreServices& services,
                                             std::shared_ptr<Document> document);
 
-}  // namespace cursiv::test
+}  // namespace cursiv::test::detail

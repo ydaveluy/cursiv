@@ -37,7 +37,7 @@ class VirtualFileSystemProvider final : public FileSystemProvider {
 
   [[nodiscard]] bool isDirectory(std::string_view uri) const;
 
-  UriTrie<Entry> _trie;
+  cursiv::detail::UriTrie<Entry> _trie;
 };
 
 }  // namespace cursiv::test

@@ -76,6 +76,54 @@ constexpr std::size_t kMaxOutlineDepth = 16;
 constexpr std::string_view kSeverities[] = {"error", "warning", "information",
                                             "hint"};
 
+// `file` (required), `line` and `column` (1-based, utf-16 columns).
+json::Value tool_position_schema() {
+  json::Object properties;
+  properties["file"] =
+      tool_property("string", "path or file:// uri of the document");
+  properties["line"] = tool_property("integer", "1-based line");
+  properties["column"] =
+      tool_property("integer", "1-based column, in utf-16 units");
+  json::Array required;
+  required.emplace_back(json::String("file"));
+  required.emplace_back(json::String("line"));
+  required.emplace_back(json::String("column"));
+  return tool_object_schema(std::move(properties), std::move(required));
+}
+
+// The three positional arguments, resolved to the store's vocabulary --
+// 0-based here, 1-based on the wire.
+struct McpToolPosition {
+  std::string uri;
+  std::uint32_t line = 0;
+  std::uint32_t column = 0;
+};
+
+// Throws a model-readable message on a miss; the endpoint turns it into an
+// `isError` result.
+McpToolPosition tool_position(const json::Value& arguments) {
+  const json::Value* const file = tool_argument(arguments, "file");
+  const json::Value* const line = tool_argument(arguments, "line");
+  const json::Value* const column = tool_argument(arguments, "column");
+  if (file == nullptr || !file->isString())
+    throw std::invalid_argument("'file' names the document");
+  if (line == nullptr || !line->isInteger() || line->integer() < 1)
+    throw std::invalid_argument("'line' is 1-based");
+  if (column == nullptr || !column->isInteger() || column->integer() < 1)
+    throw std::invalid_argument("'column' is 1-based");
+  return {tool_file_uri(file->string()),
+          static_cast<std::uint32_t>(line->integer() - 1),
+          static_cast<std::uint32_t>(column->integer() - 1)};
+}
+
+// `line:column`, 1-based, the convention every answer speaks.
+void append_tool_position(std::string& out, const Document& document,
+                          TextOffset offset) {
+  const Position position = document.textDocument().positionAt(offset);
+  out += std::to_string(position.line + 1);
+  out += ':';
+  out += std::to_string(position.character + 1);
+}
 
 void append_location(std::string& out, const Document& document,
                      const AstNode* node) {
@@ -91,7 +139,8 @@ void append_diagnostics(std::string& out, const Document& document) {
   all.reserve(document.diagnostics.size());
   for (const Diagnostic& diagnostic : document.diagnostics)
     all.push_back(&diagnostic);
-  const std::vector<JsonValue::Array> spelled = spelling_actions(document, all);
+  const std::vector<JsonValue::Array> spelled =
+      detail::spelling_actions(document, all);
   for (std::size_t i = 0; i < all.size(); ++i) {
     const Diagnostic& diagnostic = *all[i];
     out += '[';
@@ -111,7 +160,7 @@ void append_diagnostics(std::string& out, const Document& document) {
     const char* sep = " -- fix: ";
     const auto name = [&](const JsonValue& row) {
       if (!row.isObject()) return;
-      const auto title = row.object().find(std::string(kTitleField));
+      const auto title = row.object().find(std::string(detail::kTitleField));
       if (title == row.object().end() || !title->second.isString()) return;
       out += sep;
       out += title->second.string();
@@ -119,7 +168,7 @@ void append_diagnostics(std::string& out, const Document& document) {
     };
     if (diagnostic.data.has_value() && diagnostic.data->isObject()) {
       const JsonValue::Object& data = diagnostic.data->object();
-      const auto rows = data.find(std::string(kDefaultCodeActionsKey));
+      const auto rows = data.find(std::string(detail::kDefaultCodeActionsKey));
       if (rows != data.end() && rows->second.isArray())
         for (const JsonValue& row : rows->second.array()) name(row);
     }
@@ -969,8 +1018,8 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
             shared, tool_file_uri(file->string()), DocumentState::Parsed, token,
             [&](const Document& document, const CoreServices& language,
                 std::string& out) {
-              const NamedNodes named =
-                  collect_named_nodes(document, *language.nameProvider, token);
+              const detail::NamedNodes named = detail::collect_named_nodes(
+                  document, *language.nameProvider, token);
               // Postorder: an owner comes after what it owns, so each list
               // below is in text order and each count is final when read.
               std::vector<std::vector<std::size_t>> owned(named.nodes.size());
@@ -978,7 +1027,7 @@ void DefaultMcpService::registerDocumentSymbolsTool(McpServer& server) const {
               std::vector<std::size_t> below(named.nodes.size(), 0);
               for (std::size_t i = 0; i < named.nodes.size(); ++i) {
                 const std::size_t owner = named.owners[i];
-                if (owner == NamedNodes::kNoOwner) {
+                if (owner == detail::NamedNodes::kNoOwner) {
                   roots.push_back(i);
                   continue;
                 }
@@ -1031,7 +1080,7 @@ std::vector<NextFeature> features_at(const Document& document,
                                      CstLeaf& word) {
   const Cst& cst = document.parseResult.cst();
   std::vector<NextFeature> nexts;
-  word = word_at(cst, offset);
+  word = detail::word_at(cst, offset);
   if (word) {
     parser.nextFeaturesAt(cst, word.begin, word.end, nexts);
     if (!nexts.empty() || offset != word.end || offset == word.begin)

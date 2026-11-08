@@ -134,11 +134,11 @@ void GrammarSemanticTokenProvider::computeHighlighting(
            owner ? Category::Type : Category::Property);
   };
   if (whole) {
-    const NamedNodes named =
-        collect_named_nodes(document, *_core.nameProvider, token);
+    const detail::NamedNodes named =
+        detail::collect_named_nodes(document, *_core.nameProvider, token);
     std::vector<bool> owns(named.nodes.size(), false);
     for (const std::size_t owner : named.owners)
-      if (owner != NamedNodes::kNoOwner) owns[owner] = true;
+      if (owner != detail::NamedNodes::kNoOwner) owns[owner] = true;
     for (std::size_t i = 0; i < named.nodes.size(); ++i)
       declare(named.nameNodes[i], owns[i]);
   } else if (first < cst.leaf_count() && past > 0) {

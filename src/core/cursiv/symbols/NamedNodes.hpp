@@ -17,6 +17,8 @@ namespace cursiv {
 class NameProvider;
 struct Document;
 
+namespace detail {
+
 struct NamedNodes {
   static constexpr std::size_t kNoOwner =
       std::numeric_limits<std::size_t>::max();
@@ -32,5 +34,7 @@ struct NamedNodes {
 [[nodiscard]] NamedNodes collect_named_nodes(const Document& document,
                                              const NameProvider& names,
                                              const CancellationToken& token);
+
+}  // namespace detail
 
 }  // namespace cursiv

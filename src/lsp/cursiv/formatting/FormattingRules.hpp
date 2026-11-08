@@ -2,17 +2,15 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "cursiv/formatting/FormattingAction.hpp"
 
-// The vocabulary a rule is written in, and the compound shapes every
-// language repeats. None of them names a grammar, so they compile once for
-// the tree. They live at namespace scope; `AbstractFormatter` re-exposes
-// them as members so a rule reads `oneSpace`, not `cursiv::oneSpace`.
+// The vocabulary a rule is written in: the action builders, and the options
+// of the compound shapes every language repeats. `AbstractFormatter` exposes
+// them as members, so a rule reads `oneSpace`, not `cursiv::oneSpace`.
 
 namespace cursiv {
 
@@ -67,15 +65,6 @@ struct KeepActionBuilder {
   [[nodiscard]] operator FormattingAction() const { return operator()({}); }
 };
 
-// The named instances and the compound shapes live as members of
-// `AbstractFormatter`; only what a member is built from lives here.
-[[nodiscard]] FormattingAction make_spaces(
-    std::int32_t count, FormattingActionOptions options = {});
-[[nodiscard]] FormattingAction make_new_lines(
-    std::int32_t count, FormattingActionOptions options = {});
-[[nodiscard]] FormattingAction fit_actions(
-    std::initializer_list<FormattingAction> actions);
-
 struct BlockFormatOptions {
   std::optional<FormattingAction> beforeOpen = std::nullopt;
   std::optional<FormattingAction> insideEmpty = std::nullopt;
@@ -110,21 +99,5 @@ struct MultilineCommentFormatOptions {
   // comment is being made multi-line for the first time.
   std::string_view newlineStyle = {};
 };
-
-// The compound shapes, called through members of `AbstractFormatter` --
-// `formatBlock` and the three others -- a language author never spells
-// these directly.
-void do_format_block(FormattingRegion open, FormattingRegion close,
-                     FormattingRegion content,
-                     const BlockFormatOptions& options);
-
-void do_format_separated_list(FormattingRegion separators,
-                              const SeparatedListFormatOptions& options);
-
-[[nodiscard]] std::string do_format_line_comment(
-    std::string_view text, const LineCommentFormatOptions& options);
-
-[[nodiscard]] std::string do_format_multiline_comment(
-    std::string_view text, const MultilineCommentFormatOptions& options);
 
 }  // namespace cursiv

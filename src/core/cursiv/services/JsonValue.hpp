@@ -27,8 +27,9 @@ class JsonValue {
   };
 
   using Array = std::vector<JsonValue>;
-  using Object = std::unordered_map<std::string, JsonValue,
-                                    TransparentStringHash, std::equal_to<>>;
+  using Object =
+      std::unordered_map<std::string, JsonValue, detail::TransparentStringHash,
+                         std::equal_to<>>;
   using Storage = std::variant<std::nullptr_t, bool, std::int64_t, double,
                                std::string, Array, Object>;
 

@@ -16,8 +16,6 @@ namespace cursiv {
 // lower case.
 [[nodiscard]] std::string normalize_uri(std::string_view uri);
 
-[[nodiscard]] bool is_file_uri(std::string_view uri);
-
 // The local path a `file:` URI names, if it names one.
 [[nodiscard]] std::optional<std::string> file_uri_to_path(std::string_view uri);
 

@@ -26,7 +26,6 @@
 #include "cursiv/lr/table/LrProduction.hpp"
 #include "cursiv/shared/table/TermInfo.hpp"
 #include "cursiv/shared/table/Token.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/lr/GrowthGrammars.hpp"
 #include "growth/generated/G/Module.hpp"
@@ -35,6 +34,7 @@
 #include "growthfastalr/generated/Lr/Module.hpp"
 #include "growthfastalr/generated/Lr/Parser.hpp"
 #include "growthfastalr/generated/Lr/Table.hpp"
+#include "support/AstText.hpp"
 
 namespace {
 

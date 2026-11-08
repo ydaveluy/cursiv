@@ -12,11 +12,11 @@
 #include "asicases/generated/G/Module.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/lr/AsiAst.hpp"
 #include "engines/lr/ParseChecks.hpp"
 #include "engines/shared/CstAudit.hpp"
+#include "support/AstText.hpp"
 
 namespace {
 

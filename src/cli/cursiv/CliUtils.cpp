@@ -122,8 +122,18 @@ void quote_text(std::ostream& out, std::string_view text) {
   out << '\'';
 }
 
-}  // namespace
+// `help` wins over every other flag on the line. `root`, when set, is
+// scanned into the workspace before the file is judged.
+struct Invocation {
+  std::string path;
+  std::string root;
+  bool dump = false;
+  bool json = false;
+  bool help = false;
+};
 
+// Empty when the arguments do not form a run: the caller then prints the
+// usage and answers `kUsage`. `--help` always answers a value.
 std::optional<Invocation> parse_args(int argc, char** argv) {
   Invocation invocation;
   // Help is independent of whether the rest forms a valid invocation.
@@ -162,6 +172,7 @@ std::optional<Invocation> parse_args(int argc, char** argv) {
   return invocation;
 }
 
+// The usage line, with the extensions the registered languages serve.
 void print_usage(std::string_view program, const ServiceRegistry& registry,
                  std::ostream& out) {
   out << "usage: " << program
@@ -175,6 +186,8 @@ void print_usage(std::string_view program, const ServiceRegistry& registry,
       << "  --help        print this usage and answer 0.\n"
       << "  this binary serves " << served_extensions(registry) << "\n";
 }
+
+}  // namespace
 
 void initialize_root(std::string_view root, SharedCoreServices& shared) {
   std::error_code error;
@@ -297,10 +310,12 @@ void print_diagnostics(const Document& document, std::string_view displayPath,
   }
 }
 
+namespace {
+
 // The AST class built at each record, by record id: the grammar names only
 // the records of terminals and data rules. A wrapper can share its content's
 // record; the class kept there is the wrapper's, whose parent sits elsewhere.
-static std::vector<std::string_view> ast_classes(const ParseResult& parsed) {
+std::vector<std::string_view> ast_classes(const ParseResult& parsed) {
   std::vector<std::string_view> classes(parsed.cst().size());
   for (const AstNode* const node : parsed.nodes()) {
     if (node == nullptr || node->type == nullptr ||
@@ -314,6 +329,9 @@ static std::vector<std::string_view> ast_classes(const ParseResult& parsed) {
   return classes;
 }
 
+// The concrete syntax tree, indented, in source order. A node is named by the
+// AST class it built, or else by its terminal or data rule: the tree does not
+// know what its element ids mean, so `grammar` says it.
 void dump_cst(const Document& document, const Grammar& grammar,
               std::ostream& out) {
   // Not gated on the AST: the tree is whatever the parser built, and a
@@ -362,7 +380,7 @@ void dump_cst(const Document& document, const Grammar& grammar,
 
 // Escape controls and replace ill-formed UTF-8 by U+FFFD. Valid spans go to
 // the stream together, without copying or an output operation per byte.
-static void write_json_string(std::ostream& out, std::string_view text) {
+void write_json_string(std::ostream& out, std::string_view text) {
   out << '"';
   std::size_t plain = 0;
   const auto writePlain = [&](std::size_t end) {
@@ -415,7 +433,7 @@ static void write_json_string(std::ostream& out, std::string_view text) {
 
 // Offsets are uint32_t: ten decimal digits suffice. Stream flags and locale
 // must not change JSON numbers into hexadecimal or grouped decimal text.
-static void write_json_offset(std::ostream& out, TextOffset offset) {
+void write_json_offset(std::ostream& out, TextOffset offset) {
   char digits[10];
   const auto [end, error] =
       std::to_chars(digits, digits + sizeof(digits), offset);
@@ -423,6 +441,10 @@ static void write_json_offset(std::ostream& out, TextOffset offset) {
   out.write(digits, end - digits);
 }
 
+// The same tree as JSON, on one line: per node `element`, `begin` and `end`,
+// plus `type` (the AST class built there), `hidden` and `recovered` when set,
+// and `text` on a leaf. The text is not cut, since this form is meant to be
+// read back; ill-formed UTF-8 is replaced by U+FFFD in the output only.
 void dump_cst_json(const Document& document, const Grammar& grammar,
                    std::ostream& out) {
   const cursiv::Cst& cst = document.parseResult.cst();
@@ -485,6 +507,9 @@ void dump_cst_json(const Document& document, const Grammar& grammar,
   out << '\n';
 }
 
+// The tree (`--json` wins over `--dump`) on `out`, and the diagnostics and
+// the verdict line on `err`, so a script piping the tree does not see them
+// mixed in. Throws `std::ios_base::failure` when a write fails.
 int report(const Document& document, const Grammar& grammar,
            std::string_view displayPath, bool dump, bool json,
            std::ostream& out, std::ostream& err) {
@@ -503,8 +528,10 @@ int report(const Document& document, const Grammar& grammar,
   return errors ? kDiagnostics : kClean;
 }
 
+}  // namespace
+
 int run_command(const std::function<int()>& command) {
-  enter_host_directory();
+  detail::enter_host_directory();
   try {
     const int status = command();
     flush_output(std::cout);

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <span>
@@ -36,11 +37,14 @@
 
 namespace cursiv {
 
-// Which records write this member, as a consteval bitset over the element
-// table. Level-invariant by construction: a collapsed grammar relabels the
-// payload's record, and the field column travels with it.
+namespace detail {
+
+// The AST class that declares the member `Ptr` points to: a rule may name a
+// member of its node's class or of one of its bases.
 template <auto Ptr>
-using feature_owner = typename cursiv::detail::field_tag<Ptr>::owner;
+using feature_owner = typename field_tag<Ptr>::owner;
+
+}  // namespace detail
 
 template <class NodeT>
 class NodeFormatter {
@@ -69,7 +73,7 @@ class NodeFormatter {
 
   // The record that writes `Feature`; the first when the member is a list.
   template <auto Feature>
-    requires std::derived_from<NodeT, feature_owner<Feature>>
+    requires std::derived_from<NodeT, detail::feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property() const {
     return property<Feature>(std::size_t{0});
   }
@@ -79,7 +83,7 @@ class NodeFormatter {
   // diagnostic uses, so the two can never disagree about where a member was
   // written.
   template <auto Feature>
-    requires std::derived_from<NodeT, feature_owner<Feature>>
+    requires std::derived_from<NodeT, detail::feature_owner<Feature>>
   [[nodiscard]] FormattingRegion property(std::size_t index) const {
     if (!searchable()) return FormattingRegion(_cst, {}, _collector);
     const std::optional<CstNodeView> at = find_node_for_feature(
@@ -92,7 +96,7 @@ class NodeFormatter {
   // the order given.
   template <auto... Features>
     requires(sizeof...(Features) > 0 &&
-             (std::derived_from<NodeT, feature_owner<Features>> && ...))
+             (std::derived_from<NodeT, detail::feature_owner<Features>> && ...))
   [[nodiscard]] FormattingRegion properties() const {
     std::vector<NodeId> found;
     if (searchable())
@@ -247,13 +251,9 @@ class AbstractFormatter : public Formatter {
   static constexpr NoIndentActionBuilder noIndent{};
 
   [[nodiscard]] static FormattingAction spaces(
-      std::int32_t count, FormattingActionOptions options = {}) {
-    return make_spaces(count, options);
-  }
+      std::int32_t count, FormattingActionOptions options = {});
   [[nodiscard]] static FormattingAction newLines(
-      std::int32_t count, FormattingActionOptions options = {}) {
-    return make_new_lines(count, options);
-  }
+      std::int32_t count, FormattingActionOptions options = {});
 
   // Several candidate shapes, and the engine keeps the one the author already
   // wrote: `fit(oneSpace, newLine)` leaves a one-line construction on one line
@@ -262,16 +262,15 @@ class AbstractFormatter : public Formatter {
     requires(sizeof...(Actions) > 0 &&
              (std::convertible_to<Actions, FormattingAction> && ...))
   [[nodiscard]] static FormattingAction fit(Actions&&... actions) {
-    return fit_actions(
+    return fitAll(
         {static_cast<FormattingAction>(std::forward<Actions>(actions))...});
   }
 
+  // An empty block stays on its line; a block with content opens a line
+  // after `open` and before `close`, and indents the content.
   static void formatBlock(FormattingRegion open, FormattingRegion close,
                           FormattingRegion content,
-                          const BlockFormatOptions& options) {
-    do_format_block(std::move(open), std::move(close), std::move(content),
-                    options);
-  }
+                          const BlockFormatOptions& options);
   static void formatBlock(FormattingRegion open, FormattingRegion close,
                           FormattingRegion content = {}) {
     formatBlock(std::move(open), std::move(close), std::move(content),
@@ -279,17 +278,13 @@ class AbstractFormatter : public Formatter {
   }
 
   static void formatSeparatedList(FormattingRegion separators,
-                                  const SeparatedListFormatOptions& options) {
-    do_format_separated_list(std::move(separators), options);
-  }
+                                  const SeparatedListFormatOptions& options);
   static void formatSeparatedList(FormattingRegion separators) {
     formatSeparatedList(std::move(separators), SeparatedListFormatOptions{});
   }
 
   [[nodiscard]] static std::string formatLineComment(
-      std::string_view text, const LineCommentFormatOptions& options) {
-    return do_format_line_comment(text, options);
-  }
+      std::string_view text, const LineCommentFormatOptions& options);
   [[nodiscard]] static std::string formatLineComment(std::string_view text) {
     return formatLineComment(text, LineCommentFormatOptions{});
   }
@@ -304,9 +299,7 @@ class AbstractFormatter : public Formatter {
   }
 
   [[nodiscard]] static std::string formatMultilineComment(
-      std::string_view text, const MultilineCommentFormatOptions& options) {
-    return do_format_multiline_comment(text, options);
-  }
+      std::string_view text, const MultilineCommentFormatOptions& options);
   [[nodiscard]] static std::string formatMultilineComment(
       std::string_view text) {
     return formatMultilineComment(text, MultilineCommentFormatOptions{});
@@ -376,6 +369,10 @@ class AbstractFormatter : public Formatter {
       const CancellationToken& token) const;
 
  private:
+  // The moves of every action, ordered from the tightest to the loosest.
+  [[nodiscard]] static FormattingAction fitAll(
+      std::initializer_list<FormattingAction> actions);
+
   using FormatCallback = std::function<void(
       const AbstractFormatter&, FormattingBuilder&, const AstNode*)>;
   using HiddenCallback =

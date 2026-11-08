@@ -63,8 +63,8 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
   if (!document.hasAst()) return {};
 
   const Cst& cst = document.parseResult.cst();
-  const NamedNodes named =
-      collect_named_nodes(document, *_core.nameProvider, token);
+  const detail::NamedNodes named =
+      detail::collect_named_nodes(document, *_core.nameProvider, token);
   std::optional<TextRange> entry;
 
   std::vector<lsp::DocumentSymbol> symbols;
@@ -86,7 +86,7 @@ std::vector<lsp::DocumentSymbol> DefaultDocumentSymbolProvider::getSymbols(
   std::vector<lsp::DocumentSymbol> roots;
   for (std::size_t i = 0; i < symbols.size(); ++i) {
     const std::size_t owner = named.owners[i];
-    if (owner == NamedNodes::kNoOwner) {
+    if (owner == detail::NamedNodes::kNoOwner) {
       roots.push_back(std::move(symbols[i]));
       continue;
     }

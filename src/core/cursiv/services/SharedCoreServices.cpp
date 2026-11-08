@@ -38,7 +38,7 @@ void SharedCoreServices::visitServices(
 }
 
 std::string_view SharedCoreServices::firstMissingService() const {
-  return first_missing_service(*this);
+  return detail::first_missing_service(*this);
 }
 
 void install_default_shared_core_services(SharedCoreServices& shared) {

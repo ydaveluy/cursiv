@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -27,7 +26,6 @@
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/ConcurrentTable.hpp"
 #include "cursiv/utils/DocumentCache.hpp"
-#include "cursiv/utils/EditDistance.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/utils/RoundMarks.hpp"
 #include "cursiv/utils/SimpleCache.hpp"
@@ -38,6 +36,7 @@
 #include "cursiv/workspace/DocumentBuilder.hpp"
 #include "cursiv/workspace/DocumentFactory.hpp"
 #include "cursiv/workspace/Documents.hpp"
+#include "support/RetiredTables.hpp"
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 
@@ -121,20 +120,6 @@ void run() {
 
 }  // namespace case_fold
 
-namespace edit_distance {
-
-void run() {
-  const auto unlimited = std::numeric_limits<std::size_t>::max();
-  CHECK(cursiv::edit_distance("a", "b", unlimited) == 1);
-  CHECK(cursiv::edit_distance("", "abc", unlimited) == 3);
-  CHECK(cursiv::edit_distance("abcd", "a", unlimited) == 3);
-  CHECK(cursiv::edit_distance("a", "abcd", unlimited - 1) == 3);
-  CHECK(cursiv::edit_distance(std::string(65, 'a'), "a", unlimited) ==
-        unlimited);
-}
-
-}  // namespace edit_distance
-
 // A `function_ref` calls what it was bound to: a function, a pointer read at
 // binding, a borrowed callable whose later state it sees.
 namespace function_ref {
@@ -192,16 +177,17 @@ namespace uri_trie {
 
 namespace {
 
-std::vector<int> all(const cursiv::UriTrie<int>& trie, std::string_view uri) {
+std::vector<int> all(const cursiv::detail::UriTrie<int>& trie,
+                     std::string_view uri) {
   return trie.findAll(uri);
 }
 
 void moving_reparents_the_root_children() {
-  cursiv::UriTrie<int> moved;
+  cursiv::detail::UriTrie<int> moved;
   {
-    cursiv::UriTrie<int> original;
+    cursiv::detail::UriTrie<int> original;
     original.insert("mem:///leaf", 1);
-    cursiv::UriTrie<int> temporary(std::move(original));
+    cursiv::detail::UriTrie<int> temporary(std::move(original));
     moved = std::move(temporary);
   }
   CHECK(moved.has("mem:///leaf"));
@@ -214,7 +200,7 @@ void moving_reparents_the_root_children() {
 }
 
 void exact_prefix_and_subtree_erasure() {
-  cursiv::UriTrie<int> trie;
+  cursiv::detail::UriTrie<int> trie;
   trie.insert("file:///w/a/x.ws", 1);
   trie.insert("file:///w/a/y.ws", 2);
   trie.insert("file:///w/b/z.ws", 3);
@@ -252,7 +238,7 @@ void* deep_path_on_a_cramped_stack(void* arg) {
   auto* const listed = static_cast<std::size_t*>(arg);
   std::string uri = "mem:///";
   for (int i = 0; i < 100000; ++i) uri += "a/";
-  cursiv::UriTrie<int> trie;
+  cursiv::detail::UriTrie<int> trie;
   trie.insert(uri + "x", 1);
   trie.insert("mem:///a/y", 2);
   *listed = trie.all().size() + trie.findAll("mem:///a").size();
@@ -294,14 +280,6 @@ void run() {
 namespace uri_utils {
 
 namespace {
-
-void the_scheme_is_recognized_whatever_its_case() {
-  CHECK(cursiv::is_file_uri("file:///a/b"));
-  CHECK(cursiv::is_file_uri("FILE:///a/b"));
-  CHECK(!cursiv::is_file_uri("http://x/a"));
-  CHECK(cursiv::is_file_uri("file:/a"));
-  CHECK(cursiv::is_file_uri("file:/"));
-}
 
 // `file:/path` has no authority at all (RFC 8089): a Java client sends it
 // where the folder scan sends `file:///path`, and both name one document.
@@ -590,7 +568,6 @@ void a_drive_letter_normalizes_on_any_host() {
 }
 
 void run() {
-  the_scheme_is_recognized_whatever_its_case();
   a_single_slash_names_the_same_file();
   an_escape_does_not_hide_an_extension();
   a_host_is_lower_case();
@@ -1116,8 +1093,7 @@ void keys_of_one_hash_still_fit() {
   CHECK(found == kKeys);
 }
 
-// What a clear retired is freed by a collection, without waiting for the
-// next retirement.
+// Counts the values alive, so a test sees when a table's are freed.
 struct Live {
   static inline int count = 0;
   Live() { ++count; }
@@ -1125,22 +1101,6 @@ struct Live {
   Live& operator=(const Live&) = default;
   ~Live() { --count; }
 };
-
-void a_collection_frees_what_a_clear_retired() {
-  cursiv::detail::collect_retired_tables();
-  {
-    cursiv::detail::ConcurrentTable<int, Live> table;
-    {
-      Live value;
-      CHECK(table.insert(table.generation(), 1, value).has_value());
-    }
-    CHECK(Live::count == 1);
-    table.clear();
-    CHECK(Live::count == 1);
-    cursiv::detail::collect_retired_tables();
-    CHECK(Live::count == 0);
-  }
-}
 
 // A slot's tag spares a lookup the keys it cannot hold: about one key
 // compared per hit and almost none per miss, on a 32-bit target as well,
@@ -1178,7 +1138,7 @@ void a_lookup_compares_about_one_key() {
 // was retired before is freed meanwhile, and the rest once it leaves. A
 // `forEach` still running is such a reader.
 void a_guard_holds_back_only_what_follows_it() {
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   cursiv::detail::ConcurrentTable<int, Live> before;
   cursiv::detail::ConcurrentTable<int, Live> after;
   const auto fill = [](cursiv::detail::ConcurrentTable<int, Live>& table) {
@@ -1194,19 +1154,20 @@ void a_guard_holds_back_only_what_follows_it() {
   before.clear();
   reader.forEach([&](int) {
     after.clear();
-    cursiv::detail::collect_retired_tables();
+    support::collect_retired_tables();
     CHECK(Live::count == 1);
   });
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   CHECK(Live::count == 0);
 }
 
-// What holds a lot is collected soon, not after many retirements: a few
-// large tables would otherwise wait for dozens of small ones. The large
-// table's growths and clear are a dozen retirements, megabytes in all, and
-// the collection they bring frees the small table retired before them.
+// What a clear retired waits for a collection, and what holds a lot is
+// collected soon, not after many retirements: a few large tables would
+// otherwise wait for dozens of small ones. The large table the helper fills
+// and clears is a dozen retirements, megabytes in all, and the collection
+// they bring frees the small table retired before them.
 void a_large_retirement_is_collected_soon() {
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   cursiv::detail::ConcurrentTable<int, Live> small;
   {
     Live value;
@@ -1214,12 +1175,7 @@ void a_large_retirement_is_collected_soon() {
   }
   small.clear();
   CHECK(Live::count == 1);
-  cursiv::detail::ConcurrentTable<int, std::uint64_t> large;
-  for (int k = 0; k < 200000; ++k) {
-    std::uint64_t value = 0;
-    (void)large.insert(large.generation(), k, value);
-  }
-  large.clear();
+  support::collect_retired_tables();
   CHECK(Live::count == 0);
 }
 
@@ -1240,7 +1196,7 @@ void a_clear_during_a_growth_frees_its_successor() {
     }
   done = true;
   clearer.join();
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
 }
 #endif
 
@@ -1275,7 +1231,7 @@ void a_thread_gives_its_slot_back_even_from_a_late_guard() {
 void more_threads_than_slots_read_at_once() {
   constexpr int kHolders = 1024;  // one per slot: none is left after them
   constexpr int kLate = 4;
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   cursiv::detail::ConcurrentTable<int, int> table;
   int one = 1;
   (void)table.insert(table.generation(), 1, one);
@@ -1320,14 +1276,14 @@ void more_threads_than_slots_read_at_once() {
   CHECK(allInside);
   if (allInside) {
     held.clear();
-    cursiv::detail::collect_retired_tables();
+    support::collect_retired_tables();
     CHECK(Live::count == 1);
   }
   cleared = true;
   released = true;
   for (auto& thread : threads) thread.join();
   CHECK(wrong.load() == 0);
-  cursiv::detail::collect_retired_tables();
+  support::collect_retired_tables();
   CHECK(Live::count == 0);
 }
 #endif
@@ -1365,7 +1321,6 @@ void run() {
   a_slot_is_not_filled_from_a_temporary();
   keys_of_one_hash_still_fit();
   a_lookup_compares_about_one_key();
-  a_collection_frees_what_a_clear_retired();
   a_guard_holds_back_only_what_follows_it();
   a_large_retirement_is_collected_soon();
 }
@@ -1387,7 +1342,6 @@ void run() {
 int main() {
   round_marks::run();
   case_fold::run();
-  edit_distance::run();
   function_ref::run();
   uri_trie::run();
   uri_utils::run();

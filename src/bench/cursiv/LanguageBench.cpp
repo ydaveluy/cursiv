@@ -877,7 +877,7 @@ int dump_corpus(const Options& o, std::span<const Language> languages) {
 
 int cursiv::bench::run(int argc, char** argv,
                        std::span<const Language> languages) try {
-  enter_host_directory();
+  cursiv::detail::enter_host_directory();
   const Options o = options(argc, argv, languages);
   if (o.help) {
     std::printf(

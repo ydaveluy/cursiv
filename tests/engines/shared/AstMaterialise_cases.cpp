@@ -6,10 +6,10 @@
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/CursivLexicon.hpp"
 #include "cursiv/FuzzLane.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/AstMaterialiseGrammars.hpp"
 #include "engines/shared/AstTreeGrammars.hpp"
+#include "support/AstText.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -42,7 +42,7 @@ Pair readers(std::string_view prefix) {
 
 std::string tree(const Reader& r, const cursiv::ParseResult& result) {
   std::string out;
-  if (result.value) cursiv::test::ast_of(*r.reflection, *result.value, out);
+  if (result.value) support::ast_of(*r.reflection, *result.value, out);
   return out;
 }
 
@@ -368,7 +368,7 @@ std::string tree(const Engine& e, std::string_view text, std::size_t& nodes) {
   if (!r.accepted || !r.diagnostics.empty() || r.value == nullptr)
     return "<refused>";
   nodes = r.nodes().size();
-  cursiv::test::ast_of(*e.reflection, *r.value, out);
+  support::ast_of(*e.reflection, *r.value, out);
   return out;
 }
 

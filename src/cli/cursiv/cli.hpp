@@ -5,14 +5,11 @@
 
 #include <concepts>
 #include <functional>
-#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
-#include "cursiv/grammar/Grammar.hpp"
-#include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
 #include "cursiv/workspace/Document.hpp"
 
@@ -31,30 +28,6 @@ class UsageError : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
 };
-
-// `help` wins over every other flag on the line. `root`, when set, is
-// scanned into the workspace before the file is judged.
-struct Invocation {
-  std::string path;
-  std::string root;
-  bool dump = false;
-  bool json = false;
-  bool help = false;
-};
-
-/**
- * Parses the command line. Returns `std::nullopt` when the arguments do
- * not form a run, in which case the caller prints the usage and answers
- * `kUsage`. `--help` always returns a value, never the empty answer.
- */
-[[nodiscard]] std::optional<Invocation> parse_args(int argc, char** argv);
-
-/**
- * Prints the usage line, including the extensions `registry`'s languages
- * serve.
- */
-void print_usage(std::string_view program,
-                 const cursiv::ServiceRegistry& registry, std::ostream& out);
 
 /**
  * Scans `root` into the workspace, as an editor's `initialized`
@@ -82,36 +55,6 @@ void initialize_root(std::string_view root, cursiv::SharedCoreServices& shared);
  */
 void print_diagnostics(const cursiv::Document& document,
                        std::string_view displayPath, std::ostream& out);
-
-/**
- * Prints the concrete syntax tree, indented, in source order. A node is named
- * by the AST class it built, or else by its terminal or data rule. `grammar`
- * is separate because the tree itself does not know what its element ids
- * mean.
- */
-void dump_cst(const cursiv::Document& document, const cursiv::Grammar& grammar,
-              std::ostream& out);
-
-/**
- * The same tree as JSON, one line, per node `element`/`begin`/`end` plus
- * `type` (the AST class built there), `hidden`/`recovered` when set and
- * `text` on a leaf. Unlike `dump_cst`,
- * leaf text is not truncated, since this form is meant to be re-parsed.
- * Ill-formed UTF-8 is replaced by U+FFFD in the output only.
- */
-void dump_cst_json(const cursiv::Document& document,
-                   const cursiv::Grammar& grammar, std::ostream& out);
-
-/**
- * Prints the tree (`--json` wins over `--dump` if both are set) to `out`,
- * and diagnostics plus the verdict line to `err`, so a script piping the
- * tree does not see them mixed in.
- * Flushes the output and throws std::ios_base::failure if writing fails.
- */
-[[nodiscard]] int report(const cursiv::Document& document,
-                         const cursiv::Grammar& grammar,
-                         std::string_view displayPath, bool dump, bool json,
-                         std::ostream& out, std::ostream& err);
 
 /**
  * Runs a command of the language's own, such as `generate`, with the exit

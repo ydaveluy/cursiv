@@ -1,6 +1,7 @@
 #include "cursiv/utils/UriUtils.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -15,6 +16,21 @@
 namespace cursiv {
 
 namespace {
+
+// ASCII case folding: the scheme, the host and a drive letter are folded, and
+// a byte past ASCII is left as it is.
+constexpr auto kLowerTable = [] {
+  std::array<char, 256> t{};
+  for (int i = 0; i < 256; ++i)
+    t[static_cast<std::size_t>(i)] = (i >= 'A' && i <= 'Z')
+                                         ? static_cast<char>(i - 'A' + 'a')
+                                         : static_cast<char>(i);
+  return t;
+}();
+
+constexpr char to_lower(char c) {
+  return kLowerTable[static_cast<unsigned char>(c)];
+}
 
 bool has_file_scheme(std::string_view uri) {
   if (uri.size() < 5) return false;
@@ -164,7 +180,7 @@ bool same_place(const UriParts& a, const UriParts& b) {
   return a.scheme == b.scheme && a.authority == b.authority;
 }
 
-std::string lower_case(std::string_view text) {
+std::string ascii_lower(std::string_view text) {
   std::string out(text);
   for (char& c : out) c = to_lower(c);
   return out;
@@ -201,7 +217,7 @@ std::string format_authority(std::string_view authority, Read read) {
     out += '@';
     authority.remove_prefix(at + 1);
   }
-  const std::string host = lower_case(read(authority));
+  const std::string host = ascii_lower(read(authority));
   if (const std::size_t colon = host.rfind(':');
       colon == std::string::npos) {
     out += percent_encode(host, kAuthorityBare);
@@ -309,7 +325,7 @@ std::string normalize_uri(std::string_view uri) {
   if (parts.scheme.empty() || is_normal_uri(parts)) return std::string(uri);
   // Each component decoded, then written back one way: the spelling depends on
   // the text alone, never on the host.
-  const std::string scheme = lower_case(parts.scheme);
+  const std::string scheme = ascii_lower(parts.scheme);
   std::string out = scheme + ':';
   const std::string authority = format_authority(
       parts.authority,
@@ -329,8 +345,6 @@ std::string normalize_uri(std::string_view uri) {
     out += '#' + percent_encode(percent_decode(parts.fragment), kUnreserved);
   return out;
 }
-
-bool is_file_uri(std::string_view uri) { return has_file_scheme(uri); }
 
 std::optional<std::string> file_uri_to_path(std::string_view uri) {
   if (!has_file_scheme(uri)) return std::nullopt;

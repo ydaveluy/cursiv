@@ -79,7 +79,7 @@ Disposable expectCompletion(const LspServices& services,
                               " completion items");
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (base.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

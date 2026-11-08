@@ -9,8 +9,8 @@
 // at the junction: the core never learns the framework's type, the framework
 // never learns the core's.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 [[nodiscard]] lsp::LSPAny to_lsp_any(const JsonValue& value);
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

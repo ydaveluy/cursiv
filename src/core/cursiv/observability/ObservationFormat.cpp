@@ -27,8 +27,6 @@ void append_field(std::string& out, std::string_view key,
   append_flat(out, value);
 }
 
-}  // namespace
-
 std::string_view to_string(ObservationSeverity severity) noexcept {
   using enum ObservationSeverity;
   switch (severity) {
@@ -69,7 +67,9 @@ std::string_view to_string(ObservationCode code) noexcept {
   return "?";
 }
 
-std::string format_observation(const Observation& observation) {
+}  // namespace
+
+std::string detail::format_observation(const Observation& observation) {
   std::string formatted;
   formatted.reserve(observation.message.size() + 64);
   formatted.append(to_string(observation.severity));

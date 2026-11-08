@@ -22,9 +22,9 @@
 #include "cursiv/workspace/TextDocument.hpp"
 #include "cursiv/completion/CompletionContext.hpp"
 #include "cursiv/completion/DefaultCompletionProvider.hpp"
+#include "cursiv/formatting/AbstractFormatter.hpp"
 #include "cursiv/formatting/Formatter.hpp"
 #include "cursiv/formatting/FormattingEngine.hpp"
-#include "cursiv/formatting/FormattingRules.hpp"
 #include "cursiv/services/LspServices.hpp"
 #include "cursiv/text/LspPosition.hpp"
 #include "cursiv/Check.hpp"
@@ -760,15 +760,15 @@ void indentation_counts_do_not_wrap() {
   const auto chosen = options();
   bool rejected = false;
   try {
-    (void)cursiv::indentation_text(std::numeric_limits<std::int32_t>::max(),
-                                   chosen);
+    (void)cursiv::detail::indentation_text(
+        std::numeric_limits<std::int32_t>::max(), chosen);
   } catch (const std::length_error&) {
     rejected = true;
   }
   CHECK(rejected);
 
   const cursiv::Cst cst;
-  cursiv::FormattingActions actions(0);
+  cursiv::detail::FormattingActions actions(0);
   const cursiv::HiddenNodeFormatter negative(
       cst, cursiv::kNoNode, std::numeric_limits<std::int32_t>::min(), chosen,
       "\n", actions);
@@ -962,7 +962,7 @@ void a_hidden_callback_can_add_rules_after_a_deferred_append() {
   const cursiv::Document& document =
       *world.built("datatype String\n// c\nentity Person {}\n");
   const auto& cst = document.parseResult.cst();
-  cursiv::FormattingActions actions(cst.size());
+  cursiv::detail::FormattingActions actions(cst.size());
   bool registered = false;
   for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
     if (cst.childless(id) && cst.text(id) == "String") {
@@ -974,7 +974,7 @@ void a_hidden_callback_can_add_rules_after_a_deferred_append() {
   }
   CHECK(registered);
   int comments = 0;
-  const auto edits = cursiv::run_formatting(
+  const auto edits = cursiv::detail::run_formatting(
       document, cst, options(), std::nullopt, actions,
       [&](cursiv::NodeId id, std::int32_t level, std::string_view) {
         ++comments;
@@ -997,7 +997,7 @@ void comment_margins_follow_all_text_document_line_breaks() {
     const cursiv::Document& document = *world.built(
         prefix + "/* c" + newline + " * d" + newline + " */" + suffix);
     const auto& cst = document.parseResult.cst();
-    cursiv::FormattingActions actions(cst.size());
+    cursiv::detail::FormattingActions actions(cst.size());
     for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
       if (cst.childless(id) && cst.text(id) == "String") {
         actions.collect(id, cursiv::FormattingMode::Append,
@@ -1005,9 +1005,10 @@ void comment_margins_follow_all_text_document_line_breaks() {
         break;
       }
     }
-    const auto edits = cursiv::run_formatting(
+    const auto edits = cursiv::detail::run_formatting(
         document, cst, options(), std::nullopt, actions,
-        [](cursiv::NodeId, std::int32_t, std::string_view) {}, cursiv::kNoCancel);
+        [](cursiv::NodeId, std::int32_t, std::string_view) {},
+        cursiv::kNoCancel);
     CHECK(applied(document, edits) ==
           prefix + "  /* c" + newline + "   * d" + newline + "   */" + suffix);
   }
@@ -1045,7 +1046,7 @@ void a_block_comment_keeps_its_alignment_over_a_mixed_margin() {
   const cursiv::Document& document = *world.built(
       "datatype String\n\t /* c\n\t  * d\n\t  */\nentity Person {}\n");
   const auto& cst = document.parseResult.cst();
-  cursiv::FormattingActions actions(cst.size());
+  cursiv::detail::FormattingActions actions(cst.size());
   for (cursiv::NodeId id = 0; id < cst.size(); ++id) {
     if (cst.childless(id) && cst.text(id) == "String") {
       actions.collect(id, cursiv::FormattingMode::Append,
@@ -1053,7 +1054,7 @@ void a_block_comment_keeps_its_alignment_over_a_mixed_margin() {
       break;
     }
   }
-  const auto edits = cursiv::run_formatting(
+  const auto edits = cursiv::detail::run_formatting(
       document, cst, options(), std::nullopt, actions,
       [](cursiv::NodeId, std::int32_t, std::string_view) {}, cursiv::kNoCancel);
   CHECK(applied(document, edits) ==
@@ -1207,6 +1208,11 @@ void a_multiline_comment_is_reindented() {
   CHECK(format(world, *formatted).empty());
 }
 
+// The comment shapes of the base, as a language's formatter calls them.
+struct Comments : cursiv::AbstractFormatter {
+  using AbstractFormatter::formatMultilineComment;
+};
+
 // Blanks right after the opening marker are no line of the comment: the shape
 // one pass gives is the one the next pass keeps, whitespace normalized or not.
 void a_doc_comment_reaches_its_shape_in_one_pass() {
@@ -1233,9 +1239,8 @@ void a_doc_comment_reaches_its_shape_in_one_pass() {
          {"/** \n * Text\n */", "/**  Text\n */", "/**\t\n *  a  b\n */"}) {
       const cursiv::MultilineCommentFormatOptions chosen{.normalizeWhitespace =
                                                              normalize};
-      const std::string once =
-          cursiv::do_format_multiline_comment(text, chosen);
-      CHECK(cursiv::do_format_multiline_comment(once, chosen) == once);
+      const std::string once = Comments::formatMultilineComment(text, chosen);
+      CHECK(Comments::formatMultilineComment(once, chosen) == once);
     }
 }
 

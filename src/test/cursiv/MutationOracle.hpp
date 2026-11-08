@@ -18,6 +18,8 @@
 
 namespace cursiv::test {
 
+namespace detail {
+
 inline constexpr char kMutationAlphabet[] =
     " \t\n{}[]()<>,;:=+-*/\"'@0123abcXY";
 
@@ -55,6 +57,8 @@ inline void mutation_floor(std::string_view lang, const cursiv::Grammar& grammar
               lang.data(), what.c_str(), broken);
 }
 
+}  // namespace detail
+
 inline void mutation_oracle(const cursiv::Parser& engine, std::string_view lang,
                             const std::string& seed) {
   const Proj valid = project(engine, seed);
@@ -67,11 +71,11 @@ inline void mutation_oracle(const cursiv::Parser& engine, std::string_view lang,
   const cursiv::Grammar& grammar = engine.getGrammar();
   const auto judge = [&](const std::string& doc, char op, std::size_t pos,
                          char byte) {
-    mutation_floor(lang, grammar, engine.parse(doc), doc,
-                   mutation_name(op, pos, byte));
+    detail::mutation_floor(lang, grammar, engine.parse(doc), doc,
+                           detail::mutation_name(op, pos, byte));
   };
   for (std::size_t pos = 0; pos <= seed.size(); ++pos) {
-    for (const char c : std::string_view(kMutationAlphabet)) {
+    for (const char c : std::string_view(detail::kMutationAlphabet)) {
       std::string doc = seed;
       doc.insert(doc.begin() + static_cast<long>(pos), c);
       judge(doc, 'i', pos, c);
@@ -80,7 +84,7 @@ inline void mutation_oracle(const cursiv::Parser& engine, std::string_view lang,
     std::string doc = seed;
     doc.erase(doc.begin() + static_cast<long>(pos));
     judge(doc, 'd', pos, 0);
-    for (const char c : std::string_view(kMutationAlphabet)) {
+    for (const char c : std::string_view(detail::kMutationAlphabet)) {
       if (c == seed[pos]) continue;
       std::string rep = seed;
       rep[pos] = c;

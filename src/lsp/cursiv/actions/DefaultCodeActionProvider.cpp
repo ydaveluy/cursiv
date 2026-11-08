@@ -89,7 +89,8 @@ namespace {
     }
   }
   return !diagnostic.data.has_value() ||
-         same_json_payload(to_lsp_any(*diagnostic.data), *candidate.data);
+         same_json_payload(detail::to_lsp_any(*diagnostic.data),
+                           *candidate.data);
 }
 
 // One edit row into one code action; null when the row is malformed, stale
@@ -103,17 +104,17 @@ namespace {
   // The edit is derived from kind/title/newText/begin/end/revision alone: the
   // `editKind` the writer also carries is not consumed here -- insert against
   // replace is what `begin == end` already says.
-  const JsonValue* kind = field(object, kKindField);
-  const JsonValue* title = field(object, kTitleField);
-  const JsonValue* newText = field(object, kNewTextField);
-  const JsonValue* begin = field(object, kBeginField);
-  const JsonValue* end = field(object, kEndField);
-  const JsonValue* revision = field(object, kRevisionField);
-  if (kind == nullptr || !kind->isString() || kind->string() != kQuickFixKind ||
-      title == nullptr || !title->isString() || newText == nullptr ||
-      !newText->isString() || begin == nullptr || !begin->isInteger() ||
-      end == nullptr || !end->isInteger() || revision == nullptr ||
-      !revision->isInteger())
+  const JsonValue* kind = field(object, detail::kKindField);
+  const JsonValue* title = field(object, detail::kTitleField);
+  const JsonValue* newText = field(object, detail::kNewTextField);
+  const JsonValue* begin = field(object, detail::kBeginField);
+  const JsonValue* end = field(object, detail::kEndField);
+  const JsonValue* revision = field(object, detail::kRevisionField);
+  if (kind == nullptr || !kind->isString() ||
+      kind->string() != detail::kQuickFixKind || title == nullptr ||
+      !title->isString() || newText == nullptr || !newText->isString() ||
+      begin == nullptr || !begin->isInteger() || end == nullptr ||
+      !end->isInteger() || revision == nullptr || !revision->isInteger())
     return std::nullopt;
   if (revision->integer() != static_cast<std::int64_t>(document.buildRevision))
     return std::nullopt;
@@ -186,13 +187,13 @@ std::vector<lsp::CodeAction> DefaultCodeActionProvider::getCodeActions(
     // reference's whole scope, which no validation pays for every site.
     throw_if_cancelled(token);
     const std::vector<JsonValue::Array> spelled =
-        spelling_actions(document, asked);
+        detail::spelling_actions(document, asked);
     for (std::size_t i = 0; i < asked.size(); ++i) {
       throw_if_cancelled(token);
       const Diagnostic& diagnostic = *asked[i];
       if (diagnostic.data.has_value() && diagnostic.data->isObject())
-        if (const JsonValue* rows =
-                field(diagnostic.data->object(), kDefaultCodeActionsKey);
+        if (const JsonValue* rows = field(diagnostic.data->object(),
+                                          detail::kDefaultCodeActionsKey);
             rows != nullptr && rows->isArray())
           for (const JsonValue& row : rows->array()) offer(diagnostic, row);
       for (const JsonValue& row : spelled[i]) offer(diagnostic, row);

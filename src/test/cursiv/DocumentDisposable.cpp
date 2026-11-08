@@ -10,8 +10,8 @@
 
 namespace cursiv::test {
 
-Disposable documentDisposable(const CoreServices& services,
-                              std::shared_ptr<Document> document) {
+Disposable detail::documentDisposable(const CoreServices& services,
+                                      std::shared_ptr<Document> document) {
   const SharedCoreServices* const shared = &services.shared();
   return Disposable::create([shared, held = std::move(document)] {
     const std::shared_ptr<Document> one[] = {held};

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <string_view>
 
@@ -21,19 +20,6 @@ struct str {
   constexpr char operator[](std::size_t i) const { return data[i]; }
   constexpr std::string_view view() const { return {data, N - 1}; }
 };
-
-inline constexpr auto kLowerTable = [] {
-  std::array<char, 256> t{};
-  for (int i = 0; i < 256; ++i)
-    t[static_cast<std::size_t>(i)] = (i >= 'A' && i <= 'Z')
-                                         ? static_cast<char>(i - 'A' + 'a')
-                                         : static_cast<char>(i);
-  return t;
-}();
-
-constexpr char to_lower(char c) {
-  return kLowerTable[static_cast<unsigned char>(c)];
-}
 
 // A flat 256-entry table, so `test` is one indexed byte load.
 struct CharSet {

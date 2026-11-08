@@ -673,34 +673,39 @@ namespace service_slot {
 
 namespace {
 
-struct Container {
+cursiv::SharedCoreServices workspace;
+
+// A container that yields the slots it is given and nothing else.
+struct Container final : cursiv::CoreServices {
   std::vector<cursiv::ServiceSlot> slots;
-  void visitServices(
-      cursiv::function_ref<void(const cursiv::ServiceSlot&)> yield) const {
+  explicit Container(std::vector<cursiv::ServiceSlot> given)
+      : cursiv::CoreServices(workspace), slots(std::move(given)) {}
+  void visitServices(cursiv::function_ref<void(const cursiv::ServiceSlot&)>
+                         yield) const override {
     for (const cursiv::ServiceSlot& s : slots) yield(s);
   }
 };
 
 void a_complete_container_names_nothing() {
-  const Container c{{{"parser", true, true}, {"linker", true, true}}};
-  CHECK(cursiv::first_missing_service(c).empty());
+  const Container c({{"parser", true, true}, {"linker", true, true}});
+  CHECK(c.firstMissingService().empty());
 }
 
 void the_first_required_hole_is_the_answer() {
-  const Container c{{{"parser", true, true},
+  const Container c({{"parser", true, true},
                      {"linker", true, false},
-                     {"validator", true, false}}};
-  CHECK(cursiv::first_missing_service(c) == "linker");
+                     {"validator", true, false}});
+  CHECK(c.firstMissingService() == "linker");
 }
 
 // An optional slot left empty is not a hole.
 void what_is_not_required_is_not_owed() {
-  const Container c{{{"documentation", false, false}, {"parser", true, true}}};
-  CHECK(cursiv::first_missing_service(c).empty());
+  const Container c({{"documentation", false, false}, {"parser", true, true}});
+  CHECK(c.firstMissingService().empty());
 }
 
 void an_empty_container_owes_nothing() {
-  CHECK(cursiv::first_missing_service(Container{}).empty());
+  CHECK(Container({}).firstMissingService().empty());
 }
 
 }  // namespace
@@ -777,7 +782,7 @@ void an_observation_is_one_line() {
       .message = "line one\nline two\r\nthree",
       .uri = "file:///w",
       .languageId = "ws"};
-  const std::string line = cursiv::format_observation(observation);
+  const std::string line = cursiv::detail::format_observation(observation);
   CHECK(line.find('\n') == std::string::npos);
   CHECK(line.find('\r') == std::string::npos);
   CHECK(line.find("warning WorkspaceDirectoryReadFailed:") == 0);
@@ -788,7 +793,7 @@ void an_observation_is_one_line() {
   cursiv::Observation controls;
   controls.message = std::string("a\0b\x1b[2Jc", 8);
   controls.uri = std::string("file:///\0w", 10);
-  const std::string flat = cursiv::format_observation(controls);
+  const std::string flat = cursiv::detail::format_observation(controls);
   CHECK(flat.find("a b [2Jc") != std::string::npos);
   CHECK(flat.ends_with("uri=file:/// w"));
 }

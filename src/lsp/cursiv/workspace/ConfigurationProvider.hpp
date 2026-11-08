@@ -28,15 +28,17 @@ class ConfigurationSectionListener {
                                             const lsp::LSPAny& value) = 0;
 };
 
-/**
- * A language's `validation` setting, as category identities matched against
- * `registry` and the runtime's built-ins. Reads either `[...]` or
- * `{"categories": [...]}`; an empty result means "everything", not "nothing
- * matched".
- */
+namespace detail {
+
+// A language's `validation` setting, as category identities matched against
+// `registry` and the runtime's built-ins. Reads either `[...]` or
+// `{"categories": [...]}`; an empty result means "everything", not "nothing
+// matched".
 [[nodiscard]] std::vector<const cursiv::ValidationCategory*>
 validation_categories(const lsp::LSPAny& validation,
                       const ValidationRegistry& registry);
+
+}  // namespace detail
 
 class ConfigurationProvider {
  public:

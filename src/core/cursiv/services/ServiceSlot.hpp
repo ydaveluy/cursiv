@@ -17,6 +17,8 @@ struct ServiceSlot {
   bool installed = false;
 };
 
+namespace detail {
+
 // The first required slot nothing has filled, empty when the container is
 // complete. A storey above appends its own rows and this stays the one answer.
 template <class Services>
@@ -28,5 +30,7 @@ std::string_view first_missing_service(const Services& services) {
   });
   return missing;
 }
+
+}  // namespace detail
 
 }  // namespace cursiv

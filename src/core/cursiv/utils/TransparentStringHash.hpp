@@ -4,7 +4,7 @@
 #include <functional>
 #include <string_view>
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // Transparent, so a lookup by `string_view` does not materialise a
 // `std::string` first.
@@ -15,4 +15,4 @@ struct TransparentStringHash {
   }
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

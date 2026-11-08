@@ -213,19 +213,4 @@ void TableEpochs::retire(Retired& record, void* object, void (*free)(void*),
   State::freeAll(due);
 }
 
-void TableEpochs::collect() noexcept {
-  State& s = state();
-  Retired* due = nullptr;
-  {
-    const std::scoped_lock lock(s.mutex);
-    // Moved on as a retirement does: what was retired last is older than
-    // what any reader announces from now.
-    current.fetch_add(1, std::memory_order_seq_cst);
-    due = s.collectLocked();
-  }
-  State::freeAll(due);
-}
-
-void collect_retired_tables() noexcept { TableEpochs::collect(); }
-
 }  // namespace cursiv::detail

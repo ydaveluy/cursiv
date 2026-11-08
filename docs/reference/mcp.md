@@ -94,6 +94,41 @@ A tool about one document can call `route_document_tool` from
 `WorkspaceState` such as `WorkspaceState::IndexedReferences`, which a tool
 that reads references needs.
 
+The same header helps you describe a tool's arguments and read them:
+
+| Helper | Result |
+|---|---|
+| `tool_property(type, description)` | One property of an input schema, such as `tool_property("string", "the rule's name")` |
+| `tool_object_schema(properties, required)` | An object schema for `inputSchema`; the names in `required` are mandatory |
+| `tool_argument(arguments, key)` | The argument named `key`, or `nullptr` if the call does not pass it |
+| `tool_file_uri(file)` | A `file://` URI for a path; a URI is returned as is |
+
+```cpp
+lsp::json::Object properties;
+properties["file"] =
+    cursiv::tool_property("string", "path or file:// uri of the document");
+lsp::json::Array required;
+required.emplace_back(lsp::json::String("file"));
+server->registerTool(
+    {.name = "byte-count",
+     .description = "How many bytes a document holds.",
+     .inputSchema = cursiv::tool_object_schema(std::move(properties),
+                                               std::move(required))},
+    [&shared = _shared](const lsp::json::Value& arguments,
+                        const cursiv::CancellationToken& token) {
+      const lsp::json::Value* file = cursiv::tool_argument(arguments, "file");
+      if (file == nullptr || !file->isString())
+        return cursiv::McpToolResult{"'file' names the document", true};
+      return cursiv::route_document_tool(
+          shared, cursiv::tool_file_uri(file->string()),
+          cursiv::DocumentState::Parsed, token,
+          [](const cursiv::Document& document, const cursiv::CoreServices&,
+             std::string& out) {
+            out = std::to_string(document.textDocument().getText().size());
+          });
+    });
+```
+
 Call `install_mcp_service` from the function that registers your languages
 (`register_lsp_services` in the scaffold), so it runs before the server
 starts. A core-only application derives from `DefaultMcpService`, which has

@@ -2,11 +2,9 @@
 
 #include <lsp/json/json.h>
 
-#include <cstdint>
 #include <string>
 #include <string_view>
 
-#include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/ServiceRequirement.hpp"
@@ -22,15 +20,13 @@ struct CoreServices;
 struct Document;
 struct SharedCoreServices;
 
+// One property of an input schema: its JSON type and what it holds.
 [[nodiscard]] lsp::json::Value tool_property(std::string_view type,
                                              std::string_view description);
+// An object schema of `properties`, the names in `required` mandatory.
 [[nodiscard]] lsp::json::Value tool_object_schema(lsp::json::Object properties,
                                                   lsp::json::Array required);
-/**
- * `file` (required), `line` and `column` (1-based, utf-16 columns).
- */
-[[nodiscard]] lsp::json::Value tool_position_schema();
-
+// The argument named `key`; null when the call did not pass it.
 [[nodiscard]] const lsp::json::Value* tool_argument(
     const lsp::json::Value& arguments, std::string_view key);
 
@@ -38,25 +34,6 @@ struct SharedCoreServices;
  * A path becomes an absolute file:// uri; anything already a uri passes.
  */
 [[nodiscard]] std::string tool_file_uri(std::string_view file);
-
-// The three positional arguments, resolved to the store's vocabulary --
-// 0-based here, 1-based on the wire.
-struct McpToolPosition {
-  std::string uri;
-  std::uint32_t line = 0;
-  std::uint32_t column = 0;
-};
-/**
- * Resolves the three positional arguments. Throws a model-readable message
- * on a miss; the endpoint turns it into an `isError` result.
- */
-[[nodiscard]] McpToolPosition tool_position(const lsp::json::Value& arguments);
-
-/**
- * `line:column`, 1-based, the convention every answer speaks.
- */
-void append_tool_position(std::string& out, const Document& document,
-                          TextOffset offset);
 
 /**
  * The document-tool spine: the requirement awaited off the lock, the

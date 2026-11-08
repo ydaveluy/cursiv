@@ -33,7 +33,7 @@ constexpr std::string_view kDidChangeConfigurationId =
 
 // Matched by description against what `registry` declares: configuration
 // is the one place a category must arrive as text.
-std::vector<const cursiv::ValidationCategory*> validation_categories(
+std::vector<const cursiv::ValidationCategory*> detail::validation_categories(
     const lsp::LSPAny& validation, const ValidationRegistry& registry) {
   std::vector<const cursiv::ValidationCategory*> out;
   const lsp::LSPAny* names = &validation;

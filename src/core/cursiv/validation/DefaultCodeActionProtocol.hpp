@@ -16,7 +16,7 @@
 // It travels in `data` and not the message: a quick fix that re-parsed the
 // prose would break on the first reworded sentence.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 inline constexpr std::string_view kDefaultCodeActionsKey =
     "cursivDefaultCodeActions";
@@ -42,4 +42,4 @@ inline constexpr std::string_view kReplaceEdit = "replace";
                                         std::string newText,
                                         std::uint64_t revision);
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

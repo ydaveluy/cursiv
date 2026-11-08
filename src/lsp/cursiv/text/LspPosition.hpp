@@ -3,12 +3,9 @@
 #include <lsp/types.h>
 
 #include <cstdint>
-#include <span>
-#include <vector>
 
 #include "cursiv/text/Position.hpp"
 #include "cursiv/text/Range.hpp"
-#include "cursiv/workspace/TextDocument.hpp"
 
 // `cursiv::Position` and `lsp::Position` are both a line and a column in
 // UTF-16 code units, so the conversion is a field-for-field copy. The core
@@ -34,12 +31,5 @@ namespace cursiv {
 [[nodiscard]] constexpr lsp::Range to_lsp(Range r) noexcept {
   return lsp::Range{to_lsp(r.start), to_lsp(r.end)};
 }
-
-// The changes of a `didChange`, in the core's units: a ranged-vs-whole-
-// document choice is exactly the core event's optional range, so this
-// decides nothing. Strings are copied, since the params do not outlive the
-// call.
-[[nodiscard]] std::vector<TextDocumentContentChangeEvent> from_lsp(
-    std::span<const lsp::TextDocumentContentChangeEvent> changes);
 
 }  // namespace cursiv

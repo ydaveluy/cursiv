@@ -74,11 +74,6 @@ struct Document;
 [[nodiscard]] CstLeaf find_leaf_before_offset(const Cst& cst,
                                               TextOffset offset);
 
-// The word a caret writes in: the visible leaf ending at the caret whose last
-// scalar is a word's, else the word leaf the caret stands at the start of or
-// inside; empty between words. What completes there replaces it.
-[[nodiscard]] CstLeaf word_at(const Cst& cst, TextOffset offset);
-
 // The innermost node owning `leaf`. Postorder puts a record's ancestors
 // after it, so the first entry of the tree's map at or past the leaf is
 // either that owner or a descendant of it: from there the AST parents climb
@@ -87,5 +82,14 @@ struct Document;
 // The node that owns the caret, reached from the leaf before it. Null when no
 // leaf answers or nothing owns it -- the caller's root stands in.
 [[nodiscard]] AstNode* owner_at(const Cst& cst, TextOffset offset);
+
+namespace detail {
+
+// The word a caret writes in: the visible leaf ending at the caret whose last
+// scalar is a word's, else the word leaf the caret stands at the start of or
+// inside; empty between words. What completes there replaces it.
+[[nodiscard]] CstLeaf word_at(const Cst& cst, TextOffset offset);
+
+}  // namespace detail
 
 }  // namespace cursiv

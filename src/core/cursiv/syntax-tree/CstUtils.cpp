@@ -275,7 +275,7 @@ bool ends_a_word(std::string_view text, const CstLeaf& leaf) {
 
 }  // namespace
 
-CstLeaf word_at(const Cst& cst, TextOffset offset) {
+CstLeaf detail::word_at(const Cst& cst, TextOffset offset) {
   const std::string_view text = cst.text();
   const auto word = [&](const CstLeaf& leaf) {
     return !leaf.hidden && leaf.end > leaf.begin && ends_a_word(text, leaf);

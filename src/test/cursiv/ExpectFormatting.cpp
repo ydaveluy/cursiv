@@ -82,7 +82,7 @@ Disposable expectFormatting(const LspServices& services,
   expectedFunction(normalizeEOL(edited),
                    normalizeEOL(expectedFormatting.after));
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedFormatting.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

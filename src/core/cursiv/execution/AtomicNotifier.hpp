@@ -16,7 +16,7 @@
 // worker sleeps on that word through `detail::wait_while_equal`, which blocks
 // on every target.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 class AtomicNotifier {
  public:
@@ -111,4 +111,4 @@ class AtomicNotifier {
   static constexpr std::uint64_t kWaiterMask = kEpochInc - 1;
 };
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

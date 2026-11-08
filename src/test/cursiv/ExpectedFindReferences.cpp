@@ -37,7 +37,7 @@ Disposable expectFindReferences(
   std::vector<lsp::Range> expectedRanges;
   expectedRanges.reserve(marked.ranges.size());
   for (const auto& span : marked.ranges)
-    expectedRanges.push_back(markedRange(*document, span));
+    expectedRanges.push_back(detail::markedRange(*document, span));
 
   for (const TextOffset index : marked.indices) {
     std::vector<lsp::Location> references;
@@ -63,14 +63,14 @@ Disposable expectFindReferences(
       return std::pair{range.start.line, range.start.character};
     });
     for (std::size_t at = 0; at < wanted.size() && at < found.size(); ++at) {
-      expectSameRange(found[at].range, wanted[at]);
+      detail::expectSameRange(found[at].range, wanted[at]);
       expectedFunction(found[at].uri.toString(), document->uri,
                        "reference at range " + rangeToString(found[at].range) +
                            " is in another document");
     }
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedFindReferences.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

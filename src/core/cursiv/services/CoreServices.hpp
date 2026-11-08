@@ -77,7 +77,7 @@ struct CoreServices {
   // this one.
   std::unique_ptr<const DocumentValidator> documentValidator;
 
-  // `first_missing_service` scans exactly what this yields, and a storey above
+  // `firstMissingService` scans exactly what this yields, and a storey above
   // appends its own rows.
   virtual void visitServices(
       cursiv::function_ref<void(const ServiceSlot&)> yield) const;

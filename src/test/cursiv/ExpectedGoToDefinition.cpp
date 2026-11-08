@@ -52,8 +52,8 @@ Disposable expectGoToDefinition(
     for (std::size_t at = 0; at < many->size() && at < links.size(); ++at)
       if (const auto* const range =
               detail::markerAt(marked.ranges, (*many)[at]))
-        expectSameRange(links[at].targetSelectionRange,
-                        markedRange(*document, *range));
+        detail::expectSameRange(links[at].targetSelectionRange,
+                                detail::markedRange(*document, *range));
   } else {
     const std::size_t index =
         std::get<std::size_t>(expectedGoToDefinition.rangeIndex);
@@ -62,11 +62,11 @@ Disposable expectGoToDefinition(
                          std::to_string(links.size()));
     if (!links.empty())
       if (const auto* const range = detail::markerAt(marked.ranges, index))
-        expectSameRange(links.front().targetSelectionRange,
-                        markedRange(*document, *range));
+        detail::expectSameRange(links.front().targetSelectionRange,
+                                detail::markedRange(*document, *range));
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedGoToDefinition.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

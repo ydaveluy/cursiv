@@ -4,9 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -14,7 +12,6 @@
 #include "cursiv/services/CoreServices.hpp"
 #include "cursiv/services/ServiceRegistry.hpp"
 #include "cursiv/services/SharedCoreServices.hpp"
-#include "cursiv/text/Position.hpp"
 #include "cursiv/utils/UriUtils.hpp"
 #include "cursiv/workspace/Document.hpp"
 #include "cursiv/workspace/DocumentBuilder.hpp"
@@ -40,20 +37,6 @@ json::Value tool_object_schema(json::Object properties, json::Array required) {
   out["properties"] = json::Value(std::move(properties));
   if (!required.empty()) out["required"] = json::Value(std::move(required));
   return json::Value(std::move(out));
-}
-
-json::Value tool_position_schema() {
-  json::Object properties;
-  properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
-  properties["line"] = tool_property("integer", "1-based line");
-  properties["column"] =
-      tool_property("integer", "1-based column, in utf-16 units");
-  json::Array required;
-  required.emplace_back(json::String("file"));
-  required.emplace_back(json::String("line"));
-  required.emplace_back(json::String("column"));
-  return tool_object_schema(std::move(properties), std::move(required));
 }
 
 const json::Value* tool_argument(const json::Value& arguments,
@@ -84,29 +67,6 @@ bool has_scheme(std::string_view text) {
 std::string tool_file_uri(std::string_view file) {
   if (has_scheme(file)) return std::string(file);
   return path_to_file_uri(file);
-}
-
-McpToolPosition tool_position(const json::Value& arguments) {
-  const json::Value* const file = tool_argument(arguments, "file");
-  const json::Value* const line = tool_argument(arguments, "line");
-  const json::Value* const column = tool_argument(arguments, "column");
-  if (file == nullptr || !file->isString())
-    throw std::invalid_argument("'file' names the document");
-  if (line == nullptr || !line->isInteger() || line->integer() < 1)
-    throw std::invalid_argument("'line' is 1-based");
-  if (column == nullptr || !column->isInteger() || column->integer() < 1)
-    throw std::invalid_argument("'column' is 1-based");
-  return {tool_file_uri(file->string()),
-          static_cast<std::uint32_t>(line->integer() - 1),
-          static_cast<std::uint32_t>(column->integer() - 1)};
-}
-
-void append_tool_position(std::string& out, const Document& document,
-                          TextOffset offset) {
-  const Position position = document.textDocument().positionAt(offset);
-  out += std::to_string(position.line + 1);
-  out += ':';
-  out += std::to_string(position.character + 1);
 }
 
 namespace {

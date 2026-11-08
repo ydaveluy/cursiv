@@ -23,7 +23,6 @@
 #include "cursiv/shared/runtime/GapPositions.hpp"
 #include "cursiv/shared/table/GapLeaf.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/ConditionsGrammar.hpp"
 #include "engines/ll/LlTerms.hpp"
@@ -31,6 +30,7 @@
 #include "impliedrivalll/generated/RivalLl/Module.hpp"
 #include "impliedrivallr/generated/RivalLr/Module.hpp"
 #include "reachpredictll/generated/ReachLl/Module.hpp"
+#include "support/AstText.hpp"
 #include "triviapredictll/generated/TriviaLl/Module.hpp"
 #include "triviapredictll/generated/TriviaLl/Table.hpp"
 
@@ -197,7 +197,7 @@ void predicates_and_implied_tokens_match_the_table_engine() {
   for (const std::string_view text : {"4242 + 4242", "1 + \n 42", "42/*c*/"}) {
     const auto a = ll->parse(text);
     const auto b = lr->parse(text);
-    CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
+    CHECK(support::records(a.cst()) == support::records(b.cst()));
   }
 }
 
@@ -375,7 +375,7 @@ void a_given_up_tag_leaves_no_node() {
              3}}) {
     const auto a = ll->parse(text);
     std::string out;
-    if (a.value) cursiv::test::ast_of(*reflection, *a.value, out);
+    if (a.value) support::ast_of(*reflection, *a.value, out);
     CHECK(out == tree);
     CHECK(a.diagnostics.size() == 1 &&
           a.diagnostics[0].kind == cursiv::DiagnosticKind::incomplete &&

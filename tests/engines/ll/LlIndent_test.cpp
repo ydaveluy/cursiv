@@ -19,7 +19,6 @@
 #include "cursiv/ll/runtime/ll_predictor.hpp"
 #include "cursiv/ll/runtime/ll_read.hpp"
 #include "cursiv/lr/gen/LrLowering.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/CaretOffers.hpp"
 #include "dedentrunflatll/generated/FlatLl/Module.hpp"
@@ -38,6 +37,7 @@
 #include "llindentbare/generated/Bare/Module.hpp"
 #include "llindentfolded/generated/Folded/Module.hpp"
 #include "llindentlaid/generated/Laid/Module.hpp"
+#include "support/AstText.hpp"
 
 namespace {
 using cursiv::test::failures;
@@ -137,8 +137,8 @@ void parity(const cursiv::Parser& ll, const cursiv::Parser& lr,
     CHECK(cleanA == cleanB);
     if (cleanA && cleanB && a.value != nullptr && b.value != nullptr) {
       std::string x, y;
-      cursiv::test::ast_of(reflection, *a.value, x);
-      cursiv::test::ast_of(reflection, *b.value, y);
+      support::ast_of(reflection, *a.value, x);
+      support::ast_of(reflection, *b.value, y);
       CHECK(x == y);
     }
     for (cursiv::NodeId i = 0; i < a.cst().size(); ++i) {
@@ -274,8 +274,8 @@ void a_form_feed_starts_the_indentation_again() {
       const auto b = p->parse(plain);
       CHECK(a.diagnostics.empty());
       std::string x, y;
-      cursiv::test::ast_of(*r, *a.value, x);
-      cursiv::test::ast_of(*r, *b.value, y);
+      support::ast_of(*r, *a.value, x);
+      support::ast_of(*r, *b.value, y);
       CHECK(x == y);
     }
   }
@@ -296,8 +296,8 @@ void an_invented_indent_opens_a_level() {
     const auto b = lr->parse(text);
     CHECK(a.diagnostics.size() == b.diagnostics.size());
     std::string x, y;
-    cursiv::test::ast_of(*rl, *a.value, x);
-    cursiv::test::ast_of(*rr, *b.value, y);
+    support::ast_of(*rl, *a.value, x);
+    support::ast_of(*rr, *b.value, y);
     CHECK(x == y);
   }
 }
@@ -322,8 +322,8 @@ void repairs_agree_with_the_table_engine(
       CHECK(x.kind != cursiv::DiagnosticKind::incomplete);
     }
     std::string s, t;
-    cursiv::test::ast_of(*rl, *a.value, s);
-    cursiv::test::ast_of(*rr, *b.value, t);
+    support::ast_of(*rl, *a.value, s);
+    support::ast_of(*rr, *b.value, t);
     CHECK(s == t);
   }
 }
@@ -508,7 +508,7 @@ template <class Pair>
 Reading read(Pair& p, std::string_view text) {
   const auto result = p.first->parse(text);
   Reading out{result.accepted, result.diagnostics.size(), {}};
-  if (result.value) cursiv::test::ast_of(*p.second, *result.value, out.ast);
+  if (result.value) support::ast_of(*p.second, *result.value, out.ast);
   return out;
 }
 

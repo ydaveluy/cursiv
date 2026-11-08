@@ -8,7 +8,7 @@
 #include "cursiv/services/JsonValue.hpp"
 #include "cursiv/text/TextRange.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 JsonValue make_action_row(std::string_view editKind, std::string title,
                           TextRange range, std::string newText,
@@ -26,4 +26,4 @@ JsonValue make_action_row(std::string_view editKind, std::string title,
   return JsonValue(std::move(row));
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

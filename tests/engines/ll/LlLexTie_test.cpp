@@ -9,10 +9,10 @@
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/ll/runtime/LlContext.hpp"
 #include "cursiv/ll/runtime/ll_lookahead.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/ExplicitUnitAst.hpp"
 #include "engines/ll/LlTerms.hpp"
+#include "support/AstText.hpp"
 #include "unitsll/generated/Ll/Module.hpp"
 #include "unitsll/generated/Ll/Table.hpp"
 #include "lextiereservedll/generated/ReservedLl/Module.hpp"
@@ -26,7 +26,7 @@ std::string read(Parser& p, Reflection& r, std::string_view text) {
   CHECK(result.accepted && result.diagnostics.empty());
   if (!result.value) return "";
   std::string out;
-  cursiv::test::ast_of(*r, *result.value, out);
+  support::ast_of(*r, *result.value, out);
   return out;
 }
 

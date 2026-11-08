@@ -85,15 +85,15 @@ Disposable expectRename(const LspServices& services,
                          " edits but received " + std::to_string(edits.size()));
     for (std::size_t at = 0; at < marked.ranges.size() && at < edits.size();
          ++at) {
-      expectSameRange(edits[at].range,
-                      markedRange(*document, marked.ranges[at]));
+      detail::expectSameRange(
+          edits[at].range, detail::markedRange(*document, marked.ranges[at]));
       expectedFunction(edits[at].newText, input.newName,
                        "expected the edit to write '" + input.newName +
                            "' but it writes '" + edits[at].newText + "'");
     }
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

@@ -13,7 +13,6 @@
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/shared/runtime/IndentLevel.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "edges/generated/G/Module.hpp"
 #include "engines/lr/ContinuedLineGrammar.hpp"
@@ -24,6 +23,7 @@
 #include "peekcaret/generated/G/Module.hpp"
 #include "peekcaret/generated/G/Table.hpp"
 #include "rulerefusal/generated/G/Module.hpp"
+#include "support/AstText.hpp"
 #include "trivialr/generated/Lr/Module.hpp"
 #include "trivialr/generated/Lr/Table.hpp"
 #include "wideterms/generated/G/Module.hpp"
@@ -316,7 +316,7 @@ void a_text_no_condition_admits_is_repaired_not_lost(
   const auto tree = [&](const cursiv::ParseResult& result) {
     std::string out;
     if (result.value != nullptr)
-      cursiv::test::ast_of(reflection, *result.value, out);
+      support::ast_of(reflection, *result.value, out);
     return out;
   };
   for (const std::string_view text :

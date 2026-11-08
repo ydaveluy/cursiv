@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iomanip>
 #include <iostream>
 #include <locale>
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -29,6 +31,9 @@ struct CountingParser final : cursiv::Parser {
       ws::generated::Workspace::create_parser();
   mutable int calls = 0;
   mutable int grammarQueries = 0;
+  // Off, a parse keeps its tree and drops its AST, as a failed AST
+  // construction does.
+  bool keepsAst = true;
   const cursiv::Grammar& getGrammar() const noexcept override {
     ++grammarQueries;
     return parser->getGrammar();
@@ -37,7 +42,9 @@ struct CountingParser final : cursiv::Parser {
       std::string_view text,
       const cursiv::CancellationToken& token) const override {
     ++calls;
-    return parser->parse(text, token);
+    cursiv::ParseResult result = parser->parse(text, token);
+    if (!keepsAst) result.value = nullptr;
+    return result;
   }
 };
 
@@ -51,16 +58,16 @@ CountingParser& register_workspace(cursiv::SharedCoreServices& shared,
   return counter;
 }
 
+// `argv` points into `values`: the arguments are never copied.
 struct Arguments {
   std::vector<std::string> values;
   std::vector<char*> argv;
   Arguments(std::initializer_list<std::string> args) : values(args) {
     for (auto& value : values) argv.push_back(value.data());
   }
+  Arguments(const Arguments&) = delete;
+  Arguments& operator=(const Arguments&) = delete;
   int argc() const { return static_cast<int>(argv.size()); }
-  std::optional<cursiv::Invocation> parse() {
-    return cursiv::parse_args(argc(), argv.data());
-  }
 };
 
 struct Capture {
@@ -86,25 +93,67 @@ struct Scratch {
     std::error_code ignored;
     std::filesystem::remove_all(root, ignored);
   }
+  // A file of its own, holding exactly `text`.
+  [[nodiscard]] std::string file(std::string_view text) const {
+    const std::filesystem::path path = root / "text.ws";
+    std::ofstream(path, std::ios::binary)
+        .write(text.data(), static_cast<std::streamsize>(text.size()));
+    return path.string();
+  }
 };
 
+// What one run of the command line answered and printed.
+struct Run {
+  int status = 0;
+  std::string out;
+  std::string err;
+};
+
+Run run_on(cursiv::SharedCoreServices& shared, Arguments& args,
+           bool keepsAst = true) {
+  Capture capture;
+  const int status = cursiv::detail::run_cli_on(
+      args.argc(), args.argv.data(),
+      [keepsAst](auto& world) {
+        register_workspace(world).keepsAst = keepsAst;
+        return true;
+      },
+      shared);
+  return {status, capture.out.str(), capture.err.str()};
+}
+
+Run run(Arguments&& args, bool keepsAst = true) {
+  cursiv::SharedCoreServices shared;
+  return run_on(shared, args, keepsAst);
+}
+
 void help_wins_even_over_invalid_arguments() {
-  for (Arguments args : {Arguments{"cli", "--unknown", "--help"},
-                         Arguments{"cli", "--help", "--root"},
-                         Arguments{"cli", "a.ws", "b.ws", "-h"},
-                         Arguments{"cli", "--root", "--help"}}) {
-    const auto parsed = args.parse();
-    CHECK(parsed.has_value() && parsed->help);
+  Arguments helps[] = {Arguments{"cli", "--unknown", "--help"},
+                       Arguments{"cli", "--help", "--root"},
+                       Arguments{"cli", "a.ws", "b.ws", "-h"},
+                       Arguments{"cli", "--root", "--help"}};
+  for (Arguments& args : helps) {
+    const Run answer = run(std::move(args));
+    CHECK(answer.status == cursiv::kClean);
+    CHECK(answer.out.starts_with("usage: cli "));
   }
-  for (Arguments args :
-       {Arguments{"cli"}, Arguments{"cli", "--root"},
-        Arguments{"cli", "a.ws", "b.ws"},
-        Arguments{"cli", "--root", "", "a.ws"}, Arguments{"cli", "", "a.ws"}})
-    CHECK(!args.parse().has_value());
-  Arguments normal{"cli", "--dump", "--json", "--root", "dir", "a.ws"};
-  const auto parsed = normal.parse();
-  CHECK(parsed.has_value() && parsed->path == "a.ws" && parsed->root == "dir" &&
-        parsed->dump && parsed->json && !parsed->help);
+  Arguments misuses[] = {Arguments{"cli"}, Arguments{"cli", "--root"},
+                         Arguments{"cli", "a.ws", "b.ws"},
+                         Arguments{"cli", "--root", "", "a.ws"},
+                         Arguments{"cli", "", "a.ws"}};
+  for (Arguments& args : misuses) {
+    const Run answer = run(std::move(args));
+    CHECK(answer.status == cursiv::kUsage);
+    CHECK(answer.out.empty() && answer.err.starts_with("usage: cli "));
+  }
+  // Every flag at once: the folder is scanned first, so the reference
+  // resolves, and the JSON wins over the text dump.
+  const Scratch files;
+  const Run answer =
+      run({"cli", "--dump", "--json", "--root", files.root.string(),
+           (files.root / "sub" / "main.ws").string()});
+  CHECK(answer.status == cursiv::kClean);
+  CHECK(answer.out.starts_with("{\"element\":"));
 }
 
 void diagnostics_use_byte_columns_and_all_line_terminators() {
@@ -127,21 +176,16 @@ void diagnostics_use_byte_columns_and_all_line_terminators() {
   CHECK(document.diagnostics.front().message == "third");
 }
 
+// A failed AST construction still leaves the parser's tree for inspection.
 void json_keeps_a_cst_without_an_ast() {
-  const auto parser = ws::generated::Workspace::create_parser();
-  cursiv::Document document(cursiv::TextDocument::create(
-      "file:///a.ws", "workspace", 0, "datatype String"));
-  document.parseResult = parser->parse(document.textDocument().getText());
-  CHECK(document.parseResult.cst().has_entry());
-  std::ostringstream expected;
-  cursiv::dump_cst_json(document, parser->getGrammar(), expected);
-  // A failed AST construction still leaves the parser's CST for inspection.
-  document.parseResult.value = nullptr;
-  std::ostringstream actual, text;
-  cursiv::dump_cst_json(document, parser->getGrammar(), actual);
-  cursiv::dump_cst(document, parser->getGrammar(), text);
-  CHECK(actual.str() == expected.str());
-  CHECK(text.str().find("datatype") != std::string::npos);
+  const Scratch files;
+  const std::string path = files.file("datatype String");
+  const Run expected = run({"cli", "--json", path});
+  const Run json = run({"cli", "--json", path}, false);
+  const Run text = run({"cli", "--dump", path}, false);
+  CHECK(json.out.starts_with("{\"element\":"));
+  CHECK(json.out == expected.out);
+  CHECK(text.out.find("datatype") != std::string::npos);
 }
 
 struct GroupedNumbers final : std::numpunct<char> {
@@ -150,71 +194,62 @@ struct GroupedNumbers final : std::numpunct<char> {
 };
 
 void json_ignores_stream_number_formatting() {
-  const auto parser = ws::generated::Workspace::create_parser();
-  cursiv::Document document(cursiv::TextDocument::create(
-      "file:///a.ws", "workspace", 0, "datatype " + std::string(1200, 'a')));
-  document.parseResult = parser->parse(document.textDocument().getText());
-  std::ostringstream expected, actual;
-  cursiv::dump_cst_json(document, parser->getGrammar(), expected);
-  actual.imbue(std::locale(std::locale::classic(), new GroupedNumbers));
-  actual << std::hex << std::showbase;
-  const auto flags = actual.flags();
-  cursiv::dump_cst_json(document, parser->getGrammar(), actual);
-  CHECK(actual.str() == expected.str());
-  CHECK(actual.flags() == flags);
+  const Scratch files;
+  const std::string path = files.file("datatype " + std::string(1200, 'a'));
+  const Run expected = run({"cli", "--json", path});
+  const std::locale locale = std::cout.getloc();
+  const auto before = std::cout.flags();
+  std::cout.imbue(std::locale(std::locale::classic(), new GroupedNumbers));
+  std::cout << std::hex << std::showbase;
+  const auto flags = std::cout.flags();
+  const Run actual = run({"cli", "--json", path});
+  CHECK(std::cout.flags() == flags);
+  std::cout.imbue(locale);
+  std::cout.flags(before);
+  CHECK(actual.out.find("1209") != std::string::npos);
+  CHECK(actual.out == expected.out);
 }
 
 // A node is named by the AST class it built: the grammar has no name for the
 // record of a rule that builds a node. Where a node spans its whole parent,
 // the two share a record, and the parent's class is shown.
 void the_dump_names_the_ast_classes() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const Scratch files;
   for (const auto& [source, expected] :
        {std::pair{"datatype A datatype B",
                   "Workspace [0..21)\n  DataType [0..10)\n"},
         std::pair{"datatype A", "Workspace [0..10)\n   [0..8)"}}) {
-    cursiv::Document document(
-        cursiv::TextDocument::create("file:///a.ws", "workspace", 0, source));
-    document.parseResult = parser->parse(document.textDocument().getText());
-    std::ostringstream text, json;
-    cursiv::dump_cst(document, parser->getGrammar(), text);
-    cursiv::dump_cst_json(document, parser->getGrammar(), json);
-    CHECK(text.str().starts_with(expected));
-    CHECK(json.str().starts_with(
-        "{\"element\":\"\",\"type\":\"Workspace\","));
+    const std::string path = files.file(source);
+    CHECK(run({"cli", "--dump", path}).out.starts_with(expected));
+    CHECK(run({"cli", "--json", path})
+              .out.starts_with("{\"element\":\"\",\"type\":\"Workspace\","));
   }
 }
 
 void text_dump_escapes_control_bytes() {
-  const auto parser = ws::generated::Workspace::create_parser();
-  cursiv::Document document(cursiv::TextDocument::create(
-      "file:///a.ws", "workspace", 0,
-      std::string("datatype /* ") + '\0' + '\x1b' + " */ String"));
-  document.parseResult = parser->parse(document.textDocument().getText());
-  std::ostringstream out;
-  cursiv::dump_cst(document, parser->getGrammar(), out);
-  CHECK(out.str().find("\\x00\\x1b") != std::string::npos);
-  CHECK(out.str().find('\0') == std::string::npos);
-  CHECK(out.str().find('\x1b') == std::string::npos);
+  const Scratch files;
+  const Run dump = run(
+      {"cli", "--dump",
+       files.file(std::string("datatype /* ") + '\0' + '\x1b' + " */ String")});
+  CHECK(dump.out.find("\\x00\\x1b") != std::string::npos);
+  CHECK(dump.out.find('\0') == std::string::npos);
+  CHECK(dump.out.find('\x1b') == std::string::npos);
 }
 
 // A long leaf is cut between two characters, never inside one.
 void text_dump_cuts_between_characters() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const Scratch files;
   // The comment's sixtieth byte is the first of `é`.
   const std::string comment = "/*" + std::string(57, 'a') + "\xc3\xa9*/";
-  cursiv::Document document(cursiv::TextDocument::create(
-      "file:///a.ws", "workspace", 0, "datatype " + comment + " String"));
-  document.parseResult = parser->parse(document.textDocument().getText());
-  std::ostringstream out;
-  cursiv::dump_cst(document, parser->getGrammar(), out);
-  CHECK(out.str().find("'/*" + std::string(57, 'a') + "...'") !=
+  const Run dump =
+      run({"cli", "--dump", files.file("datatype " + comment + " String")});
+  CHECK(dump.out.find("'/*" + std::string(57, 'a') + "...'") !=
         std::string::npos);
-  CHECK(out.str().find('\xc3') == std::string::npos);
+  CHECK(dump.out.find('\xc3') == std::string::npos);
 }
 
 void json_replaces_invalid_utf8_without_changing_the_document() {
-  const auto parser = ws::generated::Workspace::create_parser();
+  const Scratch files;
   const std::pair<std::string, std::string> cases[] = {
       {"é€😀", "é€😀"},
       {std::string("\xff"), "\\ufffd"},
@@ -226,16 +261,16 @@ void json_replaces_invalid_utf8_without_changing_the_document() {
       {std::string("\x80\xe0\x9f\x80"), "\\ufffd\\ufffd\\ufffd\\ufffd"}};
   for (const auto& [bytes, escaped] : cases) {
     const std::string source = "datatype /*" + bytes + "*/ String";
-    cursiv::Document document(
-        cursiv::TextDocument::create("file:///a.ws", "workspace", 0, source));
-    document.parseResult = parser->parse(document.textDocument().getText());
-    CHECK(document.parseResult.cst().has_entry());
-    std::ostringstream out;
-    cursiv::dump_cst_json(document, parser->getGrammar(), out);
-    CHECK(out.str().find("\"text\":\"/*" + escaped + "*/\"") !=
+    cursiv::SharedCoreServices shared;
+    Arguments args{"cli", "--json", files.file(source)};
+    const Run json = run_on(shared, args);
+    CHECK(json.out.find("\"text\":\"/*" + escaped + "*/\"") !=
           std::string::npos);
-    CHECK(document.textDocument().getText() == source);
-    CHECK(document.parseResult.cst().text() == source);
+    const auto documents = shared.documents->all();
+    CHECK(documents.size() == 1);
+    if (documents.size() != 1) continue;
+    CHECK(documents[0]->textDocument().getText() == source);
+    CHECK(documents[0]->parseResult.cst().text() == source);
   }
 }
 
@@ -269,17 +304,10 @@ void read_failures_are_usage_errors() {
   shared.fileSystemProvider =
       std::make_unique<cursiv::EmptyFileSystemProvider>();
   Arguments args{"cli", (files.root / "types.ws").string()};
-  Capture capture;
-  const int status = cursiv::detail::run_cli_on(
-      args.argc(), args.argv.data(),
-      [](auto& world) {
-        register_workspace(world);
-        return true;
-      },
-      shared);
-  CHECK(status == cursiv::kUsage);
-  CHECK(capture.out.str().empty());
-  CHECK(!capture.err.str().empty());
+  const Run answer = run_on(shared, args);
+  CHECK(answer.status == cursiv::kUsage);
+  CHECK(answer.out.empty());
+  CHECK(!answer.err.empty());
 }
 
 void the_factory_selects_the_grammar_used_for_reporting() {
@@ -316,9 +344,10 @@ void failed_output_is_not_a_successful_command() {
     int sync() override { return -1; }
   };
   Scratch files;
-  for (Arguments args :
-       {Arguments{"cli", "--help"},
-        Arguments{"cli", "--json", (files.root / "types.ws").string()}}) {
+  Arguments lines[] = {
+      Arguments{"cli", "--help"},
+      Arguments{"cli", "--json", (files.root / "types.ws").string()}};
+  for (Arguments& args : lines) {
     cursiv::SharedCoreServices shared;
     Capture capture;
     FailedFlush output;

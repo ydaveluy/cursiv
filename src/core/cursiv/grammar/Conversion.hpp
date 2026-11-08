@@ -184,8 +184,8 @@ constexpr std::from_chars_result from_chars(const char* first, const char* last,
 using std::from_chars;
 #endif
 
-}  // namespace detail
-
+// The conversion of the closed set `has_default_convert` names, reached
+// through `default_converter<T>`.
 template <class M>
 constexpr ConversionResult<M> default_convert(std::string_view text) {
   if constexpr (std::is_same_v<M, std::string_view>)
@@ -217,11 +217,10 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
     }
     if constexpr (std::same_as<M, double>) {
       double fast = 0.0;
-      if (detail::fast_decimal(digits, fast))
-        return ConversionResult<M>::ok(fast);
+      if (fast_decimal(digits, fast)) return ConversionResult<M>::ok(fast);
     }
     const auto [p, ec] =
-        detail::from_chars(digits.data(), digits.data() + digits.size(), v);
+        from_chars(digits.data(), digits.data() + digits.size(), v);
     if (ec == std::errc{} && p == digits.data() + digits.size())
       return ConversionResult<M>::ok(v);
     return ConversionResult<M>::err(ec == std::errc::result_out_of_range
@@ -233,22 +232,23 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
   // enumerator list is a static array, so the loop is unrolled and each
   // comparison is against a literal.
   else if constexpr (std::is_enum_v<M>) {
-    if (M found{};
-        detail::find_enumerator<M>(text, found, detail::enum_probes{}))
+    if (M found{}; find_enumerator<M>(text, found, enum_probes{}))
       return ConversionResult<M>::ok(found);
     return ConversionResult<M>::err("not an enumerator of " +
-                                    std::string(detail::type_name<M>()));
+                                    std::string(type_name<M>()));
   } else
     static_assert(has_default_convert<M>,
                   "no default converter for this member type: specialise "
                   "cursiv::default_converter<T>, or convert with as<f>(e)");
 }
 
+}  // namespace detail
+
 template <class T>
   requires has_default_convert<T>
 struct default_converter<T> {
   static constexpr ConversionResult<T> convert(std::string_view text) {
-    return default_convert<T>(text);
+    return detail::default_convert<T>(text);
   }
 };
 

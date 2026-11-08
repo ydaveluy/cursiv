@@ -57,7 +57,7 @@ Disposable expectHover(const LspServices& services,
     expectedFunction(*content, *expectedHover.hover);
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (expectedHover.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

@@ -7,7 +7,7 @@
 // The line terminators as the document's line index counts them: "\n", a
 // lone "\r", and "\r\n" once.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 struct LineTerminator {
   std::size_t position;
@@ -39,4 +39,4 @@ struct LineTerminator {
   return ch == ' ' || ch == '\t';
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

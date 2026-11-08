@@ -243,6 +243,27 @@ void as_plain_text(lsp::MarkupContent& content) {
     content.kind = lsp::MarkupKindEnum(lsp::MarkupKind::PlainText);
 }
 
+// The changes of a `didChange`, in the core's units: a ranged-vs-whole-
+// document choice is exactly the core event's optional range, so this
+// decides nothing. Strings are copied, since the params do not outlive the
+// call.
+std::vector<TextDocumentContentChangeEvent> from_lsp(
+    std::span<const lsp::TextDocumentContentChangeEvent> changes) {
+  std::vector<TextDocumentContentChangeEvent> converted;
+  converted.reserve(changes.size());
+  for (const lsp::TextDocumentContentChangeEvent& change : changes) {
+    if (const auto* whole =
+            std::get_if<lsp::TextDocumentContentChangeWholeDocument>(&change)) {
+      converted.emplace_back(std::nullopt, whole->text);
+      continue;
+    }
+    const auto& ranged =
+        std::get<lsp::TextDocumentContentChangePartial>(change);
+    converted.emplace_back(cursiv::from_lsp(ranged.range), ranged.text);
+  }
+  return converted;
+}
+
 }  // namespace
 
 DefaultLanguageServer::~DefaultLanguageServer() noexcept {
@@ -1663,7 +1684,7 @@ void DefaultLanguageServer::publish(const Document& document) const {
       }
       // The machine payload rides along: LSP round-trips `data` untouched
       // into `codeAction` requests, which is the quick-fix chain's wire.
-      if (d.data.has_value()) published.data = to_lsp_any(*d.data);
+      if (d.data.has_value()) published.data = detail::to_lsp_any(*d.data);
       // The href, wrapped: `codeDescription` carries only the URL on the core
       // side, and LSP wants it inside a one-field object.
       if (d.codeDescription.has_value()) {

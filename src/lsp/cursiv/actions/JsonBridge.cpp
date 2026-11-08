@@ -8,7 +8,7 @@
 
 #include "cursiv/services/JsonValue.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // The framework's integer is 32-bit on the wire; a payload value outside it
 // travels as a decimal, exact up to 2^53 in magnitude. Past that the client
@@ -39,4 +39,4 @@ lsp::LSPAny to_lsp_any(const JsonValue& value) {
   return lsp::LSPAny(lsp::json::Null{});
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

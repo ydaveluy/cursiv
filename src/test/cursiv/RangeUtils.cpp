@@ -26,12 +26,13 @@ std::string rangeToString(const lsp::Range& range) {
          std::to_string(range.end.character);
 }
 
-lsp::Range markedRange(const Document& document,
-                       const std::pair<TextOffset, TextOffset>& span) {
+lsp::Range detail::markedRange(const Document& document,
+                               const std::pair<TextOffset, TextOffset>& span) {
   return to_lsp(document.textDocument().rangeAt(span.first, span.second));
 }
 
-void expectSameRange(const lsp::Range& actual, const lsp::Range& expected) {
+void detail::expectSameRange(const lsp::Range& actual,
+                             const lsp::Range& expected) {
   expectedFunction(rangeToString(actual), rangeToString(expected),
                    "expected range " + rangeToString(expected) +
                        " does not match actual range " + rangeToString(actual));

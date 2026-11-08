@@ -45,7 +45,6 @@
 #include "cursiv/shared/runtime/AstConvThunks.hpp"
 #include "cursiv/shared/runtime/StampedGrammar.hpp"
 #include "cursiv/shared/table/StampLayout.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/ParityGrammar.hpp"
@@ -56,6 +55,7 @@
 #include "parityll/generated/Ll/Module.hpp"
 #include "parityll/generated/Ll/Table.hpp"
 #include "paritylr/generated/Lr/Module.hpp"
+#include "support/AstText.hpp"
 #include "tagll/generated/Ll/Module.hpp"
 #include "taglr/generated/Lr/Module.hpp"
 
@@ -1371,7 +1371,7 @@ void the_two_engines_write_one_tree() {
     const cursiv::ParseResult a = lr->parse(text);
     const cursiv::ParseResult b = ll->parse(text);
     CHECK(a.accepted == b.accepted);
-    CHECK(cursiv::test::records(a.cst()) == cursiv::test::records(b.cst()));
+    CHECK(support::records(a.cst()) == support::records(b.cst()));
     CHECK((a.value == nullptr) == (b.value == nullptr));
     if (a.value == nullptr || b.value == nullptr) continue;
     std::string x, y;
@@ -1459,8 +1459,8 @@ void a_string_instance_is_spelled_as_written() {
   CHECK(a.value != nullptr && b.value != nullptr);
   if (a.value == nullptr || b.value == nullptr) return;
   std::string x, y;
-  cursiv::test::ast_of(*lrR, *a.value, x);
-  cursiv::test::ast_of(*llR, *b.value, y);
+  support::ast_of(*lrR, *a.value, x);
+  support::ast_of(*llR, *b.value, y);
   CHECK(x == y);
   CHECK(x.find("first=") != std::string::npos &&
         x.find("second=") != std::string::npos);
@@ -1530,8 +1530,8 @@ void a_repair_both_engines_make_is_one_repair() {
               a.diagnostics[i].begin == b.diagnostics[i].begin &&
               a.diagnostics[i].end == b.diagnostics[i].end;
     std::string x, y;
-    if (a.value != nullptr) cursiv::test::ast_of(*lrR, *a.value, x);
-    if (b.value != nullptr) cursiv::test::ast_of(*llR, *b.value, y);
+    if (a.value != nullptr) support::ast_of(*lrR, *a.value, x);
+    if (b.value != nullptr) support::ast_of(*llR, *b.value, y);
     if (!alike || x != y)
       std::fprintf(stderr, "repair parity input=[%.*s] LR=%zu LL=%zu\n",
                    static_cast<int>(text.size()), text.data(),
@@ -1586,7 +1586,7 @@ void a_stray_token_in_an_expression_leaves_the_statement() {
     for (const cursiv::ParseDiagnostic& d : a.diagnostics)
       CHECK(d.end - d.begin <= 4);
     std::string x;
-    cursiv::test::ast_of(*rl, *a.value, x);
+    support::ast_of(*rl, *a.value, x);
     CHECK(x.find("lets0=") != std::string::npos);
     CHECK(x.find("shows0=") != std::string::npos);
     unsigned widest = 0;
@@ -2167,8 +2167,8 @@ void generated_public_ast_is_unchanged() {
             b.diagnostics.empty());
       if (a.value && b.value) {
         std::string x, y;
-        cursiv::test::ast_of(*reflect, *a.value, x);
-        cursiv::test::ast_of(*reflect, *b.value, y);
+        support::ast_of(*reflect, *a.value, x);
+        support::ast_of(*reflect, *b.value, y);
         CHECK(x == y);
       }
       if (std::string_view(text) == "let a = call(1,2);") {

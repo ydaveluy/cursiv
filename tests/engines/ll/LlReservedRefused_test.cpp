@@ -22,7 +22,6 @@
 #include "cursiv/lr/runtime/lr_rescan.hpp"
 #include "cursiv/lr/runtime/lr_search.hpp"
 #include "cursiv/shared/runtime/TypoCandidates.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/LlTerms.hpp"
 #include "engines/ll/ReservedRefusedGlrGrammar.hpp"
@@ -40,6 +39,7 @@
 #include "refusedlr/generated/Lr/Table.hpp"
 #include "refusedmemoll/generated/MemoLl/Module.hpp"
 #include "refusedmemolr/generated/MemoLr/Module.hpp"
+#include "support/AstText.hpp"
 
 namespace reserved_refused_cases {
 namespace {
@@ -96,7 +96,7 @@ void check(const cursiv::Parser& ll, const cursiv::Parser* lr, Spell spell,
     if (lr) {
       const auto b = lr->parse(text);
       same = same && b.diagnostics.empty() && spell(b) == expected &&
-          cursiv::test::records(a.cst()) == cursiv::test::records(b.cst());
+             support::records(a.cst()) == support::records(b.cst());
     }
     if (!same)
       std::printf("`%.*s`: got `%s`, expected `%.*s`\n",

@@ -21,11 +21,6 @@ namespace cursiv::detail {
 template <class K, class V, class Hash, class KeyEqual>
 class ConcurrentTable;
 
-// Frees now the tables no reader can still hold: what a clear or a growth
-// retired otherwise waits for enough retirements, in number or in bytes. For
-// tests, which check what is freed when; any thread may call it at any time.
-void collect_retired_tables() noexcept;
-
 // Process-wide epoch-based reclamation, the tables' own: nothing else reads
 // it. A reader announces the epoch it entered in a slot of its own thread,
 // so reading writes nothing another thread touches; what a writer takes out
@@ -37,7 +32,6 @@ void collect_retired_tables() noexcept;
 class TableEpochs {
   template <class, class, class, class>
   friend class ConcurrentTable;
-  friend void collect_retired_tables() noexcept;
 
   static constexpr std::uint64_t kIdle = ~std::uint64_t{0};
 
@@ -99,7 +93,6 @@ class TableEpochs {
   // collection, in number or in `bytes`, the room `object` takes.
   static void retire(Retired& record, void* object, void (*free)(void*),
                      std::size_t bytes) noexcept;
-  static void collect() noexcept;
 
   // Trivial, and declared `constinit`, so reading it costs no initialisation
   // check. Defined once, in the source file: an inline thread-local variable

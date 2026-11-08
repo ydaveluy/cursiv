@@ -70,13 +70,13 @@ class DefaultDocuments : public Documents {
 
   SharedCoreServices& _shared;
   std::vector<Row> _rows;
-  std::unordered_map<std::string, DocumentId, TransparentStringHash,
+  std::unordered_map<std::string, DocumentId, detail::TransparentStringHash,
                      std::equal_to<>>
       _byUri;
   // A second index over the same truth, never a second truth: `_rows` holds the
   // documents, `_byUri` answers one URI in a hash, and this answers a folder --
   // which a flat map only answers by reading every key.
-  UriTrie<DocumentId> _byFolder;
+  detail::UriTrie<DocumentId> _byFolder;
 };
 
 }  // namespace cursiv

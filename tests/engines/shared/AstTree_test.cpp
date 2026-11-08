@@ -8,10 +8,10 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/shared/AstTreeGrammars.hpp"
 #include "engines/shared/Checks.hpp"
+#include "support/AstText.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -205,7 +205,7 @@ std::string tree(const Engine& e, std::string_view text) {
   std::string out;
   if (!r.accepted || !r.diagnostics.empty() || r.value == nullptr)
     return "<refused>";
-  cursiv::test::ast_of(*e.reflection, *r.value, out);
+  support::ast_of(*e.reflection, *r.value, out);
   return out;
 }
 

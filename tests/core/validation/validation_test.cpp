@@ -698,14 +698,15 @@ void a_linking_error_names_its_member() {
 cursiv::JsonValue::Array fixes_of(const cursiv::Document& document,
                                   const cursiv::Diagnostic& error) {
   const cursiv::Diagnostic* const one[] = {&error};
-  return cursiv::spelling_actions(document, one).front();
+  return cursiv::detail::spelling_actions(document, one).front();
 }
 
 // The names a row set would write, nearest first.
 std::vector<std::string> names_in(const cursiv::JsonValue::Array& rows) {
   std::vector<std::string> names;
   for (const cursiv::JsonValue& row : rows) {
-    const auto text = row.object().find(std::string(cursiv::kNewTextField));
+    const auto text =
+        row.object().find(std::string(cursiv::detail::kNewTextField));
     if (text != row.object().end()) names.push_back(text->second.string());
   }
   return names;
@@ -742,13 +743,15 @@ void a_misspelt_reference_offers_its_neighbours() {
     const auto field = [&](std::string_view name) {
       return row.object().find(std::string(name))->second;
     };
-    CHECK(field(cursiv::kTitleField).string() == "Replace with 'String'");
-    CHECK(field(cursiv::kEditKindField).string() == cursiv::kReplaceEdit);
-    CHECK(field(cursiv::kBeginField).integer() ==
+    CHECK(field(cursiv::detail::kTitleField).string() ==
+          "Replace with 'String'");
+    CHECK(field(cursiv::detail::kEditKindField).string() ==
+          cursiv::detail::kReplaceEdit);
+    CHECK(field(cursiv::detail::kBeginField).integer() ==
           static_cast<std::int64_t>(error->range.begin));
-    CHECK(field(cursiv::kEndField).integer() ==
+    CHECK(field(cursiv::detail::kEndField).integer() ==
           static_cast<std::int64_t>(error->range.end));
-    CHECK(field(cursiv::kRevisionField).integer() ==
+    CHECK(field(cursiv::detail::kRevisionField).integer() ==
           static_cast<std::int64_t>(near->buildRevision));
   }
 
@@ -804,7 +807,7 @@ void the_validation_looks_up_no_neighbour() {
   CHECK(scope->walks == 0);
   CHECK(error->data.has_value() &&
         !error->data->object().contains(
-            std::string(cursiv::kDefaultCodeActionsKey)));
+            std::string(cursiv::detail::kDefaultCodeActionsKey)));
   CHECK(fixes_of(*document, *error).size() == 1);
   CHECK(scope->walks == 1);
 }
@@ -826,7 +829,7 @@ void a_document_broken_everywhere_stops_being_spelt() {
       broken.push_back(&d);
   unsigned spelt = 0;
   for (const cursiv::JsonValue::Array& rows :
-       cursiv::spelling_actions(*document, broken))
+       cursiv::detail::spelling_actions(*document, broken))
     if (!names_in(rows).empty()) ++spelt;
   CHECK(broken.size() == 70);
   CHECK(spelt == 64);
@@ -947,7 +950,8 @@ void a_deletion_offers_no_quick_fix() {
   CHECK(repaired->message == "Unexpected ')', expecting 'datatype'.");
   CHECK(!repaired->code.has_value());
   const cursiv::JsonValue::Object& data = repaired->data->object();
-  CHECK(data.find(std::string(cursiv::kDefaultCodeActionsKey)) == data.end());
+  CHECK(data.find(std::string(cursiv::detail::kDefaultCodeActionsKey)) ==
+        data.end());
 }
 
 // The build publishes a repair with its edit rows, and applying the edit
@@ -962,7 +966,7 @@ void a_repairs_quick_fix_really_fixes() {
   CHECK(repaired->data.has_value() && repaired->data->isObject());
   const cursiv::JsonValue* const rows = [&]() -> const cursiv::JsonValue* {
     const auto it = repaired->data->object().find(
-        std::string(cursiv::kDefaultCodeActionsKey));
+        std::string(cursiv::detail::kDefaultCodeActionsKey));
     return it == repaired->data->object().end() ? nullptr : &it->second;
   }();
   CHECK(rows != nullptr && rows->isArray() && !rows->array().empty());
@@ -970,9 +974,11 @@ void a_repairs_quick_fix_really_fixes() {
   // The row applied to the text is a document that parses clean.
   const cursiv::JsonValue::Object& row = rows->array().front().object();
   const auto begin =
-      row.find(std::string(cursiv::kBeginField))->second.integer();
-  const auto end = row.find(std::string(cursiv::kEndField))->second.integer();
-  const auto newText = row.find(std::string(cursiv::kNewTextField))->second;
+      row.find(std::string(cursiv::detail::kBeginField))->second.integer();
+  const auto end =
+      row.find(std::string(cursiv::detail::kEndField))->second.integer();
+  const auto newText =
+      row.find(std::string(cursiv::detail::kNewTextField))->second;
   std::string fixed = text;
   fixed.replace(static_cast<std::size_t>(begin),
                 static_cast<std::size_t>(end - begin), newText.string());

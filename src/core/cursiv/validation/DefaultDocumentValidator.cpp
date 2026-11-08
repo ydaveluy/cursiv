@@ -163,15 +163,16 @@ void DefaultDocumentValidator::attachRepairActions(
   JsonValue::Array rows;
   for (const std::string_view spelling : spellings) {
     if (spelling == replaced) continue;
-    rows.push_back(make_action_row(
-        insert ? kInsertEdit : kReplaceEdit,
+    rows.push_back(detail::make_action_row(
+        insert ? detail::kInsertEdit : detail::kReplaceEdit,
         std::format("{} '{}'", insert ? "Insert" : "Replace with", spelling),
         range, std::string(spelling), document.buildRevision));
   }
   if (rows.empty()) return;
 
   JsonValue::Object payload;
-  payload.try_emplace(std::string(kDefaultCodeActionsKey), std::move(rows));
+  payload.try_emplace(std::string(detail::kDefaultCodeActionsKey),
+                      std::move(rows));
   diagnostic.data = JsonValue(std::move(payload));
 }
 

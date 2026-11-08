@@ -1230,8 +1230,9 @@ void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   diagnostic.severity = cursiv::DiagnosticSeverity::Warning;
   diagnostic.code = cursiv::DiagnosticCode("audit.replace");
   cursiv::JsonValue::Object data;
-  data[std::string(cursiv::kDefaultCodeActionsKey)] = cursiv::JsonValue::Array{
-      cursiv::make_action_row(cursiv::kReplaceEdit, "replace", {0, 1}, "b", 0)};
+  data[std::string(cursiv::detail::kDefaultCodeActionsKey)] =
+      cursiv::JsonValue::Array{cursiv::detail::make_action_row(
+          cursiv::detail::kReplaceEdit, "replace", {0, 1}, "b", 0)};
   data["numbers"] = cursiv::JsonValue::Array{
       cursiv::JsonValue(1.0), cursiv::JsonValue(cursiv::JsonValue::Object{
                                   {"nested", cursiv::JsonValue(2.0)}})};
@@ -1246,7 +1247,7 @@ void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   echo.severity = lsp::DiagnosticSeverity::Warning;
   echo.source = "audit";
   echo.code = std::string("audit.replace");
-  echo.data = cursiv::to_lsp_any(*document.diagnostics.front().data);
+  echo.data = cursiv::detail::to_lsp_any(*document.diagnostics.front().data);
   echo.tags =
       lsp::Array<lsp::DiagnosticTagEnum>{lsp::DiagnosticTag::Deprecated};
   lsp::CodeDescription description;
@@ -1307,8 +1308,8 @@ void an_action_preserves_the_matching_diagnostic_and_rejects_stale_payloads() {
   params.context.diagnostics.front() = echo;
   auto& duplicate = params.context.diagnostics.front().data->object();
   duplicate.remove("numbers");
-  duplicate.append(std::string(cursiv::kDefaultCodeActionsKey),
-                   duplicate.get(cursiv::kDefaultCodeActionsKey));
+  duplicate.append(std::string(cursiv::detail::kDefaultCodeActionsKey),
+                   duplicate.get(cursiv::detail::kDefaultCodeActionsKey));
   const auto duplicated = provider.getCodeActions(document, params);
   CHECK(duplicated.size() == 1);
   if (duplicated.size() == 1 && duplicated.front().diagnostics.has_value() &&

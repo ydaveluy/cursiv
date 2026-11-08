@@ -49,8 +49,8 @@ BuildOptions LspDocumentBuilder::configuredBuildOptions(
   const std::optional<lsp::LSPAny> validation =
       _lsp.configurationProvider->getConfiguration(languageId, "validation");
   if (!validation.has_value()) return updateBuildOptions();
-  return BuildOptions{
-      true, validation_categories(*validation, *services->validationRegistry)};
+  return BuildOptions{true, detail::validation_categories(
+                                *validation, *services->validationRegistry)};
 }
 
 }  // namespace cursiv

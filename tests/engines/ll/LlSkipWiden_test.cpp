@@ -4,9 +4,9 @@
 #include <string_view>
 
 #include "cursiv/parser/Parser.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "skipwidenll/generated/Ll/Module.hpp"
+#include "support/AstText.hpp"
 
 namespace {
 
@@ -22,7 +22,7 @@ std::string read(Parser& p, Reflection& r, std::string_view text) {
   const auto result = p->parse(text);
   CHECK(result.accepted && result.diagnostics.empty());
   std::string out;
-  if (result.value) cursiv::test::ast_of(*r, *result.value, out);
+  if (result.value) support::ast_of(*r, *result.value, out);
   out += " hidden:";
   for (cursiv::NodeId i = 0; i < result.cst().size(); ++i) {
     const auto& n = result.cst()[i];

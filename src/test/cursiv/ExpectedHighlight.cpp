@@ -45,7 +45,8 @@ Disposable expectHighlight(const LspServices& services,
     for (std::size_t at = 0; at < many->size() && at < highlights.size(); ++at)
       if (const auto* const range =
               detail::markerAt(marked.ranges, (*many)[at]))
-        expectSameRange(highlights[at].range, markedRange(*document, *range));
+        detail::expectSameRange(highlights[at].range,
+                                detail::markedRange(*document, *range));
   } else if (const auto* const one =
                  std::get_if<std::size_t>(&input.rangeIndex)) {
     expectedFunction(std::to_string(highlights.size()), "1",
@@ -53,8 +54,8 @@ Disposable expectHighlight(const LspServices& services,
                          std::to_string(highlights.size()));
     if (!highlights.empty())
       if (const auto* const range = detail::markerAt(marked.ranges, *one))
-        expectSameRange(highlights.front().range,
-                        markedRange(*document, *range));
+        detail::expectSameRange(highlights.front().range,
+                                detail::markedRange(*document, *range));
   } else {
     expectedFunction(
         std::to_string(highlights.size()), std::to_string(marked.ranges.size()),
@@ -62,11 +63,12 @@ Disposable expectHighlight(const LspServices& services,
             " highlights but received " + std::to_string(highlights.size()));
     for (std::size_t at = 0;
          at < marked.ranges.size() && at < highlights.size(); ++at)
-      expectSameRange(highlights[at].range,
-                      markedRange(*document, marked.ranges[at]));
+      detail::expectSameRange(
+          highlights[at].range,
+          detail::markedRange(*document, marked.ranges[at]));
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

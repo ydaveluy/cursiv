@@ -20,7 +20,7 @@
 // postorder tape with no parent link; document order comes from descending
 // the forest's roots through `reverse_children`.
 
-namespace cursiv {
+namespace cursiv::detail {
 
 // The rules of one request, keyed by (record, side). A later rule of equal or
 // higher priority replaces an earlier one on the same boundary, so a general
@@ -103,4 +103,4 @@ class RangeLines {
         visitHidden,
     const CancellationToken& token);
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

@@ -41,8 +41,9 @@ class DefaultServiceRegistry : public ServiceRegistry,
   }
 
  private:
-  using ByName = std::unordered_map<std::string, const CoreServices*,
-                                    TransparentStringHash, std::equal_to<>>;
+  using ByName =
+      std::unordered_map<std::string, const CoreServices*,
+                         detail::TransparentStringHash, std::equal_to<>>;
 
   [[nodiscard]] static const CoreServices* lookup(
       const ByName& table, std::string_view key) noexcept;

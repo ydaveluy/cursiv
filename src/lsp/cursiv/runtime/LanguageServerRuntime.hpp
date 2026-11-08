@@ -21,9 +21,11 @@ namespace cursiv {
 [[nodiscard]] int start_language_server(SharedLspServices& shared,
                                         lsp::io::Stream& stream);
 
-/**
- * The same session over the process's standard input and output.
- */
+namespace detail {
+
+// The same session over the process's standard input and output.
 [[nodiscard]] int run_language_server_stdio(SharedLspServices& shared);
+
+}  // namespace detail
 
 }  // namespace cursiv

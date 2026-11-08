@@ -60,7 +60,7 @@ Disposable expectFoldings(const LspServices& services,
     }
   }
 
-  Disposable disposable = documentDisposable(services, document);
+  Disposable disposable = detail::documentDisposable(services, document);
   if (input.disposeAfterCheck) disposable.dispose();
   return disposable;
 }

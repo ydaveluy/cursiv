@@ -37,8 +37,8 @@ void check_coverage(const cursiv::Grammar& grammar, const cursiv::Cst& cst,
                     const std::string& name) {
   for (cursiv::NodeId i = 0; i < cst.size(); ++i) {
     const cursiv::CstNode& n = cst[i];
-    if (n.subtreeSize != 1 ||
-        !cursiv::test::skipped_leaf(grammar, n) || n.hidden)
+    if (n.subtreeSize != 1 || !cursiv::test::detail::skipped_leaf(grammar, n) ||
+        n.hidden)
       continue;
     bool covered = false;
     for (const cursiv::ParseDiagnostic& d : cst.diagnostics())
@@ -92,14 +92,14 @@ void row(const cursiv::Parser& engine, const std::string& text,
          const std::string& name, const cursiv::test::Proj* baseline) {
   const cursiv::ParseResult result = engine.parse(text);
   cursiv::test::Proj p =
-      cursiv::test::project(engine.getGrammar(), result.cst(), text);
+      cursiv::test::detail::project(engine.getGrammar(), result.cst(), text);
   p.value = result.value != nullptr;
   const int inv =
-      baseline ? cursiv::test::invented(p.tokens, baseline->tokens) : 0;
+      baseline ? cursiv::test::detail::invented(p.tokens, baseline->tokens) : 0;
   const std::size_t validTokens =
       baseline ? baseline->tokens.size() : p.tokens.size();
   std::printf("%-38s %s\n", name.c_str(),
-              cursiv::test::signature(p, validTokens, inv).c_str());
+              cursiv::test::detail::signature(p, validTokens, inv).c_str());
   check_tree(result, text, name);
   check_coverage(engine.getGrammar(), result.cst(), name);
   check_claims(result.cst(), name);
@@ -117,12 +117,13 @@ void mutate_pass(const cursiv::Parser& engine, const std::string& seed) {
                        char byte) {
     ++tried;
     const cursiv::ParseResult r = engine.parse(doc);
-    const std::string name = cursiv::test::mutation_name(op, pos, byte);
+    const std::string name = cursiv::test::detail::mutation_name(op, pos, byte);
     check_tree(r, doc, "mutate:" + name);
-    cursiv::test::mutation_floor("torture", engine.getGrammar(), r, doc, name);
+    cursiv::test::detail::mutation_floor("torture", engine.getGrammar(), r, doc,
+                                         name);
   };
   for (std::size_t pos = 0; pos <= seed.size(); ++pos) {
-    for (char c : std::string_view(cursiv::test::kMutationAlphabet)) {
+    for (char c : std::string_view(cursiv::test::detail::kMutationAlphabet)) {
       std::string doc = seed;
       doc.insert(doc.begin() + static_cast<long>(pos), c);
       one(doc, 'i', pos, c);
@@ -131,7 +132,7 @@ void mutate_pass(const cursiv::Parser& engine, const std::string& seed) {
       std::string doc = seed;
       doc.erase(doc.begin() + static_cast<long>(pos));
       one(doc, 'd', pos, 0);
-      for (char c : std::string_view(cursiv::test::kMutationAlphabet)) {
+      for (char c : std::string_view(cursiv::test::detail::kMutationAlphabet)) {
         std::string rep = seed;
         rep[pos] = c;
         one(rep, 'r', pos, c);
@@ -169,10 +170,11 @@ void recycled_neighbour() {
   const cursiv::Parser& engine = *parser;
   const auto one = [&](const std::string& text, const std::string& name) {
     const cursiv::ParseResult result = engine.parse(text);
-    auto p = cursiv::test::project(engine.getGrammar(), result.cst(), text);
+    auto p =
+        cursiv::test::detail::project(engine.getGrammar(), result.cst(), text);
     p.value = result.value != nullptr;
     std::printf("%-38s %s\n", name.c_str(),
-                cursiv::test::signature(p, p.tokens.size(), 0).c_str());
+                cursiv::test::detail::signature(p, p.tokens.size(), 0).c_str());
     check_tree(result, text, name);
     check_coverage(engine.getGrammar(), result.cst(), name);
     if (std::ranges::find(p.tokens, "Y") == p.tokens.end()) {

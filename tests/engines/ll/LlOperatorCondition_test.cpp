@@ -7,9 +7,9 @@
 
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "engines/ll/OperatorConditionGrammar.hpp"
+#include "support/AstText.hpp"
 
 namespace operator_condition_cases {
 namespace {
@@ -47,7 +47,7 @@ void read(const Reader& r, const Case& c) {
   const bool clean = result.accepted && result.diagnostics.empty() &&
                      !result.cst().recovered() && result.value != nullptr;
   std::string tree;
-  if (clean) cursiv::test::ast_of(*r.reflection, *result.value, tree);
+  if (clean) support::ast_of(*r.reflection, *result.value, tree);
   const bool wants = !c.tree.empty();
   if (clean != wants || (wants && tree != c.tree))
     std::printf("%s: '%.*s' read %s%s, wants %s\n", r.engine,

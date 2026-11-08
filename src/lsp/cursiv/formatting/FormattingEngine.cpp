@@ -25,7 +25,7 @@
 #include "cursiv/formatting/LineTerminator.hpp"
 #include "cursiv/text/LspPosition.hpp"
 
-namespace cursiv {
+namespace cursiv::detail {
 
 namespace {
 
@@ -698,4 +698,4 @@ std::vector<lsp::TextEdit> run_formatting(
   return finalize_edits(document, std::move(edits), sorted);
 }
 
-}  // namespace cursiv
+}  // namespace cursiv::detail

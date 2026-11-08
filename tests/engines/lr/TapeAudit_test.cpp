@@ -18,10 +18,10 @@
 #include "cursiv/syntax-tree/Cst.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "edges/generated/G/Module.hpp"
 #include "engines/shared/CstAudit.hpp"
+#include "support/AstText.hpp"
 #include "torture/generated/Torture/Module.hpp"
 
 // Domain A audit lane: CST integrity invariants over LR.

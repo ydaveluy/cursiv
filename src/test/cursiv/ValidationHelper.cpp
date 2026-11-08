@@ -25,7 +25,7 @@ ValidationResult validationHelper(const CoreServices& services,
   // Constructed, never assigned: copy-assigning a `Diagnostic` walks the
   // variant assignment of its `data` payload, which g++ reads as a delete of an
   // object it cannot see allocated.
-  ValidationResult result{documentDisposable(services, document),
+  ValidationResult result{detail::documentDisposable(services, document),
                           document->diagnostics, document, &services};
 
   if (options.failOnParsingErrors) {

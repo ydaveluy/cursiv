@@ -6,9 +6,9 @@
 
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/CstNode.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "indirectfoldll/generated/Ll/Module.hpp"
+#include "support/AstText.hpp"
 
 #include "semanticll/generated/Ll/Module.hpp"
 
@@ -23,7 +23,7 @@ std::string read(Parser& p, Reflection& r, std::string_view prefix, std::string_
   CHECK(result.accepted && result.diagnostics.empty());
   if (!result.value) return "";
   std::string out;
-  cursiv::test::ast_of(*r, *result.value, out);
+  support::ast_of(*r, *result.value, out);
   return out;
 }
 
@@ -38,7 +38,7 @@ void abandoned(const cursiv::Parser& parser,
   const auto result = parser.parse(input);
   CHECK(result.accepted && result.value != nullptr && result.cst().recovered());
   std::string out;
-  if (result.value) cursiv::test::ast_of(reflection, *result.value, out);
+  if (result.value) support::ast_of(reflection, *result.value, out);
   bool right = result.diagnostics.size() == spans.size();
   auto expected = spans.begin();
   for (const auto& diagnostic : result.diagnostics) {

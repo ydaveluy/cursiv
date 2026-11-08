@@ -35,7 +35,6 @@
 #include "cursiv/shared/gen/AstRegistry.hpp"
 #include "cursiv/shared/gen/AstRowOf.hpp"
 #include "cursiv/shared/gen/CommonArtifacts.hpp"
-#include "cursiv/AstText.hpp"
 #include "cursiv/Check.hpp"
 #include "deferrednested/generated/NestedFirst/Module.hpp"
 #include "engines/lr/AsiGrammar.hpp"
@@ -59,6 +58,7 @@
 #include "astfusedlr/generated/Lr/Module.hpp"
 #include "passes/generated/G/Module.hpp"
 #include "passes/generated/G/Table.hpp"
+#include "support/AstText.hpp"
 #include "torture/ElectionGrammar.hpp"
 
 namespace lr_identity_cases {
