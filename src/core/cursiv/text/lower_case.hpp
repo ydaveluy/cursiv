@@ -25,14 +25,13 @@ inline char32_t lower_scalar(char32_t cp) noexcept {
 }
 
 inline bool cased(char32_t cp) noexcept {
-  return unicode::detail::within(unicode::detail::kCased,
-                                 std::size(unicode::detail::kCased), cp);
+  return unicode::within(unicode::detail::kCased,
+                         std::size(unicode::detail::kCased), cp);
 }
 
 inline bool case_ignorable(char32_t cp) noexcept {
-  return unicode::detail::within(unicode::detail::kCaseIgnorable,
-                                 std::size(unicode::detail::kCaseIgnorable),
-                                 cp);
+  return unicode::within(unicode::detail::kCaseIgnorable,
+                         std::size(unicode::detail::kCaseIgnorable), cp);
 }
 
 // Whether the sigma at `[begin, end)` follows a cased letter and precedes

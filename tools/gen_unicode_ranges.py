@@ -78,19 +78,20 @@ out = [
     '// tools/gen_unicode_ranges.py from Python\'s unicodedata and the Unicode',
     f'// Character Database, Unicode {VERSION}: never edited.',
     '#pragma once', '', '#include <string_view>', '',
-    'namespace cursiv::unicode::detail {', '',
+    'namespace cursiv::unicode {', '',
     '// The general categories, their majors, and the identifier, space and',
     '// alphabetic properties: a class of code points is a set of these.',
     'enum class Property : unsigned {',
 ]
 for name in props:
     out.append(f'  {name},')
-out += ['  count', '};', '',
+out += ['  count', '};', '', 'namespace detail {', '',
         '// For a dump alone: what a property is called.',
         'inline constexpr std::string_view kNames[] = {']
 for name in props:
     out.append(f'    "{name}",')
-out += ['};', '', '}  // namespace cursiv::unicode::detail', '']
+out += ['};', '', '}  // namespace detail', '', '}  // namespace cursiv::unicode',
+        '']
 open(os.path.join(unicode_dir, 'UnicodeProperty.hpp'), 'w').write('\n'.join(out))
 
 out = [
@@ -100,7 +101,7 @@ out = [
     '#pragma once', '', '#include <span>', '',
     '#include "cursiv/grammar/unicode/UnicodeProperty.hpp"',
     '#include "cursiv/grammar/unicode/UnicodeRange.hpp"', '',
-    'namespace cursiv::unicode::detail {', '',
+    'namespace cursiv::unicode {', '',
 ]
 for name, rs in props.items():
     body = ','.join(f'{{{lo:#x},{hi:#x}}}' for lo, hi in rs)
@@ -108,7 +109,7 @@ for name, rs in props.items():
 out += ['', 'inline constexpr std::span<const Range> kTables[] = {']
 for name in props:
     out.append(f'    k{name},')
-out += ['};', '', '}  // namespace cursiv::unicode::detail', '']
+out += ['};', '', '}  // namespace cursiv::unicode', '']
 path = os.path.join(unicode_dir, 'UnicodeRanges.hpp')
 open(path, 'w').write('\n'.join(out))
 print(path, sum(len(r) for r in props.values()), 'ranges')

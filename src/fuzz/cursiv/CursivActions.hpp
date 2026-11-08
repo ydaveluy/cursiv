@@ -313,7 +313,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
                          !cursiv::detail::has_default_convert<A>) {
       return Write::not_modelled;
     } else {
-      return accept<F, A>(o, cursiv::detail::default_convert<A>(text));
+      return accept<F, A>(o, default_convert<A>(text));
     }
   }
 }

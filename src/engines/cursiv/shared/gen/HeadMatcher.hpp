@@ -190,8 +190,8 @@ struct HeadMatcher {
             out.write(sets[r.count].any()
                           ? concat(lead,
                                    " ? "
-                                   "::std::min<::cursiv::TextOffset>(::cursiv::"
-                                   "detail::utf8_width(p[",
+                                   "::std::min<::cursiv::TextOffset>("
+                                   "::cursiv::utf8_width(p[",
                                    r.at, "u]), rest - ", r.at, "u) : 1u;\n")
                           : "1u;\n");
             out.line("      if (seen < ", r.at, "u + width) seen = ", r.at,
@@ -262,8 +262,9 @@ struct HeadMatcher {
       if (reach) {
         out.write("        const ::cursiv::TextOffset width = ");
         out.write(decoded ? "sets[r.count].has(c) ? "
-                            "::std::min<::cursiv::TextOffset>(::cursiv::"
-                            "detail::utf8_width(p[r.at]), rest - r.at) : 1u;\n"
+                            "::std::min<::cursiv::TextOffset>("
+                            "::cursiv::utf8_width(p[r.at]), rest - r.at) : "
+                            "1u;\n"
                           : "1u;\n");
         out.line("        if (seen < r.at + width) seen = r.at + width;");
       }

@@ -2,9 +2,11 @@
 
 #include <lsp/json/json.h>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
+#include "cursiv/text/TextOffset.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/FunctionRef.hpp"
 #include "cursiv/workspace/ServiceRequirement.hpp"
@@ -26,6 +28,8 @@ struct SharedCoreServices;
 // An object schema of `properties`, the names in `required` mandatory.
 [[nodiscard]] lsp::json::Value tool_object_schema(lsp::json::Object properties,
                                                   lsp::json::Array required);
+// The schema of a position: `file`, `line` and `column`, all required.
+[[nodiscard]] lsp::json::Value tool_position_schema();
 // The argument named `key`; null when the call did not pass it.
 [[nodiscard]] const lsp::json::Value* tool_argument(
     const lsp::json::Value& arguments, std::string_view key);
@@ -34,6 +38,18 @@ struct SharedCoreServices;
  * A path becomes an absolute file:// uri; anything already a uri passes.
  */
 [[nodiscard]] std::string tool_file_uri(std::string_view file);
+
+// A position as the store reads it: 0-based, where the call is 1-based.
+struct McpToolPosition {
+  std::string uri;
+  std::uint32_t line = 0;
+  std::uint32_t column = 0;
+};
+// The position the arguments name; a bad one throws a message the model reads.
+[[nodiscard]] McpToolPosition tool_position(const lsp::json::Value& arguments);
+// Appends `line:column`, 1-based, the form every answer uses.
+void append_tool_position(std::string& out, const Document& document,
+                          TextOffset offset);
 
 /**
  * The document-tool spine: the requirement awaited off the lock, the

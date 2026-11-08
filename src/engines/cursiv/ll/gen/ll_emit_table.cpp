@@ -43,7 +43,7 @@ std::string u(std::uint64_t v) { return concat(v, "u"); }
 std::string byte_set(const ByteSet& s) {
   return concat("{{", s.w[0], "u,", s.w[1], "u,", s.w[2], "u,", s.w[3], "u}}");
 }
-std::string range(const unicode::detail::Range& r) {
+std::string range(const unicode::Range& r) {
   return concat("{", static_cast<std::uint32_t>(r.lo), "u,",
                 static_cast<std::uint32_t>(r.hi), "u}");
 }
@@ -552,15 +552,14 @@ LlTableSource ll_emit_table(const LlFinalProgram& done, const std::string& ns) {
     o.array("::std::uint16_t", "kSectionEnd", a.sectionEnd);
   }
   o.array("::std::uint16_t", "kWordBounds", a.wordBounds);
-  o.array("::cursiv::unicode::detail::Range", "kWordRanges", g.wordRanges.v,
-          range);
+  o.array("::cursiv::unicode::Range", "kWordRanges", g.wordRanges.v, range);
   if (classes) {
     std::vector<std::uint32_t> scalars(g.nsets);
     for (std::uint16_t i = 0; i < g.nsets; ++i)
       scalars[i] = lex_set_scalars(g, i);
     o.array("::std::uint32_t", "kSetScalars", scalars);
-    o.array("::cursiv::unicode::detail::Range", "kScalarRanges",
-            g.scalarRanges.v, range);
+    o.array("::cursiv::unicode::Range", "kScalarRanges", g.scalarRanges.v,
+            range);
   }
   // The functions the view points at, as the header declares them: their
   // definitions, and the large bodies only they call, go to the parser's own

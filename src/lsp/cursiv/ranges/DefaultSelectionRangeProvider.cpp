@@ -48,11 +48,11 @@ struct TokenSpan {
   const auto size = static_cast<TextOffset>(text.size());
   const auto is = [&](TextOffset lead) {
     std::size_t len = 0;
-    return lead < size && detail::word_scalar(detail::scalar_at(
-                              text.data() + lead, size - lead, len));
+    return lead < size &&
+           detail::word_scalar(scalar_at(text.data() + lead, size - lead, len));
   };
   const auto width = [&](TextOffset lead) {
-    return static_cast<TextOffset>(detail::utf8_width(text[lead]));
+    return static_cast<TextOffset>(utf8_width(text[lead]));
   };
   TextOffset cursor = offset < size ? scalar_start(text, offset) : size;
   // The caret just past a word is still on it -- the same half-open-span rule

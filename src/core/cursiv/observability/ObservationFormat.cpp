@@ -69,7 +69,7 @@ std::string_view to_string(ObservationCode code) noexcept {
 
 }  // namespace
 
-std::string detail::format_observation(const Observation& observation) {
+std::string format_observation(const Observation& observation) {
   std::string formatted;
   formatted.reserve(observation.message.size() + 64);
   formatted.append(to_string(observation.severity));

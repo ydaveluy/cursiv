@@ -19,18 +19,15 @@
 #include "cursiv/syntax-tree/AstNode.hpp"
 #include "cursiv/syntax-tree/VariantNodeAlt.hpp"
 #include "cursiv/text/ClassItem.hpp"
-#include "cursiv/text/scalar_at.hpp"
 #include "cursiv/utils/CaseFold.hpp"
 #include "cursiv/utils/Tag.hpp"
 #include "cursiv/utils/TypeName.hpp"
-#include "cursiv/utils/Utf8.hpp"
 #include "cursiv/utils/ctstring.hpp"
 #include "cursiv/utils/typelist.hpp"
 
 namespace cursiv::engine {
 
 using cursiv::detail::alts_list;
-using cursiv::detail::append_scalar;
 using cursiv::detail::ast_cast_unchecked;
 using cursiv::detail::ast_pointer_alt;
 using cursiv::detail::AstArena;
@@ -50,7 +47,6 @@ using cursiv::detail::cpp_literal_end;
 using cursiv::detail::declared_of_t;
 using cursiv::detail::dedupe;
 using cursiv::detail::dedupe_t;
-using cursiv::detail::default_convert;
 using cursiv::detail::dependent_false;
 using cursiv::detail::enum_probes;
 using cursiv::detail::enumerator_name;
@@ -115,7 +111,6 @@ using cursiv::detail::kLitGuardWord;
 using cursiv::detail::kNode;
 using cursiv::detail::kNoImage;
 using cursiv::detail::kNoIndex;
-using cursiv::detail::kNoScalar;
 using cursiv::detail::kRule;
 using cursiv::detail::lit_pays;
 using cursiv::detail::named_rule_t;
@@ -137,7 +132,6 @@ using cursiv::detail::RefBranchFn;
 using cursiv::detail::Rule;
 using cursiv::detail::rule_type_t;
 using cursiv::detail::RulesOf;
-using cursiv::detail::scalar_at;
 using cursiv::detail::section_entry_t;
 using cursiv::detail::section_hidden_t;
 using cursiv::detail::section_ignored_t;
@@ -159,7 +153,6 @@ using cursiv::detail::tl_size;
 using cursiv::detail::transparent;
 using cursiv::detail::type_name;
 using cursiv::detail::unwrap_result_t;
-using cursiv::detail::utf8_width;
 using cursiv::detail::variant_node_alt;
 using cursiv::detail::ViewBase;
 using cursiv::detail::word_final_in;

@@ -782,7 +782,7 @@ void an_observation_is_one_line() {
       .message = "line one\nline two\r\nthree",
       .uri = "file:///w",
       .languageId = "ws"};
-  const std::string line = cursiv::detail::format_observation(observation);
+  const std::string line = cursiv::format_observation(observation);
   CHECK(line.find('\n') == std::string::npos);
   CHECK(line.find('\r') == std::string::npos);
   CHECK(line.find("warning WorkspaceDirectoryReadFailed:") == 0);
@@ -793,7 +793,7 @@ void an_observation_is_one_line() {
   cursiv::Observation controls;
   controls.message = std::string("a\0b\x1b[2Jc", 8);
   controls.uri = std::string("file:///\0w", 10);
-  const std::string flat = cursiv::detail::format_observation(controls);
+  const std::string flat = cursiv::format_observation(controls);
   CHECK(flat.find("a b [2Jc") != std::string::npos);
   CHECK(flat.ends_with("uri=file:/// w"));
 }

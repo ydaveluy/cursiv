@@ -4,7 +4,7 @@
 
 #include <cstddef>
 
-#include "cursiv/shared/utils/CoreContract.hpp"
+#include "cursiv/text/scalar_at.hpp"
 
 namespace cursiv::engine {
 

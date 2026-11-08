@@ -76,55 +76,6 @@ constexpr std::size_t kMaxOutlineDepth = 16;
 constexpr std::string_view kSeverities[] = {"error", "warning", "information",
                                             "hint"};
 
-// `file` (required), `line` and `column` (1-based, utf-16 columns).
-json::Value tool_position_schema() {
-  json::Object properties;
-  properties["file"] =
-      tool_property("string", "path or file:// uri of the document");
-  properties["line"] = tool_property("integer", "1-based line");
-  properties["column"] =
-      tool_property("integer", "1-based column, in utf-16 units");
-  json::Array required;
-  required.emplace_back(json::String("file"));
-  required.emplace_back(json::String("line"));
-  required.emplace_back(json::String("column"));
-  return tool_object_schema(std::move(properties), std::move(required));
-}
-
-// The three positional arguments, resolved to the store's vocabulary --
-// 0-based here, 1-based on the wire.
-struct McpToolPosition {
-  std::string uri;
-  std::uint32_t line = 0;
-  std::uint32_t column = 0;
-};
-
-// Throws a model-readable message on a miss; the endpoint turns it into an
-// `isError` result.
-McpToolPosition tool_position(const json::Value& arguments) {
-  const json::Value* const file = tool_argument(arguments, "file");
-  const json::Value* const line = tool_argument(arguments, "line");
-  const json::Value* const column = tool_argument(arguments, "column");
-  if (file == nullptr || !file->isString())
-    throw std::invalid_argument("'file' names the document");
-  if (line == nullptr || !line->isInteger() || line->integer() < 1)
-    throw std::invalid_argument("'line' is 1-based");
-  if (column == nullptr || !column->isInteger() || column->integer() < 1)
-    throw std::invalid_argument("'column' is 1-based");
-  return {tool_file_uri(file->string()),
-          static_cast<std::uint32_t>(line->integer() - 1),
-          static_cast<std::uint32_t>(column->integer() - 1)};
-}
-
-// `line:column`, 1-based, the convention every answer speaks.
-void append_tool_position(std::string& out, const Document& document,
-                          TextOffset offset) {
-  const Position position = document.textDocument().positionAt(offset);
-  out += std::to_string(position.line + 1);
-  out += ':';
-  out += std::to_string(position.character + 1);
-}
-
 void append_location(std::string& out, const Document& document,
                      const AstNode* node) {
   out += document.uri;

@@ -104,9 +104,8 @@ static_assert(std::is_same_v<decltype(uc::L | ~cr<"a">), detail::AnyChar>);
 static_assert(std::is_same_v<decltype(~cr<"a!"> | uc::L), CpSet<0, true, "!">>);
 static_assert(std::is_same_v<decltype(uc::L | ~cr<"a!">), CpSet<0, true, "!">>);
 
-constexpr bool difference_is(
-    std::string_view a, std::string_view b,
-    std::initializer_list<unicode::detail::Range> want) {
+constexpr bool difference_is(std::string_view a, std::string_view b,
+                             std::initializer_list<unicode::Range> want) {
   const auto actual =
       detail::ClassRanges::of(a).minus(detail::ClassRanges::of(b));
   return std::equal(actual.r.begin(), actual.r.end(), want.begin(), want.end());
@@ -132,7 +131,7 @@ static_assert(difference_is(R"(\u{0}-\u{10ffff})", R"(\u{0})",
 static_assert(difference_is(R"(\u{0}\u{10ffff})", R"(\u{0}-\u{10ffff})", {}));
 
 constexpr bool union_is(std::string_view a, std::string_view b,
-                        std::initializer_list<unicode::detail::Range> want) {
+                        std::initializer_list<unicode::Range> want) {
   const auto actual =
       detail::ClassRanges::of(a).united(detail::ClassRanges::of(b));
   return std::equal(actual.r.begin(), actual.r.end(), want.begin(), want.end());
@@ -261,10 +260,10 @@ static_assert(fault("\xc3") == ClassFault::malformed);
 static_assert(fault(R"(\d\-x-)") == ClassFault::none);
 
 bool same_ranges(const LexCodePoints& c,
-                 std::initializer_list<unicode::detail::Range> want) {
+                 std::initializer_list<unicode::Range> want) {
   if (c.ranges.size() != want.size()) return false;
   std::size_t i = 0;
-  for (const unicode::detail::Range& r : want) {
+  for (const unicode::Range& r : want) {
     if (c.ranges[i].lo != r.lo || c.ranges[i].hi != r.hi) return false;
     ++i;
   }
@@ -410,8 +409,8 @@ int main() {
   CHECK(LexCodePoints::of(0, true, R"(\w)").strays());
   CHECK(!LexCodePoints::of(0, true, R"(\u{0}-\u{10FFFF})").ranges.empty());
   CHECK(same_ranges(
-      LexCodePoints::of(detail::cp_bit(unicode::detail::Property::White_Space),
-                        false, ""),
+      LexCodePoints::of(detail::cp_bit(unicode::Property::White_Space), false,
+                        ""),
       {{0x09, 0x0D},
        {0x20, 0x20},
        {0x85, 0x85},

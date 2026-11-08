@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <numeric>
 
-namespace cursiv::unicode::detail {
+namespace cursiv::unicode {
 
 struct Range {
   char32_t lo;
@@ -25,4 +25,4 @@ constexpr bool within(const Range* r, std::size_t n, char32_t cp) {
   return lo < n && r[lo].lo <= cp;
 }
 
-}  // namespace cursiv::unicode::detail
+}  // namespace cursiv::unicode

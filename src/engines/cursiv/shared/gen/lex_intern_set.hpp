@@ -98,7 +98,7 @@ template <class Cfg>
 LexCodePoints lex_set_cps(const Cfg& g, std::uint16_t s) {
   if (g.setDecode[s] == kNoSet) return {};
   const std::uint32_t at = lex_set_scalars(g, s);
-  const unicode::detail::Range* const r =
+  const unicode::Range* const r =
       at == 0 ? g.wordRanges.data() : g.scalarRanges.data() + (at >> 16);
   LexCodePoints all;
   all.ranges.assign(r, r + (at == 0 ? g.wordRanges.size() : at & 0xFFFFu));
@@ -125,7 +125,7 @@ std::uint16_t lex_intern_cps_bound(Cfg& g, const ByteSet& bytes,
     const std::size_t base = g.scalarRanges.size();
     if (n > 0xFFFFu || base > 0xFFFFu)
       throw LowerRefused(LowerFail::tokenGraphTooLarge);
-    for (const unicode::detail::Range& r : kept.ranges)
+    for (const unicode::Range& r : kept.ranges)
       g.scalarRanges[g.scalarRanges.size()] = r;
     at = static_cast<std::uint32_t>(base << 16 | n);
   }

@@ -338,14 +338,12 @@ static_assert(std::is_same_v<std::remove_cv_t<decltype(lit<"a", cr<"0-9">>)>,
 static_assert(std::is_same_v<decltype(cr<"a-z_"> | uc::L),
                              decltype(uc::L | cr<"a-z_">)>);
 static_assert(
-    std::is_same_v<
-        decltype(cr<"$"> | uc::Nd),
-        CpSet<detail::cp_bit(unicode::detail::Property::Nd), false, "$">>);
+    std::is_same_v<decltype(cr<"$"> | uc::Nd),
+                   CpSet<detail::cp_bit(unicode::Property::Nd), false, "$">>);
 // The syntax characters are spelled `\xNN`.
-static_assert(
-    std::is_same_v<decltype(cr<R"(+\\-)"> | uc::Nd),
-                   CpSet<detail::cp_bit(unicode::detail::Property::Nd), false,
-                         "+\\x2d\\x5c">>);
+static_assert(std::is_same_v<decltype(cr<R"(+\\-)"> | uc::Nd),
+                             CpSet<detail::cp_bit(unicode::Property::Nd), false,
+                                   "+\\x2d\\x5c">>);
 
 // A union is one class, and `~` complements among all characters, ill-formed
 // bytes included: twice gives the class back.

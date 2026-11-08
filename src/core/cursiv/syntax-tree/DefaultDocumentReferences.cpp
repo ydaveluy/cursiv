@@ -154,7 +154,7 @@ void DefaultDocumentReferences::visit_resolved(
 bool DefaultDocumentReferences::anyUnresolved() const noexcept {
   return std::ranges::any_of(handles, [&](const RefHandle& h) {
     return h.owner != nullptr &&
-           detail::has_error(_f.refOps[h.field].state(*h.owner, h.index));
+           has_error(_f.refOps[h.field].state(*h.owner, h.index));
   });
 }
 
@@ -169,7 +169,7 @@ void DefaultDocumentReferences::visit_unresolved(
   if (h.owner == nullptr) return;
   const RefOps& ops = _f.refOps[h.field];
   const RefState why = ops.state(*h.owner, h.index);
-  if (!detail::has_error(why)) return;
+  if (!has_error(why)) return;
   // Anchored on the name and not on the node that holds it: the word the
   // editor underlines is the one the text was read from.
   TextOffset begin = 0;

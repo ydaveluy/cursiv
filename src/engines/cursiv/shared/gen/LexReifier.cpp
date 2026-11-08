@@ -467,7 +467,7 @@ void LexReifier::declare_word(const ImageClassDesc& bound) {
   _wordBytes = cps.bytes();
   LexCodePoints wide;
   wide.ranges = cps.wide();
-  for (const unicode::detail::Range& r : wide.ranges)
+  for (const unicode::Range& r : wide.ranges)
     _c.wordRanges[_c.wordRanges.size()] = r;
   _c.wordLeads = wide.leads();
 }

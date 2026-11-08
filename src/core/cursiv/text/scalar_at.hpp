@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-namespace cursiv::detail {
+namespace cursiv {
 
 inline constexpr char32_t kNoScalar = 0xFFFFFFFFu;
 
@@ -52,4 +52,4 @@ inline void append_scalar(std::string& out, char32_t cp) {
   out += static_cast<char>(0x80 | (cp & 0x3F));
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv

@@ -944,7 +944,7 @@ class LexicalPredicateEmitter {
         out.line(
             "        if (!echoed.empty()) { out.unite(echoed); break; }\n"
             "        ::std::size_t width = 0;\n"
-            "        (void)::cursiv::detail::scalar_at(src + p.at, len - p.at, "
+            "        (void)::cursiv::scalar_at(src + p.at, len - p.at, "
             "width);\n"
             "        p.at += static_cast<::cursiv::TextOffset>(\n"
             "            width != 0 ? width : 1);\n"

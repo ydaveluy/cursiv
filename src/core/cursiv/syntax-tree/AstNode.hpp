@@ -356,9 +356,7 @@ enum class RefState : std::uint8_t {
   ErrorCycle
 };
 
-namespace detail {
 constexpr bool has_error(RefState s) { return s >= RefState::ErrorNotFound; }
-}  // namespace detail
 
 // A scope provider may read references, so resolution re-enters this protocol.
 // Each resolution in flight is filed under its thread: a read that would wait

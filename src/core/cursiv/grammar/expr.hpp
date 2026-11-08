@@ -115,7 +115,7 @@ struct Doc : GrammarNode {
 };
 
 // A class of characters: the Unicode properties it names, one bit each over
-// `unicode::detail::Property`, the scalars spelled beside them in canonical
+// `unicode::Property`, the scalars spelled beside them in canonical
 // form
 // (`"\\xc0-\\xff"`, `"$_"`), and whether the whole is complemented. A
 // complement holds every scalar outside the rest, and a byte that starts no
@@ -918,7 +918,7 @@ consteval auto cr_of() {
   else
     return class_of<Spec, false>();
 }
-consteval std::uint64_t cp_bit(unicode::detail::Property p) {
+consteval std::uint64_t cp_bit(unicode::Property p) {
   return std::uint64_t{1} << static_cast<unsigned>(p);
 }
 // What a class is called, for a dump and a terminal's name: `\p{L|Nd}`,
@@ -940,8 +940,7 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
   put("\\p{");
   if (complement) sink('^');
   bool first = true;
-  for (unsigned i = 0;
-       i < static_cast<unsigned>(unicode::detail::Property::count); ++i)
+  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
     if ((props >> i) & 1) {
       if (!first) sink('|');
       first = false;
@@ -954,11 +953,10 @@ constexpr void cp_name_emit(std::uint64_t props, bool complement,
 template <std::uint64_t M>
 consteval ClassRanges props_ranges() {
   ClassRanges out;
-  for (unsigned i = 0;
-       i < static_cast<unsigned>(unicode::detail::Property::count); ++i)
+  for (unsigned i = 0; i < static_cast<unsigned>(unicode::Property::count); ++i)
     if ((M >> i) & 1)
-      out.r.insert(out.r.end(), unicode::detail::kTables[i].begin(),
-                   unicode::detail::kTables[i].end());
+      out.r.insert(out.r.end(), unicode::kTables[i].begin(),
+                   unicode::kTables[i].end());
   out.merge();
   return out;
 }
@@ -1041,47 +1039,47 @@ constexpr auto operator|(Byte, CpSet<M, N, S>) {
 // The Unicode properties, which hold scalars only: a general category and its
 // majors, and the identifier, space and alphabetic properties.
 struct uc {
-  template <unicode::detail::Property P>
+  template <unicode::Property P>
   using of = CpSet<detail::cp_bit(P), false, "">;
-  static constexpr of<unicode::detail::Property::L> L{};
-  static constexpr of<unicode::detail::Property::M> M{};
-  static constexpr of<unicode::detail::Property::N> N{};
-  static constexpr of<unicode::detail::Property::P> P{};
-  static constexpr of<unicode::detail::Property::S> S{};
-  static constexpr of<unicode::detail::Property::Z> Z{};
-  static constexpr of<unicode::detail::Property::C> C{};
-  static constexpr of<unicode::detail::Property::Lu> Lu{};
-  static constexpr of<unicode::detail::Property::Ll> Ll{};
-  static constexpr of<unicode::detail::Property::Lt> Lt{};
-  static constexpr of<unicode::detail::Property::Lm> Lm{};
-  static constexpr of<unicode::detail::Property::Lo> Lo{};
-  static constexpr of<unicode::detail::Property::Mn> Mn{};
-  static constexpr of<unicode::detail::Property::Mc> Mc{};
-  static constexpr of<unicode::detail::Property::Me> Me{};
-  static constexpr of<unicode::detail::Property::Nd> Nd{};
-  static constexpr of<unicode::detail::Property::Nl> Nl{};
-  static constexpr of<unicode::detail::Property::No> No{};
-  static constexpr of<unicode::detail::Property::Pc> Pc{};
-  static constexpr of<unicode::detail::Property::Pd> Pd{};
-  static constexpr of<unicode::detail::Property::Ps> Ps{};
-  static constexpr of<unicode::detail::Property::Pe> Pe{};
-  static constexpr of<unicode::detail::Property::Pi> Pi{};
-  static constexpr of<unicode::detail::Property::Pf> Pf{};
-  static constexpr of<unicode::detail::Property::Po> Po{};
-  static constexpr of<unicode::detail::Property::Sm> Sm{};
-  static constexpr of<unicode::detail::Property::Sc> Sc{};
-  static constexpr of<unicode::detail::Property::Sk> Sk{};
-  static constexpr of<unicode::detail::Property::So> So{};
-  static constexpr of<unicode::detail::Property::Zs> Zs{};
-  static constexpr of<unicode::detail::Property::Zl> Zl{};
-  static constexpr of<unicode::detail::Property::Zp> Zp{};
-  static constexpr of<unicode::detail::Property::Cc> Cc{};
-  static constexpr of<unicode::detail::Property::Cf> Cf{};
-  static constexpr of<unicode::detail::Property::Co> Co{};
-  static constexpr of<unicode::detail::Property::XID_Start> XID_Start{};
-  static constexpr of<unicode::detail::Property::XID_Continue> XID_Continue{};
-  static constexpr of<unicode::detail::Property::White_Space> White_Space{};
-  static constexpr of<unicode::detail::Property::Alphabetic> Alphabetic{};
+  static constexpr of<unicode::Property::L> L{};
+  static constexpr of<unicode::Property::M> M{};
+  static constexpr of<unicode::Property::N> N{};
+  static constexpr of<unicode::Property::P> P{};
+  static constexpr of<unicode::Property::S> S{};
+  static constexpr of<unicode::Property::Z> Z{};
+  static constexpr of<unicode::Property::C> C{};
+  static constexpr of<unicode::Property::Lu> Lu{};
+  static constexpr of<unicode::Property::Ll> Ll{};
+  static constexpr of<unicode::Property::Lt> Lt{};
+  static constexpr of<unicode::Property::Lm> Lm{};
+  static constexpr of<unicode::Property::Lo> Lo{};
+  static constexpr of<unicode::Property::Mn> Mn{};
+  static constexpr of<unicode::Property::Mc> Mc{};
+  static constexpr of<unicode::Property::Me> Me{};
+  static constexpr of<unicode::Property::Nd> Nd{};
+  static constexpr of<unicode::Property::Nl> Nl{};
+  static constexpr of<unicode::Property::No> No{};
+  static constexpr of<unicode::Property::Pc> Pc{};
+  static constexpr of<unicode::Property::Pd> Pd{};
+  static constexpr of<unicode::Property::Ps> Ps{};
+  static constexpr of<unicode::Property::Pe> Pe{};
+  static constexpr of<unicode::Property::Pi> Pi{};
+  static constexpr of<unicode::Property::Pf> Pf{};
+  static constexpr of<unicode::Property::Po> Po{};
+  static constexpr of<unicode::Property::Sm> Sm{};
+  static constexpr of<unicode::Property::Sc> Sc{};
+  static constexpr of<unicode::Property::Sk> Sk{};
+  static constexpr of<unicode::Property::So> So{};
+  static constexpr of<unicode::Property::Zs> Zs{};
+  static constexpr of<unicode::Property::Zl> Zl{};
+  static constexpr of<unicode::Property::Zp> Zp{};
+  static constexpr of<unicode::Property::Cc> Cc{};
+  static constexpr of<unicode::Property::Cf> Cf{};
+  static constexpr of<unicode::Property::Co> Co{};
+  static constexpr of<unicode::Property::XID_Start> XID_Start{};
+  static constexpr of<unicode::Property::XID_Continue> XID_Continue{};
+  static constexpr of<unicode::Property::White_Space> White_Space{};
+  static constexpr of<unicode::Property::Alphabetic> Alphabetic{};
 };
 inline constexpr detail::AnyChar any{};
 inline constexpr Byte byte{};

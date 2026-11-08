@@ -240,7 +240,7 @@ struct SpellOf<C, CpSet<M, N, S>, D> {
     cx.clear();
     for (char32_t cp = 0x80; cp <= 0x10FFFF; ++cp)
       if (cursiv::detail::word_class<CpSet<M, N, S>>::has(cp)) {
-        cursiv::detail::append_scalar(out, cp);
+        append_scalar(out, cp);
         return true;
       }
     return false;
@@ -561,13 +561,12 @@ struct CursivLexicon final : GrammarLexicon {
     out.reserve(s.size());
     for (std::size_t i = 0; i < s.size();) {
       std::size_t len = 0;
-      const char32_t cp =
-          cursiv::detail::scalar_at(s.data() + i, s.size() - i, len);
+      const char32_t cp = scalar_at(s.data() + i, s.size() - i, len);
       if (len == 0) {
         out += s[i++];
         continue;
       }
-      cursiv::detail::append_scalar(out, cursiv::detail::fold_scalar(cp));
+      append_scalar(out, cursiv::detail::fold_scalar(cp));
       i += len;
     }
     return out;

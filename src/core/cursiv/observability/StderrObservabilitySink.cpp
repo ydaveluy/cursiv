@@ -10,7 +10,7 @@ namespace cursiv {
 
 void StderrObservabilitySink::publish(const Observation& observation) noexcept {
   try {
-    const std::string line = detail::format_observation(observation);
+    const std::string line = format_observation(observation);
     // One static mutex, not a member: the sink is replaceable and two
     // instances would otherwise interleave on the same stream.
     static std::mutex mutex;

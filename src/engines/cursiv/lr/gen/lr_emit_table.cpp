@@ -154,7 +154,7 @@ struct LrTableEmitter : TextBuilder {
     cell(f);
   }
   void cell(const LexRelayGen& r) { write(lex_relay_source(r, names)); }
-  void cell(const unicode::detail::Range& r) {
+  void cell(const unicode::Range& r) {
     write("{", static_cast<std::uint32_t>(r.lo), "u,",
           static_cast<std::uint32_t>(r.hi), "u}");
   }

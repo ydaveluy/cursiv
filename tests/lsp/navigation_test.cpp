@@ -5,6 +5,7 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <span>
@@ -15,11 +16,13 @@
 #include <vector>
 
 #include "cursiv/parser/Parser.hpp"
+#include "cursiv/references/NameProvider.hpp"
 #include "cursiv/references/References.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/workspace/AstNodeDescription.hpp"
 #include "cursiv/workspace/Document.hpp"
+#include "cursiv/hierarchy/HierarchyProviderSupport.hpp"
 #include "cursiv/hover/HoverProvider.hpp"
 #include "cursiv/navigation/DefinitionProvider.hpp"
 #include "cursiv/navigation/DocumentHighlightProvider.hpp"
@@ -158,6 +161,31 @@ void a_multi_reference_links_every_member() {
           spans(*link.originSelectionRange, 0, 7, 8));
 }
 
+void a_hierarchy_item_keeps_the_selected_overload() {
+  const MultiRef world("multiref", ".mref");
+  const auto documents =
+      world.built({{"file:///w/q.mref", "SELECT t FROM t, t"}});
+  const auto targets = cursiv::hierarchy_nodes_at(
+      *world.language->references, *documents[0], {0, 7}, cursiv::kNoCancel);
+  CHECK(targets.size() == 2);
+  if (targets.size() != 2) return;
+  for (std::size_t index = 0; index < targets.size(); ++index) {
+    const auto name =
+        world.language->nameProvider->getNameNode(*targets[index]);
+    CHECK(name.has_value());
+    if (!name) continue;
+    const auto position =
+        documents[0]->textDocument().positionAt(name->begin());
+    const auto* selected = cursiv::hierarchy_node_of_item(
+        *world.shared.documents, *world.language->references,
+        lsp::Uri::parse(documents[0]->uri),
+        {static_cast<lsp::Uint>(position.line),
+         static_cast<lsp::Uint>(position.character)},
+        cursiv::kNoCancel);
+    CHECK(selected == targets[index]);
+  }
+}
+
 // Nothing linked is `nullopt`, never an empty list: a keyword denotes nothing.
 void nothing_is_linked_from_a_keyword() {
   const Workspace world("workspace", ".ws");
@@ -172,6 +200,7 @@ void run() {
   a_link_previews_the_declaration_and_selects_its_name();
   a_link_reaches_into_another_document();
   a_multi_reference_links_every_member();
+  a_hierarchy_item_keeps_the_selected_overload();
   nothing_is_linked_from_a_keyword();
 }
 

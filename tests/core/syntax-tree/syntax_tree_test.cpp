@@ -1786,8 +1786,8 @@ static_assert(std::is_base_of_v<cursiv::AstNode, N>);
 // is four bytes and the number would differ while saying the same thing. What
 // a pin catches is a field added.
 static_assert(sizeof(void*) != 8 || sizeof(cursiv::RefHandle) == 16);
-static_assert(!cursiv::detail::has_error(cursiv::RefState::Resolved) &&
-              cursiv::detail::has_error(cursiv::RefState::ErrorNotFound));
+static_assert(!cursiv::has_error(cursiv::RefState::Resolved) &&
+              cursiv::has_error(cursiv::RefState::ErrorNotFound));
 
 // A diagnostic positions by range, and by nothing else: whoever reads one
 // holds the tree already -- `ParseResult` owns it -- so the type carries no
@@ -4451,7 +4451,7 @@ void threads_around_a_ring_all_see_the_cycle() {
     for (const Ref& r : graph.refs) CHECK(!detail::ref_running(raw(r)));
     for (const Ref& r : graph.refs) {
       const RefState s = r.resolve();
-      CHECK(cancel ? cursiv::detail::has_error(s) : s == RefState::ErrorCycle);
+      CHECK(cancel ? has_error(s) : s == RefState::ErrorCycle);
     }
   }
 }

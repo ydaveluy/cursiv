@@ -4329,7 +4329,7 @@ void the_word_count_answers_what_a_byte_walk_answers() {
                         std::size_t to) {
     std::uint32_t n = 0;
     for (std::size_t at = from; at < to;) {
-      const std::size_t step = cursiv::detail::utf8_width(text[at]);
+      const std::size_t step = cursiv::utf8_width(text[at]);
       n += step == 4 ? 2U : 1U;
       at += step;
     }

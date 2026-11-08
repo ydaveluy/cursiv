@@ -188,6 +188,8 @@ constexpr std::from_chars_result from_chars(const char* first, const char* last,
 using std::from_chars;
 #endif
 
+}  // namespace detail
+
 // The conversion of the closed set `has_default_convert` names, reached
 // through `default_converter<T>`.
 template <class M>
@@ -206,7 +208,7 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
            : spells("false")
                ? ConversionResult<M>::ok(false)
                : ConversionResult<M>::err("expected 'true' or 'false'");
-  } else if constexpr (from_chars_number<M>) {
+  } else if constexpr (detail::from_chars_number<M>) {
     M v{};
     // std::from_chars refuses a leading '+' for every arithmetic type (only
     // '-' is a sign it reads), so an optional-sign grammar like
@@ -221,10 +223,11 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
     }
     if constexpr (std::same_as<M, double>) {
       double fast = 0.0;
-      if (fast_decimal(digits, fast)) return ConversionResult<M>::ok(fast);
+      if (detail::fast_decimal(digits, fast))
+        return ConversionResult<M>::ok(fast);
     }
     const auto [p, ec] =
-        from_chars(digits.data(), digits.data() + digits.size(), v);
+        detail::from_chars(digits.data(), digits.data() + digits.size(), v);
     if (ec == std::errc{} && p == digits.data() + digits.size())
       return ConversionResult<M>::ok(v);
     return ConversionResult<M>::err(ec == std::errc::result_out_of_range
@@ -236,23 +239,22 @@ constexpr ConversionResult<M> default_convert(std::string_view text) {
   // enumerator list is a static array, so the loop is unrolled and each
   // comparison is against a literal.
   else if constexpr (std::is_enum_v<M>) {
-    if (M found{}; find_enumerator<M>(text, found, enum_probes{}))
+    if (M found{};
+        detail::find_enumerator<M>(text, found, detail::enum_probes{}))
       return ConversionResult<M>::ok(found);
     return ConversionResult<M>::err("not an enumerator of " +
-                                    std::string(type_name<M>()));
+                                    std::string(detail::type_name<M>()));
   } else
-    static_assert(has_default_convert<M>,
+    static_assert(detail::has_default_convert<M>,
                   "no default converter for this member type: specialise "
                   "cursiv::default_converter<T>, or convert with as<f>(e)");
 }
-
-}  // namespace detail
 
 template <class T>
   requires detail::has_default_convert<T>
 struct default_converter<T> {
   static constexpr ConversionResult<T> convert(std::string_view text) {
-    return detail::default_convert<T>(text);
+    return default_convert<T>(text);
   }
 };
 

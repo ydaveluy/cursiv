@@ -76,7 +76,7 @@ class DefaultDocuments : public Documents {
   // A second index over the same truth, never a second truth: `_rows` holds the
   // documents, `_byUri` answers one URI in a hash, and this answers a folder --
   // which a flat map only answers by reading every key.
-  detail::UriTrie<DocumentId> _byFolder;
+  UriTrie<DocumentId> _byFolder;
 };
 
 }  // namespace cursiv

@@ -15,10 +15,9 @@ namespace cursiv::engine {
 
 [[nodiscard]] constexpr bool white_space_only(std::string_view text) noexcept {
   for (std::size_t at = 0, len = 0; at < text.size(); at += len)
-    if (!unicode::detail::within(
-            unicode::detail::kWhite_Space,
-            std::size(unicode::detail::kWhite_Space),
-            scalar_at(text.data() + at, text.size() - at, len)))
+    if (!unicode::within(unicode::kWhite_Space,
+                         std::size(unicode::kWhite_Space),
+                         scalar_at(text.data() + at, text.size() - at, len)))
       return false;
   return true;
 }

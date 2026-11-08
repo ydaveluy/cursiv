@@ -16,7 +16,7 @@
 // root -- costs a walk of the tree. The key is segments, split on `/` after
 // normalisation, so two spellings of one URI land on one node.
 
-namespace cursiv::detail {
+namespace cursiv {
 
 template <class T>
 class UriTrie {
@@ -212,4 +212,4 @@ void UriTrie<T>::FreeNode::operator()(Node* node) const noexcept {
   }
 }
 
-}  // namespace cursiv::detail
+}  // namespace cursiv

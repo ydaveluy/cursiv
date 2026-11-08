@@ -25,11 +25,11 @@ struct LrLowCfg : LrLowFacts {
   std::array<TermInfo, S.terms> terms{};
   std::array<LrProduction, S.prods> prods{};
   // The scalars past ASCII the word class holds, sorted and disjoint.
-  std::array<unicode::detail::Range, S.wordRanges> wordRanges{};
+  std::array<unicode::Range, S.wordRanges> wordRanges{};
   // Per set decoding another class, its scalars in `scalarRanges`: `at << 16
   // | count`, zero for the word class's.
   std::array<std::uint32_t, S.scalarRanges != 0 ? S.sets : 0> setScalars{};
-  std::array<unicode::detail::Range, S.scalarRanges> scalarRanges{};
+  std::array<unicode::Range, S.scalarRanges> scalarRanges{};
 
   constexpr std::string_view term_name(std::uint16_t t) const {
     return {names.data() + terms[t].nameOff, terms[t].nameLen};

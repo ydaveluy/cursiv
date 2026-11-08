@@ -177,17 +177,16 @@ namespace uri_trie {
 
 namespace {
 
-std::vector<int> all(const cursiv::detail::UriTrie<int>& trie,
-                     std::string_view uri) {
+std::vector<int> all(const cursiv::UriTrie<int>& trie, std::string_view uri) {
   return trie.findAll(uri);
 }
 
 void moving_reparents_the_root_children() {
-  cursiv::detail::UriTrie<int> moved;
+  cursiv::UriTrie<int> moved;
   {
-    cursiv::detail::UriTrie<int> original;
+    cursiv::UriTrie<int> original;
     original.insert("mem:///leaf", 1);
-    cursiv::detail::UriTrie<int> temporary(std::move(original));
+    cursiv::UriTrie<int> temporary(std::move(original));
     moved = std::move(temporary);
   }
   CHECK(moved.has("mem:///leaf"));
@@ -200,7 +199,7 @@ void moving_reparents_the_root_children() {
 }
 
 void exact_prefix_and_subtree_erasure() {
-  cursiv::detail::UriTrie<int> trie;
+  cursiv::UriTrie<int> trie;
   trie.insert("file:///w/a/x.ws", 1);
   trie.insert("file:///w/a/y.ws", 2);
   trie.insert("file:///w/b/z.ws", 3);
@@ -238,7 +237,7 @@ void* deep_path_on_a_cramped_stack(void* arg) {
   auto* const listed = static_cast<std::size_t*>(arg);
   std::string uri = "mem:///";
   for (int i = 0; i < 100000; ++i) uri += "a/";
-  cursiv::detail::UriTrie<int> trie;
+  cursiv::UriTrie<int> trie;
   trie.insert(uri + "x", 1);
   trie.insert("mem:///a/y", 2);
   *listed = trie.all().size() + trie.findAll("mem:///a").size();
@@ -280,6 +279,14 @@ void run() {
 namespace uri_utils {
 
 namespace {
+
+void the_scheme_is_recognized_whatever_its_case() {
+  CHECK(cursiv::is_file_uri("file:///a/b"));
+  CHECK(cursiv::is_file_uri("FILE:///a/b"));
+  CHECK(!cursiv::is_file_uri("http://x/a"));
+  CHECK(cursiv::is_file_uri("file:/a"));
+  CHECK(cursiv::is_file_uri("file:/"));
+}
 
 // `file:/path` has no authority at all (RFC 8089): a Java client sends it
 // where the folder scan sends `file:///path`, and both name one document.
@@ -568,6 +575,7 @@ void a_drive_letter_normalizes_on_any_host() {
 }
 
 void run() {
+  the_scheme_is_recognized_whatever_its_case();
   a_single_slash_names_the_same_file();
   an_escape_does_not_hide_an_extension();
   a_host_is_lower_case();

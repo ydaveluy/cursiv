@@ -20,10 +20,10 @@ struct LexBoundary {
   const ByteSet* sets = nullptr;
   const std::uint16_t* decode = nullptr;
   const ByteSet* wordBytes = nullptr;
-  const unicode::detail::Range* wordRanges = nullptr;
+  const unicode::Range* wordRanges = nullptr;
   std::size_t nwordRanges = 0;
   const std::uint32_t* setScalars = nullptr;
-  const unicode::detail::Range* scalarRanges = nullptr;
+  const unicode::Range* scalarRanges = nullptr;
 
   bool word_at(const char* src, TextOffset i, TextOffset len) const {
     const auto b = static_cast<unsigned char>(src[i]);
@@ -46,8 +46,7 @@ struct LexBoundary {
       if (d != kNoSet && sets[d].has(b)) {
         if (setScalars != nullptr)
           if (const auto ranges = setScalars[set]; ranges != 0) {
-            const unicode::detail::Range* const r =
-                scalarRanges + (ranges >> 16);
+            const unicode::Range* const r = scalarRanges + (ranges >> 16);
             const std::size_t n = ranges & 0xFFFFu;
             return (!lex_lists_only_back(r, n) &&
                     lex_scalar_in(r, n, src + i, len - i)) ||

@@ -13,7 +13,7 @@ namespace cursiv::engine {
 
 struct LexWordClass {
   ByteSet bytes;
-  std::vector<unicode::detail::Range> wide;
+  std::vector<unicode::Range> wide;
   std::uint16_t set = kNoSet;
 };
 

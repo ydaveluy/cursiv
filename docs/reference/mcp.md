@@ -100,8 +100,11 @@ The same header helps you describe a tool's arguments and read them:
 |---|---|
 | `tool_property(type, description)` | One property of an input schema, such as `tool_property("string", "the rule's name")` |
 | `tool_object_schema(properties, required)` | An object schema for `inputSchema`; the names in `required` are mandatory |
+| `tool_position_schema()` | The input schema of a position: `file`, `line` and `column`, all required; lines and columns count from 1, columns in UTF-16 units |
 | `tool_argument(arguments, key)` | The argument named `key`, or `nullptr` if the call does not pass it |
 | `tool_file_uri(file)` | A `file://` URI for a path; a URI is returned as is |
+| `tool_position(arguments)` | The `McpToolPosition` the arguments name: its URI, and its line and column from 0. A missing or bad argument throws, and the call answers an error the model reads |
+| `append_tool_position(out, document, offset)` | Appends the `line:column` of an offset, from 1, as the built-in tools write it |
 
 ```cpp
 lsp::json::Object properties;

@@ -346,6 +346,8 @@ std::string normalize_uri(std::string_view uri) {
   return out;
 }
 
+bool is_file_uri(std::string_view uri) { return has_file_scheme(uri); }
+
 std::optional<std::string> file_uri_to_path(std::string_view uri) {
   if (!has_file_scheme(uri)) return std::nullopt;
   // URI components are separated before decoding: an escaped '?' or '#'

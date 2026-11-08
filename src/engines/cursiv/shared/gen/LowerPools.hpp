@@ -64,8 +64,8 @@ struct LowerPools : LowerVerdicts {
   // Per decoded set, where `scalarRanges` lists the scalars it tests, as
   // `lex_set_scalars` reads it.
   Vec<std::uint32_t> setScalars{};
-  Vec<unicode::detail::Range> scalarRanges{};
-  Vec<unicode::detail::Range> wordRanges{};
+  Vec<unicode::Range> scalarRanges{};
+  Vec<unicode::Range> wordRanges{};
   // The lead bytes of the scalars `wordRanges` holds.
   ByteSet wordLeads{};
   Vec<LexNode> lex{};

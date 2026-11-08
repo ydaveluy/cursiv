@@ -271,7 +271,7 @@ bool ends_a_word(std::string_view text, const CstLeaf& leaf) {
     --last;
   std::size_t len = 0;
   return detail::word_scalar(
-      detail::scalar_at(text.data() + last, text.size() - last, len));
+      scalar_at(text.data() + last, text.size() - last, len));
 }
 
 }  // namespace

@@ -927,8 +927,7 @@ void closer_candidates_stand_on_character_boundaries() {
         boundaries[at] = true;
         if (at == text.size()) break;
         std::size_t width = 0;
-        (void)cursiv::detail::scalar_at(text.data() + at, text.size() - at,
-                                        width);
+        (void)cursiv::scalar_at(text.data() + at, text.size() - at, width);
         at += width != 0 ? width : 1;
       }
       for (std::size_t at = 0; at <= text.size(); ++at)
